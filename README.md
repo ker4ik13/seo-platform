@@ -39,6 +39,20 @@ frontend bundle не попадают.
 Directus можно перевести на тот же S3-провайдер с отдельным bucket:
 `DIRECTUS_STORAGE_DRIVER=s3`, `S3_BUCKET_CMS=...`.
 
+Application bucket должен разрешать CORS только с origin основного Web:
+
+- методы `PUT`, `GET`, `HEAD`;
+- request headers, используемые S3-подписью;
+- response header `ETag` в `ExposeHeaders`;
+- короткий `MaxAgeSeconds`, соответствующий политике провайдера.
+
+Wildcard origin с credentials запрещён. Signed URL передаётся только клиенту,
+не логируется и истекает по `S3_SIGNED_URL_TTL_SECONDS`. Для bucket обязательно
+настроить lifecycle: abort incomplete multipart uploads через 2 дня и
+retention/удаление quarantine и временных объектов по продуктовой политике.
+Периодический reconciliation job дополнительно закрывает просроченные записи
+и orphan objects; bucket lifecycle остаётся последней линией защиты.
+
 Для писем приложения заполнить SMTP-переменные и включить
 `EMAIL_ENABLED=true`. Для Directus дополнительно установить
 `DIRECTUS_EMAIL_TRANSPORT=smtp`. До этого оба контура остаются работоспособными,
