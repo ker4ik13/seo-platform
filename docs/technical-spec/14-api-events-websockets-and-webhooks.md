@@ -346,6 +346,19 @@ Resumable upload должен переживать перезагрузку вк
 События не содержат signed URLs, object key, исходное содержимое, credentials
 или malware signature.
 
+### 12.3. Создание и чтение импорта
+
+- `POST /api/v1/projects/{projectId}/imports` создаёт import только из
+  project-scoped upload в состоянии `ready`, требует `semantic.import`, CSRF
+  и `Idempotency-Key`;
+- `GET /api/v1/projects/{projectId}/imports/{importId}` требует
+  `semantic.view` и возвращает только безопасный progress/preview/failure
+  contract;
+- trusted internal HTTP передаёт `workspaceId`, `projectId` и `actorId` и в
+  заголовках, и в команде; jobs-сервис отклоняет любое несовпадение;
+- raw rows, S3 object key, signed URL и внутренний текст dependency error
+  публичный API не возвращает.
+
 ## 13. Основные группы endpoint
 
 Полная OpenAPI-спецификация создаётся в `platform-contracts`. Обязательные группы:
@@ -631,6 +644,9 @@ Publisher отправляет событие в NATS JetStream и помеча�
 - `job.progressed.v1`;
 - `job.completed.v1`;
 - `job.failed.v1`;
+- `semantic.import.created.v1`;
+- `semantic.import.parsed.v1`;
+- `semantic.import.failed.v1`;
 - `import.completed.v1`;
 - `semantics.version.created.v1`;
 - `seo.rank-check.completed.v1`;

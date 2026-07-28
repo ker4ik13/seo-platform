@@ -979,6 +979,16 @@ malware signature или внутреннюю ошибку dependency.
 
 Row staging создаётся в staging schema/partitioned tables и очищается retention job.
 
+В первом вертикальном срезе parsing metadata хранится в `semantic_imports`, а
+сырой ряд — в `semantic_import_staging_rows`. Staging hash-partitioned на 16
+partitions по `import_id`; ключ строки — `(import_id, row_number)`. Запись
+содержит только исходный массив значений, allowlisted issue codes и
+fingerprint. `semantic_imports` хранит tenant/actor scope, upload reference,
+requested/detected parsing options, headers, mapping proposal, ограниченный
+sample, counters, progress, failure code, lease/heartbeat и optimistic
+`version`. Эти таблицы не являются каноническим semantic core и не дают
+jobs-сервису право записывать `seo_db` напрямую.
+
 ### 6.3. Integrations
 
 #### `integration_credentials`

@@ -2,9 +2,9 @@
 
 Последнее обновление: 28 июля 2026 года
 
-Текущий инкремент: Semantics import → Upload inspection
-Статус: resumable S3 upload и обязательный inspection worker реализованы;
-parser/staging следующие
+Текущий инкремент: Semantics import → Streaming CSV/TSV staging
+Статус: resumable S3 upload, обязательный inspection worker и потоковый
+CSV/TSV parser/staging реализованы; mapping/validation/publish следующие
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -58,6 +58,7 @@ all backend services <──> NATS
 jobs/realtime <──> Redis
 jobs <──> S3
 upload inspection worker ──> ClamAV
+import worker ──> S3 + partitioned staging in jobs_db
 platform-web public/docs <──> Directus
 ```
 
@@ -118,8 +119,10 @@ Backend convention:
 - `platform-api/src/tenants` — workspace/project commands и queries;
 - `platform-api/src/tenants/team.*` — приглашения, участники и проектные
   ограничения доступа;
-- `platform-api/src/uploads` — project-scoped public upload commands и
-  доверенный client к jobs-integrations;
+- `platform-api/src/uploads` — project-scoped public upload commands;
+- `platform-api/src/jobs` — общий internal HTTP client к jobs-integrations;
+- `platform-api/src/imports` — project-scoped create/read orchestration с
+  `semantic.import`/`semantic.view`;
 - `platform-api/src/audit`, `src/outbox` — переиспользуемые transactional
   записи аудита и событий;
 - `platform-jobs-integrations/src/queue` — BullMQ connection, system queue и
@@ -132,6 +135,8 @@ Backend convention:
 - `platform-jobs-integrations/src/uploads` — multipart lifecycle, opaque
   object keys, size verification, lease/heartbeat inspection и upload outbox
   events;
+- `platform-jobs-integrations/src/imports` — потоковый CSV/TSV parser,
+  Key Collector header mapping, import lease/heartbeat и staging;
 - `platform-jobs-integrations/src/email` — email port, disabled и SMTP adapters;
 - `platform-realtime/src/realtime` — Socket.IO gateway и Redis adapter;
 - `platform-web/app` — public, tools, docs и private `/app` App Router screens;
@@ -149,6 +154,8 @@ Entrypoints:
 - system worker: `platform-jobs-integrations/src/worker.main.ts`;
 - upload inspection worker:
   `platform-jobs-integrations/src/inspection-worker.main.ts`;
+- semantic import worker:
+  `platform-jobs-integrations/src/import-worker.main.ts`;
 - Next.js: App Router соответствующего frontend-пакета;
 - remote stack: `platform-infrastructure/compose.dokploy.yml`.
 
@@ -168,7 +175,7 @@ Entrypoints:
 | Admin shell | vertical slice |
 | Auth core | vertical slice |
 | Workspaces/projects/team access | vertical slice |
-| Semantics/import | vertical slice: upload + inspection |
+| Semantics/import | vertical slice: upload + inspection + CSV/TSV staging |
 | Rankings/integrations | planned |
 | Billing/YooKassa | planned |
 | Directus content | planned |
@@ -211,13 +218,23 @@ Web после multipart completion опрашивает project-scoped status e
 показывает scanning/ready/rejected и позволяет отдельно обновить долгую
 проверку, не создавая повторную загрузку.
 
+Второй import slice создаёт import только из `READY` upload, повторяет команду
+по `Idempotency-Key` и ставит в отдельную BullMQ queue только `importId`.
+Import worker потоково определяет UTF-8/Windows-1251 и разделитель, корректно
+обрабатывает quoted/multiline CSV/TSV, восстанавливает зависший lease,
+сохраняет исходные значения в 16 hash partitions и предлагает mapping
+типовых колонок Key Collector. Jobs API не возвращает raw staging наружу.
+Web автоматически запускает CSV/TSV parsing после inspection, показывает
+progress и ограниченный preview колонок/строк. Публикация в канонический
+semantic core ещё не выполняется.
+
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 42 pass, 0 fail.
-- Jobs/integrations unit tests: 18 pass, 0 fail.
+- Platform API unit tests: 44 pass, 0 fail.
+- Jobs/integrations unit tests: 29 pass, 0 fail.
 - Contracts unit tests: 1 pass, 0 fail.
 - Unified Web security helper tests: 2 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
@@ -232,7 +249,7 @@ Web после multipart completion опрашивает project-scoped status e
 
 ## 9. Следующий вертикальный срез
 
-`import job → streaming parser → semantic staging → preview → publish version`
+`mapping command → validation preview → chunked publish to seo-data → semantic version`
 
 OAuth/OIDC выполняется после подтверждения зависимости `jose`; QR для TOTP —
 после подтверждения `qrcode`.
@@ -245,6 +262,11 @@ OAuth/OIDC выполняется после подтверждения зави
 - Для rejected/quarantine objects ещё требуется production lifecycle policy и
   отдельный reconciliation/cleanup job; выдача и импорт таких объектов
   запрещены уже сейчас.
+- Partitioned import staging требует retention/cleanup job и метрик роста до
+  production; raw rows не считаются бессрочной историей.
+- CSV/TSV включены; XLSX/ZIP требуют подтверждения production-зависимостей
+  `exceljs`/`unzipper`, а legacy XLS — изолированного LibreOffice worker с
+  отдельными CPU/RAM/time limits.
 - ClamAV требует отдельного memory/capacity budget на VPS; concurrency
   inspection worker ограничивается независимо от API.
 - Bucket требует внешней CORS/lifecycle настройки: Web origin, exposed `ETag`,
