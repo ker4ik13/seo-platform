@@ -29,6 +29,7 @@ export interface AppConfig {
   readonly databaseUrl: string;
   readonly databasePoolMax: number;
   readonly redisUrl: string;
+  readonly internalApiToken?: string;
   readonly nats: {
     readonly url: string;
     readonly user?: string;
@@ -36,6 +37,11 @@ export interface AppConfig {
   };
   readonly s3: S3Config;
   readonly email: EmailConfig;
+  readonly uploads: {
+    readonly maxSizeBytes: number;
+    readonly partSizeBytes: number;
+    readonly expiresHours: number;
+  };
 }
 
 function bool(value: string | undefined, fallback = false): boolean {
@@ -87,6 +93,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const smtpHost = optional(env, "SMTP_HOST");
   const smtpUser = optional(env, "SMTP_USER");
   const smtpPassword = optional(env, "SMTP_PASSWORD");
+  const internalApiToken = optional(env, "INTERNAL_API_TOKEN");
 
   if (
     s3Enabled &&
@@ -104,6 +111,14 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   ) {
     throw new Error("Email is enabled but SMTP configuration is incomplete");
   }
+  if (
+    nodeEnv === "production" &&
+    (!internalApiToken || internalApiToken.length < 32)
+  ) {
+    throw new Error(
+      "INTERNAL_API_TOKEN with at least 32 characters is required in production"
+    );
+  }
 
   return {
     nodeEnv: nodeEnv as AppConfig["nodeEnv"],
@@ -116,6 +131,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "DATABASE_POOL_MAX"
     ),
     redisUrl: env.REDIS_URL?.trim() || "redis://localhost:6379",
+    ...(internalApiToken ? { internalApiToken } : {}),
     nats: {
       url: env.NATS_URL?.trim() || "nats://localhost:4222",
       ...(natsUser ? { user: natsUser } : {}),
@@ -146,6 +162,23 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       secure: bool(env.SMTP_SECURE),
       ...(smtpUser ? { user: smtpUser } : {}),
       ...(smtpPassword ? { password: smtpPassword } : {})
+    },
+    uploads: {
+      maxSizeBytes: positiveInteger(
+        env.UPLOAD_MAX_SIZE_BYTES,
+        5 * 1_024 * 1_024 * 1_024,
+        "UPLOAD_MAX_SIZE_BYTES"
+      ),
+      partSizeBytes: positiveInteger(
+        env.UPLOAD_PART_SIZE_BYTES,
+        8 * 1_024 * 1_024,
+        "UPLOAD_PART_SIZE_BYTES"
+      ),
+      expiresHours: positiveInteger(
+        env.UPLOAD_EXPIRES_HOURS,
+        24,
+        "UPLOAD_EXPIRES_HOURS"
+      )
     }
   };
 }

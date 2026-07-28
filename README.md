@@ -14,3 +14,14 @@
 - SMTP transactional email полностью конфигурируется через env и по умолчанию выключен;
 - disabled adapters позволяют поднять foundation без внешних credentials;
 - включённый, но недоступный обязательный adapter виден в readiness.
+
+## Multipart uploads
+
+Внутренний API `/internal/v1/uploads` создаёт opaque project-scoped object
+keys, выдаёт короткоживущие signed URLs на отдельные parts, проверяет полный
+набор ETag и фактический размер объекта при завершении. Все команды привязаны
+к проверенным `workspaceId`, `projectId`, `actorId`; создание идемпотентно.
+
+Статус `UPLOADED` ещё не разрешает импорт: следующий worker обязан потоково
+вычислить SHA-256, проверить MIME по содержимому и malware scan, после чего
+перевести объект в `READY` либо `REJECTED`.

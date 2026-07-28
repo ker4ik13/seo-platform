@@ -2,6 +2,7 @@ import type {
   CompletedPart,
   MultipartUpload,
   ObjectStoragePort,
+  StoredObjectMetadata,
   StorageBucket
 } from "./object-storage.port.js";
 
@@ -50,6 +51,13 @@ export class DisabledObjectStorageAdapter implements ObjectStoragePort {
     _bucket: StorageBucket,
     _objectKey: string
   ): Promise<string> {
+    return Promise.reject(this.disabled());
+  }
+
+  public headObject(
+    _bucket: StorageBucket,
+    _objectKey: string
+  ): Promise<StoredObjectMetadata | undefined> {
     return Promise.reject(this.disabled());
   }
 

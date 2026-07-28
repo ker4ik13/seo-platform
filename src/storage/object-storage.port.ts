@@ -10,6 +10,11 @@ export interface CompletedPart {
   readonly etag: string;
 }
 
+export interface StoredObjectMetadata {
+  readonly sizeBytes: bigint;
+  readonly etag?: string;
+}
+
 export interface ObjectStoragePort {
   isEnabled(): boolean;
   healthCheck(): Promise<void>;
@@ -39,6 +44,10 @@ export interface ObjectStoragePort {
     bucket: StorageBucket,
     objectKey: string
   ): Promise<string>;
+  headObject(
+    bucket: StorageBucket,
+    objectKey: string
+  ): Promise<StoredObjectMetadata | undefined>;
   deleteObject(bucket: StorageBucket, objectKey: string): Promise<void>;
 }
 

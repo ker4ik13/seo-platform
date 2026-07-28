@@ -5,6 +5,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  HeadObjectCommand,
   S3Client,
   UploadPartCommand
 } from "@aws-sdk/client-s3";
@@ -14,6 +15,7 @@ import type {
   CompletedPart,
   MultipartUpload,
   ObjectStoragePort,
+  StoredObjectMetadata,
   StorageBucket
 } from "./object-storage.port.js";
 
@@ -131,13 +133,17 @@ export class S3ObjectStorageAdapter implements ObjectStoragePort {
     objectKey: string,
     uploadId: string
   ): Promise<void> {
-    await this.client.send(
-      new AbortMultipartUploadCommand({
-        Bucket: this.bucketName(bucket),
-        Key: this.objectKey(objectKey),
-        UploadId: uploadId
-      })
-    );
+    try {
+      await this.client.send(
+        new AbortMultipartUploadCommand({
+          Bucket: this.bucketName(bucket),
+          Key: this.objectKey(objectKey),
+          UploadId: uploadId
+        })
+      );
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
   }
 
   public createDownloadUrl(
@@ -152,6 +158,27 @@ export class S3ObjectStorageAdapter implements ObjectStoragePort {
       }),
       { expiresIn: this.config.signedUrlTtlSeconds }
     );
+  }
+
+  public async headObject(
+    bucket: StorageBucket,
+    objectKey: string
+  ): Promise<StoredObjectMetadata | undefined> {
+    try {
+      const result = await this.client.send(
+        new HeadObjectCommand({
+          Bucket: this.bucketName(bucket),
+          Key: this.objectKey(objectKey)
+        })
+      );
+      return {
+        sizeBytes: BigInt(result.ContentLength ?? 0),
+        ...(result.ETag ? { etag: result.ETag } : {})
+      };
+    } catch (error) {
+      if (isNotFound(error)) return undefined;
+      throw error;
+    }
   }
 
   public async deleteObject(
@@ -184,4 +211,17 @@ export class S3ObjectStorageAdapter implements ObjectStoragePort {
     }
     return key;
   }
+}
+
+function isNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (("name" in error && error.name === "NotFound") ||
+      ("$metadata" in error &&
+        typeof error.$metadata === "object" &&
+        error.$metadata !== null &&
+        "httpStatusCode" in error.$metadata &&
+        error.$metadata.httpStatusCode === 404))
+  );
 }

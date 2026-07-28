@@ -23,3 +23,13 @@ test("requires S3 buckets when S3 is enabled", () => {
     { message: "S3 is enabled but credentials or buckets are incomplete" }
   );
 });
+
+test("loads bounded multipart upload defaults", () => {
+  const config = loadAppConfig({
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test"
+  });
+
+  assert.equal(config.uploads.partSizeBytes, 8 * 1_024 * 1_024);
+  assert.equal(config.uploads.maxSizeBytes, 5 * 1_024 * 1_024 * 1_024);
+});

@@ -145,43 +145,43 @@ model JobItem {
 }
 
 model IntegrationCredential {
-  id             String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId    String           @map("workspace_id") @db.Uuid
-  provider       String           @db.VarChar(64)
-  label          String           @db.VarChar(160)
-  mode           CredentialMode
-  status         CredentialStatus @default(ACTIVE)
-  ciphertext     Bytes
-  nonce          Bytes
-  authTag        Bytes            @map("auth_tag")
-  keyVersion     Int              @map("key_version")
-  displayHint    String?          @map("display_hint") @db.VarChar(100)
-  capabilities   Json
-  providerMeta   Json?            @map("provider_meta")
-  verifiedAt     DateTime?        @map("verified_at") @db.Timestamptz(6)
-  lastSuccessAt  DateTime?        @map("last_success_at") @db.Timestamptz(6)
-  lastErrorAt    DateTime?        @map("last_error_at") @db.Timestamptz(6)
-  version        Int              @default(1)
-  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt      DateTime?        @map("deleted_at") @db.Timestamptz(6)
+  id            String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId   String           @map("workspace_id") @db.Uuid
+  provider      String           @db.VarChar(64)
+  label         String           @db.VarChar(160)
+  mode          CredentialMode
+  status        CredentialStatus @default(ACTIVE)
+  ciphertext    Bytes
+  nonce         Bytes
+  authTag       Bytes            @map("auth_tag")
+  keyVersion    Int              @map("key_version")
+  displayHint   String?          @map("display_hint") @db.VarChar(100)
+  capabilities  Json
+  providerMeta  Json?            @map("provider_meta")
+  verifiedAt    DateTime?        @map("verified_at") @db.Timestamptz(6)
+  lastSuccessAt DateTime?        @map("last_success_at") @db.Timestamptz(6)
+  lastErrorAt   DateTime?        @map("last_error_at") @db.Timestamptz(6)
+  version       Int              @default(1)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt     DateTime?        @map("deleted_at") @db.Timestamptz(6)
 
   @@index([workspaceId, provider, status])
   @@map("integration_credentials")
 }
 
 model IntegrationBinding {
-  id                String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId       String         @map("workspace_id") @db.Uuid
-  projectId         String?        @map("project_id") @db.Uuid
-  capability        String         @db.VarChar(100)
-  primaryCredential String?        @map("primary_credential_id") @db.Uuid
-  fallbackPolicy    Json?          @map("fallback_policy")
-  budgetPolicy      Json           @map("budget_policy")
-  enabled           Boolean        @default(true)
-  version           Int            @default(1)
-  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId       String   @map("workspace_id") @db.Uuid
+  projectId         String?  @map("project_id") @db.Uuid
+  capability        String   @db.VarChar(100)
+  primaryCredential String?  @map("primary_credential_id") @db.Uuid
+  fallbackPolicy    Json?    @map("fallback_policy")
+  budgetPolicy      Json     @map("budget_policy")
+  enabled           Boolean  @default(true)
+  version           Int      @default(1)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([workspaceId, projectId, capability])
   @@map("integration_bindings")
@@ -211,44 +211,51 @@ model ProviderUsage {
 }
 
 model Automation {
-  id             String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId    String   @map("workspace_id") @db.Uuid
-  projectId      String   @map("project_id") @db.Uuid
-  name           String   @db.VarChar(160)
+  id             String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  projectId      String    @map("project_id") @db.Uuid
+  name           String    @db.VarChar(160)
   definition     Json
-  timezone       String   @db.VarChar(64)
-  enabled        Boolean  @default(false)
-  pausedReason   String?  @map("paused_reason") @db.Text
+  timezone       String    @db.VarChar(64)
+  enabled        Boolean   @default(false)
+  pausedReason   String?   @map("paused_reason") @db.Text
   nextRunAt      DateTime? @map("next_run_at") @db.Timestamptz(6)
   lastRunAt      DateTime? @map("last_run_at") @db.Timestamptz(6)
-  consecutiveErr Int      @default(0) @map("consecutive_errors")
-  version        Int      @default(1)
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  consecutiveErr Int       @default(0) @map("consecutive_errors")
+  version        Int       @default(1)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@index([workspaceId, projectId, enabled, nextRunAt])
   @@map("automations")
 }
 
 model Upload {
-  id             String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId    String       @map("workspace_id") @db.Uuid
-  projectId      String?      @map("project_id") @db.Uuid
-  actorId        String       @map("actor_id") @db.Uuid
-  status         UploadStatus @default(INITIATED)
-  bucket         String       @db.VarChar(100)
-  objectKey      String       @map("object_key") @db.Text
-  originalName   String       @map("original_name") @db.Text
-  mediaType      String       @map("media_type") @db.VarChar(255)
-  sizeBytes      BigInt       @map("size_bytes")
-  checksum       String       @db.VarChar(128)
-  multipartId    String?      @map("multipart_id") @db.Text
-  scanResult     Json?        @map("scan_result")
-  expiresAt      DateTime     @map("expires_at") @db.Timestamptz(6)
-  version        Int          @default(1)
-  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id               String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId      String       @map("workspace_id") @db.Uuid
+  projectId        String?      @map("project_id") @db.Uuid
+  actorId          String       @map("actor_id") @db.Uuid
+  status           UploadStatus @default(INITIATED)
+  bucket           String       @db.VarChar(100)
+  objectKey        String       @map("object_key") @db.Text
+  originalName     String       @map("original_name") @db.Text
+  mediaType        String       @map("media_type") @db.VarChar(255)
+  sizeBytes        BigInt       @map("size_bytes")
+  declaredChecksum String?      @map("declared_checksum") @db.VarChar(128)
+  checksum         String?      @db.VarChar(128)
+  multipartId      String?      @map("multipart_id") @db.Text
+  partSizeBytes    Int          @map("part_size_bytes")
+  partCount        Int          @map("part_count")
+  idempotencyKey   String       @map("idempotency_key") @db.VarChar(180)
+  scanResult       Json?        @map("scan_result")
+  expiresAt        DateTime     @map("expires_at") @db.Timestamptz(6)
+  uploadedAt       DateTime?    @map("uploaded_at") @db.Timestamptz(6)
+  abortedAt        DateTime?    @map("aborted_at") @db.Timestamptz(6)
+  version          Int          @default(1)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  @@unique([workspaceId, actorId, idempotencyKey])
   @@index([workspaceId, projectId, status, createdAt])
   @@index([status, expiresAt])
   @@map("uploads")
