@@ -36,6 +36,7 @@ export default async function ProjectNotificationSettingsPage({
       <SettingsTabs
         active="project-notifications"
         projectId={project.id}
+        workspaceRoleCode={context.workspace?.roleCode}
       />
       <ProjectNotificationSettings
         projectId={project.id}

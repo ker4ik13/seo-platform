@@ -1,9 +1,17 @@
+import { canViewWorkspaceIntegrations } from "../lib/app-permissions";
+
 export function SettingsTabs({
   active,
-  projectId
+  projectId,
+  workspaceRoleCode
 }: Readonly<{
-  active: "security" | "notifications" | "project-notifications";
+  active:
+    | "security"
+    | "notifications"
+    | "integrations"
+    | "project-notifications";
   projectId?: string;
+  workspaceRoleCode: string | undefined;
 }>) {
   return (
     <nav className="settings-tabs" aria-label="Разделы настроек">
@@ -21,6 +29,15 @@ export function SettingsTabs({
       >
         Уведомления
       </a>
+      {canViewWorkspaceIntegrations(workspaceRoleCode) && (
+        <a
+          aria-current={active === "integrations" ? "page" : undefined}
+          className={active === "integrations" ? "active" : undefined}
+          href="/app/settings/integrations"
+        >
+          Интеграции
+        </a>
+      )}
       {projectId && (
         <a
           aria-current={

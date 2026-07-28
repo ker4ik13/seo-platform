@@ -22,6 +22,7 @@ export default async function SecuritySettingsPage() {
       <SettingsTabs
         active="security"
         {...(context.project ? { projectId: context.project.id } : {})}
+        workspaceRoleCode={context.workspace?.roleCode}
       />
       <div className="settings-stack">
         <MfaSettings />

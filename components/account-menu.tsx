@@ -6,6 +6,7 @@ import {
   browserApiRequest,
   BrowserApiError
 } from "../lib/browser-api";
+import { canViewWorkspaceIntegrations } from "../lib/app-permissions";
 
 export function AccountMenu({
   user,
@@ -57,6 +58,11 @@ export function AccountMenu({
           <a className="account-menu-link" href="/app/settings/notifications">
             Настройки уведомлений
           </a>
+          {canViewWorkspaceIntegrations(roleCode) && (
+            <a className="account-menu-link" href="/app/settings/integrations">
+              API-интеграции
+            </a>
+          )}
           <button disabled={busy} onClick={logout} type="button">
             {busy ? "Выходим…" : "Выйти"}
           </button>

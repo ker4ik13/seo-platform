@@ -22,6 +22,7 @@ export default async function NotificationSettingsPage() {
       <SettingsTabs
         active="notifications"
         {...(context.project ? { projectId: context.project.id } : {})}
+        workspaceRoleCode={context.workspace?.roleCode}
       />
       <NotificationSettings
         email={context.user.email}
