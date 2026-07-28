@@ -139,7 +139,7 @@
 - source/freshness/provenance;
 - fallback между BYOK credentials при явной настройке;
 - notification center;
-- email/Telegram notifications;
+- email, browser Web Push и Telegram notifications;
 - operational provider dashboard;
 - limits без платежей либо controlled beta plan;
 - project dashboard v1;

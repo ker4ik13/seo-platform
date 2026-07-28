@@ -22,6 +22,8 @@
 - Public/project Toolbox и API используют один capability registry.
 - Billing никогда автоматически не удаляет проекты и не скрывает историю.
 - Чек НПД создаётся только для verified успешного платежа ЮKassa.
+- Настройки каналов уведомлений принадлежат профилю пользователя; проектные
+  подписки задают типы работ и могут только сужать/переопределять профиль.
 
 ## 2. Development workspace
 
@@ -98,6 +100,12 @@ Backend convention:
 
 Специализированные модули:
 
+- `platform-api/src/identity` — account/session lifecycle и CSRF guards;
+- `platform-api/src/authorization` — default-deny permission catalog и
+  проверка tenant context;
+- `platform-api/src/tenants` — workspace/project commands и queries;
+- `platform-api/src/audit`, `src/outbox` — переиспользуемые transactional
+  записи аудита и событий;
 - `platform-jobs-integrations/src/queue` — BullMQ connection и system queue;
 - `platform-jobs-integrations/src/storage` — S3 port, disabled и S3 adapters;
 - `platform-jobs-integrations/src/email` — email port, disabled и SMTP adapters;
@@ -128,7 +136,7 @@ Entrypoints:
 | Realtime public gateway | foundation |
 | Unified Web/Admin shells | vertical slice |
 | Auth core | vertical slice |
-| Workspaces/projects | planned |
+| Workspaces/projects | vertical slice |
 | Semantics/import | planned |
 | Rankings/integrations | planned |
 | Billing/YooKassa | planned |
@@ -147,7 +155,7 @@ CSRF, session inventory/revocation, PostgreSQL rate limit, audit и outbox.
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 11 pass, 0 fail.
+- Platform API unit tests: 22 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
 - Unified Next.js production build: pass; проверены public site, Toolbox,
   API docs и private `/app`.

@@ -408,6 +408,9 @@ Resumable upload должен переживать перезагрузку вк
 - `/report-shares`;
 - `/notifications`;
 - `/notification-preferences`;
+- `/me/notification-preferences`;
+- `/me/push-subscriptions`;
+- `/projects/{projectId}/notification-subscription`;
 
 ### 13.8. Billing
 

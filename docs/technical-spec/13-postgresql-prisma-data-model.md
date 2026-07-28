@@ -1019,6 +1019,8 @@ Append-only:
 - `notifications`;
 - `notification_recipients`;
 - `notification_preferences`;
+- `project_notification_subscriptions`;
+- `web_push_subscriptions`;
 - `deliveries`;
 - `delivery_attempts`;
 
