@@ -83,6 +83,86 @@ footer { align-items: center; display: grid; gap: 20px; grid-template-columns: 1
 footer p { color: var(--muted); font-size: 11px; text-align: center; }
 footer small { color: #aaa; font-size: 10px; text-align: right; }
 
+.public-section {
+  margin: 0 auto;
+  max-width: 1184px;
+  padding: clamp(68px, 9vw, 118px) 28px 90px;
+}
+.public-section > h1,
+.docs-layout article > h1 {
+  font-size: clamp(38px, 5vw, 66px);
+  letter-spacing: -.055em;
+  line-height: 1.02;
+  margin: 18px 0;
+  max-width: 850px;
+}
+.public-lead {
+  color: var(--muted);
+  font-size: clamp(15px, 1.6vw, 18px);
+  line-height: 1.65;
+  max-width: 720px;
+}
+.tool-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 50px;
+}
+.tool-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  min-height: 220px;
+  padding: 24px;
+  transition: border-color .18s ease, transform .18s ease;
+}
+.tool-card:hover { border-color: #cfc9f5; transform: translateY(-2px); }
+.tool-card > span {
+  color: var(--brand);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.tool-card h2 { font-size: 20px; letter-spacing: -.03em; margin: 32px 0 10px; }
+.tool-card p { color: var(--muted); font-size: 12px; line-height: 1.65; }
+.tool-card small { color: var(--brand); display: block; font-size: 11px; font-weight: 650; margin-top: 24px; }
+.tool-detail { max-width: 960px; }
+.back-link { color: var(--muted); display: block; font-size: 11px; margin-bottom: 38px; }
+.tool-placeholder {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  margin-top: 42px;
+  padding: 25px;
+}
+.tool-placeholder > div { align-items: center; display: flex; gap: 12px; }
+.tool-placeholder strong { font-size: 12px; }
+.tool-placeholder code { background: #f0effb; border-radius: 6px; color: var(--brand-dark); font-size: 11px; padding: 6px 8px; }
+.tool-placeholder p { color: var(--muted); font-size: 12px; line-height: 1.65; margin: 22px 0; }
+.tool-placeholder button { background: #efeff1; border: 0; border-radius: 8px; color: #92939a; font: inherit; font-size: 11px; padding: 10px 14px; }
+
+.docs-layout {
+  display: grid;
+  gap: clamp(34px, 6vw, 84px);
+  grid-template-columns: 190px minmax(0, 780px);
+  margin: 0 auto;
+  max-width: 1184px;
+  padding: 62px 28px 110px;
+}
+.docs-layout aside { align-self: start; display: grid; gap: 13px; position: sticky; top: 30px; }
+.docs-layout aside strong { font-size: 12px; margin-bottom: 10px; }
+.docs-layout aside a { color: var(--muted); font-size: 11px; }
+.docs-layout article section { border-top: 1px solid var(--line); margin-top: 42px; padding-top: 30px; }
+.docs-layout article section h2 { font-size: 22px; margin-bottom: 16px; }
+.docs-layout article section p { color: var(--muted); font-size: 13px; line-height: 1.7; }
+.docs-layout pre { background: #1e1f26; border-radius: 12px; color: #f4f3fb; font-size: 12px; overflow-x: auto; padding: 20px; }
+.api-list { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.api-list > div { align-items: center; display: grid; gap: 18px; grid-template-columns: minmax(210px, .9fr) 1fr; padding: 13px 15px; }
+.api-list > div + div { border-top: 1px solid var(--line); }
+.api-list code { color: var(--brand-dark); font-size: 10px; }
+.api-list span { font-size: 12px; }
+
 @media (max-width: 760px) {
   .site-header { height: 64px; padding: 0 18px; }
   .site-header nav { display: none; }
@@ -98,6 +178,11 @@ footer small { color: #aaa; font-size: 10px; text-align: right; }
   .features h2 { margin-top: 24px; }
   footer { grid-template-columns: 1fr; justify-items: center; }
   footer small { text-align: center; }
+  .public-section { padding: 62px 18px 70px; }
+  .tool-grid { grid-template-columns: 1fr; }
+  .docs-layout { grid-template-columns: 1fr; padding: 44px 18px 80px; }
+  .docs-layout aside { display: none; }
+  .api-list > div { align-items: start; grid-template-columns: 1fr; }
 }
 
 @media (max-width: 460px) {

@@ -53,10 +53,10 @@ export default async function MarketingPage({ params }: PageProps) {
 
   const locale = rawLocale;
   const page = await getMarketingPage(locale);
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3001";
+  const appUrl = "/app";
   const copy = locale === "ru"
     ? {
-        nav: ["Продукт", "Интеграции", "Цены", "Ресурсы"],
+        nav: ["Продукт", "Toolbox", "API", "Цены"],
         login: "Войти",
         proof: "Для агентств, in-house команд и самостоятельных SEO-специалистов",
         dashboard: "Обзор проекта",
@@ -67,7 +67,7 @@ export default async function MarketingPage({ params }: PageProps) {
         footer: "Сделано для спокойной, точной SEO-работы."
       }
     : {
-        nav: ["Product", "Integrations", "Pricing", "Resources"],
+        nav: ["Product", "Toolbox", "API", "Pricing"],
         login: "Sign in",
         proof: "For agencies, in-house teams and independent SEO specialists",
         dashboard: "Project overview",
@@ -83,7 +83,14 @@ export default async function MarketingPage({ params }: PageProps) {
       <header className="site-header">
         <a className="brand" href={`/${locale}`}><span>S</span>SEO Workspace</a>
         <nav aria-label="Основная навигация">
-          {copy.nav.map((item) => <a href="#features" key={item}>{item}</a>)}
+          {copy.nav.map((item, index) => (
+            <a
+              href={index === 1 ? "/tools" : index === 2 ? "/docs/api" : "#features"}
+              key={item}
+            >
+              {item}
+            </a>
+          ))}
         </nav>
         <div className="header-actions">
           <a className="locale" href={locale === "ru" ? "/en" : "/ru"}>
