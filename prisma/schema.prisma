@@ -1,0 +1,283 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum JobStatus {
+  DRAFT
+  ESTIMATING
+  AWAITING_APPROVAL
+  RESERVING_BALANCE
+  QUEUED
+  WAITING_RATE_LIMIT
+  RUNNING
+  PAUSE_REQUESTED
+  PAUSED
+  CANCEL_REQUESTED
+  CANCELLED
+  RETRY_SCHEDULED
+  PARTIALLY_COMPLETED
+  COMPLETED
+  FAILED_RETRYABLE
+  FAILED_FINAL
+  EXPIRED
+}
+
+enum JobItemStatus {
+  PENDING
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED_RETRYABLE
+  FAILED_FINAL
+  CANCELLED
+}
+
+enum CredentialMode {
+  BYOK_API_KEY
+  BYOK_OAUTH
+  PLATFORM_INCLUDED
+  PLATFORM_PAID
+  FALLBACK_PLATFORM_PAID
+}
+
+enum CredentialStatus {
+  ACTIVE
+  DEGRADED
+  RATE_LIMITED
+  LOW_BALANCE
+  EXPIRED
+  REVOKED
+  INVALID
+  DISABLED
+}
+
+enum UploadStatus {
+  INITIATED
+  UPLOADING
+  UPLOADED
+  SCANNING
+  READY
+  REJECTED
+  EXPIRED
+  ABORTED
+}
+
+enum OutboxStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+}
+
+model Job {
+  id                 String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId        String         @map("workspace_id") @db.Uuid
+  projectId          String?        @map("project_id") @db.Uuid
+  type               String         @db.VarChar(100)
+  status             JobStatus      @default(DRAFT)
+  stage              String?        @db.VarChar(64)
+  priority           Int            @default(100)
+  actorId            String?        @map("actor_id") @db.Uuid
+  scheduleId         String?        @map("schedule_id") @db.Uuid
+  parentJobId        String?        @map("parent_job_id") @db.Uuid
+  deduplicationKey   String?        @map("deduplication_key") @db.VarChar(180)
+  idempotencyKey     String?        @map("idempotency_key") @db.VarChar(180)
+  inputSnapshot      Json           @map("input_snapshot")
+  scopeSnapshot      Json           @map("scope_snapshot")
+  progressCurrent    BigInt         @default(0) @map("progress_current")
+  progressTotal      BigInt?        @map("progress_total")
+  progressUnit       String?        @map("progress_unit") @db.VarChar(32)
+  estimatedCostMicro BigInt?        @map("estimated_cost_micro")
+  reservedCostMicro  BigInt?        @map("reserved_cost_micro")
+  actualCostMicro    BigInt?        @map("actual_cost_micro")
+  currency           String?        @db.Char(3)
+  credentialMode     CredentialMode @map("credential_mode")
+  provider           String?        @db.VarChar(64)
+  attempt            Int            @default(0)
+  maxAttempts        Int            @default(3) @map("max_attempts")
+  errorSummary       Json?          @map("error_summary")
+  resultSummary      Json?          @map("result_summary")
+  correlationId      String         @map("correlation_id") @db.VarChar(100)
+  version            Int            @default(1)
+  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  queuedAt           DateTime?      @map("queued_at") @db.Timestamptz(6)
+  startedAt          DateTime?      @map("started_at") @db.Timestamptz(6)
+  finishedAt         DateTime?      @map("finished_at") @db.Timestamptz(6)
+  cancelRequestedAt  DateTime?      @map("cancel_requested_at") @db.Timestamptz(6)
+
+  items JobItem[]
+
+  @@unique([workspaceId, idempotencyKey])
+  @@index([workspaceId, projectId, status, createdAt])
+  @@index([status, priority, createdAt])
+  @@index([deduplicationKey, status])
+  @@map("jobs")
+}
+
+model JobItem {
+  id                String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId       String        @map("workspace_id") @db.Uuid
+  projectId         String?       @map("project_id") @db.Uuid
+  jobId             String        @map("job_id") @db.Uuid
+  sequence          Int
+  status            JobItemStatus @default(PENDING)
+  inputReference    Json          @map("input_reference")
+  providerRequestId String?       @map("provider_request_id") @db.VarChar(255)
+  outputReference   Json?         @map("output_reference")
+  actualCostMicro   BigInt?       @map("actual_cost_micro")
+  error             Json?
+  attempt           Int           @default(0)
+  retryAt           DateTime?     @map("retry_at") @db.Timestamptz(6)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, sequence])
+  @@index([workspaceId, status, retryAt])
+  @@map("job_items")
+}
+
+model IntegrationCredential {
+  id             String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId    String           @map("workspace_id") @db.Uuid
+  provider       String           @db.VarChar(64)
+  label          String           @db.VarChar(160)
+  mode           CredentialMode
+  status         CredentialStatus @default(ACTIVE)
+  ciphertext     Bytes
+  nonce          Bytes
+  authTag        Bytes            @map("auth_tag")
+  keyVersion     Int              @map("key_version")
+  displayHint    String?          @map("display_hint") @db.VarChar(100)
+  capabilities   Json
+  providerMeta   Json?            @map("provider_meta")
+  verifiedAt     DateTime?        @map("verified_at") @db.Timestamptz(6)
+  lastSuccessAt  DateTime?        @map("last_success_at") @db.Timestamptz(6)
+  lastErrorAt    DateTime?        @map("last_error_at") @db.Timestamptz(6)
+  version        Int              @default(1)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt      DateTime?        @map("deleted_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, provider, status])
+  @@map("integration_credentials")
+}
+
+model IntegrationBinding {
+  id                String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId       String         @map("workspace_id") @db.Uuid
+  projectId         String?        @map("project_id") @db.Uuid
+  capability        String         @db.VarChar(100)
+  primaryCredential String?        @map("primary_credential_id") @db.Uuid
+  fallbackPolicy    Json?          @map("fallback_policy")
+  budgetPolicy      Json           @map("budget_policy")
+  enabled           Boolean        @default(true)
+  version           Int            @default(1)
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, projectId, capability])
+  @@map("integration_bindings")
+}
+
+model ProviderUsage {
+  id             String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId    String         @map("workspace_id") @db.Uuid
+  projectId      String?        @map("project_id") @db.Uuid
+  jobId          String         @map("job_id") @db.Uuid
+  jobItemId      String?        @map("job_item_id") @db.Uuid
+  provider       String         @db.VarChar(64)
+  operation      String         @db.VarChar(100)
+  credentialMode CredentialMode @map("credential_mode")
+  units          BigInt
+  providerCost   BigInt?        @map("provider_cost_micro")
+  customerPrice  BigInt?        @map("customer_price_micro")
+  currency       String         @db.Char(3)
+  priceBookVer   Int?           @map("price_book_version")
+  occurredAt     DateTime       @map("occurred_at") @db.Timestamptz(6)
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, occurredAt])
+  @@index([provider, operation, occurredAt])
+  @@index([jobId])
+  @@map("provider_usage")
+}
+
+model Automation {
+  id             String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  projectId      String   @map("project_id") @db.Uuid
+  name           String   @db.VarChar(160)
+  definition     Json
+  timezone       String   @db.VarChar(64)
+  enabled        Boolean  @default(false)
+  pausedReason   String?  @map("paused_reason") @db.Text
+  nextRunAt      DateTime? @map("next_run_at") @db.Timestamptz(6)
+  lastRunAt      DateTime? @map("last_run_at") @db.Timestamptz(6)
+  consecutiveErr Int      @default(0) @map("consecutive_errors")
+  version        Int      @default(1)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, projectId, enabled, nextRunAt])
+  @@map("automations")
+}
+
+model Upload {
+  id             String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId    String       @map("workspace_id") @db.Uuid
+  projectId      String?      @map("project_id") @db.Uuid
+  actorId        String       @map("actor_id") @db.Uuid
+  status         UploadStatus @default(INITIATED)
+  bucket         String       @db.VarChar(100)
+  objectKey      String       @map("object_key") @db.Text
+  originalName   String       @map("original_name") @db.Text
+  mediaType      String       @map("media_type") @db.VarChar(255)
+  sizeBytes      BigInt       @map("size_bytes")
+  checksum       String       @db.VarChar(128)
+  multipartId    String?      @map("multipart_id") @db.Text
+  scanResult     Json?        @map("scan_result")
+  expiresAt      DateTime     @map("expires_at") @db.Timestamptz(6)
+  version        Int          @default(1)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, projectId, status, createdAt])
+  @@index([status, expiresAt])
+  @@map("uploads")
+}
+
+model InboxEvent {
+  eventId     String   @id @map("event_id") @db.Uuid
+  eventType   String   @map("event_type") @db.VarChar(160)
+  consumer    String   @db.VarChar(100)
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  @@index([consumer, processedAt])
+  @@map("inbox_events")
+}
+
+model OutboxEvent {
+  id          String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  eventType   String       @map("event_type") @db.VarChar(160)
+  aggregateId String       @map("aggregate_id") @db.Uuid
+  workspaceId String       @map("workspace_id") @db.Uuid
+  projectId   String?      @map("project_id") @db.Uuid
+  payload     Json
+  metadata    Json
+  status      OutboxStatus @default(PENDING)
+  attempts    Int          @default(0)
+  availableAt DateTime     @default(now()) @map("available_at") @db.Timestamptz(6)
+  publishedAt DateTime?    @map("published_at") @db.Timestamptz(6)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([status, availableAt])
+  @@map("outbox_events")
+}
