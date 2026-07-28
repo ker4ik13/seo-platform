@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { ConfigModule } from "./config/config.module.js";
 import { DatabaseModule } from "./database/database.module.js";
 import { HealthModule } from "./health/health.module.js";
+import { IdentityModule } from "./identity/identity.module.js";
 import { MessagingModule } from "./messaging/messaging.module.js";
 import { SystemModule } from "./system/system.module.js";
 
@@ -11,6 +12,7 @@ import { SystemModule } from "./system/system.module.js";
     DatabaseModule,
     MessagingModule,
     HealthModule,
+    IdentityModule,
     SystemModule
   ]
 })

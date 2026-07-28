@@ -102,6 +102,7 @@ model UserIdentity {
 model Session {
   id               String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
   userId           String    @map("user_id") @db.Uuid
+  accessTokenHash  String    @unique(map: "sessions_access_token_hash_key") @map("access_token_hash") @db.Text
   refreshTokenHash String    @unique(map: "sessions_refresh_token_hash_key") @map("refresh_token_hash") @db.Text
   csrfTokenHash    String    @map("csrf_token_hash") @db.Text
   familyId         String    @map("family_id") @db.Uuid
@@ -109,6 +110,7 @@ model Session {
   userAgent        String?   @map("user_agent") @db.Text
   ipAddress        String?   @map("ip_address") @db.Inet
   authenticatedAt  DateTime  @default(now()) @map("authenticated_at") @db.Timestamptz(6)
+  accessExpiresAt  DateTime  @map("access_expires_at") @db.Timestamptz(6)
   expiresAt        DateTime  @map("expires_at") @db.Timestamptz(6)
   lastUsedAt       DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(6)
   revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(6)
@@ -152,6 +154,20 @@ model UserConsent {
 
   @@index([userId, type, createdAt])
   @@map("user_consents")
+}
+
+model AuthRateLimitBucket {
+  id              String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  action          String    @db.VarChar(32)
+  subjectHash     String    @map("subject_hash") @db.Char(64)
+  windowStartedAt DateTime  @map("window_started_at") @db.Timestamptz(6)
+  counter         Int       @default(1)
+  blockedUntil    DateTime? @map("blocked_until") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([action, subjectHash])
+  @@index([blockedUntil])
+  @@map("auth_rate_limit_buckets")
 }
 
 model Workspace {

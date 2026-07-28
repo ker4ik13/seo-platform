@@ -17,8 +17,10 @@ export interface AppConfig {
     readonly realtime: string;
   };
   readonly auth: {
+    readonly accessCookieName: string;
     readonly sessionCookieName: string;
     readonly csrfCookieName: string;
+    readonly accessTokenTtlMinutes: number;
     readonly sessionTtlDays: number;
     readonly emailVerificationRequired: boolean;
     readonly emailVerificationTtlMinutes: number;
@@ -124,9 +126,16 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         env.REALTIME_INTERNAL_URL?.trim() || "http://localhost:4003"
     },
     auth: {
+      accessCookieName:
+        env.AUTH_ACCESS_COOKIE_NAME?.trim() || "seo_access",
       sessionCookieName:
         env.AUTH_SESSION_COOKIE_NAME?.trim() || "seo_session",
       csrfCookieName: env.AUTH_CSRF_COOKIE_NAME?.trim() || "seo_csrf",
+      accessTokenTtlMinutes: positiveInteger(
+        env.AUTH_ACCESS_TOKEN_TTL_MINUTES,
+        15,
+        "AUTH_ACCESS_TOKEN_TTL_MINUTES"
+      ),
       sessionTtlDays: positiveInteger(
         env.AUTH_SESSION_TTL_DAYS,
         30,
