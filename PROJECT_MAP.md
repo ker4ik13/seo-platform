@@ -2,9 +2,9 @@
 
 Последнее обновление: 28 июля 2026 года
 
-Текущий инкремент: Semantics import → Validated chunked publish
-Статус: mapping, validation preview, идемпотентная публикация в `seo-data`,
-partial cancellation и semantic version реализованы для CSV/TSV
+Текущий инкремент: Semantics import → Published core query
+Статус: mapping, validation preview, идемпотентная публикация и
+project-scoped чтение опубликованного ядра реализованы для CSV/TSV
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -124,6 +124,10 @@ Backend convention:
 - `platform-api/src/jobs` — общий internal HTTP client к jobs-integrations;
 - `platform-api/src/imports` — project-scoped create/read orchestration с
   `semantic.import`/`semantic.view`;
+- `platform-api/src/semantics` — public project-scoped keyword queries с
+  `semantic.view`;
+- `platform-api/src/seo-data` — строго валидируемый internal read client к
+  владельцу semantic core;
 - `platform-api/src/audit`, `src/outbox` — переиспользуемые transactional
   записи аудита и событий;
 - `platform-jobs-integrations/src/queue` — BullMQ connection, system queue и
@@ -143,6 +147,8 @@ Backend convention:
   HTTP client владельца semantic core;
 - `platform-seo-data/src/semantic-imports` — нормализация, import receipts,
   идемпотентное применение chunks и semantic version;
+- `platform-seo-data/src/keywords` — tenant-scoped keyword read model,
+  trigram search и cursor pagination;
 - `platform-seo-data/src/internal` — fail-closed авторизация внутренних
   tenant/actor команд;
 - `platform-jobs-integrations/src/email` — email port, disabled и SMTP adapters;
@@ -183,7 +189,7 @@ Entrypoints:
 | Admin shell | vertical slice |
 | Auth core | vertical slice |
 | Workspaces/projects/team access | vertical slice |
-| Semantics/import | vertical slice: CSV/TSV → mapping → validation → publish |
+| Semantics/import | vertical slice: CSV/TSV → mapping → validation → publish → query |
 | Rankings/integrations | planned |
 | Billing/YooKassa | planned |
 | Directus content | planned |
@@ -249,13 +255,21 @@ complete идемпотентными, project advisory lock сериализу�
 текущий chunk и фиксирует partial version; зависший `cancel_requested`
 подбирается dispatcher-ом. Jobs не имеет подключения к `seo_db`.
 
+Опубликованное ядро читается по `GET /api/v1/projects/:projectId/keywords`.
+Platform API проверяет session, `semantic.view` и tenant scope, затем вызывает
+internal query `seo-data`; Web использует только same-origin BFF. Список
+применяет keyset cursor по `created_at DESC, id DESC`, до 200 строк, связанный
+с поиском opaque cursor и GIN/trigram индекс. Exact count выполняется только
+на первой странице. UI содержит поиск, дозагрузку, loading/empty/error states
+и автоматически обновляется после полной или частичной публикации версии.
+
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 45 pass, 0 fail.
-- SEO data unit tests: 7 pass, 0 fail.
+- Platform API unit tests: 49 pass, 0 fail.
+- SEO data unit tests: 10 pass, 0 fail.
 - Jobs/integrations unit tests: 35 pass, 0 fail.
 - Contracts unit tests: 1 pass, 0 fail.
 - Unified Web security helper tests: 2 pass, 0 fail.

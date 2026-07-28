@@ -424,6 +424,20 @@ internal token плюс точным совпадением trusted tenant/actor
 - `/projects/{projectId}/page-map`;
 - `/projects/{projectId}/bulk-commands`;
 
+Начальный query-контракт `GET /projects/{projectId}/keywords`:
+
+- permission: `semantic.view`;
+- query: `limit=1..200`, opaque `cursor`, опциональный `search` до 200
+  Unicode-символов;
+- сортировка: `createdAt DESC, id DESC`;
+- response: collection envelope `data + page + meta`;
+- `page`: `hasNext`, опциональные `nextCursor` и `totalApprox`;
+- внутренний вызов `platform-api → seo-data` передаёт проверенные
+  workspace/project/actor headers и использует короткий read timeout;
+- `seo-data` повторно сопоставляет route project с trusted project context;
+- внешний API никогда не раскрывает internal request ID и не доверяет форме
+  ответа доменного сервиса без runtime validation.
+
 ### 13.4. Сбор данных
 
 - `/projects/{projectId}/tracking-contexts`;

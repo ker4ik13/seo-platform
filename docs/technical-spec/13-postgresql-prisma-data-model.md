@@ -506,12 +506,19 @@ Versioned rollout configuration.
 Indexes:
 
 - unique `(project_id, text_normalized)` where deleted_at null, если включён строгий dedup;
+- `(workspace_id, project_id, status, created_at desc, id desc)` для
+  tenant-scoped keyset pagination;
 - `(project_id, group_id, id)`;
 - `(project_id, cluster_id, id)`;
 - `(project_id, target_page_id)`;
 - `(project_id, is_tracked)`;
 - GIN/trigram on text_normalized;
 - partial issues indexes.
+
+Для trigram-поиска migration владельца `seo_db` включает PostgreSQL extension
+`pg_trgm`. Точный `count` выполняется только для первой страницы; cursor-page
+не повторяет его. Каждый query одновременно фильтруется по `workspace_id`,
+`project_id` и активному status.
 
 При необходимости строгий dedup заменяется отдельной `keyword_unique_keys`, чтобы поддержать variants.
 
