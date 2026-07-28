@@ -16,16 +16,86 @@ export class BrowserApiError extends Error {
   }
 }
 
+export interface BrowserCursorPage {
+  readonly nextCursor?: string;
+  readonly hasNext: boolean;
+  readonly totalApprox?: number;
+}
+
+export interface BrowserApiCollection<Data> {
+  readonly data: readonly Data[];
+  readonly page: BrowserCursorPage;
+}
+
+interface BrowserApiOptions {
+  readonly method?: "GET" | "POST" | "PATCH" | "DELETE";
+  readonly body?: unknown;
+  readonly ifMatch?: number;
+  readonly idempotencyKey?: string;
+  readonly signal?: AbortSignal;
+}
+
 export async function browserApiRequest<Data>(
   path: string,
-  options: {
-    readonly method?: "GET" | "POST" | "PATCH" | "DELETE";
-    readonly body?: unknown;
-    readonly ifMatch?: number;
-    readonly idempotencyKey?: string;
-    readonly signal?: AbortSignal;
-  } = {}
+  options: BrowserApiOptions = {}
 ): Promise<Data> {
+  const { response, payload } = await browserApiPayload(path, options);
+  if (response.status === 204) return undefined as Data;
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    !("data" in payload)
+  ) {
+    throw invalidResponse();
+  }
+  return payload.data as Data;
+}
+
+export async function browserApiCollectionRequest<Data>(
+  path: string,
+  options: BrowserApiOptions = {}
+): Promise<BrowserApiCollection<Data>> {
+  const { payload } = await browserApiPayload(path, options);
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    !("data" in payload) ||
+    !Array.isArray(payload.data) ||
+    !("page" in payload) ||
+    typeof payload.page !== "object" ||
+    payload.page === null
+  ) {
+    throw invalidResponse();
+  }
+  const page = payload.page as Readonly<Record<string, unknown>>;
+  if (
+    typeof page.hasNext !== "boolean" ||
+    (page.nextCursor !== undefined &&
+      typeof page.nextCursor !== "string") ||
+    (page.totalApprox !== undefined &&
+      (!Number.isSafeInteger(page.totalApprox) ||
+        Number(page.totalApprox) < 0))
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    data: payload.data as Data[],
+    page: {
+      hasNext: page.hasNext,
+      ...(typeof page.nextCursor === "string"
+        ? { nextCursor: page.nextCursor }
+        : {}),
+      ...(typeof page.totalApprox === "number"
+        ? { totalApprox: page.totalApprox }
+        : {})
+    }
+  };
+}
+
+async function browserApiPayload(
+  path: string,
+  options: BrowserApiOptions
+): Promise<{ readonly response: Response; readonly payload: unknown }> {
   if (!path.startsWith("/app/api/")) {
     throw new Error("Browser API path must use the same-origin BFF");
   }
@@ -62,19 +132,15 @@ export async function browserApiRequest<Data>(
   });
   const payload = await response.json().catch(() => undefined);
   if (!response.ok) throw browserApiError(response.status, payload);
-  if (response.status === 204) return undefined as Data;
-  if (
-    typeof payload !== "object" ||
-    payload === null ||
-    !("data" in payload)
-  ) {
-    throw new BrowserApiError(
-      502,
-      "INVALID_RESPONSE",
-      "Сервер вернул некорректный ответ"
-    );
-  }
-  return payload.data as Data;
+  return { response, payload };
+}
+
+function invalidResponse(): BrowserApiError {
+  return new BrowserApiError(
+    502,
+    "INVALID_RESPONSE",
+    "Сервер вернул некорректный ответ"
+  );
 }
 
 function browserCookie(name: string): string | undefined {

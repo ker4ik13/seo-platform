@@ -1,5 +1,5 @@
 import { AppShell } from "../../../../components/app-shell";
-import { SemanticUpload } from "../../../../components/semantic-upload";
+import { SemanticsWorkspace } from "../../../../components/semantics-workspace";
 import { ProjectOnboarding } from "../../../../components/tenant-onboarding";
 import { requireProtectedAppContext } from "../../../../lib/protected-app";
 
@@ -29,16 +29,7 @@ export default async function SemanticsPage() {
               </p>
             </div>
           </section>
-          <div className="settings-stack semantic-stack">
-            <SemanticUpload projectId={context.project.id} />
-            <section className="panel panel-empty compact">
-              <strong>Опубликованных запросов пока нет</strong>
-              <p>
-                После проверки файла здесь появятся preview импорта, конфликты
-                и управление колонками Key Collector.
-              </p>
-            </section>
-          </div>
+          <SemanticsWorkspace projectId={context.project.id} />
         </>
       )}
     </AppShell>

@@ -131,8 +131,9 @@ const MAX_CONCURRENCY = 3;
 const INSPECTION_TIMEOUT_MS = 30 * 60 * 1_000;
 
 export function SemanticUpload({
-  projectId
-}: Readonly<{ projectId: string }>) {
+  projectId,
+  onPublished
+}: Readonly<{ projectId: string; onPublished?: () => void }>) {
   const [file, setFile] = useState<File>();
   const [stage, setStage] = useState<UploadStage>("idle");
   const [progress, setProgress] = useState(0);
@@ -157,6 +158,7 @@ export function SemanticUpload({
   const activeRequests = useRef(new Set<XMLHttpRequest>());
   const backgroundRequest = useRef<AbortController | undefined>(undefined);
   const cancelled = useRef(false);
+  const notifiedSemanticVersions = useRef(new Set<string>());
   const busy = ![
     "idle",
     "uploaded",
@@ -185,6 +187,14 @@ export function SemanticUpload({
     () => uploadStatus(stage, progress),
     [stage, progress]
   );
+
+  function notifyPublished(result: SemanticImportResult): void {
+    if (notifiedSemanticVersions.current.has(result.semanticVersionId)) {
+      return;
+    }
+    notifiedSemanticVersions.current.add(result.semanticVersionId);
+    onPublished?.();
+  }
 
   useEffect(
     () => () => backgroundRequest.current?.abort(),
@@ -281,12 +291,16 @@ export function SemanticUpload({
         semanticImport.result
       ) {
         setImportResult(semanticImport.result);
+        notifyPublished(semanticImport.result);
         setStage("completed");
         setMessage(
           `Импорт завершён. Создана версия ядра №${semanticImport.result.semanticVersionNumber}.`
         );
       } else if (semanticImport.status === "CANCELLED") {
         setImportResult(semanticImport.result);
+        if (semanticImport.result?.partial) {
+          notifyPublished(semanticImport.result);
+        }
         setStage("cancelled");
         setMessage(
           semanticImport.result?.partial
@@ -472,6 +486,10 @@ export function SemanticUpload({
         );
       setImportVersion(semanticImport.version);
       if (semanticImport.status === "CANCELLED") {
+        setImportResult(semanticImport.result);
+        if (semanticImport.result?.partial) {
+          notifyPublished(semanticImport.result);
+        }
         setStage("cancelled");
         setMessage("Импорт отменён.");
       } else {
