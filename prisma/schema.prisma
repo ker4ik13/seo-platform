@@ -231,33 +231,38 @@ model Automation {
 }
 
 model Upload {
-  id               String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId      String       @map("workspace_id") @db.Uuid
-  projectId        String?      @map("project_id") @db.Uuid
-  actorId          String       @map("actor_id") @db.Uuid
-  status           UploadStatus @default(INITIATED)
-  bucket           String       @db.VarChar(100)
-  objectKey        String       @map("object_key") @db.Text
-  originalName     String       @map("original_name") @db.Text
-  mediaType        String       @map("media_type") @db.VarChar(255)
-  sizeBytes        BigInt       @map("size_bytes")
-  declaredChecksum String?      @map("declared_checksum") @db.VarChar(128)
-  checksum         String?      @db.VarChar(128)
-  multipartId      String?      @map("multipart_id") @db.Text
-  partSizeBytes    Int          @map("part_size_bytes")
-  partCount        Int          @map("part_count")
-  idempotencyKey   String       @map("idempotency_key") @db.VarChar(180)
-  scanResult       Json?        @map("scan_result")
-  expiresAt        DateTime     @map("expires_at") @db.Timestamptz(6)
-  uploadedAt       DateTime?    @map("uploaded_at") @db.Timestamptz(6)
-  abortedAt        DateTime?    @map("aborted_at") @db.Timestamptz(6)
-  version          Int          @default(1)
-  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                    String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId           String       @map("workspace_id") @db.Uuid
+  projectId             String?      @map("project_id") @db.Uuid
+  actorId               String       @map("actor_id") @db.Uuid
+  status                UploadStatus @default(INITIATED)
+  bucket                String       @db.VarChar(100)
+  objectKey             String       @map("object_key") @db.Text
+  originalName          String       @map("original_name") @db.Text
+  mediaType             String       @map("media_type") @db.VarChar(255)
+  detectedMediaType     String?      @map("detected_media_type") @db.VarChar(255)
+  sizeBytes             BigInt       @map("size_bytes")
+  declaredChecksum      String?      @map("declared_checksum") @db.VarChar(128)
+  checksum              String?      @db.VarChar(128)
+  multipartId           String?      @map("multipart_id") @db.Text
+  partSizeBytes         Int          @map("part_size_bytes")
+  partCount             Int          @map("part_count")
+  idempotencyKey        String       @map("idempotency_key") @db.VarChar(180)
+  scanResult            Json?        @map("scan_result")
+  expiresAt             DateTime     @map("expires_at") @db.Timestamptz(6)
+  uploadedAt            DateTime?    @map("uploaded_at") @db.Timestamptz(6)
+  abortedAt             DateTime?    @map("aborted_at") @db.Timestamptz(6)
+  inspectionStartedAt   DateTime?    @map("inspection_started_at") @db.Timestamptz(6)
+  inspectionHeartbeatAt DateTime?    @map("inspection_heartbeat_at") @db.Timestamptz(6)
+  inspectionCompletedAt DateTime?    @map("inspection_completed_at") @db.Timestamptz(6)
+  version               Int          @default(1)
+  createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@unique([workspaceId, actorId, idempotencyKey])
   @@index([workspaceId, projectId, status, createdAt])
   @@index([status, expiresAt])
+  @@index([status, inspectionHeartbeatAt, uploadedAt])
   @@map("uploads")
 }
 

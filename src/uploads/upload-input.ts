@@ -1,5 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import {
+  importExtensionByMediaType,
   supportedImportMediaTypes,
   type CompleteUploadInput,
   type CreateUploadPartUrlsInput,
@@ -32,6 +33,15 @@ export function internalCreateUploadInput(
   }
   const mediaType = string(input, "mediaType");
   if (!SUPPORTED_MEDIA_TYPES.has(mediaType)) invalid("mediaType");
+  if (
+    !fileName.toLowerCase().endsWith(
+      importExtensionByMediaType[
+        mediaType as InternalCreateUploadInput["mediaType"]
+      ]
+    )
+  ) {
+    invalid("fileName");
+  }
   const checksumValue = input.checksumSha256;
   const checksumSha256 =
     checksumValue === undefined

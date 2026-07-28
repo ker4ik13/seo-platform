@@ -6,9 +6,11 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "dev:worker:system": "tsx watch src/worker.main.ts",
+    "dev:worker:inspection": "tsx watch src/inspection-worker.main.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "start:worker:system": "node dist/worker.main.js",
+    "start:worker:inspection": "node dist/inspection-worker.main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test 'src/**/*.test.ts'",
     "prisma:generate": "prisma generate",

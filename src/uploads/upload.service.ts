@@ -20,6 +20,7 @@ import type { Upload } from "../generated/prisma/client.js";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { QueueService } from "../queue/queue.service.js";
 import {
   OBJECT_STORAGE,
   type ObjectStoragePort,
@@ -33,7 +34,8 @@ export class UploadService {
   public constructor(
     private readonly prisma: PrismaService,
     @Inject(OBJECT_STORAGE) private readonly storage: ObjectStoragePort,
-    @Inject(APP_CONFIG) private readonly config: AppConfig
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly queue: QueueService
   ) {}
 
   public async create(
@@ -157,6 +159,22 @@ export class UploadService {
     }
   }
 
+  public async get(
+    uploadId: string,
+    workspaceId: string,
+    projectId: string
+  ): Promise<UploadSummary> {
+    const upload = await this.prisma.upload.findFirst({
+      where: {
+        id: uploadId,
+        workspaceId,
+        projectId
+      }
+    });
+    if (!upload) throw new NotFoundException("Upload not found");
+    return toUploadSummary(upload);
+  }
+
   public async complete(
     uploadId: string,
     workspaceId: string,
@@ -167,7 +185,11 @@ export class UploadService {
   ): Promise<UploadSummary> {
     this.requireStorage();
     const upload = await this.load(uploadId, workspaceId, projectId, actorId);
-    if (["UPLOADED", "SCANNING", "READY"].includes(upload.status)) {
+    if (upload.status === "UPLOADED") {
+      await this.enqueueInspection(upload.id);
+      return toUploadSummary(upload);
+    }
+    if (["SCANNING", "READY"].includes(upload.status)) {
       return toUploadSummary(upload);
     }
     this.assertUploadable(upload);
@@ -238,7 +260,7 @@ export class UploadService {
       );
     }
 
-    return this.prisma.$transaction(async (transaction) => {
+    const result = await this.prisma.$transaction(async (transaction) => {
       const changed = await transaction.upload.updateMany({
         where: {
           id: upload.id,
@@ -280,6 +302,8 @@ export class UploadService {
       }
       return toUploadSummary(current);
     });
+    await this.enqueueInspection(result.id);
+    return result;
   }
 
   public async abort(
@@ -434,25 +458,67 @@ export class UploadService {
       );
     }
   }
+
+  private async enqueueInspection(uploadId: string): Promise<void> {
+    try {
+      await this.queue.enqueueUploadInspection(uploadId);
+    } catch (error) {
+      throw new ServiceUnavailableException(
+        "Unable to schedule upload inspection",
+        { cause: error }
+      );
+    }
+  }
 }
 
 export function toUploadSummary(upload: Upload): UploadSummary {
   if (!upload.projectId) {
     throw new Error("Project upload is missing projectId");
   }
+  const rejectionCode =
+    upload.status === "REJECTED"
+      ? safeRejectionCode(upload.scanResult)
+      : undefined;
   return {
     id: upload.id,
     workspaceId: upload.workspaceId,
     projectId: upload.projectId,
     originalName: upload.originalName,
     mediaType: upload.mediaType,
+    ...(upload.detectedMediaType
+      ? { detectedMediaType: upload.detectedMediaType }
+      : {}),
     sizeBytes: upload.sizeBytes.toString(),
     ...(upload.checksum ? { checksumSha256: upload.checksum } : {}),
+    ...(rejectionCode ? { rejectionCode } : {}),
     status: upload.status,
     expiresAt: upload.expiresAt.toISOString(),
     createdAt: upload.createdAt.toISOString(),
+    ...(upload.uploadedAt
+      ? { uploadedAt: upload.uploadedAt.toISOString() }
+      : {}),
+    ...(upload.inspectionCompletedAt
+      ? {
+          inspectionCompletedAt:
+            upload.inspectionCompletedAt.toISOString()
+        }
+      : {}),
     version: upload.version
   };
+}
+
+function safeRejectionCode(value: unknown): string | undefined {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("code" in value) ||
+    typeof value.code !== "string"
+  ) {
+    return undefined;
+  }
+  return /^[A-Z][A-Z0-9_]{1,63}$/u.test(value.code)
+    ? value.code
+    : undefined;
 }
 
 function safeExtension(fileName: string): string {

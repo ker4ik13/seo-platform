@@ -181,6 +181,23 @@ export class S3ObjectStorageAdapter implements ObjectStoragePort {
     }
   }
 
+  public async getObjectStream(
+    bucket: StorageBucket,
+    objectKey: string
+  ): Promise<AsyncIterable<Uint8Array>> {
+    const result = await this.client.send(
+      new GetObjectCommand({
+        Bucket: this.bucketName(bucket),
+        Key: this.objectKey(objectKey)
+      })
+    );
+    const body = result.Body;
+    if (!body || !(Symbol.asyncIterator in body)) {
+      throw new Error("S3 did not return a streaming object body");
+    }
+    return body as AsyncIterable<Uint8Array>;
+  }
+
   public async deleteObject(
     bucket: StorageBucket,
     objectKey: string

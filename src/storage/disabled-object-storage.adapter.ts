@@ -61,6 +61,13 @@ export class DisabledObjectStorageAdapter implements ObjectStoragePort {
     return Promise.reject(this.disabled());
   }
 
+  public getObjectStream(
+    _bucket: StorageBucket,
+    _objectKey: string
+  ): Promise<AsyncIterable<Uint8Array>> {
+    return Promise.reject(this.disabled());
+  }
+
   public deleteObject(
     _bucket: StorageBucket,
     _objectKey: string

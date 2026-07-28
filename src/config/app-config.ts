@@ -22,6 +22,14 @@ export interface EmailConfig {
   readonly password?: string;
 }
 
+export interface MalwareScannerConfig {
+  readonly enabled: boolean;
+  readonly host?: string;
+  readonly port: number;
+  readonly connectTimeoutMs: number;
+  readonly scanTimeoutMs: number;
+}
+
 export interface AppConfig {
   readonly nodeEnv: "development" | "test" | "production";
   readonly port: number;
@@ -37,10 +45,15 @@ export interface AppConfig {
   };
   readonly s3: S3Config;
   readonly email: EmailConfig;
+  readonly malwareScanner: MalwareScannerConfig;
   readonly uploads: {
     readonly maxSizeBytes: number;
     readonly partSizeBytes: number;
     readonly expiresHours: number;
+    readonly inspectionLeaseMinutes: number;
+    readonly inspectionDispatchSeconds: number;
+    readonly inspectionHeartbeatSeconds: number;
+    readonly inspectionConcurrency: number;
   };
 }
 
@@ -82,6 +95,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   const s3Enabled = bool(env.S3_ENABLED);
   const emailEnabled = bool(env.EMAIL_ENABLED);
+  const malwareScannerEnabled = bool(env.MALWARE_SCANNER_ENABLED);
   const natsUser = optional(env, "NATS_USER");
   const natsPassword = optional(env, "NATS_PASSWORD");
   const s3Endpoint = optional(env, "S3_ENDPOINT");
@@ -94,6 +108,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const smtpUser = optional(env, "SMTP_USER");
   const smtpPassword = optional(env, "SMTP_PASSWORD");
   const internalApiToken = optional(env, "INTERNAL_API_TOKEN");
+  const malwareScannerHost = optional(env, "MALWARE_SCANNER_HOST");
 
   if (
     s3Enabled &&
@@ -110,6 +125,11 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     (!emailFrom || !smtpHost || !smtpUser || !smtpPassword)
   ) {
     throw new Error("Email is enabled but SMTP configuration is incomplete");
+  }
+  if (malwareScannerEnabled && !malwareScannerHost) {
+    throw new Error(
+      "Malware scanner is enabled but MALWARE_SCANNER_HOST is missing"
+    );
   }
   if (
     nodeEnv === "production" &&
@@ -163,6 +183,25 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       ...(smtpUser ? { user: smtpUser } : {}),
       ...(smtpPassword ? { password: smtpPassword } : {})
     },
+    malwareScanner: {
+      enabled: malwareScannerEnabled,
+      ...(malwareScannerHost ? { host: malwareScannerHost } : {}),
+      port: positiveInteger(
+        env.MALWARE_SCANNER_PORT,
+        3310,
+        "MALWARE_SCANNER_PORT"
+      ),
+      connectTimeoutMs: positiveInteger(
+        env.MALWARE_SCANNER_CONNECT_TIMEOUT_MS,
+        5_000,
+        "MALWARE_SCANNER_CONNECT_TIMEOUT_MS"
+      ),
+      scanTimeoutMs: positiveInteger(
+        env.MALWARE_SCANNER_SCAN_TIMEOUT_MS,
+        15 * 60 * 1_000,
+        "MALWARE_SCANNER_SCAN_TIMEOUT_MS"
+      )
+    },
     uploads: {
       maxSizeBytes: positiveInteger(
         env.UPLOAD_MAX_SIZE_BYTES,
@@ -178,6 +217,26 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         env.UPLOAD_EXPIRES_HOURS,
         24,
         "UPLOAD_EXPIRES_HOURS"
+      ),
+      inspectionLeaseMinutes: positiveInteger(
+        env.UPLOAD_INSPECTION_LEASE_MINUTES,
+        30,
+        "UPLOAD_INSPECTION_LEASE_MINUTES"
+      ),
+      inspectionDispatchSeconds: positiveInteger(
+        env.UPLOAD_INSPECTION_DISPATCH_SECONDS,
+        30,
+        "UPLOAD_INSPECTION_DISPATCH_SECONDS"
+      ),
+      inspectionHeartbeatSeconds: positiveInteger(
+        env.UPLOAD_INSPECTION_HEARTBEAT_SECONDS,
+        60,
+        "UPLOAD_INSPECTION_HEARTBEAT_SECONDS"
+      ),
+      inspectionConcurrency: positiveInteger(
+        env.UPLOAD_INSPECTION_CONCURRENCY,
+        2,
+        "UPLOAD_INSPECTION_CONCURRENCY"
       )
     }
   };

@@ -48,6 +48,10 @@ export interface ObjectStoragePort {
     bucket: StorageBucket,
     objectKey: string
   ): Promise<StoredObjectMetadata | undefined>;
+  getObjectStream(
+    bucket: StorageBucket,
+    objectKey: string
+  ): Promise<AsyncIterable<Uint8Array>>;
   deleteObject(bucket: StorageBucket, objectKey: string): Promise<void>;
 }
 

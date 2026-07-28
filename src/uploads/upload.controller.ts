@@ -3,6 +3,7 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   Headers,
   Inject,
   Param,
@@ -91,6 +92,23 @@ export class UploadController {
         context.actorId,
         completeUploadInput(body),
         request.id
+      )
+    );
+  }
+
+  @Get(":uploadId")
+  public async get(
+    @Param("uploadId") uploadId: string,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<UploadSummary>> {
+    const context = uploadContext(uploadId, headers);
+    return response(
+      request,
+      await this.uploads.get(
+        context.uploadId,
+        context.workspaceId,
+        context.projectId
       )
     );
   }

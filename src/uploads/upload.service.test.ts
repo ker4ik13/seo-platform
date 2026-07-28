@@ -4,6 +4,7 @@ import { UnprocessableEntityException } from "@nestjs/common";
 import type { Upload } from "../generated/prisma/client.js";
 import type { AppConfig } from "../config/app-config.js";
 import type { PrismaService } from "../database/prisma.service.js";
+import type { QueueService } from "../queue/queue.service.js";
 import type { ObjectStoragePort } from "../storage/object-storage.port.js";
 import { UploadService } from "./upload.service.js";
 
@@ -27,7 +28,12 @@ test("creates an opaque, idempotent multipart declaration", async () => {
       }
     }
   } as unknown as PrismaService;
-  const service = new UploadService(prisma, storage(), config());
+  const service = new UploadService(
+    prisma,
+    storage(),
+    config(),
+    queue()
+  );
 
   const result = await service.create({
     workspaceId,
@@ -65,7 +71,12 @@ test("requires every part and scopes lookup to actor and tenant", async () => {
       completed = true;
     }
   });
-  const service = new UploadService(prisma, objectStorage, config());
+  const service = new UploadService(
+    prisma,
+    objectStorage,
+    config(),
+    queue()
+  );
 
   await assert.rejects(
     service.complete(
@@ -94,6 +105,45 @@ test("requires every part and scopes lookup to actor and tenant", async () => {
   assert.equal(completed, false);
 });
 
+test("returns a project-scoped inspection status without exposing scanner details", async () => {
+  let lookup: unknown;
+  const completedAt = new Date();
+  const prisma = {
+    upload: {
+      findFirst: async ({ where }: { where: unknown }) => {
+        lookup = where;
+        return uploadRecord({
+          status: "REJECTED",
+          detectedMediaType: "application/octet-stream",
+          scanResult: {
+            status: "REJECTED",
+            code: "MALWARE_DETECTED",
+            malwareSignature: "Must.Not.Leak"
+          },
+          inspectionCompletedAt: completedAt
+        });
+      }
+    }
+  } as unknown as PrismaService;
+  const service = new UploadService(prisma, storage(), config(), queue());
+
+  const result = await service.get(
+    "01900000-0000-7000-8000-000000000005",
+    workspaceId,
+    projectId
+  );
+
+  assert.deepEqual(lookup, {
+    id: "01900000-0000-7000-8000-000000000005",
+    workspaceId,
+    projectId
+  });
+  assert.equal(result.status, "REJECTED");
+  assert.equal(result.rejectionCode, "MALWARE_DETECTED");
+  assert.equal(result.inspectionCompletedAt, completedAt.toISOString());
+  assert.equal("malwareSignature" in result, false);
+});
+
 function uploadRecord(overrides: Partial<Upload> = {}): Upload {
   const now = new Date();
   return {
@@ -106,6 +156,7 @@ function uploadRecord(overrides: Partial<Upload> = {}): Upload {
     objectKey: `${workspaceId}/${projectId}/opaque.csv`,
     originalName: "keywords.csv",
     mediaType: "text/csv",
+    detectedMediaType: null,
     sizeBytes: 1_024n,
     declaredChecksum: null,
     checksum: null,
@@ -117,6 +168,9 @@ function uploadRecord(overrides: Partial<Upload> = {}): Upload {
     expiresAt: new Date(now.getTime() + 60_000),
     uploadedAt: null,
     abortedAt: null,
+    inspectionStartedAt: null,
+    inspectionHeartbeatAt: null,
+    inspectionCompletedAt: null,
     version: 1,
     createdAt: now,
     updatedAt: now,
@@ -139,6 +193,7 @@ function storage(
     abortMultipartUpload: async () => undefined,
     createDownloadUrl: async () => "https://storage.invalid/download",
     headObject: async () => ({ sizeBytes: 1_024n }),
+    getObjectStream: async () => emptyStream(),
     deleteObject: async () => undefined,
     ...overrides
   };
@@ -165,10 +220,30 @@ function config(): AppConfig {
       port: 587,
       secure: false
     },
+    malwareScanner: {
+      enabled: false,
+      port: 3310,
+      connectTimeoutMs: 5_000,
+      scanTimeoutMs: 900_000
+    },
     uploads: {
       maxSizeBytes: 5 * 1_024 * 1_024 * 1_024,
       partSizeBytes: 8 * 1_024 * 1_024,
-      expiresHours: 24
+      expiresHours: 24,
+      inspectionLeaseMinutes: 30,
+      inspectionDispatchSeconds: 30,
+      inspectionHeartbeatSeconds: 60,
+      inspectionConcurrency: 2
     }
   };
+}
+
+function queue(): QueueService {
+  return {
+    enqueueUploadInspection: async () => undefined
+  } as unknown as QueueService;
+}
+
+async function* emptyStream(): AsyncGenerator<Uint8Array> {
+  yield new Uint8Array();
 }
