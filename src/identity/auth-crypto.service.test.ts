@@ -79,3 +79,20 @@ test("derives deterministic invitation token without persisting it in events", (
   assert.equal(first, second);
   assert.match(first, /^[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/u);
 });
+
+test("derives deterministic password reset token", () => {
+  const expiresAt = new Date("2026-07-28T21:00:00.000Z");
+  const first = cryptoService.passwordResetToken(
+    "01900000-0000-7000-8000-000000000005",
+    "01900000-0000-7000-8000-000000000006",
+    expiresAt
+  );
+  const second = cryptoService.passwordResetToken(
+    "01900000-0000-7000-8000-000000000005",
+    "01900000-0000-7000-8000-000000000006",
+    expiresAt
+  );
+
+  assert.equal(first, second);
+  assert.match(first, /^[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/u);
+});

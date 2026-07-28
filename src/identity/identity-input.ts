@@ -1,7 +1,9 @@
 import type {
   LoginInput,
   RegisterAccountInput,
+  RequestPasswordResetInput,
   ResendEmailVerificationInput,
+  ResetPasswordInput,
   VerifyEmailInput
 } from "@seo-platform/contracts";
 import {
@@ -96,6 +98,23 @@ export function resendVerificationInput(
   const input = inputObject(value);
   return {
     email: stringField(input, "email", { min: 3, max: 320 })
+  };
+}
+
+export function requestPasswordResetInput(
+  value: unknown
+): RequestPasswordResetInput {
+  const input = inputObject(value);
+  return {
+    email: stringField(input, "email", { min: 3, max: 320 })
+  };
+}
+
+export function resetPasswordInput(value: unknown): ResetPasswordInput {
+  const input = inputObject(value);
+  return {
+    token: stringField(input, "token", { min: 32, max: 256 }),
+    password: passwordField(input, "password", true)
   };
 }
 

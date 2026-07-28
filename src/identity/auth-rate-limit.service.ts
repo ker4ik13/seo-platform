@@ -3,7 +3,13 @@ import { DomainError } from "../common/domain-error.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { AuthCryptoService } from "./auth-crypto.service.js";
 
-type RateLimitAction = "LOGIN" | "REGISTER" | "VERIFY" | "RESEND";
+type RateLimitAction =
+  | "LOGIN"
+  | "REGISTER"
+  | "VERIFY"
+  | "RESEND"
+  | "PASSWORD_RESET_REQUEST"
+  | "PASSWORD_RESET";
 
 interface RateLimitPolicy {
   readonly limit: number;
@@ -14,7 +20,17 @@ const policies: Readonly<Record<RateLimitAction, RateLimitPolicy>> = {
   LOGIN: { limit: 10, windowSeconds: 15 * 60, blockSeconds: 15 * 60 },
   REGISTER: { limit: 10, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
   VERIFY: { limit: 20, windowSeconds: 15 * 60, blockSeconds: 15 * 60 },
-  RESEND: { limit: 3, windowSeconds: 60 * 60, blockSeconds: 60 * 60 }
+  RESEND: { limit: 3, windowSeconds: 60 * 60, blockSeconds: 60 * 60 },
+  PASSWORD_RESET_REQUEST: {
+    limit: 3,
+    windowSeconds: 60 * 60,
+    blockSeconds: 60 * 60
+  },
+  PASSWORD_RESET: {
+    limit: 10,
+    windowSeconds: 15 * 60,
+    blockSeconds: 15 * 60
+  }
 };
 
 interface RateLimitRow {

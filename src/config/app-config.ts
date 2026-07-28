@@ -24,6 +24,7 @@ export interface AppConfig {
     readonly sessionTtlDays: number;
     readonly emailVerificationRequired: boolean;
     readonly emailVerificationTtlMinutes: number;
+    readonly passwordResetTtlMinutes: number;
     readonly cookieSecure: boolean;
     readonly passwordPepper?: string;
     readonly exposeDevelopmentTokens: boolean;
@@ -150,6 +151,11 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         env.AUTH_EMAIL_VERIFICATION_TTL_MINUTES,
         30,
         "AUTH_EMAIL_VERIFICATION_TTL_MINUTES"
+      ),
+      passwordResetTtlMinutes: positiveInteger(
+        env.AUTH_PASSWORD_RESET_TTL_MINUTES,
+        30,
+        "AUTH_PASSWORD_RESET_TTL_MINUTES"
       ),
       cookieSecure: booleanValue(
         env.AUTH_COOKIE_SECURE,

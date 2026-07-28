@@ -75,6 +75,20 @@ export class AuthCryptoService {
     return `${inviteId}.${signature}`;
   }
 
+  public passwordResetToken(
+    tokenId: string,
+    userId: string,
+    expiresAt: Date
+  ): string {
+    const key =
+      this.config.auth.passwordPepper ??
+      "development-only-password-reset-signing-key";
+    const signature = createHmac("sha256", key)
+      .update(`password-reset:${tokenId}:${userId}:${expiresAt.toISOString()}`)
+      .digest("base64url");
+    return `${tokenId}.${signature}`;
+  }
+
   public hashOpaqueToken(token: string): string {
     const pepper = this.config.auth.passwordPepper;
     return pepper

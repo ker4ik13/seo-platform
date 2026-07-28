@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
-import { loginInput, registerInput } from "./identity-input.js";
+import {
+  loginInput,
+  registerInput,
+  requestPasswordResetInput,
+  resetPasswordInput
+} from "./identity-input.js";
 
 const validRegistration = {
   email: "User@example.com",
@@ -56,6 +61,26 @@ test("rejects a known common password", () => {
     () =>
       registerInput({
         ...validRegistration,
+        password: "password1234"
+      }),
+    (error) =>
+      error instanceof DomainError &&
+      error.fieldErrors?.[0]?.code === "PASSWORD_COMPROMISED"
+  );
+});
+
+test("parses password reset request without normalizing the API contract", () => {
+  assert.deepEqual(
+    requestPasswordResetInput({ email: "User@example.com" }),
+    { email: "User@example.com" }
+  );
+});
+
+test("applies the strong password policy to password reset", () => {
+  assert.throws(
+    () =>
+      resetPasswordInput({
+        token: "a".repeat(64),
         password: "password1234"
       }),
     (error) =>

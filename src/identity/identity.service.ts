@@ -4,8 +4,11 @@ import {
   type AcceptedOperation,
   type AuthenticationResult,
   type LoginInput,
+  type PasswordResetAccepted,
   type RegisterAccountInput,
+  type RequestPasswordResetInput,
   type ResendEmailVerificationInput,
+  type ResetPasswordInput,
   type VerifyEmailInput
 } from "@seo-platform/contracts";
 import type { Prisma, User } from "../generated/prisma/client.js";
@@ -39,6 +42,9 @@ export interface AuthenticationCommandResult {
 }
 export interface AcceptedCommandResult {
   readonly response: AcceptedOperation;
+}
+export interface PasswordResetRequestCommandResult {
+  readonly response: PasswordResetAccepted;
 }
 
 @Injectable()
@@ -396,6 +402,159 @@ export class IdentityService {
     };
   }
 
+  public async requestPasswordReset(
+    input: RequestPasswordResetInput,
+    context: RequestContext
+  ): Promise<PasswordResetRequestCommandResult> {
+    const email = normalizeEmail(input.email);
+    await this.rateLimits.consume("PASSWORD_RESET_REQUEST", [
+      `ip:${context.ipAddress ?? "unknown"}`,
+      `email:${email}`
+    ]);
+
+    const user = await this.prisma.user.findUnique({
+      where: { emailNormalized: email }
+    });
+    if (!user || user.status !== "ACTIVE" || !user.emailVerifiedAt) {
+      return { response: { accepted: true } };
+    }
+
+    const resetToken = await this.prisma.$transaction(
+      async (transaction) => {
+        await transaction.oneTimeToken.updateMany({
+          where: {
+            userId: user.id,
+            purpose: "PASSWORD_RESET",
+            consumedAt: null
+          },
+          data: { consumedAt: new Date() }
+        });
+        const token = await this.createPasswordResetToken(
+          transaction,
+          user,
+          context
+        );
+        await this.audit.record(
+          {
+            actorId: user.id,
+            action: "identity.password.reset_requested",
+            resourceType: "user",
+            resourceId: user.id,
+            requestId: context.requestId
+          },
+          transaction
+        );
+        return token;
+      }
+    );
+
+    return {
+      response: {
+        accepted: true,
+        ...(this.config.auth.exposeDevelopmentTokens
+          ? { resetTokenForDevelopment: resetToken }
+          : {})
+      }
+    };
+  }
+
+  public async resetPassword(
+    input: ResetPasswordInput,
+    context: RequestContext
+  ): Promise<AuthenticationCommandResult> {
+    const tokenHash = this.crypto.hashOpaqueToken(input.token);
+    await this.rateLimits.consume("PASSWORD_RESET", [
+      `ip:${context.ipAddress ?? "unknown"}`,
+      `token:${tokenHash}`
+    ]);
+
+    const record = await this.prisma.oneTimeToken.findUnique({
+      where: { tokenHash },
+      include: { user: true }
+    });
+    if (
+      !record ||
+      record.purpose !== "PASSWORD_RESET" ||
+      record.consumedAt ||
+      record.expiresAt <= new Date() ||
+      record.user.status !== "ACTIVE" ||
+      !record.user.emailVerifiedAt
+    ) {
+      throw this.invalidPasswordResetToken();
+    }
+
+    const passwordHash = await this.crypto.hashPassword(input.password);
+    const result = await this.prisma.$transaction(async (transaction) => {
+      const consumed = await transaction.oneTimeToken.updateMany({
+        where: {
+          id: record.id,
+          consumedAt: null,
+          expiresAt: { gt: new Date() }
+        },
+        data: { consumedAt: new Date() }
+      });
+      if (consumed.count !== 1) {
+        throw this.invalidPasswordResetToken();
+      }
+
+      const user = await transaction.user.update({
+        where: {
+          id: record.userId,
+          status: "ACTIVE"
+        },
+        data: {
+          passwordHash,
+          version: { increment: 1 }
+        }
+      });
+      await transaction.oneTimeToken.updateMany({
+        where: {
+          userId: user.id,
+          purpose: "PASSWORD_RESET",
+          consumedAt: null
+        },
+        data: { consumedAt: new Date() }
+      });
+      await transaction.session.updateMany({
+        where: {
+          userId: user.id,
+          revokedAt: null
+        },
+        data: { revokedAt: new Date() }
+      });
+      await this.audit.record(
+        {
+          actorId: user.id,
+          action: "identity.password.changed_via_reset",
+          resourceType: "user",
+          resourceId: user.id,
+          requestId: context.requestId
+        },
+        transaction
+      );
+      await this.outbox.userEvent(transaction, {
+        eventType: domainEventTypes.userPasswordChanged,
+        user,
+        payload: {
+          userId: user.id,
+          method: "PASSWORD_RESET"
+        },
+        requestId: context.requestId
+      });
+      const session = await this.sessions.issue(transaction, user.id, context);
+      return { user, session };
+    });
+
+    return {
+      response: {
+        user: toUserSummary(result.user),
+        session: toSessionSummary(result.session.session),
+        emailVerificationRequired: false
+      },
+      credentials: result.session.credentials
+    };
+  }
+
   private async createVerificationToken(
     transaction: Transaction,
     user: User,
@@ -434,6 +593,53 @@ export class IdentityService {
       requestId: context.requestId
     });
     return token;
+  }
+
+  private async createPasswordResetToken(
+    transaction: Transaction,
+    user: User,
+    context: RequestContext
+  ): Promise<string> {
+    const expiresAt = new Date(
+      Date.now() + this.config.auth.passwordResetTtlMinutes * 60 * 1_000
+    );
+    const record = await transaction.oneTimeToken.create({
+      data: {
+        userId: user.id,
+        purpose: "PASSWORD_RESET",
+        tokenHash: this.crypto.hashOpaqueToken(this.crypto.randomToken()),
+        expiresAt
+      }
+    });
+    const token = this.crypto.passwordResetToken(
+      record.id,
+      user.id,
+      expiresAt
+    );
+    await transaction.oneTimeToken.update({
+      where: { id: record.id },
+      data: { tokenHash: this.crypto.hashOpaqueToken(token) }
+    });
+    await this.outbox.userEvent(transaction, {
+      eventType: domainEventTypes.passwordResetRequested,
+      user,
+      payload: {
+        userId: user.id,
+        oneTimeTokenId: record.id,
+        locale: user.locale,
+        expiresAt: expiresAt.toISOString()
+      },
+      requestId: context.requestId
+    });
+    return token;
+  }
+
+  private invalidPasswordResetToken(): DomainError {
+    return new DomainError({
+      statusCode: 409,
+      code: "RESOURCE_STATE_CONFLICT",
+      message: "Password reset link is invalid or expired"
+    });
   }
 
   private consent(

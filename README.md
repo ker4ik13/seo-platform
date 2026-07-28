@@ -13,6 +13,8 @@
 - email/password registration и обязательные consent snapshots;
 - Argon2id password hashing с production pepper;
 - одноразовая email verification;
+- безопасное восстановление пароля с единообразным ответом, TTL и отзывом
+  прежних сессий;
 - login/logout и server-side session inventory;
 - opaque cookie session rotation и token-family replay revocation;
 - session-bound CSRF;
@@ -40,4 +42,4 @@ Production требует `AUTH_PASSWORD_PEPPER`, `AUTH_COOKIE_SECURE=true` и
 `AUTH_EXPOSE_DEVELOPMENT_TOKENS=false`. Verification token передаётся email
 worker как ссылка на одноразовую запись: открытый token детерминированно
 восстанавливается внутри доверенного контура и не попадает в outbox или логи.
-То же правило применяется к приглашениям в workspace.
+То же правило применяется к приглашениям в workspace и восстановлению пароля.

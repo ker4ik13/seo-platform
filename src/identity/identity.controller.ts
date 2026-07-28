@@ -16,6 +16,7 @@ import type {
   ApiResponse,
   AuthenticationResult,
   CurrentAccount,
+  PasswordResetAccepted,
   UserSessionSummary
 } from "@seo-platform/contracts";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -29,6 +30,8 @@ import { CurrentPrincipal } from "./current-principal.js";
 import {
   loginInput,
   registerInput,
+  requestPasswordResetInput,
+  resetPasswordInput,
   resendVerificationInput,
   verifyEmailInput
 } from "./identity-input.js";
@@ -108,6 +111,34 @@ export class IdentityController {
       resendVerificationInput(body),
       requestContext(request)
     );
+    return apiResponse(request, result.response);
+  }
+
+  @Post("auth/password/request")
+  @HttpCode(202)
+  public async requestPasswordReset(
+    @Body() body: unknown,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<PasswordResetAccepted>> {
+    const result = await this.identity.requestPasswordReset(
+      requestPasswordResetInput(body),
+      requestContext(request)
+    );
+    return apiResponse(request, result.response);
+  }
+
+  @Post("auth/password/reset")
+  @HttpCode(200)
+  public async resetPassword(
+    @Body() body: unknown,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<ApiResponse<AuthenticationResult>> {
+    const result = await this.identity.resetPassword(
+      resetPasswordInput(body),
+      requestContext(request)
+    );
+    if (result.credentials) this.cookies.write(reply, result.credentials);
     return apiResponse(request, result.response);
   }
 
