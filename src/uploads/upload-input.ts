@@ -1,4 +1,5 @@
 import {
+  importExtensionByMediaType,
   supportedImportMediaTypes,
   type CompleteUploadInput,
   type CreateUploadInput,
@@ -21,6 +22,15 @@ export function createUploadInput(value: unknown): CreateUploadInput {
   if (/[\\/\u0000-\u001f\u007f]/u.test(fileName)) invalid("fileName");
   const mediaType = stringField(input, "mediaType", { min: 1, max: 255 });
   if (!SUPPORTED_MEDIA_TYPES.has(mediaType)) invalid("mediaType");
+  if (
+    !fileName.toLowerCase().endsWith(
+      importExtensionByMediaType[
+        mediaType as CreateUploadInput["mediaType"]
+      ]
+    )
+  ) {
+    invalid("fileName");
+  }
   const sizeBytes = stringField(input, "sizeBytes", { min: 1, max: 20 });
   if (!/^[1-9]\d*$/u.test(sizeBytes)) invalid("sizeBytes");
   const checksumSha256 =

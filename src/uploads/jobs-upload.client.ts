@@ -66,6 +66,17 @@ export class JobsUploadClient {
     );
   }
 
+  public get(
+    context: InternalContext,
+    uploadId: string
+  ): Promise<UploadSummary> {
+    return this.request(
+      "GET",
+      `/internal/v1/uploads/${encodeURIComponent(uploadId)}`,
+      context
+    );
+  }
+
   public abort(
     context: InternalContext,
     uploadId: string
@@ -78,7 +89,7 @@ export class JobsUploadClient {
   }
 
   private async request<Data>(
-    method: "POST" | "DELETE",
+    method: "GET" | "POST" | "DELETE",
     path: string,
     context: InternalContext,
     body?: unknown

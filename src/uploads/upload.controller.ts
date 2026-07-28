@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   Param,
   Post,
   Req,
@@ -26,7 +27,8 @@ import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
 import { requestContext } from "../identity/request-context.js";
 import {
   CsrfSessionGuard,
-  headerValue
+  headerValue,
+  SessionAuthGuard
 } from "../identity/session-auth.guard.js";
 import { JobsUploadClient } from "./jobs-upload.client.js";
 import {
@@ -109,6 +111,29 @@ export class UploadController {
         },
         uploadId,
         completeUploadInput(body)
+      )
+    );
+  }
+
+  @Get(":uploadId")
+  @RequirePermission("file.download")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async get(
+    @Param("uploadId") uploadId: string,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<UploadSummary>> {
+    assertUuid(uploadId, "uploadId");
+    const context = requestContext(request);
+    return apiResponse(
+      request,
+      await this.uploads.get(
+        {
+          tenant: requiredTenant(request),
+          actorId: principal.userId,
+          requestId: context.requestId
+        },
+        uploadId
       )
     );
   }
