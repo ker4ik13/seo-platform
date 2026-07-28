@@ -28,26 +28,36 @@ enum OutboxStatus {
   FAILED
 }
 
+enum SemanticImportReceiptStatus {
+  RECEIVING
+  COMPLETED
+}
+
 model Keyword {
-  id                 String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId        String       @map("workspace_id") @db.Uuid
-  projectId          String       @map("project_id") @db.Uuid
-  textOriginal       String       @map("text_original") @db.Text
-  textNormalized     String       @map("text_normalized") @db.Text
-  normalizedHash     String       @map("normalized_hash") @db.Char(64)
-  language           String       @default("und") @db.VarChar(16)
-  priority           Int          @default(0)
-  status             EntityStatus @default(ACTIVE)
-  clusterId          String?      @map("cluster_id") @db.Uuid
-  targetPageId       String?      @map("target_page_id") @db.Uuid
-  isTracked          Boolean      @default(false) @map("is_tracked")
-  customValues       Json         @default("{}") @map("custom_values")
-  version            Int          @default(1)
-  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt          DateTime?    @map("deleted_at") @db.Timestamptz(6)
+  id             String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId    String         @map("workspace_id") @db.Uuid
+  projectId      String         @map("project_id") @db.Uuid
+  textOriginal   String         @map("text_original") @db.Text
+  textNormalized String         @map("text_normalized") @db.Text
+  normalizedHash String         @map("normalized_hash") @db.Char(64)
+  language       String         @default("und") @db.VarChar(16)
+  priority       Int            @default(0)
+  status         EntityStatus   @default(ACTIVE)
+  clusterId      String?        @map("cluster_id") @db.Uuid
+  targetPageId   String?        @map("target_page_id") @db.Uuid
+  isTracked      Boolean        @default(false) @map("is_tracked")
+  customValues   Json           @default("{}") @map("custom_values")
+  sourceMode     DataSourceMode @default(MANUAL) @map("source_mode")
+  sourceId       String?        @map("source_id") @db.Uuid
+  createdBy      String?        @map("created_by") @db.Uuid
+  updatedBy      String?        @map("updated_by") @db.Uuid
+  version        Int            @default(1)
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt      DateTime?      @map("deleted_at") @db.Timestamptz(6)
 
   memberships KeywordGroupMembership[]
+  tags        KeywordTag[]
 
   @@unique([projectId, language, normalizedHash])
   @@index([workspaceId, projectId, status, id])
@@ -63,6 +73,8 @@ model KeywordGroup {
   projectId   String       @map("project_id") @db.Uuid
   parentId    String?      @map("parent_id") @db.Uuid
   name        String       @db.VarChar(255)
+  path        String?      @db.Text
+  pathHash    String?      @map("path_hash") @db.Char(64)
   color       String?      @db.VarChar(16)
   position    Int          @default(0)
   status      EntityStatus @default(ACTIVE)
@@ -72,6 +84,7 @@ model KeywordGroup {
 
   memberships KeywordGroupMembership[]
 
+  @@unique([projectId, pathHash])
   @@index([projectId, parentId, position])
   @@map("keyword_groups")
 }
@@ -88,6 +101,37 @@ model KeywordGroupMembership {
   @@id([keywordId, groupId])
   @@index([projectId, groupId, keywordId])
   @@map("keyword_group_memberships")
+}
+
+model Tag {
+  id             String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId    String       @map("workspace_id") @db.Uuid
+  projectId      String       @map("project_id") @db.Uuid
+  name           String       @db.VarChar(160)
+  normalizedName String       @map("normalized_name") @db.VarChar(160)
+  status         EntityStatus @default(ACTIVE)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  keywords KeywordTag[]
+
+  @@unique([projectId, normalizedName])
+  @@index([workspaceId, projectId, status, name])
+  @@map("tags")
+}
+
+model KeywordTag {
+  projectId String   @map("project_id") @db.Uuid
+  keywordId String   @map("keyword_id") @db.Uuid
+  tagId     String   @map("tag_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  keyword Keyword @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([keywordId, tagId])
+  @@index([projectId, tagId, keywordId])
+  @@map("keyword_tags")
 }
 
 model Cluster {
@@ -213,6 +257,48 @@ model SemanticVersion {
   @@unique([projectId, number])
   @@index([workspaceId, projectId, createdAt])
   @@map("semantic_versions")
+}
+
+model SemanticImportReceipt {
+  importId           String                      @id @map("import_id") @db.Uuid
+  workspaceId        String                      @map("workspace_id") @db.Uuid
+  projectId          String                      @map("project_id") @db.Uuid
+  actorId            String                      @map("actor_id") @db.Uuid
+  status             SemanticImportReceiptStatus @default(RECEIVING)
+  mappingHash        String                      @map("mapping_hash") @db.Char(64)
+  duplicatePolicy    String                      @map("duplicate_policy") @db.VarChar(32)
+  expectedChunks     Int                         @map("expected_chunks")
+  expectedUniqueRows BigInt                      @map("expected_unique_rows")
+  semanticVersionId  String?                     @map("semantic_version_id") @db.Uuid
+  resultSummary      Json?                       @map("result_summary")
+  createdAt          DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  completedAt        DateTime?                   @map("completed_at") @db.Timestamptz(6)
+
+  chunks SemanticImportChunkReceipt[]
+
+  @@index([workspaceId, projectId, status, createdAt])
+  @@map("semantic_import_receipts")
+}
+
+model SemanticImportChunkReceipt {
+  importId               String   @map("import_id") @db.Uuid
+  chunkIndex             Int      @map("chunk_index")
+  payloadHash            String   @map("payload_hash") @db.Char(64)
+  inputRows              Int      @map("input_rows")
+  createdKeywords        BigInt   @default(0) @map("created_keywords")
+  updatedKeywords        BigInt   @default(0) @map("updated_keywords")
+  skippedKeywords        BigInt   @default(0) @map("skipped_keywords")
+  createdGroups          BigInt   @default(0) @map("created_groups")
+  createdPages           BigInt   @default(0) @map("created_pages")
+  createdTags            BigInt   @default(0) @map("created_tags")
+  createdMetricSnapshots BigInt   @default(0) @map("created_metric_snapshots")
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  semanticImport SemanticImportReceipt @relation(fields: [importId], references: [importId], onDelete: Cascade)
+
+  @@id([importId, chunkIndex])
+  @@map("semantic_import_chunk_receipts")
 }
 
 model OutboxEvent {

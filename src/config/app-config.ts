@@ -4,6 +4,7 @@ export interface AppConfig {
   readonly version: string;
   readonly databaseUrl: string;
   readonly databasePoolMax: number;
+  readonly internalApiToken?: string;
   readonly nats: {
     readonly url: string;
     readonly user?: string;
@@ -37,6 +38,15 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   const user = env.NATS_USER?.trim();
   const password = env.NATS_PASSWORD?.trim();
+  const internalApiToken = env.INTERNAL_API_TOKEN?.trim();
+  if (
+    nodeEnv === "production" &&
+    (!internalApiToken || internalApiToken.length < 32)
+  ) {
+    throw new Error(
+      "INTERNAL_API_TOKEN with at least 32 characters is required in production"
+    );
+  }
 
   return {
     nodeEnv: nodeEnv as AppConfig["nodeEnv"],
@@ -48,6 +58,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       20,
       "DATABASE_POOL_MAX"
     ),
+    ...(internalApiToken ? { internalApiToken } : {}),
     nats: {
       url: env.NATS_URL?.trim() || "nats://localhost:4222",
       ...(user ? { user } : {}),

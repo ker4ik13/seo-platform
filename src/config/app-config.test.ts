@@ -11,3 +11,14 @@ test("uses the SEO service default port", () => {
   assert.equal(config.port, 4001);
   assert.equal(config.nats.url, "nats://localhost:4222");
 });
+
+test("requires internal authentication in production", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: "postgresql://test"
+      }),
+    /INTERNAL_API_TOKEN/u
+  );
+});

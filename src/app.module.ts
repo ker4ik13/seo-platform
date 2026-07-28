@@ -4,6 +4,7 @@ import { DatabaseModule } from "./database/database.module.js";
 import { HealthModule } from "./health/health.module.js";
 import { MessagingModule } from "./messaging/messaging.module.js";
 import { SystemModule } from "./system/system.module.js";
+import { SemanticImportModule } from "./semantic-imports/semantic-import.module.js";
 
 @Module({
   imports: [
@@ -11,6 +12,7 @@ import { SystemModule } from "./system/system.module.js";
     DatabaseModule,
     MessagingModule,
     HealthModule,
+    SemanticImportModule,
     SystemModule
   ]
 })
