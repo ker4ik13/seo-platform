@@ -5,6 +5,7 @@ export interface AppConfig {
   readonly databaseUrl: string;
   readonly databasePoolMax: number;
   readonly redisUrl: string;
+  readonly internalApiToken?: string;
   readonly nats: {
     readonly url: string;
     readonly user?: string;
@@ -39,6 +40,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   const natsUser = env.NATS_USER?.trim();
   const natsPassword = env.NATS_PASSWORD?.trim();
+  const internalApiToken = env.INTERNAL_API_TOKEN?.trim();
   const webOrigins = (env.WEB_ORIGINS ?? "http://localhost:3001")
     .split(",")
     .map((origin) => origin.trim())
@@ -46,6 +48,14 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   if (webOrigins.length === 0) {
     throw new Error("WEB_ORIGINS must contain at least one origin");
+  }
+  if (
+    nodeEnv === "production" &&
+    (!internalApiToken || internalApiToken.length < 32)
+  ) {
+    throw new Error(
+      "INTERNAL_API_TOKEN with at least 32 characters is required in production"
+    );
   }
 
   return {
@@ -59,6 +69,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "DATABASE_POOL_MAX"
     ),
     redisUrl: env.REDIS_URL?.trim() || "redis://localhost:6379",
+    ...(internalApiToken ? { internalApiToken } : {}),
     nats: {
       url: env.NATS_URL?.trim() || "nats://localhost:4222",
       ...(natsUser ? { user: natsUser } : {}),

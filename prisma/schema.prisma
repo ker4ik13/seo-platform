@@ -21,6 +21,55 @@ enum OutboxStatus {
   FAILED
 }
 
+enum NotificationChannel {
+  IN_APP
+  EMAIL
+  WEB_PUSH
+}
+
+enum NotificationEventType {
+  ASSIGNMENT
+  MENTION
+  SEMANTIC_IMPORT
+  RANK_TRACKING
+  FREQUENCY_COLLECTION
+  SERP_COLLECTION
+  CLUSTERING
+  CRAWL_RADAR
+  SITEMAP
+  MAGNET
+  AUTOMATION
+  INTEGRATION
+  JOB
+  REPORT
+  SECURITY
+  BILLING
+  PRODUCT
+}
+
+enum NotificationSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum NotificationDeliveryMode {
+  INSTANT
+  HOURLY_DIGEST
+  DAILY_DIGEST
+}
+
+enum ProjectNotificationMode {
+  INHERIT
+  OVERRIDE
+  PAUSED
+}
+
+enum ProjectNotificationSubscriptionStatus {
+  ACTIVE
+  INACTIVE
+}
+
 model CollaborationDocument {
   id                String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId       String   @map("workspace_id") @db.Uuid
@@ -75,6 +124,77 @@ model Notification {
   @@unique([userId, dedupeKey])
   @@index([workspaceId, userId, readAt, createdAt])
   @@map("notifications")
+}
+
+model NotificationPreference {
+  id             String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId         String   @unique(map: "notification_preferences_user_id_key") @map("user_id") @db.Uuid
+  inAppEnabled   Boolean  @default(true) @map("in_app_enabled")
+  emailEnabled   Boolean  @default(false) @map("email_enabled")
+  webPushEnabled Boolean  @default(false) @map("web_push_enabled")
+  timezone       String   @default("UTC") @db.VarChar(64)
+  quietStart     String?  @map("quiet_start") @db.VarChar(5)
+  quietEnd       String?  @map("quiet_end") @db.VarChar(5)
+  criticalBypass Boolean  @default(true) @map("critical_bypass")
+  digestTime     String   @default("09:00") @map("digest_time") @db.VarChar(5)
+  version        Int      @default(1)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  rules         NotificationRule[]
+  subscriptions ProjectNotificationSubscription[]
+
+  @@map("notification_preferences")
+}
+
+model NotificationRule {
+  id              String                   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  preferenceId    String                   @map("preference_id") @db.Uuid
+  subscriptionId  String?                  @map("subscription_id") @db.Uuid
+  scopeKey        String                   @map("scope_key") @db.Uuid
+  userId          String                   @map("user_id") @db.Uuid
+  projectId       String?                  @map("project_id") @db.Uuid
+  eventType       NotificationEventType    @map("event_type")
+  channel         NotificationChannel
+  enabled         Boolean                  @default(true)
+  minimumSeverity NotificationSeverity     @default(INFO) @map("minimum_severity")
+  deliveryMode    NotificationDeliveryMode @default(INSTANT) @map("delivery_mode")
+  createdAt       DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  preference   NotificationPreference           @relation(fields: [preferenceId], references: [id], onDelete: Cascade)
+  subscription ProjectNotificationSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([scopeKey, eventType, channel], map: "notification_rules_scope_event_channel_key")
+  @@index([userId, projectId, eventType, channel], map: "notification_rules_user_project_event_channel_idx")
+  @@index([preferenceId, subscriptionId], map: "notification_rules_preference_subscription_idx")
+  @@map("notification_rules")
+}
+
+model ProjectNotificationSubscription {
+  id                String                                @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  preferenceId      String                                @map("preference_id") @db.Uuid
+  userId            String                                @map("user_id") @db.Uuid
+  workspaceId       String                                @map("workspace_id") @db.Uuid
+  projectId         String                                @map("project_id") @db.Uuid
+  membershipId      String                                @map("membership_id") @db.Uuid
+  membershipVersion Int                                   @map("membership_version")
+  mode              ProjectNotificationMode               @default(INHERIT)
+  pausedUntil       DateTime?                             @map("paused_until") @db.Timestamptz(6)
+  notifyOwnJobs     Boolean                               @default(true) @map("notify_own_jobs")
+  status            ProjectNotificationSubscriptionStatus @default(ACTIVE)
+  version           Int                                   @default(1)
+  createdAt         DateTime                              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime                              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deactivatedAt     DateTime?                             @map("deactivated_at") @db.Timestamptz(6)
+
+  preference NotificationPreference @relation(fields: [preferenceId], references: [id], onDelete: Cascade)
+  rules      NotificationRule[]
+
+  @@unique([userId, projectId, membershipId, membershipVersion], map: "project_notification_subscription_membership_snapshot_key")
+  @@index([workspaceId, projectId, status, userId], map: "project_notification_scope_status_user_idx")
+  @@index([membershipId, status], map: "project_notification_subscriptions_membership_status_idx")
+  @@map("project_notification_subscriptions")
 }
 
 model InboxEvent {

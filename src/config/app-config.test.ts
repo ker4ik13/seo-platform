@@ -19,4 +19,15 @@ describe("loadAppConfig", () => {
   it("requires a database URL", () => {
     assert.throws(() => loadAppConfig({ NODE_ENV: "test" }), /DATABASE_URL/);
   });
+
+  it("requires internal authentication in production", () => {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "production",
+          DATABASE_URL: "postgresql://test:test@localhost:5432/test"
+        }),
+      /INTERNAL_API_TOKEN/
+    );
+  });
 });
