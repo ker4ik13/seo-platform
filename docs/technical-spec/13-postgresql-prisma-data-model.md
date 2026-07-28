@@ -1102,15 +1102,24 @@ Append-only:
 - `delivery_attempts`;
 
 `notification_preferences` хранит пользовательские master-switches, timezone,
-quiet hours, digest schedule и defaults новых проектов.
+quiet hours, digest schedule, bypass critical events, optimistic `version` и
+defaults новых проектов. `user_id` уникален; профиль создаётся лениво с
+безопасными defaults: in-app включён, email и Web Push выключены.
 
 `notification_rules` хранит нормализованную матрицу
-`user_id + project_id? + event_type + channel`, minimum severity, delivery
-mode и enabled state. Project rule не может расширить глобально запрещённый
-канал.
+`preference_id + scope_key + event_type + channel`, optional subscription,
+user/project scope, minimum severity, delivery mode и enabled state.
+`scope_key` равен UUID профильного preference либо UUID membership-bound
+project subscription и вместе с event/channel образует unique constraint.
+Project rule не может расширить глобально запрещённый канал.
 
-`project_notification_subscriptions` привязана к membership snapshot и
-деактивируется при отзыве project access.
+`project_notification_subscriptions` хранит `user_id`, `workspace_id`,
+`project_id`, `membership_id`, `membership_version`, mode
+`inherit/override/paused`, `paused_until`, `notify_own_jobs`, status и
+optimistic `version`. Unique membership snapshot не позволяет случайно
+переиспользовать прежний scope; при новом snapshot прежние active-подписки
+деактивируются. Удаление/отзыв project access должно дополнительно
+деактивировать подписку через событие membership lifecycle.
 
 `web_push_subscriptions` хранит endpoint и browser keys зашифрованно,
 device label, user agent metadata, last success/error и revoked/expired state.

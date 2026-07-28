@@ -291,6 +291,9 @@ Permission Web Push запрашивается только по нажатию 
 Настройка принадлежит конкретному пользователю и не меняет предпочтения
 остальных участников. После потери project access она становится неактивной;
 повторное добавление пользователя не включает старую подписку автоматически.
+Подписка хранит снимок `membershipId + membershipVersion`. Смена версии или
+создание нового membership создаёт новый scope, а прежний scope переводится в
+`inactive`. Простого совпадения `userId + projectId` недостаточно.
 
 ### 12.3. Разрешение правил
 
@@ -308,6 +311,25 @@ Permission Web Push запрашивается только по нажатию 
 настроек не меняла объяснение уже созданной доставки. Проверка membership и
 доступа повторяется перед формированием deep link и непосредственно перед
 отправкой.
+
+### 12.4. Вертикальный срез настроек
+
+Первый рабочий срез обязан включать:
+
+- хранение профильных master-switches, timezone, quiet hours, digest time и
+  нормализованной матрицы правил;
+- режимы проекта `inherit`, `override`, `paused`, срок паузы и
+  `notifyOwnJobs`;
+- серверное вычисление effective policy: UI preview не является источником
+  истины;
+- optimistic locking через `version`/`If-Match`;
+- явный пользовательский запрос browser permission без автоматического prompt;
+- loading, saving, saved, validation, conflict, error и blocked-channel states.
+
+В этом срезе разрешено не создавать фактическую доставку. Device registration,
+VAPID lifecycle, email/Web Push adapters, digest scheduler, retry и delivery
+history реализуются следующим delivery-срезом и не должны имитироваться
+успешными UI-сообщениями.
 
 ## 13. Каналы
 

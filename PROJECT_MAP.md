@@ -2,9 +2,10 @@
 
 Последнее обновление: 28 июля 2026 года
 
-Текущий инкремент: Semantics import → Published core query
-Статус: mapping, validation preview, идемпотентная публикация и
-project-scoped чтение опубликованного ядра реализованы для CSV/TSV
+Текущий инкремент: Profile/project notification preferences
+Статус: профильные правила, проектные override/pause, effective policy и
+адаптивные экраны реализованы; delivery worker и device subscriptions следуют
+отдельным вертикальным срезом
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -128,6 +129,10 @@ Backend convention:
   `semantic.view`;
 - `platform-api/src/seo-data` — строго валидируемый internal read client к
   владельцу semantic core;
+- `platform-api/src/notifications` — public profile/project notification
+  preferences с CSRF, tenant authorization и optimistic locking;
+- `platform-api/src/realtime` — строго валидируемый internal client владельца
+  notification policy;
 - `platform-api/src/audit`, `src/outbox` — переиспользуемые transactional
   записи аудита и событий;
 - `platform-jobs-integrations/src/queue` — BullMQ connection, system queue и
@@ -153,6 +158,10 @@ Backend convention:
   tenant/actor команд;
 - `platform-jobs-integrations/src/email` — email port, disabled и SMTP adapters;
 - `platform-realtime/src/realtime` — Socket.IO gateway и Redis adapter;
+- `platform-realtime/src/notifications` — профильные правила, membership-bound
+  проектные подписки и вычисление effective policy;
+- `platform-realtime/src/internal` — fail-closed internal HTTP authentication
+  и проверенный actor/tenant/membership context;
 - `platform-web/app` — public, tools, docs и private `/app` App Router screens;
 - `platform-web/app/app/api` — same-origin browser BFF только к
   `/api/v1` Platform API;
@@ -190,6 +199,7 @@ Entrypoints:
 | Auth core | vertical slice |
 | Workspaces/projects/team access | vertical slice |
 | Semantics/import | vertical slice: CSV/TSV → mapping → validation → publish → query |
+| Notification preferences | vertical slice: profile/project rules → effective policy |
 | Rankings/integrations | planned |
 | Billing/YooKassa | planned |
 | Directus content | planned |
@@ -263,14 +273,26 @@ internal query `seo-data`; Web использует только same-origin BFF
 на первой странице. UI содержит поиск, дозагрузку, loading/empty/error states
 и автоматически обновляется после полной или частичной публикации версии.
 
+Настройки уведомлений читаются и изменяются только через Platform API:
+`/api/v1/me/notification-preferences` и
+`/api/v1/projects/:projectId/notification-subscription`. Профиль задаёт
+master-switch каналов, timezone, quiet hours, digest schedule и матрицу
+категорий. Проект может наследовать профиль, переопределить только разрешённые
+каналы либо временно поставить доставку на паузу. Подписка привязана к
+`workspace_members.id + version`; отзыв или новая версия членства не
+активирует старые правила. Web Push permission запрашивается только явной
+кнопкой. Регистрация browser device, VAPID, email/Web Push delivery, digest и
+delivery history пока не входят в этот срез.
+
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 49 pass, 0 fail.
+- Platform API unit tests: 53 pass, 0 fail.
 - SEO data unit tests: 10 pass, 0 fail.
 - Jobs/integrations unit tests: 35 pass, 0 fail.
+- Realtime unit tests: 8 pass, 0 fail.
 - Contracts unit tests: 1 pass, 0 fail.
 - Unified Web security helper tests: 2 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
@@ -284,12 +306,15 @@ internal query `seo-data`; Web использует только same-origin BFF
   1440 и 390 px; document overflow и browser errors не найдены, таблица
   прокручивается только внутри своего контейнера, singleton mapping и
   обязательный separator проверены интерактивно.
+- Notification preferences browser QA: profile/project screens на 1280 px,
+  document overflow и browser errors не найдены; override, live effective
+  preview, pause и успешный optimistic save проверены интерактивно.
 - Target runtime: Node.js 24. Локальная проверка выполнялась на Node.js 22 с
   ожидаемым engine warning; контейнеры используют Node.js 24.
 
 ## 9. Следующий вертикальный срез
 
-`semantic core query API → виртуализированная таблица импортированных запросов`
+`notification.requested.v1 → durable policy resolver → email/Web Push delivery`
 
 OAuth/OIDC выполняется после подтверждения зависимости `jose`; QR для TOTP —
 после подтверждения `qrcode`.
@@ -304,6 +329,9 @@ OAuth/OIDC выполняется после подтверждения зави
 - `semantic_import_receipts` без chunks требуют bounded reconciliation/retention;
   receipt с применёнными chunks автоматически не удаляется.
 - Durable outbox/inbox publisher и consumers ещё не реализованы.
+- Notification preferences не создают deliveries сами по себе: отсутствуют
+  durable consumer, digest scheduler, Web Push device/VAPID lifecycle и
+  provider delivery history.
 - Для rejected/quarantine objects ещё требуется production lifecycle policy и
   отдельный reconciliation/cleanup job; выдача и импорт таких объектов
   запрещены уже сейчас.

@@ -484,6 +484,27 @@ internal token плюс точным совпадением trusted tenant/actor
 - `/me/push-subscriptions`;
 - `/projects/{projectId}/notification-subscription`;
 
+Рабочий contract предпочтений:
+
+- `GET /api/v1/me/notification-preferences` — создаёт безопасный профиль по
+  умолчанию при первом чтении и возвращает полную нормализованную матрицу;
+- `PATCH /api/v1/me/notification-preferences` — требует browser session,
+  CSRF и `If-Match`, заменяет профильные правила атомарно;
+- `GET /api/v1/projects/{projectId}/notification-subscription` — требует
+  `project.view`, возвращает membership snapshot, сохранённые правила и
+  серверную effective policy;
+- `PATCH /api/v1/projects/{projectId}/notification-subscription` — требует
+  `project.view`, CSRF и `If-Match`; пользователь изменяет только собственную
+  подписку доступного проекта.
+
+Platform API передаёт realtime-сервису только проверенные заголовки
+`X-Actor-Id`, `X-Workspace-Id`, `X-Project-Id`, `X-Membership-Id`,
+`X-Membership-Version` и internal credential. Realtime-сервис повторно
+валидирует совпадение заголовков с route/body и не принимает tenant context
+непосредственно от browser. Project override, пытающийся включить глобально
+выключенный канал, сохраняется как предпочтение, но effective policy всегда
+возвращает канал выключенным с источником блокировки профиля.
+
 ### 13.8. Billing
 
 - `/workspaces/{workspaceId}/subscription`;
