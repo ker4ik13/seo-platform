@@ -2,9 +2,9 @@
 
 Последнее обновление: 28 июля 2026 года
 
-Текущий инкремент: Semantics import → Streaming CSV/TSV staging
-Статус: resumable S3 upload, обязательный inspection worker и потоковый
-CSV/TSV parser/staging реализованы; mapping/validation/publish следующие
+Текущий инкремент: Semantics import → Validated chunked publish
+Статус: mapping, validation preview, идемпотентная публикация в `seo-data`,
+partial cancellation и semantic version реализованы для CSV/TSV
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -59,6 +59,7 @@ jobs/realtime <──> Redis
 jobs <──> S3
 upload inspection worker ──> ClamAV
 import worker ──> S3 + partitioned staging in jobs_db
+import worker ──internal HTTP──> seo-data semantic core
 platform-web public/docs <──> Directus
 ```
 
@@ -136,7 +137,14 @@ Backend convention:
   object keys, size verification, lease/heartbeat inspection и upload outbox
   events;
 - `platform-jobs-integrations/src/imports` — потоковый CSV/TSV parser,
-  Key Collector header mapping, import lease/heartbeat и staging;
+  Key Collector header mapping, raw/validated staging, lease/heartbeat,
+  validation summary и chunked publisher;
+- `platform-jobs-integrations/src/seo-data` — строго валидируемый internal
+  HTTP client владельца semantic core;
+- `platform-seo-data/src/semantic-imports` — нормализация, import receipts,
+  идемпотентное применение chunks и semantic version;
+- `platform-seo-data/src/internal` — fail-closed авторизация внутренних
+  tenant/actor команд;
 - `platform-jobs-integrations/src/email` — email port, disabled и SMTP adapters;
 - `platform-realtime/src/realtime` — Socket.IO gateway и Redis adapter;
 - `platform-web/app` — public, tools, docs и private `/app` App Router screens;
@@ -175,7 +183,7 @@ Entrypoints:
 | Admin shell | vertical slice |
 | Auth core | vertical slice |
 | Workspaces/projects/team access | vertical slice |
-| Semantics/import | vertical slice: upload + inspection + CSV/TSV staging |
+| Semantics/import | vertical slice: CSV/TSV → mapping → validation → publish |
 | Rankings/integrations | planned |
 | Billing/YooKassa | planned |
 | Directus content | planned |
@@ -226,15 +234,29 @@ Import worker потоково определяет UTF-8/Windows-1251 и раз
 типовых колонок Key Collector. Jobs API не возвращает raw staging наружу.
 Web автоматически запускает CSV/TSV parsing после inspection, показывает
 progress и ограниченный preview колонок/строк. Публикация в канонический
-semantic core ещё не выполняется.
+semantic core выполняется только после отдельного подтверждения пользователя.
+
+Третий import slice сохраняет подтверждённые язык, separator групп, mapping и
+merge policy, затем создаёт отдельный validated staging. Нормализация и поиск
+существующих запросов выполняются владельцем `seo_db`; неизвестные показатели,
+позиции без tracking context и исходные raw values не теряются. UI показывает
+summary дублей, ошибок и готовых уникальных запросов до необратимой публикации.
+
+Publisher передаёт не более 500 уникальных строк на command, повторно
+валидируемую `seo-data`. Receipt с mapping/payload hash делает begin/chunk/
+complete идемпотентными, project advisory lock сериализует merge, а complete
+создаёт semantic version и outbox event. Отмена во время публикации завершает
+текущий chunk и фиксирует partial version; зависший `cancel_requested`
+подбирается dispatcher-ом. Jobs не имеет подключения к `seo_db`.
 
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 44 pass, 0 fail.
-- Jobs/integrations unit tests: 29 pass, 0 fail.
+- Platform API unit tests: 45 pass, 0 fail.
+- SEO data unit tests: 7 pass, 0 fail.
+- Jobs/integrations unit tests: 35 pass, 0 fail.
 - Contracts unit tests: 1 pass, 0 fail.
 - Unified Web security helper tests: 2 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
@@ -244,12 +266,16 @@ semantic core ещё не выполняется.
 - Visual QA: 1440, 1024 и 390 px; horizontal overflow не найден.
 - Semantics upload browser QA: 1280 px, runtime errors и horizontal overflow
   не найдены; устранён CSS conflict публичного `.brand` с app shell.
+- Mapping/publish wizard browser QA: реальный multipart flow через mock S3/API,
+  1440 и 390 px; document overflow и browser errors не найдены, таблица
+  прокручивается только внутри своего контейнера, singleton mapping и
+  обязательный separator проверены интерактивно.
 - Target runtime: Node.js 24. Локальная проверка выполнялась на Node.js 22 с
   ожидаемым engine warning; контейнеры используют Node.js 24.
 
 ## 9. Следующий вертикальный срез
 
-`mapping command → validation preview → chunked publish to seo-data → semantic version`
+`semantic core query API → виртуализированная таблица импортированных запросов`
 
 OAuth/OIDC выполняется после подтверждения зависимости `jose`; QR для TOTP —
 после подтверждения `qrcode`.
@@ -258,6 +284,11 @@ OAuth/OIDC выполняется после подтверждения зави
 
 - Дашборд использует честные empty states до первого SEO domain slice.
 - Realtime не допускает вход в project rooms до общей token/permission проверки.
+- Миграция backfill-ит `keyword_groups.path/path_hash` для корректного
+  корневого дерева; orphan/cyclic legacy groups перед production требуют
+  отдельного data-quality audit.
+- `semantic_import_receipts` без chunks требуют bounded reconciliation/retention;
+  receipt с применёнными chunks автоматически не удаляется.
 - Durable outbox/inbox publisher и consumers ещё не реализованы.
 - Для rejected/quarantine objects ещё требуется production lifecycle policy и
   отдельный reconciliation/cleanup job; выдача и импорт таких объектов

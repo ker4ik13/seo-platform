@@ -989,6 +989,26 @@ sample, counters, progress, failure code, lease/heartbeat и optimistic
 `version`. Эти таблицы не являются каноническим semantic core и не дают
 jobs-сервису право записывать `seo_db` напрямую.
 
+Следующий срез добавляет в `semantic_imports` подтверждённый mapping,
+validation/result summary и независимые lease/heartbeat поля validation и
+publishing. `semantic_import_validated_rows` hash-partitioned на 16 partitions,
+содержит normalized hash, allowlisted canonical row, issue codes,
+`is_valid` и `project_duplicate`. Raw и validated staging остаются собственностью
+`jobs_db` и удаляются только отдельной retention job после завершения
+диагностического срока.
+
+В `seo_db` идемпотентность публикации обеспечивают:
+
+- `semantic_import_receipts` — scope, mapping hash, duplicate policy,
+  ожидаемые chunks/rows, итоговая semantic version и result summary;
+- `semantic_import_chunk_receipts` — индекс и payload hash чанка, фактические
+  счётчики созданных/обновлённых сущностей и snapshots.
+
+`keywords` хранит `source_mode`, `source_id`, `created_by`, `updated_by`;
+иерархический путь группы имеет project-scoped hash; `tags` и `keyword_tags`
+принадлежат `seo_db`. Canonical merge создаёт/обновляет только сущности этого
+владельца БД и никогда не открывает jobs-сервису Prisma connection к `seo_db`.
+
 ### 6.3. Integrations
 
 #### `integration_credentials`

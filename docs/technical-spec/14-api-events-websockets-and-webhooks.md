@@ -354,10 +354,29 @@ Resumable upload должен переживать перезагрузку вк
 - `GET /api/v1/projects/{projectId}/imports/{importId}` требует
   `semantic.view` и возвращает только безопасный progress/preview/failure
   contract;
+- `POST /api/v1/projects/{projectId}/imports/{importId}/mapping` требует
+  `semantic.import`, CSRF и `If-Match`, сохраняет mapping/merge policy и
+  запускает validation;
+- `POST /api/v1/projects/{projectId}/imports/{importId}/publish` требует
+  `semantic.import`, CSRF и `If-Match`, подтверждает validation preview и
+  запускает chunked publish;
+- `POST /api/v1/projects/{projectId}/imports/{importId}/cancel` требует
+  `semantic.import` и CSRF; команда идемпотентна и не требует stale version,
+  чтобы остановка долгой операции не блокировалась конкурирующим heartbeat;
 - trusted internal HTTP передаёт `workspaceId`, `projectId` и `actorId` и в
   заголовках, и в команде; jobs-сервис отклоняет любое несовпадение;
 - raw rows, S3 object key, signed URL и внутренний текст dependency error
   публичный API не возвращает.
+
+Внутренний `seo-data` contract:
+
+- `POST /internal/v1/semantic-imports/{importId}/normalize`;
+- `POST /internal/v1/semantic-imports/{importId}/begin`;
+- `POST /internal/v1/semantic-imports/{importId}/chunks`;
+- `POST /internal/v1/semantic-imports/{importId}/complete`.
+
+Все команды bounded, повторно валидируются владельцем данных и защищены
+internal token плюс точным совпадением trusted tenant/actor headers с body.
 
 ## 13. Основные группы endpoint
 
@@ -646,8 +665,10 @@ Publisher отправляет событие в NATS JetStream и помеча�
 - `job.failed.v1`;
 - `semantic.import.created.v1`;
 - `semantic.import.parsed.v1`;
+- `semantic.import.validated.v1`;
+- `semantic.import.completed.v1`;
+- `semantic.import.cancelled.v1`;
 - `semantic.import.failed.v1`;
-- `import.completed.v1`;
 - `semantics.version.created.v1`;
 - `seo.rank-check.completed.v1`;
 - `seo.frequency-check.completed.v1`;

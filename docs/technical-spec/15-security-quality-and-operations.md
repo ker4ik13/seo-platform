@@ -793,6 +793,11 @@ Radar/crawler capacity:
 - outbox/inbox cleanup после retention;
 - Yjs compaction;
 - orphan object reconciliation;
+- незавершённые `semantic_import_receipts` без chunks очищаются только после
+  сверки с terminal import в `jobs_db`; receipt с применённым chunk не
+  удаляется автоматически и требует safe finalize/reconciliation;
+- validation/raw import staging очищается отдельными bounded batches после
+  diagnostic retention, но semantic version и агрегированный result остаются;
 - webhook delivery cleanup;
 - provider credential revalidation;
 - price book sync/review;

@@ -547,9 +547,12 @@ Wizard должен распознавать и предлагать mapping:
    если он был указан, и выполняет антивирусную проверку.
 5. Parser job читает потоково.
 6. Строки попадают в staging tables.
-7. Validation job создаёт summary.
-8. Пользователь подтверждает mapping/merge, если не применён auto preset.
-9. Commit job выполняет chunked merge.
+7. Пользователь проверяет предложенный mapping, язык, разделитель пути групп
+   и merge policy; сохранение mapping переводит import в `validating`.
+8. Validation job нормализует запросы через `seo-data`, создаёт безопасный
+   summary и переводит import в `awaiting_confirmation`.
+9. Пользователь подтверждает validation preview; commit job выполняет
+   chunked merge через внутренний API владельца semantic core.
 10. Создаются semantic version, audit и результат.
 
 Требования:
@@ -565,6 +568,16 @@ Wizard должен распознавать и предлагать mapping:
 - staging принадлежит `jobs_db`, hash-partitioned по `import_id`; публикация
   канонических Keywords выполняется только через внутренний контракт
   `seo-data`, без прямого доступа к его БД;
+- validation staging хранится отдельно от raw staging, также partitioned по
+  `import_id`; canonical row содержит только allowlisted нормализованные поля,
+  issue codes и признак существующего запроса;
+- `seo-data` проверяет tenant/actor context одновременно по trusted headers и
+  body, повторно валидирует каждую строку и не доверяет типам jobs-сервиса;
+- каждый commit chunk имеет стабильный индекс и SHA-256 payload; receipt
+  `(import_id, chunk_index)` делает повторную доставку идемпотентной и
+  отклоняет подмену payload под уже использованным индексом;
+- публикация сериализуется advisory lock по project, а финализация создаёт
+  ровно одну `SemanticVersion`; повтор complete возвращает прежний результат;
 - неизвестные колонки и исходные значения не теряются: до подтверждения
   mapping они сохраняются в `raw_values`, а UI показывает предложенное
   сопоставление и ограниченный sample;
@@ -590,8 +603,18 @@ Wizard должен распознавать и предлагать mapping:
 - progress отражает bytes, rows и stage;
 - отмена до commit безопасна;
 - отмена commit завершает текущую транзакцию chunk и прекращает следующие;
-- импорт может завершиться частично;
+- импорт может завершиться частично; crash после `cancel_requested`
+  восстанавливается dispatcher-ом, а уже применённые chunks фиксируются
+  отдельной partial semantic version;
 - row-level errors экспортируются.
+
+Состояния первой рабочей реализации:
+
+`queued → parsing → awaiting_mapping → validating → awaiting_confirmation → ready_to_publish → publishing → completed`.
+
+Из `parsing`, `validating` и `publishing` worker восстанавливает просроченный
+lease. Отмена до `publishing` является немедленной; во время `publishing` —
+кооперативной. Терминальные состояния: `completed`, `failed`, `cancelled`.
 
 ## 20. Стратегии merge
 
