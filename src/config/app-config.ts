@@ -7,6 +7,7 @@ export interface AppConfig {
   readonly dependencyTimeoutMs: number;
   readonly internalCommandTimeoutMs: number;
   readonly internalApiToken?: string;
+  readonly integrationCredentialApiToken?: string;
   readonly corsOrigins: readonly string[];
   readonly nats: {
     readonly url: string;
@@ -82,6 +83,8 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const passwordPepper = env.AUTH_PASSWORD_PEPPER?.trim();
   const dataEncryptionKey = env.AUTH_DATA_ENCRYPTION_KEY?.trim();
   const internalApiToken = env.INTERNAL_API_TOKEN?.trim();
+  const integrationCredentialApiToken =
+    env.PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN?.trim();
 
   if (!["development", "test", "production"].includes(nodeEnv)) {
     throw new Error("NODE_ENV must be development, test or production");
@@ -108,6 +111,24 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   ) {
     throw new Error(
       "INTERNAL_API_TOKEN with at least 32 characters is required in production"
+    );
+  }
+  if (
+    nodeEnv === "production" &&
+    (!integrationCredentialApiToken ||
+      integrationCredentialApiToken.length < 32)
+  ) {
+    throw new Error(
+      "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN with at least 32 characters is required in production"
+    );
+  }
+  if (
+    internalApiToken &&
+    integrationCredentialApiToken &&
+    internalApiToken === integrationCredentialApiToken
+  ) {
+    throw new Error(
+      "Credential API token must differ from the shared internal API token"
     );
   }
 
@@ -144,6 +165,9 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "INTERNAL_COMMAND_TIMEOUT_MS"
     ),
     ...(internalApiToken ? { internalApiToken } : {}),
+    ...(integrationCredentialApiToken
+      ? { integrationCredentialApiToken }
+      : {}),
     corsOrigins: (env.CORS_ORIGINS ?? "")
       .split(",")
       .map((origin) => origin.trim())

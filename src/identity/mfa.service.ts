@@ -37,6 +37,7 @@ import {
   matchTotp,
   normalizeRecoveryCode
 } from "./totp.js";
+import { RecentAuthenticationService } from "./recent-authentication.service.js";
 
 type Transaction = Prisma.TransactionClient;
 
@@ -60,6 +61,7 @@ export class MfaService {
     private readonly sessions: SessionService,
     private readonly audit: AuditService,
     private readonly outbox: OutboxService,
+    private readonly recentAuthentication: RecentAuthenticationService,
     @Inject(APP_CONFIG) private readonly config: AppConfig
   ) {}
 
@@ -221,7 +223,7 @@ export class MfaService {
     principal: AuthenticatedPrincipal,
     context: RequestContext
   ): Promise<TotpSetupResult> {
-    this.assertRecentAuthentication(principal);
+    this.recentAuthentication.assert(principal);
     const user = await this.prisma.user.findUnique({
       where: { id: principal.userId }
     });
@@ -287,7 +289,7 @@ export class MfaService {
     input: ConfirmTotpInput,
     context: RequestContext
   ): Promise<ConfirmTotpResult> {
-    this.assertRecentAuthentication(principal);
+    this.recentAuthentication.assert(principal);
     const method = await this.prisma.mfaMethod.findFirst({
       where: {
         id: input.methodId,
@@ -375,7 +377,7 @@ export class MfaService {
     input: DisableTotpInput,
     context: RequestContext
   ): Promise<DisableTotpResult> {
-    this.assertRecentAuthentication(principal);
+    this.recentAuthentication.assert(principal);
     const user = await this.prisma.user.findUnique({
       where: { id: principal.userId }
     });
@@ -568,20 +570,6 @@ export class MfaService {
         );
       }
     });
-  }
-
-  private assertRecentAuthentication(
-    principal: AuthenticatedPrincipal
-  ): void {
-    const oldestAllowed = Date.now() -
-      this.config.auth.recentAuthenticationMinutes * 60 * 1_000;
-    if (principal.authenticatedAt.getTime() < oldestAllowed) {
-      throw new DomainError({
-        statusCode: 401,
-        code: "REAUTHENTICATION_REQUIRED",
-        message: "Recent authentication is required"
-      });
-    }
   }
 
   private otpauthUri(email: string, secret: string): string {

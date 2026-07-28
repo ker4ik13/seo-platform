@@ -19,11 +19,11 @@ export class AuthorizationService {
     workspaceId: string,
     permission: Permission
   ): Promise<TenantAuthorization> {
-    assertUuid(workspaceId, "workspaceId");
+    const canonicalWorkspaceId = assertUuid(workspaceId, "workspaceId");
     const membership = await this.prisma.workspaceMember.findUnique({
       where: {
         workspaceId_userId: {
-          workspaceId,
+          workspaceId: canonicalWorkspaceId,
           userId
         }
       },
@@ -47,7 +47,10 @@ export class AuthorizationService {
     if (!hasSystemPermission(membership.roleCode, permission)) {
       throw this.forbidden(permission);
     }
-    return { workspaceId, roleCode: membership.roleCode };
+    return {
+      workspaceId: membership.workspace.id,
+      roleCode: membership.roleCode
+    };
   }
 
   public async forProject(
@@ -55,9 +58,9 @@ export class AuthorizationService {
     projectId: string,
     permission: Permission
   ): Promise<TenantAuthorization> {
-    assertUuid(projectId, "projectId");
+    const canonicalProjectId = assertUuid(projectId, "projectId");
     const project = await this.prisma.project.findUnique({
-      where: { id: projectId }
+      where: { id: canonicalProjectId }
     });
     if (
       !project ||
@@ -75,7 +78,7 @@ export class AuthorizationService {
       include: {
         workspace: true,
         projectAccesses: {
-          where: { projectId },
+          where: { projectId: project.id },
           take: 1
         }
       }
@@ -115,7 +118,7 @@ export class AuthorizationService {
 
     return {
       workspaceId: project.workspaceId,
-      projectId,
+      projectId: project.id,
       roleCode: membership.roleCode,
       membershipId: membership.id,
       membershipVersion: membership.version,

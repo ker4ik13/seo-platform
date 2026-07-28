@@ -45,11 +45,25 @@ test("does not allow development tokens in production", () => {
         AUTH_PASSWORD_PEPPER: "production-secret",
         AUTH_DATA_ENCRYPTION_KEY: Buffer.alloc(32).toString("base64url"),
         INTERNAL_API_TOKEN: "x".repeat(32),
+        PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
         AUTH_EXPOSE_DEVELOPMENT_TOKENS: "true"
       }),
     {
       message: "AUTH_EXPOSE_DEVELOPMENT_TOKENS cannot be enabled in production"
     }
+  );
+});
+
+test("keeps the credential caller token separate from shared service auth", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        INTERNAL_API_TOKEN: "x".repeat(32),
+        PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "x".repeat(32)
+      }),
+    /must differ from the shared internal API token/u
   );
 });
 

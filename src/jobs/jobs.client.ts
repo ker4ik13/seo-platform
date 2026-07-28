@@ -1,4 +1,10 @@
 import { Inject, Injectable } from "@nestjs/common";
+import {
+  integrationCapabilities,
+  integrationCredentialModes,
+  integrationCredentialStatuses,
+  integrationProviders
+} from "@seo-platform/contracts";
 import type {
   CompleteUploadInput,
   ConfigureSemanticImportInput,
@@ -8,6 +14,12 @@ import type {
   CreatedMultipartUpload,
   CreateUploadInput,
   CreateUploadPartUrlsInput,
+  CreateIntegrationCredentialInput,
+  IntegrationCredentialSummary,
+  IntegrationProviderCatalogItem,
+  InternalCreateIntegrationCredentialInput,
+  InternalDeleteIntegrationCredentialInput,
+  InternalUpdateIntegrationCredentialInput,
   InternalCreateUploadInput,
   InternalCreateSemanticImportInput,
   InternalConfigureSemanticImportInput,
@@ -15,7 +27,8 @@ import type {
   InternalCancelSemanticImportInput,
   SemanticImportSummary,
   UploadPartUrls,
-  UploadSummary
+  UploadSummary,
+  UpdateIntegrationCredentialInput
 } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
@@ -27,6 +40,15 @@ interface InternalContext {
   readonly actorId: string;
   readonly requestId: string;
 }
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const CAPABILITIES = new Set<string>(integrationCapabilities);
+const CREDENTIAL_MODES = new Set<string>(integrationCredentialModes);
+const CREDENTIAL_STATUSES = new Set<string>(
+  integrationCredentialStatuses
+);
+const PROVIDERS = new Set<string>(integrationProviders);
 
 @Injectable()
 export class JobsClient {
@@ -180,22 +202,138 @@ export class JobsClient {
     );
   }
 
-  private async request<Data>(
-    method: "GET" | "POST" | "DELETE",
+  public async integrationCatalog(
+    context: InternalContext
+  ): Promise<readonly IntegrationProviderCatalogItem[]> {
+    const value = await this.requestIntegration<unknown>(
+      "GET",
+      integrationPath(context, "catalog"),
+      context
+    );
+    return providerCatalog(value);
+  }
+
+  public async listIntegrationCredentials(
+    context: InternalContext
+  ): Promise<readonly IntegrationCredentialSummary[]> {
+    const value = await this.requestIntegration<unknown>(
+      "GET",
+      integrationPath(context, "credentials"),
+      context
+    );
+    return credentialCollection(value);
+  }
+
+  public async createIntegrationCredential(
+    context: InternalContext,
+    input: CreateIntegrationCredentialInput,
+    idempotencyKey: string
+  ): Promise<IntegrationCredentialSummary> {
+    const body: InternalCreateIntegrationCredentialInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      actorId: context.actorId,
+      idempotencyKey
+    };
+    const value = await this.requestIntegration<unknown>(
+      "POST",
+      integrationPath(context, "credentials"),
+      context,
+      body
+    );
+    return credentialSummary(value);
+  }
+
+  public async updateIntegrationCredential(
+    context: InternalContext,
+    credentialId: string,
+    input: UpdateIntegrationCredentialInput,
+    version: number
+  ): Promise<IntegrationCredentialSummary> {
+    const body: InternalUpdateIntegrationCredentialInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      actorId: context.actorId,
+      version
+    };
+    const value = await this.requestIntegration<unknown>(
+      "PATCH",
+      integrationPath(
+        context,
+        `credentials/${encodeURIComponent(credentialId)}`
+      ),
+      context,
+      body
+    );
+    return credentialSummary(value);
+  }
+
+  public async revokeIntegrationCredential(
+    context: InternalContext,
+    credentialId: string,
+    version: number
+  ): Promise<void> {
+    const body: InternalDeleteIntegrationCredentialInput = {
+      workspaceId: context.tenant.workspaceId,
+      actorId: context.actorId,
+      version
+    };
+    const value = await this.requestIntegration<unknown>(
+      "DELETE",
+      integrationPath(
+        context,
+        `credentials/${encodeURIComponent(credentialId)}`
+      ),
+      context,
+      body
+    );
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      !("revoked" in value) ||
+      value.revoked !== true
+    ) {
+      throw invalidJobsResponse();
+    }
+  }
+
+  private requestIntegration<Data>(
+    method: "GET" | "POST" | "PATCH" | "DELETE",
     path: string,
     context: InternalContext,
     body?: unknown
   ): Promise<Data> {
-    const token = this.config.internalApiToken;
+    return this.request(
+      method,
+      path,
+      context,
+      body,
+      "integration-credential"
+    );
+  }
+
+  private async request<Data>(
+    method: "GET" | "POST" | "PATCH" | "DELETE",
+    path: string,
+    context: InternalContext,
+    body?: unknown,
+    authentication: "shared" | "integration-credential" = "shared"
+  ): Promise<Data> {
+    const token =
+      authentication === "integration-credential"
+        ? this.config.integrationCredentialApiToken
+        : this.config.internalApiToken;
     if (!token) throw dependencyUnavailable();
     const headers = new Headers({
       Accept: "application/json",
       "X-Internal-Token": token,
       "X-Request-Id": context.requestId,
       "X-Workspace-Id": context.tenant.workspaceId,
-      "X-Project-Id": requiredProjectId(context.tenant),
       "X-Actor-Id": context.actorId
     });
+    if (context.tenant.projectId) {
+      headers.set("X-Project-Id", context.tenant.projectId);
+    }
     if (body !== undefined) headers.set("Content-Type", "application/json");
 
     let response: Response;
@@ -219,15 +357,19 @@ export class JobsClient {
       payload === null ||
       !("data" in payload)
     ) {
-      throw new DomainError({
-        statusCode: 502,
-        code: "DEPENDENCY_UNAVAILABLE",
-        message: "Jobs service returned an invalid response",
-        retryable: true
-      });
+      throw invalidJobsResponse();
     }
     return payload.data as Data;
   }
+}
+
+function integrationPath(
+  context: InternalContext,
+  suffix: string
+): string {
+  return `/internal/v1/workspaces/${encodeURIComponent(
+    context.tenant.workspaceId
+  )}/integrations/${suffix}`;
 }
 
 function requiredProjectId(tenant: TenantAuthorization): string {
@@ -242,6 +384,15 @@ function dependencyUnavailable(): DomainError {
     statusCode: 503,
     code: "DEPENDENCY_UNAVAILABLE",
     message: "Jobs service is temporarily unavailable",
+    retryable: true
+  });
+}
+
+function invalidJobsResponse(): DomainError {
+  return new DomainError({
+    statusCode: 502,
+    code: "DEPENDENCY_UNAVAILABLE",
+    message: "Jobs service returned an invalid response",
     retryable: true
   });
 }
@@ -276,4 +427,137 @@ function upstreamError(status: number): DomainError {
     });
   }
   return dependencyUnavailable();
+}
+
+function providerCatalog(
+  value: unknown
+): readonly IntegrationProviderCatalogItem[] {
+  if (!Array.isArray(value)) throw invalidJobsResponse();
+  return value.map((item) => {
+    const input = record(item);
+    const provider = providerValue(input.provider);
+    const capabilities = stringArray(input.capabilities);
+    const supportedModes = stringArray(input.supportedModes);
+    if (
+      typeof input.displayName !== "string" ||
+      typeof input.description !== "string" ||
+      typeof input.requiresAccountIdentifier !== "boolean" ||
+      typeof input.subscriptionNotice !== "string" ||
+      (input.accountIdentifierLabel !== undefined &&
+        typeof input.accountIdentifierLabel !== "string") ||
+      capabilities.some((capability) => !CAPABILITIES.has(capability)) ||
+      supportedModes.length === 0 ||
+      supportedModes.some((mode) => !CREDENTIAL_MODES.has(mode))
+    ) {
+      throw invalidJobsResponse();
+    }
+    return {
+      provider,
+      displayName: input.displayName,
+      description: input.description,
+      capabilities:
+        capabilities as IntegrationProviderCatalogItem["capabilities"],
+      supportedModes:
+        supportedModes as IntegrationProviderCatalogItem["supportedModes"],
+      requiresAccountIdentifier: input.requiresAccountIdentifier,
+      ...(typeof input.accountIdentifierLabel === "string"
+        ? { accountIdentifierLabel: input.accountIdentifierLabel }
+        : {}),
+      subscriptionNotice: input.subscriptionNotice
+    };
+  });
+}
+
+function credentialCollection(
+  value: unknown
+): readonly IntegrationCredentialSummary[] {
+  if (!Array.isArray(value)) throw invalidJobsResponse();
+  return value.map(credentialSummary);
+}
+
+function credentialSummary(value: unknown): IntegrationCredentialSummary {
+  const input = record(value);
+  const provider = providerValue(input.provider);
+  const capabilities = stringArray(input.capabilities);
+  if (
+    typeof input.id !== "string" ||
+    !UUID_PATTERN.test(input.id) ||
+    typeof input.workspaceId !== "string" ||
+    !UUID_PATTERN.test(input.workspaceId) ||
+    typeof input.label !== "string" ||
+    typeof input.mode !== "string" ||
+    !CREDENTIAL_MODES.has(input.mode) ||
+    typeof input.status !== "string" ||
+    !CREDENTIAL_STATUSES.has(input.status) ||
+    typeof input.displayHint !== "string" ||
+    capabilities.some((capability) => !CAPABILITIES.has(capability)) ||
+    !Number.isSafeInteger(input.version) ||
+    typeof input.createdAt !== "string" ||
+    !isIsoDate(input.createdAt) ||
+    typeof input.updatedAt !== "string" ||
+    !isIsoDate(input.updatedAt) ||
+    (input.verifiedAt !== undefined &&
+      (typeof input.verifiedAt !== "string" ||
+        !isIsoDate(input.verifiedAt))) ||
+    (input.lastSuccessAt !== undefined &&
+      (typeof input.lastSuccessAt !== "string" ||
+        !isIsoDate(input.lastSuccessAt))) ||
+    (input.lastErrorAt !== undefined &&
+      (typeof input.lastErrorAt !== "string" ||
+        !isIsoDate(input.lastErrorAt)))
+  ) {
+    throw invalidJobsResponse();
+  }
+  return {
+    id: input.id,
+    workspaceId: input.workspaceId,
+    provider,
+    label: input.label,
+    mode: input.mode as IntegrationCredentialSummary["mode"],
+    status:
+      input.status as IntegrationCredentialSummary["status"],
+    displayHint: input.displayHint,
+    capabilities:
+      capabilities as IntegrationCredentialSummary["capabilities"],
+    ...(typeof input.verifiedAt === "string"
+      ? { verifiedAt: input.verifiedAt }
+      : {}),
+    ...(typeof input.lastSuccessAt === "string"
+      ? { lastSuccessAt: input.lastSuccessAt }
+      : {}),
+    ...(typeof input.lastErrorAt === "string"
+      ? { lastErrorAt: input.lastErrorAt }
+      : {}),
+    version: Number(input.version),
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt
+  };
+}
+
+function providerValue(
+  value: unknown
+): IntegrationCredentialSummary["provider"] {
+  if (typeof value !== "string" || !PROVIDERS.has(value)) {
+    throw invalidJobsResponse();
+  }
+  return value as IntegrationCredentialSummary["provider"];
+}
+
+function isIsoDate(value: string): boolean {
+  const date = new Date(value);
+  return !Number.isNaN(date.valueOf()) && date.toISOString() === value;
+}
+
+function stringArray(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw invalidJobsResponse();
+  }
+  return value;
+}
+
+function record(value: unknown): Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw invalidJobsResponse();
+  }
+  return value as Readonly<Record<string, unknown>>;
 }

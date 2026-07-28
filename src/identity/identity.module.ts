@@ -7,6 +7,7 @@ import { IdentityController } from "./identity.controller.js";
 import { IdentityService } from "./identity.service.js";
 import { MfaController } from "./mfa.controller.js";
 import { MfaService } from "./mfa.service.js";
+import { RecentAuthenticationService } from "./recent-authentication.service.js";
 import {
   CsrfSessionGuard,
   SessionAuthGuard
@@ -22,6 +23,7 @@ import { SessionService } from "./session.service.js";
     AuthRateLimitService,
     IdentityService,
     MfaService,
+    RecentAuthenticationService,
     SessionService,
     SessionCookieService,
     SessionAuthGuard,
@@ -31,6 +33,7 @@ import { SessionService } from "./session.service.js";
     IdentityService,
     SessionService,
     AuthCryptoService,
+    RecentAuthenticationService,
     SessionAuthGuard,
     CsrfSessionGuard
   ]

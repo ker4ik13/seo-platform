@@ -3,6 +3,7 @@ import { ConfigModule } from "./config/config.module.js";
 import { DatabaseModule } from "./database/database.module.js";
 import { HealthModule } from "./health/health.module.js";
 import { IdentityModule } from "./identity/identity.module.js";
+import { IntegrationModule } from "./integrations/integration.module.js";
 import { TenantModule } from "./tenants/tenant.module.js";
 import { MessagingModule } from "./messaging/messaging.module.js";
 import { SystemModule } from "./system/system.module.js";
@@ -18,6 +19,7 @@ import { NotificationModule } from "./notifications/notification.module.js";
     MessagingModule,
     HealthModule,
     IdentityModule,
+    IntegrationModule,
     TenantModule,
     UploadModule,
     SemanticImportModule,
