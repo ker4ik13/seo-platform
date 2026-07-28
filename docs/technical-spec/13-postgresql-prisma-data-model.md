@@ -111,6 +111,20 @@ Unique: `(provider, provider_subject)`.
 - code_hash;
 - used_at.
 
+#### `mfa_challenges`
+
+- id;
+- user_id;
+- token_hash;
+- attempt_count;
+- expires_at;
+- consumed_at;
+- минимальные IP/user-agent security metadata;
+- created_at.
+
+Challenge token хранится только как hash. Cleanup удаляет истёкшие challenges
+по retention-политике; сессия не создаётся до атомарного consumed transition.
+
 ### 4.2. Workspace и RBAC
 
 #### `workspaces`

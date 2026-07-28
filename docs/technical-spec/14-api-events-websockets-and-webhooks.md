@@ -587,6 +587,8 @@ Publisher отправляет событие в NATS JetStream и помеча�
 - `identity.user.created.v1`;
 - `identity.password-reset.requested.v1`;
 - `identity.user.password-changed.v1`;
+- `identity.user.mfa-enabled.v1`;
+- `identity.user.mfa-disabled.v1`;
 - `identity.user.suspended.v1`;
 - `workspace.created.v1`;
 - `workspace.invite.requested.v1`;

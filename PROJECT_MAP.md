@@ -2,7 +2,7 @@
 
 Последнее обновление: 28 июля 2026 года  
 Текущий инкремент: Identity → Workspace → Project → Team access → Private Web
-Статус: password recovery реализован; OAuth/OIDC и TOTP в работе
+Статус: password recovery и TOTP реализованы; OAuth/OIDC в работе
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -103,6 +103,8 @@ Backend convention:
 Специализированные модули:
 
 - `platform-api/src/identity` — account/session lifecycle и CSRF guards;
+- `platform-api/src/identity/mfa.*`, `totp.*` — TOTP lifecycle, login
+  challenge и recovery codes;
 - `platform-api/src/authorization` — default-deny permission catalog и
   проверка tenant context;
 - `platform-api/src/tenants` — workspace/project commands и queries;
@@ -157,7 +159,8 @@ WebSocket gateway, unified web/admin shell и Dokploy Compose.
 
 Identity core содержит регистрацию email/password, consent snapshots,
 Argon2id, email verification, одноразовое password recovery с отзывом прежних
-сессий, короткую access cookie, rotation refresh cookie, CSRF, session
+сессий, TOTP/recovery codes с зашифрованными secrets и короткоживущим login
+challenge, короткую access cookie, rotation refresh cookie, CSRF, session
 inventory/revocation, PostgreSQL rate limit, audit и outbox.
 
 Tenant core содержит workspace/project CRUD, системную RBAC-матрицу,
@@ -167,15 +170,16 @@ Tenant core содержит workspace/project CRUD, системную RBAC-м�
 
 Private Web содержит same-origin BFF, регистрацию/вход/подтверждение email,
 запрос и установку нового пароля, refresh/logout, session gate, создание и
-выбор workspace/project. До появления SEO-данных dashboard показывает empty
-states, а не демонстрационные значения.
+выбор workspace/project, MFA challenge и экран безопасности профиля. До
+появления SEO-данных dashboard показывает empty states, а не демонстрационные
+значения.
 
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 31 pass, 0 fail.
+- Platform API unit tests: 38 pass, 0 fail.
 - Unified Web security helper tests: 2 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
 - Unified Next.js production build: pass; проверены public site, Toolbox,
@@ -187,7 +191,7 @@ states, а не демонстрационные значения.
 
 ## 9. Следующий вертикальный срез
 
-`OAuth/OIDC → TOTP`
+`OAuth/OIDC`
 
 После него:
 
@@ -202,6 +206,8 @@ states, а не демонстрационные значения.
 - Directus collection schema и seed появятся вместе с CMS vertical slice.
 - Email-verification consumer ожидает подключения
   `@nats-io/jetstream`; plaintext verification token не логируется.
+- QR для TOTP пока представлен локальным `otpauth://` URI и ручным ключом;
+  UI QR появится после подтверждения зависимости `qrcode`.
 - SEO connectors, тарификация и YooKassa пока присутствуют только в ТЗ/схемах.
 - `platform-app` сохранён как legacy Git-источник до проверки переноса; новая
   функциональность добавляется только в `platform-web`.
