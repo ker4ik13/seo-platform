@@ -15,8 +15,8 @@ export class SystemController {
         version: this.config.version,
         capabilities: [
           { code: "identity", status: "available" },
-          { code: "workspaces", status: "planned" },
-          { code: "projects", status: "planned" },
+          { code: "workspaces", status: "available" },
+          { code: "projects", status: "available" },
           { code: "billing", status: "planned" },
           { code: "service-orchestration", status: "available" }
         ]

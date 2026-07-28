@@ -23,7 +23,8 @@ import {
   apiResponse,
   collectionResponse
 } from "../common/api-response.js";
-import { DomainError, validationError } from "../common/domain-error.js";
+import { DomainError } from "../common/domain-error.js";
+import { assertUuid } from "../common/identifier.js";
 import { CurrentPrincipal } from "./current-principal.js";
 import {
   loginInput,
@@ -188,7 +189,7 @@ export class IdentityController {
     @Res({ passthrough: true }) reply: FastifyReply,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<void> {
-    assertUuid(sessionId);
+    assertUuid(sessionId, "sessionId");
     const revoked = await this.sessionsService.revoke(
       principal,
       sessionId,
@@ -202,19 +203,5 @@ export class IdentityController {
       });
     }
     if (sessionId === principal.sessionId) this.cookies.clear(reply);
-  }
-}
-
-function assertUuid(value: string): void {
-  if (
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
-      value
-    )
-  ) {
-    throw validationError(
-      "sessionId",
-      "INVALID_IDENTIFIER",
-      "A valid UUID is required"
-    );
   }
 }

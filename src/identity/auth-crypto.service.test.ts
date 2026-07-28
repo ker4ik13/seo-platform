@@ -43,3 +43,20 @@ test("compares CSRF tokens without early string comparison", () => {
   assert.equal(cryptoService.tokensEqual("same", "same"), true);
   assert.equal(cryptoService.tokensEqual("same", "different"), false);
 });
+
+test("derives deterministic email token without persisting it in events", () => {
+  const expiresAt = new Date("2026-07-28T20:00:00.000Z");
+  const first = cryptoService.emailVerificationToken(
+    "01900000-0000-7000-8000-000000000001",
+    "01900000-0000-7000-8000-000000000002",
+    expiresAt
+  );
+  const second = cryptoService.emailVerificationToken(
+    "01900000-0000-7000-8000-000000000001",
+    "01900000-0000-7000-8000-000000000002",
+    expiresAt
+  );
+
+  assert.equal(first, second);
+  assert.match(first, /^[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/u);
+});

@@ -64,7 +64,6 @@ export class IdentityService {
     ]);
 
     const passwordHash = await this.crypto.hashPassword(input.password);
-    const verificationToken = this.crypto.randomToken();
     const now = new Date();
     const requiresVerification = this.config.auth.emailVerificationRequired;
     const country = normalizeCountry(input.country);
@@ -135,13 +134,12 @@ export class IdentityService {
         });
 
         if (requiresVerification) {
-          await this.createVerificationToken(
+          const verificationToken = await this.createVerificationToken(
             transaction,
             user,
-            verificationToken,
             context
           );
-          return { user };
+          return { user, verificationToken };
         }
 
         const session = await this.sessions.issue(
@@ -160,8 +158,11 @@ export class IdentityService {
             : {}),
           emailVerificationRequired: requiresVerification,
           ...(requiresVerification &&
-          this.config.auth.exposeDevelopmentTokens
-            ? { verificationTokenForDevelopment: verificationToken }
+            this.config.auth.exposeDevelopmentTokens &&
+            result.verificationToken
+            ? {
+                verificationTokenForDevelopment: result.verificationToken
+              }
             : {})
         },
         ...(result.session ? { credentials: result.session.credentials } : {})
@@ -356,33 +357,34 @@ export class IdentityService {
       return { response: { accepted: true } };
     }
 
-    const verificationToken = this.crypto.randomToken();
-    await this.prisma.$transaction(async (transaction) => {
-      await transaction.oneTimeToken.updateMany({
-        where: {
-          userId: user.id,
-          purpose: "EMAIL_VERIFICATION",
-          consumedAt: null
-        },
-        data: { consumedAt: new Date() }
-      });
-      await this.createVerificationToken(
-        transaction,
-        user,
-        verificationToken,
-        context
-      );
-      await this.audit.record(
-        {
-          actorId: user.id,
-          action: "identity.email.verification_resent",
-          resourceType: "user",
-          resourceId: user.id,
-          requestId: context.requestId
-        },
-        transaction
-      );
-    });
+    const verificationToken = await this.prisma.$transaction(
+      async (transaction) => {
+        await transaction.oneTimeToken.updateMany({
+          where: {
+            userId: user.id,
+            purpose: "EMAIL_VERIFICATION",
+            consumedAt: null
+          },
+          data: { consumedAt: new Date() }
+        });
+        const token = await this.createVerificationToken(
+          transaction,
+          user,
+          context
+        );
+        await this.audit.record(
+          {
+            actorId: user.id,
+            action: "identity.email.verification_resent",
+            resourceType: "user",
+            resourceId: user.id,
+            requestId: context.requestId
+          },
+          transaction
+        );
+        return token;
+      }
+    );
 
     return {
       response: {
@@ -397,33 +399,41 @@ export class IdentityService {
   private async createVerificationToken(
     transaction: Transaction,
     user: User,
-    token: string,
     context: RequestContext
-  ): Promise<void> {
+  ): Promise<string> {
     const expiresAt = new Date(
       Date.now() +
         this.config.auth.emailVerificationTtlMinutes * 60 * 1_000
     );
-    await transaction.oneTimeToken.create({
+    const record = await transaction.oneTimeToken.create({
       data: {
         userId: user.id,
         purpose: "EMAIL_VERIFICATION",
-        tokenHash: this.crypto.hashOpaqueToken(token),
+        tokenHash: this.crypto.hashOpaqueToken(this.crypto.randomToken()),
         expiresAt
       }
+    });
+    const token = this.crypto.emailVerificationToken(
+      record.id,
+      user.id,
+      expiresAt
+    );
+    await transaction.oneTimeToken.update({
+      where: { id: record.id },
+      data: { tokenHash: this.crypto.hashOpaqueToken(token) }
     });
     await this.outbox.userEvent(transaction, {
       eventType: domainEventTypes.emailVerificationRequested,
       user,
       payload: {
         userId: user.id,
-        email: user.emailDisplay,
+        oneTimeTokenId: record.id,
         locale: user.locale,
-        token,
         expiresAt: expiresAt.toISOString()
       },
       requestId: context.requestId
     });
+    return token;
   }
 
   private consent(

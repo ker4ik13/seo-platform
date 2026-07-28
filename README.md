@@ -20,8 +20,16 @@
 - audit и transactional outbox.
 
 Identity endpoints доступны под `/api/v1/auth/*`, `/api/v1/me` и
-`/api/v1/sessions`. Workspace/project endpoints добавляются следующим
-вертикальным срезом.
+`/api/v1/sessions`. Tenant API публикует:
+
+- `/api/v1/workspaces`;
+- `/api/v1/workspaces/{workspaceId}`;
+- `/api/v1/workspaces/{workspaceId}/projects`;
+- `/api/v1/projects/{projectId}`;
+- `/api/v1/projects/{projectId}/archive|restore`.
+
+Tenant endpoints используют default-deny permission catalog, проверенное
+membership, CSRF для команд и `If-Match`/`ETag` для конкурентных изменений.
 
 Production требует `AUTH_PASSWORD_PEPPER`, `AUTH_COOKIE_SECURE=true` и
 `AUTH_EXPOSE_DEVELOPMENT_TOKENS=false`. Verification token передаётся email

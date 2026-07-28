@@ -36,6 +36,22 @@ export class AuthCryptoService {
     return randomUUID();
   }
 
+  public emailVerificationToken(
+    tokenId: string,
+    userId: string,
+    expiresAt: Date
+  ): string {
+    const key =
+      this.config.auth.passwordPepper ??
+      "development-only-verification-signing-key";
+    const signature = createHmac("sha256", key)
+      .update(
+        `email-verification:${tokenId}:${userId}:${expiresAt.toISOString()}`
+      )
+      .digest("base64url");
+    return `${tokenId}.${signature}`;
+  }
+
   public hashOpaqueToken(token: string): string {
     const pepper = this.config.auth.passwordPepper;
     return pepper

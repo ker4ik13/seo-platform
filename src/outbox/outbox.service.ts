@@ -6,6 +6,36 @@ import type {
 
 @Injectable()
 export class OutboxService {
+  public async event(
+    transaction: Prisma.TransactionClient,
+    input: {
+      readonly eventType: string;
+      readonly aggregateType: string;
+      readonly aggregateId: string;
+      readonly aggregateVersion: number;
+      readonly workspaceId?: string;
+      readonly projectId?: string;
+      readonly payload: Prisma.InputJsonValue;
+      readonly requestId: string;
+    }
+  ): Promise<void> {
+    await transaction.outboxEvent.create({
+      data: {
+        eventType: input.eventType,
+        aggregateType: input.aggregateType,
+        aggregateId: input.aggregateId,
+        aggregateVer: input.aggregateVersion,
+        ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+        ...(input.projectId ? { projectId: input.projectId } : {}),
+        payload: input.payload,
+        metadata: {
+          requestId: input.requestId,
+          producer: "platform-api"
+        }
+      }
+    });
+  }
+
   public async userEvent(
     transaction: Prisma.TransactionClient,
     input: {
@@ -15,18 +45,13 @@ export class OutboxService {
       readonly requestId: string;
     }
   ): Promise<void> {
-    await transaction.outboxEvent.create({
-      data: {
-        eventType: input.eventType,
-        aggregateType: "user",
-        aggregateId: input.user.id,
-        aggregateVer: input.user.version,
-        payload: input.payload,
-        metadata: {
-          requestId: input.requestId,
-          producer: "platform-api"
-        }
-      }
+    await this.event(transaction, {
+      eventType: input.eventType,
+      aggregateType: "user",
+      aggregateId: input.user.id,
+      aggregateVersion: input.user.version,
+      payload: input.payload,
+      requestId: input.requestId
     });
   }
 }
