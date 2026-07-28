@@ -1,6 +1,12 @@
 "use client";
 
-import { useMemo, useRef, useState, type ChangeEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent
+} from "react";
 import {
   browserApiRequest,
   BrowserApiError
@@ -11,6 +17,8 @@ interface UploadSummary {
   readonly status: string;
   readonly originalName: string;
   readonly sizeBytes: string;
+  readonly checksumSha256?: string;
+  readonly rejectionCode?: string;
 }
 
 interface CreatedMultipartUpload {
@@ -39,10 +47,14 @@ type UploadStage =
   | "preparing"
   | "uploading"
   | "completing"
+  | "scanning"
   | "uploaded"
+  | "ready"
+  | "rejected"
   | "cancelled";
 
 const MAX_CONCURRENCY = 3;
+const INSPECTION_TIMEOUT_MS = 30 * 60 * 1_000;
 
 export function SemanticUpload({
   projectId
@@ -52,25 +64,91 @@ export function SemanticUpload({
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
+  const [completedUploadId, setCompletedUploadId] = useState<string>();
   const activeRequests = useRef(new Set<XMLHttpRequest>());
+  const inspectionRequest = useRef<AbortController | undefined>(undefined);
   const cancelled = useRef(false);
-  const busy = !["idle", "uploaded", "cancelled"].includes(stage);
+  const busy = ![
+    "idle",
+    "uploaded",
+    "ready",
+    "rejected",
+    "cancelled"
+  ].includes(stage);
+  const canCancel = ["preparing", "uploading"].includes(stage);
   const statusText = useMemo(
     () => uploadStatus(stage, progress),
     [stage, progress]
   );
 
+  useEffect(
+    () => () => inspectionRequest.current?.abort(),
+    []
+  );
+
   function selectFile(event: ChangeEvent<HTMLInputElement>): void {
+    inspectionRequest.current?.abort();
     const selected = event.target.files?.[0];
     setFile(selected);
     setStage("idle");
     setProgress(0);
+    setCompletedUploadId(undefined);
     setMessage(undefined);
     setError(undefined);
   }
 
+  async function trackInspection(uploadId: string): Promise<void> {
+    setProgress(100);
+    setStage("scanning");
+    const controller = new AbortController();
+    inspectionRequest.current = controller;
+    try {
+      const inspected = await waitForInspection(
+        projectId,
+        uploadId,
+        controller.signal
+      );
+      if (controller.signal.aborted) return;
+      setCompletedUploadId(undefined);
+      if (inspected.status === "READY") {
+        setStage("ready");
+        setMessage(
+          `${inspected.originalName} проверен и готов к распознаванию колонок.`
+        );
+      } else {
+        setStage("rejected");
+        setError(inspectionRejectionMessage(inspected.rejectionCode));
+      }
+    } catch (inspectionError) {
+      if (controller.signal.aborted) return;
+      setStage("uploaded");
+      setMessage(
+        "Файл загружен, а проверка продолжается в фоне. Обновите статус позже."
+      );
+      if (
+        inspectionError instanceof BrowserApiError &&
+        inspectionError.code === "NOT_FOUND"
+      ) {
+        setCompletedUploadId(undefined);
+        setStage("idle");
+        setMessage(undefined);
+        setError("Загрузка больше недоступна. Выберите файл заново.");
+      }
+    } finally {
+      if (inspectionRequest.current === controller) {
+        inspectionRequest.current = undefined;
+      }
+    }
+  }
+
   async function upload(): Promise<void> {
     if (!file || busy) return;
+    if (stage === "uploaded" && completedUploadId) {
+      setError(undefined);
+      setMessage(undefined);
+      await trackInspection(completedUploadId);
+      return;
+    }
     cancelled.current = false;
     setStage("preparing");
     setProgress(0);
@@ -131,11 +209,8 @@ export function SemanticUpload({
         }
       );
       sessionStorage.removeItem(storageKey);
-      setProgress(100);
-      setStage("uploaded");
-      setMessage(
-        `${result.originalName} загружен. Проверка checksum и безопасности будет выполнена в фоне.`
-      );
+      setCompletedUploadId(result.id);
+      await trackInspection(result.id);
     } catch (uploadError) {
       if (cancelled.current) return;
       for (const request of activeRequests.current) request.abort();
@@ -223,9 +298,13 @@ export function SemanticUpload({
           onClick={() => void upload()}
           type="button"
         >
-          {stage === "uploaded" ? "Загрузить ещё раз" : "Начать загрузку"}
+          {stage === "uploaded"
+            ? "Обновить статус"
+            : ["ready", "rejected"].includes(stage)
+              ? "Загрузить ещё раз"
+              : "Начать загрузку"}
         </button>
-        {busy && (
+        {canCancel && (
           <button
             className="secondary-button"
             onClick={() => void cancel()}
@@ -479,14 +558,81 @@ function formatBytes(value: number): string {
   return `${(value / 1_024 / 1_024 / 1_024).toFixed(2)} ГБ`;
 }
 
+async function waitForInspection(
+  projectId: string,
+  uploadId: string,
+  signal: AbortSignal
+): Promise<UploadSummary> {
+  const startedAt = Date.now();
+  let delayMs = 1_000;
+  while (Date.now() - startedAt < INSPECTION_TIMEOUT_MS) {
+    const upload = await browserApiRequest<UploadSummary>(
+      `/app/api/projects/${encodeURIComponent(projectId)}/uploads/${encodeURIComponent(uploadId)}`,
+      { signal }
+    );
+    if (["READY", "REJECTED"].includes(upload.status)) return upload;
+    if (!["UPLOADED", "SCANNING"].includes(upload.status)) {
+      throw new Error(`Unexpected inspection state: ${upload.status}`);
+    }
+    await pause(delayMs, signal);
+    delayMs = Math.min(5_000, Math.ceil(delayMs * 1.5));
+  }
+  throw new Error("Upload inspection is still running");
+}
+
+function pause(durationMs: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, durationMs);
+    function onAbort(): void {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(signal.reason);
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 function uploadStatus(stage: UploadStage, progress: number): string {
   if (stage === "preparing") return "Создаём защищённую загрузку…";
   if (stage === "uploading") {
     return progress > 0 ? "Загружаем части в S3…" : "Получаем ссылки…";
   }
   if (stage === "completing") return "Проверяем целостность объекта…";
-  if (stage === "uploaded") return "Загрузка завершена";
+  if (stage === "scanning") return "Проверяем checksum, тип и безопасность…";
+  if (stage === "ready") return "Файл проверен и готов";
+  if (stage === "rejected") return "Файл отклонён";
+  if (stage === "uploaded") {
+    return "Загрузка завершена, проверка продолжается";
+  }
   return "";
+}
+
+function inspectionRejectionMessage(code: string | undefined): string {
+  const messages: Readonly<Record<string, string>> = {
+    MALWARE_DETECTED:
+      "Файл отклонён: антивирус обнаружил небезопасное содержимое.",
+    SIZE_MISMATCH:
+      "Файл отклонён: фактический размер не совпал с заявленным.",
+    CHECKSUM_MISMATCH:
+      "Файл отклонён: контрольная сумма не совпала. Загрузите исходный файл заново.",
+    MIME_SIGNATURE_MISMATCH:
+      "Файл отклонён: его содержимое не соответствует выбранному формату.",
+    FORBIDDEN_FILE_SIGNATURE:
+      "Файл отклонён: обнаружен неподдерживаемый или исполняемый формат.",
+    BINARY_TEXT_FILE:
+      "Файл отклонён: CSV/TSV содержит бинарные данные."
+  };
+  return (
+    (code && messages[code]) ||
+    "Файл не прошёл проверку безопасности. Выберите корректный исходный файл."
+  );
 }
 
 function uploadErrorMessage(error: unknown): string {

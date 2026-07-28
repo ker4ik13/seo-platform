@@ -23,6 +23,7 @@ export async function browserApiRequest<Data>(
     readonly body?: unknown;
     readonly ifMatch?: number;
     readonly idempotencyKey?: string;
+    readonly signal?: AbortSignal;
   } = {}
 ): Promise<Data> {
   if (!path.startsWith("/app/api/")) {
@@ -56,7 +57,8 @@ export async function browserApiRequest<Data>(
       ? { body: JSON.stringify(options.body) }
       : {}),
     credentials: "same-origin",
-    cache: "no-store"
+    cache: "no-store",
+    ...(options.signal ? { signal: options.signal } : {})
   });
   const payload = await response.json().catch(() => undefined);
   if (!response.ok) throw browserApiError(response.status, payload);
