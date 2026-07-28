@@ -964,6 +964,12 @@ Indexes:
 - `exports`;
 - `export_artifacts`.
 
+`uploads` хранит tenant/actor scope, opaque object key, исходное отображаемое
+имя, MIME declaration, размер, `multipart_id`, размер/число parts,
+`idempotency_key`, expiry и timestamps состояний. Опциональный
+`declared_checksum` отделён от обязательного фактически вычисленного worker-ом
+`checksum`; доверять заявленному значению до inspection запрещено.
+
 Row staging создаётся в staging schema/partitioned tables и очищается retention job.
 
 ### 6.3. Integrations
@@ -1045,10 +1051,30 @@ Append-only:
 - `notifications`;
 - `notification_recipients`;
 - `notification_preferences`;
+- `notification_rules`;
 - `project_notification_subscriptions`;
 - `web_push_subscriptions`;
 - `deliveries`;
 - `delivery_attempts`;
+
+`notification_preferences` хранит пользовательские master-switches, timezone,
+quiet hours, digest schedule и defaults новых проектов.
+
+`notification_rules` хранит нормализованную матрицу
+`user_id + project_id? + event_type + channel`, minimum severity, delivery
+mode и enabled state. Project rule не может расширить глобально запрещённый
+канал.
+
+`project_notification_subscriptions` привязана к membership snapshot и
+деактивируется при отзыве project access.
+
+`web_push_subscriptions` хранит endpoint и browser keys зашифрованно,
+device label, user agent metadata, last success/error и revoked/expired state.
+
+`deliveries` содержит immutable effective-policy snapshot, deduplication key,
+канал, scheduled time и финальный status; `delivery_attempts` — provider
+message ID, классифицированную ошибку и следующий retry без тела сообщения и
+секретов.
 
 ### 7.3. Documents
 

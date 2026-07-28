@@ -245,6 +245,70 @@ Last-write-wins без уведомления запрещён для польз
 
 Security и billing-critical уведомления нельзя полностью отключить владельцу.
 
+### 12.1. Экран профиля
+
+Маршрут `/app/settings/notifications` содержит:
+
+- master-переключатели `in-app`, `email`, `browser push`;
+- подтверждённый email и ссылку на его подтверждение;
+- timezone, quiet hours и поведение critical-событий в тихие часы;
+- режим `instant`, почасовой/дневной digest и время дайджеста;
+- матрицу категорий и каналов;
+- значения по умолчанию для новых проектов;
+- список browser-устройств с названием, браузером, последней доставкой и
+  отзывом подписки;
+- тестовую отправку отдельно по email и в выбранное browser-устройство.
+
+Обязательные состояния компонентов:
+
+- loading/saving/saved/save failed;
+- email unverified/provider disabled;
+- Web Push unsupported;
+- browser permission `default`, `granted`, `denied`;
+- subscription creating/active/expired/revoked;
+- test pending/delivered/failed;
+- digest empty;
+- conflicting quiet-hours timezone после смены timezone.
+
+Permission Web Push запрашивается только по нажатию пользователя. При
+`denied` UI не пытается повторно вызвать browser prompt и показывает
+инструкцию для настроек конкретного браузера.
+
+### 12.2. Настройки проекта
+
+Маршрут `/app/projects/{projectId}/settings/notifications` показывает только
+проекты, к которым у пользователя есть доступ. Экран содержит:
+
+- общий режим `наследовать профиль`, `переопределить`, `пауза до даты`;
+- матрицу типов работ, severity и каналов;
+- выбор instant/digest для каждого типа;
+- предупреждение о глобально запрещённом или неподтверждённом канале;
+- `notify on completion` для jobs, созданных текущим пользователем;
+- уведомления обо всех jobs проекта только при соответствующем permission;
+- preview итоговой effective-настройки;
+- сброс к профильным значениям.
+
+Настройка принадлежит конкретному пользователю и не меняет предпочтения
+остальных участников. После потери project access она становится неактивной;
+повторное добавление пользователя не включает старую подписку автоматически.
+
+### 12.3. Разрешение правил
+
+Для каждого получателя effective policy вычисляется в порядке:
+
+1. обязательное системное правило security/billing-critical;
+2. подтверждённость и глобальный master-switch канала;
+3. глобальное правило категории;
+4. project override или pause;
+5. minimum severity;
+6. quiet hours и digest schedule;
+7. deduplication/cooldown.
+
+Результат вычисления сохраняется в delivery snapshot, чтобы последующая смена
+настроек не меняла объяснение уже созданной доставки. Проверка membership и
+доступа повторяется перед формированием deep link и непосредственно перед
+отправкой.
+
 ## 13. Каналы
 
 ### In-app
@@ -257,6 +321,11 @@ Security и billing-critical уведомления нельзя полност�
 - instant/digest;
 - delivery tracking;
 - bounce handling.
+- unsubscribe управляет отключаемыми категориями, но не security-critical;
+- provider message ID сохраняется без содержимого письма;
+- temporary failure повторяется с exponential backoff и jitter;
+- hard bounce отключает email-канал, создаёт in-app предупреждение и не
+  блокирует остальные каналы.
 
 ### Browser / Web Push
 
@@ -269,6 +338,14 @@ Security и billing-critical уведомления нельзя полност�
 - push содержит только безопасный preview и deep link, без API-ключей,
   финансовых деталей и закрытого содержимого;
 - клик повторно проверяет session и доступ к проекту.
+
+Service Worker должен:
+
+- показывать локализованный заголовок и безопасный preview;
+- объединять повторные события по `tag`/deduplication key;
+- фокусировать существующую вкладку либо открывать same-origin deep link;
+- не кэшировать private API response;
+- поддерживать новую версию приложения без потери действующей subscription.
 
 ### Telegram
 
@@ -442,3 +519,20 @@ Security и billing-critical уведомления нельзя полност�
 - bounced;
 - webhook retrying;
 - public link expired.
+
+## 22. Критерии приёмки уведомлений
+
+- Пользователь может глобально отключить email и Web Push, а project override
+  не обходит этот запрет.
+- Пользователь может включить разные типы работ для разных проектов.
+- Завершение и ошибка job создают не более одного уведомления на получателя
+  при повторной доставке одного domain event.
+- Quiet hours откладывают обычную instant-доставку, но не теряют событие.
+- Digest не содержит ресурс, к которому пользователь потерял доступ.
+- Web Push permission не запрашивается без явного клика.
+- `410 Gone` отключает только конкретную browser subscription.
+- Hard bounce не отключает in-app и browser channels.
+- Удаление участника немедленно прекращает проектные доставки.
+- Test email/push имеет отдельный rate limit и не создаёт production alert.
+- Notification payload, delivery log и telemetry не содержат provider keys,
+  signed URLs, cookies, платёжные реквизиты или закрытый текст ресурса.

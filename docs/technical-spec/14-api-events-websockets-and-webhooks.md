@@ -299,12 +299,14 @@ Job result указывает на domain result, export file или error repor
 
 ### 12.1. Последовательность
 
-1. `POST /uploads` с именем, размером, MIME и checksum.
+1. `POST /uploads` с именем, размером, MIME и опциональным checksum.
 2. Сервер проверяет лимит и возвращает multipart instructions.
 3. Клиент загружает parts напрямую в S3-compatible storage.
 4. Клиент вызывает `/uploads/{id}/complete`.
-5. Backend сверяет parts, checksum и размер.
-6. Antivirus/file inspection меняет статус `scanning`.
+5. Backend сверяет parts и фактический размер объекта.
+6. Antivirus/file inspection меняет статус `scanning`, потоково вычисляет
+   обязательный серверный SHA-256 и сверяет клиентский checksum, если он был
+   передан.
 7. Файл становится `ready` или `rejected`.
 8. Импорт создаётся только из `ready` upload.
 
