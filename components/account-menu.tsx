@@ -54,6 +54,9 @@ export function AccountMenu({
           <a className="account-menu-link" href="/app/settings/security">
             Безопасность и профиль
           </a>
+          <a className="account-menu-link" href="/app/settings/notifications">
+            Настройки уведомлений
+          </a>
           <button disabled={busy} onClick={logout} type="button">
             {busy ? "Выходим…" : "Выйти"}
           </button>

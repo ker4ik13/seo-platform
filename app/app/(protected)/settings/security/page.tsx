@@ -1,5 +1,6 @@
 import { AppShell } from "../../../../../components/app-shell";
 import { MfaSettings } from "../../../../../components/mfa-settings";
+import { SettingsTabs } from "../../../../../components/settings-tabs";
 import { requireProtectedAppContext } from "../../../../../lib/protected-app";
 
 export const dynamic = "force-dynamic";
@@ -18,6 +19,10 @@ export default async function SecuritySettingsPage() {
           </p>
         </div>
       </section>
+      <SettingsTabs
+        active="security"
+        {...(context.project ? { projectId: context.project.id } : {})}
+      />
       <div className="settings-stack">
         <MfaSettings />
       </div>

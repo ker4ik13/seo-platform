@@ -162,6 +162,7 @@ function accountUser(payload: unknown): AppUser {
   return {
     id: stringValue(user.id),
     email: stringValue(user.email),
+    emailVerified: booleanValue(user.emailVerified),
     displayName: stringValue(user.displayName),
     locale: stringValue(user.locale),
     timezone: stringValue(user.timezone)
@@ -216,6 +217,11 @@ function stringValue(value: unknown): string {
 function numberValue(value: unknown): number {
   if (!Number.isInteger(value)) throw invalidResponse();
   return value as number;
+}
+
+function booleanValue(value: unknown): boolean {
+  if (typeof value !== "boolean") throw invalidResponse();
+  return value;
 }
 
 function invalidResponse(): PlatformApiError {

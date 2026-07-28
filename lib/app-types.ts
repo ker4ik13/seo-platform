@@ -1,6 +1,7 @@
 export interface AppUser {
   readonly id: string;
   readonly email: string;
+  readonly emailVerified: boolean;
   readonly displayName: string;
   readonly locale: string;
   readonly timezone: string;
