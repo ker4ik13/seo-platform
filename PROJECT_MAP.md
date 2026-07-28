@@ -1,8 +1,8 @@
 # Карта проекта
 
 Последнее обновление: 28 июля 2026 года  
-Текущий инкремент: Unified Web + Identity M2
-Статус: web-архитектура консолидируется; Identity/Workspace/Project в работе
+Текущий инкремент: Identity → Workspace → Project
+Статус: Identity core реализован; Workspace/Project в работе
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -127,7 +127,8 @@ Entrypoints:
 | S3/email ports | foundation |
 | Realtime public gateway | foundation |
 | Unified Web/Admin shells | vertical slice |
-| Auth/workspaces/projects | planned |
+| Auth core | vertical slice |
+| Workspaces/projects | planned |
 | Semantics/import | planned |
 | Rankings/integrations | planned |
 | Billing/YooKassa | planned |
@@ -137,12 +138,16 @@ Foundation содержит четыре валидные Prisma schemas и на
 health/readiness, Redis/BullMQ, NATS transport, S3/SMTP adapters, fail-closed
 WebSocket gateway, unified web/admin shell и Dokploy Compose.
 
+Identity core содержит регистрацию email/password, consent snapshots,
+Argon2id, email verification, короткую access cookie, rotation refresh cookie,
+CSRF, session inventory/revocation, PostgreSQL rate limit, audit и outbox.
+
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Unit tests: 8 pass, 0 fail.
+- Platform API unit tests: 11 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
 - Unified Next.js production build: pass; проверены public site, Toolbox,
   API docs и private `/app`.
@@ -163,9 +168,11 @@ WebSocket gateway, unified web/admin shell и Dokploy Compose.
 
 - Дашборды используют демонстрационные данные до первого domain slice.
 - Realtime не допускает вход в project rooms до общей token/permission проверки.
-- Outbox/inbox publisher и consumer ещё не реализованы.
+- Durable outbox/inbox publisher и consumers ещё не реализованы.
 - Нет production observability, backup/restore и secret rotation runbooks.
 - Directus collection schema и seed появятся вместе с CMS vertical slice.
+- Email-verification consumer ожидает подключения
+  `@nats-io/jetstream`; plaintext verification token не логируется.
 - SEO connectors, тарификация и YooKassa пока присутствуют только в ТЗ/схемах.
 - `platform-app` сохранён как legacy Git-источник до проверки переноса; новая
   функциональность добавляется только в `platform-web`.
