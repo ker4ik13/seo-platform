@@ -13,7 +13,7 @@
 
 1. Создать в Dokploy Compose-проект из корня репозитория.
 2. Скопировать переменные из корневого `.env.example`, заменить все
-   `replace-me` и URL.
+   `replace-me`, URL и версии юридических документов.
 3. Сначала оставить `S3_ENABLED=false`, `EMAIL_ENABLED=false`,
    `DIRECTUS_STORAGE_DRIVER=local`.
 4. Привязать основной домен к `web:3000`, остальные домены к `admin:3002`,
@@ -27,6 +27,11 @@ PostgreSQL, Redis и NATS не публикуют порты наружу. В pr
 Для official PostgreSQL 18 volume намеренно смонтирован в
 `/var/lib/postgresql`: начиная с 18 это новый persistent volume root. Не
 возвращать старый путь `/var/lib/postgresql/data`.
+
+`AUTH_*_COOKIE_NAME` должны быть одинаковыми у `web` и `platform-api`.
+Имя CSRF cookie встраивается в browser bundle на build, поэтому его изменение
+требует пересборки Web. Содержимое cookie, access token и session token в
+frontend bundle не попадают.
 
 ## Подключение S3 и email
 
