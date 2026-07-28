@@ -20,6 +20,111 @@
    `platform-api:4000`, `realtime:4003`, `directus:8055`.
 5. Развернуть compose. Migration services завершаются до запуска приложений.
 
+## BYOK vault и ротация ключей
+
+`INTEGRATION_CREDENTIAL_KEYS` — отдельный от auth версионируемый набор
+master keys (KEK) для BYOK-секретов. Сгенерировать первое значение можно
+командой
+`node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"`
+и записать как `1:<значение>`, установив active version `1`.
+`INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS` — второй независимый
+версионируемый keyring для keyed request fingerprints. Для него нужно
+сгенерировать другое случайное значение той же длины; KEK повторно
+использовать запрещено.
+`PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN` — отдельный service credential для
+этого vault. Он должен отличаться от `INTERNAL_API_TOKEN` и передаётся только
+`platform-api` и HTTP-процессу `jobs-integrations`; generic workers,
+realtime, seo-data и migration services его не получают.
+
+Compose передаёт keyring только credential-capable процессу
+`jobs-integrations`. Migration service, `system-worker`, `import-worker` и
+`upload-inspection-worker` не получают `INTEGRATION_CREDENTIAL_*` и запускаются
+с выключенной credential capability. Будущий connector worker получает keyring
+отдельно, только когда ему потребуется server-side provider access.
+Даже процесс с общим internal token не может вызвать list/create/rotate/revoke
+credential: эти endpoints принимают только dedicated caller token.
+
+Каждый credential шифруется envelope-схемой:
+
+- случайный 256-bit data encryption key (DEK) шифрует payload через
+  AES-256-GCM;
+- active KEK шифрует DEK; в PostgreSQL сохраняются только ciphertext,
+  encrypted DEK, отдельные nonce/auth tag и версия KEK;
+- AAD payload связывает ciphertext с workspace, provider и credential ID;
+  AAD обёрнутого DEK дополнительно включает версию KEK;
+- plaintext secret и незашифрованный DEK в PostgreSQL, queue payload, audit,
+  events и logs не сохраняются.
+
+Startup credential-capable процесса проверяет формат keyring, наличие active
+version и соответствующих 32-byte keys, затем до открытия HTTP агрегированно
+сверяет все `key_version` и `fingerprint_key_version` неудалённых credentials
+с PostgreSQL. При недостающей версии процесс завершается fail-closed. Перед
+каждым rollout дополнительно получить безопасные счётчики:
+
+```sql
+SELECT 'encryption' AS keyring, key_version AS version,
+       count(*) AS credential_count
+FROM integration_credentials
+WHERE deleted_at IS NULL
+GROUP BY key_version
+UNION ALL
+SELECT 'fingerprint' AS keyring, fingerprint_key_version AS version,
+       count(*) AS credential_count
+FROM integration_credentials
+WHERE deleted_at IS NULL
+GROUP BY fingerprint_key_version
+ORDER BY keyring, version;
+```
+
+Каждая версия должна присутствовать в соответствующем keyring. Значения самих
+ключей нельзя выводить в CI logs, тикеты или результаты
+`docker compose config`.
+
+Ротация KEK выполняется с overlap:
+
+1. Сгенерировать новую уникальную версию и добавить её рядом со старой, не
+   меняя active version.
+2. Развернуть `jobs-integrations` и убедиться, что startup validation проходит,
+   а coverage query покрывается новым keyring.
+3. Переключить active version на новую и повторно развернуть процесс. Новые и
+   заменённые credentials начнут использовать новый KEK.
+4. Идемпотентно и ограниченными batch переобернуть только encrypted DEK
+   существующих записей, обновляя `key_version`; payload расшифровывать и
+   переписывать не требуется.
+5. Повторять coverage query до нулевого числа активных записей на старой
+   версии. Старый KEK удалить только после этого, завершения rollback window и
+   проверки политики encrypted backups.
+
+Автоматический bounded DEK rewrap ещё не реализован. До его появления шаг 4
+не выполняется вручную, старый KEK не удаляется, startup coverage и SQL выше
+остаются обязательными проверками. Для rollback достаточно вернуть прежнюю
+active version, пока обе версии находятся в keyring; откат БД не требуется.
+
+Fingerprint keyring ротируется отдельно: старая и новая версии сначала
+работают одновременно, затем active version переключается на новую. Старый
+fingerprint key нужен, пока есть неудалённые записи с соответствующим
+`fingerprint_key_version`: он проверяет повтор исходного create, но не
+шифрует credential. Автоматическая bounded-инвалидация старых fingerprints
+после idempotency retry window ещё не реализована, поэтому такую версию также
+нельзя удалять, пока coverage не равен нулю.
+
+При утрате используемого KEK credential-capable HTTP-процесс не стартует.
+Восстановление требует вернуть точное значение KEK из защищённой копии
+секретов. Если копии нет, нужен отдельный offline incident recovery/revoke
+tool с security review; текущая сборка такого инструмента не содержит.
+Удалять credentials или проекты и обходить startup guard вручную запрещено.
+Остальные сервисы продолжают давать read-only доступ к уже сохранённым
+результатам.
+
+Текущая envelope migration рассчитана на пустую pre-release таблицу
+`integration_credentials` и fail-closed останавливается, если находит записи.
+Это защищает от молчаливого присвоения старым ciphertext неверной схемы.
+Все DDL этой migration находятся в одной явной PostgreSQL-транзакции.
+Если migration останавливается на окружении с реальными данными, записи нельзя
+удалять: rollout отменяется, готовится отдельный expand/backfill/contract план,
+а состояние Prisma migration восстанавливается через `prisma migrate resolve`
+только после документированного recovery review.
+
 PostgreSQL, Redis и NATS не публикуют порты наружу. В production рекомендуется
 разделить credentials баз данных по сервисам; один кластер на старте сохраняет
 изоляцию databases без лишней эксплуатационной нагрузки.
