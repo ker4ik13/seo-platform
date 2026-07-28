@@ -325,6 +325,7 @@ Credentials и OAuth connections принадлежат workspace.
 
 - not connected;
 - connecting;
+- pending verification;
 - active;
 - degraded;
 - rate limited;
@@ -349,6 +350,59 @@ Credentials и OAuth connections принадлежат workspace.
 9. save.
 
 Секрет после сохранения показывается только masked. Получить исходное значение нельзя; можно заменить.
+
+### 17.1. Реализованный vault foundation
+
+Первый dependency-safe срез реализует workspace-scoped BYOK vault для
+XMLStock, Arsenkin Tools и Keys.so:
+
+- Platform API повторно проверяет session, CSRF и workspace permission;
+- vault endpoints принимают отдельный service token, доступный только
+  Platform API и credential-capable jobs HTTP process; общий internal token
+  других сервисов недостаточен;
+- jobs/integrations является единственным владельцем ciphertext;
+- случайный per-record DEK шифрует payload через AES-256-GCM, а отдельный
+  версионируемый KEK шифрует DEK;
+- payload AAD связывает ciphertext с workspace, provider и credential ID;
+  AAD обёрнутого DEK дополнительно связывает его с KEK version;
+- migration, system, import и inspection processes не получают credential
+  keyring; capability включена только для jobs/integrations API и будущего
+  connector worker;
+- response DTO, audit, events, queue и downstream job payload получают только
+  credential ID, metadata и masked hint. Plaintext существует только в памяти
+  аутентифицированного create/full-replacement request до немедленного
+  шифрования и не попадает в логи;
+- XMLStock хранит `userId + apiKey` внутри одного зашифрованного payload;
+- исходный секрет нельзя прочитать через пользовательский API;
+- rotate заменяет ciphertext и возвращает статус
+  `PENDING_VERIFICATION`;
+- revoke сразу soft-deletes запись и перезаписывает ciphertext случайными
+  байтами;
+- provider/base URL не принимается от пользователя и позже выбирается только
+  из allowlisted connector configuration.
+- create требует `Idempotency-Key`; ключ резервируется в пределах workspace, а
+  actor и нормализованный request входят в keyed 32-byte fingerprint под
+  отдельным versioned fingerprint keyring. Точный повтор возвращает уже
+  созданный credential, а тот же ключ с другим actor/payload даёт conflict.
+- workspace/actor/credential UUID канонизируются до lowercase до
+  tenant-сравнения, AAD и fingerprint, чтобы PostgreSQL UUID round-trip не
+  изменял криптографический контекст.
+
+`PENDING_VERIFICATION` не разрешает worker использовать credential. Настоящий
+provider-specific `validateCredential` и project binding являются следующим
+срезом; локальная успешная расшифровка не выдаётся пользователю за проверку
+внешнего API.
+
+Управление credential принимает только полную замену secret payload и не
+расшифровывает старое значение. Однако HTTP-процесс jobs/integrations пока
+получает симметричный KEK для envelope encryption и технически обладает
+decrypt capability. Это временная foundation boundary, а не целевая
+production-модель connector execution: provider request получает plaintext
+только внутри отдельного credential-capable connector worker/broker.
+Startup уже fail-closed агрегированно сверяет используемые в БД KEK и
+fingerprint key versions с независимыми keyrings. Автоматический bounded DEK
+rewrap и отдельная bounded-инвалидация fingerprints после retry window
+остаются обязательным operational hardening до удаления старых версий.
 
 ## 18. OAuth connections
 

@@ -1,11 +1,11 @@
 # Карта проекта
 
-Последнее обновление: 28 июля 2026 года
+Последнее обновление: 29 июля 2026 года
 
-Текущий инкремент: Notification center read model
-Статус: профильные/проектные правила и центр уведомлений с cursor pagination,
-unread count и read mutations реализованы; создание и внешняя доставка
-уведомлений следуют отдельным вертикальным срезом
+Текущий инкремент: Integration credential vault foundation
+Статус: каталог XMLStock/Arsenkin/Keys.so и encrypted BYOK
+create/list/rotate/revoke реализованы; server-side provider test, project
+binding и rank jobs следуют отдельными вертикальными срезами
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -66,6 +66,10 @@ platform-web public/docs <──> Directus
 
 Platform API синхронно передаёт upload-команды в jobs-integrations через
 internal HTTP с отдельным shared token и проверенным tenant/actor context.
+Credential endpoints дополнительно используют отдельный
+`PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`, доступный только Platform API и
+jobs-integrations HTTP; общий internal token остальных сервисов vault не
+открывает.
 Остальная межсервисная бизнес-коммуникация пока не включена: подключены
 transport и health/readiness, таблицы outbox/inbox созданы. Durable публикация
 событий начинается в следующем вертикальном срезе.
@@ -97,6 +101,15 @@ transport и health/readiness, таблицы outbox/inbox созданы. Durab
 - Directus использует local media volume до переключения
   `DIRECTUS_STORAGE_DRIVER=s3`; application uploads сразу имеют S3 adapter.
 - Production secrets задаются только в Dokploy.
+- `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN` отличается от
+  `INTERNAL_API_TOKEN` и выдаётся только Platform API и credential-capable
+  jobs/integrations HTTP process.
+- BYOK envelope encryption использует отдельный
+  `INTEGRATION_CREDENTIAL_KEYS` KEK keyring; auth encryption key для него не
+  переиспользуется. Request fingerprint использует второй независимый
+  `INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS` keyring. Оба получает только
+  credential-capable jobs/integrations process, но не generic
+  migration/system/import/inspection workers.
 - `inspection` Compose profile запускает отдельные ClamAV и upload inspection
   worker; без доступного scanner файл fail-closed остаётся `UPLOADED`.
 
@@ -123,6 +136,8 @@ Backend convention:
   ограничения доступа;
 - `platform-api/src/uploads` — project-scoped public upload commands;
 - `platform-api/src/jobs` — общий internal HTTP client к jobs-integrations;
+- `platform-api/src/integrations` — workspace-scoped public catalog и
+  credential commands с RBAC, CSRF, audit intent и optimistic locking;
 - `platform-api/src/imports` — project-scoped create/read orchestration с
   `semantic.import`/`semantic.view`;
 - `platform-api/src/semantics` — public project-scoped keyword queries с
@@ -148,6 +163,11 @@ Backend convention:
 - `platform-jobs-integrations/src/imports` — потоковый CSV/TSV parser,
   Key Collector header mapping, raw/validated staging, lease/heartbeat,
   validation summary и chunked publisher;
+- `platform-jobs-integrations/src/integrations` — allowlisted provider catalog,
+  workspace-scoped envelope vault с per-record DEK, AES-256-GCM и versioned
+  KEK, отдельный versioned HMAC fingerprint keyring, dedicated caller guard,
+  startup coverage guard, masked DTO, rotation и destructive secret overwrite
+  при revoke;
 - `platform-jobs-integrations/src/seo-data` — строго валидируемый internal
   HTTP client владельца semantic core;
 - `platform-seo-data/src/semantic-imports` — нормализация, import receipts,
@@ -200,7 +220,8 @@ Entrypoints:
 | Workspaces/projects/team access | vertical slice |
 | Semantics/import | vertical slice: CSV/TSV → mapping → validation → publish → query |
 | Notifications | vertical slice: preferences → effective policy → read center |
-| Rankings/integrations | planned |
+| Integrations | vertical slice: catalog + encrypted BYOK vault |
+| Rankings | planned |
 | Billing/YooKassa | planned |
 | Directus content | planned |
 
@@ -293,17 +314,32 @@ project/resource references и только локальный `/app` deep link;
 JSON наружу не возвращается. Mark-read команды идемпотентны и ограничены
 текущим пользователем.
 
+Workspace API-ключи управляются через `/app/settings/integrations`. Platform
+API проверяет workspace permission и передаёт trusted actor/workspace context
+в jobs/integrations. Секрет и XMLStock user ID шифруются одним authenticated
+payload под случайным per-record DEK; versioned KEK шифрует DEK. AAD связывает
+payload с workspace/provider/credential ID, а обёрнутый DEK — ещё и с KEK
+version. Секрет не возвращается после сохранения и не попадает в
+audit/queue/event. Карточки честно показывают `PENDING_VERIFICATION`:
+credential нельзя использовать до реального provider-specific test.
+Пользовательский base URL не поддерживается. Create требует
+`Idempotency-Key`: workspace-wide unique key и keyed fingerprint дают
+существующий credential для точного повтора и conflict для другого
+actor/payload. Fingerprint version не связан с KEK version, поэтому lifecycle
+идемпотентности не блокирует будущий DEK rewrap. UUID канонизируются до
+lowercase до AAD/fingerprint и не меняются после PostgreSQL round-trip.
+
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 57 pass, 0 fail.
+- Platform API unit tests: 65 pass, 0 fail.
 - SEO data unit tests: 10 pass, 0 fail.
-- Jobs/integrations unit tests: 35 pass, 0 fail.
+- Jobs/integrations unit tests: 64 pass, 0 fail.
 - Realtime unit tests: 12 pass, 0 fail.
 - Contracts unit tests: 1 pass, 0 fail.
-- Unified Web security helper tests: 2 pass, 0 fail.
+- Unified Web helper tests: 4 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
 - Unified Next.js production build: pass; проверены public site, Toolbox,
   API docs и private `/app`.
@@ -316,20 +352,25 @@ JSON наружу не возвращается. Mark-read команды иде
   прокручивается только внутри своего контейнера, singleton mapping и
   обязательный separator проверены интерактивно.
 - Notification preferences browser QA: profile/project screens на 1280 px,
-  document overflow и browser errors не найдены; override, live effective
-  preview, pause и успешный optimistic save проверены интерактивно.
+  а также mobile recheck на 390 px; document overflow и browser errors не
+  найдены, минимальный текст 11 px; override, live effective preview, pause и
+  успешный optimistic save проверены интерактивно.
 - Notification center browser QA: 1280 px, document overflow и browser errors
   не найдены; unread badge, одиночное чтение, unread filter, read-all и empty
   state проверены интерактивно.
+- Integration settings browser QA: 1440 и 390 px, document overflow и browser
+  errors не найдены; таблица/табы прокручиваются только внутри контейнеров,
+  XMLStock full-secret replacement проверен интерактивно.
 - Target runtime: Node.js 24. Локальная проверка выполнялась на Node.js 22 с
   ожидаемым engine warning; контейнеры используют Node.js 24.
 
 ## 9. Следующий вертикальный срез
 
-`notification.requested.v1 → durable policy resolver → email/Web Push delivery`
+`credential validation → project connector binding → XMLStock rank tracking`
 
-OAuth/OIDC выполняется после подтверждения зависимости `jose`; QR для TOTP —
-после подтверждения `qrcode`.
+Durable notification delivery остаётся параллельным следующим срезом после
+подтверждения `@nats-io/jetstream` и `web-push`. OAuth/OIDC выполняется после
+подтверждения зависимости `jose`; QR для TOTP — после подтверждения `qrcode`.
 
 ## 10. Незавершённые риски
 
@@ -356,13 +397,29 @@ OAuth/OIDC выполняется после подтверждения зави
   inspection worker ограничивается независимо от API.
 - Bucket требует внешней CORS/lifecycle настройки: Web origin, exposed `ETag`,
   abort incomplete multipart через 2 дня.
-- Нет production observability, backup/restore и secret rotation runbooks.
+- Нет production observability и проверенного backup/restore runbook.
+- KEK rotation runbook описан в `platform-infrastructure/README.md`, но
+  автоматический bounded DEK rewrap ещё не реализован. DB-aware startup
+  coverage работает fail-closed; до rewrap старые используемые KEK запрещено
+  удалять. Fingerprint keyring ротируется независимо; bounded-инвалидация
+  старых fingerprints после retry window также ещё не реализована.
+- Summary-list credentials пока без cursor pagination и tenant hard limit;
+  перед массовыми provider pools нужен bounded endpoint, хотя ciphertext и
+  wrapped DEK уже исключены Prisma `select`.
+- Foundation DDL migration vault обёрнута в явную транзакцию, а предшествующая
+  enum migration намеренно применяется отдельным committed шагом; обе
+  проверены `prisma validate`. Локальный Docker daemon недоступен: применение
+  и CHECK/UNIQUE/CAS на ephemeral PostgreSQL 18 остаётся обязательной
+  staging-проверкой.
 - Directus collection schema и seed появятся вместе с CMS vertical slice.
 - Email-verification consumer ожидает подключения
   `@nats-io/jetstream`; plaintext verification token не логируется.
 - QR для TOTP пока представлен локальным `otpauth://` URI и ручным ключом;
   UI QR появится после подтверждения зависимости `qrcode`.
 - SEO connectors, тарификация и YooKassa пока присутствуют только в ТЗ/схемах.
+- Credential vault пока намеренно не имеет фиктивного «test»: XMLStock
+  validation требует allowlisted connector и redacted provider fixtures;
+  Arsenkin/Keys.so остаются `PENDING_VERIFICATION`.
 - `platform-app` сохранён как legacy Git-источник до проверки переноса; новая
   функциональность добавляется только в `platform-web`.
 

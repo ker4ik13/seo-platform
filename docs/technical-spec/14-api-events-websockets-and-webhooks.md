@@ -26,7 +26,10 @@
 - Совместимые поля добавляются без смены major version.
 - Удаляемое поле помечается deprecated минимум на один публичный цикл релиза.
 - Даты передаются в ISO 8601 UTC.
-- UUID передаются строкой.
+- UUID передаются строкой и валидируются на trust boundary. Каноническое
+  lowercase-представление обязательно перед AAD, fingerprint, подписью,
+  idempotency key derivation и любым строковым сравнением; PostgreSQL UUID
+  остаётся источником нормализованного представления для обычных CRUD-путей.
 - Decimal и `bigint`, способные превысить безопасный диапазон JavaScript, передаются строкой.
 - Денежное значение передаётся как `{ amountMinor: "1250", currency: "USD" }`.
 - У интерфейсных текстов API возвращает machine-readable code, а локализацию выполняет клиент.
@@ -80,6 +83,11 @@ Workspace и project не принимаются «на доверии». Они
 - запрет передачи access token в query string;
 - sensitive actions требуют недавней повторной аутентификации;
 - disabled/suspended user или workspace блокируется до исполнения бизнес-команды.
+
+До перехода на service JWT/mTLS sensitive credential vault использует
+отдельный high-entropy caller token только для пары
+`platform-api → jobs-integrations HTTP`. Общий internal token, migration и
+generic worker credentials не дают доступа к credential endpoints.
 
 ## 4. Авторизация запроса
 
@@ -230,6 +238,7 @@ Cursor:
 - массовых изменений;
 - запуска automation вручную;
 - создания export/report snapshot;
+- создания workspace credential;
 - повторной доставки внешнего webhook, если операция изменяет состояние.
 
 Правила:
@@ -241,6 +250,15 @@ Cursor:
 - retention ключа не менее 24 часов, для финансов — не менее срока возможной повторной доставки;
 - in-progress повтор возвращает тот же command/job ID;
 - idempotency API не отменяет уникальные ограничения и бизнес-транзакцию.
+
+Credential create использует намеренно более строгий
+`workspace + endpoint` scope: один ключ нельзя независимо переиспользовать
+двум principal в одном workspace. Actor и нормализованный request входят в
+keyed fingerprint под отдельным versioned keyring. Точный повтор возвращает
+текущее masked-представление уже созданного credential; повтор после revoke
+или тот же ключ с другим actor/body возвращает `IDEMPOTENCY_CONFLICT`. Это
+явное исключение для resource-backed idempotency и не меняет требование
+хранить исходный immutable response для финансовых и job-команд.
 
 ## 10. Optimistic concurrency
 
@@ -470,6 +488,21 @@ internal token плюс точным совпадением trusted tenant/actor
 - `/projects/{projectId}/automations/{id}/runs`;
 - `/projects/{projectId}/automations/{id}/pause`;
 - `/projects/{projectId}/automations/{id}/resume`;
+
+Реализованный workspace vault использует:
+
+- `GET /api/v1/workspaces/{workspaceId}/integrations/catalog`;
+- `GET /api/v1/workspaces/{workspaceId}/integrations/credentials`;
+- `POST /api/v1/workspaces/{workspaceId}/integrations/credentials`;
+- `PATCH /api/v1/workspaces/{workspaceId}/integrations/credentials/{id}`;
+- `DELETE /api/v1/workspaces/{workspaceId}/integrations/credentials/{id}`.
+
+Read требует `integration.view`, mutations соответственно
+`integration.connect`, `integration.update`, `integration.delete`, session,
+CSRF и проверенный workspace context. PATCH/DELETE требуют `If-Match`.
+Исходный API key и account identifier отсутствуют в response contract.
+`POST .../{id}/test` появится только вместе с provider-specific connector:
+проверку локальной криптографии нельзя выдавать за внешний credential test.
 
 ### 13.7. Collaboration и reports
 

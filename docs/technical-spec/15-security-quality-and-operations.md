@@ -136,13 +136,22 @@
 - Deployment secrets задаются через Dokploy/environment secret storage либо внешний secret manager.
 - BYOK credentials шифруются envelope encryption.
 - Data encryption key шифруется master key; master key находится вне базы.
+- Payload AAD содержит workspace, provider и immutable credential ID; AAD
+  обёрнутого data key дополнительно содержит master key version.
 - Ciphertext, key version, nonce и auth tag хранятся отдельно от display metadata.
 - UI после создания показывает только mask/label/last verified.
 - API никогда не возвращает plaintext credential.
 
 ### 8.2. Использование
 
-- Decryption доступен только integration worker с нужной capability.
+- Для provider execution decryption доступен только credential-capable
+  integration worker. Generic system/import/inspection workers и migration
+  process не получают credential keyring.
+- Management API принимает только полную замену secret payload и не
+  расшифровывает прежнее значение. Foundation HTTP-процесс всё ещё получает
+  симметричный KEK для envelope encryption и поэтому технически обладает
+  decrypt capability; до production connector execution эта граница
+  выносится в credential broker/worker либо закрепляется отдельным ADR.
 - Plaintext существует в памяти минимально возможное время.
 - Credential не помещается в queue payload; передаётся credential reference.
 - Provider request logs проходят redaction.
@@ -159,6 +168,15 @@
 - Storage volumes и offsite backups шифруются.
 - Signed URL короткоживущие, scoped на object и operation.
 - Encryption keys имеют version и rotation procedure.
+- BYOK KEK и keyed idempotency fingerprint используют разные versioned
+  keyrings и независимые rotation/retention lifecycle; повторное использование
+  одного key material запрещено.
+- Credential-capable процесс до открытия HTTP агрегированно сверяет
+  используемые KEK/fingerprint versions с keyrings и при пробеле завершается
+  fail-closed.
+- Vault endpoints не принимают общий межсервисный token: отдельный caller
+  secret доступен только Platform API и credential-capable HTTP process, до
+  плановой замены на service JWT/mTLS.
 - Потеря master key рассматривается в DR runbook.
 - Secret rotation проверяется минимум дважды в год.
 

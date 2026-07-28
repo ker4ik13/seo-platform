@@ -1025,19 +1025,58 @@ publishing. `semantic_import_validated_rows` hash-partitioned на 16 partitions
 - provider;
 - mode;
 - label;
-- owner;
-- secret_ciphertext или vault reference;
+- payload ciphertext;
+- payload 96-bit nonce;
+- payload GCM auth tag;
 - encrypted_data_key;
-- scopes;
+- data_key_nonce;
+- data_key_auth_tag;
+- KEK version;
+- masked display hint;
 - capabilities;
 - status;
-- expires_at;
-- last_test_at;
+- provider metadata без plaintext secret;
+- idempotency key;
+- keyed request fingerprint без plaintext secret;
+- fingerprint key version;
+- created_by;
+- updated_by;
+- verified_at;
 - last_success_at;
-- last_error_code;
+- last_error_at;
+- deleted_at;
 - version.
 
-Секретные поля никогда не возвращаются Prisma DTO наружу.
+Текущая реализация использует envelope encryption: случайный 256-bit DEK
+шифрует payload через AES-256-GCM, а versioned KEK jobs/integrations шифрует
+DEK. Payload AAD содержит workspace, provider и immutable credential ID; AAD
+обёрнутого DEK дополнительно содержит KEK version. Новый или заменённый ключ
+получает `PENDING_VERIFICATION`. Секретные поля никогда не возвращаются Prisma
+DTO наружу; revoke перезаписывает payload ciphertext и encrypted DEK до soft
+delete. Ограничения БД проверяют длины GCM nonce/tag, непустые ciphertext/DEK,
+положительные KEK/fingerprint key versions и 32-byte request fingerprint.
+Уникальный `workspace_id + idempotency_key` делает создание безопасным при
+повторе после сетевого timeout. Actor и нормализованный create payload входят
+в HMAC под отдельным versioned fingerprint keyring, поэтому тот же workspace
+key с другим actor/payload возвращает conflict. Fingerprint создания остаётся
+неизменным при rotate/rename: точный повтор исходного POST не создаёт второй
+credential и возвращает его текущее masked-представление. После revoke повтор
+получает conflict. Отделение `fingerprint_key_version` от `key_version`
+позволяет переоборачивать DEK и удалять старый KEK без зависимости от
+idempotency lifecycle. Все UUID канонизируются до lowercase до вычисления
+AAD/HMAC и совпадают с представлением PostgreSQL. Структурированный
+`last_error_code` и
+provider-specific expiry добавляются вместе с connector validation/history.
+
+Добавление `PENDING_VERIFICATION` вынесено в отдельную migration, чтобы новая
+PostgreSQL enum value была committed до использования в DEFAULT следующей
+migration. Foundation migration с обязательными envelope-полями имеет
+fail-closed precondition и одну явную транзакцию: pre-release
+`integration_credentials` должна быть пустой, а DDL применяется целиком или
+не применяется. Если в окружении уже есть записи, их запрещено удалять ради
+deploy: используется отдельный expand → application backfill → validate →
+contract план, а failed migration восстанавливается через документированный
+`prisma migrate resolve` workflow.
 
 #### `project_connector_bindings`
 

@@ -148,6 +148,12 @@
 
 В P2 XMLStock, Arsenkin Tools и Keys.so запускаются с BYOK. Platform-paid XMLStock допускается после developer/commercial согласования. Platform-paid Arsenkin и Keys.so не являются exit requirement P2.
 
+Промежуточно реализован encrypted workspace vault и каталог первой тройки:
+create/list/rotate/revoke, masked DTO, optimistic concurrency и
+`PENDING_VERIFICATION`. Это закрывает хранение BYOK, но не считается
+выполненным P2 до server-side provider test, project binding, tracking
+context и реального rank job.
+
 #### Exit gate
 
 - несколько пилотных команд используют платформу для реального регулярного tracking;
