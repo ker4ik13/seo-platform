@@ -1,0 +1,24 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { loadAppConfig } from "./app-config.js";
+
+test("loads explicit service configuration", () => {
+  const config = loadAppConfig({
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    PORT: "4100",
+    SEO_DATA_INTERNAL_URL: "http://seo",
+    JOBS_INTERNAL_URL: "http://jobs",
+    REALTIME_INTERNAL_URL: "http://realtime"
+  });
+
+  assert.equal(config.nodeEnv, "test");
+  assert.equal(config.port, 4100);
+  assert.equal(config.services.seoData, "http://seo");
+});
+
+test("rejects an absent database URL", () => {
+  assert.throws(() => loadAppConfig({ NODE_ENV: "test" }), {
+    message: "Missing required environment variable: DATABASE_URL"
+  });
+});

@@ -1,0 +1,213 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum WorkspaceStatus {
+  ACTIVE
+  READ_ONLY
+  SUSPENDED
+  DELETING
+  DELETED
+}
+
+enum MemberStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  REMOVED
+}
+
+enum ProjectStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+  DELETING
+  DELETED
+}
+
+enum OutboxStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+}
+
+model User {
+  id              String     @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  emailNormalized String     @unique(map: "users_email_normalized_key") @map("email_normalized") @db.VarChar(320)
+  emailDisplay    String     @map("email_display") @db.VarChar(320)
+  emailVerifiedAt DateTime?  @map("email_verified_at") @db.Timestamptz(6)
+  passwordHash    String?    @map("password_hash") @db.Text
+  displayName     String     @map("display_name") @db.VarChar(160)
+  locale          String     @default("en") @db.VarChar(16)
+  timezone        String     @default("UTC") @db.VarChar(64)
+  country         String?    @db.Char(2)
+  status          UserStatus @default(PENDING_VERIFICATION)
+  version         Int        @default(1)
+  createdAt       DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt       DateTime?  @map("deleted_at") @db.Timestamptz(6)
+
+  identities  UserIdentity[]
+  sessions    Session[]
+  memberships WorkspaceMember[]
+
+  @@index([status, createdAt])
+  @@map("users")
+}
+
+model UserIdentity {
+  id              String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId          String   @map("user_id") @db.Uuid
+  provider        String   @db.VarChar(32)
+  providerSubject String   @map("provider_subject") @db.VarChar(255)
+  providerEmail   String?  @map("provider_email") @db.VarChar(320)
+  metadata        Json?
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastUsedAt      DateTime @default(now()) @map("last_used_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerSubject])
+  @@index([userId])
+  @@map("user_identities")
+}
+
+model Session {
+  id               String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId           String    @map("user_id") @db.Uuid
+  refreshTokenHash String    @unique(map: "sessions_refresh_token_hash_key") @map("refresh_token_hash") @db.Text
+  familyId         String    @map("family_id") @db.Uuid
+  userAgent        String?   @map("user_agent") @db.Text
+  ipAddress        String?   @map("ip_address") @db.Inet
+  expiresAt        DateTime  @map("expires_at") @db.Timestamptz(6)
+  lastUsedAt       DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(6)
+  revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model Workspace {
+  id              String          @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  name            String          @db.VarChar(160)
+  slug            String          @unique @db.VarChar(100)
+  country         String?         @db.Char(2)
+  locale          String          @default("en") @db.VarChar(16)
+  timezone        String          @default("UTC") @db.VarChar(64)
+  billingCurrency String          @default("RUB") @map("billing_currency") @db.Char(3)
+  status          WorkspaceStatus @default(ACTIVE)
+  ownerUserId     String          @map("owner_user_id") @db.Uuid
+  version         Int             @default(1)
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt       DateTime?       @map("deleted_at") @db.Timestamptz(6)
+
+  members  WorkspaceMember[]
+  projects Project[]
+
+  @@index([ownerUserId])
+  @@index([status, createdAt])
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  id          String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String       @map("workspace_id") @db.Uuid
+  userId      String       @map("user_id") @db.Uuid
+  roleCode    String       @map("role_code") @db.VarChar(64)
+  status      MemberStatus @default(INVITED)
+  version     Int          @default(1)
+  joinedAt    DateTime?    @map("joined_at") @db.Timestamptz(6)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([userId, status])
+  @@map("workspace_members")
+}
+
+model Project {
+  id             String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId    String        @map("workspace_id") @db.Uuid
+  name           String        @db.VarChar(160)
+  slug           String        @db.VarChar(100)
+  domain         String        @db.VarChar(255)
+  locale         String        @default("en") @db.VarChar(16)
+  timezone       String        @default("UTC") @db.VarChar(64)
+  status         ProjectStatus @default(DRAFT)
+  createdBy      String        @map("created_by") @db.Uuid
+  version        Int           @default(1)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  archivedAt     DateTime?     @map("archived_at") @db.Timestamptz(6)
+  deletedAt      DateTime?     @map("deleted_at") @db.Timestamptz(6)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, slug])
+  @@index([workspaceId, status, createdAt])
+  @@map("projects")
+}
+
+model AuditEvent {
+  id              String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId     String?  @map("workspace_id") @db.Uuid
+  projectId       String?  @map("project_id") @db.Uuid
+  actorType       String   @map("actor_type") @db.VarChar(32)
+  actorId         String?  @map("actor_id") @db.Uuid
+  action          String   @db.VarChar(160)
+  resourceType    String   @map("resource_type") @db.VarChar(100)
+  resourceId      String?  @map("resource_id") @db.Uuid
+  outcome         String   @db.VarChar(32)
+  reason          String?  @db.Text
+  redactedChanges Json?    @map("redacted_changes")
+  requestId       String?  @map("request_id") @db.VarChar(100)
+  traceId         String?  @map("trace_id") @db.VarChar(100)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, createdAt])
+  @@index([resourceType, resourceId, createdAt])
+  @@map("audit_events")
+}
+
+model OutboxEvent {
+  id            String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  eventType     String       @map("event_type") @db.VarChar(160)
+  aggregateType String       @map("aggregate_type") @db.VarChar(100)
+  aggregateId   String       @map("aggregate_id") @db.Uuid
+  aggregateVer  Int          @map("aggregate_version")
+  workspaceId   String?      @map("workspace_id") @db.Uuid
+  projectId     String?      @map("project_id") @db.Uuid
+  payload       Json
+  metadata      Json
+  status        OutboxStatus @default(PENDING)
+  attempts      Int          @default(0)
+  availableAt   DateTime     @default(now()) @map("available_at") @db.Timestamptz(6)
+  publishedAt   DateTime?    @map("published_at") @db.Timestamptz(6)
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([status, availableAt])
+  @@index([aggregateType, aggregateId, aggregateVer])
+  @@map("outbox_events")
+}
