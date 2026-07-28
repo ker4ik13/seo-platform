@@ -1,0 +1,726 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SemaFlow — SEO-платформа для команд</title>
+  <meta name="description" content="Дизайн-прототип SEO-платформы: проекты, семантическое ядро, позиции, частотности, API-интеграции и автоматизации.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" data-sidebar>
+      <div class="brand">
+        <div class="brand__mark">
+          <span></span><span></span><span></span>
+        </div>
+        <div><b>Sema</b>Flow<small>SEO workspace</small></div>
+      </div>
+
+      <button class="workspace-switcher" type="button" data-project-menu>
+        <span class="workspace-switcher__avatar">ПС</span>
+        <span><small>Текущий проект</small><b>ПромСоюз</b></span>
+        <i>⌄</i>
+      </button>
+
+      <nav class="sidebar-nav" aria-label="Навигация проекта">
+        <span class="sidebar-nav__label">Проект</span>
+        <button class="is-active" data-view-link="dashboard"><i>⌂</i><span>Обзор</span></button>
+        <button data-view-link="semantics"><i>⌗</i><span>Семантика</span><b class="nav-count">12 842</b></button>
+        <button data-view-link="positions"><i>↗</i><span>Позиции</span></button>
+        <button data-view-link="parsing"><i>◉</i><span>Сбор данных</span><b class="nav-status"></b></button>
+        <button data-view-link="competitors"><i>◎</i><span>Конкуренты</span></button>
+        <button data-view-link="pages"><i>▤</i><span>Страницы сайта</span></button>
+        <button data-view-link="notes"><i>▣</i><span>Заметки и файлы</span></button>
+        <button data-view-link="automations"><i>⚡</i><span>Автоматизации</span></button>
+
+        <span class="sidebar-nav__label sidebar-nav__label--second">Управление</span>
+        <button data-view-link="team"><i>♙</i><span>Команда</span><b class="nav-count">5</b></button>
+        <button data-view-link="integrations"><i>◇</i><span>Интеграции</span><b class="nav-count nav-count--green">7</b></button>
+        <button data-view-link="settings"><i>⚙</i><span>Настройки</span></button>
+      </nav>
+
+      <div class="sidebar-usage">
+        <div class="sidebar-usage__top"><span>Лимит операций</span><b>68%</b></div>
+        <div class="progress"><i style="width:68%"></i></div>
+        <p>342 180 из 500 000</p>
+        <a href="#">Управление тарифом</a>
+      </div>
+
+      <div class="sidebar-user">
+        <div class="avatar">КМ</div>
+        <div><b>Кирилл М.</b><small>Администратор</small></div>
+        <button>•••</button>
+      </div>
+    </aside>
+
+    <div class="project-popover" data-project-popover>
+      <div class="popover-search"><span>⌕</span><input placeholder="Найти проект"></div>
+      <span class="popover-label">Недавние проекты</span>
+      <button class="project-option is-active"><i class="project-icon project-icon--blue">ПС</i><span><b>ПромСоюз</b><small>12 842 запроса</small></span><em>✓</em></button>
+      <button class="project-option"><i class="project-icon project-icon--purple">НЛ</i><span><b>Нейролюб</b><small>8 106 запросов</small></span></button>
+      <button class="project-option"><i class="project-icon project-icon--green">АС</i><span><b>Асфальтстрой</b><small>2 410 запросов</small></span></button>
+      <div class="project-popover__footer"><button data-modal-open="new-project">＋ Новый проект</button><a href="#">Все проекты</a></div>
+    </div>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar__left">
+          <button class="sidebar-toggle" type="button" data-sidebar-toggle>☰</button>
+          <div class="global-search"><span>⌕</span><input placeholder="Поиск по проекту, запросам и заметкам"><kbd>⌘ K</kbd></div>
+        </div>
+        <div class="topbar__right">
+          <div class="sync-state"><i></i><span>Данные актуальны<small>обновлено 7 мин назад</small></span></div>
+          <button class="icon-button" type="button" aria-label="Очередь задач" data-drawer-open="queue">◷<b>3</b></button>
+          <button class="icon-button" type="button" aria-label="Уведомления">♢<b>7</b></button>
+          <button class="primary-button primary-button--compact" type="button" data-modal-open="quick-run"><span>＋</span> Запустить сбор</button>
+        </div>
+      </header>
+
+      <section class="view is-active" data-view="dashboard">
+        <div class="page-head">
+          <div>
+            <div class="breadcrumbs"><span>Проекты</span><i>›</i><span>ПромСоюз</span></div>
+            <h1>Обзор проекта</h1>
+            <p>promsoyuz.ru · Москва · Яндекс и Google</p>
+          </div>
+          <div class="page-head__actions">
+            <button class="secondary-button" type="button" data-edit-dashboard>⚙ Настроить дашборд</button>
+            <button class="date-button" type="button">28 июл. 2026 <span>⌄</span></button>
+          </div>
+        </div>
+
+        <div class="project-health">
+          <div class="project-health__score"><div class="score-ring"><b>82</b><span>/100</span></div><div><small>Здоровье проекта</small><strong>Хорошая динамика</strong><p>За 30 дней показатель вырос на 6 пунктов</p></div></div>
+          <div class="project-health__items">
+            <div><i class="status-dot status-dot--green"></i><span><b>Позиции</b><small>Рост по 386 запросам</small></span><strong>+8.4%</strong></div>
+            <div><i class="status-dot status-dot--orange"></i><span><b>Семантика</b><small>182 запроса без URL</small></span><strong>Нужно внимание</strong></div>
+            <div><i class="status-dot status-dot--blue"></i><span><b>Данные</b><small>7 из 8 источников работают</small></span><strong>Актуальны</strong></div>
+          </div>
+        </div>
+
+        <div class="metric-grid">
+          <article class="metric-card">
+            <div class="metric-card__head"><span>Видимость в Яндексе</span><i class="metric-icon metric-icon--blue">↗</i></div>
+            <div class="metric-card__value"><strong>61,8%</strong><em class="trend trend--up">↑ 4,7%</em></div>
+            <div class="sparkline sparkline--blue"><svg viewBox="0 0 220 46" preserveAspectRatio="none"><path class="area" d="M0,39 C24,34 27,40 50,31 S82,33 101,22 S137,29 154,18 S188,14 220,5 L220,46 L0,46 Z"/><path d="M0,39 C24,34 27,40 50,31 S82,33 101,22 S137,29 154,18 S188,14 220,5"/></svg></div>
+            <small>против предыдущих 30 дней</small>
+          </article>
+          <article class="metric-card">
+            <div class="metric-card__head"><span>Запросов в ТОП-10</span><i class="metric-icon metric-icon--green">★</i></div>
+            <div class="metric-card__value"><strong>428</strong><em class="trend trend--up">↑ 36</em></div>
+            <div class="mini-bars"><i style="height:35%"></i><i style="height:46%"></i><i style="height:42%"></i><i style="height:62%"></i><i style="height:68%"></i><i style="height:80%"></i><i style="height:92%"></i></div>
+            <small>из 1 240 отслеживаемых</small>
+          </article>
+          <article class="metric-card">
+            <div class="metric-card__head"><span>Средняя позиция</span><i class="metric-icon metric-icon--purple">≈</i></div>
+            <div class="metric-card__value"><strong>18,4</strong><em class="trend trend--up">↑ 2,1</em></div>
+            <div class="metric-card__scale"><span>1</span><div><i style="width:72%"></i><b style="left:72%"></b></div><span>50</span></div>
+            <small>лучший показатель за 90 дней</small>
+          </article>
+          <article class="metric-card">
+            <div class="metric-card__head"><span>Прогноз трафика</span><i class="metric-icon metric-icon--orange">◒</i></div>
+            <div class="metric-card__value"><strong>12,6K</strong><em class="trend trend--up">↑ 14%</em></div>
+            <div class="forecast-row"><span><i></i>Яндекс 8,9K</span><span><i></i>Google 3,7K</span></div>
+            <small>визитов в месяц по текущим позициям</small>
+          </article>
+        </div>
+
+        <div class="dashboard-grid">
+          <article class="panel visibility-panel">
+            <div class="panel-head">
+              <div><h2>Динамика видимости</h2><p>По 1 240 отслеживаемым запросам</p></div>
+              <div class="segmented"><button class="is-active">Яндекс</button><button>Google</button></div>
+            </div>
+            <div class="chart-legend"><span><i class="legend-blue"></i>ПромСоюз</span><span><i class="legend-gray"></i>Среднее конкурентов</span><b>30 дней⌄</b></div>
+            <div class="line-chart">
+              <div class="chart-y"><span>80%</span><span>60%</span><span>40%</span><span>20%</span><span>0%</span></div>
+              <div class="chart-canvas">
+                <i class="grid-line" style="top:0"></i><i class="grid-line" style="top:25%"></i><i class="grid-line" style="top:50%"></i><i class="grid-line" style="top:75%"></i><i class="grid-line" style="top:100%"></i>
+                <svg viewBox="0 0 640 210" preserveAspectRatio="none">
+                  <defs><linearGradient id="visibilityFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#4d73ff" stop-opacity=".28"/><stop offset="1" stop-color="#4d73ff" stop-opacity="0"/></linearGradient></defs>
+                  <path class="competitor-line" d="M0 156 C60 151, 80 145, 125 149 S215 136, 266 141 S335 126, 390 132 S480 122, 525 124 S590 117, 640 119"/>
+                  <path class="visibility-area" d="M0 164 C45 158, 74 162, 108 150 S169 139, 207 145 S267 121, 305 128 S360 104, 405 111 S467 82, 509 92 S576 67, 640 55 L640 210 L0 210 Z"/>
+                  <path class="visibility-line" d="M0 164 C45 158, 74 162, 108 150 S169 139, 207 145 S267 121, 305 128 S360 104, 405 111 S467 82, 509 92 S576 67, 640 55"/>
+                  <circle cx="640" cy="55" r="5"/>
+                </svg>
+                <div class="chart-tooltip"><span>24 июля</span><b>61,8%</b><small>+1,7% за день</small></div>
+              </div>
+              <div class="chart-x"><span>29 июн</span><span>5 июл</span><span>11 июл</span><span>17 июл</span><span>23 июл</span><span>28 июл</span></div>
+            </div>
+          </article>
+
+          <article class="panel distribution-panel">
+            <div class="panel-head"><div><h2>Распределение позиций</h2><p>Последний съём сегодня, 08:30</p></div><button class="more-button">•••</button></div>
+            <div class="distribution-content">
+              <div class="donut"><div><b>1 240</b><span>запросов</span></div></div>
+              <div class="distribution-list">
+                <div><span><i style="background:#4266eb"></i>ТОП-3</span><b>184</b><em>14,8%</em></div>
+                <div><span><i style="background:#6f8cff"></i>4–10</span><b>244</b><em>19,7%</em></div>
+                <div><span><i style="background:#42c4ad"></i>11–30</span><b>376</b><em>30,3%</em></div>
+                <div><span><i style="background:#ffb75d"></i>31–50</span><b>218</b><em>17,6%</em></div>
+                <div><span><i style="background:#dce3eb"></i>Вне ТОП-50</span><b>218</b><em>17,6%</em></div>
+              </div>
+            </div>
+            <button class="panel-link" data-view-link="positions">Открыть отчёт по позициям <span>→</span></button>
+          </article>
+
+          <article class="panel movers-panel">
+            <div class="panel-head"><div><h2>Изменения по запросам</h2><p>Самые заметные движения за последний съём</p></div><button class="more-button">•••</button></div>
+            <div class="mini-table">
+              <div class="mini-table__head"><span>Запрос</span><span>Част.</span><span>Было</span><span>Стало</span><span>Δ</span></div>
+              <div><span><b>купить листовой металл</b><small>/catalog/listovoy-prokat/</small></span><span>2 918</span><span>14</span><span><b>6</b></span><em class="rank-up">↑ 8</em></div>
+              <div><span><b>арматура цена за тонну</b><small>/catalog/armatura/</small></span><span>1 744</span><span>21</span><span><b>11</b></span><em class="rank-up">↑ 10</em></div>
+              <div><span><b>труба нержавеющая купить</b><small>/catalog/truby/nerzhaveyushchie/</small></span><span>983</span><span>8</span><span><b>13</b></span><em class="rank-down">↓ 5</em></div>
+              <div><span><b>швеллер металлический</b><small>/catalog/fasonnyy-prokat/</small></span><span>621</span><span>33</span><span><b>19</b></span><em class="rank-up">↑ 14</em></div>
+            </div>
+            <button class="panel-link" data-view-link="semantics">Все изменения <span>→</span></button>
+          </article>
+
+          <article class="panel tasks-panel">
+            <div class="panel-head"><div><h2>Активные задачи</h2><p>Сборы данных и автоматизации</p></div><button class="more-button" data-drawer-open="queue">•••</button></div>
+            <div class="task-list">
+              <div class="task-item">
+                <i class="task-icon task-icon--blue">↗</i>
+                <div><b>Съём позиций · Яндекс</b><small>734 из 1 240 запросов</small><div class="progress"><i style="width:59%"></i></div></div>
+                <strong>59%</strong>
+              </div>
+              <div class="task-item">
+                <i class="task-icon task-icon--purple">W</i>
+                <div><b>Wordstat · точная частотность</b><small>В очереди · 2 860 запросов</small></div>
+                <span class="badge badge--waiting">Ожидает</span>
+              </div>
+              <div class="task-item">
+                <i class="task-icon task-icon--green">✓</i>
+                <div><b>Кластеризация по ТОП-10</b><small>Завершено 12 минут назад</small></div>
+                <span class="badge badge--done">Готово</span>
+              </div>
+            </div>
+            <button class="panel-link" data-drawer-open="queue">Открыть очередь задач <span>→</span></button>
+          </article>
+
+          <article class="panel attention-panel">
+            <div class="panel-head"><div><h2>Требует внимания</h2><p>Автоматически найденные проблемы</p></div><span class="badge badge--alert">6</span></div>
+            <div class="attention-list">
+              <button><i class="attention-icon attention-icon--orange">!</i><span><b>182 запроса не привязаны к URL</b><small>Потенциал — 8 400 показов в месяц</small></span><em>→</em></button>
+              <button><i class="attention-icon attention-icon--red">↯</i><span><b>Каннибализация на 14 страницах</b><small>Несколько URL ранжируются по одному кластеру</small></span><em>→</em></button>
+              <button><i class="attention-icon attention-icon--blue">◷</i><span><b>Частотность устарела у 2 140 фраз</b><small>Последнее обновление более 90 дней назад</small></span><em>→</em></button>
+            </div>
+          </article>
+
+          <article class="panel schedule-panel">
+            <div class="panel-head"><div><h2>Ближайшие запуски</h2><p>Расписание автоматизаций</p></div><button class="more-button" data-view-link="automations">•••</button></div>
+            <div class="schedule-list">
+              <div><span class="schedule-date"><b>29</b><small>июл</small></span><p><b>Ежедневный съём позиций</b><small>Яндекс · Москва · 1 240 ключей</small></p><em>08:30</em></div>
+              <div><span class="schedule-date schedule-date--purple"><b>01</b><small>авг</small></span><p><b>Обновление частотности</b><small>Wordstat · точная и базовая</small></p><em>02:00</em></div>
+              <div><span class="schedule-date schedule-date--green"><b>04</b><small>авг</small></span><p><b>Еженедельный отчёт</b><small>Telegram + Email · 5 получателей</small></p><em>10:00</em></div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="view" data-view="semantics">
+        <div class="page-head page-head--compact">
+          <div>
+            <div class="breadcrumbs"><span>ПромСоюз</span><i>›</i><span>Семантика</span></div>
+            <h1>Семантическое ядро</h1>
+            <p>12 842 запроса · обновлено сегодня в 08:43</p>
+          </div>
+          <div class="page-head__actions">
+            <button class="secondary-button">⇧ Импорт</button>
+            <button class="secondary-button">⇩ Экспорт</button>
+            <button class="primary-button" data-modal-open="add-keywords">＋ Добавить запросы</button>
+          </div>
+        </div>
+
+        <div class="semantics-stats">
+          <div><span>Всего запросов</span><b>12 842</b><small>+624 за 30 дней</small></div>
+          <div><span>Кластеризовано</span><b>11 906 <em>92,7%</em></b><small>936 ждут обработки</small></div>
+          <div><span>С привязанным URL</span><b>10 214 <em>79,5%</em></b><small class="text-orange">182 важных без URL</small></div>
+          <div><span>С актуальной частотой</span><b>10 702 <em>83,3%</em></b><small>2 140 старше 90 дней</small></div>
+          <div><span>Отслеживаем позиции</span><b>1 240</b><small>9,7% от ядра</small></div>
+        </div>
+
+        <div class="semantics-workspace">
+          <aside class="cluster-sidebar">
+            <div class="cluster-sidebar__head"><b>Группы</b><button>＋</button></div>
+            <div class="cluster-search"><span>⌕</span><input placeholder="Найти группу"></div>
+            <div class="cluster-tree">
+              <button class="is-active"><span><i>▰</i>Все запросы</span><b>12 842</b></button>
+              <button><span><i>☆</i>Важные</span><b>346</b></button>
+              <button><span><i>◷</i>Без группы</span><b>936</b></button>
+              <div class="tree-divider"></div>
+              <button class="tree-parent is-open"><span><i>⌄</i><em>▰</em>Металлопрокат</span><b>8 416</b></button>
+              <button class="tree-child"><span>Листовой прокат</span><b>2 184</b></button>
+              <button class="tree-child is-selected"><span>Арматура</span><b>1 644</b></button>
+              <button class="tree-child"><span>Трубы</span><b>2 106</b></button>
+              <button class="tree-child"><span>Фасонный прокат</span><b>1 279</b></button>
+              <button class="tree-child"><span>Цветной металл</span><b>1 203</b></button>
+              <button class="tree-parent"><span><i>›</i><em>▰</em>Услуги</span><b>1 483</b></button>
+              <button class="tree-parent"><span><i>›</i><em>▰</em>Информация</span><b>1 071</b></button>
+              <button class="tree-parent"><span><i>›</i><em>▰</em>Бренды</span><b>936</b></button>
+            </div>
+            <button class="new-group">＋ Новая группа</button>
+          </aside>
+
+          <div class="keyword-area">
+            <div class="keyword-toolbar">
+              <div class="toolbar-search"><span>⌕</span><input placeholder="Поиск по запросам"></div>
+              <button class="toolbar-button">☷ Фильтры <b>3</b></button>
+              <button class="toolbar-button">Колонки ⌄</button>
+              <button class="toolbar-button">Сохранённые виды ⌄</button>
+              <div class="toolbar-spacer"></div>
+              <button class="toolbar-icon">↻</button>
+              <button class="toolbar-icon">•••</button>
+            </div>
+
+            <div class="filter-chips">
+              <span>Группа: Арматура <button>×</button></span>
+              <span>Частота: от 100 <button>×</button></span>
+              <span>Регион: Москва <button>×</button></span>
+              <button>Сбросить всё</button>
+            </div>
+
+            <div class="bulk-bar" data-bulk-bar>
+              <span><b>3</b> выбрано</span>
+              <button>▰ Переместить</button>
+              <button>⌗ Кластеризовать</button>
+              <button>W Собрать частоту</button>
+              <button>↗ Снять позиции</button>
+              <button>🏷 Теги</button>
+              <button class="bulk-more">•••</button>
+              <button class="bulk-close" data-clear-selection>×</button>
+            </div>
+
+            <div class="keyword-table-wrap">
+              <table class="keyword-table">
+                <thead>
+                  <tr>
+                    <th class="check-col"><label class="checkbox"><input type="checkbox" data-select-all><span></span></label></th>
+                    <th class="star-col">☆</th>
+                    <th class="keyword-col">Ключевой запрос <i>↕</i></th>
+                    <th>Кластер</th>
+                    <th>Целевая страница</th>
+                    <th>Интент</th>
+                    <th class="number-col">Базовая<br>частота <i>↕</i></th>
+                    <th class="number-col">Точная<br>частота</th>
+                    <th class="position-col"><span class="engine engine--y">Я</span> Позиция</th>
+                    <th class="position-col"><span class="engine engine--g">G</span> Позиция</th>
+                    <th>Данные</th>
+                    <th class="action-col"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr class="is-selected">
+                    <td><label class="checkbox"><input type="checkbox" checked data-row-check><span></span></label></td><td><button class="star is-active">★</button></td>
+                    <td><div class="keyword-cell"><b>арматура купить</b><small><span class="tag tag--blue">ВЧ</span><span class="tag tag--green">Коммерческий</span></small></div></td>
+                    <td><button class="cluster-pill">Арматура / Купить</button></td>
+                    <td><a class="url-cell" href="#">/catalog/armatura/<span>↗</span></a></td><td><span class="intent intent--commercial">Купить</span></td>
+                    <td class="number"><b>18 302</b><small>28.07</small></td><td class="number"><b>2 914</b><small>28.07</small></td>
+                    <td><div class="position"><b>4</b><em class="rank-up">↑ 2</em><small>Сегодня</small></div></td><td><div class="position"><b>7</b><em class="rank-up">↑ 1</em><small>Сегодня</small></div></td>
+                    <td><span class="freshness freshness--fresh">Актуально</span></td><td><button class="row-more">•••</button></td>
+                  </tr>
+                  <tr class="is-selected">
+                    <td><label class="checkbox"><input type="checkbox" checked data-row-check><span></span></label></td><td><button class="star">☆</button></td>
+                    <td><div class="keyword-cell"><b>арматура цена за тонну</b><small><span class="tag tag--blue">ВЧ</span><span class="tag tag--green">Коммерческий</span></small></div></td>
+                    <td><button class="cluster-pill">Арматура / Цена</button></td>
+                    <td><a class="url-cell" href="#">/catalog/armatura/<span>↗</span></a></td><td><span class="intent intent--commercial">Купить</span></td>
+                    <td class="number"><b>12 417</b><small>28.07</small></td><td class="number"><b>1 744</b><small>28.07</small></td>
+                    <td><div class="position"><b>11</b><em class="rank-up">↑ 10</em><small>Сегодня</small></div></td><td><div class="position"><b>16</b><em class="rank-down">↓ 2</em><small>Сегодня</small></div></td>
+                    <td><span class="freshness freshness--fresh">Актуально</span></td><td><button class="row-more">•••</button></td>
+                  </tr>
+                  <tr class="is-selected">
+                    <td><label class="checkbox"><input type="checkbox" checked data-row-check><span></span></label></td><td><button class="star">☆</button></td>
+                    <td><div class="keyword-cell"><b>арматура 12 мм цена</b><small><span class="tag tag--purple">СЧ</span><span class="tag tag--green">Коммерческий</span></small></div></td>
+                    <td><button class="cluster-pill">Арматура / 12 мм</button></td>
+                    <td><a class="url-cell" href="#">/catalog/armatura/12-mm/<span>↗</span></a></td><td><span class="intent intent--commercial">Купить</span></td>
+                    <td class="number"><b>5 184</b><small>28.07</small></td><td class="number"><b>846</b><small>28.07</small></td>
+                    <td><div class="position"><b>8</b><em class="rank-up">↑ 3</em><small>Сегодня</small></div></td><td><div class="position"><b>12</b><em>—</em><small>Сегодня</small></div></td>
+                    <td><span class="freshness freshness--fresh">Актуально</span></td><td><button class="row-more">•••</button></td>
+                  </tr>
+                  <tr>
+                    <td><label class="checkbox"><input type="checkbox" data-row-check><span></span></label></td><td><button class="star">☆</button></td>
+                    <td><div class="keyword-cell"><b>купить арматуру в москве</b><small><span class="tag tag--purple">СЧ</span><span class="tag tag--green">Коммерческий</span></small></div></td>
+                    <td><button class="cluster-pill">Арматура / Купить</button></td>
+                    <td><a class="url-cell" href="#">/catalog/armatura/<span>↗</span></a></td><td><span class="intent intent--commercial">Купить</span></td>
+                    <td class="number"><b>3 947</b><small>28.07</small></td><td class="number"><b>614</b><small>28.07</small></td>
+                    <td><div class="position"><b>3</b><em class="rank-up">↑ 1</em><small>Сегодня</small></div></td><td><div class="position"><b>6</b><em class="rank-up">↑ 2</em><small>Сегодня</small></div></td>
+                    <td><span class="freshness freshness--fresh">Актуально</span></td><td><button class="row-more">•••</button></td>
+                  </tr>
+                  <tr class="has-warning">
+                    <td><label class="checkbox"><input type="checkbox" data-row-check><span></span></label></td><td><button class="star">☆</button></td>
+                    <td><div class="keyword-cell"><b>арматура оптом</b><small><span class="tag tag--purple">СЧ</span><span class="tag tag--green">Коммерческий</span><span class="issue-tag">! Без URL</span></small></div></td>
+                    <td><button class="cluster-pill">Арматура / Оптом</button></td>
+                    <td><button class="empty-url">＋ Назначить URL</button></td><td><span class="intent intent--commercial">Купить</span></td>
+                    <td class="number"><b>2 781</b><small>28.07</small></td><td class="number"><b>384</b><small>28.07</small></td>
+                    <td><div class="position"><b>28</b><em class="rank-down">↓ 4</em><small>Сегодня</small></div></td><td><div class="position"><b>—</b><em>—</em><small>Нет URL</small></div></td>
+                    <td><span class="freshness freshness--fresh">Актуально</span></td><td><button class="row-more">•••</button></td>
+                  </tr>
+                  <tr>
+                    <td><label class="checkbox"><input type="checkbox" data-row-check><span></span></label></td><td><button class="star">☆</button></td>
+                    <td><div class="keyword-cell"><b>арматура а500с</b><small><span class="tag tag--gray">НЧ</span><span class="tag tag--blue">Информационный</span></small></div></td>
+                    <td><button class="cluster-pill">Арматура / А500С</button></td>
+                    <td><a class="url-cell" href="#">/articles/armatura-a500s/<span>↗</span></a></td><td><span class="intent intent--info">Узнать</span></td>
+                    <td class="number"><b>1 624</b><small>28.07</small></td><td class="number"><b>212</b><small>28.07</small></td>
+                    <td><div class="position"><b>18</b><em class="rank-up">↑ 6</em><small>Сегодня</small></div></td><td><div class="position"><b>24</b><em class="rank-up">↑ 3</em><small>Сегодня</small></div></td>
+                    <td><span class="freshness freshness--stale">72 дня</span></td><td><button class="row-more">•••</button></td>
+                  </tr>
+                  <tr>
+                    <td><label class="checkbox"><input type="checkbox" data-row-check><span></span></label></td><td><button class="star">☆</button></td>
+                    <td><div class="keyword-cell"><b>вес арматуры 12 мм</b><small><span class="tag tag--purple">СЧ</span><span class="tag tag--blue">Информационный</span></small></div></td>
+                    <td><button class="cluster-pill">Арматура / Вес</button></td>
+                    <td><a class="url-cell" href="#">/articles/ves-armatury/<span>↗</span></a></td><td><span class="intent intent--info">Узнать</span></td>
+                    <td class="number"><b>6 482</b><small>12.05</small></td><td class="number"><b>1 022</b><small>12.05</small></td>
+                    <td><div class="position"><b>9</b><em class="rank-down">↓ 1</em><small>Сегодня</small></div></td><td><div class="position"><b>14</b><em>—</em><small>Сегодня</small></div></td>
+                    <td><span class="freshness freshness--old">Устарело</span></td><td><button class="row-more">•••</button></td>
+                  </tr>
+                  <tr>
+                    <td><label class="checkbox"><input type="checkbox" data-row-check><span></span></label></td><td><button class="star">☆</button></td>
+                    <td><div class="keyword-cell"><b>арматура для фундамента</b><small><span class="tag tag--gray">НЧ</span><span class="tag tag--blue">Информационный</span></small></div></td>
+                    <td><button class="cluster-pill">Арматура / Применение</button></td>
+                    <td><a class="url-cell" href="#">/articles/armatura-dlya-fundamenta/<span>↗</span></a></td><td><span class="intent intent--info">Узнать</span></td>
+                    <td class="number"><b>891</b><small>28.07</small></td><td class="number"><b>104</b><small>28.07</small></td>
+                    <td><div class="position"><b>16</b><em class="rank-up">↑ 4</em><small>Сегодня</small></div></td><td><div class="position"><b>19</b><em class="rank-up">↑ 2</em><small>Сегодня</small></div></td>
+                    <td><span class="freshness freshness--fresh">Актуально</span></td><td><button class="row-more">•••</button></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="table-footer">
+              <span>Показано 1–100 из 1 644</span>
+              <div><button disabled>‹</button><button class="is-active">1</button><button>2</button><button>3</button><span>…</span><button>17</button><button>›</button></div>
+              <label>Строк на странице <select><option>100</option><option>250</option><option>500</option></select></label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" data-view="positions">
+        <div class="page-head page-head--compact">
+          <div><div class="breadcrumbs"><span>ПромСоюз</span><i>›</i><span>Позиции</span></div><h1>Мониторинг позиций</h1><p>1 240 запросов · Яндекс и Google · Москва</p></div>
+          <div class="page-head__actions"><button class="secondary-button">⇩ Скачать отчёт</button><button class="secondary-button" data-modal-open="schedule">◷ Расписание</button><button class="primary-button" data-modal-open="quick-run">↻ Снять позиции</button></div>
+        </div>
+
+        <div class="position-controls">
+          <div class="engine-tabs"><button class="is-active"><span class="engine engine--y">Я</span>Яндекс <b>Москва</b></button><button><span class="engine engine--g">G</span>Google <b>Москва</b></button><button>＋ Поисковик</button></div>
+          <div><button class="date-button">29 июн — 28 июл <span>⌄</span></button><button class="toolbar-icon">⚙</button></div>
+        </div>
+
+        <div class="position-metrics">
+          <div><span>Видимость</span><b>61,8%</b><em class="trend trend--up">↑ 4,7%</em><small>57,1% ранее</small></div>
+          <div><span>Средняя позиция</span><b>18,4</b><em class="trend trend--up">↑ 2,1</em><small>20,5 ранее</small></div>
+          <div><span>ТОП-3</span><b>184</b><em class="trend trend--up">↑ 22</em><small>14,8% запросов</small></div>
+          <div><span>ТОП-10</span><b>428</b><em class="trend trend--up">↑ 36</em><small>34,5% запросов</small></div>
+          <div><span>Выросли / упали</span><b><i class="green">386</i> / <i class="red">142</i></b><small>712 без изменений</small></div>
+        </div>
+
+        <div class="positions-layout">
+          <article class="panel positions-chart-panel">
+            <div class="panel-head"><div><h2>Динамика позиций</h2><p>Видимость и распределение запросов</p></div><div class="segmented"><button class="is-active">Видимость</button><button>Средняя позиция</button><button>ТОП</button></div></div>
+            <div class="chart-legend chart-legend--large"><span><i class="legend-blue"></i>Видимость</span><span><i class="legend-green"></i>ТОП-10</span><b>День ⌄</b></div>
+            <div class="line-chart line-chart--large">
+              <div class="chart-y"><span>80%</span><span>60%</span><span>40%</span><span>20%</span><span>0%</span></div>
+              <div class="chart-canvas">
+                <i class="grid-line" style="top:0"></i><i class="grid-line" style="top:25%"></i><i class="grid-line" style="top:50%"></i><i class="grid-line" style="top:75%"></i><i class="grid-line" style="top:100%"></i>
+                <svg viewBox="0 0 820 250" preserveAspectRatio="none">
+                  <defs><linearGradient id="posFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="#4d73ff" stop-opacity=".22"/><stop offset="1" stop-color="#4d73ff" stop-opacity="0"/></linearGradient></defs>
+                  <path class="secondary-chart-line" d="M0 192 C65 183,96 188,143 174 S229 175,277 161 S359 149,410 151 S495 136,548 142 S640 122,690 129 S772 110,820 105"/>
+                  <path class="position-area" d="M0 202 C60 194,93 198,139 180 S224 187,272 161 S359 158,404 138 S490 127,541 135 S622 100,678 111 S759 82,820 70 L820 250 L0 250 Z"/>
+                  <path class="position-line" d="M0 202 C60 194,93 198,139 180 S224 187,272 161 S359 158,404 138 S490 127,541 135 S622 100,678 111 S759 82,820 70"/>
+                </svg>
+              </div>
+              <div class="chart-x"><span>29 июн</span><span>5 июл</span><span>11 июл</span><span>17 июл</span><span>23 июл</span><span>28 июл</span></div>
+            </div>
+          </article>
+
+          <article class="panel competitor-share">
+            <div class="panel-head"><div><h2>Доля видимости</h2><p>Сравнение с конкурентами</p></div><button class="more-button">•••</button></div>
+            <div class="share-list">
+              <div><span><i style="background:#4d73ff">ПС</i><b>promsoyuz.ru</b></span><em>61,8%</em><div><i style="width:100%"></i></div></div>
+              <div><span><i style="background:#8d68e8">МП</i><b>metallprofil.ru</b></span><em>54,2%</em><div><i style="width:87%"></i></div></div>
+              <div><span><i style="background:#30b6a1">МС</i><b>mc.ru</b></span><em>48,7%</em><div><i style="width:79%"></i></div></div>
+              <div><span><i style="background:#f0a84e">СМ</i><b>stal-m.ru</b></span><em>39,1%</em><div><i style="width:63%"></i></div></div>
+              <div><span><i style="background:#91a2b5">АМ</i><b>ametist.ru</b></span><em>34,6%</em><div><i style="width:56%"></i></div></div>
+            </div>
+            <button class="panel-link">Управление конкурентами <span>→</span></button>
+          </article>
+        </div>
+
+        <article class="panel position-table-panel">
+          <div class="position-table-toolbar"><div class="toolbar-search"><span>⌕</span><input placeholder="Найти запрос"></div><button class="toolbar-button">☷ Фильтры <b>2</b></button><button class="toolbar-button">Группа: Все ⌄</button><div class="toolbar-spacer"></div><button class="toolbar-button">Колонки ⌄</button></div>
+          <table class="position-report-table">
+            <thead><tr><th>Запрос</th><th>Группа</th><th>Частота</th><th>29 июн</th><th>7 июл</th><th>14 июл</th><th>21 июл</th><th>Сегодня</th><th>Изменение</th><th>URL</th></tr></thead>
+            <tbody>
+              <tr><td><b>арматура купить</b></td><td>Арматура</td><td>18 302</td><td>12</td><td>10</td><td>8</td><td>6</td><td><strong>4</strong></td><td><em class="rank-up">↑ 8</em></td><td><a>/catalog/armatura/ ↗</a></td></tr>
+              <tr><td><b>лист стальной цена</b></td><td>Листовой прокат</td><td>14 892</td><td>7</td><td>7</td><td>5</td><td>5</td><td><strong>3</strong></td><td><em class="rank-up">↑ 4</em></td><td><a>/catalog/list-stalnoy/ ↗</a></td></tr>
+              <tr><td><b>труба профильная купить</b></td><td>Трубы</td><td>9 118</td><td>16</td><td>14</td><td>11</td><td>9</td><td><strong>8</strong></td><td><em class="rank-up">↑ 8</em></td><td><a>/catalog/truba-profilnaya/ ↗</a></td></tr>
+              <tr><td><b>швеллер цена</b></td><td>Фасонный прокат</td><td>5 462</td><td>18</td><td>17</td><td>15</td><td>16</td><td><strong>11</strong></td><td><em class="rank-up">↑ 7</em></td><td><a>/catalog/shveller/ ↗</a></td></tr>
+              <tr><td><b>нержавеющий лист</b></td><td>Нержавейка</td><td>4 074</td><td>8</td><td>9</td><td>8</td><td>10</td><td><strong>13</strong></td><td><em class="rank-down">↓ 5</em></td><td><a>/catalog/nerzhaveyushchiy-list/ ↗</a></td></tr>
+            </tbody>
+          </table>
+        </article>
+      </section>
+
+      <section class="view" data-view="parsing">
+        <div class="page-head page-head--compact">
+          <div><div class="breadcrumbs"><span>ПромСоюз</span><i>›</i><span>Сбор данных</span></div><h1>Сбор и обогащение данных</h1><p>Парсеры, частотности, поисковая выдача и подсказки</p></div>
+          <div class="page-head__actions"><button class="secondary-button" data-drawer-open="queue">◷ Очередь <b>3</b></button><button class="primary-button" data-modal-open="quick-run">＋ Новая задача</button></div>
+        </div>
+
+        <div class="collector-grid">
+          <article class="collector-card collector-card--wordstat">
+            <div class="collector-card__icon">W</div><span class="connector-state connector-state--online">API подключён</span>
+            <h2>Парсер Wordstat</h2><p>Соберите вложенные запросы и частотности с учётом региона и операторов.</p>
+            <ul><li>Левая и правая колонка</li><li>Базовая, «точная» и !фиксация</li><li>Минус-слова и глубина парсинга</li></ul>
+            <button data-modal-open="quick-run">Запустить сбор <span>→</span></button>
+          </article>
+          <article class="collector-card">
+            <div class="collector-card__icon collector-card__icon--blue">⌕</div><span class="connector-state connector-state--online">XMLRiver</span>
+            <h2>Сбор поисковой выдачи</h2><p>ТОП-10/20/50 Яндекса и Google для кластеризации, анализа и позиций.</p>
+            <ul><li>Регионы и тип устройства</li><li>Органика, реклама и колдунщики</li><li>Сохранение снимков выдачи</li></ul>
+            <button data-modal-open="quick-run">Настроить задачу <span>→</span></button>
+          </article>
+          <article class="collector-card">
+            <div class="collector-card__icon collector-card__icon--purple">⌘</div><span class="connector-state connector-state--online">Keys.so</span>
+            <h2>Ключи конкурентов</h2><p>Импортируйте запросы и страницы конкурентов из подключённой базы.</p>
+            <ul><li>Общие и уникальные запросы</li><li>Лучшие страницы конкурентов</li><li>Пересечение доменов</li></ul>
+            <button data-modal-open="quick-run">Найти запросы <span>→</span></button>
+          </article>
+          <article class="collector-card">
+            <div class="collector-card__icon collector-card__icon--green">✦</div><span class="connector-state">Без API</span>
+            <h2>Поисковые подсказки</h2><p>Расширьте ядро подсказками Яндекса, Google и YouTube.</p>
+            <ul><li>Перебор букв и слов</li><li>Вопросительные хвосты</li><li>Автоматическая дедупликация</li></ul>
+            <button data-modal-open="quick-run">Собрать подсказки <span>→</span></button>
+          </article>
+        </div>
+
+        <div class="parsing-layout">
+          <article class="panel task-builder">
+            <div class="panel-head"><div><h2>Быстрый сбор частотности</h2><p>Проверьте стоимость и запустите задачу</p></div><span class="source-chip"><i>W</i>Яндекс Wordstat API</span></div>
+            <form>
+              <label class="full"><span>Источник запросов</span><select><option>Группа «Арматура» — 1 644 запроса</option><option>Все ядро — 12 842 запроса</option><option>Вставить список вручную</option></select></label>
+              <label><span>Регион</span><select><option>Москва и область</option><option>Россия</option><option>Санкт-Петербург</option></select></label>
+              <label><span>Тип частотности</span><select><option>Базовая + «точная»</option><option>Только базовая</option><option>Все типы</option></select></label>
+              <label><span>Приоритет</span><select><option>Обычный</option><option>Высокий</option></select></label>
+              <label><span>После завершения</span><select><option>Сохранить в ядро и уведомить</option><option>Только сохранить</option></select></label>
+            </form>
+            <div class="cost-estimate">
+              <div><span>Запросов</span><b>1 644</b></div><div><span>Операций API</span><b>3 288</b></div><div><span>Расчётное время</span><b>≈ 7 минут</b></div><div><span>Стоимость</span><b>164,40 ₽</b></div>
+              <button class="primary-button" data-start-demo>Запустить задачу</button>
+            </div>
+          </article>
+
+          <article class="panel api-balance">
+            <div class="panel-head"><div><h2>Баланс источников</h2><p>Расходы за июль</p></div><button class="more-button">•••</button></div>
+            <div class="api-balance__total"><span>Всего потрачено</span><b>8 470 ₽</b><em>из лимита 15 000 ₽</em><div class="progress"><i style="width:56%"></i></div></div>
+            <div class="source-cost"><span><i class="source-logo source-logo--river">XR</i><b>XMLRiver<small>Позиции и выдача</small></b></span><em>3 842 ₽</em></div>
+            <div class="source-cost"><span><i class="source-logo source-logo--wordstat">W</i><b>Wordstat<small>Частотности</small></b></span><em>2 174 ₽</em></div>
+            <div class="source-cost"><span><i class="source-logo source-logo--keys">K</i><b>Keys.so<small>Конкуренты</small></b></span><em>1 680 ₽</em></div>
+            <div class="source-cost"><span><i class="source-logo source-logo--ars">A</i><b>Arsenkin<small>SEO-инструменты</small></b></span><em>774 ₽</em></div>
+          </article>
+        </div>
+
+        <article class="panel queue-preview">
+          <div class="panel-head"><div><h2>Последние задачи</h2><p>История запусков и результаты</p></div><button class="panel-link" data-drawer-open="queue">Вся очередь →</button></div>
+          <table><thead><tr><th>Задача</th><th>Проект</th><th>Источник</th><th>Объём</th><th>Статус</th><th>Запущено</th><th>Стоимость</th><th></th></tr></thead><tbody>
+            <tr><td><b>Съём позиций · Яндекс</b><small>Москва, desktop</small></td><td>ПромСоюз</td><td><span class="source-chip"><i>XR</i>XMLRiver</span></td><td>1 240</td><td><span class="task-progress"><i style="width:59%"></i><b>59%</b></span></td><td>Сегодня, 11:42</td><td>248 ₽</td><td>•••</td></tr>
+            <tr><td><b>Точная частотность</b><small>Группа «Арматура»</small></td><td>ПромСоюз</td><td><span class="source-chip"><i>W</i>Wordstat</span></td><td>1 644</td><td><span class="badge badge--waiting">В очереди</span></td><td>Сегодня, 11:39</td><td>164 ₽</td><td>•••</td></tr>
+            <tr><td><b>Ключи конкурентов</b><small>5 доменов</small></td><td>Нейролюб</td><td><span class="source-chip"><i>K</i>Keys.so</span></td><td>8 921</td><td><span class="badge badge--done">Готово</span></td><td>Сегодня, 10:14</td><td>480 ₽</td><td>•••</td></tr>
+          </tbody></table>
+        </article>
+      </section>
+
+      <section class="view" data-view="integrations">
+        <div class="page-head page-head--compact">
+          <div><div class="breadcrumbs"><span>Рабочая область</span><i>›</i><span>Интеграции</span></div><h1>Интеграции и API</h1><p>Подключайте источники данных и управляйте расходами</p></div>
+          <div class="page-head__actions"><button class="secondary-button">Документация API ↗</button><button class="primary-button" data-modal-open="integration">＋ Добавить интеграцию</button></div>
+        </div>
+
+        <div class="integration-summary">
+          <div><i class="summary-icon summary-icon--green">✓</i><span><b>7 подключено</b><small>6 работают стабильно</small></span></div>
+          <div><i class="summary-icon summary-icon--orange">!</i><span><b>1 требует внимания</b><small>XMLStock: заканчивается баланс</small></span></div>
+          <div><i class="summary-icon summary-icon--blue">₽</i><span><b>8 470 ₽ за июль</b><small>56% месячного лимита</small></span></div>
+          <div><i class="summary-icon summary-icon--purple">↻</i><span><b>428 912 операций</b><small>+18% к июню</small></span></div>
+        </div>
+
+        <div class="integration-head"><div><h2>Источники SEO-данных</h2><p>Используются для семантики, позиций, выдачи и анализа конкурентов</p></div><div class="toolbar-search"><span>⌕</span><input placeholder="Найти интеграцию"></div></div>
+        <div class="integration-grid">
+          <article class="integration-card">
+            <div class="integration-card__head"><i class="integration-logo integration-logo--keys">K</i><span class="connector-state connector-state--online">Подключено</span><button>•••</button></div>
+            <h3>Keys.so</h3><p>Ключи конкурентов, органические страницы, пересечения доменов и исторические данные.</p>
+            <div class="integration-meta"><span>Последний запрос<small>12 минут назад</small></span><span>За месяц<small>38 420 операций</small></span></div>
+            <div class="integration-card__footer"><span><i class="health health--good"></i>Работает стабильно</span><button data-modal-open="integration">Настроить</button></div>
+          </article>
+          <article class="integration-card">
+            <div class="integration-card__head"><i class="integration-logo integration-logo--river">XR</i><span class="connector-state connector-state--online">Основной</span><button>•••</button></div>
+            <h3>XMLRiver</h3><p>Съём позиций и поисковой выдачи Яндекса и Google по регионам и устройствам.</p>
+            <div class="integration-meta"><span>Баланс<small>4 820 ₽</small></span><span>За месяц<small>184 210 операций</small></span></div>
+            <div class="integration-card__footer"><span><i class="health health--good"></i>Работает стабильно</span><button data-modal-open="integration">Настроить</button></div>
+          </article>
+          <article class="integration-card integration-card--warning">
+            <div class="integration-card__head"><i class="integration-logo integration-logo--stock">XS</i><span class="connector-state connector-state--warning">Мало средств</span><button>•••</button></div>
+            <h3>XMLStock</h3><p>Резервный источник XML-выдачи и проверок позиций для автоматического переключения.</p>
+            <div class="integration-meta"><span>Баланс<small class="text-orange">184 ₽</small></span><span>За месяц<small>22 914 операций</small></span></div>
+            <div class="integration-card__footer"><span><i class="health health--warn"></i>Требуется пополнение</span><button data-modal-open="integration">Настроить</button></div>
+          </article>
+          <article class="integration-card">
+            <div class="integration-card__head"><i class="integration-logo integration-logo--ars">A</i><span class="connector-state connector-state--online">Подключено</span><button>•••</button></div>
+            <h3>Arsenkin Tools</h3><p>Проверка индексации, парсинг подсветок, сравнение ТОПа и дополнительные SEO-метрики.</p>
+            <div class="integration-meta"><span>Последний запрос<small>2 часа назад</small></span><span>За месяц<small>14 062 операции</small></span></div>
+            <div class="integration-card__footer"><span><i class="health health--good"></i>Работает стабильно</span><button data-modal-open="integration">Настроить</button></div>
+          </article>
+          <article class="integration-card">
+            <div class="integration-card__head"><i class="integration-logo integration-logo--wordstat">W</i><span class="connector-state connector-state--online">Подключено</span><button>•••</button></div>
+            <h3>Яндекс Wordstat API</h3><p>Парсинг запросов, базовой и точной частотности с региональными настройками.</p>
+            <div class="integration-meta"><span>Токен<small>Действителен</small></span><span>За месяц<small>142 804 операции</small></span></div>
+            <div class="integration-card__footer"><span><i class="health health--good"></i>Лимиты в норме</span><button data-modal-open="integration">Настроить</button></div>
+          </article>
+          <article class="integration-card">
+            <div class="integration-card__head"><i class="integration-logo integration-logo--webmaster">Я</i><span class="connector-state connector-state--online">3 сайта</span><button>•••</button></div>
+            <h3>Яндекс Вебмастер</h3><p>Запросы сайта, клики, показы, индексация страниц и диагностика проблем.</p>
+            <div class="integration-meta"><span>Синхронизация<small>Сегодня, 08:10</small></span><span>Сайтов<small>3 подключено</small></span></div>
+            <div class="integration-card__footer"><span><i class="health health--good"></i>Данные актуальны</span><button data-modal-open="integration">Настроить</button></div>
+          </article>
+        </div>
+
+        <div class="integration-head integration-head--secondary"><div><h2>Доступные подключения</h2><p>Расширьте возможности рабочей области</p></div></div>
+        <div class="available-grid">
+          <article><i class="integration-logo integration-logo--gsc">G</i><span><b>Google Search Console</b><small>Запросы, страницы и клики</small></span><button>Подключить</button></article>
+          <article><i class="integration-logo integration-logo--metric">M</i><span><b>Яндекс Метрика</b><small>Трафик и конверсии</small></span><button>Подключить</button></article>
+          <article><i class="integration-logo integration-logo--telegram">T</i><span><b>Telegram</b><small>Отчёты и уведомления</small></span><button>Подключить</button></article>
+          <article><i class="integration-logo integration-logo--webhook">↗</i><span><b>Webhooks</b><small>События и автоматизация</small></span><button>Настроить</button></article>
+        </div>
+      </section>
+
+      <section class="view" data-view="automations">
+        <div class="page-head page-head--compact">
+          <div><div class="breadcrumbs"><span>ПромСоюз</span><i>›</i><span>Автоматизации</span></div><h1>Автоматизации</h1><p>Расписания, триггеры и уведомления проекта</p></div>
+          <button class="primary-button" data-modal-open="schedule">＋ Новое правило</button>
+        </div>
+        <div class="automation-summary"><div><b>6</b><span>активных правил</span></div><div><b>184</b><span>запуска за месяц</span></div><div><b>98,4%</b><span>успешных задач</span></div><div><b>3 842 ₽</b><span>расходы автоматизаций</span></div></div>
+        <div class="automation-list">
+          <article><div class="automation-icon automation-icon--blue">↗</div><div class="automation-copy"><span class="badge badge--done">Активно</span><h3>Ежедневный съём позиций</h3><p>Каждый день в 08:30 · Яндекс и Google · Москва · 1 240 запросов</p><small>Следующий запуск: завтра в 08:30 · Средняя стоимость 248 ₽</small></div><div class="automation-result"><b>Последний запуск</b><span>Сегодня, 08:43</span><em class="text-green">✓ Успешно</em></div><label class="switch"><input checked type="checkbox"><span></span></label><button class="row-more">•••</button></article>
+          <article><div class="automation-icon automation-icon--purple">W</div><div class="automation-copy"><span class="badge badge--done">Активно</span><h3>Еженедельное обновление частотности</h3><p>Каждый понедельник в 02:00 · Запросы старше 60 дней · Wordstat API</p><small>Следующий запуск: 3 августа · Лимит 5 000 операций</small></div><div class="automation-result"><b>Последний запуск</b><span>27 июля, 02:14</span><em class="text-green">✓ Успешно</em></div><label class="switch"><input checked type="checkbox"><span></span></label><button class="row-more">•••</button></article>
+          <article><div class="automation-icon automation-icon--orange">!</div><div class="automation-copy"><span class="badge badge--done">Активно</span><h3>Уведомление о падении позиций</h3><p>Если запрос с частотой от 500 падает более чем на 5 позиций</p><small>Telegram: SEO-команда · Email: 3 получателя</small></div><div class="automation-result"><b>Срабатываний</b><span>12 за 30 дней</span><em>Последнее: вчера</em></div><label class="switch"><input checked type="checkbox"><span></span></label><button class="row-more">•••</button></article>
+          <article><div class="automation-icon automation-icon--green">▤</div><div class="automation-copy"><span class="badge badge--waiting">Пауза</span><h3>Еженедельный клиентский отчёт</h3><p>Каждую пятницу в 10:00 · PDF + ссылка на дашборд · White label</p><small>Получатели: director@promsoyuz.ru и ещё 2</small></div><div class="automation-result"><b>Последний отчёт</b><span>24 июля, 10:02</span><em class="text-green">✓ Доставлен</em></div><label class="switch"><input type="checkbox"><span></span></label><button class="row-more">•••</button></article>
+        </div>
+      </section>
+
+      <section class="view" data-view="notes">
+        <div class="page-head page-head--compact">
+          <div><div class="breadcrumbs"><span>ПромСоюз</span><i>›</i><span>Заметки и файлы</span></div><h1>База знаний проекта</h1><p>Тексты, решения, брифы, файлы и история проекта</p></div>
+          <div class="page-head__actions"><button class="secondary-button">⇧ Загрузить файл</button><button class="primary-button">＋ Новая страница</button></div>
+        </div>
+        <div class="knowledge-layout">
+          <aside class="knowledge-tree"><div class="cluster-search"><span>⌕</span><input placeholder="Поиск"></div><button class="is-active">▤ Главная проекта</button><button>▰ Стратегия SEO</button><button>▰ Бриф и информация</button><button>▰ Редакционная политика</button><button>▰ Технические задачи</button><button>▰ Конкуренты</button><button>▰ Отчёты</button><div class="tree-divider"></div><button>🗑 Корзина</button></aside>
+          <article class="knowledge-editor"><div class="editor-cover"><span>ПС</span><button>Изменить обложку</button></div><div class="editor-body"><div class="editor-meta"><span>Обновлено Кириллом 2 часа назад</span><button>Поделиться</button><button>•••</button></div><h1 contenteditable="true">Главная проекта «ПромСоюз»</h1><p class="lead" contenteditable="true">Единое рабочее пространство по SEO-продвижению promsoyuz.ru: цели, вводные данные, решения и полезные ссылки.</p><h2>Цели проекта</h2><ul><li>Рост небрендового органического трафика по коммерческим кластерам металлопроката.</li><li>Развитие посадочных страниц под типы, размеры, марки стали и регионы.</li><li>Устранение каннибализации и улучшение индексации каталога.</li></ul><div class="info-block"><i>i</i><p><b>Основной регион продвижения: Москва и Московская область</b><span>Дополнительный мониторинг: Санкт-Петербург и вся Россия.</span></p></div><h2>Приоритетные направления</h2><div class="content-table"><div><b>Направление</b><b>Ответственный</b><b>Статус</b></div><div><span>Листовой прокат</span><span>Кирилл</span><em class="badge badge--done">В работе</em></div><div><span>Арматура</span><span>Алексей</span><em class="badge badge--done">В работе</em></div><div><span>Трубы</span><span>Ирина</span><em class="badge badge--waiting">План</em></div></div></div></article>
+          <aside class="knowledge-outline"><b>На странице</b><a href="#">Цели проекта</a><a href="#">Приоритетные направления</a><a href="#">Полезные ссылки</a><div class="tree-divider"></div><b>Связано</b><a href="#">Семантика · 12 842</a><a href="#">Задачи · 18</a><a href="#">Файлы · 24</a></aside>
+        </div>
+      </section>
+
+      <section class="view placeholder-view" data-view="competitors">
+        <div class="page-head"><div><div class="breadcrumbs"><span>ПромСоюз</span><i>›</i><span>Конкуренты</span></div><h1>Конкуренты</h1><p>Сравнение видимости, запросов и страниц</p></div></div>
+        <div class="placeholder-content"><i>◎</i><h2>Модуль конкурентов заложен в структуру</h2><p>Пересечение семантики, доля видимости, общие URL, новые запросы и мониторинг изменений конкурентов.</p><button class="primary-button">＋ Добавить конкурента</button></div>
+      </section>
+      <section class="view placeholder-view" data-view="pages">
+        <div class="page-head"><div><div class="breadcrumbs"><span>ПромСоюз</span><i>›</i><span>Страницы</span></div><h1>Карта страниц</h1><p>Связь URL, кластеров, позиций и задач</p></div></div>
+        <div class="placeholder-content"><i>▤</i><h2>SEO-карта сайта</h2><p>Все посадочные, назначенные кластеры, каннибализация, контентный статус и потенциал трафика.</p><button class="primary-button">Сканировать сайт</button></div>
+      </section>
+      <section class="view placeholder-view" data-view="team">
+        <div class="page-head"><div><div class="breadcrumbs"><span>Рабочая область</span><i>›</i><span>Команда</span></div><h1>Команда и доступы</h1><p>Роли, проекты и журнал действий</p></div></div>
+        <div class="placeholder-content"><i>♙</i><h2>5 участников рабочей области</h2><p>Владелец, SEO-специалист, редактор, аналитик и клиент с разными уровнями доступа.</p><button class="primary-button">＋ Пригласить участника</button></div>
+      </section>
+      <section class="view placeholder-view" data-view="settings">
+        <div class="page-head"><div><div class="breadcrumbs"><span>ПромСоюз</span><i>›</i><span>Настройки</span></div><h1>Настройки проекта</h1><p>Домены, регионы, поисковики, валюты и уведомления</p></div></div>
+        <div class="placeholder-content"><i>⚙</i><h2>Конфигурация проекта</h2><p>Основной домен, зеркала, регионы, поисковые системы, устройства и расписания по умолчанию.</p><button class="primary-button">Открыть настройки</button></div>
+      </section>
+    </main>
+  </div>
+
+  <div class="drawer" data-drawer="queue" aria-hidden="true">
+    <div class="drawer__backdrop" data-drawer-close></div>
+    <aside class="drawer__panel">
+      <div class="drawer__head"><div><h2>Очередь задач</h2><p>3 активных · 2 в ожидании</p></div><button data-drawer-close>×</button></div>
+      <div class="drawer-task"><div class="drawer-task__top"><span><i class="task-icon task-icon--blue">↗</i><b>Съём позиций · Яндекс</b></span><em>59%</em></div><p>ПромСоюз · Москва · desktop</p><div class="progress"><i style="width:59%"></i></div><small>734 из 1 240 · осталось ≈ 4 мин</small><button>Остановить</button></div>
+      <div class="drawer-task"><div class="drawer-task__top"><span><i class="task-icon task-icon--purple">W</i><b>Точная частотность</b></span><span class="badge badge--waiting">Ожидает</span></div><p>ПромСоюз · группа «Арматура»</p><small>1 644 запроса · Wordstat API</small><button>Отменить</button></div>
+      <div class="drawer-task"><div class="drawer-task__top"><span><i class="task-icon task-icon--green">K</i><b>Ключи конкурентов</b></span><span class="badge badge--waiting">Ожидает</span></div><p>Нейролюб · 5 доменов</p><small>Keys.so · расчётно 480 ₽</small><button>Отменить</button></div>
+      <button class="drawer__history">История всех задач →</button>
+    </aside>
+  </div>
+
+  <div class="modal" data-modal="quick-run" aria-hidden="true">
+    <div class="modal__backdrop" data-modal-close></div>
+    <div class="modal__dialog modal__dialog--wide">
+      <div class="modal__head"><div><span>Новая задача</span><h2>Что нужно собрать?</h2></div><button data-modal-close>×</button></div>
+      <div class="quick-actions">
+        <button class="is-active"><i>↗</i><span><b>Позиции</b><small>Яндекс и Google</small></span></button>
+        <button><i>W</i><span><b>Частотность</b><small>Wordstat</small></span></button>
+        <button><i>⌕</i><span><b>Поисковая выдача</b><small>ТОП-10/20/50</small></span></button>
+        <button><i>K</i><span><b>Ключи конкурентов</b><small>Keys.so</small></span></button>
+      </div>
+      <form class="modal-form">
+        <label><span>Проект</span><select><option>ПромСоюз</option><option>Нейролюб</option></select></label>
+        <label><span>Запросы</span><select><option>Отслеживаемые — 1 240</option><option>Все ядро — 12 842</option><option>Выбранная группа</option></select></label>
+        <label><span>Поисковая система</span><select><option>Яндекс</option><option>Google</option><option>Яндекс + Google</option></select></label>
+        <label><span>Регион и устройство</span><select><option>Москва · desktop</option><option>Москва · mobile</option><option>Россия · desktop</option></select></label>
+      </form>
+      <div class="modal-estimate"><div><span>Источник</span><b>XMLRiver</b></div><div><span>Запросов</span><b>1 240</b></div><div><span>Время</span><b>≈ 8 минут</b></div><div><span>Стоимость</span><b>248 ₽</b></div></div>
+      <div class="modal__actions"><button class="secondary-button" data-modal-close>Отмена</button><button class="primary-button" data-start-demo>Запустить сбор</button></div>
+    </div>
+  </div>
+  <div class="modal" data-modal="integration" aria-hidden="true">
+    <div class="modal__backdrop" data-modal-close></div>
+    <div class="modal__dialog">
+      <div class="modal__head"><div><span>Подключение</span><h2>Настроить API</h2></div><button data-modal-close>×</button></div>
+      <p class="modal-copy">Ключ хранится в зашифрованном виде и доступен только серверным задачам рабочей области.</p>
+      <form class="modal-form modal-form--single">
+        <label><span>Сервис</span><select><option>XMLRiver</option><option>Keys.so</option><option>Arsenkin Tools</option><option>XMLStock</option></select></label>
+        <label><span>API-ключ</span><input type="password" value="api_key_hidden_123456"></label>
+        <label><span>Месячный лимит расходов</span><input value="5 000 ₽"></label>
+        <label class="check-label"><input type="checkbox" checked> Автоматически использовать как резервный источник</label>
+      </form>
+      <div class="connection-test"><i>✓</i><span><b>Соединение установлено</b><small>Баланс 4 820 ₽ · ответ API 184 мс</small></span></div>
+      <div class="modal__actions"><button class="secondary-button" data-modal-close>Отмена</button><button class="primary-button" data-save-demo>Сохранить</button></div>
+    </div>
+  </div>
+
+  <div class="modal" data-modal="schedule" aria-hidden="true">
+    <div class="modal__backdrop" data-modal-close></div>
+    <div class="modal__dialog">
+      <div class="modal__head"><div><span>Автоматизация</span><h2>Настроить расписание</h2></div><button data-modal-close>×</button></div>
+      <form class="modal-form modal-form--single">
+        <label><span>Задача</span><select><option>Съём позиций</option><option>Обновление частотности</option><option>Кластеризация</option></select></label>
+        <label><span>Периодичность</span><select><option>Каждый день</option><option>По будням</option><option>Раз в неделю</option><option>Раз в месяц</option></select></label>
+        <div class="form-row"><label><span>Время</span><input type="time" value="08:30"></label><label><span>Часовой пояс</span><select><option>Москва (UTC+3)</option></select></label></div>
+        <label><span>Если данных много</span><select><option>Выполнить в пределах лимита и уведомить</option><option>Не запускать без подтверждения</option></select></label>
+      </form>
+      <div class="modal__actions"><button class="secondary-button" data-modal-close>Отмена</button><button class="primary-button" data-save-demo>Создать правило</button></div>
+    </div>
+  </div>
+
+  <div class="modal" data-modal="new-project" aria-hidden="true">
+    <div class="modal__backdrop" data-modal-close></div>
+    <div class="modal__dialog">
+      <div class="modal__head"><div><span>Рабочая область</span><h2>Новый SEO-проект</h2></div><button data-modal-close>×</button></div>
+      <form class="modal-form modal-form--single"><label><span>Название проекта</span><input placeholder="Например, Нейролюб"></label><label><span>Домен</span><input placeholder="example.ru"></label><label><span>Регион</span><select><option>Москва и Московская область</option><option>Россия</option></select></label><label><span>Поисковые системы</span><select><option>Яндекс + Google</option><option>Яндекс</option><option>Google</option></select></label></form>
+      <div class="modal__actions"><button class="secondary-button" data-modal-close>Отмена</button><button class="primary-button" data-save-demo>Создать проект</button></div>
+    </div>
+  </div>
+  
+  <div class="modal" data-modal="add-keywords" aria-hidden="true">
+    <div class="modal__backdrop" data-modal-close></div>
+    <div class="modal__dialog">
+      <div class="modal__head"><div><span>Семантика</span><h2>Добавить запросы</h2></div><button data-modal-close>×</button></div>
+      <div class="import-tabs"><button class="is-active">Вставить список</button><button>CSV / XLSX</button><button>Из источника</button></div>
+      <textarea class="keyword-input" placeholder="По одному запросу на строку&#10;арматура купить&#10;арматура цена за тонну"></textarea>
+      <div class="modal__actions"><button class="secondary-button" data-modal-close>Отмена</button><button class="primary-button" data-save-demo>Добавить в ядро</button></div>
+    </div>
+  </div>
+
+  <div class="toast" data-toast><i>✓</i><span>Задача добавлена в очередь</span></div>
+  <script src="script.js"></script>
+</body>
+</html>

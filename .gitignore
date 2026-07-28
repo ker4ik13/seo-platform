@@ -1,0 +1,27 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+node_modules/
+.pnpm-store/
+.next/
+dist/
+coverage/
+*.tsbuildinfo
+**/src/generated/
+**/prisma/generated/
+uploads/
+tmp/
+*.log
+
+# Independent product repositories. They will become submodules after
+# remote repository URLs are assigned.
+/platform-contracts/
+/platform-api/
+/platform-seo-data/
+/platform-jobs-integrations/
+/platform-realtime/
+/platform-app/
+/platform-admin/
+/platform-marketing/
+/platform-infrastructure/

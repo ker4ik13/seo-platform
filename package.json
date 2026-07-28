@@ -1,0 +1,18 @@
+{
+  "name": "seo-platform-development-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.17.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build": "pnpm --filter @seo-platform/contracts build && pnpm --filter '!@seo-platform/contracts' --recursive --if-present run build",
+    "typecheck": "pnpm --filter @seo-platform/contracts build && pnpm --recursive --if-present run typecheck",
+    "lint": "pnpm --recursive --if-present run lint",
+    "test": "pnpm --recursive --if-present run test",
+    "infra:validate": "docker compose -f platform-infrastructure/compose.dokploy.yml config --quiet",
+    "prisma:generate": "pnpm --filter './platform-api' --filter './platform-seo-data' --filter './platform-jobs-integrations' --filter './platform-realtime' run prisma:generate",
+    "prisma:validate": "pnpm --filter './platform-api' --filter './platform-seo-data' --filter './platform-jobs-integrations' --filter './platform-realtime' run prisma:validate"
+  }
+}

@@ -1,0 +1,10 @@
+.git
+.DS_Store
+**/.next
+**/dist
+**/node_modules
+**/.env
+**/.env.*
+!**/.env.example
+semaflow-seo-platform-design
+docs
