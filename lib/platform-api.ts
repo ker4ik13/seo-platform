@@ -1,28 +1,227 @@
-interface ApiState {
-  readonly available: boolean;
-  readonly version?: string;
-}
+import { cache } from "react";
+import { cookies } from "next/headers";
+import type {
+  AppProject,
+  AppUser,
+  AppWorkspace,
+  ProtectedAppContext
+} from "./app-types";
 
-export async function getPlatformApiState(): Promise<ApiState> {
-  const baseUrl =
-    process.env.PLATFORM_API_INTERNAL_URL ?? "http://localhost:4000";
-
-  try {
-    const response = await fetch(`${baseUrl}/internal/v1/system`, {
-      cache: "no-store",
-      signal: AbortSignal.timeout(1_500)
-    });
-    if (!response.ok) return { available: false };
-
-    const payload = (await response.json()) as {
-      data?: { version?: string };
-    };
-    return {
-      available: true,
-      ...(payload.data?.version ? { version: payload.data.version } : {})
-    };
-  } catch {
-    return { available: false };
+export class PlatformApiError extends Error {
+  public constructor(
+    public readonly status: number,
+    public readonly code: string,
+    message: string
+  ) {
+    super(message);
+    this.name = "PlatformApiError";
   }
 }
 
+export const loadProtectedAppContext = cache(
+  async (): Promise<ProtectedAppContext> => {
+    const accountPayload = await platformApiData<unknown>("/api/v1/me");
+    const user = accountUser(accountPayload);
+    const workspacesPayload = await platformApiCollection(
+      "/api/v1/workspaces"
+    );
+    const workspaces = workspacesPayload.map(appWorkspace);
+    const cookieStore = await cookies();
+    const preferredWorkspaceId = cookieStore.get("seo_workspace")?.value;
+    const workspace =
+      workspaces.find(({ id }) => id === preferredWorkspaceId) ??
+      workspaces[0];
+
+    if (!workspace) {
+      return {
+        user,
+        workspaces,
+        projects: []
+      };
+    }
+
+    const projectsPayload = await platformApiCollection(
+      `/api/v1/workspaces/${encodeURIComponent(workspace.id)}/projects`
+    );
+    const projects = projectsPayload.map(appProject);
+    const preferredProjectId = cookieStore.get("seo_project")?.value;
+    const project =
+      projects.find(({ id }) => id === preferredProjectId) ?? projects[0];
+
+    return {
+      user,
+      workspaces,
+      workspace,
+      projects,
+      ...(project ? { project } : {})
+    };
+  }
+);
+
+async function platformApiCollection(path: string): Promise<readonly unknown[]> {
+  const payload = await platformApiJson(path);
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    !("data" in payload) ||
+    !Array.isArray(payload.data)
+  ) {
+    throw invalidResponse();
+  }
+  return payload.data;
+}
+
+async function platformApiData<Data>(
+  path: string
+): Promise<Data> {
+  const payload = await platformApiJson(path);
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    !("data" in payload)
+  ) {
+    throw invalidResponse();
+  }
+  return payload.data as Data;
+}
+
+async function platformApiJson(path: string): Promise<unknown> {
+  const headers = new Headers({
+    Accept: "application/json"
+  });
+  const cookieStore = await cookies();
+  const cookieHeader = cookieStore
+    .getAll()
+    .map(({ name, value }) => `${name}=${value}`)
+    .join("; ");
+  if (cookieHeader) headers.set("Cookie", cookieHeader);
+
+  let response: Response;
+  try {
+    response = await fetch(platformApiUrl(path), {
+      headers,
+      cache: "no-store",
+      signal: AbortSignal.timeout(3_000)
+    });
+  } catch {
+    throw new PlatformApiError(
+      503,
+      "PROVIDER_UNAVAILABLE",
+      "Platform API is unavailable"
+    );
+  }
+
+  const payload = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    const apiError = readApiError(payload);
+    throw new PlatformApiError(
+      response.status,
+      apiError.code,
+      apiError.message
+    );
+  }
+  return payload;
+}
+
+function platformApiUrl(path: string): URL {
+  const baseUrl =
+    process.env.PLATFORM_API_INTERNAL_URL ?? "http://localhost:4000";
+  return new URL(path, baseUrl);
+}
+
+function readApiError(payload: unknown): {
+  readonly code: string;
+  readonly message: string;
+} {
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "error" in payload &&
+    typeof payload.error === "object" &&
+    payload.error !== null
+  ) {
+    const code =
+      "code" in payload.error && typeof payload.error.code === "string"
+        ? payload.error.code
+        : "INTERNAL_ERROR";
+    const message =
+      "message" in payload.error && typeof payload.error.message === "string"
+        ? payload.error.message
+        : "Platform API request failed";
+    return { code, message };
+  }
+  return {
+    code: "INTERNAL_ERROR",
+    message: "Platform API request failed"
+  };
+}
+
+function accountUser(payload: unknown): AppUser {
+  const account = record(payload);
+  const user = record(account.user);
+  return {
+    id: stringValue(user.id),
+    email: stringValue(user.email),
+    displayName: stringValue(user.displayName),
+    locale: stringValue(user.locale),
+    timezone: stringValue(user.timezone)
+  };
+}
+
+function appWorkspace(payload: unknown): AppWorkspace {
+  const workspace = record(payload);
+  const status = stringValue(workspace.status);
+  if (!["ACTIVE", "READ_ONLY", "SUSPENDED"].includes(status)) {
+    throw invalidResponse();
+  }
+  return {
+    id: stringValue(workspace.id),
+    name: stringValue(workspace.name),
+    slug: stringValue(workspace.slug),
+    status: status as AppWorkspace["status"],
+    roleCode: stringValue(workspace.roleCode),
+    version: numberValue(workspace.version)
+  };
+}
+
+function appProject(payload: unknown): AppProject {
+  const project = record(payload);
+  const status = stringValue(project.status);
+  if (!["DRAFT", "ACTIVE", "ARCHIVED"].includes(status)) {
+    throw invalidResponse();
+  }
+  return {
+    id: stringValue(project.id),
+    workspaceId: stringValue(project.workspaceId),
+    name: stringValue(project.name),
+    slug: stringValue(project.slug),
+    domain: stringValue(project.domain),
+    status: status as AppProject["status"],
+    version: numberValue(project.version)
+  };
+}
+
+function record(value: unknown): Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw invalidResponse();
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function stringValue(value: unknown): string {
+  if (typeof value !== "string") throw invalidResponse();
+  return value;
+}
+
+function numberValue(value: unknown): number {
+  if (!Number.isInteger(value)) throw invalidResponse();
+  return value as number;
+}
+
+function invalidResponse(): PlatformApiError {
+  return new PlatformApiError(
+    502,
+    "INVALID_UPSTREAM_RESPONSE",
+    "Platform API returned an invalid response"
+  );
+}

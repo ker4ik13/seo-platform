@@ -11,6 +11,12 @@
 доступа к данным приложения. Public/project Toolbox и публичный API используют
 общий capability registry и backend handlers.
 
-`/app` сейчас показывает foundation dashboard с безопасными demo data при
-недоступном Platform API. Tenant auth будет подключён следующим вертикальным
-срезом; route уже имеет noindex/no-store headers.
+`/app` использует same-origin BFF `/app/api/**`: browser cookies не передаются
+в JavaScript, CSRF header проверяется Platform API, а Server Components
+получают tenant context через внутреннюю сеть. Реализованы регистрация, вход,
+подтверждение email, refresh redirect, выход, создание/выбор workspace и
+проекта. Неподключённые SEO-данные показываются честными empty states, а не
+демонстрационными значениями.
+
+Имена auth cookies в Web и Platform API должны совпадать. Публичная зона,
+Toolbox и API docs не зависят от пользовательской сессии.
