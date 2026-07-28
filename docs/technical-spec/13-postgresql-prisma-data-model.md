@@ -138,6 +138,7 @@ Unique: `(provider, provider_subject)`.
 - user_id;
 - system_role_code nullable;
 - custom_role_id nullable;
+- all_projects;
 - status;
 - joined_at;
 - invited_by;
@@ -178,25 +179,36 @@ Unique: `(role_id, permission_code)`.
 - id;
 - workspace_id;
 - email_normalized;
-- role;
+- email_display;
+- role_code;
+- all_projects;
+- project_accesses JSONB;
+- message;
 - token_hash;
-- project_scope;
 - status;
 - expires_at;
-- accepted_by;
-- created_by;
+- accepted_at;
+- revoked_at;
+- invited_by;
 - created_at.
 
-#### `project_access`
+`project_accesses` в приглашении хранит только проверенный снимок
+`[{ projectId, level }]`; после принятия он нормализуется в
+`project_member_access`. Открытый invitation token в БД, outbox, очереди и
+логах не хранится.
 
-- workspace_id;
-- project_id external ID;
-- user_id;
-- access_level;
-- custom_role_id;
-- permission_overrides;
+#### `project_member_access`
+
+- id;
+- project_id;
+- member_id;
+- level `none/viewer/member/manager`;
 - created_at;
 - updated_at.
+
+Unique: `(project_id, member_id)`. Проектный уровень может только сужать
+workspace role; отсутствие записи означает полный role access только при
+`all_projects=true`.
 
 ### 4.3. Projects
 

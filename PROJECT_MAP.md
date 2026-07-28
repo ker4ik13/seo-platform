@@ -1,8 +1,8 @@
 # Карта проекта
 
 Последнее обновление: 28 июля 2026 года  
-Текущий инкремент: Identity → Workspace → Project
-Статус: Identity core реализован; Workspace/Project в работе
+Текущий инкремент: Identity → Workspace → Project → Team access
+Статус: Identity и tenant core реализованы; подключение private Web в работе
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -104,6 +104,8 @@ Backend convention:
 - `platform-api/src/authorization` — default-deny permission catalog и
   проверка tenant context;
 - `platform-api/src/tenants` — workspace/project commands и queries;
+- `platform-api/src/tenants/team.*` — приглашения, участники и проектные
+  ограничения доступа;
 - `platform-api/src/audit`, `src/outbox` — переиспользуемые transactional
   записи аудита и событий;
 - `platform-jobs-integrations/src/queue` — BullMQ connection и system queue;
@@ -136,7 +138,7 @@ Entrypoints:
 | Realtime public gateway | foundation |
 | Unified Web/Admin shells | vertical slice |
 | Auth core | vertical slice |
-| Workspaces/projects | vertical slice |
+| Workspaces/projects/team access | vertical slice |
 | Semantics/import | planned |
 | Rankings/integrations | planned |
 | Billing/YooKassa | planned |
@@ -150,12 +152,17 @@ Identity core содержит регистрацию email/password, consent sn
 Argon2id, email verification, короткую access cookie, rotation refresh cookie,
 CSRF, session inventory/revocation, PostgreSQL rate limit, audit и outbox.
 
+Tenant core содержит workspace/project CRUD, системную RBAC-матрицу,
+одноразовые workspace invitations, optimistic locking участников и
+`project_member_access`. Проектное назначение только сужает workspace role;
+`NONE` и отсутствие назначения при `all_projects=false` скрывают проект.
+
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 22 pass, 0 fail.
+- Platform API unit tests: 28 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
 - Unified Next.js production build: pass; проверены public site, Toolbox,
   API docs и private `/app`.
@@ -166,7 +173,7 @@ CSRF, session inventory/revocation, PostgreSQL rate limit, audit и outbox.
 
 ## 9. Следующий вертикальный срез
 
-`registration → workspace → project → permission check → audit event`
+`browser auth → workspace/project switcher → protected application shell`
 
 После него:
 

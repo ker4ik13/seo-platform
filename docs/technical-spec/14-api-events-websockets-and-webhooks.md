@@ -347,6 +347,7 @@ Resumable upload должен переживать перезагрузку вк
 - `/workspaces/{workspaceId}`;
 - `/workspaces/{workspaceId}/members`;
 - `/workspaces/{workspaceId}/invites`;
+- `/workspace-invites/accept`;
 - `/workspaces/{workspaceId}/roles`;
 - `/workspaces/{workspaceId}/projects`;
 - `/projects/{projectId}`;
@@ -586,6 +587,9 @@ Publisher отправляет событие в NATS JetStream и помеча�
 - `identity.user.created.v1`;
 - `identity.user.suspended.v1`;
 - `workspace.created.v1`;
+- `workspace.invite.requested.v1`;
+- `workspace.invite.accepted.v1`;
+- `workspace.invite.revoked.v1`;
 - `workspace.member.changed.v1`;
 - `project.created.v1`;
 - `project.archived.v1`;
