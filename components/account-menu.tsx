@@ -51,6 +51,9 @@ export function AccountMenu({
         <div className="account-popover">
           <strong>{user.displayName}</strong>
           <span>{user.email}</span>
+          <a className="account-menu-link" href="/app/settings/security">
+            Безопасность и профиль
+          </a>
           <button disabled={busy} onClick={logout} type="button">
             {busy ? "Выходим…" : "Выйти"}
           </button>

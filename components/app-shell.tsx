@@ -124,14 +124,16 @@ export function AppShell({
         </nav>
 
         <div className="sidebar-spacer" />
-        <span
-          aria-disabled="true"
-          className="nav-item disabled"
-          title="Настройки профиля и уведомлений будут подключены отдельным срезом"
+        <a
+          aria-current={activeSection === "settings" ? "page" : undefined}
+          className={
+            activeSection === "settings" ? "nav-item active" : "nav-item"
+          }
+          href="/app/settings/security"
         >
           <Icon name="settings" />
           <span>Настройки</span>
-        </span>
+        </a>
         <div className="workspace-usage">
           <span>
             <strong>Тарификация не подключена</strong>

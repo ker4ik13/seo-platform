@@ -15,8 +15,9 @@
 в JavaScript, CSRF header проверяется Platform API, а Server Components
 получают tenant context через внутреннюю сеть. Реализованы регистрация, вход,
 подтверждение email, безопасное восстановление пароля, refresh redirect, выход,
-создание/выбор workspace и проекта. Неподключённые SEO-данные показываются
-честными empty states, а не демонстрационными значениями.
+MFA challenge, настройка TOTP/recovery codes в профиле, создание/выбор
+workspace и проекта. Неподключённые SEO-данные показываются честными empty
+states, а не демонстрационными значениями.
 
 Имена auth cookies в Web и Platform API должны совпадать. Публичная зона,
 Toolbox и API docs не зависят от пользовательской сессии.

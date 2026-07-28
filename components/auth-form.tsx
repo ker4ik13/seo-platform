@@ -12,6 +12,12 @@ interface AuthenticationResult {
   readonly verificationTokenForDevelopment?: string;
 }
 
+interface MfaChallengeResult {
+  readonly mfaRequired: true;
+  readonly challengeToken: string;
+  readonly expiresAt: string;
+}
+
 export function AuthForm({
   mode,
   returnTo = "/app",
@@ -38,7 +44,9 @@ export function AuthForm({
     const email = String(form.get("email") ?? "").trim();
 
     try {
-      const result = await browserApiRequest<AuthenticationResult>(
+      const result = await browserApiRequest<
+        AuthenticationResult | MfaChallengeResult
+      >(
         `/app/api/auth/${isRegister ? "register" : "login"}`,
         {
           method: "POST",
@@ -71,6 +79,14 @@ export function AuthForm({
         }
       );
 
+      if (isMfaChallenge(result)) {
+        sessionStorage.setItem("mfa-challenge-token", result.challengeToken);
+        sessionStorage.setItem("mfa-challenge-expires-at", result.expiresAt);
+        window.location.assign(
+          `/app/mfa?returnTo=${encodeURIComponent(safeAppReturnTo(returnTo))}`
+        );
+        return;
+      }
       if (result.emailVerificationRequired) {
         sessionStorage.setItem("pending-verification-email", email);
         if (result.verificationTokenForDevelopment) {
@@ -258,6 +274,12 @@ function FormField({
 
 function optionalValue(value: FormDataEntryValue | null): string | undefined {
   return typeof value === "string" && value ? value : undefined;
+}
+
+function isMfaChallenge(
+  result: AuthenticationResult | MfaChallengeResult
+): result is MfaChallengeResult {
+  return "mfaRequired" in result && result.mfaRequired;
 }
 
 function errorMessage(error: BrowserApiError): string {
