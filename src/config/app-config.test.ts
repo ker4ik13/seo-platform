@@ -44,6 +44,7 @@ test("does not allow development tokens in production", () => {
         DATABASE_URL: "postgresql://test",
         AUTH_PASSWORD_PEPPER: "production-secret",
         AUTH_DATA_ENCRYPTION_KEY: Buffer.alloc(32).toString("base64url"),
+        INTERNAL_API_TOKEN: "x".repeat(32),
         AUTH_EXPOSE_DEVELOPMENT_TOKENS: "true"
       }),
     {

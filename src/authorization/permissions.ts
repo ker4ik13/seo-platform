@@ -103,6 +103,16 @@ export type SystemRoleCode = (typeof systemRoleCodes)[number];
 
 export type ProjectAccessLevel = "NONE" | "VIEWER" | "MEMBER" | "MANAGER";
 
+const readOnlySafePermissions: ReadonlySet<Permission> = new Set([
+  ...permissions.filter((permission) => permission.endsWith(".view")),
+  "project.export",
+  "semantic.export",
+  "ranking.export",
+  "file.download",
+  "billing.top_up",
+  "billing.manage_payment_methods"
+]);
+
 const viewPermissions: readonly Permission[] = [
   "workspace.view",
   "project.view",
@@ -329,4 +339,8 @@ export function hasProjectAccessPermission(
   if (level === "VIEWER") return viewPermissions.includes(permission);
   if (level === "MEMBER") return projectMemberPermissions.has(permission);
   return projectManagerPermissions.has(permission);
+}
+
+export function isReadOnlySafePermission(permission: Permission): boolean {
+  return readOnlySafePermissions.has(permission);
 }

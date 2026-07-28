@@ -6,6 +6,7 @@ import { IdentityModule } from "./identity/identity.module.js";
 import { TenantModule } from "./tenants/tenant.module.js";
 import { MessagingModule } from "./messaging/messaging.module.js";
 import { SystemModule } from "./system/system.module.js";
+import { UploadModule } from "./uploads/upload.module.js";
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { SystemModule } from "./system/system.module.js";
     HealthModule,
     IdentityModule,
     TenantModule,
+    UploadModule,
     SystemModule
   ]
 })

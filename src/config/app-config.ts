@@ -5,6 +5,8 @@ export interface AppConfig {
   readonly databaseUrl: string;
   readonly databasePoolMax: number;
   readonly dependencyTimeoutMs: number;
+  readonly internalCommandTimeoutMs: number;
+  readonly internalApiToken?: string;
   readonly corsOrigins: readonly string[];
   readonly nats: {
     readonly url: string;
@@ -79,6 +81,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const natsPassword = env.NATS_PASSWORD?.trim();
   const passwordPepper = env.AUTH_PASSWORD_PEPPER?.trim();
   const dataEncryptionKey = env.AUTH_DATA_ENCRYPTION_KEY?.trim();
+  const internalApiToken = env.INTERNAL_API_TOKEN?.trim();
 
   if (!["development", "test", "production"].includes(nodeEnv)) {
     throw new Error("NODE_ENV must be development, test or production");
@@ -97,6 +100,14 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   ) {
     throw new Error(
       "AUTH_DATA_ENCRYPTION_KEY must be a Base64URL-encoded 32-byte key"
+    );
+  }
+  if (
+    nodeEnv === "production" &&
+    (!internalApiToken || internalApiToken.length < 32)
+  ) {
+    throw new Error(
+      "INTERNAL_API_TOKEN with at least 32 characters is required in production"
     );
   }
 
@@ -127,6 +138,12 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       1500,
       "INTERNAL_REQUEST_TIMEOUT_MS"
     ),
+    internalCommandTimeoutMs: positiveInteger(
+      env.INTERNAL_COMMAND_TIMEOUT_MS,
+      15_000,
+      "INTERNAL_COMMAND_TIMEOUT_MS"
+    ),
+    ...(internalApiToken ? { internalApiToken } : {}),
     corsOrigins: (env.CORS_ORIGINS ?? "")
       .split(",")
       .map((origin) => origin.trim())

@@ -6,6 +6,7 @@ import type { TenantAuthorization } from "./authorization.types.js";
 import {
   hasProjectAccessPermission,
   hasSystemPermission,
+  isReadOnlySafePermission,
   type Permission
 } from "./permissions.js";
 
@@ -42,6 +43,7 @@ export class AuthorizationService {
         message: "Workspace access is suspended"
       });
     }
+    this.assertWritable(membership.workspace.status, permission);
     if (!hasSystemPermission(membership.roleCode, permission)) {
       throw this.forbidden(permission);
     }
@@ -92,6 +94,7 @@ export class AuthorizationService {
         message: "Workspace access is suspended"
       });
     }
+    this.assertWritable(membership.workspace.status, permission);
     if (!hasSystemPermission(membership.roleCode, permission)) {
       throw this.forbidden(permission);
     }
@@ -127,6 +130,24 @@ export class AuthorizationService {
       message: "Required permission is missing",
       details: { permission }
     });
+  }
+
+  private assertWritable(
+    workspaceStatus: string,
+    permission: Permission
+  ): void {
+    if (
+      workspaceStatus === "READ_ONLY" &&
+      !isReadOnlySafePermission(permission)
+    ) {
+      throw new DomainError({
+        statusCode: 402,
+        code: "PAYMENT_REQUIRED",
+        message:
+          "Workspace is read-only; existing results remain available",
+        details: { permission, workspaceStatus }
+      });
+    }
   }
 
   private notFound(): DomainError {

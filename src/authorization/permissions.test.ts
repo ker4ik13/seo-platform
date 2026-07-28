@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   hasProjectAccessPermission,
-  hasSystemPermission
+  hasSystemPermission,
+  isReadOnlySafePermission
 } from "./permissions.js";
 
 test("owner has every permission", () => {
@@ -38,4 +39,12 @@ test("project assignment can only narrow workspace role permissions", () => {
     hasProjectAccessPermission("MANAGER", "billing.manage_plan"),
     false
   );
+});
+
+test("read-only mode allows viewing, exporting and balance recovery only", () => {
+  assert.equal(isReadOnlySafePermission("semantic.view"), true);
+  assert.equal(isReadOnlySafePermission("semantic.export"), true);
+  assert.equal(isReadOnlySafePermission("billing.top_up"), true);
+  assert.equal(isReadOnlySafePermission("semantic.import"), false);
+  assert.equal(isReadOnlySafePermission("collector.run"), false);
 });
