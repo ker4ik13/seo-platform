@@ -22,6 +22,7 @@ export async function browserApiRequest<Data>(
     readonly method?: "GET" | "POST" | "PATCH" | "DELETE";
     readonly body?: unknown;
     readonly ifMatch?: number;
+    readonly idempotencyKey?: string;
   } = {}
 ): Promise<Data> {
   if (!path.startsWith("/app/api/")) {
@@ -37,6 +38,9 @@ export async function browserApiRequest<Data>(
   }
   if (options.ifMatch !== undefined) {
     headers.set("If-Match", `"v${options.ifMatch}"`);
+  }
+  if (options.idempotencyKey) {
+    headers.set("Idempotency-Key", options.idempotencyKey);
   }
   if (method !== "GET") {
     const csrf = browserCookie(

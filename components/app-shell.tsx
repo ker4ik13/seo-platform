@@ -30,7 +30,7 @@ const navigation: readonly {
     icon: "semantic",
     href: "/app/semantics",
     section: "semantics",
-    available: false
+    available: true
   },
   {
     label: "Позиции",
@@ -75,7 +75,7 @@ export function AppShell({
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <a className="brand" href="/app" aria-label="SEO Workspace">
+        <a className="app-brand" href="/app" aria-label="SEO Workspace">
           <span className="brand-mark">S</span>
           <span>SEO Workspace</span>
         </a>
@@ -147,7 +147,7 @@ export function AppShell({
 
       <div className="main-column">
         <header className="topbar">
-          <div className="mobile-brand">
+          <div className="app-mobile-brand">
             <span className="brand-mark">S</span>
             <strong>Workspace</strong>
           </div>
