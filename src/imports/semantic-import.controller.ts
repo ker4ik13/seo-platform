@@ -20,6 +20,7 @@ import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.
 import { apiResponse } from "../common/api-response.js";
 import { assertUuid } from "../common/identifier.js";
 import { requiredIdempotencyKey } from "../common/idempotency-key.js";
+import { requiredVersion } from "../common/version-precondition.js";
 import { CurrentPrincipal } from "../identity/current-principal.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
 import { requestContext } from "../identity/request-context.js";
@@ -29,7 +30,10 @@ import {
   SessionAuthGuard
 } from "../identity/session-auth.guard.js";
 import { JobsClient } from "../jobs/jobs.client.js";
-import { createSemanticImportInput } from "./semantic-import-input.js";
+import {
+  configureSemanticImportInput,
+  createSemanticImportInput
+} from "./semantic-import-input.js";
 
 @Controller("api/v1/projects/:projectId/imports")
 export class SemanticImportController {
@@ -79,6 +83,82 @@ export class SemanticImportController {
           requestId: context.requestId
         },
         importId
+      )
+    );
+  }
+
+  @Post(":importId/mapping")
+  @RequirePermission("semantic.import")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async configure(
+    @Param("importId") importId: string,
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticImportSummary>> {
+    assertUuid(importId, "importId");
+    const context = requestContext(request);
+    return apiResponse(
+      request,
+      await this.jobs.configureSemanticImport(
+        {
+          tenant: requiredTenant(request),
+          actorId: principal.userId,
+          requestId: context.requestId
+        },
+        importId,
+        configureSemanticImportInput(
+          body,
+          requiredVersion(headerValue(request, "if-match"))
+        )
+      )
+    );
+  }
+
+  @Post(":importId/publish")
+  @RequirePermission("semantic.import")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async publish(
+    @Param("importId") importId: string,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticImportSummary>> {
+    assertUuid(importId, "importId");
+    const context = requestContext(request);
+    return apiResponse(
+      request,
+      await this.jobs.confirmSemanticImport(
+        {
+          tenant: requiredTenant(request),
+          actorId: principal.userId,
+          requestId: context.requestId
+        },
+        importId,
+        { version: requiredVersion(headerValue(request, "if-match")) }
+      )
+    );
+  }
+
+  @Post(":importId/cancel")
+  @RequirePermission("semantic.import")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async cancel(
+    @Param("importId") importId: string,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticImportSummary>> {
+    assertUuid(importId, "importId");
+    const context = requestContext(request);
+    return apiResponse(
+      request,
+      await this.jobs.cancelSemanticImport(
+        {
+          tenant: requiredTenant(request),
+          actorId: principal.userId,
+          requestId: context.requestId
+        },
+        importId,
+        {}
       )
     );
   }

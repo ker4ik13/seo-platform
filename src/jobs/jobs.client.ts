@@ -1,12 +1,18 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type {
   CompleteUploadInput,
+  ConfigureSemanticImportInput,
+  ConfirmSemanticImportInput,
+  CancelSemanticImportInput,
   CreateSemanticImportInput,
   CreatedMultipartUpload,
   CreateUploadInput,
   CreateUploadPartUrlsInput,
   InternalCreateUploadInput,
   InternalCreateSemanticImportInput,
+  InternalConfigureSemanticImportInput,
+  InternalConfirmSemanticImportInput,
+  InternalCancelSemanticImportInput,
   SemanticImportSummary,
   UploadPartUrls,
   UploadSummary
@@ -114,6 +120,63 @@ export class JobsClient {
       "GET",
       `/internal/v1/imports/${encodeURIComponent(importId)}`,
       context
+    );
+  }
+
+  public configureSemanticImport(
+    context: InternalContext,
+    importId: string,
+    input: ConfigureSemanticImportInput
+  ): Promise<SemanticImportSummary> {
+    const body: InternalConfigureSemanticImportInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      projectId: requiredProjectId(context.tenant),
+      actorId: context.actorId
+    };
+    return this.request(
+      "POST",
+      `/internal/v1/imports/${encodeURIComponent(importId)}/mapping`,
+      context,
+      body
+    );
+  }
+
+  public confirmSemanticImport(
+    context: InternalContext,
+    importId: string,
+    input: ConfirmSemanticImportInput
+  ): Promise<SemanticImportSummary> {
+    const body: InternalConfirmSemanticImportInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      projectId: requiredProjectId(context.tenant),
+      actorId: context.actorId
+    };
+    return this.request(
+      "POST",
+      `/internal/v1/imports/${encodeURIComponent(importId)}/publish`,
+      context,
+      body
+    );
+  }
+
+  public cancelSemanticImport(
+    context: InternalContext,
+    importId: string,
+    input: CancelSemanticImportInput
+  ): Promise<SemanticImportSummary> {
+    const body: InternalCancelSemanticImportInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      projectId: requiredProjectId(context.tenant),
+      actorId: context.actorId
+    };
+    return this.request(
+      "POST",
+      `/internal/v1/imports/${encodeURIComponent(importId)}/cancel`,
+      context,
+      body
     );
   }
 

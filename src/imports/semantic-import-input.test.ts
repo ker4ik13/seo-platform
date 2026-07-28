@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
-import { createSemanticImportInput } from "./semantic-import-input.js";
+import {
+  configureSemanticImportInput,
+  createSemanticImportInput
+} from "./semantic-import-input.js";
 
 test("parses explicit or default semantic import options", () => {
   const uploadId = "01900000-0000-7000-8000-000000000005";
@@ -27,6 +30,49 @@ test("parses explicit or default semantic import options", () => {
       delimiter: "SEMICOLON",
       headerMode: "PRESENT"
     }
+  );
+});
+
+test("requires one keyword column and preserves custom mappings", () => {
+  assert.deepEqual(
+    configureSemanticImportInput(
+      {
+        columns: [
+          { sourceIndex: 0, target: "keyword.text" },
+          {
+            sourceIndex: 1,
+            target: "custom",
+            customName: "Мой показатель"
+          }
+        ],
+        defaultLanguage: "ru",
+        groupSeparator: ">",
+        duplicatePolicy: "MERGE_NON_EMPTY"
+      },
+      3
+    ),
+    {
+      version: 3,
+      columns: [
+        { sourceIndex: 0, target: "keyword.text" },
+        {
+          sourceIndex: 1,
+          target: "custom",
+          customName: "Мой показатель"
+        }
+      ],
+      defaultLanguage: "ru",
+      groupSeparator: ">",
+      duplicatePolicy: "MERGE_NON_EMPTY"
+    }
+  );
+  assert.throws(
+    () =>
+      configureSemanticImportInput(
+        { columns: [{ sourceIndex: 0, target: "custom" }] },
+        1
+      ),
+    DomainError
   );
 });
 
