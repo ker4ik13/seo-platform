@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { ProtectedAppContext } from "../lib/app-types";
 import { AccountMenu } from "./account-menu";
 import { Icon, type IconName } from "./icon";
+import { NotificationBell } from "./notification-bell";
 import { TenantSwitcher } from "./tenant-switcher";
 
 const navigation: readonly {
@@ -162,15 +163,7 @@ export function AppShell({
             <kbd>⌘ K</kbd>
           </label>
           <div className="topbar-actions">
-            <button
-              aria-label="Уведомления — пока нет событий"
-              className="icon-button"
-              disabled
-              title="Центр уведомлений будет подключён вместе с email и Web Push"
-              type="button"
-            >
-              <Icon name="bell" />
-            </button>
+            <NotificationBell />
             <AccountMenu
               roleCode={context.workspace?.roleCode}
               user={context.user}

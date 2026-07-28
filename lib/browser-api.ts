@@ -20,6 +20,7 @@ export interface BrowserCursorPage {
   readonly nextCursor?: string;
   readonly hasNext: boolean;
   readonly totalApprox?: number;
+  readonly unreadCount?: number;
 }
 
 export interface BrowserApiCollection<Data> {
@@ -74,7 +75,10 @@ export async function browserApiCollectionRequest<Data>(
       typeof page.nextCursor !== "string") ||
     (page.totalApprox !== undefined &&
       (!Number.isSafeInteger(page.totalApprox) ||
-        Number(page.totalApprox) < 0))
+        Number(page.totalApprox) < 0)) ||
+    (page.unreadCount !== undefined &&
+      (!Number.isSafeInteger(page.unreadCount) ||
+        Number(page.unreadCount) < 0))
   ) {
     throw invalidResponse();
   }
@@ -87,6 +91,9 @@ export async function browserApiCollectionRequest<Data>(
         : {}),
       ...(typeof page.totalApprox === "number"
         ? { totalApprox: page.totalApprox }
+        : {}),
+      ...(typeof page.unreadCount === "number"
+        ? { unreadCount: page.unreadCount }
         : {})
     }
   };
