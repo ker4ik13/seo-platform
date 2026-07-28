@@ -185,7 +185,7 @@ services:
       JOBS_INTERNAL_URL: http://jobs-integrations:4002
       REALTIME_INTERNAL_URL: http://realtime:4003
       INTERNAL_REQUEST_TIMEOUT_MS: 1500
-      CORS_ORIGINS: ${APP_PUBLIC_URL},${ADMIN_PUBLIC_URL}
+      CORS_ORIGINS: ${WEB_PUBLIC_URL},${ADMIN_PUBLIC_URL}
     expose:
       - "4000"
     networks:
@@ -310,7 +310,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/realtime_db
       DATABASE_POOL_MAX: ${REALTIME_DATABASE_POOL_MAX:-20}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-      WEB_ORIGINS: ${APP_PUBLIC_URL},${ADMIN_PUBLIC_URL}
+      WEB_ORIGINS: ${WEB_PUBLIC_URL},${ADMIN_PUBLIC_URL}
     expose:
       - "4003"
     networks:
@@ -336,45 +336,26 @@ services:
       retries: 5
       start_period: 15s
 
-  marketing:
+  web:
     restart: unless-stopped
     init: true
     build:
       context: ..
       dockerfile: platform-infrastructure/docker/web.Dockerfile
       args:
-        PACKAGE_NAME: "@seo-platform/marketing"
-        PACKAGE_PATH: platform-marketing
+        PACKAGE_NAME: "@seo-platform/web"
+        PACKAGE_PATH: platform-web
     environment:
       NODE_ENV: production
       PORT: 3000
-      NEXT_PUBLIC_SITE_URL: ${MARKETING_PUBLIC_URL}
-      NEXT_PUBLIC_APP_URL: ${APP_PUBLIC_URL}
+      NEXT_PUBLIC_SITE_URL: ${WEB_PUBLIC_URL}
+      NEXT_PUBLIC_PLATFORM_API_URL: ${API_PUBLIC_URL}
+      PLATFORM_API_INTERNAL_URL: http://platform-api:4000
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-ru}
       DIRECTUS_URL: http://directus:8055
       DIRECTUS_READ_TOKEN: ${DIRECTUS_READ_TOKEN:-}
     expose:
       - "3000"
-    networks:
-      - internal
-      - edge
-
-  app:
-    restart: unless-stopped
-    init: true
-    build:
-      context: ..
-      dockerfile: platform-infrastructure/docker/web.Dockerfile
-      args:
-        PACKAGE_NAME: "@seo-platform/app"
-        PACKAGE_PATH: platform-app
-    environment:
-      NODE_ENV: production
-      PORT: 3001
-      PLATFORM_API_INTERNAL_URL: http://platform-api:4000
-      NEXT_PUBLIC_REALTIME_URL: ${REALTIME_PUBLIC_URL}
-    expose:
-      - "3001"
     networks:
       - internal
       - edge
