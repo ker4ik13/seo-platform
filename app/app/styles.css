@@ -356,9 +356,11 @@ svg { display: block; }
 .form-field .field-error { color: var(--red); }
 .checkbox-field { align-items: flex-start; display: grid; font-size: 11px; gap: 9px; grid-template-columns: auto 1fr; line-height: 1.5; }
 .checkbox-field input { height: 16px; margin: 1px 0 0; width: 16px; }
-.checkbox-field a, .auth-switch a { color: var(--brand); font-weight: 650; }
+.checkbox-field a, .auth-switch a, .auth-inline-link a { color: var(--brand); font-weight: 650; }
 .auth-submit { width: 100%; }
+.auth-inline-link { font-size: 12px; margin-top: -7px; text-align: right; }
 .auth-switch { color: var(--muted); font-size: 12px; text-align: center; }
+.auth-form > a.auth-submit { display: inline-flex; justify-content: center; }
 .inline-alert { border: 1px solid; border-radius: 10px; font-size: 12px; line-height: 1.5; padding: 10px 12px; }
 .inline-alert.danger { background: #fff3f5; border-color: #f0c5cc; color: #9f2f40; }
 .inline-alert.warning { background: #fff9ec; border-color: #eed9ac; color: #806022; }

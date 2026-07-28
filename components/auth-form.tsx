@@ -155,6 +155,11 @@ export function AuthForm({
         required
         type="password"
       />
+      {!isRegister && (
+        <p className="auth-inline-link">
+          <a href="/app/forgot-password">Забыли пароль?</a>
+        </p>
+      )}
 
       {isRegister && (
         <>
