@@ -463,4 +463,8 @@ Fallback запрещён:
 - Raw SERP не читается для обычного отчёта.
 - Retention raw и parsed данных настраивается отдельно.
 - Удаление старых partitions выполняется обслуживающим job.
-
+- Parsed/aggregate rank history платного workspace хранится без фиксированного
+  продуктового срока и остаётся доступной в billing read-only.
+- Raw SERP, provider payload и HTML имеют `expiresAt` из plan snapshot;
+  их удаление не удаляет position/frequency aggregates и provenance metadata.
+- Нулевой баланс блокирует новый сбор, но не чтение существующей истории.

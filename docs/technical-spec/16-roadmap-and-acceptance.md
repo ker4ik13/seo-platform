@@ -61,7 +61,7 @@
 
 #### Не входит
 
-Публичный production, полноценный billing, все integrations и polished marketing site.
+Публичный production, полноценный billing, все integrations и polished unified web.
 
 ### P1. Закрытая alpha: workspace → project → semantics
 
@@ -172,7 +172,9 @@
 - trial/promo;
 - payment provider;
 - ЮKassa adapter, автоплатежи и возвраты;
-- 54-ФЗ/фискализация по заключению бухгалтера;
+- НПД receipt workflow для текущего статуса самозанятого;
+- ручная регистрация чека ЮKassa-платежа через «Мой налог» и доставка клиенту;
+- 54-ФЗ/фискализация только после смены статуса и заключения бухгалтера;
 - invoices/receipts по применимой модели;
 - workspace usage;
 - limits/add-ons;
@@ -188,9 +190,12 @@
 - insufficient balance states;
 - grace/dunning;
 - billing admin/reconciliation;
-- marketing site;
+- единый `platform-web`: публичный сайт и защищённый `/app`;
 - Directus;
 - pricing/features pages;
+- статьи и индексируемый стартовый Toolbox;
+- `/docs/api` и generated OpenAPI reference;
+- базовые scoped API tokens во всех платных тарифах;
 - localized SEO metadata;
 - forms/lead capture;
 - docs/help minimum;
@@ -231,6 +236,7 @@
 - stop words;
 - geo and device variants;
 - automated collections;
+- Magnet: GSC/Webmaster/GA4/Метрика → staging → dedup → semantic publish;
 - provider fallback chains;
 - expanded integrations: Keys.so, XMLRiver, XMLStock, Arsenkin и выбранные международные аналоги;
 - cost optimization/routing;
@@ -257,6 +263,8 @@
 - content brief;
 - knowledge/files;
 - technical crawler;
+- Radar с настраиваемым interval/speed, polite per-host limits и page diffs;
+- sitemap generator/versioning/submission;
 - audit issues;
 - Google Search Console;
 - GA4;
@@ -277,7 +285,7 @@
 
 - custom roles;
 - SCIM/SAML SSO при подтверждённом спросе;
-- service accounts/public API;
+- advanced service accounts, higher API quotas и IP allowlists;
 - advanced audit export;
 - approval workflows;
 - workspace templates;
@@ -714,6 +722,70 @@ Staging game day имитирует потерю основной базы.
 - documented timeline;
 - corrective actions.
 
+### AC-17. Единый web и индексация
+
+Проверяется:
+
+- public pages, articles, `/tools` и `/docs/api` доступны на основном домене;
+- `/app` требует сессию;
+- `/app` отсутствует в sitemap и public search;
+- HTML metadata и `X-Robots-Tag` содержат noindex/nofollow;
+- tenant response имеет private/no-store и не попадает в public cache;
+- public tool landing индексируем, временный user result — нет;
+- Directus outage использует stale public cache и не блокирует `/app`.
+
+### AC-18. Public/project Toolbox и API parity
+
+Проверяется:
+
+- capability имеет один code/schema/domain handler;
+- public, project UI и API используют одинаковую validation;
+- anonymous limits и low-priority queue соблюдаются;
+- платный запуск требует estimate/approval/reservation;
+- public result можно явно сохранить в доступный проект;
+- API доступен на Solo и любом старшем платном тарифе;
+- API docs и OpenAPI соответствуют реализации.
+
+### AC-19. Radar и sitemap
+
+Проверяется:
+
+- interval, speed, concurrency, scope и quiet window сохраняются;
+- robots и per-host token bucket соблюдаются;
+- 429/503/latency включают backoff и снижение нагрузки;
+- один tenant не блокирует API или jobs других tenants;
+- unchanged URL использует conditional request/skip;
+- page snapshot и field diff воспроизводимы;
+- sitemap исключает non-canonical/non-indexable/error URL;
+- более 50 000 URL разбиваются через sitemap index;
+- version/download/diff/submission работают.
+
+### AC-20. Magnet
+
+Проверяется:
+
+- GSC/Webmaster/GA4/Метрика сохраняют отдельный provenance;
+- staging отмечает new/existing/conflict;
+- повторный sync не создаёт дубли;
+- partial provider failure сохраняет остальные результаты;
+- preview показывает фактически импортируемые поля;
+- publish создаёт semantic version и mapping результата.
+
+### AC-21. ЮKassa и чек НПД
+
+Проверяется:
+
+- только verified YooKassa `succeeded` создаёт obligation;
+- duplicate webhook не создаёт второй чек;
+- gross amount совпадает с платежом до комиссии;
+- ручная регистрация требует MFA/audit и официальный receipt ID/URL;
+- чек доставляется клиенту и виден в billing history;
+- reconciliation находит successful payment без obligation;
+- полный refund создаёт cancellation task;
+- partial refund требует replacement workflow;
+- credentials «Мой налог» нигде не сохраняются;
+- API чеков ЮKassa по 54-ФЗ не используется для самозанятого.
+
 ## 10. Модульная матрица приёмки
 
 | Модуль | Обязательный happy path | Обязательные отказные случаи |
@@ -728,6 +800,10 @@ Staging game day имитирует потерю основной базы.
 | Automations | schedule/run/notify | overlap, DST, budget, paused dependency |
 | Reports | build/snapshot/share | expired/revoked token, stale source |
 | Billing | subscribe/reserve/settle | duplicate webhook, decline, insufficient balance |
+| NPD receipt | YooKassa success/register/deliver | duplicate webhook, missing manual receipt, refund/replacement |
+| Toolbox/API | public/project/API parity | abuse limit, unauthenticated paid run, schema mismatch |
+| Radar/sitemap | polite run/diff/generate | host backoff, partial crawl, invalid URL set |
+| Magnet | sync/preview/publish | partial provider failure, duplicate/conflict |
 | CMS | draft/preview/publish | invalid locale/block/SEO configuration |
 | Admin | search/support/action | missing reason/MFA, forbidden secret access |
 

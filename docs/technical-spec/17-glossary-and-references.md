@@ -245,7 +245,7 @@ Backend for frontend. Отдельный BFF не вводится на стар
 | ID | Решение | Статус |
 |---|---|---|
 | ADR-2026-001 | Международный продукт, первые локали `en` и `ru` | принято |
-| ADR-2026-002 | Main domain для сайта, отдельные generic subdomains для приложения и систем | принято |
+| ADR-2026-002 | Main domain для сайта, отдельные generic subdomains для приложения и систем | заменено ADR-2026-027 |
 | ADR-2026-003 | Next.js/React/TypeScript для web-приложений | принято |
 | ADR-2026-004 | NestJS для backend | принято |
 | ADR-2026-005 | Self-hosted PostgreSQL 18 и Prisma | принято |
@@ -255,7 +255,7 @@ Backend for frontend. Отдельный BFF не вводится на стар
 | ADR-2026-009 | NATS JetStream + outbox/inbox для надёжных событий | рекомендуется ТЗ |
 | ADR-2026-010 | Socket.IO + Redis adapter для presence/UI realtime | принято по рекомендации |
 | ADR-2026-011 | Yjs/Hocuspocus для совместных документов | рекомендуется ТЗ |
-| ADR-2026-012 | Directus только для marketing CMS | принято |
+| ADR-2026-012 | Directus только для публичного web-контента и документации, без application data | принято |
 | ADR-2026-013 | Собственная app-admin | принято |
 | ADR-2026-014 | Subscription + included limits + balance/add-ons | принято |
 | ADR-2026-015 | BYOK и platform credentials | принято |
@@ -270,6 +270,12 @@ Backend for frontend. Отдельный BFF не вводится на стар
 | ADR-2026-024 | Подписка отделена от prepaid data balance | принято |
 | ADR-2026-025 | Стартовые планы: Trial, Solo, Team, Agency, Business, Enterprise | рекомендуется ТЗ |
 | ADR-2026-026 | Keys.so platform-paid запрещён до отдельного коммерческого соглашения | обязательно по текущим публичным условиям |
+| ADR-2026-027 | Единый `platform-web`: публичный сайт и Toolbox на `/`, защищённое приложение на `/app` | принято |
+| ADR-2026-028 | API docs публикуются на `/docs/api`; machine API остаётся на техническом поддомене | принято |
+| ADR-2026-029 | Базовый API всех SEO-инструментов включён во все платные тарифы | принято |
+| ADR-2026-030 | Billing ограничивает новые операции, но не чтение; проекты не удаляются автоматически | принято |
+| ADR-2026-031 | Агрегированная история долговременная, raw SERP имеет отдельный retention | принято |
+| ADR-2026-032 | Public и project Toolbox используют общий capability registry и jobs | принято |
 
 Формальные ADR-файлы создаются в infrastructure/platform repositories до реализации P0.
 
@@ -424,7 +430,13 @@ Keys.so в первом релизе работает только как BYOK: 
 - [ЮKassa: способы приёма платежей](https://yookassa.ru/docs/support/payments/accept-methods)
 - [ЮKassa: автоплатежи](https://yookassa.ru/developers/payment-acceptance/scenario-extensions/recurring-payments/basics)
 - [ЮKassa: API](https://yookassa.ru/developers/api)
+- [ЮKassa: чеки для компаний, ИП и самозанятых](https://yookassa.ru/developers/payment-acceptance/receipts/basics)
+- [ЮKassa: история изменений и прекращение сервиса чеков НПД 29.12.2025](https://yookassa.ru/developers/using-api/changelog)
 - [ЮKassa: отправка чеков по 54-ФЗ](https://yookassa.ru/docs/support/merchant/payments/implement/online-sales-register)
+- [ФНС: вопросы и ответы по НПД и информационному обмену](https://npd.nalog.ru/faq/)
+- [ФНС: протокол информационного обмена с уполномоченными партнёрами](https://npd.nalog.ru/html/sites/www.npd.nalog.ru/infexch.pdf)
+- [ФНС: формирование и передача чека НПД](https://www.nalog.gov.ru/rn53/news/activities_fts/14618624/)
+- [ФНС: аннулирование и исправление чека НПД](https://www.nalog.gov.ru/rn08/news/activities_fts/16626196/)
 
 ### 7.7. Рыночные ориентиры
 

@@ -1,20 +1,63 @@
-# Маркетинговый сайт, Directus и административная панель
+# Единый web-сайт, Toolbox, Directus и административная панель
 
 ## 1. Доменные зоны
 
 Шаблон:
 
-- `example.com` — маркетинговый сайт;
-- `app.example.com` — приложение;
+- `example.com` — единый web-продукт;
+- `example.com/app` — защищённое приложение;
+- `example.com/tools` — индексируемый публичный Toolbox;
+- `example.com/docs` — документация продукта;
+- `example.com/docs/api` — документация публичного API;
 - `admin.example.com` — внутренняя админка;
-- `api.example.com` — API gateway;
-- `docs.example.com` — документация;
+- `api.example.com` — machine API gateway и OpenAPI JSON;
 - `status.example.com` — status page;
 - `assets.example.com` — публичные оптимизированные assets при необходимости.
 
 Бренд и фактический домен не фиксируются.
 
-## 2. Цели маркетингового сайта
+Все пользовательские web-маршруты принадлежат одному Next.js repository и
+одной дизайн-системе. Это не отменяет серверную проверку сессии, tenant context
+и permissions на `/app`.
+
+## 2. Маршрутные и индексирующие зоны
+
+### 2.1. Публичная зона
+
+Публичные индексируемые маршруты:
+
+- `/`;
+- `/features/**`;
+- `/integrations/**`;
+- `/pricing`;
+- `/articles/**`;
+- `/cases/**`;
+- `/tools`;
+- `/tools/{toolSlug}`;
+- `/docs/**`, включая `/docs/api/**`;
+- локализованные эквиваленты.
+
+Страницы результатов публичных инструментов, preview, пользовательские query
+parameters и временные share URL по умолчанию не индексируются. Индексируется
+посадочная страница инструмента с редакционным описанием и статическим примером,
+а не произвольно сгенерированный пользователем результат.
+
+### 2.2. Зона приложения
+
+Все маршруты `/app`:
+
+- требуют сессию, кроме контролируемого auth flow;
+- возвращают `X-Robots-Tag: noindex, nofollow, noarchive`;
+- имеют Next.js metadata `robots: noindex, nofollow`;
+- перечислены в `robots.txt` как `Disallow: /app`;
+- не попадают в sitemap, RSS, внутренний публичный поиск и публичный cache;
+- используют `Cache-Control: private, no-store` для tenant-данных.
+
+Отсутствие сессии приводит к redirect на вход с безопасным `returnTo`, а не к
+рендерингу данных в HTML. Защита маршрута не считается проверкой permissions:
+каждый API-запрос отдельно проверяет workspace/project access.
+
+## 3. Цели публичного сайта
 
 - объяснить ценность продукта;
 - конвертировать посетителя в регистрацию/trial/demo;
@@ -25,8 +68,11 @@
 - собирать заявки enterprise;
 - поддерживать локализованные landing pages;
 - сообщать об обновлениях.
+- давать полезные бесплатные SEO-инструменты с низким порогом входа;
+- конвертировать результат публичного инструмента в регистрацию и проект;
+- публиковать версионированную документацию и примеры публичного API.
 
-## 3. Страницы сайта
+## 4. Страницы сайта
 
 Обязательные:
 
@@ -58,8 +104,13 @@
 - Acceptable use;
 - 404/500;
 - search.
+- Toolbox catalog;
+- отдельная SEO-страница каждого инструмента;
+- API overview, authentication, quick start, errors, pagination и webhooks;
+- API reference по capability;
+- OpenAPI download и changelog API.
 
-## 4. SEO сайта
+## 5. SEO сайта
 
 Для каждой индексируемой страницы:
 
@@ -90,14 +141,102 @@
 - responsive images;
 - no orphan marketing pages;
 - automated broken link checks.
+- автоматическая проверка, что `/app`, временные результаты и preview не
+  попали в sitemap или индексируемый route manifest;
+- уникальный редакционный текст для страницы каждого Toolbox-инструмента;
+- отсутствие массовой генерации thin pages по введённым URL/ключам;
+- schema.org `SoftwareApplication`/`WebApplication` для Toolbox только там,
+  где разметка соответствует видимому содержимому.
 
-## 5. CMS Directus
+## 6. Публичный Toolbox
+
+### 6.1. Принцип общей реализации
+
+Публичный и проектный Toolbox не являются отдельными наборами функций.
+`ToolCapability` определяет:
+
+- стабильный `code` и версию;
+- локализуемое название и описание;
+- input/output JSON Schema;
+- доступность anonymous/free/paid;
+- требуемые providers;
+- синхронный preview и асинхронный run;
+- estimate/cost unit;
+- rate limits и max input;
+- retention результата;
+- возможность сохранить результат в проект;
+- API operation IDs;
+- UI renderer и состояния.
+
+Один domain handler используется маршрутами:
+
+- `/tools/{toolSlug}` — публичный сценарий;
+- `/app/.../projects/{projectId}/tools/{toolSlug}` — проектный сценарий;
+- `api.example.com/v1/tools/{toolCode}/...` — API.
+
+Публичный результат временный и не содержит project data. После входа
+пользователь может явно сохранить совместимый результат в выбранный проект.
+Проектный запуск сохраняет provenance, job, стоимость и историю в tenant scope.
+
+### 6.2. Стартовый каталог
+
+- проверка HTTP status/redirect chain;
+- preview title/description/H1/canonical/robots;
+- проверка indexability одного URL;
+- robots.txt tester;
+- sitemap validator;
+- SERP snippet preview;
+- нормализация и очистка небольшого списка ключей;
+- удаление явных/неявных дублей;
+- word/character/n-gram counter;
+- кластеризация, частотность, SERP и другие платные инструменты после входа,
+  estimate и подтверждения стоимости.
+
+Каталог расширяется capability registry без создания отдельной архитектуры.
+
+### 6.3. Anonymous abuse protection
+
+- IP/device/account limits;
+- CAPTCHA только после risk threshold;
+- малые hard limits input;
+- SSRF-защита URL-инструментов;
+- отдельный низкоприоритетный queue class;
+- cache безопасных нормализованных результатов;
+- запрет browser rendering для anonymous по умолчанию;
+- платные provider calls только после входа и явного подтверждения;
+- один anonymous tenant не может вытеснить project jobs.
+
+## 7. Документация публичного API
+
+Документация находится на `/docs/api` в том же web-продукте, но имеет отдельную
+навигацию и visual mode. Она включает:
+
+- quick start;
+- создание и rotation API token;
+- scopes и workspace/project restrictions;
+- authentication и security;
+- rate limits и quota headers;
+- idempotency;
+- estimate → approve → job → result flow;
+- все SEO capabilities;
+- imports/exports;
+- webhooks;
+- error catalog;
+- SDK/examples для TypeScript, Python, cURL;
+- OpenAPI version selector и migration guides;
+- API status/changelog.
+
+Reference генерируется из versioned OpenAPI в `platform-contracts`; Directus
+хранит guides, tutorials и пояснения, но не дублирует схемы вручную. API
+Explorer не сохраняет токен в CMS, analytics или server logs.
+
+## 8. CMS Directus
 
 Directus управляет только контентом маркетингового сайта и документационными материалами. Он не является источником истины для пользователей, проектов, billing и jobs приложения.
 
-## 6. Directus collections
+## 9. Directus collections
 
-### 6.1. Настройки
+### 9.1. Настройки
 
 `site_settings`:
 
@@ -111,7 +250,7 @@ Directus управляет только контентом маркетинго
 - contact;
 - maintenance banner.
 
-### 6.2. Локали
+### 9.2. Локали
 
 `locales`:
 
@@ -123,7 +262,7 @@ Directus управляет только контентом маркетинго
 - direction;
 - date/number settings.
 
-### 6.3. Страницы
+### 9.3. Страницы
 
 `pages`:
 
@@ -148,7 +287,7 @@ Directus управляет только контентом маркетинго
 - SEO relation;
 - navigation label.
 
-### 6.4. SEO
+### 9.4. SEO
 
 `seo_meta`:
 
@@ -163,7 +302,7 @@ Directus управляет только контентом маркетинго
 - sitemap priority/changefreq;
 - exclude from sitemap.
 
-### 6.5. Блоки
+### 9.5. Блоки
 
 Используется block registry, а не произвольный HTML.
 
@@ -203,7 +342,7 @@ Directus управляет только контентом маркетинго
 - schedule;
 - audience/experiment optional.
 
-### 6.6. Навигация
+### 9.6. Навигация
 
 - menus;
 - menu items;
@@ -214,7 +353,7 @@ Directus управляет только контентом маркетинго
 - visibility;
 - auth state.
 
-### 6.7. Контент
+### 9.7. Контент
 
 - articles;
 - article translations;
@@ -230,8 +369,10 @@ Directus управляет только контентом маркетинго
 - feature catalog;
 - comparison pages;
 - legal documents.
+- tool landing content, examples and FAQs;
+- API guides/tutorials/changelog, но не generated reference schemas.
 
-### 6.8. Формы
+### 9.8. Формы
 
 - form definitions;
 - fields;
@@ -243,7 +384,7 @@ Directus управляет только контентом маркетинго
 
 Sensitive submissions имеют отдельные permissions и retention.
 
-### 6.9. Redirects
+### 9.9. Redirects
 
 - source;
 - destination;
@@ -255,7 +396,7 @@ Sensitive submissions имеют отдельные permissions и retention.
 
 Проверяются loops и chains.
 
-## 7. Editorial workflow
+## 10. Editorial workflow
 
 Статусы:
 
@@ -287,7 +428,7 @@ Sensitive submissions имеют отдельные permissions и retention.
 
 Directus content versioning используется для draft variants и rollback.
 
-## 8. Pricing на сайте
+## 11. Pricing на сайте
 
 Фактические тарифы и цены принадлежат billing service.
 
@@ -301,7 +442,7 @@ Directus content versioning используется для draft variants и ro
 
 CMS не может изменить фактическую сумму списания.
 
-## 9. Интеграции на сайте
+## 12. Интеграции на сайте
 
 Каталог содержит:
 
@@ -317,7 +458,7 @@ CMS не может изменить фактическую сумму спис�
 
 Техническая availability синхронизируется из integration registry, маркетинговый текст — из Directus.
 
-## 10. Preview
+## 13. Preview
 
 - CMS preview использует подписанный short-lived token.
 - Preview URL имеет noindex.
@@ -325,7 +466,7 @@ CMS не может изменить фактическую сумму спис�
 - Preview показывает locale и responsive mode.
 - Сотрудник не должен логиниться в production app для просмотра CMS preview.
 
-## 11. Сайт: состояния
+## 14. Web-состояния
 
 - published;
 - scheduled;
@@ -340,14 +481,20 @@ CMS не может изменить фактическую сумму спис�
 - pricing API unavailable;
 - 404;
 - 500.
+- anonymous tool ready/running/rate-limited;
+- tool result ready/expired;
+- sign-in required to increase limits;
+- save-to-project chooser;
+- API schema version unavailable;
+- `/app` unauthenticated/forbidden/read-only.
 
-## 12. Внутренняя административная панель
+## 15. Внутренняя административная панель
 
 Собственное Next.js-приложение на `admin.example.com`.
 
 Доступно только platform roles. Доступ защищён обязательной 2FA, IP/risk policies и отдельным audit.
 
-## 13. Разделы admin
+## 16. Разделы admin
 
 ### Dashboard
 
@@ -508,7 +655,7 @@ CMS не может изменить фактическую сумму спис�
 - environment config references;
 - status page incident controls.
 
-## 14. Опасные admin-действия
+## 17. Опасные admin-действия
 
 Требуют step-up authentication и reason:
 
@@ -524,12 +671,12 @@ CMS не может изменить фактическую сумму спис�
 
 Некоторые действия требуют four-eyes approval выше настраиваемого порога.
 
-## 15. Status page
+## 18. Status page
 
 Компоненты:
 
-- marketing site;
-- app;
+- public web/Toolbox/docs;
+- `/app`;
 - API;
 - jobs;
 - integrations by provider group;
@@ -544,4 +691,3 @@ Incident:
 - resolved.
 
 Публичный status не раскрывает внутренние детали и секреты.
-

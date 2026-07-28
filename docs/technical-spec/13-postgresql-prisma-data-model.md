@@ -358,6 +358,46 @@ DB constraint/trigger или application invariant гарантирует бал
 - action;
 - version.
 
+#### `payments`, `refunds`
+
+- provider и immutable external ID;
+- workspace/subscription/order reference;
+- gross amount/currency;
+- status;
+- payment method type;
+- succeeded/cancelled/refunded timestamps;
+- verified provider payload reference;
+- reconciliation state;
+- idempotency/version.
+
+Unique `(provider, external_id)`. Provider payload целиком при необходимости
+хранится зашифрованно/S3 по retention, а не в audit.
+
+#### `npd_receipt_obligations`
+
+Таблица создаётся только для receipt workflow платежей ЮKassa:
+
+- id;
+- payment_id unique;
+- yookassa_payment_id unique;
+- gross_amount_minor/currency;
+- paid_at;
+- service_description_snapshot;
+- buyer_type;
+- buyer_name/inn;
+- delivery_email/phone encrypted or access-controlled;
+- registration_mode;
+- status;
+- official_receipt_id/url;
+- artifact_object_key;
+- registered_at/delivered_at;
+- delivery_attempts;
+- cancellation_reason;
+- replacement_receipt_id;
+- audit timestamps/version.
+
+Не хранит логин, пароль, access token или session cookies «Мой налог».
+
 ### 4.6. Platform API/webhooks
 
 #### `api_clients`
@@ -583,6 +623,42 @@ Unique `(project_id, url_normalized)`.
 
 Append-only technical/content snapshots.
 
+#### `radar_configurations`, `radar_runs`
+
+- scope/view/sitemap;
+- interval/timezone/window;
+- requests_per_minute/concurrency;
+- max URLs/runtime;
+- field watch rules;
+- own/competitor host policy;
+- backoff/paused state;
+- last/next run;
+- immutable run settings snapshot.
+
+#### `page_changes`
+
+- project/page/snapshot IDs;
+- field/rule;
+- before/after normalized value or S3 reference;
+- before/after hashes;
+- severity;
+- detected_at;
+- acknowledged/resolved state;
+- notification reference.
+
+Append-only evidence не переписывается при acknowledgement.
+
+#### `generated_sitemaps`, `generated_sitemap_files`
+
+- project/config/version;
+- source snapshot;
+- status;
+- URL counts;
+- validation summary;
+- checksum/object key;
+- generated/published/submitted timestamps;
+- previous version relation.
+
 ### 5.4. Tracking
 
 #### `tracking_contexts`
@@ -775,6 +851,21 @@ Partition monthly.
 - engagement;
 - conversions;
 - revenue + currency.
+
+#### `magnet_proposals`, `magnet_proposal_items`
+
+- project;
+- source connection/property/date/dimensions snapshot;
+- item query/page and normalized key;
+- source metrics JSON с field-level provenance;
+- classification `NEW/EXISTING/CONFLICT/IGNORED`;
+- selected/published state;
+- target group/page;
+- resulting keyword ID;
+- created/expires/published timestamps.
+
+Unique source identity делает повторный sync идемпотентным. Proposal item не
+заменяет канонические analytics snapshots.
 
 ### 5.10. Issues и версии
 
@@ -1104,6 +1195,18 @@ if (result.count !== 1) {
 
 Retention не должен нарушать юридические обязательства и active report snapshots.
 
+Обязательная продуктовая политика:
+
+- проекты не удаляются по billing timeout, нулевому балансу или downgrade;
+- parsed/aggregate rank, frequency и analytics history хранится без
+  фиксированного срока, пока существует workspace;
+- read-only workspace продолжает читать агрегированную историю;
+- raw SERP/provider payload/HTML/browser artifacts имеют отдельный
+  `expires_at` по plan snapshot и удаляются partition/object lifecycle job;
+- удаление пользователем проходит grace period и отдельный deletion manifest;
+- financial, payment и NPD receipt records сохраняются по юридической policy,
+  даже если пользовательские данные должны быть минимизированы/анонимизированы.
+
 ## 14. Backup и восстановление
 
 - ежедневный full backup;
@@ -1113,4 +1216,3 @@ Retention не должен нарушать юридические обязат
 - object storage versioning/replication;
 - отдельный backup Directus;
 - документированный порядок восстановления согласованности event projections.
-

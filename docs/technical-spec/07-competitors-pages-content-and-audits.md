@@ -86,6 +86,9 @@
 - появление SERP feature;
 - смена ranking page.
 
+Изменения содержимого и технических полей URL отслеживаются Radar-модулем из
+раздела 10.4. Мониторинг SERP и Radar не смешиваются в один тип snapshot.
+
 ## 2. Карта страниц проекта
 
 ### 2.1. Сущность Page
@@ -382,6 +385,109 @@ Views:
 - content-type allowlist;
 - per-domain rate limit.
 
+### 10.4. Radar: управляемый мониторинг изменений
+
+Radar запускает повторный обход собственного сайта и явно добавленных страниц
+конкурентов. Пользователь настраивает:
+
+- scope: sitemap, page view, URL list, include/exclude patterns;
+- интервал и timezone;
+- допустимые часы обхода;
+- скорость: requests per minute и concurrency;
+- max URLs/run и max runtime;
+- desktop/mobile user agent profile;
+- conditional requests;
+- уведомляемые поля и пороги;
+- получателей и quiet hours.
+
+Сравниваются:
+
+- HTTP status и redirect chain;
+- title, description, H1 и headings;
+- canonical, robots, hreflang;
+- structured data;
+- content hash и значимые текстовые изменения;
+- internal/external links;
+- indexability;
+- response time и размер;
+- появление/исчезновение URL в sitemap.
+
+Каждый запуск создаёт immutable `page_snapshot`; изменение создаёт
+`page_change` с before/after hash, нормализованным diff, severity, источником и
+ссылкой на job. Большой HTML хранится в S3 по отдельному retention, а
+агрегированный change history — долговременно.
+
+#### Politeness и защита доступности
+
+- `robots.txt` соблюдается; для конкурентов его обход запрещён без исключений;
+- используется идентифицируемый User-Agent с contact URL;
+- default rate консервативен, увеличение проходит warning и plan limits;
+- per-host distributed token bucket учитывает все workspaces;
+- одновременно для host выполняется не более одного Radar/crawl job, если
+  policy не разрешает иное;
+- `ETag`, `Last-Modified`, sitemap `lastmod` и content hash используются для
+  пропуска неизменившихся ресурсов;
+- `429`, `503`, рост latency и connection errors включают exponential backoff,
+  уменьшают concurrency и могут перевести host в `PAUSED_BY_SITE`;
+- timeout, response-size, redirect и download budgets ограничены;
+- JS rendering выключен по умолчанию, тарифицируется отдельно и выполняется в
+  изолированном browser worker pool;
+- anonymous Toolbox не использует Radar worker pool;
+- API никогда не ждёт crawl синхронно: создаётся job;
+- global crawl concurrency, CPU/memory limits и fair scheduling гарантируют,
+  что Radar не вытесняет rankings, billing и интерактивные операции.
+
+Состояния Radar:
+
+- `NOT_CONFIGURED`;
+- `SCHEDULED`;
+- `QUEUED`;
+- `RUNNING`;
+- `BACKING_OFF`;
+- `PAUSED_BY_USER`;
+- `PAUSED_BY_SITE`;
+- `PARTIAL`;
+- `COMPLETED`;
+- `FAILED`;
+- `READ_ONLY_BILLING`.
+
+### 10.5. Генератор sitemap
+
+Источник URL:
+
+- page map;
+- успешный crawl;
+- импорт;
+- Search Console/Вебмастер;
+- ручной список;
+- сохранённый page view.
+
+Wizard:
+
+1. источник и scope;
+2. include/exclude rules;
+3. canonical/indexability/status validation;
+4. правила `lastmod`;
+5. локали/hreflang;
+6. разбиение файлов и sitemap index;
+7. preview warnings;
+8. generate/download/publish.
+
+Требования:
+
+- не более 50 000 URL и 50 MB uncompressed на один sitemap;
+- превышение автоматически создаёт sitemap index;
+- включаются только canonical indexable URL с допустимым HTTP status;
+- `lastmod` указывается только при наличии достоверного источника изменения;
+- gzip optional;
+- результат версионируется, имеет checksum и хранится в S3;
+- publish на сайт выполняется только через отдельно подтверждённую CMS/storage
+  integration; по умолчанию доступно скачивание;
+- поддерживается отправка/повторная отправка в Search Console и Вебмастер;
+- показывается diff с предыдущей версией;
+- пользователь может включить автообновление после успешного Radar/crawl, но
+  публикация не происходит при critical validation errors.
+
 ## 11. Технические issues
 
 Категории:
@@ -484,4 +590,3 @@ Bulk actions:
 - archived page;
 - collaborator editing;
 - permission restricted.
-

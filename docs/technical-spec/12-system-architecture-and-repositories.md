@@ -20,8 +20,7 @@
 ```mermaid
 flowchart LR
     U["Пользователь"] --> T["Traefik / Dokploy"]
-    T --> WEB["Marketing Next.js"]
-    T --> APP["App Next.js"]
+    T --> WEB["Unified Next.js / public + /app + docs"]
     T --> ADM["Admin Next.js"]
     T --> API["Platform API / Gateway"]
     T --> RT["Realtime service"]
@@ -51,19 +50,14 @@ flowchart LR
 
 ## 3. Репозитории
 
-### 3.1. `platform-marketing`
+### 3.1. `platform-web`
 
-- Next.js marketing site;
-- Directus SDK;
-- localized pages;
-- SEO;
-- forms;
-- preview;
-- tests.
-
-### 3.2. `platform-app`
-
-- Next.js application;
+- единый Next.js web-продукт;
+- публичный сайт, статьи и локализованные SEO-страницы;
+- индексируемый `/tools` и временные noindex tool results;
+- `/docs` и generated `/docs/api`;
+- защищённое приложение в `/app`;
+- Directus SDK только в public/docs server boundary;
 - design system package;
 - TanStack Query/Table/Virtual;
 - ECharts;
@@ -72,7 +66,22 @@ flowchart LR
 - Socket.IO/Hocuspocus clients;
 - Playwright.
 
-### 3.3. `platform-admin`
+Route groups обязаны изолировать caching и data access:
+
+- `app/(public)` — cacheable/ISR страницы без tenant data;
+- `app/tools` — индексируемый каталог и public tool UI;
+- `app/docs` — документация;
+- `app/app` — authenticated, private/no-store;
+- server-only Directus client не импортируется в client bundles;
+- project Toolbox и public Toolbox используют общий generated API client и
+  capability metadata, а не дублируют бизнес-логику.
+
+На старте это один deployable. При росте одно и то же image может запускаться
+двумя runtime profiles за path-based routing (`public` и `app`), чтобы всплеск
+SEO-трафика или anonymous Toolbox не снижал доступность `/app`. Кодовая база,
+домен и release artifact при этом остаются общими.
+
+### 3.2. `platform-admin`
 
 - Next.js internal admin;
 - отдельный auth audience;
@@ -80,7 +89,7 @@ flowchart LR
 - high-risk action confirmation;
 - audit views.
 
-### 3.4. `platform-api`
+### 3.3. `platform-api`
 
 NestJS:
 
@@ -94,11 +103,12 @@ NestJS:
 - support/admin API;
 - audit;
 - API keys/webhooks registry;
+- public Toolbox orchestration и anonymous entitlement;
 - orchestration to other services.
 
 Database: `platform_db`.
 
-### 3.5. `platform-seo-data`
+### 3.4. `platform-seo-data`
 
 NestJS:
 
@@ -111,12 +121,14 @@ NestJS:
 - SERP parsed data;
 - analytics aggregates;
 - issues;
+- Radar page snapshots/diffs и sitemap models;
+- Magnet staging/read models;
 - versioning;
 - heavy domain queries.
 
 Database: `seo_db`.
 
-### 3.6. `platform-jobs-integrations`
+### 3.5. `platform-jobs-integrations`
 
 NestJS monorepo/repository с несколькими entrypoints:
 
@@ -127,6 +139,10 @@ NestJS monorepo/repository с несколькими entrypoints:
 - frequency worker;
 - competitor worker;
 - crawl worker;
+- Radar scheduler/polite crawl worker;
+- sitemap generation worker;
+- Magnet sync worker;
+- public Toolbox low-priority worker profile;
 - report worker;
 - connector registry;
 - credential broker client;
@@ -136,7 +152,7 @@ Database: `jobs_db`; Redis/BullMQ; S3.
 
 Workers развёртываются независимо из одного репозитория и одного или нескольких image targets.
 
-### 3.7. `platform-realtime`
+### 3.6. `platform-realtime`
 
 - NestJS Socket.IO gateway;
 - Redis adapter;
@@ -148,7 +164,7 @@ Workers развёртываются независимо из одного ре
 
 Database: `realtime_db`; Redis; S3.
 
-### 3.8. `platform-contracts`
+### 3.7. `platform-contracts`
 
 Отдельный versioned repository/package registry:
 
@@ -162,7 +178,7 @@ Database: `realtime_db`; Redis; S3.
 
 Не содержит доменной бизнес-логики.
 
-### 3.9. `platform-infrastructure`
+### 3.8. `platform-infrastructure`
 
 - Dokploy Compose/Stack definitions;
 - environment templates;
@@ -173,6 +189,10 @@ Database: `realtime_db`; Redis; S3.
 - runbooks;
 - disaster recovery;
 - migration orchestration.
+
+`platform-marketing` и `platform-app` являются миграционными источниками до
+завершения переноса в `platform-web`. Новая функциональность в них не
+добавляется. Их Git history сохраняется до верифицированной консолидации.
 
 ## 4. Почему сервисов четыре
 
@@ -212,6 +232,8 @@ Backend ограничивается:
 - Tiptap;
 - i18n library;
 - accessible UI primitives.
+- один web repository для public/docs/tools и `/app`;
+- route-level cache/security policies вместо двух расходящихся frontend.
 
 ### Backend
 

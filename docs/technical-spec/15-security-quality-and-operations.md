@@ -242,6 +242,15 @@ VPS делятся на роли:
 - CORS разрешает только известные origins; credentials не сочетаются с `*`.
 - GraphQL не вводится без отдельной необходимости и threat model.
 - Source maps production доступны только error-monitoring backend.
+- `/app/**` возвращает `X-Robots-Tag: noindex, nofollow, noarchive`, private
+  metadata и `Cache-Control: private, no-store`;
+- `/app` исключён из sitemap/public search и закрыт `robots.txt`, но security
+  не полагается на robots directive;
+- публичные Toolbox results, preview и tokenized URLs имеют noindex и не
+  создают user-generated SEO pages;
+- server-only Directus/application clients не попадают в browser bundle;
+- единый основной домен не означает общий cache: public и `/app` имеют
+  разные cache keys/policies и automated tenant leak tests.
 
 ## 14. API security
 
@@ -476,7 +485,10 @@ Maintenance, внешние provider outages и force majeure учитывают
 - Firefox;
 - Safari.
 
-Mobile Safari/Chrome поддерживают marketing site, guest reports и dashboard/read flows. Полноценная работа с многомиллионной семантической таблицей на телефоне не является обязательной; интерфейс показывает адаптированные действия.
+Mobile Safari/Chrome поддерживают public web, Toolbox, guest reports и
+dashboard/read flows. Полноценная работа с многомиллионной семантической
+таблицей на телефоне не является обязательной; интерфейс показывает
+адаптированные действия.
 
 ## 24. Стратегия тестирования
 
@@ -729,6 +741,16 @@ Page-worthy:
 
 Порог расширения определяется заранее. До достижения 70–80% устойчивой ёмкости создаётся capacity task.
 
+Radar/crawler capacity:
+
+- отдельные worker concurrency и autoscaling limits;
+- per-host token bucket поверх per-tenant fair queue;
+- reserved capacity для billing/security/interactive jobs;
+- JS rendering в отдельном browser pool;
+- emergency global pause без остановки API и чтения результатов;
+- alert по queue lag, host backoff, CPU, memory, open sockets и egress;
+- public Toolbox не использует paid/crawl reserved concurrency.
+
 ## 34. Dokploy requirements
 
 - Все production services описаны Compose/конфигурацией в infrastructure repo.
@@ -789,6 +811,20 @@ Page-worthy:
 5. tombstone/event;
 6. backup expiry по retention;
 7. audit completion.
+
+Billing read-only не является стадией удаления. Окончание подписки, нулевой
+баланс и downgrade никогда не запускают шаги project deletion. Они блокируют
+только новые расходы/изменения и сохраняют чтение.
+
+Для платежей ЮKassa в режиме НПД:
+
+- запрещено хранить credentials/session «Мой налог»;
+- ручная регистрация требует platform-admin MFA и audit;
+- официальный receipt URL/ID сверяется с payment amount и buyer snapshot;
+- receipt delivery contact защищается как PII;
+- webhook payload ЮKassa проходит authentication, idempotency и reconciliation;
+- чек не отменяется до подтверждённого refund;
+- automated adapter разрешён только при официальном доступе ФНС/оператора.
 
 ## 37. Operational admin
 

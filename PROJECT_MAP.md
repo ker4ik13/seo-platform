@@ -1,8 +1,8 @@
 # Карта проекта
 
 Последнее обновление: 28 июля 2026 года  
-Текущий инкремент: Foundation M1  
-Статус: завершён и проверен; следующий срез — Identity/Workspace/Project
+Текущий инкремент: Unified Web + Identity M2
+Статус: web-архитектура консолидируется; Identity/Workspace/Project в работе
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -18,6 +18,10 @@
 - Email подключается через port/adapter и может быть выключен.
 - Frontend не обращается к domain services напрямую: публичный вход — platform API.
 - Platform-paid SEO API запрещён без price book, budget и коммерческого права.
+- Основной домен обслуживает единый `platform-web`; `/app` private/noindex.
+- Public/project Toolbox и API используют один capability registry.
+- Billing никогда автоматически не удаляет проекты и не скрывает историю.
+- Чек НПД создаётся только для verified успешного платежа ЮKassa.
 
 ## 2. Development workspace
 
@@ -30,9 +34,8 @@
 | `platform-seo-data` | semantics, pages, positions, competitors | да |
 | `platform-jobs-integrations` | jobs, workers, connectors, S3/email ports | несколько entrypoints |
 | `platform-realtime` | WebSocket presence/collaboration delivery | да |
-| `platform-app` | основное пользовательское приложение | да |
+| `platform-web` | public site, Toolbox, API docs и приложение `/app` | да |
 | `platform-admin` | внутренняя административная панель | да |
-| `platform-marketing` | маркетинговый сайт и Directus client | да |
 | `platform-infrastructure` | Compose/Dokploy, monitoring, runbooks | конфигурация |
 | `docs/technical-spec` | нормативное ТЗ | нет |
 | `semaflow-seo-platform-design` | исходный статический дизайн-прототип | нет |
@@ -40,9 +43,9 @@
 ## 3. Текущие связи
 
 ```text
-platform-app ───────┐
-platform-admin ─────┼──> platform-api
-platform-marketing ─┘          │
+platform-web ──────┐
+platform-admin ────┼──> platform-api
+                               │
                                ├──> platform-seo-data
                                ├──> platform-jobs-integrations
                                └──> platform-realtime
@@ -50,7 +53,7 @@ platform-marketing ─┘          │
 all backend services <──> NATS
 jobs/realtime <──> Redis
 jobs <──> S3
-marketing <──> Directus
+platform-web public/docs <──> Directus
 ```
 
 Пока межсервисная бизнес-коммуникация не включена: подключены transport и
@@ -61,8 +64,7 @@ health/readiness, таблицы outbox/inbox созданы. Публикаци
 
 | Компонент | Порт |
 |---|---:|
-| marketing | 3000 |
-| app | 3001 |
+| unified web | 3000 |
 | admin | 3002 |
 | platform-api | 4000 |
 | seo-data | 4001 |
@@ -100,7 +102,7 @@ Backend convention:
 - `platform-jobs-integrations/src/storage` — S3 port, disabled и S3 adapters;
 - `platform-jobs-integrations/src/email` — email port, disabled и SMTP adapters;
 - `platform-realtime/src/realtime` — Socket.IO gateway и Redis adapter;
-- `platform-*/app` — Next.js App Router screens;
+- `platform-web/app` — public, tools, docs и private `/app` App Router screens;
 - `platform-*/lib` и `components` — adapters и переиспользуемые UI-части;
 - `platform-infrastructure/docker` — reusable backend/web images;
 - `platform-infrastructure/postgres/init` — создание service databases.
@@ -124,7 +126,7 @@ Entrypoints:
 | NATS/Redis wiring | foundation |
 | S3/email ports | foundation |
 | Realtime public gateway | foundation |
-| App/Admin/Marketing shells | foundation |
+| Unified Web/Admin shells | vertical slice |
 | Auth/workspaces/projects | planned |
 | Semantics/import | planned |
 | Rankings/integrations | planned |
@@ -133,7 +135,7 @@ Entrypoints:
 
 Foundation содержит четыре валидные Prisma schemas и начальные migrations,
 health/readiness, Redis/BullMQ, NATS transport, S3/SMTP adapters, fail-closed
-WebSocket gateway, три адаптивных frontend shell и Dokploy Compose.
+WebSocket gateway, unified web/admin shell и Dokploy Compose.
 
 ## 8. Проверенное состояние
 
@@ -142,7 +144,8 @@ WebSocket gateway, три адаптивных frontend shell и Dokploy Compose
 - TypeScript strict typecheck: pass для 8 пакетов.
 - Unit tests: 8 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
-- Next.js production build: pass для app/admin/marketing.
+- Unified Next.js production build: pass; проверены public site, Toolbox,
+  API docs и private `/app`.
 - Compose config: pass с `.env.example`.
 - Visual QA: 1440, 1024 и 390 px; horizontal overflow не найден.
 - Target runtime: Node.js 24. Локальная проверка выполнялась на Node.js 22 с
@@ -164,6 +167,8 @@ WebSocket gateway, три адаптивных frontend shell и Dokploy Compose
 - Нет production observability, backup/restore и secret rotation runbooks.
 - Directus collection schema и seed появятся вместе с CMS vertical slice.
 - SEO connectors, тарификация и YooKassa пока присутствуют только в ТЗ/схемах.
+- `platform-app` сохранён как legacy Git-источник до проверки переноса; новая
+  функциональность добавляется только в `platform-web`.
 
 ## 11. Правило обновления карты
 

@@ -419,6 +419,33 @@ Resumable upload должен переживать перезагрузку вк
 - `/billing/checkout`;
 - `/billing/top-ups`;
 - `/billing/invoices`;
+- `/billing/yookassa/npd-receipts`;
+- `/billing/yookassa/npd-receipts/{receiptId}`;
+- `/billing/yookassa/npd-receipts/{receiptId}/register-manual`;
+- `/billing/yookassa/npd-receipts/{receiptId}/deliver`;
+- `/billing/yookassa/npd-receipts/{receiptId}/cancel`;
+
+### 13.9. Toolbox, Radar, sitemap и Magnet
+
+- `/tool-capabilities`;
+- `/tools/{toolCode}/estimate`;
+- `/tools/{toolCode}/run`;
+- `/tools/{toolCode}/jobs/{jobId}`;
+- `/public/tools/{toolCode}/run` — только anonymous-safe capabilities;
+- `/projects/{projectId}/tools/{toolCode}/run`;
+- `/projects/{projectId}/radar/configurations`;
+- `/projects/{projectId}/radar/runs`;
+- `/projects/{projectId}/page-changes`;
+- `/projects/{projectId}/sitemaps`;
+- `/projects/{projectId}/sitemaps/generate`;
+- `/projects/{projectId}/magnet/estimate`;
+- `/projects/{projectId}/magnet/sync`;
+- `/projects/{projectId}/magnet/proposals`;
+- `/projects/{projectId}/magnet/proposals/{id}/publish`.
+
+Capability endpoint является источником доступности для public Toolbox,
+project Toolbox, API docs и generated clients. UI не поддерживает отдельный
+скрытый endpoint, отсутствующий в OpenAPI.
 
 ## 14. Bulk API
 
@@ -443,7 +470,9 @@ Bulk update принимает:
 
 ## 15. Public API
 
-Публичный API предоставляется отдельным feature/тарифом.
+Базовый публичный API всех доступных SEO-инструментов включён во все платные
+тарифы. Тариф определяет quota, concurrency, retention и advanced scopes, но
+не создаёт искусственную доплату только за API-доступ.
 
 Требования:
 
@@ -458,6 +487,22 @@ Bulk update принимает:
 - rotation без немедленного разрыва старого ключа;
 - запрет возвращать provider credentials;
 - pagination и async job модель идентичны основному API.
+- каждый UI tool имеет публичный API operation либо явно документирован как
+  локальная presentation-only функция;
+- estimate, billing reservation, provenance и project permissions одинаковы
+  для UI и API;
+- anonymous `/public/tools` не является пользовательским API: он имеет малые
+  IP limits, отдельную очередь и не принимает API tokens;
+- Trial получает sandbox/ограниченный read API без системных платных расходов.
+
+Документация:
+
+- индексируемый портал — `https://example.com/docs/api`;
+- versioned reference генерируется из `platform-contracts`;
+- OpenAPI JSON — `https://api.example.com/openapi/v1.json`;
+- интерактивный Explorer хранит token только в памяти вкладки;
+- examples используют синтетические данные;
+- breaking changes публикуются до отключения версии.
 
 ## 16. Межсервисные синхронные вызовы
 
@@ -793,6 +838,7 @@ Provider-specific поля допускаются в namespaced `metadata`, но
 Лимиты применяются на:
 
 - IP для anonymous auth;
+- IP/device для public Toolbox;
 - account/session;
 - API token;
 - workspace;
@@ -811,6 +857,7 @@ Rate limit должен:
 - не списывать средства за не начатую операцию;
 - иметь admin visibility;
 - не позволять одному workspace вытеснить остальных из общей очереди.
+- не позволять anonymous Toolbox использовать reserved paid worker capacity.
 
 ## 25. OpenAPI, AsyncAPI и генерация типов
 
@@ -821,6 +868,7 @@ Rate limit должен:
 - WebSocket event schemas;
 - webhook schemas;
 - JSON Schema фильтров и automation definitions.
+- capability registry schemas, связывающие web Toolbox, project Toolbox и API.
 
 CI:
 

@@ -140,6 +140,7 @@
 - `analytics-sync`;
 - `reports`;
 - `notifications`;
+- `public-toolbox`;
 - `maintenance`.
 
 Workers разделяются по профилю ресурсов:
@@ -171,6 +172,11 @@ Rate limiting настраивается по provider и credential. Нельз
 - per-credential quota;
 - max active chunks per job;
 - plan-based limits.
+- anonymous/public-toolbox имеет отдельные concurrency и quota, всегда ниже
+  project jobs и не может занять зарезервированную paid capacity;
+- crawl/Radar дополнительно ограничивается глобально, per-workspace и per-host;
+- billing, webhook reconciliation и security jobs имеют зарезервированную
+  capacity, недоступную тяжёлым SEO workers.
 
 ## 10. Automation
 
@@ -263,6 +269,9 @@ Automation состоит из:
 - Изменение schedule выполняется upsert без дублирования.
 - Timezone/DST тестируются отдельно.
 - Пропущенный запуск имеет policy: skip, run once, catch up limited.
+- Radar scheduler перед enqueue проверяет per-host budget, active crawl,
+  billing read-only и backoff state; пропущенные crawl-запуски не образуют
+  неограниченную очередь.
 
 ## 14. Интеграции: уровни
 
@@ -518,6 +527,33 @@ Connector учитывает provider quotas и не подменяет офиц
 - inbound automation triggers;
 - retry and delivery log;
 - endpoint verification.
+
+### 21.13. Magnet
+
+Magnet — не новый внешний provider, а orchestration над:
+
+- Google Search Console;
+- Яндекс Вебмастер;
+- Google Analytics 4;
+- Яндекс Метрика.
+
+Сценарий:
+
+1. пользователь выбирает подключения, период, property/site и country/device;
+2. sync job сохраняет source snapshots без смешивания несовместимых метрик;
+3. staging строит объединённое предложение запросов;
+4. запросы помечаются как `NEW`, `EXISTING`, `CONFLICT` или `IGNORED`;
+5. preview показывает query, landing page, impressions, clicks, CTR, average
+   position, sessions/conversions и источник каждого поля;
+6. пользователь фильтрует и выбирает строки;
+7. publish job дедуплицирует их, сохраняет provenance, создаёт/обновляет
+   keywords и при необходимости предлагает group/page mapping;
+8. результат можно запланировать как регулярный discovery, но автоматическое
+   добавление в ядро выключено по умолчанию.
+
+Один provider error создаёт partial result, не уничтожая данные остальных.
+Повторный sync идемпотентен по connection/property/date/dimensions и не создаёт
+дублирующие keywords.
 
 ## 22. Platform-key usage
 
