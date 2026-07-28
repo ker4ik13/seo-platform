@@ -9,6 +9,7 @@ import { SystemModule } from "./system/system.module.js";
 import { UploadModule } from "./uploads/upload.module.js";
 import { SemanticImportModule } from "./imports/semantic-import.module.js";
 import { SemanticModule } from "./semantics/semantic.module.js";
+import { NotificationModule } from "./notifications/notification.module.js";
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { SemanticModule } from "./semantics/semantic.module.js";
     UploadModule,
     SemanticImportModule,
     SemanticModule,
+    NotificationModule,
     SystemModule
   ]
 })

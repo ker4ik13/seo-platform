@@ -5,6 +5,8 @@ export interface TenantAuthorization {
   readonly projectId?: string;
   readonly roleCode: string;
   readonly projectAccessLevel?: "VIEWER" | "MEMBER" | "MANAGER";
+  readonly membershipId?: string;
+  readonly membershipVersion?: number;
 }
 
 export type TenantRequest = AuthenticatedRequest & {

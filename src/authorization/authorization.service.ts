@@ -117,6 +117,8 @@ export class AuthorizationService {
       workspaceId: project.workspaceId,
       projectId,
       roleCode: membership.roleCode,
+      membershipId: membership.id,
+      membershipVersion: membership.version,
       ...(projectAccess
         ? { projectAccessLevel: projectAccess.level }
         : {})
