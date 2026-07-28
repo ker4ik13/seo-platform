@@ -157,3 +157,48 @@ export interface InternalUpdateProjectNotificationSubscriptionInput
   readonly membershipVersion: number;
   readonly version: number;
 }
+
+export interface NotificationListQuery {
+  readonly limit: number;
+  readonly cursor?: string;
+  readonly unreadOnly: boolean;
+}
+
+export interface NotificationResourceReference {
+  readonly type: string;
+  readonly id: string;
+}
+
+export interface NotificationListItem {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly projectId?: string;
+  readonly eventType: NotificationEventType;
+  readonly severity: NotificationSeverity;
+  readonly title: string;
+  readonly body?: string;
+  readonly actorId?: string;
+  readonly resource?: NotificationResourceReference;
+  readonly deepLink?: string;
+  readonly readAt?: string;
+  readonly createdAt: string;
+}
+
+export interface NotificationCursorPage {
+  readonly nextCursor?: string;
+  readonly hasNext: boolean;
+  readonly unreadCount: number;
+}
+
+export interface NotificationCollectionResponse {
+  readonly data: readonly NotificationListItem[];
+  readonly page: NotificationCursorPage;
+  readonly meta: {
+    readonly requestId: string;
+  };
+}
+
+export interface NotificationReadAllResult {
+  readonly updated: number;
+  readonly readAt: string;
+}
