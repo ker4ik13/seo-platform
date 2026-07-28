@@ -48,6 +48,7 @@ enum CredentialMode {
 }
 
 enum CredentialStatus {
+  PENDING_VERIFICATION
   ACTIVE
   DEGRADED
   RATE_LIMITED
@@ -159,28 +160,40 @@ model JobItem {
 }
 
 model IntegrationCredential {
-  id            String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId   String           @map("workspace_id") @db.Uuid
-  provider      String           @db.VarChar(64)
-  label         String           @db.VarChar(160)
-  mode          CredentialMode
-  status        CredentialStatus @default(ACTIVE)
-  ciphertext    Bytes
-  nonce         Bytes
-  authTag       Bytes            @map("auth_tag")
-  keyVersion    Int              @map("key_version")
-  displayHint   String?          @map("display_hint") @db.VarChar(100)
-  capabilities  Json
-  providerMeta  Json?            @map("provider_meta")
-  verifiedAt    DateTime?        @map("verified_at") @db.Timestamptz(6)
-  lastSuccessAt DateTime?        @map("last_success_at") @db.Timestamptz(6)
-  lastErrorAt   DateTime?        @map("last_error_at") @db.Timestamptz(6)
-  version       Int              @default(1)
-  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt     DateTime?        @map("deleted_at") @db.Timestamptz(6)
+  id                    String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId           String           @map("workspace_id") @db.Uuid
+  provider              String           @db.VarChar(64)
+  label                 String           @db.VarChar(160)
+  mode                  CredentialMode
+  status                CredentialStatus @default(PENDING_VERIFICATION)
+  ciphertext            Bytes
+  nonce                 Bytes
+  authTag               Bytes            @map("auth_tag")
+  encryptedDataKey      Bytes            @map("encrypted_data_key")
+  dataKeyNonce          Bytes            @map("data_key_nonce")
+  dataKeyAuthTag        Bytes            @map("data_key_auth_tag")
+  keyVersion            Int              @map("key_version")
+  displayHint           String?          @map("display_hint") @db.VarChar(100)
+  capabilities          Json
+  providerMeta          Json?            @map("provider_meta")
+  idempotencyKey        String           @map("idempotency_key") @db.VarChar(255)
+  requestFingerprint    Bytes            @map("request_fingerprint")
+  fingerprintKeyVersion Int              @map("fingerprint_key_version")
+  createdBy             String?          @map("created_by") @db.Uuid
+  updatedBy             String?          @map("updated_by") @db.Uuid
+  verifiedAt            DateTime?        @map("verified_at") @db.Timestamptz(6)
+  lastSuccessAt         DateTime?        @map("last_success_at") @db.Timestamptz(6)
+  lastErrorAt           DateTime?        @map("last_error_at") @db.Timestamptz(6)
+  version               Int              @default(1)
+  createdAt             DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt             DateTime?        @map("deleted_at") @db.Timestamptz(6)
 
+  @@unique([workspaceId, idempotencyKey])
   @@index([workspaceId, provider, status])
+  @@index([workspaceId, createdAt, id])
+  @@index([keyVersion, deletedAt, id])
+  @@index([fingerprintKeyVersion, deletedAt, id])
   @@map("integration_credentials")
 }
 

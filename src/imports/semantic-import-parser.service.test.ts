@@ -244,6 +244,11 @@ function configFixture(): AppConfig {
       connectTimeoutMs: 5_000,
       scanTimeoutMs: 900_000
     },
+    integrationCredentials: {
+      enabled: false,
+      keys: new Map(),
+      fingerprintKeys: new Map()
+    },
     uploads: {
       maxSizeBytes: 5 * 1_024 * 1_024 * 1_024,
       partSizeBytes: 8 * 1_024 * 1_024,

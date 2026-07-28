@@ -1,4 +1,3 @@
-import { createHash, timingSafeEqual } from "node:crypto";
 import {
   Inject,
   Injectable,
@@ -10,18 +9,19 @@ import {
 import type { FastifyRequest } from "fastify";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
+import { internalTokensEqual } from "../internal/internal-api.guard.js";
 
 @Injectable()
-export class InternalApiGuard implements CanActivate {
+export class IntegrationCredentialApiGuard implements CanActivate {
   public constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig
   ) {}
 
   public canActivate(context: ExecutionContext): boolean {
-    const expected = this.config.internalApiToken;
+    const expected = this.config.integrationCredentialApiToken;
     if (!expected) {
       throw new ServiceUnavailableException(
-        "Internal API authentication is not configured"
+        "Credential API authentication is not configured"
       );
     }
     const request = context.switchToHttp().getRequest<FastifyRequest>();
@@ -30,17 +30,10 @@ export class InternalApiGuard implements CanActivate {
       typeof provided !== "string" ||
       !internalTokensEqual(expected, provided)
     ) {
-      throw new UnauthorizedException("Internal authentication failed");
+      throw new UnauthorizedException(
+        "Credential API authentication failed"
+      );
     }
     return true;
   }
-}
-
-export function internalTokensEqual(
-  expected: string,
-  provided: string
-): boolean {
-  const left = createHash("sha256").update(expected).digest();
-  const right = createHash("sha256").update(provided).digest();
-  return timingSafeEqual(left, right);
 }

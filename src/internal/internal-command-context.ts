@@ -9,17 +9,31 @@ export interface InternalCommandContext {
   readonly actorId: string;
 }
 
+export interface InternalWorkspaceCommandContext {
+  readonly workspaceId: string;
+  readonly actorId: string;
+}
+
 export function internalCommandContext(
   headers: Readonly<Record<string, string | string[] | undefined>>
 ): InternalCommandContext {
+  const workspace = internalWorkspaceCommandContext(headers);
+  return {
+    ...workspace,
+    projectId: internalUuid(
+      internalHeader(headers, "x-project-id"),
+      "projectId"
+    )
+  };
+}
+
+export function internalWorkspaceCommandContext(
+  headers: Readonly<Record<string, string | string[] | undefined>>
+): InternalWorkspaceCommandContext {
   return {
     workspaceId: internalUuid(
       internalHeader(headers, "x-workspace-id"),
       "workspaceId"
-    ),
-    projectId: internalUuid(
-      internalHeader(headers, "x-project-id"),
-      "projectId"
     ),
     actorId: internalUuid(
       internalHeader(headers, "x-actor-id"),
@@ -43,13 +57,27 @@ export function assertInternalContext(
   }
 }
 
+export function assertInternalWorkspaceContext(
+  expected: InternalWorkspaceCommandContext,
+  actual: InternalWorkspaceCommandContext
+): void {
+  if (
+    expected.workspaceId !== actual.workspaceId ||
+    expected.actorId !== actual.actorId
+  ) {
+    throw new BadRequestException(
+      "Trusted internal context does not match the command"
+    );
+  }
+}
+
 export function internalUuid(value: string, field: string): string {
   if (!UUID_PATTERN.test(value)) {
     throw new BadRequestException(
       `Invalid trusted internal identifier: ${field}`
     );
   }
-  return value;
+  return value.toLowerCase();
 }
 
 function internalHeader(

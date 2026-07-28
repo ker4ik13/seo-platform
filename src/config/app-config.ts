@@ -30,6 +30,14 @@ export interface MalwareScannerConfig {
   readonly scanTimeoutMs: number;
 }
 
+export interface IntegrationCredentialEncryptionConfig {
+  readonly enabled: boolean;
+  readonly keys: ReadonlyMap<number, Buffer>;
+  readonly activeKeyVersion?: number;
+  readonly fingerprintKeys: ReadonlyMap<number, Buffer>;
+  readonly activeFingerprintKeyVersion?: number;
+}
+
 export interface AppConfig {
   readonly nodeEnv: "development" | "test" | "production";
   readonly port: number;
@@ -38,6 +46,7 @@ export interface AppConfig {
   readonly databasePoolMax: number;
   readonly redisUrl: string;
   readonly internalApiToken?: string;
+  readonly integrationCredentialApiToken?: string;
   readonly internalCommandTimeoutMs: number;
   readonly services: {
     readonly seoData: string;
@@ -50,6 +59,7 @@ export interface AppConfig {
   readonly s3: S3Config;
   readonly email: EmailConfig;
   readonly malwareScanner: MalwareScannerConfig;
+  readonly integrationCredentials: IntegrationCredentialEncryptionConfig;
   readonly uploads: {
     readonly maxSizeBytes: number;
     readonly partSizeBytes: number;
@@ -100,6 +110,55 @@ function positiveInteger(
   return parsed;
 }
 
+function versionedKeyring(
+  value: string | undefined,
+  environmentVariable: string
+): ReadonlyMap<number, Buffer> {
+  const keys = new Map<number, Buffer>();
+  if (!value?.trim()) return keys;
+
+  for (const entry of value.split(",")) {
+    const match = /^([1-9]\d*):([A-Za-z0-9_-]{43})$/u.exec(entry.trim());
+    if (!match?.[1] || !match[2]) {
+      throw new Error(
+        `${environmentVariable} must use version:base64url entries`
+      );
+    }
+    const version = Number.parseInt(match[1], 10);
+    const key = Buffer.from(match[2], "base64url");
+    if (
+      !Number.isSafeInteger(version) ||
+      version > 2_147_483_647 ||
+      key.length !== 32 ||
+      keys.has(version) ||
+      [...keys.values()].some((existing) => existing.equals(key))
+    ) {
+      throw new Error(
+        `${environmentVariable} must contain unique 32-byte keys`
+      );
+    }
+    keys.set(version, key);
+  }
+  return keys;
+}
+
+function keyVersion(
+  value: string,
+  environmentVariable: string
+): number {
+  const version = Number(value);
+  if (
+    !Number.isSafeInteger(version) ||
+    version < 1 ||
+    version > 2_147_483_647
+  ) {
+    throw new Error(
+      `${environmentVariable} must be a positive PostgreSQL integer`
+    );
+  }
+  return version;
+}
+
 export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const nodeEnv = env.NODE_ENV ?? "development";
   if (!["development", "test", "production"].includes(nodeEnv)) {
@@ -121,7 +180,36 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const smtpUser = optional(env, "SMTP_USER");
   const smtpPassword = optional(env, "SMTP_PASSWORD");
   const internalApiToken = optional(env, "INTERNAL_API_TOKEN");
+  const integrationCredentialApiToken = optional(
+    env,
+    "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN"
+  );
   const malwareScannerHost = optional(env, "MALWARE_SCANNER_HOST");
+  const integrationCredentialKeys = versionedKeyring(
+    env.INTEGRATION_CREDENTIAL_KEYS,
+    "INTEGRATION_CREDENTIAL_KEYS"
+  );
+  const integrationCredentialFingerprintKeys = versionedKeyring(
+    env.INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS,
+    "INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS"
+  );
+  const integrationCredentialsEnabled = bool(
+    env.INTEGRATION_CREDENTIALS_ENABLED
+  );
+  const integrationCredentialActiveKeyVersion =
+    env.INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION
+      ? keyVersion(
+          env.INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION,
+          "INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION"
+        )
+      : undefined;
+  const integrationCredentialActiveFingerprintKeyVersion =
+    env.INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION
+      ? keyVersion(
+          env.INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION,
+          "INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION"
+        )
+      : undefined;
 
   if (
     s3Enabled &&
@@ -152,6 +240,82 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "INTERNAL_API_TOKEN with at least 32 characters is required in production"
     );
   }
+  if (
+    integrationCredentialKeys.size > 0 &&
+    integrationCredentialActiveKeyVersion === undefined
+  ) {
+    throw new Error(
+      "INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION is required when credential keys are configured"
+    );
+  }
+  if (
+    integrationCredentialActiveKeyVersion !== undefined &&
+    !integrationCredentialKeys.has(integrationCredentialActiveKeyVersion)
+  ) {
+    throw new Error(
+      "INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION must reference a configured key"
+    );
+  }
+  if (integrationCredentialsEnabled && integrationCredentialKeys.size === 0) {
+    throw new Error(
+      "INTEGRATION_CREDENTIAL_KEYS is required when integration credentials are enabled"
+    );
+  }
+  if (
+    integrationCredentialFingerprintKeys.size > 0 &&
+    integrationCredentialActiveFingerprintKeyVersion === undefined
+  ) {
+    throw new Error(
+      "INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION is required when fingerprint keys are configured"
+    );
+  }
+  if (
+    integrationCredentialActiveFingerprintKeyVersion !== undefined &&
+    !integrationCredentialFingerprintKeys.has(
+      integrationCredentialActiveFingerprintKeyVersion
+    )
+  ) {
+    throw new Error(
+      "INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION must reference a configured key"
+    );
+  }
+  if (
+    integrationCredentialsEnabled &&
+    integrationCredentialFingerprintKeys.size === 0
+  ) {
+    throw new Error(
+      "INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS is required when integration credentials are enabled"
+    );
+  }
+  if (
+    integrationCredentialsEnabled &&
+    (!integrationCredentialApiToken ||
+      integrationCredentialApiToken.length < 32)
+  ) {
+    throw new Error(
+      "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN with at least 32 characters is required when integration credentials are enabled"
+    );
+  }
+  if (
+    internalApiToken &&
+    integrationCredentialApiToken &&
+    internalApiToken === integrationCredentialApiToken
+  ) {
+    throw new Error(
+      "Credential API token must differ from the shared internal API token"
+    );
+  }
+  if (
+    [...integrationCredentialKeys.values()].some((encryptionKey) =>
+      [...integrationCredentialFingerprintKeys.values()].some(
+        (fingerprintKey) => encryptionKey.equals(fingerprintKey)
+      )
+    )
+  ) {
+    throw new Error(
+      "Integration credential encryption and fingerprint keyrings must use different key material"
+    );
+  }
 
   return {
     nodeEnv: nodeEnv as AppConfig["nodeEnv"],
@@ -165,6 +329,9 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ),
     redisUrl: env.REDIS_URL?.trim() || "redis://localhost:6379",
     ...(internalApiToken ? { internalApiToken } : {}),
+    ...(integrationCredentialApiToken
+      ? { integrationCredentialApiToken }
+      : {}),
     internalCommandTimeoutMs: positiveInteger(
       env.SEO_DATA_COMMAND_TIMEOUT_MS,
       60_000,
@@ -223,6 +390,20 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         15 * 60 * 1_000,
         "MALWARE_SCANNER_SCAN_TIMEOUT_MS"
       )
+    },
+    integrationCredentials: {
+      enabled: integrationCredentialsEnabled,
+      keys: integrationCredentialKeys,
+      ...(integrationCredentialActiveKeyVersion !== undefined
+        ? { activeKeyVersion: integrationCredentialActiveKeyVersion }
+        : {}),
+      fingerprintKeys: integrationCredentialFingerprintKeys,
+      ...(integrationCredentialActiveFingerprintKeyVersion !== undefined
+        ? {
+            activeFingerprintKeyVersion:
+              integrationCredentialActiveFingerprintKeyVersion
+          }
+        : {})
     },
     uploads: {
       maxSizeBytes: positiveInteger(
