@@ -5,7 +5,7 @@
 - PostgreSQL 18 с отдельными databases для четырёх backend-контуров и Directus;
 - Redis с AOF для BullMQ, Socket.IO и cache;
 - NATS с JetStream;
-- четыре NestJS API, отдельный system worker;
+- четыре NestJS API, отдельные system и import workers;
 - единый web (`/`, `/tools`, `/docs`, `/app`), admin и Directus;
 - S3 и SMTP подключаются как внешние managed/hosted сервисы.
 
@@ -78,6 +78,20 @@ ClamAV требует заметного отдельного memory budget; д�
 worker и ClamAV лучше вынести на отдельную VPS, не меняя API и схему данных.
 Для rejected objects в S3 обязательны quarantine retention и lifecycle
 cleanup; публичные download/import endpoints их не выдают.
+
+## Потоковый импорт CSV/TSV
+
+`import-worker` запускается как отдельный process type из image
+`jobs-integrations` и не зависит от HTTP API по памяти или времени выполнения.
+Он читает только uploads со статусом `READY`, потоково разбирает CSV/TSV и
+сохраняет строки в partitioned staging `jobs_db`. Его concurrency и размер
+batch задаются `IMPORT_PARSE_CONCURRENCY` и `IMPORT_STAGING_BATCH_ROWS`.
+
+На первой VPS следует начинать с concurrency `1`–`2`. Worker имеет
+lease/heartbeat и периодически возвращает в очередь зависшие parsing jobs,
+поэтому рестарт контейнера не требует ручного восстановления. XLSX/ZIP/XLS
+подключаются отдельными изолированными parser adapters; до их включения
+jobs API fail-closed отклоняет запуск неподдерживаемого формата.
 
 ## Масштабирование
 

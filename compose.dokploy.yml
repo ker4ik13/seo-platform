@@ -43,6 +43,12 @@ x-jobs-env: &jobs-env
   MALWARE_SCANNER_PORT: ${MALWARE_SCANNER_PORT:-3310}
   MALWARE_SCANNER_CONNECT_TIMEOUT_MS: ${MALWARE_SCANNER_CONNECT_TIMEOUT_MS:-5000}
   MALWARE_SCANNER_SCAN_TIMEOUT_MS: ${MALWARE_SCANNER_SCAN_TIMEOUT_MS:-900000}
+  IMPORT_PARSE_LEASE_MINUTES: ${IMPORT_PARSE_LEASE_MINUTES:-30}
+  IMPORT_PARSE_DISPATCH_SECONDS: ${IMPORT_PARSE_DISPATCH_SECONDS:-30}
+  IMPORT_PARSE_HEARTBEAT_SECONDS: ${IMPORT_PARSE_HEARTBEAT_SECONDS:-30}
+  IMPORT_PARSE_CONCURRENCY: ${IMPORT_PARSE_CONCURRENCY:-2}
+  IMPORT_STAGING_BATCH_ROWS: ${IMPORT_STAGING_BATCH_ROWS:-1000}
+  IMPORT_PREVIEW_ROWS: ${IMPORT_PREVIEW_ROWS:-20}
   EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
   EMAIL_FROM: ${EMAIL_FROM:-}
   SMTP_HOST: ${SMTP_HOST:-}
@@ -367,6 +373,24 @@ services:
       redis:
         condition: service_healthy
       clamav:
+        condition: service_healthy
+
+  import-worker:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/jobs-integrations"
+    command: ["node", "dist/import-worker.main.js"]
+    environment:
+      <<: [*common-backend-env, *jobs-env]
+      DATABASE_POOL_MAX: ${JOBS_IMPORT_DATABASE_POOL_MAX:-10}
+    depends_on:
+      jobs-integrations-migrate:
+        condition: service_completed_successfully
+      redis:
         condition: service_healthy
 
   realtime:
