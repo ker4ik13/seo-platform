@@ -61,6 +61,8 @@ model Keyword {
 
   @@unique([projectId, language, normalizedHash])
   @@index([workspaceId, projectId, status, id])
+  @@index([workspaceId, projectId, status, createdAt(sort: Desc), id(sort: Desc)], map: "keywords_workspace_project_status_created_id_idx")
+  @@index([textNormalized(ops: raw("gin_trgm_ops"))], type: Gin, map: "keywords_text_normalized_trgm_idx")
   @@index([projectId, clusterId, id])
   @@index([projectId, targetPageId, id])
   @@index([projectId, isTracked, id])
