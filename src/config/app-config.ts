@@ -16,6 +16,16 @@ export interface AppConfig {
     readonly jobs: string;
     readonly realtime: string;
   };
+  readonly auth: {
+    readonly sessionCookieName: string;
+    readonly csrfCookieName: string;
+    readonly sessionTtlDays: number;
+    readonly emailVerificationRequired: boolean;
+    readonly emailVerificationTtlMinutes: number;
+    readonly cookieSecure: boolean;
+    readonly passwordPepper?: string;
+    readonly exposeDevelopmentTokens: boolean;
+  };
 }
 
 function required(env: NodeJS.ProcessEnv, key: string): string {
@@ -42,13 +52,44 @@ function positiveInteger(
   return parsed;
 }
 
+function booleanValue(
+  value: string | undefined,
+  fallback: boolean,
+  key: string
+): boolean {
+  if (value === undefined || value.trim() === "") return fallback;
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
+
+  throw new Error(`${key} must be true or false`);
+}
+
 export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const nodeEnv = env.NODE_ENV ?? "development";
   const natsUser = env.NATS_USER?.trim();
   const natsPassword = env.NATS_PASSWORD?.trim();
+  const passwordPepper = env.AUTH_PASSWORD_PEPPER?.trim();
 
   if (!["development", "test", "production"].includes(nodeEnv)) {
     throw new Error("NODE_ENV must be development, test or production");
+  }
+
+  if (nodeEnv === "production" && !passwordPepper) {
+    throw new Error("AUTH_PASSWORD_PEPPER is required in production");
+  }
+
+  const exposeDevelopmentTokens = booleanValue(
+    env.AUTH_EXPOSE_DEVELOPMENT_TOKENS,
+    nodeEnv !== "production",
+    "AUTH_EXPOSE_DEVELOPMENT_TOKENS"
+  );
+
+  if (nodeEnv === "production" && exposeDevelopmentTokens) {
+    throw new Error(
+      "AUTH_EXPOSE_DEVELOPMENT_TOKENS cannot be enabled in production"
+    );
   }
 
   return {
@@ -81,6 +122,33 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       jobs: env.JOBS_INTERNAL_URL?.trim() || "http://localhost:4002",
       realtime:
         env.REALTIME_INTERNAL_URL?.trim() || "http://localhost:4003"
+    },
+    auth: {
+      sessionCookieName:
+        env.AUTH_SESSION_COOKIE_NAME?.trim() || "seo_session",
+      csrfCookieName: env.AUTH_CSRF_COOKIE_NAME?.trim() || "seo_csrf",
+      sessionTtlDays: positiveInteger(
+        env.AUTH_SESSION_TTL_DAYS,
+        30,
+        "AUTH_SESSION_TTL_DAYS"
+      ),
+      emailVerificationRequired: booleanValue(
+        env.AUTH_EMAIL_VERIFICATION_REQUIRED,
+        nodeEnv === "production",
+        "AUTH_EMAIL_VERIFICATION_REQUIRED"
+      ),
+      emailVerificationTtlMinutes: positiveInteger(
+        env.AUTH_EMAIL_VERIFICATION_TTL_MINUTES,
+        30,
+        "AUTH_EMAIL_VERIFICATION_TTL_MINUTES"
+      ),
+      cookieSecure: booleanValue(
+        env.AUTH_COOKIE_SECURE,
+        nodeEnv === "production",
+        "AUTH_COOKIE_SECURE"
+      ),
+      ...(passwordPepper ? { passwordPepper } : {}),
+      exposeDevelopmentTokens
     }
   };
 }

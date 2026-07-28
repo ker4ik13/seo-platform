@@ -45,6 +45,17 @@ enum OutboxStatus {
   FAILED
 }
 
+enum OneTimeTokenPurpose {
+  EMAIL_VERIFICATION
+  PASSWORD_RESET
+}
+
+enum ConsentType {
+  TERMS
+  PRIVACY
+  MARKETING
+}
+
 model User {
   id              String     @id @default(dbgenerated("uuidv7()")) @db.Uuid
   emailNormalized String     @unique(map: "users_email_normalized_key") @map("email_normalized") @db.VarChar(320)
@@ -64,6 +75,8 @@ model User {
   identities  UserIdentity[]
   sessions    Session[]
   memberships WorkspaceMember[]
+  oneTimeTokens OneTimeToken[]
+  consents      UserConsent[]
 
   @@index([status, createdAt])
   @@map("users")
@@ -90,9 +103,12 @@ model Session {
   id               String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
   userId           String    @map("user_id") @db.Uuid
   refreshTokenHash String    @unique(map: "sessions_refresh_token_hash_key") @map("refresh_token_hash") @db.Text
+  csrfTokenHash    String    @map("csrf_token_hash") @db.Text
   familyId         String    @map("family_id") @db.Uuid
+  replacedBySessionId String? @map("replaced_by_session_id") @db.Uuid
   userAgent        String?   @map("user_agent") @db.Text
   ipAddress        String?   @map("ip_address") @db.Inet
+  authenticatedAt  DateTime  @default(now()) @map("authenticated_at") @db.Timestamptz(6)
   expiresAt        DateTime  @map("expires_at") @db.Timestamptz(6)
   lastUsedAt       DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(6)
   revokedAt        DateTime? @map("revoked_at") @db.Timestamptz(6)
@@ -101,8 +117,41 @@ model Session {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, revokedAt])
+  @@index([familyId, revokedAt])
   @@index([expiresAt])
   @@map("sessions")
+}
+
+model OneTimeToken {
+  id        String              @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId    String              @map("user_id") @db.Uuid
+  purpose   OneTimeTokenPurpose
+  tokenHash String              @unique(map: "one_time_tokens_token_hash_key") @map("token_hash") @db.Text
+  expiresAt DateTime            @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime?          @map("consumed_at") @db.Timestamptz(6)
+  createdAt DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose, consumedAt])
+  @@index([expiresAt])
+  @@map("one_time_tokens")
+}
+
+model UserConsent {
+  id              String      @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId          String      @map("user_id") @db.Uuid
+  type            ConsentType
+  documentVersion String      @map("document_version") @db.VarChar(64)
+  accepted        Boolean
+  source          String      @db.VarChar(32)
+  ipAddress       String?     @map("ip_address") @db.Inet
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type, createdAt])
+  @@map("user_consents")
 }
 
 model Workspace {
