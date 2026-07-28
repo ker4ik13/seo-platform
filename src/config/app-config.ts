@@ -25,8 +25,12 @@ export interface AppConfig {
     readonly emailVerificationRequired: boolean;
     readonly emailVerificationTtlMinutes: number;
     readonly passwordResetTtlMinutes: number;
+    readonly mfaChallengeTtlMinutes: number;
+    readonly recentAuthenticationMinutes: number;
+    readonly totpIssuer: string;
     readonly cookieSecure: boolean;
     readonly passwordPepper?: string;
+    readonly dataEncryptionKey?: string;
     readonly exposeDevelopmentTokens: boolean;
   };
 }
@@ -74,6 +78,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const natsUser = env.NATS_USER?.trim();
   const natsPassword = env.NATS_PASSWORD?.trim();
   const passwordPepper = env.AUTH_PASSWORD_PEPPER?.trim();
+  const dataEncryptionKey = env.AUTH_DATA_ENCRYPTION_KEY?.trim();
 
   if (!["development", "test", "production"].includes(nodeEnv)) {
     throw new Error("NODE_ENV must be development, test or production");
@@ -81,6 +86,18 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   if (nodeEnv === "production" && !passwordPepper) {
     throw new Error("AUTH_PASSWORD_PEPPER is required in production");
+  }
+  if (nodeEnv === "production" && !dataEncryptionKey) {
+    throw new Error("AUTH_DATA_ENCRYPTION_KEY is required in production");
+  }
+  if (
+    dataEncryptionKey &&
+    (!/^[A-Za-z0-9_-]{43}$/u.test(dataEncryptionKey) ||
+      Buffer.from(dataEncryptionKey, "base64url").length !== 32)
+  ) {
+    throw new Error(
+      "AUTH_DATA_ENCRYPTION_KEY must be a Base64URL-encoded 32-byte key"
+    );
   }
 
   const exposeDevelopmentTokens = booleanValue(
@@ -157,12 +174,24 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         30,
         "AUTH_PASSWORD_RESET_TTL_MINUTES"
       ),
+      mfaChallengeTtlMinutes: positiveInteger(
+        env.AUTH_MFA_CHALLENGE_TTL_MINUTES,
+        5,
+        "AUTH_MFA_CHALLENGE_TTL_MINUTES"
+      ),
+      recentAuthenticationMinutes: positiveInteger(
+        env.AUTH_RECENT_AUTHENTICATION_MINUTES,
+        10,
+        "AUTH_RECENT_AUTHENTICATION_MINUTES"
+      ),
+      totpIssuer: env.AUTH_TOTP_ISSUER?.trim() || "SEO Workspace",
       cookieSecure: booleanValue(
         env.AUTH_COOKIE_SECURE,
         nodeEnv === "production",
         "AUTH_COOKIE_SECURE"
       ),
       ...(passwordPepper ? { passwordPepper } : {}),
+      ...(dataEncryptionKey ? { dataEncryptionKey } : {}),
       exposeDevelopmentTokens
     }
   };

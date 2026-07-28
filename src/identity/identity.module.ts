@@ -5,6 +5,8 @@ import { AuthCryptoService } from "./auth-crypto.service.js";
 import { AuthRateLimitService } from "./auth-rate-limit.service.js";
 import { IdentityController } from "./identity.controller.js";
 import { IdentityService } from "./identity.service.js";
+import { MfaController } from "./mfa.controller.js";
+import { MfaService } from "./mfa.service.js";
 import {
   CsrfSessionGuard,
   SessionAuthGuard
@@ -14,11 +16,12 @@ import { SessionService } from "./session.service.js";
 
 @Module({
   imports: [AuditModule, OutboxModule],
-  controllers: [IdentityController],
+  controllers: [IdentityController, MfaController],
   providers: [
     AuthCryptoService,
     AuthRateLimitService,
     IdentityService,
+    MfaService,
     SessionService,
     SessionCookieService,
     SessionAuthGuard,

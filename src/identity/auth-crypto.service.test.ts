@@ -96,3 +96,15 @@ test("derives deterministic password reset token", () => {
   assert.equal(first, second);
   assert.match(first, /^[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/u);
 });
+
+test("encrypts MFA secrets with authenticated encryption", () => {
+  const first = cryptoService.encryptMfaSecret("BASE32SECRET");
+  const second = cryptoService.encryptMfaSecret("BASE32SECRET");
+
+  assert.notEqual(first, second);
+  assert.equal(cryptoService.decryptMfaSecret(first), "BASE32SECRET");
+  assert.throws(
+    () => cryptoService.decryptMfaSecret(`${first.slice(0, -1)}x`),
+    { message: "Invalid encrypted MFA secret" }
+  );
+});

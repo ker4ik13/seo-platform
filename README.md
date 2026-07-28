@@ -15,6 +15,8 @@
 - одноразовая email verification;
 - безопасное восстановление пароля с единообразным ответом, TTL и отзывом
   прежних сессий;
+- TOTP 2FA, одноразовые recovery codes, MFA login challenge и шифрование
+  секретов AES-256-GCM;
 - login/logout и server-side session inventory;
 - opaque cookie session rotation и token-family replay revocation;
 - session-bound CSRF;
@@ -43,3 +45,7 @@ Production требует `AUTH_PASSWORD_PEPPER`, `AUTH_COOKIE_SECURE=true` и
 worker как ссылка на одноразовую запись: открытый token детерминированно
 восстанавливается внутри доверенного контура и не попадает в outbox или логи.
 То же правило применяется к приглашениям в workspace и восстановлению пароля.
+
+Production дополнительно требует отдельный 32-байтный
+`AUTH_DATA_ENCRYPTION_KEY` в Base64URL для TOTP secrets. Смена этого ключа
+выполняется отдельной процедурой re-encryption, а не простой заменой env.

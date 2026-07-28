@@ -9,7 +9,8 @@ type RateLimitAction =
   | "VERIFY"
   | "RESEND"
   | "PASSWORD_RESET_REQUEST"
-  | "PASSWORD_RESET";
+  | "PASSWORD_RESET"
+  | "MFA_VERIFY";
 
 interface RateLimitPolicy {
   readonly limit: number;
@@ -27,6 +28,11 @@ const policies: Readonly<Record<RateLimitAction, RateLimitPolicy>> = {
     blockSeconds: 60 * 60
   },
   PASSWORD_RESET: {
+    limit: 10,
+    windowSeconds: 15 * 60,
+    blockSeconds: 15 * 60
+  },
+  MFA_VERIFY: {
     limit: 10,
     windowSeconds: 15 * 60,
     blockSeconds: 15 * 60

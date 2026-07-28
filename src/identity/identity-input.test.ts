@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
 import {
+  confirmTotpInput,
+  disableTotpInput,
   loginInput,
   registerInput,
   requestPasswordResetInput,
-  resetPasswordInput
+  resetPasswordInput,
+  verifyMfaChallengeInput
 } from "./identity-input.js";
 
 const validRegistration = {
@@ -86,5 +89,38 @@ test("applies the strong password policy to password reset", () => {
     (error) =>
       error instanceof DomainError &&
       error.fieldErrors?.[0]?.code === "PASSWORD_COMPROMISED"
+  );
+});
+
+test("parses MFA verification and setup confirmation", () => {
+  assert.deepEqual(
+    verifyMfaChallengeInput({
+      challengeToken: "x".repeat(43),
+      code: "123456"
+    }),
+    {
+      challengeToken: "x".repeat(43),
+      code: "123456"
+    }
+  );
+  assert.deepEqual(
+    confirmTotpInput({
+      methodId: "01900000-0000-7000-8000-000000000001",
+      code: "123456"
+    }),
+    {
+      methodId: "01900000-0000-7000-8000-000000000001",
+      code: "123456"
+    }
+  );
+});
+
+test("preserves current password material when disabling MFA", () => {
+  assert.equal(
+    disableTotpInput({
+      password: "  current password  ",
+      code: "ABCD-2345-EFGH"
+    }).password,
+    "  current password  "
   );
 });

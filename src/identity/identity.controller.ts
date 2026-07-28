@@ -16,6 +16,7 @@ import type {
   ApiResponse,
   AuthenticationResult,
   CurrentAccount,
+  LoginResult,
   PasswordResetAccepted,
   UserSessionSummary
 } from "@seo-platform/contracts";
@@ -77,7 +78,7 @@ export class IdentityController {
     @Body() body: unknown,
     @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply
-  ): Promise<ApiResponse<AuthenticationResult>> {
+  ): Promise<ApiResponse<LoginResult>> {
     const result = await this.identity.login(
       loginInput(body),
       requestContext(request)

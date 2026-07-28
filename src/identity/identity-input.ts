@@ -1,9 +1,12 @@
 import type {
+  ConfirmTotpInput,
+  DisableTotpInput,
   LoginInput,
   RegisterAccountInput,
   RequestPasswordResetInput,
   ResendEmailVerificationInput,
   ResetPasswordInput,
+  VerifyMfaChallengeInput,
   VerifyEmailInput
 } from "@seo-platform/contracts";
 import {
@@ -14,6 +17,7 @@ import {
   stringField
 } from "../common/input.js";
 import { validationError } from "../common/domain-error.js";
+import { assertUuid } from "../common/identifier.js";
 
 const COMMON_PASSWORDS = new Set([
   "123456789012",
@@ -115,6 +119,37 @@ export function resetPasswordInput(value: unknown): ResetPasswordInput {
   return {
     token: stringField(input, "token", { min: 32, max: 256 }),
     password: passwordField(input, "password", true)
+  };
+}
+
+export function verifyMfaChallengeInput(
+  value: unknown
+): VerifyMfaChallengeInput {
+  const input = inputObject(value);
+  return {
+    challengeToken: stringField(input, "challengeToken", {
+      min: 32,
+      max: 256
+    }),
+    code: stringField(input, "code", { min: 6, max: 32 })
+  };
+}
+
+export function confirmTotpInput(value: unknown): ConfirmTotpInput {
+  const input = inputObject(value);
+  const methodId = stringField(input, "methodId", { min: 36, max: 36 });
+  assertUuid(methodId, "methodId");
+  return {
+    methodId,
+    code: stringField(input, "code", { min: 6, max: 6 })
+  };
+}
+
+export function disableTotpInput(value: unknown): DisableTotpInput {
+  const input = inputObject(value);
+  return {
+    password: passwordField(input, "password", false),
+    code: stringField(input, "code", { min: 6, max: 32 })
   };
 }
 

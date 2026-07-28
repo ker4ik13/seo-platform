@@ -4,6 +4,7 @@ import {
   type AcceptedOperation,
   type AuthenticationResult,
   type LoginInput,
+  type LoginResult,
   type PasswordResetAccepted,
   type RegisterAccountInput,
   type RequestPasswordResetInput,
@@ -32,6 +33,7 @@ import type {
   RequestContext,
   SessionCredentials
 } from "./identity.types.js";
+import { MfaService } from "./mfa.service.js";
 import { SessionService } from "./session.service.js";
 
 type Transaction = Prisma.TransactionClient;
@@ -46,6 +48,10 @@ export interface AcceptedCommandResult {
 export interface PasswordResetRequestCommandResult {
   readonly response: PasswordResetAccepted;
 }
+export interface LoginCommandResult {
+  readonly response: LoginResult;
+  readonly credentials?: SessionCredentials;
+}
 
 @Injectable()
 export class IdentityService {
@@ -53,6 +59,7 @@ export class IdentityService {
     private readonly prisma: PrismaService,
     private readonly crypto: AuthCryptoService,
     private readonly rateLimits: AuthRateLimitService,
+    private readonly mfa: MfaService,
     private readonly sessions: SessionService,
     private readonly audit: AuditService,
     private readonly outbox: OutboxService,
@@ -188,7 +195,7 @@ export class IdentityService {
   public async login(
     input: LoginInput,
     context: RequestContext
-  ): Promise<AuthenticationCommandResult> {
+  ): Promise<LoginCommandResult> {
     const email = normalizeEmail(input.email);
     await this.rateLimits.consume("LOGIN", [
       `ip:${context.ipAddress ?? "unknown"}`,
@@ -231,6 +238,24 @@ export class IdentityService {
     }
 
     const issued = await this.prisma.$transaction(async (transaction) => {
+      const challenge = await this.mfa.createLoginChallenge(
+        transaction,
+        user,
+        context
+      );
+      if (challenge) {
+        await this.audit.record(
+          {
+            actorId: user.id,
+            action: "identity.login.mfa_required",
+            resourceType: "user",
+            resourceId: user.id,
+            requestId: context.requestId
+          },
+          transaction
+        );
+        return { challenge };
+      }
       const session = await this.sessions.issue(transaction, user.id, context);
       await this.audit.record(
         {
@@ -242,16 +267,19 @@ export class IdentityService {
         },
         transaction
       );
-      return session;
+      return { session };
     });
 
+    if (issued.challenge) {
+      return { response: issued.challenge };
+    }
     return {
       response: {
         user: toUserSummary(user),
-        session: toSessionSummary(issued.session),
+        session: toSessionSummary(issued.session.session),
         emailVerificationRequired: false
       },
-      credentials: issued.credentials
+      credentials: issued.session.credentials
     };
   }
 

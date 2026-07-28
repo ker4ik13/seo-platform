@@ -1,4 +1,6 @@
 import {
+  createCipheriv,
+  createDecipheriv,
   createHash,
   createHmac,
   randomBytes,
@@ -21,6 +23,7 @@ const PASSWORD_OPTIONS = {
   parallelism: 1,
   hashLength: 32
 } as const;
+const MFA_SECRET_AAD = Buffer.from("mfa-secret:v1", "utf8");
 
 @Injectable()
 export class AuthCryptoService {
@@ -96,6 +99,56 @@ export class AuthCryptoService {
       : createHash("sha256").update(token).digest("hex");
   }
 
+  public encryptMfaSecret(secret: string): string {
+    const initializationVector = randomBytes(12);
+    const cipher = createCipheriv(
+      "aes-256-gcm",
+      this.dataEncryptionKey(),
+      initializationVector
+    );
+    cipher.setAAD(MFA_SECRET_AAD);
+    const encrypted = Buffer.concat([
+      cipher.update(secret, "utf8"),
+      cipher.final()
+    ]);
+    const authenticationTag = cipher.getAuthTag();
+    return [
+      "v1",
+      initializationVector.toString("base64url"),
+      authenticationTag.toString("base64url"),
+      encrypted.toString("base64url")
+    ].join(".");
+  }
+
+  public decryptMfaSecret(value: string): string {
+    const [version, ivValue, tagValue, encryptedValue, extra] =
+      value.split(".");
+    if (
+      version !== "v1" ||
+      !ivValue ||
+      !tagValue ||
+      !encryptedValue ||
+      extra !== undefined
+    ) {
+      throw new Error("Invalid encrypted MFA secret");
+    }
+    try {
+      const decipher = createDecipheriv(
+        "aes-256-gcm",
+        this.dataEncryptionKey(),
+        Buffer.from(ivValue, "base64url")
+      );
+      decipher.setAAD(MFA_SECRET_AAD);
+      decipher.setAuthTag(Buffer.from(tagValue, "base64url"));
+      return Buffer.concat([
+        decipher.update(Buffer.from(encryptedValue, "base64url")),
+        decipher.final()
+      ]).toString("utf8");
+    } catch {
+      throw new Error("Invalid encrypted MFA secret");
+    }
+  }
+
   public tokensEqual(left: string, right: string): boolean {
     const leftHash = createHash("sha256").update(left).digest();
     const rightHash = createHash("sha256").update(right).digest();
@@ -124,5 +177,17 @@ export class AuthCryptoService {
 
   private passwordMaterial(password: string): string {
     return `${password}\u0000${this.config.auth.passwordPepper ?? ""}`;
+  }
+
+  private dataEncryptionKey(): Buffer {
+    if (this.config.auth.dataEncryptionKey) {
+      return Buffer.from(this.config.auth.dataEncryptionKey, "base64url");
+    }
+    return createHash("sha256")
+      .update(
+        this.config.auth.passwordPepper ??
+          "development-only-data-encryption-key"
+      )
+      .digest();
   }
 }
