@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
+import { requiredIdempotencyKey } from "../common/idempotency-key.js";
 import {
   completeUploadInput,
   createUploadInput,
-  createUploadPartUrlsInput,
-  idempotencyKey
+  createUploadPartUrlsInput
 } from "./upload-input.js";
 
 test("parses a CSV upload declaration", () => {
@@ -48,7 +48,7 @@ test("rejects unsupported files and missing idempotency keys", () => {
       }),
     DomainError
   );
-  assert.throws(() => idempotencyKey(undefined), DomainError);
+  assert.throws(() => requiredIdempotencyKey(undefined), DomainError);
 });
 
 test("parses upload part commands", () => {

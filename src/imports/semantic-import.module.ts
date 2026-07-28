@@ -1,10 +1,10 @@
 import { Module } from "@nestjs/common";
 import { AuthorizationModule } from "../authorization/authorization.module.js";
 import { JobsModule } from "../jobs/jobs.module.js";
-import { UploadController } from "./upload.controller.js";
+import { SemanticImportController } from "./semantic-import.controller.js";
 
 @Module({
   imports: [AuthorizationModule, JobsModule],
-  controllers: [UploadController]
+  controllers: [SemanticImportController]
 })
-export class UploadModule {}
+export class SemanticImportModule {}

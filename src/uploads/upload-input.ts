@@ -10,7 +10,6 @@ import { inputObject, stringField } from "../common/input.js";
 
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/iu;
 const ETAG_PATTERN = /^"?[A-Fa-f0-9]{32}(?:-\d+)?"?$/u;
-const IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{8,180}$/u;
 const SUPPORTED_MEDIA_TYPES = new Set<string>(supportedImportMediaTypes);
 
 export function createUploadInput(value: unknown): CreateUploadInput {
@@ -93,17 +92,6 @@ export function completeUploadInput(value: unknown): CompleteUploadInput {
     invalid("parts");
   }
   return { parts };
-}
-
-export function idempotencyKey(value: string | undefined): string {
-  if (!value || !IDEMPOTENCY_PATTERN.test(value)) {
-    throw validationError(
-      "Idempotency-Key",
-      "INVALID_IDEMPOTENCY_KEY",
-      "A stable idempotency key is required"
-    );
-  }
-  return value;
 }
 
 function invalid(path: string): never {

@@ -1,10 +1,13 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type {
   CompleteUploadInput,
+  CreateSemanticImportInput,
   CreatedMultipartUpload,
   CreateUploadInput,
   CreateUploadPartUrlsInput,
   InternalCreateUploadInput,
+  InternalCreateSemanticImportInput,
+  SemanticImportSummary,
   UploadPartUrls,
   UploadSummary
 } from "@seo-platform/contracts";
@@ -20,12 +23,12 @@ interface InternalContext {
 }
 
 @Injectable()
-export class JobsUploadClient {
+export class JobsClient {
   public constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig
   ) {}
 
-  public create(
+  public createUpload(
     context: InternalContext,
     input: CreateUploadInput,
     idempotencyKey: string
@@ -40,7 +43,7 @@ export class JobsUploadClient {
     return this.request("POST", "/internal/v1/uploads", context, body);
   }
 
-  public partUrls(
+  public createUploadPartUrls(
     context: InternalContext,
     uploadId: string,
     input: CreateUploadPartUrlsInput
@@ -53,7 +56,7 @@ export class JobsUploadClient {
     );
   }
 
-  public complete(
+  public completeUpload(
     context: InternalContext,
     uploadId: string,
     input: CompleteUploadInput
@@ -66,7 +69,7 @@ export class JobsUploadClient {
     );
   }
 
-  public get(
+  public getUpload(
     context: InternalContext,
     uploadId: string
   ): Promise<UploadSummary> {
@@ -77,13 +80,39 @@ export class JobsUploadClient {
     );
   }
 
-  public abort(
+  public abortUpload(
     context: InternalContext,
     uploadId: string
   ): Promise<UploadSummary> {
     return this.request(
       "DELETE",
       `/internal/v1/uploads/${encodeURIComponent(uploadId)}`,
+      context
+    );
+  }
+
+  public createSemanticImport(
+    context: InternalContext,
+    input: CreateSemanticImportInput,
+    idempotencyKey: string
+  ): Promise<SemanticImportSummary> {
+    const body: InternalCreateSemanticImportInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      projectId: requiredProjectId(context.tenant),
+      actorId: context.actorId,
+      idempotencyKey
+    };
+    return this.request("POST", "/internal/v1/imports", context, body);
+  }
+
+  public getSemanticImport(
+    context: InternalContext,
+    importId: string
+  ): Promise<SemanticImportSummary> {
+    return this.request(
+      "GET",
+      `/internal/v1/imports/${encodeURIComponent(importId)}`,
       context
     );
   }
@@ -130,7 +159,7 @@ export class JobsUploadClient {
       throw new DomainError({
         statusCode: 502,
         code: "DEPENDENCY_UNAVAILABLE",
-        message: "Upload service returned an invalid response",
+        message: "Jobs service returned an invalid response",
         retryable: true
       });
     }
@@ -149,7 +178,7 @@ function dependencyUnavailable(): DomainError {
   return new DomainError({
     statusCode: 503,
     code: "DEPENDENCY_UNAVAILABLE",
-    message: "Upload service is temporarily unavailable",
+    message: "Jobs service is temporarily unavailable",
     retryable: true
   });
 }
@@ -159,21 +188,21 @@ function upstreamError(status: number): DomainError {
     return new DomainError({
       statusCode: 404,
       code: "NOT_FOUND",
-      message: "Upload not found"
+      message: "Resource not found"
     });
   }
   if (status === 409) {
     return new DomainError({
       statusCode: 409,
       code: "RESOURCE_STATE_CONFLICT",
-      message: "Upload state does not allow this operation"
+      message: "Resource state does not allow this operation"
     });
   }
   if (status === 400 || status === 422) {
     return new DomainError({
       statusCode: 422,
       code: "VALIDATION_FAILED",
-      message: "Upload request is invalid"
+      message: "Jobs request is invalid"
     });
   }
   if (status === 413) {

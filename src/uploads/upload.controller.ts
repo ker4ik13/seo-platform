@@ -15,6 +15,7 @@ import type {
   UploadSummary
 } from "@seo-platform/contracts";
 import { apiResponse } from "../common/api-response.js";
+import { requiredIdempotencyKey } from "../common/idempotency-key.js";
 import { assertUuid } from "../common/identifier.js";
 import { RequirePermission } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
@@ -30,17 +31,16 @@ import {
   headerValue,
   SessionAuthGuard
 } from "../identity/session-auth.guard.js";
-import { JobsUploadClient } from "./jobs-upload.client.js";
+import { JobsClient } from "../jobs/jobs.client.js";
 import {
   completeUploadInput,
   createUploadInput,
-  createUploadPartUrlsInput,
-  idempotencyKey
+  createUploadPartUrlsInput
 } from "./upload-input.js";
 
 @Controller("api/v1/projects/:projectId/uploads")
 export class UploadController {
-  public constructor(private readonly uploads: JobsUploadClient) {}
+  public constructor(private readonly jobs: JobsClient) {}
 
   @Post()
   @RequirePermission("file.upload")
@@ -53,14 +53,16 @@ export class UploadController {
     const context = requestContext(request);
     return apiResponse(
       request,
-      await this.uploads.create(
+      await this.jobs.createUpload(
         {
           tenant: requiredTenant(request),
           actorId: principal.userId,
           requestId: context.requestId
         },
         createUploadInput(body),
-        idempotencyKey(headerValue(request, "idempotency-key"))
+        requiredIdempotencyKey(
+          headerValue(request, "idempotency-key")
+        )
       )
     );
   }
@@ -78,7 +80,7 @@ export class UploadController {
     const context = requestContext(request);
     return apiResponse(
       request,
-      await this.uploads.partUrls(
+      await this.jobs.createUploadPartUrls(
         {
           tenant: requiredTenant(request),
           actorId: principal.userId,
@@ -103,7 +105,7 @@ export class UploadController {
     const context = requestContext(request);
     return apiResponse(
       request,
-      await this.uploads.complete(
+      await this.jobs.completeUpload(
         {
           tenant: requiredTenant(request),
           actorId: principal.userId,
@@ -127,7 +129,7 @@ export class UploadController {
     const context = requestContext(request);
     return apiResponse(
       request,
-      await this.uploads.get(
+      await this.jobs.getUpload(
         {
           tenant: requiredTenant(request),
           actorId: principal.userId,
@@ -150,7 +152,7 @@ export class UploadController {
     const context = requestContext(request);
     return apiResponse(
       request,
-      await this.uploads.abort(
+      await this.jobs.abortUpload(
         {
           tenant: requiredTenant(request),
           actorId: principal.userId,

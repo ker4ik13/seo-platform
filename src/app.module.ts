@@ -7,6 +7,7 @@ import { TenantModule } from "./tenants/tenant.module.js";
 import { MessagingModule } from "./messaging/messaging.module.js";
 import { SystemModule } from "./system/system.module.js";
 import { UploadModule } from "./uploads/upload.module.js";
+import { SemanticImportModule } from "./imports/semantic-import.module.js";
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { UploadModule } from "./uploads/upload.module.js";
     IdentityModule,
     TenantModule,
     UploadModule,
+    SemanticImportModule,
     SystemModule
   ]
 })
