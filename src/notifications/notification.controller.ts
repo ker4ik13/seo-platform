@@ -6,12 +6,17 @@ import {
   Headers,
   Param,
   Patch,
+  Post,
+  Query,
   Req,
   UseGuards
 } from "@nestjs/common";
 import type {
   ApiResponse,
+  NotificationCollectionResponse,
+  NotificationListItem,
   NotificationPreferencesSummary,
+  NotificationReadAllResult,
   ProjectNotificationSubscriptionSummary
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
@@ -25,6 +30,8 @@ import {
   notificationPreferencesInput,
   projectNotificationSubscriptionInput
 } from "./notification-input.js";
+import { notificationListQuery } from "./notification-center-query.js";
+import { NotificationCenterService } from "./notification-center.service.js";
 import { NotificationService } from "./notification.service.js";
 
 type InternalHeaders = Readonly<
@@ -35,8 +42,57 @@ type InternalHeaders = Readonly<
 @UseGuards(InternalApiGuard)
 export class NotificationController {
   public constructor(
+    private readonly center: NotificationCenterService,
     private readonly notifications: NotificationService
   ) {}
+
+  @Get("users/:userId/notifications")
+  public async listNotifications(
+    @Param("userId") userId: string,
+    @Headers() headers: InternalHeaders,
+    @Query() query: unknown,
+    @Req() request: FastifyRequest
+  ): Promise<NotificationCollectionResponse> {
+    const actor = internalActorContext(headers);
+    assertSame(internalUuid(userId, "userId"), actor.actorId, "user");
+    return this.center.list(
+      actor.actorId,
+      notificationListQuery(query),
+      request.id
+    );
+  }
+
+  @Patch("users/:userId/notifications/:notificationId/read")
+  public async markNotificationRead(
+    @Param("userId") userId: string,
+    @Param("notificationId") notificationId: string,
+    @Headers() headers: InternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<NotificationListItem>> {
+    const actor = internalActorContext(headers);
+    assertSame(internalUuid(userId, "userId"), actor.actorId, "user");
+    return response(
+      request,
+      await this.center.markRead(
+        actor.actorId,
+        internalUuid(notificationId, "notificationId")
+      )
+    );
+  }
+
+  @Post("users/:userId/notifications/read-all")
+  public async markAllNotificationsRead(
+    @Param("userId") userId: string,
+    @Headers() headers: InternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<NotificationReadAllResult>> {
+    const actor = internalActorContext(headers);
+    assertSame(internalUuid(userId, "userId"), actor.actorId, "user");
+    return response(
+      request,
+      await this.center.markAllRead(actor.actorId)
+    );
+  }
 
   @Get("users/:userId/notification-preferences")
   public async getPreferences(

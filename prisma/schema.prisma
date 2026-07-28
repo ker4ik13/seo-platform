@@ -110,19 +110,27 @@ model Comment {
 }
 
 model Notification {
-  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId String    @map("workspace_id") @db.Uuid
-  userId      String    @map("user_id") @db.Uuid
-  type        String    @db.VarChar(100)
-  title       String    @db.VarChar(255)
-  body        String?   @db.Text
-  data        Json?
-  dedupeKey   String?   @map("dedupe_key") @db.VarChar(180)
-  readAt      DateTime? @map("read_at") @db.Timestamptz(6)
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  id           String               @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId  String               @map("workspace_id") @db.Uuid
+  projectId    String?              @map("project_id") @db.Uuid
+  userId       String               @map("user_id") @db.Uuid
+  eventType    String               @map("type") @db.VarChar(100)
+  severity     NotificationSeverity @default(INFO)
+  title        String               @db.VarChar(255)
+  body         String?              @db.Text
+  actorId      String?              @map("actor_id") @db.Uuid
+  resourceType String?              @map("resource_type") @db.VarChar(64)
+  resourceId   String?              @map("resource_id") @db.Uuid
+  deepLink     String?              @map("deep_link") @db.VarChar(600)
+  data         Json?
+  dedupeKey    String?              @map("dedupe_key") @db.VarChar(180)
+  readAt       DateTime?            @map("read_at") @db.Timestamptz(6)
+  createdAt    DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@unique([userId, dedupeKey])
   @@index([workspaceId, userId, readAt, createdAt])
+  @@index([userId, createdAt(sort: Desc), id(sort: Desc)], map: "notifications_user_created_id_idx")
+  @@index([userId, readAt, createdAt(sort: Desc), id(sort: Desc)], map: "notifications_user_read_created_id_idx")
   @@map("notifications")
 }
 
