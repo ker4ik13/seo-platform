@@ -103,8 +103,12 @@ test("encrypts MFA secrets with authenticated encryption", () => {
 
   assert.notEqual(first, second);
   assert.equal(cryptoService.decryptMfaSecret(first), "BASE32SECRET");
+  const parts = first.split(".");
+  const encrypted = Buffer.from(parts[3]!, "base64url");
+  encrypted[0] = encrypted[0]! ^ 1;
+  parts[3] = encrypted.toString("base64url");
   assert.throws(
-    () => cryptoService.decryptMfaSecret(`${first.slice(0, -1)}x`),
+    () => cryptoService.decryptMfaSecret(parts.join(".")),
     { message: "Invalid encrypted MFA secret" }
   );
 });
