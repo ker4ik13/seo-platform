@@ -57,6 +57,19 @@ parameters и временные share URL по умолчанию не инде
 рендерингу данных в HTML. Защита маршрута не считается проверкой permissions:
 каждый API-запрос отдельно проверяет workspace/project access.
 
+Browser-запросы приложения идут через same-origin BFF `/app/api/**`, который:
+
+- проксирует только публичный `/api/v1` Platform API по внутренней сети;
+- не делает HttpOnly cookie доступными JavaScript;
+- передаёт CSRF, `If-Match`, idempotency и correlation headers;
+- сохраняет несколько `Set-Cookie` без склейки;
+- не кэширует tenant responses;
+- не заменяет backend authentication, tenant context и permission guards.
+
+Server Components передают cookies только Platform API. При истёкшем access
+cookie контролируемый refresh route ротирует session и возвращает пользователя
+только на проверенный локальный `returnTo`.
+
 ## 3. Цели публичного сайта
 
 - объяснить ценность продукта;
