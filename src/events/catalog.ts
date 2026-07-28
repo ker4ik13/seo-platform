@@ -2,6 +2,8 @@ export const domainEventTypes = {
   userCreated: "identity.user.created.v1",
   emailVerificationRequested: "identity.email-verification.requested.v1",
   userEmailVerified: "identity.user.email-verified.v1",
+  passwordResetRequested: "identity.password-reset.requested.v1",
+  userPasswordChanged: "identity.user.password-changed.v1",
   workspaceCreated: "workspace.created.v1",
   workspaceUpdated: "workspace.updated.v1",
   workspaceInviteRequested: "workspace.invite.requested.v1",

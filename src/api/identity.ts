@@ -63,7 +63,21 @@ export interface ResendEmailVerificationInput {
   readonly email: string;
 }
 
+export interface RequestPasswordResetInput {
+  readonly email: string;
+}
+
+export interface ResetPasswordInput {
+  readonly token: string;
+  readonly password: string;
+}
+
 export interface AcceptedOperation {
   readonly accepted: true;
   readonly verificationTokenForDevelopment?: string;
+}
+
+export interface PasswordResetAccepted {
+  readonly accepted: true;
+  readonly resetTokenForDevelopment?: string;
 }
