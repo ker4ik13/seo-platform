@@ -21,6 +21,8 @@ export const domainEventTypes = {
   jobCompleted: "job.completed.v1",
   jobFailed: "job.failed.v1",
   uploadCompleted: "upload.completed.v1",
+  uploadReady: "upload.ready.v1",
+  uploadRejected: "upload.rejected.v1",
   uploadAborted: "upload.aborted.v1",
   semanticVersionCreated: "semantics.version.created.v1",
   rankCheckCompleted: "seo.rank-check.completed.v1",

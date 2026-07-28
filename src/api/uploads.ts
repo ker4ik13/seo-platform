@@ -9,6 +9,17 @@ export const supportedImportMediaTypes = [
 export type SupportedImportMediaType =
   (typeof supportedImportMediaTypes)[number];
 
+export const importExtensionByMediaType: Readonly<
+  Record<SupportedImportMediaType, string>
+> = {
+  "text/csv": ".csv",
+  "text/tab-separated-values": ".tsv",
+  "application/vnd.ms-excel": ".xls",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+    ".xlsx",
+  "application/zip": ".zip"
+};
+
 export type UploadStatus =
   | "INITIATED"
   | "UPLOADING"
@@ -32,11 +43,15 @@ export interface UploadSummary {
   readonly projectId: string;
   readonly originalName: string;
   readonly mediaType: string;
+  readonly detectedMediaType?: string;
   readonly sizeBytes: string;
   readonly checksumSha256?: string;
+  readonly rejectionCode?: string;
   readonly status: UploadStatus;
   readonly expiresAt: string;
   readonly createdAt: string;
+  readonly uploadedAt?: string;
+  readonly inspectionCompletedAt?: string;
   readonly version: number;
 }
 
