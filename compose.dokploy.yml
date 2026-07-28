@@ -1,0 +1,476 @@
+name: ${COMPOSE_PROJECT_NAME:-seo-platform}
+
+x-backend-defaults: &backend-defaults
+  restart: unless-stopped
+  init: true
+  networks:
+    - internal
+  depends_on:
+    postgres:
+      condition: service_healthy
+    nats:
+      condition: service_healthy
+
+x-common-backend-env: &common-backend-env
+  NODE_ENV: production
+  SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+  NATS_URL: nats://nats:4222
+  NATS_USER: ${NATS_USER:?NATS_USER is required}
+  NATS_PASSWORD: ${NATS_PASSWORD:?NATS_PASSWORD is required}
+
+x-jobs-env: &jobs-env
+  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/jobs_db
+  REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+  S3_ENABLED: ${S3_ENABLED:-false}
+  S3_ENDPOINT: ${S3_ENDPOINT:-}
+  S3_REGION: ${S3_REGION:-ru-central1}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+  S3_BUCKET_UPLOADS: ${S3_BUCKET_UPLOADS:-}
+  S3_BUCKET_ARTIFACTS: ${S3_BUCKET_ARTIFACTS:-}
+  S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+  EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
+  EMAIL_FROM: ${EMAIL_FROM:-}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_SECURE: ${SMTP_SECURE:-false}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+
+services:
+  postgres:
+    image: postgres:18.3-alpine3.23
+    restart: unless-stopped
+    shm_size: 256mb
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--requirepass",
+        "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
+      ]
+    volumes:
+      - redis_data:/data
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "-a",
+          "${REDIS_PASSWORD}",
+          "--no-auth-warning",
+          "ping"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  nats:
+    image: nats:2.12-alpine
+    restart: unless-stopped
+    command:
+      [
+        "--jetstream",
+        "--store_dir=/data",
+        "--http_port=8222",
+        "--user=${NATS_USER:?NATS_USER is required}",
+        "--pass=${NATS_PASSWORD:?NATS_PASSWORD is required}"
+      ]
+    volumes:
+      - nats_data:/data
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:8222/healthz | grep -q ok"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  platform-api-migrate:
+    <<: *backend-defaults
+    restart: "no"
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: migration
+      args:
+        PACKAGE_NAME: "@seo-platform/platform-api"
+    environment:
+      <<: *common-backend-env
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/platform_db
+
+  seo-data-migrate:
+    <<: *backend-defaults
+    restart: "no"
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: migration
+      args:
+        PACKAGE_NAME: "@seo-platform/seo-data"
+    environment:
+      <<: *common-backend-env
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/seo_db
+
+  jobs-integrations-migrate:
+    <<: *backend-defaults
+    restart: "no"
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: migration
+      args:
+        PACKAGE_NAME: "@seo-platform/jobs-integrations"
+    environment:
+      <<: *common-backend-env
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/jobs_db
+
+  realtime-migrate:
+    <<: *backend-defaults
+    restart: "no"
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: migration
+      args:
+        PACKAGE_NAME: "@seo-platform/realtime"
+    environment:
+      <<: *common-backend-env
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/realtime_db
+
+  platform-api:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/platform-api"
+    environment:
+      <<: *common-backend-env
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/platform_db
+      DATABASE_POOL_MAX: ${PLATFORM_API_DATABASE_POOL_MAX:-20}
+      SEO_DATA_INTERNAL_URL: http://seo-data:4001
+      JOBS_INTERNAL_URL: http://jobs-integrations:4002
+      REALTIME_INTERNAL_URL: http://realtime:4003
+      INTERNAL_REQUEST_TIMEOUT_MS: 1500
+      CORS_ORIGINS: ${APP_PUBLIC_URL},${ADMIN_PUBLIC_URL}
+    expose:
+      - "4000"
+    networks:
+      - internal
+      - edge
+    depends_on:
+      platform-api-migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  seo-data:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/seo-data"
+    environment:
+      <<: *common-backend-env
+      PORT: 4001
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/seo_db
+      DATABASE_POOL_MAX: ${SEO_DATA_DATABASE_POOL_MAX:-30}
+    expose:
+      - "4001"
+    depends_on:
+      seo-data-migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4001/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  jobs-integrations:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/jobs-integrations"
+    environment:
+      <<: [*common-backend-env, *jobs-env]
+      PORT: 4002
+      DATABASE_POOL_MAX: ${JOBS_DATABASE_POOL_MAX:-30}
+    expose:
+      - "4002"
+    depends_on:
+      jobs-integrations-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4002/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  system-worker:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/jobs-integrations"
+    command: ["node", "dist/worker.main.js"]
+    environment:
+      <<: [*common-backend-env, *jobs-env]
+      DATABASE_POOL_MAX: ${JOBS_DATABASE_POOL_MAX:-20}
+    depends_on:
+      jobs-integrations-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+
+  realtime:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/realtime"
+    environment:
+      <<: *common-backend-env
+      PORT: 4003
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/realtime_db
+      DATABASE_POOL_MAX: ${REALTIME_DATABASE_POOL_MAX:-20}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      WEB_ORIGINS: ${APP_PUBLIC_URL},${ADMIN_PUBLIC_URL}
+    expose:
+      - "4003"
+    networks:
+      - internal
+      - edge
+    depends_on:
+      realtime-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4003/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  marketing:
+    restart: unless-stopped
+    init: true
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/web.Dockerfile
+      args:
+        PACKAGE_NAME: "@seo-platform/marketing"
+        PACKAGE_PATH: platform-marketing
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      NEXT_PUBLIC_SITE_URL: ${MARKETING_PUBLIC_URL}
+      NEXT_PUBLIC_APP_URL: ${APP_PUBLIC_URL}
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-ru}
+      DIRECTUS_URL: http://directus:8055
+      DIRECTUS_READ_TOKEN: ${DIRECTUS_READ_TOKEN:-}
+    expose:
+      - "3000"
+    networks:
+      - internal
+      - edge
+
+  app:
+    restart: unless-stopped
+    init: true
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/web.Dockerfile
+      args:
+        PACKAGE_NAME: "@seo-platform/app"
+        PACKAGE_PATH: platform-app
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      PLATFORM_API_INTERNAL_URL: http://platform-api:4000
+      NEXT_PUBLIC_REALTIME_URL: ${REALTIME_PUBLIC_URL}
+    expose:
+      - "3001"
+    networks:
+      - internal
+      - edge
+    depends_on:
+      platform-api:
+        condition: service_healthy
+
+  admin:
+    restart: unless-stopped
+    init: true
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/web.Dockerfile
+      args:
+        PACKAGE_NAME: "@seo-platform/admin"
+        PACKAGE_PATH: platform-admin
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      PLATFORM_API_INTERNAL_URL: http://platform-api:4000
+    expose:
+      - "3002"
+    networks:
+      - internal
+      - edge
+    depends_on:
+      platform-api:
+        condition: service_healthy
+
+  directus:
+    image: directus/directus:12.1.1
+    restart: unless-stopped
+    environment:
+      SECRET: ${DIRECTUS_SECRET:?DIRECTUS_SECRET is required}
+      ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL:?DIRECTUS_ADMIN_EMAIL is required}
+      ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD:?DIRECTUS_ADMIN_PASSWORD is required}
+      PUBLIC_URL: ${DIRECTUS_PUBLIC_URL}
+      DB_CLIENT: pg
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: directus_db
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      CACHE_ENABLED: "true"
+      CACHE_STORE: redis
+      REDIS: redis://:${REDIS_PASSWORD}@redis:6379/1
+      STORAGE_LOCATIONS: media
+      STORAGE_MEDIA_DRIVER: ${DIRECTUS_STORAGE_DRIVER:-local}
+      STORAGE_MEDIA_ROOT: /directus/uploads
+      STORAGE_MEDIA_KEY: ${S3_ACCESS_KEY_ID:-}
+      STORAGE_MEDIA_SECRET: ${S3_SECRET_ACCESS_KEY:-}
+      STORAGE_MEDIA_BUCKET: ${S3_BUCKET_CMS:-}
+      STORAGE_MEDIA_REGION: ${S3_REGION:-ru-central1}
+      STORAGE_MEDIA_ENDPOINT: ${S3_ENDPOINT:-}
+      STORAGE_MEDIA_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+      EMAIL_TRANSPORT: ${DIRECTUS_EMAIL_TRANSPORT:-sendmail}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      EMAIL_SMTP_HOST: ${SMTP_HOST:-}
+      EMAIL_SMTP_PORT: ${SMTP_PORT:-587}
+      EMAIL_SMTP_SECURE: ${SMTP_SECURE:-false}
+      EMAIL_SMTP_USER: ${SMTP_USER:-}
+      EMAIL_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    volumes:
+      - directus_uploads:/directus/uploads
+      - directus_extensions:/directus/extensions
+    expose:
+      - "8055"
+    networks:
+      - internal
+      - edge
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8055/server/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+
+volumes:
+  postgres_data:
+  redis_data:
+  nats_data:
+  directus_uploads:
+  directus_extensions:
+
+networks:
+  internal:
+    internal: true
+  edge:
