@@ -114,11 +114,15 @@ export class TenantController {
   @RequirePermission("project.view")
   @UseGuards(SessionAuthGuard, TenantPermissionGuard)
   public async projects(
-    @Req() request: TenantRequest
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiCollectionResponse<ProjectSummary>> {
     return collectionResponse(
       request,
-      await this.tenants.listProjects(requiredWorkspaceId(request))
+      await this.tenants.listProjects(
+        principal.userId,
+        requiredWorkspaceId(request)
+      )
     );
   }
 

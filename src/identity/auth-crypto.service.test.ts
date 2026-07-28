@@ -60,3 +60,22 @@ test("derives deterministic email token without persisting it in events", () => 
   assert.equal(first, second);
   assert.match(first, /^[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/u);
 });
+
+test("derives deterministic invitation token without persisting it in events", () => {
+  const expiresAt = new Date("2026-08-04T20:00:00.000Z");
+  const first = cryptoService.workspaceInvitationToken(
+    "01900000-0000-7000-8000-000000000003",
+    "01900000-0000-7000-8000-000000000004",
+    "member@example.com",
+    expiresAt
+  );
+  const second = cryptoService.workspaceInvitationToken(
+    "01900000-0000-7000-8000-000000000003",
+    "01900000-0000-7000-8000-000000000004",
+    "member@example.com",
+    expiresAt
+  );
+
+  assert.equal(first, second);
+  assert.match(first, /^[0-9a-f-]{36}\.[A-Za-z0-9_-]{43}$/u);
+});

@@ -4,6 +4,8 @@ import { PrismaService } from "../database/prisma.service.js";
 
 export interface AuditRecord {
   readonly actorId?: string;
+  readonly workspaceId?: string;
+  readonly projectId?: string;
   readonly action: string;
   readonly resourceType: string;
   readonly resourceId?: string;
@@ -22,6 +24,8 @@ export class AuditService {
     const client = transaction ?? this.prisma;
     await client.auditEvent.create({
       data: {
+        ...(input.workspaceId ? { workspaceId: input.workspaceId } : {}),
+        ...(input.projectId ? { projectId: input.projectId } : {}),
         actorType: input.actorId ? "USER" : "ANONYMOUS",
         ...(input.actorId ? { actorId: input.actorId } : {}),
         action: input.action,

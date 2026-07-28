@@ -56,6 +56,22 @@ enum ConsentType {
   MARKETING
 }
 
+enum WorkspaceInviteStatus {
+  SENT
+  DELIVERED
+  ACCEPTED
+  EXPIRED
+  REVOKED
+  BOUNCED
+}
+
+enum ProjectAccessLevel {
+  NONE
+  VIEWER
+  MEMBER
+  MANAGER
+}
+
 model User {
   id              String     @id @default(dbgenerated("uuidv7()")) @db.Uuid
   emailNormalized String     @unique(map: "users_email_normalized_key") @map("email_normalized") @db.VarChar(320)
@@ -187,6 +203,7 @@ model Workspace {
 
   members  WorkspaceMember[]
   projects Project[]
+  invites  WorkspaceInvite[]
 
   @@index([ownerUserId])
   @@index([status, createdAt])
@@ -198,7 +215,9 @@ model WorkspaceMember {
   workspaceId String       @map("workspace_id") @db.Uuid
   userId      String       @map("user_id") @db.Uuid
   roleCode    String       @map("role_code") @db.VarChar(64)
+  allProjects Boolean      @default(true) @map("all_projects")
   status      MemberStatus @default(INVITED)
+  invitedBy   String?      @map("invited_by") @db.Uuid
   version     Int          @default(1)
   joinedAt    DateTime?    @map("joined_at") @db.Timestamptz(6)
   createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -206,10 +225,36 @@ model WorkspaceMember {
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectAccesses ProjectMemberAccess[]
 
   @@unique([workspaceId, userId])
   @@index([userId, status])
   @@map("workspace_members")
+}
+
+model WorkspaceInvite {
+  id              String                @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId     String                @map("workspace_id") @db.Uuid
+  emailNormalized String                @map("email_normalized") @db.VarChar(320)
+  emailDisplay    String                @map("email_display") @db.VarChar(320)
+  roleCode        String                @map("role_code") @db.VarChar(64)
+  allProjects     Boolean               @default(true) @map("all_projects")
+  projectAccesses Json                  @map("project_accesses")
+  message         String?               @db.Text
+  tokenHash       String                @unique(map: "workspace_invites_token_hash_key") @map("token_hash") @db.Text
+  status          WorkspaceInviteStatus @default(SENT)
+  invitedBy       String                @map("invited_by") @db.Uuid
+  expiresAt       DateTime              @map("expires_at") @db.Timestamptz(6)
+  acceptedAt      DateTime?             @map("accepted_at") @db.Timestamptz(6)
+  revokedAt       DateTime?             @map("revoked_at") @db.Timestamptz(6)
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status, createdAt])
+  @@index([emailNormalized, status])
+  @@map("workspace_invites")
 }
 
 model Project {
@@ -229,10 +274,27 @@ model Project {
   deletedAt      DateTime?     @map("deleted_at") @db.Timestamptz(6)
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  memberAccesses ProjectMemberAccess[]
 
   @@unique([workspaceId, slug])
   @@index([workspaceId, status, createdAt])
   @@map("projects")
+}
+
+model ProjectMemberAccess {
+  id        String             @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  projectId String             @map("project_id") @db.Uuid
+  memberId  String             @map("member_id") @db.Uuid
+  level     ProjectAccessLevel
+  createdAt DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  project Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  member  WorkspaceMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, memberId])
+  @@index([memberId, level])
+  @@map("project_member_access")
 }
 
 model AuditEvent {

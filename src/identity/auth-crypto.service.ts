@@ -52,6 +52,29 @@ export class AuthCryptoService {
     return `${tokenId}.${signature}`;
   }
 
+  public workspaceInvitationToken(
+    inviteId: string,
+    workspaceId: string,
+    emailNormalized: string,
+    expiresAt: Date
+  ): string {
+    const key =
+      this.config.auth.passwordPepper ??
+      "development-only-invitation-signing-key";
+    const signature = createHmac("sha256", key)
+      .update(
+        [
+          "workspace-invitation",
+          inviteId,
+          workspaceId,
+          emailNormalized,
+          expiresAt.toISOString()
+        ].join(":")
+      )
+      .digest("base64url");
+    return `${inviteId}.${signature}`;
+  }
+
   public hashOpaqueToken(token: string): string {
     const pepper = this.config.auth.passwordPepper;
     return pepper

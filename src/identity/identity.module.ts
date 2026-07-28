@@ -27,6 +27,7 @@ import { SessionService } from "./session.service.js";
   exports: [
     IdentityService,
     SessionService,
+    AuthCryptoService,
     SessionAuthGuard,
     CsrfSessionGuard
   ]

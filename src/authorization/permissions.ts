@@ -101,6 +101,8 @@ export const systemRoleCodes = [
 
 export type SystemRoleCode = (typeof systemRoleCodes)[number];
 
+export type ProjectAccessLevel = "NONE" | "VIEWER" | "MEMBER" | "MANAGER";
+
 const viewPermissions: readonly Permission[] = [
   "workspace.view",
   "project.view",
@@ -116,6 +118,63 @@ const viewPermissions: readonly Permission[] = [
   "presence.view",
   "file.download"
 ];
+
+const projectMemberPermissions: ReadonlySet<Permission> = new Set([
+  ...viewPermissions,
+  "project.export",
+  "semantic.create",
+  "semantic.update",
+  "semantic.delete",
+  "semantic.import",
+  "semantic.export",
+  "semantic.bulk_edit",
+  "semantic.cluster",
+  "semantic.assign_url",
+  "semantic.manage_custom_columns",
+  "ranking.configure",
+  "ranking.run",
+  "ranking.export",
+  "collector.run",
+  "collector.cancel",
+  "collector.retry",
+  "competitor.manage",
+  "page.manage",
+  "content.edit",
+  "task.manage",
+  "knowledge.edit",
+  "file.upload",
+  "file.delete",
+  "automation.view",
+  "report.create",
+  "comment.create",
+  "comment.resolve",
+  "comment.delete_own",
+  "mention.use"
+]);
+
+const projectManagerPermissions: ReadonlySet<Permission> = new Set([
+  ...projectMemberPermissions,
+  "project.update",
+  "project.archive",
+  "project.restore",
+  "project.manage_access",
+  "semantic.restore_version",
+  "collector.approve_cost",
+  "serp.view_raw",
+  "integration.view",
+  "integration.connect",
+  "integration.update",
+  "integration.test",
+  "integration.view_usage",
+  "integration.use_system_credentials",
+  "integration.manage_fallback",
+  "automation.manage",
+  "automation.enable",
+  "report.manage",
+  "report.share",
+  "report.white_label",
+  "comment.moderate"
+]);
 
 const rolePermissions: Readonly<
   Record<Exclude<SystemRoleCode, "OWNER">, ReadonlySet<Permission>>
@@ -260,4 +319,14 @@ export function hasSystemPermission(
 }
 export function isSystemRoleCode(value: string): value is SystemRoleCode {
   return (systemRoleCodes as readonly string[]).includes(value);
+}
+
+export function hasProjectAccessPermission(
+  level: ProjectAccessLevel,
+  permission: Permission
+): boolean {
+  if (level === "NONE") return false;
+  if (level === "VIEWER") return viewPermissions.includes(permission);
+  if (level === "MEMBER") return projectMemberPermissions.has(permission);
+  return projectManagerPermissions.has(permission);
 }

@@ -4,6 +4,7 @@ import { assertUuid } from "../common/identifier.js";
 import { PrismaService } from "../database/prisma.service.js";
 import type { TenantAuthorization } from "./authorization.types.js";
 import {
+  hasProjectAccessPermission,
   hasSystemPermission,
   type Permission
 } from "./permissions.js";
@@ -62,15 +63,60 @@ export class AuthorizationService {
     ) {
       throw this.notFound();
     }
-    const workspace = await this.forWorkspace(
-      userId,
-      project.workspaceId,
-      permission
-    );
+    const membership = await this.prisma.workspaceMember.findUnique({
+      where: {
+        workspaceId_userId: {
+          workspaceId: project.workspaceId,
+          userId
+        }
+      },
+      include: {
+        workspace: true,
+        projectAccesses: {
+          where: { projectId },
+          take: 1
+        }
+      }
+    });
+    if (
+      !membership ||
+      membership.status !== "ACTIVE" ||
+      ["DELETING", "DELETED"].includes(membership.workspace.status)
+    ) {
+      throw this.notFound();
+    }
+    if (membership.workspace.status === "SUSPENDED") {
+      throw new DomainError({
+        statusCode: 403,
+        code: "FORBIDDEN",
+        message: "Workspace access is suspended"
+      });
+    }
+    if (!hasSystemPermission(membership.roleCode, permission)) {
+      throw this.forbidden(permission);
+    }
+
+    const projectAccess = membership.projectAccesses[0];
+    if (
+      projectAccess?.level === "NONE" ||
+      (!membership.allProjects && !projectAccess)
+    ) {
+      throw this.notFound();
+    }
+    if (
+      projectAccess &&
+      !hasProjectAccessPermission(projectAccess.level, permission)
+    ) {
+      throw this.forbidden(permission);
+    }
+
     return {
-      workspaceId: workspace.workspaceId,
+      workspaceId: project.workspaceId,
       projectId,
-      roleCode: workspace.roleCode
+      roleCode: membership.roleCode,
+      ...(projectAccess
+        ? { projectAccessLevel: projectAccess.level }
+        : {})
     };
   }
 

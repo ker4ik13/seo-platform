@@ -92,6 +92,7 @@ export class TenantService {
           await this.audit.record(
             {
               actorId: userId,
+              workspaceId: created.id,
               action: "workspace.created",
               resourceType: "workspace",
               resourceId: created.id,
@@ -182,6 +183,7 @@ export class TenantService {
       await this.audit.record(
         {
           actorId: userId,
+          workspaceId,
           action: "workspace.updated",
           resourceType: "workspace",
           resourceId: workspaceId,
@@ -208,12 +210,44 @@ export class TenantService {
   }
 
   public async listProjects(
+    userId: string,
     workspaceId: string
   ): Promise<readonly ProjectSummary[]> {
+    const membership = await this.prisma.workspaceMember.findUnique({
+      where: {
+        workspaceId_userId: {
+          workspaceId,
+          userId
+        }
+      },
+      select: {
+        id: true,
+        allProjects: true
+      }
+    });
+    if (!membership) throw this.notFound();
+
     const projects = await this.prisma.project.findMany({
       where: {
         workspaceId,
-        status: { notIn: ["DELETING", "DELETED"] }
+        status: { notIn: ["DELETING", "DELETED"] },
+        ...(membership.allProjects
+          ? {
+              memberAccesses: {
+                none: {
+                  memberId: membership.id,
+                  level: "NONE"
+                }
+              }
+            }
+          : {
+              memberAccesses: {
+                some: {
+                  memberId: membership.id,
+                  level: { not: "NONE" }
+                }
+              }
+            })
       },
       orderBy: { createdAt: "asc" },
       take: 1_000
@@ -268,6 +302,8 @@ export class TenantService {
         await this.audit.record(
           {
             actorId: userId,
+            workspaceId,
+            projectId: created.id,
             action: "project.created",
             resourceType: "project",
             resourceId: created.id,
@@ -359,6 +395,8 @@ export class TenantService {
       await this.audit.record(
         {
           actorId: userId,
+          workspaceId: project.workspaceId,
+          projectId,
           action: "project.updated",
           resourceType: "project",
           resourceId: projectId,
@@ -446,6 +484,8 @@ export class TenantService {
       await this.audit.record(
         {
           actorId: userId,
+          workspaceId: project.workspaceId,
+          projectId,
           action,
           resourceType: "project",
           resourceId: projectId,
