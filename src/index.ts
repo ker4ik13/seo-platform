@@ -1,5 +1,6 @@
 export * from "./api/identity.js";
 export * from "./api/keywords.js";
+export * from "./api/notifications.js";
 export * from "./api/semantic-imports.js";
 export * from "./api/tenants.js";
 export * from "./api/uploads.js";
