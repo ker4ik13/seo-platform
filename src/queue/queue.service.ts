@@ -15,6 +15,8 @@ import {
 } from "./upload-inspection.queue.js";
 import {
   enqueueSemanticImport,
+  enqueueSemanticImportPublish,
+  enqueueSemanticImportValidation,
   SEMANTIC_IMPORT_QUEUE,
   type SemanticImportJobData
 } from "./semantic-import.queue.js";
@@ -72,5 +74,33 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       throw new Error("Semantic import queue is not connected");
     }
     await enqueueSemanticImport(this.semanticImportQueue, importId);
+  }
+
+  public async enqueueSemanticImportValidation(
+    importId: string,
+    version: number
+  ): Promise<void> {
+    if (!this.semanticImportQueue) {
+      throw new Error("Semantic import queue is not connected");
+    }
+    await enqueueSemanticImportValidation(
+      this.semanticImportQueue,
+      importId,
+      version
+    );
+  }
+
+  public async enqueueSemanticImportPublish(
+    importId: string,
+    version: number
+  ): Promise<void> {
+    if (!this.semanticImportQueue) {
+      throw new Error("Semantic import queue is not connected");
+    }
+    await enqueueSemanticImportPublish(
+      this.semanticImportQueue,
+      importId,
+      version
+    );
   }
 }

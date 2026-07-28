@@ -41,6 +41,8 @@ test("loads bounded multipart upload defaults", () => {
   assert.equal(config.imports.parseConcurrency, 2);
   assert.equal(config.imports.stagingBatchRows, 1_000);
   assert.equal(config.imports.previewRows, 20);
+  assert.equal(config.imports.publishBatchRows, 200);
+  assert.equal(config.services.seoData, "http://localhost:4001");
 });
 
 test("requires a host when malware scanning is enabled", () => {

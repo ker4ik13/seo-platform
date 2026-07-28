@@ -7,10 +7,16 @@ import type { AppConfig } from "./config/app-config.js";
 import { APP_CONFIG } from "./config/config.module.js";
 import { ImportWorkerModule } from "./import-worker.module.js";
 import { SemanticImportParserService } from "./imports/semantic-import-parser.service.js";
+import { SemanticImportPublisherService } from "./imports/semantic-import-publisher.service.js";
+import { SemanticImportValidatorService } from "./imports/semantic-import-validator.service.js";
 import {
   enqueueSemanticImport,
+  enqueueSemanticImportPublish,
+  enqueueSemanticImportValidation,
   SEMANTIC_IMPORT_PARSE_JOB,
+  SEMANTIC_IMPORT_PUBLISH_JOB,
   SEMANTIC_IMPORT_QUEUE,
+  SEMANTIC_IMPORT_VALIDATE_JOB,
   type SemanticImportJobData
 } from "./queue/semantic-import.queue.js";
 
@@ -25,6 +31,8 @@ async function bootstrap(): Promise<void> {
   );
   const config = app.get<AppConfig>(APP_CONFIG);
   const parser = app.get(SemanticImportParserService);
+  const validator = app.get(SemanticImportValidatorService);
+  const publisher = app.get(SemanticImportPublisherService);
   const workerConnection = redis(config.redisUrl);
   const queueConnection = redis(config.redisUrl);
   const queue = new Queue<SemanticImportJobData>(
@@ -34,13 +42,19 @@ async function bootstrap(): Promise<void> {
   const worker = new Worker<SemanticImportJobData>(
     SEMANTIC_IMPORT_QUEUE,
     async (job) => {
-      if (
-        job.name !== SEMANTIC_IMPORT_PARSE_JOB ||
-        !UUID_PATTERN.test(job.data.importId)
-      ) {
+      if (!UUID_PATTERN.test(job.data.importId)) {
         throw new Error("Invalid semantic import job");
       }
-      return parser.parse(job.data.importId);
+      if (job.name === SEMANTIC_IMPORT_PARSE_JOB) {
+        return parser.parse(job.data.importId);
+      }
+      if (job.name === SEMANTIC_IMPORT_VALIDATE_JOB) {
+        return validator.validate(job.data.importId);
+      }
+      if (job.name === SEMANTIC_IMPORT_PUBLISH_JOB) {
+        return publisher.publish(job.data.importId);
+      }
+      throw new Error("Unknown semantic import job");
     },
     {
       connection: workerConnection,
@@ -53,9 +67,27 @@ async function bootstrap(): Promise<void> {
     if (dispatching) return;
     dispatching = true;
     try {
-      const importIds = await parser.pendingImportIds();
+      const [importIds, validations, publications] = await Promise.all([
+        parser.pendingImportIds(),
+        validator.pendingImports(),
+        publisher.pendingImports()
+      ]);
       for (const importId of importIds) {
         await enqueueSemanticImport(queue, importId);
+      }
+      for (const semanticImport of validations) {
+        await enqueueSemanticImportValidation(
+          queue,
+          semanticImport.id,
+          semanticImport.version
+        );
+      }
+      for (const semanticImport of publications) {
+        await enqueueSemanticImportPublish(
+          queue,
+          semanticImport.id,
+          semanticImport.version
+        );
       }
     } catch {
       logger.error("Unable to dispatch pending semantic imports");

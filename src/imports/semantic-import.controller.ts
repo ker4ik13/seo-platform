@@ -19,7 +19,12 @@ import {
   internalUuid
 } from "../internal/internal-command-context.js";
 import { InternalApiGuard } from "../internal/internal-api.guard.js";
-import { internalCreateSemanticImportInput } from "./semantic-import-input.js";
+import {
+  internalCancelSemanticImportInput,
+  internalConfigureSemanticImportInput,
+  internalConfirmSemanticImportInput,
+  internalCreateSemanticImportInput
+} from "./semantic-import-input.js";
 import { SemanticImportService } from "./semantic-import.service.js";
 
 @Controller("internal/v1/imports")
@@ -56,6 +61,61 @@ export class SemanticImportController {
         internalUuid(importId, "importId"),
         context.workspaceId,
         context.projectId
+      )
+    );
+  }
+
+  @Post(":importId/mapping")
+  public async configure(
+    @Param("importId") importId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticImportSummary>> {
+    const input = internalConfigureSemanticImportInput(body);
+    assertInternalContext(input, internalCommandContext(headers));
+    return response(
+      request,
+      await this.semanticImports.configure(
+        internalUuid(importId, "importId"),
+        input
+      )
+    );
+  }
+
+  @Post(":importId/publish")
+  public async publish(
+    @Param("importId") importId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticImportSummary>> {
+    const input = internalConfirmSemanticImportInput(body);
+    assertInternalContext(input, internalCommandContext(headers));
+    return response(
+      request,
+      await this.semanticImports.confirm(
+        internalUuid(importId, "importId"),
+        input
+      )
+    );
+  }
+
+  @Post(":importId/cancel")
+  public async cancel(
+    @Param("importId") importId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticImportSummary>> {
+    const input = internalCancelSemanticImportInput(body);
+    assertInternalContext(input, internalCommandContext(headers));
+    return response(
+      request,
+      await this.semanticImports.cancel(
+        internalUuid(importId, "importId"),
+        input,
+        request.id
       )
     );
   }

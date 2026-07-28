@@ -198,6 +198,8 @@ function configFixture(): AppConfig {
     databaseUrl: "postgresql://unused",
     databasePoolMax: 1,
     redisUrl: "redis://unused",
+    internalCommandTimeoutMs: 60_000,
+    services: { seoData: "http://seo-data" },
     nats: { url: "nats://unused" },
     s3: {
       enabled: true,
@@ -229,7 +231,8 @@ function configFixture(): AppConfig {
       parseHeartbeatSeconds: 30,
       parseConcurrency: 2,
       stagingBatchRows: 1_000,
-      previewRows: 20
+      previewRows: 20,
+      publishBatchRows: 200
     }
   };
 }

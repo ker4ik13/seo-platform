@@ -1,12 +1,20 @@
 import { BadRequestException } from "@nestjs/common";
 import {
+  semanticImportDuplicatePolicies,
   semanticImportDelimiters,
   semanticImportEncodings,
   semanticImportHeaderModes,
+  semanticImportTargets,
+  type InternalCancelSemanticImportInput,
+  type InternalConfigureSemanticImportInput,
+  type InternalConfirmSemanticImportInput,
   type InternalCreateSemanticImportInput,
+  type SemanticImportDuplicatePolicy,
   type SemanticImportDelimiter,
   type SemanticImportEncoding,
-  type SemanticImportHeaderMode
+  type SemanticImportHeaderMode,
+  type SemanticImportMappingColumn,
+  type SemanticImportTarget
 } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
 
@@ -51,6 +59,129 @@ export function internalCreateSemanticImportInput(
   };
 }
 
+export function internalConfigureSemanticImportInput(
+  value: unknown
+): InternalConfigureSemanticImportInput {
+  const input = record(value);
+  const columns = array(input.columns, "columns").map((value, index) =>
+    mappingColumn(value, index)
+  );
+  if (columns.length === 0 || columns.length > 500) invalid("columns");
+  if (
+    new Set(columns.map(({ sourceIndex }) => sourceIndex)).size !==
+    columns.length
+  ) {
+    invalid("columns.sourceIndex");
+  }
+  if (
+    columns.filter(({ target }) => target === "keyword.text").length !== 1
+  ) {
+    invalid("columns.keyword.text");
+  }
+  const singletonTargets = columns
+    .map(({ target }) => target)
+    .filter((target) => !["custom", "ignore"].includes(target));
+  if (new Set(singletonTargets).size !== singletonTargets.length) {
+    invalid("columns.target");
+  }
+  const groupSeparator =
+    input.groupSeparator === undefined
+      ? "/"
+      : string(input, "groupSeparator");
+  if (groupSeparator.length > 8) invalid("groupSeparator");
+  const defaultLanguage =
+    input.defaultLanguage === undefined
+      ? "und"
+      : string(input, "defaultLanguage");
+  if (
+    defaultLanguage !== "und" &&
+    !/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u.test(defaultLanguage)
+  ) {
+    invalid("defaultLanguage");
+  }
+  return {
+    workspaceId: uuid(input, "workspaceId"),
+    projectId: uuid(input, "projectId"),
+    actorId: uuid(input, "actorId"),
+    version: positiveVersion(input.version),
+    columns,
+    defaultLanguage,
+    groupSeparator,
+    duplicatePolicy: enumValue<SemanticImportDuplicatePolicy>(
+      input.duplicatePolicy,
+      semanticImportDuplicatePolicies,
+      "SKIP_EXISTING",
+      "duplicatePolicy"
+    )
+  };
+}
+
+export function internalConfirmSemanticImportInput(
+  value: unknown
+): InternalConfirmSemanticImportInput {
+  return versionedContext(value);
+}
+
+export function internalCancelSemanticImportInput(
+  value: unknown
+): InternalCancelSemanticImportInput {
+  const input = record(value);
+  return {
+    workspaceId: uuid(input, "workspaceId"),
+    projectId: uuid(input, "projectId"),
+    actorId: uuid(input, "actorId"),
+    ...(input.version === undefined
+      ? {}
+      : { version: positiveVersion(input.version) })
+  };
+}
+
+function versionedContext(
+  value: unknown
+): InternalConfirmSemanticImportInput {
+  const input = record(value);
+  return {
+    workspaceId: uuid(input, "workspaceId"),
+    projectId: uuid(input, "projectId"),
+    actorId: uuid(input, "actorId"),
+    version: positiveVersion(input.version)
+  };
+}
+
+function mappingColumn(
+  value: unknown,
+  index: number
+): SemanticImportMappingColumn {
+  const input = record(value);
+  if (
+    !Number.isSafeInteger(input.sourceIndex) ||
+    Number(input.sourceIndex) < 0
+  ) {
+    invalid(`columns.${index}.sourceIndex`);
+  }
+  const target = enumValue<SemanticImportTarget>(
+    input.target,
+    semanticImportTargets,
+    "ignore",
+    `columns.${index}.target`
+  );
+  const customName =
+    input.customName === undefined
+      ? undefined
+      : string(input, "customName");
+  if (customName && customName.length > 160) {
+    invalid(`columns.${index}.customName`);
+  }
+  if (target === "custom" && !customName) {
+    invalid(`columns.${index}.customName`);
+  }
+  return {
+    sourceIndex: Number(input.sourceIndex),
+    target,
+    ...(customName ? { customName } : {})
+  };
+}
+
 function enumValue<Value extends string>(
   value: unknown,
   allowed: readonly Value[],
@@ -71,6 +202,11 @@ function record(value: unknown): Readonly<Record<string, unknown>> {
   return value as Readonly<Record<string, unknown>>;
 }
 
+function array(value: unknown, field: string): readonly unknown[] {
+  if (!Array.isArray(value)) invalid(field);
+  return value;
+}
+
 function string(
   input: Readonly<Record<string, unknown>>,
   field: string
@@ -85,6 +221,13 @@ function uuid(
   field: string
 ): string {
   return internalUuid(string(input, field), field);
+}
+
+function positiveVersion(value: unknown): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 1) {
+    invalid("version");
+  }
+  return Number(value);
 }
 
 function invalid(field: string): never {

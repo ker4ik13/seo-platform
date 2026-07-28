@@ -38,6 +38,10 @@ export interface AppConfig {
   readonly databasePoolMax: number;
   readonly redisUrl: string;
   readonly internalApiToken?: string;
+  readonly internalCommandTimeoutMs: number;
+  readonly services: {
+    readonly seoData: string;
+  };
   readonly nats: {
     readonly url: string;
     readonly user?: string;
@@ -62,6 +66,7 @@ export interface AppConfig {
     readonly parseConcurrency: number;
     readonly stagingBatchRows: number;
     readonly previewRows: number;
+    readonly publishBatchRows: number;
   };
 }
 
@@ -160,6 +165,15 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ),
     redisUrl: env.REDIS_URL?.trim() || "redis://localhost:6379",
     ...(internalApiToken ? { internalApiToken } : {}),
+    internalCommandTimeoutMs: positiveInteger(
+      env.SEO_DATA_COMMAND_TIMEOUT_MS,
+      60_000,
+      "SEO_DATA_COMMAND_TIMEOUT_MS"
+    ),
+    services: {
+      seoData:
+        optional(env, "SEO_DATA_URL") || "http://localhost:4001"
+    },
     nats: {
       url: env.NATS_URL?.trim() || "nats://localhost:4222",
       ...(natsUser ? { user: natsUser } : {}),
@@ -277,6 +291,11 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         env.IMPORT_PREVIEW_ROWS,
         20,
         "IMPORT_PREVIEW_ROWS"
+      ),
+      publishBatchRows: positiveInteger(
+        env.IMPORT_PUBLISH_BATCH_ROWS,
+        200,
+        "IMPORT_PUBLISH_BATCH_ROWS"
       )
     }
   };
