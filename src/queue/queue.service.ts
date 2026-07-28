@@ -13,6 +13,11 @@ import {
   UPLOAD_INSPECTION_QUEUE,
   type UploadInspectionJobData
 } from "./upload-inspection.queue.js";
+import {
+  enqueueSemanticImport,
+  SEMANTIC_IMPORT_QUEUE,
+  type SemanticImportJobData
+} from "./semantic-import.queue.js";
 
 export const SYSTEM_QUEUE = "system";
 
@@ -21,6 +26,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   private connection?: Redis;
   private systemQueue?: Queue;
   private uploadInspectionQueue?: Queue<UploadInspectionJobData>;
+  private semanticImportQueue?: Queue<SemanticImportJobData>;
 
   public constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
@@ -37,11 +43,15 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     this.uploadInspectionQueue = new Queue(UPLOAD_INSPECTION_QUEUE, {
       connection: this.connection
     });
+    this.semanticImportQueue = new Queue(SEMANTIC_IMPORT_QUEUE, {
+      connection: this.connection
+    });
   }
 
   public async onModuleDestroy(): Promise<void> {
     await this.systemQueue?.close();
     await this.uploadInspectionQueue?.close();
+    await this.semanticImportQueue?.close();
     await this.connection?.quit();
   }
 
@@ -55,5 +65,12 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       throw new Error("Upload inspection queue is not connected");
     }
     await enqueueUploadInspection(this.uploadInspectionQueue, uploadId);
+  }
+
+  public async enqueueSemanticImport(importId: string): Promise<void> {
+    if (!this.semanticImportQueue) {
+      throw new Error("Semantic import queue is not connected");
+    }
+    await enqueueSemanticImport(this.semanticImportQueue, importId);
   }
 }

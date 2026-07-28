@@ -222,6 +222,14 @@ function configFixture(): AppConfig {
       inspectionDispatchSeconds: 30,
       inspectionHeartbeatSeconds: 60,
       inspectionConcurrency: 2
+    },
+    imports: {
+      parseLeaseMinutes: 30,
+      parseDispatchSeconds: 30,
+      parseHeartbeatSeconds: 30,
+      parseConcurrency: 2,
+      stagingBatchRows: 1_000,
+      previewRows: 20
     }
   };
 }

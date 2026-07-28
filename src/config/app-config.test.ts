@@ -37,6 +37,10 @@ test("loads bounded multipart upload defaults", () => {
   assert.equal(config.uploads.inspectionDispatchSeconds, 30);
   assert.equal(config.uploads.inspectionHeartbeatSeconds, 60);
   assert.equal(config.uploads.inspectionConcurrency, 2);
+  assert.equal(config.imports.parseLeaseMinutes, 30);
+  assert.equal(config.imports.parseConcurrency, 2);
+  assert.equal(config.imports.stagingBatchRows, 1_000);
+  assert.equal(config.imports.previewRows, 20);
 });
 
 test("requires a host when malware scanning is enabled", () => {

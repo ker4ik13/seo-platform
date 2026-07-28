@@ -55,6 +55,14 @@ export interface AppConfig {
     readonly inspectionHeartbeatSeconds: number;
     readonly inspectionConcurrency: number;
   };
+  readonly imports: {
+    readonly parseLeaseMinutes: number;
+    readonly parseDispatchSeconds: number;
+    readonly parseHeartbeatSeconds: number;
+    readonly parseConcurrency: number;
+    readonly stagingBatchRows: number;
+    readonly previewRows: number;
+  };
 }
 
 function bool(value: string | undefined, fallback = false): boolean {
@@ -237,6 +245,38 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         env.UPLOAD_INSPECTION_CONCURRENCY,
         2,
         "UPLOAD_INSPECTION_CONCURRENCY"
+      )
+    },
+    imports: {
+      parseLeaseMinutes: positiveInteger(
+        env.IMPORT_PARSE_LEASE_MINUTES,
+        30,
+        "IMPORT_PARSE_LEASE_MINUTES"
+      ),
+      parseDispatchSeconds: positiveInteger(
+        env.IMPORT_PARSE_DISPATCH_SECONDS,
+        30,
+        "IMPORT_PARSE_DISPATCH_SECONDS"
+      ),
+      parseHeartbeatSeconds: positiveInteger(
+        env.IMPORT_PARSE_HEARTBEAT_SECONDS,
+        30,
+        "IMPORT_PARSE_HEARTBEAT_SECONDS"
+      ),
+      parseConcurrency: positiveInteger(
+        env.IMPORT_PARSE_CONCURRENCY,
+        2,
+        "IMPORT_PARSE_CONCURRENCY"
+      ),
+      stagingBatchRows: positiveInteger(
+        env.IMPORT_STAGING_BATCH_ROWS,
+        1_000,
+        "IMPORT_STAGING_BATCH_ROWS"
+      ),
+      previewRows: positiveInteger(
+        env.IMPORT_PREVIEW_ROWS,
+        20,
+        "IMPORT_PREVIEW_ROWS"
       )
     }
   };

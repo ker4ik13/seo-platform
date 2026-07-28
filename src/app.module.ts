@@ -9,6 +9,7 @@ import { QueueModule } from "./queue/queue.module.js";
 import { StorageModule } from "./storage/storage.module.js";
 import { SystemModule } from "./system/system.module.js";
 import { UploadModule } from "./uploads/upload.module.js";
+import { SemanticImportModule } from "./imports/semantic-import.module.js";
 
 @Module({
   imports: [
@@ -21,7 +22,8 @@ import { UploadModule } from "./uploads/upload.module.js";
     InternalModule,
     HealthModule,
     SystemModule,
-    UploadModule
+    UploadModule,
+    SemanticImportModule
   ]
 })
 export class AppModule {}
