@@ -1,5 +1,6 @@
 export const domainEventTypes = {
   userCreated: "identity.user.created.v1",
+  userEmailVerified: "identity.user.email-verified.v1",
   workspaceCreated: "workspace.created.v1",
   workspaceMemberChanged: "workspace.member.changed.v1",
   projectCreated: "project.created.v1",
