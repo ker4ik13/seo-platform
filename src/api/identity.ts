@@ -55,6 +55,55 @@ export interface LoginInput {
   readonly password: string;
 }
 
+export interface MfaChallengeResult {
+  readonly mfaRequired: true;
+  readonly challengeToken: string;
+  readonly methods: readonly ("TOTP" | "RECOVERY_CODE")[];
+  readonly expiresAt: string;
+}
+
+export type LoginResult = AuthenticationResult | MfaChallengeResult;
+
+export interface VerifyMfaChallengeInput {
+  readonly challengeToken: string;
+  readonly code: string;
+}
+
+export interface MfaOverview {
+  readonly totp?: {
+    readonly id: string;
+    readonly status: "ACTIVE";
+    readonly confirmedAt: string;
+    readonly lastUsedAt?: string;
+  };
+  readonly remainingRecoveryCodes: number;
+}
+
+export interface TotpSetupResult {
+  readonly methodId: string;
+  readonly secret: string;
+  readonly otpauthUri: string;
+}
+
+export interface ConfirmTotpInput {
+  readonly methodId: string;
+  readonly code: string;
+}
+
+export interface ConfirmTotpResult {
+  readonly enabled: true;
+  readonly recoveryCodes: readonly string[];
+}
+
+export interface DisableTotpInput {
+  readonly password: string;
+  readonly code: string;
+}
+
+export interface DisableTotpResult {
+  readonly disabled: true;
+}
+
 export interface VerifyEmailInput {
   readonly token: string;
 }
