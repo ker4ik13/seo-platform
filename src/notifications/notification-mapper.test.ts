@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
 import {
+  notificationCollectionResponse,
   notificationPreferencesSummary,
+  notificationReadAllResult,
   projectNotificationSubscriptionSummary
 } from "./notification-mapper.js";
 
@@ -65,6 +67,56 @@ test("rejects malformed effective notification rules", () => {
         ],
         version: 1,
         updatedAt: "2026-07-28T00:00:00.000Z"
+      }),
+    DomainError
+  );
+});
+
+test("maps a strict notification collection and read-all result", () => {
+  const response = notificationCollectionResponse({
+    data: [
+      {
+        id: "01900000-0000-7000-8000-000000000010",
+        workspaceId,
+        projectId,
+        eventType: "JOB",
+        severity: "WARNING",
+        title: "Задание завершено частично",
+        body: "Проверьте строки с ошибками",
+        deepLink: "/app/jobs/01900000-0000-7000-8000-000000000010",
+        createdAt: "2026-07-29T00:00:00.000Z"
+      }
+    ],
+    page: { hasNext: false, unreadCount: 1 },
+    meta: { requestId: "request-1" }
+  });
+  assert.equal(response.data[0]?.severity, "WARNING");
+  assert.equal(
+    notificationReadAllResult({
+      updated: 1,
+      readAt: "2026-07-29T00:01:00.000Z"
+    }).updated,
+    1
+  );
+});
+
+test("rejects an external notification deep link", () => {
+  assert.throws(
+    () =>
+      notificationCollectionResponse({
+        data: [
+          {
+            id: "01900000-0000-7000-8000-000000000010",
+            workspaceId,
+            eventType: "JOB",
+            severity: "INFO",
+            title: "Задание завершено",
+            deepLink: "https://evil.example",
+            createdAt: "2026-07-29T00:00:00.000Z"
+          }
+        ],
+        page: { hasNext: false, unreadCount: 1 },
+        meta: { requestId: "request-1" }
       }),
     DomainError
   );

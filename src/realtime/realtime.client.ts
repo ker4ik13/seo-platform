@@ -2,7 +2,11 @@ import { Inject, Injectable } from "@nestjs/common";
 import type {
   InternalUpdateNotificationPreferencesInput,
   InternalUpdateProjectNotificationSubscriptionInput,
+  NotificationCollectionResponse,
+  NotificationListItem,
+  NotificationListQuery,
   NotificationPreferencesSummary,
+  NotificationReadAllResult,
   ProjectNotificationSubscriptionSummary,
   UpdateNotificationPreferencesInput,
   UpdateProjectNotificationSubscriptionInput
@@ -12,7 +16,10 @@ import { DomainError } from "../common/domain-error.js";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import {
+  notificationCollectionResponse,
+  notificationListItem,
   notificationPreferencesSummary,
+  notificationReadAllResult,
   projectNotificationSubscriptionSummary
 } from "../notifications/notification-mapper.js";
 
@@ -40,6 +47,46 @@ export class RealtimeClient {
       context
     );
     return notificationPreferencesSummary(data);
+  }
+
+  public async listNotifications(
+    context: ActorContext,
+    query: NotificationListQuery
+  ): Promise<NotificationCollectionResponse> {
+    const parameters = new URLSearchParams({
+      limit: String(query.limit),
+      unreadOnly: String(query.unreadOnly)
+    });
+    if (query.cursor) parameters.set("cursor", query.cursor);
+    const payload = await this.requestPayload(
+      "GET",
+      `/internal/v1/users/${encodeURIComponent(context.actorId)}/notifications?${parameters.toString()}`,
+      context
+    );
+    return notificationCollectionResponse(payload);
+  }
+
+  public async markNotificationRead(
+    context: ActorContext,
+    notificationId: string
+  ): Promise<NotificationListItem> {
+    const data = await this.request(
+      "PATCH",
+      `/internal/v1/users/${encodeURIComponent(context.actorId)}/notifications/${encodeURIComponent(notificationId)}/read`,
+      context
+    );
+    return notificationListItem(data);
+  }
+
+  public async markAllNotificationsRead(
+    context: ActorContext
+  ): Promise<NotificationReadAllResult> {
+    const data = await this.request(
+      "POST",
+      `/internal/v1/users/${encodeURIComponent(context.actorId)}/notifications/read-all`,
+      context
+    );
+    return notificationReadAllResult(data);
   }
 
   public async updateNotificationPreferences(
@@ -97,11 +144,22 @@ export class RealtimeClient {
   }
 
   private async request(
-    method: "GET" | "PATCH",
+    method: "GET" | "PATCH" | "POST",
     path: string,
     context: ActorContext | ProjectContext,
     body?: unknown
   ): Promise<unknown> {
+    const payload = await this.requestPayload(method, path, context, body);
+    if (!("data" in payload)) throw invalidResponse();
+    return payload.data;
+  }
+
+  private async requestPayload(
+    method: "GET" | "PATCH" | "POST",
+    path: string,
+    context: ActorContext | ProjectContext,
+    body?: unknown
+  ): Promise<Readonly<Record<string, unknown>>> {
     const token = this.config.internalApiToken;
     if (!token) throw dependencyUnavailable();
     const headers = new Headers({
@@ -140,14 +198,10 @@ export class RealtimeClient {
     }
     const payload = await response.json().catch(() => undefined);
     if (!response.ok) throw upstreamError(response.status);
-    if (
-      typeof payload !== "object" ||
-      payload === null ||
-      !("data" in payload)
-    ) {
+    if (typeof payload !== "object" || payload === null) {
       throw invalidResponse();
     }
-    return payload.data;
+    return payload as Readonly<Record<string, unknown>>;
   }
 }
 
