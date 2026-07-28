@@ -5,7 +5,7 @@
 - PostgreSQL 18 с отдельными databases для четырёх backend-контуров и Directus;
 - Redis с AOF для BullMQ, Socket.IO и cache;
 - NATS с JetStream;
-- четыре NestJS API, отдельные system и import workers;
+- четыре NestJS API, отдельные system, inspection и import workers;
 - единый web (`/`, `/tools`, `/docs`, `/app`), admin и Directus;
 - S3 и SMTP подключаются как внешние managed/hosted сервисы.
 
@@ -83,9 +83,18 @@ cleanup; публичные download/import endpoints их не выдают.
 
 `import-worker` запускается как отдельный process type из image
 `jobs-integrations` и не зависит от HTTP API по памяти или времени выполнения.
-Он читает только uploads со статусом `READY`, потоково разбирает CSV/TSV и
-сохраняет строки в partitioned staging `jobs_db`. Его concurrency и размер
-batch задаются `IMPORT_PARSE_CONCURRENCY` и `IMPORT_STAGING_BATCH_ROWS`.
+Он читает только uploads со статусом `READY`, потоково разбирает CSV/TSV,
+сохраняет строки в partitioned staging `jobs_db`, валидирует подтверждённое
+сопоставление и публикует уникальные строки чанками через internal HTTP
+`seo-data`. Его concurrency и размеры batch задаются
+`IMPORT_PARSE_CONCURRENCY`, `IMPORT_STAGING_BATCH_ROWS` и
+`IMPORT_PUBLISH_BATCH_ROWS`.
+
+Вызовы jobs → `seo-data` используют `SEO_DATA_URL`, общий
+`INTERNAL_API_TOKEN`, trusted tenant/actor headers и отдельный timeout
+`SEO_DATA_COMMAND_TIMEOUT_MS`. Jobs не получает доступ к `seo_db`.
+Повтор chunk безопасен благодаря receipt/payload hash; рестарт после
+кооперативной отмены завершает partial semantic version.
 
 На первой VPS следует начинать с concurrency `1`–`2`. Worker имеет
 lease/heartbeat и периодически возвращает в очередь зависшие parsing jobs,
