@@ -969,6 +969,13 @@ Indexes:
 `idempotency_key`, expiry и timestamps состояний. Опциональный
 `declared_checksum` отделён от обязательного фактически вычисленного worker-ом
 `checksum`; доверять заявленному значению до inspection запрещено.
+Дополнительно сохраняются `detected_media_type`,
+`inspection_started_at`, `inspection_heartbeat_at` и
+`inspection_completed_at`. `inspection_started_at` является lease token:
+terminal update допустим только для worker-а, который всё ещё владеет этим
+значением. `scan_result` содержит машинный код результата и технические
+метаданные; публичный API возвращает только allowlisted rejection code, но не
+malware signature или внутреннюю ошибку dependency.
 
 Row staging создаётся в staging schema/partitioned tables и очищается retention job.
 

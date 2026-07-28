@@ -2,8 +2,9 @@
 
 Последнее обновление: 28 июля 2026 года
 
-Текущий инкремент: Semantics import → Multipart upload
-Статус: resumable S3 upload реализован; inspection/import workers следующие
+Текущий инкремент: Semantics import → Upload inspection
+Статус: resumable S3 upload и обязательный inspection worker реализованы;
+parser/staging следующие
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -56,6 +57,7 @@ platform-admin ────┼──> platform-api
 all backend services <──> NATS
 jobs/realtime <──> Redis
 jobs <──> S3
+upload inspection worker ──> ClamAV
 platform-web public/docs <──> Directus
 ```
 
@@ -79,6 +81,7 @@ transport и health/readiness, таблицы outbox/inbox созданы. Durab
 | PostgreSQL | 5432 |
 | Redis | 6379 |
 | NATS client/monitor | 4222 / 8222 |
+| ClamAV `clamd` (только internal network) | 3310 |
 
 ## 5. Конфигурация
 
@@ -91,6 +94,8 @@ transport и health/readiness, таблицы outbox/inbox созданы. Durab
 - Directus использует local media volume до переключения
   `DIRECTUS_STORAGE_DRIVER=s3`; application uploads сразу имеют S3 adapter.
 - Production secrets задаются только в Dokploy.
+- `inspection` Compose profile запускает отдельные ClamAV и upload inspection
+  worker; без доступного scanner файл fail-closed остаётся `UPLOADED`.
 
 ## 6. Внутренняя структура пакетов
 
@@ -117,12 +122,16 @@ Backend convention:
   доверенный client к jobs-integrations;
 - `platform-api/src/audit`, `src/outbox` — переиспользуемые transactional
   записи аудита и событий;
-- `platform-jobs-integrations/src/queue` — BullMQ connection и system queue;
+- `platform-jobs-integrations/src/queue` — BullMQ connection, system queue и
+  идемпотентная `upload-inspection` queue;
 - `platform-jobs-integrations/src/storage` — S3 port, disabled и S3 adapters;
+- `platform-jobs-integrations/src/malware` — scanner port, disabled adapter и
+  потоковый `clamd` INSTREAM adapter;
 - `platform-jobs-integrations/src/internal` — fail-closed авторизация
   внутренних HTTP-команд;
 - `platform-jobs-integrations/src/uploads` — multipart lifecycle, opaque
-  object keys, size verification и upload outbox events;
+  object keys, size verification, lease/heartbeat inspection и upload outbox
+  events;
 - `platform-jobs-integrations/src/email` — email port, disabled и SMTP adapters;
 - `platform-realtime/src/realtime` — Socket.IO gateway и Redis adapter;
 - `platform-web/app` — public, tools, docs и private `/app` App Router screens;
@@ -138,6 +147,8 @@ Entrypoints:
 
 - API/SEO/realtime/jobs HTTP: `src/main.ts`;
 - system worker: `platform-jobs-integrations/src/worker.main.ts`;
+- upload inspection worker:
+  `platform-jobs-integrations/src/inspection-worker.main.ts`;
 - Next.js: App Router соответствующего frontend-пакета;
 - remote stack: `platform-infrastructure/compose.dokploy.yml`.
 
@@ -157,7 +168,7 @@ Entrypoints:
 | Admin shell | vertical slice |
 | Auth core | vertical slice |
 | Workspaces/projects/team access | vertical slice |
-| Semantics/import | vertical slice: upload |
+| Semantics/import | vertical slice: upload + inspection |
 | Rankings/integrations | planned |
 | Billing/YooKassa | planned |
 | Directus content | planned |
@@ -190,13 +201,23 @@ resume через `sessionStorage`, retry/cancel, обязательную пр�
 статус `UPLOADED`; использовать объект для импорта можно лишь после inspection
 worker и статуса `READY`.
 
+Inspection worker читает S3 строго потоком, удерживает восстанавливаемый
+lease/heartbeat, считает фактический SHA-256 и размер, проверяет сигнатуру
+контейнера/MIME и передаёт весь поток в ClamAV. Scanner работает fail-closed:
+его недоступность возвращает запись в `UPLOADED` для retry, а не разрешает
+импорт. Итог фиксируется событиями `upload.ready.v1` или
+`upload.rejected.v1`; rejected-объект не получает download/import access.
+Web после multipart completion опрашивает project-scoped status endpoint,
+показывает scanning/ready/rejected и позволяет отдельно обновить долгую
+проверку, не создавая повторную загрузку.
+
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
 - Platform API unit tests: 42 pass, 0 fail.
-- Jobs/integrations unit tests: 8 pass, 0 fail.
+- Jobs/integrations unit tests: 18 pass, 0 fail.
 - Contracts unit tests: 1 pass, 0 fail.
 - Unified Web security helper tests: 2 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
@@ -211,7 +232,7 @@ worker и статуса `READY`.
 
 ## 9. Следующий вертикальный срез
 
-`upload inspection → import job → semantic staging → preview → publish version`
+`import job → streaming parser → semantic staging → preview → publish version`
 
 OAuth/OIDC выполняется после подтверждения зависимости `jose`; QR для TOTP —
 после подтверждения `qrcode`.
@@ -221,8 +242,11 @@ OAuth/OIDC выполняется после подтверждения зави
 - Дашборд использует честные empty states до первого SEO domain slice.
 - Realtime не допускает вход в project rooms до общей token/permission проверки.
 - Durable outbox/inbox publisher и consumers ещё не реализованы.
-- Upload inspection пока не вычисляет серверный SHA-256, не проверяет magic
-  MIME/malware и не переводит объект из `UPLOADED` в `READY`.
+- Для rejected/quarantine objects ещё требуется production lifecycle policy и
+  отдельный reconciliation/cleanup job; выдача и импорт таких объектов
+  запрещены уже сейчас.
+- ClamAV требует отдельного memory/capacity budget на VPS; concurrency
+  inspection worker ограничивается независимо от API.
 - Bucket требует внешней CORS/lifecycle настройки: Web origin, exposed `ETag`,
   abort incomplete multipart через 2 дня.
 - Нет production observability, backup/restore и secret rotation runbooks.

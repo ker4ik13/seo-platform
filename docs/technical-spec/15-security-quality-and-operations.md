@@ -765,6 +765,22 @@ Radar/crawler capacity:
 - Deployment history и rollback image сохраняются.
 - Dokploy и VPS config экспортируются/документируются так, чтобы восстановление не зависело от единственного UI.
 
+### 34.1. Upload inspection contour
+
+- ClamAV и inspection worker запускаются отдельным Compose profile/process
+  type и доступны только во внутренней Docker network;
+- `clamd` не публикует TCP 3310 наружу, использует persistent volume
+  сигнатур и healthcheck с увеличенным cold-start;
+- API не зависит от ClamAV по readiness и остаётся доступным для чтения;
+  недоступность scanner останавливает только переход новых файлов в `ready`;
+- лимиты `StreamMaxLength`, upload size и worker timeout согласованы;
+- concurrency, queue lag, scan latency, retry rate и signatures age имеют
+  отдельные метрики/alerts;
+- rejected objects никогда не получают signed download URL и удаляются
+  lifecycle/reconciliation job по утверждённому quarantine retention;
+- увеличение upload limit требует capacity review S3 egress, ClamAV memory,
+  scan time и очереди, а не только изменения frontend-константы.
+
 ## 35. Maintenance
 
 Периодические задачи:

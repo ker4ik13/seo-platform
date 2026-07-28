@@ -558,6 +558,20 @@ Wizard должен распознавать и предлагать mapping:
 - поддерживается resume;
 - клиентский checksum опционален, чтобы браузер не читал многогигабайтный
   файл целиком; серверный SHA-256 обязателен до статуса `ready`;
+- inspection выполняется отдельным масштабируемым worker process через
+  идемпотентную BullMQ queue; queue payload содержит только `upload_id`;
+- worker получает upload lease атомарно, обновляет heartbeat и повторно
+  подбирает зависшие `scanning` записи после истечения lease;
+- весь поток без выборочного пропуска передаётся в ClamAV INSTREAM, а первые
+  ограниченные байты используются только для проверки container signature и
+  фактического MIME;
+- scanner работает fail-closed: при недоступных S3/ClamAV upload возвращается
+  в `uploaded` с retryable техническим состоянием и никогда не становится
+  `ready`;
+- malware, несовпадение размера/checksum и подмена типа переводят upload в
+  `rejected`; parser и download URL для такого объекта запрещены;
+- UI получает текущее состояние через project-scoped read endpoint и может
+  безопасно повторять polling до terminal state;
 - commit идемпотентен;
 - повтор job не создаёт дубли;
 - progress отражает bytes, rows и stage;

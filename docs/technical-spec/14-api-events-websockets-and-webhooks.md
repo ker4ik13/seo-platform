@@ -310,6 +310,19 @@ Job result указывает на domain result, export file или error repor
 7. Файл становится `ready` или `rejected`.
 8. Импорт создаётся только из `ready` upload.
 
+Project API:
+
+- `POST /api/v1/projects/{projectId}/uploads`;
+- `POST /api/v1/projects/{projectId}/uploads/{uploadId}/parts`;
+- `POST /api/v1/projects/{projectId}/uploads/{uploadId}/complete`;
+- `GET /api/v1/projects/{projectId}/uploads/{uploadId}`;
+- `DELETE /api/v1/projects/{projectId}/uploads/{uploadId}` до завершения.
+
+Create/parts/complete/abort требуют CSRF и `file.upload`. Read endpoint требует
+обычную session authentication, verified tenant context и `file.download`;
+он не ограничивается actor-ом загрузки, поэтому статус видит уполномоченная
+команда проекта.
+
 ### 12.2. Состояния upload
 
 - `initiated`;
@@ -322,6 +335,16 @@ Job result указывает на domain result, export file или error repor
 - `aborted`.
 
 Resumable upload должен переживать перезагрузку вкладки. Отдельные parts могут повторяться идемпотентно.
+
+`upload.completed.v1` означает только успешное завершение S3 multipart и
+переход в `uploaded`. После обязательной проверки outbox фиксирует ровно одно
+из terminal events:
+
+- `upload.ready.v1` — содержит server checksum и detected MIME;
+- `upload.rejected.v1` — содержит безопасный rejection code.
+
+События не содержат signed URLs, object key, исходное содержимое, credentials
+или malware signature.
 
 ## 13. Основные группы endpoint
 
