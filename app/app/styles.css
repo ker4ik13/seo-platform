@@ -414,6 +414,22 @@ svg { display: block; }
 .upload-progress-track { background: #e8e8ee; border-radius: 999px; height: 7px; overflow: hidden; }
 .upload-progress-track i { background: var(--brand); border-radius: inherit; display: block; height: 100%; transition: width .2s ease; }
 .upload-note { color: var(--muted); font-size: 11px; line-height: 1.5; }
+.import-preview { border: 1px solid var(--line); border-radius: 14px; display: grid; gap: 12px; min-width: 0; padding: 14px; }
+.import-preview-summary { display: flex; flex-wrap: wrap; gap: 8px; }
+.import-preview-summary span { align-items: baseline; background: #f5f5f7; border-radius: 9px; color: var(--muted); display: flex; font-size: 10px; gap: 5px; padding: 7px 9px; }
+.import-preview-summary strong { color: var(--text); font-size: 12px; }
+.import-preview-table { max-width: 100%; overflow: auto; }
+.import-preview-table table { border-collapse: separate; border-spacing: 0; font-size: 11px; min-width: 720px; width: 100%; }
+.import-preview-table th,
+.import-preview-table td { border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); max-width: 220px; min-width: 140px; overflow: hidden; padding: 9px 10px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.import-preview-table th:first-child,
+.import-preview-table td:first-child { border-left: 1px solid var(--line); }
+.import-preview-table th { background: #f8f8fa; border-top: 1px solid var(--line); color: var(--text); position: sticky; top: 0; z-index: 1; }
+.import-preview-table th:first-child { border-top-left-radius: 8px; }
+.import-preview-table th:last-child { border-top-right-radius: 8px; }
+.import-preview-table th span,
+.import-preview-table th small { display: block; overflow: hidden; text-overflow: ellipsis; }
+.import-preview-table th small { color: var(--brand); font-size: 9px; font-weight: 600; margin-top: 3px; }
 
 .onboarding-panel {
   align-items: flex-start;
