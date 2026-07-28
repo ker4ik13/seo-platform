@@ -50,6 +50,36 @@ interface SemanticImportPreview {
   readonly errorRows: string;
 }
 
+interface SemanticImportMappingColumn {
+  readonly sourceIndex: number;
+  readonly target: string;
+  readonly customName?: string;
+}
+
+interface SemanticImportValidation {
+  readonly totalRows: string;
+  readonly validRows: string;
+  readonly warningRows: string;
+  readonly errorRows: string;
+  readonly duplicateRowsInFile: string;
+  readonly existingKeywordsInProject: string;
+  readonly uniqueKeywordsToProcess: string;
+  readonly issueCounts: Readonly<Record<string, string>>;
+}
+
+interface SemanticImportResult {
+  readonly partial: boolean;
+  readonly semanticVersionId: string;
+  readonly semanticVersionNumber: number;
+  readonly createdKeywords: string;
+  readonly updatedKeywords: string;
+  readonly skippedKeywords: string;
+  readonly createdGroups: string;
+  readonly createdPages: string;
+  readonly createdTags: string;
+  readonly createdMetricSnapshots: string;
+}
+
 interface SemanticImportSummary {
   readonly id: string;
   readonly uploadId: string;
@@ -58,7 +88,16 @@ interface SemanticImportSummary {
   readonly progressBytes: string;
   readonly totalBytes: string;
   readonly preview?: SemanticImportPreview;
+  readonly mapping?: {
+    readonly columns: readonly SemanticImportMappingColumn[];
+    readonly defaultLanguage: string;
+    readonly groupSeparator: string;
+    readonly duplicatePolicy: string;
+  };
+  readonly validation?: SemanticImportValidation;
+  readonly result?: SemanticImportResult;
   readonly failureCode?: string;
+  readonly version: number;
 }
 
 interface StoredUploadSession {
@@ -76,11 +115,15 @@ type UploadStage =
   | "completing"
   | "scanning"
   | "parsing"
+  | "validating"
+  | "validation-ready"
+  | "publishing"
   | "import-pending"
   | "preview"
   | "import-failed"
   | "uploaded"
   | "ready"
+  | "completed"
   | "rejected"
   | "cancelled";
 
@@ -97,6 +140,18 @@ export function SemanticUpload({
   const [error, setError] = useState<string>();
   const [importPreview, setImportPreview] =
     useState<SemanticImportPreview>();
+  const [mappingColumns, setMappingColumns] = useState<
+    readonly SemanticImportMappingColumn[]
+  >([]);
+  const [duplicatePolicy, setDuplicatePolicy] =
+    useState("SKIP_EXISTING");
+  const [defaultLanguage, setDefaultLanguage] = useState("und");
+  const [groupSeparator, setGroupSeparator] = useState("/");
+  const [validation, setValidation] =
+    useState<SemanticImportValidation>();
+  const [importResult, setImportResult] =
+    useState<SemanticImportResult>();
+  const [importVersion, setImportVersion] = useState<number>();
   const [completedUploadId, setCompletedUploadId] = useState<string>();
   const [completedImportId, setCompletedImportId] = useState<string>();
   const activeRequests = useRef(new Set<XMLHttpRequest>());
@@ -107,12 +162,25 @@ export function SemanticUpload({
     "uploaded",
     "import-pending",
     "preview",
+    "validation-ready",
     "import-failed",
     "ready",
+    "completed",
     "rejected",
     "cancelled"
   ].includes(stage);
-  const canCancel = ["preparing", "uploading"].includes(stage);
+  const semanticCancellationStages: readonly UploadStage[] = [
+    "parsing",
+    "import-pending",
+    "preview",
+    "validating",
+    "validation-ready",
+    "publishing"
+  ];
+  const canCancel =
+    ["preparing", "uploading"].includes(stage) ||
+    (Boolean(completedImportId) &&
+      semanticCancellationStages.includes(stage));
   const statusText = useMemo(
     () => uploadStatus(stage, progress),
     [stage, progress]
@@ -132,12 +200,21 @@ export function SemanticUpload({
     setCompletedUploadId(undefined);
     setCompletedImportId(undefined);
     setImportPreview(undefined);
+    setMappingColumns([]);
+    setDefaultLanguage("und");
+    setGroupSeparator("/");
+    setValidation(undefined);
+    setImportResult(undefined);
+    setImportVersion(undefined);
     setMessage(undefined);
     setError(undefined);
   }
 
-  async function trackSemanticImport(importId: string): Promise<void> {
-    setStage("parsing");
+  async function trackSemanticImport(
+    importId: string,
+    activeStage: "parsing" | "validating" | "publishing" = "parsing"
+  ): Promise<void> {
+    setStage(activeStage);
     const controller = new AbortController();
     backgroundRequest.current = controller;
     try {
@@ -152,15 +229,69 @@ export function SemanticUpload({
         }
       );
       if (controller.signal.aborted) return;
-      setCompletedImportId(undefined);
+      setCompletedImportId(semanticImport.id);
+      setImportVersion(semanticImport.version);
+      if (semanticImport.preview) {
+        setImportPreview(semanticImport.preview);
+      }
       if (
         semanticImport.status === "AWAITING_MAPPING" &&
         semanticImport.preview
       ) {
-        setImportPreview(semanticImport.preview);
+        setValidation(undefined);
+        setImportResult(undefined);
+        setMappingColumns(
+          semanticImport.mapping?.columns ??
+            suggestedMapping(semanticImport.preview)
+        );
+        setDuplicatePolicy(
+          semanticImport.mapping?.duplicatePolicy ?? "SKIP_EXISTING"
+        );
+        setDefaultLanguage(
+          semanticImport.mapping?.defaultLanguage ?? "und"
+        );
+        setGroupSeparator(
+          semanticImport.mapping?.groupSeparator ?? "/"
+        );
         setStage("preview");
         setMessage(
           `Распознано ${formatInteger(semanticImport.preview.totalRows)} строк. Проверьте предложенное сопоставление колонок.`
+        );
+      } else if (
+        semanticImport.status === "AWAITING_CONFIRMATION" &&
+        semanticImport.validation
+      ) {
+        setMappingColumns(semanticImport.mapping?.columns ?? []);
+        setDuplicatePolicy(
+          semanticImport.mapping?.duplicatePolicy ?? "SKIP_EXISTING"
+        );
+        setDefaultLanguage(
+          semanticImport.mapping?.defaultLanguage ?? "und"
+        );
+        setGroupSeparator(
+          semanticImport.mapping?.groupSeparator ?? "/"
+        );
+        setValidation(semanticImport.validation);
+        setStage("validation-ready");
+        setMessage(
+          `Проверка завершена: ${formatInteger(semanticImport.validation.uniqueKeywordsToProcess)} уникальных запросов готовы к публикации.`
+        );
+      } else if (
+        semanticImport.status === "COMPLETED" &&
+        semanticImport.result
+      ) {
+        setImportResult(semanticImport.result);
+        setStage("completed");
+        setMessage(
+          `Импорт завершён. Создана версия ядра №${semanticImport.result.semanticVersionNumber}.`
+        );
+      } else if (semanticImport.status === "CANCELLED") {
+        setImportResult(semanticImport.result);
+        setStage("cancelled");
+        setMessage(
+          semanticImport.result?.partial
+            ? "Импорт остановлен после текущего чанка. Частичный результат сохранён отдельной версией."
+            : "Импорт отменён до публикации данных."
         );
       } else {
         setStage("import-failed");
@@ -213,6 +344,144 @@ export function SemanticUpload({
       if (signal?.aborted) return;
       setStage("ready");
       setError(importStartErrorMessage(importError));
+    }
+  }
+
+  function updateMapping(
+    sourceIndex: number,
+    target: string,
+    sourceName: string
+  ): void {
+    setMappingColumns((current) => {
+      const singleton = !["custom", "ignore"].includes(target);
+      return current.map((column) => {
+        if (
+          singleton &&
+          column.sourceIndex !== sourceIndex &&
+          column.target === target
+        ) {
+          const fallbackName =
+            importPreview?.columns.find(
+              ({ index }) => index === column.sourceIndex
+            )?.sourceName ?? `Колонка ${column.sourceIndex + 1}`;
+          return {
+            sourceIndex: column.sourceIndex,
+            target: "custom",
+            customName: column.customName ?? fallbackName
+          };
+        }
+        return column.sourceIndex === sourceIndex
+          ? {
+              sourceIndex,
+              target,
+              ...(target === "custom"
+                ? { customName: column.customName ?? sourceName }
+                : {})
+            }
+          : column;
+      });
+    });
+  }
+
+  function updateCustomName(
+    sourceIndex: number,
+    customName: string
+  ): void {
+    setMappingColumns((current) =>
+      current.map((column) =>
+        column.sourceIndex === sourceIndex
+          ? { ...column, customName }
+          : column
+      )
+    );
+  }
+
+  async function validateImport(): Promise<void> {
+    if (
+      !completedImportId ||
+      importVersion === undefined ||
+      mappingColumns.length === 0
+    ) {
+      return;
+    }
+    setStage("validating");
+    setMessage(undefined);
+    setError(undefined);
+    setValidation(undefined);
+    setImportResult(undefined);
+    try {
+      const semanticImport =
+        await browserApiRequest<SemanticImportSummary>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/imports/${encodeURIComponent(completedImportId)}/mapping`,
+          {
+            method: "POST",
+            ifMatch: importVersion,
+            body: {
+              columns: mappingColumns,
+              defaultLanguage,
+              groupSeparator,
+              duplicatePolicy
+            }
+          }
+        );
+      setImportVersion(semanticImport.version);
+      await trackSemanticImport(
+        semanticImport.id,
+        "validating"
+      );
+    } catch (validationError) {
+      setStage("preview");
+      setError(importCommandErrorMessage(validationError));
+    }
+  }
+
+  async function publishImport(): Promise<void> {
+    if (!completedImportId || importVersion === undefined) return;
+    setStage("publishing");
+    setMessage(undefined);
+    setError(undefined);
+    try {
+      const semanticImport =
+        await browserApiRequest<SemanticImportSummary>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/imports/${encodeURIComponent(completedImportId)}/publish`,
+          {
+            method: "POST",
+            ifMatch: importVersion
+          }
+        );
+      setImportVersion(semanticImport.version);
+      await trackSemanticImport(
+        semanticImport.id,
+        "publishing"
+      );
+    } catch (publishError) {
+      setStage("validation-ready");
+      setError(importCommandErrorMessage(publishError));
+    }
+  }
+
+  async function cancelImport(): Promise<void> {
+    if (!completedImportId) return;
+    try {
+      const semanticImport =
+        await browserApiRequest<SemanticImportSummary>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/imports/${encodeURIComponent(completedImportId)}/cancel`,
+          {
+            method: "POST"
+          }
+        );
+      setImportVersion(semanticImport.version);
+      if (semanticImport.status === "CANCELLED") {
+        setStage("cancelled");
+        setMessage("Импорт отменён.");
+      } else {
+        await trackSemanticImport(
+          semanticImport.id,
+          "publishing"
+        );
+      }
+    } catch (cancelError) {
+      setError(importCommandErrorMessage(cancelError));
     }
   }
 
@@ -290,6 +559,10 @@ export function SemanticUpload({
     setMessage(undefined);
     setCompletedImportId(undefined);
     setImportPreview(undefined);
+    setMappingColumns([]);
+    setValidation(undefined);
+    setImportResult(undefined);
+    setImportVersion(undefined);
     const storageKey = sessionKey(projectId, file);
     let session = readSession(storageKey);
 
@@ -447,14 +720,52 @@ export function SemanticUpload({
             <table>
               <thead>
                 <tr>
-                  {importPreview.columns.slice(0, 12).map((column) => (
-                    <th key={column.index}>
-                      <span>{column.sourceName}</span>
-                      <small>
-                        {mappingTargetLabel(column.suggestedTarget)}
-                      </small>
-                    </th>
-                  ))}
+                  {importPreview.columns.slice(0, 12).map((column) => {
+                    const selected =
+                      mappingColumns.find(
+                        ({ sourceIndex }) => sourceIndex === column.index
+                      ) ?? {
+                        sourceIndex: column.index,
+                        target: column.suggestedTarget
+                      };
+                    return (
+                      <th key={column.index}>
+                        <span>{column.sourceName}</span>
+                        <select
+                          aria-label={`Назначение колонки ${column.sourceName}`}
+                          disabled={stage !== "preview"}
+                          onChange={(event) =>
+                            updateMapping(
+                              column.index,
+                              event.target.value,
+                              column.sourceName
+                            )
+                          }
+                          value={selected.target}
+                        >
+                          {MAPPING_TARGETS.map((target) => (
+                            <option key={target} value={target}>
+                              {mappingTargetLabel(target)}
+                            </option>
+                          ))}
+                        </select>
+                        {selected.target === "custom" && (
+                          <input
+                            aria-label={`Имя пользовательской колонки ${column.sourceName}`}
+                            disabled={stage !== "preview"}
+                            maxLength={160}
+                            onChange={(event) =>
+                              updateCustomName(
+                                column.index,
+                                event.target.value
+                              )
+                            }
+                            value={selected.customName ?? column.sourceName}
+                          />
+                        )}
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -477,10 +788,155 @@ export function SemanticUpload({
               staging.
             </small>
           )}
+          {stage === "preview" && (
+            <div className="import-mapping-options">
+              <label>
+                Язык запросов
+                <input
+                  aria-label="Язык запросов по умолчанию"
+                  maxLength={35}
+                  onChange={(event) =>
+                    setDefaultLanguage(event.target.value)
+                  }
+                  placeholder="ru, en или und"
+                  value={defaultLanguage}
+                />
+              </label>
+              <label>
+                Разделитель групп
+                <input
+                  aria-label="Разделитель пути групп"
+                  maxLength={8}
+                  onChange={(event) =>
+                    setGroupSeparator(event.target.value)
+                  }
+                  value={groupSeparator}
+                />
+              </label>
+              <label>
+                Дубли в проекте
+                <select
+                  onChange={(event) =>
+                    setDuplicatePolicy(event.target.value)
+                  }
+                  value={duplicatePolicy}
+                >
+                  <option value="SKIP_EXISTING">
+                    Пропустить существующие
+                  </option>
+                  <option value="MERGE_NON_EMPTY">
+                    Заполнить только пустые поля
+                  </option>
+                  <option value="OVERWRITE_MAPPED">
+                    Обновить сопоставленные поля
+                  </option>
+                </select>
+              </label>
+            </div>
+          )}
+        </div>
+      )}
+      {validation && (
+        <div className="import-validation" aria-label="Проверка импорта">
+          <div className="import-preview-summary">
+            <span>
+              <strong>
+                {formatInteger(validation.uniqueKeywordsToProcess)}
+              </strong>
+              уникальных
+            </span>
+            <span>
+              <strong>
+                {formatInteger(validation.duplicateRowsInFile)}
+              </strong>
+              дублей в файле
+            </span>
+            <span>
+              <strong>
+                {formatInteger(validation.existingKeywordsInProject)}
+              </strong>
+              уже в проекте
+            </span>
+            <span>
+              <strong>{formatInteger(validation.errorRows)}</strong>
+              ошибок
+            </span>
+          </div>
+          {Object.keys(validation.issueCounts).length > 0 && (
+            <p className="upload-note">
+              Проверка сохранила проблемные строки отдельно:{" "}
+              {Object.entries(validation.issueCounts)
+                .map(
+                  ([code, count]) =>
+                    `${importIssueLabel(code)} — ${formatInteger(count)}`
+                )
+                .join("; ")}
+            </p>
+          )}
+        </div>
+      )}
+      {importResult && (
+        <div className="import-validation" aria-label="Результат импорта">
+          <div className="import-preview-summary">
+            <span>
+              <strong>{formatInteger(importResult.createdKeywords)}</strong>
+              создано запросов
+            </span>
+            <span>
+              <strong>{formatInteger(importResult.updatedKeywords)}</strong>
+              обновлено
+            </span>
+            <span>
+              <strong>{formatInteger(importResult.createdGroups)}</strong>
+              новых групп
+            </span>
+            <span>
+              <strong>
+                {formatInteger(importResult.createdMetricSnapshots)}
+              </strong>
+              метрик
+            </span>
+          </div>
         </div>
       )}
       <div className="security-actions">
-        {stage !== "preview" && (
+        {stage === "preview" && (
+          <button
+            className="primary-button"
+            disabled={
+              !mappingColumns.some(
+                ({ target }) => target === "keyword.text"
+              ) ||
+              !defaultLanguage.trim() ||
+              !groupSeparator.trim() ||
+              mappingColumns.some(
+                ({ target, customName }) =>
+                  target === "custom" && !customName?.trim()
+              )
+            }
+            onClick={() => void validateImport()}
+            type="button"
+          >
+            Проверить импорт
+          </button>
+        )}
+        {stage === "validation-ready" && (
+          <button
+            className="primary-button"
+            disabled={
+              !validation ||
+              validation.uniqueKeywordsToProcess === "0"
+            }
+            onClick={() => void publishImport()}
+            type="button"
+          >
+            Импортировать{" "}
+            {validation
+              ? formatInteger(validation.uniqueKeywordsToProcess)
+              : ""}
+          </button>
+        )}
+        {!["preview", "validation-ready"].includes(stage) && (
           <button
             className="primary-button"
             disabled={!file || busy}
@@ -491,7 +947,16 @@ export function SemanticUpload({
               ? "Обновить статус"
               : stage === "import-pending"
                 ? "Обновить импорт"
-                : ["ready", "rejected", "import-failed"].includes(stage)
+                : stage === "validating"
+                  ? "Проверяем импорт…"
+                  : stage === "publishing"
+                    ? "Публикуем ядро…"
+                : [
+                      "ready",
+                      "rejected",
+                      "import-failed",
+                      "completed"
+                    ].includes(stage)
                   ? "Загрузить ещё раз"
                   : "Начать загрузку"}
           </button>
@@ -499,7 +964,12 @@ export function SemanticUpload({
         {canCancel && (
           <button
             className="secondary-button"
-            onClick={() => void cancel()}
+            onClick={() =>
+              void (completedImportId &&
+              semanticCancellationStages.includes(stage)
+                ? cancelImport()
+                : cancel())
+            }
             type="button"
           >
             Отменить
@@ -790,11 +1260,26 @@ async function waitForSemanticImport(
       Number(semanticImport.totalBytes)
     );
     if (
-      ["AWAITING_MAPPING", "FAILED"].includes(semanticImport.status)
+      [
+        "AWAITING_MAPPING",
+        "AWAITING_CONFIRMATION",
+        "COMPLETED",
+        "FAILED",
+        "CANCELLED"
+      ].includes(semanticImport.status)
     ) {
       return semanticImport;
     }
-    if (!["QUEUED", "PARSING"].includes(semanticImport.status)) {
+    if (
+      ![
+        "QUEUED",
+        "PARSING",
+        "VALIDATING",
+        "READY_TO_PUBLISH",
+        "PUBLISHING",
+        "CANCEL_REQUESTED"
+      ].includes(semanticImport.status)
+    ) {
       throw new Error(
         `Unexpected semantic import state: ${semanticImport.status}`
       );
@@ -832,10 +1317,14 @@ function uploadStatus(stage: UploadStage, progress: number): string {
   if (stage === "completing") return "Проверяем целостность объекта…";
   if (stage === "scanning") return "Проверяем checksum, тип и безопасность…";
   if (stage === "parsing") return "Читаем строки и распознаём колонки…";
+  if (stage === "validating") return "Проверяем строки, дубли и значения…";
+  if (stage === "validation-ready") return "Проверка импорта готова";
+  if (stage === "publishing") return "Публикуем семантическое ядро чанками…";
   if (stage === "import-pending") return "Импорт обрабатывается в фоне";
   if (stage === "preview") return "Предпросмотр импорта готов";
   if (stage === "import-failed") return "Файл не удалось разобрать";
   if (stage === "ready") return "Файл проверен и готов";
+  if (stage === "completed") return "Импорт завершён";
   if (stage === "rejected") return "Файл отклонён";
   if (stage === "uploaded") {
     return "Загрузка завершена, проверка продолжается";
@@ -859,6 +1348,22 @@ function importStartErrorMessage(error: unknown): string {
   return "Не удалось запустить распознавание файла. Повторите позже.";
 }
 
+function importCommandErrorMessage(error: unknown): string {
+  if (error instanceof BrowserApiError) {
+    if (error.code === "VERSION_CONFLICT") {
+      return "Импорт изменился в другой вкладке. Обновите его состояние и повторите.";
+    }
+    if (error.code === "PAYMENT_REQUIRED") {
+      return "Проект доступен только для чтения. Новые операции временно недоступны.";
+    }
+    if (error.code === "DEPENDENCY_UNAVAILABLE") {
+      return "Фоновый сервис временно недоступен. Состояние сохранено — повторите позже.";
+    }
+    return error.message;
+  }
+  return "Не удалось выполнить действие с импортом. Повторите позже.";
+}
+
 function importFailureMessage(code: string | undefined): string {
   const messages: Readonly<Record<string, string>> = {
     EMPTY_IMPORT: "В файле не найдено строк для импорта.",
@@ -873,7 +1378,19 @@ function importFailureMessage(code: string | undefined): string {
     FIELD_TOO_LARGE:
       "Одна из ячеек превышает безопасный лимит размера.",
     ROW_TOO_LARGE:
-      "Одна из строк превышает безопасный лимит размера."
+      "Одна из строк превышает безопасный лимит размера.",
+    IMPORT_MAPPING_INVALID:
+      "Сопоставление колонок устарело или повреждено. Вернитесь к настройке импорта.",
+    SEO_DATA_VALIDATION_REJECTED:
+      "Сервис семантики отклонил проверку. Проверьте язык и сопоставление колонок.",
+    IMPORT_VALIDATION_MISSING:
+      "Результат проверки импорта недоступен. Выполните проверку заново.",
+    IMPORT_HAS_NO_VALID_ROWS:
+      "В файле нет уникальных корректных запросов для публикации.",
+    IMPORT_TOO_MANY_CHUNKS:
+      "Импорт превышает безопасный лимит одной операции.",
+    SEO_DATA_PUBLISH_REJECTED:
+      "Сервис семантики отклонил публикацию. Данные staging сохранены для диагностики."
   };
   return (
     (code && messages[code]) ||
@@ -895,10 +1412,65 @@ function mappingTargetLabel(value: string): string {
     "metric.observed_at": "Дата проверки",
     "keyword.tags": "Теги",
     "metric.kei": "KEI",
-    custom: "Своя колонка"
+    custom: "Своя колонка",
+    ignore: "Не импортировать"
   };
   return labels[value] ?? "Своя колонка";
 }
+
+function suggestedMapping(
+  preview: SemanticImportPreview
+): readonly SemanticImportMappingColumn[] {
+  const assigned = new Set<string>();
+  return preview.columns.map((column) => {
+    const suggested = MAPPING_TARGETS.some(
+      (target) => target === column.suggestedTarget
+    )
+      ? column.suggestedTarget
+      : "custom";
+    const singleton = !["custom", "ignore"].includes(suggested);
+    const target =
+      singleton && assigned.has(suggested) ? "custom" : suggested;
+    if (singleton) assigned.add(suggested);
+    return {
+      sourceIndex: column.index,
+      target,
+      ...(target === "custom"
+        ? { customName: column.sourceName }
+        : {})
+    };
+  });
+}
+
+function importIssueLabel(value: string): string {
+  const labels: Readonly<Record<string, string>> = {
+    COLUMN_COUNT_MISMATCH: "разное число колонок",
+    KEYWORD_REQUIRED: "нет ключевой фразы",
+    INVALID_TARGET_URL: "некорректный URL",
+    INVALID_FREQUENCY: "некорректная частотность",
+    INVALID_OBSERVED_AT: "некорректная дата",
+    GROUP_DEPTH_EXCEEDED: "группа глубже 10 уровней",
+    TRACKING_CONTEXT_REQUIRED: "позиции сохранены до выбора контекста"
+  };
+  return labels[value] ?? value;
+}
+
+const MAPPING_TARGETS = [
+  "ignore",
+  "keyword.text",
+  "group.path",
+  "page.target_url",
+  "frequency.base",
+  "frequency.exact",
+  "frequency.fixed",
+  "ranking.position",
+  "context.search_engine",
+  "context.region",
+  "metric.observed_at",
+  "keyword.tags",
+  "metric.kei",
+  "custom"
+] as const;
 
 function formatInteger(value: string): string {
   const parsed = Number(value);
