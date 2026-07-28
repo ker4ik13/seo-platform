@@ -34,6 +34,15 @@ x-jobs-env: &jobs-env
   UPLOAD_MAX_SIZE_BYTES: ${UPLOAD_MAX_SIZE_BYTES:-5368709120}
   UPLOAD_PART_SIZE_BYTES: ${UPLOAD_PART_SIZE_BYTES:-8388608}
   UPLOAD_EXPIRES_HOURS: ${UPLOAD_EXPIRES_HOURS:-24}
+  UPLOAD_INSPECTION_LEASE_MINUTES: ${UPLOAD_INSPECTION_LEASE_MINUTES:-30}
+  UPLOAD_INSPECTION_DISPATCH_SECONDS: ${UPLOAD_INSPECTION_DISPATCH_SECONDS:-30}
+  UPLOAD_INSPECTION_HEARTBEAT_SECONDS: ${UPLOAD_INSPECTION_HEARTBEAT_SECONDS:-60}
+  UPLOAD_INSPECTION_CONCURRENCY: ${UPLOAD_INSPECTION_CONCURRENCY:-2}
+  MALWARE_SCANNER_ENABLED: ${MALWARE_SCANNER_ENABLED:-false}
+  MALWARE_SCANNER_HOST: ${MALWARE_SCANNER_HOST:-}
+  MALWARE_SCANNER_PORT: ${MALWARE_SCANNER_PORT:-3310}
+  MALWARE_SCANNER_CONNECT_TIMEOUT_MS: ${MALWARE_SCANNER_CONNECT_TIMEOUT_MS:-5000}
+  MALWARE_SCANNER_SCAN_TIMEOUT_MS: ${MALWARE_SCANNER_SCAN_TIMEOUT_MS:-900000}
   EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
   EMAIL_FROM: ${EMAIL_FROM:-}
   SMTP_HOST: ${SMTP_HOST:-}
@@ -120,6 +129,24 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  clamav:
+    image: clamav/clamav:1.5.3-debian13-slim
+    profiles:
+      - inspection
+    restart: unless-stopped
+    init: true
+    volumes:
+      - clamav_data:/var/lib/clamav
+      - ./clamav/clamd.conf:/etc/clamav/clamd.conf:ro
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 5m
 
   platform-api-migrate:
     <<: *backend-defaults
@@ -317,6 +344,31 @@ services:
       nats:
         condition: service_healthy
 
+  upload-inspection-worker:
+    <<: *backend-defaults
+    profiles:
+      - inspection
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/jobs-integrations"
+    command: ["node", "dist/inspection-worker.main.js"]
+    environment:
+      <<: [*common-backend-env, *jobs-env]
+      DATABASE_POOL_MAX: ${JOBS_INSPECTION_DATABASE_POOL_MAX:-10}
+      MALWARE_SCANNER_ENABLED: "true"
+      MALWARE_SCANNER_HOST: clamav
+      MALWARE_SCANNER_PORT: 3310
+    depends_on:
+      jobs-integrations-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+
   realtime:
     <<: *backend-defaults
     build:
@@ -478,6 +530,7 @@ volumes:
   nats_data:
   directus_uploads:
   directus_extensions:
+  clamav_data:
 
 networks:
   internal:

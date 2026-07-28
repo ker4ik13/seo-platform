@@ -58,6 +58,27 @@ retention/удаление quarantine и временных объектов п�
 `DIRECTUS_EMAIL_TRANSPORT=smtp`. До этого оба контура остаются работоспособными,
 но не отправляют письма.
 
+## Проверка загружаемых файлов
+
+Production upload pipeline запускается Compose profile `inspection`. Он
+добавляет официальный ClamAV container и отдельный
+`upload-inspection-worker`; TCP 3310 остаётся только во внутренней сети.
+Сигнатуры ClamAV сохраняются в volume `clamav_data`, поэтому первый cold start
+может занимать несколько минут.
+
+В Dokploy нужно включить profile `inspection` одновременно с
+`S3_ENABLED=true`. Scanner работает fail-closed: если ClamAV или S3 временно
+недоступны, API продолжает обслуживать приложение и просмотр данных, но файл
+остаётся `UPLOADED` и повторно ставится в очередь. Статус `READY` без полного
+потокового сканирования невозможен.
+
+ClamAV требует заметного отдельного memory budget; для первого VPS следует
+планировать около 4 GiB только на scanner/signature database и начинать с
+`UPLOAD_INSPECTION_CONCURRENCY=1` или `2`. При нехватке памяти inspection
+worker и ClamAV лучше вынести на отдельную VPS, не меняя API и схему данных.
+Для rejected objects в S3 обязательны quarantine retention и lifecycle
+cleanup; публичные download/import endpoints их не выдают.
+
 ## Масштабирование
 
 API, SEO data, jobs API, workers, realtime и Next.js stateless на уровне
