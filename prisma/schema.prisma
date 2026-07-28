@@ -1,0 +1,234 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum EntityStatus {
+  ACTIVE
+  ARCHIVED
+  DELETED
+}
+
+enum DataSourceMode {
+  BYOK
+  PLATFORM
+  IMPORT
+  MANUAL
+}
+
+enum OutboxStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+}
+
+model Keyword {
+  id                 String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId        String       @map("workspace_id") @db.Uuid
+  projectId          String       @map("project_id") @db.Uuid
+  textOriginal       String       @map("text_original") @db.Text
+  textNormalized     String       @map("text_normalized") @db.Text
+  normalizedHash     String       @map("normalized_hash") @db.Char(64)
+  language           String       @default("und") @db.VarChar(16)
+  priority           Int          @default(0)
+  status             EntityStatus @default(ACTIVE)
+  clusterId          String?      @map("cluster_id") @db.Uuid
+  targetPageId       String?      @map("target_page_id") @db.Uuid
+  isTracked          Boolean      @default(false) @map("is_tracked")
+  customValues       Json         @default("{}") @map("custom_values")
+  version            Int          @default(1)
+  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt          DateTime?    @map("deleted_at") @db.Timestamptz(6)
+
+  memberships KeywordGroupMembership[]
+
+  @@unique([projectId, language, normalizedHash])
+  @@index([workspaceId, projectId, status, id])
+  @@index([projectId, clusterId, id])
+  @@index([projectId, targetPageId, id])
+  @@index([projectId, isTracked, id])
+  @@map("keywords")
+}
+
+model KeywordGroup {
+  id          String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String       @map("workspace_id") @db.Uuid
+  projectId   String       @map("project_id") @db.Uuid
+  parentId    String?      @map("parent_id") @db.Uuid
+  name        String       @db.VarChar(255)
+  color       String?      @db.VarChar(16)
+  position    Int          @default(0)
+  status      EntityStatus @default(ACTIVE)
+  version     Int          @default(1)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  memberships KeywordGroupMembership[]
+
+  @@index([projectId, parentId, position])
+  @@map("keyword_groups")
+}
+
+model KeywordGroupMembership {
+  projectId String   @map("project_id") @db.Uuid
+  keywordId String   @map("keyword_id") @db.Uuid
+  groupId   String   @map("group_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  keyword Keyword      @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+  group   KeywordGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([keywordId, groupId])
+  @@index([projectId, groupId, keywordId])
+  @@map("keyword_group_memberships")
+}
+
+model Cluster {
+  id          String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String       @map("workspace_id") @db.Uuid
+  projectId   String       @map("project_id") @db.Uuid
+  name        String       @db.VarChar(255)
+  method      String       @db.VarChar(64)
+  evidence    Json?
+  status      EntityStatus @default(ACTIVE)
+  version     Int          @default(1)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([projectId, status, id])
+  @@map("clusters")
+}
+
+model Page {
+  id            String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId   String       @map("workspace_id") @db.Uuid
+  projectId     String       @map("project_id") @db.Uuid
+  url           String       @db.Text
+  normalizedUrl String       @map("normalized_url") @db.Text
+  urlHash       String       @map("url_hash") @db.Char(64)
+  title         String?      @db.Text
+  contentStatus String?      @map("content_status") @db.VarChar(64)
+  status        EntityStatus @default(ACTIVE)
+  version       Int          @default(1)
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([projectId, urlHash])
+  @@index([workspaceId, projectId, status, id])
+  @@map("pages")
+}
+
+model TrackingContext {
+  id           String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId  String       @map("workspace_id") @db.Uuid
+  projectId    String       @map("project_id") @db.Uuid
+  searchEngine String       @map("search_engine") @db.VarChar(32)
+  regionCode   String       @map("region_code") @db.VarChar(100)
+  language     String       @db.VarChar(16)
+  device       String       @db.VarChar(32)
+  depth        Int
+  settings     Json
+  status       EntityStatus @default(ACTIVE)
+  version      Int          @default(1)
+  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([projectId, status, id])
+  @@map("tracking_contexts")
+}
+
+model RankSnapshot {
+  id                String         @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId       String         @map("workspace_id") @db.Uuid
+  projectId         String         @map("project_id") @db.Uuid
+  keywordId         String         @map("keyword_id") @db.Uuid
+  trackingContextId String         @map("tracking_context_id") @db.Uuid
+  observedAt        DateTime       @map("observed_at") @db.Timestamptz(6)
+  position          Int?
+  resultUrl         String?        @map("result_url") @db.Text
+  provider          String         @db.VarChar(64)
+  sourceMode        DataSourceMode @map("source_mode")
+  jobId             String         @map("job_id") @db.Uuid
+  metadata          Json?
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([observedAt, id])
+  @@index([projectId, trackingContextId, observedAt])
+  @@index([projectId, keywordId, trackingContextId, observedAt])
+  @@map("rank_snapshots")
+}
+
+model CurrentRank {
+  projectId         String         @map("project_id") @db.Uuid
+  keywordId         String         @map("keyword_id") @db.Uuid
+  trackingContextId String         @map("tracking_context_id") @db.Uuid
+  observedAt        DateTime       @map("observed_at") @db.Timestamptz(6)
+  position          Int?
+  resultUrl         String?        @map("result_url") @db.Text
+  provider          String         @db.VarChar(64)
+  sourceMode        DataSourceMode @map("source_mode")
+  snapshotId        String         @map("snapshot_id") @db.Uuid
+  version           Int            @default(1)
+  updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([keywordId, trackingContextId])
+  @@index([projectId, trackingContextId, position])
+  @@map("current_ranks")
+}
+
+model FrequencySnapshot {
+  id          String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String         @map("workspace_id") @db.Uuid
+  projectId   String         @map("project_id") @db.Uuid
+  keywordId   String         @map("keyword_id") @db.Uuid
+  type        String         @db.VarChar(64)
+  regionCode  String         @map("region_code") @db.VarChar(100)
+  value       BigInt?
+  observedAt  DateTime       @map("observed_at") @db.Timestamptz(6)
+  provider    String         @db.VarChar(64)
+  sourceMode  DataSourceMode @map("source_mode")
+  jobId       String         @map("job_id") @db.Uuid
+  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([projectId, keywordId, type, regionCode, observedAt])
+  @@map("frequency_snapshots")
+}
+
+model SemanticVersion {
+  id          String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  projectId   String   @map("project_id") @db.Uuid
+  number      Int
+  reason      String   @db.VarChar(160)
+  actorId     String   @map("actor_id") @db.Uuid
+  manifest    Json
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([projectId, number])
+  @@index([workspaceId, projectId, createdAt])
+  @@map("semantic_versions")
+}
+
+model OutboxEvent {
+  id          String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  eventType   String       @map("event_type") @db.VarChar(160)
+  aggregateId String       @map("aggregate_id") @db.Uuid
+  workspaceId String       @map("workspace_id") @db.Uuid
+  projectId   String       @map("project_id") @db.Uuid
+  payload     Json
+  metadata    Json
+  status      OutboxStatus @default(PENDING)
+  attempts    Int          @default(0)
+  availableAt DateTime     @default(now()) @map("available_at") @db.Timestamptz(6)
+  publishedAt DateTime?    @map("published_at") @db.Timestamptz(6)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([status, availableAt])
+  @@map("outbox_events")
+}
