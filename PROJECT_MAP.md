@@ -2,7 +2,7 @@
 
 Последнее обновление: 28 июля 2026 года  
 Текущий инкремент: Identity → Workspace → Project → Team access → Private Web
-Статус: browser auth и tenant shell реализованы; расширение Identity в работе
+Статус: password recovery реализован; OAuth/OIDC и TOTP в работе
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -156,8 +156,9 @@ health/readiness, Redis/BullMQ, NATS transport, S3/SMTP adapters, fail-closed
 WebSocket gateway, unified web/admin shell и Dokploy Compose.
 
 Identity core содержит регистрацию email/password, consent snapshots,
-Argon2id, email verification, короткую access cookie, rotation refresh cookie,
-CSRF, session inventory/revocation, PostgreSQL rate limit, audit и outbox.
+Argon2id, email verification, одноразовое password recovery с отзывом прежних
+сессий, короткую access cookie, rotation refresh cookie, CSRF, session
+inventory/revocation, PostgreSQL rate limit, audit и outbox.
 
 Tenant core содержит workspace/project CRUD, системную RBAC-матрицу,
 одноразовые workspace invitations, optimistic locking участников и
@@ -165,15 +166,16 @@ Tenant core содержит workspace/project CRUD, системную RBAC-м�
 `NONE` и отсутствие назначения при `all_projects=false` скрывают проект.
 
 Private Web содержит same-origin BFF, регистрацию/вход/подтверждение email,
-refresh/logout, session gate, создание и выбор workspace/project. До появления
-SEO-данных dashboard показывает empty states, а не демонстрационные значения.
+запрос и установку нового пароля, refresh/logout, session gate, создание и
+выбор workspace/project. До появления SEO-данных dashboard показывает empty
+states, а не демонстрационные значения.
 
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 28 pass, 0 fail.
+- Platform API unit tests: 31 pass, 0 fail.
 - Unified Web security helper tests: 2 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
 - Unified Next.js production build: pass; проверены public site, Toolbox,
@@ -185,7 +187,7 @@ SEO-данных dashboard показывает empty states, а не демон
 
 ## 9. Следующий вертикальный срез
 
-`password recovery → OAuth/OIDC → TOTP`
+`OAuth/OIDC → TOTP`
 
 После него:
 

@@ -585,6 +585,8 @@ Publisher отправляет событие в NATS JetStream и помеча�
 ### 17.4. Обязательные события
 
 - `identity.user.created.v1`;
+- `identity.password-reset.requested.v1`;
+- `identity.user.password-changed.v1`;
 - `identity.user.suspended.v1`;
 - `workspace.created.v1`;
 - `workspace.invite.requested.v1`;
