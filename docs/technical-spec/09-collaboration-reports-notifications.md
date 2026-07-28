@@ -208,6 +208,23 @@ Last-write-wins без уведомления запрещён для польз
 - delivery channels;
 - deduplication key.
 
+Первый read-срез центра:
+
+- маршрут `/app/notifications`;
+- фильтры `все` и `непрочитанные`;
+- глобальный unread count в колокольчике;
+- cursor pagination по `createdAt DESC, id DESC`;
+- идемпотентные действия `прочитать одно` и `прочитать всё`;
+- переход только по валидированному внутреннему deep link `/app`;
+- loading, empty, filtered-empty, error/degraded, loading-more и mutation
+  pending states.
+
+Центр не получает raw provider payload и произвольный notification `data`.
+Публичная модель содержит только allowlist полей: категория, severity, title,
+body, безопасные resource references, deep link и timestamps. Уведомление
+может оставаться доступным после потери project access, но deep link обязан
+повторно пройти текущую авторизацию целевого ресурса.
+
 ## 12. Предпочтения уведомлений
 
 Двухуровневая модель:

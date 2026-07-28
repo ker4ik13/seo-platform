@@ -1101,6 +1101,14 @@ Append-only:
 - `deliveries`;
 - `delivery_attempts`;
 
+`notifications` хранит `workspace_id`, optional `project_id`, получателя,
+allowlist event type, severity, title/body, optional actor/resource reference,
+локальный deep link, dedupe key, `read_at` и `created_at`. Индексы
+`user_id + created_at DESC + id DESC` и
+`user_id + read_at + created_at DESC + id DESC` обслуживают общий и unread
+cursor-list. Внешний provider payload и credentials в таблицу не копируются.
+Deep link ограничен маршрутом `/app`.
+
 `notification_preferences` хранит пользовательские master-switches, timezone,
 quiet hours, digest schedule, bypass critical events, optimistic `version` и
 defaults новых проектов. `user_id` уникален; профиль создаётся лениво с

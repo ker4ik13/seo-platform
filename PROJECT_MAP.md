@@ -2,10 +2,10 @@
 
 Последнее обновление: 28 июля 2026 года
 
-Текущий инкремент: Profile/project notification preferences
-Статус: профильные правила, проектные override/pause, effective policy и
-адаптивные экраны реализованы; delivery worker и device subscriptions следуют
-отдельным вертикальным срезом
+Текущий инкремент: Notification center read model
+Статус: профильные/проектные правила и центр уведомлений с cursor pagination,
+unread count и read mutations реализованы; создание и внешняя доставка
+уведомлений следуют отдельным вертикальным срезом
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -159,7 +159,7 @@ Backend convention:
 - `platform-jobs-integrations/src/email` — email port, disabled и SMTP adapters;
 - `platform-realtime/src/realtime` — Socket.IO gateway и Redis adapter;
 - `platform-realtime/src/notifications` — профильные правила, membership-bound
-  проектные подписки и вычисление effective policy;
+  проектные подписки, effective policy и user-scoped notification center;
 - `platform-realtime/src/internal` — fail-closed internal HTTP authentication
   и проверенный actor/tenant/membership context;
 - `platform-web/app` — public, tools, docs и private `/app` App Router screens;
@@ -199,7 +199,7 @@ Entrypoints:
 | Auth core | vertical slice |
 | Workspaces/projects/team access | vertical slice |
 | Semantics/import | vertical slice: CSV/TSV → mapping → validation → publish → query |
-| Notification preferences | vertical slice: profile/project rules → effective policy |
+| Notifications | vertical slice: preferences → effective policy → read center |
 | Rankings/integrations | planned |
 | Billing/YooKassa | planned |
 | Directus content | planned |
@@ -284,15 +284,24 @@ master-switch каналов, timezone, quiet hours, digest schedule и матр
 кнопкой. Регистрация browser device, VAPID, email/Web Push delivery, digest и
 delivery history пока не входят в этот срез.
 
+Центр уведомлений доступен по `/app/notifications`; колокольчик получает
+user-scoped unread count, а список использует keyset cursor
+`created_at DESC, id DESC`, связанный с фильтром `unreadOnly`. Публичные
+`GET /api/v1/notifications`, `PATCH /:id/read` и `POST /read-all` проходят
+только через Platform API. Realtime DB хранит явные event type, severity,
+project/resource references и только локальный `/app` deep link; произвольный
+JSON наружу не возвращается. Mark-read команды идемпотентны и ограничены
+текущим пользователем.
+
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 53 pass, 0 fail.
+- Platform API unit tests: 57 pass, 0 fail.
 - SEO data unit tests: 10 pass, 0 fail.
 - Jobs/integrations unit tests: 35 pass, 0 fail.
-- Realtime unit tests: 8 pass, 0 fail.
+- Realtime unit tests: 12 pass, 0 fail.
 - Contracts unit tests: 1 pass, 0 fail.
 - Unified Web security helper tests: 2 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
@@ -309,6 +318,9 @@ delivery history пока не входят в этот срез.
 - Notification preferences browser QA: profile/project screens на 1280 px,
   document overflow и browser errors не найдены; override, live effective
   preview, pause и успешный optimistic save проверены интерактивно.
+- Notification center browser QA: 1280 px, document overflow и browser errors
+  не найдены; unread badge, одиночное чтение, unread filter, read-all и empty
+  state проверены интерактивно.
 - Target runtime: Node.js 24. Локальная проверка выполнялась на Node.js 22 с
   ожидаемым engine warning; контейнеры используют Node.js 24.
 

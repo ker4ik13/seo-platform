@@ -505,6 +505,24 @@ Platform API передаёт realtime-сервису только провер�
 выключенный канал, сохраняется как предпочтение, но effective policy всегда
 возвращает канал выключенным с источником блокировки профиля.
 
+Рабочий contract центра уведомлений:
+
+- `GET /api/v1/notifications?limit&cursor&unreadOnly` требует session и
+  возвращает `data`, `page.hasNext`, opaque `page.nextCursor` и актуальный
+  `page.unreadCount`;
+- `PATCH /api/v1/notifications/{notificationId}/read` требует session и CSRF,
+  идемпотентно отмечает только собственное уведомление;
+- `POST /api/v1/notifications/read-all` требует session и CSRF, возвращает
+  число изменённых строк и единый `readAt`;
+- cursor связан с `unreadOnly`; смена фильтра делает прежний cursor
+  недействительным;
+- item не содержит внутренний JSON `data`, dedupe key и delivery metadata;
+- deep link принимается Platform API только если это локальный путь `/app`.
+
+Внутренние эквиваленты находятся под
+`/internal/v1/users/{userId}/notifications`. `userId` в URL обязан совпасть с
+проверенным `X-Actor-Id`; browser не передаёт его самостоятельно.
+
 ### 13.8. Billing
 
 - `/workspaces/{workspaceId}/subscription`;
