@@ -47,6 +47,11 @@ test("claims, decrypts and completes a credential validation", async () => {
   assert.equal(fixture.store.job.progressCurrent, 1n);
   assert.equal(fixture.store.job.leaseOwner, null);
   assert.equal(fixture.store.credential.status, "ACTIVE");
+  assert.deepEqual(fixture.store.credential.capabilities, [
+    "KEYWORD_RESEARCH",
+    "COMPETITOR_RESEARCH",
+    "SERP_COLLECTION"
+  ]);
   assert.ok(fixture.store.credential.verifiedAt instanceof Date);
   assert.equal(fixture.store.credential.lastErrorCode, null);
   assert.deepEqual(fixture.store.credential.providerMeta, {

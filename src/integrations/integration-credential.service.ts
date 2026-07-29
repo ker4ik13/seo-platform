@@ -14,6 +14,7 @@ import type {
 } from "@seo-platform/contracts";
 import type { IntegrationCredential } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { safeIntegrationCredentialCapabilities } from "./integration-credential-capabilities.js";
 import { IntegrationCredentialCryptoService } from "./integration-credential-crypto.service.js";
 import { integrationCredentialId } from "./integration-credential-id.js";
 import {
@@ -37,6 +38,7 @@ type IntegrationCredentialSummaryRecord = Pick<
   | "lastSuccessAt"
   | "lastErrorAt"
   | "lastErrorCode"
+  | "capabilities"
   | "materialVersion"
   | "version"
   | "createdAt"
@@ -55,6 +57,7 @@ const CREDENTIAL_SUMMARY_SELECT = {
   lastSuccessAt: true,
   lastErrorAt: true,
   lastErrorCode: true,
+  capabilities: true,
   materialVersion: true,
   version: true,
   createdAt: true,
@@ -412,7 +415,10 @@ function toSummary(
     mode: credential.mode,
     status: credential.status,
     displayHint: credential.displayHint ?? "••••",
-    capabilities: integrationProviderMetadata(provider).capabilities,
+    capabilities: safeIntegrationCredentialCapabilities(
+      provider,
+      credential.capabilities
+    ),
     ...(credential.verifiedAt
       ? { verifiedAt: credential.verifiedAt.toISOString() }
       : {}),

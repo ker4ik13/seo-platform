@@ -59,6 +59,10 @@ enum CredentialStatus {
   DISABLED
 }
 
+enum ProjectConnectorRouteSourceKind {
+  WORKSPACE_CREDENTIAL
+}
+
 enum UploadStatus {
   INITIATED
   UPLOADING
@@ -199,7 +203,10 @@ model IntegrationCredential {
   updatedAt             DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt             DateTime?        @map("deleted_at") @db.Timestamptz(6)
 
+  connectorRoutes ProjectConnectorRoute[]
+
   @@unique([workspaceId, idempotencyKey])
+  @@unique([workspaceId, id])
   @@index([workspaceId, provider, status])
   @@index([workspaceId, createdAt, id])
   @@index([keyVersion, deletedAt, id])
@@ -207,21 +214,60 @@ model IntegrationCredential {
   @@map("integration_credentials")
 }
 
-model IntegrationBinding {
-  id                String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId       String   @map("workspace_id") @db.Uuid
-  projectId         String?  @map("project_id") @db.Uuid
-  capability        String   @db.VarChar(100)
-  primaryCredential String?  @map("primary_credential_id") @db.Uuid
-  fallbackPolicy    Json?    @map("fallback_policy")
-  budgetPolicy      Json     @map("budget_policy")
-  enabled           Boolean  @default(true)
-  version           Int      @default(1)
-  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+model ProjectConnectorBinding {
+  id             String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  projectId      String   @map("project_id") @db.Uuid
+  capability     String   @db.VarChar(100)
+  enabled        Boolean  @default(true)
+  createdBy      String   @map("created_by") @db.Uuid
+  updatedBy      String   @map("updated_by") @db.Uuid
+  version        Int      @default(1)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  @@index([workspaceId, projectId, capability])
-  @@map("integration_bindings")
+  routes ProjectConnectorRoute[]
+  createReceipt ProjectConnectorBindingCreateReceipt?
+
+  @@unique([workspaceId, projectId, capability], map: "project_connector_bindings_tenant_project_capability_key")
+  @@unique([workspaceId, projectId, id], map: "project_connector_bindings_tenant_project_id_key")
+  @@index([workspaceId, projectId, createdAt, id], map: "project_connector_bindings_tenant_project_created_idx")
+  @@map("project_connector_bindings")
+}
+
+model ProjectConnectorBindingCreateReceipt {
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  idempotencyKey   String   @map("idempotency_key") @db.VarChar(180)
+  requestHash      Bytes    @map("request_hash")
+  bindingId        String   @map("binding_id") @db.Uuid
+  responseSnapshot Json     @map("response_snapshot")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  binding ProjectConnectorBinding @relation(fields: [workspaceId, projectId, bindingId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "project_connector_binding_receipts_binding_tenant_fkey")
+
+  @@id([workspaceId, projectId, idempotencyKey])
+  @@unique([workspaceId, projectId, bindingId], map: "project_connector_binding_receipts_tenant_project_binding_key")
+  @@map("project_connector_binding_create_receipts")
+}
+
+model ProjectConnectorRoute {
+  id           String                          @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId  String                          @map("workspace_id") @db.Uuid
+  projectId    String                          @map("project_id") @db.Uuid
+  bindingId    String                          @map("binding_id") @db.Uuid
+  position     Int
+  sourceKind   ProjectConnectorRouteSourceKind @map("source_kind")
+  credentialId String                          @map("credential_id") @db.Uuid
+  createdAt    DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime                        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  binding ProjectConnectorBinding @relation(fields: [workspaceId, projectId, bindingId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "project_connector_routes_binding_tenant_fkey")
+  credential IntegrationCredential @relation(fields: [workspaceId, credentialId], references: [workspaceId, id], onDelete: Restrict, map: "project_connector_routes_credential_tenant_fkey")
+
+  @@unique([workspaceId, projectId, bindingId, position], map: "project_connector_routes_tenant_project_binding_position_key")
+  @@index([workspaceId, credentialId], map: "project_connector_routes_tenant_credential_idx")
+  @@map("project_connector_routes")
 }
 
 model ProviderUsage {

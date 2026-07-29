@@ -6,16 +6,22 @@ import { IntegrationCredentialCryptoService } from "./integration-credential-cry
 import { IntegrationCredentialKeyCoverageService } from "./integration-credential-key-coverage.service.js";
 import { IntegrationCredentialService } from "./integration-credential.service.js";
 import { IntegrationCredentialValidationService } from "./integration-credential-validation.service.js";
+import { ProjectConnectorBindingController } from "./project-connector-binding.controller.js";
+import { ProjectConnectorBindingService } from "./project-connector-binding.service.js";
 
 @Module({
-  controllers: [IntegrationCredentialController],
+  controllers: [
+    IntegrationCredentialController,
+    ProjectConnectorBindingController
+  ],
   providers: [
     IntegrationCredentialApiGuard,
     IntegrationCredentialConnectorRegistry,
     IntegrationCredentialCryptoService,
     IntegrationCredentialKeyCoverageService,
     IntegrationCredentialService,
-    IntegrationCredentialValidationService
+    IntegrationCredentialValidationService,
+    ProjectConnectorBindingService
   ]
 })
 export class IntegrationModule {}

@@ -39,7 +39,8 @@ const createInput: InternalCreateIntegrationCredentialInput =
 test("lists the bounded active validation for the current credential material", async () => {
   const crypto = testCrypto();
   const credential = credentialRecord(crypto, createInput, {
-    materialVersion: 3
+    materialVersion: 3,
+    capabilities: ["SERP_COLLECTION", "CLUSTERING", 42]
   });
   const validation = validationJobRecord({
     deduplicationKey:
@@ -78,6 +79,7 @@ test("lists the bounded active validation for the current credential material", 
     result[0]?.activeValidation?.credentialMaterialVersion,
     3
   );
+  assert.deepEqual(result[0]?.capabilities, ["SERP_COLLECTION"]);
   assert.deepEqual(validationQuery, {
     where: {
       workspaceId,

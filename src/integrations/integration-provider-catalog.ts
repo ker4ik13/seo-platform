@@ -25,8 +25,12 @@ export const integrationProviderCatalog = [
     provider: "ARSENKIN",
     displayName: "Arsenkin Tools",
     description:
-      "Clustering, indexation checks and supported SEO tools through a user-owned account.",
-    capabilities: ["CLUSTERING", "INDEXATION"],
+      "Rank tracking, clustering, indexation checks and supported SEO tools through a user-owned account.",
+    capabilities: [
+      "SERP_RANK_TRACKING",
+      "CLUSTERING",
+      "INDEXATION"
+    ],
     supportedModes: ["BYOK_API_KEY"],
     credentialValidationMode: "ACCOUNT_METADATA",
     requiresAccountIdentifier: false,

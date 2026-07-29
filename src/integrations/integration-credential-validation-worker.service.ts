@@ -23,6 +23,7 @@ import {
   toValidationSummary,
   validationJobJson
 } from "./integration-credential-validation-job.js";
+import { integrationProviderMetadata } from "./integration-provider-catalog.js";
 
 const SCHEDULED_STATUSES = [
   "RETRY_SCHEDULED",
@@ -196,6 +197,7 @@ export class IntegrationCredentialValidationWorkerService {
         await this.finishSuccess(
           job,
           credential,
+          provider,
           leaseOwner,
           result.providerMeta
         )
@@ -326,6 +328,7 @@ export class IntegrationCredentialValidationWorkerService {
   private async finishSuccess(
     job: Job,
     credential: IntegrationCredential,
+    provider: IntegrationProvider,
     leaseOwner: string,
     providerMeta: Readonly<Record<string, unknown>> | undefined
   ): Promise<Job> {
@@ -342,6 +345,9 @@ export class IntegrationCredentialValidationWorkerService {
           },
           data: {
             status: "ACTIVE",
+            capabilities: [
+              ...integrationProviderMetadata(provider).capabilities
+            ],
             verifiedAt: completedAt,
             lastSuccessAt: completedAt,
             lastErrorAt: null,
