@@ -7,6 +7,7 @@ export * from "./api/semantic-imports.js";
 export * from "./api/tenants.js";
 export * from "./api/tracking-contexts.js";
 export * from "./api/uploads.js";
+export * from "./api/web-push.js";
 export * from "./events/catalog.js";
 export * from "./events/envelope.js";
 export * from "./events/integrations.js";
