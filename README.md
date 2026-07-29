@@ -13,7 +13,9 @@
 
 1. Создать в Dokploy Compose-проект из корня репозитория.
 2. Скопировать переменные из корневого `.env.example`, заменить все
-   `replace-me`, URL и версии юридических документов.
+   обязательные placeholders (`replace-me`, `replace-with-*`), URL и версии
+   юридических документов. Пустые обязательные service secrets нужно
+   сгенерировать отдельно; копировать примеры как реальные секреты запрещено.
 3. Сначала оставить `S3_ENABLED=false`, `EMAIL_ENABLED=false`,
    `DIRECTUS_STORAGE_DRIVER=local`.
 4. Привязать основной домен к `web:3000`, остальные домены к `admin:3002`,
@@ -253,11 +255,26 @@ HTTP lifecycle browser-устройств включается отдельно 
 - `WEB_PUSH_MAX_ACTIVE_DEVICES` по умолчанию ограничивает пользователя
   двадцатью активными browser installations.
 
+Значение `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` в `.env.example`
+намеренно пустое, поэтому Compose fail-closed не запустится без явной
+настройки. Сгенерировать URL-safe secret можно командой:
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"
+```
+
 Сначала развернуть миграцию, полный набор keyrings и dedicated token с
-`WEB_PUSH_REGISTRATION_ENABLED=false`. После проверки coverage и конфигурации
-переключить только `realtime` на `true`. Отображение `version → key bytes`
-immutable; ротация выполняется expand-first, старую версию нельзя удалять,
-пока она используется активными строками.
+`WEB_PUSH_REGISTRATION_ENABLED=false`. Текущий startup guard сверяет номера
+версий, но не bytes: включать регистрацию в production до persistent
+authenticated canary/verifier запрещено. В staging после ручной проверки
+immutable key material и coverage переключить только `realtime` на `true`.
+Отображение `version → key bytes` immutable; ротация выполняется
+expand-first, старую версию нельзя удалять,
+пока она используется активными строками. Fingerprint rotation требует
+одинакового overlap keyring на всех Realtime replicas: сначала расширить
+keyring везде, затем drain старых replicas и только после этого переключить
+active version. Partial unique index защищает один digest, но не разные HMAC
+digests одного endpoint под разными версиями ключа.
 
 VAPID private key намеренно отсутствует в текущих HTTP/API/Web process и в
 этом Compose. Он будет принадлежать отдельному sender process после включения
