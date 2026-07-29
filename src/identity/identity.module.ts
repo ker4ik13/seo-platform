@@ -34,6 +34,7 @@ import { SessionService } from "./session.service.js";
     SessionService,
     AuthCryptoService,
     RecentAuthenticationService,
+    SessionCookieService,
     SessionAuthGuard,
     CsrfSessionGuard
   ]

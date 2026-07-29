@@ -1,10 +1,11 @@
 import { Module } from "@nestjs/common";
 import { AuthorizationModule } from "../authorization/authorization.module.js";
+import { IdentityModule } from "../identity/identity.module.js";
 import { SeoDataModule } from "../seo-data/seo-data.module.js";
 import { KeywordController } from "./keyword.controller.js";
 
 @Module({
-  imports: [AuthorizationModule, SeoDataModule],
+  imports: [AuthorizationModule, IdentityModule, SeoDataModule],
   controllers: [KeywordController]
 })
 export class SemanticModule {}
