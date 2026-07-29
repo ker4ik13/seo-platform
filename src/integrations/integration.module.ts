@@ -22,6 +22,7 @@ import { ProjectConnectorBindingService } from "./project-connector-binding.serv
     IntegrationCredentialService,
     IntegrationCredentialValidationService,
     ProjectConnectorBindingService
-  ]
+  ],
+  exports: [IntegrationCredentialApiGuard]
 })
 export class IntegrationModule {}

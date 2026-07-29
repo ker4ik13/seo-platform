@@ -215,18 +215,18 @@ model IntegrationCredential {
 }
 
 model ProjectConnectorBinding {
-  id             String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId    String   @map("workspace_id") @db.Uuid
-  projectId      String   @map("project_id") @db.Uuid
-  capability     String   @db.VarChar(100)
-  enabled        Boolean  @default(true)
-  createdBy      String   @map("created_by") @db.Uuid
-  updatedBy      String   @map("updated_by") @db.Uuid
-  version        Int      @default(1)
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id          String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  projectId   String   @map("project_id") @db.Uuid
+  capability  String   @db.VarChar(100)
+  enabled     Boolean  @default(true)
+  createdBy   String   @map("created_by") @db.Uuid
+  updatedBy   String   @map("updated_by") @db.Uuid
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  routes ProjectConnectorRoute[]
+  routes        ProjectConnectorRoute[]
   createReceipt ProjectConnectorBindingCreateReceipt?
 
   @@unique([workspaceId, projectId, capability], map: "project_connector_bindings_tenant_project_capability_key")
@@ -262,12 +262,61 @@ model ProjectConnectorRoute {
   createdAt    DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime                        @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  binding ProjectConnectorBinding @relation(fields: [workspaceId, projectId, bindingId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "project_connector_routes_binding_tenant_fkey")
-  credential IntegrationCredential @relation(fields: [workspaceId, credentialId], references: [workspaceId, id], onDelete: Restrict, map: "project_connector_routes_credential_tenant_fkey")
+  binding    ProjectConnectorBinding @relation(fields: [workspaceId, projectId, bindingId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "project_connector_routes_binding_tenant_fkey")
+  credential IntegrationCredential   @relation(fields: [workspaceId, credentialId], references: [workspaceId, id], onDelete: Restrict, map: "project_connector_routes_credential_tenant_fkey")
 
   @@unique([workspaceId, projectId, bindingId, position], map: "project_connector_routes_tenant_project_binding_position_key")
   @@index([workspaceId, credentialId], map: "project_connector_routes_tenant_credential_idx")
   @@map("project_connector_routes")
+}
+
+model RankEstimate {
+  id                                   String            @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId                          String            @map("workspace_id") @db.Uuid
+  projectId                            String            @map("project_id") @db.Uuid
+  actorId                              String            @map("actor_id") @db.Uuid
+  trackingContextId                    String            @map("tracking_context_id") @db.Uuid
+  idempotencyScope                     String            @map("idempotency_scope") @db.VarChar(180)
+  idempotencyKey                       String            @map("idempotency_key") @db.VarChar(180)
+  requestHash                          Bytes             @map("request_hash")
+  projectVersion                       Int               @map("project_version")
+  projectDomainHash                    Bytes             @map("project_domain_hash")
+  contextVersion                       Int               @map("context_version")
+  configurationVersion                 Int               @map("configuration_version")
+  configurationHash                    Bytes             @map("configuration_hash")
+  semanticScopeHash                    Bytes?            @map("semantic_scope_hash")
+  scopeHash                            Bytes?            @map("scope_hash")
+  bindingId                            String?           @map("binding_id") @db.Uuid
+  bindingVersion                       Int?              @map("binding_version")
+  routeId                              String?           @map("route_id") @db.Uuid
+  credentialId                         String?           @map("credential_id") @db.Uuid
+  credentialStatus                     CredentialStatus? @map("credential_status")
+  credentialVersion                    Int?              @map("credential_version")
+  credentialMaterialVersion            Int?              @map("credential_material_version")
+  credentialDeletedAt                  DateTime?         @map("credential_deleted_at") @db.Timestamptz(6)
+  credentialValidationId               String?           @map("credential_validation_id") @db.Uuid
+  credentialValidationVersion          Int?              @map("credential_validation_version")
+  credentialValidationConnectorVersion String?           @map("credential_validation_connector_version") @db.VarChar(64)
+  credentialValidationFinishedAt       DateTime?         @map("credential_validation_finished_at") @db.Timestamptz(6)
+  credentialVerifiedAt                 DateTime?         @map("credential_verified_at") @db.Timestamptz(6)
+  provider                             String            @db.VarChar(64)
+  credentialMode                       CredentialMode    @map("credential_mode")
+  providerPolicyVersion                String            @map("provider_policy_version") @db.VarChar(64)
+  keywordCount                         Int               @map("keyword_count")
+  providerTaskCount                    Int               @map("provider_task_count")
+  minimumSubmitRequestCount            Int               @map("minimum_submit_request_count")
+  minimumCheckRequestCount             Int               @map("minimum_check_request_count")
+  minimumGetRequestCount               Int               @map("minimum_get_request_count")
+  blockers                             Json
+  responseSnapshot                     Json              @map("response_snapshot")
+  calculatedAt                         DateTime          @map("calculated_at") @db.Timestamptz(6)
+  expiresAt                            DateTime          @map("expires_at") @db.Timestamptz(6)
+  createdAt                            DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, idempotencyScope, idempotencyKey], map: "rank_estimates_workspace_scope_idempotency_key")
+  @@index([workspaceId, projectId, trackingContextId, createdAt], map: "rank_estimates_tenant_context_created_idx")
+  @@index([expiresAt, id], map: "rank_estimates_expiry_idx")
+  @@map("rank_estimates")
 }
 
 model ProviderUsage {

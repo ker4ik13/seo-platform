@@ -1,0 +1,2 @@
+export const ARSENKIN_CREDENTIAL_VALIDATION_CONNECTOR_VERSION =
+  "arsenkin@1.0.0";

@@ -5,6 +5,7 @@ import {
   type ProviderFetch
 } from "./integration-credential-validation.connector.js";
 import type { IntegrationCredentialSecret } from "./integration-credential-crypto.service.js";
+import { ARSENKIN_CREDENTIAL_VALIDATION_CONNECTOR_VERSION } from "./integration-credential-connector-versions.js";
 import {
   providerJsonRequest,
   ProviderTransportError
@@ -13,12 +14,12 @@ import {
 const ARSENKIN_LIMITS_URL = new URL(
   "https://arsenkin.ru/api/tools/info"
 );
-
 export class ArsenkinCredentialValidationConnector
   implements IntegrationCredentialValidationConnector
 {
   public readonly provider = "ARSENKIN" as const;
-  public readonly version = "arsenkin@1.0.0";
+  public readonly version =
+    ARSENKIN_CREDENTIAL_VALIDATION_CONNECTOR_VERSION;
 
   public constructor(private readonly fetcher: ProviderFetch = fetch) {}
 

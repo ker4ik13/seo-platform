@@ -80,3 +80,137 @@ test("treats an incomplete normalization response as retryable", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("accepts only a bounded redacted rank scope for the trusted project", async () => {
+  const originalFetch = globalThis.fetch;
+  let observedUrl = "";
+  let observedBody: unknown;
+  globalThis.fetch = (async (request, init) => {
+    observedUrl = String(request);
+    observedBody = JSON.parse(String(init?.body));
+    return Response.json({
+      data: rankScope(),
+      meta: { requestId: "seo-request-1" }
+    });
+  }) as typeof fetch;
+  try {
+    const result = await new SeoDataClient(config).rankEstimateScope({
+      workspaceId: context.workspaceId,
+      projectId: context.projectId,
+      actorId: context.actorId,
+      trackingContextId: context.importId
+    });
+    assert.equal(result.keywordCount, "251");
+    assert.equal(result.semanticScopeHash.availability, "AVAILABLE");
+    assert.equal(
+      observedUrl,
+      `http://seo-data:4001/internal/v1/projects/${context.projectId}/rank-estimate-scopes`
+    );
+    assert.deepEqual(observedBody, {
+      workspaceId: context.workspaceId,
+      projectId: context.projectId,
+      actorId: context.actorId,
+      trackingContextId: context.importId
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects secret-bearing or scope-inconsistent rank scope responses", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const data of [
+      { ...rankScope(), keywordText: "private keyword sentinel" },
+      { ...rankScope(), projectId: context.actorId },
+      {
+        ...rankScope(),
+        keywordCount: "1001",
+        pairCount: "1001"
+      }
+    ]) {
+      globalThis.fetch = (async () =>
+        Response.json({
+          data,
+          meta: { requestId: "seo-request-2" }
+        })) as typeof fetch;
+      await assert.rejects(
+        () =>
+          new SeoDataClient(config).rankEstimateScope({
+            workspaceId: context.workspaceId,
+            projectId: context.projectId,
+            actorId: context.actorId,
+            trackingContextId: context.importId
+          }),
+        (error: unknown) =>
+          error instanceof SeoDataClientError &&
+          error.code === "UNAVAILABLE"
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects an oversized or extensible rank scope envelope", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const response of [
+      Response.json({
+        data: rankScope(),
+        meta: { requestId: "seo-request-3", secret: "unexpected" }
+      }),
+      new Response("x".repeat(64 * 1_024 + 1), {
+        headers: { "Content-Type": "application/json" }
+      })
+    ]) {
+      globalThis.fetch = (async () => response) as typeof fetch;
+      await assert.rejects(
+        () =>
+          new SeoDataClient(config).rankEstimateScope({
+            workspaceId: context.workspaceId,
+            projectId: context.projectId,
+            actorId: context.actorId,
+            trackingContextId: context.importId
+          }),
+        (error: unknown) =>
+          error instanceof SeoDataClientError &&
+          error.code === "UNAVAILABLE"
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+function rankScope() {
+  return {
+    workspaceId: context.workspaceId,
+    projectId: context.projectId,
+    trackingContextId: context.importId,
+    contextStatus: "ACTIVE",
+    contextVersion: 3,
+    configurationVersion: 3,
+    configurationHash: "a".repeat(64),
+    configuration: {
+      searchEngine: "GOOGLE",
+      countryCode: "RU",
+      regionCode: "213",
+      regionLabel: "Moscow",
+      language: "ru",
+      device: "DESKTOP",
+      depth: 30,
+      domainMatchRule: { mode: "EXACT_HOST" },
+      safeSearch: false
+    },
+    keywordCount: "251",
+    contextCount: "1",
+    pairCount: "251",
+    semanticScopeHash: {
+      availability: "AVAILABLE",
+      algorithm: "SHA_256",
+      value: "b".repeat(64)
+    },
+    calculatedAt: "2026-07-29T10:00:00.000Z"
+  };
+}
