@@ -3,6 +3,7 @@ export * from "./api/integrations.js";
 export * from "./api/keywords.js";
 export * from "./api/notifications.js";
 export * from "./api/rank-estimates.js";
+export * from "./api/rank-execution-grants.js";
 export * from "./api/rank-history.js";
 export * from "./api/rank-runs.js";
 export * from "./api/semantic-imports.js";

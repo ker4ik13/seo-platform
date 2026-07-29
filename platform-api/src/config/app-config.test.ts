@@ -47,6 +47,7 @@ test("does not allow development tokens in production", () => {
         INTERNAL_API_TOKEN: "x".repeat(32),
         PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
         PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
+        JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: "g".repeat(32),
         AUTH_EXPOSE_DEVELOPMENT_TOKENS: "true"
       }),
     {
@@ -107,6 +108,50 @@ test("rejects the documented notification token placeholder", () => {
           "replace-with-a-distinct-random-notification-token"
       }),
     /must not use an example placeholder/u
+  );
+});
+
+test("requires the dedicated rank grant caller token in production", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: "postgresql://test",
+        AUTH_PASSWORD_PEPPER: "production-secret",
+        AUTH_DATA_ENCRYPTION_KEY: Buffer.alloc(32).toString("base64url"),
+        INTERNAL_API_TOKEN: "i".repeat(32),
+        PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
+        PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32)
+      }),
+    /JOBS_TO_PLATFORM_RANK_GRANT_TOKEN/u
+  );
+});
+
+test("rejects the documented rank grant token placeholder", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        JOBS_TO_PLATFORM_RANK_GRANT_TOKEN:
+          "replace-with-a-distinct-random-rank-grant-token"
+      }),
+    /must not use an example placeholder/u
+  );
+});
+
+test("keeps the rank grant token separate from other internal tokens", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        INTERNAL_API_TOKEN: "i".repeat(32),
+        PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
+        PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
+        JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: "n".repeat(32)
+      }),
+    /Every internal API token must be distinct/u
   );
 });
 

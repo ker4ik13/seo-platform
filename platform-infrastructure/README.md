@@ -18,10 +18,11 @@
    обязательные placeholders (`replace-me`, `replace-with-*`), URL и версии
    юридических документов. Пустые обязательные service secrets нужно
    сгенерировать отдельно; копировать примеры как реальные секреты запрещено.
-   Отдельно обязательно задать `JOBS_TO_SEO_RANK_TOKEN`,
-   `JOBS_TO_SEO_RANK_RESULT_TOKEN` и `RANK_HISTORY_CURSOR_KEY`: последние две
-   переменные намеренно оставлены пустыми в корневом примере, а старые копии
-   примера могут ещё не содержать их.
+   Отдельно обязательно задать `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`,
+   `JOBS_TO_SEO_RANK_TOKEN`, `JOBS_TO_SEO_RANK_RESULT_TOKEN` и
+   `RANK_HISTORY_CURSOR_KEY`: grant, result и cursor secrets намеренно
+   оставлены пустыми в корневом примере, а старые копии примера могут ещё не
+   содержать их.
 3. Сначала оставить `S3_ENABLED=false`, `EMAIL_ENABLED=false`,
    `DIRECTUS_STORAGE_DRIVER=local`.
 4. Привязать основной домен к `web:3000`, а нужные технические домены — к
@@ -53,6 +54,27 @@ session/audience, обязательной 2FA, platform-role authorization, aud
 Admin origin также запрещено добавлять в Platform API `CORS_ORIGINS` и
 Realtime `WEB_ORIGINS`; текущий Compose разрешает только `WEB_PUBLIC_URL`.
 Фальшивая auth-заглушка не является основанием для внешней публикации.
+
+## Dedicated Jobs → Platform API rank grant boundary
+
+`JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` защищает internal issuer endpoint
+execution grant. Это отдельный случайный service credential длиной не менее
+32 символов; он обязан отличаться от `INTERNAL_API_TOKEN`, rank manifest/result
+tokens, credential-vault и notification tokens, encryption keys и provider
+credentials.
+
+В текущем issuer foundation Compose передаёт этот secret только HTTP-процессу
+`platform-api`, который валидирует запрос и сохраняет immutable решение.
+`rank-worker`, Jobs HTTP и остальные процессы его пока не получают. Добавлять
+его в `rank-worker` можно только одновременно с реализацией Jobs grant client,
+его acceptance/consume boundary и обновлением scope regression test. Передача
+через общие anchors запрещена.
+
+Корневой `.env.example` оставляет значение пустым намеренно: перед первым
+deploy оператор создаёт новый URL-safe secret в secret storage Dokploy.
+Секрет нельзя писать в Git, URL, логи, traces, queue/event payload или
+диагностические artifacts. До появления Jobs-клиента ротация требует только
+замены secret и redeploy всех реплик `platform-api`.
 
 ## Dedicated Jobs → SEO Data rank boundary
 

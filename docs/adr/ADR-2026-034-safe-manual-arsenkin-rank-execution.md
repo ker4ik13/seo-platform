@@ -211,15 +211,25 @@ generic/import/connector workers и не queue payload.
 ## Authoritative execution grant
 
 Перед каждым новым `set` rank worker синхронно получает одноразовый grant с
-TTL около 30 секунд. Claim server-side повторно проверяет:
+TTL ровно 30 секунд. Ответственность разделена по владельцам данных:
 
-- ACTIVE workspace/project;
-- entitlement и quota;
-- Job/cancel state;
-- binding ID/version/route;
-- credential ID/material version/status/capability;
-- connector version;
-- provider/capability kill switch.
+- Platform API issuer под row locks повторно проверяет ACTIVE
+  workspace/project, project version/domain evidence, active user/membership
+  version, `ranking.run`, entitlement и authoritative quota reservation;
+- request не передаёт Platform API binding/route/credential IDs или secrets:
+  Jobs связывает эту private projection с grant через opaque
+  `executionEvidenceHash`;
+- Jobs проверяет expiry, exact request/scope hashes и в одной транзакции
+  импортирует/потребляет grant вместе с Job/cancel, item/attempt,
+  binding/route, credential material, connector version и kill switch state.
+
+Platform API сохраняет immutable decision receipt. Exact idempotency replay
+возвращает исходный ответ и не превращает истёкший сохранённый grant в новый
+denial; expiry проверяет Jobs. Production issuer остаётся fail-closed и не
+может выдать `GRANTED` без reservation ID. Dedicated
+`JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` текущего issuer foundation получает
+только Platform API; rank-worker получает его лишь вместе с bounded Jobs
+client/acceptance slice.
 
 Read-only или архивирование запрещают новые `set`, но уже принятый provider
 request разрешено `check/get` и сохранить. Security suspension, revoke или

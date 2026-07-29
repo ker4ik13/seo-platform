@@ -17,9 +17,13 @@ durable создаёт `PREPARING` Job и immutable sidecar, seal-ит manifest 
 chunks, атомарно строит append-only snapshots/current projection, завершает
 успешный/partial manifest с redacted outbox event и предоставляет internal
 keyset history. Platform API публикует bounded read-only history proxy, а Web
-— private/noindex экран с фильтрами и cursor-дозагрузкой. Provider
-execution/grants всё ещё отсутствуют. Срез следует ADR-2026-034; live
-Arsenkin submit остаётся выключенным до прохождения contract/security gates.
+— private/noindex экран с фильтрами и cursor-дозагрузкой. Platform API теперь
+имеет protected issuer foundation одноразового 30-секундного execution grant:
+он повторно проверяет owned lifecycle/RBAC state под row locks и сохраняет
+immutable exact decision receipt. Production policy остаётся fail-closed,
+Jobs grant client/import/consume и provider execution ещё отсутствуют. Срез
+следует ADR-2026-034; live Arsenkin submit остаётся выключенным до прохождения
+contract/security gates.
 
 Параллельный dependency-free срез browser Web Push device lifecycle
 реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет
@@ -139,6 +143,15 @@ SEO Data атомарный bounded scope, читает только allowlisted
 metadata и сохраняет immutable redacted receipt в `rank_estimates`. Exact
 replay не продлевает TTL и не повторяет SEO read; estimate не является
 execution grant.
+Перед будущим provider submit Jobs должен запросить Platform API через
+`POST /internal/v1/workspaces/:workspaceId/projects/:projectId/rank-execution-grants`.
+Issuer требует exact single-value request/tenant/actor/idempotency headers,
+сверяет их с path/body и сохраняет immutable decision в
+`platform_db.rank_execution_grant_receipts`. Exact replay возвращает исходный
+receipt даже после expiry; проверка TTL и атомарное потребление вместе с
+Jobs-owned Job/item/credential state относятся к следующему Jobs-срезу.
+Глобальный route-specific `onSend` сохраняет `Cache-Control: no-store` также
+для parser/guard errors, которые возникают до входа в controller.
 История позиций читается Web только через same-origin BFF и public Platform
 API `GET /api/v1/projects/:projectId/rank-history`. Platform API проверяет
 session, `ranking.view` и tenant scope, затем передаёт trusted context и
@@ -178,6 +191,12 @@ transport и health/readiness, таблицы outbox/inbox созданы. Durab
 - `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN` отличается от
   `INTERNAL_API_TOKEN` и выдаётся только Platform API и credential-capable
   jobs/integrations HTTP process.
+- `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` защищает только internal issuer
+  execution grants и отличается от всех остальных service tokens. Текущий
+  Compose передаёт его только Platform API; rank-worker получит secret лишь
+  одновременно с реализацией bounded Jobs grant client. Generic Jobs HTTP,
+  connector/import/inspection/system/migration, Web и остальные сервисы его
+  не получают.
 - `JOBS_TO_SEO_RANK_TOKEN` отличается от всех остальных service tokens и
   защищает seal/chunk boundary с plaintext keyword snapshots. До появления
   provider execution его получают только SEO Data HTTP и отдельный
@@ -270,7 +289,14 @@ Backend convention:
   и point keyword assignments с `ranking.view/configure`, CSRF,
   idempotency/OCC и audit, а также provider-free rank estimate с
   `ranking.view` и trusted lifecycle/access snapshot, public manual Job
-  lifecycle и bounded read-only rank history proxy;
+  lifecycle, bounded read-only rank history proxy и protected fail-closed
+  execution-grant issuer с immutable exact replay;
+- `platform-contracts/src/api/rank-execution-grants.ts` — exact Jobs →
+  Platform request/scope hash preimages, 30-second grant/decision contracts и
+  redaction allowlist без binding/credential/secret IDs;
+- `platform-api/prisma/migrations/20260729230000_rank_execution_grant_receipts`
+  — immutable issuer decisions, exact idempotency/item-attempt keys,
+  authoritative quota reservation и update/delete/truncate guards;
 - `platform-contracts/src/api/rank-runs.ts` и `src/events/rankings.ts` —
   exact manual-run lifecycle, manifest/chunk, normalized ingest/finalize и
   redacted completion event contracts; manifest preimage builders
@@ -723,31 +749,38 @@ SEO Data с одним manifest lock и запретом late ingest. Internal h
 валидирует scope, диапазон, фильтры, порядок, дубликаты и cursor coherence,
 redact-ит ответ SEO Data и отдаёт collection envelope. Private/noindex Web
 экран использует bounded UTC range, optional context/keyword filters и
-load-more. Execution grants, scoped connector submission/status и
-normalized result producer ещё не реализованы, поэтому production worker
-пока не создаёт эти snapshots.
+load-more. Platform API execution-grant issuer foundation реализован, но
+production policy выдаёт только persisted `DENIED`, пока отсутствует
+authoritative entitlement/quota implementation. Jobs client, atomic grant
+acceptance/consumption, scoped connector submission/status и normalized result
+producer ещё не реализованы, поэтому production worker пока не создаёт эти
+snapshots.
 
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 211 pass, 0 fail.
+- Platform API tests: 273 pass, 0 fail, 3 opt-in PostgreSQL 18 tests skipped
+  без отдельного disposable database URL.
 - SEO data unit tests: 89 pass, 0 fail.
 - Jobs/integrations tests: 219 pass, 0 fail, 2 disposable-DB tests skipped
   в обычном запуске; оба DB tests отдельно проходят.
 - Realtime unit tests: 50 pass, 0 fail.
-- Contracts unit tests: 53 pass, 0 fail.
+- Contracts unit tests: 64 pass, 0 fail.
 - Unified Web helper tests: 101 pass, 0 fail.
-- Infrastructure static tests: 10 pass, 0 fail.
-- Full monorepo test gate: 733 pass, 0 fail, 2 disposable-DB tests skipped.
+- Infrastructure static tests: 12 pass, 0 fail.
+- Full monorepo test gate: 808 pass, 0 fail, 5 disposable/opt-in DB tests
+  skipped.
 - Root lint: pass на pinned Oxlint 1.76.0 с Import, React, Promise и Node
   plugins и `--deny-warnings`.
 - NestJS production build: pass для 4 сервисов.
 - Next.js production builds: pass для Web и Admin; в Web проверены public
   site, Toolbox, API docs и private `/app`.
-- Compose config: pass с `.env.example` и ephemeral overrides для намеренно
-  пустых dedicated token examples; resolved secrets не выводились.
+- Compose config: предыдущий baseline pass с `.env.example` и ephemeral
+  overrides для намеренно пустых dedicated token examples. Текущая grant-token
+  проводка защищена static scope tests; повторный render недоступен без Docker
+  на этом хосте и остаётся CI/staging gate.
 - Предшествующие Jobs migrations и connector column grants: pass на локальном
   PostgreSQL 16; отдельно проверены запреты `INSERT`, ciphertext/outbox
   access, ownership и `BYPASSRLS`. Полная цепочка из 13 Jobs migrations,
@@ -825,6 +858,11 @@ normalized result producer ещё не реализованы, поэтому pr
   test-only `uuidv7()` shim.
   Node.js 24 и PostgreSQL 18 остаются staging gates. Live provider submit,
   ingest и completion event в этот срез не входят.
+- Platform API execution-grant issuer: Contracts 11/11, Platform API 59 pass
+  и 3 opt-in PostgreSQL 18 tests skipped, infrastructure scope 2/2; Prisma
+  validate/generate, strict typecheck, lint, production build и diff-check —
+  pass. Review findings по usable TTL, early-error `no-store`, exact expired
+  replay, reservation coherence и production secret scope устранены.
 - Shared canonical JSON: official RFC 8785 primitive/key-order/UTF-8 vectors,
   hostile values/accessors/cycles/Proxy fail-closed; server-only subpath
   resolution из SEO Data проверен. Production dependencies не добавлялись.
@@ -846,18 +884,20 @@ normalized result producer ещё не реализованы, поэтому pr
 
 ## 9. Следующий вертикальный срез
 
-`execution grant → scoped connector boundary → provider submit/status →
-normalized result producer/ingest receipts`
+`Jobs grant client/acceptance → scoped connector boundary → provider
+submit/status → normalized result producer/ingest receipts`
 
 Provider-free estimate и SEO Data immutable manifest из ADR-2026-034
 завершены; durable Jobs `PREPARING` saga, exact seal recovery, cooperative
 cancel, public/Web Job lifecycle и normalized SEO Data result persistence
 также готовы. Public bounded history proxy и private/noindex Web UI уже
-подключены к internal read model. Следующий runtime-шаг — authoritative
-one-time grant, scoped connector operations, provider submit/status и
-producer нормализованных результатов с сохранением ingest receipts. Live
-Arsenkin `set` выключен, пока нет recorded provider contract и устранения
-global vault read.
+подключены к internal read model. Authoritative one-time grant уже имеет
+Platform-owned issuer/receipt foundation; следующим нужно импортировать и
+атомарно потреблять его в Jobs вместе с Job/item/credential state, затем
+добавить scoped connector operations, provider submit/status и producer
+нормализованных результатов с сохранением ingest receipts. Live Arsenkin
+`set` выключен, пока нет recorded provider contract и устранения global vault
+read.
 Неоднозначность manifest preparation уже fail-closed переходит в
 `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN` без бесконечного auto-retry.
 
@@ -968,6 +1008,13 @@ durable-доставка не реализована. OAuth/OIDC выполня�
   fresh/constraint-negative smoke на PostgreSQL 15. Обычный rebuild unique
   index требует worker drain/maintenance window; для большой live-БД нужен
   expand/concurrent-index план. PostgreSQL 18 smoke обязателен до deploy.
+- `rank_execution_grant_receipts` требуют fresh migration/constraint/race
+  smoke на PostgreSQL 18. Opt-in suite проверяет quota/TTL/immutability,
+  concurrent exact winner и lifecycle race; без отдельного disposable
+  `PLATFORM_API_RANK_GRANT_TEST_DATABASE_URL` эти тесты безопасно пропускаются.
+- Issuer receipt сам не авторизует provider call: до Jobs-owned
+  `rank_execution_grant_acceptances`, atomic consume и exact expiry/scope
+  validation любой submit остаётся запрещён.
 - Проверка lifecycle проекта сейчас авторитетна в Platform API, но между ней и
   commit в jobs database остаётся межсервисное TOCTOU. До первого исполняемого
   rank job jobs/integrations обязан получить project/workspace lifecycle

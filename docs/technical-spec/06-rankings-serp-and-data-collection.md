@@ -78,7 +78,8 @@ Country, language, safe search и domain rule запрещено молча от
 `POST /rank-estimates` не вызывает provider и возвращает versioned scope hash,
 configuration versions, credential freshness, provider limits, тарифную quota,
 expiry и `executionAllowed`. `POST /rank-runs` требует актуальный estimate,
-`ranking.run`, CSRF, idempotency key и authoritative execution grant.
+`ranking.run`, CSRF и idempotency key; будущий provider submit этого run
+дополнительно требует authoritative execution grant.
 
 ### 3.2. Реализованный provider-free estimate
 
@@ -137,8 +138,16 @@ found/not-found ingest и terminal finalize. Manifest seal/chunk runtime уже
 Integrity hashes покрывают полный versioned RFC 8785 JCS preimage. Jobs
 preparation/cancel и public Job lifecycle, а также SEO Data normalized
 ingest/finalize/current/internal history реализованы. Следующими остаются
-execution grant, scoped connector submit/status и provider-side producer
-нормализованных результатов.
+Jobs-side grant import/consume, scoped connector submit/status и provider-side
+producer нормализованных результатов.
+
+Platform API issuer foundation уже принимает exact Jobs request без
+binding/credential IDs, повторно проверяет owned lifecycle/RBAC state и
+сохраняет immutable 30-секундный decision receipt с exact replay. Production
+policy пока всегда fail-closed, потому что authoritative entitlement/quota
+ledger не реализован. Jobs ещё не вызывает endpoint, не проверяет expiry и не
+потребляет grant атомарно с локальным execution state, поэтому foundation не
+разрешает provider submit.
 
 ### 3.4. Реализованный read slice истории
 
@@ -165,9 +174,9 @@ Private/noindex Web route
 `/app/projects/:projectId/rankings` показывает UTC date range,
 context/keyword filters, load-more, loading/empty/error/offline states и
 явные archived/read-only пояснения. Экран не доказывает готовность сбора:
-execution grant, scoped connector boundary, live provider submit/status и
-normalized result producer отсутствуют, поэтому до trusted ingest история
-остаётся пустой. Live Arsenkin `set` работает fail-closed.
+Jobs grant acceptance/consumption, scoped connector boundary, live provider
+submit/status и normalized result producer отсутствуют, поэтому до trusted
+ingest история остаётся пустой. Live Arsenkin `set` работает fail-closed.
 
 ## 4. Rank snapshot
 

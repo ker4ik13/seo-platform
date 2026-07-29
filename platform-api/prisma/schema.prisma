@@ -72,6 +72,24 @@ enum ProjectAccessLevel {
   MANAGER
 }
 
+enum RankExecutionGrantDecision {
+  GRANTED
+  DENIED
+}
+
+enum RankExecutionGrantDenialReason {
+  WORKSPACE_NOT_ACTIVE
+  PROJECT_NOT_ACTIVE
+  PROJECT_VERSION_CHANGED
+  MEMBERSHIP_NOT_ACTIVE
+  MEMBERSHIP_VERSION_CHANGED
+  RUN_PERMISSION_DENIED
+  ENTITLEMENT_NOT_AVAILABLE
+  ENTITLEMENT_DENIED
+  QUOTA_NOT_AVAILABLE
+  QUOTA_EXHAUSTED
+}
+
 enum MfaMethodType {
   TOTP
 }
@@ -359,6 +377,39 @@ model ProjectMemberAccess {
   @@unique([projectId, memberId])
   @@index([memberId, level])
   @@map("project_member_access")
+}
+
+model RankExecutionGrantReceipt {
+  id                 String                          @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId        String                          @map("workspace_id") @db.Uuid
+  projectId          String                          @map("project_id") @db.Uuid
+  actorId            String                          @map("actor_id") @db.Uuid
+  membershipId       String                          @map("membership_id") @db.Uuid
+  jobId              String                          @map("job_id") @db.Uuid
+  jobItemId          String                          @map("job_item_id") @db.Uuid
+  executionAttempt   Int                             @map("execution_attempt")
+  projectVersion     Int                             @map("project_version")
+  membershipVersion  Int                             @map("membership_version")
+  policyVersion      String                          @map("policy_version") @db.VarChar(64)
+  idempotencyScope   String                          @map("idempotency_scope") @db.VarChar(180)
+  idempotencyKey     String                          @map("idempotency_key") @db.VarChar(180)
+  requestHash        Bytes                           @map("request_hash")
+  scopeHash          Bytes                           @map("scope_hash")
+  requestSnapshot    Json                            @map("request_snapshot")
+  responseSnapshot   Json                            @map("response_snapshot")
+  decision           RankExecutionGrantDecision
+  denialReason       RankExecutionGrantDenialReason? @map("denial_reason")
+  decidedAt          DateTime                        @map("decided_at") @db.Timestamptz(6)
+  expiresAt          DateTime?                       @map("expires_at") @db.Timestamptz(6)
+  quotaReservationId String?                         @map("quota_reservation_id") @db.Uuid
+  correlationId      String                          @map("correlation_id") @db.VarChar(100)
+  createdAt          DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, idempotencyScope, idempotencyKey], map: "rank_execution_grants_workspace_idempotency_key")
+  @@unique([workspaceId, jobItemId, executionAttempt], map: "rank_execution_grants_item_attempt_key")
+  @@index([workspaceId, projectId, decidedAt], map: "rank_execution_grants_tenant_decided_idx")
+  @@index([expiresAt, id], map: "rank_execution_grants_expiry_idx")
+  @@map("rank_execution_grant_receipts")
 }
 
 model AuditEvent {

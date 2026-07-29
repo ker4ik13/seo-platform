@@ -184,9 +184,9 @@ exact normalized chunks, сохраняет append-only snapshots/current projec
 `GET /api/v1/projects/:projectId/rank-history` и private/noindex Web route
 `/app/projects/:projectId/rankings` уже реализованы с bounded UTC range,
 optional context/keyword filters, opaque cursor/load-more и archived/read-only
-states. Provider execution/grants, scoped connector submit/status,
-normalized result producer и schedule остаются следующими вертикальными
-срезами. Оценка сохраняется в Jobs как immutable idempotency receipt, доступна в read-only и не вызывает
+states. Provider execution, Jobs grant acceptance/consumption, scoped
+connector submit/status, normalized result producer и schedule остаются
+следующими вертикальными срезами. Оценка сохраняется в Jobs как immutable idempotency receipt, доступна в read-only и не вызывает
 провайдера, BullMQ, списание, usage, outbox или event. Профильные и
 membership-bound проектные настройки уведомлений, in-app центр и
 dependency-free lifecycle browser devices уже реализованы. Endpoint/browser
@@ -255,12 +255,15 @@ Target runtime — Node.js 24; текущий полный lint/typecheck/test/b
 ADR-2026-034. Provider-free estimate и exact execution contracts из ADR уже
 реализованы; immutable SEO Data manifest, protected result ingest/finalize,
 durable Jobs preparation, public/Web Job lifecycle, normalized SEO Data
-history/outbox и public history API/UI готовы. Provider execution/grants,
-scoped connector submit/status и normalized result producer ещё не
-реализованы. Live `set` остаётся выключенным до recorded one-key contract или
+history/outbox и public history API/UI готовы. Provider execution, Jobs grant
+consumption, scoped connector submit/status и normalized result producer ещё
+не реализованы. Platform API issuer foundation уже сохраняет immutable exact
+30-секундные decisions под lifecycle/RBAC locks, но production policy остаётся
+fail-closed, а Jobs client/acceptance/consume отсутствуют; это ещё не provider
+execution. Live `set` остаётся выключенным до recorded one-key contract или
 письменного подтверждения response/status/retry semantics, устранения global
-vault read, authoritative execution grant, producer-side обработки ingest
-receipts и `SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit. Наличие working
+vault read, authoritative grant acceptance/consumption, producer-side
+обработки ingest receipts и `SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit. Наличие working
 credential validation и capability в binding не считается доказательством рабочего
 `positions` execution.
 

@@ -9,6 +9,7 @@ export interface AppConfig {
   readonly internalApiToken?: string;
   readonly integrationCredentialApiToken?: string;
   readonly realtimeNotificationApiToken?: string;
+  readonly rankExecutionGrantApiToken?: string;
   readonly corsOrigins: readonly string[];
   readonly nats: {
     readonly url: string;
@@ -95,6 +96,8 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     env.PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN?.trim();
   const realtimeNotificationApiToken =
     env.PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN?.trim();
+  const rankExecutionGrantApiToken =
+    env.JOBS_TO_PLATFORM_RANK_GRANT_TOKEN?.trim();
 
   if (!["development", "test", "production"].includes(nodeEnv)) {
     throw new Error("NODE_ENV must be development, test or production");
@@ -142,9 +145,24 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "A generated PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN with at least 32 characters is required in production"
     );
   }
+  if (
+    nodeEnv === "production" &&
+    (!rankExecutionGrantApiToken ||
+      rankExecutionGrantApiToken.length < 32 ||
+      isPlaceholderSecret(rankExecutionGrantApiToken))
+  ) {
+    throw new Error(
+      "A generated JOBS_TO_PLATFORM_RANK_GRANT_TOKEN with at least 32 characters is required in production"
+    );
+  }
   if (isPlaceholderSecret(realtimeNotificationApiToken)) {
     throw new Error(
       "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN must not use an example placeholder"
+    );
+  }
+  if (isPlaceholderSecret(rankExecutionGrantApiToken)) {
+    throw new Error(
+      "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN must not use an example placeholder"
     );
   }
   if (
@@ -159,7 +177,8 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const internalTokens = [
     internalApiToken,
     integrationCredentialApiToken,
-    realtimeNotificationApiToken
+    realtimeNotificationApiToken,
+    rankExecutionGrantApiToken
   ].filter((value): value is string => Boolean(value));
   if (new Set(internalTokens).size !== internalTokens.length) {
     throw new Error("Every internal API token must be distinct");
@@ -203,6 +222,9 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       : {}),
     ...(realtimeNotificationApiToken
       ? { realtimeNotificationApiToken }
+      : {}),
+    ...(rankExecutionGrantApiToken
+      ? { rankExecutionGrantApiToken }
       : {}),
     corsOrigins: (env.CORS_ORIGINS ?? "")
       .split(",")

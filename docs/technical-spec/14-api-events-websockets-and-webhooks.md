@@ -573,10 +573,20 @@ Jobs самостоятельно вызывает
 `/internal/v1/workspaces/{workspaceId}/projects/{projectId}/rank-estimates`.
 Обе стороны строго сверяют path, headers, body и tenant-scoped response.
 
-Будущий публичный Run отвечает `202 + Location`. Перед каждым новым provider
-submit требуется одноразовый authoritative execution grant; неоднозначный
-submit имеет отдельный публично видимый status и не повторяется
-автоматически.
+Будущий provider submit требует одноразовый authoritative execution grant;
+неоднозначный submit имеет отдельный публично видимый status и не повторяется
+автоматически. Issuer foundation Platform API уже предоставляет:
+
+- `POST /internal/v1/workspaces/{workspaceId}/projects/{projectId}/rank-execution-grants`.
+
+Endpoint защищён отдельным `X-Rank-Grant-Token`, требует single-value
+`X-Request-Id`, tenant/actor headers и `Idempotency-Key` и сверяет их с
+path/body. Response всегда имеет `Cache-Control: no-store`; новый immutable
+decision — `201`, exact replay — `200`, conflict — `409`. TTL `GRANTED` ровно
+30 секунд. Expired replay остаётся exact; expiry проверяет будущий Jobs
+consumer. Request/response не содержат binding/credential IDs или secrets,
+production policy пока сохраняет только `DENIED`. Route-specific global
+`onSend` добавляет `no-store` также к parser/guard errors до controller.
 
 Публичный Location первого rank slice всегда project-scoped. GET требует
 `ranking.view`; cancel — `collector.cancel`, CSRF и пустой exact body.

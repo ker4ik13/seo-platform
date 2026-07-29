@@ -113,6 +113,7 @@ NestJS:
 - support/admin API;
 - audit;
 - API keys/webhooks registry;
+- authoritative rank execution grant issuer и immutable decision receipts;
 - public Toolbox orchestration и anonymous entitlement;
 - orchestration to other services.
 
@@ -195,8 +196,11 @@ credential role `DISABLED`, только `jobs_db`, Redis, internal SEO Data URL
 выделенный `JOBS_TO_SEO_RANK_TOKEN`. Он не получает HTTP/internal/vault,
 NATS, S3, SMTP или provider credentials, не публикует port и в текущем
 Dokploy Compose подключён только к `internal`. Перед live provider execution
-для него дополнительно создаётся минимальная отдельная PostgreSQL role; env
-изоляция сама по себе не заменяет DB grants.
+для него дополнительно создаётся минимальная отдельная PostgreSQL role.
+Dedicated `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` текущего issuer foundation
+передаётся только Platform API; rank-worker получит его одновременно с
+bounded grant client/acceptance implementation. Env изоляция сама по себе не
+заменяет DB grants.
 
 ### 3.6. `platform-realtime`
 

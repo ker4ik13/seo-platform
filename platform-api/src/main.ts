@@ -8,6 +8,7 @@ import {
 import { AppModule } from "./app.module.js";
 import { ApiExceptionFilter } from "./common/api-exception.filter.js";
 import { loadAppConfig } from "./config/app-config.js";
+import { applyRankExecutionGrantNoStore } from "./rankings/rank-execution-grant-http.js";
 
 async function bootstrap(): Promise<void> {
   const config = loadAppConfig();
@@ -26,6 +27,7 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
 
   adapter.getInstance().addHook("onSend", async (request, reply, payload) => {
+    applyRankExecutionGrantNoStore(request, reply);
     reply.header("X-Request-Id", request.id);
     reply.header("X-API-Version", "v1");
     return payload;

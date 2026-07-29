@@ -204,6 +204,21 @@
   execution-role запрещён. Claim повторно проверяет tenant/job/item, lease,
   одноразовый lifecycle grant, binding/material/connector versions и kill
   switch.
+- Platform API issuer защищён отдельным
+  `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`, который не переиспользуется как
+  internal/credential/realtime/SEO rank token. Текущий Compose передаёт его
+  только Platform API; rank-worker получит secret только одновременно с Jobs
+  grant client. Token отсутствует у generic Jobs HTTP, connector/import/
+  inspection/system/migration, Web и остальных сервисов. Internal endpoint
+  требует exact single-value request/tenant/actor/idempotency headers,
+  `no-store` и path/header/body coherence.
+- Issuer сериализует owned authorization rows в порядке
+  workspace → project → user → membership → project access и сохраняет
+  immutable decision в той же transaction, где policy создаёт authoritative
+  quota reservation. Production policy не имеет runtime/env bypass и не
+  выдаёт `GRANTED` без reservation ID. Expired exact replay не переписывается;
+  future Jobs consumer обязан проверить TTL/hash/scope и атомарно consume-ить
+  grant с локальным execution state.
 - Plaintext keyword manifest boundary использует отдельный
   `JOBS_TO_SEO_RANK_TOKEN` и `x-rank-execution-token`. Он обязан отличаться
   от `INTERNAL_API_TOKEN` и credential/realtime tokens. Generic internal
@@ -958,9 +973,9 @@ Radar/crawler capacity:
   Перед live provider execution нужна отдельная минимальная DB role с
   проверенными grants; общий Jobs DB user не считается окончательной
   least-privilege boundary;
-- live Arsenkin submit остаётся выключенным, пока не реализованы scoped
-  execution grants, узкая vault boundary, normalized ingest и provider
-  contract gates.
+- live Arsenkin submit остаётся выключенным, пока не реализованы Jobs-side
+  grant acceptance/consumption, узкая vault boundary, normalized ingest и
+  provider contract gates.
 
 ## 35. Maintenance
 

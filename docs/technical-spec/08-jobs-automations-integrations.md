@@ -750,12 +750,35 @@ sidecar либо active dedup conflicts. Обычный rebuild unique index т�
 worker drain/maintenance window; large live database использует отдельный
 expand/concurrent-index rollout.
 
-Public Platform API routes и Web Job flow для create/get/cancel ещё не
-подключены. Provider-effective execution, one-time grants, scoped Arsenkin
-submit/poll/get, normalized ingest, успешный/частичный finalize, position
-history, completion outbox/events и schedules также не реализованы. Live
-Arsenkin execution остаётся выключенным; готовый PREPARING runtime не
-является доказательством рабочего съёма позиций.
+Public Platform API routes и Web Job flow для create/get/cancel подключены;
+normalized ingest/finalize, internal/public history и completion outbox также
+реализованы. Provider-effective execution, Jobs-side grant acceptance,
+scoped Arsenkin submit/poll/get и schedules ещё отсутствуют. Live Arsenkin
+execution остаётся выключенным; готовые PREPARING и issuer runtimes не
+являются доказательством рабочего съёма позиций.
+
+### 17.6. Platform-owned execution grant issuer foundation
+
+Platform API предоставляет protected internal endpoint
+`POST /internal/v1/workspaces/{workspaceId}/projects/{projectId}/rank-execution-grants`.
+Он требует dedicated caller token, exact single-value
+`X-Request-Id/X-Workspace-Id/X-Project-Id/X-Actor-Id/Idempotency-Key`,
+совпадение path/headers/body и `Cache-Control: no-store`.
+
+Issuer в `Serializable` transaction блокирует workspace, project, user,
+membership и project access в canonical parent-before-child порядке,
+повторно проверяет lifecycle/version/domain/RBAC и вызывает policy внутри той
+же транзакции. `GRANTED` невозможен без authoritative
+`quotaReservationId`; production provider policy пока возвращает только
+persisted `DENIED`. Новый receipt отвечает `201`, exact replay — `200`, reuse
+key/scope — `409`. Replay всегда возвращает сохранённый decision, даже если
+30-секундный grant уже истёк.
+
+Request несёт только opaque `executionEvidenceHash`, но не
+binding/route/credential IDs или secrets. Jobs client и таблица acceptance
+ещё не реализованы: следующий slice обязан строго проверить request/scope
+hashes и expiry, затем атомарно потребить grant вместе с Job/item/credential
+state. До этого provider submit запрещён.
 
 ## 18. OAuth connections
 

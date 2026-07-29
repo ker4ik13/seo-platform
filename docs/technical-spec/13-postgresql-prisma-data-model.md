@@ -464,6 +464,37 @@ Unique `(provider, external_id)`. Provider payload целиком при нео�
 
 Versioned rollout configuration.
 
+### 4.7. Rank execution authorization
+
+#### `rank_execution_grant_receipts`
+
+Immutable Platform-owned decision перед новым provider submit хранит:
+
+- workspace/project/actor/membership и их project/membership version
+  evidence;
+- opaque external Job/JobItem/execution-attempt и policy version;
+- tenant-scoped idempotency scope/key;
+- независимые 32-byte request/scope hashes и exact allowlisted request/response
+  JSON snapshots;
+- `GRANTED|DENIED`, finite denial reason, DB-derived decision time и для
+  grant — expiry ровно через 30 секунд;
+- обязательный authoritative `quota_reservation_id` только для `GRANTED`;
+- bounded safe correlation ID и created timestamp.
+
+Unique `(workspace_id, idempotency_scope, idempotency_key)` обеспечивает exact
+replay/conflict, а `(workspace_id, job_item_id, execution_attempt)` запрещает
+две авторизации одного submit attempt под разными keys. CHECK matrix требует
+reservation и exact TTL для `GRANTED`, отсутствие reservation/expiry для
+`DENIED`, bounded hashes/JSON и API-equivalent policy/idempotency/correlation
+formats. `BEFORE UPDATE OR DELETE` и `BEFORE TRUNCATE` triggers запрещают
+переписывать receipt. External Jobs IDs остаются opaque и не получают
+cross-database FK.
+
+Expiry не изменяет receipt и не создаёт synthetic denial: exact replay
+возвращает исходный snapshot, а Jobs проверяет expiry при будущем атомарном
+import/consume. Production policy пока не создаёт quota reservation и поэтому
+может сохранить только `DENIED`.
+
 ## 5. `seo_db`
 
 ### 5.1. Project projection
