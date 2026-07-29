@@ -1,0 +1,709 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { ConflictException } from "@nestjs/common";
+import type {
+  InternalCreateRankEstimateInput,
+  InternalRankEstimateScope
+} from "@seo-platform/contracts";
+import type { PrismaService } from "../database/prisma.service.js";
+import type { SeoDataClient } from "../seo-data/seo-data.client.js";
+import { rankEstimateSnapshot } from "./rank-estimate-snapshot.js";
+import {
+  RANK_ESTIMATE_TTL_MILLISECONDS,
+  RankEstimateService
+} from "./rank-estimate.service.js";
+
+const workspaceId = "0190abcd-0000-7000-8000-000000000001";
+const projectId = "0190abcd-0000-7000-8000-000000000002";
+const actorId = "0190abcd-0000-7000-8000-000000000003";
+const trackingContextId = "0190abcd-0000-7000-8000-000000000004";
+const otherTrackingContextId =
+  "0190abcd-0000-7000-8000-000000000010";
+const estimateId = "0190abcd-0000-7000-8000-000000000005";
+const bindingId = "0190abcd-0000-7000-8000-000000000006";
+const routeId = "0190abcd-0000-7000-8000-000000000007";
+const credentialId = "0190abcd-0000-7000-8000-000000000008";
+const validationId = "0190abcd-0000-7000-8000-000000000009";
+const secretSentinel = "must-never-be-selected-or-persisted";
+
+const input: InternalCreateRankEstimateInput = {
+  workspaceId,
+  projectId,
+  actorId,
+  trackingContextId,
+  project: {
+    id: projectId,
+    workspaceId,
+    domain: "example.com",
+    status: "ACTIVE",
+    version: 7
+  },
+  access: {
+    workspaceStatus: "ACTIVE",
+    canRunRanking: true,
+    entitlementStatus: "NOT_AVAILABLE"
+  },
+  billingCurrency: "RUB",
+  quota: { status: "NOT_AVAILABLE" }
+};
+
+test("calculates bounded task counts, exact TTL and a redacted immutable estimate", async () => {
+  const harness = estimateHarness({ scope: scope({ keywordCount: "251" }) });
+  const estimate = await harness.service.create(
+    input,
+    "rank-estimate-0001"
+  );
+
+  assert.equal(estimate.status, "BLOCKED");
+  assert.equal(estimate.executionAllowed, false);
+  assert.equal(estimate.workload.taskCount, "2");
+  assert.equal(estimate.workload.minimumRequestCount, "6");
+  assert.equal(estimate.providerLimits.status, "NOT_AVAILABLE");
+  assert.equal(estimate.expectedDuration.status, "NOT_AVAILABLE");
+  assert.equal(estimate.credentialFreshness.status, "FRESH");
+  assert.equal(
+    new Date(estimate.expiresAt).getTime() -
+      new Date(estimate.calculatedAt).getTime(),
+    RANK_ESTIMATE_TTL_MILLISECONDS
+  );
+  assert.deepEqual(
+    estimate.blockers.slice(-3).map(({ code }) => code),
+    [
+      "PROVIDER_CONTRACT_NOT_READY",
+      "PROVIDER_EXECUTION_DISABLED",
+      "ENTITLEMENT_NOT_AVAILABLE"
+    ]
+  );
+  assert.equal(harness.transactionIsolation, "RepeatableRead");
+  assert.equal(harness.seoCalls, 1);
+
+  const selectedCredential =
+    harness.bindingQuery?.select.routes.select.credential.select;
+  assert.ok(selectedCredential);
+  assert.equal(selectedCredential.ciphertext, undefined);
+  assert.equal(selectedCredential.encryptedDataKey, undefined);
+  assert.equal(selectedCredential.providerMeta, undefined);
+  assert.equal(selectedCredential.displayHint, undefined);
+  assert.equal(
+    JSON.stringify(harness.createdData).includes(secretSentinel),
+    false
+  );
+  const publicSnapshot = JSON.stringify(
+    harness.createdData?.responseSnapshot
+  );
+  assert.equal(publicSnapshot.includes(bindingId), false);
+  assert.equal(publicSnapshot.includes(routeId), false);
+  assert.equal(publicSnapshot.includes(credentialId), false);
+  assert.equal(publicSnapshot.includes(validationId), false);
+  assert.equal(publicSnapshot.includes(input.project.domain), false);
+  assert.equal(
+    harness.createdData?.minimumSubmitRequestCount,
+    2
+  );
+  assert.equal(harness.createdData?.minimumCheckRequestCount, 2);
+  assert.equal(harness.createdData?.minimumGetRequestCount, 2);
+});
+
+test("replays without another SEO read and conflicts on another payload", async () => {
+  const harness = estimateHarness();
+  const original = await harness.service.create(
+    input,
+    "rank-estimate-0002"
+  );
+  const replay = await harness.service.create(
+    input,
+    "rank-estimate-0002"
+  );
+
+  assert.deepEqual(replay, original);
+  assert.equal(harness.seoCalls, 1);
+  assert.equal(harness.transactionCalls, 1);
+
+  const driftReplay = await harness.service.create(
+    {
+      ...input,
+      project: {
+        ...input.project,
+        domain: "changed.example.com",
+        status: "ARCHIVED",
+        version: 8
+      },
+      access: {
+        workspaceStatus: "SUSPENDED",
+        canRunRanking: false,
+        entitlementStatus: "DENIED"
+      },
+      billingCurrency: "USD",
+      quota: {
+        status: "EXHAUSTED",
+        limit: "10",
+        used: "10",
+        remaining: "0"
+      }
+    },
+    "rank-estimate-0002"
+  );
+  assert.deepEqual(driftReplay, original);
+  assert.equal(harness.seoCalls, 1);
+  assert.equal(harness.transactionCalls, 1);
+
+  await assert.rejects(
+    harness.service.create(
+      {
+        ...input,
+        trackingContextId: otherTrackingContextId
+      },
+      "rank-estimate-0002"
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof ConflictException);
+      assert.equal(
+        (
+          error.getResponse() as Readonly<Record<string, unknown>>
+        ).code,
+        "IDEMPOTENCY_CONFLICT"
+      );
+      return true;
+    }
+  );
+  assert.equal(harness.seoCalls, 1);
+});
+
+test("returns the concurrent immutable winner after a unique conflict", async () => {
+  const harness = estimateHarness({ uniqueConflictOnCreate: true });
+  const estimate = await harness.service.create(
+    input,
+    "rank-estimate-0003"
+  );
+
+  assert.equal(estimate.id, estimateId);
+  assert.equal(harness.seoCalls, 1);
+  assert.equal(harness.transactionCalls, 1);
+});
+
+test("fails closed when a private receipt no longer matches its public snapshot", async () => {
+  const harness = estimateHarness();
+  await harness.service.create(input, "rank-estimate-corrupt");
+  harness.changeStored({ providerTaskCount: 4 });
+
+  await assert.rejects(
+    harness.service.create(input, "rank-estimate-corrupt"),
+    /Invalid immutable rank estimate snapshot/u
+  );
+  assert.equal(harness.seoCalls, 1);
+});
+
+test("fails closed for private context corruption when the sentinel scope hash is unavailable", async () => {
+  const harness = estimateHarness({
+    scope: scope({
+      keywordCount: "1001",
+      semanticScopeHash: { availability: "UNAVAILABLE" }
+    })
+  });
+  await harness.service.create(
+    input,
+    "rank-estimate-corrupt-sentinel"
+  );
+  harness.changeStored({ trackingContextId: otherTrackingContextId });
+
+  await assert.rejects(
+    harness.service.create(
+      input,
+      "rank-estimate-corrupt-sentinel"
+    ),
+    /Invalid immutable rank estimate snapshot/u
+  );
+  assert.equal(harness.seoCalls, 1);
+});
+
+test("blocks stale and missing validation proof without selecting secret material", async () => {
+  const staleAt = new Date(Date.now() - 25 * 60 * 60 * 1_000);
+  const stale = estimateHarness({
+    binding: binding({ verifiedAt: staleAt }),
+    validation: validation(staleAt)
+  });
+  const staleEstimate = await stale.service.create(
+    input,
+    "rank-estimate-stale"
+  );
+  assert.equal(staleEstimate.credentialFreshness.status, "STALE");
+  assert.ok(
+    staleEstimate.blockers.some(
+      ({ code }) => code === "CREDENTIAL_NOT_FRESH"
+    )
+  );
+  assert.equal(stale.createdData?.credentialValidationId, validationId);
+  assert.equal(
+    stale.createdData?.credentialValidationConnectorVersion,
+    "arsenkin@1.0.0"
+  );
+
+  const missing = estimateHarness({
+    binding: binding({ verifiedAt: null }),
+    validation: null
+  });
+  const missingEstimate = await missing.service.create(
+    input,
+    "rank-estimate-missing"
+  );
+  assert.equal(
+    missingEstimate.credentialFreshness.status,
+    "UNVERIFIED"
+  );
+  assert.equal(missing.createdData?.credentialValidationId, null);
+  assert.equal(missing.createdData?.credentialVerifiedAt, null);
+});
+
+test("does not accept a completed proof for another material version", async () => {
+  const verifiedAt = new Date(Date.now() - 60_000);
+  const harness = estimateHarness({
+    binding: binding({ verifiedAt }),
+    validation: validation(verifiedAt, { materialVersion: 2 })
+  });
+  const estimate = await harness.service.create(
+    input,
+    "rank-estimate-old-material"
+  );
+
+  assert.equal(estimate.credentialFreshness.status, "STALE");
+  assert.equal(harness.createdData?.credentialValidationId, null);
+  assert.ok(
+    estimate.blockers.some(
+      ({ code }) => code === "CREDENTIAL_NOT_FRESH"
+    )
+  );
+});
+
+test("keeps a missing binding as a blocked estimate without a credential read", async () => {
+  const harness = estimateHarness({ binding: null, validation: null });
+  const estimate = await harness.service.create(
+    input,
+    "rank-estimate-no-binding"
+  );
+
+  assert.equal(
+    estimate.credentialFreshness.status,
+    "NOT_AVAILABLE"
+  );
+  assert.ok(
+    estimate.blockers.some(
+      ({ code }) => code === "BINDING_NOT_CONFIGURED"
+    )
+  );
+  assert.equal(harness.validationQuery, undefined);
+  assert.equal(harness.createdData?.credentialId, null);
+});
+
+test("projects lifecycle, permission, entitlement and quota as deterministic blockers", async () => {
+  const harness = estimateHarness({
+    binding: null,
+    validation: null,
+    scope: scope({
+      contextStatus: "ARCHIVED",
+      keywordCount: "0",
+      pairCount: "0"
+    })
+  });
+  const estimate = await harness.service.create(
+    {
+      ...input,
+      project: { ...input.project, status: "ARCHIVED" },
+      access: {
+        workspaceStatus: "READ_ONLY",
+        canRunRanking: false,
+        entitlementStatus: "DENIED"
+      },
+      quota: {
+        status: "EXHAUSTED",
+        limit: "10",
+        used: "10",
+        remaining: "0"
+      }
+    },
+    "rank-estimate-access"
+  );
+  const codes = estimate.blockers.map(({ code }) => code);
+
+  for (const code of [
+    "CONTEXT_ARCHIVED",
+    "NO_ASSIGNED_KEYWORDS",
+    "ENTITLEMENT_DENIED",
+    "QUOTA_EXCEEDED",
+    "MISSING_RUN_PERMISSION",
+    "WORKSPACE_READ_ONLY",
+    "PROJECT_ARCHIVED"
+  ] as const) {
+    assert.ok(codes.includes(code));
+  }
+  assert.equal(new Set(codes).size, codes.length);
+});
+
+test("uses a bounded 1001 sentinel without fabricating a partial hash", async () => {
+  const harness = estimateHarness({
+    scope: scope({
+      keywordCount: "1001",
+      semanticScopeHash: { availability: "UNAVAILABLE" }
+    })
+  });
+  const estimate = await harness.service.create(
+    input,
+    "rank-estimate-limit"
+  );
+
+  assert.equal(estimate.scope.keywordCount, "1001");
+  assert.deepEqual(estimate.scope.scopeHash, {
+    availability: "UNAVAILABLE"
+  });
+  assert.equal(estimate.workload.taskCount, "0");
+  assert.equal(harness.createdData?.semanticScopeHash, null);
+  assert.equal(harness.createdData?.scopeHash, null);
+  assert.ok(
+    estimate.blockers.some(
+      ({ code }) => code === "KEYWORD_LIMIT_EXCEEDED"
+    )
+  );
+});
+
+test("keeps a provider-incompatible bounded scope blocked and exactly replayable", async () => {
+  const harness = estimateHarness({
+    scope: scope({
+      keywordCount: "1",
+      semanticScopeHash: { availability: "UNAVAILABLE" }
+    })
+  });
+  const original = await harness.service.create(
+    input,
+    "rank-estimate-unavailable-bounded"
+  );
+  const replay = await harness.service.create(
+    input,
+    "rank-estimate-unavailable-bounded"
+  );
+
+  assert.equal(original.status, "BLOCKED");
+  assert.equal(original.scope.keywordCount, "1");
+  assert.deepEqual(original.scope.scopeHash, {
+    availability: "UNAVAILABLE"
+  });
+  assert.equal(original.workload.taskCount, "1");
+  assert.equal(original.workload.minimumRequestCount, "3");
+  assert.ok(
+    original.blockers.some(
+      ({ code }) => code === "SCOPE_HASH_UNAVAILABLE"
+    )
+  );
+  assert.equal(
+    original.blockers.some(
+      ({ code }) => code === "KEYWORD_LIMIT_EXCEEDED"
+    ),
+    false
+  );
+  assert.equal(harness.createdData?.semanticScopeHash, null);
+  assert.equal(harness.createdData?.scopeHash, null);
+  assert.deepEqual(replay, original);
+  assert.equal(harness.seoCalls, 1);
+  assert.equal(harness.transactionCalls, 1);
+});
+
+test("rejects unavailable empty and available sentinel snapshots", async () => {
+  const unavailableHarness = estimateHarness({
+    scope: scope({
+      keywordCount: "1",
+      semanticScopeHash: { availability: "UNAVAILABLE" }
+    })
+  });
+  const unavailable = await unavailableHarness.service.create(
+    input,
+    "rank-estimate-snapshot-empty"
+  );
+  assert.throws(
+    () =>
+      rankEstimateSnapshot({
+        ...unavailable,
+        scope: {
+          ...unavailable.scope,
+          keywordCount: "0",
+          pairCount: "0"
+        },
+        workload: {
+          ...unavailable.workload,
+          taskCount: "0",
+          minimumRequestCount: "0"
+        }
+      }),
+    /Invalid immutable rank estimate snapshot/u
+  );
+
+  const availableHarness = estimateHarness();
+  const available = await availableHarness.service.create(
+    input,
+    "rank-estimate-snapshot-sentinel"
+  );
+  assert.throws(
+    () =>
+      rankEstimateSnapshot({
+        ...available,
+        scope: {
+          ...available.scope,
+          keywordCount: "1001",
+          pairCount: "1001"
+        },
+        workload: {
+          ...available.workload,
+          taskCount: "0",
+          minimumRequestCount: "0"
+        }
+      }),
+    /Invalid immutable rank estimate snapshot/u
+  );
+});
+
+test("rejects unavailable empty and one-null stored hash replays", async () => {
+  const harness = estimateHarness({
+    scope: scope({
+      keywordCount: "1",
+      semanticScopeHash: { availability: "UNAVAILABLE" }
+    })
+  });
+  await harness.service.create(
+    input,
+    "rank-estimate-invalid-stored-hashes"
+  );
+
+  harness.changeStored({ keywordCount: 0 });
+  await assert.rejects(
+    harness.service.create(
+      input,
+      "rank-estimate-invalid-stored-hashes"
+    ),
+    /Invalid immutable rank estimate scope hashes/u
+  );
+
+  harness.changeStored({
+    keywordCount: 1,
+    scopeHash: Uint8Array.from(Buffer.alloc(32))
+  });
+  await assert.rejects(
+    harness.service.create(
+      input,
+      "rank-estimate-invalid-stored-hashes"
+    ),
+    /Invalid immutable rank estimate scope hashes/u
+  );
+  assert.equal(harness.seoCalls, 1);
+});
+
+test("strictly scopes connector and validation reads to the trusted tenant", async () => {
+  const harness = estimateHarness();
+  await harness.service.create(input, "rank-estimate-scope");
+
+  assert.deepEqual(harness.bindingQuery?.where, {
+    workspaceId,
+    projectId,
+    capability: "SERP_RANK_TRACKING"
+  });
+  assert.equal(harness.validationQuery?.where.workspaceId, workspaceId);
+  assert.equal(
+    harness.validationQuery?.where.deduplicationKey,
+    `integration-credential-validation:${credentialId}:3`
+  );
+  assert.equal(
+    "inputSnapshot" in harness.validationQuery.where,
+    false
+  );
+});
+
+function estimateHarness(options: {
+  readonly scope?: InternalRankEstimateScope;
+  readonly binding?: ReturnType<typeof binding> | null;
+  readonly validation?: ReturnType<typeof validation> | null;
+  readonly uniqueConflictOnCreate?: boolean;
+} = {}) {
+  let stored: Record<string, unknown> | null = null;
+  let createdData: Record<string, unknown> | undefined;
+  let bindingQuery: any;
+  let validationQuery: any;
+  let transactionIsolation: string | undefined;
+  let seoCalls = 0;
+  let transactionCalls = 0;
+  const selectedBinding =
+    options.binding === undefined ? binding() : options.binding;
+  const selectedValidation =
+    options.validation === undefined
+      ? validation(selectedBinding?.routes[0]?.credential.verifiedAt ?? null)
+      : options.validation;
+
+  const rankEstimate = {
+    findUnique: async () => stored,
+    create: async ({ data }: { readonly data: Record<string, unknown> }) => {
+      createdData = data;
+      stored = { ...data, createdAt: new Date() };
+      if (options.uniqueConflictOnCreate) {
+        throw { code: "P2002" };
+      }
+      return stored;
+    }
+  };
+  const transaction = {
+    rankEstimate,
+    projectConnectorBinding: {
+      findFirst: async (query: unknown) => {
+        bindingQuery = query;
+        return selectedBinding;
+      }
+    },
+    job: {
+      findFirst: async (query: unknown) => {
+        validationQuery = query;
+        return selectedValidation;
+      }
+    },
+    $queryRaw: async () => [{ id: estimateId, calculatedAt: new Date() }]
+  };
+  const prisma = {
+    rankEstimate,
+    $transaction: async (
+      callback: (value: typeof transaction) => Promise<unknown>,
+      config: { readonly isolationLevel: string }
+    ) => {
+      transactionCalls += 1;
+      transactionIsolation = config.isolationLevel;
+      return callback(transaction);
+    }
+  } as unknown as PrismaService;
+  const seoData = {
+    rankEstimateScope: async () => {
+      seoCalls += 1;
+      return options.scope ?? scope();
+    }
+  } as unknown as SeoDataClient;
+
+  return {
+    service: new RankEstimateService(prisma, seoData),
+    get createdData() {
+      return createdData;
+    },
+    get bindingQuery() {
+      return bindingQuery;
+    },
+    get validationQuery() {
+      return validationQuery;
+    },
+    get transactionIsolation() {
+      return transactionIsolation;
+    },
+    get seoCalls() {
+      return seoCalls;
+    },
+    get transactionCalls() {
+      return transactionCalls;
+    },
+    changeStored(change: Readonly<Record<string, unknown>>) {
+      if (!stored) throw new Error("No stored estimate");
+      stored = { ...stored, ...change };
+    }
+  };
+}
+
+function scope(
+  overrides: Partial<InternalRankEstimateScope> = {}
+): InternalRankEstimateScope {
+  const keywordCount = overrides.keywordCount ?? "250";
+  return {
+    workspaceId,
+    projectId,
+    trackingContextId,
+    contextStatus: "ACTIVE",
+    contextVersion: 3,
+    configurationVersion: 3,
+    configurationHash: "a".repeat(64),
+    configuration: {
+      searchEngine: "GOOGLE",
+      countryCode: "RU",
+      language: "ru",
+      device: "DESKTOP",
+      depth: 30,
+      domainMatchRule: { mode: "EXACT_HOST" },
+      safeSearch: false
+    },
+    keywordCount,
+    contextCount: "1",
+    pairCount: keywordCount,
+    semanticScopeHash: {
+      availability: "AVAILABLE",
+      algorithm: "SHA_256",
+      value: "b".repeat(64)
+    },
+    calculatedAt: new Date().toISOString(),
+    ...overrides
+  };
+}
+
+function binding(
+  overrides: {
+    readonly verifiedAt?: Date | null;
+    readonly status?: string;
+  } = {}
+) {
+  const verifiedAt =
+    overrides.verifiedAt === undefined
+      ? new Date(Date.now() - 60_000)
+      : overrides.verifiedAt;
+  return {
+    id: bindingId,
+    workspaceId,
+    projectId,
+    capability: "SERP_RANK_TRACKING",
+    enabled: true,
+    version: 4,
+    routes: [
+      {
+        id: routeId,
+        workspaceId,
+        projectId,
+        bindingId,
+        position: 0,
+        sourceKind: "WORKSPACE_CREDENTIAL",
+        credentialId,
+        credential: {
+          id: credentialId,
+          workspaceId,
+          provider: "ARSENKIN",
+          mode: "BYOK_API_KEY",
+          status: overrides.status ?? "ACTIVE",
+          capabilities: ["SERP_RANK_TRACKING"],
+          materialVersion: 3,
+          version: 6,
+          verifiedAt,
+          lastSuccessAt: verifiedAt,
+          deletedAt: null,
+          ciphertext: secretSentinel
+        }
+      }
+    ]
+  };
+}
+
+function validation(
+  finishedAt: Date | null,
+  overrides: { readonly materialVersion?: number } = {}
+) {
+  if (!finishedAt) return null;
+  const materialVersion = overrides.materialVersion ?? 3;
+  return {
+    id: validationId,
+    workspaceId,
+    provider: "ARSENKIN",
+    status: "COMPLETED",
+    deduplicationKey:
+      `integration-credential-validation:${credentialId}:${materialVersion}`,
+    inputSnapshot: {
+      kind: "integration.credential.validation.v1",
+      credentialId,
+      credentialMaterialVersion: materialVersion,
+      connectorVersion: "arsenkin@1.0.0"
+    },
+    version: 5,
+    finishedAt
+  };
+}

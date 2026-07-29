@@ -1,0 +1,235 @@
+import { BadRequestException } from "@nestjs/common";
+import {
+  semanticImportDuplicatePolicies,
+  semanticImportDelimiters,
+  semanticImportEncodings,
+  semanticImportHeaderModes,
+  semanticImportTargets,
+  type InternalCancelSemanticImportInput,
+  type InternalConfigureSemanticImportInput,
+  type InternalConfirmSemanticImportInput,
+  type InternalCreateSemanticImportInput,
+  type SemanticImportDuplicatePolicy,
+  type SemanticImportDelimiter,
+  type SemanticImportEncoding,
+  type SemanticImportHeaderMode,
+  type SemanticImportMappingColumn,
+  type SemanticImportTarget
+} from "@seo-platform/contracts";
+import { internalUuid } from "../internal/internal-command-context.js";
+
+const IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{8,180}$/u;
+
+export function internalCreateSemanticImportInput(
+  value: unknown
+): InternalCreateSemanticImportInput {
+  const input = record(value);
+  const parse =
+    input.parse === undefined ? {} : record(input.parse);
+  const idempotencyKey = string(input, "idempotencyKey");
+  if (!IDEMPOTENCY_PATTERN.test(idempotencyKey)) {
+    invalid("idempotencyKey");
+  }
+  return {
+    workspaceId: uuid(input, "workspaceId"),
+    projectId: uuid(input, "projectId"),
+    actorId: uuid(input, "actorId"),
+    uploadId: uuid(input, "uploadId"),
+    idempotencyKey,
+    parse: {
+      encoding: enumValue<SemanticImportEncoding>(
+        parse.encoding,
+        semanticImportEncodings,
+        "AUTO",
+        "parse.encoding"
+      ),
+      delimiter: enumValue<SemanticImportDelimiter>(
+        parse.delimiter,
+        semanticImportDelimiters,
+        "AUTO",
+        "parse.delimiter"
+      ),
+      headerMode: enumValue<SemanticImportHeaderMode>(
+        parse.headerMode,
+        semanticImportHeaderModes,
+        "AUTO",
+        "parse.headerMode"
+      )
+    }
+  };
+}
+
+export function internalConfigureSemanticImportInput(
+  value: unknown
+): InternalConfigureSemanticImportInput {
+  const input = record(value);
+  const columns = array(input.columns, "columns").map((value, index) =>
+    mappingColumn(value, index)
+  );
+  if (columns.length === 0 || columns.length > 500) invalid("columns");
+  if (
+    new Set(columns.map(({ sourceIndex }) => sourceIndex)).size !==
+    columns.length
+  ) {
+    invalid("columns.sourceIndex");
+  }
+  if (
+    columns.filter(({ target }) => target === "keyword.text").length !== 1
+  ) {
+    invalid("columns.keyword.text");
+  }
+  const singletonTargets = columns
+    .map(({ target }) => target)
+    .filter((target) => !["custom", "ignore"].includes(target));
+  if (new Set(singletonTargets).size !== singletonTargets.length) {
+    invalid("columns.target");
+  }
+  const groupSeparator =
+    input.groupSeparator === undefined
+      ? "/"
+      : string(input, "groupSeparator");
+  if (groupSeparator.length > 8) invalid("groupSeparator");
+  const defaultLanguage =
+    input.defaultLanguage === undefined
+      ? "und"
+      : string(input, "defaultLanguage");
+  if (
+    defaultLanguage !== "und" &&
+    !/^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u.test(defaultLanguage)
+  ) {
+    invalid("defaultLanguage");
+  }
+  return {
+    workspaceId: uuid(input, "workspaceId"),
+    projectId: uuid(input, "projectId"),
+    actorId: uuid(input, "actorId"),
+    version: positiveVersion(input.version),
+    columns,
+    defaultLanguage,
+    groupSeparator,
+    duplicatePolicy: enumValue<SemanticImportDuplicatePolicy>(
+      input.duplicatePolicy,
+      semanticImportDuplicatePolicies,
+      "SKIP_EXISTING",
+      "duplicatePolicy"
+    )
+  };
+}
+
+export function internalConfirmSemanticImportInput(
+  value: unknown
+): InternalConfirmSemanticImportInput {
+  return versionedContext(value);
+}
+
+export function internalCancelSemanticImportInput(
+  value: unknown
+): InternalCancelSemanticImportInput {
+  const input = record(value);
+  return {
+    workspaceId: uuid(input, "workspaceId"),
+    projectId: uuid(input, "projectId"),
+    actorId: uuid(input, "actorId"),
+    ...(input.version === undefined
+      ? {}
+      : { version: positiveVersion(input.version) })
+  };
+}
+
+function versionedContext(
+  value: unknown
+): InternalConfirmSemanticImportInput {
+  const input = record(value);
+  return {
+    workspaceId: uuid(input, "workspaceId"),
+    projectId: uuid(input, "projectId"),
+    actorId: uuid(input, "actorId"),
+    version: positiveVersion(input.version)
+  };
+}
+
+function mappingColumn(
+  value: unknown,
+  index: number
+): SemanticImportMappingColumn {
+  const input = record(value);
+  if (
+    !Number.isSafeInteger(input.sourceIndex) ||
+    Number(input.sourceIndex) < 0
+  ) {
+    invalid(`columns.${index}.sourceIndex`);
+  }
+  const target = enumValue<SemanticImportTarget>(
+    input.target,
+    semanticImportTargets,
+    "ignore",
+    `columns.${index}.target`
+  );
+  const customName =
+    input.customName === undefined
+      ? undefined
+      : string(input, "customName");
+  if (customName && customName.length > 160) {
+    invalid(`columns.${index}.customName`);
+  }
+  if (target === "custom" && !customName) {
+    invalid(`columns.${index}.customName`);
+  }
+  return {
+    sourceIndex: Number(input.sourceIndex),
+    target,
+    ...(customName ? { customName } : {})
+  };
+}
+
+function enumValue<Value extends string>(
+  value: unknown,
+  allowed: readonly Value[],
+  fallback: Value,
+  field: string
+): Value {
+  if (value === undefined) return fallback;
+  if (typeof value !== "string" || !allowed.includes(value as Value)) {
+    invalid(field);
+  }
+  return value as Value;
+}
+
+function record(value: unknown): Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new BadRequestException("A JSON object is required");
+  }
+  return value as Readonly<Record<string, unknown>>;
+}
+
+function array(value: unknown, field: string): readonly unknown[] {
+  if (!Array.isArray(value)) invalid(field);
+  return value;
+}
+
+function string(
+  input: Readonly<Record<string, unknown>>,
+  field: string
+): string {
+  const value = input[field];
+  if (typeof value !== "string" || !value.trim()) invalid(field);
+  return value.trim();
+}
+
+function uuid(
+  input: Readonly<Record<string, unknown>>,
+  field: string
+): string {
+  return internalUuid(string(input, field), field);
+}
+
+function positiveVersion(value: unknown): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 1) {
+    invalid("version");
+  }
+  return Number(value);
+}
+
+function invalid(field: string): never {
+  throw new BadRequestException(`Invalid field: ${field}`);
+}

@@ -1,0 +1,576 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum JobStatus {
+  DRAFT
+  ESTIMATING
+  AWAITING_APPROVAL
+  RESERVING_BALANCE
+  PREPARING
+  QUEUED
+  WAITING_RATE_LIMIT
+  RUNNING
+  PAUSE_REQUESTED
+  PAUSED
+  CANCEL_REQUESTED
+  CANCELLED
+  RETRY_SCHEDULED
+  PARTIALLY_COMPLETED
+  COMPLETED
+  FAILED_RETRYABLE
+  FAILED_FINAL
+  ACTION_REQUIRED
+  EXPIRED
+}
+
+enum JobItemStatus {
+  PENDING
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED_RETRYABLE
+  FAILED_FINAL
+  CANCELLED
+}
+
+enum CredentialMode {
+  BYOK_API_KEY
+  BYOK_OAUTH
+  PLATFORM_INCLUDED
+  PLATFORM_PAID
+  FALLBACK_PLATFORM_PAID
+}
+
+enum CredentialStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  DEGRADED
+  RATE_LIMITED
+  LOW_BALANCE
+  EXPIRED
+  REVOKED
+  INVALID
+  DISABLED
+}
+
+enum ProjectConnectorRouteSourceKind {
+  WORKSPACE_CREDENTIAL
+}
+
+enum UploadStatus {
+  INITIATED
+  UPLOADING
+  UPLOADED
+  SCANNING
+  READY
+  REJECTED
+  EXPIRED
+  ABORTED
+}
+
+enum SemanticImportStatus {
+  QUEUED
+  PARSING
+  AWAITING_MAPPING
+  VALIDATING
+  AWAITING_CONFIRMATION
+  READY_TO_PUBLISH
+  PUBLISHING
+  COMPLETED
+  FAILED
+  CANCEL_REQUESTED
+  CANCELLED
+}
+
+enum OutboxStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+}
+
+enum RankManifestSealState {
+  PENDING
+  OUTCOME_UNKNOWN
+  NOT_SEALED
+  SEALED
+  FINALIZED
+}
+
+enum RankCheckFinalStatus {
+  COMPLETED
+  PARTIALLY_COMPLETED
+  CANCELLED
+  FAILED
+  ACTION_REQUIRED
+}
+
+model Job {
+  id                 String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId        String         @map("workspace_id") @db.Uuid
+  projectId          String?        @map("project_id") @db.Uuid
+  type               String         @db.VarChar(100)
+  status             JobStatus      @default(DRAFT)
+  stage              String?        @db.VarChar(64)
+  priority           Int            @default(100)
+  actorId            String?        @map("actor_id") @db.Uuid
+  scheduleId         String?        @map("schedule_id") @db.Uuid
+  parentJobId        String?        @map("parent_job_id") @db.Uuid
+  deduplicationKey   String?        @map("deduplication_key") @db.VarChar(180)
+  idempotencyScope   String         @map("idempotency_scope") @db.VarChar(180)
+  idempotencyKey     String?        @map("idempotency_key") @db.VarChar(180)
+  requestHash        Bytes?         @map("request_hash")
+  inputSnapshot      Json           @map("input_snapshot")
+  scopeSnapshot      Json           @map("scope_snapshot")
+  progressCurrent    BigInt         @default(0) @map("progress_current")
+  progressTotal      BigInt?        @map("progress_total")
+  progressUnit       String?        @map("progress_unit") @db.VarChar(32)
+  estimatedCostMicro BigInt?        @map("estimated_cost_micro")
+  reservedCostMicro  BigInt?        @map("reserved_cost_micro")
+  actualCostMicro    BigInt?        @map("actual_cost_micro")
+  currency           String?        @db.Char(3)
+  credentialMode     CredentialMode @map("credential_mode")
+  provider           String?        @db.VarChar(64)
+  attempt            Int            @default(0)
+  maxAttempts        Int            @default(3) @map("max_attempts")
+  errorSummary       Json?          @map("error_summary")
+  resultSummary      Json?          @map("result_summary")
+  correlationId      String         @map("correlation_id") @db.VarChar(100)
+  version            Int            @default(1)
+  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  queuedAt           DateTime?      @map("queued_at") @db.Timestamptz(6)
+  startedAt          DateTime?      @map("started_at") @db.Timestamptz(6)
+  finishedAt         DateTime?      @map("finished_at") @db.Timestamptz(6)
+  cancelRequestedAt  DateTime?      @map("cancel_requested_at") @db.Timestamptz(6)
+  leaseOwner         String?        @map("lease_owner") @db.VarChar(100)
+  leaseExpiresAt     DateTime?      @map("lease_expires_at") @db.Timestamptz(6)
+  retryAt            DateTime?      @map("retry_at") @db.Timestamptz(6)
+  updatedAt          DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  items   JobItem[]
+  rankRun RankJobRun?
+
+  @@unique([workspaceId, idempotencyScope, idempotencyKey])
+  @@unique([workspaceId, projectId, id], map: "jobs_tenant_project_id_key")
+  @@index([workspaceId, projectId, status, createdAt])
+  @@index([status, priority, createdAt])
+  @@index([workspaceId, deduplicationKey, status])
+  @@index([type, status, leaseExpiresAt, createdAt])
+  @@index([type, status, retryAt, priority, createdAt])
+  @@map("jobs")
+}
+
+model JobItem {
+  id                String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId       String        @map("workspace_id") @db.Uuid
+  projectId         String?       @map("project_id") @db.Uuid
+  jobId             String        @map("job_id") @db.Uuid
+  sequence          Int
+  status            JobItemStatus @default(PENDING)
+  inputReference    Json          @map("input_reference")
+  providerRequestId String?       @map("provider_request_id") @db.VarChar(255)
+  outputReference   Json?         @map("output_reference")
+  actualCostMicro   BigInt?       @map("actual_cost_micro")
+  error             Json?
+  attempt           Int           @default(0)
+  retryAt           DateTime?     @map("retry_at") @db.Timestamptz(6)
+  createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, sequence])
+  @@index([workspaceId, status, retryAt])
+  @@map("job_items")
+}
+
+model IntegrationCredential {
+  id                    String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId           String           @map("workspace_id") @db.Uuid
+  provider              String           @db.VarChar(64)
+  label                 String           @db.VarChar(160)
+  mode                  CredentialMode
+  status                CredentialStatus @default(PENDING_VERIFICATION)
+  ciphertext            Bytes
+  nonce                 Bytes
+  authTag               Bytes            @map("auth_tag")
+  encryptedDataKey      Bytes            @map("encrypted_data_key")
+  dataKeyNonce          Bytes            @map("data_key_nonce")
+  dataKeyAuthTag        Bytes            @map("data_key_auth_tag")
+  keyVersion            Int              @map("key_version")
+  displayHint           String?          @map("display_hint") @db.VarChar(100)
+  capabilities          Json
+  providerMeta          Json?            @map("provider_meta")
+  idempotencyKey        String           @map("idempotency_key") @db.VarChar(255)
+  requestFingerprint    Bytes            @map("request_fingerprint")
+  fingerprintKeyVersion Int              @map("fingerprint_key_version")
+  materialVersion       Int              @default(1) @map("material_version")
+  createdBy             String?          @map("created_by") @db.Uuid
+  updatedBy             String?          @map("updated_by") @db.Uuid
+  verifiedAt            DateTime?        @map("verified_at") @db.Timestamptz(6)
+  lastSuccessAt         DateTime?        @map("last_success_at") @db.Timestamptz(6)
+  lastErrorAt           DateTime?        @map("last_error_at") @db.Timestamptz(6)
+  lastErrorCode         String?          @map("last_error_code") @db.VarChar(100)
+  version               Int              @default(1)
+  createdAt             DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt             DateTime?        @map("deleted_at") @db.Timestamptz(6)
+
+  connectorRoutes ProjectConnectorRoute[]
+
+  @@unique([workspaceId, idempotencyKey])
+  @@unique([workspaceId, id])
+  @@index([workspaceId, provider, status])
+  @@index([workspaceId, createdAt, id])
+  @@index([keyVersion, deletedAt, id])
+  @@index([fingerprintKeyVersion, deletedAt, id])
+  @@map("integration_credentials")
+}
+
+model ProjectConnectorBinding {
+  id          String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String   @map("workspace_id") @db.Uuid
+  projectId   String   @map("project_id") @db.Uuid
+  capability  String   @db.VarChar(100)
+  enabled     Boolean  @default(true)
+  createdBy   String   @map("created_by") @db.Uuid
+  updatedBy   String   @map("updated_by") @db.Uuid
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  routes        ProjectConnectorRoute[]
+  createReceipt ProjectConnectorBindingCreateReceipt?
+
+  @@unique([workspaceId, projectId, capability], map: "project_connector_bindings_tenant_project_capability_key")
+  @@unique([workspaceId, projectId, id], map: "project_connector_bindings_tenant_project_id_key")
+  @@index([workspaceId, projectId, createdAt, id], map: "project_connector_bindings_tenant_project_created_idx")
+  @@map("project_connector_bindings")
+}
+
+model ProjectConnectorBindingCreateReceipt {
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  idempotencyKey   String   @map("idempotency_key") @db.VarChar(180)
+  requestHash      Bytes    @map("request_hash")
+  bindingId        String   @map("binding_id") @db.Uuid
+  responseSnapshot Json     @map("response_snapshot")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  binding ProjectConnectorBinding @relation(fields: [workspaceId, projectId, bindingId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "project_connector_binding_receipts_binding_tenant_fkey")
+
+  @@id([workspaceId, projectId, idempotencyKey])
+  @@unique([workspaceId, projectId, bindingId], map: "project_connector_binding_receipts_tenant_project_binding_key")
+  @@map("project_connector_binding_create_receipts")
+}
+
+model ProjectConnectorRoute {
+  id           String                          @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId  String                          @map("workspace_id") @db.Uuid
+  projectId    String                          @map("project_id") @db.Uuid
+  bindingId    String                          @map("binding_id") @db.Uuid
+  position     Int
+  sourceKind   ProjectConnectorRouteSourceKind @map("source_kind")
+  credentialId String                          @map("credential_id") @db.Uuid
+  createdAt    DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime                        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  binding    ProjectConnectorBinding @relation(fields: [workspaceId, projectId, bindingId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "project_connector_routes_binding_tenant_fkey")
+  credential IntegrationCredential   @relation(fields: [workspaceId, credentialId], references: [workspaceId, id], onDelete: Restrict, map: "project_connector_routes_credential_tenant_fkey")
+
+  @@unique([workspaceId, projectId, bindingId, position], map: "project_connector_routes_tenant_project_binding_position_key")
+  @@index([workspaceId, credentialId], map: "project_connector_routes_tenant_credential_idx")
+  @@map("project_connector_routes")
+}
+
+model RankEstimate {
+  id                                   String            @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId                          String            @map("workspace_id") @db.Uuid
+  projectId                            String            @map("project_id") @db.Uuid
+  actorId                              String            @map("actor_id") @db.Uuid
+  trackingContextId                    String            @map("tracking_context_id") @db.Uuid
+  idempotencyScope                     String            @map("idempotency_scope") @db.VarChar(180)
+  idempotencyKey                       String            @map("idempotency_key") @db.VarChar(180)
+  requestHash                          Bytes             @map("request_hash")
+  projectVersion                       Int               @map("project_version")
+  projectDomainHash                    Bytes             @map("project_domain_hash")
+  contextVersion                       Int               @map("context_version")
+  configurationVersion                 Int               @map("configuration_version")
+  configurationHash                    Bytes             @map("configuration_hash")
+  semanticScopeHash                    Bytes?            @map("semantic_scope_hash")
+  scopeHash                            Bytes?            @map("scope_hash")
+  bindingId                            String?           @map("binding_id") @db.Uuid
+  bindingVersion                       Int?              @map("binding_version")
+  routeId                              String?           @map("route_id") @db.Uuid
+  credentialId                         String?           @map("credential_id") @db.Uuid
+  credentialStatus                     CredentialStatus? @map("credential_status")
+  credentialVersion                    Int?              @map("credential_version")
+  credentialMaterialVersion            Int?              @map("credential_material_version")
+  credentialDeletedAt                  DateTime?         @map("credential_deleted_at") @db.Timestamptz(6)
+  credentialValidationId               String?           @map("credential_validation_id") @db.Uuid
+  credentialValidationVersion          Int?              @map("credential_validation_version")
+  credentialValidationConnectorVersion String?           @map("credential_validation_connector_version") @db.VarChar(64)
+  credentialValidationFinishedAt       DateTime?         @map("credential_validation_finished_at") @db.Timestamptz(6)
+  credentialVerifiedAt                 DateTime?         @map("credential_verified_at") @db.Timestamptz(6)
+  provider                             String            @db.VarChar(64)
+  credentialMode                       CredentialMode    @map("credential_mode")
+  providerPolicyVersion                String            @map("provider_policy_version") @db.VarChar(64)
+  keywordCount                         Int               @map("keyword_count")
+  providerTaskCount                    Int               @map("provider_task_count")
+  minimumSubmitRequestCount            Int               @map("minimum_submit_request_count")
+  minimumCheckRequestCount             Int               @map("minimum_check_request_count")
+  minimumGetRequestCount               Int               @map("minimum_get_request_count")
+  blockers                             Json
+  responseSnapshot                     Json              @map("response_snapshot")
+  executionSnapshot                    Json?             @map("execution_snapshot")
+  executionSnapshotHash                Bytes?            @map("execution_snapshot_hash")
+  calculatedAt                         DateTime          @map("calculated_at") @db.Timestamptz(6)
+  expiresAt                            DateTime          @map("expires_at") @db.Timestamptz(6)
+  createdAt                            DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  rankRun RankJobRun?
+
+  @@unique([workspaceId, idempotencyScope, idempotencyKey], map: "rank_estimates_workspace_scope_idempotency_key")
+  @@unique([workspaceId, projectId, id], map: "rank_estimates_tenant_project_id_key")
+  @@index([workspaceId, projectId, trackingContextId, createdAt], map: "rank_estimates_tenant_context_created_idx")
+  @@index([expiresAt, id], map: "rank_estimates_expiry_idx")
+  @@map("rank_estimates")
+}
+
+model RankJobRun {
+  jobId                    String                @id @map("job_id") @db.Uuid
+  workspaceId              String                @map("workspace_id") @db.Uuid
+  projectId                String                @map("project_id") @db.Uuid
+  estimateId               String                @map("estimate_id") @db.Uuid
+  trackingContextId        String                @map("tracking_context_id") @db.Uuid
+  projectDomain            String                @map("project_domain") @db.Text
+  projectStatus            String                @map("project_status") @db.VarChar(16)
+  projectVersion           Int                   @map("project_version")
+  manifestCommand          Json                  @map("manifest_command")
+  manifestCommandHash      Bytes                 @map("manifest_command_hash")
+  sealState                RankManifestSealState @default(PENDING) @map("seal_state")
+  sealAttemptCount         Int                   @default(0) @map("seal_attempt_count")
+  lastSealAttemptAt        DateTime?             @map("last_seal_attempt_at") @db.Timestamptz(6)
+  manifestId               String?               @map("manifest_id") @db.Uuid
+  manifestHashSchema       String?               @map("manifest_hash_schema") @db.VarChar(64)
+  manifestHash             Bytes?                @map("manifest_hash")
+  manifestDeduplicationHash Bytes?               @map("manifest_deduplication_hash")
+  manifestPairCount        Int?                  @map("manifest_pair_count")
+  manifestChunkCount       Int?                  @map("manifest_chunk_count")
+  manifestChunkSize        Int?                  @map("manifest_chunk_size")
+  manifestSealedAt         DateTime?             @map("manifest_sealed_at") @db.Timestamptz(6)
+  finalizationStatus       RankCheckFinalStatus? @map("finalization_status")
+  finalizationRequestHash  Bytes?                @map("finalization_request_hash")
+  finalizedAt              DateTime?             @map("finalized_at") @db.Timestamptz(6)
+  cancelRequestedBy        String?               @map("cancel_requested_by") @db.Uuid
+  createdAt                DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  job      Job          @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "rank_job_runs_job_tenant_fkey")
+  estimate RankEstimate @relation(fields: [workspaceId, projectId, estimateId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "rank_job_runs_estimate_tenant_fkey")
+
+  @@unique([workspaceId, projectId, estimateId], map: "rank_job_runs_tenant_estimate_key")
+  @@unique([workspaceId, projectId, jobId], map: "rank_job_runs_tenant_job_key")
+  @@unique([manifestId], map: "rank_job_runs_manifest_id_key")
+  @@index([sealState, lastSealAttemptAt, createdAt], map: "rank_job_runs_seal_recovery_idx")
+  @@map("rank_job_runs")
+}
+
+model ProviderUsage {
+  id             String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId    String         @map("workspace_id") @db.Uuid
+  projectId      String?        @map("project_id") @db.Uuid
+  jobId          String         @map("job_id") @db.Uuid
+  jobItemId      String?        @map("job_item_id") @db.Uuid
+  provider       String         @db.VarChar(64)
+  operation      String         @db.VarChar(100)
+  credentialMode CredentialMode @map("credential_mode")
+  units          BigInt
+  providerCost   BigInt?        @map("provider_cost_micro")
+  customerPrice  BigInt?        @map("customer_price_micro")
+  currency       String         @db.Char(3)
+  priceBookVer   Int?           @map("price_book_version")
+  occurredAt     DateTime       @map("occurred_at") @db.Timestamptz(6)
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, occurredAt])
+  @@index([provider, operation, occurredAt])
+  @@index([jobId])
+  @@map("provider_usage")
+}
+
+model Automation {
+  id             String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  projectId      String    @map("project_id") @db.Uuid
+  name           String    @db.VarChar(160)
+  definition     Json
+  timezone       String    @db.VarChar(64)
+  enabled        Boolean   @default(false)
+  pausedReason   String?   @map("paused_reason") @db.Text
+  nextRunAt      DateTime? @map("next_run_at") @db.Timestamptz(6)
+  lastRunAt      DateTime? @map("last_run_at") @db.Timestamptz(6)
+  consecutiveErr Int       @default(0) @map("consecutive_errors")
+  version        Int       @default(1)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, projectId, enabled, nextRunAt])
+  @@map("automations")
+}
+
+model Upload {
+  id                    String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId           String       @map("workspace_id") @db.Uuid
+  projectId             String?      @map("project_id") @db.Uuid
+  actorId               String       @map("actor_id") @db.Uuid
+  status                UploadStatus @default(INITIATED)
+  bucket                String       @db.VarChar(100)
+  objectKey             String       @map("object_key") @db.Text
+  originalName          String       @map("original_name") @db.Text
+  mediaType             String       @map("media_type") @db.VarChar(255)
+  detectedMediaType     String?      @map("detected_media_type") @db.VarChar(255)
+  sizeBytes             BigInt       @map("size_bytes")
+  declaredChecksum      String?      @map("declared_checksum") @db.VarChar(128)
+  checksum              String?      @db.VarChar(128)
+  multipartId           String?      @map("multipart_id") @db.Text
+  partSizeBytes         Int          @map("part_size_bytes")
+  partCount             Int          @map("part_count")
+  idempotencyKey        String       @map("idempotency_key") @db.VarChar(180)
+  scanResult            Json?        @map("scan_result")
+  expiresAt             DateTime     @map("expires_at") @db.Timestamptz(6)
+  uploadedAt            DateTime?    @map("uploaded_at") @db.Timestamptz(6)
+  abortedAt             DateTime?    @map("aborted_at") @db.Timestamptz(6)
+  inspectionStartedAt   DateTime?    @map("inspection_started_at") @db.Timestamptz(6)
+  inspectionHeartbeatAt DateTime?    @map("inspection_heartbeat_at") @db.Timestamptz(6)
+  inspectionCompletedAt DateTime?    @map("inspection_completed_at") @db.Timestamptz(6)
+  version               Int          @default(1)
+  createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, actorId, idempotencyKey])
+  @@index([workspaceId, projectId, status, createdAt])
+  @@index([status, expiresAt])
+  @@index([status, inspectionHeartbeatAt, uploadedAt])
+  @@map("uploads")
+}
+
+model SemanticImport {
+  id                    String               @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId           String               @map("workspace_id") @db.Uuid
+  projectId             String               @map("project_id") @db.Uuid
+  uploadId              String               @map("upload_id") @db.Uuid
+  actorId               String               @map("actor_id") @db.Uuid
+  status                SemanticImportStatus @default(QUEUED)
+  stage                 String               @default("queued") @db.VarChar(64)
+  sourceFormat          String               @map("source_format") @db.VarChar(64)
+  requestedEncoding     String               @map("requested_encoding") @db.VarChar(32)
+  requestedDelimiter    String               @map("requested_delimiter") @db.VarChar(32)
+  headerMode            String               @map("header_mode") @db.VarChar(32)
+  detectedEncoding      String?              @map("detected_encoding") @db.VarChar(32)
+  detectedDelimiter     String?              @map("detected_delimiter") @db.VarChar(32)
+  headers               Json?
+  suggestedMapping      Json?                @map("suggested_mapping")
+  sampleRows            Json?                @map("sample_rows")
+  confirmedMapping      Json?                @map("confirmed_mapping")
+  validationSummary     Json?                @map("validation_summary")
+  resultSummary         Json?                @map("result_summary")
+  totalRows             BigInt               @default(0) @map("total_rows")
+  validRows             BigInt               @default(0) @map("valid_rows")
+  warningRows           BigInt               @default(0) @map("warning_rows")
+  errorRows             BigInt               @default(0) @map("error_rows")
+  progressBytes         BigInt               @default(0) @map("progress_bytes")
+  totalBytes            BigInt               @map("total_bytes")
+  failure               Json?
+  idempotencyKey        String               @map("idempotency_key") @db.VarChar(180)
+  parsingStartedAt      DateTime?            @map("parsing_started_at") @db.Timestamptz(6)
+  parsingHeartbeatAt    DateTime?            @map("parsing_heartbeat_at") @db.Timestamptz(6)
+  parsingCompletedAt    DateTime?            @map("parsing_completed_at") @db.Timestamptz(6)
+  validationStartedAt   DateTime?            @map("validation_started_at") @db.Timestamptz(6)
+  validationHeartbeatAt DateTime?            @map("validation_heartbeat_at") @db.Timestamptz(6)
+  validationCompletedAt DateTime?            @map("validation_completed_at") @db.Timestamptz(6)
+  publishingStartedAt   DateTime?            @map("publishing_started_at") @db.Timestamptz(6)
+  publishingHeartbeatAt DateTime?            @map("publishing_heartbeat_at") @db.Timestamptz(6)
+  publishingCompletedAt DateTime?            @map("publishing_completed_at") @db.Timestamptz(6)
+  cancelRequestedAt     DateTime?            @map("cancel_requested_at") @db.Timestamptz(6)
+  version               Int                  @default(1)
+  createdAt             DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  stagingRows   SemanticImportStagingRow[]
+  validatedRows SemanticImportValidatedRow[]
+
+  @@unique([workspaceId, actorId, idempotencyKey])
+  @@index([workspaceId, projectId, status, createdAt])
+  @@index([uploadId, status])
+  @@index([status, parsingHeartbeatAt, createdAt])
+  @@map("semantic_imports")
+}
+
+model SemanticImportStagingRow {
+  importId    String   @map("import_id") @db.Uuid
+  rowNumber   BigInt   @map("row_number")
+  rawValues   Json     @map("raw_values")
+  issues      Json     @default("[]")
+  fingerprint String   @db.Char(64)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  semanticImport SemanticImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@id([importId, rowNumber])
+  @@index([importId, fingerprint])
+  @@map("semantic_import_staging_rows")
+}
+
+model SemanticImportValidatedRow {
+  importId         String   @map("import_id") @db.Uuid
+  rowNumber        BigInt   @map("row_number")
+  normalizedHash   String?  @map("normalized_hash") @db.Char(64)
+  canonicalRow     Json?    @map("canonical_row")
+  issues           Json     @default("[]")
+  isValid          Boolean  @default(false) @map("is_valid")
+  projectDuplicate Boolean  @default(false) @map("project_duplicate")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  semanticImport SemanticImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@id([importId, rowNumber])
+  @@index([importId, normalizedHash])
+  @@index([importId, isValid, projectDuplicate])
+  @@map("semantic_import_validated_rows")
+}
+
+model InboxEvent {
+  eventId     String   @id @map("event_id") @db.Uuid
+  eventType   String   @map("event_type") @db.VarChar(160)
+  consumer    String   @db.VarChar(100)
+  processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
+
+  @@index([consumer, processedAt])
+  @@map("inbox_events")
+}
+
+model OutboxEvent {
+  id          String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  eventType   String       @map("event_type") @db.VarChar(160)
+  aggregateId String       @map("aggregate_id") @db.Uuid
+  workspaceId String       @map("workspace_id") @db.Uuid
+  projectId   String?      @map("project_id") @db.Uuid
+  payload     Json
+  metadata    Json
+  status      OutboxStatus @default(PENDING)
+  attempts    Int          @default(0)
+  availableAt DateTime     @default(now()) @map("available_at") @db.Timestamptz(6)
+  publishedAt DateTime?    @map("published_at") @db.Timestamptz(6)
+  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([status, availableAt])
+  @@map("outbox_events")
+}

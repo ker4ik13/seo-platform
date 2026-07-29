@@ -1,0 +1,56 @@
+{
+  "name": "@seo-platform/jobs-integrations",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "dev:worker:system": "tsx watch src/worker.main.ts",
+    "dev:worker:inspection": "tsx watch src/inspection-worker.main.ts",
+    "dev:worker:import": "tsx watch src/import-worker.main.ts",
+    "dev:worker:connector": "tsx watch src/connector-worker.main.ts",
+    "dev:worker:rank": "tsx watch src/rank-worker.main.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:worker:system": "node dist/worker.main.js",
+    "start:worker:inspection": "node dist/inspection-worker.main.js",
+    "start:worker:import": "node dist/import-worker.main.js",
+    "start:worker:connector": "node dist/connector-worker.main.js",
+    "start:worker:rank": "node dist/rank-worker.main.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test 'src/**/*.test.ts'",
+    "prisma:generate": "prisma generate",
+    "prisma:validate": "prisma validate",
+    "prisma:migrate:deploy": "prisma migrate deploy"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1096.0",
+    "@aws-sdk/s3-request-presigner": "3.1096.0",
+    "@nestjs/common": "11.1.28",
+    "@nestjs/core": "11.1.28",
+    "@nestjs/platform-fastify": "11.1.28",
+    "@prisma/adapter-pg": "7.9.1",
+    "@prisma/client": "7.9.1",
+    "@seo-platform/contracts": "workspace:*",
+    "bullmq": "5.81.2",
+    "dotenv": "17.2.3",
+    "fastify": "5.10.0",
+    "ioredis": "5.11.1",
+    "@nats-io/transport-node": "3.4.0",
+    "nodemailer": "9.0.3",
+    "pg": "8.16.3",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/nodemailer": "8.0.1",
+    "@types/pg": "8.15.5",
+    "prisma": "7.9.1",
+    "tsx": "4.20.6",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}
