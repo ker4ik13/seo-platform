@@ -324,6 +324,7 @@ services:
       PORT: 4001
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/seo_db
       DATABASE_POOL_MAX: ${SEO_DATA_DATABASE_POOL_MAX:-30}
+      JOBS_TO_SEO_RANK_TOKEN: ${JOBS_TO_SEO_RANK_TOKEN:?JOBS_TO_SEO_RANK_TOKEN is required}
     expose:
       - "4001"
     depends_on:

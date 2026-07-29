@@ -16,11 +16,42 @@
    обязательные placeholders (`replace-me`, `replace-with-*`), URL и версии
    юридических документов. Пустые обязательные service secrets нужно
    сгенерировать отдельно; копировать примеры как реальные секреты запрещено.
+   Отдельно обязательно задать `JOBS_TO_SEO_RANK_TOKEN`: старые копии
+   корневого примера могут ещё не содержать эту переменную.
 3. Сначала оставить `S3_ENABLED=false`, `EMAIL_ENABLED=false`,
    `DIRECTUS_STORAGE_DRIVER=local`.
 4. Привязать основной домен к `web:3000`, остальные домены к `admin:3002`,
    `platform-api:4000`, `realtime:4003`, `directus:8055`.
 5. Развернуть compose. Migration services завершаются до запуска приложений.
+
+## Dedicated Jobs → SEO Data rank boundary
+
+`JOBS_TO_SEO_RANK_TOKEN` защищает внутренние операции immutable rank
+manifest и чтение их plaintext chunks. Это отдельный случайный service
+credential длиной не менее 32 символов. Он обязан отличаться от
+`INTERNAL_API_TOKEN`, credential-vault token, notification token, encryption
+keys и provider credentials.
+
+Текущий Compose передаёт этот secret только HTTP-процессу `seo-data`.
+Отдельного `rank-worker` в текущем образе jobs/integrations ещё нет, поэтому
+consumer secret пока не выдаётся ни одному jobs process. В частности, его не
+получают `jobs-integrations`, `system-worker`, `import-worker`,
+`upload-inspection-worker`, `connector-worker`, migrations, Platform API,
+Realtime, Web и Admin. Наличие переменной в Dokploy project environment не
+означает её передачу контейнеру: контейнер получает secret только через
+явную запись в своём `environment`.
+
+После появления отдельного `rank-worker` тот же secret можно передать только
+ему и `seo-data`, одновременно обновив regression-тест scope. Добавлять его в
+общие anchors `x-common-backend-env` или `x-jobs-env` запрещено.
+
+Пошаговый rollout, безопасная проверка и rollback описаны в
+[`runbooks/jobs-to-seo-rank-token.md`](./runbooks/jobs-to-seo-rank-token.md).
+Инвариант получателей проверяется без раскрытия значения:
+
+```bash
+node --test tests/rank-token-scope.test.mjs
+```
 
 ## BYOK vault и ротация ключей
 
