@@ -38,9 +38,9 @@ import {
   parseWebPushSubscriptionsState,
   serializeWebPushRegistration,
   serializeWebPushRename,
-  webPushDeviceNeedsReconciliation,
-  webPushSubscriptionMatchesInput
+  webPushDeviceNeedsReconciliation
 } from "../lib/push-notifications";
+import { settlePushRegistrationReconciliation } from "../lib/push-registration-reconciliation";
 
 const PUSH_SUBSCRIPTIONS_PATH = "/app/api/me/push-subscriptions";
 const INITIAL_FEATURE_SUPPORT: WebPushFeatureSupport = {
@@ -292,26 +292,26 @@ export function BrowserPushSettings({
       );
       const currentSubscription = await currentBrowserPushSubscription();
       setLocalSubscription(Boolean(currentSubscription));
-      if (
-        !currentSubscription ||
-        !webPushSubscriptionMatchesInput(
-          currentSubscription,
-          requestBody.subscription
-        )
-      ) {
+      const settlement = await settlePushRegistrationReconciliation(
+        {
+          ownerUserId: userId,
+          installationId: targetInstallation.installationId,
+          sentGeneration: pending.generation,
+          sentSubscription: requestBody.subscription,
+          currentSubscription
+        },
+        {
+          request: requestPushReconciliation,
+          complete: completePushReconciliation
+        }
+      );
+      setInstallation(settlement.record);
+      if (settlement.status === "REARMED_AFTER_LOCAL_CHANGE") {
         setError({
           message:
-            "Сервер сохранил отправленную подписку, но браузер уже успел изменить её. Выполните синхронизацию ещё раз."
+            "Сервер сохранил отправленную подписку, но браузер уже успел изменить её. Новая синхронизация сохранена и должна быть выполнена ещё раз."
         });
-        return;
-      }
-      const completion = await completePushReconciliation(
-        userId,
-        targetInstallation.installationId,
-        pending.generation
-      );
-      setInstallation(completion.record);
-      if (!completion.cleared) {
+      } else if (settlement.status === "SUPERSEDED") {
         setError({
           message:
             "Подписка изменилась в другой вкладке или Service Worker. Выполните синхронизацию ещё раз."
