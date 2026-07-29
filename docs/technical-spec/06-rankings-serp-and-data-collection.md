@@ -105,7 +105,10 @@ credential, не вызывает Arsenkin и не создаёт domain event:
    пяти­минутный receipt.
 
 Значение `1001` является bounded sentinel «не менее 1 001», а не точным
-count; hash такого неполного множества имеет состояние `UNAVAILABLE`. Final
+count; hash такого неполного множества имеет состояние `UNAVAILABLE`.
+Bounded scope `1..1000` также возвращает `UNAVAILABLE`, если keyword text
+нарушает provider character/UTF-8/total-byte preflight; пустой scope всегда
+hashable. Final
 scope hash включает semantic scope, project domain/version и версии
 binding/credential/validation/policy, но публичный ответ не раскрывает эти
 идентификаторы.
@@ -126,13 +129,14 @@ entitlement и quota возвращают честный `NOT_AVAILABLE`, пок
 
 ### 3.3. Зафиксированные execution-контракты
 
-До включения runtime реализованы exact contracts ручного запуска: public
-command принимает только `estimateId`; Job projection использует конечную
-матрицу status/stage; SEO Data boundary разделяет immutable manifest,
-bounded chunks, normalized found/not-found ingest и terminal finalize.
-Semantic active-run hash исключает run-specific IDs и timestamps, тогда как
-integrity hashes покрывают полный versioned RFC 8785 JCS preimage. Runtime
-manifest, Job orchestration и provider execution остаются следующими этапами.
+Exact contracts ручного запуска фиксируют: public command принимает только
+`estimateId`; Job projection использует конечную матрицу status/stage; SEO
+Data boundary разделяет immutable manifest, bounded chunks, normalized
+found/not-found ingest и terminal finalize. Manifest seal/chunk runtime уже
+реализован с immutable DB state machine и content-only active dedup.
+Integrity hashes покрывают полный versioned RFC 8785 JCS preimage. Job
+orchestration, ingest/finalize и provider execution остаются следующими
+этапами.
 
 ## 4. Rank snapshot
 

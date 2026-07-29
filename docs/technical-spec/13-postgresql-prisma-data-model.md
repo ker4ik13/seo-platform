@@ -1280,8 +1280,8 @@ PostgreSQL 18 обязателен в staging.
 - 32-byte request hash;
 - project version и hash домена без plaintext domain;
 - context/configuration versions и hashes;
-- semantic/final scope hashes либо явный `NULL` для bounded overflow
-  sentinel;
+- semantic/final scope hashes либо согласованная пара `NULL`, когда bounded
+  scope нельзя безопасно materialize для provider;
 - private binding/route/credential/material/validation version snapshot;
 - provider/mode/policy version;
 - keyword/task/minimum stage request counts;
@@ -1291,16 +1291,86 @@ PostgreSQL 18 обязателен в staging.
 
 Unique `workspace_id + idempotency_scope + idempotency_key` обеспечивает
 exact replay и conflict. CHECK constraints требуют 32-byte hashes,
-согласованные nullable hashes только для `keyword_count=1001`, положительные
-версии, exact chunk counts, JSON array/object, полный validation proof и TTL
-пять минут. Receipt не имеет FK в другую database; IDs внешнего владельца
-являются immutable snapshot. Private IDs и domain hash не входят в public
-DTO.
+положительные версии, exact chunk counts, JSON array/object, полный
+validation proof и TTL пять минут. Hash availability имеет точную матрицу:
+
+- `keyword_count=0` — оба hashes обязательно доступны;
+- `keyword_count=1..1000` — оба hashes либо доступны, либо оба `NULL`;
+  `NULL` означает bounded, но provider-incompatible text/byte scope;
+- `keyword_count=1001` — overflow sentinel, оба hashes обязательно `NULL`;
+- только один `NULL` и `1001 + AVAILABLE` запрещены.
+
+Receipt не имеет FK в другую database; IDs внешнего владельца являются
+immutable snapshot. Private IDs и domain hash не входят в public DTO.
 
 Физическая очистка выполняется отдельной maintenance policy после окна
 сетевых повторов и диагностики; expiry не означает автоматическое удаление
 проекта, tracking context или результатов. До появления `rank-runs` таблица
 не создаёт provider usage, billing reservation или Job.
+
+#### `rank_execution_manifests`
+
+Immutable pre-provider scope принадлежит `seo_db`. Header содержит:
+
+- tenant/project/job/estimate и audit actor;
+- project domain/status/version snapshot;
+- tracking context/configuration versions и evidence hashes;
+- semantic/final estimate scope hashes;
+- provider/operation и provider-effective execution JSON;
+- retention, pair/chunk counts;
+- full `manifest_hash`, semantic `deduplication_hash`, schema versions;
+- `sealed_at`, optional `closed_at`, lifecycle status.
+
+`sealed_by` входит в full manifest preimage. Storage-local `request_hash`
+сравнивается timing-safe для exact replay/idempotency conflict и не входит в
+contract manifest hash.
+
+Lifecycle enum: `BUILDING`, `SEALED`, `CLOSED`. `BUILDING` допустим только
+внутри транзакции создания; deferred constraint trigger запрещает его commit.
+Единственный разрешённый update после seal — `SEALED → CLOSED` с
+`closed_at >= sealed_at`. Header нельзя удалить, переписать, открыть повторно
+или вставить сразу как `SEALED/CLOSED`; `TRUNCATE` запрещён.
+
+Partial unique
+`workspace_id + project_id + provider + deduplication_hash WHERE status =
+SEALED` запрещает второй активный эквивалентный provider run. Semantic hash
+содержит только provider-effective content: tenant/project, domain,
+execution/retention и упорядоченные
+`keyword_id + text_hash + language`. Tracking-context identity, logical
+revisions, configuration/semantic/final evidence hashes, assignment/run IDs,
+actor и timestamps в него не входят, но run-specific evidence остаётся в
+full manifest hash. Поэтому clone/rename эквивалентного context, display-only
+label, metadata edit или reassignment не обходят active dedup. `CLOSED`
+освобождает active key, не удаляя историю.
+
+#### `rank_execution_manifest_chunks`
+
+- tenant/project/manifest composite FK с `ON DELETE/UPDATE RESTRICT`;
+- zero-based `chunk_index`;
+- `rank-manifest-chunk@1`, 32-byte chunk hash;
+- `entry_count=1..250`;
+- unique tenant/project/manifest/chunk identity.
+
+Chunks можно вставлять только пока parent `BUILDING`; update/delete/late
+insert и `TRUNCATE` запрещены. При `BUILDING → SEALED` DB проверяет exact
+chunk count, contiguous indices и совпадение declared/actual entry counts.
+
+#### `rank_execution_manifest_entries`
+
+- immutable entry ID и global sequence;
+- assignment/keyword IDs;
+- exact keyword version/text/language snapshot;
+- SHA-256 точных raw UTF-8 bytes текста;
+- tenant-safe FK к chunk, assignment и keyword с `RESTRICT`;
+- unique sequence, assignment и keyword внутри manifest.
+
+Пределы первого Arsenkin slice: 1 000 entries, chunk 250, максимум 500
+Unicode code points и 2 000 UTF-8 bytes на keyword, 2 000 000 bytes на весь
+scope. До чтения текста выполняется byte-first bounded aggregate preflight;
+provider-incompatible scope не materialize-ится. Seal trigger проверяет, что
+assignment активен, относится к manifest tracking context и тому же keyword,
+а keyword активен и совпадает по version/text/language. Все три таблицы
+создаются migration `20260729160000_rank_execution_manifests`.
 
 #### `connector_registry`
 

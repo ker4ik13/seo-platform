@@ -508,13 +508,22 @@ Provider/credential/schedule не входят в tracking context по ADR-2026
 Следующий execution-этап добавит:
 
 - `POST /api/v1/projects/{projectId}/rank-runs`;
-- `GET /api/v1/jobs/{jobId}` и cancel/retry-safe actions.
+- `GET /api/v1/projects/{projectId}/jobs/{jobId}`;
+- `POST /api/v1/projects/{projectId}/jobs/{jobId}/cancel`.
 
 DTO и event contracts этого этапа уже зафиксированы в
 `platform-contracts`: public create содержит только `estimateId`, public Job
 не раскрывает provider/credential/keyword/result internals, а internal
 границы описывают manifest seal/chunk, normalized ingest и monotonic
-finalize. Наличие контрактов не означает готовность перечисленных endpoints.
+finalize. SEO Data часть manifest boundary уже реализована:
+
+- `POST /internal/v1/projects/{projectId}/rank-manifests`;
+- `GET /internal/v1/projects/{projectId}/rank-manifests/{manifestId}/chunks/{chunkIndex}?jobId=...`.
+
+Она требует trusted tenant headers/body и отдельный
+`x-rank-execution-token`, атомарно перепроверяет estimate scope и не вызывает
+provider. Наличие этого internal boundary не означает готовность публичных
+Job endpoints, Jobs PREPARING saga, ingest/finalize или connector execution.
 
 Estimate body содержит только `trackingContextId`. Endpoint требует
 `ranking.view`, session, CSRF и `Idempotency-Key`, отвечает `201` immutable
@@ -534,6 +543,12 @@ Jobs самостоятельно вызывает
 Run отвечает `202 + Location`. Перед каждым новым provider submit требуется
 одноразовый authoritative execution grant; неоднозначный submit имеет
 отдельный публично видимый status и не повторяется автоматически.
+
+Location первого rank slice всегда project-scoped. GET требует
+`ranking.view`; cancel — `collector.cancel`, CSRF и пустой exact body.
+`actorId` передаётся как audit actor и не ограничивает teammate access.
+Чтение и cancel доступны в billing read-only/архивном проекте; повтор cancel
+не переписывает terminal outcome.
 
 `seo.rank-check.completed.v1` создаётся только для runtime-проверенного
 `COMPLETED` или `PARTIALLY_COMPLETED`; inconsistent counts и

@@ -189,6 +189,11 @@
 - `collector.approve_cost`;
 - `serp.view_raw`.
 
+`collector.cancel` является read-only-safe командой: она не запускает новую
+работу и должна оставаться доступной при billing `READ_ONLY` и в архивном
+проекте. Право применяется к tenant-scoped Job проекта, а не только к Job,
+созданным текущим пользователем.
+
 ### 5.5. Конкуренты, страницы и контент
 
 - `competitor.view`;

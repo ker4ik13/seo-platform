@@ -115,7 +115,9 @@ outbox event и не вызывает provider.
 Команда требует CSRF, `ranking.run`, `Idempotency-Key`, актуальный `estimateId`,
 ACTIVE workspace/project, READY binding, ACTIVE BYOK credential, entitlement,
 quota и открытый provider/capability kill switch. Ответ — `202` и `Location`
-на Job.
+на tenant-safe project-scoped
+`/api/v1/projects/{projectId}/jobs/{jobId}`. Глобальный Job URL не
+используется, пока Platform API не владеет безопасной locator projection.
 
 Точный повтор возвращает существующий Job. Другой command под тем же ключом
 возвращает `IDEMPOTENCY_CONFLICT`. Active deduplication по
@@ -126,6 +128,13 @@ submit через новый пользовательский ключ.
 `estimateId`, конечную discriminated lifecycle-матрицу Job и отдельный
 `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`. Он не включает runtime endpoint,
 Job/JobItem или provider call.
+
+Чтение Job требует `ranking.view`. Cooperative cancel использует
+`collector.cancel`, разрешён в billing read-only и для архивного проекта и
+идемпотентен: `CANCEL_REQUESTED/CANCELLED` replay не меняет состояние, другой
+terminal status также не переписывается. `actorId` команды — audit actor, а
+не owner predicate: участник команды с project permission может читать и
+отменять Job другого участника.
 
 ## Immutable manifest
 
@@ -144,11 +153,53 @@ credential material version, connector version, mode и format. Public DTO
 не раскрывает credential/binding internals.
 
 Contract разделяет full integrity `manifestHash` и semantic
-`deduplicationHash`: второй исключает run-specific IDs/время, поэтому новый
-idempotency key не обходит active dedup. Manifest/chunk/ingest hashes
-используют versioned preimage и RFC 8785 JCS; ingest hash покрывает всю
+`deduplicationHash`. Semantic preimage содержит только tenant/project,
+фактический domain, provider-effective execution, retention и упорядоченные
+`keywordId + textHash + language`. Он не содержит tracking context identity,
+run/assignment IDs, logical revisions, configuration/scope evidence hashes,
+actor и время. Поэтому clone/rename эквивалентного context, display-only
+`regionLabel`, изменение метаданных ключа, remove/reassign и новый
+idempotency key не обходят project-wide active dedup, если внешняя работа та
+же. Run-specific audit/evidence-поля входят в full `manifestHash`.
+Audit `sealedBy` входит в full seal/preimage. Storage-local `requestHash`
+используется только для timing-safe проверки exact command replay и явно не
+является частью contract manifest integrity.
+
+Manifest/chunk hashes строятся только общими exact allowlist-builder’ами
+`platform-contracts` и RFC 8785 JCS с versioned domain separator. Hash текста
+ключа — SHA-256 точных UTF-8 bytes без normalization/JSON/newline. Golden
+vectors обязательны для producer и verifier. Ingest hash покрывает полную
 provenance команды. Finalize и ingest сериализуются одним manifest lock,
 после terminal finalize late ingest запрещён.
+
+Реализованный SEO Data boundary хранит три таблицы:
+
+- `rank_execution_manifests`;
+- `rank_execution_manifest_chunks`;
+- `rank_execution_manifest_entries`.
+
+Manifest создаётся как `BUILDING` только внутри одной `RepeatableRead`
+транзакции, наполняется chunks/entries и переводится в `SEALED`. Deferred
+constraint trigger запрещает committed `BUILDING`; прямой insert
+`SEALED/CLOSED`, изменение/удаление header или children, late child insert и
+`TRUNCATE` запрещены. Единственный последующий переход —
+`SEALED → CLOSED`; закрытие освобождает partial unique active-dedup key, но
+не удаляет manifest. При seal DB повторно проверяет принадлежность assignment
+контексту/ключу и точное состояние keyword snapshot.
+
+Перед materialization SEO Data выполняет bounded byte-first preflight:
+максимум 1 000 ключей, 500 Unicode code points и 2 000 UTF-8 bytes на ключ,
+2 000 000 bytes на весь scope; chunk size — 250. Лимит 500 символов принят
+консервативно из опубликованного Projects API Arsenkin, поскольку отдельный
+лимит `positions` не опубликован. Provider-incompatible bounded scope
+возвращает unavailable hash и не загружает большие тексты в Node.
+
+Secret-bearing endpoints seal/chunk используют отдельный
+`JOBS_TO_SEO_RANK_TOKEN` и header `x-rank-execution-token`; общий
+`INTERNAL_API_TOKEN` их не открывает. Пока Jobs PREPARING runtime не
+реализован, этот token получает только SEO Data для валидации. При добавлении
+caller secret передаётся только конкретному Jobs HTTP/rank process, не
+generic/import/connector workers и не queue payload.
 
 Создание — идемпотентная saga:
 

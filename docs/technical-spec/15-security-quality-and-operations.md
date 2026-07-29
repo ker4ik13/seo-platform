@@ -204,6 +204,14 @@
   execution-role запрещён. Claim повторно проверяет tenant/job/item, lease,
   одноразовый lifecycle grant, binding/material/connector versions и kill
   switch.
+- Plaintext keyword manifest boundary использует отдельный
+  `JOBS_TO_SEO_RANK_TOKEN` и `x-rank-execution-token`. Он обязан отличаться
+  от `INTERNAL_API_TOKEN` и credential/realtime tokens. Generic internal
+  callers, connector/import/system workers, Web, queue payload и логи его не
+  получают. До появления Jobs PREPARING caller secret настраивается только
+  у SEO Data validator; затем выдаётся одному минимальному caller process.
+  Ротация выполняется совместимым expand → switch caller → retire old
+  protocol, без публикации обоих значений в application data.
 - Любой provider response, для которого нет recorded schema, считается
   `INVALID_RESPONSE`, не преобразуется эвристически в rank snapshots и не
   попадает в публичные ошибки, логи или events.
@@ -622,6 +630,7 @@ dashboard/read flows. Полноценная работа с многомилл�
 - outbox/inbox;
 - queues;
 - partition queries;
+- immutable rank manifest lifecycle, provenance и active semantic dedup;
 - credential encryption;
 - webhooks;
 - object upload;
@@ -666,7 +675,11 @@ dashboard/read flows. Полноценная работа с многомилл�
 - accessibility;
 - visual regression;
 - backup restore;
-- migration rehearsal.
+- migration rehearsal;
+- Для rank manifest migration отдельно проверяются: fresh apply;
+  невозможность committed `BUILDING`; прямого `SEALED/CLOSED`; late
+  child/update/delete/truncate; provenance mismatch; concurrent active-dedup
+  winner; `SEALED → CLOSED` и повторный seal после освобождения active key.
 
 ## 25. Тестовые данные и среды
 
@@ -698,6 +711,8 @@ dashboard/read flows. Полноценная работа с многомилл�
 - unit/integration tests;
 - contract validation;
 - Prisma schema validation/migration check;
+- PostgreSQL 18 fresh migration и negative invariant smoke для новых
+  trigger/partial-index state machines;
 - build;
 - dependency/security scan;
 - container build/scan;
@@ -718,6 +733,9 @@ Merge запрещён при failed required checks. Исключение уя�
 - Worker drain перед shutdown.
 - Старый consumer не получает несовместимое событие.
 - После deploy выполняются smoke tests.
+- `20260729160000_rank_execution_manifests` до production обязательно
+  репетируется на PostgreSQL 18. Успешный локальный PostgreSQL 15 smoke
+  является дополнительным evidence, но не заменяет target-version gate.
 - Автоматический rollback допускается только если не усугубит уже применённую migration.
 
 ## 28. Feature flags

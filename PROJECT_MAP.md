@@ -3,15 +3,16 @@
 Последнее обновление: 29 июля 2026 года
 
 Текущий инкремент: manual BYOK rank execution foundation
-Статус: versioned tracking context и provider-free оценка готовности
-завершены во всех слоях: contracts, SEO Data, Platform API,
-Jobs/integrations и Web. Immutable estimate хранится в `jobs_db`, доступен
-при read-only и не вызывает provider, decrypt, Job/BullMQ, списание или
-event. Exact contracts следующего execution-среза уже фиксируют public Job
-lifecycle, immutable manifest/chunks, normalized ingest/finalize и redacted
-`seo.rank-check.completed.v1`; их runtime ещё не реализован. Provider
+Статус: versioned tracking context, provider-free оценка и immutable
+execution manifest в SEO Data завершены. Estimate хранится в `jobs_db`,
+доступен при read-only и не вызывает provider, decrypt, Job/BullMQ, списание
+или event. SEO Data уже атомарно seal-ит bounded keyword snapshots в
+immutable header/chunks/entries и защищает active semantic dedup; Jobs пока
+не создаёт `PREPARING` Job и не вызывает этот boundary. Exact contracts
+фиксируют public Job lifecycle, normalized ingest/finalize и redacted
+`seo.rank-check.completed.v1`, но их runtime ещё не реализован. Provider
 execution и position history отсутствуют. Срез следует ADR-2026-034; live
-Arsenkin submit остаётся выключенным до прохождения contract/security gates
+Arsenkin submit остаётся выключенным до прохождения contract/security gates.
 
 Параллельный dependency-free срез browser Web Push device lifecycle
 реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет
@@ -61,6 +62,8 @@ session-expiry sweeper ещё отсутствуют.
 - Tracking context не хранит provider/credential/schedule: его immutable
   search configuration принадлежит SEO data, routing — Jobs, schedule —
   automation.
+- Rank manifest принадлежит SEO Data, остаётся immutable после seal и
+  закрывается без физического удаления после terminal finalize.
 
 ## 2. Development workspace
 
@@ -158,8 +161,12 @@ transport и health/readiness, таблицы outbox/inbox созданы. Durab
 - `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN` отличается от
   `INTERNAL_API_TOKEN` и выдаётся только Platform API и credential-capable
   jobs/integrations HTTP process.
-- `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` отличается от обоих
-  предыдущих secrets и выдаётся только Platform API и Realtime HTTP для
+- `JOBS_TO_SEO_RANK_TOKEN` отличается от всех остальных service tokens и
+  защищает seal/chunk boundary с plaintext keyword snapshots. До появления
+  Jobs PREPARING caller он передаётся только SEO Data HTTP; generic,
+  connector, import и migration processes его не получают.
+- `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` отличается от остальных
+  service secrets и выдаётся только Platform API и Realtime HTTP для
   управления browser Web Push devices. Пример намеренно пуст, runtime
   отклоняет placeholder, а production Compose требует явно сгенерированное
   значение.
@@ -236,9 +243,20 @@ Backend convention:
   `ranking.view` и trusted lifecycle/access snapshot;
 - `platform-contracts/src/api/rank-runs.ts` и `src/events/rankings.ts` —
   exact manual-run lifecycle, manifest/chunk, normalized ingest/finalize и
-  redacted completion event contracts; это границы, а не готовый runtime;
+  redacted completion event contracts; manifest preimage builders уже
+  используются SEO Data, Job/ingest/finalize остаются следующими runtime
+  границами;
+- `platform-contracts/canonical-json` — server-only RFC 8785 JCS subpath для
+  одинаковых contract hash preimages в Jobs и SEO Data; root/browser export
+  намеренно отсутствует;
 - `platform-api/src/seo-data` — строго валидируемый internal read/command
   client к владельцу semantic core и tracking contexts;
+- `platform-seo-data/src/rank-manifests` — dedicated-auth seal/chunk API,
+  bounded preflight, immutable manifest state machine, hash verification и
+  active semantic dedup;
+- `platform-seo-data/prisma/migrations/20260729160000_rank_execution_manifests`
+  — header/chunk/entry tables, provenance/immutability triggers и partial
+  unique active-dedup index;
 - `platform-api/src/notifications` — public profile/project notification
   preferences с CSRF, tenant authorization и optimistic locking, а также
   profile-scoped browser device lifecycle с recent-auth enable;
@@ -597,21 +615,36 @@ Provider-free estimate доступен через
 resource использует
 dedicated caller token, stable-intent request hash и immutable public/private
 snapshot. SEO Data возвращает exact count до 1 000 либо sentinel `1001`,
-после которого semantic/final hash недоступен. TTL receipt — пять минут;
+а для provider-incompatible bounded scope 1..1 000 либо overflow `1001`
+возвращает согласованные unavailable semantic/final hashes. Пустой scope
+всегда materializable. TTL receipt — пять минут;
 replay после drift project/access/quota возвращает исходный ответ. Пока
 обязательны `PROVIDER_CONTRACT_NOT_READY` и
 `PROVIDER_EXECUTION_DISABLED`, ни provider call, ни Job/BullMQ, ни usage,
 reservation, outbox/event не создаются.
 
-Execution contract foundation для следующего этапа принимает в public create
-только `estimateId` и возвращает Job через конечную discriminated lifecycle
-матрицу. Internal contracts разделяют полный integrity hash manifest,
-semantic active-run deduplication hash, chunk hash и ingest-envelope hash;
-canonical JSON закреплён как RFC 8785 JCS. Finalize сериализуется с ingest на
-одном manifest lock, закрывает late ingest и только для валидного
-`COMPLETED/PARTIALLY_COMPLETED` допускает exact redacted
-`seo.rank-check.completed.v1`. Реализация endpoints/таблиц/worker ещё
-выполняется.
+Secret-bearing rank manifest endpoints принадлежат SEO Data и защищены
+отдельным `JOBS_TO_SEO_RANK_TOKEN`; общий internal token не даёт читать
+keyword text chunks. Сейчас secret получает только SEO Data validator:
+Jobs caller ещё не реализован и generic/connector/import workers secret не
+получают.
+
+Execution contract foundation принимает в public create только `estimateId`
+и возвращает Job через конечную discriminated lifecycle матрицу. SEO Data
+manifest runtime уже реализует dedicated-auth seal/chunk endpoints,
+`RepeatableRead` snapshot, byte-first limits, immutable
+`BUILDING → SEALED → CLOSED`, provenance checks и partial unique active
+semantic dedup. Shared allowlist preimage builders и golden vectors
+синхронизируют producer/verifier; full hash включает `sealedBy`, semantic hash
+не меняется от clone/rename tracking context, display label, metadata или
+remove/reassign, если provider-effective work остаётся тем же. Interactive
+manifest transaction использует явные `maxWait=5s` и `timeout=30s`.
+
+Jobs `PREPARING`/JobItem runtime, execution grants, connector submission,
+normalized ingest/finalize и position history ещё не реализованы. Contract
+требует сериализовать finalize с ingest на одном manifest lock, закрыть late
+ingest и только для валидного `COMPLETED/PARTIALLY_COMPLETED` опубликовать
+exact redacted `seo.rank-check.completed.v1`.
 
 ## 8. Проверенное состояние
 
@@ -619,10 +652,10 @@ canonical JSON закреплён как RFC 8785 JCS. Finalize сериализ
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
 - Platform API unit tests: 128 pass, 0 fail.
-- SEO data unit tests: 28 pass, 0 fail.
-- Jobs/integrations unit tests: 154 pass, 0 fail.
+- SEO data unit tests: 51 pass, 0 fail.
+- Jobs/integrations unit tests: 159 pass, 0 fail.
 - Realtime unit tests: 12 pass, 0 fail.
-- Contracts unit tests: 27 pass, 0 fail.
+- Contracts unit tests: 36 pass, 0 fail.
 - Unified Web helper tests: 54 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
 - Unified Next.js production build: pass; проверены public site, Toolbox,
@@ -664,10 +697,9 @@ canonical JSON закреплён как RFC 8785 JCS. Finalize сериализ
   browser backend в текущем окружении недоступен, поэтому новый экран требует
   повторного visual smoke после удалённого deploy.
 - Tracking context SEO Data: Prisma validate/generate, strict typecheck,
-  20 unit tests и production build pass. Migration review pass; применение
-  DDL не проверено на живом PostgreSQL в текущем окружении из-за
-  недоступного Docker и отсутствующего локального connection, поэтому fresh,
-  fail-closed и concurrent-writer smoke обязательны на PostgreSQL 18 staging.
+  production build pass. Fresh full SEO migration chain применён на локальном
+  PostgreSQL 15; fail-closed/concurrent-writer сценарии и повтор на целевом
+  PostgreSQL 18 остаются staging gates.
 - Tracking context Platform API: strict typecheck, 116 unit tests, production
   build и diff-check pass. Compiled bootstrap зарегистрировал новые modules и
   routes без DI errors; startup остановился только на ожидаемо недоступном
@@ -677,17 +709,25 @@ canonical JSON закреплён как RFC 8785 JCS. Finalize сериализ
   client helpers покрыты тестами. Защищённый browser visual/e2e не запускался
   без live auth/API и остаётся обязательным после удалённого deploy.
 - Provider-free rank estimate: Contracts 9/9, SEO Data 28/28, Platform API
-  128/128, Jobs/integrations 154/154 и Web 54/54 tests; strict typecheck,
+  128/128, Jobs/integrations 159/159 и Web 54/54 tests; strict typecheck,
   production build и diff-check проходят. Проверены exact replay после
   mutable snapshot drift, concurrent winner, bounded SEO response,
   credential projection без secret columns, finite blockers, 1001 sentinel,
   TTL и redaction. Живой PostgreSQL 18 migration smoke и защищённый visual/e2e
   остаются staging gates.
-- Manual rank execution contracts: 11/11 targeted tests, strict typecheck,
-  production build и diff-check — pass. Независимый review не нашёл P0/P1;
-  проверены runtime finite lifecycle/status, public redaction,
-  semantic/integrity hash separation, canonical ingest provenance,
-  finalize/late-ingest ordering и terminal count invariants.
+- Manual rank execution contracts: 12/12 targeted tests, strict typecheck,
+  production build и diff-check — pass. Review findings по nullable estimate
+  hash matrix, provenance, TOAST preflight, semantic dedup и full sealedBy
+  integrity устранены; проверены finite lifecycle/status, public redaction,
+  canonical ingest provenance, finalize/late-ingest ordering и terminal
+  count invariants.
+- Immutable rank manifest SEO Data: Prisma validate/generate, strict
+  typecheck, 51/51 tests, production build и diff-check — pass. Fresh
+  migrations и state/provenance/active-dedup negative smoke прошли на
+  PostgreSQL 15; target PostgreSQL 18 остаётся release gate.
+- Shared canonical JSON: official RFC 8785 primitive/key-order/UTF-8 vectors,
+  hostile values/accessors/cycles/Proxy fail-closed; server-only subpath
+  resolution из SEO Data проверен. Production dependencies не добавлялись.
 - Identity session-family producer: Contracts 16/16 и Platform API 175/175
   tests, strict typecheck/build/diff-check, Prisma validate/generate — pass.
   Проверены exact redacted payload, whole-family/idempotent revoke, чужая
@@ -708,8 +748,8 @@ canonical JSON закреплён как RFC 8785 JCS. Finalize сериализ
 
 `manual BYOK rank job → position history`
 
-Provider-free estimate из ADR-2026-034 завершён, exact execution contracts
-готовы. Следующий runtime-шаг — immutable execution manifest,
+Provider-free estimate и SEO Data immutable manifest из ADR-2026-034
+завершены. Следующий runtime-шаг — durable Jobs `PREPARING` saga,
 authoritative one-time grant, scoped connector operations, ingest receipts
 и partial persistence. Live Arsenkin `set`
 выключен, пока нет recorded provider contract, безопасного
@@ -806,9 +846,13 @@ durable-доставка не реализована. OAuth/OIDC выполня�
 - Versioned tracking context migration fail-closed требует пустые
   pre-release `tracking_contexts`, `rank_snapshots` и `current_ranks`, удерживая
   их `ACCESS EXCLUSIVE` от проверки до destructive contract step. SQL,
-  constraints и migration-order проверены тестами, но живой PostgreSQL smoke
-  в текущем окружении не выполнен; fresh/fail-closed/concurrent-writer
-  сценарии на PostgreSQL 18 остаются staging-gate.
+  constraints и migration-order проверены тестами; fresh apply прошёл в
+  полном SEO migration chain на PostgreSQL 15. Fail-closed/concurrent-writer
+  сценарии и PostgreSQL 18 остаются staging-gate.
+- Rank manifest migration fresh apply и negative lifecycle/provenance/
+  active-dedup smoke прошли на PostgreSQL 15. PostgreSQL 18, реальная
+  concurrent transaction гонка и rollback/failure injection обязательны до
+  release.
 - `rank_estimates` migration согласована с Prisma и проверена статическими
   тестами CHECK/indices, но не исполнялась на живом PostgreSQL. Fresh apply и
   constraint-negative smoke на PostgreSQL 18 обязательны до deploy.

@@ -158,9 +158,10 @@ contract. Project binding для `SERP_RANK_TRACKING` уже реализова�
 CAS/ETag, redacted outbox и project settings UI. Arsenkin предоставляет эту
 capability в текущем allowlist, а существующий ключ получает её только после
 успешной повторной provider validation. Binding ещё не выполняет rank job:
-versioned tracking context и provider-free оценка готовности уже реализованы,
-но provider execution, immutable execution manifest, история позиций и
-schedule остаются следующими вертикальными срезами. Оценка сохраняется в
+versioned tracking context, provider-free оценка и immutable SEO Data
+execution manifest уже реализованы, но Jobs PREPARING/runtime, provider
+execution, история позиций и schedule остаются следующими вертикальными
+срезами. Оценка сохраняется в
 Jobs как immutable idempotency receipt, доступна в read-only и не вызывает
 провайдера, BullMQ, списание, usage, outbox или event. Профильные и
 membership-bound проектные настройки уведомлений, in-app центр и
@@ -197,14 +198,17 @@ API оставляет межсервисное TOCTOU до commit отдель�
 authoritative lifecycle projection/inbox либо эквивалентная precondition.
 Project binding migration проверена на PostgreSQL 16. Новая migration
 immutable `rank_estimates` прошла schema/static review, но обе migration
-должны быть повторно проверены на целевом PostgreSQL 18 staging.
+должны быть повторно проверены на целевом PostgreSQL 18 staging. SEO Data
+rank manifest migration прошла fresh/state/provenance/active-dedup smoke на
+PostgreSQL 15; PostgreSQL 18 и реальная concurrency гонка остаются gates.
 
 Архитектура первого Arsenkin manual rank job зафиксирована
 ADR-2026-034. Provider-free estimate и exact execution contracts из ADR уже
-реализованы; runtime manifest/Job/ingest ещё выполняются. Live `set`
+реализованы; immutable SEO Data manifest также готов, runtime Job/ingest ещё
+выполняются. Live `set`
 остаётся выключенным до recorded one-key contract или
 письменного подтверждения response/status/retry semantics, устранения global
-vault read, authoritative execution grant, manifest/ingest receipts и
+vault read, authoritative execution grant, ingest receipts и
 `SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit. Наличие working credential
 validation и capability в binding не считается доказательством рабочего
 `positions` execution.

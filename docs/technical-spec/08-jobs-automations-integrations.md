@@ -107,6 +107,13 @@
 - UI показывает, что отмена запрошена.
 - Пауза сохраняет checkpoint.
 - Не все job types поддерживают pause; это отражается в capabilities.
+- Cancel требует tenant/project scope и `collector.cancel`, но не ownership
+  по `actorId`: уполномоченный участник команды может остановить чужой Job
+  проекта.
+- `CANCEL_REQUESTED` и `CANCELLED` обрабатываются как idempotent replay;
+  другой terminal status возвращается без перезаписи.
+- Cancel разрешён при billing read-only и для архивного проекта, поскольку
+  уменьшает будущую работу; новые submit при этом остаются запрещены.
 
 ## 7. Retry
 
@@ -631,6 +638,25 @@ Blockers имеют finite vocabulary из `platform-contracts` и локали�
 Provider contract gate и execution kill switch разделены. Пока оба закрыты,
 estimate всегда `BLOCKED`; это намеренно не запускает read-only credential
 validation connector и не доказывает работоспособность `positions`.
+
+### 17.4. Реализованный SEO Data immutable manifest
+
+SEO Data уже предоставляет dedicated-auth seal/chunk boundary для будущей
+Jobs `PREPARING` saga. Он повторно проверяет current project/context/config/
+semantic scope evidence из estimate, ограничивает первый Arsenkin slice
+1 000 ключами и chunks по 250 и сохраняет exact keyword snapshots.
+
+State machine `BUILDING → SEALED → CLOSED` защищена DB triggers: committed
+`BUILDING`, direct sealed insert, mutation/deletion/truncate и late child
+запрещены. Partial unique active semantic hash блокирует эквивалентную
+provider work даже после rename, display-only configuration label, metadata
+edit или reassignment. `CLOSED` сохраняет manifest/history и только
+освобождает active key.
+
+Текущий Jobs runtime этот boundary ещё не вызывает: таблицы Job/JobItem,
+PREPARING recovery/cancel, queue message и provider call в данном срезе не
+создаются. До подключения caller `JOBS_TO_SEO_RANK_TOKEN` не выдаётся
+generic/connector/import workers.
 
 ## 18. OAuth connections
 
