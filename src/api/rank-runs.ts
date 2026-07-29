@@ -573,6 +573,12 @@ export interface InternalRankManifestEstimateSeal {
    * Exact non-negative decimal integer from 1 through 1,000.
    */
   readonly pairCount: string;
+  /**
+   * Original immutable estimate expiry. Exact replay remains valid after this
+   * timestamp, but SEO Data must reject a new manifest when its authoritative
+   * seal timestamp is greater than or equal to expiresAt.
+   */
+  readonly expiresAt: string;
 }
 
 /**
@@ -608,6 +614,12 @@ export interface InternalRankManifestSeal {
   readonly projectId: string;
   readonly jobId: string;
   readonly estimateId: string;
+  /**
+   * Original immutable estimate expiry, included in the full manifest
+   * integrity preimage. It is intentionally absent from semantic active-run
+   * deduplication because it does not change provider work.
+   */
+  readonly estimateExpiresAt: string;
   /**
    * Audit actor that requested the immutable seal.
    */
@@ -838,6 +850,7 @@ export function rankManifestHashPreimage(
     projectId: seal.projectId,
     jobId: seal.jobId,
     estimateId: seal.estimateId,
+    estimateExpiresAt: seal.estimateExpiresAt,
     sealedBy: seal.sealedBy,
     trackingContextId: seal.trackingContextId,
     provider: seal.provider,

@@ -413,7 +413,8 @@ test("manifest boundaries seal exact scope and keep keyword text internal", () =
       configurationHash: hash("a"),
       semanticScopeHash: hash("b"),
       scopeHash: hash("c"),
-      pairCount: "1"
+      pairCount: "1",
+      expiresAt: "2026-07-29T12:05:00.000Z"
     },
     execution,
     retention: {
@@ -428,6 +429,7 @@ test("manifest boundaries seal exact scope and keep keyword text internal", () =
     projectId: ids.projectId,
     jobId: ids.jobId,
     estimateId: ids.estimateId,
+    estimateExpiresAt: "2026-07-29T12:05:00.000Z",
     sealedBy: ids.actorId,
     trackingContextId: ids.trackingContextId,
     provider: "ARSENKIN",
@@ -564,7 +566,8 @@ test("manifest boundaries seal exact scope and keep keyword text internal", () =
           configurationVersion: 97,
           configurationHash: hash("7"),
           semanticScopeHash: hash("8"),
-          scopeHash: hash("9")
+          scopeHash: hash("9"),
+          expiresAt: "2026-07-29T12:06:00.000Z"
         }
       },
       chunk.entries.map((entry) => ({
@@ -587,6 +590,10 @@ test("manifest boundaries seal exact scope and keep keyword text internal", () =
   assert.equal("manifestHash" in manifestPreimage, false);
   assert.equal(manifestPreimage.jobId, ids.jobId);
   assert.equal(manifestPreimage.sealedBy, ids.actorId);
+  assert.equal(
+    manifestPreimage.estimateExpiresAt,
+    "2026-07-29T12:05:00.000Z"
+  );
   assert.deepEqual(manifestPreimage.scopeHash, hash("c"));
   assert.deepEqual(manifestPreimage.chunkHashes, [chunk.chunkHash]);
 
@@ -603,7 +610,7 @@ test("manifest boundaries seal exact scope and keep keyword text internal", () =
   );
   assert.equal(
     canonicalJsonSha256("rank-manifest@1", manifestPreimage),
-    "381b9a258e705fd8625d684a9a4273ccfc65fc02b28a5c23f50a5baade3fd217"
+    "8f8160effac285b26d142e472f7ebc71f41363e47bfd0410a6ef6bceda5e7030"
   );
 });
 
