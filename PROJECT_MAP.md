@@ -16,9 +16,10 @@ durable создаёт `PREPARING` Job и immutable sidecar, seal-ит manifest 
 восстанавливаемый Web Job flow готовы. SEO Data принимает exact normalized
 chunks, атомарно строит append-only snapshots/current projection, завершает
 успешный/partial manifest с redacted outbox event и предоставляет internal
-keyset history. Provider execution/grants и public history API ещё
-отсутствуют. Срез следует ADR-2026-034; live Arsenkin submit остаётся
-выключенным до прохождения contract/security gates.
+keyset history. Platform API публикует bounded read-only history proxy, а Web
+— private/noindex экран с фильтрами и cursor-дозагрузкой. Provider
+execution/grants всё ещё отсутствуют. Срез следует ADR-2026-034; live
+Arsenkin submit остаётся выключенным до прохождения contract/security gates.
 
 Параллельный dependency-free срез browser Web Push device lifecycle
 реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет
@@ -87,7 +88,7 @@ boundary и при реальной операционной необходим�
 | `platform-jobs-integrations` | jobs, workers, connectors, S3/email ports | несколько entrypoints |
 | `platform-realtime` | WebSocket presence/collaboration delivery | да |
 | `platform-web` | public site, Toolbox, API docs и приложение `/app` | да |
-| `platform-admin` | внутренняя административная панель | да |
+| `platform-admin` | незавершённый internal-only административный shell | да, без внешнего ingress |
 | `platform-infrastructure` | Compose/Dokploy, monitoring, runbooks | конфигурация |
 | `.github/workflows/ci.yml` | Node.js 24 workspace quality gate | GitHub Actions |
 | `docs/technical-spec` | нормативное ТЗ | нет |
@@ -138,6 +139,11 @@ SEO Data атомарный bounded scope, читает только allowlisted
 metadata и сохраняет immutable redacted receipt в `rank_estimates`. Exact
 replay не продлевает TTL и не повторяет SEO read; estimate не является
 execution grant.
+История позиций читается Web только через same-origin BFF и public Platform
+API `GET /api/v1/projects/:projectId/rank-history`. Platform API проверяет
+session, `ranking.view` и tenant scope, затем передаёт trusted context и
+bounded UTC/filter/cursor query во внутренний read model SEO Data. Чтение
+остаётся доступным для архивного проекта и billing read-only workspace.
 Остальная межсервисная бизнес-коммуникация пока не включена: подключены
 transport и health/readiness, таблицы outbox/inbox созданы. Durable публикация
 событий начинается в следующем вертикальном срезе.
@@ -177,6 +183,13 @@ transport и health/readiness, таблицы outbox/inbox созданы. Durab
   provider execution его получают только SEO Data HTTP и отдельный
   `rank-worker`; generic HTTP, connector, import, inspection, system и
   migration processes его не получают.
+- `JOBS_TO_SEO_RANK_RESULT_TOKEN` защищает отдельную запись уже
+  нормализованных результатов и не переиспользует preparation credential.
+  Текущий Compose требует его, но передаёт только SEO Data: result producer
+  ещё не подключён, а остальные процессы не получают этот secret.
+- `RANK_HISTORY_CURSOR_KEY` — отдельный HMAC key непрозрачного history
+  cursor. Текущий Compose требует и передаёт его только SEO Data; Platform
+  API, Web, workers и migration processes key не получают.
 - Rank-worker требует `RANK_PREPARATION_ENABLED=true`, отдельные bounded
   lease/dispatch/concurrency settings и lease минимум на пять секунд длиннее
   SEO Data timeout. Он запускается отдельным Dokploy process из того же image
@@ -256,12 +269,14 @@ Backend convention:
 - `platform-api/src/rankings` — public tracking context CRUD/archive/restore
   и point keyword assignments с `ranking.view/configure`, CSRF,
   idempotency/OCC и audit, а также provider-free rank estimate с
-  `ranking.view` и trusted lifecycle/access snapshot;
+  `ranking.view` и trusted lifecycle/access snapshot, public manual Job
+  lifecycle и bounded read-only rank history proxy;
 - `platform-contracts/src/api/rank-runs.ts` и `src/events/rankings.ts` —
   exact manual-run lifecycle, manifest/chunk, normalized ingest/finalize и
   redacted completion event contracts; manifest preimage builders
-  используются Jobs и SEO Data, Job preparation/cancel/finalize реализованы,
-  ingest/completion event остаются следующими runtime-границами;
+  используются Jobs и SEO Data, Job preparation/cancel и SEO Data
+  ingest/finalize/completion outbox реализованы; provider-side normalized
+  result producer остаётся следующей runtime-границей;
 - `platform-contracts/canonical-json` — server-only RFC 8785 JCS subpath для
   одинаковых contract hash preimages в Jobs и SEO Data; root/browser export
   намеренно отсутствует;
@@ -270,6 +285,9 @@ Backend convention:
 - `platform-seo-data/src/rank-manifests` — dedicated-auth seal/chunk API,
   bounded preflight, immutable manifest state machine, hash verification и
   active semantic dedup;
+- `platform-seo-data/src/rank-results` — dedicated-auth normalized chunk
+  ingest, append-only snapshots/current projection, terminal finalize
+  receipts/completion outbox и internal HMAC-cursor history;
 - `platform-seo-data/prisma/migrations/20260729160000_rank_execution_manifests`
   — header/chunk/entry tables, provenance/immutability triggers и partial
   unique active-dedup index;
@@ -348,6 +366,18 @@ Backend convention:
   private/noindex экран контекстов позиций; UI-компоненты находятся в
   `platform-web/components/tracking-context-*`, provider-free estimate —
   в `rank-estimate-panel.tsx`;
+- `platform-web/app/app/(protected)/projects/[projectId]/rankings`,
+  `components/rank-history.tsx`, `components/rankings-tabs.tsx` и
+  `lib/rank-history.ts` — private/noindex история позиций с UTC range,
+  context/keyword filters, cursor-дозагрузкой и явными archived/read-only
+  состояниями;
+- Web image получает обязательный `WEB_PUBLIC_URL` как
+  `NEXT_PUBLIC_SITE_URL` до `next build`, чтобы canonical metadata, robots и
+  sitemap не зависели от запоздалого runtime env;
+- незавершённый `platform-admin` остаётся только в Compose-сети `internal`,
+  без `edge`, host port и browser CORS/WebSocket allowlist. Публичный ingress
+  запрещён до отдельной operator auth session/audience, обязательной 2FA,
+  platform-role authorization, audit и server-backed non-demo data;
 - `platform-web/lib/protected-app.ts` — server-side session gate и безопасный
   refresh redirect;
 - `platform-*/lib` и `components` — adapters и переиспользуемые UI-части;
@@ -355,6 +385,9 @@ Backend convention:
 - `platform-infrastructure/compose.dokploy.yml` — отдельный internal-only
   `rank-worker` process того же Jobs image с exact env allowlist, bounded
   resources, migration/Redis/SEO Data dependencies и без ports/outbound;
+- тот же Compose fail-closed требует `JOBS_TO_SEO_RANK_RESULT_TOKEN` и
+  `RANK_HISTORY_CURSOR_KEY` только для `seo-data`; regression test запрещает
+  их случайную выдачу остальным runtime processes;
 - `platform-infrastructure/postgres/init` — создание service databases;
 - `platform-infrastructure/postgres/permissions` — идемпотентные fail-closed
   grants внутри `jobs_db` после migrations; первый script создаёт/ужесточает
@@ -400,7 +433,7 @@ Entrypoints:
 | Semantics/import | vertical slice: CSV/TSV → mapping → validation → publish → query |
 | Notifications | vertical slice: preferences → effective policy → read center → encrypted browser device lifecycle |
 | Integrations | vertical slice: catalog + encrypted BYOK vault + validation + project binding |
-| Rankings | vertical slice: configuration only (contexts + assignments) |
+| Rankings | vertical slice: contexts + estimate/preparation + persisted/public history; provider execution отсутствует |
 | Billing/YooKassa | planned |
 | Directus content | planned |
 
@@ -686,25 +719,33 @@ version drift принимает cancel между seal request/response. Зав
 Normalized chunk ingest, append-only snapshots, monotonic current projection,
 успешный/partial finalize и atomic redacted completion outbox реализованы в
 SEO Data с одним manifest lock и запретом late ingest. Internal history
-использует tenant/filter-bound HMAC cursor. Execution grants, scoped connector
-submission и public Platform API history route ещё не реализованы, поэтому
-production worker пока не создаёт эти snapshots.
+использует tenant/filter-bound HMAC cursor. Public Platform API строго
+валидирует scope, диапазон, фильтры, порядок, дубликаты и cursor coherence,
+redact-ит ответ SEO Data и отдаёт collection envelope. Private/noindex Web
+экран использует bounded UTC range, optional context/keyword filters и
+load-more. Execution grants, scoped connector submission/status и
+normalized result producer ещё не реализованы, поэтому production worker
+пока не создаёт эти snapshots.
 
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 194 pass, 0 fail.
-- SEO data unit tests: 86 pass, 0 fail.
-- Jobs/integrations tests: 215 pass, 0 fail, 2 disposable-DB tests skipped
+- Platform API unit tests: 211 pass, 0 fail.
+- SEO data unit tests: 89 pass, 0 fail.
+- Jobs/integrations tests: 219 pass, 0 fail, 2 disposable-DB tests skipped
   в обычном запуске; оба DB tests отдельно проходят.
-- Realtime unit tests: 12 pass, 0 fail.
+- Realtime unit tests: 50 pass, 0 fail.
 - Contracts unit tests: 53 pass, 0 fail.
-- Unified Web helper tests: 96 pass, 0 fail.
+- Unified Web helper tests: 101 pass, 0 fail.
+- Infrastructure static tests: 10 pass, 0 fail.
+- Full monorepo test gate: 733 pass, 0 fail, 2 disposable-DB tests skipped.
+- Root lint: pass на pinned Oxlint 1.76.0 с Import, React, Promise и Node
+  plugins и `--deny-warnings`.
 - NestJS production build: pass для 4 сервисов.
-- Unified Next.js production build: pass; проверены public site, Toolbox,
-  API docs и private `/app`.
+- Next.js production builds: pass для Web и Admin; в Web проверены public
+  site, Toolbox, API docs и private `/app`.
 - Compose config: pass с `.env.example` и ephemeral overrides для намеренно
   пустых dedicated token examples; resolved secrets не выводились.
 - Предшествующие Jobs migrations и connector column grants: pass на локальном
@@ -800,20 +841,23 @@ production worker пока не создаёт эти snapshots.
   Platform API targeted mapping tests 8/8 и typecheck — pass. Fresh migration
   и реальные concurrent transactions остаются PostgreSQL 18 staging gate;
   JetStream publisher/subscription в этот dependency-free срез не входят.
-- Target runtime: Node.js 24. Локальная проверка выполнялась на Node.js 22 с
-  ожидаемым engine warning; контейнеры используют Node.js 24.
+- Target runtime: Node.js 24. Текущий полный lint/typecheck/test/build baseline
+  проверен на Node.js 24.18.1; контейнеры также используют Node.js 24.
 
 ## 9. Следующий вертикальный срез
 
-`execution grant → provider submit → public position history`
+`execution grant → scoped connector boundary → provider submit/status →
+normalized result producer/ingest receipts`
 
 Provider-free estimate и SEO Data immutable manifest из ADR-2026-034
 завершены; durable Jobs `PREPARING` saga, exact seal recovery, cooperative
 cancel, public/Web Job lifecycle и normalized SEO Data result persistence
-также готовы. Следующий runtime-шаг — authoritative one-time grant, scoped
-connector operations, provider submit/status и подключение public history
-proxy/UI к готовому internal read model. Live Arsenkin `set` выключен, пока
-нет recorded provider contract и устранения global vault read.
+также готовы. Public bounded history proxy и private/noindex Web UI уже
+подключены к internal read model. Следующий runtime-шаг — authoritative
+one-time grant, scoped connector operations, provider submit/status и
+producer нормализованных результатов с сохранением ingest receipts. Live
+Arsenkin `set` выключен, пока нет recorded provider contract и устранения
+global vault read.
 Неоднозначность manifest preparation уже fail-closed переходит в
 `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN` без бесконечного auto-retry.
 
@@ -844,8 +888,8 @@ durable-доставка не реализована. OAuth/OIDC выполня�
   receipt актуальным и сам не удаляет строку.
 - `rank_snapshots` первого normalized slice пока не partitioned. До реальной
   нагрузки обязательны RANGE partitioning, partition maintenance/retention и
-  representative history load test. Public Platform API history proxy ещё
-  отсутствует; internal SEO Data query не является browser API.
+  representative history load test. Public history proxy/UI уже доступны,
+  но не заменяют эти storage/load release gates.
 - Notification preferences не создают deliveries сами по себе: отсутствуют
   transactional outbox/durable consumer, email/Web Push adapters, digest
   scheduler, VAPID private-key sender и provider delivery history. Device

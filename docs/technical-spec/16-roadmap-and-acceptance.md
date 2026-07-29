@@ -60,6 +60,15 @@
 - Dokploy topology выдерживает staging flow;
 - оценена стоимость системных provider keys.
 
+Фактический infrastructure hardening для rank history уже требует в Compose
+два независимых обязательных секрета:
+`JOBS_TO_SEO_RANK_RESULT_TOKEN` для normalized-result write boundary и
+`RANK_HISTORY_CURSOR_KEY` для HMAC cursor. В текущей topology оба значения
+получает только `seo-data`; preparation/connector/Web/Platform API processes их не
+получают. Это не закрывает P0 partition prototype/query-plan gate.
+Representative history load test также не выполнен и остаётся последующим
+release gate.
+
 #### Не входит
 
 Публичный production, полноценный billing, все integrations и polished unified web.
@@ -171,10 +180,13 @@ attempt/version и committed Job/Run/Estimate coherence. Public Platform API
 routes и восстанавливаемый Web Job flow реализованы. SEO Data уже принимает
 exact normalized chunks, сохраняет append-only snapshots/current projection,
 атомарно завершает successful/partial manifest с redacted outbox и
-предоставляет internal keyset history. Provider execution/grants, public
-history API/UI и schedule остаются следующими вертикальными срезами. Оценка
-сохраняется в
-Jobs как immutable idempotency receipt, доступна в read-only и не вызывает
+предоставляет internal keyset history. Public
+`GET /api/v1/projects/:projectId/rank-history` и private/noindex Web route
+`/app/projects/:projectId/rankings` уже реализованы с bounded UTC range,
+optional context/keyword filters, opaque cursor/load-more и archived/read-only
+states. Provider execution/grants, scoped connector submit/status,
+normalized result producer и schedule остаются следующими вертикальными
+срезами. Оценка сохраняется в Jobs как immutable idempotency receipt, доступна в read-only и не вызывает
 провайдера, BullMQ, списание, usage, outbox или event. Профильные и
 membership-bound проектные настройки уведомлений, in-app центр и
 dependency-free lifecycle browser devices уже реализованы. Endpoint/browser
@@ -204,11 +216,14 @@ sidecar переходит в `OUTCOME_UNKNOWN`; только доказанно
 ambiguity или исчерпание attempts завершают Job как
 `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`. Provider submit в этом runtime ещё
 отсутствует и автоматически не resubmit-ится.
-SEO Data protected finalize уже атомарно закрывает manifest и сохраняет
-immutable receipt для zero-persisted `CANCELLED/FAILED/ACTION_REQUIRED`;
-успешный/частичный finalize остаётся fail-closed до normalized ingest.
-Public/admin reconcile/acknowledge API, UI и политика безопасного resolution
-для terminal `ACTION_REQUIRED` ещё не реализованы.
+SEO Data protected result boundary уже идемпотентно принимает normalized
+chunks, сохраняет ingest receipts, append-only snapshots/current projection и
+после полного принятого набора атомарно finalizes successful/partial manifest
+с redacted completion outbox. Zero-persisted
+`CANCELLED/FAILED/ACTION_REQUIRED` также сохраняют immutable finalize receipt.
+Provider-side producer этих normalized chunks/receipt acknowledgements ещё не
+реализован. Public/admin reconcile/acknowledge API, UI и политика безопасного
+resolution для terminal `ACTION_REQUIRED` ещё не реализованы.
 
 Realtime application-handler gate включает durable revoked-family tombstone,
 scoped inbox receipt и fail-closed проверку tombstone в device upsert; он
@@ -233,20 +248,20 @@ Jobs migration fail-closed проверяет legacy manual rows/active dedup
 conflicts; первый rollout требует worker drain/maintenance window для
 обычного unique-index rebuild, а large live database — отдельный
 expand/concurrent-index план.
-Target runtime — Node.js 24; локальные проверки на Node.js 22 с engine
-warning не заменяют Node.js 24 CI/staging gate.
+Target runtime — Node.js 24; текущий полный lint/typecheck/test/build baseline
+проверен на Node.js 24.18.1.
 
 Архитектура первого Arsenkin manual rank job зафиксирована
 ADR-2026-034. Provider-free estimate и exact execution contracts из ADR уже
-реализованы; immutable SEO Data manifest, protected cancellation finalize,
-durable Jobs preparation, public/Web Job lifecycle и normalized SEO Data
-ingest/history/outbox готовы. Provider execution/grants и public history API
-ещё не реализованы. Live `set` остаётся выключенным до recorded one-key
-contract или
+реализованы; immutable SEO Data manifest, protected result ingest/finalize,
+durable Jobs preparation, public/Web Job lifecycle, normalized SEO Data
+history/outbox и public history API/UI готовы. Provider execution/grants,
+scoped connector submit/status и normalized result producer ещё не
+реализованы. Live `set` остаётся выключенным до recorded one-key contract или
 письменного подтверждения response/status/retry semantics, устранения global
-vault read, authoritative execution grant, ingest receipts и
-`SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit. Наличие working credential
-validation и capability в binding не считается доказательством рабочего
+vault read, authoritative execution grant, producer-side обработки ingest
+receipts и `SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit. Наличие working
+credential validation и capability в binding не считается доказательством рабочего
 `positions` execution.
 
 До production rollout BYOK дополнительно блокируют две границы текущего
@@ -274,8 +289,22 @@ validation slice:
 - retryable seal/finalize ambiguity повторяется exact в bounded budget, а
   non-retryable ambiguity и 20 исчерпанных attempts дают
   `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`;
-- публичные routes, provider execution и position history не объявляются
-  готовыми на основании этого среза.
+- готовые public Job/history read routes и Web UI сами по себе не объявляют
+  provider execution готовым.
+
+#### Промежуточная приёмка public history read
+
+- `GET /api/v1/projects/:projectId/rank-history` требует session,
+  `ranking.view` и tenant scope, но сохраняет чтение archive/read-only;
+- canonical UTC range использует inclusive `observedFrom` и exclusive
+  `observedBefore`, optional UUIDv7 context/keyword, limit `1..200` и opaque
+  cursor; array/unknown query отклоняются;
+- Platform API fail-closed валидирует/redact-ит scope, filters, order,
+  duplicates и page coherence ответа SEO Data;
+- private/noindex Web route предоставляет filters, loading/empty/error/offline,
+  load-more и read-only states;
+- приёмка read slice не закрывает provider execution, partitioning и
+  representative load-test gates.
 
 #### Exit gate
 

@@ -54,6 +54,16 @@ Retry delay и BullMQ delivery backoff используют bounded jitter. Canc
 worker всегда блокируют строки в порядке `Job → RankJobRun`.
 Этот entrypoint пока не вызывает Arsenkin и не включает live provider
 submit: соответствующие release gates из ADR-2026-034 остаются обязательными.
+Следующий связный runtime-путь — authoritative execution grant → scoped
+connector boundary → provider submit/status → normalized result producer с
+сохранением ingest receipts. Public history API/UI уже готовы и не входят в
+этот следующий шаг.
+
+Result producer в Jobs пока отсутствует. Поэтому текущие Jobs HTTP/workers,
+включая rank-worker и connector-worker, не получают
+`JOBS_TO_SEO_RANK_RESULT_TOKEN` или `RANK_HISTORY_CURSOR_KEY`; Compose требует
+и передаёт оба значения только `seo-data`. Live Arsenkin `set` остаётся
+fail-closed.
 
 Локальный запуск:
 
@@ -79,8 +89,9 @@ submit: соответствующие release gates из ADR-2026-034 оста�
 
 Lease обязан превышать timeout команды SEO Data минимум на пять секунд.
 Rank-worker не должен получать `INTERNAL_API_TOKEN`,
-`PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`, credential keyrings, NATS
-credentials, S3 access keys или SMTP credentials. `JOBS_TO_SEO_RANK_TOKEN`
+`PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`, `JOBS_TO_SEO_RANK_RESULT_TOKEN`,
+`RANK_HISTORY_CURSOR_KEY`, credential keyrings, NATS credentials, S3 access
+keys или SMTP credentials. `JOBS_TO_SEO_RANK_TOKEN`
 также запрещён HTTP, generic, import, inspection и connector processes,
 queue payload, логам и application data. Поэтому нельзя включать rank-worker
 простым переключением флага в полном management-env: в Dokploy создаётся

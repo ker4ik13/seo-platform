@@ -134,9 +134,40 @@ Exact contracts ручного запуска фиксируют: public command
 Data boundary разделяет immutable manifest, bounded chunks, normalized
 found/not-found ingest и terminal finalize. Manifest seal/chunk runtime уже
 реализован с immutable DB state machine и content-only active dedup.
-Integrity hashes покрывают полный versioned RFC 8785 JCS preimage. Job
-orchestration, ingest/finalize и provider execution остаются следующими
-этапами.
+Integrity hashes покрывают полный versioned RFC 8785 JCS preimage. Jobs
+preparation/cancel и public Job lifecycle, а также SEO Data normalized
+ingest/finalize/current/internal history реализованы. Следующими остаются
+execution grant, scoped connector submit/status и provider-side producer
+нормализованных результатов.
+
+### 3.4. Реализованный read slice истории
+
+SEO Data принимает exact normalized result chunks через отдельный
+`JOBS_TO_SEO_RANK_RESULT_TOKEN`, строит append-only snapshots/current
+projection, атомарно finalizes successful/partial manifest и пишет redacted
+completion outbox. Внутренний history read использует tenant/filter-bound
+HMAC cursor под отдельным `RANK_HISTORY_CURSOR_KEY`. Текущий Compose требует
+оба secret, но передаёт их только `seo-data`; Jobs result producer ещё не
+подключён.
+
+Public Platform API предоставляет
+`GET /api/v1/projects/:projectId/rank-history`. Route требует browser session,
+`ranking.view` и проверенный tenant scope; чтение разрешено для архивного
+проекта и billing read-only workspace. Query принимает canonical UTC
+`observedFrom` включительно и `observedBefore` исключительно, optional UUIDv7
+`trackingContextId`/`keywordId`, limit `1..200` с default `100` и opaque
+base64url cursor. Array/unknown parameters и некогерентный диапазон
+отклоняются. Platform API fail-closed проверяет scope, фильтры, диапазон,
+порядок, дубликаты и pagination coherence ответа SEO Data, redact-ит private
+поля и возвращает collection `data + page + meta`.
+
+Private/noindex Web route
+`/app/projects/:projectId/rankings` показывает UTC date range,
+context/keyword filters, load-more, loading/empty/error/offline states и
+явные archived/read-only пояснения. Экран не доказывает готовность сбора:
+execution grant, scoped connector boundary, live provider submit/status и
+normalized result producer отсутствуют, поэтому до trusted ingest история
+остаётся пустой. Live Arsenkin `set` работает fail-closed.
 
 ## 4. Rank snapshot
 
@@ -550,3 +581,8 @@ Fallback запрещён:
 - Raw SERP, provider payload и HTML имеют `expiresAt` из plan snapshot;
   их удаление не удаляет position/frequency aggregates и provenance metadata.
 - Нулевой баланс блокирует новый сбор, но не чтение существующей истории.
+
+Фактический первый normalized slice пока хранит `rank_snapshots` без RANGE
+partitioning. Partition maintenance/retention и representative history load
+test не выполнены и остаются release gates, даже при готовом public read
+API/UI.

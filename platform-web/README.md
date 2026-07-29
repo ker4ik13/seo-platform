@@ -19,6 +19,15 @@ MFA challenge, настройка TOTP/recovery codes в профиле, соз�
 workspace и проекта. Неподключённые SEO-данные показываются честными empty
 states, а не демонстрационными значениями.
 
+Rankings UI разделён на private/noindex контексты и историю. Route
+`/app/projects/:projectId/rankings` читает только public Platform API через
+same-origin BFF, поддерживает UTC date range, context/keyword filters,
+cursor load-more, loading/empty/error/offline и archived/read-only states.
+`JOBS_TO_SEO_RANK_RESULT_TOKEN` и `RANK_HISTORY_CURSOR_KEY` Web не получает.
+История показывает только сохранённые normalized observations: execution
+grant, live provider submit/status и result producer ещё отсутствуют, поэтому
+экран не означает готовность реального сбора.
+
 Экран `/app/semantics` поддерживает прямую multipart-загрузку CSV/TSV/XLS/
 XLSX/ZIP в S3, прогресс, ограниченную параллельность, повтор parts,
 возобновление после перезагрузки вкладки и явную отмену. Файл не публикуется

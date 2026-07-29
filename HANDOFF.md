@@ -32,7 +32,10 @@ beta. Нельзя включать публичные платежи, сист�
 - encrypted BYOK vault, validation Keys.so/Arsenkin и project connector
   binding;
 - tracking contexts, keyword assignments, provider-free rank estimate,
-  immutable rank manifest и durable preparation/cancel recovery;
+  immutable rank manifest, durable preparation/cancel recovery и normalized
+  SEO Data ingest/finalize/current/history;
+- public bounded rank-history API и private/noindex Web-экран с UTC,
+  context/keyword filters, load-more и read-only состояниями;
 - профильные/проектные настройки уведомлений, in-app центр и безопасный
   lifecycle browser push devices;
 - базовые Web/Admin shells и responsive UI состояний реализованных срезов.
@@ -42,9 +45,10 @@ beta. Нельзя включать публичные платежи, сист�
 Критический следующий путь:
 
 1. Завершить реальное снятие позиций: authoritative execution grant,
-   lifecycle/billing precondition, узкий доступ connector worker к BYOK,
-   подтверждённый контракт Arsenkin, provider submit/status, normalized ingest,
-   current/history read API и UI.
+   lifecycle/billing precondition, scoped connector boundary без глобального
+   чтения BYOK vault, подтверждённый контракт Arsenkin, provider submit/status
+   и producer нормализованных результатов с сохранением ingest receipts.
+   Public history API/UI уже готовы и не являются следующим runtime-шагом.
 2. Добавить расписания, tenant fairness, per-provider/workspace rate limits,
    retries/partial results и проектные уведомления о результате.
 3. Подключить transactional outbox publisher и durable JetStream consumers.
@@ -79,8 +83,8 @@ beta. Нельзя включать публичные платежи, сист�
 - устранение глобального чтения BYOK vault execution-процессом;
 - startup decrypt-canary и безопасная ротация keyrings;
 - PostgreSQL concurrency/migration negative tests;
-- RANGE partitioning/maintenance для `rank_snapshots`, representative history
-  load test и публичный Platform API proxy истории позиций;
+- RANGE partitioning/maintenance для `rank_snapshots` и representative
+  history load test; наличие public history proxy/UI этот gate не закрывает;
 - object storage lifecycle, quarantine cleanup и import staging retention;
 - durable outbox/inbox и disaster recovery.
 
@@ -89,8 +93,9 @@ beta. Нельзя включать публичные платежи, сист�
 Не распараллеливать следующие этапы до потери связности. Рекомендуемый порядок:
 
 1. Поднять development/staging контур на VPS и зафиксировать baseline QA.
-2. Закончить текущий вертикальный срез
-   `manual BYOK rank job → normalized position history`.
+2. Закончить текущий runtime-срез
+   `execution grant → scoped connector boundary → provider submit/status →
+   normalized result producer/ingest receipts`.
 3. Закрыть durable events и notification delivery.
 4. Довести P1 semantic/collaboration gaps до используемой командной alpha.
 5. Реализовать billing/YooKassa/НПД и только затем platform-paid providers.
@@ -138,11 +143,15 @@ corepack pnpm build
 1. Создать Compose project из корня репозитория.
 2. Перенести значения из `.env.example` в secret/environment UI Dokploy.
 3. Заменить каждый placeholder и сгенерировать все отдельные service tokens и
-   keyrings; не хранить реальный `.env` в Git.
+   keyrings; не хранить реальный `.env` в Git. Compose fail-closed требует
+   отдельные `JOBS_TO_SEO_RANK_RESULT_TOKEN` и `RANK_HISTORY_CURSOR_KEY`; в
+   текущей topology оба значения получает только `seo-data`, а не Jobs/Web/API workers.
 4. На первом запуске оставить `S3_ENABLED=false`, `EMAIL_ENABLED=false`,
    `WEB_PUSH_REGISTRATION_ENABLED=false`,
    `DIRECTUS_STORAGE_DRIVER=local`.
-5. Привязать временные development domains к Web/Admin/API/Realtime/Directus.
+5. Привязать временные development domains к Web/API/Realtime/Directus.
+   Не публиковать незавершённый Admin: он остаётся internal-only до operator
+   auth/2FA/authorization/audit и замены demo data.
 6. Выполнить migrations как отдельные one-shot release steps, затем поднять
    applications/workers.
 7. Проверить health/readiness, логи без секретов и только после этого
@@ -158,6 +167,8 @@ corepack pnpm build
 - CSV/TSV upload → inspection → mapping → publish → keyword list;
 - BYOK credential create → validation → project binding;
 - tracking context → assignment → estimate → manual Job lifecycle;
+- bounded rank history API/UI: UTC range, context/keyword filters, load-more,
+  archived project и billing read-only;
 - notification preferences/device lifecycle без заявления о реальной
   доставке;
 - `/app` возвращает `noindex` и отсутствует в sitemap;
