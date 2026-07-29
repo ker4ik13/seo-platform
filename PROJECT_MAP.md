@@ -11,6 +11,13 @@ event. Provider execution и position history отсутствуют. Следу
 execution slice следует ADR-2026-034; live Arsenkin submit остаётся
 выключенным до прохождения contract/security gates
 
+Параллельный dependency-free срез browser Web Push device lifecycle
+реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет
+ими через отдельный Realtime token, secret material хранится в
+`realtime_db` под AES-256-GCM и отдельными HMAC fingerprints, а Web
+регистрирует Service Worker только для `/app/`. Реальная email/Web Push
+доставка и test send остаются выключены.
+
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
 ## 1. Инварианты
@@ -31,6 +38,8 @@ execution slice следует ADR-2026-034; live Arsenkin submit остаётс
 - Чек НПД создаётся только для verified успешного платежа ЮKassa.
 - Настройки каналов уведомлений принадлежат профилю пользователя; проектные
   подписки задают типы работ и могут только сужать/переопределять профиль.
+- Browser Push device принадлежит профилю, а не проекту; project rule выбирает
+  события/канал, но не получает endpoint или browser keys.
 - Tracking context не хранит provider/credential/schedule: его immutable
   search configuration принадлежит SEO data, routing — Jobs, schedule —
   automation.
@@ -131,6 +140,17 @@ transport и health/readiness, таблицы outbox/inbox созданы. Durab
 - `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN` отличается от
   `INTERNAL_API_TOKEN` и выдаётся только Platform API и credential-capable
   jobs/integrations HTTP process.
+- `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` отличается от обоих
+  предыдущих secrets и выдаётся только Platform API и Realtime HTTP для
+  управления browser Web Push devices.
+- Browser subscription material использует отдельные versioned keyrings
+  `WEB_PUSH_SUBSCRIPTION_KEYS` (AES-256-GCM) и
+  `WEB_PUSH_FINGERPRINT_KEYS` (HMAC-SHA-256). Их key material не
+  переиспользуется, отображение version → bytes immutable, active rows
+  проходят startup coverage guard.
+- `WEB_PUSH_ENDPOINT_ORIGINS` является exact HTTPS origin allowlist.
+  `WEB_PUSH_REGISTRATION_ENABLED=false` — безопасный default; VAPID private
+  key не передаётся Platform API, Realtime HTTP, Web или текущему Compose.
 - BYOK envelope encryption использует отдельный
   `INTEGRATION_CREDENTIAL_KEYS` KEK keyring; auth encryption key для него не
   переиспользуется. Request fingerprint использует второй независимый
@@ -194,9 +214,10 @@ Backend convention:
 - `platform-api/src/seo-data` — строго валидируемый internal read/command
   client к владельцу semantic core и tracking contexts;
 - `platform-api/src/notifications` — public profile/project notification
-  preferences с CSRF, tenant authorization и optimistic locking;
+  preferences с CSRF, tenant authorization и optimistic locking, а также
+  profile-scoped browser device lifecycle с recent-auth enable;
 - `platform-api/src/realtime` — строго валидируемый internal client владельца
-  notification policy;
+  notification policy и encrypted browser subscription storage;
 - `platform-api/src/audit`, `src/outbox` — переиспользуемые transactional
   записи аудита и событий;
 - `platform-jobs-integrations/src/queue` — BullMQ connection, system,
@@ -240,12 +261,18 @@ Backend convention:
 - `platform-jobs-integrations/src/email` — email port, disabled и SMTP adapters;
 - `platform-realtime/src/realtime` — Socket.IO gateway и Redis adapter;
 - `platform-realtime/src/notifications` — профильные правила, membership-bound
-  проектные подписки, effective policy и user-scoped notification center;
+  проектные подписки, effective policy, user-scoped notification center и
+  encrypted browser Web Push device lifecycle;
 - `platform-realtime/src/internal` — fail-closed internal HTTP authentication
   и проверенный actor/tenant/membership context;
 - `platform-web/app` — public, tools, docs и private `/app` App Router screens;
 - `platform-web/app/app/api` — same-origin browser BFF только к
   `/api/v1` Platform API;
+- `platform-web/components/browser-push-settings.tsx`,
+  `lib/browser-push.ts`, `lib/push-installation.ts` и
+  `public/push-service-worker.js` — явный permission/registration flow,
+  IndexedDB installation UUID, device list/rename/revoke/reconcile и
+  Service Worker со scope `/app/` без fetch cache;
 - `platform-web/app/app/(protected)/projects/[projectId]/rankings/contexts` —
   private/noindex экран контекстов позиций; UI-компоненты находятся в
   `platform-web/components/tracking-context-*`, provider-free estimate —
@@ -295,7 +322,7 @@ Entrypoints:
 | Auth core | vertical slice |
 | Workspaces/projects/team access | vertical slice |
 | Semantics/import | vertical slice: CSV/TSV → mapping → validation → publish → query |
-| Notifications | vertical slice: preferences → effective policy → read center |
+| Notifications | vertical slice: preferences → effective policy → read center → encrypted browser device lifecycle |
 | Integrations | vertical slice: catalog + encrypted BYOK vault + validation + project binding |
 | Rankings | vertical slice: configuration only (contexts + assignments) |
 | Billing/YooKassa | planned |
@@ -378,8 +405,21 @@ master-switch каналов, timezone, quiet hours, digest schedule и матр
 каналы либо временно поставить доставку на паузу. Подписка привязана к
 `workspace_members.id + version`; отзыв или новая версия членства не
 активирует старые правила. Web Push permission запрашивается только явной
-кнопкой. Регистрация browser device, VAPID, email/Web Push delivery, digest и
-delivery history пока не входят в этот срез.
+кнопкой.
+
+Browser devices читаются и изменяются через
+`GET/PUT/PATCH/DELETE /api/v1/me/push-subscriptions`; публичный body не задаёт
+actor/session/status. Platform API инжектирует проверенную session family и
+использует отдельный `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN`.
+Installation UUID хранится Web в IndexedDB. Realtime принимает только exact
+HTTPS endpoint origins, шифрует endpoint/keys через versioned AES-256-GCM,
+использует независимый HMAC keyring для fingerprints, ограничивает active
+devices (default 20) и стирает secret material при terminal revoke/expiry.
+VAPID public key имеет immutable version; private key не поступает в HTTP/Web
+process. Service Worker работает в scope `/app/`, не содержит fetch handler и
+не кэширует private API. Registration честно возвращает
+`deliveryAvailable=false` и `testDeliveryAvailable=false`: email/Web Push
+sender, digest и delivery history пока отсутствуют.
 
 Центр уведомлений доступен по `/app/notifications`; колокольчик получает
 user-scoped unread count, а список использует keyset cursor
@@ -581,11 +621,13 @@ operations, ingest receipts и partial persistence. Live Arsenkin `set`
 
 Параллельный обязательный следующий срез уведомлений:
 `profile/project effective policy → transactional outbox/durable consumer →
-email + Web Push delivery`. Он включает browser device/VAPID lifecycle,
-идемпотентные delivery attempts, retry/DLQ, digest и delivery history.
-Production-зависимости `@nats-io/jetstream` и `web-push` ещё не одобрены, а
-фактическая durable-доставка не реализована. OAuth/OIDC выполняется после
-подтверждения зависимости `jose`; QR для TOTP — после подтверждения `qrcode`.
+email + Web Push delivery`. Browser device/VAPID public-key lifecycle уже
+реализован по ADR-2026-035; следующий срез добавляет durable session-family
+revoke event, VAPID private-key sender, идемпотентные delivery attempts,
+retry/DLQ, digest и delivery history. Production-зависимости
+`@nats-io/jetstream` и `web-push` ещё не одобрены, а фактическая
+durable-доставка не реализована. OAuth/OIDC выполняется после подтверждения
+зависимости `jose`; QR для TOTP — после подтверждения `qrcode`.
 
 ## 10. Незавершённые риски
 
@@ -602,7 +644,12 @@ Production-зависимости `@nats-io/jetstream` и `web-push` ещё не
   receipt актуальным и сам не удаляет строку.
 - Notification preferences не создают deliveries сами по себе: отсутствуют
   transactional outbox/durable consumer, email/Web Push adapters, digest
-  scheduler, Web Push device/VAPID lifecycle и provider delivery history.
+  scheduler, VAPID private-key sender и provider delivery history. Device
+  lifecycle готов, но durable identity event об отзыве session family и его
+  consumer остаются release blocker перед внешней доставкой.
+- `web_push_subscriptions` migration требует fresh apply и constraint-negative
+  smoke на PostgreSQL 18 staging; VAPID/encryption/fingerprint key rollout
+  требует expand-first coverage review. Delivery/test остаются выключены.
 - Для rejected/quarantine objects ещё требуется production lifecycle policy и
   отдельный reconciliation/cleanup job; выдача и импорт таких объектов
   запрещены уже сейчас.

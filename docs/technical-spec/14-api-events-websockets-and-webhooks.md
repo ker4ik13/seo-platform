@@ -677,6 +677,36 @@ Platform API передаёт realtime-сервису только провер�
 `/internal/v1/users/{userId}/notifications`. `userId` в URL обязан совпасть с
 проверенным `X-Actor-Id`; browser не передаёт его самостоятельно.
 
+Рабочий contract browser Web Push devices:
+
+- `GET /api/v1/me/push-subscriptions` требует session и возвращает bounded
+  redacted device list вместе с registration availability, VAPID public key/
+  version и active-device limit; endpoint, browser keys, fingerprints,
+  session family и internal IDs наружу не возвращаются;
+- `PUT /api/v1/me/push-subscriptions/{installationId}` требует session, CSRF,
+  recent authentication и принимает `ENABLE/RECONCILE`, device label, VAPID
+  key version и browser `PushSubscription`; `userId`, `sessionFamilyId`,
+  status и user-agent metadata browser body задавать не может;
+- `PATCH /api/v1/me/push-subscriptions/{installationId}` требует session,
+  CSRF и `If-Match`, меняет только label собственного устройства;
+- `DELETE /api/v1/me/push-subscriptions/{installationId}` требует session и
+  CSRF, идемпотентно переводит только собственное устройство в terminal
+  `REVOKED` и уничтожает secret material;
+- `installationId` — client-generated UUID установки из IndexedDB, а не
+  identity/session identifier;
+- registration возвращает только `deliveryAvailable=false` и
+  `testDeliveryAvailable=false`, пока реальный sender выключен.
+
+Platform API вызывает
+`/internal/v1/users/{userId}/push-subscriptions/{installationId}` через
+отдельный `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN`, который должен
+отличаться от общего `INTERNAL_API_TOKEN`. Он инжектирует проверенные
+`X-Actor-Id`, `X-Session-Family-Id`, request ID и нормализованную user-agent
+metadata. Realtime повторно проверяет actor/route и exact endpoint origin
+allowlist; endpoint/key material и dedicated token запрещены в logs, audit,
+events и публичных errors. Полный lifecycle и release blockers определены
+ADR-2026-035.
+
 ### 13.8. Billing
 
 - `/workspaces/{workspaceId}/subscription`;

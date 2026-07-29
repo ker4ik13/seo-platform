@@ -283,7 +283,9 @@ Security и billing-critical уведомления нельзя полност�
 - Web Push unsupported;
 - browser permission `default`, `granted`, `denied`;
 - subscription creating/active/expired/revoked;
+- server registration disabled, device limit reached и reconciliation required;
 - test pending/delivered/failed;
+- test unavailable до включения реального sender;
 - digest empty;
 - conflicting quiet-hours timezone после смены timezone.
 
@@ -344,16 +346,20 @@ Permission Web Push запрашивается только по нажатию 
 - loading, saving, saved, validation, conflict, error и blocked-channel states.
 
 Текущий repository slice реализует хранение и API профильных/проектных
-настроек, вычисление effective policy и in-app центр, но не создаёт
-фактические email/Web Push delivery attempts.
+настроек, вычисление effective policy, in-app центр и dependency-free
+lifecycle browser Web Push devices по ADR-2026-035. Он не создаёт фактические
+email/Web Push delivery attempts: registration state всегда явно возвращает
+`deliveryAvailable=false` и `testDeliveryAvailable=false`, пока не подключён
+sender.
 
 Следующий обязательный вертикальный срез:
 `redacted domain event → transactional outbox → durable consumer → effective
 profile/project policy → idempotent Email/Web Push delivery attempt`. В него
-входят device registration, VAPID lifecycle, retry/DLQ, digest scheduler и
-delivery history. Production-зависимости `@nats-io/jetstream` и `web-push`
-ещё не одобрены; до их подтверждения adapters остаются портами, а UI не должен
-имитировать успешную внешнюю доставку.
+входят VAPID private-key sender, retry/DLQ, digest scheduler и delivery
+history. Production-зависимости `@nats-io/jetstream` и `web-push` ещё не
+одобрены; до их подтверждения adapters остаются портами, а UI не должен
+имитировать успешную внешнюю доставку. Durable identity event об отзыве
+session family и его consumer являются release blocker для реальной доставки.
 
 ## 13. Каналы
 
@@ -378,6 +384,8 @@ delivery history. Production-зависимости `@nats-io/jetstream` и `web
 - используется стандарт Web Push через Service Worker;
 - permission запрашивается только после явного действия пользователя;
 - browser subscription принадлежит пользователю и конкретному устройству;
+- device является частью профиля; project rule выбирает события и канал, но
+  не владеет browser subscription;
 - endpoint и keys шифруются/защищаются как credentials;
 - подписку можно назвать, протестировать и отозвать из профиля;
 - expired/`410 Gone` subscription отключается автоматически;
@@ -392,6 +400,23 @@ Service Worker должен:
 - фокусировать существующую вкладку либо открывать same-origin deep link;
 - не кэшировать private API response;
 - поддерживать новую версию приложения без потери действующей subscription.
+
+Device lifecycle следует ADR-2026-035:
+
+- Web создаёт случайный installation UUID и сохраняет его в IndexedDB;
+- Service Worker регистрируется со scope `/app/`, не содержит `fetch` handler
+  и не создаёт private cache;
+- endpoint проходит точный allowlist HTTPS origins; redirects и эвристическое
+  совпадение hostname запрещены;
+- endpoint/browser keys хранятся единым AES-256-GCM ciphertext с versioned
+  AAD, а deduplication использует отдельный versioned HMAC-SHA-256 keyring;
+- active device count bounded server-side, default — 20;
+- terminal revoke/expiry атомарно стирает ciphertext, nonce/tag и
+  fingerprints, сохраняя безопасный tombstone;
+- VAPID private key отсутствует в HTTP/API/Web process и появляется только у
+  будущего sender;
+- смена browser subscription ставит локальный reconciliation marker; Service
+  Worker не передаёт credentials без активной session.
 
 ### Telegram
 
@@ -576,6 +601,12 @@ Service Worker должен:
 - Quiet hours откладывают обычную instant-доставку, но не теряют событие.
 - Digest не содержит ресурс, к которому пользователь потерял доступ.
 - Web Push permission не запрашивается без явного клика.
+- Browser device принадлежит профилю, имеет client installation UUID и не
+  привязывается напрямую к проекту.
+- Endpoint принимается только из exact HTTPS origin allowlist; публичные
+  ответы не содержат endpoint, browser keys, fingerprints или session family.
+- Revoke/expiry стирает secret material; active devices ограничены server-side.
+- До включения sender UI и API явно показывают, что delivery/test недоступны.
 - `410 Gone` отключает только конкретную browser subscription.
 - Hard bounce не отключает in-app и browser channels.
 - Удаление участника немедленно прекращает проектные доставки.

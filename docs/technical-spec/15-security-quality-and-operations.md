@@ -209,6 +209,21 @@
 - Credential-capable процесс до открытия HTTP агрегированно сверяет
   используемые KEK/fingerprint versions с keyrings и при пробеле завершается
   fail-closed.
+- Browser Web Push subscription material использует отдельные от BYOK и auth
+  versioned keyrings: AES-256-GCM для endpoint/keys и HMAC-SHA-256 для exact
+  fingerprints. Key material между ними не переиспользуется; Realtime до
+  открытия HTTP агрегированно проверяет coverage active rows.
+- Управление push devices принимает только отдельный
+  `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN`; общий internal credential не
+  даёт доступ к этой границе. Endpoint принимается только по exact HTTPS
+  origin allowlist без IP literals, credentials, fragment и custom ports.
+- VAPID private key запрещён в Platform API, Realtime management HTTP, Web,
+  browser bundle, Compose текущего среза, logs и обычных application config
+  dumps. Его получает только будущий sender role; резервная копия допустима
+  только внутри защищённого versioned secret store.
+- Revoke/expiry browser device обязан в одной транзакции очистить ciphertext,
+  nonce/tag и fingerprints. Durable session-family revoked event и consumer
+  обязательны до включения внешней доставки.
 - KEK rollout выполняется в порядке expand keyring → startup decrypt-canary
   verify каждой используемой версии → drain старых replicas → switch active.
   Текущий coverage guard и missing-version retry проверяют наличие версии, но

@@ -300,7 +300,7 @@ Backend ограничивается:
 | проекты как identity и настройки верхнего уровня | platform-api |
 | semantic core, pages, rankings, competitors | seo-data |
 | jobs, schedules, connectors, usage | jobs-integrations |
-| comments, presence, Yjs metadata, deliveries | realtime |
+| comments, presence, Yjs metadata, notification policy, browser push devices, deliveries | realtime |
 | subscriptions, ledger, plans | platform-api billing modules |
 | CMS content | Directus |
 
@@ -485,6 +485,13 @@ VPS 3:
 - Credential connector принимает только versioned application allowlist
   provider origins; до high-assurance production outbound network
   дополнительно ограничивается host firewall или egress proxy.
+- Browser push management использует отдельный Platform API → Realtime token.
+  Realtime HTTP получает только VAPID public key, exact push endpoint origin
+  allowlist и отдельные encryption/fingerprint keyrings; VAPID private key
+  этому process, Platform API и Web не выдаётся.
+- Web Push registration и delivery включаются раздельно. Текущий Compose
+  передаёт `WEB_PUSH_REGISTRATION_ENABLED=false` по умолчанию и не содержит
+  sender/VAPID private key.
 - Images публикуются в private registry, например GHCR.
 - Tag immutable: git SHA + release version.
 - `latest` не используется для production deploy.

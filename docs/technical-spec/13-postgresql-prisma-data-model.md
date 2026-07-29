@@ -1370,8 +1370,22 @@ optimistic `version`. Unique membership snapshot не позволяет слу�
 деактивируются. Удаление/отзыв project access должно дополнительно
 деактивировать подписку через событие membership lifecycle.
 
-`web_push_subscriptions` хранит endpoint и browser keys зашифрованно,
-device label, user agent metadata, last success/error и revoked/expired state.
+`web_push_subscriptions` принадлежит `realtime_db` и хранит user-scoped
+installation UUID, registration session-family snapshot, device label,
+нормализованную недоверенную browser/platform metadata, VAPID public-key
+version, optimistic `version`, provider expiry, last success/error и
+`active/revoked/expired` state. Endpoint, `p256dh` и `auth` сохраняются одним
+AES-256-GCM ciphertext с nonce/auth tag и encryption key version; отдельные
+versioned HMAC fingerprints обеспечивают active endpoint uniqueness и
+reconciliation без расшифровки. Encryption и fingerprint keyrings используют
+разный material. Active rows обязаны иметь полный crypto tuple, terminal rows
+не должны его иметь: revoke/expiry атомарно стирает ciphertext, nonce/tag и
+fingerprints, сохраняя безопасный tombstone. Unique
+`user_id + installation_id` не позволяет одному browser installation создать
+несколько устройств пользователя; partial unique active endpoint не допускает
+молчаливую передачу endpoint другому аккаунту. Active count bounded policy,
+default 20. Cross-database FK на identity session family запрещён; lifecycle
+отзыва применяется через durable identity event до включения sender.
 
 `deliveries` содержит immutable effective-policy snapshot, deduplication key,
 канал, scheduled time и финальный status; `delivery_attempts` — provider

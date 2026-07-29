@@ -163,14 +163,21 @@ versioned tracking context и provider-free оценка готовности у
 schedule остаются следующими вертикальными срезами. Оценка сохраняется в
 Jobs как immutable idempotency receipt, доступна в read-only и не вызывает
 провайдера, BullMQ, списание, usage, outbox или event. Профильные и
-membership-bound проектные настройки уведомлений и in-app центр уже
-реализованы, но durable email/Web Push delivery ещё нет.
+membership-bound проектные настройки уведомлений, in-app центр и
+dependency-free lifecycle browser devices уже реализованы. Endpoint/browser
+keys защищены AES-GCM и отдельным HMAC keyring, управление идёт через
+dedicated Platform API → Realtime token, а Service Worker ограничен scope
+`/app/` и не кэширует private API. Durable email/Web Push delivery ещё нет;
+registration честно возвращает `deliveryAvailable=false` и
+`testDeliveryAvailable=false`.
 Следующий обязательный notification-срез должен провести redacted terminal
 event через transactional outbox/durable consumer, effective policy и
-идемпотентные delivery attempts; `@nats-io/jetstream` и `web-push` требуют
-отдельного одобрения production-зависимостей. P2 не считается выполненным до
-реального rank job, multi-tenant queue fairness, terminal outbox/delivery и
-security/load/restore gates.
+идемпотентные delivery attempts. До реальной отправки также обязателен durable
+identity event об отзыве session family, consumer для terminal device revoke и
+отдельный sender role с VAPID private key; `@nats-io/jetstream` и `web-push`
+требуют отдельного одобрения production-зависимостей. P2 не считается
+выполненным до реального rank job, multi-tenant queue fairness, terminal
+outbox/delivery и security/load/restore gates.
 
 Перед исполнением первого rank job jobs/integrations должен повторно проверять
 workspace/project lifecycle и billing. Текущая проверка mutation в Platform
