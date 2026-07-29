@@ -153,14 +153,28 @@ create/list/rotate/revoke, masked DTO, optimistic concurrency, а также
 асинхронный provider-specific validation для Arsenkin и Keys.so с
 идемпотентным PostgreSQL Job, lease/retry и отдельным connector worker.
 XMLStock validation остаётся заблокированным до подтверждённого provider
-contract. Профильные и membership-bound проектные настройки уведомлений и
-in-app центр уже реализованы, но durable email/Web Push delivery ещё нет.
+contract. Project binding для `SERP_RANK_TRACKING` уже реализован как
+нормализованный BYOK route с tenant-safe FK, immutable idempotency receipt,
+CAS/ETag, redacted outbox и project settings UI. Arsenkin предоставляет эту
+capability в текущем allowlist, а существующий ключ получает её только после
+успешной повторной provider validation. Binding ещё не выполняет rank job:
+tracking context, provider execution, история позиций и schedule остаются
+следующими вертикальными срезами. Профильные и membership-bound проектные
+настройки уведомлений и in-app центр уже реализованы, но durable email/Web
+Push delivery ещё нет.
 Следующий обязательный notification-срез должен провести redacted terminal
 event через transactional outbox/durable consumer, effective policy и
 идемпотентные delivery attempts; `@nats-io/jetstream` и `web-push` требуют
 отдельного одобрения production-зависимостей. P2 не считается выполненным до
-project binding, tracking context, реального rank job, multi-tenant queue
-fairness, terminal outbox/delivery и security/load/restore gates.
+tracking context, реального rank job, multi-tenant queue fairness, terminal
+outbox/delivery и security/load/restore gates.
+
+Перед исполнением первого rank job jobs/integrations должен повторно проверять
+workspace/project lifecycle и billing. Текущая проверка mutation в Platform
+API оставляет межсервисное TOCTOU до commit отдельной jobs database; требуется
+authoritative lifecycle projection/inbox либо эквивалентная precondition.
+Project binding migration проверена на PostgreSQL 16, но целевой PostgreSQL 18
+остаётся staging-gate.
 
 До production rollout BYOK дополнительно блокируют две границы текущего
 validation slice:

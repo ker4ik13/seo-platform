@@ -1117,13 +1117,60 @@ credential broker/KMS, исключающим global vault read; дополни�
 
 #### `project_connector_bindings`
 
-- project ID;
+- id;
+- workspace_id;
+- обязательный project_id;
 - capability;
-- primary credential;
-- fallback policy;
-- budgets;
-- config;
-- version.
+- enabled;
+- created_by/updated_by;
+- version;
+- timestamps.
+
+Ограничения:
+
+- unique `workspace_id + project_id + capability`;
+- tenant-safe unique `workspace_id + project_id + id` для composite FK;
+- положительная version;
+- binding не удаляется автоматически и выключается через `enabled=false`.
+
+#### `project_connector_routes`
+
+- id;
+- workspace_id/project_id/binding_id;
+- position;
+- source_kind;
+- credential_id;
+- timestamps.
+
+Первый slice разрешает только один route на binding: `position=0` и
+`WORKSPACE_CREDENTIAL`. Composite FK
+`workspace_id + project_id + binding_id` запрещает подменить tenant проекта,
+а FK `workspace_id + credential_id` запрещает привязать credential другого
+workspace. Оба FK используют `ON DELETE RESTRICT`: revoke credential
+уничтожает secret и soft-deletes запись, но не удаляет историю настройки.
+
+#### `project_connector_binding_create_receipts`
+
+- workspace_id/project_id/idempotency_key — composite primary key;
+- 32-byte request_hash;
+- binding_id;
+- immutable response_snapshot;
+- created_at.
+
+Receipt имеет tenant-safe FK и unique на
+`workspace_id + project_id + binding_id`. Он создаётся в одной транзакции с
+binding, route и outbox event. Response snapshot возвращает точный исходный
+create result даже после PATCH; при чтении его структура, UUID, timestamps,
+enum values и совпадение с receipt scope валидируются fail-closed.
+
+Migration заменяет pre-release `integration_bindings` только если таблица
+пуста. Сразу после `BEGIN` она берёт `ACCESS EXCLUSIVE` lock legacy-таблицы,
+после чего проверка, DROP/CREATE, indexes/FK выполняются одной транзакцией.
+Так конкурентный writer не может вставить строку в окне check → DROP. При
+наличии строк deploy останавливается и не удаляет их; нужен отдельный expand →
+backfill → validate → contract план. Fresh migration, fail-closed rollback и
+concurrent-writer сценарий проверены на PostgreSQL 16, повтор на целевом
+PostgreSQL 18 обязателен в staging.
 
 #### `connector_registry`
 

@@ -2,10 +2,12 @@
 
 Последнее обновление: 29 июля 2026 года
 
-Текущий инкремент: BYOK credential validation
-Статус: каталог и encrypted BYOK vault для XMLStock/Arsenkin/Keys.so, а также
-асинхронная server-side проверка Arsenkin/Keys.so реализованы; XMLStock
-validation, project binding и rank jobs следуют отдельными срезами
+Текущий инкремент: project connector binding
+Статус: encrypted BYOK vault и проверка Arsenkin/Keys.so дополнены
+project-scoped привязкой источника для съёма позиций; документированная rank
+capability Arsenkin активируется после повторной реальной проверки ключа.
+XMLStock validation, tracking context и реальные rank jobs следуют отдельными
+срезами
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -75,6 +77,10 @@ jobs-integrations HTTP; общий internal token остальных серви�
 получает только `jobId`. Отдельный execution-role connector worker забирает
 lease и перед вызовом провайдера повторно проверяет workspace, material
 version, connector version и состояние credential.
+Project binding читается и изменяется через Platform API, а хранится только
+в jobs/integrations. Public body не задаёт tenant/actor context; Platform API
+передаёт его через тот же dedicated credential boundary и строго проверяет
+scope/safe response перед возвратом в Web.
 Остальная межсервисная бизнес-коммуникация пока не включена: подключены
 transport и health/readiness, таблицы outbox/inbox созданы. Durable публикация
 событий начинается в следующем вертикальном срезе.
@@ -158,8 +164,9 @@ Backend convention:
   ограничения доступа;
 - `platform-api/src/uploads` — project-scoped public upload commands;
 - `platform-api/src/jobs` — общий internal HTTP client к jobs-integrations;
-- `platform-api/src/integrations` — workspace-scoped public catalog и
-  credential commands с RBAC, CSRF, audit intent и optimistic locking;
+- `platform-api/src/integrations` — workspace-scoped public catalog/credential
+  commands и project-scoped connector settings с RBAC, CSRF, audit intent,
+  idempotency и optimistic locking;
 - `platform-api/src/imports` — project-scoped create/read orchestration с
   `semantic.import`/`semantic.view`;
 - `platform-api/src/semantics` — public project-scoped keyword queries с
@@ -190,8 +197,8 @@ Backend convention:
   workspace-scoped envelope vault с per-record DEK, AES-256-GCM и versioned
   KEK, отдельный versioned HMAC fingerprint keyring, dedicated caller guard,
   startup coverage guard, masked DTO, rotation, destructive secret overwrite
-  при revoke, connector registry и lease/CAS state machine проверки
-  credentials;
+  при revoke, connector registry, lease/CAS state machine проверки credentials
+  и нормализованные project binding/route/create receipt;
 - `platform-jobs-integrations/src/seo-data` — строго валидируемый internal
   HTTP client владельца semantic core;
 - `platform-seo-data/src/semantic-imports` — нормализация, import receipts,
@@ -255,7 +262,7 @@ Entrypoints:
 | Workspaces/projects/team access | vertical slice |
 | Semantics/import | vertical slice: CSV/TSV → mapping → validation → publish → query |
 | Notifications | vertical slice: preferences → effective policy → read center |
-| Integrations | vertical slice: catalog + encrypted BYOK vault + Arsenkin/Keys.so validation |
+| Integrations | vertical slice: catalog + encrypted BYOK vault + validation + project binding |
 | Rankings | planned |
 | Billing/YooKassa | planned |
 | Directus content | planned |
@@ -382,6 +389,9 @@ lease/retry indexes начинаются с `job.type`. В очередь не �
 Execution worker расшифровывает его только в памяти и вызывает фиксированные
 HTTPS endpoints Arsenkin или Keys.so с timeout, запретом redirect, строгим
 JSON для `2xx`, body limit 1 MiB и нормализацией ошибок.
+Успешная provider validation заменяет сохранённый capability snapshot
+текущим allowlist каталога: удалённая capability исчезает сразу через
+пересечение, а новая не выдаётся старому ключу без повторной внешней проверки.
 Terminal update атомарно сверяет workspace и `material_version`: замена или
 revoke credential делает старую проверку `STALE`, не перезаписывая новый
 материал. Retry учитывает ограниченный `Retry-After`. XMLStock остаётся
@@ -389,17 +399,44 @@ revoke credential делает старую проверку `STALE`, не пе�
 Partial unique active dedup key ограничивает один validation на пару
 credential/material даже при разных `Idempotency-Key`.
 
+Проектные источники настраиваются через
+`/app/projects/:projectId/settings/integrations`. Первый честный UI-срез
+показывает только `SERP_RANK_TRACKING`; общий contract остаётся
+capability-based. На пару `workspace + project + capability` существует одна
+привязка и один нормализованный route `WORKSPACE_CREDENTIAL` с `position=0`.
+Создание разрешает только non-deleted `ACTIVE BYOK_API_KEY`, принадлежащий
+workspace и поддерживающий capability одновременно в сохранённом credential и
+текущем provider catalog. Отключить уже сломанную привязку можно без активного
+ключа; включение и смена route повторяют строгую проверку.
+
+POST требует `Idempotency-Key`: binding, route, immutable create receipt с
+32-byte request hash/исходным response snapshot и redacted outbox event
+создаются одной транзакцией. Поэтому replay после PATCH возвращает исходный
+ответ создания. PATCH требует `If-Match`, использует CAS и при гонке отвечает
+`412 VERSION_CONFLICT` с безопасным `currentVersion`. Billing `READ_ONLY` и
+архивный проект сохраняют просмотр, но не разрешают новые изменения; проекты
+и bindings автоматически не удаляются. Platform keys, fallback и budgets
+пока возвращают `FEATURE_NOT_AVAILABLE`, а credential options не содержат
+секрет, masked hint или provider metadata.
+Aggregate читается одним `RepeatableRead` snapshot и возвращает не более 500
+options; при большем vault выставляет `credentialOptionsTruncated`, сохраняя
+в выдаче credentials уже назначенных bindings. Create/enable/swap держат
+tenant-scoped `FOR SHARE` lock credential до commit, поэтому rotate/revoke не
+может пройти между проверкой и записью binding. Outbox payload типизирован в
+`platform-contracts`, не содержит credential ID и передаёт безопасный
+`changedFields`, включая смену route между двумя ключами одного provider.
+
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 78 pass, 0 fail.
+- Platform API unit tests: 97 pass, 0 fail.
 - SEO data unit tests: 10 pass, 0 fail.
-- Jobs/integrations unit tests: 116 pass, 0 fail.
+- Jobs/integrations unit tests: 135 pass, 0 fail.
 - Realtime unit tests: 12 pass, 0 fail.
-- Contracts unit tests: 1 pass, 0 fail.
-- Unified Web helper tests: 13 pass, 0 fail.
+- Contracts unit tests: 2 pass, 0 fail.
+- Unified Web helper tests: 28 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
 - Unified Next.js production build: pass; проверены public site, Toolbox,
   API docs и private `/app`.
@@ -426,12 +463,17 @@ credential/material даже при разных `Idempotency-Key`.
 - Integration settings browser QA: 1440 и 390 px, document overflow и browser
   errors не найдены; таблица/табы прокручиваются только внутри контейнеров,
   XMLStock full-secret replacement проверен интерактивно.
+- Project connector settings: production build и same-origin BFF smoke pass;
+  отдельно проверены cross-workspace deep link, reconnect race, immutable
+  create replay, `412/409`, bounded options и mobile overflow. Интерактивный
+  browser backend в текущем окружении недоступен, поэтому новый экран требует
+  повторного visual smoke после удалённого deploy.
 - Target runtime: Node.js 24. Локальная проверка выполнялась на Node.js 22 с
   ожидаемым engine warning; контейнеры используют Node.js 24.
 
 ## 9. Следующий вертикальный срез
 
-`project connector binding → XMLStock validation/rank tracking`
+`tracking context → manual BYOK rank job → position history`
 
 Параллельный обязательный следующий срез уведомлений:
 `profile/project effective policy → transactional outbox/durable consumer →
@@ -492,6 +534,17 @@ Production-зависимости `@nats-io/jetstream` и `web-push` ещё не
   включая CHECK/partial UNIQUE/CAS, успешно применены на локальном
   PostgreSQL 16; повторная staging-проверка на целевом PostgreSQL 18 остаётся
   обязательной.
+- Project binding migration также выполняется одной транзакцией и fail-closed
+  останавливается при непустой pre-release `integration_bindings`; для такого
+  окружения нужен expand → backfill → validate → contract план. Fresh и
+  fail-closed сценарии проверены на PostgreSQL 16. Перед precondition таблица
+  блокируется `ACCESS EXCLUSIVE`, и concurrent-writer smoke подтвердил
+  отсутствие окна check → DROP; PostgreSQL 18 остаётся staging-gate.
+- Проверка lifecycle проекта сейчас авторитетна в Platform API, но между ней и
+  commit в jobs database остаётся межсервисное TOCTOU. До первого исполняемого
+  rank job jobs/integrations обязан получить project/workspace lifecycle
+  projection либо другую authoritative precondition, а execution всегда
+  повторно проверяет lifecycle/billing.
 - Terminal credential validation пока не создаёт transactional outbox event:
   email/Web Push и полный durable audit результата требуют отдельного
   redacted события.

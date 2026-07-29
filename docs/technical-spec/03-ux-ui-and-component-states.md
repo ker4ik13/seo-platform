@@ -349,3 +349,46 @@ Dashboard, отчёты, управление задачами и огранич
 
 Эти состояния включаются в критерии приёмки каждой user story.
 
+## 21. Настройки источников проекта
+
+Маршрут `/app/projects/{projectId}/settings/integrations` использует точный
+project deep link, а не только workspace из старого cookie. Для первого
+рабочего среза экран настраивает `SERP_RANK_TRACKING`; contract и backend
+остаются capability-based.
+
+Экран содержит:
+
+- heading и project settings tabs «Источники проекта» / «Уведомления проекта»;
+- один binding с provider/label/status и честной стоимостью BYOK у самого
+  провайдера;
+- недоступные credentials с причиной, но без full secret, masked hint и
+  provider metadata;
+- ссылку на workspace-экран управления ключами;
+- заблокированные пояснения для platform key, fallback и budget без ложных
+  интерактивных controls;
+- sticky save bar с dirty/version state.
+
+Обязательные состояния:
+
+- initial loading с `aria-busy`;
+- recoverable load error и retry без потери уже загруженного state;
+- пустой список credentials и отсутствие подходящих `ACTIVE BYOK_API_KEY`;
+- bounded список более 500 credentials с явным сообщением о неполной выдаче
+  и ссылкой на workspace-экран управления подключениями;
+- готовый, выключенный, pending, unavailable и capability-mismatch binding;
+- billing read-only, archived project и view-without-update;
+- dirty, busy, success и offline без локальной mutation queue;
+- `412 VERSION_CONFLICT`: пользовательский draft сохраняется, authoritative
+  binding перечитывается, пользователь явно принимает серверную версию либо
+  повторяет поверх новой версии;
+- `401` ведёт через refresh с исходным `returnTo`, `402` сохраняет read-only
+  просмотр, `403` очищает credential options, `404` не раскрывает существование
+  чужого проекта;
+- mobile: одна колонка, touch target не менее 44 px и отсутствие document
+  overflow.
+
+Create использует стабильный `Idempotency-Key` до смены payload или успешного
+ответа. Поскольку точный replay может вернуть immutable create snapshot после
+чужого PATCH, Web после POST перечитывает aggregate и принимает только текущую
+server revision. Update отправляет текущий `If-Match`; WebSocket может только
+ускорить refetch, но не заменяет authoritative HTTP response/version.

@@ -535,6 +535,47 @@ Server-side test сейчас доступен только для Arsenkin и K
 возвращает нормализованную ошибку недоступной проверки до подтверждённого
 provider contract.
 
+Реализованные project connector settings используют:
+
+- `GET /api/v1/projects/{projectId}/integration-settings`;
+- `POST /api/v1/projects/{projectId}/integration-settings`;
+- `PATCH /api/v1/projects/{projectId}/integration-settings/{bindingId}`.
+
+GET требует `integration.view` и возвращает bindings, безопасные
+credential options и access projection. Credential option содержит только
+`id`, workspace, provider, label, mode, status и allowlisted capabilities:
+secret, display hint, provider metadata и account identifier запрещены.
+Массив ограничен 500 элементами; `credentialOptionsTruncated=true` сообщает
+о наличии остальных, а credentials уже настроенных bindings обязаны остаться
+в bounded ответе.
+Чтение остаётся доступным в billing `READ_ONLY` и для архивного проекта.
+
+POST/PATCH требуют `integration.update`, browser session и CSRF. POST требует
+`Idempotency-Key`, отвечает `201` и возвращает entity version/ETag. PATCH
+требует `If-Match`; capability и tenant context в public body отсутствуют,
+binding ID берётся из path. Billing `READ_ONLY` даёт `402` до controller,
+архивный проект — `409` до audit/internal RPC. Публичный API записывает
+audit intent до RPC fail-closed. После commit Jobs сбой вторичной записи
+success-audit логируется безопасно, но не превращает уже применённый POST/PATCH
+в ложный `500`; durable truth результата — атомарный jobs outbox event, из
+которого audit projection должна достраиваться после подключения durable
+consumer.
+
+Внутренняя граница:
+
+- `GET|POST /internal/v1/workspaces/{workspaceId}/projects/{projectId}/integration-settings`;
+- `PATCH .../integration-settings/{bindingId}`.
+
+Она использует dedicated credential token и требует точного совпадения
+workspace/project/actor в path, trusted headers и command body. Platform API
+строго валидирует UUID, scope, bounded arrays, enums, timestamps, policies,
+route consistency, duplicate IDs/capabilities и соответствие availability
+текущему safe credential option. Неизвестное либо secret-bearing internal
+поле превращает ответ в `502 DEPENDENCY_UNAVAILABLE`, а не протекает в Web.
+Upstream `412` сохраняется как публичный `VERSION_CONFLICT` только с
+положительным `currentVersion`; `IDEMPOTENCY_CONFLICT` и `DUPLICATE`
+нормализуются без upstream message.
+
 ### 13.7. Collaboration и reports
 
 - `/projects/{projectId}/comments`;
@@ -781,6 +822,8 @@ Publisher отправляет событие в NATS JetStream и помеча�
 - `job.completed.v1`;
 - `job.failed.v1`;
 - `integration.credential-validation.finished.v1`;
+- `integration.project-connector-binding.created.v1`;
+- `integration.project-connector-binding.updated.v1`;
 - `semantic.import.created.v1`;
 - `semantic.import.parsed.v1`;
 - `semantic.import.validated.v1`;
@@ -803,6 +846,14 @@ allowlisted error code. Secret, provider response и account identifier
 запрещены. Событие записывается transactional outbox одновременно с terminal
 Job/credential update; текущий первый validation slice ещё должен добавить
 эту запись перед включением email/Web Push.
+
+`integration.project-connector-binding.created.v1` и `.updated.v1`
+записываются в jobs outbox атомарно с binding transaction. Payload содержит
+workspace/project/binding IDs, capability, enabled, route position/source,
+provider/credential mode, fallback/budget mode, availability, version и
+changedBy, а также allowlisted `changedFields`. Credential ID, label, display
+hint, provider metadata и secret запрещены. Общий payload contract находится
+в `platform-contracts`.
 
 ## 18. NATS subjects и consumers
 

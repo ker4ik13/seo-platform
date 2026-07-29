@@ -217,6 +217,22 @@
 
 Пользователь без специального разрешения никогда не видит полный секрет.
 
+Project connector settings используют `integration.view` для чтения и
+`integration.update` для создания/изменения binding. Системная роль и
+project assignment пересекаются: `MANAGER` не расширяет более узкую
+workspace role, а `VIEWER`/`MEMBER` сужают даже `OWNER`/`ADMIN` в рамках
+назначения. В текущей системной матрице binding меняют `OWNER` и `ADMIN`;
+`SEO_LEAD`/`SEO_SPECIALIST` могут видеть и тестировать доступные им credentials,
+но не обходят отсутствие `integration.update`.
+
+Billing `READ_ONLY` оставляет `integration.view`, но mutation guard возвращает
+`402 PAYMENT_REQUIRED`. Архивный проект также читается, а изменение binding
+возвращает `409 RESOURCE_STATE_CONFLICT`. Будущие platform credentials,
+fallback и budgets дополнительно требуют соответственно
+`integration.use_system_credentials`, `integration.manage_fallback` и
+`billing.set_budgets`; наличие permission само по себе не включает ещё не
+реализованную возможность.
+
 ### 5.7. Автоматизации и отчёты
 
 - `automation.view`;
@@ -323,4 +339,3 @@
 - прямой URL возвращает страницу `403`, не `404`, если раскрытие существования ресурса допустимо;
 - API возвращает стандартизированную ошибку `FORBIDDEN`;
 - изменение прав в активной сессии применяется не позднее 60 секунд и немедленно для опасных операций.
-

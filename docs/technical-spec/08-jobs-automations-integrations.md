@@ -457,6 +457,10 @@ Web гидратирует эту job после reload/navigation и продо
 
 `PENDING_VERIFICATION` не разрешает SEO jobs использовать credential.
 Arsenkin/Keys.so переходят в `ACTIVE` только после реального provider response.
+Успешная проверка заменяет сохранённый список capabilities текущим allowlist
+provider catalog. Новая документированная возможность поэтому становится
+доступна существующему credential только после повторной внешней проверки, а
+удалённая возможность сразу отсекается пересечением с каталогом.
 XMLStock остаётся `PROVIDER_DOCUMENTATION_REQUIRED`: локальная расшифровка не
 выдаётся пользователю за внешний test до подтверждённого provider contract и
 redacted fixtures.
@@ -508,6 +512,74 @@ per-workspace/provider quotas и fair scheduling. Terminal validation result
 также должен записывать redacted
 transactional outbox event для durable audit и email/Web Push; audit записей
 `requested/queued` в Platform API для этого недостаточно.
+
+### 17.2. Реализованная проектная привязка connector
+
+Jobs/integrations владеет нормализованными
+`project_connector_bindings`, `project_connector_routes` и
+`project_connector_binding_create_receipts`. На
+`workspace + project + capability` разрешён один binding; удаление в
+пользовательском flow отсутствует, выключение выполняется через
+`enabled=false`.
+
+Первый slice поддерживает один route:
+
+- `position=0`;
+- `sourceKind=WORKSPACE_CREDENTIAL`;
+- non-deleted credential того же workspace;
+- mode только `BYOK_API_KEY`;
+- status `ACTIVE` при create, включении или смене route;
+- capability одновременно присутствует в сохранённом credential JSON и
+  текущем provider catalog.
+
+Если credential после настройки стал pending/invalid/revoked или потерял
+capability, GET сохраняет binding и возвращает явный availability. Отключение
+текущего сломанного route разрешено без повторной проверки `ACTIVE`; включение
+или замена credential всегда проверяются заново. Автоматическое переключение
+на системный ключ запрещено.
+
+Bindings и credential options читаются в одной interactive transaction с
+`RepeatableRead`, чтобы rotate/revoke не формировал взаимоисключающие
+проекции. Aggregate ограничен 500 credential options и возвращает
+`credentialOptionsTruncated`; credentials уже назначенных bindings остаются в
+bounded выдаче. Полный выбор сверх лимита появится в отдельном cursor/search
+endpoint. Create, enable и route swap выполняют tenant-scoped
+`SELECT ... FOR SHARE` credential внутри write transaction; конкурентный
+rotate/revoke ждёт её завершения. Отключение неизменённого сломанного route
+lock не требует.
+
+Create binding использует тот же строгий шаблон платных команд:
+
+- trusted workspace/project/actor берутся из совпадающих path, headers и
+  internal body;
+- обязательный `Idempotency-Key` связан 32-byte hash с полным каноническим
+  command;
+- binding, route, immutable create receipt, исходный safe response snapshot и
+  redacted outbox event записываются одной транзакцией;
+- точный replay после последующего PATCH возвращает исходный create snapshot,
+  а другой command с тем же ключом — `IDEMPOTENCY_CONFLICT`;
+- snapshot строго валидируется и обязан совпадать с tenant/binding scope
+  receipt.
+
+PATCH использует CAS по положительной `version`; проигравший запрос получает
+HTTP `412 VERSION_CONFLICT` и только безопасный `currentVersion`. Outbox
+события `integration.project-connector-binding.created.v1` и
+`.updated.v1` содержат capability, provider/mode, availability и version, но
+не содержат credential ID, label, display hint, provider metadata или secret.
+Payload использует общий versioned contract из `platform-contracts` и
+allowlisted `changedFields`; смена route между двумя credentials одного
+provider видна consumer без раскрытия идентификаторов ключей.
+
+Platform credentials, fallback и binding budgets пока строго возвращают
+`FEATURE_NOT_AVAILABLE`: они появятся только вместе с commercial agreement,
+price book, estimate/reservation/settlement и hard budget. Сам binding ещё не
+запускает provider operation и не доказывает готовность rank tracking.
+
+Между проверкой lifecycle проекта в Platform API и commit в отдельной
+jobs database остаётся межсервисное TOCTOU. До первого исполняемого SEO job
+jobs/integrations должен получить authoritative lifecycle projection/inbox
+либо другую проверяемую precondition; worker в любом случае повторно проверяет
+workspace/project/billing перед provider call.
 
 ## 18. OAuth connections
 
@@ -622,6 +694,8 @@ Connector учитывает provider quotas и не подменяет офиц
 - submit/check/get task lifecycle;
 - лимит одновременных задач;
 - запросный rate limit;
+- съём позиций через документированный `positions` tool с поисковой системой,
+  регионом и глубиной;
 - clustering;
 - indexation and supported SEO tools;
 - provider task cleanup.
