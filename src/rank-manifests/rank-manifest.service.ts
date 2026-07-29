@@ -89,6 +89,7 @@ const MANIFEST_SELECT = {
   projectId: true,
   jobId: true,
   estimateId: true,
+  estimateExpiresAt: true,
   sealedBy: true,
   requestHash: true,
   provider: true,
@@ -214,6 +215,7 @@ export class RankManifestService {
             return storedManifestSeal(existing);
           }
 
+          assertEstimateNotExpired(input, snapshotAt);
           const { context, configuration, assignments } =
             await currentManifestScope(transaction, input);
           assertEstimateStillCurrent(
@@ -275,6 +277,7 @@ export class RankManifestService {
               projectId: seal.projectId,
               jobId: seal.jobId,
               estimateId: seal.estimateId,
+              estimateExpiresAt: new Date(seal.estimateExpiresAt),
               sealedBy: input.actorId,
               requestHash: databaseBytes(requestHash),
               provider: seal.provider,
@@ -459,6 +462,23 @@ function assertManifestScopeBounds(
     manifestConflict(
       "ESTIMATE_STALE",
       "Rank scope exceeds the sealed provider execution limits"
+    );
+  }
+}
+
+function assertEstimateNotExpired(
+  input: InternalSealRankManifestInput,
+  snapshotAt: Date
+): void {
+  const expiresAt = new Date(input.estimate.expiresAt);
+  if (
+    Number.isNaN(expiresAt.getTime()) ||
+    expiresAt.toISOString() !== input.estimate.expiresAt ||
+    snapshotAt.getTime() >= expiresAt.getTime()
+  ) {
+    manifestConflict(
+      "ESTIMATE_EXPIRED",
+      "Rank estimate expired before the manifest could be sealed"
     );
   }
 }
@@ -680,6 +700,7 @@ function manifestSealWithoutHash(
     projectId: input.projectId,
     jobId: input.jobId,
     estimateId: input.estimateId,
+    estimateExpiresAt: input.estimate.expiresAt,
     sealedBy: input.actorId,
     trackingContextId: input.estimate.trackingContextId,
     provider: input.provider,
@@ -744,6 +765,9 @@ function storedManifestSeal(
       Math.ceil(record.pairCount / MANIFEST_CHUNK_SIZE) ||
     record.chunkSize !== MANIFEST_CHUNK_SIZE ||
     !sealedAtValid ||
+    !(record.estimateExpiresAt instanceof Date) ||
+    Number.isNaN(record.estimateExpiresAt.getTime()) ||
+    record.estimateExpiresAt.getTime() <= record.sealedAt.getTime() ||
     record.chunks.length !== record.chunkCount
   ) {
     throw new Error("Stored rank manifest header is invalid");
@@ -781,6 +805,7 @@ function storedManifestSeal(
     projectId: record.projectId,
     jobId: record.jobId,
     estimateId: record.estimateId,
+    estimateExpiresAt: record.estimateExpiresAt.toISOString(),
     sealedBy: record.sealedBy,
     trackingContextId: record.trackingContextId,
     provider: "ARSENKIN",

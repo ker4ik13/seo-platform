@@ -92,6 +92,17 @@ test("rejects unknown fields, malformed hashes and forged project scope", () => 
       }),
     BadRequestException
   );
+  assert.throws(
+    () =>
+      internalSealRankManifestInput({
+        ...command(),
+        estimate: {
+          ...command().estimate,
+          expiresAt: "2026-07-29T12:05:00Z"
+        }
+      }),
+    BadRequestException
+  );
 });
 
 test("normalizes a bounded manifest chunk query", () => {
@@ -162,7 +173,8 @@ function command() {
         algorithm: "SHA_256",
         value: "c".repeat(64)
       },
-      pairCount: "2"
+      pairCount: "2",
+      expiresAt: "2026-07-29T12:05:00.000Z"
     },
     execution: {
       searchEngine: "GOOGLE",

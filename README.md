@@ -34,7 +34,8 @@ Secret-bearing rank manifest API изолирован отдельным
 internal token его не открывает:
 
 - `POST /internal/v1/projects/:projectId/rank-manifests`;
-- `GET .../rank-manifests/:manifestId/chunks/:chunkIndex?jobId=...`.
+- `GET .../rank-manifests/:manifestId/chunks/:chunkIndex?jobId=...`;
+- `POST .../rank-manifests/:manifestId/finalize`.
 
 Estimate и seal сначала читают только bounded SQL-агрегаты размера scope.
 Тексты материализуются лишь для не более 1 000 фраз, каждая до 500 Unicode
@@ -42,6 +43,20 @@ code points / 2 000 UTF-8 bytes. Manifest строится в одной Repeata
 транзакции, переходит `BUILDING → SEALED`, а БД запрещает неполную фиксацию,
 поздние child inserts, переписывание и удаление. После обработки допустим
 только однократный lifecycle-переход `SEALED → CLOSED`.
+
+Seal хранит срок действия estimate и для нового manifest отклоняет
+`snapshotAt >= estimate.expiresAt`; exact replay уже созданного manifest
+проверяется до expiry gate и остаётся доступным. Миграция hardening
+останавливается fail-closed, если до её применения таблица manifest уже не
+пуста: правдивого backfill для полного `rank-manifest@1` hash не существует.
+
+Finalize сериализуется row-lock того же manifest. Пока ingest receipts не
+реализованы, он принимает только безопасные zero-result статусы
+`CANCELLED`, `FAILED`, `ACTION_REQUIRED`, атомарно переводит manifest
+`SEALED → CLOSED` и создаёт неизменяемую receipt. Exact replay того же
+`job + manifest + status` возвращает исходную receipt; другой terminal
+status конфликтует. `COMPLETED` и `PARTIALLY_COMPLETED` отклоняются
+fail-closed, completion event в этом срезе не создаётся.
 
 Список контекстов ограничен 200 агрегатами и возвращает
 `contextsTruncated`. Список назначений использует связанный с контекстом и

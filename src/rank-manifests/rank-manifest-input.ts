@@ -45,6 +45,7 @@ export function internalSealRankManifestInput(
   const workspaceId = uuid(input.workspaceId, "workspaceId");
   const projectId = uuid(input.projectId, "projectId");
   const project = rankRunProject(input.project);
+  const estimate = rankManifestEstimate(input.estimate);
   if (project.id !== projectId || project.workspaceId !== workspaceId) {
     invalid("project");
   }
@@ -59,7 +60,7 @@ export function internalSealRankManifestInput(
     provider: "ARSENKIN",
     operation: "POSITIONS",
     project,
-    estimate: rankManifestEstimate(input.estimate),
+    estimate,
     execution: rankExecutionParameters(input.execution),
     retention: rankManifestRetention(input.retention)
   };
@@ -193,7 +194,8 @@ function rankManifestEstimate(
     "configurationHash",
     "semanticScopeHash",
     "scopeHash",
-    "pairCount"
+    "pairCount",
+    "expiresAt"
   ]);
   const pairCount = requiredString(input.pairCount, "estimate.pairCount");
   if (!DECIMAL_PAIR_COUNT_PATTERN.test(pairCount)) {
@@ -221,7 +223,8 @@ function rankManifestEstimate(
       "estimate.semanticScopeHash"
     ),
     scopeHash: manifestHash(input.scopeHash, "estimate.scopeHash"),
-    pairCount
+    pairCount,
+    expiresAt: isoTimestamp(input.expiresAt, "estimate.expiresAt")
   };
 }
 
@@ -395,6 +398,18 @@ function chunkIndex(value: unknown): number {
 function requiredString(value: unknown, field: string): string {
   if (typeof value !== "string" || !value) invalid(field);
   return value;
+}
+
+function isoTimestamp(value: unknown, field: string): string {
+  const timestamp = requiredString(value, field);
+  const parsed = new Date(timestamp);
+  if (
+    Number.isNaN(parsed.getTime()) ||
+    parsed.toISOString() !== timestamp
+  ) {
+    invalid(field);
+  }
+  return timestamp;
 }
 
 function invalid(field: string): never {

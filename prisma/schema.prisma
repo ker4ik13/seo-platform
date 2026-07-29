@@ -64,6 +64,14 @@ enum RankExecutionManifestStatus {
   CLOSED
 }
 
+enum RankCheckFinalStatus {
+  COMPLETED
+  PARTIALLY_COMPLETED
+  CANCELLED
+  FAILED
+  ACTION_REQUIRED
+}
+
 model Keyword {
   id             String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId    String         @map("workspace_id") @db.Uuid
@@ -325,18 +333,47 @@ model RankExecutionManifest {
   retention             Json
   status                RankExecutionManifestStatus @default(BUILDING)
   sealedAt              DateTime                    @map("sealed_at") @db.Timestamptz(6)
+  estimateExpiresAt     DateTime                    @map("estimate_expires_at") @db.Timestamptz(6)
   closedAt              DateTime?                   @map("closed_at") @db.Timestamptz(6)
   createdAt             DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
 
   context TrackingContext @relation("RankManifestContext", fields: [workspaceId, projectId, trackingContextId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_execution_manifests_context_tenant_fkey")
   configuration TrackingContextVersion @relation("RankManifestConfiguration", fields: [workspaceId, projectId, trackingContextId, configurationVersion], references: [workspaceId, projectId, contextId, configurationVersion], onDelete: Restrict, onUpdate: Restrict, map: "rank_execution_manifests_configuration_tenant_fkey")
   chunks RankExecutionManifestChunk[]
+  finalizationReceipt RankCheckFinalizationReceipt?
 
   @@unique([workspaceId, projectId, jobId], map: "rank_execution_manifests_tenant_project_job_key")
   @@unique([workspaceId, projectId, id], map: "rank_execution_manifests_tenant_project_id_key")
+  @@unique([workspaceId, projectId, id, jobId], map: "rank_execution_manifests_tenant_project_id_job_key")
   @@index([workspaceId, projectId, trackingContextId, sealedAt(sort: Desc)], map: "rank_execution_manifests_context_sealed_idx")
   @@index([workspaceId, projectId, provider, deduplicationHash], map: "rank_execution_manifests_dedup_idx")
   @@map("rank_execution_manifests")
+}
+
+model RankCheckFinalizationReceipt {
+  manifestId           String               @id @map("manifest_id") @db.Uuid
+  workspaceId          String               @map("workspace_id") @db.Uuid
+  projectId            String               @map("project_id") @db.Uuid
+  jobId                String               @map("job_id") @db.Uuid
+  finalizedBy          String               @map("finalized_by") @db.Uuid
+  schemaVersion        String               @map("schema_version") @db.VarChar(32)
+  requestHash          Bytes                @map("request_hash")
+  trackingContextId    String               @map("tracking_context_id") @db.Uuid
+  configurationVersion Int                  @map("configuration_version")
+  status               RankCheckFinalStatus
+  pairCount            Int                  @map("pair_count")
+  persistedCount       Int                  @map("persisted_count")
+  foundCount           Int                  @map("found_count")
+  notFoundCount        Int                  @map("not_found_count")
+  missingCount         Int                  @map("missing_count")
+  finalizedAt          DateTime             @map("finalized_at") @db.Timestamptz(6)
+
+  manifest RankExecutionManifest @relation(fields: [workspaceId, projectId, manifestId, jobId], references: [workspaceId, projectId, id, jobId], onDelete: Restrict, onUpdate: Restrict, map: "rank_check_finalization_receipts_manifest_tenant_fkey")
+
+  @@unique([workspaceId, projectId, manifestId, jobId], map: "rank_final_receipts_tenant_manifest_job_key")
+  @@unique([workspaceId, projectId, jobId], map: "rank_check_finalization_receipts_tenant_project_job_key")
+  @@index([workspaceId, projectId, trackingContextId, finalizedAt(sort: Desc)], map: "rank_check_finalization_receipts_context_finalized_idx")
+  @@map("rank_check_finalization_receipts")
 }
 
 model RankExecutionManifestChunk {

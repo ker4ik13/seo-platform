@@ -15,6 +15,7 @@ const trackingContextId =
   "01900000-0000-7000-8000-000000000006";
 const manifestId = "01900000-0000-7000-8000-000000000007";
 const sealedAt = new Date("2026-07-29T12:00:00.000Z");
+const estimateExpiresAt = "2026-07-29T13:00:00.000Z";
 
 test("atomically seals immutable header, chunks and keyword snapshots", async () => {
   const harness = manifestHarness();
@@ -38,6 +39,7 @@ test("atomically seals immutable header, chunks and keyword snapshots", async ()
   assert.equal(result.chunkCount, "1");
   assert.equal(result.chunkSize, "250");
   assert.equal(result.status, "SEALED");
+  assert.equal(result.estimateExpiresAt, estimateExpiresAt);
   assert.match(result.manifestHash.value, /^[0-9a-f]{64}$/u);
   assert.match(result.deduplicationHash.value, /^[0-9a-f]{64}$/u);
   assert.notEqual(
@@ -46,7 +48,7 @@ test("atomically seals immutable header, chunks and keyword snapshots", async ()
   );
   assert.equal(
     result.manifestHash.value,
-    "965957cbd8dfd14230912e1b001f3aa62bd3219c6e7eb2680ba998f8fe4fe290"
+    "121ba6198f465e1c282f2e16ce02d638a19f0423dfc68c7d30b017c96d32736e"
   );
   assert.equal(
     result.deduplicationHash.value,
@@ -102,6 +104,36 @@ test("exact replay returns the original seal before mutable scope reads", async 
       hasError(error, 409, "IDEMPOTENCY_CONFLICT")
   );
   assert.equal(harness.scopeReads, 1);
+});
+
+test("rejects a new manifest at expiry before reading mutable scope", async () => {
+  const harness = manifestHarness({
+    sealedAt: new Date(estimateExpiresAt)
+  });
+  await assert.rejects(
+    () =>
+      new RankManifestService(harness.prisma).seal(
+        command(harness.context, harness.assignments)
+      ),
+    (error: unknown) =>
+      hasError(error, 409, "ESTIMATE_EXPIRED")
+  );
+  assert.equal(harness.scopeReads, 0);
+  assert.equal(harness.manifestWrites, 0);
+});
+
+test("returns exact replay after estimate expiry without mutable scope reads", async () => {
+  const harness = manifestHarness();
+  const service = new RankManifestService(harness.prisma);
+  const input = command(harness.context, harness.assignments);
+  const first = await service.seal(input);
+  harness.snapshotAt = new Date("2026-07-29T13:01:00.000Z");
+
+  const replay = await service.seal(input);
+
+  assert.deepEqual(replay, first);
+  assert.equal(harness.scopeReads, 1);
+  assert.equal(harness.manifestWrites, 1);
 });
 
 test("exact replay reconstructs the immutable seal after lifecycle close", async () => {
@@ -463,7 +495,8 @@ function command(
         semanticRankScopeHash(context, configuration, assignments)
       ),
       scopeHash: hash("c".repeat(64)),
-      pairCount: String(assignments.length)
+      pairCount: String(assignments.length),
+      expiresAt: estimateExpiresAt
     },
     execution: {
       searchEngine: "GOOGLE",
@@ -550,7 +583,7 @@ function manifestHarness(
         : 0
   );
   const allocatedManifestId = options.manifestId ?? manifestId;
-  const allocatedSealedAt = options.sealedAt ?? sealedAt;
+  let allocatedSealedAt = options.sealedAt ?? sealedAt;
   const entryIdOffset = options.entryIdOffset ?? 20;
   const storedChunks: Array<Record<string, unknown>> = [];
   const storedEntries: Array<Record<string, unknown>> = [];
@@ -813,6 +846,9 @@ function manifestHarness(
     },
     get chunkWhere() {
       return chunkWhere;
+    },
+    set snapshotAt(value: Date) {
+      allocatedSealedAt = value;
     },
     closeManifest(closedAt: Date) {
       if (!storedManifest) throw new Error("Manifest is not sealed");

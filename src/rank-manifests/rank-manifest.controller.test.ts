@@ -139,7 +139,8 @@ function command() {
       configurationHash: hash("a"),
       semanticScopeHash: hash("b"),
       scopeHash: hash("c"),
-      pairCount: "1"
+      pairCount: "1",
+      expiresAt: "2026-07-29T12:05:00.000Z"
     },
     execution: {
       searchEngine: "GOOGLE",
@@ -168,6 +169,7 @@ function sealResult() {
     projectId,
     jobId,
     estimateId,
+    estimateExpiresAt: "2026-07-29T12:05:00.000Z",
     sealedBy: actorId,
     trackingContextId,
     provider: "ARSENKIN",
