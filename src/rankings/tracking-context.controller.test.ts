@@ -20,12 +20,14 @@ import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.
 import { DomainError } from "../common/domain-error.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
 import { IdentityModule } from "../identity/identity.module.js";
+import { JobsModule } from "../jobs/jobs.module.js";
 import {
   CsrfSessionGuard,
   SessionAuthGuard
 } from "../identity/session-auth.guard.js";
 import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import { SeoDataModule } from "../seo-data/seo-data.module.js";
+import { TenantModule } from "../tenants/tenant.module.js";
 import { RankingModule } from "./ranking.module.js";
 import { TrackingContextController } from "./tracking-context.controller.js";
 
@@ -134,7 +136,13 @@ test("declares ranking read and configure permission boundaries", () => {
 test("imports every module required by ranking controller guards and clients", () => {
   assert.deepEqual(
     Reflect.getMetadata(MODULE_METADATA.IMPORTS, RankingModule),
-    [AuthorizationModule, IdentityModule, SeoDataModule]
+    [
+      AuthorizationModule,
+      IdentityModule,
+      JobsModule,
+      SeoDataModule,
+      TenantModule
+    ]
   );
 });
 

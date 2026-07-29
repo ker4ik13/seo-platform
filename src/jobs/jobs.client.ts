@@ -26,6 +26,7 @@ import type {
   InternalCreateIntegrationCredentialInput,
   InternalCreateIntegrationCredentialValidationInput,
   InternalCreateProjectConnectorBindingInput,
+  InternalCreateRankEstimateInput,
   InternalDeleteIntegrationCredentialInput,
   InternalUpdateProjectConnectorBindingInput,
   InternalUpdateIntegrationCredentialInput,
@@ -40,6 +41,7 @@ import type {
   ProjectConnectorCredentialOption,
   ProjectConnectorFallbackPolicy,
   ProjectConnectorRoute,
+  RankEstimate,
   SemanticImportSummary,
   UploadPartUrls,
   UploadSummary,
@@ -50,6 +52,7 @@ import { DomainError } from "../common/domain-error.js";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import type { AppConfig } from "../config/app-config.js";
+import { scopedRankEstimate } from "./rank-estimate-response.js";
 
 interface InternalContext {
   readonly tenant: TenantAuthorization;
@@ -451,18 +454,43 @@ export class JobsClient {
     );
   }
 
+  public async createRankEstimate(
+    context: InternalContext,
+    input: InternalCreateRankEstimateInput,
+    idempotencyKey: string
+  ): Promise<RankEstimate> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.requestIntegration<unknown>(
+      "POST",
+      `/internal/v1/workspaces/${encodeURIComponent(
+        context.tenant.workspaceId
+      )}/projects/${encodeURIComponent(projectId)}/rank-estimates`,
+      context,
+      input,
+      idempotencyKey
+    );
+    return scopedRankEstimate(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      input.trackingContextId
+    );
+  }
+
   private requestIntegration<Data>(
     method: "GET" | "POST" | "PATCH" | "DELETE",
     path: string,
     context: InternalContext,
-    body?: unknown
+    body?: unknown,
+    idempotencyKey?: string
   ): Promise<Data> {
     return this.request(
       method,
       path,
       context,
       body,
-      "integration-credential"
+      "integration-credential",
+      idempotencyKey
     );
   }
 
@@ -471,7 +499,8 @@ export class JobsClient {
     path: string,
     context: InternalContext,
     body?: unknown,
-    authentication: "shared" | "integration-credential" = "shared"
+    authentication: "shared" | "integration-credential" = "shared",
+    idempotencyKey?: string
   ): Promise<Data> {
     const token =
       authentication === "integration-credential"
@@ -487,6 +516,9 @@ export class JobsClient {
     });
     if (context.tenant.projectId) {
       headers.set("X-Project-Id", context.tenant.projectId);
+    }
+    if (idempotencyKey) {
+      headers.set("Idempotency-Key", idempotencyKey);
     }
     if (body !== undefined) headers.set("Content-Type", "application/json");
 
