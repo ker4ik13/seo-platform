@@ -176,15 +176,19 @@ event через transactional outbox/durable consumer, effective policy и
 identity lifecycle. Producer `identity.session-family.revoked.v1` уже
 реализован по ADR-2026-036 с atomic Platform API outbox, whole-family revoke,
 user advisory lock и stale-version recheck. Ещё отсутствуют durable publisher,
-Realtime consumer terminal device revoke, global session-expiry sweeper и
-отдельный sender role с VAPID private key; `@nats-io/jetstream` и `web-push`
-требуют отдельного одобрения production-зависимостей. P2 не считается
+JetStream subscription, global session-expiry sweeper и отдельный sender role
+с VAPID private key. Dependency-free Realtime handler с scoped inbox,
+revoked-family tombstone, terminal device revoke и fail-closed upsert уже
+реализован; `@nats-io/jetstream` и `web-push` требуют отдельного одобрения
+production-зависимостей. P2 не считается
 выполненным до реального rank job, multi-tenant queue fairness, terminal
 outbox/delivery и security/load/restore gates.
 
-Realtime consumer exit gate включает durable revoked-family tombstone и
-fail-closed проверку tombstone в device upsert. Тест обязан покрывать оба
-порядка `registration → event` и `event → delayed registration`; update только
+Realtime application-handler gate включает durable revoked-family tombstone,
+scoped inbox receipt и fail-closed проверку tombstone в device upsert; он
+реализован и тестирует оба порядка `registration → event` и
+`event → delayed registration`. Полный exit gate всё ещё требует durable
+publisher/subscription и PostgreSQL 18 concurrency smoke; update только
 существующих devices не принимается из-за resurrection race.
 
 Перед исполнением первого rank job jobs/integrations должен повторно проверять

@@ -1406,7 +1406,8 @@ replicas → drain старых replicas → switch active version`; смеша�
 default 20. Cross-database FK на identity session family запрещён; lifecycle
 отзыва применяется через durable identity event до включения sender.
 Platform API producer этого события реализован по ADR-2026-036; durable
-publisher и Realtime inbox consumer ещё обязательны.
+publisher и JetStream subscription к готовому Realtime application handler
+ещё обязательны.
 
 До включения sender `realtime_db` получает
 `revoked_session_family_tombstones`:
@@ -1423,8 +1424,10 @@ Unique `(user_id, session_family_id)` делает повтор идемпоте
 проверяет tombstone до create/update, поэтому event-before-registration не
 допускает resurrection. Tombstone retention не короче максимального refresh
 TTL плюс предельной задержки outbox/consumer и сохраняется, пока нужен
-связанный device tombstone. Таблица является release-blocker consumer slice и
-не входит в текущую migration producer.
+связанный device tombstone. Таблица, scoped inbox receipt, handler и
+fail-closed upsert guard входят в отдельную Realtime migration; fresh apply и
+concurrent smoke на PostgreSQL 18 остаются release gate. Producer migration
+при этом не меняется.
 
 `deliveries` содержит immutable effective-policy snapshot, deduplication key,
 канал, scheduled time и финальный status; `delivery_attempts` — provider

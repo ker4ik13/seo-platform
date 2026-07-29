@@ -243,8 +243,9 @@
   только внутри защищённого versioned secret store.
 - Revoke/expiry browser device обязан в одной транзакции очистить ciphertext,
   nonce/tag и fingerprints. Producer durable session-family revoked event уже
-  реализован по ADR-2026-036; outbox publisher и Realtime consumer обязательны
-  до включения внешней доставки.
+  реализован по ADR-2026-036; Realtime application handler с durable
+  tombstone и fail-closed upsert также готов. Outbox publisher и JetStream
+  subscription обязательны до включения внешней доставки.
 - KEK rollout выполняется в порядке expand keyring → startup decrypt-canary
   verify каждой используемой версии → drain старых replicas → switch active.
   Текущий coverage guard и missing-version retry проверяют наличие версии, но

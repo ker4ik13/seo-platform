@@ -24,8 +24,12 @@ Dependency-free identity producer по ADR-2026-036 добавляет
 `identity.session-family.revoked.v1`: Platform API terminal-отзывает целые
 session families и атомарно пишет redacted outbox event. Все session lifecycle
 writers одного пользователя используют общий PostgreSQL advisory transaction
-lock; выдача повторно проверяет актуальные `user.version + ACTIVE`. Durable
-publisher, Realtime consumer и global session-expiry sweeper ещё отсутствуют.
+lock; выдача повторно проверяет актуальные `user.version + ACTIVE`. Realtime
+уже содержит dependency-free application handler: exact event validation,
+scoped inbox receipt, durable revoked-family tombstone, terminal device
+revoke и fail-closed tombstone check при upsert используют один user advisory
+lock. Durable JetStream publisher/transport subscription и global
+session-expiry sweeper ещё отсутствуют.
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -462,6 +466,17 @@ installation UUID; перенос между аккаунтами запрещё
 `deliveryAvailable=false` и `testDeliveryAvailable=false`: email/Web Push
 sender, digest и delivery history пока отсутствуют.
 
+Dependency-free handler `identity.session-family.revoked.v1` атомарно
+сохраняет versioned inbox scope, durable tombstone и отзывает только active
+devices той же `userId + sessionFamilyId`, уничтожая crypto/fingerprint
+material. Второй event ID той же family идемпотентен, а reuse event ID для
+другого scope отклоняется. Device upsert проверяет tombstone сразу после
+общего user lock и до endpoint lock либо mutation; Platform API сохраняет
+terminal `401 UNAUTHENTICATED`, не маскируя его как сбой зависимости. DDL
+добавляет индекс `user + registered session family + status`. Сам handler
+ещё не подписан на JetStream, поэтому producer outbox пока не доставляет
+событие автоматически.
+
 Центр уведомлений доступен по `/app/notifications`; колокольчик получает
 user-scoped unread count, а список использует keyset cursor
 `created_at DESC, id DESC`, связанный с фильтром `unreadOnly`. Публичные
@@ -659,6 +674,13 @@ reservation, outbox/event не создаются.
   session, stale principal/version, refresh reuse/expiry commit-before-401,
   reset и MFA ordering. Реальные PostgreSQL 18 race/outbox rollback tests
   остаются staging gate; Prisma schema/migration в этом срезе не менялись.
+- Realtime revoked-family application handler: Prisma validate/generate,
+  strict typecheck, 47/47 tests, production build и diff-check — pass.
+  Покрыты оба порядка event/registration, exact duplicate, второй event ID,
+  scope collision, rollback и сохранение валидного delivery snapshot.
+  Platform API targeted mapping tests 8/8 и typecheck — pass. Fresh migration
+  и реальные concurrent transactions остаются PostgreSQL 18 staging gate;
+  JetStream publisher/subscription в этот dependency-free срез не входят.
 - Target runtime: Node.js 24. Локальная проверка выполнялась на Node.js 22 с
   ожидаемым engine warning; контейнеры используют Node.js 24.
 
@@ -676,10 +698,10 @@ operations, ingest receipts и partial persistence. Live Arsenkin `set`
 `profile/project effective policy → transactional outbox/durable consumer →
 email + Web Push delivery`. Browser device/VAPID public-key lifecycle уже
 реализован по ADR-2026-035; следующий срез добавляет durable session-family
-event publisher/Realtime consumer с revoked-family tombstone и fail-closed
-device-upsert check (producer уже реализован по ADR-2026-036), VAPID
-private-key sender, идемпотентные delivery attempts, retry/DLQ, digest и
-delivery history. Production-зависимости
+event publisher и transport subscription к уже готовому Realtime handler
+(producer, tombstone и fail-closed device-upsert check реализованы по
+ADR-2026-036), VAPID private-key sender, идемпотентные delivery attempts,
+retry/DLQ, digest и delivery history. Production-зависимости
 `@nats-io/jetstream` и `web-push` ещё не одобрены, а фактическая
 durable-доставка не реализована. OAuth/OIDC выполняется после подтверждения
 зависимости `jose`; QR для TOTP — после подтверждения `qrcode`.
@@ -700,10 +722,10 @@ durable-доставка не реализована. OAuth/OIDC выполня�
 - Notification preferences не создают deliveries сами по себе: отсутствуют
   transactional outbox/durable consumer, email/Web Push adapters, digest
   scheduler, VAPID private-key sender и provider delivery history. Device
-  lifecycle и identity producer готовы, но durable outbox publisher и
-  Realtime consumer session-family event с durable revoked-family tombstone и
-  fail-closed tombstone check при device upsert, а также bounded global
-  provider-expiry sweeper остаются release blocker перед внешней доставкой.
+  lifecycle, identity producer, Realtime tombstone handler и fail-closed
+  device-upsert check готовы, но durable outbox publisher/JetStream
+  subscription и bounded global provider-expiry sweeper остаются release
+  blocker перед внешней доставкой.
   До sweeper due subscriptions безопасно очищаются в user-scoped list/upsert.
 - Identity terminal lifecycle ещё требует PostgreSQL 18 staging race tests
   `rotate ↔ rotate`, `login ↔ password reset`,

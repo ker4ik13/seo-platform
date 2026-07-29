@@ -2,7 +2,8 @@
 
 Дата: 29 июля 2026 года
 Статус: принято
-Затронутые репозитории: `platform-contracts`, `platform-api`
+Затронутые репозитории: `platform-contracts`, `platform-api`,
+`platform-realtime`
 
 ## Контекст
 
@@ -104,17 +105,20 @@ credential material запрещены. Контракт находится в `
   не была изменена.
 - Advisory lock сериализует lifecycle только одного пользователя и не создаёт
   глобальный bottleneck.
-- Текущий срез dependency-free: publisher JetStream и Realtime consumer не
-  добавлены, поэтому наличие outbox row ещё не означает доставку события или
-  отзыв browser device.
-- Схема Prisma и migration не меняются.
+- Producer-срез dependency-free: publisher JetStream не добавлен, поэтому
+  наличие outbox row ещё не означает автоматическую доставку события.
+- Realtime dependency-free application handler уже добавлен вместе с Prisma
+  migration: versioned inbox scope, durable revoked-family tombstone,
+  terminal device revoke и upsert guard используют один user advisory lock.
+  Handler ещё не подключён к durable transport subscription.
 
 ## Release blockers и проверка
 
-- Durable outbox publisher и идемпотентный Realtime inbox consumer должны
-  атомарно записать inbox, durable revoked-family tombstone и перевести все
-  active devices с совпавшей session family в terminal state до включения Web
-  Push sender.
+- Durable outbox publisher и JetStream subscription должны доставлять
+  validated envelope в готовый идемпотентный Realtime application handler до
+  включения Web Push sender. Handler атомарно записывает scoped inbox receipt,
+  durable revoked-family tombstone и переводит все active devices с
+  совпавшей session family в terminal state.
 - Одного update существующих devices недостаточно: событие может быть
   обработано раньше запоздавшего registration request, уже
   аутентифицированного старой family. Realtime хранит tombstone по
@@ -123,6 +127,10 @@ credential material запрещены. Контракт находится в `
   Поэтому возможны оба порядка без resurrection:
   `registration → event → terminal revoke` и
   `event → tombstone → rejected registration`.
+- `inbox_events.scope_key` nullable для совместимости с прежними consumers,
+  но этот handler всегда записывает versioned
+  `consumer + userId + sessionFamilyId` и отклоняет reuse одного event ID для
+  другого scope.
 - Tombstone нельзя очищать раньше максимального refresh-session TTL плюс
   допустимая задержка outbox/consumer и пока существует связанный device
   tombstone. Конкретная bounded retention фиксируется вместе с consumer.

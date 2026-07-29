@@ -360,8 +360,11 @@ history. Production-зависимости `@nats-io/jetstream` и `web-push` е
 одобрены; до их подтверждения adapters остаются портами, а UI не должен
 имитировать успешную внешнюю доставку. Producer
 `identity.session-family.revoked.v1` уже атомарно пишет Platform API outbox по
-ADR-2026-036; durable publisher и Realtime consumer terminal-отзыва devices
-остаются release blocker для реальной доставки.
+ADR-2026-036. Dependency-free Realtime application handler уже атомарно
+пишет scoped inbox receipt и revoked-family tombstone, terminal-отзывает
+devices и защищает upsert от event-before-registration. Durable publisher и
+JetStream subscription к handler остаются release blocker для реальной
+доставки.
 
 ## 13. Каналы
 
@@ -427,11 +430,12 @@ Device lifecycle следует ADR-2026-035:
 - corrupt/future local record и owner conflict обрабатываются fail-closed;
   recovery требует явного подтверждения, успешного browser unsubscribe и
   нового installation UUID без молчаливого переноса между аккаунтами.
-- Realtime consumer `identity.session-family.revoked.v1` должен идемпотентно и
-  в одной локальной транзакции записать inbox и revoked-family tombstone, а
-  также terminal-отозвать все active devices с совпавшими
-  `userId + registration session family`; producer outbox без
-  publisher/consumer не считается применённым отзывом.
+- Realtime handler `identity.session-family.revoked.v1` идемпотентно и в
+  одной локальной транзакции записывает scoped inbox receipt и revoked-family
+  tombstone, а также terminal-отзывает все active devices с совпавшими
+  `userId + registration session family`. Producer outbox без durable
+  publisher/JetStream subscription пока не считается автоматически
+  применённым отзывом.
 - Device registration/upsert под тем же user/device lock проверяет durable
   tombstone до записи. Это закрывает reorder, когда event обработан раньше
   уже начатого запроса регистрации старой family; такой запрос fail-closed не
