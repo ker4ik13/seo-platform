@@ -11,26 +11,32 @@ import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { internalTokensEqual } from "./internal-token.js";
 
+/**
+ * Dedicated secret-bearing boundary for rank workers. The generic internal
+ * service token must never authorize plaintext manifest chunk reads.
+ */
 @Injectable()
-export class InternalApiGuard implements CanActivate {
+export class RankExecutionApiGuard implements CanActivate {
   public constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig
   ) {}
 
   public canActivate(context: ExecutionContext): boolean {
-    const expected = this.config.internalApiToken;
+    const expected = this.config.jobsToSeoRankToken;
     if (!expected) {
       throw new ServiceUnavailableException(
-        "Internal API authentication is not configured"
+        "Rank execution authentication is not configured"
       );
     }
     const request = context.switchToHttp().getRequest<FastifyRequest>();
-    const provided = request.headers["x-internal-token"];
+    const provided = request.headers["x-rank-execution-token"];
     if (
       typeof provided !== "string" ||
       !internalTokensEqual(expected, provided)
     ) {
-      throw new UnauthorizedException("Internal authentication failed");
+      throw new UnauthorizedException(
+        "Rank execution authentication failed"
+      );
     }
     return true;
   }

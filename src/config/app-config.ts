@@ -5,6 +5,7 @@ export interface AppConfig {
   readonly databaseUrl: string;
   readonly databasePoolMax: number;
   readonly internalApiToken?: string;
+  readonly jobsToSeoRankToken?: string;
   readonly nats: {
     readonly url: string;
     readonly user?: string;
@@ -39,12 +40,30 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const user = env.NATS_USER?.trim();
   const password = env.NATS_PASSWORD?.trim();
   const internalApiToken = env.INTERNAL_API_TOKEN?.trim();
+  const jobsToSeoRankToken = env.JOBS_TO_SEO_RANK_TOKEN?.trim();
   if (
     nodeEnv === "production" &&
     (!internalApiToken || internalApiToken.length < 32)
   ) {
     throw new Error(
       "INTERNAL_API_TOKEN with at least 32 characters is required in production"
+    );
+  }
+  if (
+    nodeEnv === "production" &&
+    (!jobsToSeoRankToken || jobsToSeoRankToken.length < 32)
+  ) {
+    throw new Error(
+      "JOBS_TO_SEO_RANK_TOKEN with at least 32 characters is required in production"
+    );
+  }
+  if (
+    internalApiToken &&
+    jobsToSeoRankToken &&
+    internalApiToken === jobsToSeoRankToken
+  ) {
+    throw new Error(
+      "JOBS_TO_SEO_RANK_TOKEN must differ from INTERNAL_API_TOKEN"
     );
   }
 
@@ -59,6 +78,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "DATABASE_POOL_MAX"
     ),
     ...(internalApiToken ? { internalApiToken } : {}),
+    ...(jobsToSeoRankToken ? { jobsToSeoRankToken } : {}),
     nats: {
       url: env.NATS_URL?.trim() || "nats://localhost:4222",
       ...(user ? { user } : {}),

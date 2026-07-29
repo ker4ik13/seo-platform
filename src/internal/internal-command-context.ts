@@ -49,7 +49,7 @@ export function internalUuid(value: string, field: string): string {
       `Invalid trusted internal identifier: ${field}`
     );
   }
-  return value;
+  return value.toLowerCase();
 }
 
 function internalHeader(

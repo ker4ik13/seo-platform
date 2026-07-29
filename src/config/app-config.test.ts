@@ -21,4 +21,35 @@ test("requires internal authentication in production", () => {
       }),
     /INTERNAL_API_TOKEN/u
   );
+
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: "postgresql://test",
+        INTERNAL_API_TOKEN: "i".repeat(32)
+      }),
+    /JOBS_TO_SEO_RANK_TOKEN/u
+  );
+});
+
+test("keeps generic and secret-bearing rank tokens distinct", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: "postgresql://test",
+        INTERNAL_API_TOKEN: "s".repeat(32),
+        JOBS_TO_SEO_RANK_TOKEN: "s".repeat(32)
+      }),
+    /must differ/u
+  );
+
+  const config = loadAppConfig({
+    NODE_ENV: "production",
+    DATABASE_URL: "postgresql://test",
+    INTERNAL_API_TOKEN: "i".repeat(32),
+    JOBS_TO_SEO_RANK_TOKEN: "r".repeat(32)
+  });
+  assert.equal(config.jobsToSeoRankToken, "r".repeat(32));
 });

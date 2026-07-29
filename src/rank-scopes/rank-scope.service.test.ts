@@ -87,6 +87,13 @@ test("hash is stable and changes with execution-relevant keyword state", async (
   ];
   const first = await scopeService(context(), original).calculate(command);
   const replay = await scopeService(context(), original).calculate(command);
+  const reassigned = await scopeService(context(), [
+    original[1]!,
+    {
+      ...original[0]!,
+      id: "01900000-0000-7000-8000-000000009999"
+    }
+  ]).calculate(command);
   const textChanged = await scopeService(context(), [
     {
       ...original[0]!,
@@ -113,8 +120,12 @@ test("hash is stable and changes with execution-relevant keyword state", async (
     availableScopeHash(first.semanticScopeHash)
   );
   assert.equal(
+    availableScopeHash(reassigned.semanticScopeHash),
+    availableScopeHash(first.semanticScopeHash)
+  );
+  assert.equal(
     availableScopeHash(first.semanticScopeHash),
-    "54e3f23fc6003af97c270fe7e5ebd04a494eeecfb4e9984094a2b1e3a05b2b02"
+    "15001c9a454f7e4bbe2dfedada203e01b87e11fe55b39c00a7a5019dc70f01bb"
   );
   assert.doesNotMatch(
     JSON.stringify(first),
@@ -191,6 +202,25 @@ test("returns an unavailable hash for a bounded over-limit scope", async () => {
   assert.doesNotMatch(serialized, new RegExp(sentinelText, "u"));
 });
 
+test("does not materialize provider-incompatible keyword text", async () => {
+  const observed: unknown[] = [];
+  const result = await scopeService(
+    context(),
+    [
+      assignment(1, {
+        textOriginal: "я".repeat(501)
+      })
+    ],
+    observed
+  ).calculate(command);
+
+  assert.equal(result.keywordCount, "1");
+  assert.deepEqual(result.semanticScopeHash, {
+    availability: "UNAVAILABLE"
+  });
+  assert.equal(observed.length, 2);
+});
+
 test("foreign tenant and context stay indistinguishable as not found", async () => {
   const foreignWorkspaceId =
     "01900000-0000-7000-8000-000000000099";
@@ -246,6 +276,29 @@ function scopeService(
     ) => {
       observed.push(options);
       return work({
+        $queryRaw: async (strings: TemplateStringsArray) => {
+          assert.match(
+            strings.join(""),
+            /CASE[\s\S]*octet_length[\s\S]*THEN[\s\S]*ELSE char_length/u
+          );
+          const bounded = assignments.slice(0, 1_001);
+          const characterCounts = bounded.map(
+            ({ keyword }) => [...keyword.textOriginal].length
+          );
+          const byteCounts = bounded.map(({ keyword }) =>
+            Buffer.byteLength(keyword.textOriginal, "utf8")
+          );
+          return [
+            {
+              assignmentCount: bounded.length,
+              maxKeywordCharacters: Math.max(0, ...characterCounts),
+              maxKeywordBytes: String(Math.max(0, ...byteCounts)),
+              totalKeywordBytes: String(
+                byteCounts.reduce((total, value) => total + value, 0)
+              )
+            }
+          ];
+        },
         trackingContext: {
           findFirst: async ({
             where
@@ -267,9 +320,15 @@ function scopeService(
             take: number;
           }) => {
             observed.push(where);
-            assert.deepEqual(orderBy, { id: "asc" });
+            assert.deepEqual(orderBy, { keywordId: "asc" });
             assert.equal(take, 1_001);
-            return assignments;
+            return [...assignments].sort((left, right) =>
+              left.keywordId < right.keywordId
+                ? -1
+                : left.keywordId > right.keywordId
+                  ? 1
+                  : 0
+            );
           }
         }
       });

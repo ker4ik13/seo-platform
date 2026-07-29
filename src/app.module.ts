@@ -8,6 +8,7 @@ import { SemanticImportModule } from "./semantic-imports/semantic-import.module.
 import { KeywordModule } from "./keywords/keyword.module.js";
 import { TrackingContextModule } from "./tracking-contexts/tracking-context.module.js";
 import { RankScopeModule } from "./rank-scopes/rank-scope.module.js";
+import { RankManifestModule } from "./rank-manifests/rank-manifest.module.js";
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { RankScopeModule } from "./rank-scopes/rank-scope.module.js";
     KeywordModule,
     TrackingContextModule,
     RankScopeModule,
+    RankManifestModule,
     SystemModule
   ]
 })
