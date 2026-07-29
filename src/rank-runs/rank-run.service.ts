@@ -5,12 +5,14 @@ import {
   Injectable,
   NotFoundException
 } from "@nestjs/common";
-import type {
-  InternalCancelRankJobInput,
-  InternalCreateRankRunInput,
-  InternalRankJobQuery,
-  RankJobFailureCode,
-  RankJobSummary
+import {
+  rankRunConflictDetails,
+  type InternalCancelRankJobInput,
+  type InternalCreateRankRunInput,
+  type InternalRankRunConflictDetails,
+  type InternalRankJobQuery,
+  type RankJobSummary,
+  type RankRunConflictReason
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import type {
@@ -387,7 +389,11 @@ export class RankRunService {
     if (equivalent) {
       throw rankJobConflict(
         "EQUIVALENT_RUN_ACTIVE",
-        "This rank estimate was already used"
+        "This rank estimate was already used",
+        {
+          reason: "EQUIVALENT_RUN_ACTIVE",
+          existingJobId: equivalent.jobId
+        }
       );
     }
     return undefined;
@@ -665,11 +671,33 @@ function isConcurrencyFailure(error: unknown, depth = 0): boolean {
 }
 
 function rankJobConflict(
-  code: RankJobFailureCode | "IDEMPOTENCY_CONFLICT",
-  message: string
+  code: RankRunConflictReason | "IDEMPOTENCY_CONFLICT",
+  message: string,
+  details?: InternalRankRunConflictDetails
 ): HttpException {
+  let safeDetails: InternalRankRunConflictDetails | undefined;
+  if (code !== "IDEMPOTENCY_CONFLICT") {
+    try {
+      safeDetails = rankRunConflictDetails(
+        code === "EQUIVALENT_RUN_ACTIVE"
+          ? details
+          : { reason: code }
+      );
+    } catch {
+      throw new Error("Rank Job conflict details are invalid");
+    }
+    if (safeDetails.reason !== code) {
+      throw new Error("Rank Job conflict reason does not match its code");
+    }
+  }
   return new HttpException(
-    { error: { code, message } },
+    {
+      error: {
+        code,
+        message,
+        ...(safeDetails ? { details: safeDetails } : {})
+      }
+    },
     HttpStatus.CONFLICT
   );
 }

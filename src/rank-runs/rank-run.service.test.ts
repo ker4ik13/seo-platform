@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { HttpException } from "@nestjs/common";
 import type {
   InternalCancelRankJobInput,
   InternalCreateRankRunInput
@@ -84,6 +85,68 @@ test("returns an exact idempotent replay before mutable execution checks", async
   assert.equal(transactionCalls, 0);
   assert.equal(estimateLookups, 0);
   assert.deepEqual(enqueued, [jobId]);
+});
+
+test("returns the attachable equivalent Job after a concurrent create", async () => {
+  const prisma = {
+    job: {
+      findUnique: async () => null
+    },
+    rankJobRun: {
+      findFirst: async () => ({ jobId })
+    },
+    $transaction: async () => {
+      throw { code: "P2002" };
+    }
+  } as unknown as PrismaService;
+  const service = new RankRunService(prisma, queue([]));
+
+  await assert.rejects(
+    service.create(
+      rankRunInput(),
+      "rank-run-idempotency-0002",
+      "request-concurrent"
+    ),
+    (error: unknown) => {
+      assert.ok(error instanceof HttpException);
+      assert.equal(error.getStatus(), 409);
+      assert.deepEqual(error.getResponse(), {
+        error: {
+          code: "EQUIVALENT_RUN_ACTIVE",
+          message: "This rank estimate was already used",
+          details: {
+            reason: "EQUIVALENT_RUN_ACTIVE",
+            existingJobId: jobId
+          }
+        }
+      });
+      return true;
+    }
+  );
+});
+
+test("fails closed instead of exposing a malformed equivalent Job locator", async () => {
+  const prisma = {
+    job: {
+      findUnique: async () => null
+    },
+    rankJobRun: {
+      findFirst: async () => ({ jobId: "not-a-job-id" })
+    },
+    $transaction: async () => {
+      throw { code: "P2002" };
+    }
+  } as unknown as PrismaService;
+  const service = new RankRunService(prisma, queue([]));
+
+  await assert.rejects(
+    service.create(
+      rankRunInput(),
+      "rank-run-idempotency-0003",
+      "request-malformed-winner"
+    ),
+    /Rank Job conflict details are invalid/u
+  );
 });
 
 test("cancels an unsealed preparation atomically without manifest work", async () => {
