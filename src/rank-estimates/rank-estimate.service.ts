@@ -808,15 +808,25 @@ function checkedReplay(
 function storedExecutionScopeHash(
   stored: StoredRankEstimate
 ): RankEstimateScopeHash {
+  if (
+    !Number.isInteger(stored.keywordCount) ||
+    stored.keywordCount < 0 ||
+    stored.keywordCount > 1_001
+  ) {
+    throw new Error("Invalid immutable rank estimate keyword count");
+  }
   if (stored.semanticScopeHash === null || stored.scopeHash === null) {
     if (
       stored.semanticScopeHash !== null ||
       stored.scopeHash !== null ||
-      stored.keywordCount !== 1_001
+      stored.keywordCount === 0
     ) {
       throw new Error("Invalid immutable rank estimate scope hashes");
     }
     return { availability: "UNAVAILABLE" };
+  }
+  if (stored.keywordCount > RANK_ESTIMATE_KEYWORD_LIMIT) {
+    throw new Error("Invalid immutable rank estimate scope hashes");
   }
   const projectDomainHash = bytes32(stored.projectDomainHash);
   const semanticScopeHash = bytes32(stored.semanticScopeHash);

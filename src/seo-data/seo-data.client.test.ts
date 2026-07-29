@@ -117,12 +117,47 @@ test("accepts only a bounded redacted rank scope for the trusted project", async
   }
 });
 
-test("rejects secret-bearing or scope-inconsistent rank scope responses", async () => {
+test("accepts an unavailable hash for a bounded provider-incompatible scope", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () =>
+    Response.json({
+      data: {
+        ...rankScope(),
+        keywordCount: "1",
+        pairCount: "1",
+        semanticScopeHash: { availability: "UNAVAILABLE" }
+      },
+      meta: { requestId: "seo-request-unavailable-bounded" }
+    })) as typeof fetch;
+  try {
+    const result = await new SeoDataClient(config).rankEstimateScope({
+      workspaceId: context.workspaceId,
+      projectId: context.projectId,
+      actorId: context.actorId,
+      trackingContextId: context.importId
+    });
+
+    assert.equal(result.keywordCount, "1");
+    assert.deepEqual(result.semanticScopeHash, {
+      availability: "UNAVAILABLE"
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects secret-bearing, unhashable-empty or scope-inconsistent rank scope responses", async () => {
   const originalFetch = globalThis.fetch;
   try {
     for (const data of [
       { ...rankScope(), keywordText: "private keyword sentinel" },
       { ...rankScope(), projectId: context.actorId },
+      {
+        ...rankScope(),
+        keywordCount: "0",
+        pairCount: "0",
+        semanticScopeHash: { availability: "UNAVAILABLE" }
+      },
       {
         ...rankScope(),
         keywordCount: "1001",

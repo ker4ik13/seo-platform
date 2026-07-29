@@ -82,8 +82,10 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
     !positiveInteger(scope.contextVersion) ||
     !positiveInteger(scope.configurationVersion) ||
     Number(scope.configurationVersion) > Number(scope.contextVersion) ||
-    (keywordCount === "1001") !==
-      (scopeHash.availability === "UNAVAILABLE") ||
+    (keywordCount === "0" &&
+      scopeHash.availability === "UNAVAILABLE") ||
+    (keywordCount === "1001" &&
+      scopeHash.availability === "AVAILABLE") ||
     Number(taskCount) !==
       (keywordCount === "1001"
         ? 0

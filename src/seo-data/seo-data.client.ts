@@ -368,8 +368,10 @@ function rankEstimateScope(
   if (
     !configuration ||
     !semanticScopeHash ||
-    (payload.keywordCount === "1001") !==
-      (semanticScopeHash.availability === "UNAVAILABLE")
+    (payload.keywordCount === "0" &&
+      semanticScopeHash.availability === "UNAVAILABLE") ||
+    (payload.keywordCount === "1001" &&
+      semanticScopeHash.availability === "AVAILABLE")
   ) {
     return undefined;
   }

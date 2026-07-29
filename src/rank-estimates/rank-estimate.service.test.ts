@@ -7,6 +7,7 @@ import type {
 } from "@seo-platform/contracts";
 import type { PrismaService } from "../database/prisma.service.js";
 import type { SeoDataClient } from "../seo-data/seo-data.client.js";
+import { rankEstimateSnapshot } from "./rank-estimate-snapshot.js";
 import {
   RANK_ESTIMATE_TTL_MILLISECONDS,
   RankEstimateService
@@ -361,6 +362,135 @@ test("uses a bounded 1001 sentinel without fabricating a partial hash", async ()
       ({ code }) => code === "KEYWORD_LIMIT_EXCEEDED"
     )
   );
+});
+
+test("keeps a provider-incompatible bounded scope blocked and exactly replayable", async () => {
+  const harness = estimateHarness({
+    scope: scope({
+      keywordCount: "1",
+      semanticScopeHash: { availability: "UNAVAILABLE" }
+    })
+  });
+  const original = await harness.service.create(
+    input,
+    "rank-estimate-unavailable-bounded"
+  );
+  const replay = await harness.service.create(
+    input,
+    "rank-estimate-unavailable-bounded"
+  );
+
+  assert.equal(original.status, "BLOCKED");
+  assert.equal(original.scope.keywordCount, "1");
+  assert.deepEqual(original.scope.scopeHash, {
+    availability: "UNAVAILABLE"
+  });
+  assert.equal(original.workload.taskCount, "1");
+  assert.equal(original.workload.minimumRequestCount, "3");
+  assert.ok(
+    original.blockers.some(
+      ({ code }) => code === "SCOPE_HASH_UNAVAILABLE"
+    )
+  );
+  assert.equal(
+    original.blockers.some(
+      ({ code }) => code === "KEYWORD_LIMIT_EXCEEDED"
+    ),
+    false
+  );
+  assert.equal(harness.createdData?.semanticScopeHash, null);
+  assert.equal(harness.createdData?.scopeHash, null);
+  assert.deepEqual(replay, original);
+  assert.equal(harness.seoCalls, 1);
+  assert.equal(harness.transactionCalls, 1);
+});
+
+test("rejects unavailable empty and available sentinel snapshots", async () => {
+  const unavailableHarness = estimateHarness({
+    scope: scope({
+      keywordCount: "1",
+      semanticScopeHash: { availability: "UNAVAILABLE" }
+    })
+  });
+  const unavailable = await unavailableHarness.service.create(
+    input,
+    "rank-estimate-snapshot-empty"
+  );
+  assert.throws(
+    () =>
+      rankEstimateSnapshot({
+        ...unavailable,
+        scope: {
+          ...unavailable.scope,
+          keywordCount: "0",
+          pairCount: "0"
+        },
+        workload: {
+          ...unavailable.workload,
+          taskCount: "0",
+          minimumRequestCount: "0"
+        }
+      }),
+    /Invalid immutable rank estimate snapshot/u
+  );
+
+  const availableHarness = estimateHarness();
+  const available = await availableHarness.service.create(
+    input,
+    "rank-estimate-snapshot-sentinel"
+  );
+  assert.throws(
+    () =>
+      rankEstimateSnapshot({
+        ...available,
+        scope: {
+          ...available.scope,
+          keywordCount: "1001",
+          pairCount: "1001"
+        },
+        workload: {
+          ...available.workload,
+          taskCount: "0",
+          minimumRequestCount: "0"
+        }
+      }),
+    /Invalid immutable rank estimate snapshot/u
+  );
+});
+
+test("rejects unavailable empty and one-null stored hash replays", async () => {
+  const harness = estimateHarness({
+    scope: scope({
+      keywordCount: "1",
+      semanticScopeHash: { availability: "UNAVAILABLE" }
+    })
+  });
+  await harness.service.create(
+    input,
+    "rank-estimate-invalid-stored-hashes"
+  );
+
+  harness.changeStored({ keywordCount: 0 });
+  await assert.rejects(
+    harness.service.create(
+      input,
+      "rank-estimate-invalid-stored-hashes"
+    ),
+    /Invalid immutable rank estimate scope hashes/u
+  );
+
+  harness.changeStored({
+    keywordCount: 1,
+    scopeHash: Uint8Array.from(Buffer.alloc(32))
+  });
+  await assert.rejects(
+    harness.service.create(
+      input,
+      "rank-estimate-invalid-stored-hashes"
+    ),
+    /Invalid immutable rank estimate scope hashes/u
+  );
+  assert.equal(harness.seoCalls, 1);
 });
 
 test("strictly scopes connector and validation reads to the trusted tenant", async () => {
