@@ -18,3 +18,9 @@ export function canManageWorkspaceIntegrations(
 ): boolean {
   return Boolean(roleCode && INTEGRATION_MANAGE_ROLES.has(roleCode));
 }
+
+export function canTestWorkspaceIntegrations(
+  roleCode: string | undefined
+): boolean {
+  return canViewWorkspaceIntegrations(roleCode);
+}

@@ -14,6 +14,7 @@ import {
   browserApiRequest,
   BrowserApiError
 } from "../lib/browser-api";
+import { IntegrationCredentialValidation } from "./integration-credential-validation";
 
 type Provider = IntegrationProvider;
 type CredentialStatus = IntegrationCredentialStatus;
@@ -36,20 +37,32 @@ interface IntegrationOperationError {
   readonly reauthenticationRequired: boolean;
 }
 
+type CredentialOperationKind =
+  | "create"
+  | "update"
+  | "revoke"
+  | "validation";
+type CredentialOperationState = Readonly<
+  Record<string, CredentialOperationKind | undefined>
+>;
+
 const EMPTY_DRAFT: CredentialDraft = {
   provider: "XMLSTOCK",
   label: "",
   apiKey: "",
   accountIdentifier: ""
 };
+const CREATE_OPERATION_KEY = "__create_credential__";
 
 export function IntegrationSettings({
   workspaceId,
   canManage,
+  canTest,
   readOnly
 }: Readonly<{
   workspaceId: string;
   canManage: boolean;
+  canTest: boolean;
   readOnly: boolean;
 }>) {
   const [catalog, setCatalog] = useState<readonly ProviderCatalogItem[]>([]);
@@ -60,8 +73,8 @@ export function IntegrationSettings({
   const [editApiKey, setEditApiKey] = useState("");
   const [editAccountIdentifier, setEditAccountIdentifier] = useState("");
   const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState<string>();
-  const [saving, setSaving] = useState(false);
+  const [credentialOperations, setCredentialOperations] =
+    useState<CredentialOperationState>({});
   const [loadError, setLoadError] = useState<string>();
   const [createError, setCreateError] =
     useState<IntegrationOperationError>();
@@ -76,6 +89,15 @@ export function IntegrationSettings({
     useState<CredentialFieldErrors>({});
   const [reload, setReload] = useState(0);
   const createIdempotencyKey = useRef<string | undefined>(undefined);
+  const credentialOperationsRef = useRef<Record<
+    string,
+    CredentialOperationKind | undefined
+  >>({});
+  const saving =
+    credentialOperations[CREATE_OPERATION_KEY] === "create";
+  const editingOperation = editing
+    ? credentialOperations[editing.id]
+    : undefined;
 
   useEffect(() => {
     const controller = new AbortController();
@@ -112,8 +134,30 @@ export function IntegrationSettings({
     [catalog, draft.provider]
   );
 
+  async function refreshCredential(
+    credentialId: string
+  ): Promise<Credential | undefined> {
+    const result = await browserApiCollectionRequest<Credential>(
+      `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/credentials`
+    );
+    const refreshed = result.data.find(
+      (credential) => credential.id === credentialId
+    );
+    setCredentials((current) =>
+      refreshed
+        ? current.map((credential) =>
+            credential.id === credentialId ? refreshed : credential
+          )
+        : current.filter((credential) => credential.id !== credentialId)
+    );
+    setEditing((current) =>
+      current?.id === credentialId ? refreshed : current
+    );
+    setListError(undefined);
+    return refreshed;
+  }
+
   async function createCredential(): Promise<void> {
-    if (saving) return;
     const validationErrors = validateCreateCredential(
       draft,
       Boolean(selectedProvider?.requiresAccountIdentifier)
@@ -127,7 +171,7 @@ export function IntegrationSettings({
       setSuccess(undefined);
       return;
     }
-    setSaving(true);
+    if (!acquireCredentialOperation("create")) return;
     setCreateError(undefined);
     setSuccess(undefined);
     setCreateFieldErrors({});
@@ -168,11 +212,12 @@ export function IntegrationSettings({
           : integrationOperationError(requestError)
       );
     } finally {
-      setSaving(false);
+      releaseCredentialOperation("create");
     }
   }
 
   function beginEdit(credential: Credential): void {
+    if (isCredentialOperationActive(credential.id)) return;
     setEditing(credential);
     setEditLabel(credential.label);
     setEditApiKey("");
@@ -192,7 +237,7 @@ export function IntegrationSettings({
   }
 
   async function saveEdit(): Promise<void> {
-    if (!editing || busyId) return;
+    if (!editing || isCredentialOperationActive(editing.id)) return;
     const validationErrors = validateEditCredential(
       editLabel,
       editApiKey,
@@ -208,7 +253,8 @@ export function IntegrationSettings({
       setSuccess(undefined);
       return;
     }
-    setBusyId(editing.id);
+    const credentialId = editing.id;
+    if (!acquireCredentialOperation("update", credentialId)) return;
     setEditError(undefined);
     setSuccess(undefined);
     setEditFieldErrors({});
@@ -244,20 +290,20 @@ export function IntegrationSettings({
           : integrationOperationError(requestError)
       );
     } finally {
-      setBusyId(undefined);
+      releaseCredentialOperation("update", credentialId);
     }
   }
 
   async function revoke(credential: Credential): Promise<void> {
     if (
-      busyId ||
+      isCredentialOperationActive(credential.id) ||
       !window.confirm(
         `Отключить «${credential.label}»? Ключ будет отозван и перезаписан в активном vault.`
       )
     ) {
       return;
     }
-    setBusyId(credential.id);
+    if (!acquireCredentialOperation("revoke", credential.id)) return;
     setListError(undefined);
     setSuccess(undefined);
     try {
@@ -273,8 +319,39 @@ export function IntegrationSettings({
     } catch (requestError) {
       setListError(integrationOperationError(requestError));
     } finally {
-      setBusyId(undefined);
+      releaseCredentialOperation("revoke", credential.id);
     }
+  }
+
+  function acquireCredentialOperation(
+    kind: CredentialOperationKind,
+    credentialId?: string
+  ): boolean {
+    const key = credentialOperationKey(kind, credentialId);
+    if (credentialOperationsRef.current[key]) return false;
+    const next = {
+      ...credentialOperationsRef.current,
+      [key]: kind
+    };
+    credentialOperationsRef.current = next;
+    setCredentialOperations(next);
+    return true;
+  }
+
+  function releaseCredentialOperation(
+    kind: CredentialOperationKind,
+    credentialId?: string
+  ): void {
+    const key = credentialOperationKey(kind, credentialId);
+    if (credentialOperationsRef.current[key] !== kind) return;
+    const next = { ...credentialOperationsRef.current };
+    delete next[key];
+    credentialOperationsRef.current = next;
+    setCredentialOperations(next);
+  }
+
+  function isCredentialOperationActive(credentialId: string): boolean {
+    return Boolean(credentialOperationsRef.current[credentialId]);
   }
 
   if (loading) {
@@ -497,8 +574,10 @@ export function IntegrationSettings({
               {saving ? "Шифруем…" : "Сохранить ключ"}
             </button>
             <span>
-              Новое подключение останется «ожидает проверки» до
-              provider-specific server-side test.
+              {selectedProvider?.credentialValidationMode ===
+              "ACCOUNT_METADATA"
+                ? "После сохранения запустите безопасную проверку подключения в списке ниже."
+                : "Для XMLStock автоматическая внешняя проверка пока недоступна; подключение останется «ожидает проверки»."}
             </span>
           </div>
         </section>
@@ -559,26 +638,78 @@ export function IntegrationSettings({
                     }).format(new Date(credential.updatedAt))}
                   </span>
                 </div>
-                {canManage && (
-                  <div className="integration-row-actions">
-                    <button
-                      className="text-button"
-                      disabled={Boolean(busyId)}
-                      onClick={() => beginEdit(credential)}
-                      type="button"
-                    >
-                      Изменить
-                    </button>
-                    <button
-                      className="text-button danger-text"
-                      disabled={Boolean(busyId)}
-                      onClick={() => void revoke(credential)}
-                      type="button"
-                    >
-                      {busyId === credential.id ? "Отключаем…" : "Отключить"}
-                    </button>
-                  </div>
-                )}
+                <div className="integration-row-actions">
+                  <IntegrationCredentialValidation
+                    activeValidation={credential.activeValidation}
+                    canTest={canTest}
+                    credentialId={credential.id}
+                    credentialLastErrorCode={credential.lastErrorCode}
+                    credentialLabel={credential.label}
+                    credentialStatus={credential.status}
+                    credentialVersion={credential.version}
+                    key={`${credential.id}:${credential.version}`}
+                    onAcquireOperation={() =>
+                      acquireCredentialOperation(
+                        "validation",
+                        credential.id
+                      )
+                    }
+                    onReleaseOperation={() =>
+                      releaseCredentialOperation(
+                        "validation",
+                        credential.id
+                      )
+                    }
+                    onResolveConflict={async () =>
+                      (
+                        await refreshCredential(credential.id)
+                      )?.activeValidation
+                    }
+                    onTerminal={async () => {
+                      await refreshCredential(credential.id);
+                    }}
+                    operationBlocked={Boolean(
+                      (credentialOperations[credential.id] &&
+                        credentialOperations[credential.id] !==
+                          "validation") ||
+                        editing?.id === credential.id
+                    )}
+                    provider={credential.provider}
+                    readOnly={readOnly}
+                    validationMode={
+                      catalog.find(
+                        ({ provider }) => provider === credential.provider
+                      )?.credentialValidationMode
+                    }
+                    workspaceId={workspaceId}
+                  />
+                  {canManage && (
+                    <div className="integration-credential-actions">
+                      <button
+                        className="text-button"
+                        disabled={Boolean(
+                          credentialOperations[credential.id]
+                        )}
+                        onClick={() => beginEdit(credential)}
+                        type="button"
+                      >
+                        Изменить
+                      </button>
+                      <button
+                        className="text-button danger-text"
+                        disabled={Boolean(
+                          credentialOperations[credential.id]
+                        )}
+                        onClick={() => void revoke(credential)}
+                        type="button"
+                      >
+                        {credentialOperations[credential.id] === "revoke"
+                          ? "Отключаем…"
+                          : "Отключить"}
+                      </button>
+                    </div>
+                  )}
+                </div>
               </article>
             ))}
           </div>
@@ -587,7 +718,10 @@ export function IntegrationSettings({
 
       {editing && (
         <section
-          aria-busy={busyId === editing.id}
+          aria-busy={
+            editingOperation === "update" ||
+            editingOperation === "revoke"
+          }
           aria-label="Изменение подключения"
           className="panel integration-edit-card"
         >
@@ -604,7 +738,7 @@ export function IntegrationSettings({
             </div>
             <button
               className="text-button"
-              disabled={busyId === editing.id}
+              disabled={Boolean(editingOperation)}
               onClick={closeEdit}
               type="button"
             >
@@ -622,7 +756,7 @@ export function IntegrationSettings({
                     : undefined
                 }
                 aria-invalid={Boolean(editFieldErrors.label)}
-                disabled={busyId === editing.id}
+                disabled={Boolean(editingOperation)}
                 maxLength={160}
                 minLength={1}
                 onChange={(event) => {
@@ -653,7 +787,7 @@ export function IntegrationSettings({
                 }
                 aria-invalid={Boolean(editFieldErrors.apiKey)}
                 autoComplete="new-password"
-                disabled={busyId === editing.id}
+                disabled={Boolean(editingOperation)}
                 maxLength={2048}
                 minLength={8}
                 onChange={(event) => {
@@ -692,7 +826,7 @@ export function IntegrationSettings({
                   aria-invalid={Boolean(
                     editFieldErrors.accountIdentifier
                   )}
-                  disabled={busyId === editing.id}
+                  disabled={Boolean(editingOperation)}
                   maxLength={255}
                   minLength={1}
                   onChange={(event) => {
@@ -722,11 +856,11 @@ export function IntegrationSettings({
           <div className="integration-form-actions">
             <button
               className="primary-button"
-              disabled={Boolean(busyId)}
+              disabled={Boolean(editingOperation)}
               onClick={() => void saveEdit()}
               type="button"
             >
-              {busyId === editing.id ? "Сохраняем…" : "Сохранить"}
+              {editingOperation === "update" ? "Сохраняем…" : "Сохранить"}
             </button>
             {(editApiKey.trim() || editAccountIdentifier.trim()) && (
               <span>
@@ -738,6 +872,17 @@ export function IntegrationSettings({
       )}
     </div>
   );
+}
+
+function credentialOperationKey(
+  kind: CredentialOperationKind,
+  credentialId: string | undefined
+): string {
+  if (kind === "create") return CREATE_OPERATION_KEY;
+  if (!credentialId) {
+    throw new Error(`Credential ID is required for ${kind}`);
+  }
+  return credentialId;
 }
 
 function StatusBadge({

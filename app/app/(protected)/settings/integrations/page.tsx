@@ -3,6 +3,7 @@ import { IntegrationSettings } from "../../../../../components/integration-setti
 import { SettingsTabs } from "../../../../../components/settings-tabs";
 import {
   canManageWorkspaceIntegrations,
+  canTestWorkspaceIntegrations,
   canViewWorkspaceIntegrations
 } from "../../../../../lib/app-permissions";
 import { requireProtectedAppContext } from "../../../../../lib/protected-app";
@@ -16,6 +17,9 @@ export default async function IntegrationSettingsPage() {
   );
   const canManage =
     canManageWorkspaceIntegrations(context.workspace?.roleCode) &&
+    context.workspace?.status === "ACTIVE";
+  const canTest =
+    canTestWorkspaceIntegrations(context.workspace?.roleCode) &&
     context.workspace?.status === "ACTIVE";
 
   return (
@@ -58,6 +62,7 @@ export default async function IntegrationSettingsPage() {
       ) : (
         <IntegrationSettings
           canManage={canManage}
+          canTest={canTest}
           readOnly={context.workspace.status === "READ_ONLY"}
           workspaceId={context.workspace.id}
         />
