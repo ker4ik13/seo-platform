@@ -1,0 +1,708 @@
+name: ${COMPOSE_PROJECT_NAME:-seo-platform}
+
+x-backend-defaults: &backend-defaults
+  restart: unless-stopped
+  init: true
+  networks:
+    - internal
+  depends_on:
+    postgres:
+      condition: service_healthy
+    nats:
+      condition: service_healthy
+
+x-common-backend-env: &common-backend-env
+  NODE_ENV: production
+  SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+  NATS_URL: nats://nats:4222
+  NATS_USER: ${NATS_USER:?NATS_USER is required}
+  NATS_PASSWORD: ${NATS_PASSWORD:?NATS_PASSWORD is required}
+  INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
+
+x-jobs-env: &jobs-env
+  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/jobs_db
+  REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+  SEO_DATA_COMMAND_TIMEOUT_MS: ${SEO_DATA_COMMAND_TIMEOUT_MS:-60000}
+  SEO_DATA_URL: http://seo-data:4001
+  S3_ENABLED: ${S3_ENABLED:-false}
+  S3_ENDPOINT: ${S3_ENDPOINT:-}
+  S3_REGION: ${S3_REGION:-ru-central1}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+  S3_BUCKET_UPLOADS: ${S3_BUCKET_UPLOADS:-}
+  S3_BUCKET_ARTIFACTS: ${S3_BUCKET_ARTIFACTS:-}
+  S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+  S3_SIGNED_URL_TTL_SECONDS: ${S3_SIGNED_URL_TTL_SECONDS:-900}
+  UPLOAD_MAX_SIZE_BYTES: ${UPLOAD_MAX_SIZE_BYTES:-5368709120}
+  UPLOAD_PART_SIZE_BYTES: ${UPLOAD_PART_SIZE_BYTES:-8388608}
+  UPLOAD_EXPIRES_HOURS: ${UPLOAD_EXPIRES_HOURS:-24}
+  UPLOAD_INSPECTION_LEASE_MINUTES: ${UPLOAD_INSPECTION_LEASE_MINUTES:-30}
+  UPLOAD_INSPECTION_DISPATCH_SECONDS: ${UPLOAD_INSPECTION_DISPATCH_SECONDS:-30}
+  UPLOAD_INSPECTION_HEARTBEAT_SECONDS: ${UPLOAD_INSPECTION_HEARTBEAT_SECONDS:-60}
+  UPLOAD_INSPECTION_CONCURRENCY: ${UPLOAD_INSPECTION_CONCURRENCY:-2}
+  MALWARE_SCANNER_ENABLED: ${MALWARE_SCANNER_ENABLED:-false}
+  MALWARE_SCANNER_HOST: ${MALWARE_SCANNER_HOST:-}
+  MALWARE_SCANNER_PORT: ${MALWARE_SCANNER_PORT:-3310}
+  MALWARE_SCANNER_CONNECT_TIMEOUT_MS: ${MALWARE_SCANNER_CONNECT_TIMEOUT_MS:-5000}
+  MALWARE_SCANNER_SCAN_TIMEOUT_MS: ${MALWARE_SCANNER_SCAN_TIMEOUT_MS:-900000}
+  IMPORT_PARSE_LEASE_MINUTES: ${IMPORT_PARSE_LEASE_MINUTES:-30}
+  IMPORT_PARSE_DISPATCH_SECONDS: ${IMPORT_PARSE_DISPATCH_SECONDS:-30}
+  IMPORT_PARSE_HEARTBEAT_SECONDS: ${IMPORT_PARSE_HEARTBEAT_SECONDS:-30}
+  IMPORT_PARSE_CONCURRENCY: ${IMPORT_PARSE_CONCURRENCY:-2}
+  IMPORT_STAGING_BATCH_ROWS: ${IMPORT_STAGING_BATCH_ROWS:-1000}
+  IMPORT_PREVIEW_ROWS: ${IMPORT_PREVIEW_ROWS:-20}
+  IMPORT_PUBLISH_BATCH_ROWS: ${IMPORT_PUBLISH_BATCH_ROWS:-200}
+  INTEGRATION_VALIDATION_TIMEOUT_MS: ${INTEGRATION_VALIDATION_TIMEOUT_MS:-10000}
+  INTEGRATION_VALIDATION_LEASE_SECONDS: ${INTEGRATION_VALIDATION_LEASE_SECONDS:-120}
+  INTEGRATION_VALIDATION_DISPATCH_SECONDS: ${INTEGRATION_VALIDATION_DISPATCH_SECONDS:-15}
+  INTEGRATION_VALIDATION_CONCURRENCY: ${INTEGRATION_VALIDATION_CONCURRENCY:-2}
+  EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
+  EMAIL_FROM: ${EMAIL_FROM:-}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_SECURE: ${SMTP_SECURE:-false}
+  SMTP_USER: ${SMTP_USER:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+
+x-integration-credential-management-env: &integration-credential-management-env
+  INTEGRATION_CREDENTIAL_ROLE: MANAGEMENT
+  PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: ${PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN:?PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN is required}
+  INTEGRATION_CREDENTIAL_KEYS: ${INTEGRATION_CREDENTIAL_KEYS:?INTEGRATION_CREDENTIAL_KEYS is required}
+  INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: ${INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION:?INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION is required}
+  INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS: ${INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS:?INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS is required}
+  INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION: ${INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION:?INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION is required}
+
+x-integration-credential-execution-env: &integration-credential-execution-env
+  INTEGRATION_CREDENTIAL_ROLE: EXECUTION
+  INTEGRATION_CREDENTIAL_KEYS: ${INTEGRATION_CREDENTIAL_KEYS:?INTEGRATION_CREDENTIAL_KEYS is required}
+  INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: ${INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION:?INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION is required}
+
+services:
+  postgres:
+    image: postgres:18.3-alpine3.23
+    restart: unless-stopped
+    shm_size: 256mb
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--requirepass",
+        "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
+      ]
+    volumes:
+      - redis_data:/data
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "redis-cli",
+          "-a",
+          "${REDIS_PASSWORD}",
+          "--no-auth-warning",
+          "ping"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  nats:
+    image: nats:2.12-alpine
+    restart: unless-stopped
+    command:
+      [
+        "--jetstream",
+        "--store_dir=/data",
+        "--http_port=8222",
+        "--user=${NATS_USER:?NATS_USER is required}",
+        "--pass=${NATS_PASSWORD:?NATS_PASSWORD is required}"
+      ]
+    volumes:
+      - nats_data:/data
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:8222/healthz | grep -q ok"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  clamav:
+    image: clamav/clamav:1.5.3-debian13-slim
+    profiles:
+      - inspection
+    restart: unless-stopped
+    init: true
+    volumes:
+      - clamav_data:/var/lib/clamav
+      - ./clamav/clamd.conf:/etc/clamav/clamd.conf:ro
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 5m
+
+  platform-api-migrate:
+    <<: *backend-defaults
+    restart: "no"
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: migration
+      args:
+        PACKAGE_NAME: "@seo-platform/platform-api"
+    environment:
+      <<: *common-backend-env
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/platform_db
+
+  seo-data-migrate:
+    <<: *backend-defaults
+    restart: "no"
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: migration
+      args:
+        PACKAGE_NAME: "@seo-platform/seo-data"
+    environment:
+      <<: *common-backend-env
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/seo_db
+
+  jobs-integrations-migrate:
+    <<: *backend-defaults
+    restart: "no"
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: migration
+      args:
+        PACKAGE_NAME: "@seo-platform/jobs-integrations"
+    environment:
+      <<: *common-backend-env
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/jobs_db
+
+  jobs-connector-db-permissions:
+    image: postgres:18.3-alpine3.23
+    restart: "no"
+    init: true
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: jobs_db
+      PGUSER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      JOBS_CONNECTOR_DATABASE_USER: ${JOBS_CONNECTOR_DATABASE_USER:-jobs_connector}
+      JOBS_CONNECTOR_DATABASE_PASSWORD: ${JOBS_CONNECTOR_DATABASE_PASSWORD:?JOBS_CONNECTOR_DATABASE_PASSWORD is required}
+    command:
+      [
+        "psql",
+        "--no-psqlrc",
+        "--file=/permissions/jobs-connector.sql"
+      ]
+    volumes:
+      - ./postgres/permissions/jobs-connector.sql:/permissions/jobs-connector.sql:ro
+    networks:
+      - internal
+    depends_on:
+      jobs-integrations-migrate:
+        condition: service_completed_successfully
+
+  realtime-migrate:
+    <<: *backend-defaults
+    restart: "no"
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: migration
+      args:
+        PACKAGE_NAME: "@seo-platform/realtime"
+    environment:
+      <<: *common-backend-env
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/realtime_db
+
+  platform-api:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/platform-api"
+    environment:
+      <<: *common-backend-env
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/platform_db
+      DATABASE_POOL_MAX: ${PLATFORM_API_DATABASE_POOL_MAX:-20}
+      SEO_DATA_INTERNAL_URL: http://seo-data:4001
+      JOBS_INTERNAL_URL: http://jobs-integrations:4002
+      REALTIME_INTERNAL_URL: http://realtime:4003
+      INTERNAL_REQUEST_TIMEOUT_MS: 1500
+      INTERNAL_COMMAND_TIMEOUT_MS: ${INTERNAL_COMMAND_TIMEOUT_MS:-15000}
+      PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: ${PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN:?PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN is required}
+      PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: ${PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN:?PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN is required}
+      CORS_ORIGINS: ${WEB_PUBLIC_URL},${ADMIN_PUBLIC_URL}
+      AUTH_PASSWORD_PEPPER: ${AUTH_PASSWORD_PEPPER:?AUTH_PASSWORD_PEPPER is required}
+      AUTH_DATA_ENCRYPTION_KEY: ${AUTH_DATA_ENCRYPTION_KEY:?AUTH_DATA_ENCRYPTION_KEY is required}
+      AUTH_ACCESS_COOKIE_NAME: ${AUTH_ACCESS_COOKIE_NAME:-seo_access}
+      AUTH_SESSION_COOKIE_NAME: ${AUTH_SESSION_COOKIE_NAME:-seo_session}
+      AUTH_CSRF_COOKIE_NAME: ${AUTH_CSRF_COOKIE_NAME:-seo_csrf}
+      AUTH_ACCESS_TOKEN_TTL_MINUTES: ${AUTH_ACCESS_TOKEN_TTL_MINUTES:-15}
+      AUTH_SESSION_TTL_DAYS: ${AUTH_SESSION_TTL_DAYS:-30}
+      AUTH_EMAIL_VERIFICATION_REQUIRED: ${AUTH_EMAIL_VERIFICATION_REQUIRED:-true}
+      AUTH_EMAIL_VERIFICATION_TTL_MINUTES: ${AUTH_EMAIL_VERIFICATION_TTL_MINUTES:-30}
+      AUTH_PASSWORD_RESET_TTL_MINUTES: ${AUTH_PASSWORD_RESET_TTL_MINUTES:-30}
+      AUTH_MFA_CHALLENGE_TTL_MINUTES: ${AUTH_MFA_CHALLENGE_TTL_MINUTES:-5}
+      AUTH_RECENT_AUTHENTICATION_MINUTES: ${AUTH_RECENT_AUTHENTICATION_MINUTES:-10}
+      AUTH_TOTP_ISSUER: ${AUTH_TOTP_ISSUER:-SEO Workspace}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
+      AUTH_EXPOSE_DEVELOPMENT_TOKENS: "false"
+    expose:
+      - "4000"
+    networks:
+      - internal
+      - edge
+    depends_on:
+      platform-api-migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  seo-data:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/seo-data"
+    environment:
+      <<: *common-backend-env
+      PORT: 4001
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/seo_db
+      DATABASE_POOL_MAX: ${SEO_DATA_DATABASE_POOL_MAX:-30}
+      JOBS_TO_SEO_RANK_TOKEN: ${JOBS_TO_SEO_RANK_TOKEN:?JOBS_TO_SEO_RANK_TOKEN is required}
+    expose:
+      - "4001"
+    depends_on:
+      seo-data-migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4001/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  jobs-integrations:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/jobs-integrations"
+    environment:
+      <<: [*common-backend-env, *jobs-env, *integration-credential-management-env]
+      PORT: 4002
+      DATABASE_POOL_MAX: ${JOBS_DATABASE_POOL_MAX:-30}
+    expose:
+      - "4002"
+    networks:
+      - internal
+      - outbound
+    depends_on:
+      jobs-integrations-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4002/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  system-worker:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/jobs-integrations"
+    command: ["node", "dist/worker.main.js"]
+    environment:
+      <<: [*common-backend-env, *jobs-env]
+      DATABASE_POOL_MAX: ${JOBS_DATABASE_POOL_MAX:-20}
+    networks:
+      - internal
+      - outbound
+    depends_on:
+      jobs-integrations-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+
+  upload-inspection-worker:
+    <<: *backend-defaults
+    profiles:
+      - inspection
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/jobs-integrations"
+    command: ["node", "dist/inspection-worker.main.js"]
+    environment:
+      <<: [*common-backend-env, *jobs-env]
+      DATABASE_POOL_MAX: ${JOBS_INSPECTION_DATABASE_POOL_MAX:-10}
+      MALWARE_SCANNER_ENABLED: "true"
+      MALWARE_SCANNER_HOST: clamav
+      MALWARE_SCANNER_PORT: 3310
+    networks:
+      - internal
+      - outbound
+    depends_on:
+      jobs-integrations-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+
+  import-worker:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/jobs-integrations"
+    command: ["node", "dist/import-worker.main.js"]
+    environment:
+      <<: [*common-backend-env, *jobs-env]
+      DATABASE_POOL_MAX: ${JOBS_IMPORT_DATABASE_POOL_MAX:-10}
+    networks:
+      - internal
+      - outbound
+    depends_on:
+      jobs-integrations-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  rank-worker:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/jobs-integrations"
+    command: ["node", "dist/rank-worker.main.js"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/jobs_db
+      DATABASE_POOL_MAX: ${JOBS_RANK_DATABASE_POOL_MAX:-10}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      SEO_DATA_URL: http://seo-data:4001
+      SEO_DATA_COMMAND_TIMEOUT_MS: ${SEO_DATA_COMMAND_TIMEOUT_MS:-60000}
+      RANK_PREPARATION_ENABLED: "true"
+      JOBS_TO_SEO_RANK_TOKEN: ${JOBS_TO_SEO_RANK_TOKEN:?JOBS_TO_SEO_RANK_TOKEN is required}
+      RANK_PREPARATION_LEASE_SECONDS: ${RANK_PREPARATION_LEASE_SECONDS:-120}
+      RANK_PREPARATION_DISPATCH_SECONDS: ${RANK_PREPARATION_DISPATCH_SECONDS:-15}
+      RANK_PREPARATION_CONCURRENCY: ${RANK_PREPARATION_CONCURRENCY:-2}
+      INTEGRATION_CREDENTIAL_ROLE: DISABLED
+    cpus: "${JOBS_RANK_CPU_LIMIT:-1.0}"
+    mem_limit: "${JOBS_RANK_MEMORY_LIMIT:-512M}"
+    pids_limit: ${JOBS_RANK_PIDS_LIMIT:-128}
+    networks:
+      - internal
+    depends_on:
+      jobs-integrations-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      seo-data:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "ps -o args | grep -q '[r]ank-worker.main.js'"
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  connector-worker:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/jobs-integrations"
+    command: ["node", "dist/connector-worker.main.js"]
+    environment:
+      <<: *integration-credential-execution-env
+      NODE_ENV: production
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+      DATABASE_URL: postgresql://${JOBS_CONNECTOR_DATABASE_USER:-jobs_connector}:${JOBS_CONNECTOR_DATABASE_PASSWORD:?JOBS_CONNECTOR_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      DATABASE_POOL_MAX: ${JOBS_CONNECTOR_DATABASE_POOL_MAX:-10}
+      INTEGRATION_VALIDATION_TIMEOUT_MS: ${INTEGRATION_VALIDATION_TIMEOUT_MS:-10000}
+      INTEGRATION_VALIDATION_LEASE_SECONDS: ${INTEGRATION_VALIDATION_LEASE_SECONDS:-120}
+      INTEGRATION_VALIDATION_DISPATCH_SECONDS: ${INTEGRATION_VALIDATION_DISPATCH_SECONDS:-15}
+      INTEGRATION_VALIDATION_CONCURRENCY: ${INTEGRATION_VALIDATION_CONCURRENCY:-2}
+    networks:
+      - internal
+      - outbound
+    depends_on:
+      jobs-connector-db-permissions:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  realtime:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/realtime"
+    environment:
+      <<: *common-backend-env
+      PORT: 4003
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/realtime_db
+      DATABASE_POOL_MAX: ${REALTIME_DATABASE_POOL_MAX:-20}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      WEB_ORIGINS: ${WEB_PUBLIC_URL},${ADMIN_PUBLIC_URL}
+      PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: ${PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN:?PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN is required}
+      WEB_PUSH_REGISTRATION_ENABLED: ${WEB_PUSH_REGISTRATION_ENABLED:-false}
+      WEB_PUSH_VAPID_PUBLIC_KEY: ${WEB_PUSH_VAPID_PUBLIC_KEY:-}
+      WEB_PUSH_VAPID_KEY_VERSION: ${WEB_PUSH_VAPID_KEY_VERSION:-}
+      WEB_PUSH_ENDPOINT_ORIGINS: ${WEB_PUSH_ENDPOINT_ORIGINS:-}
+      WEB_PUSH_SUBSCRIPTION_KEYS: ${WEB_PUSH_SUBSCRIPTION_KEYS:-}
+      WEB_PUSH_ACTIVE_SUBSCRIPTION_KEY_VERSION: ${WEB_PUSH_ACTIVE_SUBSCRIPTION_KEY_VERSION:-}
+      WEB_PUSH_FINGERPRINT_KEYS: ${WEB_PUSH_FINGERPRINT_KEYS:-}
+      WEB_PUSH_ACTIVE_FINGERPRINT_KEY_VERSION: ${WEB_PUSH_ACTIVE_FINGERPRINT_KEY_VERSION:-}
+      WEB_PUSH_MAX_ACTIVE_DEVICES: ${WEB_PUSH_MAX_ACTIVE_DEVICES:-20}
+    expose:
+      - "4003"
+    networks:
+      - internal
+      - edge
+    depends_on:
+      realtime-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4003/health/live').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  web:
+    restart: unless-stopped
+    init: true
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/web.Dockerfile
+      args:
+        PACKAGE_NAME: "@seo-platform/web"
+        PACKAGE_PATH: platform-web
+        NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME: ${AUTH_CSRF_COOKIE_NAME:-seo_csrf}
+        NEXT_PUBLIC_TERMS_VERSION: ${TERMS_VERSION:?TERMS_VERSION is required}
+        NEXT_PUBLIC_PRIVACY_VERSION: ${PRIVACY_VERSION:?PRIVACY_VERSION is required}
+        NEXT_PUBLIC_MARKETING_VERSION: ${MARKETING_VERSION:?MARKETING_VERSION is required}
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      NEXT_PUBLIC_SITE_URL: ${WEB_PUBLIC_URL}
+      NEXT_PUBLIC_PLATFORM_API_URL: ${API_PUBLIC_URL}
+      PLATFORM_API_INTERNAL_URL: http://platform-api:4000
+      AUTH_ACCESS_COOKIE_NAME: ${AUTH_ACCESS_COOKIE_NAME:-seo_access}
+      AUTH_SESSION_COOKIE_NAME: ${AUTH_SESSION_COOKIE_NAME:-seo_session}
+      AUTH_CSRF_COOKIE_NAME: ${AUTH_CSRF_COOKIE_NAME:-seo_csrf}
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-ru}
+      DIRECTUS_URL: http://directus:8055
+      DIRECTUS_READ_TOKEN: ${DIRECTUS_READ_TOKEN:-}
+    expose:
+      - "3000"
+    networks:
+      - internal
+      - edge
+    depends_on:
+      platform-api:
+        condition: service_healthy
+
+  admin:
+    restart: unless-stopped
+    init: true
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/web.Dockerfile
+      args:
+        PACKAGE_NAME: "@seo-platform/admin"
+        PACKAGE_PATH: platform-admin
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      PLATFORM_API_INTERNAL_URL: http://platform-api:4000
+    expose:
+      - "3002"
+    networks:
+      - internal
+      - edge
+    depends_on:
+      platform-api:
+        condition: service_healthy
+
+  directus:
+    image: directus/directus:12.1.1
+    restart: unless-stopped
+    environment:
+      SECRET: ${DIRECTUS_SECRET:?DIRECTUS_SECRET is required}
+      ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL:?DIRECTUS_ADMIN_EMAIL is required}
+      ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD:?DIRECTUS_ADMIN_PASSWORD is required}
+      PUBLIC_URL: ${DIRECTUS_PUBLIC_URL}
+      DB_CLIENT: pg
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: directus_db
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      CACHE_ENABLED: "true"
+      CACHE_STORE: redis
+      REDIS: redis://:${REDIS_PASSWORD}@redis:6379/1
+      STORAGE_LOCATIONS: media
+      STORAGE_MEDIA_DRIVER: ${DIRECTUS_STORAGE_DRIVER:-local}
+      STORAGE_MEDIA_ROOT: /directus/uploads
+      STORAGE_MEDIA_KEY: ${S3_ACCESS_KEY_ID:-}
+      STORAGE_MEDIA_SECRET: ${S3_SECRET_ACCESS_KEY:-}
+      STORAGE_MEDIA_BUCKET: ${S3_BUCKET_CMS:-}
+      STORAGE_MEDIA_REGION: ${S3_REGION:-ru-central1}
+      STORAGE_MEDIA_ENDPOINT: ${S3_ENDPOINT:-}
+      STORAGE_MEDIA_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+      EMAIL_TRANSPORT: ${DIRECTUS_EMAIL_TRANSPORT:-sendmail}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      EMAIL_SMTP_HOST: ${SMTP_HOST:-}
+      EMAIL_SMTP_PORT: ${SMTP_PORT:-587}
+      EMAIL_SMTP_SECURE: ${SMTP_SECURE:-false}
+      EMAIL_SMTP_USER: ${SMTP_USER:-}
+      EMAIL_SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    volumes:
+      - directus_uploads:/directus/uploads
+      - directus_extensions:/directus/extensions
+    expose:
+      - "8055"
+    networks:
+      - internal
+      - edge
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8055/server/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 8
+      start_period: 30s
+
+volumes:
+  postgres_data:
+  redis_data:
+  nats_data:
+  directus_uploads:
+  directus_extensions:
+  clamav_data:
+
+networks:
+  internal:
+    internal: true
+  edge:
+  outbound:
+    driver: bridge

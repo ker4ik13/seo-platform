@@ -1,0 +1,40 @@
+FROM node:24-alpine AS build
+
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+
+RUN corepack enable && corepack prepare pnpm@11.17.0 --activate
+RUN pnpm config set store-dir /pnpm/store
+
+WORKDIR /workspace
+COPY . .
+
+RUN pnpm install --frozen-lockfile
+
+ARG PACKAGE_NAME
+ARG PACKAGE_PATH
+ARG NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME=seo_csrf
+ARG NEXT_PUBLIC_TERMS_VERSION=2026-07-28-draft
+ARG NEXT_PUBLIC_PRIVACY_VERSION=2026-07-28-draft
+ARG NEXT_PUBLIC_MARKETING_VERSION=2026-07-28-draft
+ENV TARGET_PACKAGE=$PACKAGE_NAME
+ENV TARGET_PATH=$PACKAGE_PATH
+ENV NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME=$NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME
+ENV NEXT_PUBLIC_TERMS_VERSION=$NEXT_PUBLIC_TERMS_VERSION
+ENV NEXT_PUBLIC_PRIVACY_VERSION=$NEXT_PUBLIC_PRIVACY_VERSION
+ENV NEXT_PUBLIC_MARKETING_VERSION=$NEXT_PUBLIC_MARKETING_VERSION
+
+RUN pnpm --filter "$TARGET_PACKAGE" build \
+  && pnpm --filter "$TARGET_PACKAGE" deploy --prod /deploy \
+  && cp -R "$TARGET_PATH/.next" /deploy/.next
+
+FROM node:24-alpine AS runtime
+
+ENV NODE_ENV=production
+ENV HOSTNAME=0.0.0.0
+WORKDIR /app
+
+COPY --from=build --chown=node:node /deploy ./
+
+USER node
+CMD ["npm", "run", "start"]
