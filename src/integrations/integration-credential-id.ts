@@ -1,6 +1,10 @@
 import { randomBytes } from "node:crypto";
 
 export function integrationCredentialId(now = Date.now()): string {
+  return integrationRecordId(now);
+}
+
+export function integrationRecordId(now = Date.now()): string {
   if (!Number.isSafeInteger(now) || now < 0 || now > 0xffffffffffff) {
     throw new Error("UUIDv7 timestamp is outside the supported range");
   }

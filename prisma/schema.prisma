@@ -102,7 +102,9 @@ model Job {
   scheduleId         String?        @map("schedule_id") @db.Uuid
   parentJobId        String?        @map("parent_job_id") @db.Uuid
   deduplicationKey   String?        @map("deduplication_key") @db.VarChar(180)
+  idempotencyScope   String         @map("idempotency_scope") @db.VarChar(180)
   idempotencyKey     String?        @map("idempotency_key") @db.VarChar(180)
+  requestHash        Bytes?         @map("request_hash")
   inputSnapshot      Json           @map("input_snapshot")
   scopeSnapshot      Json           @map("scope_snapshot")
   progressCurrent    BigInt         @default(0) @map("progress_current")
@@ -125,13 +127,19 @@ model Job {
   startedAt          DateTime?      @map("started_at") @db.Timestamptz(6)
   finishedAt         DateTime?      @map("finished_at") @db.Timestamptz(6)
   cancelRequestedAt  DateTime?      @map("cancel_requested_at") @db.Timestamptz(6)
+  leaseOwner         String?        @map("lease_owner") @db.VarChar(100)
+  leaseExpiresAt     DateTime?      @map("lease_expires_at") @db.Timestamptz(6)
+  retryAt            DateTime?      @map("retry_at") @db.Timestamptz(6)
+  updatedAt          DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   items JobItem[]
 
-  @@unique([workspaceId, idempotencyKey])
+  @@unique([workspaceId, idempotencyScope, idempotencyKey])
   @@index([workspaceId, projectId, status, createdAt])
   @@index([status, priority, createdAt])
-  @@index([deduplicationKey, status])
+  @@index([workspaceId, deduplicationKey, status])
+  @@index([type, status, leaseExpiresAt, createdAt])
+  @@index([type, status, retryAt, priority, createdAt])
   @@map("jobs")
 }
 
@@ -179,11 +187,13 @@ model IntegrationCredential {
   idempotencyKey        String           @map("idempotency_key") @db.VarChar(255)
   requestFingerprint    Bytes            @map("request_fingerprint")
   fingerprintKeyVersion Int              @map("fingerprint_key_version")
+  materialVersion       Int              @default(1) @map("material_version")
   createdBy             String?          @map("created_by") @db.Uuid
   updatedBy             String?          @map("updated_by") @db.Uuid
   verifiedAt            DateTime?        @map("verified_at") @db.Timestamptz(6)
   lastSuccessAt         DateTime?        @map("last_success_at") @db.Timestamptz(6)
   lastErrorAt           DateTime?        @map("last_error_at") @db.Timestamptz(6)
+  lastErrorCode         String?          @map("last_error_code") @db.VarChar(100)
   version               Int              @default(1)
   createdAt             DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt             DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)

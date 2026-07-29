@@ -20,6 +20,11 @@ import {
   SEMANTIC_IMPORT_QUEUE,
   type SemanticImportJobData
 } from "./semantic-import.queue.js";
+import {
+  enqueueIntegrationCredentialValidation,
+  INTEGRATION_CREDENTIAL_VALIDATION_QUEUE,
+  type IntegrationCredentialValidationJobData
+} from "./integration-credential-validation.queue.js";
 
 export const SYSTEM_QUEUE = "system";
 
@@ -29,6 +34,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   private systemQueue?: Queue;
   private uploadInspectionQueue?: Queue<UploadInspectionJobData>;
   private semanticImportQueue?: Queue<SemanticImportJobData>;
+  private integrationCredentialValidationQueue?: Queue<IntegrationCredentialValidationJobData>;
 
   public constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
@@ -48,12 +54,17 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     this.semanticImportQueue = new Queue(SEMANTIC_IMPORT_QUEUE, {
       connection: this.connection
     });
+    this.integrationCredentialValidationQueue = new Queue(
+      INTEGRATION_CREDENTIAL_VALIDATION_QUEUE,
+      { connection: this.connection }
+    );
   }
 
   public async onModuleDestroy(): Promise<void> {
     await this.systemQueue?.close();
     await this.uploadInspectionQueue?.close();
     await this.semanticImportQueue?.close();
+    await this.integrationCredentialValidationQueue?.close();
     await this.connection?.quit();
   }
 
@@ -101,6 +112,20 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       this.semanticImportQueue,
       importId,
       version
+    );
+  }
+
+  public async enqueueIntegrationCredentialValidation(
+    jobId: string
+  ): Promise<void> {
+    if (!this.integrationCredentialValidationQueue) {
+      throw new Error(
+        "Integration credential validation queue is not connected"
+      );
+    }
+    await enqueueIntegrationCredentialValidation(
+      this.integrationCredentialValidationQueue,
+      jobId
     );
   }
 }

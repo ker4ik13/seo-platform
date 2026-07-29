@@ -4,6 +4,7 @@ import {
   type CreateIntegrationCredentialInput,
   type IntegrationProvider,
   type InternalCreateIntegrationCredentialInput,
+  type InternalCreateIntegrationCredentialValidationInput,
   type InternalDeleteIntegrationCredentialInput,
   type InternalUpdateIntegrationCredentialInput,
   type UpdateIntegrationCredentialInput
@@ -42,6 +43,21 @@ export function internalCreateIntegrationCredentialInput(
   }
   return {
     ...createIntegrationCredentialInput(input),
+    workspaceId: uuidField(input, "workspaceId"),
+    actorId: uuidField(input, "actorId"),
+    idempotencyKey
+  };
+}
+
+export function internalCreateIntegrationCredentialValidationInput(
+  value: unknown
+): InternalCreateIntegrationCredentialValidationInput {
+  const input = record(value);
+  const idempotencyKey = stringField(input, "idempotencyKey");
+  if (!IDEMPOTENCY_PATTERN.test(idempotencyKey)) {
+    invalid("idempotencyKey");
+  }
+  return {
     workspaceId: uuidField(input, "workspaceId"),
     actorId: uuidField(input, "actorId"),
     idempotencyKey
@@ -113,7 +129,8 @@ function labelField(input: Readonly<Record<string, unknown>>): string {
 }
 
 function apiKeyField(input: Readonly<Record<string, unknown>>): string {
-  const apiKey = stringField(input, "apiKey");
+  const apiKey = input.apiKey;
+  if (typeof apiKey !== "string") invalid("apiKey");
   if (!SECRET_PATTERN.test(apiKey)) invalid("apiKey");
   return apiKey;
 }

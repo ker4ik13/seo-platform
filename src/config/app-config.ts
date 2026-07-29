@@ -30,8 +30,14 @@ export interface MalwareScannerConfig {
   readonly scanTimeoutMs: number;
 }
 
+export type IntegrationCredentialRole =
+  | "DISABLED"
+  | "MANAGEMENT"
+  | "EXECUTION";
+
 export interface IntegrationCredentialEncryptionConfig {
   readonly enabled: boolean;
+  readonly role: IntegrationCredentialRole;
   readonly keys: ReadonlyMap<number, Buffer>;
   readonly activeKeyVersion?: number;
   readonly fingerprintKeys: ReadonlyMap<number, Buffer>;
@@ -60,6 +66,12 @@ export interface AppConfig {
   readonly email: EmailConfig;
   readonly malwareScanner: MalwareScannerConfig;
   readonly integrationCredentials: IntegrationCredentialEncryptionConfig;
+  readonly integrationCredentialValidation: {
+    readonly timeoutMs: number;
+    readonly leaseSeconds: number;
+    readonly dispatchSeconds: number;
+    readonly concurrency: number;
+  };
   readonly uploads: {
     readonly maxSizeBytes: number;
     readonly partSizeBytes: number;
@@ -87,6 +99,36 @@ function bool(value: string | undefined, fallback = false): boolean {
   throw new Error(`Expected boolean, received: ${value}`);
 }
 
+function integrationCredentialRole(
+  env: NodeJS.ProcessEnv
+): IntegrationCredentialRole {
+  const configured = env.INTEGRATION_CREDENTIAL_ROLE?.trim().toUpperCase();
+  if (
+    configured !== undefined &&
+    !["DISABLED", "MANAGEMENT", "EXECUTION"].includes(configured)
+  ) {
+    throw new Error(
+      "INTEGRATION_CREDENTIAL_ROLE must be DISABLED, MANAGEMENT or EXECUTION"
+    );
+  }
+  const legacyEnabled =
+    env.INTEGRATION_CREDENTIALS_ENABLED === undefined
+      ? undefined
+      : bool(env.INTEGRATION_CREDENTIALS_ENABLED);
+  const role =
+    (configured as IntegrationCredentialRole | undefined) ??
+    (legacyEnabled ? "MANAGEMENT" : "DISABLED");
+  if (
+    legacyEnabled !== undefined &&
+    legacyEnabled !== (role !== "DISABLED")
+  ) {
+    throw new Error(
+      "INTEGRATION_CREDENTIAL_ROLE conflicts with INTEGRATION_CREDENTIALS_ENABLED"
+    );
+  }
+  return role;
+}
+
 function required(env: NodeJS.ProcessEnv, key: string): string {
   const value = env[key]?.trim();
   if (!value) throw new Error(`Missing required environment variable: ${key}`);
@@ -104,8 +146,24 @@ function positiveInteger(
   key: string
 ): number {
   const parsed = Number(value ?? fallback);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
     throw new Error(`${key} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function boundedInteger(
+  value: string | undefined,
+  fallback: number,
+  key: string,
+  minimum: number,
+  maximum: number
+): number {
+  const parsed = positiveInteger(value, fallback, key);
+  if (parsed < minimum || parsed > maximum) {
+    throw new Error(
+      `${key} must be between ${minimum} and ${maximum}`
+    );
   }
   return parsed;
 }
@@ -193,9 +251,10 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     env.INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS,
     "INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS"
   );
-  const integrationCredentialsEnabled = bool(
-    env.INTEGRATION_CREDENTIALS_ENABLED
-  );
+  const credentialRole = integrationCredentialRole(env);
+  const integrationCredentialsEnabled = credentialRole !== "DISABLED";
+  const credentialManagementEnabled = credentialRole === "MANAGEMENT";
+  const credentialExecutionEnabled = credentialRole === "EXECUTION";
   const integrationCredentialActiveKeyVersion =
     env.INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION
       ? keyVersion(
@@ -210,6 +269,19 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
           "INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION"
         )
       : undefined;
+
+  if (
+    credentialRole === "DISABLED" &&
+    (integrationCredentialKeys.size > 0 ||
+      integrationCredentialActiveKeyVersion !== undefined ||
+      integrationCredentialFingerprintKeys.size > 0 ||
+      integrationCredentialActiveFingerprintKeyVersion !== undefined ||
+      integrationCredentialApiToken)
+  ) {
+    throw new Error(
+      "Credential-disabled processes must not receive credential keyrings or the dedicated credential API token"
+    );
+  }
 
   if (
     s3Enabled &&
@@ -234,6 +306,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (
     nodeEnv === "production" &&
+    !credentialExecutionEnabled &&
     (!internalApiToken || internalApiToken.length < 32)
   ) {
     throw new Error(
@@ -280,7 +353,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
   if (
-    integrationCredentialsEnabled &&
+    credentialManagementEnabled &&
     integrationCredentialFingerprintKeys.size === 0
   ) {
     throw new Error(
@@ -288,7 +361,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
   if (
-    integrationCredentialsEnabled &&
+    credentialManagementEnabled &&
     (!integrationCredentialApiToken ||
       integrationCredentialApiToken.length < 32)
   ) {
@@ -303,6 +376,44 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   ) {
     throw new Error(
       "Credential API token must differ from the shared internal API token"
+    );
+  }
+  if (
+    credentialExecutionEnabled &&
+    (integrationCredentialFingerprintKeys.size > 0 ||
+      integrationCredentialApiToken ||
+      internalApiToken ||
+      natsUser ||
+      natsPassword ||
+      s3AccessKeyId ||
+      s3SecretAccessKey ||
+      smtpUser ||
+      smtpPassword)
+  ) {
+    throw new Error(
+      "Execution-only credential workers must not receive management, internal API, NATS, S3 or SMTP credentials"
+    );
+  }
+  const integrationValidationTimeoutMs = boundedInteger(
+    env.INTEGRATION_VALIDATION_TIMEOUT_MS,
+    10_000,
+    "INTEGRATION_VALIDATION_TIMEOUT_MS",
+    1_000,
+    120_000
+  );
+  const integrationValidationLeaseSeconds = boundedInteger(
+    env.INTEGRATION_VALIDATION_LEASE_SECONDS,
+    120,
+    "INTEGRATION_VALIDATION_LEASE_SECONDS",
+    10,
+    600
+  );
+  if (
+    integrationValidationLeaseSeconds * 1_000 <
+    integrationValidationTimeoutMs + 5_000
+  ) {
+    throw new Error(
+      "INTEGRATION_VALIDATION_LEASE_SECONDS must exceed the provider timeout by at least 5 seconds"
     );
   }
   if (
@@ -393,6 +504,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     integrationCredentials: {
       enabled: integrationCredentialsEnabled,
+      role: credentialRole,
       keys: integrationCredentialKeys,
       ...(integrationCredentialActiveKeyVersion !== undefined
         ? { activeKeyVersion: integrationCredentialActiveKeyVersion }
@@ -404,6 +516,24 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
               integrationCredentialActiveFingerprintKeyVersion
           }
         : {})
+    },
+    integrationCredentialValidation: {
+      timeoutMs: integrationValidationTimeoutMs,
+      leaseSeconds: integrationValidationLeaseSeconds,
+      dispatchSeconds: boundedInteger(
+        env.INTEGRATION_VALIDATION_DISPATCH_SECONDS,
+        15,
+        "INTEGRATION_VALIDATION_DISPATCH_SECONDS",
+        5,
+        300
+      ),
+      concurrency: boundedInteger(
+        env.INTEGRATION_VALIDATION_CONCURRENCY,
+        2,
+        "INTEGRATION_VALIDATION_CONCURRENCY",
+        1,
+        32
+      )
     },
     uploads: {
       maxSizeBytes: positiveInteger(

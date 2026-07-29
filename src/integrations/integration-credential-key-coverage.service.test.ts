@@ -47,3 +47,34 @@ test("fails startup before serving credentials with an incomplete keyring", asyn
     /encryption versions: 1/u
   );
 });
+
+test("execution workers verify encryption coverage without fingerprint keys", async () => {
+  const key = Buffer.alloc(32, 2).toString("base64url");
+  const requestedGroups: string[] = [];
+  const prisma = {
+    integrationCredential: {
+      groupBy: async ({
+        by
+      }: {
+        readonly by: readonly string[];
+      }) => {
+        requestedGroups.push(String(by[0]));
+        return [{ keyVersion: 2 }];
+      }
+    }
+  } as unknown as PrismaService;
+  const service = new IntegrationCredentialKeyCoverageService(
+    prisma,
+    loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      INTEGRATION_CREDENTIAL_ROLE: "EXECUTION",
+      INTEGRATION_CREDENTIAL_KEYS: `2:${key}`,
+      INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "2"
+    })
+  );
+
+  await service.onModuleInit();
+
+  assert.deepEqual(requestedGroups, ["keyVersion"]);
+});

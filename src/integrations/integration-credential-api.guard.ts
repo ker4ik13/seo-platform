@@ -18,6 +18,11 @@ export class IntegrationCredentialApiGuard implements CanActivate {
   ) {}
 
   public canActivate(context: ExecutionContext): boolean {
+    if (this.config.integrationCredentials.role !== "MANAGEMENT") {
+      throw new ServiceUnavailableException(
+        "Credential management capability is not configured"
+      );
+    }
     const expected = this.config.integrationCredentialApiToken;
     if (!expected) {
       throw new ServiceUnavailableException(

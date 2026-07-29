@@ -19,20 +19,22 @@ export class IntegrationCredentialKeyCoverageService
   public async onModuleInit(): Promise<void> {
     if (!this.config.integrationCredentials.enabled) return;
 
-    const [encryptionVersions, fingerprintVersions] = await Promise.all([
-      this.prisma.integrationCredential.groupBy({
+    const encryptionVersions =
+      await this.prisma.integrationCredential.groupBy({
         by: ["keyVersion"],
         where: { deletedAt: null }
-      }),
-      this.prisma.integrationCredential.groupBy({
-        by: ["fingerprintKeyVersion"],
-        where: { deletedAt: null }
-      })
-    ]);
+      });
     const missingEncryptionKeys = missingKeyVersions(
       encryptionVersions.map((record) => record.keyVersion),
       this.config.integrationCredentials.keys
     );
+    const fingerprintVersions =
+      this.config.integrationCredentials.role === "MANAGEMENT"
+        ? await this.prisma.integrationCredential.groupBy({
+            by: ["fingerprintKeyVersion"],
+            where: { deletedAt: null }
+          })
+        : [];
     const missingFingerprintKeys = missingKeyVersions(
       fingerprintVersions.map((record) => record.fingerprintKeyVersion),
       this.config.integrationCredentials.fingerprintKeys

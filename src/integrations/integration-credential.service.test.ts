@@ -7,14 +7,24 @@ import {
 import type { InternalCreateIntegrationCredentialInput } from "@seo-platform/contracts";
 import { loadAppConfig } from "../config/app-config.js";
 import type { PrismaService } from "../database/prisma.service.js";
-import type { IntegrationCredential } from "../generated/prisma/client.js";
+import type {
+  IntegrationCredential,
+  Job
+} from "../generated/prisma/client.js";
 import { IntegrationCredentialCryptoService } from "./integration-credential-crypto.service.js";
 import { internalCreateIntegrationCredentialInput } from "./integration-credential-input.js";
 import { IntegrationCredentialService } from "./integration-credential.service.js";
+import {
+  INTEGRATION_CREDENTIAL_VALIDATION_INPUT_KIND,
+  INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE,
+  integrationCredentialValidationDeduplicationKey,
+  integrationCredentialValidationScope
+} from "./integration-credential-validation-job.js";
 
 const workspaceId = "0190abcd-0000-7000-8000-000000000001";
 const actorId = "0190abcd-0000-7000-8000-0000000000a2";
 const credentialId = "0190abcd-0000-7000-8000-0000000000b3";
+const validationId = "0190abcd-0000-7000-8000-0000000000c4";
 const createInput: InternalCreateIntegrationCredentialInput =
   internalCreateIntegrationCredentialInput({
     workspaceId: workspaceId.toUpperCase(),
@@ -25,6 +35,131 @@ const createInput: InternalCreateIntegrationCredentialInput =
     apiKey: "secret-api-key",
     accountIdentifier: "account-1"
   });
+
+test("lists the bounded active validation for the current credential material", async () => {
+  const crypto = testCrypto();
+  const credential = credentialRecord(crypto, createInput, {
+    materialVersion: 3
+  });
+  const validation = validationJobRecord({
+    deduplicationKey:
+      integrationCredentialValidationDeduplicationKey(
+        credentialId,
+        3
+      ),
+    inputSnapshot: {
+      kind: INTEGRATION_CREDENTIAL_VALIDATION_INPUT_KIND,
+      credentialId,
+      credentialMaterialVersion: 3,
+      connectorVersion: "xmlstock@1.0.0"
+    }
+  });
+  let validationQuery: unknown;
+  const prisma = {
+    integrationCredential: {
+      findMany: async () => [credential]
+    },
+    job: {
+      findMany: async (query: unknown) => {
+        validationQuery = query;
+        return [validation];
+      }
+    }
+  } as unknown as PrismaService;
+
+  const result = await new IntegrationCredentialService(
+    prisma,
+    crypto
+  ).list(workspaceId);
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.activeValidation?.id, validationId);
+  assert.equal(
+    result[0]?.activeValidation?.credentialMaterialVersion,
+    3
+  );
+  assert.deepEqual(validationQuery, {
+    where: {
+      workspaceId,
+      type: INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE,
+      status: {
+        in: [
+          "QUEUED",
+          "WAITING_RATE_LIMIT",
+          "RUNNING",
+          "RETRY_SCHEDULED"
+        ]
+      },
+      deduplicationKey: {
+        in: [
+          integrationCredentialValidationDeduplicationKey(
+            credentialId,
+            3
+          )
+        ]
+      }
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }]
+  });
+});
+
+test("does not query validation jobs for an empty credential list", async () => {
+  const crypto = testCrypto();
+  let validationQueries = 0;
+  const prisma = {
+    integrationCredential: {
+      findMany: async () => []
+    },
+    job: {
+      findMany: async () => {
+        validationQueries += 1;
+        return [];
+      }
+    }
+  } as unknown as PrismaService;
+
+  const result = await new IntegrationCredentialService(
+    prisma,
+    crypto
+  ).list(workspaceId);
+
+  assert.deepEqual(result, []);
+  assert.equal(validationQueries, 0);
+});
+
+test("fails closed for an active validation projection from another material version", async () => {
+  const crypto = testCrypto();
+  const credential = credentialRecord(crypto, createInput, {
+    materialVersion: 3
+  });
+  const prisma = {
+    integrationCredential: {
+      findMany: async () => [credential]
+    },
+    job: {
+      findMany: async () => [
+        validationJobRecord({
+          deduplicationKey:
+            integrationCredentialValidationDeduplicationKey(
+              credentialId,
+              3
+            ),
+          inputSnapshot: {
+            kind: INTEGRATION_CREDENTIAL_VALIDATION_INPUT_KIND,
+            credentialId,
+            credentialMaterialVersion: 2,
+            connectorVersion: "xmlstock@1.0.0"
+          }
+        })
+      ]
+    }
+  } as unknown as PrismaService;
+
+  await assert.rejects(
+    new IntegrationCredentialService(prisma, crypto).list(workspaceId),
+    /Invalid active credential validation projection/
+  );
+});
 
 test("creates one masked credential for an idempotent request", async () => {
   const crypto = testCrypto();
@@ -129,6 +264,7 @@ test("rejects a P2002 winner created with a different payload", async () => {
 
 test("rotates only a complete replacement secret and uses optimistic locking", async () => {
   const crypto = testCrypto();
+  const executor = testExecutionCrypto();
   let state = credentialRecord(crypto, createInput);
   const originalFingerprint = state.requestFingerprint;
   let updateWhere: Readonly<Record<string, unknown>> | undefined;
@@ -154,6 +290,8 @@ test("rotates only a complete replacement secret and uses optimistic locking", a
           dataKeyAuthTag: bytes(data.dataKeyAuthTag),
           keyVersion: Number(data.keyVersion),
           status: "PENDING_VERIFICATION",
+          materialVersion: state.materialVersion + 1,
+          lastErrorCode: null,
           version: state.version + 1,
           updatedAt: new Date()
         };
@@ -189,9 +327,10 @@ test("rotates only a complete replacement secret and uses optimistic locking", a
     version: 1
   });
   assert.equal(result.version, 2);
+  assert.equal(state.materialVersion, 2);
   assert.deepEqual(state.requestFingerprint, originalFingerprint);
   assert.deepEqual(
-    crypto.decrypt(workspaceId, "XMLSTOCK", credentialId, {
+    executor.decrypt(workspaceId, "XMLSTOCK", credentialId, {
       ciphertext: Buffer.from(state.ciphertext),
       nonce: Buffer.from(state.nonce),
       authTag: Buffer.from(state.authTag),
@@ -245,6 +384,7 @@ test("destroys encrypted material on a tenant-scoped revoke", async () => {
   assert.equal(update?.data.status, "REVOKED");
   assert.ok(update?.data.deletedAt instanceof Date);
   assert.equal(update?.data.displayHint, null);
+  assert.deepEqual(update?.data.materialVersion, { increment: 1 });
   assert.notDeepEqual(
     bytes(update?.data.ciphertext),
     current.ciphertext
@@ -253,6 +393,41 @@ test("destroys encrypted material on a tenant-scoped revoke", async () => {
     bytes(update?.data.requestFingerprint),
     current.requestFingerprint
   );
+});
+
+test("keeps secret material version stable for a label-only update", async () => {
+  const crypto = testCrypto();
+  const current = credentialRecord(crypto, createInput);
+  let updateData: Readonly<Record<string, unknown>> | undefined;
+  const prisma = {
+    integrationCredential: {
+      findFirst: async () => current,
+      update: async ({
+        data
+      }: {
+        readonly data: Readonly<Record<string, unknown>>;
+      }) => {
+        updateData = data;
+        return {
+          ...current,
+          label: String(data.label),
+          version: current.version + 1
+        };
+      }
+    }
+  } as unknown as PrismaService;
+
+  await new IntegrationCredentialService(prisma, crypto).update(
+    credentialId,
+    {
+      workspaceId,
+      actorId,
+      version: 1,
+      label: "Renamed"
+    }
+  );
+
+  assert.equal(updateData?.materialVersion, undefined);
 });
 
 test("returns a conflict when a compare-and-swap update loses the race", async () => {
@@ -291,6 +466,19 @@ function testCrypto(): IntegrationCredentialCryptoService {
       INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS: `4:${fingerprintKey}`,
       INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION: "4",
       PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32)
+    })
+  );
+}
+
+function testExecutionCrypto(): IntegrationCredentialCryptoService {
+  const key = Buffer.alloc(32, 7).toString("base64url");
+  return new IntegrationCredentialCryptoService(
+    loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      INTEGRATION_CREDENTIAL_ROLE: "EXECUTION",
+      INTEGRATION_CREDENTIAL_KEYS: `1:${key}`,
+      INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1"
     })
   );
 }
@@ -343,15 +531,71 @@ function credentialRecord(
     idempotencyKey: input.idempotencyKey,
     requestFingerprint: Uint8Array.from(requestFingerprint.digest),
     fingerprintKeyVersion: requestFingerprint.keyVersion,
+    materialVersion: 1,
     createdBy: input.actorId,
     updatedBy: input.actorId,
     verifiedAt: null,
     lastSuccessAt: null,
     lastErrorAt: null,
+    lastErrorCode: null,
     version: 1,
     createdAt: now,
     updatedAt: now,
     deletedAt: null,
+    ...overrides
+  };
+}
+
+function validationJobRecord(overrides: Partial<Job> = {}): Job {
+  const now = new Date("2026-07-29T09:00:00.000Z");
+  return {
+    id: validationId,
+    workspaceId,
+    projectId: null,
+    type: INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE,
+    status: "QUEUED",
+    stage: "credential_validation_queued",
+    priority: 10,
+    actorId,
+    scheduleId: null,
+    parentJobId: null,
+    deduplicationKey:
+      integrationCredentialValidationDeduplicationKey(credentialId, 1),
+    idempotencyScope:
+      integrationCredentialValidationScope(credentialId),
+    idempotencyKey: "credential-validation-001",
+    requestHash: null,
+    inputSnapshot: {
+      kind: INTEGRATION_CREDENTIAL_VALIDATION_INPUT_KIND,
+      credentialId,
+      credentialMaterialVersion: 1,
+      connectorVersion: "xmlstock@1.0.0"
+    },
+    scopeSnapshot: { workspaceId, credentialId },
+    progressCurrent: 0n,
+    progressTotal: 1n,
+    progressUnit: "credential",
+    estimatedCostMicro: 0n,
+    reservedCostMicro: null,
+    actualCostMicro: null,
+    currency: null,
+    credentialMode: "BYOK_API_KEY",
+    provider: "XMLSTOCK",
+    attempt: 0,
+    maxAttempts: 3,
+    errorSummary: null,
+    resultSummary: null,
+    correlationId: "request-1",
+    version: 1,
+    createdAt: now,
+    queuedAt: now,
+    startedAt: null,
+    finishedAt: null,
+    cancelRequestedAt: null,
+    leaseOwner: null,
+    leaseExpiresAt: null,
+    retryAt: null,
+    updatedAt: now,
     ...overrides
   };
 }

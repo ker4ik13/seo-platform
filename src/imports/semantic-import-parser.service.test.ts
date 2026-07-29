@@ -246,8 +246,15 @@ function configFixture(): AppConfig {
     },
     integrationCredentials: {
       enabled: false,
+      role: "DISABLED",
       keys: new Map(),
       fingerprintKeys: new Map()
+    },
+    integrationCredentialValidation: {
+      timeoutMs: 10_000,
+      leaseSeconds: 120,
+      dispatchSeconds: 15,
+      concurrency: 2
     },
     uploads: {
       maxSizeBytes: 5 * 1_024 * 1_024 * 1_024,

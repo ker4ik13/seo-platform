@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import type {
   IntegrationCredentialSummary,
+  IntegrationCredentialValidationSummary,
   IntegrationProvider,
   InternalCreateIntegrationCredentialInput,
   InternalUpdateIntegrationCredentialInput
@@ -15,6 +16,12 @@ import type { IntegrationCredential } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { IntegrationCredentialCryptoService } from "./integration-credential-crypto.service.js";
 import { integrationCredentialId } from "./integration-credential-id.js";
+import {
+  ACTIVE_INTEGRATION_CREDENTIAL_VALIDATION_JOB_STATUSES,
+  INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE,
+  integrationCredentialValidationDeduplicationKey,
+  toValidationSummary
+} from "./integration-credential-validation-job.js";
 import { integrationProviderMetadata } from "./integration-provider-catalog.js";
 
 type IntegrationCredentialSummaryRecord = Pick<
@@ -29,6 +36,8 @@ type IntegrationCredentialSummaryRecord = Pick<
   | "verifiedAt"
   | "lastSuccessAt"
   | "lastErrorAt"
+  | "lastErrorCode"
+  | "materialVersion"
   | "version"
   | "createdAt"
   | "updatedAt"
@@ -45,6 +54,8 @@ const CREDENTIAL_SUMMARY_SELECT = {
   verifiedAt: true,
   lastSuccessAt: true,
   lastErrorAt: true,
+  lastErrorCode: true,
+  materialVersion: true,
   version: true,
   createdAt: true,
   updatedAt: true
@@ -65,7 +76,58 @@ export class IntegrationCredentialService {
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       select: CREDENTIAL_SUMMARY_SELECT
     });
-    return credentials.map(toSummary);
+    if (credentials.length === 0) return [];
+
+    const validations = await this.prisma.job.findMany({
+      where: {
+        workspaceId,
+        type: INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE,
+        status: {
+          in: [
+            ...ACTIVE_INTEGRATION_CREDENTIAL_VALIDATION_JOB_STATUSES
+          ]
+        },
+        deduplicationKey: {
+          in: credentials.map((credential) =>
+            integrationCredentialValidationDeduplicationKey(
+              credential.id,
+              credential.materialVersion
+            )
+          )
+        }
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }]
+    });
+    const activeByCredential = new Map<
+      string,
+      IntegrationCredentialValidationSummary
+    >();
+    const credentialById = new Map(
+      credentials.map((credential) => [credential.id, credential])
+    );
+    for (const validation of validations) {
+      const summary = toValidationSummary(validation);
+      const credential = credentialById.get(summary.credentialId);
+      if (
+        !credential ||
+        summary.credentialMaterialVersion !==
+          credential.materialVersion ||
+        validation.deduplicationKey !==
+          integrationCredentialValidationDeduplicationKey(
+            credential.id,
+            credential.materialVersion
+          ) ||
+        activeByCredential.has(summary.credentialId)
+      ) {
+        throw new Error(
+          "Invalid active credential validation projection"
+        );
+      }
+      activeByCredential.set(summary.credentialId, summary);
+    }
+    return credentials.map((credential) =>
+      toSummary(credential, activeByCredential.get(credential.id))
+    );
   }
 
   public async create(
@@ -194,7 +256,9 @@ export class IntegrationCredentialService {
                 },
                 status: "PENDING_VERIFICATION" as const,
                 verifiedAt: null,
-                lastErrorAt: null
+                lastErrorAt: null,
+                lastErrorCode: null,
+                materialVersion: { increment: 1 }
               }
             : {}),
           version: { increment: 1 }
@@ -240,6 +304,7 @@ export class IntegrationCredentialService {
           requestFingerprint: databaseBytes(randomBytes(32)),
           displayHint: null,
           providerMeta: {},
+          materialVersion: { increment: 1 },
           version: { increment: 1 }
         }
       });
@@ -335,7 +400,8 @@ function databaseBytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
 }
 
 function toSummary(
-  credential: IntegrationCredentialSummaryRecord
+  credential: IntegrationCredentialSummaryRecord,
+  activeValidation?: IntegrationCredentialValidationSummary
 ): IntegrationCredentialSummary {
   const provider = providerValue(credential.provider);
   return {
@@ -356,6 +422,10 @@ function toSummary(
     ...(credential.lastErrorAt
       ? { lastErrorAt: credential.lastErrorAt.toISOString() }
       : {}),
+    ...(credential.lastErrorCode
+      ? { lastErrorCode: credential.lastErrorCode }
+      : {}),
+    ...(activeValidation ? { activeValidation } : {}),
     version: credential.version,
     createdAt: credential.createdAt.toISOString(),
     updatedAt: credential.updatedAt.toISOString()

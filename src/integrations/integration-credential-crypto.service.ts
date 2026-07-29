@@ -55,6 +55,7 @@ export class IntegrationCredentialCryptoService {
     credentialId: string,
     secret: IntegrationCredentialSecret
   ): EncryptedIntegrationCredential {
+    this.assertManagementRole();
     const { key: masterKey, version } = this.activeKey();
     const dataKey = randomBytes(32);
     try {
@@ -88,9 +89,7 @@ export class IntegrationCredentialCryptoService {
     credentialId: string,
     encrypted: EncryptedIntegrationCredential
   ): IntegrationCredentialSecret {
-    if (!this.config.integrationCredentials.enabled) {
-      throw encryptionUnavailable();
-    }
+    this.assertExecutionRole();
     const key = this.config.integrationCredentials.keys.get(
       encrypted.keyVersion
     );
@@ -133,9 +132,7 @@ export class IntegrationCredentialCryptoService {
     input: IntegrationCredentialRequestFingerprintInput,
     keyVersion?: number
   ): IntegrationCredentialRequestFingerprint {
-    if (!this.config.integrationCredentials.enabled) {
-      throw encryptionUnavailable();
-    }
+    this.assertManagementRole();
     const fingerprintKey =
       keyVersion === undefined
         ? this.activeFingerprintKey()
@@ -185,7 +182,7 @@ export class IntegrationCredentialCryptoService {
     readonly key: Buffer;
     readonly version: number;
   } {
-    if (!this.config.integrationCredentials.enabled) {
+    if (this.config.integrationCredentials.role !== "MANAGEMENT") {
       throw encryptionUnavailable();
     }
     const version =
@@ -196,6 +193,18 @@ export class IntegrationCredentialCryptoService {
         : this.config.integrationCredentials.fingerprintKeys.get(version);
     if (!key || version === undefined) throw encryptionUnavailable();
     return { key, version };
+  }
+
+  private assertManagementRole(): void {
+    if (this.config.integrationCredentials.role !== "MANAGEMENT") {
+      throw encryptionUnavailable();
+    }
+  }
+
+  private assertExecutionRole(): void {
+    if (this.config.integrationCredentials.role !== "EXECUTION") {
+      throw encryptionUnavailable();
+    }
   }
 }
 

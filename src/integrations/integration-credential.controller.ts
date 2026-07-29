@@ -4,6 +4,8 @@ import {
   Delete,
   Get,
   Headers,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -12,6 +14,7 @@ import {
 } from "@nestjs/common";
 import type {
   ApiResponse,
+  IntegrationCredentialValidationSummary,
   IntegrationCredentialSummary,
   IntegrationProviderCatalogItem
 } from "@seo-platform/contracts";
@@ -24,17 +27,20 @@ import {
 import { IntegrationCredentialApiGuard } from "./integration-credential-api.guard.js";
 import {
   internalCreateIntegrationCredentialInput,
+  internalCreateIntegrationCredentialValidationInput,
   internalDeleteIntegrationCredentialInput,
   internalUpdateIntegrationCredentialInput
 } from "./integration-credential-input.js";
 import { IntegrationCredentialService } from "./integration-credential.service.js";
+import { IntegrationCredentialValidationService } from "./integration-credential-validation.service.js";
 import { integrationProviderCatalog } from "./integration-provider-catalog.js";
 
 @Controller("internal/v1/workspaces/:workspaceId/integrations")
 @UseGuards(IntegrationCredentialApiGuard)
 export class IntegrationCredentialController {
   public constructor(
-    private readonly credentials: IntegrationCredentialService
+    private readonly credentials: IntegrationCredentialService,
+    private readonly validations: IntegrationCredentialValidationService
   ) {}
 
   @Get("catalog")
@@ -92,6 +98,47 @@ export class IntegrationCredentialController {
       await this.credentials.update(
         internalUuid(credentialId, "credentialId"),
         input
+      )
+    );
+  }
+
+  @Post("credentials/:credentialId/validations")
+  @HttpCode(HttpStatus.ACCEPTED)
+  public async validate(
+    @Param("workspaceId") workspaceId: string,
+    @Param("credentialId") credentialId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<IntegrationCredentialValidationSummary>> {
+    const context = workspaceContext(workspaceId, headers);
+    const input = internalCreateIntegrationCredentialValidationInput(body);
+    assertInternalWorkspaceContext(input, context);
+    return response(
+      request,
+      await this.validations.request(
+        internalUuid(credentialId, "credentialId"),
+        input,
+        request.id
+      )
+    );
+  }
+
+  @Get("credentials/:credentialId/validations/:validationId")
+  public async validation(
+    @Param("workspaceId") workspaceId: string,
+    @Param("credentialId") credentialId: string,
+    @Param("validationId") validationId: string,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<IntegrationCredentialValidationSummary>> {
+    const context = workspaceContext(workspaceId, headers);
+    return response(
+      request,
+      await this.validations.get(
+        internalUuid(credentialId, "credentialId"),
+        internalUuid(validationId, "validationId"),
+        context.workspaceId
       )
     );
   }

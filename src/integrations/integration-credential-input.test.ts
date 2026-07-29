@@ -21,7 +21,7 @@ test("requires the XMLStock account identifier and keeps secrets private", () =>
     createIntegrationCredentialInput({
       provider: "XMLSTOCK",
       label: " Main ",
-      apiKey: " secret-api-key ",
+      apiKey: "secret-api-key",
       accountIdentifier: " 12345 "
     }),
     {
@@ -33,7 +33,7 @@ test("requires the XMLStock account identifier and keeps secrets private", () =>
   );
 });
 
-test("allows a label-only update and rejects whitespace in an API key", () => {
+test("allows a label-only update and never normalizes API key material", () => {
   assert.deepEqual(updateIntegrationCredentialInput({ label: "Renamed" }), {
     label: "Renamed"
   });
@@ -42,6 +42,23 @@ test("allows a label-only update and rejects whitespace in an API key", () => {
       updateIntegrationCredentialInput({
         label: "Renamed",
         apiKey: "secret key"
+      }),
+    BadRequestException
+  );
+  assert.throws(
+    () =>
+      createIntegrationCredentialInput({
+        provider: "KEYS_SO",
+        label: "Primary",
+        apiKey: " secret-api-key"
+      }),
+    BadRequestException
+  );
+  assert.throws(
+    () =>
+      updateIntegrationCredentialInput({
+        label: "Renamed",
+        apiKey: "secret-api-key "
       }),
     BadRequestException
   );

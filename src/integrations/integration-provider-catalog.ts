@@ -15,6 +15,7 @@ export const integrationProviderCatalog = [
       "WORDSTAT"
     ],
     supportedModes: ["BYOK_API_KEY"],
+    credentialValidationMode: "PROVIDER_DOCUMENTATION_REQUIRED",
     requiresAccountIdentifier: true,
     accountIdentifierLabel: "XMLStock user ID",
     subscriptionNotice:
@@ -27,6 +28,7 @@ export const integrationProviderCatalog = [
       "Clustering, indexation checks and supported SEO tools through a user-owned account.",
     capabilities: ["CLUSTERING", "INDEXATION"],
     supportedModes: ["BYOK_API_KEY"],
+    credentialValidationMode: "ACCOUNT_METADATA",
     requiresAccountIdentifier: false,
     subscriptionNotice:
       "An Arsenkin Tools plan with API access is purchased separately."
@@ -42,6 +44,7 @@ export const integrationProviderCatalog = [
       "SERP_COLLECTION"
     ],
     supportedModes: ["BYOK_API_KEY"],
+    credentialValidationMode: "ACCOUNT_METADATA",
     requiresAccountIdentifier: false,
     subscriptionNotice:
       "A Keys.so plan with REST API access is purchased separately."
