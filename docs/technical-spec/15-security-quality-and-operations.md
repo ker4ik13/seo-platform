@@ -182,6 +182,16 @@
   писать только нормализованный error code и redacted outbox/audit event, но
   не raw provider response; в первом validation slice terminal outbox ещё
   отсутствует.
+- Для manual rank execution применяется ADR-2026-034. До live submit
+  connector получает только scoped execution claim через allowlisted
+  SECURITY DEFINER operations: authorize action, record submit, schedule
+  poll, stage normalized rows и finish/fail. Прямой global read jobs/vault
+  execution-role запрещён. Claim повторно проверяет tenant/job/item, lease,
+  одноразовый lifecycle grant, binding/material/connector versions и kill
+  switch.
+- Любой provider response, для которого нет recorded schema, считается
+  `INVALID_RESPONSE`, не преобразуется эвристически в rank snapshots и не
+  попадает в публичные ошибки, логи или events.
 
 ## 9. Шифрование и ключи
 

@@ -6,7 +6,7 @@
 
 - search engine;
 - country;
-- region/provider region ID;
+- provider-neutral platform region code/label;
 - language;
 - device;
 - result depth;
@@ -18,6 +18,9 @@
 По ADR-2026-033 provider/credential принадлежат project connector binding, а
 schedule/timezone — automation. Экран может показывать их effective projection
 рядом с context, но они не входят в immutable tracking configuration.
+Provider-specific region ID и форма provider request получаются adapter
+mapping при создании immutable execution manifest и не записываются обратно
+в tracking context.
 
 ## 2. Конфигурация отслеживания
 
@@ -58,6 +61,30 @@ Wizard:
 - доступный баланс;
 - fallback max cost;
 - данные, которые будут сохранены.
+
+### 3.1. Первый manual BYOK slice
+
+По ADR-2026-034 первый execution slice использует Arsenkin `positions` только
+после прохождения provider contract gate. До этого разрешены context,
+assignment, binding, estimate и compatibility UI, но live submit выключен
+provider/capability kill switch.
+
+Первый scope ограничен Google Desktop/Mobile TOP-30, simple format, одним
+context на provider task, chunk до 250 keywords и 1 000 keywords на command.
+Яндекс, raw SERP, fallback и platform-paid route в этот slice не входят.
+Country, language, safe search и domain rule запрещено молча отбрасывать:
+непредставимый context получает compatibility blocker ещё в estimate.
+
+`POST /rank-estimates` не вызывает provider и возвращает versioned scope hash,
+configuration versions, credential freshness, provider limits, тарифную quota,
+expiry и `executionAllowed`. `POST /rank-runs` требует актуальный estimate,
+`ranking.run`, CSRF, idempotency key и authoritative execution grant.
+
+После начала provider `set` неоднозначный timeout/crash/`5xx` переводит item в
+`SUBMIT_OUTCOME_UNKNOWN`. Автоматический повтор submit запрещён, пока provider
+не предоставляет доказуемую идемпотентность или способ восстановить task ID.
+Пользователь может создать только осознанный новый запуск с предупреждением о
+возможном повторном списании внешних лимитов.
 
 ## 4. Rank snapshot
 

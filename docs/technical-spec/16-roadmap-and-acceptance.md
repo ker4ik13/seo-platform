@@ -176,6 +176,14 @@ authoritative lifecycle projection/inbox либо эквивалентная pre
 Project binding migration проверена на PostgreSQL 16, но целевой PostgreSQL 18
 остаётся staging-gate.
 
+Архитектура первого Arsenkin manual rank job зафиксирована
+ADR-2026-034. Live `set` остаётся выключенным до recorded one-key contract или
+письменного подтверждения response/status/retry semantics, устранения global
+vault read, authoritative execution grant, manifest/ingest receipts и
+`SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit. Наличие working credential
+validation и capability в binding не считается доказательством рабочего
+`positions` execution.
+
 До production rollout BYOK дополнительно блокируют две границы текущего
 validation slice:
 
@@ -598,6 +606,8 @@ Owner создаёт workspace, приглашает Admin, SEO Specialist и Cl
 - idempotent start;
 - provider rate limiting;
 - retry;
+- потерянный/неоднозначный submit не повторяется автоматически и показывает
+  `SUBMIT_OUTCOME_UNKNOWN`;
 - positions/history/source/date/region/device;
 - partial results;
 - credential disabled state;

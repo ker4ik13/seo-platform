@@ -474,6 +474,38 @@ internal token плюс точным совпадением trusted tenant/actor
 - `/projects/{projectId}/data-collection/estimate`;
 - `/projects/{projectId}/data-collection/run`;
 
+Реализованный tracking context API использует:
+
+- `GET|POST /api/v1/projects/{projectId}/tracking-contexts`;
+- `GET|PATCH /api/v1/projects/{projectId}/tracking-contexts/{contextId}`;
+- `POST .../{contextId}/archive|restore`;
+- `GET .../{contextId}/keywords`;
+- `PUT|DELETE .../{contextId}/keywords/{keywordId}`.
+
+Read требует `ranking.view`; mutations — `ranking.configure`, browser session
+и CSRF. Create требует `Idempotency-Key`; PATCH/archive/restore —
+`If-Match`. GET collection возвращает bounded 200 contexts,
+`contextsTruncated` и access projection. Keyword list использует opaque
+keyset cursor и limit `1..200`; point PUT/DELETE идемпотентны. Архивный
+проект блокирует mutations, billing read-only оставляет чтение доступным.
+
+Tenant/actor отсутствуют в public body. Platform API передаёт их в internal
+headers/body, SEO Data повторно сверяет route project, trusted context и
+command scope. Ответ SEO Data проходит строгую runtime-проверку workspace,
+project, entity/configuration versions, temporal archive state и дочерних IDs.
+Provider/credential/schedule не входят в tracking context по ADR-2026-033.
+
+Планируемый первый manual flow по ADR-2026-034 добавляет:
+
+- `POST /api/v1/projects/{projectId}/rank-estimates`;
+- `POST /api/v1/projects/{projectId}/rank-runs`;
+- `GET /api/v1/jobs/{jobId}` и cancel/retry-safe actions.
+
+Run отвечает `202 + Location`. Estimate не вызывает provider. Перед каждым
+новым provider submit требуется одноразовый authoritative execution grant;
+неоднозначный submit имеет отдельный публично видимый status и не повторяется
+автоматически.
+
 ### 13.5. Imports/exports/jobs
 
 - `/uploads`;
@@ -831,6 +863,11 @@ Publisher отправляет событие в NATS JetStream и помеча�
 - `semantic.import.cancelled.v1`;
 - `semantic.import.failed.v1`;
 - `semantics.version.created.v1`;
+- `seo.tracking-context.created.v1`;
+- `seo.tracking-context.updated.v1`;
+- `seo.tracking-context.archived.v1`;
+- `seo.tracking-context.restored.v1`;
+- `seo.tracking-context.keyword-assignment.changed.v1`;
 - `seo.rank-check.completed.v1`;
 - `seo.frequency-check.completed.v1`;
 - `seo.serp-collected.v1`;
@@ -854,6 +891,22 @@ provider/credential mode, fallback/budget mode, availability, version и
 changedBy, а также allowlisted `changedFields`. Credential ID, label, display
 hint, provider metadata и secret запрещены. Общий payload contract находится
 в `platform-contracts`.
+
+События `seo.tracking-context.created.v1`, `.updated.v1`, `.archived.v1` и
+`.restored.v1` записываются в SEO Data outbox одной транзакцией с изменением
+aggregate. Их общий payload содержит только `contextId`, `workspaceId`,
+`projectId`, status, entity/configuration versions, search engine, device,
+`changedBy` и allowlisted `changedFields` из `name/configuration/status`.
+Название context, country/region/language, domain match value, keyword text,
+URL, provider, credential, schedule, budget и raw configuration запрещены.
+
+`seo.tracking-context.keyword-assignment.changed.v1` содержит только
+workspace/project/context/keyword IDs, операцию `ASSIGNED/REMOVED` и
+`changedBy`. Keyword text и значения колонок семантики в event не попадают.
+Точный payload обоих семейств типизирован в `platform-contracts`. В текущем
+срезе producer создаёт transactional outbox rows, но durable publisher и
+consumers ещё не включены; наличие строки outbox нельзя интерпретировать как
+доставку в NATS.
 
 ## 18. NATS subjects и consumers
 

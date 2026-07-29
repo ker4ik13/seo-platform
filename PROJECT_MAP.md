@@ -2,11 +2,13 @@
 
 Последнее обновление: 29 июля 2026 года
 
-Текущий инкремент: versioned tracking contexts
-Статус: project connector binding завершён; по ADR-2026-033 tracking context
-принадлежит SEO data и хранит только immutable search configuration.
-Provider остаётся в connector binding, schedule — в automation; context CRUD,
-keyword assignments и UI находятся в разработке
+Текущий инкремент: manual BYOK rank job foundation
+Статус: versioned tracking context завершён во всех слоях: contracts,
+SEO Data, Platform API и Web. Rankings пока реализован только как
+конфигурационный vertical slice: контексты и назначения ключей готовы,
+provider execution и position history ещё отсутствуют. Следующий execution
+slice следует ADR-2026-034; live Arsenkin submit остаётся выключенным до
+прохождения contract/security gates
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -83,6 +85,10 @@ Project binding читается и изменяется через Platform API
 в jobs/integrations. Public body не задаёт tenant/actor context; Platform API
 передаёт его через тот же dedicated credential boundary и строго проверяет
 scope/safe response перед возвратом в Web.
+Tracking context читается и изменяется через Platform API, а хранится только
+в SEO Data. Platform API передаёт проверенный tenant/actor context по internal
+HTTP; SEO Data повторно сверяет route/project scope и атомарно пишет redacted
+outbox event вместе с domain change.
 Остальная межсервисная бизнес-коммуникация пока не включена: подключены
 transport и health/readiness, таблицы outbox/inbox созданы. Durable публикация
 событий начинается в следующем вертикальном срезе.
@@ -173,8 +179,11 @@ Backend convention:
   `semantic.import`/`semantic.view`;
 - `platform-api/src/semantics` — public project-scoped keyword queries с
   `semantic.view`;
-- `platform-api/src/seo-data` — строго валидируемый internal read client к
-  владельцу semantic core;
+- `platform-api/src/rankings` — public tracking context CRUD/archive/restore
+  и point keyword assignments с `ranking.view/configure`, CSRF,
+  idempotency/OCC и audit;
+- `platform-api/src/seo-data` — строго валидируемый internal read/command
+  client к владельцу semantic core и tracking contexts;
 - `platform-api/src/notifications` — public profile/project notification
   preferences с CSRF, tenant authorization и optimistic locking;
 - `platform-api/src/realtime` — строго валидируемый internal client владельца
@@ -206,7 +215,11 @@ Backend convention:
 - `platform-seo-data/src/semantic-imports` — нормализация, import receipts,
   идемпотентное применение chunks и semantic version;
 - `platform-seo-data/src/keywords` — tenant-scoped keyword read model,
-  trigram search и cursor pagination;
+  trigram search, cursor pagination и derived `isTracked` по активным
+  temporal assignments;
+- `platform-seo-data/src/tracking-contexts` — logical context,
+  immutable configuration versions, temporal keyword assignments,
+  create receipts и transactional redacted outbox events;
 - `platform-seo-data/src/internal` — fail-closed авторизация внутренних
   tenant/actor команд;
 - `platform-jobs-integrations/src/email` — email port, disabled и SMTP adapters;
@@ -218,6 +231,9 @@ Backend convention:
 - `platform-web/app` — public, tools, docs и private `/app` App Router screens;
 - `platform-web/app/app/api` — same-origin browser BFF только к
   `/api/v1` Platform API;
+- `platform-web/app/app/(protected)/projects/[projectId]/rankings/contexts` —
+  private/noindex экран контекстов позиций; UI-компоненты находятся в
+  `platform-web/components/tracking-context-*`;
 - `platform-web/lib/protected-app.ts` — server-side session gate и безопасный
   refresh redirect;
 - `platform-*/lib` и `components` — adapters и переиспользуемые UI-части;
@@ -265,7 +281,7 @@ Entrypoints:
 | Semantics/import | vertical slice: CSV/TSV → mapping → validation → publish → query |
 | Notifications | vertical slice: preferences → effective policy → read center |
 | Integrations | vertical slice: catalog + encrypted BYOK vault + validation + project binding |
-| Rankings | planned |
+| Rankings | vertical slice: configuration only (contexts + assignments) |
 | Billing/YooKassa | planned |
 | Directus content | planned |
 
@@ -428,17 +444,44 @@ tenant-scoped `FOR SHARE` lock credential до commit, поэтому rotate/rev
 `platform-contracts`, не содержит credential ID и передаёт безопасный
 `changedFields`, включая смену route между двумя ключами одного provider.
 
+Контексты позиций настраиваются на
+`/app/projects/:projectId/rankings/contexts`. Public API
+`/api/v1/projects/:projectId/tracking-contexts` поддерживает list/create/get/
+update/archive/restore и point PUT/DELETE assignments; внутренний mirror
+принадлежит SEO Data. Read требует `ranking.view`, mutation —
+`ranking.configure`, CSRF и mutable project/workspace. Create использует
+immutable idempotency receipt, update/archive/restore — `If-Match`; billing
+read-only и архивный проект не скрывают чтение. Списки bounded: 200 contexts
+с `contextsTruncated`, assignments — keyset cursor с limit до 200.
+
+`seo_db` migration `20260729130000_versioned_tracking_contexts` добавила
+`tracking_context_versions`, `tracking_context_keyword_assignments` и
+`tracking_context_create_receipts`, а `tracking_contexts` оставила logical
+entity с OCC/archive state. Поисковые изменения создают immutable
+configuration version; rename/archive/restore её не переписывают. Assignment
+закрывается `removed_at`, повторное назначение создаёт новый период,
+`keywords.is_tracked` больше не источник истины. Migration блокирует legacy
+tracking/rank tables `ACCESS EXCLUSIVE` и fail-closed останавливается при
+наличии данных.
+
+Contracts содержат HTTP DTO и события
+`seo.tracking-context.created/updated/archived/restored.v1` и
+`seo.tracking-context.keyword-assignment.changed.v1`. SEO Data пишет их в
+outbox атомарно и без name, keyword text, URL, provider/credential/schedule и
+raw configuration. Durable outbox publisher всё ещё не реализован, поэтому
+эти записи ещё не доставляются через NATS.
+
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 97 pass, 0 fail.
-- SEO data unit tests: 10 pass, 0 fail.
+- Platform API unit tests: 116 pass, 0 fail.
+- SEO data unit tests: 20 pass, 0 fail.
 - Jobs/integrations unit tests: 135 pass, 0 fail.
 - Realtime unit tests: 12 pass, 0 fail.
 - Contracts unit tests: 2 pass, 0 fail.
-- Unified Web helper tests: 28 pass, 0 fail.
+- Unified Web helper tests: 44 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
 - Unified Next.js production build: pass; проверены public site, Toolbox,
   API docs и private `/app`.
@@ -470,12 +513,31 @@ tenant-scoped `FOR SHARE` lock credential до commit, поэтому rotate/rev
   create replay, `412/409`, bounded options и mobile overflow. Интерактивный
   browser backend в текущем окружении недоступен, поэтому новый экран требует
   повторного visual smoke после удалённого deploy.
+- Tracking context SEO Data: Prisma validate/generate, strict typecheck,
+  20 unit tests и production build pass. Migration review pass; применение
+  DDL не проверено на живом PostgreSQL в текущем окружении из-за
+  недоступного Docker и отсутствующего локального connection, поэтому fresh,
+  fail-closed и concurrent-writer smoke обязательны на PostgreSQL 18 staging.
+- Tracking context Platform API: strict typecheck, 116 unit tests, production
+  build и diff-check pass. Compiled bootstrap зарегистрировал новые modules и
+  routes без DI errors; startup остановился только на ожидаемо недоступном
+  тестовом NATS.
+- Tracking context Web: strict typecheck, 44 helper/BFF tests, production
+  build и diff-check pass; private/noindex route входит в build. BFF PUT и
+  client helpers покрыты тестами. Защищённый browser visual/e2e не запускался
+  без live auth/API и остаётся обязательным после удалённого deploy.
 - Target runtime: Node.js 24. Локальная проверка выполнялась на Node.js 22 с
   ожидаемым engine warning; контейнеры используют Node.js 24.
 
 ## 9. Следующий вертикальный срез
 
-`tracking context → manual BYOK rank job → position history`
+`manual BYOK rank job → position history`
+
+Execution следует ADR-2026-034: сначала estimate и immutable manifest, затем
+authoritative execution grant, scoped connector operations, ingest receipts и
+partial persistence. Live Arsenkin `set` выключен, пока нет recorded provider
+contract, безопасного `SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit и устранения
+global vault read.
 
 Параллельный обязательный следующий срез уведомлений:
 `profile/project effective policy → transactional outbox/durable consumer →
@@ -487,7 +549,7 @@ Production-зависимости `@nats-io/jetstream` и `web-push` ещё не
 
 ## 10. Незавершённые риски
 
-- Дашборд использует честные empty states до первого SEO domain slice.
+- Дашборд использует честные empty states до первого rank data slice.
 - Realtime не допускает вход в project rooms до общей token/permission проверки.
 - Миграция backfill-ит `keyword_groups.path/path_hash` для корректного
   корневого дерева; orphan/cyclic legacy groups перед production требуют
@@ -542,6 +604,12 @@ Production-зависимости `@nats-io/jetstream` и `web-push` ещё не
   fail-closed сценарии проверены на PostgreSQL 16. Перед precondition таблица
   блокируется `ACCESS EXCLUSIVE`, и concurrent-writer smoke подтвердил
   отсутствие окна check → DROP; PostgreSQL 18 остаётся staging-gate.
+- Versioned tracking context migration fail-closed требует пустые
+  pre-release `tracking_contexts`, `rank_snapshots` и `current_ranks`, удерживая
+  их `ACCESS EXCLUSIVE` от проверки до destructive contract step. SQL,
+  constraints и migration-order проверены тестами, но живой PostgreSQL smoke
+  в текущем окружении не выполнен; fresh/fail-closed/concurrent-writer
+  сценарии на PostgreSQL 18 остаются staging-gate.
 - Проверка lifecycle проекта сейчас авторитетна в Platform API, но между ней и
   commit в jobs database остаётся межсервисное TOCTOU. До первого исполняемого
   rank job jobs/integrations обязан получить project/workspace lifecycle
@@ -575,10 +643,12 @@ Production-зависимости `@nats-io/jetstream` и `web-push` ещё не
   `@nats-io/jetstream`; plaintext verification token не логируется.
 - QR для TOTP пока представлен локальным `otpauth://` URI и ручным ключом;
   UI QR появится после подтверждения зависимости `qrcode`.
-- Rank/frequency connectors, тарификация и YooKassa пока присутствуют только
-  в ТЗ/схемах. Реализованные Arsenkin/Keys.so connectors сейчас выполняют
-  только read-only credential validation; XMLStock ждёт подтверждённого
-  provider contract и redacted fixtures.
+- Rank/frequency execution, тарификация и YooKassa пока присутствуют только
+  в ТЗ/схемах; tracking configuration уже реализована, но ещё не создаёт rank
+  jobs/snapshots. Arsenkin/Keys.so connectors сейчас выполняют только
+  read-only credential validation; live Arsenkin `positions` заблокирован
+  ADR-2026-034, XMLStock ждёт подтверждённого provider contract и redacted
+  fixtures.
 - `platform-app` сохранён как legacy Git-источник до проверки переноса; новая
   функциональность добавляется только в `platform-web`.
 

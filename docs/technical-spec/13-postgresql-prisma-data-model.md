@@ -503,6 +503,12 @@ Versioned rollout configuration.
 - deleted_at;
 - version.
 
+`is_tracked` временно сохраняется как legacy compatibility column, но не
+является источником истины. Публичный `isTracked` вычисляется по наличию
+активного temporal assignment к активному tracking context. Новые команды
+назначения не должны обновлять этот boolean; удалить колонку можно только
+отдельной contract migration после проверки всех consumers.
+
 Indexes:
 
 - unique `(project_id, text_normalized)` where deleted_at null, если включён строгий dedup;
@@ -696,30 +702,111 @@ Append-only evidence не переписывается при acknowledgement.
 
 #### `tracking_contexts`
 
-- id;
+- id, logical context ID;
 - workspace_id;
 - project_id;
 - name;
-- search_engine;
-- country;
-- region_provider_id;
-- region_label;
-- language;
-- device;
-- depth;
-- domain_rule;
-- active;
-- config_version;
+- status `ACTIVE/ARCHIVED`;
+- created_by;
+- updated_by;
+- archived_by nullable;
+- version для optimistic concurrency;
 - created_at;
-- updated_at.
+- updated_at;
+- archived_at nullable.
 
-#### `keyword_tracking_contexts`
+Эта таблица хранит пользовательскую идентичность контекста, но не provider,
+credential, fallback, budget, schedule и поисковые параметры. Hard delete в
+пользовательском flow отсутствует; archive/restore сохраняют конфигурационную
+историю и назначения.
 
-- keyword_id;
+Ограничения и индексы:
+
+- unique `(workspace_id, project_id, id)` для tenant-safe дочерних связей;
+- index `(workspace_id, project_id, status, created_at, id)`;
+- `version > 0`;
+- `archived_by/archived_at` обязательны только для `ARCHIVED` и отсутствуют
+  для `ACTIVE`.
+
+#### `tracking_context_versions`
+
+- workspace_id;
+- project_id;
 - context_id;
-- active;
-- added_at;
-- removed_at.
+- configuration_version;
+- search_engine `GOOGLE/YANDEX`;
+- country_code ISO alpha-2;
+- region_code nullable, канонический код региона платформы;
+- region_label nullable и допустим только вместе с region_code;
+- language BCP 47;
+- device `DESKTOP/MOBILE`;
+- depth `30/50/100`;
+- domain_match_mode;
+- domain_match_value nullable;
+- safe_search;
+- configuration_hash SHA-256;
+- created_by;
+- created_at.
+
+Primary key: `(context_id, configuration_version)`. Дополнительный unique
+`(workspace_id, project_id, context_id, configuration_version)` и составной
+foreign key в `tracking_contexts` не позволяют связать версию с другим
+tenant/project. У режимов `SPECIFIC_URL/URL_PREFIX` значение обязательно, у
+остальных режимов — запрещено.
+
+Configuration version неизменяема: изменение любой поисковой настройки
+добавляет следующую строку. Rename, archive и restore меняют только entity
+version в `tracking_contexts` и не создают фиктивную configuration version.
+Rank manifest/snapshot обязан ссылаться на точную configuration version, а не
+только на logical context.
+
+#### `tracking_context_keyword_assignments`
+
+- id;
+- workspace_id;
+- project_id;
+- context_id;
+- keyword_id;
+- assigned_by;
+- assigned_at;
+- removed_by nullable;
+- removed_at nullable.
+
+Назначение temporal и не удаляется физически. Снятие закрывает период через
+`removed_by/removed_at`; повторное назначение создаёт новую строку. Partial
+unique `(workspace_id, project_id, context_id, keyword_id) WHERE removed_at
+IS NULL` допускает только один активный период. Составные foreign keys к
+контексту и keyword включают `workspace_id/project_id` и используют
+`ON DELETE RESTRICT`.
+
+`SemanticKeywordListItem.isTracked` равен `true`, только если существует
+активный assignment к активному context; `keywords.is_tracked` для этого
+решения не читается.
+
+#### `tracking_context_create_receipts`
+
+- workspace_id;
+- project_id;
+- actor_id;
+- idempotency_key;
+- request_hash, ровно 32 bytes;
+- context_id;
+- immutable response_snapshot;
+- created_at.
+
+Primary key:
+`(workspace_id, project_id, actor_id, idempotency_key)`. Exact replay
+возвращает исходный snapshot создания, в том числе после последующих
+изменений context. Другой request hash под тем же ключом возвращает
+`IDEMPOTENCY_CONFLICT`. Receipt и logical context создаются одной
+транзакцией.
+
+Migration `20260729130000_versioned_tracking_contexts` преобразует раннюю
+provider-shaped foundation table только при пустых `tracking_contexts`,
+`rank_snapshots` и `current_ranks`. Все три таблицы блокируются
+`ACCESS EXCLUSIVE` до проверки. Наличие хотя бы одной legacy строки
+останавливает migration; для такого окружения требуется отдельный
+expand → inspect → backfill → validate → contract plan.
 
 ### 5.5. Rank snapshots
 
@@ -1340,6 +1427,7 @@ model Keyword {
   groupId        String?   @map("group_id") @db.Uuid
   clusterId      String?   @map("cluster_id") @db.Uuid
   targetPageId   String?   @map("target_page_id") @db.Uuid
+  /// Legacy compatibility; temporal assignments are authoritative.
   isTracked      Boolean   @default(false) @map("is_tracked")
   version        Int       @default(1)
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz

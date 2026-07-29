@@ -134,6 +134,13 @@
 - retry только failed items;
 - manual retry создаёт новую attempt chain.
 
+Общее правило `network/5xx` не применяется к неидемпотентному provider
+submit. По ADR-2026-034, если connector уже начал отправку Arsenkin `set`, но
+не получил однозначный task ID, item переходит в `SUBMIT_OUTCOME_UNKNOWN`.
+Такой item не попадает в auto-retry и failed-subset retry. UI требует
+отдельного подтверждения нового запуска с предупреждением о возможном
+повторном provider charge.
+
 ## 8. Очереди BullMQ
 
 Базовые очереди:
@@ -161,6 +168,17 @@ Workers разделяются по профилю ресурсов:
 - browser-rendering;
 - large-memory;
 - report-rendering.
+
+Manual rank job дополнительно разделяет process capabilities внутри одного
+`platform-jobs-integrations` image:
+
+- rank worker без KEK управляет manifest, fairness и persistence;
+- connector worker с execution KEK выполняет только allowlisted provider
+  calls и строгую нормализацию.
+
+Это не новый сервис. До live rank submit connector role должен получать
+scoped execution через SECURITY DEFINER operations, а не global read Job и
+credential tables.
 
 Rate limiting настраивается по provider и credential. Нельзя полагаться только на общий limiter очереди; connector поддерживает распределённые quota buckets.
 
