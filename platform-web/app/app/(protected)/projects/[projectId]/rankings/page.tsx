@@ -1,20 +1,20 @@
 import type { Metadata } from "next";
-import { AppShell } from "../../../../../../../components/app-shell";
-import { RankingsTabs } from "../../../../../../../components/rankings-tabs";
-import { TrackingContextSettings } from "../../../../../../../components/tracking-context-settings";
-import { requireProtectedProjectAppContext } from "../../../../../../../lib/protected-app";
+import { AppShell } from "../../../../../../components/app-shell";
+import { RankHistory } from "../../../../../../components/rank-history";
+import { RankingsTabs } from "../../../../../../components/rankings-tabs";
+import { requireProtectedProjectAppContext } from "../../../../../../lib/protected-app";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Контексты отслеживания позиций",
+  title: "История позиций",
   robots: {
     index: false,
     follow: false
   }
 };
 
-export default async function TrackingContextsPage({
+export default async function RankHistoryPage({
   params
 }: Readonly<{
   params: Promise<{ readonly projectId: string }>;
@@ -37,24 +37,23 @@ export default async function TrackingContextsPage({
         <span aria-hidden="true">/</span>
         <span>{project.name}</span>
         <span aria-hidden="true">/</span>
-        <span aria-current="page">Контексты позиций</span>
+        <span aria-current="page">История позиций</span>
       </nav>
       <section className="page-heading tracking-context-heading">
         <div>
           <p className="eyebrow">Позиции · {project.name}</p>
-          <h1>Контексты отслеживания</h1>
+          <h1>История позиций</h1>
           <p>
-            Зафиксируйте поисковую систему, географию, устройство и правило
-            сопоставления домена. Изменения создают новую версию конфигурации и
-            не переписывают историю позиций.
+            Просматривайте сохранённые снимки по контексту, запросу и
+            календарному диапазону UTC. История не переписывается при изменении
+            настроек.
           </p>
         </div>
       </section>
-      <RankingsTabs active="contexts" projectId={project.id} />
-      <TrackingContextSettings
+      <RankingsTabs active="history" projectId={project.id} />
+      <RankHistory
         key={project.id}
         projectId={project.id}
-        projectName={project.name}
         projectStatus={project.status}
         workspaceStatus={workspace.status}
       />

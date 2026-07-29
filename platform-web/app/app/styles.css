@@ -2063,6 +2063,260 @@ svg { display: block; }
 .onboarding-form { display: grid; gap: 15px; grid-column: 2; max-width: 480px; width: 100%; }
 .form-row { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
+.rankings-tabs { max-width: 1180px; }
+.rank-history-stack { display: grid; gap: 14px; max-width: 1180px; }
+.rank-history-boundary-note,
+.rank-history-offline { overflow-wrap: anywhere; }
+.rank-history-filters,
+.rank-history-results,
+.rank-history-loading,
+.rank-history-empty {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  min-width: 0;
+  padding: 19px;
+}
+.rank-history-filters > header,
+.rank-history-results-heading {
+  align-items: flex-start;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+}
+.rank-history-filters > header > div,
+.rank-history-results-heading > div { min-width: 0; }
+.rank-history-filters h2,
+.rank-history-results h2 { font-size: 16px; }
+.rank-history-filters header p,
+.rank-history-results-heading p {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+  margin-top: 5px;
+}
+.rank-history-filter-grid {
+  align-items: end;
+  display: grid;
+  gap: 12px;
+  grid-template-columns:
+    minmax(230px, 1.2fr)
+    minmax(145px, .6fr)
+    minmax(145px, .6fr)
+    minmax(230px, 1fr)
+    auto;
+}
+.rank-history-filter-grid .form-field input,
+.rank-history-filter-grid .form-field select { min-height: 42px; }
+.rank-history-filter-grid .form-field small {
+  min-height: 31px;
+  overflow-wrap: anywhere;
+}
+.rank-history-submit { margin-bottom: 31px; white-space: nowrap; }
+.rank-history-truncated-note {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+  padding-top: 13px;
+}
+.rank-history-results { gap: 16px; }
+.rank-history-loading {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  min-height: 130px;
+}
+.rank-history-loading.compact {
+  background: #fafafd;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  box-shadow: none;
+  min-height: 170px;
+  padding: 20px;
+}
+.rank-history-loading > div { min-width: 0; }
+.rank-history-loading strong { font-size: 13px; }
+.rank-history-loading p {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
+  margin-top: 5px;
+}
+.rank-history-failure,
+.rank-history-empty {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 220px;
+  text-align: center;
+}
+.rank-history-empty-inline {
+  border: 0;
+  border-radius: 11px;
+  box-shadow: none;
+  padding: 28px;
+}
+.rank-history-empty-mark {
+  align-items: center;
+  background: #eeecff;
+  border-radius: 12px;
+  color: var(--brand);
+  display: inline-flex;
+  font-size: 18px;
+  font-weight: 800;
+  height: 44px;
+  justify-content: center;
+  width: 44px;
+}
+.rank-history-failure h2,
+.rank-history-empty h2 { font-size: 16px; margin-top: 14px; }
+.rank-history-failure p,
+.rank-history-empty p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 7px auto 0;
+  max-width: 540px;
+}
+.rank-history-failure small {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.rank-history-failure .secondary-button,
+.rank-history-empty .primary-button { margin-top: 18px; }
+.rank-history-alert {
+  align-items: center;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+.rank-history-alert > span { min-width: 0; overflow-wrap: anywhere; }
+.rank-history-alert small {
+  color: inherit;
+  display: block;
+  font-size: 11px;
+  margin-top: 3px;
+  opacity: .8;
+}
+.rank-history-table-wrap {
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  max-width: 100%;
+  overflow: auto;
+}
+.rank-history-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 11px;
+  min-width: 1080px;
+  width: 100%;
+}
+.rank-history-table th,
+.rank-history-table td {
+  border-bottom: 1px solid var(--line);
+  max-width: 260px;
+  overflow: hidden;
+  padding: 11px 12px;
+  text-align: left;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+.rank-history-table th {
+  background: #f8f8fa;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .025em;
+  position: sticky;
+  text-transform: uppercase;
+  top: 0;
+  white-space: nowrap;
+  z-index: 1;
+}
+.rank-history-table tbody tr:last-child td { border-bottom: 0; }
+.rank-history-table tbody tr:hover td { background: #fafafd; }
+.rank-history-table td strong,
+.rank-history-table td small { display: block; }
+.rank-history-table td small {
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 4px;
+}
+.rank-history-table td:first-child { min-width: 190px; }
+.rank-history-table td:nth-child(2) { min-width: 210px; }
+.rank-history-table td:nth-child(4) { min-width: 220px; }
+.rank-position {
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 750;
+  padding: 5px 8px;
+  white-space: nowrap;
+}
+.rank-position.found { background: #eaf8f2; color: var(--green); }
+.rank-position.not-found { background: #f1f2f5; color: var(--muted); }
+.rank-history-url {
+  color: var(--brand);
+  display: block;
+  font-weight: 650;
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rank-history-url:hover { text-decoration: underline; text-underline-offset: 2px; }
+.rank-history-muted { color: var(--muted); }
+.rank-quality-ok { color: var(--green); font-weight: 650; }
+.rank-quality-warning { color: var(--warning-text); font-weight: 650; }
+.rank-history-footer {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 11px;
+  gap: 14px;
+  justify-content: space-between;
+}
+.rank-history-cards { display: none; list-style: none; margin: 0; padding: 0; }
+.rank-history-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  min-width: 0;
+  padding: 14px;
+}
+.rank-history-card > header {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+.rank-history-card header > div { min-width: 0; }
+.rank-history-card header strong,
+.rank-history-card header small { display: block; overflow-wrap: anywhere; }
+.rank-history-card header strong { font-size: 12px; }
+.rank-history-card header small { color: var(--muted); font-size: 11px; margin-top: 5px; }
+.rank-history-card dl { display: grid; gap: 10px; margin: 14px 0 0; }
+.rank-history-card dl > div {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 76px minmax(0, 1fr);
+  padding-top: 10px;
+}
+.rank-history-card dt { color: var(--muted); font-size: 11px; }
+.rank-history-card dd {
+  font-size: 11px;
+  line-height: 1.5;
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 1140px) {
   .integration-credential-row { grid-template-columns: minmax(190px, 1fr) auto; }
   .integration-credential-meta { grid-column: 1; }
@@ -2087,6 +2341,15 @@ svg { display: block; }
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .tracking-keyword-grid { grid-template-columns: 1fr; }
+  .rank-history-filter-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .rank-history-context-field,
+  .rank-history-keyword-field { grid-column: span 2; }
+  .rank-history-submit {
+    justify-self: start;
+    margin-bottom: 0;
+  }
 }
 
 @media (max-width: 760px) {
@@ -2303,6 +2566,28 @@ svg { display: block; }
   .tracking-context-keywords > header > span {
     align-self: flex-start;
   }
+  .rank-history-filters > header,
+  .rank-history-results-heading,
+  .rank-history-alert,
+  .rank-history-footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .rank-history-filter-grid { grid-template-columns: 1fr; }
+  .rank-history-context-field,
+  .rank-history-keyword-field { grid-column: auto; }
+  .rank-history-filter-grid .form-field input,
+  .rank-history-filter-grid .form-field select,
+  .rank-history-submit,
+  .rank-history-footer .secondary-button,
+  .rank-history-empty .primary-button,
+  .rank-history-failure .secondary-button {
+    min-height: 44px;
+  }
+  .rank-history-submit { width: 100%; }
+  .rank-history-table-wrap { display: none; }
+  .rank-history-cards { display: grid; gap: 10px; }
+  .rank-history-footer { gap: 10px; }
 }
 
 @media (max-width: 520px) {

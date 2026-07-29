@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import type { ProtectedAppContext } from "../lib/app-types";
-import { trackingContextsReturnTo } from "../lib/tracking-contexts";
+import { rankHistoryReturnTo } from "../lib/rank-history";
 import { AccountMenu } from "./account-menu";
 import { Icon, type IconName } from "./icon";
 import { NotificationBell } from "./notification-bell";
@@ -80,7 +80,7 @@ export function AppShell({
     item: (typeof navigation)[number]
   ): string =>
     item.projectScoped && context.project
-      ? trackingContextsReturnTo(context.project.id)
+      ? rankHistoryReturnTo(context.project.id)
       : item.href;
   return (
     <div className="app-shell">
