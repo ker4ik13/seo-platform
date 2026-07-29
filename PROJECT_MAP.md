@@ -2,12 +2,11 @@
 
 Последнее обновление: 29 июля 2026 года
 
-Текущий инкремент: project connector binding
-Статус: encrypted BYOK vault и проверка Arsenkin/Keys.so дополнены
-project-scoped привязкой источника для съёма позиций; документированная rank
-capability Arsenkin активируется после повторной реальной проверки ключа.
-XMLStock validation, tracking context и реальные rank jobs следуют отдельными
-срезами
+Текущий инкремент: versioned tracking contexts
+Статус: project connector binding завершён; по ADR-2026-033 tracking context
+принадлежит SEO data и хранит только immutable search configuration.
+Provider остаётся в connector binding, schedule — в automation; context CRUD,
+keyword assignments и UI находятся в разработке
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -29,6 +28,9 @@ XMLStock validation, tracking context и реальные rank jobs следую
 - Чек НПД создаётся только для verified успешного платежа ЮKassa.
 - Настройки каналов уведомлений принадлежат профилю пользователя; проектные
   подписки задают типы работ и могут только сужать/переопределять профиль.
+- Tracking context не хранит provider/credential/schedule: его immutable
+  search configuration принадлежит SEO data, routing — Jobs, schedule —
+  automation.
 
 ## 2. Development workspace
 

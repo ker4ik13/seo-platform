@@ -12,11 +12,12 @@
 - result depth;
 - domain matching rule;
 - safe search;
-- provider;
-- schedule;
-- timezone.
 
 Один проект может иметь несколько активных контекстов. Контексты имеют человекочитаемые названия.
+
+По ADR-2026-033 provider/credential принадлежат project connector binding, а
+schedule/timezone — automation. Экран может показывать их effective projection
+рядом с context, но они не входят в immutable tracking configuration.
 
 ## 2. Конфигурация отслеживания
 
@@ -24,15 +25,17 @@
 
 - создать контекст;
 - выбрать запросы по view/group/tag/filter;
-- задать расписание;
-- назначить основной и fallback provider;
-- установить budget;
 - включить/исключить SERP features;
 - настроить domain matching;
 - выбрать хранение raw SERP;
 - сделать test run.
 
-Изменение контекста не переписывает историю. Существенно изменённый контекст создаёт новую версию.
+Расписание, provider/fallback и budget настраиваются связанными automation и
+connector policy, а не дублируются в context.
+
+Изменение контекста не переписывает историю. Любое изменение поисковой
+конфигурации создаёт новую immutable configuration version; rename,
+archive/restore меняют только revision логической сущности.
 
 ## 3. Запуск съёма позиций
 

@@ -276,8 +276,10 @@ Backend for frontend. Отдельный BFF не вводится на стар
 | ADR-2026-030 | Billing ограничивает новые операции, но не чтение; проекты не удаляются автоматически | принято |
 | ADR-2026-031 | Агрегированная история долговременная, raw SERP имеет отдельный retention | принято |
 | ADR-2026-032 | Public и project Toolbox используют общий capability registry и jobs | принято |
+| ADR-2026-033 | Tracking context хранит versioned search configuration; provider и schedule принадлежат connector/automation | принято |
 
-Формальные ADR-файлы создаются в infrastructure/platform repositories до реализации P0.
+Новые формальные ADR-файлы хранятся в `docs/adr`; прежние решения из реестра
+переносятся туда при первом существенном изменении соответствующей границы.
 
 ## 4. Почему не создаются десятки микросервисов
 
