@@ -256,14 +256,28 @@ model WebPushSubscription {
 
   @@unique([userId, installationId], map: "web_push_subscriptions_user_installation_key")
   @@index([userId, status, updatedAt(sort: Desc), id(sort: Desc)], map: "web_push_subscriptions_user_status_updated_idx")
+  @@index([userId, registeredSessionFamilyId, status], map: "web_push_subscriptions_user_family_status_idx")
   @@index([status, providerExpiresAt], map: "web_push_subscriptions_status_expiry_idx")
   @@map("web_push_subscriptions")
+}
+
+model RevokedSessionFamilyTombstone {
+  userId          String   @map("user_id") @db.Uuid
+  sessionFamilyId String   @map("session_family_id") @db.Uuid
+  sourceEventId   String   @unique(map: "revoked_session_family_tombstones_source_event_key") @map("source_event_id") @db.Uuid
+  revokedAt       DateTime @map("revoked_at") @db.Timestamptz(6)
+  receivedAt      DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+
+  @@id([userId, sessionFamilyId], map: "revoked_session_family_tombstones_pkey")
+  @@index([receivedAt, userId, sessionFamilyId], map: "revoked_session_family_tombstones_retention_idx")
+  @@map("revoked_session_family_tombstones")
 }
 
 model InboxEvent {
   eventId     String   @id @map("event_id") @db.Uuid
   eventType   String   @map("event_type") @db.VarChar(160)
   consumer    String   @db.VarChar(100)
+  scopeKey    String?  @map("scope_key") @db.VarChar(180)
   processedAt DateTime @default(now()) @map("processed_at") @db.Timestamptz(6)
 
   @@index([consumer, processedAt])

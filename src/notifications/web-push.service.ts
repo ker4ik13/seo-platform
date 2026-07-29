@@ -1,13 +1,11 @@
-import {
-  createHash,
-  timingSafeEqual
-} from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import {
   ConflictException,
   Inject,
   Injectable,
   NotFoundException,
-  ServiceUnavailableException
+  ServiceUnavailableException,
+  UnauthorizedException
 } from "@nestjs/common";
 import type {
   InternalRenameWebPushDeviceInput,
@@ -25,6 +23,11 @@ import { APP_CONFIG } from "../config/config.module.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { WebPushCryptoService } from "./web-push-crypto.service.js";
 import type { EncryptedWebPushMaterial } from "./web-push-crypto.service.js";
+import {
+  acquireWebPushAdvisoryLock,
+  acquireWebPushUserLock,
+  webPushAdvisoryKey
+} from "./web-push-user-lock.js";
 
 const MAX_RETURNED_DEVICES = 100;
 
@@ -38,10 +41,7 @@ export class WebPushService {
 
   public async list(userId: string): Promise<WebPushSubscriptionsState> {
     const devices = await this.prisma.$transaction(async (transaction) => {
-      await acquireLock(
-        transaction,
-        advisoryKey("web-push:user", userId)
-      );
+      await acquireWebPushUserLock(transaction, userId);
       await expireDueSubscriptions(transaction, userId, new Date());
       const activeDevices =
         await transaction.webPushSubscription.findMany({
@@ -87,7 +87,7 @@ export class WebPushService {
     const endpointFingerprints = this.crypto.endpointFingerprints(
       input.subscription.endpoint
     );
-    const endpointLock = advisoryKey(
+    const endpointLock = webPushAdvisoryKey(
       "web-push:endpoint",
       input.subscription.endpoint
     );
@@ -95,11 +95,13 @@ export class WebPushService {
     try {
       const device = await this.prisma.$transaction(
         async (transaction) => {
-          await acquireLock(
+          await acquireWebPushUserLock(transaction, input.userId);
+          await assertSessionFamilyNotRevoked(
             transaction,
-            advisoryKey("web-push:user", input.userId)
+            input.userId,
+            input.sessionFamilyId
           );
-          await acquireLock(transaction, endpointLock);
+          await acquireWebPushAdvisoryLock(transaction, endpointLock);
           await expireDueSubscriptions(
             transaction,
             input.userId,
@@ -250,10 +252,7 @@ export class WebPushService {
     input: InternalRenameWebPushDeviceInput
   ): Promise<WebPushDeviceSummary> {
     const device = await this.prisma.$transaction(async (transaction) => {
-      await acquireLock(
-        transaction,
-        advisoryKey("web-push:user", input.userId)
-      );
+      await acquireWebPushUserLock(transaction, input.userId);
       const current =
         await transaction.webPushSubscription.findUnique({
           where: {
@@ -282,10 +281,7 @@ export class WebPushService {
     installationId: string
   ): Promise<WebPushRevokeResult> {
     return this.prisma.$transaction(async (transaction) => {
-      await acquireLock(
-        transaction,
-        advisoryKey("web-push:user", userId)
-      );
+      await acquireWebPushUserLock(transaction, userId);
       const current =
         await transaction.webPushSubscription.findUnique({
           where: {
@@ -440,6 +436,24 @@ async function expireDueSubscriptions(
   });
 }
 
+async function assertSessionFamilyNotRevoked(
+  transaction: Prisma.TransactionClient,
+  userId: string,
+  sessionFamilyId: string
+): Promise<void> {
+  const tombstone =
+    await transaction.revokedSessionFamilyTombstone.findUnique({
+      where: {
+        userId_sessionFamilyId: {
+          userId,
+          sessionFamilyId
+        }
+      },
+      select: { userId: true }
+    });
+  if (tombstone) throw sessionFamilyRevoked();
+}
+
 function providerExpiration(value: number | null): Date | null {
   return value === null ? null : new Date(value);
 }
@@ -491,27 +505,6 @@ function sameMaterial(
   );
 }
 
-function advisoryKey(namespace: string, value: string): readonly [number, number] {
-  const digest = createHash("sha256")
-    .update(namespace, "utf8")
-    .update("\0", "utf8")
-    .update(value, "utf8")
-    .digest();
-  return [digest.readInt32BE(0), digest.readInt32BE(4)];
-}
-
-async function acquireLock(
-  transaction: Prisma.TransactionClient,
-  key: readonly [number, number]
-): Promise<void> {
-  await transaction.$queryRaw`
-    SELECT pg_advisory_xact_lock(
-      ${key[0]}::integer,
-      ${key[1]}::integer
-    )
-  `;
-}
-
 function isUniqueConstraintError(error: unknown): boolean {
   return (
     typeof error === "object" &&
@@ -544,6 +537,13 @@ function explicitEnableRequired(): ConflictException {
     "EXPLICIT_ENABLE_REQUIRED",
     "An explicitly revoked device requires user confirmation"
   );
+}
+
+function sessionFamilyRevoked(): UnauthorizedException {
+  return new UnauthorizedException({
+    code: "UNAUTHENTICATED",
+    message: "The session used to register this browser device was revoked"
+  });
 }
 
 function versionConflict(): ConflictException {

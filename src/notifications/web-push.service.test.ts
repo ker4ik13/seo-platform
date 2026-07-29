@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { createECDH } from "node:crypto";
 import test from "node:test";
-import { ConflictException } from "@nestjs/common";
+import {
+  ConflictException,
+  HttpException,
+  UnauthorizedException
+} from "@nestjs/common";
 import type { InternalUpsertWebPushSubscriptionInput } from "@seo-platform/contracts";
 import { loadAppConfig } from "../config/app-config.js";
 import type { PrismaService } from "../database/prisma.service.js";
@@ -169,6 +173,44 @@ test("expires due devices before checking endpoint ownership and device cap", as
   );
 
   assert.equal(result.status, "ACTIVE");
+});
+
+test("rejects delayed registration after the session-family event tombstone", async () => {
+  const calls: string[] = [];
+  const transaction = {
+    $queryRaw: async () => {
+      calls.push("user-lock");
+      return [];
+    },
+    revokedSessionFamilyTombstone: {
+      findUnique: async () => {
+        calls.push("tombstone");
+        return { userId };
+      }
+    },
+    webPushSubscription: {
+      updateMany: async () => {
+        calls.push("device-update");
+        return { count: 0 };
+      },
+      findUnique: async () => {
+        calls.push("device-read");
+        return null;
+      },
+      create: async () => {
+        calls.push("device-create");
+        return device();
+      }
+    }
+  };
+
+  await assert.rejects(
+    serviceWith(transaction).upsert(installationId, input),
+    (error: unknown) =>
+      error instanceof UnauthorizedException &&
+      responseCode(error) === "UNAUTHENTICATED"
+  );
+  assert.deepEqual(calls, ["user-lock", "tombstone"]);
 });
 
 test("lists every active device before bounded tombstone history", async () => {
@@ -367,6 +409,14 @@ function serviceWith(
       : {};
   const preparedTransaction = {
     ...transaction,
+    revokedSessionFamilyTombstone: {
+      findUnique: async () => null,
+      ...(typeof transaction.revokedSessionFamilyTombstone ===
+        "object" &&
+      transaction.revokedSessionFamilyTombstone !== null
+        ? transaction.revokedSessionFamilyTombstone
+        : {})
+    },
     webPushSubscription: {
       updateMany: async () => ({ count: 0 }),
       ...subscriptionModel
@@ -457,7 +507,7 @@ function device(
   };
 }
 
-function responseCode(error: ConflictException): unknown {
+function responseCode(error: HttpException): unknown {
   const response = error.getResponse();
   return typeof response === "object" &&
     response !== null &&
