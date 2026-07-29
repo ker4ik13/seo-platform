@@ -78,7 +78,8 @@ export function webPushDeviceSummary(
     !dateString(device.updatedAt) ||
     !optionalDate(device.revokedAt) ||
     !optionalDate(device.expiredAt) ||
-    !positiveInteger(device.version)
+    !positiveInteger(device.version) ||
+    !validDeviceLifecycle(device)
   ) {
     throw invalidResponse();
   }
@@ -245,6 +246,44 @@ function positiveInteger(value: unknown): value is number {
 
 function optionalDate(value: unknown): value is string | undefined {
   return value === undefined || dateString(value);
+}
+
+function validDeviceLifecycle(
+  device: Readonly<Record<string, unknown>>
+): boolean {
+  const validDelivery =
+    device.lastDeliveryStatus === "NEVER"
+      ? device.lastDeliveryAt === undefined
+      : device.lastDeliveryAt !== undefined;
+  if (!validDelivery) return false;
+
+  if (device.status === "ACTIVE") {
+    return (
+      device.statusReason === undefined &&
+      device.revokedAt === undefined &&
+      device.expiredAt === undefined
+    );
+  }
+  if (device.status === "REVOKED") {
+    return (
+      (device.statusReason === "USER_REVOKED" ||
+        device.statusReason === "SESSION_REVOKED" ||
+        device.statusReason === "PERMISSION_REVOKED" ||
+        device.statusReason === "ACCOUNT_CHANGED") &&
+      device.expirationAt === undefined &&
+      device.revokedAt !== undefined &&
+      device.expiredAt === undefined
+    );
+  }
+  if (device.status === "EXPIRED") {
+    return (
+      device.statusReason === "PUSH_SERVICE_GONE" &&
+      device.expirationAt === undefined &&
+      device.revokedAt === undefined &&
+      device.expiredAt !== undefined
+    );
+  }
+  return false;
 }
 
 function dateString(value: unknown): value is string {

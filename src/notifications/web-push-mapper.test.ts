@@ -57,6 +57,63 @@ test("rejects any secret or unknown field from the owner response", () => {
   }
 });
 
+test("rejects inconsistent lifecycle and delivery projections", () => {
+  for (const inconsistent of [
+    {
+      ...device(),
+      statusReason: "USER_REVOKED",
+      revokedAt: "2026-07-29T10:00:00.000Z"
+    },
+    {
+      ...device(),
+      status: "REVOKED"
+    },
+    {
+      ...device(),
+      status: "REVOKED",
+      statusReason: "PUSH_SERVICE_GONE",
+      revokedAt: "2026-07-29T10:00:00.000Z"
+    },
+    {
+      ...device(),
+      status: "EXPIRED",
+      statusReason: "USER_REVOKED",
+      expiredAt: "2026-07-29T10:00:00.000Z"
+    },
+    {
+      ...device(),
+      lastDeliveryAt: "2026-07-29T10:00:00.000Z"
+    },
+    {
+      ...device(),
+      lastDeliveryStatus: "DELIVERED"
+    }
+  ]) {
+    assert.throws(
+      () => webPushDeviceSummary(inconsistent),
+      DomainError
+    );
+  }
+});
+
+test("maps consistent revoked and expired tombstones", () => {
+  const revoked = webPushDeviceSummary({
+    ...device(),
+    status: "REVOKED",
+    statusReason: "USER_REVOKED",
+    revokedAt: "2026-07-29T10:00:00.000Z"
+  });
+  const expired = webPushDeviceSummary({
+    ...device(),
+    status: "EXPIRED",
+    statusReason: "PUSH_SERVICE_GONE",
+    expiredAt: "2026-07-29T10:00:00.000Z"
+  });
+
+  assert.equal(revoked.status, "REVOKED");
+  assert.equal(expired.status, "EXPIRED");
+});
+
 test("rejects malformed registration keys and duplicate devices", () => {
   assert.throws(
     () =>

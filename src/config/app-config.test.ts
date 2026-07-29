@@ -97,6 +97,19 @@ test("requires the dedicated notification caller token in production", () => {
   );
 });
 
+test("rejects the documented notification token placeholder", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN:
+          "replace-with-a-distinct-random-notification-token"
+      }),
+    /must not use an example placeholder/u
+  );
+});
+
 test("requires a valid data encryption key in production", () => {
   assert.throws(
     () =>

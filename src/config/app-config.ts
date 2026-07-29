@@ -77,6 +77,13 @@ function booleanValue(
   throw new Error(`${key} must be true or false`);
 }
 
+function isPlaceholderSecret(value: string | undefined): boolean {
+  return (
+    value !== undefined &&
+    /^(?:replace-me|replace-with-)/iu.test(value)
+  );
+}
+
 export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const nodeEnv = env.NODE_ENV ?? "development";
   const natsUser = env.NATS_USER?.trim();
@@ -128,10 +135,16 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (
     nodeEnv === "production" &&
     (!realtimeNotificationApiToken ||
-      realtimeNotificationApiToken.length < 32)
+      realtimeNotificationApiToken.length < 32 ||
+      isPlaceholderSecret(realtimeNotificationApiToken))
   ) {
     throw new Error(
-      "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN with at least 32 characters is required in production"
+      "A generated PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN with at least 32 characters is required in production"
+    );
+  }
+  if (isPlaceholderSecret(realtimeNotificationApiToken)) {
+    throw new Error(
+      "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN must not use an example placeholder"
     );
   }
   if (
