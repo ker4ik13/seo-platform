@@ -5,7 +5,7 @@
 - PostgreSQL 18 с отдельными databases для четырёх backend-контуров и Directus;
 - Redis с AOF для BullMQ, Socket.IO и cache;
 - NATS с JetStream;
-- четыре NestJS API, отдельные system, inspection и import workers;
+- четыре NestJS API, отдельные system, inspection, import и connector workers;
 - единый web (`/`, `/tools`, `/docs`, `/app`), admin и Directus;
 - S3 и SMTP подключаются как внешние managed/hosted сервисы.
 
@@ -36,13 +36,50 @@ master keys (KEK) для BYOK-секретов. Сгенерировать пе�
 `platform-api` и HTTP-процессу `jobs-integrations`; generic workers,
 realtime, seo-data и migration services его не получают.
 
-Compose передаёт keyring только credential-capable процессу
+Compose передаёт полный management keyring только HTTP-процессу
 `jobs-integrations`. Migration service, `system-worker`, `import-worker` и
 `upload-inspection-worker` не получают `INTEGRATION_CREDENTIAL_*` и запускаются
-с выключенной credential capability. Будущий connector worker получает keyring
-отдельно, только когда ему потребуется server-side provider access.
+с ролью `DISABLED`. `connector-worker` получает только роль `EXECUTION`,
+encryption KEK и его active version: fingerprint keyring и dedicated
+management token ему намеренно недоступны. Общий `INTERNAL_API_TOKEN` и
+учётные данные NATS этому процессу также не передаются.
+Runtime config guard подтверждает это fail-closed: роль `DISABLED` не стартует
+при наличии credential secrets, а `EXECUTION` отклоняет
+management/fingerprint/internal/NATS и S3/SMTP secrets. Guard уменьшает риск
+ошибочной доставки секретов, но не заменяет process/database/KMS isolation.
 Даже процесс с общим internal token не может вызвать list/create/rotate/revoke
 credential: эти endpoints принимают только dedicated caller token.
+
+`JOBS_CONNECTOR_DATABASE_USER` и `JOBS_CONNECTOR_DATABASE_PASSWORD` задают
+отдельную PostgreSQL-роль без superuser, role membership и ownership объектов
+кластера; скрипт не выдаёт ей `CREATE`, `INSERT` или `DELETE`. Пароль
+генерируется URL-safe, например в base64url, потому что Compose подставляет
+его в DSN. После jobs migration одноразовый сервис
+`jobs-connector-db-permissions` идемпотентно создаёт/ужесточает роль и выдаёт
+`CONNECT` к `jobs_db`, `USAGE` на `public`, `SELECT` всех строк и колонок
+таблиц `jobs` и `integration_credentials`, а также `UPDATE` явно перечисленных
+колонок состояния. Это ограничивает DML, но **не** обеспечивает tenant/secret
+isolation: компрометированный execution process может прочитать job
+snapshots/metadata всех tenants и все encrypted credential rows, а вместе с
+KEK — весь BYOK vault этого database. Привилегированную существующую роль,
+роль с membership или ownership объектов скрипт fail-closed использовать
+отказывается; прежние прямые grants вне `jobs_db` и наследуемый через
+`PUBLIC` доступ требуют отдельного cluster-wide privilege audit.
+
+До production широкий read grant является release blocker. Нужны отдельная
+узкая execution projection/table со scope, который проверяется на стороне БД,
+либо credential broker/KMS, не позволяющий execution login читать весь vault.
+Дополнительно обязательны fresh non-owner role provisioning, cluster-wide
+grant audit и `pg_hba`/отдельный cluster boundary. Называть текущую роль
+tenant-isolated или least-read до этого запрещено.
+
+Нормативный grant-скрипт:
+`postgres/permissions/jobs-connector.sql`. `connector-worker` запускается
+только после его успешного завершения. HTTP-процесс и migration продолжают
+использовать основную роль сервиса, а execution worker не получает её пароль.
+После каждой migration проверяется diff требуемых worker-запросов: добавлять
+широкие `ALL TABLES`, default privileges или права изменения ciphertext
+запрещено.
 
 Каждый credential шифруется envelope-схемой:
 
@@ -56,9 +93,10 @@ credential: эти endpoints принимают только dedicated caller to
   events и logs не сохраняются.
 
 Startup credential-capable процесса проверяет формат keyring, наличие active
-version и соответствующих 32-byte keys, затем до открытия HTTP агрегированно
-сверяет все `key_version` и `fingerprint_key_version` неудалённых credentials
-с PostgreSQL. При недостающей версии процесс завершается fail-closed. Перед
+version и соответствующих 32-byte keys. Management-процесс до открытия HTTP
+агрегированно сверяет все `key_version` и `fingerprint_key_version`
+неудалённых credentials с PostgreSQL; execution worker сверяет только
+`key_version`. При недостающей версии процесс завершается fail-closed. Перед
 каждым rollout дополнительно получить безопасные счётчики:
 
 ```sql
@@ -76,29 +114,50 @@ GROUP BY fingerprint_key_version
 ORDER BY keyring, version;
 ```
 
-Каждая версия должна присутствовать в соответствующем keyring. Значения самих
-ключей нельзя выводить в CI logs, тикеты или результаты
+Каждая версия должна присутствовать в соответствующем keyring. Отображение
+`keyVersion → key bytes` immutable: однажды выпущенной версии запрещено
+присваивать новое значение. Для нового key material всегда создаётся новая
+версия. Значения самих ключей нельзя выводить в CI logs, тикеты или результаты
 `docker compose config`.
 
 Ротация KEK выполняется с overlap:
 
 1. Сгенерировать новую уникальную версию и добавить её рядом со старой, не
    меняя active version.
-2. Развернуть `jobs-integrations` и убедиться, что startup validation проходит,
-   а coverage query покрывается новым keyring.
-3. Переключить active version на новую и повторно развернуть процесс. Новые и
-   заменённые credentials начнут использовать новый KEK.
-4. Идемпотентно и ограниченными batch переобернуть только encrypted DEK
+2. С прежней active version развернуть расширенный keyring одновременно в
+   management `jobs-integrations` и во **всех** репликах `connector-worker`.
+3. Startup canary/verifier должен выполнить безопасную authenticated
+   расшифровку canary каждой используемой версии во всех новых replicas.
+   Проверки только номера версии или длины ключа недостаточно.
+4. После успешной canary-проверки drain-ить старые replicas и убедиться, что
+   они больше не исполняют jobs.
+5. Только после подтверждения шагов 2–4 переключить active version в
+   management process и синхронизировать конфигурацию connector replicas.
+   Новые и заменённые credentials начнут использовать новый KEK.
+6. Идемпотентно и ограниченными batch переобернуть только encrypted DEK
    существующих записей, обновляя `key_version`; payload расшифровывать и
    переписывать не требуется.
-5. Повторять coverage query до нулевого числа активных записей на старой
+7. Повторять coverage query до нулевого числа активных записей на старой
    версии. Старый KEK удалить только после этого, завершения rollback window и
    проверки политики encrypted backups.
 
-Автоматический bounded DEK rewrap ещё не реализован. До его появления шаг 4
+Автоматический bounded DEK rewrap ещё не реализован. До его появления шаг 6
 не выполняется вручную, старый KEK не удаляется, startup coverage и SQL выше
 остаются обязательными проверками. Для rollback достаточно вернуть прежнюю
 active version, пока обе версии находятся в keyring; откат БД не требуется.
+Если старая execution replica всё же встретит неизвестную `key_version`,
+validation получает retryable platform error и не меняет статус credential.
+Это страховка от отсутствующей версии при rollout race, а не проверка
+правильности bytes и не замена обязательному expand-first шагу.
+
+Startup decrypt-canary/verifier пока не реализован. Coverage guard видит
+наличие `keyVersion`, но не обнаруживает ошибочную замену значения под
+существующей версией; missing-version retry тоже от этого не защищает. До
+production обязательны verifier и/или глобальный decrypt-failure circuit
+breaker: всплеск authentication/decrypt failures одной версии должен
+остановить execution и поднять incident, а не массово переводить валидные
+credentials в `DISABLED`. До реализации этого барьера production-ротация KEK
+запрещена.
 
 Fingerprint keyring ротируется отдельно: старая и новая версии сначала
 работают одновременно, затем active version переключается на новую. Старый
@@ -108,7 +167,8 @@ fingerprint key нужен, пока есть неудалённые запис�
 после idempotency retry window ещё не реализована, поэтому такую версию также
 нельзя удалять, пока coverage не равен нулю.
 
-При утрате используемого KEK credential-capable HTTP-процесс не стартует.
+При утрате используемого KEK credential-capable management/execution процесс
+не стартует.
 Восстановление требует вернуть точное значение KEK из защищённой копии
 секретов. Если копии нет, нужен отдельный offline incident recovery/revoke
 tool с security review; текущая сборка такого инструмента не содержит.
@@ -128,6 +188,14 @@ tool с security review; текущая сборка такого инструм
 PostgreSQL, Redis и NATS не публикуют порты наружу. В production рекомендуется
 разделить credentials баз данных по сервисам; один кластер на старте сохраняет
 изоляцию databases без лишней эксплуатационной нагрузки.
+
+Jobs runtime processes подключены одновременно к изолированной сети
+`internal` и отдельной непубликуемой сети `outbound`. Она нужна для S3, SMTP и
+проверенных provider HTTPS endpoints: без неё Docker `internal: true` не даёт
+контейнеру маршрут в интернет. Ни один порт worker через `outbound` не
+публикуется. Connector-код принимает только фиксированные HTTPS origins
+Keys.so/Arsenkin и запрещает redirects; для high-assurance production
+дополнительно нужен host firewall или egress proxy с DNS/hostname allowlist.
 
 Для official PostgreSQL 18 volume намеренно смонтирован в
 `/var/lib/postgresql`: начиная с 18 это новый persistent volume root. Не

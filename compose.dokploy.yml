@@ -52,6 +52,10 @@ x-jobs-env: &jobs-env
   IMPORT_STAGING_BATCH_ROWS: ${IMPORT_STAGING_BATCH_ROWS:-1000}
   IMPORT_PREVIEW_ROWS: ${IMPORT_PREVIEW_ROWS:-20}
   IMPORT_PUBLISH_BATCH_ROWS: ${IMPORT_PUBLISH_BATCH_ROWS:-200}
+  INTEGRATION_VALIDATION_TIMEOUT_MS: ${INTEGRATION_VALIDATION_TIMEOUT_MS:-10000}
+  INTEGRATION_VALIDATION_LEASE_SECONDS: ${INTEGRATION_VALIDATION_LEASE_SECONDS:-120}
+  INTEGRATION_VALIDATION_DISPATCH_SECONDS: ${INTEGRATION_VALIDATION_DISPATCH_SECONDS:-15}
+  INTEGRATION_VALIDATION_CONCURRENCY: ${INTEGRATION_VALIDATION_CONCURRENCY:-2}
   EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
   EMAIL_FROM: ${EMAIL_FROM:-}
   SMTP_HOST: ${SMTP_HOST:-}
@@ -60,13 +64,18 @@ x-jobs-env: &jobs-env
   SMTP_USER: ${SMTP_USER:-}
   SMTP_PASSWORD: ${SMTP_PASSWORD:-}
 
-x-integration-credential-env: &integration-credential-env
-  INTEGRATION_CREDENTIALS_ENABLED: "true"
+x-integration-credential-management-env: &integration-credential-management-env
+  INTEGRATION_CREDENTIAL_ROLE: MANAGEMENT
   PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: ${PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN:?PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN is required}
   INTEGRATION_CREDENTIAL_KEYS: ${INTEGRATION_CREDENTIAL_KEYS:?INTEGRATION_CREDENTIAL_KEYS is required}
   INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: ${INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION:?INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION is required}
   INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS: ${INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS:?INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS is required}
   INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION: ${INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION:?INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION is required}
+
+x-integration-credential-execution-env: &integration-credential-execution-env
+  INTEGRATION_CREDENTIAL_ROLE: EXECUTION
+  INTEGRATION_CREDENTIAL_KEYS: ${INTEGRATION_CREDENTIAL_KEYS:?INTEGRATION_CREDENTIAL_KEYS is required}
+  INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: ${INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION:?INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION is required}
 
 services:
   postgres:
@@ -204,6 +213,32 @@ services:
       <<: *common-backend-env
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/jobs_db
 
+  jobs-connector-db-permissions:
+    image: postgres:18.3-alpine3.23
+    restart: "no"
+    init: true
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: jobs_db
+      PGUSER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      JOBS_CONNECTOR_DATABASE_USER: ${JOBS_CONNECTOR_DATABASE_USER:-jobs_connector}
+      JOBS_CONNECTOR_DATABASE_PASSWORD: ${JOBS_CONNECTOR_DATABASE_PASSWORD:?JOBS_CONNECTOR_DATABASE_PASSWORD is required}
+    command:
+      [
+        "psql",
+        "--no-psqlrc",
+        "--file=/permissions/jobs-connector.sql"
+      ]
+    volumes:
+      - ./postgres/permissions/jobs-connector.sql:/permissions/jobs-connector.sql:ro
+    networks:
+      - internal
+    depends_on:
+      jobs-integrations-migrate:
+        condition: service_completed_successfully
+
   realtime-migrate:
     <<: *backend-defaults
     restart: "no"
@@ -317,11 +352,14 @@ services:
       args:
         PACKAGE_NAME: "@seo-platform/jobs-integrations"
     environment:
-      <<: [*common-backend-env, *jobs-env, *integration-credential-env]
+      <<: [*common-backend-env, *jobs-env, *integration-credential-management-env]
       PORT: 4002
       DATABASE_POOL_MAX: ${JOBS_DATABASE_POOL_MAX:-30}
     expose:
       - "4002"
+    networks:
+      - internal
+      - outbound
     depends_on:
       jobs-integrations-migrate:
         condition: service_completed_successfully
@@ -354,6 +392,9 @@ services:
     environment:
       <<: [*common-backend-env, *jobs-env]
       DATABASE_POOL_MAX: ${JOBS_DATABASE_POOL_MAX:-20}
+    networks:
+      - internal
+      - outbound
     depends_on:
       jobs-integrations-migrate:
         condition: service_completed_successfully
@@ -379,6 +420,9 @@ services:
       MALWARE_SCANNER_ENABLED: "true"
       MALWARE_SCANNER_HOST: clamav
       MALWARE_SCANNER_PORT: 3310
+    networks:
+      - internal
+      - outbound
     depends_on:
       jobs-integrations-migrate:
         condition: service_completed_successfully
@@ -399,8 +443,40 @@ services:
     environment:
       <<: [*common-backend-env, *jobs-env]
       DATABASE_POOL_MAX: ${JOBS_IMPORT_DATABASE_POOL_MAX:-10}
+    networks:
+      - internal
+      - outbound
     depends_on:
       jobs-integrations-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  connector-worker:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/jobs-integrations"
+    command: ["node", "dist/connector-worker.main.js"]
+    environment:
+      <<: *integration-credential-execution-env
+      NODE_ENV: production
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+      DATABASE_URL: postgresql://${JOBS_CONNECTOR_DATABASE_USER:-jobs_connector}:${JOBS_CONNECTOR_DATABASE_PASSWORD:?JOBS_CONNECTOR_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      DATABASE_POOL_MAX: ${JOBS_CONNECTOR_DATABASE_POOL_MAX:-10}
+      INTEGRATION_VALIDATION_TIMEOUT_MS: ${INTEGRATION_VALIDATION_TIMEOUT_MS:-10000}
+      INTEGRATION_VALIDATION_LEASE_SECONDS: ${INTEGRATION_VALIDATION_LEASE_SECONDS:-120}
+      INTEGRATION_VALIDATION_DISPATCH_SECONDS: ${INTEGRATION_VALIDATION_DISPATCH_SECONDS:-15}
+      INTEGRATION_VALIDATION_CONCURRENCY: ${INTEGRATION_VALIDATION_CONCURRENCY:-2}
+    networks:
+      - internal
+      - outbound
+    depends_on:
+      jobs-connector-db-permissions:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -572,3 +648,5 @@ networks:
   internal:
     internal: true
   edge:
+  outbound:
+    driver: bridge
