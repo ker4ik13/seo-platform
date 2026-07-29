@@ -45,6 +45,7 @@ import {
   trackingGeographyLabel as geographyLabel,
   trackingSearchEngineLabel as searchEngineLabel
 } from "../lib/tracking-context-presentation";
+import { RankEstimatePanel } from "./rank-estimate-panel";
 import { TrackingContextEditor } from "./tracking-context-editor";
 import { TrackingContextKeywords } from "./tracking-context-keywords";
 
@@ -1060,6 +1061,14 @@ export function TrackingContextSettings({
                     value={formatDate(context.updatedAt)}
                   />
                 </dl>
+
+                <RankEstimatePanel
+                  context={context}
+                  contextLoading={loading}
+                  online={online}
+                  projectId={projectId}
+                  returnTo={returnTo}
+                />
 
                 {confirmingArchive && (
                   <div
