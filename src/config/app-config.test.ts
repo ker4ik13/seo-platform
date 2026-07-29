@@ -31,16 +31,41 @@ test("requires internal authentication in production", () => {
       }),
     /JOBS_TO_SEO_RANK_TOKEN/u
   );
+
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: "postgresql://test",
+        INTERNAL_API_TOKEN: "i".repeat(32),
+        JOBS_TO_SEO_RANK_TOKEN: "r".repeat(32)
+      }),
+    /JOBS_TO_SEO_RANK_RESULT_TOKEN/u
+  );
+
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: "postgresql://test",
+        INTERNAL_API_TOKEN: "i".repeat(32),
+        JOBS_TO_SEO_RANK_TOKEN: "r".repeat(32),
+        JOBS_TO_SEO_RANK_RESULT_TOKEN: "d".repeat(32)
+      }),
+    /RANK_HISTORY_CURSOR_KEY/u
+  );
 });
 
-test("keeps generic and secret-bearing rank tokens distinct", () => {
+test("keeps generic, preparation and result rank tokens distinct", () => {
   assert.throws(
     () =>
       loadAppConfig({
         NODE_ENV: "production",
         DATABASE_URL: "postgresql://test",
         INTERNAL_API_TOKEN: "s".repeat(32),
-        JOBS_TO_SEO_RANK_TOKEN: "s".repeat(32)
+        JOBS_TO_SEO_RANK_TOKEN: "s".repeat(32),
+        JOBS_TO_SEO_RANK_RESULT_TOKEN: "x".repeat(32),
+        RANK_HISTORY_CURSOR_KEY: "c".repeat(32)
       }),
     /must differ/u
   );
@@ -49,7 +74,23 @@ test("keeps generic and secret-bearing rank tokens distinct", () => {
     NODE_ENV: "production",
     DATABASE_URL: "postgresql://test",
     INTERNAL_API_TOKEN: "i".repeat(32),
-    JOBS_TO_SEO_RANK_TOKEN: "r".repeat(32)
+    JOBS_TO_SEO_RANK_TOKEN: "r".repeat(32),
+    JOBS_TO_SEO_RANK_RESULT_TOKEN: "d".repeat(32),
+    RANK_HISTORY_CURSOR_KEY: "c".repeat(32)
   });
   assert.equal(config.jobsToSeoRankToken, "r".repeat(32));
+  assert.equal(config.jobsToSeoRankResultToken, "d".repeat(32));
+
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: "postgresql://test",
+        INTERNAL_API_TOKEN: "i".repeat(32),
+        JOBS_TO_SEO_RANK_TOKEN: "r".repeat(32),
+        JOBS_TO_SEO_RANK_RESULT_TOKEN: "r".repeat(32),
+        RANK_HISTORY_CURSOR_KEY: "c".repeat(32)
+      }),
+    /must differ/u
+  );
 });

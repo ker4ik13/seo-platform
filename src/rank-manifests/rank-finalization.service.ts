@@ -6,13 +6,15 @@ import {
   Injectable,
   NotFoundException
 } from "@nestjs/common";
-import type {
-  InternalFinalizeRankCheckInput,
-  InternalRankCheckFinalizationReceipt,
-  RankCheckFinalStatus,
-  RankManifestHash
+import {
+  domainEventTypes,
+  rankCheckCompletedEventDataV1,
+  type InternalFinalizeRankCheckInput,
+  type InternalRankCheckFinalizationReceipt,
+  type RankCheckFinalStatus,
+  type RankManifestHash
 } from "@seo-platform/contracts";
-import { canonicalJsonSha256 } from "@seo-platform/contracts/canonical-json";
+import { rankCheckFinalizationHash } from "@seo-platform/contracts/rank-results-canonical";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 
@@ -22,12 +24,6 @@ const FINALIZATION_TRANSACTION_TIMEOUT_MS = 15_000;
 const HASH_PATTERN = /^[0-9a-f]{64}$/u;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const ZERO_RESULT_FINAL_STATUSES =
-  new Set<RankCheckFinalStatus>([
-    "CANCELLED",
-    "FAILED",
-    "ACTION_REQUIRED"
-  ]);
 
 const FINALIZATION_RECEIPT_SELECT = {
   manifestId: true,
@@ -67,6 +63,12 @@ interface LockedManifest {
   readonly finalizedAt: Date;
 }
 
+interface IngestAggregate {
+  readonly persistedCount: number;
+  readonly foundCount: number;
+  readonly notFoundCount: number;
+}
+
 @Injectable()
 export class RankFinalizationService {
   public constructor(private readonly prisma: PrismaService) {}
@@ -74,18 +76,14 @@ export class RankFinalizationService {
   public async finalize(
     input: InternalFinalizeRankCheckInput
   ): Promise<InternalRankCheckFinalizationReceipt> {
-    if (!ZERO_RESULT_FINAL_STATUSES.has(input.status)) {
-      finalizationConflict(
-        "RANK_INGEST_NOT_READY",
-        "Result-bearing rank finalization requires ingest receipts"
-      );
-    }
-    const requestHash = finalizationRequestHash(input);
+    const requestHash = hashBytes(rankCheckFinalizationHash(input));
     return this.prisma.$transaction(
       async (transaction) => {
         const manifest = await lockManifest(transaction, input);
         if (!manifest) {
-          throw new NotFoundException("Rank execution manifest not found");
+          throw new NotFoundException(
+            "Rank execution manifest not found"
+          );
         }
         assertLockedManifest(manifest);
         const existing =
@@ -111,6 +109,16 @@ export class RankFinalizationService {
             "Rank execution manifest is not ready for finalization"
           );
         }
+
+        const aggregate = await aggregateIngestReceipts(
+          transaction,
+          input
+        );
+        assertFinalizationOutcome(
+          input.status,
+          manifest.pairCount,
+          aggregate.persistedCount
+        );
         const finalizedAt = manifest.finalizedAt;
         await transaction.rankExecutionManifest.update({
           where: { id: manifest.id },
@@ -133,14 +141,22 @@ export class RankFinalizationService {
               configurationVersion: manifest.configurationVersion,
               status: input.status,
               pairCount: manifest.pairCount,
-              persistedCount: 0,
-              foundCount: 0,
-              notFoundCount: 0,
-              missingCount: manifest.pairCount,
+              persistedCount: aggregate.persistedCount,
+              foundCount: aggregate.foundCount,
+              notFoundCount: aggregate.notFoundCount,
+              missingCount:
+                manifest.pairCount - aggregate.persistedCount,
               finalizedAt
             },
             select: FINALIZATION_RECEIPT_SELECT
           });
+        await emitCompletionEvent(
+          transaction,
+          input.status,
+          manifest,
+          aggregate,
+          finalizedAt
+        );
         return storedFinalizationReceipt(
           created,
           {
@@ -190,6 +206,79 @@ async function lockManifest(
   return rows[0];
 }
 
+async function aggregateIngestReceipts(
+  transaction: Prisma.TransactionClient,
+  input: InternalFinalizeRankCheckInput
+): Promise<IngestAggregate> {
+  const aggregate = await transaction.rankChunkIngestReceipt.aggregate({
+    where: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      manifestId: input.manifestId,
+      jobId: input.jobId
+    },
+    _sum: {
+      persistedCount: true,
+      foundCount: true,
+      notFoundCount: true
+    }
+  });
+  const result: IngestAggregate = {
+    persistedCount: aggregate._sum.persistedCount ?? 0,
+    foundCount: aggregate._sum.foundCount ?? 0,
+    notFoundCount: aggregate._sum.notFoundCount ?? 0
+  };
+  if (
+    !validCount(result.persistedCount, 0, 1_000) ||
+    !validCount(result.foundCount, 0, result.persistedCount) ||
+    !validCount(result.notFoundCount, 0, result.persistedCount) ||
+    result.persistedCount !==
+      result.foundCount + result.notFoundCount
+  ) {
+    throw new Error("Stored rank ingest aggregates are invalid");
+  }
+  return result;
+}
+
+async function emitCompletionEvent(
+  transaction: Prisma.TransactionClient,
+  status: RankCheckFinalStatus,
+  manifest: LockedManifest,
+  aggregate: IngestAggregate,
+  finalizedAt: Date
+): Promise<void> {
+  if (status !== "COMPLETED" && status !== "PARTIALLY_COMPLETED") {
+    return;
+  }
+  const payload = rankCheckCompletedEventDataV1({
+    jobId: manifest.jobId,
+    manifestId: manifest.id,
+    workspaceId: manifest.workspaceId,
+    projectId: manifest.projectId,
+    trackingContextId: manifest.trackingContextId,
+    configurationVersion: manifest.configurationVersion,
+    status,
+    pairCount: String(manifest.pairCount),
+    persistedCount: String(aggregate.persistedCount),
+    foundCount: String(aggregate.foundCount),
+    notFoundCount: String(aggregate.notFoundCount),
+    completedAt: finalizedAt
+  });
+  await transaction.outboxEvent.create({
+    data: {
+      eventType: domainEventTypes.rankCheckCompleted,
+      aggregateId: manifest.id,
+      workspaceId: manifest.workspaceId,
+      projectId: manifest.projectId,
+      payload: { ...payload },
+      metadata: {
+        producer: "seo-data",
+        source: "rank-results"
+      }
+    }
+  });
+}
+
 function storedFinalizationReceipt(
   record: FinalizationReceiptRecord,
   manifest: LockedManifest,
@@ -214,11 +303,18 @@ function storedFinalizationReceipt(
     record.trackingContextId !== manifest.trackingContextId ||
     record.configurationVersion !== manifest.configurationVersion ||
     record.pairCount !== manifest.pairCount ||
-    !ZERO_RESULT_FINAL_STATUSES.has(record.status) ||
-    record.persistedCount !== 0 ||
-    record.foundCount !== 0 ||
-    record.notFoundCount !== 0 ||
-    record.missingCount !== record.pairCount ||
+    !validCount(record.persistedCount, 0, record.pairCount) ||
+    !validCount(record.foundCount, 0, record.persistedCount) ||
+    !validCount(record.notFoundCount, 0, record.persistedCount) ||
+    record.persistedCount !==
+      record.foundCount + record.notFoundCount ||
+    record.missingCount !==
+      record.pairCount - record.persistedCount ||
+    !finalizationOutcomeIsValid(
+      record.status,
+      record.pairCount,
+      record.persistedCount
+    ) ||
     manifest.status !== "CLOSED" ||
     !(manifest.closedAt instanceof Date) ||
     Number.isNaN(manifest.closedAt.getTime()) ||
@@ -250,9 +346,9 @@ function storedFinalizationReceipt(
     configurationVersion: record.configurationVersion,
     status: record.status,
     pairCount: String(record.pairCount),
-    persistedCount: "0",
-    foundCount: "0",
-    notFoundCount: "0",
+    persistedCount: String(record.persistedCount),
+    foundCount: String(record.foundCount),
+    notFoundCount: String(record.notFoundCount),
     missingCount: String(record.missingCount),
     finalizedAt: record.finalizedAt.toISOString()
   };
@@ -280,21 +376,53 @@ function assertLockedManifest(manifest: LockedManifest): void {
   }
 }
 
-function finalizationRequestHash(
-  input: InternalFinalizeRankCheckInput
-): Buffer {
-  // actorId is audit provenance of the first write, not part of the
-  // job+manifest+status idempotency identity defined by the contract.
-  return Buffer.from(
-    canonicalJsonSha256(FINALIZE_SCHEMA, {
-      schemaVersion: input.schemaVersion,
-      workspaceId: input.workspaceId,
-      projectId: input.projectId,
-      jobId: input.jobId,
-      manifestId: input.manifestId,
-      status: input.status
-    }),
-    "hex"
+function assertFinalizationOutcome(
+  status: RankCheckFinalStatus,
+  pairCount: number,
+  persistedCount: number
+): void {
+  if (!finalizationOutcomeIsValid(status, pairCount, persistedCount)) {
+    finalizationConflict(
+      "RANK_FINALIZATION_OUTCOME_CONFLICT",
+      "Rank finalization status does not match persisted results"
+    );
+  }
+}
+
+function finalizationOutcomeIsValid(
+  status: RankCheckFinalStatus,
+  pairCount: number,
+  persistedCount: number
+): boolean {
+  if (
+    !validCount(pairCount, 1, 1_000) ||
+    !validCount(persistedCount, 0, pairCount)
+  ) {
+    return false;
+  }
+  switch (status) {
+    case "COMPLETED":
+      return persistedCount === pairCount;
+    case "PARTIALLY_COMPLETED":
+      return persistedCount > 0 && persistedCount < pairCount;
+    case "CANCELLED":
+      return true;
+    case "FAILED":
+      return persistedCount === 0;
+    case "ACTION_REQUIRED":
+      return persistedCount < pairCount;
+  }
+}
+
+function validCount(
+  value: number,
+  minimum: number,
+  maximum: number
+): boolean {
+  return (
+    Number.isSafeInteger(value) &&
+    value >= minimum &&
+    value <= maximum
   );
 }
 
@@ -310,6 +438,16 @@ function hashFromBytes(value: Uint8Array): RankManifestHash {
     algorithm: "SHA_256",
     value: bytes.toString("hex")
   };
+}
+
+function hashBytes(hash: RankManifestHash): Buffer {
+  if (
+    hash.algorithm !== "SHA_256" ||
+    !HASH_PATTERN.test(hash.value)
+  ) {
+    throw new TypeError("Invalid rank finalization hash");
+  }
+  return Buffer.from(hash.value, "hex");
 }
 
 function databaseBytes(value: Uint8Array): Uint8Array<ArrayBuffer> {

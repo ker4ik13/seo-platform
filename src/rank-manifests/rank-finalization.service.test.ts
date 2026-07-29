@@ -33,6 +33,7 @@ test("atomically closes a sealed manifest with a zero-result receipt", async () 
   assert.equal(harness.lockCalls, 1);
   assert.equal(harness.manifestUpdates, 1);
   assert.equal(harness.receiptWrites, 1);
+  assert.equal(harness.outboxWrites, 0);
   assert.equal(harness.status, "CLOSED");
   assert.equal(result.status, "CANCELLED");
   assert.equal(result.pairCount, "2");
@@ -92,7 +93,7 @@ test("allows all safe zero-result terminal statuses", async () => {
   }
 });
 
-test("fails closed for result-bearing terminal statuses before storage access", async () => {
+test("fails closed when result-bearing status disagrees with persisted rows", async () => {
   for (const status of [
     "COMPLETED",
     "PARTIALLY_COMPLETED"
@@ -104,12 +105,69 @@ test("fails closed for result-bearing terminal statuses before storage access", 
           command(status)
         ),
       (error: unknown) =>
-        hasError(error, 409, "RANK_INGEST_NOT_READY")
+        hasError(
+          error,
+          409,
+          "RANK_FINALIZATION_OUTCOME_CONFLICT"
+        )
     );
-    assert.equal(harness.lockCalls, 0);
+    assert.equal(harness.lockCalls, 1);
     assert.equal(harness.manifestUpdates, 0);
     assert.equal(harness.receiptWrites, 0);
+    assert.equal(harness.outboxWrites, 0);
   }
+});
+
+test("derives complete counts and writes one redacted outbox event", async () => {
+  const harness = finalizationHarness({
+    ingest: {
+      persistedCount: 2,
+      foundCount: 1,
+      notFoundCount: 1
+    }
+  });
+  const result = await new RankFinalizationService(
+    harness.prisma
+  ).finalize(command("COMPLETED"));
+
+  assert.equal(result.status, "COMPLETED");
+  assert.equal(result.persistedCount, "2");
+  assert.equal(result.foundCount, "1");
+  assert.equal(result.notFoundCount, "1");
+  assert.equal(result.missingCount, "0");
+  assert.equal(harness.outboxWrites, 1);
+  assert.deepEqual(harness.outboxPayload, {
+    jobId,
+    manifestId,
+    workspaceId,
+    projectId,
+    trackingContextId,
+    configurationVersion: 2,
+    status: "COMPLETED",
+    pairCount: "2",
+    persistedCount: "2",
+    foundCount: "1",
+    notFoundCount: "1",
+    completedAt: finalizedAt.toISOString()
+  });
+});
+
+test("derives partial counts and writes one completion event", async () => {
+  const harness = finalizationHarness({
+    ingest: {
+      persistedCount: 1,
+      foundCount: 0,
+      notFoundCount: 1
+    }
+  });
+  const result = await new RankFinalizationService(
+    harness.prisma
+  ).finalize(command("PARTIALLY_COMPLETED"));
+
+  assert.equal(result.status, "PARTIALLY_COMPLETED");
+  assert.equal(result.persistedCount, "1");
+  assert.equal(result.missingCount, "1");
+  assert.equal(harness.outboxWrites, 1);
 });
 
 test("keeps foreign tenant/job/manifest scope indistinguishable from missing", async () => {
@@ -181,6 +239,11 @@ function finalizationHarness(
   initial: {
     readonly status?: "SEALED" | "CLOSED";
     readonly closedAt?: Date | null;
+    readonly ingest?: {
+      readonly persistedCount: number;
+      readonly foundCount: number;
+      readonly notFoundCount: number;
+    };
   } = {}
 ) {
   let status = initial.status ?? ("SEALED" as "SEALED" | "CLOSED");
@@ -189,6 +252,8 @@ function finalizationHarness(
   let lockCalls = 0;
   let manifestUpdates = 0;
   let receiptWrites = 0;
+  let outboxWrites = 0;
+  let outboxPayload: unknown;
   const transactionOptions: unknown[] = [];
 
   const transaction = {
@@ -245,6 +310,29 @@ function finalizationHarness(
         return { id: manifestId };
       }
     },
+    rankChunkIngestReceipt: {
+      aggregate: async ({
+        where
+      }: {
+        where: Readonly<Record<string, unknown>>;
+      }) => {
+        assert.deepEqual(where, {
+          workspaceId,
+          projectId,
+          manifestId,
+          jobId
+        });
+        return {
+          _sum: {
+            persistedCount:
+              initial.ingest?.persistedCount ?? null,
+            foundCount: initial.ingest?.foundCount ?? null,
+            notFoundCount:
+              initial.ingest?.notFoundCount ?? null
+          }
+        };
+      }
+    },
     rankCheckFinalizationReceipt: {
       findUnique: async () => receipt,
       create: async ({
@@ -256,6 +344,28 @@ function finalizationHarness(
         receiptWrites += 1;
         receipt = { ...data };
         return receipt;
+      }
+    },
+    outboxEvent: {
+      create: async ({
+        data
+      }: {
+        data: Readonly<Record<string, unknown>>;
+      }) => {
+        assert.equal(
+          data.eventType,
+          "seo.rank-check.completed.v1"
+        );
+        assert.equal(data.aggregateId, manifestId);
+        assert.equal(data.workspaceId, workspaceId);
+        assert.equal(data.projectId, projectId);
+        assert.deepEqual(data.metadata, {
+          producer: "seo-data",
+          source: "rank-results"
+        });
+        outboxWrites += 1;
+        outboxPayload = data.payload;
+        return { id: "01900000-0000-7000-8000-000000000090" };
       }
     }
   };
@@ -280,6 +390,12 @@ function finalizationHarness(
     },
     get receiptWrites() {
       return receiptWrites;
+    },
+    get outboxWrites() {
+      return outboxWrites;
+    },
+    get outboxPayload() {
+      return outboxPayload;
     },
     get status() {
       return status;

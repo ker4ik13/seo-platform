@@ -9,6 +9,7 @@ import { KeywordModule } from "./keywords/keyword.module.js";
 import { TrackingContextModule } from "./tracking-contexts/tracking-context.module.js";
 import { RankScopeModule } from "./rank-scopes/rank-scope.module.js";
 import { RankManifestModule } from "./rank-manifests/rank-manifest.module.js";
+import { RankResultModule } from "./rank-results/rank-result.module.js";
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { RankManifestModule } from "./rank-manifests/rank-manifest.module.js";
     TrackingContextModule,
     RankScopeModule,
     RankManifestModule,
+    RankResultModule,
     SystemModule
   ]
 })

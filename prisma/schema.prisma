@@ -100,6 +100,7 @@ model Keyword {
   tags                KeywordTag[]
   trackingAssignments TrackingContextKeywordAssignment[]
   rankManifestEntries RankExecutionManifestEntry[]
+  rankSnapshots       RankSnapshot[] @relation("RankSnapshotKeyword")
 
   @@unique([projectId, language, normalizedHash])
   @@unique([workspaceId, projectId, id], map: "keywords_tenant_project_id_key")
@@ -341,6 +342,8 @@ model RankExecutionManifest {
   configuration TrackingContextVersion @relation("RankManifestConfiguration", fields: [workspaceId, projectId, trackingContextId, configurationVersion], references: [workspaceId, projectId, contextId, configurationVersion], onDelete: Restrict, onUpdate: Restrict, map: "rank_execution_manifests_configuration_tenant_fkey")
   chunks RankExecutionManifestChunk[]
   finalizationReceipt RankCheckFinalizationReceipt?
+  ingestReceipts RankChunkIngestReceipt[] @relation("RankIngestManifest")
+  rankSnapshots RankSnapshot[] @relation("RankSnapshotManifest")
 
   @@unique([workspaceId, projectId, jobId], map: "rank_execution_manifests_tenant_project_job_key")
   @@unique([workspaceId, projectId, id], map: "rank_execution_manifests_tenant_project_id_key")
@@ -388,6 +391,8 @@ model RankExecutionManifestChunk {
 
   manifest RankExecutionManifest @relation(fields: [workspaceId, projectId, manifestId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_execution_manifest_chunks_manifest_tenant_fkey")
   entries RankExecutionManifestEntry[]
+  ingestReceipt RankChunkIngestReceipt? @relation("RankIngestChunk")
+  rankSnapshots RankSnapshot[] @relation("RankSnapshotChunk")
 
   @@id([manifestId, chunkIndex])
   @@unique([workspaceId, projectId, manifestId, chunkIndex], map: "rank_execution_manifest_chunks_tenant_project_chunk_key")
@@ -413,50 +418,116 @@ model RankExecutionManifestEntry {
   chunk RankExecutionManifestChunk @relation(fields: [workspaceId, projectId, manifestId, chunkIndex], references: [workspaceId, projectId, manifestId, chunkIndex], onDelete: Restrict, onUpdate: Restrict, map: "rank_execution_manifest_entries_chunk_tenant_fkey")
   assignment TrackingContextKeywordAssignment @relation(fields: [workspaceId, projectId, assignmentId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_execution_manifest_entries_assignment_tenant_fkey")
   keyword Keyword @relation(fields: [workspaceId, projectId, keywordId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_execution_manifest_entries_keyword_tenant_fkey")
+  rankSnapshot RankSnapshot? @relation("RankSnapshotEntry")
 
   @@unique([manifestId, sequence], map: "rank_execution_manifest_entries_sequence_key")
   @@unique([manifestId, assignmentId], map: "rank_execution_manifest_entries_assignment_key")
   @@unique([manifestId, keywordId], map: "rank_execution_manifest_entries_keyword_key")
+  @@unique([workspaceId, projectId, manifestId, chunkIndex, id], map: "rank_execution_manifest_entries_tenant_chunk_id_key")
   @@index([workspaceId, projectId, manifestId, chunkIndex, sequence], map: "rank_execution_manifest_entries_chunk_read_idx")
   @@map("rank_execution_manifest_entries")
 }
 
+model RankChunkIngestReceipt {
+  manifestId          String   @map("manifest_id") @db.Uuid
+  chunkIndex          Int      @map("chunk_index")
+  workspaceId         String   @map("workspace_id") @db.Uuid
+  projectId           String   @map("project_id") @db.Uuid
+  jobId               String   @map("job_id") @db.Uuid
+  jobItemId           String   @map("job_item_id") @db.Uuid
+  ingestedBy          String   @map("ingested_by") @db.Uuid
+  schemaVersion       String   @map("schema_version") @db.VarChar(32)
+  ingestEnvelopeHash  Bytes    @map("ingest_envelope_hash")
+  manifestChunkHash   Bytes    @map("manifest_chunk_hash")
+  provider            String   @db.VarChar(32)
+  operation           String   @db.VarChar(32)
+  providerRequestId   String   @map("provider_request_id") @db.VarChar(256)
+  connectorVersion    String   @map("connector_version") @db.VarChar(64)
+  observedAt          DateTime @map("observed_at") @db.Timestamptz(6)
+  status              String   @db.VarChar(16)
+  persistedCount      Int      @map("persisted_count")
+  foundCount          Int      @map("found_count")
+  notFoundCount       Int      @map("not_found_count")
+  currentUpdatedCount Int      @map("current_updated_count")
+  currentSkippedCount Int      @map("current_skipped_count")
+  appliedAt           DateTime @map("applied_at") @db.Timestamptz(6)
+
+  manifest RankExecutionManifest @relation("RankIngestManifest", fields: [workspaceId, projectId, manifestId, jobId], references: [workspaceId, projectId, id, jobId], onDelete: Restrict, onUpdate: Restrict, map: "rank_chunk_ingest_receipts_manifest_tenant_fkey")
+  chunk RankExecutionManifestChunk @relation("RankIngestChunk", fields: [workspaceId, projectId, manifestId, chunkIndex], references: [workspaceId, projectId, manifestId, chunkIndex], onDelete: Restrict, onUpdate: Restrict, map: "rank_chunk_ingest_receipts_chunk_tenant_fkey")
+
+  @@id([manifestId, chunkIndex])
+  @@unique([workspaceId, projectId, manifestId, chunkIndex], map: "rank_chunk_ingest_receipts_tenant_chunk_key")
+  @@unique([workspaceId, projectId, jobItemId], map: "rank_chunk_ingest_receipts_tenant_job_item_key")
+  @@index([workspaceId, projectId, jobId, chunkIndex], map: "rank_chunk_ingest_receipts_job_idx")
+  @@map("rank_chunk_ingest_receipts")
+}
+
 model RankSnapshot {
-  id                String         @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId       String         @map("workspace_id") @db.Uuid
-  projectId         String         @map("project_id") @db.Uuid
-  keywordId         String         @map("keyword_id") @db.Uuid
-  trackingContextId String         @map("tracking_context_id") @db.Uuid
-  observedAt        DateTime       @map("observed_at") @db.Timestamptz(6)
-  position          Int?
-  resultUrl         String?        @map("result_url") @db.Text
-  provider          String         @db.VarChar(64)
-  sourceMode        DataSourceMode @map("source_mode")
-  jobId             String         @map("job_id") @db.Uuid
-  metadata          Json?
-  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  id                   String         @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId          String         @map("workspace_id") @db.Uuid
+  projectId            String         @map("project_id") @db.Uuid
+  keywordId            String         @map("keyword_id") @db.Uuid
+  trackingContextId    String         @map("tracking_context_id") @db.Uuid
+  configurationVersion Int            @map("configuration_version")
+  manifestId           String         @map("manifest_id") @db.Uuid
+  manifestEntryId      String         @map("manifest_entry_id") @db.Uuid
+  chunkIndex           Int            @map("chunk_index")
+  sequence             Int
+  jobId                String         @map("job_id") @db.Uuid
+  jobItemId            String         @map("job_item_id") @db.Uuid
+  observedAt           DateTime       @map("observed_at") @db.Timestamptz(6)
+  found                Boolean
+  position             Int?
+  absolutePosition     Int?           @map("absolute_position")
+  pixelPosition        Int?           @map("pixel_position")
+  rankingUrl           String?        @map("ranking_url") @db.Text
+  normalizedRankingUrl String?        @map("normalized_ranking_url") @db.Text
+  title                String?        @db.Text
+  snippet              String?        @db.Text
+  resultType           String?        @map("result_type") @db.VarChar(32)
+  serpFeatures         Json           @map("serp_features")
+  dataQualityFlags     Json           @map("data_quality_flags")
+  provider             String         @db.VarChar(32)
+  sourceMode           DataSourceMode @map("source_mode")
+  providerRequestId    String         @map("provider_request_id") @db.VarChar(256)
+  connectorVersion     String         @map("connector_version") @db.VarChar(64)
+  createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  manifest RankExecutionManifest @relation("RankSnapshotManifest", fields: [workspaceId, projectId, manifestId, jobId], references: [workspaceId, projectId, id, jobId], onDelete: Restrict, onUpdate: Restrict, map: "rank_snapshots_manifest_tenant_fkey")
+  chunk RankExecutionManifestChunk @relation("RankSnapshotChunk", fields: [workspaceId, projectId, manifestId, chunkIndex], references: [workspaceId, projectId, manifestId, chunkIndex], onDelete: Restrict, onUpdate: Restrict, map: "rank_snapshots_chunk_tenant_fkey")
+  manifestEntry RankExecutionManifestEntry @relation("RankSnapshotEntry", fields: [workspaceId, projectId, manifestId, chunkIndex, manifestEntryId], references: [workspaceId, projectId, manifestId, chunkIndex, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_snapshots_entry_tenant_fkey")
+  keyword Keyword @relation("RankSnapshotKeyword", fields: [workspaceId, projectId, keywordId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_snapshots_keyword_tenant_fkey")
 
   @@id([observedAt, id])
-  @@index([projectId, trackingContextId, observedAt])
-  @@index([projectId, keywordId, trackingContextId, observedAt])
+  @@unique([manifestId, manifestEntryId], map: "rank_snapshots_manifest_entry_key")
+  @@unique([workspaceId, projectId, manifestId, chunkIndex, manifestEntryId], map: "rank_snapshots_tenant_manifest_entry_key")
+  @@index([workspaceId, projectId, trackingContextId, observedAt(sort: Desc), id(sort: Desc)], map: "rank_snapshots_context_history_idx")
+  @@index([workspaceId, projectId, keywordId, trackingContextId, observedAt(sort: Desc), id(sort: Desc)], map: "rank_snapshots_keyword_history_idx")
+  @@index([workspaceId, projectId, jobId, chunkIndex], map: "rank_snapshots_job_chunk_idx")
   @@map("rank_snapshots")
 }
 
 model CurrentRank {
-  projectId         String         @map("project_id") @db.Uuid
-  keywordId         String         @map("keyword_id") @db.Uuid
-  trackingContextId String         @map("tracking_context_id") @db.Uuid
-  observedAt        DateTime       @map("observed_at") @db.Timestamptz(6)
-  position          Int?
-  resultUrl         String?        @map("result_url") @db.Text
-  provider          String         @db.VarChar(64)
-  sourceMode        DataSourceMode @map("source_mode")
-  snapshotId        String         @map("snapshot_id") @db.Uuid
-  version           Int            @default(1)
-  updatedAt         DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspaceId          String         @map("workspace_id") @db.Uuid
+  projectId            String         @map("project_id") @db.Uuid
+  keywordId            String         @map("keyword_id") @db.Uuid
+  trackingContextId    String         @map("tracking_context_id") @db.Uuid
+  configurationVersion Int            @map("configuration_version")
+  observedAt           DateTime       @map("observed_at") @db.Timestamptz(6)
+  snapshotId           String         @map("snapshot_id") @db.Uuid
+  found                Boolean
+  position             Int?
+  previousPosition     Int?           @map("previous_position")
+  rankingUrl           String?        @map("ranking_url") @db.Text
+  normalizedRankingUrl String?        @map("normalized_ranking_url") @db.Text
+  provider             String         @db.VarChar(32)
+  sourceMode           DataSourceMode @map("source_mode")
+  dataQualityFlags     Json           @map("data_quality_flags")
+  version              Int            @default(1)
+  updatedAt            DateTime       @map("updated_at") @db.Timestamptz(6)
 
-  @@id([keywordId, trackingContextId])
-  @@index([projectId, trackingContextId, position])
+  @@id([workspaceId, projectId, keywordId, trackingContextId])
+  @@index([workspaceId, projectId, trackingContextId, position], map: "current_ranks_context_position_idx")
   @@map("current_ranks")
 }
 
