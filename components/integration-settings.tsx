@@ -2,9 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
-  IntegrationCapability,
-  IntegrationCredentialMode,
-  IntegrationCredentialStatus,
   IntegrationCredentialSummary,
   IntegrationProvider,
   IntegrationProviderCatalogItem
@@ -14,10 +11,15 @@ import {
   browserApiRequest,
   BrowserApiError
 } from "../lib/browser-api";
+import {
+  integrationCapabilityLabel,
+  integrationCredentialModeLabel,
+  integrationProviderLabel
+} from "../lib/integration-presentation";
 import { IntegrationCredentialValidation } from "./integration-credential-validation";
+import { IntegrationStatusBadge } from "./integration-status-badge";
 
 type Provider = IntegrationProvider;
-type CredentialStatus = IntegrationCredentialStatus;
 type ProviderCatalogItem = IntegrationProviderCatalogItem;
 type Credential = IntegrationCredentialSummary;
 type CredentialField = "label" | "apiKey" | "accountIdentifier";
@@ -198,7 +200,7 @@ export function IntegrationSettings({
       setDraft({ ...EMPTY_DRAFT, provider: draft.provider });
       setCreateFieldErrors({});
       setSuccess(
-        `${providerLabel(credential.provider)} сохранён в зашифрованном vault`
+        `${integrationProviderLabel(credential.provider)} сохранён в зашифрованном vault`
       );
     } catch (requestError) {
       const fieldErrors = integrationFieldErrors(requestError);
@@ -401,7 +403,9 @@ export function IntegrationSettings({
             </header>
             <div className="integration-capabilities">
               {provider.capabilities.map((capability) => (
-                <span key={capability}>{capabilityLabel(capability)}</span>
+                <span key={capability}>
+                  {integrationCapabilityLabel(capability)}
+                </span>
               ))}
             </div>
             <small>{providerNotice(provider.provider)}</small>
@@ -618,19 +622,19 @@ export function IntegrationSettings({
               <article className="integration-credential-row" key={credential.id}>
                 <div className="integration-credential-main">
                   <span className="integration-provider-mark compact">
-                    {providerLabel(credential.provider).slice(0, 1)}
+                    {integrationProviderLabel(credential.provider).slice(0, 1)}
                   </span>
                   <div>
                     <strong>{credential.label}</strong>
                     <span>
-                      {providerLabel(credential.provider)} ·{" "}
+                      {integrationProviderLabel(credential.provider)} ·{" "}
                       <code>{credential.displayHint}</code>
                     </span>
                   </div>
                 </div>
-                <StatusBadge status={credential.status} />
+                <IntegrationStatusBadge status={credential.status} />
                 <div className="integration-credential-meta">
-                  <span>{credentialModeLabel(credential.mode)}</span>
+                  <span>{integrationCredentialModeLabel(credential.mode)}</span>
                   <span>
                     Обновлено{" "}
                     {new Intl.DateTimeFormat("ru", {
@@ -885,31 +889,6 @@ function credentialOperationKey(
   return credentialId;
 }
 
-function StatusBadge({
-  status
-}: Readonly<{ status: CredentialStatus }>) {
-  const labels: Readonly<
-    Record<CredentialStatus, { readonly label: string; readonly tone: string }>
-  > = {
-    PENDING_VERIFICATION: {
-      label: "Ожидает проверки",
-      tone: "pending"
-    },
-    ACTIVE: { label: "Активно", tone: "active" },
-    DEGRADED: { label: "Нестабильно", tone: "warning" },
-    RATE_LIMITED: { label: "Лимит запросов", tone: "warning" },
-    LOW_BALANCE: { label: "Низкий баланс", tone: "warning" },
-    EXPIRED: { label: "Истёк", tone: "danger" },
-    REVOKED: { label: "Отозван", tone: "danger" },
-    INVALID: { label: "Некорректный", tone: "danger" },
-    DISABLED: { label: "Отключён", tone: "muted" }
-  };
-  const value = labels[status];
-  return (
-    <span className={`integration-status ${value.tone}`}>{value.label}</span>
-  );
-}
-
 function IntegrationErrorAlert({
   error
 }: Readonly<{ error: IntegrationOperationError }>) {
@@ -926,15 +905,6 @@ function IntegrationErrorAlert({
       )}
     </div>
   );
-}
-
-function providerLabel(provider: Provider): string {
-  const labels: Readonly<Record<Provider, string>> = {
-    XMLSTOCK: "XMLStock",
-    ARSENKIN: "Arsenkin Tools",
-    KEYS_SO: "Keys.so"
-  };
-  return labels[provider];
 }
 
 function providerDescription(provider: Provider): string {
@@ -958,30 +928,6 @@ function providerNotice(provider: Provider): string {
     KEYS_SO: "Тариф Keys.so с доступом к REST API оплачивается отдельно."
   };
   return notices[provider];
-}
-
-function capabilityLabel(value: IntegrationCapability): string {
-  const labels: Readonly<Record<IntegrationCapability, string>> = {
-    SERP_RANK_TRACKING: "Съём позиций",
-    SERP_COLLECTION: "Выдача",
-    WORDSTAT: "Wordstat",
-    CLUSTERING: "Кластеризация",
-    INDEXATION: "Индексация",
-    KEYWORD_RESEARCH: "Ключевые слова",
-    COMPETITOR_RESEARCH: "Конкуренты"
-  };
-  return labels[value];
-}
-
-function credentialModeLabel(mode: IntegrationCredentialMode): string {
-  const labels: Readonly<Record<IntegrationCredentialMode, string>> = {
-    BYOK_API_KEY: "Свой API-ключ",
-    BYOK_OAUTH: "Свой OAuth",
-    PLATFORM_INCLUDED: "Включено в тариф",
-    PLATFORM_PAID: "Баланс платформы",
-    FALLBACK_PLATFORM_PAID: "Резерв платформы"
-  };
-  return labels[mode];
 }
 
 function integrationErrorMessage(error: unknown): string {

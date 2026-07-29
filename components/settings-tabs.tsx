@@ -9,7 +9,8 @@ export function SettingsTabs({
     | "security"
     | "notifications"
     | "integrations"
-    | "project-notifications";
+    | "project-notifications"
+    | "project-integrations";
   projectId?: string;
   workspaceRoleCode: string | undefined;
 }>) {
@@ -38,6 +39,19 @@ export function SettingsTabs({
           Интеграции
         </a>
       )}
+      {projectId && canViewWorkspaceIntegrations(workspaceRoleCode) && (
+        <a
+          aria-current={
+            active === "project-integrations" ? "page" : undefined
+          }
+          className={
+            active === "project-integrations" ? "active" : undefined
+          }
+          href={`/app/projects/${encodeURIComponent(projectId)}/settings/integrations`}
+        >
+          Интеграции проекта
+        </a>
+      )}
       {projectId && (
         <a
           aria-current={
@@ -48,7 +62,7 @@ export function SettingsTabs({
           }
           href={`/app/projects/${encodeURIComponent(projectId)}/settings/notifications`}
         >
-          Текущий проект
+          Уведомления проекта
         </a>
       )}
     </nav>

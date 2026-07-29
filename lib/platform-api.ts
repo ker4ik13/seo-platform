@@ -6,6 +6,10 @@ import type {
   AppWorkspace,
   ProtectedAppContext
 } from "./app-types";
+import {
+  type ProtectedAppBaseContext,
+  resolveExplicitProjectAppContext
+} from "./project-app-context";
 
 export class PlatformApiError extends Error {
   public constructor(
@@ -18,24 +22,31 @@ export class PlatformApiError extends Error {
   }
 }
 
+const loadProtectedAppBaseContext = cache(
+  async (): Promise<ProtectedAppBaseContext> => {
+    const [accountPayload, workspacesPayload] = await Promise.all([
+      platformApiData<unknown>("/api/v1/me"),
+      platformApiCollection("/api/v1/workspaces")
+    ]);
+    return {
+      user: accountUser(accountPayload),
+      workspaces: workspacesPayload.map(appWorkspace)
+    };
+  }
+);
+
 export const loadProtectedAppContext = cache(
   async (): Promise<ProtectedAppContext> => {
-    const accountPayload = await platformApiData<unknown>("/api/v1/me");
-    const user = accountUser(accountPayload);
-    const workspacesPayload = await platformApiCollection(
-      "/api/v1/workspaces"
-    );
-    const workspaces = workspacesPayload.map(appWorkspace);
+    const base = await loadProtectedAppBaseContext();
     const cookieStore = await cookies();
     const preferredWorkspaceId = cookieStore.get("seo_workspace")?.value;
     const workspace =
-      workspaces.find(({ id }) => id === preferredWorkspaceId) ??
-      workspaces[0];
+      base.workspaces.find(({ id }) => id === preferredWorkspaceId) ??
+      base.workspaces[0];
 
     if (!workspace) {
       return {
-        user,
-        workspaces,
+        ...base,
         projects: []
       };
     }
@@ -49,12 +60,37 @@ export const loadProtectedAppContext = cache(
       projects.find(({ id }) => id === preferredProjectId) ?? projects[0];
 
     return {
-      user,
-      workspaces,
+      ...base,
       workspace,
       projects,
       ...(project ? { project } : {})
     };
+  }
+);
+
+export const loadProtectedProjectAppContext = cache(
+  async (projectId: string): Promise<ProtectedAppContext> => {
+    const base = await loadProtectedAppBaseContext();
+    const context = await resolveExplicitProjectAppContext(
+      base,
+      projectId,
+      {
+        loadProject: async (explicitProjectId) =>
+          appProject(
+            await platformApiData<unknown>(
+              `/api/v1/projects/${encodeURIComponent(explicitProjectId)}`
+            )
+          ),
+        loadWorkspaceProjects: async (workspaceId) =>
+          (
+            await platformApiCollection(
+              `/api/v1/workspaces/${encodeURIComponent(workspaceId)}/projects`
+            )
+          ).map(appProject)
+      }
+    );
+    if (!context) throw invalidResponse();
+    return context;
   }
 );
 

@@ -1,8 +1,7 @@
-import { notFound } from "next/navigation";
 import { AppShell } from "../../../../../../../components/app-shell";
 import { ProjectNotificationSettings } from "../../../../../../../components/project-notification-settings";
 import { SettingsTabs } from "../../../../../../../components/settings-tabs";
-import { requireProtectedAppContext } from "../../../../../../../lib/protected-app";
+import { requireProtectedProjectAppContext } from "../../../../../../../lib/protected-app";
 
 export const dynamic = "force-dynamic";
 
@@ -11,12 +10,10 @@ export default async function ProjectNotificationSettingsPage({
 }: Readonly<{
   params: Promise<{ readonly projectId: string }>;
 }>) {
-  const [{ projectId }, context] = await Promise.all([
-    params,
-    requireProtectedAppContext()
-  ]);
-  const project = context.projects.find(({ id }) => id === projectId);
-  if (!project) notFound();
+  const { projectId } = await params;
+  const context = await requireProtectedProjectAppContext(projectId);
+  const project = context.project;
+  if (!project) throw new Error("Project context is missing");
 
   return (
     <AppShell

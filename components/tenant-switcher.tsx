@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+
 import type {
   AppProject,
   AppWorkspace
@@ -16,6 +18,22 @@ export function TenantSwitcher({
   projects: readonly AppProject[];
   project: AppProject | undefined;
 }>) {
+  const workspaceId = workspace?.id;
+  const projectId = project?.id;
+  const projectWorkspaceId = project?.workspaceId;
+
+  useEffect(() => {
+    if (!workspaceId) {
+      return;
+    }
+
+    writePreference("seo_workspace", workspaceId);
+    writePreference(
+      "seo_project",
+      projectId && projectWorkspaceId === workspaceId ? projectId : ""
+    );
+  }, [projectId, projectWorkspaceId, workspaceId]);
+
   function selectWorkspace(workspaceId: string): void {
     writePreference("seo_workspace", workspaceId);
     writePreference("seo_project", "");
@@ -66,9 +84,11 @@ export function TenantSwitcher({
 }
 
 function writePreference(name: string, value: string): void {
+  const secure = window.location.protocol === "https:" ? "; Secure" : "";
+
   if (!value) {
-    document.cookie = `${encodeURIComponent(name)}=; Path=/; Max-Age=0; SameSite=Lax`;
+    document.cookie = `${encodeURIComponent(name)}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
     return;
   }
-  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
 }

@@ -5,14 +5,27 @@ export interface BrowserFieldError {
 }
 
 export class BrowserApiError extends Error {
+  public readonly status: number;
+  public readonly code: string;
+  public readonly fieldErrors: readonly BrowserFieldError[];
+  public readonly requestId: string | undefined;
+  public readonly retryable: boolean;
+
   public constructor(
-    public readonly status: number,
-    public readonly code: string,
+    status: number,
+    code: string,
     message: string,
-    public readonly fieldErrors: readonly BrowserFieldError[] = []
+    fieldErrors: readonly BrowserFieldError[] = [],
+    requestId?: string,
+    retryable = status >= 500
   ) {
     super(message);
     this.name = "BrowserApiError";
+    this.status = status;
+    this.code = code;
+    this.fieldErrors = fieldErrors;
+    this.requestId = requestId;
+    this.retryable = retryable;
   }
 }
 
@@ -138,7 +151,13 @@ async function browserApiPayload(
     ...(options.signal ? { signal: options.signal } : {})
   });
   const payload = await response.json().catch(() => undefined);
-  if (!response.ok) throw browserApiError(response.status, payload);
+  if (!response.ok) {
+    throw browserApiError(
+      response.status,
+      payload,
+      response.headers.get("x-request-id") ?? undefined
+    );
+  }
   return { response, payload };
 }
 
@@ -160,7 +179,11 @@ function browserCookie(name: string): string | undefined {
   return item ? decodeURIComponent(item.slice(prefix.length)) : undefined;
 }
 
-function browserApiError(status: number, payload: unknown): BrowserApiError {
+function browserApiError(
+  status: number,
+  payload: unknown,
+  responseRequestId?: string
+): BrowserApiError {
   if (
     typeof payload === "object" &&
     payload !== null &&
@@ -169,6 +192,10 @@ function browserApiError(status: number, payload: unknown): BrowserApiError {
     payload.error !== null
   ) {
     const error = payload.error as Readonly<Record<string, unknown>>;
+    const requestId =
+      typeof error.requestId === "string"
+        ? error.requestId
+        : responseRequestId;
     return new BrowserApiError(
       status,
       typeof error.code === "string" ? error.code : "REQUEST_FAILED",
@@ -177,7 +204,11 @@ function browserApiError(status: number, payload: unknown): BrowserApiError {
         : "Не удалось выполнить запрос",
       Array.isArray(error.fieldErrors)
         ? error.fieldErrors.filter(isFieldError)
-        : []
+        : [],
+      requestId,
+      typeof error.retryable === "boolean"
+        ? error.retryable
+        : status >= 500
     );
   }
   return new BrowserApiError(
@@ -185,7 +216,10 @@ function browserApiError(status: number, payload: unknown): BrowserApiError {
     "REQUEST_FAILED",
     status >= 500
       ? "Сервис временно недоступен"
-      : "Не удалось выполнить запрос"
+      : "Не удалось выполнить запрос",
+    [],
+    responseRequestId,
+    status >= 500
   );
 }
 
