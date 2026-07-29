@@ -18,6 +18,13 @@ execution slice следует ADR-2026-034; live Arsenkin submit остаётс
 регистрирует Service Worker только для `/app/`. Реальная email/Web Push
 доставка и test send остаются выключены.
 
+Dependency-free identity producer по ADR-2026-036 добавляет
+`identity.session-family.revoked.v1`: Platform API terminal-отзывает целые
+session families и атомарно пишет redacted outbox event. Все session lifecycle
+writers одного пользователя используют общий PostgreSQL advisory transaction
+lock; выдача повторно проверяет актуальные `user.version + ACTIVE`. Durable
+publisher, Realtime consumer и global session-expiry sweeper ещё отсутствуют.
+
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
 ## 1. Инварианты
@@ -40,6 +47,9 @@ execution slice следует ADR-2026-034; live Arsenkin submit остаётс
   подписки задают типы работ и могут только сужать/переопределять профиль.
 - Browser Push device принадлежит профилю, а не проекту; project rule выбирает
   события/канал, но не получает endpoint или browser keys.
+- Terminal session revoke применяется ко всей refresh family и атомарно пишет
+  `identity.session-family.revoked.v1`; обычная rotation и access-token TTL
+  terminal event не создают.
 - Tracking context не хранит provider/credential/schedule: его immutable
   search configuration принадлежит SEO data, routing — Jobs, schedule —
   automation.
@@ -192,7 +202,10 @@ Backend convention:
 
 Специализированные модули:
 
-- `platform-api/src/identity` — account/session lifecycle и CSRF guards;
+- `platform-api/src/identity` — account/session lifecycle, user-scoped
+  advisory lock, whole-family terminal revoke/outbox и CSRF guards;
+- `platform-api/src/common/uuid-v7.ts` — dependency-free RFC 9562 UUIDv7 для
+  новых межсервисных session-family aggregate IDs;
 - `platform-api/src/identity/mfa.*`, `totp.*` — TOTP lifecycle, login
   challenge и recovery codes;
 - `platform-api/src/authorization` — default-deny permission catalog и
@@ -340,7 +353,14 @@ Identity core содержит регистрацию email/password, consent sn
 Argon2id, email verification, одноразовое password recovery с отзывом прежних
 сессий, TOTP/recovery codes с зашифрованными secrets и короткоживущим login
 challenge, короткую access cookie, rotation refresh cookie, CSRF, session
-inventory/revocation, PostgreSQL rate limit, audit и outbox.
+inventory/revocation, PostgreSQL rate limit, audit и outbox. По ADR-2026-036
+terminal revoke сериализуется advisory lock по user, меняет distinct whole
+families и пишет exact redacted `identity.session-family.revoked.v1`.
+Password reset дополнительно инвалидирует outstanding login MFA challenges;
+session issue повторно проверяет ожидаемую версию active user под lock.
+MFA setup/activation/disable и revoke-others повторно валидируют exact
+active/unexpired principal session под тем же lock. Новые family IDs — UUIDv7;
+legacy UUIDv4 продолжают читаться без backfill.
 
 Tenant core содержит workspace/project CRUD, системную RBAC-матрицу,
 одноразовые workspace invitations, optimistic locking участников и
@@ -615,6 +635,12 @@ reservation, outbox/event не создаются.
   credential projection без secret columns, finite blockers, 1001 sentinel,
   TTL и redaction. Живой PostgreSQL 18 migration smoke и защищённый visual/e2e
   остаются staging gates.
+- Identity session-family producer: Contracts 16/16 и Platform API 175/175
+  tests, strict typecheck/build/diff-check, Prisma validate/generate — pass.
+  Проверены exact redacted payload, whole-family/idempotent revoke, чужая
+  session, stale principal/version, refresh reuse/expiry commit-before-401,
+  reset и MFA ordering. Реальные PostgreSQL 18 race/outbox rollback tests
+  остаются staging gate; Prisma schema/migration в этом срезе не менялись.
 - Target runtime: Node.js 24. Локальная проверка выполнялась на Node.js 22 с
   ожидаемым engine warning; контейнеры используют Node.js 24.
 
@@ -632,8 +658,10 @@ operations, ingest receipts и partial persistence. Live Arsenkin `set`
 `profile/project effective policy → transactional outbox/durable consumer →
 email + Web Push delivery`. Browser device/VAPID public-key lifecycle уже
 реализован по ADR-2026-035; следующий срез добавляет durable session-family
-revoke event, VAPID private-key sender, идемпотентные delivery attempts,
-retry/DLQ, digest и delivery history. Production-зависимости
+event publisher/Realtime consumer с revoked-family tombstone и fail-closed
+device-upsert check (producer уже реализован по ADR-2026-036), VAPID
+private-key sender, идемпотентные delivery attempts, retry/DLQ, digest и
+delivery history. Production-зависимости
 `@nats-io/jetstream` и `web-push` ещё не одобрены, а фактическая
 durable-доставка не реализована. OAuth/OIDC выполняется после подтверждения
 зависимости `jose`; QR для TOTP — после подтверждения `qrcode`.
@@ -654,10 +682,16 @@ durable-доставка не реализована. OAuth/OIDC выполня�
 - Notification preferences не создают deliveries сами по себе: отсутствуют
   transactional outbox/durable consumer, email/Web Push adapters, digest
   scheduler, VAPID private-key sender и provider delivery history. Device
-  lifecycle готов, но durable identity event об отзыве session family и его
-  consumer, а также bounded global provider-expiry sweeper остаются release
-  blocker перед внешней доставкой. До sweeper due subscriptions безопасно
-  очищаются в user-scoped list/upsert.
+  lifecycle и identity producer готовы, но durable outbox publisher и
+  Realtime consumer session-family event с durable revoked-family tombstone и
+  fail-closed tombstone check при device upsert, а также bounded global
+  provider-expiry sweeper остаются release blocker перед внешней доставкой.
+  До sweeper due subscriptions безопасно очищаются в user-scoped list/upsert.
+- Identity terminal lifecycle ещё требует PostgreSQL 18 staging race tests
+  `rotate ↔ rotate`, `login ↔ password reset`,
+  `MFA challenge/confirm/disable ↔ reset`, outbox rollback, future
+  suspend/deactivate producer и bounded global
+  refresh-session expiry sweeper.
 - `web_push_subscriptions` migration требует fresh apply и constraint-negative
   smoke на PostgreSQL 18 staging; VAPID/encryption/fingerprint key rollout
   требует expand-first coverage review. Startup guard видит только номера

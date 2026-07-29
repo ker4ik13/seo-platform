@@ -423,6 +423,12 @@ internal token плюс точным совпадением trusted tenant/actor
 - `/me/export`;
 - `/me/deletion`.
 
+`POST /auth/logout`, `DELETE /sessions/{sessionId}`,
+`DELETE /sessions/others`, password reset, MFA disable, refresh reuse и полное
+refresh expiry используют terminal family revoke по ADR-2026-036. Rotation
+обычного refresh не terminal. Ошибка outbox откатывает команду; для reuse и
+expiry `UNAUTHENTICATED` формируется только после успешного commit.
+
 ### 13.2. Workspace и project
 
 - `/workspaces`;
@@ -883,6 +889,7 @@ Publisher отправляет событие в NATS JetStream и помеча�
 - `identity.user.password-changed.v1`;
 - `identity.user.mfa-enabled.v1`;
 - `identity.user.mfa-disabled.v1`;
+- `identity.session-family.revoked.v1`;
 - `identity.user.suspended.v1`;
 - `workspace.created.v1`;
 - `workspace.invite.requested.v1`;
@@ -924,6 +931,22 @@ Publisher отправляет событие в NATS JetStream и помеча�
 - `audit.security-event.recorded.v1`.
 
 Частый progress не отправляется в durable bus на каждую строку; worker агрегирует обновления.
+`identity.session-family.revoked.v1` имеет aggregate
+`session-family/{sessionFamilyId}`, version `1`, не имеет workspace/project и
+содержит строго `userId`, `sessionFamilyId`, `revokedAt` ISO. Причина, session
+ID, email, IP/user-agent и token material запрещены. Platform API пишет событие
+одной транзакцией с условным terminal revoke только если реально изменена хотя
+бы одна строка family. Повтор и rotation внутри family event не создают.
+Точный payload типизирован в `platform-contracts`. Durable publisher и
+Realtime consumer в текущем срезе отсутствуют; outbox row не означает
+доставку.
+
+Realtime consumer обязан одной транзакцией записывать inbox, durable
+revoked-family tombstone по `userId + sessionFamilyId` и terminal-отзывать
+существующие devices. Device upsert проверяет tombstone под тем же
+user/device lock до записи. Это обязательная защита от reorder
+event-before-registration; простого `UPDATE active devices` недостаточно.
+
 `integration.credential-validation.finished.v1` содержит только workspace,
 credential/job IDs, provider, material/connector versions, terminal status и
 allowlisted error code. Secret, provider response и account identifier

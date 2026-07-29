@@ -93,6 +93,18 @@ Unique: `(provider, provider_subject)`.
 - revoked_at;
 - revoke_reason.
 
+`family_id` является aggregate ID terminal lifecycle. Все security-значимые
+session writers одного пользователя сериализуются user-scoped PostgreSQL
+advisory transaction lock. Terminal helper выбирает distinct active families,
+условно меняет только `revoked_at IS NULL` с единым timestamp и создаёт по
+одному `identity.session-family.revoked.v1` outbox row только для family, где
+реально изменилась хотя бы одна session. Rotation внутри family не terminal и
+событие не создаёт. Текущий producer использует существующие `sessions` и
+`outbox_events`; новая таблица или Prisma migration не требуется.
+Новые family IDs — UUIDv7; существующие UUIDv4 продолжают читаться без
+backfill, так как колонка и event aggregate принимают UUID независимо от
+версии.
+
 #### `mfa_methods`
 
 - id;
@@ -1393,6 +1405,26 @@ replicas → drain старых replicas → switch active version`; смеша�
 молчаливой передаче endpoint другому аккаунту. Active count bounded policy,
 default 20. Cross-database FK на identity session family запрещён; lifecycle
 отзыва применяется через durable identity event до включения sender.
+Platform API producer этого события реализован по ADR-2026-036; durable
+publisher и Realtime inbox consumer ещё обязательны.
+
+До включения sender `realtime_db` получает
+`revoked_session_family_tombstones`:
+
+- `user_id`;
+- `session_family_id`;
+- source `event_id`;
+- `revoked_at`;
+- `received_at`.
+
+Unique `(user_id, session_family_id)` делает повтор идемпотентным; cross-DB FK
+запрещён. Consumer одной транзакцией пишет inbox + tombstone и terminal-
+отзывает совпавшие devices. Registration/upsert под тем же user/device lock
+проверяет tombstone до create/update, поэтому event-before-registration не
+допускает resurrection. Tombstone retention не короче максимального refresh
+TTL плюс предельной задержки outbox/consumer и сохраняется, пока нужен
+связанный device tombstone. Таблица является release-blocker consumer slice и
+не входит в текущую migration producer.
 
 `deliveries` содержит immutable effective-policy snapshot, deduplication key,
 канал, scheduled time и финальный status; `delivery_attempts` — provider

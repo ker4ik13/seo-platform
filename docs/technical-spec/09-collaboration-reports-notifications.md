@@ -358,8 +358,10 @@ profile/project policy → idempotent Email/Web Push delivery attempt`. В не�
 входят VAPID private-key sender, retry/DLQ, digest scheduler и delivery
 history. Production-зависимости `@nats-io/jetstream` и `web-push` ещё не
 одобрены; до их подтверждения adapters остаются портами, а UI не должен
-имитировать успешную внешнюю доставку. Durable identity event об отзыве
-session family и его consumer являются release blocker для реальной доставки.
+имитировать успешную внешнюю доставку. Producer
+`identity.session-family.revoked.v1` уже атомарно пишет Platform API outbox по
+ADR-2026-036; durable publisher и Realtime consumer terminal-отзыва devices
+остаются release blocker для реальной доставки.
 
 ## 13. Каналы
 
@@ -417,6 +419,15 @@ Device lifecycle следует ADR-2026-035:
   будущего sender;
 - смена browser subscription ставит локальный reconciliation marker; Service
   Worker не передаёт credentials без активной session.
+- Realtime consumer `identity.session-family.revoked.v1` должен идемпотентно и
+  в одной локальной транзакции записать inbox и revoked-family tombstone, а
+  также terminal-отозвать все active devices с совпавшими
+  `userId + registration session family`; producer outbox без
+  publisher/consumer не считается применённым отзывом.
+- Device registration/upsert под тем же user/device lock проверяет durable
+  tombstone до записи. Это закрывает reorder, когда event обработан раньше
+  уже начатого запроса регистрации старой family; такой запрос fail-closed не
+  может воскресить device.
 
 ### Telegram
 

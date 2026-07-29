@@ -110,6 +110,21 @@
 - Маркетинговый сайт не получает cookie приложения без необходимости.
 - Admin использует отдельную cookie/session audience.
 - Access session короткоживущая; refresh rotation.
+- Security-значимые session writers одного пользователя сериализуются общим
+  namespaced PostgreSQL advisory transaction lock. Выдача session под lock
+  повторно требует ожидаемую версию `ACTIVE` пользователя.
+- Terminal revoke всегда применяется ко всей refresh family и атомарно пишет
+  redacted `identity.session-family.revoked.v1`; outbox failure откатывает
+  revoke. Rotation внутри family и access-token TTL это событие не создают.
+- Новая refresh family получает UUIDv7; legacy UUIDv4 остаётся валидным
+  идентификатором существующей family без миграции.
+- Password reset под тем же lock инвалидирует outstanding login MFA
+  challenges до выдачи новой family. MFA disable и revoke others исключают
+  всю family текущей principal.
+- MFA setup/activation/disable и session revoke-others повторно валидируют под
+  lock active/unexpired principal session по точным
+  `sessionId + userId + sessionFamilyId`; activation/disable также требуют
+  ожидаемую user version.
 - Session record содержит hash token, device metadata, IP history в допустимом объёме и expiry.
 - CSRF token привязан к session.
 - Logout инвалидирует server-side session.
@@ -227,8 +242,9 @@
   dumps. Его получает только будущий sender role; резервная копия допустима
   только внутри защищённого versioned secret store.
 - Revoke/expiry browser device обязан в одной транзакции очистить ciphertext,
-  nonce/tag и fingerprints. Durable session-family revoked event и consumer
-  обязательны до включения внешней доставки.
+  nonce/tag и fingerprints. Producer durable session-family revoked event уже
+  реализован по ADR-2026-036; outbox publisher и Realtime consumer обязательны
+  до включения внешней доставки.
 - KEK rollout выполняется в порядке expand keyring → startup decrypt-canary
   verify каждой используемой версии → drain старых replicas → switch active.
   Текущий coverage guard и missing-version retry проверяют наличие версии, но
@@ -880,6 +896,8 @@ Radar/crawler capacity:
 - index bloat/reindex planning;
 - expired uploads/exports cleanup;
 - old session/token cleanup;
+- bounded global refresh-session expiry sweeper, который использует тот же
+  family revoke/outbox helper; один lazy refresh path недостаточен;
 - outbox/inbox cleanup после retention;
 - Yjs compaction;
 - orphan object reconciliation;
@@ -967,6 +985,10 @@ Billing read-only не является стадией удаления. Око�
 - включить maintenance banner.
 
 Прямое редактирование production DB из UI запрещено.
+Будущая команда suspend/deactivate/delete account обязана в своей транзакции
+взять identity session lifecycle lock, отозвать все active families и создать
+`identity.session-family.revoked.v1` на каждую изменённую family. Наличие lazy
+проверки при refresh не заменяет producer команды.
 
 ## 38. Definition of Done
 

@@ -173,11 +173,19 @@ registration честно возвращает `deliveryAvailable=false` и
 Следующий обязательный notification-срез должен провести redacted terminal
 event через transactional outbox/durable consumer, effective policy и
 идемпотентные delivery attempts. До реальной отправки также обязателен durable
-identity event об отзыве session family, consumer для terminal device revoke и
+identity lifecycle. Producer `identity.session-family.revoked.v1` уже
+реализован по ADR-2026-036 с atomic Platform API outbox, whole-family revoke,
+user advisory lock и stale-version recheck. Ещё отсутствуют durable publisher,
+Realtime consumer terminal device revoke, global session-expiry sweeper и
 отдельный sender role с VAPID private key; `@nats-io/jetstream` и `web-push`
 требуют отдельного одобрения production-зависимостей. P2 не считается
 выполненным до реального rank job, multi-tenant queue fairness, terminal
 outbox/delivery и security/load/restore gates.
+
+Realtime consumer exit gate включает durable revoked-family tombstone и
+fail-closed проверку tombstone в device upsert. Тест обязан покрывать оба
+порядка `registration → event` и `event → delayed registration`; update только
+существующих devices не принимается из-за resurrection race.
 
 Перед исполнением первого rank job jobs/integrations должен повторно проверять
 workspace/project lifecycle и billing. Текущая проверка mutation в Platform
@@ -534,6 +542,10 @@ Backlog ведётся по потокам:
 - видит английский onboarding;
 - даты хранятся UTC;
 - audit/security events созданы.
+- конкурентный password reset не позволяет login или MFA challenge со старым
+  user/password snapshot создать сессию после reset commit;
+- terminal logout/revoke/reset создаёт ровно одно redacted outbox event на
+  каждую реально отозванную session family.
 
 Повторяется для Google, Яндекс и Telegram с безопасным linking.
 
@@ -918,6 +930,11 @@ Staging game day имитирует потерю основной базы.
   breaker проверен fault-injection тестом;
 - connector execution DB/KMS boundary не допускает global read multi-tenant
   jobs и BYOK vault; cluster-wide grants и `pg_hba` проверены.
+- на PostgreSQL 18 пройдены реальные race tests `rotate ↔ rotate`,
+  `login ↔ password reset`,
+  `MFA challenge/confirm/disable ↔ password reset`, а также
+  rollback terminal revoke при ошибке outbox; in-memory unit test этот gate не
+  заменяет.
 
 До P3:
 

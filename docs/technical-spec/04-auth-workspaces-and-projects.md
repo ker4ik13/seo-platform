@@ -75,7 +75,12 @@
   открытый токен там запрещён.
 - Новый пароль проходит ту же строгую политику, что и при регистрации.
 - Успешная смена пароля атомарно поглощает токен, меняет пароль, отзывает все
-  прежние сессии, пишет audit/outbox и создаёт новую сессию текущему браузеру.
+  distinct прежние session families, инвалидирует незавершённые login MFA
+  challenges, пишет audit/outbox и создаёт новую family текущему браузеру.
+- Password reset и выдача session сериализуются общим user-scoped PostgreSQL
+  advisory transaction lock. Выдача повторно требует актуальную версию
+  `ACTIVE` пользователя под lock, поэтому login/challenge, начатый со старым
+  password snapshot, не создаёт сессию после reset.
 - Просроченная, использованная или отозванная ссылка возвращает безопасное
   состояние без раскрытия дополнительных данных аккаунта.
 
@@ -112,6 +117,16 @@
 - Refresh session хранится в `HttpOnly`, `Secure`, `SameSite` cookie.
 - Refresh tokens ротируются.
 - Повторное использование отозванного refresh token отзывает семейство сессий.
+- Rotation внутри одной family не является terminal revoke и не создаёт
+  `identity.session-family.revoked.v1`.
+- Logout и завершение выбранной session отзывают всю её family. Выбранная
+  session сначала находится с условиями `id + userId`; чужой ID не раскрывает
+  данные. «Завершить другие» исключает всю family текущей principal.
+- Каждый terminal revoke условно меняет только `revoked_at IS NULL` и в той же
+  транзакции создаёт один redacted outbox event на реально изменённую family.
+- Refresh reuse, полное истечение refresh session и inactive account сначала
+  commit-ят terminal revoke/outbox, затем возвращают unauthenticated. Истечение
+  короткого access token не завершает family.
 - Пользователь видит список устройств, IP, примерную географию и время активности.
 - Можно завершить отдельную или все другие сессии.
 - Опасные операции требуют recent authentication.
@@ -151,7 +166,12 @@
 - успешный TOTP/recovery code атомарно поглощается вместе с challenge и только
   после этого создаётся сессия;
 - setup и отключение требуют recent authentication; отключение также требует
-  текущий пароль и второй фактор и отзывает все другие сессии;
+  текущий пароль и второй фактор и отзывает все другие session families,
+  исключая всю family текущей principal;
+- TOTP setup/activation/disable внутри транзакции повторно проверяют под
+  session lifecycle lock точные `sessionId + userId + sessionFamilyId`,
+  active/unexpired session и ожидаемую версию active user; snapshot guard до
+  транзакции не является достаточной проверкой;
 - открытые TOTP secrets, challenge tokens и recovery codes запрещены в логах,
   outbox, audit changes и очередях.
 
