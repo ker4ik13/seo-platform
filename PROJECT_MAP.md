@@ -12,8 +12,11 @@ durable создаёт `PREPARING` Job и immutable sidecar, seal-ит manifest 
 изолированный rank-worker, восстанавливает потерянные BullMQ notifications,
 сериализует cancel и закрывает sealed cancellation через SEO Data finalize.
 Неоднозначный исход ограниченно повторяется exact-командой и затем становится
-`ACTION_REQUIRED`, а не ложным `NOT_SEALED`. Public Platform API маршруты,
-provider execution, normalized ingest/event и position history ещё
+`ACTION_REQUIRED`, а не ложным `NOT_SEALED`. Public Platform API и
+восстанавливаемый Web Job flow готовы. SEO Data принимает exact normalized
+chunks, атомарно строит append-only snapshots/current projection, завершает
+успешный/partial manifest с redacted outbox event и предоставляет internal
+keyset history. Provider execution/grants и public history API ещё
 отсутствуют. Срез следует ADR-2026-034; live Arsenkin submit остаётся
 выключенным до прохождения contract/security gates.
 
@@ -680,25 +683,25 @@ version drift принимает cancel между seal request/response. Зав
 неоднозначность либо исчерпание budget дают terminal
 `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`.
 
-Execution grants, scoped connector submission, normalized chunk ingest,
-успешный/partial finalize, completion outbox/event и position history ещё не
-реализованы. Contract требует сериализовать finalize с ingest на одном
-manifest lock, закрыть late ingest и только для валидного
-`COMPLETED/PARTIALLY_COMPLETED` опубликовать exact redacted
-`seo.rank-check.completed.v1`.
+Normalized chunk ingest, append-only snapshots, monotonic current projection,
+успешный/partial finalize и atomic redacted completion outbox реализованы в
+SEO Data с одним manifest lock и запретом late ingest. Internal history
+использует tenant/filter-bound HMAC cursor. Execution grants, scoped connector
+submission и public Platform API history route ещё не реализованы, поэтому
+production worker пока не создаёт эти snapshots.
 
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 128 pass, 0 fail.
-- SEO data unit tests: 51 pass, 0 fail.
-- Jobs/integrations tests: 213 pass, 0 fail, 2 disposable-DB tests skipped
+- Platform API unit tests: 194 pass, 0 fail.
+- SEO data unit tests: 86 pass, 0 fail.
+- Jobs/integrations tests: 215 pass, 0 fail, 2 disposable-DB tests skipped
   в обычном запуске; оба DB tests отдельно проходят.
 - Realtime unit tests: 12 pass, 0 fail.
-- Contracts unit tests: 36 pass, 0 fail.
-- Unified Web helper tests: 54 pass, 0 fail.
+- Contracts unit tests: 53 pass, 0 fail.
+- Unified Web helper tests: 96 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
 - Unified Next.js production build: pass; проверены public site, Toolbox,
   API docs и private `/app`.
@@ -802,15 +805,16 @@ manifest lock, закрыть late ingest и только для валидно�
 
 ## 9. Следующий вертикальный срез
 
-`manual BYOK rank job → position history`
+`execution grant → provider submit → public position history`
 
 Provider-free estimate и SEO Data immutable manifest из ADR-2026-034
 завершены; durable Jobs `PREPARING` saga, exact seal recovery, cooperative
-cancel и cancellation finalize также готовы. Следующий runtime-шаг —
-authoritative one-time grant, scoped connector operations, normalized ingest
-receipts и partial persistence. Live Arsenkin `set` выключен, пока нет
-recorded provider contract и устранения global vault read. Неоднозначность
-manifest preparation уже fail-closed переходит в
+cancel, public/Web Job lifecycle и normalized SEO Data result persistence
+также готовы. Следующий runtime-шаг — authoritative one-time grant, scoped
+connector operations, provider submit/status и подключение public history
+proxy/UI к готовому internal read model. Live Arsenkin `set` выключен, пока
+нет recorded provider contract и устранения global vault read.
+Неоднозначность manifest preparation уже fail-closed переходит в
 `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN` без бесконечного auto-retry.
 
 Параллельный обязательный следующий срез уведомлений:
@@ -838,6 +842,10 @@ durable-доставка не реализована. OAuth/OIDC выполня�
 - `rank_estimates` требуют bounded maintenance/retention после окна
   идемпотентных повторов и диагностики; expiry пока только запрещает считать
   receipt актуальным и сам не удаляет строку.
+- `rank_snapshots` первого normalized slice пока не partitioned. До реальной
+  нагрузки обязательны RANGE partitioning, partition maintenance/retention и
+  representative history load test. Public Platform API history proxy ещё
+  отсутствует; internal SEO Data query не является browser API.
 - Notification preferences не создают deliveries сами по себе: отсутствуют
   transactional outbox/durable consumer, email/Web Push adapters, digest
   scheduler, VAPID private-key sender и provider delivery history. Device
@@ -951,8 +959,9 @@ durable-доставка не реализована. OAuth/OIDC выполня�
   UI QR появится после подтверждения зависимости `qrcode`.
 - Rank/frequency provider execution, тарификация и YooKassa пока
   присутствуют только в ТЗ/схемах; tracking configuration, provider-free
-  estimate и durable rank preparation Job реализованы, но position snapshots
-  ещё не создаются. Arsenkin/Keys.so connectors сейчас выполняют только
+  estimate, durable rank preparation Job и normalized SEO Data storage
+  реализованы, но production provider worker snapshots ещё не создаёт.
+  Arsenkin/Keys.so connectors сейчас выполняют только
   read-only credential validation; live Arsenkin `positions` заблокирован
   ADR-2026-034, XMLStock ждёт подтверждённого provider contract и redacted
   fixtures.

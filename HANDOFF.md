@@ -79,6 +79,8 @@ beta. Нельзя включать публичные платежи, сист�
 - устранение глобального чтения BYOK vault execution-процессом;
 - startup decrypt-canary и безопасная ротация keyrings;
 - PostgreSQL concurrency/migration negative tests;
+- RANGE partitioning/maintenance для `rank_snapshots`, representative history
+  load test и публичный Platform API proxy истории позиций;
 - object storage lifecycle, quarantine cleanup и import staging retention;
 - durable outbox/inbox и disaster recovery.
 

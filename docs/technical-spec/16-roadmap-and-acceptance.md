@@ -168,9 +168,12 @@ DB-first сохраняет exact manifest command/hash, создаёт `rank_jo
 cancel/worker через lock order `Job → RankJobRun`. Redis producer работает
 bounded best effort, а DB triggers защищают exact initial state, monotonic
 attempt/version и committed Job/Run/Estimate coherence. Public Platform API
-routes и Web Job flow ещё отсутствуют; provider execution, normalized
-ingest, история позиций, events и schedule остаются следующими вертикальными
-срезами. Оценка сохраняется в
+routes и восстанавливаемый Web Job flow реализованы. SEO Data уже принимает
+exact normalized chunks, сохраняет append-only snapshots/current projection,
+атомарно завершает successful/partial manifest с redacted outbox и
+предоставляет internal keyset history. Provider execution/grants, public
+history API/UI и schedule остаются следующими вертикальными срезами. Оценка
+сохраняется в
 Jobs как immutable idempotency receipt, доступна в read-only и не вызывает
 провайдера, BullMQ, списание, usage, outbox или event. Профильные и
 membership-bound проектные настройки уведомлений, in-app центр и
@@ -235,10 +238,11 @@ warning не заменяют Node.js 24 CI/staging gate.
 
 Архитектура первого Arsenkin manual rank job зафиксирована
 ADR-2026-034. Provider-free estimate и exact execution contracts из ADR уже
-реализованы; immutable SEO Data manifest, protected cancellation finalize и
-durable Jobs preparation готовы. Public Platform API, provider execution,
-normalized ingest/history и completion events ещё не реализованы. Live `set`
-остаётся выключенным до recorded one-key contract или
+реализованы; immutable SEO Data manifest, protected cancellation finalize,
+durable Jobs preparation, public/Web Job lifecycle и normalized SEO Data
+ingest/history/outbox готовы. Provider execution/grants и public history API
+ещё не реализованы. Live `set` остаётся выключенным до recorded one-key
+contract или
 письменного подтверждения response/status/retry semantics, устранения global
 vault read, authoritative execution grant, ingest receipts и
 `SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit. Наличие working credential
