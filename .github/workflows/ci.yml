@@ -53,5 +53,8 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Validate infrastructure example
+        run: pnpm infra:validate:example
+
       - name: Build
         run: pnpm build

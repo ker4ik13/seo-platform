@@ -10,8 +10,10 @@
     "build": "pnpm --filter @seo-platform/contracts build && pnpm --filter '!@seo-platform/contracts' --recursive --if-present run build",
     "typecheck": "pnpm --filter @seo-platform/contracts build && pnpm --recursive --if-present run typecheck",
     "lint": "pnpm --recursive --if-present run lint",
-    "test": "pnpm --recursive --if-present run test",
+    "test": "pnpm --recursive --if-present run test && pnpm infra:test",
+    "infra:test": "node --test 'platform-infrastructure/tests/*.test.mjs'",
     "infra:validate": "docker compose -f platform-infrastructure/compose.dokploy.yml config --quiet",
+    "infra:validate:example": "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN=ci-only-distinct-notification-token docker compose --env-file .env.example -f platform-infrastructure/compose.dokploy.yml config --quiet",
     "prisma:generate": "pnpm --filter './platform-api' --filter './platform-seo-data' --filter './platform-jobs-integrations' --filter './platform-realtime' run prisma:generate",
     "prisma:validate": "pnpm --filter './platform-api' --filter './platform-seo-data' --filter './platform-jobs-integrations' --filter './platform-realtime' run prisma:validate"
   }

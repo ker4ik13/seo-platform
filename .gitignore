@@ -10,6 +10,6 @@ coverage/
 *.tsbuildinfo
 **/src/generated/
 **/prisma/generated/
-uploads/
+/uploads/
 tmp/
 *.log
