@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { ProtectedAppContext } from "../lib/app-types";
+import { trackingContextsReturnTo } from "../lib/tracking-contexts";
 import { AccountMenu } from "./account-menu";
 import { Icon, type IconName } from "./icon";
 import { NotificationBell } from "./notification-bell";
@@ -11,6 +12,7 @@ const navigation: readonly {
   readonly href: string;
   readonly section: string;
   readonly available: boolean;
+  readonly projectScoped?: boolean;
 }[] = [
   {
     label: "Обзор",
@@ -38,7 +40,8 @@ const navigation: readonly {
     icon: "positions",
     href: "/app/rankings",
     section: "positions",
-    available: false
+    available: true,
+    projectScoped: true
   },
   {
     label: "Карта страниц",
@@ -73,6 +76,12 @@ export function AppShell({
   activeSection?: string;
 }>) {
   const hasProject = Boolean(context.project);
+  const navigationHref = (
+    item: (typeof navigation)[number]
+  ): string =>
+    item.projectScoped && context.project
+      ? trackingContextsReturnTo(context.project.id)
+      : item.href;
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -100,7 +109,7 @@ export function AppShell({
                     ? "nav-item active"
                     : "nav-item"
                 }
-                href={item.href}
+                href={navigationHref(item)}
                 key={item.label}
               >
                 <Icon name={item.icon} />
@@ -183,7 +192,7 @@ export function AppShell({
                 className={
                   item.section === activeSection ? "active" : undefined
                 }
-                href={item.href}
+                href={navigationHref(item)}
                 key={item.label}
               >
                 <Icon name={item.icon} />

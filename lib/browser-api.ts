@@ -42,7 +42,7 @@ export interface BrowserApiCollection<Data> {
 }
 
 interface BrowserApiOptions {
-  readonly method?: "GET" | "POST" | "PATCH" | "DELETE";
+  readonly method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   readonly body?: unknown;
   readonly ifMatch?: number;
   readonly idempotencyKey?: string;

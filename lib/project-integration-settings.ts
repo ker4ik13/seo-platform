@@ -8,6 +8,10 @@ import type {
   ProjectConnectorSettingsMutationRestriction,
   UpdateProjectConnectorBindingInput
 } from "@seo-platform/contracts";
+import {
+  type IdempotentCommand,
+  stableIdempotencyCommand
+} from "./idempotency.ts";
 
 export const RANK_TRACKING_CAPABILITY =
   "SERP_RANK_TRACKING" as const satisfies IntegrationCapability;
@@ -17,10 +21,7 @@ export interface ProjectConnectorDraft {
   readonly enabled: boolean;
 }
 
-export interface IdempotentCreateCommand {
-  readonly payloadSignature: string;
-  readonly key: string;
-}
+export type IdempotentCreateCommand = IdempotentCommand;
 
 export interface BindingAvailabilityPresentation {
   readonly label: string;
@@ -228,12 +229,11 @@ export function stableProjectConnectorCreateCommand(
   payloadSignature: string,
   createKey: () => string
 ): IdempotentCreateCommand {
-  return current?.payloadSignature === payloadSignature
-    ? current
-    : {
-        payloadSignature,
-        key: createKey()
-      };
+  return stableIdempotencyCommand(
+    current,
+    payloadSignature,
+    createKey
+  );
 }
 
 export function projectConnectorRestrictionMessage(

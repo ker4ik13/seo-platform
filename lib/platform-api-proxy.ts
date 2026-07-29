@@ -1,7 +1,13 @@
 import type { NextRequest } from "next/server";
-import { isSafeBrowserApiPath } from "./app-path";
+import { isSafeBrowserApiPath } from "./app-path.ts";
 
-const ALLOWED_METHODS = new Set(["GET", "POST", "PATCH", "DELETE"]);
+const ALLOWED_METHODS = new Set([
+  "GET",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE"
+]);
 const FORWARDED_REQUEST_HEADERS = [
   "accept-language",
   "content-type",
@@ -19,6 +25,7 @@ const FORWARDED_RESPONSE_HEADERS = [
   "x-trace-id"
 ] as const;
 const MAX_BROWSER_API_BODY_BYTES = 2 * 1_024 * 1_024;
+const MAX_BROWSER_API_BODY_READ_MS = 10_000;
 
 export async function proxyPlatformApi(
   request: NextRequest,
@@ -54,16 +61,20 @@ export async function proxyPlatformApi(
   }
 
   const hasBody = !["GET", "HEAD"].includes(request.method);
+  const boundedBody = hasBody
+    ? await readBoundedRequestBody(request)
+    : { ok: true as const, body: undefined };
+  if (!boundedBody.ok) return boundedBody.response;
   const upstreamUrl = new URL(
     `/api/v1/${pathSegments.map(encodeURIComponent).join("/")}`,
     process.env.PLATFORM_API_INTERNAL_URL ?? "http://localhost:4000"
   );
   upstreamUrl.search = request.nextUrl.search;
-  const requestOptions: RequestInit & { duplex?: "half" } = {
+  const requestOptions: RequestInit = {
     method: request.method,
     headers,
-    ...(hasBody && request.body
-      ? { body: request.body, duplex: "half" }
+    ...(boundedBody.body
+      ? { body: boundedBody.body }
       : {}),
     cache: "no-store",
     redirect: "manual",
@@ -96,6 +107,77 @@ export async function proxyPlatformApi(
     status: upstream.status,
     headers: responseHeaders
   });
+}
+
+async function readBoundedRequestBody(
+  request: NextRequest
+): Promise<
+  | { readonly ok: true; readonly body: ArrayBuffer | undefined }
+  | { readonly ok: false; readonly response: Response }
+> {
+  if (!request.body) {
+    return { ok: true, body: undefined };
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    void reader.cancel("BFF request body read timed out").catch(() => {
+      // The timeout response below remains authoritative.
+    });
+  }, MAX_BROWSER_API_BODY_READ_MS);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_BROWSER_API_BODY_BYTES) {
+        await reader.cancel();
+        return {
+          ok: false,
+          response: errorResponse(
+            413,
+            "FILE_TOO_LARGE",
+            "Request body is too large"
+          )
+        };
+      }
+      chunks.push(value);
+    }
+    if (timedOut) {
+      return {
+        ok: false,
+        response: errorResponse(
+          408,
+          "REQUEST_TIMEOUT",
+          "Request body took too long to read"
+        )
+      };
+    }
+  } catch {
+    return {
+      ok: false,
+      response: errorResponse(
+        400,
+        "VALIDATION_FAILED",
+        "Request body could not be read"
+      )
+    };
+  } finally {
+    clearTimeout(timeout);
+    reader.releaseLock();
+  }
+
+  const body = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, body: body.buffer };
 }
 
 export function responseCookies(headers: Headers): readonly string[] {

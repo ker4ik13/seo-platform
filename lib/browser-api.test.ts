@@ -77,3 +77,30 @@ test("falls back to the response request id and status retryability", async () =
     globalThis.fetch = originalFetch;
   }
 });
+
+test("forwards PUT for naturally idempotent resource assignment", async () => {
+  const originalFetch = globalThis.fetch;
+  let request: RequestInit | undefined;
+  globalThis.fetch = async (_input, init) => {
+    request = init;
+    return Response.json({
+      data: {
+        contextId: "context-id",
+        keywordId: "keyword-id",
+        assigned: true
+      }
+    });
+  };
+
+  try {
+    await browserApiRequest(
+      "/app/api/projects/project-id/tracking-contexts/context-id/keywords/keyword-id",
+      {
+        method: "PUT"
+      }
+    );
+    assert.equal(request?.method, "PUT");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
