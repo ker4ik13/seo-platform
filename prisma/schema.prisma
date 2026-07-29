@@ -33,6 +33,31 @@ enum SemanticImportReceiptStatus {
   COMPLETED
 }
 
+enum TrackingContextStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum TrackingSearchEngine {
+  GOOGLE
+  YANDEX
+}
+
+enum TrackingDevice {
+  DESKTOP
+  MOBILE
+}
+
+enum TrackingDomainMatchMode {
+  EXACT_HOST
+  INCLUDE_WWW
+  INCLUDE_SUBDOMAINS
+  CANONICAL_DOMAIN
+  ANY_PROJECT_MIRROR
+  SPECIFIC_URL
+  URL_PREFIX
+}
+
 model Keyword {
   id             String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId    String         @map("workspace_id") @db.Uuid
@@ -45,6 +70,7 @@ model Keyword {
   status         EntityStatus   @default(ACTIVE)
   clusterId      String?        @map("cluster_id") @db.Uuid
   targetPageId   String?        @map("target_page_id") @db.Uuid
+  /// Legacy compatibility field; active tracking assignments are authoritative.
   isTracked      Boolean        @default(false) @map("is_tracked")
   customValues   Json           @default("{}") @map("custom_values")
   sourceMode     DataSourceMode @default(MANUAL) @map("source_mode")
@@ -56,10 +82,12 @@ model Keyword {
   updatedAt      DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt      DateTime?      @map("deleted_at") @db.Timestamptz(6)
 
-  memberships KeywordGroupMembership[]
-  tags        KeywordTag[]
+  memberships         KeywordGroupMembership[]
+  tags                KeywordTag[]
+  trackingAssignments TrackingContextKeywordAssignment[]
 
   @@unique([projectId, language, normalizedHash])
+  @@unique([workspaceId, projectId, id], map: "keywords_tenant_project_id_key")
   @@index([workspaceId, projectId, status, id])
   @@index([workspaceId, projectId, status, createdAt(sort: Desc), id(sort: Desc)], map: "keywords_workspace_project_status_created_id_idx")
   @@index([textNormalized(ops: raw("gin_trgm_ops"))], type: Gin, map: "keywords_text_normalized_trgm_idx")
@@ -172,21 +200,89 @@ model Page {
 }
 
 model TrackingContext {
-  id           String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId  String       @map("workspace_id") @db.Uuid
-  projectId    String       @map("project_id") @db.Uuid
-  searchEngine String       @map("search_engine") @db.VarChar(32)
-  regionCode   String       @map("region_code") @db.VarChar(100)
-  language     String       @db.VarChar(16)
-  device       String       @db.VarChar(32)
-  depth        Int
-  settings     Json
-  status       EntityStatus @default(ACTIVE)
-  version      Int          @default(1)
-  createdAt    DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  id          String                @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String                @map("workspace_id") @db.Uuid
+  projectId   String                @map("project_id") @db.Uuid
+  name        String                @db.VarChar(160)
+  status      TrackingContextStatus @default(ACTIVE)
+  createdBy   String                @map("created_by") @db.Uuid
+  updatedBy   String                @map("updated_by") @db.Uuid
+  archivedBy  String?               @map("archived_by") @db.Uuid
+  version     Int                   @default(1)
+  createdAt   DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  archivedAt  DateTime?             @map("archived_at") @db.Timestamptz(6)
 
-  @@index([projectId, status, id])
+  configurations     TrackingContextVersion[]
+  keywordAssignments TrackingContextKeywordAssignment[]
+  createReceipts     TrackingContextCreateReceipt[]
+
+  @@unique([workspaceId, projectId, id], map: "tracking_contexts_tenant_project_id_key")
+  @@index([workspaceId, projectId, status, createdAt, id], map: "tracking_contexts_tenant_project_status_created_idx")
   @@map("tracking_contexts")
+}
+
+model TrackingContextVersion {
+  workspaceId          String                  @map("workspace_id") @db.Uuid
+  projectId            String                  @map("project_id") @db.Uuid
+  contextId            String                  @map("context_id") @db.Uuid
+  configurationVersion Int                     @map("configuration_version")
+  searchEngine         TrackingSearchEngine    @map("search_engine")
+  countryCode          String                  @map("country_code") @db.Char(2)
+  regionCode           String?                 @map("region_code") @db.VarChar(100)
+  regionLabel          String?                 @map("region_label") @db.VarChar(160)
+  language             String                  @db.VarChar(16)
+  device               TrackingDevice
+  depth                Int
+  domainMatchMode      TrackingDomainMatchMode @map("domain_match_mode")
+  domainMatchValue     String?                 @map("domain_match_value") @db.Text
+  safeSearch           Boolean                 @map("safe_search")
+  configurationHash    String                  @map("configuration_hash") @db.Char(64)
+  createdBy            String                  @map("created_by") @db.Uuid
+  createdAt            DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  context TrackingContext @relation(fields: [workspaceId, projectId, contextId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Cascade, map: "tracking_context_versions_context_tenant_fkey")
+
+  @@id([contextId, configurationVersion])
+  @@unique([workspaceId, projectId, contextId, configurationVersion], map: "tracking_context_versions_tenant_project_context_version_key")
+  @@index([workspaceId, projectId, contextId, configurationVersion(sort: Desc)], map: "tracking_context_versions_current_idx")
+  @@map("tracking_context_versions")
+}
+
+model TrackingContextKeywordAssignment {
+  id          String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  projectId   String    @map("project_id") @db.Uuid
+  contextId   String    @map("context_id") @db.Uuid
+  keywordId   String    @map("keyword_id") @db.Uuid
+  assignedBy  String    @map("assigned_by") @db.Uuid
+  assignedAt  DateTime  @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  removedBy   String?   @map("removed_by") @db.Uuid
+  removedAt   DateTime? @map("removed_at") @db.Timestamptz(6)
+
+  context TrackingContext @relation(fields: [workspaceId, projectId, contextId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Cascade, map: "tracking_context_assignments_context_tenant_fkey")
+  keyword Keyword         @relation(fields: [workspaceId, projectId, keywordId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Cascade, map: "tracking_context_assignments_keyword_tenant_fkey")
+
+  @@index([workspaceId, projectId, contextId, removedAt, assignedAt(sort: Desc), id(sort: Desc)], map: "tracking_context_assignments_context_current_idx")
+  @@index([workspaceId, projectId, keywordId, removedAt, contextId], map: "tracking_context_assignments_keyword_current_idx")
+  @@map("tracking_context_keyword_assignments")
+}
+
+model TrackingContextCreateReceipt {
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  actorId          String   @map("actor_id") @db.Uuid
+  idempotencyKey   String   @map("idempotency_key") @db.VarChar(180)
+  requestHash      Bytes    @map("request_hash")
+  contextId        String   @map("context_id") @db.Uuid
+  responseSnapshot Json     @map("response_snapshot")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  context TrackingContext @relation(fields: [workspaceId, projectId, contextId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Cascade, map: "tracking_context_create_receipts_context_tenant_fkey")
+
+  @@id([workspaceId, projectId, actorId, idempotencyKey])
+  @@index([workspaceId, projectId, contextId], map: "tracking_context_create_receipts_context_idx")
+  @@map("tracking_context_create_receipts")
 }
 
 model RankSnapshot {

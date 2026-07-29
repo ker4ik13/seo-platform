@@ -7,6 +7,7 @@ import type {
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { normalizeKeywordText } from "./keyword-normalization.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -28,7 +29,7 @@ export class KeywordService {
     query: KeywordListQuery,
     requestId: string
   ): Promise<ApiCollectionResponse<SemanticKeywordListItem>> {
-    const search = normalizeSearch(query.search);
+    const search = normalizeKeywordText(query.search);
     const cursor = query.cursor
       ? decodeCursor(query.cursor, search)
       : undefined;
@@ -97,10 +98,11 @@ export class KeywordService {
         )
       )
     ];
-    const pages =
+    const keywordIds = pageRows.map(({ id }) => id);
+    const [pages, activeTrackingAssignments] = await Promise.all([
       pageIds.length === 0
-        ? []
-        : await this.prisma.page.findMany({
+        ? Promise.resolve([])
+        : this.prisma.page.findMany({
             where: {
               workspaceId,
               projectId,
@@ -108,8 +110,25 @@ export class KeywordService {
               status: "ACTIVE"
             },
             select: { id: true, url: true }
-          });
+          }),
+      keywordIds.length === 0
+        ? Promise.resolve([])
+        : this.prisma.trackingContextKeywordAssignment.findMany({
+            where: {
+              workspaceId,
+              projectId,
+              keywordId: { in: keywordIds },
+              removedAt: null,
+              context: { status: "ACTIVE" }
+            },
+            select: { keywordId: true },
+            distinct: ["keywordId"]
+          })
+    ]);
     const pageUrlById = new Map(pages.map(({ id, url }) => [id, url]));
+    const trackedKeywordIds = new Set(
+      activeTrackingAssignments.map(({ keywordId }) => keywordId)
+    );
     const last = pageRows.at(-1);
     return {
       data: pageRows.map((row) => {
@@ -124,7 +143,7 @@ export class KeywordService {
           textNormalized: row.textNormalized,
           language: row.language,
           priority: row.priority,
-          isTracked: row.isTracked,
+          isTracked: trackedKeywordIds.has(row.id),
           ...(group ? { groupPath: group.path ?? group.name } : {}),
           ...(targetUrl ? { targetUrl } : {}),
           tags,
@@ -152,15 +171,6 @@ export class KeywordService {
       meta: { requestId }
     };
   }
-}
-
-function normalizeSearch(value: string | undefined): string {
-  return (value ?? "")
-    .normalize("NFKC")
-    .toLowerCase()
-    .replace(/ё/gu, "е")
-    .replace(/\s+/gu, " ")
-    .trim();
 }
 
 function encodeCursor(value: KeywordCursor): string {

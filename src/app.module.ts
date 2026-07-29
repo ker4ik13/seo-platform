@@ -6,6 +6,7 @@ import { MessagingModule } from "./messaging/messaging.module.js";
 import { SystemModule } from "./system/system.module.js";
 import { SemanticImportModule } from "./semantic-imports/semantic-import.module.js";
 import { KeywordModule } from "./keywords/keyword.module.js";
+import { TrackingContextModule } from "./tracking-contexts/tracking-context.module.js";
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { KeywordModule } from "./keywords/keyword.module.js";
     HealthModule,
     SemanticImportModule,
     KeywordModule,
+    TrackingContextModule,
     SystemModule
   ]
 })

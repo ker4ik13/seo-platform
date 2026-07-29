@@ -28,6 +28,13 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
           url: "https://example.com/seo"
         }
       ]
+    },
+    trackingContextKeywordAssignment: {
+      findMany: async () => [
+        {
+          keywordId: "01900000-0000-7000-8000-000000000010"
+        }
+      ]
     }
   } as unknown as PrismaService);
 
@@ -42,6 +49,7 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
   assert.equal(result.data[0]?.groupPath, "Услуги / SEO");
   assert.equal(result.data[0]?.targetUrl, "https://example.com/seo");
   assert.deepEqual(result.data[0]?.tags, ["Приоритет"]);
+  assert.equal(result.data[0]?.isTracked, true);
   assert.equal(result.page.hasNext, true);
   assert.equal(result.page.totalApprox, 2);
   assert.ok(result.page.nextCursor);
