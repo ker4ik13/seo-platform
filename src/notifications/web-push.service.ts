@@ -37,11 +37,30 @@ export class WebPushService {
   ) {}
 
   public async list(userId: string): Promise<WebPushSubscriptionsState> {
-    await this.expireDueSubscriptions(userId);
-    const devices = await this.prisma.webPushSubscription.findMany({
-      where: { userId },
-      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-      take: MAX_RETURNED_DEVICES
+    const devices = await this.prisma.$transaction(async (transaction) => {
+      await acquireLock(
+        transaction,
+        advisoryKey("web-push:user", userId)
+      );
+      await expireDueSubscriptions(transaction, userId, new Date());
+      const activeDevices =
+        await transaction.webPushSubscription.findMany({
+          where: { userId, status: "ACTIVE" },
+          orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+          take: MAX_RETURNED_DEVICES
+        });
+      const historicalDevices =
+        activeDevices.length < MAX_RETURNED_DEVICES
+          ? await transaction.webPushSubscription.findMany({
+              where: {
+                userId,
+                status: { in: ["REVOKED", "EXPIRED"] }
+              },
+              orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+              take: MAX_RETURNED_DEVICES - activeDevices.length
+            })
+          : [];
+      return [...activeDevices, ...historicalDevices];
     });
     return {
       registration: this.registrationState(),
@@ -81,6 +100,11 @@ export class WebPushService {
             advisoryKey("web-push:user", input.userId)
           );
           await acquireLock(transaction, endpointLock);
+          await expireDueSubscriptions(
+            transaction,
+            input.userId,
+            new Date()
+          );
 
           const current =
             await transaction.webPushSubscription.findUnique({
@@ -269,7 +293,7 @@ export class WebPushService {
           }
         });
       if (!current) throw notFound();
-      if (current.status !== "ACTIVE") {
+      if (current.status === "REVOKED") {
         return {
           installationId,
           status: "REVOKED",
@@ -281,7 +305,7 @@ export class WebPushService {
           where: {
             id: current.id,
             userId,
-            status: "ACTIVE",
+            status: current.status,
             version: current.version
           },
           data: {
@@ -300,10 +324,11 @@ export class WebPushService {
             version: { increment: 1 }
           }
         });
+      if (result.count !== 1) throw versionConflict();
       return {
         installationId,
         status: "REVOKED",
-        revoked: result.count === 1
+        revoked: true
       };
     });
   }
@@ -332,37 +357,6 @@ export class WebPushService {
       deliveryAvailable: false,
       testDeliveryAvailable: false
     };
-  }
-
-  private async expireDueSubscriptions(userId: string): Promise<void> {
-    await this.prisma.$transaction(async (transaction) => {
-      await acquireLock(
-        transaction,
-        advisoryKey("web-push:user", userId)
-      );
-      await transaction.webPushSubscription.updateMany({
-        where: {
-          userId,
-          status: "ACTIVE",
-          providerExpiresAt: { lte: new Date() }
-        },
-        data: {
-          status: "EXPIRED",
-          statusReason: "PUSH_SERVICE_GONE",
-          endpointFingerprint: null,
-          materialFingerprint: null,
-          materialCiphertext: null,
-          materialNonce: null,
-          materialAuthTag: null,
-          encryptionKeyVersion: null,
-          fingerprintKeyVersion: null,
-          providerExpiresAt: null,
-          revokedAt: null,
-          expiredAt: new Date(),
-          version: { increment: 1 }
-        }
-      });
-    });
   }
 
   private assertRegistrationAvailable(
@@ -415,6 +409,35 @@ function deviceSummary(
       : {}),
     version: device.version
   };
+}
+
+async function expireDueSubscriptions(
+  transaction: Prisma.TransactionClient,
+  userId: string,
+  expiredAt: Date
+): Promise<void> {
+  await transaction.webPushSubscription.updateMany({
+    where: {
+      userId,
+      status: "ACTIVE",
+      providerExpiresAt: { lte: expiredAt }
+    },
+    data: {
+      status: "EXPIRED",
+      statusReason: "PUSH_SERVICE_GONE",
+      endpointFingerprint: null,
+      materialFingerprint: null,
+      materialCiphertext: null,
+      materialNonce: null,
+      materialAuthTag: null,
+      encryptionKeyVersion: null,
+      fingerprintKeyVersion: null,
+      providerExpiresAt: null,
+      revokedAt: null,
+      expiredAt,
+      version: { increment: 1 }
+    }
+  });
 }
 
 function providerExpiration(value: number | null): Date | null {

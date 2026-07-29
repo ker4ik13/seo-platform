@@ -59,6 +59,13 @@ function optional(env: NodeJS.ProcessEnv, key: string): string | undefined {
   return value || undefined;
 }
 
+function isPlaceholderSecret(value: string | undefined): boolean {
+  return (
+    value !== undefined &&
+    /^(?:replace-me|replace-with-)/iu.test(value)
+  );
+}
+
 function boundedPositiveInteger(
   value: string | undefined,
   fallback: number,
@@ -251,19 +258,22 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (
     nodeEnv === "production" &&
-    (!notificationApiToken || notificationApiToken.length < 32)
+    (!notificationApiToken ||
+      notificationApiToken.length < 32 ||
+      isPlaceholderSecret(notificationApiToken))
   ) {
     throw new Error(
-      "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN with at least 32 characters is required in production"
+      "A generated PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN with at least 32 characters is required in production"
     );
   }
   if (
     notificationApiToken &&
     (notificationApiToken.length < 32 ||
-      notificationApiToken === internalApiToken)
+      notificationApiToken === internalApiToken ||
+      isPlaceholderSecret(notificationApiToken))
   ) {
     throw new Error(
-      "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN must be a distinct token with at least 32 characters"
+      "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN must be a generated distinct token with at least 32 characters"
     );
   }
   if (

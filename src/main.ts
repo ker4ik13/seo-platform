@@ -6,6 +6,7 @@ import {
   type NestFastifyApplication
 } from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module.js";
+import { safeRequestId } from "./common/request-id.js";
 import type { AppConfig } from "./config/app-config.js";
 import { APP_CONFIG } from "./config/config.module.js";
 import { RedisIoAdapter } from "./realtime/redis-io.adapter.js";
@@ -13,7 +14,10 @@ import { RedisIoAdapter } from "./realtime/redis-io.adapter.js";
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter(),
+    new FastifyAdapter({
+      requestIdHeader: false,
+      genReqId: safeRequestId
+    }),
     { bufferLogs: true }
   );
   const config = app.get<AppConfig>(APP_CONFIG);

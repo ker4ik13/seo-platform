@@ -90,6 +90,19 @@ describe("loadAppConfig", () => {
     );
   });
 
+  it("rejects the documented notification token placeholder", () => {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN:
+            "replace-with-a-distinct-random-notification-token"
+        }),
+      /must be a generated distinct token/u
+    );
+  });
+
   it("rejects unsafe Web Push endpoint origins", () => {
     assert.throws(
       () =>
