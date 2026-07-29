@@ -7,6 +7,7 @@ export * from "./api/tenants.js";
 export * from "./api/uploads.js";
 export * from "./events/catalog.js";
 export * from "./events/envelope.js";
+export * from "./events/integrations.js";
 export * from "./health.js";
 export * from "./http/errors.js";
 export * from "./http/responses.js";

@@ -66,6 +66,150 @@ export const integrationCredentialValidationStatuses = [
 export type IntegrationCredentialValidationStatus =
   (typeof integrationCredentialValidationStatuses)[number];
 
+export const projectConnectorRouteSourceKinds = [
+  "WORKSPACE_CREDENTIAL"
+] as const;
+
+export type ProjectConnectorRouteSourceKind =
+  (typeof projectConnectorRouteSourceKinds)[number];
+
+export const projectConnectorBindingAvailabilities = [
+  "READY",
+  "DISABLED",
+  "CREDENTIAL_PENDING",
+  "CREDENTIAL_UNAVAILABLE",
+  "CAPABILITY_MISMATCH"
+] as const;
+
+export type ProjectConnectorBindingAvailability =
+  (typeof projectConnectorBindingAvailabilities)[number];
+
+export interface ProjectConnectorFallbackPolicy {
+  readonly mode: "NONE";
+}
+
+export interface ProjectConnectorBudgetPolicy {
+  readonly mode: "DISABLED";
+}
+
+export interface ProjectConnectorRouteInput {
+  readonly position: 0;
+  readonly sourceKind: ProjectConnectorRouteSourceKind;
+  readonly credentialId: string;
+}
+
+export interface ProjectConnectorRoute {
+  readonly id: string;
+  readonly bindingId: string;
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly position: 0;
+  readonly sourceKind: ProjectConnectorRouteSourceKind;
+  readonly credentialId: string;
+  readonly provider: IntegrationProvider;
+  readonly credentialMode: IntegrationCredentialMode;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface ProjectConnectorBinding {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly capability: IntegrationCapability;
+  readonly enabled: boolean;
+  readonly route: ProjectConnectorRoute;
+  readonly fallbackPolicy: ProjectConnectorFallbackPolicy;
+  readonly budgetPolicy: ProjectConnectorBudgetPolicy;
+  readonly availability: ProjectConnectorBindingAvailability;
+  readonly version: number;
+  readonly createdBy: string;
+  readonly updatedBy: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+/**
+ * Безопасная для UI проекция workspace credential. Она намеренно не
+ * содержит display hint, provider metadata или какие-либо secret fields.
+ */
+export interface ProjectConnectorCredentialOption {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly provider: IntegrationProvider;
+  readonly label: string;
+  readonly mode: IntegrationCredentialMode;
+  readonly status: IntegrationCredentialStatus;
+  /**
+   * Пересечение сохранённых capabilities с текущим provider catalog.
+   */
+  readonly capabilities: readonly IntegrationCapability[];
+}
+
+export interface ProjectConnectorBindingsAggregate {
+  readonly bindings: readonly ProjectConnectorBinding[];
+  readonly credentialOptions: readonly ProjectConnectorCredentialOption[];
+  /**
+   * True when the bounded settings aggregate has more workspace credentials.
+   * Existing binding credentials are always retained in credentialOptions.
+   */
+  readonly credentialOptionsTruncated: boolean;
+}
+
+export const projectConnectorSettingsMutationRestrictions = [
+  "NONE",
+  "MISSING_PERMISSION",
+  "WORKSPACE_READ_ONLY",
+  "PROJECT_ARCHIVED"
+] as const;
+
+export type ProjectConnectorSettingsMutationRestriction =
+  (typeof projectConnectorSettingsMutationRestrictions)[number];
+
+export interface ProjectConnectorSettingsAccess {
+  readonly canUpdateBindings: boolean;
+  readonly canUseSystemCredentials: boolean;
+  readonly canManageFallback: boolean;
+  readonly canSetBudgets: boolean;
+  readonly mutationRestriction: ProjectConnectorSettingsMutationRestriction;
+}
+
+export interface ProjectConnectorSettings
+  extends ProjectConnectorBindingsAggregate {
+  readonly access: ProjectConnectorSettingsAccess;
+}
+
+export interface CreateProjectConnectorBindingInput {
+  readonly capability: IntegrationCapability;
+  readonly enabled: boolean;
+  readonly route: ProjectConnectorRouteInput;
+  readonly fallbackPolicy: ProjectConnectorFallbackPolicy;
+  readonly budgetPolicy: ProjectConnectorBudgetPolicy;
+}
+
+export interface InternalCreateProjectConnectorBindingInput
+  extends CreateProjectConnectorBindingInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly idempotencyKey: string;
+}
+
+export interface UpdateProjectConnectorBindingInput {
+  readonly enabled: boolean;
+  readonly route: ProjectConnectorRouteInput;
+  readonly fallbackPolicy: ProjectConnectorFallbackPolicy;
+  readonly budgetPolicy: ProjectConnectorBudgetPolicy;
+}
+
+export interface InternalUpdateProjectConnectorBindingInput
+  extends UpdateProjectConnectorBindingInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly version: number;
+}
+
 export interface IntegrationProviderCatalogItem {
   readonly provider: IntegrationProvider;
   readonly displayName: string;

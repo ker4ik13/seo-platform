@@ -31,6 +31,10 @@ export const domainEventTypes = {
   semanticImportCancelled: "semantic.import.cancelled.v1",
   semanticImportFailed: "semantic.import.failed.v1",
   semanticVersionCreated: "semantics.version.created.v1",
+  projectConnectorBindingCreated:
+    "integration.project-connector-binding.created.v1",
+  projectConnectorBindingUpdated:
+    "integration.project-connector-binding.updated.v1",
   rankCheckCompleted: "seo.rank-check.completed.v1",
   billingReservationCreated: "billing.reservation.created.v1",
   billingReservationSettled: "billing.reservation.settled.v1"
