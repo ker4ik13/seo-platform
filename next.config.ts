@@ -6,6 +6,23 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
+        source: "/push-service-worker.js",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "no-cache"
+          },
+          {
+            key: "Service-Worker-Allowed",
+            value: "/app/"
+          },
+          {
+            key: "X-Content-Type-Options",
+            value: "nosniff"
+          }
+        ]
+      },
+      {
         source: "/app/:path*",
         headers: [
           {

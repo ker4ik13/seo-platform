@@ -5,6 +5,7 @@ import {
   browserApiRequest,
   BrowserApiError
 } from "../lib/browser-api";
+import { BrowserPushSettings } from "./browser-push-settings";
 
 export type NotificationChannel = "IN_APP" | "EMAIL" | "WEB_PUSH";
 export type NotificationEventType =
@@ -79,17 +80,6 @@ export function NotificationSettings({
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string>();
   const [retryVersion, setRetryVersion] = useState(0);
-  const [pushPermission, setPushPermission] =
-    useState<NotificationPermission | "unsupported">("unsupported");
-
-  useEffect(() => {
-    setPushPermission(
-      typeof window !== "undefined" && "Notification" in window
-        ? window.Notification.permission
-        : "unsupported"
-    );
-  }, []);
-
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -176,13 +166,6 @@ export function NotificationSettings({
       const { quietHours: _quietHours, ...withoutQuietHours } = current;
       return withoutQuietHours;
     });
-  }
-
-  async function requestPushPermission(): Promise<void> {
-    if (!("Notification" in window)) return;
-    const permission = await window.Notification.requestPermission();
-    setPushPermission(permission);
-    if (permission !== "granted") updateChannel("webPush", false);
   }
 
   async function save(): Promise<void> {
@@ -279,8 +262,7 @@ export function NotificationSettings({
           />
           <ChannelSwitch
             checked={draft.channels.webPush}
-            description={pushPermissionDescription(pushPermission)}
-            disabled={pushPermission !== "granted"}
+            description="Глобальный доступ для всех зарегистрированных браузеров"
             label="Browser Push"
             onChange={(checked) => updateChannel("webPush", checked)}
           />
@@ -305,24 +287,15 @@ export function NotificationSettings({
             </a>
           )}
         </div>
-        {pushPermission !== "granted" &&
-          pushPermission !== "unsupported" && (
-            <button
-              className="secondary-button notification-permission-button"
-              disabled={pushPermission === "denied"}
-              onClick={() => void requestPushPermission()}
-              type="button"
-            >
-              {pushPermission === "denied"
-                ? "Разрешение запрещено в браузере"
-                : "Разрешить уведомления в браузере"}
-            </button>
-          )}
         <p className="notification-hint">
-          Разрешение запрашивается только по кнопке. Регистрация устройства для
-          реальной доставки будет выполнена через Service Worker и VAPID в
-          delivery-срезе.
+          Master-переключатель относится ко всему профилю и не зависит от
+          разрешения текущего браузера. Проектные правила не могут обойти этот
+          глобальный запрет.
         </p>
+        <BrowserPushSettings
+          userId={draft.userId}
+          webPushEnabled={draft.channels.webPush}
+        />
       </section>
 
       <section className="panel notification-card">
@@ -633,15 +606,6 @@ function notificationErrorMessage(error: unknown): string {
     return error.message;
   }
   return "Не удалось сохранить настройки уведомлений.";
-}
-
-function pushPermissionDescription(
-  permission: NotificationPermission | "unsupported"
-): string {
-  if (permission === "granted") return "Разрешение браузера получено";
-  if (permission === "denied") return "Заблокировано в настройках браузера";
-  if (permission === "default") return "Требуется явное разрешение";
-  return "Этот браузер не поддерживает уведомления";
 }
 
 export function channelLabel(channel: NotificationChannel): string {

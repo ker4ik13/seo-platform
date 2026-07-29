@@ -58,6 +58,69 @@ test("proxies an assignment PUT through the safe same-origin BFF", async () => {
   }
 });
 
+test("forwards the original browser user agent to Platform API", async () => {
+  const originalFetch = globalThis.fetch;
+  let forwardedHeaders: Headers | undefined;
+  globalThis.fetch = async (_input, init) => {
+    forwardedHeaders = new Headers(init?.headers);
+    return Response.json({ data: { devices: [] } });
+  };
+
+  try {
+    const request = new NextRequest(
+      "http://localhost/app/api/me/push-subscriptions",
+      {
+        headers: {
+          Cookie: "seo_session=session",
+          "User-Agent": "Browser Product/123"
+        }
+      }
+    );
+    const response = await proxyPlatformApi(request, [
+      "me",
+      "push-subscriptions"
+    ]);
+
+    assert.equal(response.status, 200);
+    assert.equal(forwardedHeaders?.get("user-agent"), "Browser Product/123");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("applies a narrow body limit to push subscription secrets", async () => {
+  const originalFetch = globalThis.fetch;
+  let upstreamCalled = false;
+  globalThis.fetch = async () => {
+    upstreamCalled = true;
+    return Response.json({ data: {} });
+  };
+
+  try {
+    const request = new NextRequest(
+      "http://localhost/app/api/me/push-subscriptions/installation-id",
+      {
+        method: "PUT",
+        body: new Uint8Array(8 * 1_024 + 1),
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": "csrf"
+        }
+      }
+    );
+    const response = await proxyPlatformApi(request, [
+      "me",
+      "push-subscriptions",
+      "installation-id"
+    ]);
+
+    assert.equal(response.status, 413);
+    assert.equal(upstreamCalled, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("rejects a streamed body that exceeds the BFF limit", async () => {
   const originalFetch = globalThis.fetch;
   let upstreamCalled = false;

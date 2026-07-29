@@ -14,6 +14,7 @@ const FORWARDED_REQUEST_HEADERS = [
   "cookie",
   "idempotency-key",
   "if-match",
+  "user-agent",
   "x-csrf-token"
 ] as const;
 const FORWARDED_RESPONSE_HEADERS = [
@@ -25,6 +26,7 @@ const FORWARDED_RESPONSE_HEADERS = [
   "x-trace-id"
 ] as const;
 const MAX_BROWSER_API_BODY_BYTES = 2 * 1_024 * 1_024;
+const MAX_PUSH_SUBSCRIPTION_BODY_BYTES = 8 * 1_024;
 const MAX_BROWSER_API_BODY_READ_MS = 10_000;
 
 export async function proxyPlatformApi(
@@ -38,10 +40,11 @@ export async function proxyPlatformApi(
   ) {
     return errorResponse(404, "NOT_FOUND", "API route not found");
   }
+  const maxBodyBytes = browserApiBodyLimit(pathSegments);
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (
     Number.isFinite(contentLength) &&
-    contentLength > MAX_BROWSER_API_BODY_BYTES
+    contentLength > maxBodyBytes
   ) {
     return errorResponse(413, "FILE_TOO_LARGE", "Request body is too large");
   }
@@ -62,7 +65,7 @@ export async function proxyPlatformApi(
 
   const hasBody = !["GET", "HEAD"].includes(request.method);
   const boundedBody = hasBody
-    ? await readBoundedRequestBody(request)
+    ? await readBoundedRequestBody(request, maxBodyBytes)
     : { ok: true as const, body: undefined };
   if (!boundedBody.ok) return boundedBody.response;
   const upstreamUrl = new URL(
@@ -110,7 +113,8 @@ export async function proxyPlatformApi(
 }
 
 async function readBoundedRequestBody(
-  request: NextRequest
+  request: NextRequest,
+  maxBodyBytes: number
 ): Promise<
   | { readonly ok: true; readonly body: ArrayBuffer | undefined }
   | { readonly ok: false; readonly response: Response }
@@ -134,7 +138,7 @@ async function readBoundedRequestBody(
       const { done, value } = await reader.read();
       if (done) break;
       totalBytes += value.byteLength;
-      if (totalBytes > MAX_BROWSER_API_BODY_BYTES) {
+      if (totalBytes > maxBodyBytes) {
         await reader.cancel();
         return {
           ok: false,
@@ -178,6 +182,12 @@ async function readBoundedRequestBody(
     offset += chunk.byteLength;
   }
   return { ok: true, body: body.buffer };
+}
+
+function browserApiBodyLimit(pathSegments: readonly string[]): number {
+  return pathSegments[0] === "me" && pathSegments[1] === "push-subscriptions"
+    ? MAX_PUSH_SUBSCRIPTION_BODY_BYTES
+    : MAX_BROWSER_API_BODY_BYTES;
 }
 
 export function responseCookies(headers: Headers): readonly string[] {
