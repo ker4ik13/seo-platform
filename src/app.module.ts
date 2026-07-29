@@ -7,6 +7,7 @@ import { SystemModule } from "./system/system.module.js";
 import { SemanticImportModule } from "./semantic-imports/semantic-import.module.js";
 import { KeywordModule } from "./keywords/keyword.module.js";
 import { TrackingContextModule } from "./tracking-contexts/tracking-context.module.js";
+import { RankScopeModule } from "./rank-scopes/rank-scope.module.js";
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { TrackingContextModule } from "./tracking-contexts/tracking-context.modu
     SemanticImportModule,
     KeywordModule,
     TrackingContextModule,
+    RankScopeModule,
     SystemModule
   ]
 })
