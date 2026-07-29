@@ -7,7 +7,9 @@ import {
   integrationCredentialValidationStatuses,
   integrationProviders,
   projectConnectorBindingAvailabilities,
-  projectConnectorRouteSourceKinds
+  projectConnectorRouteSourceKinds,
+  rankRunConflictDetails,
+  rankRunConflictReasons
 } from "@seo-platform/contracts";
 import type {
   CompleteUploadInput,
@@ -44,6 +46,8 @@ import type {
   ProjectConnectorFallbackPolicy,
   ProjectConnectorRoute,
   RankEstimate,
+  RankRunConflictDetails,
+  RankRunConflictReason,
   RankJobSummary,
   SemanticImportSummary,
   UploadPartUrls,
@@ -777,11 +781,13 @@ function upstreamError(status: number, payload: unknown): DomainError {
       });
     }
     if (isRankRunConflictReason(code)) {
+      const details = upstreamRankRunConflictDetails(payload, code);
+      if (!details) return dependencyUnavailable();
       return new DomainError({
         statusCode: 409,
         code: "RESOURCE_STATE_CONFLICT",
         message: "Manual rank Job cannot be created in the current state",
-        details: { reason: code }
+        details
       });
     }
     return new DomainError({
@@ -818,17 +824,27 @@ function upstreamError(status: number, payload: unknown): DomainError {
   return dependencyUnavailable();
 }
 
-const RANK_RUN_CONFLICT_REASONS: ReadonlySet<string> = new Set([
-  "ESTIMATE_EXPIRED",
-  "ESTIMATE_STALE",
-  "EQUIVALENT_RUN_ACTIVE",
-  "EXECUTION_GRANT_DENIED"
-]);
+const RANK_RUN_CONFLICT_REASONS: ReadonlySet<string> = new Set(
+  rankRunConflictReasons
+);
 
 function isRankRunConflictReason(
   value: string | undefined
-): value is string {
+): value is RankRunConflictReason {
   return value !== undefined && RANK_RUN_CONFLICT_REASONS.has(value);
+}
+
+function upstreamRankRunConflictDetails(
+  payload: unknown,
+  expectedReason: RankRunConflictReason
+): RankRunConflictDetails | undefined {
+  const details = unknownRecord(unknownRecord(payload)?.error)?.details;
+  try {
+    const parsed = rankRunConflictDetails(details);
+    return parsed.reason === expectedReason ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function upstreamErrorCode(payload: unknown): string | undefined {

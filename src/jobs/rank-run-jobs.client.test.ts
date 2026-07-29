@@ -106,13 +106,17 @@ test("maps safe rank create conflict reasons without exposing upstream text", as
       "ESTIMATE_STALE",
       "EQUIVALENT_RUN_ACTIVE",
       "EXECUTION_GRANT_DENIED"
-    ]) {
+    ] as const) {
       globalThis.fetch = (async (): Promise<Response> =>
         new Response(
           JSON.stringify({
             error: {
               code: reason,
-              message: "private upstream diagnostic"
+              message: "private upstream diagnostic",
+              details:
+                reason === "EQUIVALENT_RUN_ACTIVE"
+                  ? { reason, existingJobId: jobId }
+                  : { reason }
             }
           }),
           {
@@ -132,7 +136,61 @@ test("maps safe rank create conflict reasons without exposing upstream text", as
           error.statusCode === 409 &&
           error.code === "RESOURCE_STATE_CONFLICT" &&
           error.details?.reason === reason &&
+          (reason !== "EQUIVALENT_RUN_ACTIVE" ||
+            error.details?.existingJobId === jobId) &&
           !error.message.includes("private upstream")
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("fails closed for malformed rank conflict details", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    const cases: readonly unknown[] = [
+      {
+        reason: "EQUIVALENT_RUN_ACTIVE",
+        existingJobId: "not-a-job-id"
+      },
+      {
+        reason: "EQUIVALENT_RUN_ACTIVE",
+        existingJobId: jobId,
+        credentialId: "must-not-cross-boundary"
+      },
+      {
+        reason: "ESTIMATE_STALE"
+      },
+      undefined
+    ];
+    for (const [index, details] of cases.entries()) {
+      globalThis.fetch = (async (): Promise<Response> =>
+        new Response(
+          JSON.stringify({
+            error: {
+              code: "EQUIVALENT_RUN_ACTIVE",
+              message: "private upstream diagnostic",
+              ...(details === undefined ? {} : { details })
+            }
+          }),
+          {
+            status: 409,
+            headers: { "content-type": "application/json" }
+          }
+        )) as typeof fetch;
+
+      await assert.rejects(
+        client().createRankRun(
+          context(),
+          rankRunCommand(),
+          `rank-run-malformed-conflict-${index}`
+        ),
+        (error: unknown) =>
+          error instanceof DomainError &&
+          error.statusCode === 503 &&
+          error.code === "DEPENDENCY_UNAVAILABLE" &&
+          error.details === undefined
       );
     }
   } finally {
