@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ProjectConnectorBinding,
-  ProjectConnectorCredentialOption,
   ProjectConnectorSettings,
   ProjectConnectorSettingsMutationRestriction
 } from "@seo-platform/contracts";
@@ -93,6 +92,9 @@ export function ProjectIntegrationSettings({
   const settingsRef = useRef<ProjectConnectorSettings | undefined>(
     undefined
   );
+  const draftRef = useRef<ProjectConnectorDraft | undefined>(
+    undefined
+  );
   const revalidationGeneration = useRef(0);
   const createCommand = useRef<IdempotentCreateCommand | undefined>(
     undefined
@@ -100,6 +102,7 @@ export function ProjectIntegrationSettings({
   const feedbackRef = useRef<HTMLDivElement>(null);
   const returnTo = projectIntegrationReturnTo(projectId);
   settingsRef.current = settings;
+  draftRef.current = draft;
 
   function invalidateRevalidation(): void {
     revalidationGeneration.current += 1;
@@ -310,17 +313,22 @@ export function ProjectIntegrationSettings({
 
   useEffect(() => {
     if (reconnectVersion === 0) return;
-    if (!settings || !draft) {
+    const startedSettings = settingsRef.current;
+    const startedDraft = draftRef.current;
+    if (!startedSettings || !startedDraft) {
       setRetryVersion((value) => value + 1);
       return;
     }
     const controller = new AbortController();
     const baseBinding = projectConnectorBinding(
-      settings,
+      startedSettings,
       RANK_TRACKING_CAPABILITY
     );
     const startedGeneration = revalidationGeneration.current;
-    const hadLocalChanges = projectConnectorDraftDirty(baseBinding, draft);
+    const hadLocalChanges = projectConnectorDraftDirty(
+      baseBinding,
+      startedDraft
+    );
     void fetchProjectConnectorSettings(projectId, controller.signal)
       .then((refreshed) => {
         if (controller.signal.aborted) return;

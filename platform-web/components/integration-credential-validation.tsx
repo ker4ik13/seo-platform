@@ -233,18 +233,21 @@ export function useIntegrationCredentialValidation({
       current?: IntegrationCredentialValidationSummary
     ) => Promise<void>
   >(async () => undefined);
+  const activeValidationRef = useRef(activeValidation);
+  activeValidationRef.current = activeValidation;
 
   useEffect(() => {
+    const initialValidation = activeValidationRef.current;
     idempotencyKey.current = undefined;
-    setSummary(activeValidation);
+    setSummary(initialValidation);
     setError(undefined);
     setRefreshWarning(undefined);
-    setPhase(activeValidation ? "polling" : "idle");
+    setPhase(initialValidation ? "polling" : "idle");
     const resumeTimer =
-      activeValidation &&
-      !isTerminalCredentialValidationStatus(activeValidation.status)
+      initialValidation &&
+      !isTerminalCredentialValidationStatus(initialValidation.status)
         ? window.setTimeout(
-            () => void runRef.current(activeValidation),
+            () => void runRef.current(initialValidation),
             0
           )
         : undefined;
@@ -254,8 +257,9 @@ export function useIntegrationCredentialValidation({
       }
       activeRequest.current?.abort();
     };
-    // activeValidation is an initial authoritative snapshot. Its disappearance
-    // after terminal refresh must not erase the local terminal result.
+    // The ref supplies the authoritative snapshot only when identity/version
+    // changes. A same-scope disappearance after terminal refresh must not
+    // erase the locally observed terminal result or restart polling.
   }, [credentialId, credentialVersion, workspaceId]);
 
   async function start(): Promise<void> {

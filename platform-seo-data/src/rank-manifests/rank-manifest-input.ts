@@ -171,6 +171,7 @@ function rankRunProject(value: unknown): InternalRankRunProjectSnapshot {
     domain.length < 3 ||
     domain.length > 255 ||
     domain.trim() !== domain ||
+    // oxlint-disable-next-line no-control-regex -- Sealed project domains reject C0 and DEL characters.
     /[\u0000-\u001f\u007f]/u.test(domain)
   ) {
     invalid("project.domain");

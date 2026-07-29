@@ -728,9 +728,9 @@ function keywordUpdate(
           textOriginal: row.textOriginal,
           ...(targetPageId ? { targetPageId } : {})
         }
-      : {
-          ...(keyword.targetPageId ? {} : targetPageId ? { targetPageId } : {})
-        }),
+      : keyword.targetPageId || !targetPageId
+        ? {}
+        : { targetPageId }),
     customValues: json(customValues),
     sourceMode: "IMPORT",
     sourceId: importId,

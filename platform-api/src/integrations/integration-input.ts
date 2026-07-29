@@ -12,7 +12,9 @@ import {
 import { validationError } from "../common/domain-error.js";
 
 const PROVIDERS = new Set<string>(integrationProviders);
+// oxlint-disable-next-line no-control-regex -- API key material explicitly excludes whitespace, C0 and DEL.
 const API_KEY_PATTERN = /^[^\s\u0000-\u001f\u007f]{8,2048}$/u;
+// oxlint-disable-next-line no-control-regex -- Provider identifiers explicitly exclude C0 and DEL.
 const SAFE_IDENTIFIER_PATTERN = /^[^\u0000-\u001f\u007f]{1,255}$/u;
 
 export function createIntegrationCredentialInput(

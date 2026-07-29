@@ -22,19 +22,21 @@ test("queues only the authoritative PostgreSQL Job identifier", async () => {
   await enqueueRankPreparation(queue, jobId);
 
   assert.equal(additions.length, 1);
-  assert.equal(additions[0]?.[0], RANK_PREPARATION_JOB);
-  assert.deepEqual(additions[0]?.[1], { jobId });
-  assert.deepEqual(Object.keys(additions[0]?.[1] as object), ["jobId"]);
+  const addition = additions[0];
+  assert.ok(addition);
+  assert.equal(addition[0], RANK_PREPARATION_JOB);
+  assert.deepEqual(addition[1], { jobId });
+  assert.deepEqual(Object.keys(addition[1] as object), ["jobId"]);
+  const options = addition[2] as {
+    readonly jobId?: string;
+    readonly backoff?: Readonly<Record<string, unknown>>;
+  };
   assert.equal(
-    (additions[0]?.[2] as { readonly jobId?: string }).jobId,
+    options.jobId,
     `rank-preparation-${jobId}`
   );
   assert.deepEqual(
-    (
-      additions[0]?.[2] as {
-        readonly backoff?: Readonly<Record<string, unknown>>;
-      }
-    ).backoff,
+    options.backoff,
     { type: "exponential", delay: 5_000, jitter: 0.5 }
   );
 });

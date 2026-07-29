@@ -22,10 +22,13 @@ test("queues only the database job identifier", async () => {
   await enqueueIntegrationCredentialValidation(queue, validationJobId);
 
   assert.equal(additions.length, 1);
-  assert.equal(additions[0]?.[0], INTEGRATION_CREDENTIAL_VALIDATION_JOB);
-  assert.deepEqual(additions[0]?.[1], { jobId: validationJobId });
+  const addition = additions[0];
+  assert.ok(addition);
+  assert.equal(addition[0], INTEGRATION_CREDENTIAL_VALIDATION_JOB);
+  assert.deepEqual(addition[1], { jobId: validationJobId });
+  const options = addition[2] as { readonly jobId?: string };
   assert.equal(
-    (additions[0]?.[2] as { readonly jobId?: string }).jobId,
+    options.jobId,
     `integration-credential-validation-${validationJobId}`
   );
 });

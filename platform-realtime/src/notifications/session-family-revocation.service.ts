@@ -15,6 +15,7 @@ const UUID_PATTERN =
 const ISO_TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const UNSAFE_CONTEXT_PATTERN =
+  // oxlint-disable-next-line no-control-regex -- Event context must reject C0/C1 controls and bidi isolates.
   /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u;
 
 export interface SessionFamilyRevocationResult {

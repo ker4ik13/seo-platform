@@ -307,7 +307,7 @@ function loadPage(
   if (cursor) parameters.set("cursor", cursor);
   return browserApiCollectionRequest<NotificationItem>(
     `/app/api/notifications?${parameters.toString()}`,
-    { ...(signal ? { signal } : {}) }
+    signal ? { signal } : {}
   );
 }
 

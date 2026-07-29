@@ -306,6 +306,7 @@ function safeAppPath(value: unknown): value is string {
   return (
     typeof value === "string" &&
     (value === "/app" || value.startsWith("/app/")) &&
+    // oxlint-disable-next-line no-control-regex -- Private deep links reject C0 and DEL characters.
     !/[\u0000-\u001f\u007f]/u.test(value)
   );
 }

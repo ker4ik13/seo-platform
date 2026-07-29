@@ -518,6 +518,7 @@ function pushOwnerResponse(
     typeof meta.requestId !== "string" ||
     meta.requestId.length < 1 ||
     meta.requestId.length > 200 ||
+    // oxlint-disable-next-line no-control-regex -- This boundary intentionally rejects C0 and DEL characters.
     /[\u0000-\u001f\u007f]/u.test(meta.requestId) ||
     (versioned &&
       (!Number.isSafeInteger(meta.version) ||

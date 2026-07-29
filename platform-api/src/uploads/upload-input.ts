@@ -18,6 +18,7 @@ export function createUploadInput(value: unknown): CreateUploadInput {
     min: 1,
     max: 255
   }).normalize("NFC");
+  // oxlint-disable-next-line no-control-regex -- File names reject separators, C0 and DEL characters.
   if (/[\\/\u0000-\u001f\u007f]/u.test(fileName)) invalid("fileName");
   const mediaType = stringField(input, "mediaType", { min: 1, max: 255 });
   if (!SUPPORTED_MEDIA_TYPES.has(mediaType)) invalid("mediaType");

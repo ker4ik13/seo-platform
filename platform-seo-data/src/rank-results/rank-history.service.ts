@@ -22,10 +22,7 @@ import {
 import { canonicalizeJson } from "@seo-platform/contracts/canonical-json";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
-import {
-  Prisma,
-  type RankSnapshot
-} from "../generated/prisma/client.js";
+import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 
 const CURSOR_DOMAIN = "seo-platform.rank-history-cursor@1\0";

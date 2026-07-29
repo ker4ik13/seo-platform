@@ -33,8 +33,10 @@ test("streams a Key Collector CSV into staging and mapping preview", async () =>
     status: "AWAITING_MAPPING"
   });
   assert.equal(staged.length, 2);
-  assert.equal(updates.at(-1)?.status, "AWAITING_MAPPING");
-  assert.deepEqual(updates.at(-1)?.headers, [
+  const update = updates.at(-1);
+  assert.ok(update);
+  assert.equal(update.status, "AWAITING_MAPPING");
+  assert.deepEqual(update.headers, [
     "Фраза",
     "Группа",
     "Точная частотность",
@@ -42,15 +44,15 @@ test("streams a Key Collector CSV into staging and mapping preview", async () =>
   ]);
   assert.deepEqual(
     (
-      updates.at(-1)?.suggestedMapping as readonly {
+      update.suggestedMapping as readonly {
         suggestedTarget: string;
       }[]
     ).map(({ suggestedTarget }) => suggestedTarget),
     ["keyword.text", "group.path", "frequency.exact", "custom"]
   );
-  assert.equal(updates.at(-1)?.totalRows, 2n);
-  assert.equal(updates.at(-1)?.validRows, 2n);
-  assert.equal(updates.at(-1)?.warningRows, 0n);
+  assert.equal(update.totalRows, 2n);
+  assert.equal(update.validRows, 2n);
+  assert.equal(update.warningRows, 0n);
   assert.equal(events.length, 1);
 });
 

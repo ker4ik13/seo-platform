@@ -27,6 +27,7 @@ export function internalCreateUploadInput(
   const fileName = string(input, "fileName").normalize("NFC");
   if (
     fileName.length > 255 ||
+    // oxlint-disable-next-line no-control-regex -- File names reject separators, C0 and DEL characters.
     /[\\/\u0000-\u001f\u007f]/u.test(fileName)
   ) {
     invalid("fileName");

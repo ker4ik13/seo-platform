@@ -399,7 +399,7 @@ export class SemanticImportPublisherService {
             workspaceId: semanticImport.workspaceId,
             projectId: semanticImport.projectId,
             partial: Boolean(result),
-            ...(result ?? {})
+            ...result
           },
           metadata: {
             producer: "jobs-integrations",

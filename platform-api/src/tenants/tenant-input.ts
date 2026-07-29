@@ -21,10 +21,6 @@ export function createWorkspaceInput(value: unknown): CreateWorkspaceInput {
     min: 1,
     max: 64
   });
-  const confirmDuplicateDomain = optionalBooleanField(
-    input,
-    "confirmDuplicateDomain"
-  );
   const billingCurrency = stringField(input, "billingCurrency", {
     min: 3,
     max: 3

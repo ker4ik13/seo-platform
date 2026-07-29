@@ -288,7 +288,7 @@ async function loadKeywordPage(
   if (cursor) query.set("cursor", cursor);
   return browserApiCollectionRequest<SemanticKeyword>(
     `/app/api/projects/${encodeURIComponent(projectId)}/keywords?${query.toString()}`,
-    { ...(signal ? { signal } : {}) }
+    signal ? { signal } : {}
   );
 }
 

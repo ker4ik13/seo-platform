@@ -410,7 +410,7 @@ test("creates binding, route and redacted outbox event in one transaction", asyn
           ),
           projectConnectorBinding: {
             create: async ({
-              data
+              data: _data
             }: {
               data: Readonly<Record<string, unknown>>;
             }) => {

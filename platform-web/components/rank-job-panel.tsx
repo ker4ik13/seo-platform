@@ -125,6 +125,12 @@ export function RankJobPanel({
   const pollStartedAtRef = useRef<number | undefined>(undefined);
   const scopeGenerationRef = useRef(0);
   const pollInFlightRef = useRef(false);
+  const refreshJobRef = useRef<
+    (
+      jobId: string,
+      mode: "polling" | "reconciling" | "refreshing"
+    ) => Promise<void>
+  >(async () => undefined);
   const storageKey = rankJobSessionHintKey(
     projectId,
     trackingContextId
@@ -351,7 +357,7 @@ export function RankJobPanel({
       return;
     }
     setReconciliationNeeded(false);
-    void refreshJob(target, "reconciling");
+    void refreshJobRef.current(target, "reconciling");
   }, [
     confirmCancel,
     hintedJobId,
@@ -392,7 +398,7 @@ export function RankJobPanel({
       return () => window.clearTimeout(timer);
     }
     const timer = window.setTimeout(
-      () => void refreshJob(job.id, "polling"),
+      () => void refreshJobRef.current(job.id, "polling"),
       delay
     );
     return () => window.clearTimeout(timer);
@@ -442,7 +448,12 @@ export function RankJobPanel({
     }
     setCreateFailure(undefined);
     setCreateFailureEstimateId(undefined);
-  }, [createFailure, createFailureEstimateId, estimate]);
+  }, [
+    createFailure,
+    createFailureEstimateId,
+    estimate,
+    pendingCreateReceipt
+  ]);
 
   function acceptJob(next: RankJobSummary): void {
     setJob(next);
@@ -722,6 +733,7 @@ export function RankJobPanel({
       }
     }
   }
+  refreshJobRef.current = refreshJob;
 
   async function cancelJob(): Promise<void> {
     if (
@@ -822,9 +834,9 @@ export function RankJobPanel({
     setCreateFailureEstimateId(undefined);
     setReadFailure(undefined);
     if (job) {
-      setReplacementRequest({
-        ...(estimate ? { estimateId: estimate.id } : {})
-      });
+      setReplacementRequest(
+        estimate ? { estimateId: estimate.id } : {}
+      );
     }
     onExplicitRecalculation();
   }

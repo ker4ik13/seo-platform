@@ -34,6 +34,7 @@ test("matches the RFC 8785 primitive serialization sample", () => {
   assert.equal(
     canonicalizeJson({
       numbers: [
+        // oxlint-disable-next-line no-loss-of-precision -- RFC 8785 sample intentionally demonstrates IEEE-754 rounding.
         333333333.33333329,
         1e30,
         4.5,

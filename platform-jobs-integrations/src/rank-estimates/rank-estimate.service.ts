@@ -413,7 +413,7 @@ export async function executionProjection(
     select: BINDING_SELECT
   });
   if (!binding || binding.routes.length !== 1) {
-    return { ...(binding ? { binding } : {}) };
+    return binding ? { binding } : {};
   }
   const route = binding.routes[0];
   if (!route) return { binding };

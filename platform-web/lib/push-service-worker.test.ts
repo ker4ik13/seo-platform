@@ -183,9 +183,11 @@ test("increments the durable generation and notifies clients with v2", async () 
       generation: 3
     }
   ]);
+  const metadata = worker.metadata;
+  assert.ok(metadata);
+  const record = metadata.record as { reconciledGeneration: number };
   assert.equal(
-    (worker.metadata?.record as { reconciledGeneration: number })
-      .reconciledGeneration,
+    record.reconciledGeneration,
     0
   );
 });

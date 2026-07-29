@@ -364,38 +364,33 @@ test("returns only due queued/retry jobs and expired running validations", async
   const result = await worker.pendingValidationIds(5_000);
 
   assert.deepEqual(result, [validationId]);
-  assert.equal(query?.take, 500);
-  const where = query?.where as
-    | Readonly<Record<string, unknown>>
-    | undefined;
+  assert.ok(query);
+  assert.equal(query.take, 500);
+  const where = query.where as Readonly<Record<string, unknown>>;
+  const branches = where.OR as readonly Readonly<
+    Record<string, unknown>
+  >[];
   assert.equal(
-    where?.type,
+    where.type,
     INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE
   );
-  const scheduled = (
-    where?.OR as readonly Readonly<Record<string, unknown>>[]
-  )[0];
-  assert.deepEqual(scheduled?.status, {
+  const scheduled = branches[0];
+  assert.ok(scheduled);
+  assert.deepEqual(scheduled.status, {
     in: [
       "QUEUED",
       "RETRY_SCHEDULED",
       "WAITING_RATE_LIMIT"
     ]
   });
-  const due = scheduled?.OR as
-    | readonly Readonly<Record<string, unknown>>[]
-    | undefined;
-  assert.deepEqual(due?.[0], { retryAt: null });
+  const due = scheduled.OR as readonly Readonly<
+    Record<string, unknown>
+  >[];
+  assert.deepEqual(due[0], { retryAt: null });
   assert.ok(
-    object(object(due?.[1])?.retryAt)?.lte instanceof Date
+    object(object(due[1])?.retryAt)?.lte instanceof Date
   );
-  assert.equal(
-    (
-      (where?.OR as readonly Readonly<Record<string, unknown>>[])[1]
-        ?.status
-    ),
-    "RUNNING"
-  );
+  assert.equal(branches[1]?.status, "RUNNING");
 });
 
 interface WorkerFixtureOptions {

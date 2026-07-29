@@ -58,10 +58,6 @@ const ASSIGNMENT_SELECT = {
 type ContextRecord = Prisma.TrackingContextGetPayload<{
   select: typeof CONTEXT_SELECT;
 }>;
-type AssignmentRecord = Prisma.TrackingContextKeywordAssignmentGetPayload<{
-  select: typeof ASSIGNMENT_SELECT;
-}>;
-
 @Injectable()
 export class RankScopeService {
   public constructor(private readonly prisma: PrismaService) {}
