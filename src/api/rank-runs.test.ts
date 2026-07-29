@@ -10,6 +10,7 @@ import {
   redactRankJobSummary,
   type CreateRankRunInput,
   type InternalCreateRankRunInput,
+  type InternalCancelRankJobInput,
   type InternalFinalizeRankCheckInput,
   type InternalIngestRankChunkInput,
   type InternalNormalizedRankFoundResult,
@@ -68,7 +69,9 @@ test("rank run public vocabularies are finite and pin the first execution slice"
     "FINISHED"
   ]);
   assert.deepEqual(rankJobFailureCodes, [
+    "ESTIMATE_EXPIRED",
     "ESTIMATE_STALE",
+    "EQUIVALENT_RUN_ACTIVE",
     "EXECUTION_GRANT_DENIED",
     "PROVIDER_AUTHENTICATION_FAILED",
     "PROVIDER_RATE_LIMITED",
@@ -344,6 +347,25 @@ test("internal create carries trusted project and access snapshots without execu
   assert.equal(serialized.includes("bindingId"), false);
   assert.equal(serialized.includes("keywordText"), false);
   assert.equal(serialized.includes("providerPayload"), false);
+});
+
+test("internal job read and cancel identity is exact and tenant scoped", () => {
+  const input = {
+    workspaceId: ids.workspaceId,
+    projectId: ids.projectId,
+    actorId: ids.actorId,
+    jobId: ids.jobId
+  } satisfies InternalCancelRankJobInput;
+
+  assert.deepEqual(Object.keys(input), [
+    "workspaceId",
+    "projectId",
+    "actorId",
+    "jobId"
+  ]);
+  assert.equal("workspaceStatus" in input, false);
+  assert.equal("projectStatus" in input, false);
+  assert.equal("credentialId" in input, false);
 });
 
 test("manifest boundaries seal exact scope and keep keyword text internal", () => {

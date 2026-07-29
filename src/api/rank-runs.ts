@@ -46,7 +46,9 @@ export const rankJobStages = [
 export type RankJobStage = (typeof rankJobStages)[number];
 
 export const rankJobFailureCodes = [
+  "ESTIMATE_EXPIRED",
   "ESTIMATE_STALE",
+  "EQUIVALENT_RUN_ACTIVE",
   "EXECUTION_GRANT_DENIED",
   "PROVIDER_AUTHENTICATION_FAILED",
   "PROVIDER_RATE_LIMITED",
@@ -57,6 +59,11 @@ export const rankJobFailureCodes = [
   "SUBMIT_OUTCOME_UNKNOWN"
 ] as const;
 
+/**
+ * ESTIMATE_EXPIRED is final for the command and requires a newly calculated
+ * estimate. EQUIVALENT_RUN_ACTIVE is also non-retryable: the caller should
+ * open/wait for the active equivalent run and must not start another submit.
+ */
 export type RankJobFailureCode = (typeof rankJobFailureCodes)[number];
 
 export interface RankJobProgress {
@@ -495,6 +502,31 @@ export interface InternalCreateRankRunInput extends CreateRankRunInput {
   readonly access: InternalRankRunAccessSnapshot;
   readonly billingCurrency: string;
 }
+
+/**
+ * Trusted, tenant-scoped Jobs query. Public callers never supply workspace,
+ * project or actor identity in a body.
+ */
+export interface InternalRankJobQuery {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  /**
+   * Requesting actor for audit only. It is not an ownership predicate:
+   * authorized teammates can read and cancel project Jobs created by others.
+   * The Jobs query must additionally filter type=MANUAL_RANK_CHECK.
+   */
+  readonly actorId: string;
+  readonly jobId: string;
+}
+
+/**
+ * Cooperative and idempotent cancellation. Jobs re-checks tenant scope and
+ * state; cancel remains allowed when billing/project lifecycle becomes
+ * read-only because it can only reduce future work. CANCEL_REQUESTED and
+ * CANCELLED replay without mutation; another terminal state is returned
+ * unchanged and is never rewritten as cancelled.
+ */
+export type InternalCancelRankJobInput = InternalRankJobQuery;
 
 export interface RankManifestHash {
   readonly algorithm: "SHA_256";
