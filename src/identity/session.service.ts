@@ -1,8 +1,10 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type {
-  AuthenticationResult,
-  CurrentAccount,
-  UserSessionSummary
+import {
+  domainEventTypes,
+  sessionFamilyRevokedEventDataV1,
+  type AuthenticationResult,
+  type CurrentAccount,
+  type UserSessionSummary
 } from "@seo-platform/contracts";
 import type {
   Prisma,
@@ -14,6 +16,7 @@ import { DomainError } from "../common/domain-error.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import type { AppConfig } from "../config/app-config.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { OutboxService } from "../outbox/outbox.service.js";
 import { unauthenticatedError } from "./auth-errors.js";
 import { AuthCryptoService } from "./auth-crypto.service.js";
 import {
@@ -43,21 +46,47 @@ export interface SessionRotationResult {
   readonly credentials: SessionCredentials;
 }
 
+export interface SessionFamilyRevocationResult {
+  readonly revokedSessionCount: number;
+  readonly revokedFamilyIds: readonly string[];
+}
+
+interface RefreshCandidate {
+  readonly sessionId: string;
+  readonly userId: string;
+}
+
+type SessionWithUser = Prisma.SessionGetPayload<{
+  include: { user: true };
+}>;
+
+type RotationTransactionResult =
+  | {
+      readonly kind: "ROTATED";
+      readonly user: User;
+      readonly replacement: SessionIssue;
+    }
+  | {
+      readonly kind: "UNAUTHENTICATED";
+    };
+
 @Injectable()
 export class SessionService {
   public constructor(
     private readonly prisma: PrismaService,
     private readonly crypto: AuthCryptoService,
     private readonly audit: AuditService,
+    private readonly outbox: OutboxService,
     @Inject(APP_CONFIG) private readonly config: AppConfig
   ) {}
 
   public async issue(
     transaction: Prisma.TransactionClient,
-    userId: string,
+    user: Pick<User, "id" | "version">,
     context: RequestContext,
     familyId = this.crypto.randomFamilyId()
   ): Promise<SessionIssue> {
+    await this.assertSessionLifecycleUser(transaction, user);
     const accessToken = this.crypto.randomToken();
     const refreshToken = this.crypto.randomToken();
     const csrfToken = this.crypto.randomToken();
@@ -69,7 +98,7 @@ export class SessionService {
     );
     const session = await transaction.session.create({
       data: {
-        userId,
+        userId: user.id,
         accessTokenHash: this.crypto.hashOpaqueToken(accessToken),
         refreshTokenHash: this.crypto.hashOpaqueToken(refreshToken),
         csrfTokenHash: this.crypto.hashOpaqueToken(csrfToken),
@@ -113,9 +142,16 @@ export class SessionService {
     }
 
     if (session.lastUsedAt.getTime() < Date.now() - 5 * 60 * 1_000) {
-      await this.prisma.session.update({
-        where: { id: session.id },
-        data: { lastUsedAt: new Date() }
+      await this.prisma.$transaction(async (transaction) => {
+        await this.lockUserSessionLifecycle(transaction, session.userId);
+        await transaction.session.updateMany({
+          where: {
+            id: session.id,
+            userId: session.userId,
+            revokedAt: null
+          },
+          data: { lastUsedAt: new Date() }
+        });
       });
     }
 
@@ -148,32 +184,59 @@ export class SessionService {
     csrfHeader: string | undefined,
     context: RequestContext
   ): Promise<SessionRotationResult> {
-    const authenticated = await this.authenticateRefresh(
-      refreshToken,
-      csrfCookie,
-      csrfHeader
-    );
-    const rotated = await this.prisma.$transaction(async (transaction) => {
+    const candidate = await this.loadRefreshCandidate(refreshToken);
+    const result = await this.prisma.$transaction<
+      RotationTransactionResult
+    >(async (transaction) => {
+      await this.lockUserSessionLifecycle(transaction, candidate.userId);
+      const current = await transaction.session.findFirst({
+        where: {
+          id: candidate.sessionId,
+          userId: candidate.userId
+        },
+        include: { user: true }
+      });
+      if (!current) return { kind: "UNAUTHENTICATED" };
+      if (
+        await this.revokeTerminalRefreshState(
+          transaction,
+          current,
+          context.requestId
+        )
+      ) {
+        return { kind: "UNAUTHENTICATED" };
+      }
+      this.validateCsrf(current, csrfCookie, csrfHeader);
+
       const replacement = await this.issue(
         transaction,
-        authenticated.user.id,
+        current.user,
         context,
-        authenticated.session.familyId
+        current.familyId
       );
+      const rotatedAt = new Date();
       const revoked = await transaction.session.updateMany({
         where: {
-          id: authenticated.session.id,
+          id: current.id,
+          userId: current.userId,
           revokedAt: null
         },
         data: {
-          revokedAt: new Date(),
+          revokedAt: rotatedAt,
           replacedBySessionId: replacement.session.id
         }
       });
-      if (revoked.count !== 1) throw unauthenticatedError();
+      if (revoked.count !== 1) {
+        await this.revokeFamilies(transaction, {
+          userId: current.userId,
+          familyIds: [current.familyId],
+          requestId: context.requestId
+        });
+        return { kind: "UNAUTHENTICATED" };
+      }
       await this.audit.record(
         {
-          actorId: authenticated.user.id,
+          actorId: current.user.id,
           action: "identity.session.rotated",
           resourceType: "session",
           resourceId: replacement.session.id,
@@ -181,16 +244,21 @@ export class SessionService {
         },
         transaction
       );
-      return replacement;
+      return {
+        kind: "ROTATED",
+        user: current.user,
+        replacement
+      };
     });
+    if (result.kind === "UNAUTHENTICATED") throw unauthenticatedError();
 
     return {
       response: {
-        user: toUserSummary(authenticated.user),
-        session: toSessionSummary(rotated.session),
+        user: toUserSummary(result.user),
+        session: toSessionSummary(result.replacement.session),
         emailVerificationRequired: false
       },
-      credentials: rotated.credentials
+      credentials: result.replacement.credentials
     };
   }
 
@@ -200,27 +268,47 @@ export class SessionService {
     csrfHeader: string | undefined,
     context: RequestContext
   ): Promise<void> {
-    const authenticated = await this.authenticateRefresh(
-      refreshToken,
-      csrfCookie,
-      csrfHeader
-    );
-    await this.prisma.$transaction(async (transaction) => {
-      await transaction.session.updateMany({
-        where: { id: authenticated.session.id, revokedAt: null },
-        data: { revokedAt: new Date() }
-      });
-      await this.audit.record(
-        {
-          actorId: authenticated.user.id,
-          action: "identity.logout",
-          resourceType: "session",
-          resourceId: authenticated.session.id,
+    const candidate = await this.loadRefreshCandidate(refreshToken);
+    const authenticated = await this.prisma.$transaction(
+      async (transaction): Promise<boolean> => {
+        await this.lockUserSessionLifecycle(transaction, candidate.userId);
+        const current = await transaction.session.findFirst({
+          where: {
+            id: candidate.sessionId,
+            userId: candidate.userId
+          },
+          include: { user: true }
+        });
+        if (!current) return false;
+        if (
+          await this.revokeTerminalRefreshState(
+            transaction,
+            current,
+            context.requestId
+          )
+        ) {
+          return false;
+        }
+        this.validateCsrf(current, csrfCookie, csrfHeader);
+        const revoked = await this.revokeFamilies(transaction, {
+          userId: current.userId,
+          familyIds: [current.familyId],
           requestId: context.requestId
-        },
-        transaction
-      );
-    });
+        });
+        if (revoked.revokedSessionCount === 0) return false;
+        await this.audit.record(
+          {
+            actorId: current.user.id,
+            action: "identity.logout",
+            resourceType: "session",
+            resourceId: current.id,
+            requestId: context.requestId
+          },
+          transaction
+        );
+        return true;
+      });
+    if (!authenticated) throw unauthenticatedError();
   }
 
   public async list(
@@ -246,15 +334,22 @@ export class SessionService {
     context: RequestContext
   ): Promise<boolean> {
     return this.prisma.$transaction(async (transaction) => {
-      const revoked = await transaction.session.updateMany({
+      await this.assertSessionLifecyclePrincipal(transaction, principal);
+      const target = await transaction.session.findFirst({
         where: {
           id: sessionId,
-          userId: principal.userId,
-          revokedAt: null
+          userId: principal.userId
         },
-        data: { revokedAt: new Date() }
+        select: { familyId: true }
       });
-      if (revoked.count === 1) {
+      if (!target) return false;
+
+      const revoked = await this.revokeFamilies(transaction, {
+        userId: principal.userId,
+        familyIds: [target.familyId],
+        requestId: context.requestId
+      });
+      if (revoked.revokedSessionCount > 0) {
         await this.audit.record(
           {
             actorId: principal.userId,
@@ -266,7 +361,7 @@ export class SessionService {
           transaction
         );
       }
-      return revoked.count === 1;
+      return revoked.revokedSessionCount > 0;
     });
   }
 
@@ -275,13 +370,11 @@ export class SessionService {
     context: RequestContext
   ): Promise<number> {
     return this.prisma.$transaction(async (transaction) => {
-      const revoked = await transaction.session.updateMany({
-        where: {
-          userId: principal.userId,
-          id: { not: principal.sessionId },
-          revokedAt: null
-        },
-        data: { revokedAt: new Date() }
+      await this.assertSessionLifecyclePrincipal(transaction, principal);
+      const revoked = await this.revokeFamilies(transaction, {
+        userId: principal.userId,
+        excludeFamilyIds: [principal.sessionFamilyId],
+        requestId: context.requestId
       });
       await this.audit.record(
         {
@@ -293,8 +386,144 @@ export class SessionService {
         },
         transaction
       );
-      return revoked.count;
+      return revoked.revokedSessionCount;
     });
+  }
+
+  public async revokeFamilies(
+    transaction: Prisma.TransactionClient,
+    input: {
+      readonly userId: string;
+      readonly requestId: string;
+      readonly familyIds?: readonly string[];
+      readonly excludeFamilyIds?: readonly string[];
+    }
+  ): Promise<SessionFamilyRevocationResult> {
+    await this.lockUserSessionLifecycle(transaction, input.userId);
+    const requestedFamilyIds = input.familyIds
+      ? [...new Set(input.familyIds)].sort()
+      : undefined;
+    const excludedFamilyIds = [
+      ...new Set(input.excludeFamilyIds ?? [])
+    ].sort();
+    if (requestedFamilyIds?.length === 0) {
+      return { revokedSessionCount: 0, revokedFamilyIds: [] };
+    }
+
+    const familyFilter = {
+      ...(requestedFamilyIds
+        ? { in: requestedFamilyIds }
+        : {}),
+      ...(excludedFamilyIds.length > 0
+        ? { notIn: excludedFamilyIds }
+        : {})
+    };
+    const activeSessions = await transaction.session.findMany({
+      where: {
+        userId: input.userId,
+        revokedAt: null,
+        ...(Object.keys(familyFilter).length > 0
+          ? { familyId: familyFilter }
+          : {})
+      },
+      select: { familyId: true }
+    });
+    const activeFamilyIds = [
+      ...new Set(activeSessions.map(({ familyId }) => familyId))
+    ].sort();
+    if (activeFamilyIds.length === 0) {
+      return { revokedSessionCount: 0, revokedFamilyIds: [] };
+    }
+
+    const revokedAt = new Date();
+    let revokedSessionCount = 0;
+    const revokedFamilyIds: string[] = [];
+    for (const familyId of activeFamilyIds) {
+      const revoked = await transaction.session.updateMany({
+        where: {
+          userId: input.userId,
+          familyId,
+          revokedAt: null
+        },
+        data: { revokedAt }
+      });
+      if (revoked.count === 0) continue;
+
+      await this.outbox.event(transaction, {
+        eventType: domainEventTypes.sessionFamilyRevoked,
+        aggregateType: "session-family",
+        aggregateId: familyId,
+        aggregateVersion: 1,
+        payload: {
+          ...sessionFamilyRevokedEventDataV1({
+            userId: input.userId,
+            sessionFamilyId: familyId,
+            revokedAt
+          })
+        },
+        requestId: input.requestId
+      });
+      revokedSessionCount += revoked.count;
+      revokedFamilyIds.push(familyId);
+    }
+    return { revokedSessionCount, revokedFamilyIds };
+  }
+
+  public async lockUserSessionLifecycle(
+    transaction: Prisma.TransactionClient,
+    userId: string
+  ): Promise<void> {
+    await transaction.$queryRaw`
+      SELECT pg_advisory_xact_lock(
+        hashtextextended(${"identity-session-user:" + userId}, 0)
+      )
+    `;
+  }
+
+  public async assertSessionLifecycleUser(
+    transaction: Prisma.TransactionClient,
+    expectedUser: Pick<User, "id" | "version">
+  ): Promise<void> {
+    await this.lockUserSessionLifecycle(transaction, expectedUser.id);
+    const user = await transaction.user.findFirst({
+      where: {
+        id: expectedUser.id,
+        version: expectedUser.version,
+        status: "ACTIVE"
+      },
+      select: { id: true }
+    });
+    if (!user) throw unauthenticatedError();
+  }
+
+  public async assertSessionLifecyclePrincipal(
+    transaction: Prisma.TransactionClient,
+    principal: AuthenticatedPrincipal,
+    expectedUser?: Pick<User, "id" | "version">
+  ): Promise<void> {
+    if (expectedUser && expectedUser.id !== principal.userId) {
+      throw unauthenticatedError();
+    }
+    await this.lockUserSessionLifecycle(transaction, principal.userId);
+    const session = await transaction.session.findFirst({
+      where: {
+        id: principal.sessionId,
+        userId: principal.userId,
+        familyId: principal.sessionFamilyId,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+        user: {
+          is: {
+            status: "ACTIVE",
+            ...(expectedUser
+              ? { version: expectedUser.version }
+              : {})
+          }
+        }
+      },
+      select: { id: true }
+    });
+    if (!session) throw unauthenticatedError();
   }
 
   private async loadPrincipal(
@@ -315,49 +544,57 @@ export class SessionService {
     return { principal, user: session.user, session };
   }
 
-  private async authenticateRefresh(
-    refreshToken: string | undefined,
-    csrfCookie: string | undefined,
-    csrfHeader: string | undefined
-  ): Promise<AuthenticatedSession> {
+  private async loadRefreshCandidate(
+    refreshToken: string | undefined
+  ): Promise<RefreshCandidate> {
     if (!refreshToken) throw unauthenticatedError();
     const tokenHash = this.crypto.hashOpaqueToken(refreshToken);
     const session = await this.prisma.session.findUnique({
       where: { refreshTokenHash: tokenHash },
-      include: { user: true }
+      select: {
+        id: true,
+        userId: true
+      }
     });
     if (!session) throw unauthenticatedError();
+    return {
+      sessionId: session.id,
+      userId: session.userId
+    };
+  }
 
+  private async revokeTerminalRefreshState(
+    transaction: Prisma.TransactionClient,
+    session: SessionWithUser,
+    requestId: string
+  ): Promise<boolean> {
+    if (session.expiresAt <= new Date()) {
+      await this.revokeFamilies(transaction, {
+        userId: session.userId,
+        familyIds: [session.familyId],
+        requestId
+      });
+      return true;
+    }
     if (session.revokedAt) {
-      if (session.replacedBySessionId && session.expiresAt > new Date()) {
-        await this.prisma.session.updateMany({
-          where: { familyId: session.familyId, revokedAt: null },
-          data: { revokedAt: new Date() }
+      if (session.replacedBySessionId) {
+        await this.revokeFamilies(transaction, {
+          userId: session.userId,
+          familyIds: [session.familyId],
+          requestId
         });
       }
-      throw unauthenticatedError();
+      return true;
     }
-    if (session.expiresAt <= new Date()) {
-      await this.prisma.session.update({
-        where: { id: session.id },
-        data: { revokedAt: new Date() }
-      });
-      throw unauthenticatedError();
-    }
-    if (session.user.status !== "ACTIVE") throw unauthenticatedError();
-
-    this.validateCsrf(session, csrfCookie, csrfHeader);
-    return {
-      principal: {
+    if (session.user.status !== "ACTIVE") {
+      await this.revokeFamilies(transaction, {
         userId: session.userId,
-        sessionId: session.id,
-        sessionFamilyId: session.familyId,
-        authenticatedAt: session.authenticatedAt,
-        expiresAt: session.expiresAt
-      },
-      user: session.user,
-      session
-    };
+        familyIds: [session.familyId],
+        requestId
+      });
+      return true;
+    }
+    return false;
   }
 
   private validateCsrf(

@@ -144,6 +144,10 @@ export class MfaService {
     }
 
     const result = await this.prisma.$transaction(async (transaction) => {
+      await this.sessions.lockUserSessionLifecycle(
+        transaction,
+        challenge.userId
+      );
       const consumed = await transaction.mfaChallenge.updateMany({
         where: {
           id: challenge.id,
@@ -157,7 +161,7 @@ export class MfaService {
       await this.consumeSecondFactor(transaction, factor);
       const session = await this.sessions.issue(
         transaction,
-        challenge.userId,
+        challenge.user,
         context
       );
       await this.audit.record(
@@ -246,6 +250,26 @@ export class MfaService {
 
     const secret = createTotpSecret();
     const method = await this.prisma.$transaction(async (transaction) => {
+      await this.sessions.assertSessionLifecyclePrincipal(
+        transaction,
+        principal,
+        user
+      );
+      const currentActiveMethod = await transaction.mfaMethod.findFirst({
+        where: {
+          userId: principal.userId,
+          type: "TOTP",
+          status: "ACTIVE"
+        },
+        select: { id: true }
+      });
+      if (currentActiveMethod) {
+        throw new DomainError({
+          statusCode: 409,
+          code: "RESOURCE_STATE_CONFLICT",
+          message: "Disable the current TOTP method before replacing it"
+        });
+      }
       await transaction.mfaMethod.updateMany({
         where: {
           userId: principal.userId,
@@ -290,15 +314,22 @@ export class MfaService {
     context: RequestContext
   ): Promise<ConfirmTotpResult> {
     this.recentAuthentication.assert(principal);
-    const method = await this.prisma.mfaMethod.findFirst({
-      where: {
-        id: input.methodId,
-        userId: principal.userId,
-        type: "TOTP",
-        status: "PENDING"
-      }
-    });
-    if (!method) throw this.invalidSecondFactor();
+    const [user, method] = await Promise.all([
+      this.prisma.user.findUnique({
+        where: { id: principal.userId }
+      }),
+      this.prisma.mfaMethod.findFirst({
+        where: {
+          id: input.methodId,
+          userId: principal.userId,
+          type: "TOTP",
+          status: "PENDING"
+        }
+      })
+    ]);
+    if (!user || user.status !== "ACTIVE" || !method) {
+      throw this.invalidSecondFactor();
+    }
     const match = this.matchMethod(method, input.code);
     if (!match) throw this.invalidSecondFactor();
 
@@ -307,6 +338,11 @@ export class MfaService {
       () => createRecoveryCode()
     );
     await this.prisma.$transaction(async (transaction) => {
+      await this.sessions.assertSessionLifecyclePrincipal(
+        transaction,
+        principal,
+        user
+      );
       await transaction.mfaMethod.updateMany({
         where: {
           userId: principal.userId,
@@ -341,7 +377,7 @@ export class MfaService {
           codeHash: this.crypto.hashOpaqueToken(normalizeRecoveryCode(code))
         }))
       });
-      const user = await transaction.user.update({
+      const updatedUser = await transaction.user.update({
         where: { id: principal.userId },
         data: { version: { increment: 1 } }
       });
@@ -357,9 +393,9 @@ export class MfaService {
       );
       await this.outbox.userEvent(transaction, {
         eventType: domainEventTypes.userMfaEnabled,
-        user,
+        user: updatedUser,
         payload: {
-          userId: user.id,
+          userId: updatedUser.id,
           method: "TOTP"
         },
         requestId: context.requestId
@@ -396,6 +432,11 @@ export class MfaService {
     if (!factor) throw this.invalidSecondFactor();
 
     await this.prisma.$transaction(async (transaction) => {
+      await this.sessions.assertSessionLifecyclePrincipal(
+        transaction,
+        principal,
+        user
+      );
       await this.consumeSecondFactor(transaction, factor);
       const disabled = await transaction.mfaMethod.updateMany({
         where: {
@@ -412,13 +453,10 @@ export class MfaService {
       await transaction.recoveryCode.deleteMany({
         where: { userId: user.id }
       });
-      await transaction.session.updateMany({
-        where: {
-          userId: user.id,
-          id: { not: principal.sessionId },
-          revokedAt: null
-        },
-        data: { revokedAt: new Date() }
+      await this.sessions.revokeFamilies(transaction, {
+        userId: user.id,
+        excludeFamilyIds: [principal.sessionFamilyId],
+        requestId: context.requestId
       });
       const updatedUser = await transaction.user.update({
         where: { id: user.id },

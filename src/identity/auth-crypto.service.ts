@@ -4,7 +4,6 @@ import {
   createHash,
   createHmac,
   randomBytes,
-  randomUUID,
   timingSafeEqual
 } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
@@ -13,6 +12,7 @@ import {
   hash as argonHash,
   verify as argonVerify
 } from "argon2";
+import { uuidV7 } from "../common/uuid-v7.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import type { AppConfig } from "../config/app-config.js";
 
@@ -36,7 +36,7 @@ export class AuthCryptoService {
   }
 
   public randomFamilyId(): string {
-    return randomUUID();
+    return uuidV7();
   }
 
   public emailVerificationToken(

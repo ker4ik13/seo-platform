@@ -157,7 +157,7 @@ export class IdentityService {
 
         const session = await this.sessions.issue(
           transaction,
-          user.id,
+          user,
           context
         );
         return { user, session };
@@ -238,6 +238,7 @@ export class IdentityService {
     }
 
     const issued = await this.prisma.$transaction(async (transaction) => {
+      await this.sessions.assertSessionLifecycleUser(transaction, user);
       const challenge = await this.mfa.createLoginChallenge(
         transaction,
         user,
@@ -256,7 +257,7 @@ export class IdentityService {
         );
         return { challenge };
       }
-      const session = await this.sessions.issue(transaction, user.id, context);
+      const session = await this.sessions.issue(transaction, user, context);
       await this.audit.record(
         {
           actorId: user.id,
@@ -312,6 +313,10 @@ export class IdentityService {
     }
 
     const result = await this.prisma.$transaction(async (transaction) => {
+      await this.sessions.lockUserSessionLifecycle(
+        transaction,
+        record.userId
+      );
       const consumed = await transaction.oneTimeToken.updateMany({
         where: {
           id: record.id,
@@ -360,7 +365,7 @@ export class IdentityService {
         payload: { userId: user.id },
         requestId: context.requestId
       });
-      const session = await this.sessions.issue(transaction, user.id, context);
+      const session = await this.sessions.issue(transaction, user, context);
       return { user, session };
     });
 
@@ -513,6 +518,10 @@ export class IdentityService {
 
     const passwordHash = await this.crypto.hashPassword(input.password);
     const result = await this.prisma.$transaction(async (transaction) => {
+      await this.sessions.lockUserSessionLifecycle(
+        transaction,
+        record.userId
+      );
       const consumed = await transaction.oneTimeToken.updateMany({
         where: {
           id: record.id,
@@ -543,12 +552,16 @@ export class IdentityService {
         },
         data: { consumedAt: new Date() }
       });
-      await transaction.session.updateMany({
+      await transaction.mfaChallenge.updateMany({
         where: {
           userId: user.id,
-          revokedAt: null
+          consumedAt: null
         },
-        data: { revokedAt: new Date() }
+        data: { consumedAt: new Date() }
+      });
+      await this.sessions.revokeFamilies(transaction, {
+        userId: user.id,
+        requestId: context.requestId
       });
       await this.audit.record(
         {
@@ -569,7 +582,7 @@ export class IdentityService {
         },
         requestId: context.requestId
       });
-      const session = await this.sessions.issue(transaction, user.id, context);
+      const session = await this.sessions.issue(transaction, user, context);
       return { user, session };
     });
 

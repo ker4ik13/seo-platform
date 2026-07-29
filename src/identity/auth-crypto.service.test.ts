@@ -39,6 +39,15 @@ test("creates opaque random tokens and stable non-reversible lookup hashes", () 
   assert.notEqual(cryptoService.hashOpaqueToken(first), first);
 });
 
+test("creates UUIDv7 session family aggregate identifiers", () => {
+  const familyId = cryptoService.randomFamilyId();
+
+  assert.match(
+    familyId,
+    /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+  );
+});
+
 test("compares CSRF tokens without early string comparison", () => {
   assert.equal(cryptoService.tokensEqual("same", "same"), true);
   assert.equal(cryptoService.tokensEqual("same", "different"), false);
