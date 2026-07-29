@@ -12,6 +12,7 @@ import {
 import {
   rankEstimateBlockerCodes,
   type InternalCreateRankEstimateInput,
+  type InternalRankExecutionParameters,
   type InternalRankEstimateScope,
   type IntegrationProvider,
   type RankEstimate,
@@ -36,6 +37,12 @@ import {
   SeoDataClient,
   SeoDataClientError
 } from "../seo-data/seo-data.client.js";
+import {
+  rankEstimateExecutionHash,
+  rankEstimateExecutionJson,
+  rankEstimateExecutionParameters,
+  storedRankEstimateExecution
+} from "./rank-estimate-execution.js";
 import {
   rankEstimateSnapshot,
   rankEstimateSnapshotJson
@@ -103,20 +110,20 @@ const VALIDATION_SELECT = {
   finishedAt: true
 } as const satisfies Prisma.JobSelect;
 
-type BindingProjection = Prisma.ProjectConnectorBindingGetPayload<{
+export type BindingProjection = Prisma.ProjectConnectorBindingGetPayload<{
   select: typeof BINDING_SELECT;
 }>;
-type ValidationProjection = Prisma.JobGetPayload<{
+export type ValidationProjection = Prisma.JobGetPayload<{
   select: typeof VALIDATION_SELECT;
 }>;
-type EstimateTransaction = Prisma.TransactionClient;
+export type EstimateTransaction = Prisma.TransactionClient;
 
-interface ExecutionProjection {
+export interface ExecutionProjection {
   readonly binding?: BindingProjection;
   readonly validation?: ValidationProjection;
 }
 
-interface CredentialSnapshot {
+export interface CredentialSnapshot {
   readonly bindingId?: string;
   readonly bindingVersion?: number;
   readonly routeId?: string;
@@ -199,8 +206,7 @@ export class RankEstimateService {
             calculatedAt.getTime() + RANK_ESTIMATE_TTL_MILLISECONDS
           );
           const privateSnapshot = credentialSnapshot(projection);
-          const projectDomainHash = hash(
-            PROJECT_DOMAIN_HASH_DOMAIN,
+          const projectDomainHash = rankEstimateProjectDomainHash(
             input.project.domain
           );
           const scopeHash = executionScopeHash(
@@ -208,6 +214,9 @@ export class RankEstimateService {
             scope,
             projectDomainHash,
             privateSnapshot
+          );
+          const execution = rankEstimateExecutionParameters(
+            scope.configuration
           );
           const blockers = estimateBlockers(
             input,
@@ -294,6 +303,12 @@ export class RankEstimateService {
               minimumGetRequestCount: providerTaskCount,
               blockers: blockersJson(blockers),
               responseSnapshot: rankEstimateSnapshotJson(estimate),
+              executionSnapshot: execution
+                ? rankEstimateExecutionJson(execution)
+                : Prisma.DbNull,
+              executionSnapshotHash: execution
+                ? databaseBytes(rankEstimateExecutionHash(execution))
+                : null,
               calculatedAt,
               expiresAt
             }
@@ -380,7 +395,11 @@ export function rankEstimateRequestHash(
   );
 }
 
-async function executionProjection(
+export function rankEstimateProjectDomainHash(domain: string): Buffer {
+  return hash(PROJECT_DOMAIN_HASH_DOMAIN, domain);
+}
+
+export async function executionProjection(
   transaction: EstimateTransaction,
   workspaceId: string,
   projectId: string
@@ -420,7 +439,7 @@ async function executionProjection(
   };
 }
 
-function credentialSnapshot(
+export function credentialSnapshot(
   projection: ExecutionProjection
 ): CredentialSnapshot {
   const binding = projection.binding;
@@ -718,12 +737,13 @@ function publicEstimate(input: {
   readonly calculatedAt: Date;
   readonly expiresAt: Date;
 }): RankEstimate {
+  const executionAllowed = input.blockers.length === 0;
   return {
     id: input.id,
     workspaceId: input.input.workspaceId,
     projectId: input.input.projectId,
     trackingContextId: input.input.trackingContextId,
-    status: input.blockers.length > 0 ? "BLOCKED" : "READY",
+    status: executionAllowed ? "READY" : "BLOCKED",
     provider: "ARSENKIN",
     operation: "POSITIONS",
     credentialMode: "BYOK_API_KEY",
@@ -757,7 +777,7 @@ function publicEstimate(input: {
       rawSerp: "NOT_COLLECTED"
     },
     blockers: input.blockers.map((code) => ({ code })),
-    executionAllowed: false,
+    executionAllowed,
     policyVersion: RANK_ESTIMATE_POLICY_VERSION,
     calculatedAt: input.calculatedAt.toISOString(),
     expiresAt: input.expiresAt.toISOString()
@@ -772,17 +792,37 @@ function checkedReplay(
   if (!requestHashMatches(stored.requestHash, requestHash)) {
     throw idempotencyConflict();
   }
+  const { summary: snapshot } = verifiedRankEstimate(stored);
+  if (
+    snapshot.workspaceId !== input.workspaceId ||
+    snapshot.projectId !== input.projectId ||
+    snapshot.trackingContextId !== input.trackingContextId ||
+    stored.actorId !== input.actorId
+  ) {
+    throw new Error("Invalid immutable rank estimate snapshot");
+  }
+  return snapshot;
+}
+
+export interface VerifiedRankEstimate {
+  readonly summary: RankEstimate;
+  readonly execution?: InternalRankExecutionParameters;
+}
+
+export function verifiedRankEstimate(
+  stored: StoredRankEstimate
+): VerifiedRankEstimate {
   const snapshot = rankEstimateSnapshot(stored.responseSnapshot);
+  const execution = storedRankEstimateExecution(
+    stored.executionSnapshot,
+    stored.executionSnapshotHash
+  );
   const storedHash = storedExecutionScopeHash(stored);
   if (
     snapshot.id !== stored.id ||
     snapshot.workspaceId !== stored.workspaceId ||
     snapshot.projectId !== stored.projectId ||
     snapshot.trackingContextId !== stored.trackingContextId ||
-    snapshot.workspaceId !== input.workspaceId ||
-    snapshot.projectId !== input.projectId ||
-    snapshot.trackingContextId !== input.trackingContextId ||
-    stored.actorId !== input.actorId ||
     stored.provider !== "ARSENKIN" ||
     stored.credentialMode !== "BYOK_API_KEY" ||
     stored.contextVersion !== snapshot.scope.contextVersion ||
@@ -798,11 +838,15 @@ function checkedReplay(
     !credentialFreshnessMatches(stored, snapshot) ||
     snapshot.calculatedAt !== stored.calculatedAt.toISOString() ||
     snapshot.expiresAt !== stored.expiresAt.toISOString() ||
-    snapshot.policyVersion !== stored.providerPolicyVersion
+    snapshot.policyVersion !== stored.providerPolicyVersion ||
+    (snapshot.status === "READY" && execution === undefined)
   ) {
     throw new Error("Invalid immutable rank estimate snapshot");
   }
-  return snapshot;
+  return {
+    summary: snapshot,
+    ...(execution ? { execution } : {})
+  };
 }
 
 function storedExecutionScopeHash(

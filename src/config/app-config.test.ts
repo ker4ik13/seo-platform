@@ -17,6 +17,8 @@ test("keeps optional adapters disabled by default", () => {
   assert.equal(config.integrationCredentials.role, "DISABLED");
   assert.equal(config.integrationCredentials.keys.size, 0);
   assert.equal(config.integrationCredentials.fingerprintKeys.size, 0);
+  assert.equal(config.rankPreparation.enabled, false);
+  assert.equal(config.rankExecutionApiToken, undefined);
 });
 
 test("requires S3 buckets when S3 is enabled", () => {
@@ -49,6 +51,62 @@ test("loads bounded multipart upload defaults", () => {
   assert.equal(config.imports.previewRows, 20);
   assert.equal(config.imports.publishBatchRows, 200);
   assert.equal(config.services.seoData, "http://localhost:4001");
+  assert.equal(config.rankPreparation.leaseSeconds, 120);
+  assert.equal(config.rankPreparation.dispatchSeconds, 15);
+  assert.equal(config.rankPreparation.concurrency, 2);
+});
+
+test("loads an isolated rank preparation worker", () => {
+  const token = "r".repeat(32);
+  const config = loadAppConfig({
+    NODE_ENV: "production",
+    DATABASE_URL: "postgresql://test",
+    RANK_PREPARATION_ENABLED: "true",
+    JOBS_TO_SEO_RANK_TOKEN: token
+  });
+
+  assert.equal(config.rankPreparation.enabled, true);
+  assert.equal(config.rankExecutionApiToken, token);
+  assert.equal(config.integrationCredentials.role, "DISABLED");
+  assert.equal(config.internalApiToken, undefined);
+});
+
+test("rejects a rank token outside the isolated rank worker", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        JOBS_TO_SEO_RANK_TOKEN: "r".repeat(32)
+      }),
+    /Only the enabled rank preparation worker/u
+  );
+});
+
+test("rejects unrelated secrets and short leases on rank workers", () => {
+  const base = {
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    RANK_PREPARATION_ENABLED: "true",
+    JOBS_TO_SEO_RANK_TOKEN: "r".repeat(32)
+  };
+  assert.throws(
+    () =>
+      loadAppConfig({
+        ...base,
+        INTERNAL_API_TOKEN: "i".repeat(32)
+      }),
+    /Rank preparation workers must not receive/u
+  );
+  assert.throws(
+    () =>
+      loadAppConfig({
+        ...base,
+        SEO_DATA_COMMAND_TIMEOUT_MS: "60000",
+        RANK_PREPARATION_LEASE_SECONDS: "60"
+      }),
+    /must exceed the SEO Data timeout/u
+  );
 });
 
 test("requires a host when malware scanning is enabled", () => {

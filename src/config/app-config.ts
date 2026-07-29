@@ -53,6 +53,7 @@ export interface AppConfig {
   readonly redisUrl: string;
   readonly internalApiToken?: string;
   readonly integrationCredentialApiToken?: string;
+  readonly rankExecutionApiToken?: string;
   readonly internalCommandTimeoutMs: number;
   readonly services: {
     readonly seoData: string;
@@ -68,6 +69,12 @@ export interface AppConfig {
   readonly integrationCredentials: IntegrationCredentialEncryptionConfig;
   readonly integrationCredentialValidation: {
     readonly timeoutMs: number;
+    readonly leaseSeconds: number;
+    readonly dispatchSeconds: number;
+    readonly concurrency: number;
+  };
+  readonly rankPreparation: {
+    readonly enabled: boolean;
     readonly leaseSeconds: number;
     readonly dispatchSeconds: number;
     readonly concurrency: number;
@@ -242,6 +249,11 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     env,
     "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN"
   );
+  const rankExecutionApiToken = optional(
+    env,
+    "JOBS_TO_SEO_RANK_TOKEN"
+  );
+  const rankPreparationEnabled = bool(env.RANK_PREPARATION_ENABLED);
   const malwareScannerHost = optional(env, "MALWARE_SCANNER_HOST");
   const integrationCredentialKeys = versionedKeyring(
     env.INTEGRATION_CREDENTIAL_KEYS,
@@ -282,6 +294,24 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "Credential-disabled processes must not receive credential keyrings or the dedicated credential API token"
     );
   }
+  if (rankExecutionApiToken && !rankPreparationEnabled) {
+    throw new Error(
+      "Only the enabled rank preparation worker may receive JOBS_TO_SEO_RANK_TOKEN"
+    );
+  }
+  if (
+    rankPreparationEnabled &&
+    (!rankExecutionApiToken || rankExecutionApiToken.length < 32)
+  ) {
+    throw new Error(
+      "JOBS_TO_SEO_RANK_TOKEN with at least 32 characters is required by the rank preparation worker"
+    );
+  }
+  if (rankPreparationEnabled && credentialRole !== "DISABLED") {
+    throw new Error(
+      "Rank preparation workers must not receive credential decryption capability"
+    );
+  }
 
   if (
     s3Enabled &&
@@ -307,6 +337,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (
     nodeEnv === "production" &&
     !credentialExecutionEnabled &&
+    !rankPreparationEnabled &&
     (!internalApiToken || internalApiToken.length < 32)
   ) {
     throw new Error(
@@ -379,6 +410,15 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
   if (
+    rankExecutionApiToken &&
+    (rankExecutionApiToken === internalApiToken ||
+      rankExecutionApiToken === integrationCredentialApiToken)
+  ) {
+    throw new Error(
+      "Rank execution token must differ from all other service tokens"
+    );
+  }
+  if (
     credentialExecutionEnabled &&
     (integrationCredentialFingerprintKeys.size > 0 ||
       integrationCredentialApiToken ||
@@ -392,6 +432,21 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   ) {
     throw new Error(
       "Execution-only credential workers must not receive management, internal API, NATS, S3 or SMTP credentials"
+    );
+  }
+  if (
+    rankPreparationEnabled &&
+    (internalApiToken ||
+      integrationCredentialApiToken ||
+      natsUser ||
+      natsPassword ||
+      s3AccessKeyId ||
+      s3SecretAccessKey ||
+      smtpUser ||
+      smtpPassword)
+  ) {
+    throw new Error(
+      "Rank preparation workers must not receive generic internal, credential, NATS, S3 or SMTP secrets"
     );
   }
   const integrationValidationTimeoutMs = boundedInteger(
@@ -408,6 +463,27 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     10,
     600
   );
+  const rankPreparationLeaseSeconds = boundedInteger(
+    env.RANK_PREPARATION_LEASE_SECONDS,
+    120,
+    "RANK_PREPARATION_LEASE_SECONDS",
+    10,
+    600
+  );
+  const internalCommandTimeoutMs = positiveInteger(
+    env.SEO_DATA_COMMAND_TIMEOUT_MS,
+    60_000,
+    "SEO_DATA_COMMAND_TIMEOUT_MS"
+  );
+  if (
+    rankPreparationEnabled &&
+    rankPreparationLeaseSeconds * 1_000 <
+    internalCommandTimeoutMs + 5_000
+  ) {
+    throw new Error(
+      "RANK_PREPARATION_LEASE_SECONDS must exceed the SEO Data timeout by at least 5 seconds"
+    );
+  }
   if (
     integrationValidationLeaseSeconds * 1_000 <
     integrationValidationTimeoutMs + 5_000
@@ -443,11 +519,8 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(integrationCredentialApiToken
       ? { integrationCredentialApiToken }
       : {}),
-    internalCommandTimeoutMs: positiveInteger(
-      env.SEO_DATA_COMMAND_TIMEOUT_MS,
-      60_000,
-      "SEO_DATA_COMMAND_TIMEOUT_MS"
-    ),
+    ...(rankExecutionApiToken ? { rankExecutionApiToken } : {}),
+    internalCommandTimeoutMs,
     services: {
       seoData:
         optional(env, "SEO_DATA_URL") || "http://localhost:4001"
@@ -533,6 +606,24 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         "INTEGRATION_VALIDATION_CONCURRENCY",
         1,
         32
+      )
+    },
+    rankPreparation: {
+      enabled: rankPreparationEnabled,
+      leaseSeconds: rankPreparationLeaseSeconds,
+      dispatchSeconds: boundedInteger(
+        env.RANK_PREPARATION_DISPATCH_SECONDS,
+        15,
+        "RANK_PREPARATION_DISPATCH_SECONDS",
+        5,
+        300
+      ),
+      concurrency: boundedInteger(
+        env.RANK_PREPARATION_CONCURRENCY,
+        2,
+        "RANK_PREPARATION_CONCURRENCY",
+        1,
+        16
       )
     },
     uploads: {

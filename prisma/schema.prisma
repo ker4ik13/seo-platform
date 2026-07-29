@@ -14,6 +14,7 @@ enum JobStatus {
   ESTIMATING
   AWAITING_APPROVAL
   RESERVING_BALANCE
+  PREPARING
   QUEUED
   WAITING_RATE_LIMIT
   RUNNING
@@ -26,6 +27,7 @@ enum JobStatus {
   COMPLETED
   FAILED_RETRYABLE
   FAILED_FINAL
+  ACTION_REQUIRED
   EXPIRED
 }
 
@@ -94,6 +96,22 @@ enum OutboxStatus {
   FAILED
 }
 
+enum RankManifestSealState {
+  PENDING
+  OUTCOME_UNKNOWN
+  NOT_SEALED
+  SEALED
+  FINALIZED
+}
+
+enum RankCheckFinalStatus {
+  COMPLETED
+  PARTIALLY_COMPLETED
+  CANCELLED
+  FAILED
+  ACTION_REQUIRED
+}
+
 model Job {
   id                 String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId        String         @map("workspace_id") @db.Uuid
@@ -136,9 +154,11 @@ model Job {
   retryAt            DateTime?      @map("retry_at") @db.Timestamptz(6)
   updatedAt          DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  items JobItem[]
+  items   JobItem[]
+  rankRun RankJobRun?
 
   @@unique([workspaceId, idempotencyScope, idempotencyKey])
+  @@unique([workspaceId, projectId, id], map: "jobs_tenant_project_id_key")
   @@index([workspaceId, projectId, status, createdAt])
   @@index([status, priority, createdAt])
   @@index([workspaceId, deduplicationKey, status])
@@ -309,14 +329,58 @@ model RankEstimate {
   minimumGetRequestCount               Int               @map("minimum_get_request_count")
   blockers                             Json
   responseSnapshot                     Json              @map("response_snapshot")
+  executionSnapshot                    Json?             @map("execution_snapshot")
+  executionSnapshotHash                Bytes?            @map("execution_snapshot_hash")
   calculatedAt                         DateTime          @map("calculated_at") @db.Timestamptz(6)
   expiresAt                            DateTime          @map("expires_at") @db.Timestamptz(6)
   createdAt                            DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  rankRun RankJobRun?
+
   @@unique([workspaceId, idempotencyScope, idempotencyKey], map: "rank_estimates_workspace_scope_idempotency_key")
+  @@unique([workspaceId, projectId, id], map: "rank_estimates_tenant_project_id_key")
   @@index([workspaceId, projectId, trackingContextId, createdAt], map: "rank_estimates_tenant_context_created_idx")
   @@index([expiresAt, id], map: "rank_estimates_expiry_idx")
   @@map("rank_estimates")
+}
+
+model RankJobRun {
+  jobId                    String                @id @map("job_id") @db.Uuid
+  workspaceId              String                @map("workspace_id") @db.Uuid
+  projectId                String                @map("project_id") @db.Uuid
+  estimateId               String                @map("estimate_id") @db.Uuid
+  trackingContextId        String                @map("tracking_context_id") @db.Uuid
+  projectDomain            String                @map("project_domain") @db.Text
+  projectStatus            String                @map("project_status") @db.VarChar(16)
+  projectVersion           Int                   @map("project_version")
+  manifestCommand          Json                  @map("manifest_command")
+  manifestCommandHash      Bytes                 @map("manifest_command_hash")
+  sealState                RankManifestSealState @default(PENDING) @map("seal_state")
+  sealAttemptCount         Int                   @default(0) @map("seal_attempt_count")
+  lastSealAttemptAt        DateTime?             @map("last_seal_attempt_at") @db.Timestamptz(6)
+  manifestId               String?               @map("manifest_id") @db.Uuid
+  manifestHashSchema       String?               @map("manifest_hash_schema") @db.VarChar(64)
+  manifestHash             Bytes?                @map("manifest_hash")
+  manifestDeduplicationHash Bytes?               @map("manifest_deduplication_hash")
+  manifestPairCount        Int?                  @map("manifest_pair_count")
+  manifestChunkCount       Int?                  @map("manifest_chunk_count")
+  manifestChunkSize        Int?                  @map("manifest_chunk_size")
+  manifestSealedAt         DateTime?             @map("manifest_sealed_at") @db.Timestamptz(6)
+  finalizationStatus       RankCheckFinalStatus? @map("finalization_status")
+  finalizationRequestHash  Bytes?                @map("finalization_request_hash")
+  finalizedAt              DateTime?             @map("finalized_at") @db.Timestamptz(6)
+  cancelRequestedBy        String?               @map("cancel_requested_by") @db.Uuid
+  createdAt                DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  job      Job          @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "rank_job_runs_job_tenant_fkey")
+  estimate RankEstimate @relation(fields: [workspaceId, projectId, estimateId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "rank_job_runs_estimate_tenant_fkey")
+
+  @@unique([workspaceId, projectId, estimateId], map: "rank_job_runs_tenant_estimate_key")
+  @@unique([workspaceId, projectId, jobId], map: "rank_job_runs_tenant_job_key")
+  @@unique([manifestId], map: "rank_job_runs_manifest_id_key")
+  @@index([sealState, lastSealAttemptAt, createdAt], map: "rank_job_runs_seal_recovery_idx")
+  @@map("rank_job_runs")
 }
 
 model ProviderUsage {

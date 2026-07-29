@@ -8,6 +8,7 @@ import { IntegrationModule } from "./integrations/integration.module.js";
 import { MessagingModule } from "./messaging/messaging.module.js";
 import { QueueModule } from "./queue/queue.module.js";
 import { RankEstimateModule } from "./rank-estimates/rank-estimate.module.js";
+import { RankRunModule } from "./rank-runs/rank-run.module.js";
 import { StorageModule } from "./storage/storage.module.js";
 import { SystemModule } from "./system/system.module.js";
 import { UploadModule } from "./uploads/upload.module.js";
@@ -24,6 +25,7 @@ import { SemanticImportModule } from "./imports/semantic-import.module.js";
     InternalModule,
     IntegrationModule,
     RankEstimateModule,
+    RankRunModule,
     HealthModule,
     SystemModule,
     UploadModule,

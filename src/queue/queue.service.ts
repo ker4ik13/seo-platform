@@ -25,8 +25,16 @@ import {
   INTEGRATION_CREDENTIAL_VALIDATION_QUEUE,
   type IntegrationCredentialValidationJobData
 } from "./integration-credential-validation.queue.js";
+import {
+  enqueueRankPreparation,
+  RANK_PREPARATION_QUEUE,
+  type RankPreparationJobData
+} from "./rank-preparation.queue.js";
 
 export const SYSTEM_QUEUE = "system";
+
+const QUEUE_PRODUCER_CONNECT_TIMEOUT_MS = 2_000;
+const QUEUE_PRODUCER_COMMAND_TIMEOUT_MS = 2_000;
 
 @Injectable()
 export class QueueService implements OnModuleInit, OnModuleDestroy {
@@ -35,14 +43,18 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   private uploadInspectionQueue?: Queue<UploadInspectionJobData>;
   private semanticImportQueue?: Queue<SemanticImportJobData>;
   private integrationCredentialValidationQueue?: Queue<IntegrationCredentialValidationJobData>;
+  private rankPreparationQueue?: Queue<RankPreparationJobData>;
 
   public constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
   public async onModuleInit(): Promise<void> {
     this.connection = new Redis(this.config.redisUrl, {
       lazyConnect: true,
-      maxRetriesPerRequest: null,
-      enableReadyCheck: true
+      maxRetriesPerRequest: 1,
+      enableReadyCheck: true,
+      enableOfflineQueue: false,
+      connectTimeout: QUEUE_PRODUCER_CONNECT_TIMEOUT_MS,
+      commandTimeout: QUEUE_PRODUCER_COMMAND_TIMEOUT_MS
     });
     await this.connection.connect();
     this.systemQueue = new Queue(SYSTEM_QUEUE, {
@@ -58,6 +70,9 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       INTEGRATION_CREDENTIAL_VALIDATION_QUEUE,
       { connection: this.connection }
     );
+    this.rankPreparationQueue = new Queue(RANK_PREPARATION_QUEUE, {
+      connection: this.connection
+    });
   }
 
   public async onModuleDestroy(): Promise<void> {
@@ -65,6 +80,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     await this.uploadInspectionQueue?.close();
     await this.semanticImportQueue?.close();
     await this.integrationCredentialValidationQueue?.close();
+    await this.rankPreparationQueue?.close();
     await this.connection?.quit();
   }
 
@@ -127,5 +143,12 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       this.integrationCredentialValidationQueue,
       jobId
     );
+  }
+
+  public async enqueueRankPreparation(jobId: string): Promise<void> {
+    if (!this.rankPreparationQueue) {
+      throw new Error("Rank preparation queue is not connected");
+    }
+    await enqueueRankPreparation(this.rankPreparationQueue, jobId);
   }
 }

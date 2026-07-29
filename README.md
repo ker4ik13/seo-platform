@@ -8,11 +8,97 @@
 - `src/worker.main.ts` — system BullMQ worker;
 - `src/inspection-worker.main.ts` — потоковая проверка uploads;
 - `src/import-worker.main.ts` — парсинг, validation и publish семантики;
+- `src/rank-worker.main.ts` — DB-first подготовка immutable rank manifest,
+  восстановление потерянных queue messages и cooperative cancel;
 - `src/connector-worker.main.ts` — provider calls с минимальной
   `EXECUTION`-ролью credential vault.
 
 Worker entrypoints разделяются по профилю нагрузки и набору секретов, а не по
 каждой операции.
+
+## Подготовка ручного съёма позиций
+
+Internal HTTP API создаёт ручной запуск через
+`POST /internal/v1/workspaces/:workspaceId/projects/:projectId/rank-runs`,
+возвращает его через project-scoped `GET .../jobs/:jobId` и принимает
+cooperative cancel через `POST .../jobs/:jobId/cancel`. Caller передаёт
+проверенный tenant/actor context и dedicated credential API token; публичный
+клиент обращается к этим маршрутам только через Platform API.
+
+PostgreSQL является источником истины. До обращения к SEO Data сервис одной
+транзакцией повторно сверяет ранее сохранённый immutable execution snapshot,
+а затем сохраняет `PREPARING` Job, sidecar запуска, точную каноническую
+manifest-команду и её hash. Перед каждым внешним HTTP command дополнительно
+сверяется с tenant/job/estimate/project/context графом. В BullMQ
+`rank-preparation` передаётся только `jobId`, поэтому секреты, keyword text и
+execution evidence не попадают в Redis.
+
+Первичная постановка в очередь выполняется best effort после commit.
+Producer Redis не накапливает offline-команды и ограничивает connect/command
+двумя секундами, поэтому недоступная очередь не удерживает уже принятую HTTP
+команду бесконечно.
+`rank-worker` периодически выбирает из PostgreSQL незавершённые подготовки с
+истёкшими lease/retry deadline и идемпотентно восстанавливает потерянное
+сообщение. После crash или неоднозначного ответа SEO Data worker повторяет
+сохранённую exact-команду, а не строит её из изменившегося состояния. После
+успешного seal он атомарно сохраняет receipt, создаёт по одному `JobItem` на
+immutable chunk и переводит Job в `QUEUED`.
+
+Cancel до первой попытки seal завершает Job без manifest. Если попытка уже
+началась либо manifest точно создан, worker сначала восстанавливает исход
+seal либо идемпотентно finalizes manifest в SEO Data, и лишь затем фиксирует
+локальный terminal outcome. Неоднозначные/permanent ответы не записываются
+как `NOT_SEALED`: после максимум 20 exact attempts они становятся terminal
+`ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN` для reconciliation оператором.
+Retry delay и BullMQ delivery backoff используют bounded jitter. Cancel и
+worker всегда блокируют строки в порядке `Job → RankJobRun`.
+Этот entrypoint пока не вызывает Arsenkin и не включает live provider
+submit: соответствующие release gates из ADR-2026-034 остаются обязательными.
+
+Локальный запуск:
+
+- `pnpm dev:worker:rank` — watch-режим;
+- `pnpm start:worker:rank` — запуск собранного
+  `dist/rank-worker.main.js`.
+
+### Окружение rank-worker
+
+Общий `.env.example` показывает безопасный default
+`RANK_PREPARATION_ENABLED=false`. Для rank-worker в Dokploy нужен отдельный
+набор переменных:
+
+- `DATABASE_URL`, `DATABASE_POOL_MAX`, `REDIS_URL`;
+- `SEO_DATA_URL`, `SEO_DATA_COMMAND_TIMEOUT_MS`;
+- `RANK_PREPARATION_ENABLED=true`;
+- `JOBS_TO_SEO_RANK_TOKEN` длиной не менее 32 символов, совпадающий только с
+  validator token в SEO Data;
+- `RANK_PREPARATION_LEASE_SECONDS`,
+  `RANK_PREPARATION_DISPATCH_SECONDS`,
+  `RANK_PREPARATION_CONCURRENCY`;
+- `INTEGRATION_CREDENTIAL_ROLE=DISABLED`.
+
+Lease обязан превышать timeout команды SEO Data минимум на пять секунд.
+Rank-worker не должен получать `INTERNAL_API_TOKEN`,
+`PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`, credential keyrings, NATS
+credentials, S3 access keys или SMTP credentials. `JOBS_TO_SEO_RANK_TOKEN`
+также запрещён HTTP, generic, import, inspection и connector processes,
+queue payload, логам и application data. Поэтому нельзя включать rank-worker
+простым переключением флага в полном management-env: в Dokploy создаётся
+отдельный deployment/command того же image с минимальным env allowlist.
+Токен ротируется процедурой expand → switch caller → retire old, без
+переиспользования generic или credential service secrets.
+
+DB-backed проверка порядка блокировок запускается только на disposable
+database с уже применёнными migrations:
+
+`JOBS_RANK_TEST_DATABASE_URL=postgresql://... node --import tsx --test src/rank-runs/rank-job-lock.integration.test.ts`
+
+Миграция rank preparation fail-closed останавливается при legacy
+`MANUAL_RANK_CHECK` без sidecar или конфликтующих active deduplication keys.
+Она перестраивает unique index обычным DDL, поэтому для уже нагруженной базы
+нужны worker drain и maintenance window; последующий large-database rollout
+должен перейти на отдельный expand/concurrent-index план. PostgreSQL 18
+fresh/negative/race rehearsal остаётся обязательным staging gate.
 
 ## Адаптеры
 

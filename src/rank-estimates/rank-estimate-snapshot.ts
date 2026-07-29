@@ -72,8 +72,16 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
     12
   );
   const scopeHash = hash(scope.scopeHash);
+  const ready =
+    input.status === "READY" &&
+    input.executionAllowed === true &&
+    blockers.length === 0;
+  const blocked =
+    input.status === "BLOCKED" &&
+    input.executionAllowed === false &&
+    blockers.length > 0;
   if (
-    input.status !== "BLOCKED" ||
+    (!ready && !blocked) ||
     input.provider !== "ARSENKIN" ||
     input.operation !== "POSITIONS" ||
     input.credentialMode !== "BYOK_API_KEY" ||
@@ -109,17 +117,10 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
     !/^[A-Z]{3}$/u.test(input.billingCurrency) ||
     retention.normalizedRankHistory !== "LONG_TERM" ||
     retention.rawSerp !== "NOT_COLLECTED" ||
-    input.executionAllowed !== false ||
     typeof input.policyVersion !== "string" ||
     input.policyVersion.length < 1 ||
     input.policyVersion.length > 64 ||
-    expiresAt.getTime() - calculatedAt.getTime() !== 5 * 60 * 1_000 ||
-    !blockers.some(
-      ({ code }) => code === "PROVIDER_CONTRACT_NOT_READY"
-    ) ||
-    !blockers.some(
-      ({ code }) => code === "PROVIDER_EXECUTION_DISABLED"
-    )
+    expiresAt.getTime() - calculatedAt.getTime() !== 5 * 60 * 1_000
   ) {
     invalid();
   }
@@ -128,7 +129,7 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
     workspaceId: uuid(input.workspaceId),
     projectId: uuid(input.projectId),
     trackingContextId: uuid(input.trackingContextId),
-    status: "BLOCKED",
+    status: ready ? "READY" : "BLOCKED",
     provider: "ARSENKIN",
     operation: "POSITIONS",
     credentialMode: "BYOK_API_KEY",
@@ -162,7 +163,7 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
       rawSerp: "NOT_COLLECTED"
     },
     blockers,
-    executionAllowed: false,
+    executionAllowed: ready,
     policyVersion: input.policyVersion,
     calculatedAt: calculatedAt.toISOString(),
     expiresAt: expiresAt.toISOString()
@@ -266,7 +267,7 @@ function hash(value: unknown): RankEstimateScopeHash {
 }
 
 function blockerList(value: unknown): readonly RankEstimateBlocker[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 64) {
+  if (!Array.isArray(value) || value.length > 64) {
     invalid();
   }
   const blockers = value.map((candidate) => {

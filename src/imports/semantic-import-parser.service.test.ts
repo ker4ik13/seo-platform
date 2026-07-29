@@ -256,6 +256,12 @@ function configFixture(): AppConfig {
       dispatchSeconds: 15,
       concurrency: 2
     },
+    rankPreparation: {
+      enabled: false,
+      leaseSeconds: 120,
+      dispatchSeconds: 15,
+      concurrency: 2
+    },
     uploads: {
       maxSizeBytes: 5 * 1_024 * 1_024 * 1_024,
       partSizeBytes: 8 * 1_024 * 1_024,
