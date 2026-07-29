@@ -17,8 +17,10 @@
    обязательные placeholders (`replace-me`, `replace-with-*`), URL и версии
    юридических документов. Пустые обязательные service secrets нужно
    сгенерировать отдельно; копировать примеры как реальные секреты запрещено.
-   Отдельно обязательно задать `JOBS_TO_SEO_RANK_TOKEN`: старые копии
-   корневого примера могут ещё не содержать эту переменную.
+   Отдельно обязательно задать `JOBS_TO_SEO_RANK_TOKEN`,
+   `JOBS_TO_SEO_RANK_RESULT_TOKEN` и `RANK_HISTORY_CURSOR_KEY`: последние две
+   переменные намеренно оставлены пустыми в корневом примере, а старые копии
+   примера могут ещё не содержать их.
 3. Сначала оставить `S3_ENABLED=false`, `EMAIL_ENABLED=false`,
    `DIRECTUS_STORAGE_DRIVER=local`.
 4. Привязать основной домен к `web:3000`, остальные домены к `admin:3002`,
@@ -83,6 +85,50 @@ PostgreSQL/Redis/SEO Data saturation. Lease обязан превышать
 ```bash
 node --test tests/*.test.mjs
 ```
+
+## Dedicated SEO Data result и cursor boundaries
+
+`JOBS_TO_SEO_RANK_RESULT_TOKEN` защищает отдельный write boundary для уже
+нормализованных rank results. Preparation worker с
+`JOBS_TO_SEO_RANK_TOKEN` читает manifest/chunks, но не должен получать право
+записывать observations; result producer, наоборот, не должен получать
+plaintext chunks через result credential. Поэтому preparation и result
+tokens всегда генерируются независимо и не могут иметь одинаковое значение.
+В текущем Compose result token получает только HTTP-процесс `seo-data`.
+Будущий result worker можно добавить вторым явным получателем только вместе с
+review и обновлением scope regression test; передавать token через общий
+anchor запрещено.
+
+`RANK_HISTORY_CURSOR_KEY` — отдельный HMAC-SHA-256 key для аутентификации
+непрозрачных rank-history cursors. Его получает только `seo-data`; worker,
+migration и остальные API не должны его видеть.
+
+Оба значения генерируются случайно, имеют длину не менее 32 символов и должны
+отличаться друг от друга, `JOBS_TO_SEO_RANK_TOKEN`, `INTERNAL_API_TOKEN`,
+остальных service credentials, encryption/fingerprint keyrings и provider
+credentials. Пустые строки в `.env.example` — намеренный fail-closed
+предохранитель: перед первым deploy оператор обязан создать новые значения в
+secret storage Dokploy.
+
+Ротация result token сейчас выполняется заменой secret и redeploy всех
+реплик `seo-data`, поскольку result producer в этом Compose ещё не запущен.
+После появления producer single-token boundary требует короткой остановки и
+drain result writes, одновременного обновления producer и всех реплик
+`seo-data`, authenticated smoke test и только затем возобновления очереди.
+Повторно использовать preparation token как временный fallback запрещено.
+
+Ротация cursor key инвалидирует все ранее выданные cursors. Её проводят в
+окно обслуживания: завершают или останавливают активную pagination, не
+допускают одновременной работы реплик с разными keys, обновляют все реплики
+`seo-data` и проверяют, что новый cursor проходит следующий page request.
+Клиент с прежним cursor должен начать pagination заново без cursor; откат
+key после выпуска новых cursors создаст ту же инвалидацию в обратную сторону.
+
+Ни один из этих secrets нельзя писать в Git, тикеты, URL, логи, traces,
+exception messages, queue/event payloads или диагностические artifacts.
+Команда `docker compose config` раскрывает подставленные значения, поэтому для
+проверки конфигурации используется только `docker compose ... config --quiet`;
+полный rendered config нельзя печатать в CI logs или прикладывать к incident.
 
 ## BYOK vault и ротация ключей
 

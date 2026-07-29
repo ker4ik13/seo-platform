@@ -57,6 +57,8 @@ test("rank worker has an explicit least-capability runtime boundary", async () =
   for (const forbidden of [
     "INTERNAL_API_TOKEN",
     "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN",
+    "JOBS_TO_SEO_RANK_RESULT_TOKEN",
+    "RANK_HISTORY_CURSOR_KEY",
     "INTEGRATION_CREDENTIAL_KEYS",
     "INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS",
     "NATS_URL",
