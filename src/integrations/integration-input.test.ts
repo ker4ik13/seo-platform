@@ -20,13 +20,37 @@ test("validates provider-specific credential fields", () => {
     createIntegrationCredentialInput({
       provider: "KEYS_SO",
       label: " Primary ",
-      apiKey: " api-token-123 "
+      apiKey: "api-token-123"
     }),
     {
       provider: "KEYS_SO",
       label: "Primary",
       apiKey: "api-token-123"
     }
+  );
+});
+
+test("rejects surrounding whitespace instead of changing API key material", () => {
+  assert.throws(
+    () =>
+      createIntegrationCredentialInput({
+        provider: "KEYS_SO",
+        label: "Primary",
+        apiKey: " valid-api-key"
+      }),
+    (error: unknown) =>
+      error instanceof DomainError &&
+      error.code === "VALIDATION_FAILED"
+  );
+  assert.throws(
+    () =>
+      updateIntegrationCredentialInput({
+        label: "Primary",
+        apiKey: "valid-api-key "
+      }),
+    (error: unknown) =>
+      error instanceof DomainError &&
+      error.code === "VALIDATION_FAILED"
   );
 });
 

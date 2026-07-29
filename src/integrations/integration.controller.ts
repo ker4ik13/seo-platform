@@ -3,6 +3,8 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
@@ -12,6 +14,7 @@ import {
 import type {
   ApiCollectionResponse,
   ApiResponse,
+  IntegrationCredentialValidationSummary,
   IntegrationCredentialSummary,
   IntegrationProviderCatalogItem
 } from "@seo-platform/contracts";
@@ -173,6 +176,74 @@ export class IntegrationController {
       requestId: context.requestId
     });
     return apiResponse(request, result, result.version);
+  }
+
+  @Post("credentials/:credentialId/validations")
+  @HttpCode(HttpStatus.ACCEPTED)
+  @RequirePermission("integration.test")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async createValidation(
+    @Param("credentialId") credentialId: string,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<IntegrationCredentialValidationSummary>> {
+    this.recentAuthentication.assert(principal);
+    const canonicalCredentialId = assertUuid(
+      credentialId,
+      "credentialId"
+    );
+    const context = requestContext(request);
+    const tenant = requiredTenant(request);
+    const idempotencyKey = requiredIdempotencyKey(
+      headerValue(request, "idempotency-key")
+    );
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      action: "integration.credential.validation_requested",
+      resourceType: "integration_credential",
+      resourceId: canonicalCredentialId,
+      outcome: "REQUESTED",
+      requestId: context.requestId
+    });
+    const result =
+      await this.jobs.createIntegrationCredentialValidation(
+        {
+          tenant,
+          actorId: principal.userId,
+          requestId: context.requestId
+        },
+        canonicalCredentialId,
+        idempotencyKey
+      );
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      action: "integration.credential.validation_queued",
+      resourceType: "integration_credential_validation",
+      resourceId: result.id,
+      outcome: "SUCCESS",
+      requestId: context.requestId
+    });
+    return apiResponse(request, result);
+  }
+
+  @Get("credentials/:credentialId/validations/:validationId")
+  @RequirePermission("integration.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async getValidation(
+    @Param("credentialId") credentialId: string,
+    @Param("validationId") validationId: string,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<IntegrationCredentialValidationSummary>> {
+    const result =
+      await this.jobs.getIntegrationCredentialValidation(
+        internalContext(request, principal),
+        assertUuid(credentialId, "credentialId"),
+        assertUuid(validationId, "validationId")
+      );
+    return apiResponse(request, result);
   }
 
   @Delete("credentials/:credentialId")

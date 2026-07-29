@@ -20,8 +20,7 @@ export function createIntegrationCredentialInput(
 ): CreateIntegrationCredentialInput {
   const input = inputObject(value);
   const provider = providerField(input.provider);
-  const apiKey = stringField(input, "apiKey", { min: 8, max: 2048 });
-  if (!API_KEY_PATTERN.test(apiKey)) invalid("apiKey");
+  const apiKey = apiKeyField(input, true);
   const accountIdentifier = optionalAccountIdentifier(input);
   if (provider === "XMLSTOCK" && !accountIdentifier) {
     invalid("accountIdentifier");
@@ -40,11 +39,7 @@ export function updateIntegrationCredentialInput(
   value: unknown
 ): UpdateIntegrationCredentialInput {
   const input = inputObject(value);
-  const apiKey = optionalStringField(input, "apiKey", {
-    min: 8,
-    max: 2048
-  });
-  if (apiKey && !API_KEY_PATTERN.test(apiKey)) invalid("apiKey");
+  const apiKey = apiKeyField(input, false);
   const accountIdentifier = optionalAccountIdentifier(input);
   if (accountIdentifier && !apiKey) invalid("apiKey");
   return {
@@ -54,6 +49,31 @@ export function updateIntegrationCredentialInput(
     ...(apiKey ? { apiKey } : {}),
     ...(accountIdentifier ? { accountIdentifier } : {})
   };
+}
+
+function apiKeyField(
+  input: Readonly<Record<string, unknown>>,
+  required: true
+): string;
+function apiKeyField(
+  input: Readonly<Record<string, unknown>>,
+  required: false
+): string | undefined;
+function apiKeyField(
+  input: Readonly<Record<string, unknown>>,
+  required: boolean
+): string | undefined {
+  const value = input.apiKey;
+  if (
+    !required &&
+    (value === undefined || value === null || value === "")
+  ) {
+    return undefined;
+  }
+  if (typeof value !== "string" || !API_KEY_PATTERN.test(value)) {
+    invalid("apiKey");
+  }
+  return value;
 }
 
 function optionalAccountIdentifier(

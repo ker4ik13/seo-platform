@@ -3,6 +3,8 @@ import {
   integrationCapabilities,
   integrationCredentialModes,
   integrationCredentialStatuses,
+  integrationCredentialValidationModes,
+  integrationCredentialValidationStatuses,
   integrationProviders
 } from "@seo-platform/contracts";
 import type {
@@ -15,9 +17,11 @@ import type {
   CreateUploadInput,
   CreateUploadPartUrlsInput,
   CreateIntegrationCredentialInput,
+  IntegrationCredentialValidationSummary,
   IntegrationCredentialSummary,
   IntegrationProviderCatalogItem,
   InternalCreateIntegrationCredentialInput,
+  InternalCreateIntegrationCredentialValidationInput,
   InternalDeleteIntegrationCredentialInput,
   InternalUpdateIntegrationCredentialInput,
   InternalCreateUploadInput,
@@ -43,10 +47,18 @@ interface InternalContext {
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const CONNECTOR_VERSION_PATTERN = /^[a-z0-9][a-z0-9@._-]{0,31}$/u;
+const PROVIDER_ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,99}$/u;
 const CAPABILITIES = new Set<string>(integrationCapabilities);
 const CREDENTIAL_MODES = new Set<string>(integrationCredentialModes);
 const CREDENTIAL_STATUSES = new Set<string>(
   integrationCredentialStatuses
+);
+const CREDENTIAL_VALIDATION_MODES = new Set<string>(
+  integrationCredentialValidationModes
+);
+const CREDENTIAL_VALIDATION_STATUSES = new Set<string>(
+  integrationCredentialValidationStatuses
 );
 const PROVIDERS = new Set<string>(integrationProviders);
 
@@ -268,6 +280,55 @@ export class JobsClient {
     return credentialSummary(value);
   }
 
+  public async createIntegrationCredentialValidation(
+    context: InternalContext,
+    credentialId: string,
+    idempotencyKey: string
+  ): Promise<IntegrationCredentialValidationSummary> {
+    const body: InternalCreateIntegrationCredentialValidationInput = {
+      workspaceId: context.tenant.workspaceId,
+      actorId: context.actorId,
+      idempotencyKey
+    };
+    const value = await this.requestIntegration<unknown>(
+      "POST",
+      integrationPath(
+        context,
+        `credentials/${encodeURIComponent(credentialId)}/validations`
+      ),
+      context,
+      body
+    );
+    return scopedCredentialValidationSummary(
+      value,
+      context.tenant.workspaceId,
+      credentialId
+    );
+  }
+
+  public async getIntegrationCredentialValidation(
+    context: InternalContext,
+    credentialId: string,
+    validationId: string
+  ): Promise<IntegrationCredentialValidationSummary> {
+    const value = await this.requestIntegration<unknown>(
+      "GET",
+      integrationPath(
+        context,
+        `credentials/${encodeURIComponent(
+          credentialId
+        )}/validations/${encodeURIComponent(validationId)}`
+      ),
+      context
+    );
+    return scopedCredentialValidationSummary(
+      value,
+      context.tenant.workspaceId,
+      credentialId,
+      validationId
+    );
+  }
+
   public async revokeIntegrationCredential(
     context: InternalContext,
     credentialId: string,
@@ -436,6 +497,9 @@ function providerCatalog(
   return value.map((item) => {
     const input = record(item);
     const provider = providerValue(input.provider);
+    const credentialValidationMode = credentialValidationModeValue(
+      input.credentialValidationMode
+    );
     const capabilities = stringArray(input.capabilities);
     const supportedModes = stringArray(input.supportedModes);
     if (
@@ -459,6 +523,7 @@ function providerCatalog(
         capabilities as IntegrationProviderCatalogItem["capabilities"],
       supportedModes:
         supportedModes as IntegrationProviderCatalogItem["supportedModes"],
+      credentialValidationMode,
       requiresAccountIdentifier: input.requiresAccountIdentifier,
       ...(typeof input.accountIdentifierLabel === "string"
         ? { accountIdentifierLabel: input.accountIdentifierLabel }
@@ -504,7 +569,27 @@ function credentialSummary(value: unknown): IntegrationCredentialSummary {
         !isIsoDate(input.lastSuccessAt))) ||
     (input.lastErrorAt !== undefined &&
       (typeof input.lastErrorAt !== "string" ||
-        !isIsoDate(input.lastErrorAt)))
+        !isIsoDate(input.lastErrorAt))) ||
+    (input.lastErrorCode !== undefined &&
+      (typeof input.lastErrorCode !== "string" ||
+        !PROVIDER_ERROR_CODE_PATTERN.test(input.lastErrorCode)))
+  ) {
+    throw invalidJobsResponse();
+  }
+  const activeValidation =
+    input.activeValidation === undefined
+      ? undefined
+      : credentialValidationSummary(input.activeValidation);
+  if (
+    activeValidation &&
+    (activeValidation.workspaceId !== input.workspaceId ||
+      activeValidation.credentialId !== input.id ||
+      activeValidation.provider !== provider ||
+      ![
+        "QUEUED",
+        "RUNNING",
+        "RETRY_SCHEDULED"
+      ].includes(activeValidation.status))
   ) {
     throw invalidJobsResponse();
   }
@@ -528,10 +613,93 @@ function credentialSummary(value: unknown): IntegrationCredentialSummary {
     ...(typeof input.lastErrorAt === "string"
       ? { lastErrorAt: input.lastErrorAt }
       : {}),
+    ...(typeof input.lastErrorCode === "string"
+      ? { lastErrorCode: input.lastErrorCode }
+      : {}),
+    ...(activeValidation ? { activeValidation } : {}),
     version: Number(input.version),
     createdAt: input.createdAt,
     updatedAt: input.updatedAt
   };
+}
+
+function credentialValidationSummary(
+  value: unknown
+): IntegrationCredentialValidationSummary {
+  const input = record(value);
+  const provider = providerValue(input.provider);
+  if (
+    typeof input.id !== "string" ||
+    !UUID_PATTERN.test(input.id) ||
+    typeof input.workspaceId !== "string" ||
+    !UUID_PATTERN.test(input.workspaceId) ||
+    typeof input.credentialId !== "string" ||
+    !UUID_PATTERN.test(input.credentialId) ||
+    !Number.isSafeInteger(input.credentialMaterialVersion) ||
+    Number(input.credentialMaterialVersion) < 1 ||
+    typeof input.status !== "string" ||
+    !CREDENTIAL_VALIDATION_STATUSES.has(input.status) ||
+    (input.errorCode !== undefined &&
+      (typeof input.errorCode !== "string" ||
+        !PROVIDER_ERROR_CODE_PATTERN.test(input.errorCode))) ||
+    typeof input.connectorVersion !== "string" ||
+    !CONNECTOR_VERSION_PATTERN.test(input.connectorVersion) ||
+    typeof input.requestedAt !== "string" ||
+    !isIsoDate(input.requestedAt) ||
+    (input.startedAt !== undefined &&
+      (typeof input.startedAt !== "string" ||
+        !isIsoDate(input.startedAt))) ||
+    (input.retryAt !== undefined &&
+      (typeof input.retryAt !== "string" ||
+        !isIsoDate(input.retryAt))) ||
+    (input.finishedAt !== undefined &&
+      (typeof input.finishedAt !== "string" ||
+        !isIsoDate(input.finishedAt)))
+  ) {
+    throw invalidJobsResponse();
+  }
+  return {
+    id: input.id,
+    workspaceId: input.workspaceId,
+    credentialId: input.credentialId,
+    credentialMaterialVersion: Number(
+      input.credentialMaterialVersion
+    ),
+    provider,
+    status:
+      input.status as IntegrationCredentialValidationSummary["status"],
+    ...(typeof input.errorCode === "string"
+      ? { errorCode: input.errorCode }
+      : {}),
+    connectorVersion: input.connectorVersion,
+    requestedAt: input.requestedAt,
+    ...(typeof input.startedAt === "string"
+      ? { startedAt: input.startedAt }
+      : {}),
+    ...(typeof input.retryAt === "string"
+      ? { retryAt: input.retryAt }
+      : {}),
+    ...(typeof input.finishedAt === "string"
+      ? { finishedAt: input.finishedAt }
+      : {})
+  };
+}
+
+function scopedCredentialValidationSummary(
+  value: unknown,
+  workspaceId: string,
+  credentialId: string,
+  validationId?: string
+): IntegrationCredentialValidationSummary {
+  const result = credentialValidationSummary(value);
+  if (
+    result.workspaceId !== workspaceId ||
+    result.credentialId !== credentialId ||
+    (validationId !== undefined && result.id !== validationId)
+  ) {
+    throw invalidJobsResponse();
+  }
+  return result;
 }
 
 function providerValue(
@@ -541,6 +709,18 @@ function providerValue(
     throw invalidJobsResponse();
   }
   return value as IntegrationCredentialSummary["provider"];
+}
+
+function credentialValidationModeValue(
+  value: unknown
+): IntegrationProviderCatalogItem["credentialValidationMode"] {
+  if (
+    typeof value !== "string" ||
+    !CREDENTIAL_VALIDATION_MODES.has(value)
+  ) {
+    throw invalidJobsResponse();
+  }
+  return value as IntegrationProviderCatalogItem["credentialValidationMode"];
 }
 
 function isIsoDate(value: string): boolean {
