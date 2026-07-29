@@ -7,12 +7,15 @@
 execution manifest в SEO Data завершены. Estimate хранится в `jobs_db`,
 доступен при read-only и не вызывает provider, decrypt, Job/BullMQ, списание
 или event. SEO Data уже атомарно seal-ит bounded keyword snapshots в
-immutable header/chunks/entries и защищает active semantic dedup; Jobs пока
-не создаёт `PREPARING` Job и не вызывает этот boundary. Exact contracts
-фиксируют public Job lifecycle, normalized ingest/finalize и redacted
-`seo.rank-check.completed.v1`, но их runtime ещё не реализован. Provider
-execution и position history отсутствуют. Срез следует ADR-2026-034; live
-Arsenkin submit остаётся выключенным до прохождения contract/security gates.
+immutable header/chunks/entries и защищает active semantic dedup. Jobs теперь
+durable создаёт `PREPARING` Job и immutable sidecar, seal-ит manifest через
+изолированный rank-worker, восстанавливает потерянные BullMQ notifications,
+сериализует cancel и закрывает sealed cancellation через SEO Data finalize.
+Неоднозначный исход ограниченно повторяется exact-командой и затем становится
+`ACTION_REQUIRED`, а не ложным `NOT_SEALED`. Public Platform API маршруты,
+provider execution, normalized ingest/event и position history ещё
+отсутствуют. Срез следует ADR-2026-034; live Arsenkin submit остаётся
+выключенным до прохождения contract/security gates.
 
 Параллельный dependency-free срез browser Web Push device lifecycle
 реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет
@@ -163,8 +166,13 @@ transport и health/readiness, таблицы outbox/inbox созданы. Durab
   jobs/integrations HTTP process.
 - `JOBS_TO_SEO_RANK_TOKEN` отличается от всех остальных service tokens и
   защищает seal/chunk boundary с plaintext keyword snapshots. До появления
-  Jobs PREPARING caller он передаётся только SEO Data HTTP; generic,
-  connector, import и migration processes его не получают.
+  provider execution его получают только SEO Data HTTP и отдельный
+  `rank-worker`; generic HTTP, connector, import, inspection, system и
+  migration processes его не получают.
+- Rank-worker требует `RANK_PREPARATION_ENABLED=true`, отдельные bounded
+  lease/dispatch/concurrency settings и lease минимум на пять секунд длиннее
+  SEO Data timeout. Он запускается отдельным Dokploy process из того же image
+  и fail-closed отклоняет generic/credential/NATS/S3/SMTP secrets.
 - `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` отличается от остальных
   service secrets и выдаётся только Platform API и Realtime HTTP для
   управления browser Web Push devices. Пример намеренно пуст, runtime
@@ -243,9 +251,9 @@ Backend convention:
   `ranking.view` и trusted lifecycle/access snapshot;
 - `platform-contracts/src/api/rank-runs.ts` и `src/events/rankings.ts` —
   exact manual-run lifecycle, manifest/chunk, normalized ingest/finalize и
-  redacted completion event contracts; manifest preimage builders уже
-  используются SEO Data, Job/ingest/finalize остаются следующими runtime
-  границами;
+  redacted completion event contracts; manifest preimage builders
+  используются Jobs и SEO Data, Job preparation/cancel/finalize реализованы,
+  ingest/completion event остаются следующими runtime-границами;
 - `platform-contracts/canonical-json` — server-only RFC 8785 JCS subpath для
   одинаковых contract hash preimages в Jobs и SEO Data; root/browser export
   намеренно отсутствует;
@@ -265,8 +273,8 @@ Backend convention:
 - `platform-api/src/audit`, `src/outbox` — переиспользуемые transactional
   записи аудита и событий;
 - `platform-jobs-integrations/src/queue` — BullMQ connection, system,
-  `upload-inspection` и идемпотентная
-  `integration-credential-validation` queues;
+  `upload-inspection`, идемпотентная `integration-credential-validation` и
+  DB-recoverable `rank-preparation` queues;
 - `platform-jobs-integrations/src/storage` — S3 port, disabled и S3 adapters;
 - `platform-jobs-integrations/src/malware` — scanner port, disabled adapter и
   потоковый `clamd` INSTREAM adapter;
@@ -287,6 +295,13 @@ Backend convention:
 - `platform-jobs-integrations/src/rank-estimates` — immutable provider-free
   estimate receipts, strict tenant/idempotency boundary, connector metadata
   projection и finite blockers без provider call/decrypt/queue;
+- `platform-jobs-integrations/src/rank-runs` — internal create/get/cancel,
+  immutable manifest command/hash, `rank_job_runs` sidecar, явная Job/seal
+  state machine, единый `Job → RankJobRun` lock order, bounded recovery и
+  public-safe Job projection;
+- `platform-jobs-integrations/src/rank-worker.main.ts` — изолированный
+  rank-preparation entrypoint с per-delivery lease owner, PostgreSQL
+  dispatcher recovery и единственным выделенным SEO rank token;
 - `platform-jobs-integrations/src/seo-data` — строго валидируемый internal
   HTTP client владельца semantic core и bounded rank-estimate scope;
 - `platform-seo-data/src/semantic-imports` — нормализация, import receipts,
@@ -329,6 +344,9 @@ Backend convention:
   refresh redirect;
 - `platform-*/lib` и `components` — adapters и переиспользуемые UI-части;
 - `platform-infrastructure/docker` — reusable backend/web images;
+- `platform-infrastructure/compose.dokploy.yml` — отдельный internal-only
+  `rank-worker` process того же Jobs image с exact env allowlist, bounded
+  resources, migration/Redis/SEO Data dependencies и без ports/outbound;
 - `platform-infrastructure/postgres/init` — создание service databases;
 - `platform-infrastructure/postgres/permissions` — идемпотентные fail-closed
   grants внутри `jobs_db` после migrations; первый script создаёт/ужесточает
@@ -345,6 +363,8 @@ Entrypoints:
   `platform-jobs-integrations/src/inspection-worker.main.ts`;
 - semantic import worker:
   `platform-jobs-integrations/src/import-worker.main.ts`;
+- rank manifest preparation worker:
+  `platform-jobs-integrations/src/rank-worker.main.ts`;
 - credential validation connector worker:
   `platform-jobs-integrations/src/connector-worker.main.ts`;
 - connector DB permission init:
@@ -625,9 +645,10 @@ reservation, outbox/event не создаются.
 
 Secret-bearing rank manifest endpoints принадлежат SEO Data и защищены
 отдельным `JOBS_TO_SEO_RANK_TOKEN`; общий internal token не даёт читать
-keyword text chunks. Сейчас secret получает только SEO Data validator:
-Jobs caller ещё не реализован и generic/connector/import workers secret не
-получают.
+keyword text chunks. Secret получает только SEO Data validator и отдельный
+rank-worker Jobs; generic HTTP, connector/import/inspection/system workers
+secret не получают. Клиент запрещает HTTP redirects, ограничивает размер
+ответа и принимает только exact tenant-bound receipt.
 
 Execution contract foundation принимает в public create только `estimateId`
 и возвращает Job через конечную discriminated lifecycle матрицу. SEO Data
@@ -640,11 +661,26 @@ semantic dedup. Shared allowlist preimage builders и golden vectors
 remove/reassign, если provider-effective work остаётся тем же. Interactive
 manifest transaction использует явные `maxWait=5s` и `timeout=30s`.
 
-Jobs `PREPARING`/JobItem runtime, execution grants, connector submission,
-normalized ingest/finalize и position history ещё не реализованы. Contract
-требует сериализовать finalize с ingest на одном manifest lock, закрыть late
-ingest и только для валидного `COMPLETED/PARTIALLY_COMPLETED` опубликовать
-exact redacted `seo.rank-check.completed.v1`.
+Jobs `PREPARING`/JobItem preparation runtime и cancellation finalize
+реализованы. PostgreSQL хранит exact command до HTTP, BullMQ получает только
+`jobId`, bounded producer не удерживает HTTP при недоступном Redis, а
+dispatcher восстанавливает потерянные notifications. Перед HTTP exact
+command сверяется с immutable Job/Run/Estimate graph. DB triggers защищают
+initial state, monotonic version/attempt, receipts, cancel audit и committed
+Job/Run/Estimate coherence. Create вставляет Job, затем sidecar; все мутации
+существующего graph блокируют `Job → RankJobRun`. Единственный разрешённый
+version drift принимает cancel между seal request/response. Заведомо не
+созданный manifest становится `NOT_SEALED`; retryable transport ambiguity
+повторяет exact idempotent command в пределах 20 attempts, а non-retryable
+неоднозначность либо исчерпание budget дают terminal
+`ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`.
+
+Execution grants, scoped connector submission, normalized chunk ingest,
+успешный/partial finalize, completion outbox/event и position history ещё не
+реализованы. Contract требует сериализовать finalize с ingest на одном
+manifest lock, закрыть late ingest и только для валидного
+`COMPLETED/PARTIALLY_COMPLETED` опубликовать exact redacted
+`seo.rank-check.completed.v1`.
 
 ## 8. Проверенное состояние
 
@@ -653,21 +689,28 @@ exact redacted `seo.rank-check.completed.v1`.
 - TypeScript strict typecheck: pass для 8 пакетов.
 - Platform API unit tests: 128 pass, 0 fail.
 - SEO data unit tests: 51 pass, 0 fail.
-- Jobs/integrations unit tests: 159 pass, 0 fail.
+- Jobs/integrations tests: 213 pass, 0 fail, 2 disposable-DB tests skipped
+  в обычном запуске; оба DB tests отдельно проходят.
 - Realtime unit tests: 12 pass, 0 fail.
 - Contracts unit tests: 36 pass, 0 fail.
 - Unified Web helper tests: 54 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
 - Unified Next.js production build: pass; проверены public site, Toolbox,
   API docs и private `/app`.
-- Compose config: pass с `.env.example`.
+- Compose config: pass с `.env.example` и ephemeral overrides для намеренно
+  пустых dedicated token examples; resolved secrets не выводились.
 - Предшествующие Jobs migrations и connector column grants: pass на локальном
   PostgreSQL 16; отдельно проверены запреты `INSERT`, ciphertext/outbox
-  access, ownership и `BYPASSRLS`. Новая `rank_estimates` migration прошла
-  Prisma/static constraint review, но ещё не исполнялась на живой БД.
-  Целевой PostgreSQL 18 повторяется в staging.
-- Resolved Compose topology: jobs runtimes имеют `internal,outbound`,
-  connector не публикует ports и не получает management/NATS credentials.
+  access, ownership и `BYPASSRLS`. Полная цепочка из 13 Jobs migrations,
+  включая `rank_estimates`, `ACTION_REQUIRED` и `rank_job_runs`, повторно
+  применена fresh на PostgreSQL 15 с test-only `uuidv7()` shim; целевой
+  PostgreSQL 18 повторяется в staging.
+- Resolved Compose topology: outbound-required Jobs runtimes имеют
+  `internal,outbound`; connector не публикует ports и не получает
+  management/NATS credentials.
+- Rank-worker Dokploy topology: 3/3 static tests и Compose config pass;
+  process использует только `internal`, 11 allowlisted env keys, отдельный
+  rank token и не получает ports/outbound/NATS/S3/SMTP/vault credentials.
 - Visual QA: 1440, 1024 и 390 px; horizontal overflow не найден.
 - Semantics upload browser QA: 1280 px, runtime errors и horizontal overflow
   не найдены; устранён CSS conflict публичного `.brand` с app shell.
@@ -725,6 +768,14 @@ exact redacted `seo.rank-check.completed.v1`.
   typecheck, 51/51 tests, production build и diff-check — pass. Fresh
   migrations и state/provenance/active-dedup negative smoke прошли на
   PostgreSQL 15; target PostgreSQL 18 остаётся release gate.
+- Durable rank preparation Jobs: Prisma validate/generate, strict
+  typecheck, 213/213 executable tests, production build и diff-check — pass;
+  обычный suite дополнительно содержит два skipped disposable-DB tests.
+  Fresh 13-migration deploy, реальные lifecycle/immutable negative checks и
+  `Job → RankJobRun` concurrent lock-order test прошли на PostgreSQL 15 с
+  test-only `uuidv7()` shim.
+  Node.js 24 и PostgreSQL 18 остаются staging gates. Live provider submit,
+  ingest и completion event в этот срез не входят.
 - Shared canonical JSON: official RFC 8785 primitive/key-order/UTF-8 vectors,
   hostile values/accessors/cycles/Proxy fail-closed; server-only subpath
   resolution из SEO Data проверен. Production dependencies не добавлялись.
@@ -749,11 +800,13 @@ exact redacted `seo.rank-check.completed.v1`.
 `manual BYOK rank job → position history`
 
 Provider-free estimate и SEO Data immutable manifest из ADR-2026-034
-завершены. Следующий runtime-шаг — durable Jobs `PREPARING` saga,
-authoritative one-time grant, scoped connector operations, ingest receipts
-и partial persistence. Live Arsenkin `set`
-выключен, пока нет recorded provider contract, безопасного
-`SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit и устранения global vault read.
+завершены; durable Jobs `PREPARING` saga, exact seal recovery, cooperative
+cancel и cancellation finalize также готовы. Следующий runtime-шаг —
+authoritative one-time grant, scoped connector operations, normalized ingest
+receipts и partial persistence. Live Arsenkin `set` выключен, пока нет
+recorded provider contract и устранения global vault read. Неоднозначность
+manifest preparation уже fail-closed переходит в
+`ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN` без бесконечного auto-retry.
 
 Параллельный обязательный следующий срез уведомлений:
 `profile/project effective policy → transactional outbox/durable consumer →
@@ -853,9 +906,11 @@ durable-доставка не реализована. OAuth/OIDC выполня�
   active-dedup smoke прошли на PostgreSQL 15. PostgreSQL 18, реальная
   concurrent transaction гонка и rollback/failure injection обязательны до
   release.
-- `rank_estimates` migration согласована с Prisma и проверена статическими
-  тестами CHECK/indices, но не исполнялась на живом PostgreSQL. Fresh apply и
-  constraint-negative smoke на PostgreSQL 18 обязательны до deploy.
+- `rank_estimates`/rank preparation migrations согласованы с Prisma,
+  fail-closed проверяют legacy manual rows и active dedup conflicts и прошли
+  fresh/constraint-negative smoke на PostgreSQL 15. Обычный rebuild unique
+  index требует worker drain/maintenance window; для большой live-БД нужен
+  expand/concurrent-index план. PostgreSQL 18 smoke обязателен до deploy.
 - Проверка lifecycle проекта сейчас авторитетна в Platform API, но между ней и
   commit в jobs database остаётся межсервисное TOCTOU. До первого исполняемого
   rank job jobs/integrations обязан получить project/workspace lifecycle
@@ -889,10 +944,10 @@ durable-доставка не реализована. OAuth/OIDC выполня�
   `@nats-io/jetstream`; plaintext verification token не логируется.
 - QR для TOTP пока представлен локальным `otpauth://` URI и ручным ключом;
   UI QR появится после подтверждения зависимости `qrcode`.
-- Rank/frequency execution, тарификация и YooKassa пока присутствуют только
-  в ТЗ/схемах; tracking configuration и provider-free estimate реализованы,
-  но ещё не создают rank jobs/position snapshots. Arsenkin/Keys.so connectors
-  сейчас выполняют только
+- Rank/frequency provider execution, тарификация и YooKassa пока
+  присутствуют только в ТЗ/схемах; tracking configuration, provider-free
+  estimate и durable rank preparation Job реализованы, но position snapshots
+  ещё не создаются. Arsenkin/Keys.so connectors сейчас выполняют только
   read-only credential validation; live Arsenkin `positions` заблокирован
   ADR-2026-034, XMLStock ждёт подтверждённого provider contract и redacted
   fixtures.

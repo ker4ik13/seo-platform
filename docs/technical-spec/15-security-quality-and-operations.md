@@ -208,8 +208,10 @@
   `JOBS_TO_SEO_RANK_TOKEN` и `x-rank-execution-token`. Он обязан отличаться
   от `INTERNAL_API_TOKEN` и credential/realtime tokens. Generic internal
   callers, connector/import/system workers, Web, queue payload и логи его не
-  получают. До появления Jobs PREPARING caller secret настраивается только
-  у SEO Data validator; затем выдаётся одному минимальному caller process.
+  получают. В реализованном PREPARING runtime secret получают только SEO
+  Data validator и выделенный `rank-worker.main.ts`; Jobs HTTP и остальные
+  process types его не получают. Клиент запрещает HTTP redirects, ограничивает
+  body и строго валидирует tenant-bound seal/finalization receipts.
   Ротация выполняется совместимым expand → switch caller → retire old
   protocol, без публикации обоих значений в application data.
 - Любой provider response, для которого нет recorded schema, считается
@@ -605,6 +607,11 @@ dashboard/read flows. Полноценная работа с многомилл�
 таблицей на телефоне не является обязательной; интерфейс показывает
 адаптированные действия.
 
+Target server runtime — Node.js 24. Engine check должен выполняться в CI и
+production image; локальные typecheck/test/build на Node.js 22 с engine
+warning являются дополнительным evidence, но не заменяют Node.js 24 release
+gate.
+
 ## 24. Стратегия тестирования
 
 ### 24.1. Unit
@@ -631,6 +638,13 @@ dashboard/read flows. Полноценная работа с многомилл�
 - queues;
 - partition queries;
 - immutable rank manifest lifecycle, provenance и active semantic dedup;
+- manual rank `Job + RankJobRun` graph, immutable exact command/hash,
+  state/receipt triggers и dispatcher recovery;
+- конкурентные `claim ↔ cancel ↔ persist/finalize` сценарии с единым lock
+  order `Job → RankJobRun`, bounded serialization retry и единственным
+  допустимым cancel version drift;
+- bounded 20-attempt preparation и terminal
+  `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN` без ложного `NOT_SEALED`;
 - credential encryption;
 - webhooks;
 - object upload;
@@ -679,7 +693,15 @@ dashboard/read flows. Полноценная работа с многомилл�
 - Для rank manifest migration отдельно проверяются: fresh apply;
   невозможность committed `BUILDING`; прямого `SEALED/CLOSED`; late
   child/update/delete/truncate; provenance mismatch; concurrent active-dedup
-  winner; `SEALED → CLOSED` и повторный seal после освобождения active key.
+  winner; `SEALED → CLOSED`, immutable finalization receipt и повторный seal
+  после освобождения active key;
+- Для manual rank preparation migrations отдельно проверяются: fresh apply;
+  обязательный one-to-one `Job ↔ RankJobRun`; запрет incomplete graph;
+  immutable evidence/terminal outcome; разрешённые Job/seal transitions;
+  `PREPARING` dispatcher recovery; cancel до и после seal; исчерпание attempts
+  в `ACTION_REQUIRED`, а не бесконечный retry; half-null snapshot/receipt;
+  monotonic Job version/attempt; Job/Run/Estimate coherence; запрет подмены
+  command binding; Redis partition после DB commit.
 
 ## 25. Тестовые данные и среды
 
@@ -711,6 +733,7 @@ dashboard/read flows. Полноценная работа с многомилл�
 - unit/integration tests;
 - contract validation;
 - Prisma schema validation/migration check;
+- Node.js 24 engine/typecheck/test/build;
 - PostgreSQL 18 fresh migration и negative invariant smoke для новых
   trigger/partial-index state machines;
 - build;
@@ -736,6 +759,16 @@ Merge запрещён при failed required checks. Исключение уя�
 - `20260729160000_rank_execution_manifests` до production обязательно
   репетируется на PostgreSQL 18. Успешный локальный PostgreSQL 15 smoke
   является дополнительным evidence, но не заменяет target-version gate.
+- `20260729170000_rank_job_preparing_status` и
+  `20260729170100_rank_job_preparation` также требуют fresh apply,
+  constraint-negative и реальных concurrent cancel/worker smoke на
+  PostgreSQL 18. Успешный локальный PostgreSQL 15 deploy не заменяет этот
+  gate. Migration fail-closed проверяет legacy manual rows и active dedup
+  conflicts; обычный unique-index rebuild выполняется после worker drain в
+  maintenance window. Для большой live-БД заранее готовится отдельный
+  expand/concurrent-index план.
+- Jobs/integrations и SEO Data release проверяется на Node.js 24; локальный
+  Node.js 22 engine warning не принимается как production runtime evidence.
 - Автоматический rollback допускается только если не усугубит уже применённую migration.
 
 ## 28. Feature flags
@@ -906,6 +939,29 @@ Radar/crawler capacity:
 - увеличение upload limit требует capacity review S3 egress, ClamAV memory,
   scan time и очереди, а не только изменения frontend-константы.
 
+### 34.2. Manual rank preparation contour
+
+- `rank-worker.main.ts` разворачивается отдельным process type и получает
+  только необходимые PostgreSQL/Redis настройки и
+  `JOBS_TO_SEO_RANK_TOKEN`;
+- token отсутствует у Jobs HTTP, generic system, connector, import,
+  inspection, migration, Web и Platform API processes;
+- BullMQ `rank-preparation` передаёт только `jobId`; exact manifest command,
+  hash, attempts, lease и receipts остаются в PostgreSQL;
+- dispatcher периодически восстанавливает due `PREPARING/CANCEL_REQUESTED`
+  jobs после потерянного Redis notification или worker crash;
+- недоступность rank worker не влияет на чтение API; backlog/lease age,
+  attempt exhaustion, `OUTCOME_UNKNOWN` и `ACTION_REQUIRED` должны получить
+  отдельные metrics/alerts до production; текущий runtime имеет только
+  структурированные логи;
+- текущая изоляция обеспечена отдельным module/entrypoint и env allowlist.
+  Перед live provider execution нужна отдельная минимальная DB role с
+  проверенными grants; общий Jobs DB user не считается окончательной
+  least-privilege boundary;
+- live Arsenkin submit остаётся выключенным, пока не реализованы scoped
+  execution grants, узкая vault boundary, normalized ingest и provider
+  contract gates.
+
 ## 35. Maintenance
 
 Периодические задачи:
@@ -1035,6 +1091,12 @@ Billing read-only не является стадией удаления. Око�
   системный decrypt mismatch не изменяет статусы credentials.
 - Connector execution boundary не имеет global read всего multi-tenant BYOK
   vault и job snapshot набора.
+- Manual rank create/get/cancel сохраняют tenant scope, exact replay и
+  terminal outcome при конкурентном worker/cancel; non-retryable либо
+  исчерпавшая budget ambiguity завершается `ACTION_REQUIRED`, а
+  неидемпотентный provider submit автоматически не повторяется.
+- Rank execution token доступен только выделенному rank worker и SEO Data,
+  не следует redirect и не появляется в логах/queue payload.
 - Restore drill подтверждает заявленный RPO/RTO.
 - Повтор платёжного события не изменяет ledger второй раз.
 - Импорт защищён от zip bomb, formula injection и вредоносного файла.

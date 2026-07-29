@@ -1065,12 +1065,33 @@ Indexes:
 Текущая `jobs` table хранит `idempotency_scope`, опциональную пару
 `idempotency_key + 32-byte request_hash`, `lease_owner`,
 `lease_expires_at`, `retry_at` и `updated_at`. DB CHECK запрещает только одну
-часть idempotency pair. Активный partial unique index охватывает `QUEUED`,
-`WAITING_RATE_LIMIT`, `RUNNING`, `RETRY_SCHEDULED`; terminal history не мешает
-новой команде. Worker получает lease условным update по прежним status/version,
-а потерявший lease worker не может записать terminal result. Dispatcher
-фильтрует по конкретному `type`, поэтому operational lease/retry indexes
-начинаются с `type`, а не с общего `status`.
+часть idempotency pair. Активный partial unique index охватывает `PREPARING`,
+`QUEUED`, `WAITING_RATE_LIMIT`, `RUNNING`, `CANCEL_REQUESTED`,
+`RETRY_SCHEDULED`; terminal history не мешает новой команде. Worker получает
+lease условным update по прежним status/version, а потерявший lease worker не
+может записать terminal result. Dispatcher фильтрует по конкретному `type`,
+поэтому operational lease/retry indexes начинаются с `type`, а не с общего
+`status`.
+
+#### Реализованный manual rank Job graph
+
+Первый manual rank runtime создаёт `MANUAL_RANK_CHECK` только в
+`PREPARING/PREPARING_SCOPE`. Для него DB triggers фиксируют неизменяемыми
+tenant/actor/idempotency, input/scope snapshots, total/unit, оценочную
+стоимость/currency, provider/mode, max attempts, correlation и created time.
+Отдельная transition matrix запрещает возврат terminal Job в active status.
+`ACTION_REQUIRED` допустим только как terminal
+`SUBMIT_OUTCOME_UNKNOWN` с нулём подтверждённо сохранённых результатов и
+всеми парами в unknown count.
+
+Каждый такой `jobs` row обязан иметь ровно один `rank_job_runs` sidecar;
+deferred constraints запрещают commit неполного либо несогласованного graph.
+Tenant-safe composite FK связывает обе записи. Create вставляет Job, затем
+sidecar в одной транзакции; все мутации уже существующего graph сначала
+берут `SELECT ... FOR UPDATE` на `Job`, затем на `RankJobRun`. Один порядок
+lock устраняет взаимную блокировку cancel/claim/persist/finalize; после
+internal seal request допускается только один контролируемый Job version
+drift — запись cooperative cancel.
 
 ### 6.2. Imports/exports
 
@@ -1284,6 +1305,8 @@ PostgreSQL 18 обязателен в staging.
   scope нельзя безопасно materialize для provider;
 - private binding/route/credential/material/validation version snapshot;
 - provider/mode/policy version;
+- optional provider-effective `execution_snapshot` и его 32-byte hash,
+  сохраняемые только для согласованной projection и не являющиеся grant;
 - keyword/task/minimum stage request counts;
 - finite blockers;
 - redacted public response snapshot;
@@ -1301,12 +1324,59 @@ validation proof и TTL пять минут. Hash availability имеет точ
 - только один `NULL` и `1001 + AVAILABLE` запрещены.
 
 Receipt не имеет FK в другую database; IDs внешнего владельца являются
-immutable snapshot. Private IDs и domain hash не входят в public DTO.
+immutable snapshot. `BEFORE UPDATE` trigger запрещает переписывать весь
+receipt, включая optional execution pair; физическая очистка остаётся
+отдельной maintenance-операцией, а не update. Private IDs и domain hash не
+входят в public DTO.
 
 Физическая очистка выполняется отдельной maintenance policy после окна
 сетевых повторов и диагностики; expiry не означает автоматическое удаление
-проекта, tracking context или результатов. До появления `rank-runs` таблица
-не создаёт provider usage, billing reservation или Job.
+проекта, tracking context или результатов. Сам estimate не создаёт provider
+usage, billing reservation или Job; отдельный internal `rank-runs` create
+может потребить ещё действующий executable receipt только после повторной
+проверки всех mutable evidence.
+
+#### `rank_job_runs`
+
+Durable sidecar manual rank Job принадлежит `jobs_db` и хранит:
+
+- tenant/project/job, estimate и tracking context IDs;
+- trusted caller project domain/status/version snapshot; authoritative
+  current lifecycle требует отдельной project projection/precondition;
+- exact immutable manifest command и 32-byte command hash, записанные до
+  первого internal HTTP;
+- seal state `PENDING`, `OUTCOME_UNKNOWN`, `NOT_SEALED`, `SEALED` или
+  `FINALIZED`;
+- bounded seal attempt count и время последней попытки;
+- immutable manifest ID/hash/deduplication hash/pair/chunk receipt после
+  `SEALED`;
+- immutable finalization status/request hash/time после `FINALIZED`;
+- audit actor первого cancel.
+
+Unique constraints обеспечивают один run на Job, один run на estimate и одно
+локальное соответствие manifest ID. `OUTCOME_UNKNOWN` записывается вместе с
+claim до внешнего вызова. Receipt fields отсутствуют до доказанного
+`SEALED`, после `SEALED/FINALIZED` не переписываются; finalization fields
+появляются только при `FINALIZED`. Seal evidence замораживается после
+`NOT_SEALED/SEALED/FINALIZED`, строки не удаляются и не обрезаются.
+
+Insert разрешён только как exact `Job(PREPARING, version=1, attempt=0) +
+RankJobRun(PENDING, sealAttempt=0)` без lease, result/error/cancel/receipt
+evidence. Deferred graph constraints проверяют monotonic attempts,
+соответствие actor/tracking context/project version/keyword total executable
+estimate, manifest pair count после seal, допустимую Job/seal/finalization
+матрицу и provenance cancel actor. Estimate, command и terminal receipts
+после записи неизменяемы.
+
+Текущий rank worker задаёт `max_attempts=20`. Retryable ambiguity повторяет
+exact idempotent seal/finalize command только в этом budget. Исчерпание
+budget либо non-retryable неоднозначность не маркируются как `NOT_SEALED`, а
+завершают Job `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`. DB matrix допускает
+`OUTCOME_UNKNOWN|SEALED` без finalization receipt либо
+`FINALIZED/ACTION_REQUIRED`; она не выдумывает единый исход для разных
+стадий. PostgreSQL dispatcher выбирает только due, unlocked
+`PREPARING/CANCEL_REQUESTED` graph и восстанавливает потерянное BullMQ
+сообщение, в котором находится только `jobId`.
 
 #### `rank_execution_manifests`
 
@@ -1319,7 +1389,8 @@ Immutable pre-provider scope принадлежит `seo_db`. Header содер�
 - provider/operation и provider-effective execution JSON;
 - retention, pair/chunk counts;
 - full `manifest_hash`, semantic `deduplication_hash`, schema versions;
-- `sealed_at`, optional `closed_at`, lifecycle status.
+- `sealed_at`, immutable estimate expiry, optional `closed_at`, lifecycle
+  status.
 
 `sealed_by` входит в full manifest preimage. Storage-local `request_hash`
 сравнивается timing-safe для exact replay/idempotency conflict и не входит в
@@ -1371,6 +1442,27 @@ provider-incompatible scope не materialize-ится. Seal trigger провер
 assignment активен, относится к manifest tracking context и тому же keyword,
 а keyword активен и совпадает по version/text/language. Все три таблицы
 создаются migration `20260729160000_rank_execution_manifests`.
+
+#### `rank_check_finalization_receipts`
+
+Protected SEO Data finalize атомарно закрывает manifest и сохраняет
+immutable receipt:
+
+- tenant/project/manifest/job и audit actor;
+- `rank-finalize@1` и 32-byte request hash;
+- tracking context/configuration version;
+- terminal status и согласованные pair/persisted/found/not-found/missing
+  counts;
+- DB-derived `finalized_at`.
+
+Exact replay возвращает тот же receipt; repeat identity включает
+job/manifest/status, но не audit actor. Первый успешный writer фиксирует
+provenance, а другой уполномоченный actor получает исходный receipt; изменение
+семантики terminal command отклоняется.
+В текущем runtime разрешены zero-persisted
+`CANCELLED/FAILED/ACTION_REQUIRED`. `COMPLETED/PARTIALLY_COMPLETED` остаются
+fail-closed до normalized ingest, который должен сериализоваться с finalize
+на том же manifest lock и запрещать late chunks.
 
 #### `connector_registry`
 

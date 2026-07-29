@@ -39,6 +39,7 @@
 - OpenAPI/event conventions;
 - CI/CD skeleton;
 - Dokploy staging;
+- Node.js 24 runtime/build proof;
 - PostgreSQL 18 + Prisma migration proof;
 - прототип виртуализированной таблицы на 1–5 млн строк;
 - прототип streaming import 2–5 GB;
@@ -157,10 +158,18 @@ contract. Project binding для `SERP_RANK_TRACKING` уже реализова�
 нормализованный BYOK route с tenant-safe FK, immutable idempotency receipt,
 CAS/ETag, redacted outbox и project settings UI. Arsenkin предоставляет эту
 capability в текущем allowlist, а существующий ключ получает её только после
-успешной повторной provider validation. Binding ещё не выполняет rank job:
-versioned tracking context, provider-free оценка и immutable SEO Data
-execution manifest уже реализованы, но Jobs PREPARING/runtime, provider
-execution, история позиций и schedule остаются следующими вертикальными
+успешной повторной provider validation. Binding сам по себе не запускает
+provider operation. Versioned tracking context, provider-free оценка,
+immutable SEO Data execution manifest и durable Jobs PREPARING runtime уже
+реализованы. Jobs предоставляет только internal create/get/cancel:
+DB-first сохраняет exact manifest command/hash, создаёт `rank_job_runs`,
+проверяет его tenant/job/estimate binding перед HTTP, восстанавливает
+потерянные BullMQ notifications PostgreSQL dispatcher-ом и сериализует
+cancel/worker через lock order `Job → RankJobRun`. Redis producer работает
+bounded best effort, а DB triggers защищают exact initial state, monotonic
+attempt/version и committed Job/Run/Estimate coherence. Public Platform API
+routes и Web Job flow ещё отсутствуют; provider execution, normalized
+ingest, история позиций, events и schedule остаются следующими вертикальными
 срезами. Оценка сохраняется в
 Jobs как immutable idempotency receipt, доступна в read-only и не вызывает
 провайдера, BullMQ, списание, usage, outbox или event. Профильные и
@@ -185,6 +194,19 @@ production-зависимостей. P2 не считается
 выполненным до реального rank job, multi-tenant queue fairness, terminal
 outbox/delivery и security/load/restore gates.
 
+Preparation runtime имеет bounded `maxAttempts=20`. До internal seal вызова
+sidecar переходит в `OUTCOME_UNKNOWN`; только доказанное отсутствие manifest
+разрешает `NOT_SEALED`. Retryable transport/service ambiguity повторяет exact
+идемпотентную seal/finalize command в пределах budget; non-retryable
+ambiguity или исчерпание attempts завершают Job как
+`ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`. Provider submit в этом runtime ещё
+отсутствует и автоматически не resubmit-ится.
+SEO Data protected finalize уже атомарно закрывает manifest и сохраняет
+immutable receipt для zero-persisted `CANCELLED/FAILED/ACTION_REQUIRED`;
+успешный/частичный finalize остаётся fail-closed до normalized ingest.
+Public/admin reconcile/acknowledge API, UI и политика безопасного resolution
+для terminal `ACTION_REQUIRED` ещё не реализованы.
+
 Realtime application-handler gate включает durable revoked-family tombstone,
 scoped inbox receipt и fail-closed проверку tombstone в device upsert; он
 реализован и тестирует оба порядка `registration → event` и
@@ -192,20 +214,30 @@ scoped inbox receipt и fail-closed проверку tombstone в device upsert;
 publisher/subscription и PostgreSQL 18 concurrency smoke; update только
 существующих devices не принимается из-за resurrection race.
 
-Перед исполнением первого rank job jobs/integrations должен повторно проверять
+Перед первым provider submit jobs/integrations должен повторно проверить
 workspace/project lifecycle и billing. Текущая проверка mutation в Platform
 API оставляет межсервисное TOCTOU до commit отдельной jobs database; требуется
 authoritative lifecycle projection/inbox либо эквивалентная precondition.
 Project binding migration проверена на PostgreSQL 16. Новая migration
-immutable `rank_estimates` прошла schema/static review, но обе migration
-должны быть повторно проверены на целевом PostgreSQL 18 staging. SEO Data
-rank manifest migration прошла fresh/state/provenance/active-dedup smoke на
-PostgreSQL 15; PostgreSQL 18 и реальная concurrency гонка остаются gates.
+immutable `rank_estimates` и Jobs preparation migrations прошли
+schema/static review и fresh full-chain deploy на PostgreSQL 15. SEO Data
+rank manifest/finalization migrations также прошли локальный PostgreSQL 15
+smoke. В PostgreSQL 15 использовался test-only совместимый `uuidv7()` shim;
+это не является target-version evidence. Для обоих владельцев PostgreSQL 18
+fresh/negative tests и реальные
+конкурентные `claim ↔ cancel ↔ seal/finalize` гонки остаются release gates.
+Jobs migration fail-closed проверяет legacy manual rows/active dedup
+conflicts; первый rollout требует worker drain/maintenance window для
+обычного unique-index rebuild, а large live database — отдельный
+expand/concurrent-index план.
+Target runtime — Node.js 24; локальные проверки на Node.js 22 с engine
+warning не заменяют Node.js 24 CI/staging gate.
 
 Архитектура первого Arsenkin manual rank job зафиксирована
 ADR-2026-034. Provider-free estimate и exact execution contracts из ADR уже
-реализованы; immutable SEO Data manifest также готов, runtime Job/ingest ещё
-выполняются. Live `set`
+реализованы; immutable SEO Data manifest, protected cancellation finalize и
+durable Jobs preparation готовы. Public Platform API, provider execution,
+normalized ingest/history и completion events ещё не реализованы. Live `set`
 остаётся выключенным до recorded one-key contract или
 письменного подтверждения response/status/retry semantics, устранения global
 vault read, authoritative execution grant, ingest receipts и
@@ -225,6 +257,21 @@ validation slice:
   используется узкая execution projection/table с server-side scope либо
   credential broker/KMS, а также пройдены cluster-wide grant audit и
   `pg_hba`/cluster isolation.
+
+#### Промежуточная приёмка durable preparation
+
+- internal create/get/cancel проходят exact tenant и idempotency checks;
+- exact manifest command/hash записаны до HTTP/BullMQ;
+- queue loss и истёкший lease восстанавливаются PostgreSQL dispatcher-ом;
+- только `PENDING + attempt=0` cancel немедленно даёт
+  `NOT_SEALED/CANCELLED`; `OUTCOME_UNKNOWN/SEALED` сначала дают
+  `CANCEL_REQUESTED`, затем exact recovery завершает доказанным
+  `NOT_SEALED/CANCELLED`, `FINALIZED/CANCELLED` либо `ACTION_REQUIRED`;
+- retryable seal/finalize ambiguity повторяется exact в bounded budget, а
+  non-retryable ambiguity и 20 исчерпанных attempts дают
+  `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`;
+- публичные routes, provider execution и position history не объявляются
+  готовыми на основании этого среза.
 
 #### Exit gate
 
@@ -942,8 +989,14 @@ Staging game day имитирует потерю основной базы.
 - на PostgreSQL 18 пройдены реальные race tests `rotate ↔ rotate`,
   `login ↔ password reset`,
   `MFA challenge/confirm/disable ↔ password reset`, а также
-  rollback terminal revoke при ошибке outbox; in-memory unit test этот gate не
-  заменяет.
+  rollback terminal revoke при ошибке outbox;
+- на PostgreSQL 18 пройдены manual rank races
+  `claim ↔ cancel ↔ persist/finalize`, negative trigger tests и recovery
+  после потерянного BullMQ notification;
+- все production packages собраны и проверены на Node.js 24; локальный
+  Node.js 22 engine warning этот gate не заменяет.
+
+In-memory unit test не заменяет перечисленные PostgreSQL concurrency gates.
 
 До P3:
 

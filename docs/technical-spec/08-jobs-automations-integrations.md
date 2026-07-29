@@ -59,6 +59,7 @@
 - `ESTIMATING`;
 - `AWAITING_APPROVAL`;
 - `RESERVING_BALANCE`;
+- `PREPARING`;
 - `QUEUED`;
 - `WAITING_RATE_LIMIT`;
 - `RUNNING`;
@@ -71,9 +72,20 @@
 - `COMPLETED`;
 - `FAILED_RETRYABLE`;
 - `FAILED_FINAL`;
+- `ACTION_REQUIRED`;
 - `EXPIRED`.
 
 Статус и stage различаются: `RUNNING` может иметь stages `FETCHING`, `PARSING`, `SAVING`, `AGGREGATING`.
+
+Для первого manual rank slice `PREPARING/PREPARING_SCOPE` означает
+подготовку immutable scope до provider submit. Terminal
+`ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN` означает, что автоматическое
+продолжение небезопасно: система не доказывает отсутствие side effect и
+требует операторского или пользовательского решения. Этот status не должен
+автоматически возвращаться в active lifecycle. В текущем срезе
+reconcile/acknowledge API, admin/public UI и политика безопасного нового
+запуска ещё не реализованы; terminal row остаётся доступным для чтения и
+операторской диагностики.
 
 ## 4. Job item
 
@@ -141,6 +153,12 @@
 - retry только failed items;
 - manual retry создаёт новую attempt chain.
 
+Подготовка первого manual rank Job имеет отдельный bounded budget:
+`maxAttempts=20`. Временная недоступность seal/finalize повторяется только до
+этой границы; после исчерпания Job завершается как
+`ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`, а не остаётся в бесконечном hot
+retry.
+
 Общее правило `network/5xx` не применяется к неидемпотентному provider
 submit. По ADR-2026-034, если connector уже начал отправку Arsenkin `set`, но
 не получил однозначный task ID, item переходит в `SUBMIT_OUTCOME_UNKNOWN`.
@@ -165,6 +183,7 @@ submit. По ADR-2026-034, если connector уже начал отправку
 - `reports`;
 - `notifications`;
 - `integration-credential-validation`;
+- `rank-preparation`;
 - `public-toolbox`;
 - `maintenance`.
 
@@ -179,13 +198,19 @@ Workers разделяются по профилю ресурсов:
 Manual rank job дополнительно разделяет process capabilities внутри одного
 `platform-jobs-integrations` image:
 
-- rank worker без KEK управляет manifest, fairness и persistence;
+- выделенный rank worker без KEK управляет текущими preparation/recovery/
+  cancellation-finalize стадиями; fairness, normalized persistence и
+  provider execution добавляются следующими срезами;
 - connector worker с execution KEK выполняет только allowlisted provider
   calls и строгую нормализацию.
 
-Это не новый сервис. До live rank submit connector role должен получать
-scoped execution через SECURITY DEFINER operations, а не global read Job и
-credential tables.
+Это не новый сервис. Текущий `rank-worker.main.ts` получает PostgreSQL/Redis
+и только выделенный `JOBS_TO_SEO_RANK_TOKEN`; generic HTTP, connector,
+import, inspection и system workers этот token не получают. BullMQ payload
+содержит только `jobId`, а PostgreSQL dispatcher восстанавливает потерянную
+постановку и просроченные lease. До live rank submit connector role должен
+получать scoped execution через SECURITY DEFINER operations, а не global read
+Job и credential tables.
 
 Rate limiting настраивается по provider и credential. Нельзя полагаться только на общий limiter очереди; connector поддерживает распределённые quota buckets.
 
@@ -630,20 +655,26 @@ trusted headers и exact body, а также отдельный `Idempotency-Key
 
 Receipt живёт логически пять минут. Точный replay возвращает тот же
 `expiresAt` и не продлевает TTL; явный перерасчёт использует новый key.
-Другой payload под прежним key возвращает `IDEMPOTENCY_CONFLICT`. Будущий
-`rank-runs` не рассматривает estimate как grant: перед submit он обязан заново
-проверить expiry, scope и все mutable versions.
+Другой payload под прежним key возвращает `IDEMPOTENCY_CONFLICT`. Текущий
+`rank-runs` не рассматривает estimate как grant: создание
+`PREPARING` Job повторно проверяет expiry, integrity immutable receipt и
+Jobs-owned mutable binding/route/credential/validation versions. Current
+context/configuration/semantic scope повторно проверяет SEO Data во время
+seal. Актуальный lifecycle проекта пока остаётся trusted caller snapshot с
+межсервисным TOCTOU; перед будущим provider submit требуются authoritative
+project precondition и одноразовый execution grant.
 
 Blockers имеют finite vocabulary из `platform-contracts` и локализуются Web.
 Provider contract gate и execution kill switch разделены. Пока оба закрыты,
 estimate всегда `BLOCKED`; это намеренно не запускает read-only credential
 validation connector и не доказывает работоспособность `positions`.
 
-### 17.4. Реализованный SEO Data immutable manifest
+### 17.4. Реализованный SEO Data immutable manifest и finalize
 
-SEO Data уже предоставляет dedicated-auth seal/chunk boundary для будущей
-Jobs `PREPARING` saga. Он повторно проверяет current project/context/config/
-semantic scope evidence из estimate, ограничивает первый Arsenkin slice
+SEO Data предоставляет dedicated-auth seal/chunk boundary, который уже
+вызывает Jobs `PREPARING` saga. Он сверяет trusted project snapshot из
+command и повторно проверяет current context, configuration и semantic scope
+evidence из estimate, ограничивает первый Arsenkin slice
 1 000 ключами и chunks по 250 и сохраняет exact keyword snapshots.
 
 State machine `BUILDING → SEALED → CLOSED` защищена DB triggers: committed
@@ -653,10 +684,78 @@ provider work даже после rename, display-only configuration label, meta
 edit или reassignment. `CLOSED` сохраняет manifest/history и только
 освобождает active key.
 
-Текущий Jobs runtime этот boundary ещё не вызывает: таблицы Job/JobItem,
-PREPARING recovery/cancel, queue message и provider call в данном срезе не
-создаются. До подключения caller `JOBS_TO_SEO_RANK_TOKEN` не выдаётся
-generic/connector/import workers.
+Protected endpoint
+`POST /internal/v1/projects/{projectId}/rank-manifests/{manifestId}/finalize`
+проверяет exact tenant/job/finalization command, делает replay идемпотентным,
+атомарно переводит `SEALED → CLOSED` и сохраняет immutable finalization
+receipt. В текущем срезе он завершает zero-persisted
+`CANCELLED/FAILED/ACTION_REQUIRED`; успешный и частичный outcome закрыты
+fail-closed до появления normalized ingest.
+Idempotency identity включает job/manifest/status, но намеренно не audit
+`actorId`: первый успешный writer фиксирует provenance, а повтор другого
+уполномоченного actor возвращает исходный receipt.
+
+### 17.5. Реализованный durable Jobs PREPARING runtime
+
+Jobs/integrations предоставляет защищённые internal endpoints:
+
+- `POST /internal/v1/workspaces/{workspaceId}/projects/{projectId}/rank-runs`;
+- `GET /internal/v1/workspaces/{workspaceId}/projects/{projectId}/jobs/{jobId}`;
+- `POST /internal/v1/workspaces/{workspaceId}/projects/{projectId}/jobs/{jobId}/cancel`.
+
+Create использует DB-first порядок: в одной транзакции повторно проверяются
+estimate и mutable binding/route/credential/validation evidence, затем
+создаются `Job(PREPARING)`, immutable exact manifest command и его
+32-byte hash в sidecar `rank_job_runs`. Только после commit публикуется
+неавторитетное сообщение `rank-preparation` с одним `jobId`. Producer не
+накапливает offline Redis commands и имеет bounded connect/command timeout:
+недоступная очередь не удерживает уже закоммиченную HTTP-команду, а
+PostgreSQL dispatcher восстановит notification.
+
+Sidecar хранит независимую state machine:
+`PENDING → OUTCOME_UNKNOWN|NOT_SEALED`,
+`OUTCOME_UNKNOWN → NOT_SEALED|SEALED` и `SEALED → FINALIZED`, seal attempts,
+immutable manifest receipt и immutable finalization receipt.
+`OUTCOME_UNKNOWN` устанавливается до internal HTTP, поэтому crash/timeout не
+создаёт ложное доказательство отсутствия manifest. Только заранее
+классифицированные ошибки, доказывающие отсутствие seal, переводят run в
+`NOT_SEALED`. Retryable transport/service ambiguity повторяет ту же
+идемпотентную exact seal/finalize command в пределах 20 attempts;
+non-retryable ambiguity либо исчерпание budget завершает Job как
+`ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`. Неидемпотентный provider submit в
+этом runtime ещё отсутствует и этой политикой не охватывается.
+Exact command до каждого HTTP повторно сверяется с immutable
+workspace/project/actor/job/estimate/context/domain/version/pair binding;
+self-consistent hash для другого graph не покидает сервис.
+
+Create вставляет parent Job, затем sidecar в одной транзакции под
+unique/deferred constraints. Все конкурентные мутации существующего graph
+блокируют агрегат в порядке `Job → RankJobRun`. После seal request
+допускается только один контролируемый version drift: cooperative cancel мог
+записать `CANCEL_REQUESTED`, пока worker ждал SEO Data. Только
+`PENDING + attempt=0` отменяется немедленно как
+`NOT_SEALED/CANCELLED`. Для `OUTCOME_UNKNOWN` или `SEALED` сначала
+фиксируется `CANCEL_REQUESTED`; exact recovery затем даёт доказанный
+`NOT_SEALED/CANCELLED`, `FINALIZED/CANCELLED` либо, если исход безопасно не
+установлен, terminal `ACTION_REQUIRED`.
+Serialization/deadlock conflicts повторяются bounded: terminal/cancel
+состояние возвращается как authoritative replay, а неразрешённая active
+гонка — как контролируемый `503`, а не неконтролируемый `500`.
+
+DB triggers требуют exact initial `PREPARING/PENDING`, monotonic Job
+version/attempt, immutable estimate/command/receipts, provenance первого
+cancel и согласованное committed состояние `Job ↔ RankJobRun ↔ RankEstimate`.
+Migration fail-closed останавливается при legacy `MANUAL_RANK_CHECK` без
+sidecar либо active dedup conflicts. Обычный rebuild unique index требует
+worker drain/maintenance window; large live database использует отдельный
+expand/concurrent-index rollout.
+
+Public Platform API routes и Web Job flow для create/get/cancel ещё не
+подключены. Provider-effective execution, one-time grants, scoped Arsenkin
+submit/poll/get, normalized ingest, успешный/частичный finalize, position
+history, completion outbox/events и schedules также не реализованы. Live
+Arsenkin execution остаётся выключенным; готовый PREPARING runtime не
+является доказательством рабочего съёма позиций.
 
 ## 18. OAuth connections
 

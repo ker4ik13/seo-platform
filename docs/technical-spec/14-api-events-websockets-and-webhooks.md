@@ -505,7 +505,7 @@ Provider/credential/schedule не входят в tracking context по ADR-2026
 
 - `POST /api/v1/projects/{projectId}/rank-estimates`;
 
-Следующий execution-этап добавит:
+Публичный execution-этап Platform API ещё не добавлен. За ним зарезервированы:
 
 - `POST /api/v1/projects/{projectId}/rank-runs`;
 - `GET /api/v1/projects/{projectId}/jobs/{jobId}`;
@@ -515,15 +515,48 @@ DTO и event contracts этого этапа уже зафиксированы �
 `platform-contracts`: public create содержит только `estimateId`, public Job
 не раскрывает provider/credential/keyword/result internals, а internal
 границы описывают manifest seal/chunk, normalized ingest и monotonic
-finalize. SEO Data часть manifest boundary уже реализована:
+finalize.
+
+Durable Jobs preparation уже доступен только по защищённым internal routes:
+
+- `POST /internal/v1/workspaces/{workspaceId}/projects/{projectId}/rank-runs`;
+- `GET /internal/v1/workspaces/{workspaceId}/projects/{projectId}/jobs/{jobId}`;
+- `POST /internal/v1/workspaces/{workspaceId}/projects/{projectId}/jobs/{jobId}/cancel`.
+
+Create отвечает `202 + internal Location`, требует exact tenant/actor
+context и `Idempotency-Key`, повторно проверяет estimate и mutable execution
+evidence и атомарно записывает `PREPARING` Job вместе с
+`rank_job_runs`. Exact manifest command и hash фиксируются в PostgreSQL до
+HTTP или BullMQ; queue payload содержит только `jobId`. Перед HTTP worker
+сверяет command с persisted tenant/job/estimate/project/context binding.
+Queue publish — bounded best effort: Redis partition не удерживает уже
+принятый HTTP request, recovery остаётся DB-backed. GET возвращает строгую
+public-safe Job projection. Cancel разрешает teammate с доверенным audit
+actor, идемпотентно сохраняет terminal replay и не зависит от исходного
+`actorId`.
+
+Internal worker recovery использует states
+`PENDING/OUTCOME_UNKNOWN/NOT_SEALED/SEALED/FINALIZED`, PostgreSQL lease и
+единый порядок row locks `Job → RankJobRun` для мутаций существующего graph.
+Cancel между seal request/response является единственным допустимым version
+drift. Retryable transport/service ambiguity повторяет только exact
+идемпотентную seal/finalize command в пределах 20 attempts; non-retryable
+ambiguity или исчерпание budget завершают Job как
+`ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`. Неидемпотентный provider submit
+ещё не реализован и автоматически не resubmit-ится.
+
+SEO Data manifest/finalize boundary уже реализована:
 
 - `POST /internal/v1/projects/{projectId}/rank-manifests`;
-- `GET /internal/v1/projects/{projectId}/rank-manifests/{manifestId}/chunks/{chunkIndex}?jobId=...`.
+- `GET /internal/v1/projects/{projectId}/rank-manifests/{manifestId}/chunks/{chunkIndex}?jobId=...`;
+- `POST /internal/v1/projects/{projectId}/rank-manifests/{manifestId}/finalize`.
 
 Она требует trusted tenant headers/body и отдельный
 `x-rank-execution-token`, атомарно перепроверяет estimate scope и не вызывает
-provider. Наличие этого internal boundary не означает готовность публичных
-Job endpoints, Jobs PREPARING saga, ingest/finalize или connector execution.
+provider. Finalize делает exact replay, атомарно закрывает manifest и в
+текущем срезе принимает zero-persisted
+`CANCELLED/FAILED/ACTION_REQUIRED`. Успешный/частичный finalize закрыт
+fail-closed до normalized ingest.
 
 Estimate body содержит только `trackingContextId`. Endpoint требует
 `ranking.view`, session, CSRF и `Idempotency-Key`, отвечает `201` immutable
@@ -540,11 +573,12 @@ Jobs самостоятельно вызывает
 `/internal/v1/workspaces/{workspaceId}/projects/{projectId}/rank-estimates`.
 Обе стороны строго сверяют path, headers, body и tenant-scoped response.
 
-Run отвечает `202 + Location`. Перед каждым новым provider submit требуется
-одноразовый authoritative execution grant; неоднозначный submit имеет
-отдельный публично видимый status и не повторяется автоматически.
+Будущий публичный Run отвечает `202 + Location`. Перед каждым новым provider
+submit требуется одноразовый authoritative execution grant; неоднозначный
+submit имеет отдельный публично видимый status и не повторяется
+автоматически.
 
-Location первого rank slice всегда project-scoped. GET требует
+Публичный Location первого rank slice всегда project-scoped. GET требует
 `ranking.view`; cancel — `collector.cancel`, CSRF и пустой exact body.
 `actorId` передаётся как audit actor и не ограничивает teammate access.
 Чтение и cancel доступны в billing read-only/архивном проекте; повтор cancel
@@ -552,7 +586,11 @@ Location первого rank slice всегда project-scoped. GET требуе
 
 `seo.rank-check.completed.v1` создаётся только для runtime-проверенного
 `COMPLETED` или `PARTIALLY_COMPLETED`; inconsistent counts и
-`ACTION_REQUIRED` отклоняются до публикации.
+`ACTION_REQUIRED` отклоняются до публикации. Provider-effective execution,
+scoped Arsenkin submit/poll/get, normalized ingest, position history,
+completion outbox/event и schedules ещё не реализованы; live Arsenkin
+execution выключен. Internal preparation API нельзя выдавать за готовые
+публичные Platform API routes или рабочий съём позиций.
 
 ### 13.5. Imports/exports/jobs
 

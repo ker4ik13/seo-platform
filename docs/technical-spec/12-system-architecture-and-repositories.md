@@ -136,6 +136,7 @@ NestJS monorepo/repository с несколькими entrypoints:
 - credential management/validation command API;
 - scheduler;
 - import/export worker;
+- immutable rank manifest preparation/recovery worker;
 - ranking/SERP worker;
 - frequency worker;
 - competitor worker;
@@ -178,6 +179,14 @@ cluster-wide grant audit и ограничивать доступ через `pg
 cluster boundary.
 Management и execution пока используют общий Redis password; до production
 для connector worker требуется отдельный Redis ACL либо изолированный instance.
+
+`src/rank-worker.main.ts` является отдельным preparation/recovery process:
+credential role `DISABLED`, только `jobs_db`, Redis, internal SEO Data URL и
+выделенный `JOBS_TO_SEO_RANK_TOKEN`. Он не получает HTTP/internal/vault,
+NATS, S3, SMTP или provider credentials, не публикует port и в текущем
+Dokploy Compose подключён только к `internal`. Перед live provider execution
+для него дополнительно создаётся минимальная отдельная PostgreSQL role; env
+изоляция сама по себе не заменяет DB grants.
 
 ### 3.6. `platform-realtime`
 
@@ -479,9 +488,10 @@ VPS 3:
 - Публичные domains настраиваются через Dokploy/Traefik.
 - Внутренние сервисы не публикуют host ports.
 - Используются private/isolated networks.
-- Jobs API/workers одновременно используют isolated internal network и
-  отдельную сеть без опубликованных портов для исходящих S3/SMTP/provider
-  соединений; подключение к ней не должно давать входящий public route.
+- Jobs API и outbound-required workers используют isolated internal network
+  и отдельную сеть без опубликованных портов для исходящих
+  S3/SMTP/provider соединений; подключение к ней не должно давать входящий
+  public route. Rank preparation worker остаётся только в `internal`.
 - Credential connector принимает только versioned application allowlist
   provider origins; до high-assurance production outbound network
   дополнительно ограничивается host firewall или egress proxy.
