@@ -10,6 +10,7 @@ import type {
   WebPushRegistration,
   WebPushRegistrationIntent,
   WebPushRevokeResult,
+  WebPushSubscriptionInput,
   WebPushSubscriptionsState
 } from "@seo-platform/contracts";
 
@@ -240,6 +241,19 @@ export function parseWebPushDeviceSummary(
   return parseDevice(value);
 }
 
+export function parseWebPushDeviceMutation(
+  value: unknown,
+  expectedInstallationId: string
+): WebPushDeviceSummary {
+  const device = parseDevice(value);
+  assertExpectedInstallation(
+    device.installationId,
+    expectedInstallationId
+  );
+  if (device.status !== "ACTIVE") invalidPushResponse();
+  return device;
+}
+
 export function parseWebPushRevokeResult(
   value: unknown
 ): WebPushRevokeResult {
@@ -262,6 +276,18 @@ export function parseWebPushRevokeResult(
   };
 }
 
+export function parseWebPushRevokeMutation(
+  value: unknown,
+  expectedInstallationId: string
+): WebPushRevokeResult {
+  const result = parseWebPushRevokeResult(value);
+  assertExpectedInstallation(
+    result.installationId,
+    expectedInstallationId
+  );
+  return result;
+}
+
 export function serializeWebPushRegistration(
   command: WebPushRegistrationCommand
 ): UpsertWebPushSubscriptionInput {
@@ -276,9 +302,37 @@ export function serializeWebPushRegistration(
     throw new Error("Некорректная версия ключа Web Push");
   }
 
-  const endpoint = safePushEndpoint(command.subscription.endpoint);
-  const p256dh = command.subscription.getKey("p256dh");
-  const auth = command.subscription.getKey("auth");
+  return {
+    label,
+    intent: command.intent,
+    applicationServerKeyVersion: command.applicationServerKeyVersion,
+    subscription: serializePushSubscription(command.subscription)
+  };
+}
+
+export function webPushSubscriptionMatchesInput(
+  subscription: PushSubscriptionLike,
+  expected: WebPushSubscriptionInput
+): boolean {
+  try {
+    const current = serializePushSubscription(subscription);
+    return (
+      current.endpoint === expected.endpoint &&
+      current.expirationTime === expected.expirationTime &&
+      current.keys.p256dh === expected.keys.p256dh &&
+      current.keys.auth === expected.keys.auth
+    );
+  } catch {
+    return false;
+  }
+}
+
+function serializePushSubscription(
+  subscription: PushSubscriptionLike
+): WebPushSubscriptionInput {
+  const endpoint = safePushEndpoint(subscription.endpoint);
+  const p256dh = subscription.getKey("p256dh");
+  const auth = subscription.getKey("auth");
   if (!p256dh || !auth) {
     throw new Error("Браузер не вернул ключи подписки Web Push");
   }
@@ -291,7 +345,7 @@ export function serializeWebPushRegistration(
     throw new Error("Браузер вернул некорректный секрет Web Push");
   }
 
-  const expirationTime = command.subscription.expirationTime;
+  const expirationTime = subscription.expirationTime;
   if (
     expirationTime !== null &&
     (!Number.isSafeInteger(expirationTime) || expirationTime <= Date.now())
@@ -300,16 +354,11 @@ export function serializeWebPushRegistration(
   }
 
   return {
-    label,
-    intent: command.intent,
-    applicationServerKeyVersion: command.applicationServerKeyVersion,
-    subscription: {
-      endpoint,
-      expirationTime,
-      keys: {
-        p256dh: bytesToBase64Url(p256dhBytes),
-        auth: bytesToBase64Url(authBytes)
-      }
+    endpoint,
+    expirationTime,
+    keys: {
+      p256dh: bytesToBase64Url(p256dhBytes),
+      auth: bytesToBase64Url(authBytes)
     }
   };
 }
@@ -546,6 +595,18 @@ function isUuid(value: unknown): value is string {
     UUID_PATTERN.test(value) &&
     value === value.toLowerCase()
   );
+}
+
+function assertExpectedInstallation(
+  actualInstallationId: string,
+  expectedInstallationId: string
+): void {
+  if (
+    !isUuid(expectedInstallationId) ||
+    actualInstallationId !== expectedInstallationId
+  ) {
+    invalidPushResponse();
+  }
 }
 
 function stringValue(value: unknown): string {

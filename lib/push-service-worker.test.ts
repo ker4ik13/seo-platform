@@ -68,6 +68,29 @@ test("falls back to a generic preview for unknown or unsafe payload fields", asy
   );
 });
 
+test("rejects bidi controls in notification previews", async () => {
+  const worker = await loadWorker();
+  let pending: Promise<unknown> | undefined;
+  worker.listeners.get("push")?.({
+    data: {
+      text: () =>
+        JSON.stringify({
+          version: 1,
+          title: "Отчёт \u202Ecod.exe",
+          body: "Проверка проекта завершена.",
+          tag: "rank-job-1",
+          deepLink: "/app/notifications"
+        })
+    },
+    waitUntil(value: Promise<unknown>) {
+      pending = value;
+    }
+  });
+  await pending;
+
+  assert.equal(worker.notifications[0]?.title, "Новое уведомление");
+});
+
 test("never parses an oversized push payload", async () => {
   const worker = await loadWorker();
   let pending: Promise<unknown> | undefined;
@@ -118,13 +141,72 @@ test("notification click opens only a same-origin private app path", async () =>
   ]);
 });
 
-async function loadWorker(language = "ru-RU"): Promise<{
+test("increments the durable generation and notifies clients with v2", async () => {
+  const initialRecord = {
+    schemaVersion: 2,
+    installationId: "ba8f5c70-b5ab-4ac0-ae49-649f60df7fc4",
+    ownerUserId: "01900000-0000-7000-8000-000000000001",
+    reconcileGeneration: 1,
+    reconciledGeneration: 0,
+    updatedAt: "2026-07-29T12:00:00.000Z"
+  };
+  const worker = await loadWorker("ru-RU", initialRecord);
+
+  for (const expectedGeneration of [2, 3]) {
+    let pending: Promise<unknown> | undefined;
+    worker.listeners.get("pushsubscriptionchange")?.({
+      waitUntil(value: Promise<unknown>) {
+        pending = value;
+      }
+    });
+    await pending;
+
+    assert.equal(
+      worker.metadata?.record &&
+        (worker.metadata.record as {
+          reconcileGeneration: number;
+        }).reconcileGeneration,
+      expectedGeneration
+    );
+  }
+
+  assert.deepEqual(worker.metadata?.openVersions, [undefined, undefined]);
+  assert.deepEqual(worker.reconciliationMessages, [
+    {
+      type: "WEB_PUSH_RECONCILE_REQUIRED",
+      version: 2,
+      generation: 2
+    },
+    {
+      type: "WEB_PUSH_RECONCILE_REQUIRED",
+      version: 2,
+      generation: 3
+    }
+  ]);
+  assert.equal(
+    (worker.metadata?.record as { reconciledGeneration: number })
+      .reconciledGeneration,
+    0
+  );
+});
+
+interface FakeIndexedDbState {
+  record: unknown;
+  readonly openVersions: Array<number | undefined>;
+}
+
+async function loadWorker(
+  language = "ru-RU",
+  installationRecord?: unknown
+): Promise<{
   readonly listeners: Map<string, WorkerListener>;
   readonly notifications: Array<{
     readonly title: string;
     readonly options: Readonly<Record<string, unknown>>;
   }>;
   readonly openedWindows: string[];
+  readonly reconciliationMessages: unknown[];
+  readonly metadata?: FakeIndexedDbState;
 }> {
   const source = await readFile(
     new URL("../public/push-service-worker.js", import.meta.url),
@@ -136,6 +218,14 @@ async function loadWorker(language = "ru-RU"): Promise<{
     options: Readonly<Record<string, unknown>>;
   }> = [];
   const openedWindows: string[] = [];
+  const reconciliationMessages: unknown[] = [];
+  const metadata =
+    installationRecord === undefined
+      ? undefined
+      : {
+          record: structuredClone(installationRecord),
+          openVersions: []
+        };
   const workerSelf = {
     TextEncoder,
     location: { origin: "https://product.example" },
@@ -154,18 +244,119 @@ async function loadWorker(language = "ru-RU"): Promise<{
     },
     clients: {
       claim: async () => undefined,
-      matchAll: async () => [],
+      matchAll: async () =>
+        metadata
+          ? [
+              {
+                postMessage(message: unknown) {
+                  reconciliationMessages.push(
+                    structuredClone(message)
+                  );
+                }
+              }
+            ]
+          : [],
       openWindow: async (url: string) => {
         openedWindows.push(url);
         return undefined;
       }
     }
   };
-  vm.runInNewContext(source, {
+  if (metadata) {
+    Object.assign(workerSelf, {
+      indexedDB: fakeIndexedDb(metadata)
+    });
+  }
+  const context = vm.createContext({
     self: workerSelf,
     TextEncoder,
     URL,
     console
   });
-  return { listeners, notifications, openedWindows };
+  vm.runInContext(source, context);
+  if (metadata) {
+    metadata.record = vm.runInContext(
+      `JSON.parse(${JSON.stringify(JSON.stringify(installationRecord))})`,
+      context
+    );
+  }
+  return {
+    listeners,
+    notifications,
+    openedWindows,
+    reconciliationMessages,
+    ...(metadata ? { metadata } : {})
+  };
+}
+
+function fakeIndexedDb(state: FakeIndexedDbState) {
+  return {
+    open(_name: string, version?: number) {
+      state.openVersions.push(version);
+      const request: {
+        result?: ReturnType<typeof fakeDatabase>;
+        error?: Error;
+        onblocked?: () => void;
+        onerror?: () => void;
+        onsuccess?: () => void;
+        onupgradeneeded?: () => void;
+      } = {};
+      queueMicrotask(() => {
+        request.result = fakeDatabase(state);
+        request.onsuccess?.();
+      });
+      return request;
+    }
+  };
+}
+
+function fakeDatabase(state: FakeIndexedDbState) {
+  return {
+    objectStoreNames: {
+      contains: () => true
+    },
+    onversionchange: undefined as (() => void) | undefined,
+    close() {},
+    createObjectStore() {},
+    transaction() {
+      let pendingRecord: unknown;
+      const transaction: {
+        error?: Error;
+        onabort?: () => void;
+        oncomplete?: () => void;
+        onerror?: () => void;
+        objectStore: () => {
+          get: () => {
+            result?: unknown;
+            onsuccess?: () => void;
+          };
+          put: (value: unknown) => void;
+        };
+      } = {
+        objectStore: () => ({
+          get: () => {
+            const request: {
+              result?: unknown;
+              onsuccess?: () => void;
+            } = {};
+            queueMicrotask(() => {
+              request.result = state.record;
+              request.onsuccess?.();
+              queueMicrotask(() => {
+                if (pendingRecord !== undefined) {
+                  state.record = pendingRecord;
+                }
+                transaction.oncomplete?.();
+              });
+            });
+            return request;
+          },
+          put: (value: unknown) => {
+            pendingRecord = value;
+          }
+        })
+      };
+      return transaction;
+    }
+  };
 }

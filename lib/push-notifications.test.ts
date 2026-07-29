@@ -5,10 +5,13 @@ import {
   applicationServerKeyBytes,
   currentWebPushDeviceReady,
   deriveBrowserPushViewState,
+  parseWebPushDeviceMutation,
+  parseWebPushRevokeMutation,
   parseWebPushSubscriptionsState,
   serializeWebPushRegistration,
   webPushDeviceNeedsReconciliation,
-  webPushFeatureSupport
+  webPushFeatureSupport,
+  webPushSubscriptionMatchesInput
 } from "./push-notifications.ts";
 
 const applicationKeyAgreement = createECDH("prime256v1");
@@ -20,6 +23,7 @@ subscriptionKeyAgreement.generateKeys();
 const p256dh = subscriptionKeyAgreement.getPublicKey();
 const auth = Buffer.alloc(16, 7);
 const installationId = "01900000-0000-7000-8000-000000000001";
+const otherInstallationId = "01900000-0000-7000-8000-000000000002";
 const timestamp = "2026-07-29T12:00:00.000Z";
 
 test("detects every Web Push runtime boundary without prompting", () => {
@@ -174,6 +178,36 @@ test("strictly parses a redacted subscriptions state", () => {
   );
 });
 
+test("mutation responses must belong to the requested installation", () => {
+  const device = validState().devices[0];
+  assert.deepEqual(
+    parseWebPushDeviceMutation(device, installationId),
+    device
+  );
+  assert.throws(
+    () => parseWebPushDeviceMutation(device, otherInstallationId),
+    /некорректное состояние Web Push/u
+  );
+
+  const revokeResult = {
+    installationId,
+    status: "REVOKED",
+    revoked: true
+  };
+  assert.deepEqual(
+    parseWebPushRevokeMutation(revokeResult, installationId),
+    revokeResult
+  );
+  assert.throws(
+    () =>
+      parseWebPushRevokeMutation(
+        revokeResult,
+        otherInstallationId
+      ),
+    /некорректное состояние Web Push/u
+  );
+});
+
 test("serializes only the exact browser subscription contract", () => {
   const command = serializeWebPushRegistration({
     label: "  Рабочий Mac  ",
@@ -203,6 +237,35 @@ test("serializes only the exact browser subscription contract", () => {
   });
   assert.equal("userId" in command, false);
   assert.equal("sessionFamilyId" in command, false);
+});
+
+test("binds reconciliation completion to the sent local subscription", () => {
+  const sentSubscription = pushSubscription(
+    "https://push.example.test/subscriptions/sent"
+  );
+  const command = serializeWebPushRegistration({
+    label: "Рабочий Mac",
+    intent: "RECONCILE",
+    applicationServerKeyVersion: 1,
+    subscription: sentSubscription
+  });
+
+  assert.equal(
+    webPushSubscriptionMatchesInput(
+      sentSubscription,
+      command.subscription
+    ),
+    true
+  );
+  assert.equal(
+    webPushSubscriptionMatchesInput(
+      pushSubscription(
+        "https://push.example.test/subscriptions/rotated"
+      ),
+      command.subscription
+    ),
+    false
+  );
 });
 
 test("converts only canonical uncompressed VAPID keys", () => {
@@ -240,5 +303,15 @@ function validState() {
         version: 1
       }
     ]
+  };
+}
+
+function pushSubscription(endpoint: string) {
+  return {
+    endpoint,
+    expirationTime: null,
+    getKey(name: "p256dh" | "auth") {
+      return Uint8Array.from(name === "p256dh" ? p256dh : auth).buffer;
+    }
   };
 }

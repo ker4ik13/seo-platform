@@ -1616,7 +1616,7 @@ svg { display: block; }
 .browser-device-copy strong { font-size: 12px; overflow-wrap: anywhere; }
 .browser-device-copy small { color: var(--muted); display: block; font-size: 11px; line-height: 1.45; margin-top: 4px; overflow-wrap: anywhere; }
 .current-device-badge,
-.browser-device-status { border-radius: 999px; font-size: 10px; font-weight: 700; padding: 2px 6px; }
+.browser-device-status { border-radius: 999px; font-size: 11px; font-weight: 700; padding: 2px 6px; }
 .current-device-badge { background: #eeecff; color: var(--brand); }
 .browser-device-status.active { background: #e6f7ef; color: #17734e; }
 .browser-device-status.revoked { background: #f1f2f5; color: var(--muted); }
@@ -1873,6 +1873,24 @@ svg { display: block; }
   .browser-device-actions,
   .browser-device-rename { justify-content: flex-start; }
   .browser-device-rename input { width: min(320px, 60vw); }
+  .browser-push-heading p,
+  .browser-push-current p,
+  .browser-push-current > span,
+  .browser-push-card > p,
+  .browser-device-empty p,
+  .browser-device-copy small,
+  .browser-push-test small,
+  .browser-push-card .inline-alert {
+    font-size: 13px;
+  }
+  .browser-push-card .secondary-button,
+  .browser-push-card .text-button,
+  .browser-push-card .inline-alert-action {
+    align-items: center;
+    display: inline-flex;
+    min-height: 44px;
+  }
+  .browser-device-rename input { min-height: 44px; }
   .notification-savebar,
   .settings-savebar { bottom: calc(74px + env(safe-area-inset-bottom)); flex-wrap: wrap; }
   .notification-savebar > span,
@@ -2053,7 +2071,7 @@ svg { display: block; }
   .browser-push-current .secondary-button,
   .browser-push-test .secondary-button { width: 100%; }
   .browser-device-actions { align-items: stretch; flex-direction: column; }
-  .browser-device-actions .text-button { min-height: 36px; text-align: left; }
+  .browser-device-actions .text-button { min-height: 44px; text-align: left; }
   .browser-device-rename { align-items: stretch; flex-direction: column; }
   .browser-device-rename input { min-height: 44px; width: 100%; }
   .browser-push-error { align-items: flex-start; flex-direction: column; }

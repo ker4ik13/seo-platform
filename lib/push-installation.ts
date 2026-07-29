@@ -1,15 +1,15 @@
 const DATABASE_NAME = "seo-platform-device";
-const DATABASE_VERSION = 1;
 const STORE_NAME = "metadata";
 const INSTALLATION_KEY = "web-push-installation-v1";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 export interface PushInstallationRecord {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly installationId: string;
   readonly ownerUserId: string;
-  readonly reconcileRequired: boolean;
+  readonly reconcileGeneration: number;
+  readonly reconciledGeneration: number;
   readonly updatedAt: string;
 }
 
@@ -21,16 +21,18 @@ export interface PushInstallationBinding {
 
 export class PushInstallationStorageError extends Error {
   public readonly code:
-    | "UNAVAILABLE"
-    | "BLOCKED"
-    | "INVALID_RECORD"
-    | "STALE_RECORD";
+      | "UNAVAILABLE"
+      | "BLOCKED"
+      | "INVALID_RECORD"
+      | "FUTURE_VERSION"
+      | "STALE_RECORD";
 
   public constructor(
     code:
       | "UNAVAILABLE"
       | "BLOCKED"
       | "INVALID_RECORD"
+      | "FUTURE_VERSION"
       | "STALE_RECORD",
     message: string
   ) {
@@ -56,20 +58,27 @@ export function reconcilePushInstallationRecord(
     };
   }
   const record: PushInstallationRecord = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     installationId: canonicalInstallationId(createInstallationId()),
     ownerUserId,
-    reconcileRequired: true,
+    reconcileGeneration: 1,
+    reconciledGeneration: 0,
     updatedAt: canonicalTimestamp(now())
   };
   return { record, ownerConflict: false, created: true };
 }
 
-export function withPushReconciliation(
+export function pushReconciliationRequired(
+  record: PushInstallationRecord
+): boolean {
+  assertPushInstallationRecord(record);
+  return record.reconciledGeneration < record.reconcileGeneration;
+}
+
+export function withRequestedPushReconciliation(
   current: PushInstallationRecord,
   expectedOwnerUserId: string,
   expectedInstallationId: string,
-  reconcileRequired: boolean,
   now: () => string
 ): PushInstallationRecord {
   assertPushInstallationRecord(current);
@@ -82,10 +91,55 @@ export function withPushReconciliation(
       "Локальная регистрация изменилась в другой вкладке"
     );
   }
+  if (current.reconcileGeneration >= Number.MAX_SAFE_INTEGER) {
+    invalidRecord();
+  }
   return {
     ...current,
-    reconcileRequired,
+    reconcileGeneration: current.reconcileGeneration + 1,
     updatedAt: canonicalTimestamp(now())
+  };
+}
+
+export function withCompletedPushReconciliation(
+  current: PushInstallationRecord,
+  expectedOwnerUserId: string,
+  expectedInstallationId: string,
+  expectedGeneration: number,
+  now: () => string
+): {
+  readonly record: PushInstallationRecord;
+  readonly cleared: boolean;
+} {
+  assertPushInstallationRecord(current);
+  if (
+    current.ownerUserId !== expectedOwnerUserId ||
+    current.installationId !== expectedInstallationId
+  ) {
+    throw new PushInstallationStorageError(
+      "STALE_RECORD",
+      "Локальная регистрация изменилась в другой вкладке"
+    );
+  }
+  if (
+    !Number.isSafeInteger(expectedGeneration) ||
+    expectedGeneration < 1
+  ) {
+    invalidRecord();
+  }
+  if (current.reconcileGeneration !== expectedGeneration) {
+    return { record: current, cleared: false };
+  }
+  if (current.reconciledGeneration === expectedGeneration) {
+    return { record: current, cleared: true };
+  }
+  return {
+    record: {
+      ...current,
+      reconciledGeneration: expectedGeneration,
+      updatedAt: canonicalTimestamp(now())
+    },
+    cleared: true
   };
 }
 
@@ -102,11 +156,13 @@ export async function loadOrCreatePushInstallation(
   );
 }
 
-export async function markPushReconciliation(
+export async function requestPushReconciliation(
   ownerUserId: string,
-  installationId: string,
-  reconcileRequired: boolean
-): Promise<PushInstallationRecord> {
+  installationId: string
+): Promise<{
+  readonly record: PushInstallationRecord;
+  readonly generation: number;
+}> {
   const result = await mutateRecord((current) => {
     if (!current) {
       throw new PushInstallationStorageError(
@@ -114,27 +170,63 @@ export async function markPushReconciliation(
         "Локальная регистрация устройства не найдена"
       );
     }
-    const record = withPushReconciliation(
+    const record = withRequestedPushReconciliation(
       current,
       ownerUserId,
       installationId,
-      reconcileRequired,
       () => new Date().toISOString()
     );
-    return { record, ownerConflict: false, created: true };
+    return { record, ownerConflict: false, created: false };
   });
-  return result.record;
+  return {
+    record: result.record,
+    generation: result.record.reconcileGeneration
+  };
 }
 
-export async function rotatePushInstallationOwner(
+export async function completePushReconciliation(
+  ownerUserId: string,
+  installationId: string,
+  expectedGeneration: number
+): Promise<{
+  readonly record: PushInstallationRecord;
+  readonly cleared: boolean;
+}> {
+  let cleared = false;
+  const result = await mutateRecord((current) => {
+    if (!current) {
+      throw new PushInstallationStorageError(
+        "STALE_RECORD",
+        "Локальная регистрация устройства не найдена"
+      );
+    }
+    const completion = withCompletedPushReconciliation(
+      current,
+      ownerUserId,
+      installationId,
+      expectedGeneration,
+      () => new Date().toISOString()
+    );
+    cleared = completion.cleared;
+    return {
+      record: completion.record,
+      ownerConflict: false,
+      created: false
+    };
+  });
+  return { record: result.record, cleared };
+}
+
+export async function resetPushInstallationRecord(
   ownerUserId: string
 ): Promise<PushInstallationRecord> {
   assertUuid(ownerUserId, "ownerUserId");
   const record: PushInstallationRecord = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     installationId: createInstallationId(),
     ownerUserId,
-    reconcileRequired: true,
+    reconcileGeneration: 1,
+    reconciledGeneration: 0,
     updatedAt: new Date().toISOString()
   };
   await writeRecord(record);
@@ -148,7 +240,14 @@ async function mutateRecord(
 ): Promise<PushInstallationBinding> {
   const database = await openDatabase();
   return new Promise((resolve, reject) => {
-    const transaction = database.transaction(STORE_NAME, "readwrite");
+    let transaction: IDBTransaction;
+    try {
+      transaction = database.transaction(STORE_NAME, "readwrite");
+    } catch (error) {
+      database.close();
+      reject(storageFailure(error));
+      return;
+    }
     const store = transaction.objectStore(STORE_NAME);
     const request = store.get(INSTALLATION_KEY);
     let result: PushInstallationBinding | undefined;
@@ -160,9 +259,7 @@ async function mutateRecord(
             ? undefined
             : parsePushInstallationRecord(request.result);
         result = mutation(current);
-        if (result.created || result.record !== current) {
-          store.put(result.record, INSTALLATION_KEY);
-        }
+        store.put(result.record, INSTALLATION_KEY);
       } catch (error) {
         failure = error;
         transaction.abort();
@@ -194,8 +291,15 @@ async function writeRecord(record: PushInstallationRecord): Promise<void> {
   assertPushInstallationRecord(record);
   const database = await openDatabase();
   return new Promise((resolve, reject) => {
-    const transaction = database.transaction(STORE_NAME, "readwrite");
-    transaction.objectStore(STORE_NAME).put(record, INSTALLATION_KEY);
+    let transaction: IDBTransaction;
+    try {
+      transaction = database.transaction(STORE_NAME, "readwrite");
+      transaction.objectStore(STORE_NAME).put(record, INSTALLATION_KEY);
+    } catch (error) {
+      database.close();
+      reject(storageFailure(error));
+      return;
+    }
     transaction.oncomplete = () => {
       database.close();
       resolve();
@@ -221,19 +325,30 @@ function openDatabase(): Promise<IDBDatabase> {
     );
   }
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DATABASE_NAME, DATABASE_VERSION);
+    const request = indexedDB.open(DATABASE_NAME);
+    let settled = false;
+    const rejectOnce = (error: PushInstallationStorageError) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(STORE_NAME)) {
         request.result.createObjectStore(STORE_NAME);
       }
     };
     request.onsuccess = () => {
+      if (settled) {
+        request.result.close();
+        return;
+      }
+      settled = true;
       request.result.onversionchange = () => request.result.close();
       resolve(request.result);
     };
-    request.onerror = () => reject(storageFailure(request.error));
+    request.onerror = () => rejectOnce(storageFailure(request.error));
     request.onblocked = () =>
-      reject(
+      rejectOnce(
         new PushInstallationStorageError(
           "BLOCKED",
           "Закройте другие вкладки приложения и повторите попытку"
@@ -242,7 +357,9 @@ function openDatabase(): Promise<IDBDatabase> {
   });
 }
 
-function parsePushInstallationRecord(value: unknown): PushInstallationRecord {
+export function parsePushInstallationRecord(
+  value: unknown
+): PushInstallationRecord {
   if (
     typeof value !== "object" ||
     value === null ||
@@ -251,29 +368,44 @@ function parsePushInstallationRecord(value: unknown): PushInstallationRecord {
     invalidRecord();
   }
   const record = value as Readonly<Record<string, unknown>>;
+  if (
+    typeof record.schemaVersion === "number" &&
+    record.schemaVersion > 2
+  ) {
+    throw new PushInstallationStorageError(
+      "FUTURE_VERSION",
+      "Локальная регистрация создана более новой версией приложения"
+    );
+  }
+  if (record.schemaVersion === 1) {
+    return migrateVersionOneRecord(record);
+  }
   const keys = Object.keys(record);
   if (
-    keys.length !== 5 ||
+    keys.length !== 6 ||
     ![
       "schemaVersion",
       "installationId",
       "ownerUserId",
-      "reconcileRequired",
+      "reconcileGeneration",
+      "reconciledGeneration",
       "updatedAt"
     ].every((key) => keys.includes(key)) ||
-    record.schemaVersion !== 1 ||
+    record.schemaVersion !== 2 ||
     typeof record.installationId !== "string" ||
     typeof record.ownerUserId !== "string" ||
-    typeof record.reconcileRequired !== "boolean" ||
+    typeof record.reconcileGeneration !== "number" ||
+    typeof record.reconciledGeneration !== "number" ||
     typeof record.updatedAt !== "string"
   ) {
     invalidRecord();
   }
   const parsed: PushInstallationRecord = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     installationId: record.installationId,
     ownerUserId: record.ownerUserId,
-    reconcileRequired: record.reconcileRequired,
+    reconcileGeneration: record.reconcileGeneration,
+    reconciledGeneration: record.reconciledGeneration,
     updatedAt: record.updatedAt
   };
   assertPushInstallationRecord(parsed);
@@ -284,13 +416,50 @@ function assertPushInstallationRecord(
   record: PushInstallationRecord
 ): void {
   if (
-    record.schemaVersion !== 1 ||
+    record.schemaVersion !== 2 ||
     !UUID_PATTERN.test(record.installationId) ||
     !UUID_PATTERN.test(record.ownerUserId) ||
+    !Number.isSafeInteger(record.reconcileGeneration) ||
+    record.reconcileGeneration < 0 ||
+    !Number.isSafeInteger(record.reconciledGeneration) ||
+    record.reconciledGeneration < 0 ||
+    record.reconciledGeneration > record.reconcileGeneration ||
     !isIsoTimestamp(record.updatedAt)
   ) {
     invalidRecord();
   }
+}
+
+function migrateVersionOneRecord(
+  record: Readonly<Record<string, unknown>>
+): PushInstallationRecord {
+  const keys = Object.keys(record);
+  if (
+    keys.length !== 5 ||
+    ![
+      "schemaVersion",
+      "installationId",
+      "ownerUserId",
+      "reconcileRequired",
+      "updatedAt"
+    ].every((key) => keys.includes(key)) ||
+    typeof record.installationId !== "string" ||
+    typeof record.ownerUserId !== "string" ||
+    typeof record.reconcileRequired !== "boolean" ||
+    typeof record.updatedAt !== "string"
+  ) {
+    invalidRecord();
+  }
+  const migrated: PushInstallationRecord = {
+    schemaVersion: 2,
+    installationId: record.installationId,
+    ownerUserId: record.ownerUserId,
+    reconcileGeneration: record.reconcileRequired ? 1 : 0,
+    reconciledGeneration: 0,
+    updatedAt: record.updatedAt
+  };
+  assertPushInstallationRecord(migrated);
+  return migrated;
 }
 
 function createInstallationId(): string {

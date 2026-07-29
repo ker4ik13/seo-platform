@@ -19,11 +19,13 @@ import {
   unsubscribeCurrentBrowserPush
 } from "../lib/browser-push";
 import {
+  completePushReconciliation,
   loadOrCreatePushInstallation,
-  markPushReconciliation,
+  pushReconciliationRequired,
   PushInstallationStorageError,
-  type PushInstallationRecord,
-  rotatePushInstallationOwner
+  requestPushReconciliation,
+  resetPushInstallationRecord,
+  type PushInstallationRecord
 } from "../lib/push-installation";
 import {
   currentWebPushDeviceReady,
@@ -31,12 +33,13 @@ import {
   detectWebPushFeatureSupport,
   type WebPushFeatureSupport,
   type WebPushUnsupportedReason,
-  parseWebPushDeviceSummary,
-  parseWebPushRevokeResult,
+  parseWebPushDeviceMutation,
+  parseWebPushRevokeMutation,
   parseWebPushSubscriptionsState,
   serializeWebPushRegistration,
   serializeWebPushRename,
-  webPushDeviceNeedsReconciliation
+  webPushDeviceNeedsReconciliation,
+  webPushSubscriptionMatchesInput
 } from "../lib/push-notifications";
 
 const PUSH_SUBSCRIPTIONS_PATH = "/app/api/me/push-subscriptions";
@@ -50,6 +53,14 @@ type PushOperation =
   | { readonly kind: "resetting" }
   | { readonly kind: "renaming"; readonly installationId: string }
   | { readonly kind: "revoking"; readonly installationId: string };
+
+interface PushErrorPresentation {
+  readonly message: string;
+  readonly action?: {
+    readonly label: string;
+    readonly href: string;
+  };
+}
 
 export function BrowserPushSettings({
   userId,
@@ -65,10 +76,12 @@ export function BrowserPushSettings({
     useState<WebPushFeatureSupport>(INITIAL_FEATURE_SUPPORT);
   const [ownerConflict, setOwnerConflict] = useState(false);
   const [localSubscription, setLocalSubscription] = useState(false);
+  const [storageRecoveryRequired, setStorageRecoveryRequired] =
+    useState(false);
   const [online, setOnline] = useState(true);
   const [loading, setLoading] = useState(true);
   const [operation, setOperation] = useState<PushOperation>();
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<PushErrorPresentation>();
   const [retryVersion, setRetryVersion] = useState(0);
   const [editingId, setEditingId] = useState<string>();
   const [labelDraft, setLabelDraft] = useState("");
@@ -90,6 +103,7 @@ export function BrowserPushSettings({
     setFeatureSupport(support);
     setLoading(true);
     setError(undefined);
+    setStorageRecoveryRequired(false);
 
     const loadServer = browserApiRequest<unknown>(
       PUSH_SUBSCRIPTIONS_PATH,
@@ -108,7 +122,7 @@ export function BrowserPushSettings({
         if (serverResult.status === "fulfilled") {
           setState(serverResult.value);
         } else {
-          setError(pushErrorMessage(serverResult.reason));
+          setError(pushErrorPresentation(serverResult.reason));
         }
         if (browserResult.status === "fulfilled" && browserResult.value) {
           const [binding, subscription] = browserResult.value;
@@ -116,7 +130,13 @@ export function BrowserPushSettings({
           setOwnerConflict(binding.ownerConflict);
           setLocalSubscription(Boolean(subscription));
         } else if (browserResult.status === "rejected") {
-          setError(pushErrorMessage(browserResult.reason));
+          setInstallation(undefined);
+          setOwnerConflict(false);
+          setLocalSubscription(false);
+          setStorageRecoveryRequired(
+            isRecoverablePushStorageError(browserResult.reason)
+          );
+          setError(pushErrorPresentation(browserResult.reason));
         }
         setLoading(false);
       }
@@ -126,22 +146,44 @@ export function BrowserPushSettings({
 
   useEffect(() => {
     if (!featureSupport.supported) return;
+    let active = true;
     const onServiceWorkerMessage = (event: MessageEvent<unknown>) => {
       if (!isPushReconciliationMessage(event.data)) return;
-      setInstallation((current) =>
-        current ? { ...current, reconcileRequired: true } : current
-      );
+      const { generation } = event.data;
+      void loadOrCreatePushInstallation(userId)
+        .then((binding) => {
+          if (!active || binding.ownerConflict) return;
+          setInstallation((current) => {
+            if (
+              !current ||
+              current.installationId !== binding.record.installationId ||
+              binding.record.reconcileGeneration < generation
+            ) {
+              return current;
+            }
+            return binding.record;
+          });
+        })
+        .catch((storageError: unknown) => {
+          if (!active) return;
+          if (isRecoverablePushStorageError(storageError)) {
+            setStorageRecoveryRequired(true);
+          }
+          setError(pushErrorPresentation(storageError));
+        });
     };
     navigator.serviceWorker.addEventListener(
       "message",
       onServiceWorkerMessage
     );
-    return () =>
+    return () => {
+      active = false;
       navigator.serviceWorker.removeEventListener(
         "message",
         onServiceWorkerMessage
       );
-  }, [featureSupport.supported]);
+    };
+  }, [featureSupport.supported, userId]);
 
   const currentDevice = useMemo(
     () =>
@@ -165,7 +207,7 @@ export function BrowserPushSettings({
   const currentDeviceNeedsReconciliation = webPushDeviceNeedsReconciliation(
     currentDevice,
     state?.registration,
-    installation?.reconcileRequired ?? false
+    installation ? pushReconciliationRequired(installation) : false
   );
   const viewState = deriveBrowserPushViewState({
     loading,
@@ -213,7 +255,7 @@ export function BrowserPushSettings({
             "Браузер не подтвердил обновление истёкшей подписки"
           );
         }
-        targetInstallation = await rotatePushInstallationOwner(userId);
+        targetInstallation = await resetPushInstallationRecord(userId);
         setInstallation(targetInstallation);
         setLocalSubscription(false);
       }
@@ -221,37 +263,60 @@ export function BrowserPushSettings({
         state.registration.applicationServerKey
       );
       setLocalSubscription(true);
-      const pending = await markPushReconciliation(
+      const requestBody = serializeWebPushRegistration({
+        label: storedDevice?.label ?? "Этот браузер",
+        intent:
+          storedDevice?.status === "ACTIVE" ? "RECONCILE" : "ENABLE",
+        applicationServerKeyVersion:
+          state.registration.applicationServerKeyVersion,
+        subscription
+      });
+      const pending = await requestPushReconciliation(
         userId,
-        targetInstallation.installationId,
-        true
+        targetInstallation.installationId
       );
-      setInstallation(pending);
+      setInstallation(pending.record);
       const rawDevice = await browserApiRequest<unknown>(
         `${PUSH_SUBSCRIPTIONS_PATH}/${encodeURIComponent(targetInstallation.installationId)}`,
         {
           method: "PUT",
-          body: serializeWebPushRegistration({
-            label: storedDevice?.label ?? "Этот браузер",
-            intent:
-              storedDevice?.status === "ACTIVE" ? "RECONCILE" : "ENABLE",
-            applicationServerKeyVersion:
-              state.registration.applicationServerKeyVersion,
-            subscription
-          })
+          body: requestBody
         }
       );
-      const device = parseWebPushDeviceSummary(rawDevice);
+      const device = parseWebPushDeviceMutation(
+        rawDevice,
+        targetInstallation.installationId
+      );
       setState((current) =>
         current ? withPushDevice(current, device) : current
       );
-      setInstallation(
-        await markPushReconciliation(
-          userId,
-          targetInstallation.installationId,
-          false
+      const currentSubscription = await currentBrowserPushSubscription();
+      setLocalSubscription(Boolean(currentSubscription));
+      if (
+        !currentSubscription ||
+        !webPushSubscriptionMatchesInput(
+          currentSubscription,
+          requestBody.subscription
         )
+      ) {
+        setError({
+          message:
+            "Сервер сохранил отправленную подписку, но браузер уже успел изменить её. Выполните синхронизацию ещё раз."
+        });
+        return;
+      }
+      const completion = await completePushReconciliation(
+        userId,
+        targetInstallation.installationId,
+        pending.generation
       );
+      setInstallation(completion.record);
+      if (!completion.cleared) {
+        setError({
+          message:
+            "Подписка изменилась в другой вкладке или Service Worker. Выполните синхронизацию ещё раз."
+        });
+      }
     } catch (requestError) {
       if (
         requestError instanceof BrowserApiError &&
@@ -259,7 +324,7 @@ export function BrowserPushSettings({
       ) {
         setOwnerConflict(true);
       }
-      setError(pushErrorMessage(requestError));
+      setError(pushErrorPresentation(requestError));
     } finally {
       setOperation(undefined);
       setFeatureSupport(detectWebPushFeatureSupport());
@@ -270,7 +335,9 @@ export function BrowserPushSettings({
     if (operation || !featureSupport.supported) return;
     if (
       !window.confirm(
-        "Локальная push-подписка прежнего аккаунта будет удалена из этого браузера. Продолжить?"
+        storageRecoveryRequired
+          ? "Локальная push-подписка будет удалена, а повреждённая или более новая регистрация заменена новым идентификатором. Продолжить?"
+          : "Локальная push-подписка прежнего аккаунта будет удалена из этого браузера. Продолжить?"
       )
     ) {
       return;
@@ -281,12 +348,13 @@ export function BrowserPushSettings({
       if (!(await unsubscribeCurrentBrowserPush())) {
         throw new Error("Браузер не подтвердил удаление локальной подписки");
       }
-      const record = await rotatePushInstallationOwner(userId);
+      const record = await resetPushInstallationRecord(userId);
       setInstallation(record);
       setOwnerConflict(false);
       setLocalSubscription(false);
+      setStorageRecoveryRequired(false);
     } catch (requestError) {
-      setError(pushErrorMessage(requestError));
+      setError(pushErrorPresentation(requestError));
     } finally {
       setOperation(undefined);
     }
@@ -305,14 +373,17 @@ export function BrowserPushSettings({
           body: serializeWebPushRename(labelDraft)
         }
       );
-      const renamed = parseWebPushDeviceSummary(rawDevice);
+      const renamed = parseWebPushDeviceMutation(
+        rawDevice,
+        device.installationId
+      );
       setState((current) =>
         current ? withPushDevice(current, renamed) : current
       );
       setEditingId(undefined);
       setLabelDraft("");
     } catch (requestError) {
-      setError(pushErrorMessage(requestError));
+      setError(pushErrorPresentation(requestError));
       if (
         requestError instanceof BrowserApiError &&
         requestError.code === "VERSION_CONFLICT"
@@ -340,7 +411,7 @@ export function BrowserPushSettings({
         `${PUSH_SUBSCRIPTIONS_PATH}/${encodeURIComponent(device.installationId)}`,
         { method: "DELETE" }
       );
-      parseWebPushRevokeResult(rawResult);
+      parseWebPushRevokeMutation(rawResult, device.installationId);
 
       const warnings: string[] = [];
       if (isCurrent && featureSupport.supported) {
@@ -358,9 +429,10 @@ export function BrowserPushSettings({
           );
         }
         try {
-          const record = await rotatePushInstallationOwner(userId);
+          const record = await resetPushInstallationRecord(userId);
           setInstallation(record);
           setOwnerConflict(false);
+          setStorageRecoveryRequired(false);
         } catch {
           warnings.push(
             "Не удалось обновить локальный идентификатор; серверная подписка уже отозвана."
@@ -377,9 +449,11 @@ export function BrowserPushSettings({
           "Устройство отозвано, но список не обновился. Перезагрузите его повторно."
         );
       }
-      setError(warnings.length ? warnings.join(" ") : undefined);
+      setError(
+        warnings.length ? { message: warnings.join(" ") } : undefined
+      );
     } catch (requestError) {
-      setError(pushErrorMessage(requestError));
+      setError(pushErrorPresentation(requestError));
     } finally {
       setOperation(undefined);
     }
@@ -402,16 +476,20 @@ export function BrowserPushSettings({
             <p>Список устройств временно недоступен.</p>
           </div>
         </header>
-        <div className="browser-push-error inline-alert danger" role="alert">
-          <span>{error ?? "Не удалось загрузить состояние Web Push."}</span>
-          <button
-            className="inline-alert-action"
-            onClick={() => setRetryVersion((value) => value + 1)}
-            type="button"
-          >
-            Повторить
-          </button>
-        </div>
+        <PushErrorAlert
+          error={
+            error ?? {
+              message: "Не удалось загрузить состояние Web Push."
+            }
+          }
+          onRetry={() => setRetryVersion((value) => value + 1)}
+        />
+        {storageRecoveryRequired && (
+          <BrowserPushStorageRecovery
+            busy={operation?.kind === "resetting"}
+            onReset={() => void resetBrowserOwner()}
+          />
+        )}
       </section>
     );
   }
@@ -446,33 +524,35 @@ export function BrowserPushSettings({
         </div>
       )}
       {error && (
-        <div className="browser-push-error inline-alert danger compact" role="alert">
-          <span>{error}</span>
-          <button
-            className="inline-alert-action"
-            onClick={() => setRetryVersion((value) => value + 1)}
-            type="button"
-          >
-            Повторить
-          </button>
-        </div>
+        <PushErrorAlert
+          compact
+          error={error}
+          onRetry={() => setRetryVersion((value) => value + 1)}
+        />
       )}
 
-      <BrowserPushCurrentState
-        featureSupport={featureSupport}
-        onRegister={() => {
-          if (installation) {
-            void registerCurrentBrowser();
-          } else {
-            setRetryVersion((value) => value + 1);
-          }
-        }}
-        onRefresh={() => setRetryVersion((value) => value + 1)}
-        onResetOwner={() => void resetBrowserOwner()}
-        operation={operation}
-        reconcileRequired={currentDeviceNeedsReconciliation}
-        viewState={viewState}
-      />
+      {storageRecoveryRequired ? (
+        <BrowserPushStorageRecovery
+          busy={operation?.kind === "resetting"}
+          onReset={() => void resetBrowserOwner()}
+        />
+      ) : (
+        <BrowserPushCurrentState
+          featureSupport={featureSupport}
+          onRegister={() => {
+            if (installation) {
+              void registerCurrentBrowser();
+            } else {
+              setRetryVersion((value) => value + 1);
+            }
+          }}
+          onRefresh={() => setRetryVersion((value) => value + 1)}
+          onResetOwner={() => void resetBrowserOwner()}
+          operation={operation}
+          reconcileRequired={currentDeviceNeedsReconciliation}
+          viewState={viewState}
+        />
+      )}
 
       {state.devices.length ? (
         <ul className="browser-device-list">
@@ -592,6 +672,67 @@ export function BrowserPushSettings({
         </small>
       </div>
     </section>
+  );
+}
+
+function PushErrorAlert({
+  compact = false,
+  error,
+  onRetry
+}: Readonly<{
+  compact?: boolean;
+  error: PushErrorPresentation;
+  onRetry: () => void;
+}>) {
+  return (
+    <div
+      className={`browser-push-error inline-alert danger${compact ? " compact" : ""}`}
+      role="alert"
+    >
+      <span>{error.message}</span>
+      {error.action ? (
+        <a className="inline-alert-action" href={error.action.href}>
+          {error.action.label}
+        </a>
+      ) : (
+        <button
+          className="inline-alert-action"
+          onClick={onRetry}
+          type="button"
+        >
+          Повторить
+        </button>
+      )}
+    </div>
+  );
+}
+
+function BrowserPushStorageRecovery({
+  busy,
+  onReset
+}: Readonly<{
+  busy: boolean;
+  onReset: () => void;
+}>) {
+  return (
+    <div className="browser-push-current conflict">
+      <div>
+        <strong>Локальная регистрация требует сброса</strong>
+        <p>
+          Браузерное состояние повреждено или создано более новой версией
+          приложения. После подтверждения мы удалим локальную подписку и
+          заменим только запись этого устройства новым идентификатором.
+        </p>
+      </div>
+      <button
+        className="secondary-button"
+        disabled={busy}
+        onClick={onReset}
+        type="button"
+      >
+        {busy ? "Сбрасываем…" : "Сбросить локальную регистрацию"}
+      </button>
+    </div>
   );
 }
 
@@ -893,7 +1034,7 @@ function unsupportedReasonMessage(value: WebPushUnsupportedReason): string {
   return messages[value];
 }
 
-function pushErrorMessage(error: unknown): string {
+function pushErrorPresentation(error: unknown): PushErrorPresentation {
   if (error instanceof BrowserApiError) {
     const messages: Readonly<Record<string, string>> = {
       VAPID_KEY_VERSION_CHANGED:
@@ -907,28 +1048,51 @@ function pushErrorMessage(error: unknown): string {
       VERSION_CONFLICT:
         "Устройство изменилось в другой вкладке. Список будет обновлён.",
       WEB_PUSH_UNAVAILABLE:
-        "Регистрация Web Push временно недоступна на сервере.",
-      REAUTHENTICATION_REQUIRED:
-        "Для подключения браузера подтвердите вход ещё раз."
+        "Регистрация Web Push временно недоступна на сервере."
     };
-    return messages[error.code] ?? error.message;
+    if (error.code === "REAUTHENTICATION_REQUIRED") {
+      return {
+        message: "Для подключения браузера подтвердите вход ещё раз.",
+        action: {
+          label: "Подтвердить вход",
+          href: "/app/login?returnTo=%2Fapp%2Fsettings%2Fnotifications"
+        }
+      };
+    }
+    return { message: messages[error.code] ?? error.message };
   }
-  if (error instanceof PushInstallationStorageError) return error.message;
-  if (error instanceof Error) return error.message;
-  return "Не удалось обновить браузерные устройства.";
+  if (error instanceof PushInstallationStorageError) {
+    return { message: error.message };
+  }
+  if (error instanceof Error) return { message: error.message };
+  return { message: "Не удалось обновить браузерные устройства." };
+}
+
+function isRecoverablePushStorageError(error: unknown): boolean {
+  return (
+    error instanceof PushInstallationStorageError &&
+    (error.code === "INVALID_RECORD" || error.code === "FUTURE_VERSION")
+  );
 }
 
 function isPushReconciliationMessage(
   value: unknown
-): value is { readonly type: "WEB_PUSH_RECONCILE_REQUIRED"; readonly version: 1 } {
+): value is {
+  readonly type: "WEB_PUSH_RECONCILE_REQUIRED";
+  readonly version: 2;
+  readonly generation: number;
+} {
   return (
     typeof value === "object" &&
     value !== null &&
     !Array.isArray(value) &&
-    Object.keys(value).length === 2 &&
+    Object.keys(value).length === 3 &&
     "type" in value &&
     value.type === "WEB_PUSH_RECONCILE_REQUIRED" &&
     "version" in value &&
-    value.version === 1
+    value.version === 2 &&
+    "generation" in value &&
+    Number.isSafeInteger(value.generation) &&
+    Number(value.generation) > 0
   );
 }

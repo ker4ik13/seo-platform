@@ -20,7 +20,10 @@ const GENERIC_NOTIFICATIONS = Object.freeze({
 const PUSH_METADATA_DATABASE = "seo-platform-device";
 const PUSH_METADATA_STORE = "metadata";
 const PUSH_INSTALLATION_KEY = "web-push-installation-v1";
-const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/u;
+const FORBIDDEN_TEXT_CHARACTERS =
+  /[\p{Cc}\p{Cf}\u202a-\u202e\u2066-\u2069]/u;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());
@@ -52,10 +55,11 @@ self.addEventListener("notificationclick", (event) => {
 
 self.addEventListener("pushsubscriptionchange", (event) => {
   event.waitUntil(
-    Promise.all([
-      markReconciliationRequired(),
-      notifyVisibleClientsAboutReconciliation()
-    ])
+    markReconciliationRequired().then((generation) =>
+      generation === undefined
+        ? undefined
+        : notifyVisibleClientsAboutReconciliation(generation)
+    )
   );
 });
 
@@ -131,7 +135,7 @@ function safeAppDeepLink(value) {
     typeof value !== "string" ||
     value.length === 0 ||
     value.length > MAX_DEEP_LINK_LENGTH ||
-    CONTROL_CHARACTERS.test(value) ||
+    FORBIDDEN_TEXT_CHARACTERS.test(value) ||
     !value.startsWith("/") ||
     value.startsWith("//")
   ) {
@@ -191,74 +195,97 @@ async function focusOrOpenApp(deepLink) {
   return self.clients.openWindow(targetUrl);
 }
 
-function notifyVisibleClientsAboutReconciliation() {
+function notifyVisibleClientsAboutReconciliation(generation) {
   return self.clients
     .matchAll({ type: "window", includeUncontrolled: true })
     .then((windows) => {
       for (const client of windows) {
         client.postMessage({
           type: "WEB_PUSH_RECONCILE_REQUIRED",
-          version: 1
+          version: 2,
+          generation
         });
       }
     });
 }
 
 function markReconciliationRequired() {
-  if (!("indexedDB" in self)) return Promise.resolve();
+  if (!("indexedDB" in self)) return Promise.resolve(undefined);
   return openMetadataDatabase()
     .then(
       (database) =>
         new Promise((resolve) => {
-          const transaction = database.transaction(
-            PUSH_METADATA_STORE,
-            "readwrite"
-          );
+          let transaction;
+          try {
+            transaction = database.transaction(
+              PUSH_METADATA_STORE,
+              "readwrite"
+            );
+          } catch {
+            database.close();
+            resolve(undefined);
+            return;
+          }
           const store = transaction.objectStore(PUSH_METADATA_STORE);
           const request = store.get(PUSH_INSTALLATION_KEY);
+          let generation;
           request.onsuccess = () => {
-            const record = request.result;
-            if (isPlainObject(record) && record.schemaVersion === 1) {
-              store.put(
-                {
-                  ...record,
-                  reconcileRequired: true,
-                  updatedAt: new Date().toISOString()
-                },
-                PUSH_INSTALLATION_KEY
-              );
+            try {
+              const record = nextReconciliationRecord(request.result);
+              if (record) {
+                generation = record.reconcileGeneration;
+                store.put(record, PUSH_INSTALLATION_KEY);
+              }
+            } catch {
+              transaction.abort();
             }
           };
           transaction.oncomplete = () => {
             database.close();
-            resolve();
+            resolve(generation);
           };
           transaction.onerror = () => {
             database.close();
-            resolve();
+            resolve(undefined);
           };
           transaction.onabort = () => {
             database.close();
-            resolve();
+            resolve(undefined);
           };
         })
     )
     .catch(() => {
       // A foreground reconciliation will retry storage access.
+      return undefined;
     });
 }
 
 function openMetadataDatabase() {
   return new Promise((resolve, reject) => {
-    const request = self.indexedDB.open(PUSH_METADATA_DATABASE, 1);
+    const request = self.indexedDB.open(PUSH_METADATA_DATABASE);
+    let settled = false;
+    const rejectOnce = (error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(PUSH_METADATA_STORE)) {
         request.result.createObjectStore(PUSH_METADATA_STORE);
       }
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-    request.onblocked = () => reject(new Error("Push metadata DB is blocked"));
+    request.onsuccess = () => {
+      if (settled) {
+        request.result.close();
+        return;
+      }
+      settled = true;
+      request.result.onversionchange = () => request.result.close();
+      resolve(request.result);
+    };
+    request.onerror = () => rejectOnce(request.error);
+    request.onblocked = () =>
+      rejectOnce(new Error("Push metadata DB is blocked"));
   });
 }
 
@@ -267,8 +294,94 @@ function isBoundedText(value, maxLength) {
     typeof value === "string" &&
     value.trim().length > 0 &&
     value.length <= maxLength &&
-    !CONTROL_CHARACTERS.test(value)
+    !FORBIDDEN_TEXT_CHARACTERS.test(value)
   );
+}
+
+function nextReconciliationRecord(value) {
+  const current = parseInstallationRecord(value);
+  if (
+    !current ||
+    current.reconcileGeneration >= Number.MAX_SAFE_INTEGER
+  ) {
+    return undefined;
+  }
+  return {
+    ...current,
+    reconcileGeneration: current.reconcileGeneration + 1,
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function parseInstallationRecord(value) {
+  if (!isPlainObject(value)) return undefined;
+  if (value.schemaVersion === 1) {
+    if (
+      !hasExactKeys(value, [
+        "schemaVersion",
+        "installationId",
+        "ownerUserId",
+        "reconcileRequired",
+        "updatedAt"
+      ]) ||
+      typeof value.reconcileRequired !== "boolean" ||
+      !isInstallationIdentity(value)
+    ) {
+      return undefined;
+    }
+    return {
+      schemaVersion: 2,
+      installationId: value.installationId,
+      ownerUserId: value.ownerUserId,
+      reconcileGeneration: value.reconcileRequired ? 1 : 0,
+      reconciledGeneration: 0,
+      updatedAt: value.updatedAt
+    };
+  }
+  if (
+    value.schemaVersion !== 2 ||
+    !hasExactKeys(value, [
+      "schemaVersion",
+      "installationId",
+      "ownerUserId",
+      "reconcileGeneration",
+      "reconciledGeneration",
+      "updatedAt"
+    ]) ||
+    !isInstallationIdentity(value) ||
+    !Number.isSafeInteger(value.reconcileGeneration) ||
+    value.reconcileGeneration < 0 ||
+    !Number.isSafeInteger(value.reconciledGeneration) ||
+    value.reconciledGeneration < 0 ||
+    value.reconciledGeneration > value.reconcileGeneration
+  ) {
+    return undefined;
+  }
+  return value;
+}
+
+function isInstallationIdentity(value) {
+  return (
+    typeof value.installationId === "string" &&
+    UUID_PATTERN.test(value.installationId) &&
+    typeof value.ownerUserId === "string" &&
+    UUID_PATTERN.test(value.ownerUserId) &&
+    typeof value.updatedAt === "string" &&
+    isIsoTimestamp(value.updatedAt)
+  );
+}
+
+function hasExactKeys(value, expectedKeys) {
+  const keys = Object.keys(value);
+  return (
+    keys.length === expectedKeys.length &&
+    expectedKeys.every((key) => keys.includes(key))
+  );
+}
+
+function isIsoTimestamp(value) {
+  const epoch = Date.parse(value);
+  return Number.isFinite(epoch) && new Date(epoch).toISOString() === value;
 }
 
 function isPlainObject(value) {
