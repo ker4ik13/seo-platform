@@ -231,6 +231,41 @@ retention/удаление quarantine и временных объектов п�
 `DIRECTUS_EMAIL_TRANSPORT=smtp`. До этого оба контура остаются работоспособными,
 но не отправляют письма.
 
+## Регистрация browser Web Push
+
+HTTP lifecycle browser-устройств включается отдельно от фактической доставки:
+
+- `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` — отдельный случайный секрет
+  длиной не менее 32 символов только для `platform-api` и `realtime`; он не
+  должен совпадать с `INTERNAL_API_TOKEN`;
+- `WEB_PUSH_VAPID_PUBLIC_KEY` и его immutable
+  `WEB_PUSH_VAPID_KEY_VERSION` описывают только публичный application server
+  key;
+- `WEB_PUSH_ENDPOINT_ORIGINS` — точный allowlist публичных HTTPS origins push
+  services без path, credentials, IP-адресов и нестандартных портов;
+- `WEB_PUSH_SUBSCRIPTION_KEYS` — versioned AES-256-GCM keyring формата
+  `version:base64url-32-byte-key`;
+- `WEB_PUSH_FINGERPRINT_KEYS` — отдельный versioned HMAC-SHA-256 keyring того
+  же формата; material нельзя переиспользовать между keyrings;
+- active версии задаются через
+  `WEB_PUSH_ACTIVE_SUBSCRIPTION_KEY_VERSION` и
+  `WEB_PUSH_ACTIVE_FINGERPRINT_KEY_VERSION`;
+- `WEB_PUSH_MAX_ACTIVE_DEVICES` по умолчанию ограничивает пользователя
+  двадцатью активными browser installations.
+
+Сначала развернуть миграцию, полный набор keyrings и dedicated token с
+`WEB_PUSH_REGISTRATION_ENABLED=false`. После проверки coverage и конфигурации
+переключить только `realtime` на `true`. Отображение `version → key bytes`
+immutable; ротация выполняется expand-first, старую версию нельзя удалять,
+пока она используется активными строками.
+
+VAPID private key намеренно отсутствует в текущих HTTP/API/Web process и в
+этом Compose. Он будет принадлежать отдельному sender process после включения
+durable delivery. Пока `deliveryAvailable=false` и
+`testDeliveryAvailable=false`: регистрация, переименование и отзыв устройства
+не означают, что внешняя доставка работает. Production-зависимости
+`@nats-io/jetstream` и `web-push` ещё не одобрены.
+
 ## Проверка загружаемых файлов
 
 Production upload pipeline запускается Compose profile `inspection`. Он
