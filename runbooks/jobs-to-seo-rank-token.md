@@ -7,16 +7,16 @@ rank-manifest endpoints HTTP-сервиса `seo-data`. Он защищает в
 чтение plaintext keyword chunks и поэтому не заменяется общим
 `INTERNAL_API_TOKEN`.
 
-В текущем deployment consumer-процесс `rank-worker` ещё отсутствует.
-Разрешённый получатель ровно один:
+Разрешённые получатели ровно два:
 
 - `seo-data` HTTP process.
+- отдельный `rank-worker` из image `platform-jobs-integrations`.
 
 Секрет запрещено передавать migration services, `jobs-integrations` HTTP,
 `system-worker`, `import-worker`, `upload-inspection-worker`,
-`connector-worker`, Platform API, Realtime, Web, Admin и Directus. После
-реального появления отдельного `rank-worker` список может быть расширен
-только этим process type с одновременным изменением regression-теста.
+`connector-worker`, Platform API, Realtime, Web, Admin и Directus. Список
+получателей расширяется только через отдельное security review с
+одновременным изменением regression-теста.
 
 ## Создание
 
@@ -54,27 +54,26 @@ node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'
 
    Без `--quiet` команду запускать запрещено: итоговая конфигурация содержит
    раскрытые production secrets.
-4. Развернуть migration, затем только HTTP-процесс `seo-data`. Migration не
-   получает новый secret.
-5. Проверить liveness/readiness `seo-data` и отсутствие restart loop. Пустое,
-   короткое или совпадающее с `INTERNAL_API_TOKEN` значение должно
-   fail-closed остановить production startup.
-6. Пока отдельного `rank-worker` нет, не передавать secret ни одному
-   jobs-процессу. Rank execution остаётся закрытым, а остальные internal
-   SEO endpoints продолжают использовать свою существующую границу.
-7. Повторить те же шаги в production после успешной staging-проверки.
+4. Развернуть Jobs/SEO Data migrations, затем `seo-data` и отдельный
+   `rank-worker`. Migration и Jobs HTTP не получают новый secret.
+5. Проверить liveness/readiness `seo-data`, health `rank-worker` и отсутствие
+   restart loop. Пустое, короткое или совпадающее с другим service token
+   значение должно fail-closed остановить соответствующий production
+   startup.
+6. Убедиться, что `rank-worker` не имеет публичного порта и подключён только
+   к `internal`, а `docker compose config` не добавил ему NATS, S3, SMTP,
+   common internal или credential-vault secrets.
+7. Выполнить тестовую подготовку rank manifest и проверить переход
+   `PREPARING → QUEUED` без вывода keyword chunks/token в logs.
+8. Повторить те же шаги в production после успешной staging-проверки.
 
 ## Ротация
 
-Текущий runtime принимает одно значение без overlap keyring. Пока consumer
-отсутствует, ротация выполняется заменой секрета в Dokploy и rolling restart
-только `seo-data`.
-
-После появления `rank-worker` безопасная zero-downtime ротация потребует
-совместимой поддержки двух токенов или координированного maintenance rollout.
-Нельзя молча менять единственный токен сначала только у producer или только у
-consumer: это создаст частичную недоступность manifest flow. До реализации
-overlap следует:
+Текущий runtime принимает одно значение без overlap keyring. Безопасная
+zero-downtime ротация потребует совместимой поддержки двух токенов или
+координированного maintenance rollout. Нельзя молча менять единственный token
+сначала только у `seo-data` или только у `rank-worker`: это создаст частичную
+недоступность manifest flow. До реализации overlap следует:
 
 1. остановить выдачу новых rank executions;
 2. дождаться завершения либо checkpoint активных операций;

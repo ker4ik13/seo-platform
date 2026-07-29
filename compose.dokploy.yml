@@ -454,6 +454,50 @@ services:
       redis:
         condition: service_healthy
 
+  rank-worker:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/jobs-integrations"
+    command: ["node", "dist/rank-worker.main.js"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/jobs_db
+      DATABASE_POOL_MAX: ${JOBS_RANK_DATABASE_POOL_MAX:-10}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      SEO_DATA_URL: http://seo-data:4001
+      SEO_DATA_COMMAND_TIMEOUT_MS: ${SEO_DATA_COMMAND_TIMEOUT_MS:-60000}
+      RANK_PREPARATION_ENABLED: "true"
+      JOBS_TO_SEO_RANK_TOKEN: ${JOBS_TO_SEO_RANK_TOKEN:?JOBS_TO_SEO_RANK_TOKEN is required}
+      RANK_PREPARATION_LEASE_SECONDS: ${RANK_PREPARATION_LEASE_SECONDS:-120}
+      RANK_PREPARATION_DISPATCH_SECONDS: ${RANK_PREPARATION_DISPATCH_SECONDS:-15}
+      RANK_PREPARATION_CONCURRENCY: ${RANK_PREPARATION_CONCURRENCY:-2}
+      INTEGRATION_CREDENTIAL_ROLE: DISABLED
+    cpus: "${JOBS_RANK_CPU_LIMIT:-1.0}"
+    mem_limit: "${JOBS_RANK_MEMORY_LIMIT:-512M}"
+    pids_limit: ${JOBS_RANK_PIDS_LIMIT:-128}
+    networks:
+      - internal
+    depends_on:
+      jobs-integrations-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      seo-data:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "ps -o args | grep -q '[r]ank-worker.main.js'"
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
   connector-worker:
     <<: *backend-defaults
     build:

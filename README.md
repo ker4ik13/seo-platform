@@ -5,7 +5,8 @@
 - PostgreSQL 18 с отдельными databases для четырёх backend-контуров и Directus;
 - Redis с AOF для BullMQ, Socket.IO и cache;
 - NATS с JetStream;
-- четыре NestJS API, отдельные system, inspection, import и connector workers;
+- четыре NestJS API, отдельные system, inspection, import, rank и connector
+  workers;
 - единый web (`/`, `/tools`, `/docs`, `/app`), admin и Directus;
 - S3 и SMTP подключаются как внешние managed/hosted сервисы.
 
@@ -32,25 +33,55 @@ credential длиной не менее 32 символов. Он обязан �
 `INTERNAL_API_TOKEN`, credential-vault token, notification token, encryption
 keys и provider credentials.
 
-Текущий Compose передаёт этот secret только HTTP-процессу `seo-data`.
-Отдельного `rank-worker` в текущем образе jobs/integrations ещё нет, поэтому
-consumer secret пока не выдаётся ни одному jobs process. В частности, его не
-получают `jobs-integrations`, `system-worker`, `import-worker`,
+Compose передаёт этот secret ровно двум process types:
+
+- HTTP-процессу `seo-data`, который валидирует rank manifest boundary;
+- отдельному `rank-worker` из image `platform-jobs-integrations`, который
+  выполняет `dist/rank-worker.main.js` (`start:worker:rank`).
+
+Его не получают `jobs-integrations`, `system-worker`, `import-worker`,
 `upload-inspection-worker`, `connector-worker`, migrations, Platform API,
 Realtime, Web и Admin. Наличие переменной в Dokploy project environment не
 означает её передачу контейнеру: контейнер получает secret только через
-явную запись в своём `environment`.
+явную запись в своём `environment`. Добавлять token в общие anchors
+`x-common-backend-env` или `x-jobs-env` запрещено.
 
-После появления отдельного `rank-worker` тот же secret можно передать только
-ему и `seo-data`, одновременно обновив regression-тест scope. Добавлять его в
-общие anchors `x-common-backend-env` или `x-jobs-env` запрещено.
+### Rank-worker process
+
+`rank-worker` использует тот же production image, что Jobs HTTP, но имеет
+отдельный command и минимальный allowlist конфигурации:
+
+- `DATABASE_URL`, `DATABASE_POOL_MAX`, `REDIS_URL`;
+- `SEO_DATA_URL`, `SEO_DATA_COMMAND_TIMEOUT_MS`;
+- `RANK_PREPARATION_ENABLED=true`;
+- `JOBS_TO_SEO_RANK_TOKEN`;
+- `RANK_PREPARATION_LEASE_SECONDS`,
+  `RANK_PREPARATION_DISPATCH_SECONDS`,
+  `RANK_PREPARATION_CONCURRENCY`;
+- `INTEGRATION_CREDENTIAL_ROLE=DISABLED`.
+
+Процесс не получает `INTERNAL_API_TOKEN`, credential management/execution
+keyrings, NATS, S3 или SMTP credentials. Он подключён только к сети
+`internal`, не имеет `ports`/`expose` и не получает маршрут `outbound`.
+Startup ждёт успешную Jobs migration, здоровые Redis и `seo-data`.
+Container healthcheck проверяет только liveness entrypoint; operational
+readiness определяется queue lag, lease recovery и dependency metrics.
+
+Для первой VPS установлены консервативные defaults: pool `10`, concurrency
+`2`, `1 CPU`, `512M` RAM и `128` PID. Они настраиваются через
+`JOBS_RANK_DATABASE_POOL_MAX`, `RANK_PREPARATION_*`,
+`JOBS_RANK_CPU_LIMIT`, `JOBS_RANK_MEMORY_LIMIT` и
+`JOBS_RANK_PIDS_LIMIT`. Concurrency увеличивается только после проверки
+PostgreSQL/Redis/SEO Data saturation. Lease обязан превышать
+`SEO_DATA_COMMAND_TIMEOUT_MS` минимум на пять секунд; runtime проверяет этот
+инвариант fail-closed.
 
 Пошаговый rollout, безопасная проверка и rollback описаны в
 [`runbooks/jobs-to-seo-rank-token.md`](./runbooks/jobs-to-seo-rank-token.md).
 Инвариант получателей проверяется без раскрытия значения:
 
 ```bash
-node --test tests/rank-token-scope.test.mjs
+node --test tests/*.test.mjs
 ```
 
 ## BYOK vault и ротация ключей

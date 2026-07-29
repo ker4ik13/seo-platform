@@ -6,7 +6,7 @@ const secretName = "JOBS_TO_SEO_RANK_TOKEN";
 const expectedAssignment =
   "JOBS_TO_SEO_RANK_TOKEN: ${JOBS_TO_SEO_RANK_TOKEN:?JOBS_TO_SEO_RANK_TOKEN is required}";
 
-test("dedicated rank token is passed only to seo-data HTTP", async () => {
+test("dedicated rank token is passed only to seo-data HTTP and rank worker", async () => {
   const composeUrl = new URL("../compose.dokploy.yml", import.meta.url);
   const lines = (await readFile(composeUrl, "utf8")).split(/\r?\n/u);
   const occurrences = [];
@@ -43,12 +43,12 @@ test("dedicated rank token is passed only to seo-data HTTP", async () => {
 
   assert.deepEqual(
     occurrences.map(({ service }) => service),
-    ["seo-data"],
+    ["seo-data", "rank-worker"],
     `${secretName} must not be inherited by shared anchors, migrations or generic workers`
   );
-  assert.equal(
-    occurrences[0]?.line,
-    expectedAssignment,
-    `${secretName} must be explicitly required by the seo-data service`
+  assert.deepEqual(
+    occurrences.map(({ line }) => line),
+    [expectedAssignment, expectedAssignment],
+    `${secretName} must be explicitly required by both allowed services`
   );
 });
