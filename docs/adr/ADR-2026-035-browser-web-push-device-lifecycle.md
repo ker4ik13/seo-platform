@@ -82,8 +82,16 @@ tenant context, хранить открыто, логировать или пе�
   same-origin deep link внутри `/app`. Ошибка validation приводит к
   нейтральному preview и `/app/notifications`.
 - `pushsubscriptionchange` не пытается отправить secrets без session: он
-  ставит локальный reconciliation marker, который foreground UI согласует с
-  сервером.
+  атомарно повышает `reconcileGeneration` в IndexedDB schema v2, который
+  foreground UI согласует с сервером. Успешный PUT завершает marker только
+  generation-CAS и только если отправленная subscription всё ещё точно
+  совпадает с текущей browser subscription. Более новое событие другой
+  вкладки/Service Worker не очищается; delayed PUT со stale material повторно
+  повышает generation.
+- Запись неизвестной будущей версии, повреждённая запись или owner conflict
+  обрабатываются fail-closed. Recovery требует явного подтверждения,
+  успешного browser unsubscribe и нового installation UUID; молчаливый
+  overwrite или перенос installation между аккаунтами запрещён.
 - Permission запрашивается только после явного действия пользователя.
 - Project notification rules выбирают события и каналы; browser device
   принадлежит профилю, а не проекту.

@@ -417,8 +417,16 @@ Device lifecycle следует ADR-2026-035:
   fingerprints, сохраняя безопасный tombstone;
 - VAPID private key отсутствует в HTTP/API/Web process и появляется только у
   будущего sender;
-- смена browser subscription ставит локальный reconciliation marker; Service
-  Worker не передаёт credentials без активной session.
+- смена browser subscription атомарно повышает локальную
+  `reconcileGeneration` в IndexedDB schema v2; Service Worker не передаёт
+  credentials без активной session;
+- foreground завершает marker только generation-CAS и после exact-сравнения
+  отправленной и текущей browser subscription. Новая генерация другой
+  вкладки/Service Worker не очищается, а delayed PUT со stale material
+  повторно взводит reconciliation;
+- corrupt/future local record и owner conflict обрабатываются fail-closed;
+  recovery требует явного подтверждения, успешного browser unsubscribe и
+  нового installation UUID без молчаливого переноса между аккаунтами.
 - Realtime consumer `identity.session-family.revoked.v1` должен идемпотентно и
   в одной локальной транзакции записать inbox и revoked-family tombstone, а
   также terminal-отозвать все active devices с совпавшими

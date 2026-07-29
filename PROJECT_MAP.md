@@ -15,8 +15,10 @@ execution slice следует ADR-2026-034; live Arsenkin submit остаётс
 реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет
 ими через отдельный Realtime token, secret material хранится в
 `realtime_db` под AES-256-GCM и отдельными HMAC fingerprints, а Web
-регистрирует Service Worker только для `/app/`. Реальная email/Web Push
-доставка и test send остаются выключены.
+регистрирует Service Worker только для `/app/`. IndexedDB schema v2 хранит
+монотонные reconciliation generations; foreground завершает только exact
+generation через CAS и не теряет более новое изменение Service Worker/другой
+вкладки. Реальная email/Web Push доставка и test send остаются выключены.
 
 Dependency-free identity producer по ADR-2026-036 добавляет
 `identity.session-family.revoked.v1`: Platform API terminal-отзывает целые
@@ -286,10 +288,12 @@ Backend convention:
 - `platform-web/app/app/api` — same-origin browser BFF только к
   `/api/v1` Platform API;
 - `platform-web/components/browser-push-settings.tsx`,
-  `lib/browser-push.ts`, `lib/push-installation.ts` и
+  `lib/browser-push.ts`, `lib/push-installation.ts`,
+  `lib/push-registration-reconciliation.ts` и
   `public/push-service-worker.js` — явный permission/registration flow,
-  IndexedDB installation UUID, device list/rename/revoke/reconcile и
-  Service Worker со scope `/app/` без fetch cache;
+  IndexedDB installation UUID/schema v2 generation-CAS, causal reconciliation,
+  device list/rename/revoke/reconcile, явное recovery повреждённой/future
+  local record и Service Worker со scope `/app/` без fetch cache;
 - `platform-web/app/app/(protected)/projects/[projectId]/rankings/contexts` —
   private/noindex экран контекстов позиций; UI-компоненты находятся в
   `platform-web/components/tracking-context-*`, provider-free estimate —
@@ -446,7 +450,15 @@ index защищает один HMAC digest; межверсионная endpoint
 all-keyring lookup и rollout `expand на всех replicas → drain → switch`.
 VAPID public key имеет immutable version; private key не поступает в HTTP/Web
 process. Service Worker работает в scope `/app/`, не содержит fetch handler и
-не кэширует private API. Registration честно возвращает
+не кэширует private API. Локальная schema v2 хранит
+`reconcileGeneration/reconciledGeneration`: Service Worker и вкладки
+атомарно повышают generation, а успешный PUT очищает marker только для exact
+generation и только если отправленная subscription всё ещё совпадает с
+browser state. Запоздалый PUT после локальной смены subscription повторно
+взводит marker. Повреждённая или future local record восстанавливается лишь
+после явного подтверждения, успешного browser unsubscribe и выдачи нового
+installation UUID; перенос между аккаунтами запрещён. Registration честно
+возвращает
 `deliveryAvailable=false` и `testDeliveryAvailable=false`: email/Web Push
 sender, digest и delivery history пока отсутствуют.
 
@@ -607,6 +619,12 @@ reservation, outbox/event не создаются.
 - Notification center browser QA: 1280 px, document overflow и browser errors
   не найдены; unread badge, одиночное чтение, unread filter, read-all и empty
   state проверены интерактивно.
+- Browser Web Push Web: strict typecheck, 78/78 tests, production build и
+  diff-check — pass. Покрыты IndexedDB v1→v2 migration, multi-tab/Service
+  Worker generation-CAS, delayed stale PUT re-arm, exact subscription match,
+  corrupt/future record recovery, strict payload/deep-link validation и
+  same-origin BFF body limits. Protected visual/e2e с живыми API и browser
+  permission остаётся staging gate.
 - Integration settings browser QA: 1440 и 390 px, document overflow и browser
   errors не найдены; таблица/табы прокручиваются только внутри контейнеров,
   XMLStock full-secret replacement проверен интерактивно.
