@@ -2,13 +2,14 @@
 
 Последнее обновление: 29 июля 2026 года
 
-Текущий инкремент: manual BYOK rank job foundation
-Статус: versioned tracking context завершён во всех слоях: contracts,
-SEO Data, Platform API и Web. Rankings пока реализован только как
-конфигурационный vertical slice: контексты и назначения ключей готовы,
-provider execution и position history ещё отсутствуют. Следующий execution
-slice следует ADR-2026-034; live Arsenkin submit остаётся выключенным до
-прохождения contract/security gates
+Текущий инкремент: provider-free manual BYOK rank estimate
+Статус: versioned tracking context и provider-free оценка готовности
+завершены во всех слоях: contracts, SEO Data, Platform API,
+Jobs/integrations и Web. Immutable estimate хранится в `jobs_db`, доступен
+при read-only и не вызывает provider, decrypt, Job/BullMQ, списание или
+event. Provider execution и position history отсутствуют. Следующий
+execution slice следует ADR-2026-034; live Arsenkin submit остаётся
+выключенным до прохождения contract/security gates
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -89,6 +90,13 @@ Tracking context читается и изменяется через Platform AP
 в SEO Data. Platform API передаёт проверенный tenant/actor context по internal
 HTTP; SEO Data повторно сверяет route/project scope и атомарно пишет redacted
 outbox event вместе с domain change.
+Оценка готовности позиций вызывается Web через Platform API. Platform API
+загружает trusted project/workspace/access snapshot и передаёт команду в
+Jobs/integrations через dedicated credential boundary. Jobs запрашивает у
+SEO Data атомарный bounded scope, читает только allowlisted connector
+metadata и сохраняет immutable redacted receipt в `rank_estimates`. Exact
+replay не продлевает TTL и не повторяет SEO read; estimate не является
+execution grant.
 Остальная межсервисная бизнес-коммуникация пока не включена: подключены
 transport и health/readiness, таблицы outbox/inbox созданы. Durable публикация
 событий начинается в следующем вертикальном срезе.
@@ -181,7 +189,8 @@ Backend convention:
   `semantic.view`;
 - `platform-api/src/rankings` — public tracking context CRUD/archive/restore
   и point keyword assignments с `ranking.view/configure`, CSRF,
-  idempotency/OCC и audit;
+  idempotency/OCC и audit, а также provider-free rank estimate с
+  `ranking.view` и trusted lifecycle/access snapshot;
 - `platform-api/src/seo-data` — строго валидируемый internal read/command
   client к владельцу semantic core и tracking contexts;
 - `platform-api/src/notifications` — public profile/project notification
@@ -210,8 +219,11 @@ Backend convention:
   startup coverage guard, masked DTO, rotation, destructive secret overwrite
   при revoke, connector registry, lease/CAS state machine проверки credentials
   и нормализованные project binding/route/create receipt;
+- `platform-jobs-integrations/src/rank-estimates` — immutable provider-free
+  estimate receipts, strict tenant/idempotency boundary, connector metadata
+  projection и finite blockers без provider call/decrypt/queue;
 - `platform-jobs-integrations/src/seo-data` — строго валидируемый internal
-  HTTP client владельца semantic core;
+  HTTP client владельца semantic core и bounded rank-estimate scope;
 - `platform-seo-data/src/semantic-imports` — нормализация, import receipts,
   идемпотентное применение chunks и semantic version;
 - `platform-seo-data/src/keywords` — tenant-scoped keyword read model,
@@ -220,6 +232,9 @@ Backend convention:
 - `platform-seo-data/src/tracking-contexts` — logical context,
   immutable configuration versions, temporal keyword assignments,
   create receipts и transactional redacted outbox events;
+- `platform-seo-data/src/rank-scopes` — атомарный bounded snapshot контекста,
+  конфигурации и temporal assignments с domain-separated semantic hash без
+  передачи keyword IDs/text;
 - `platform-seo-data/src/internal` — fail-closed авторизация внутренних
   tenant/actor команд;
 - `platform-jobs-integrations/src/email` — email port, disabled и SMTP adapters;
@@ -233,7 +248,8 @@ Backend convention:
   `/api/v1` Platform API;
 - `platform-web/app/app/(protected)/projects/[projectId]/rankings/contexts` —
   private/noindex экран контекстов позиций; UI-компоненты находятся в
-  `platform-web/components/tracking-context-*`;
+  `platform-web/components/tracking-context-*`, provider-free estimate —
+  в `rank-estimate-panel.tsx`;
 - `platform-web/lib/protected-app.ts` — server-side session gate и безопасный
   refresh redirect;
 - `platform-*/lib` и `components` — adapters и переиспользуемые UI-части;
@@ -471,24 +487,41 @@ outbox атомарно и без name, keyword text, URL, provider/credential/s
 raw configuration. Durable outbox publisher всё ещё не реализован, поэтому
 эти записи ещё не доставляются через NATS.
 
+Provider-free estimate доступен через
+`POST /api/v1/projects/:projectId/rank-estimates` с телом только
+`trackingContextId`. Platform API требует session, CSRF, `ranking.view` и
+`Idempotency-Key`, но намеренно не требует `ACTIVE` lifecycle для успешного
+ответа: read-only, архив, отсутствие `ranking.run`, entitlement/quota и
+состояние connector возвращаются finite blockers. Jobs-owned internal
+resource использует
+dedicated caller token, stable-intent request hash и immutable public/private
+snapshot. SEO Data возвращает exact count до 1 000 либо sentinel `1001`,
+после которого semantic/final hash недоступен. TTL receipt — пять минут;
+replay после drift project/access/quota возвращает исходный ответ. Пока
+обязательны `PROVIDER_CONTRACT_NOT_READY` и
+`PROVIDER_EXECUTION_DISABLED`, ни provider call, ни Job/BullMQ, ни usage,
+reservation, outbox/event не создаются.
+
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 116 pass, 0 fail.
-- SEO data unit tests: 20 pass, 0 fail.
-- Jobs/integrations unit tests: 135 pass, 0 fail.
+- Platform API unit tests: 128 pass, 0 fail.
+- SEO data unit tests: 28 pass, 0 fail.
+- Jobs/integrations unit tests: 154 pass, 0 fail.
 - Realtime unit tests: 12 pass, 0 fail.
-- Contracts unit tests: 2 pass, 0 fail.
-- Unified Web helper tests: 44 pass, 0 fail.
+- Contracts unit tests: 9 pass, 0 fail.
+- Unified Web helper tests: 54 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
 - Unified Next.js production build: pass; проверены public site, Toolbox,
   API docs и private `/app`.
 - Compose config: pass с `.env.example`.
-- Jobs migrations и connector column grants: pass на локальном PostgreSQL 16;
-  отдельно проверены запреты `INSERT`, ciphertext/outbox access, ownership и
-  `BYPASSRLS`. Целевой PostgreSQL 18 повторяется в staging.
+- Предшествующие Jobs migrations и connector column grants: pass на локальном
+  PostgreSQL 16; отдельно проверены запреты `INSERT`, ciphertext/outbox
+  access, ownership и `BYPASSRLS`. Новая `rank_estimates` migration прошла
+  Prisma/static constraint review, но ещё не исполнялась на живой БД.
+  Целевой PostgreSQL 18 повторяется в staging.
 - Resolved Compose topology: jobs runtimes имеют `internal,outbound`,
   connector не публикует ports и не получает management/NATS credentials.
 - Visual QA: 1440, 1024 и 390 px; horizontal overflow не найден.
@@ -526,6 +559,13 @@ raw configuration. Durable outbox publisher всё ещё не реализов�
   build и diff-check pass; private/noindex route входит в build. BFF PUT и
   client helpers покрыты тестами. Защищённый browser visual/e2e не запускался
   без live auth/API и остаётся обязательным после удалённого deploy.
+- Provider-free rank estimate: Contracts 9/9, SEO Data 28/28, Platform API
+  128/128, Jobs/integrations 154/154 и Web 54/54 tests; strict typecheck,
+  production build и diff-check проходят. Проверены exact replay после
+  mutable snapshot drift, concurrent winner, bounded SEO response,
+  credential projection без secret columns, finite blockers, 1001 sentinel,
+  TTL и redaction. Живой PostgreSQL 18 migration smoke и защищённый visual/e2e
+  остаются staging gates.
 - Target runtime: Node.js 24. Локальная проверка выполнялась на Node.js 22 с
   ожидаемым engine warning; контейнеры используют Node.js 24.
 
@@ -533,11 +573,11 @@ raw configuration. Durable outbox publisher всё ещё не реализов�
 
 `manual BYOK rank job → position history`
 
-Execution следует ADR-2026-034: сначала estimate и immutable manifest, затем
-authoritative execution grant, scoped connector operations, ingest receipts и
-partial persistence. Live Arsenkin `set` выключен, пока нет recorded provider
-contract, безопасного `SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit и устранения
-global vault read.
+Provider-free estimate из ADR-2026-034 завершён. Следующий шаг — immutable
+execution manifest, authoritative one-time grant, scoped connector
+operations, ingest receipts и partial persistence. Live Arsenkin `set`
+выключен, пока нет recorded provider contract, безопасного
+`SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit и устранения global vault read.
 
 Параллельный обязательный следующий срез уведомлений:
 `profile/project effective policy → transactional outbox/durable consumer →
@@ -557,6 +597,9 @@ Production-зависимости `@nats-io/jetstream` и `web-push` ещё не
 - `semantic_import_receipts` без chunks требуют bounded reconciliation/retention;
   receipt с применёнными chunks автоматически не удаляется.
 - Durable outbox/inbox publisher и consumers ещё не реализованы.
+- `rank_estimates` требуют bounded maintenance/retention после окна
+  идемпотентных повторов и диагностики; expiry пока только запрещает считать
+  receipt актуальным и сам не удаляет строку.
 - Notification preferences не создают deliveries сами по себе: отсутствуют
   transactional outbox/durable consumer, email/Web Push adapters, digest
   scheduler, Web Push device/VAPID lifecycle и provider delivery history.
@@ -610,6 +653,9 @@ Production-зависимости `@nats-io/jetstream` и `web-push` ещё не
   constraints и migration-order проверены тестами, но живой PostgreSQL smoke
   в текущем окружении не выполнен; fresh/fail-closed/concurrent-writer
   сценарии на PostgreSQL 18 остаются staging-gate.
+- `rank_estimates` migration согласована с Prisma и проверена статическими
+  тестами CHECK/indices, но не исполнялась на живом PostgreSQL. Fresh apply и
+  constraint-negative smoke на PostgreSQL 18 обязательны до deploy.
 - Проверка lifecycle проекта сейчас авторитетна в Platform API, но между ней и
   commit в jobs database остаётся межсервисное TOCTOU. До первого исполняемого
   rank job jobs/integrations обязан получить project/workspace lifecycle
@@ -644,8 +690,9 @@ Production-зависимости `@nats-io/jetstream` и `web-push` ещё не
 - QR для TOTP пока представлен локальным `otpauth://` URI и ручным ключом;
   UI QR появится после подтверждения зависимости `qrcode`.
 - Rank/frequency execution, тарификация и YooKassa пока присутствуют только
-  в ТЗ/схемах; tracking configuration уже реализована, но ещё не создаёт rank
-  jobs/snapshots. Arsenkin/Keys.so connectors сейчас выполняют только
+  в ТЗ/схемах; tracking configuration и provider-free estimate реализованы,
+  но ещё не создают rank jobs/position snapshots. Arsenkin/Keys.so connectors
+  сейчас выполняют только
   read-only credential validation; live Arsenkin `positions` заблокирован
   ADR-2026-034, XMLStock ждёт подтверждённого provider contract и redacted
   fixtures.

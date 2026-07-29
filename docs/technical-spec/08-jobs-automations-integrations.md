@@ -599,6 +599,39 @@ jobs/integrations должен получить authoritative lifecycle projecti
 либо другую проверяемую precondition; worker в любом случае повторно проверяет
 workspace/project/billing перед provider call.
 
+### 17.3. Реализованный provider-free rank estimate
+
+`rank_estimates` — отдельный Jobs-owned operational resource, а не состояние
+`Job`. Internal create доступен только Platform API через dedicated
+credential boundary и требует совпадения workspace/project/actor в path,
+trusted headers и exact body, а также отдельный `Idempotency-Key`.
+
+До первого provider call сервис:
+
+- возвращает exact immutable replay до повторного вызова SEO Data;
+- при новом key получает bounded atomic scope у SEO Data;
+- не выбирает ciphertext, nonce, auth tag, encrypted DEK или provider
+  metadata;
+- читает binding `SERP_RANK_TRACKING`, единственный route position `0` и
+  allowlisted credential metadata;
+- считает credential свежим только при `ACTIVE` current material,
+  совпадающей текущей connector version и terminal validation proof;
+- делит до 1 000 пар на задачи по 250, но не объявляет неизвестное число
+  polling requests точным;
+- сохраняет private version snapshot и отдельный redacted public snapshot;
+- не создаёт очередь, usage, reservation, provider request или outbox event.
+
+Receipt живёт логически пять минут. Точный replay возвращает тот же
+`expiresAt` и не продлевает TTL; явный перерасчёт использует новый key.
+Другой payload под прежним key возвращает `IDEMPOTENCY_CONFLICT`. Будущий
+`rank-runs` не рассматривает estimate как grant: перед submit он обязан заново
+проверить expiry, scope и все mutable versions.
+
+Blockers имеют finite vocabulary из `platform-contracts` и локализуются Web.
+Provider contract gate и execution kill switch разделены. Пока оба закрыты,
+estimate всегда `BLOCKED`; это намеренно не запускает read-only credential
+validation connector и не доказывает работоспособность `positions`.
+
 ## 18. OAuth connections
 
 - OAuth state хранится server-side.

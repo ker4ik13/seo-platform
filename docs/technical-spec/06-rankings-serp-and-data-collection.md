@@ -80,6 +80,44 @@ configuration versions, credential freshness, provider limits, тарифную 
 expiry и `executionAllowed`. `POST /rank-runs` требует актуальный estimate,
 `ranking.run`, CSRF, idempotency key и authoritative execution grant.
 
+### 3.2. Реализованный provider-free estimate
+
+Первый реализованный estimate принимает ровно один `trackingContextId`,
+требует `ranking.view`, browser session, CSRF и `Idempotency-Key`. Он остаётся
+доступным в billing read-only и для архивного проекта: такие состояния
+возвращаются как blockers будущего запуска, а не скрывают уже сохранённые
+настройки.
+
+Поток не создаёт Job/JobItem, не ставит сообщение в BullMQ, не расшифровывает
+credential, не вызывает Arsenkin и не создаёт domain event:
+
+1. Platform API загружает актуальные project/workspace snapshot, currency и
+   проекцию наличия `ranking.run`; browser не задаёт tenant, provider,
+   credential, домен, quota или lifecycle.
+2. Jobs/integrations по internal HTTP запрашивает у SEO Data атомарный scope.
+3. SEO Data в `RepeatableRead` читает context, последнюю immutable
+   configuration и до 1 001 активного temporal assignment. Для допустимого
+   scope рассчитывается domain-separated SHA-256; keyword ID/text наружу не
+   возвращаются.
+4. Jobs/integrations в собственной `RepeatableRead` транзакции читает только
+   allowlisted binding/route/credential metadata и доказательство validation
+   текущего material, рассчитывает blockers и записывает immutable
+   пяти­минутный receipt.
+
+Значение `1001` является bounded sentinel «не менее 1 001», а не точным
+count; hash такого неполного множества имеет состояние `UNAVAILABLE`. Final
+scope hash включает semantic scope, project domain/version и версии
+binding/credential/validation/policy, но публичный ответ не раскрывает эти
+идентификаторы.
+
+До прохождения ADR-2026-034 каждый receipt содержит
+`PROVIDER_CONTRACT_NOT_READY` и `PROVIDER_EXECUTION_DISABLED`;
+`executionAllowed=false`. Provider limits, ожидаемая длительность,
+entitlement и quota возвращают честный `NOT_AVAILABLE`, пока нет
+авторитетного versioned источника. Для BYOK platform charge равен нулю,
+нормализованная история предназначена для долгого хранения, raw SERP не
+собирается.
+
 После начала provider `set` неоднозначный timeout/crash/`5xx` переводит item в
 `SUBMIT_OUTCOME_UNKNOWN`. Автоматический повтор submit запрещён, пока provider
 не предоставляет доказуемую идемпотентность или способ восстановить task ID.

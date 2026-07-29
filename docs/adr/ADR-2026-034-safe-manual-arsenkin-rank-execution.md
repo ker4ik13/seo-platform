@@ -94,6 +94,20 @@ Estimate не вызывает provider и может быть рассчита�
 источником и временем, а не как вечная константа. Денежная стоимость
 пользовательского тарифа Arsenkin не вычисляется платформой.
 
+Первый реализованный gate-zero slice хранит estimate как отдельный immutable
+resource в `jobs_db`, а не как Job. Он требует `ranking.view`, CSRF и
+`Idempotency-Key`, поэтому остаётся доступен в read-only и показывает
+lifecycle/RBAC как blockers. Jobs сам запрашивает атомарный semantic scope у
+SEO Data, затем читает allowlisted binding/credential validation metadata
+без decrypt. TTL — пять минут; exact replay его не продлевает.
+
+Пока отсутствуют recorded provider contract, authoritative entitlement/quota
+и versioned provider limit observation, соответствующие поля честно имеют
+`NOT_AVAILABLE`, а blockers
+`PROVIDER_CONTRACT_NOT_READY` и `PROVIDER_EXECUTION_DISABLED` обязательны.
+Gate-zero slice не создаёт Job/JobItem, BullMQ message, usage/reservation,
+outbox event и не вызывает provider.
+
 ### Run
 
 `POST /api/v1/projects/{projectId}/rank-runs`

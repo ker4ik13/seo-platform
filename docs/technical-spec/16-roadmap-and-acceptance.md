@@ -158,26 +158,31 @@ contract. Project binding для `SERP_RANK_TRACKING` уже реализова�
 CAS/ETag, redacted outbox и project settings UI. Arsenkin предоставляет эту
 capability в текущем allowlist, а существующий ключ получает её только после
 успешной повторной provider validation. Binding ещё не выполняет rank job:
-tracking context, provider execution, история позиций и schedule остаются
-следующими вертикальными срезами. Профильные и membership-bound проектные
-настройки уведомлений и in-app центр уже реализованы, но durable email/Web
-Push delivery ещё нет.
+versioned tracking context и provider-free оценка готовности уже реализованы,
+но provider execution, immutable execution manifest, история позиций и
+schedule остаются следующими вертикальными срезами. Оценка сохраняется в
+Jobs как immutable idempotency receipt, доступна в read-only и не вызывает
+провайдера, BullMQ, списание, usage, outbox или event. Профильные и
+membership-bound проектные настройки уведомлений и in-app центр уже
+реализованы, но durable email/Web Push delivery ещё нет.
 Следующий обязательный notification-срез должен провести redacted terminal
 event через transactional outbox/durable consumer, effective policy и
 идемпотентные delivery attempts; `@nats-io/jetstream` и `web-push` требуют
 отдельного одобрения production-зависимостей. P2 не считается выполненным до
-tracking context, реального rank job, multi-tenant queue fairness, terminal
-outbox/delivery и security/load/restore gates.
+реального rank job, multi-tenant queue fairness, terminal outbox/delivery и
+security/load/restore gates.
 
 Перед исполнением первого rank job jobs/integrations должен повторно проверять
 workspace/project lifecycle и billing. Текущая проверка mutation в Platform
 API оставляет межсервисное TOCTOU до commit отдельной jobs database; требуется
 authoritative lifecycle projection/inbox либо эквивалентная precondition.
-Project binding migration проверена на PostgreSQL 16, но целевой PostgreSQL 18
-остаётся staging-gate.
+Project binding migration проверена на PostgreSQL 16. Новая migration
+immutable `rank_estimates` прошла schema/static review, но обе migration
+должны быть повторно проверены на целевом PostgreSQL 18 staging.
 
 Архитектура первого Arsenkin manual rank job зафиксирована
-ADR-2026-034. Live `set` остаётся выключенным до recorded one-key contract или
+ADR-2026-034. Provider-free estimate из ADR уже реализован. Live `set`
+остаётся выключенным до recorded one-key contract или
 письменного подтверждения response/status/retry semantics, устранения global
 vault read, authoritative execution grant, manifest/ingest receipts и
 `SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit. Наличие working credential

@@ -495,16 +495,33 @@ command scope. Ответ SEO Data проходит строгую runtime-пр�
 project, entity/configuration versions, temporal archive state и дочерних IDs.
 Provider/credential/schedule не входят в tracking context по ADR-2026-033.
 
-Планируемый первый manual flow по ADR-2026-034 добавляет:
+Реализованный provider-free этап manual flow по ADR-2026-034 добавляет:
 
 - `POST /api/v1/projects/{projectId}/rank-estimates`;
+
+Следующий execution-этап добавит:
+
 - `POST /api/v1/projects/{projectId}/rank-runs`;
 - `GET /api/v1/jobs/{jobId}` и cancel/retry-safe actions.
 
-Run отвечает `202 + Location`. Estimate не вызывает provider. Перед каждым
-новым provider submit требуется одноразовый authoritative execution grant;
-неоднозначный submit имеет отдельный публично видимый status и не повторяется
-автоматически.
+Estimate body содержит только `trackingContextId`. Endpoint требует
+`ranking.view`, session, CSRF и `Idempotency-Key`, отвечает `201` immutable
+пяти­минутным receipt и не вызывает provider. Billing read-only, отсутствие
+`ranking.run`, DRAFT/ARCHIVED project, quota/entitlement и connector
+несовместимость являются успешным `BLOCKED`, а не потерей read access.
+Malformed/unauthenticated/forbidden/not-found/dependency и idempotency
+conflict остаются HTTP errors.
+
+Platform API передаёт Jobs только trusted project/workspace/access snapshot.
+Jobs самостоятельно вызывает
+`POST /internal/v1/projects/{projectId}/rank-estimate-scopes`, после чего
+создаёт receipt через dedicated internal boundary
+`/internal/v1/workspaces/{workspaceId}/projects/{projectId}/rank-estimates`.
+Обе стороны строго сверяют path, headers, body и tenant-scoped response.
+
+Run отвечает `202 + Location`. Перед каждым новым provider submit требуется
+одноразовый authoritative execution grant; неоднозначный submit имеет
+отдельный публично видимый status и не повторяется автоматически.
 
 ### 13.5. Imports/exports/jobs
 

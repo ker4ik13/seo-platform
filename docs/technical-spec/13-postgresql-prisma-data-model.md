@@ -1259,6 +1259,37 @@ backfill → validate → contract план. Fresh migration, fail-closed rollba
 concurrent-writer сценарий проверены на PostgreSQL 16, повтор на целевом
 PostgreSQL 18 обязателен в staging.
 
+#### `rank_estimates`
+
+Короткоживущие provider-free receipts оценки ручного съёма принадлежат
+`jobs_db` и не являются `jobs`:
+
+- tenant/actor/tracking context и idempotency scope/key;
+- 32-byte request hash;
+- project version и hash домена без plaintext domain;
+- context/configuration versions и hashes;
+- semantic/final scope hashes либо явный `NULL` для bounded overflow
+  sentinel;
+- private binding/route/credential/material/validation version snapshot;
+- provider/mode/policy version;
+- keyword/task/minimum stage request counts;
+- finite blockers;
+- redacted public response snapshot;
+- DB-derived `calculated_at`, фиксированный `expires_at` и `created_at`.
+
+Unique `workspace_id + idempotency_scope + idempotency_key` обеспечивает
+exact replay и conflict. CHECK constraints требуют 32-byte hashes,
+согласованные nullable hashes только для `keyword_count=1001`, положительные
+версии, exact chunk counts, JSON array/object, полный validation proof и TTL
+пять минут. Receipt не имеет FK в другую database; IDs внешнего владельца
+являются immutable snapshot. Private IDs и domain hash не входят в public
+DTO.
+
+Физическая очистка выполняется отдельной maintenance policy после окна
+сетевых повторов и диагностики; expiry не означает автоматическое удаление
+проекта, tracking context или результатов. До появления `rank-runs` таблица
+не создаёт provider usage, billing reservation или Job.
+
 #### `connector_registry`
 
 - provider;
