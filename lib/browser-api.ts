@@ -1,3 +1,8 @@
+import {
+  rankRunConflictDetails,
+  type RankRunConflictDetails
+} from "@seo-platform/contracts";
+
 export interface BrowserFieldError {
   readonly path: string;
   readonly code: string;
@@ -10,6 +15,9 @@ export class BrowserApiError extends Error {
   public readonly fieldErrors: readonly BrowserFieldError[];
   public readonly requestId: string | undefined;
   public readonly retryable: boolean;
+  public readonly conflictDetails: RankRunConflictDetails | undefined;
+  public readonly reason: RankRunConflictDetails["reason"] | undefined;
+  public readonly existingJobId: string | undefined;
 
   public constructor(
     status: number,
@@ -17,7 +25,8 @@ export class BrowserApiError extends Error {
     message: string,
     fieldErrors: readonly BrowserFieldError[] = [],
     requestId?: string,
-    retryable = status >= 500
+    retryable = status >= 500,
+    conflictDetails?: RankRunConflictDetails
   ) {
     super(message);
     this.name = "BrowserApiError";
@@ -26,6 +35,12 @@ export class BrowserApiError extends Error {
     this.fieldErrors = fieldErrors;
     this.requestId = requestId;
     this.retryable = retryable;
+    this.conflictDetails = conflictDetails;
+    this.reason = conflictDetails?.reason;
+    this.existingJobId =
+      conflictDetails?.reason === "EQUIVALENT_RUN_ACTIVE"
+        ? conflictDetails.existingJobId
+        : undefined;
   }
 }
 
@@ -208,7 +223,8 @@ function browserApiError(
       requestId,
       typeof error.retryable === "boolean"
         ? error.retryable
-        : status >= 500
+        : status >= 500,
+      browserApiRankRunConflictDetails(error.details)
     );
   }
   return new BrowserApiError(
@@ -221,6 +237,16 @@ function browserApiError(
     responseRequestId,
     status >= 500
   );
+}
+
+function browserApiRankRunConflictDetails(
+  value: unknown
+): RankRunConflictDetails | undefined {
+  try {
+    return rankRunConflictDetails(value);
+  } catch {
+    return undefined;
+  }
 }
 
 function isFieldError(value: unknown): value is BrowserFieldError {

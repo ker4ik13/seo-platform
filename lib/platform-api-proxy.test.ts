@@ -58,6 +58,128 @@ test("proxies an assignment PUT through the safe same-origin BFF", async () => {
   }
 });
 
+test("forwards a manual rank create with CSRF and Idempotency-Key", async () => {
+  const originalFetch = globalThis.fetch;
+  let upstreamUrl: string | undefined;
+  let upstreamInit: RequestInit | undefined;
+  globalThis.fetch = async (input, init) => {
+    upstreamUrl =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+    upstreamInit = init;
+    return Response.json(
+      {
+        data: {
+          id: "01900000-0000-7000-8000-000000000004",
+          status: "PREPARING"
+        }
+      },
+      { status: 202 }
+    );
+  };
+
+  try {
+    const body = JSON.stringify({
+      estimateId: "01900000-0000-7000-8000-000000000005"
+    });
+    const request = new NextRequest(
+      "http://localhost/app/api/projects/01900000-0000-7000-8000-000000000002/rank-runs",
+      {
+        method: "POST",
+        body,
+        headers: {
+          Cookie: "seo_session=session",
+          "Content-Type": "application/json",
+          "Idempotency-Key": "rank-run:command-1",
+          "X-CSRF-Token": "csrf"
+        }
+      }
+    );
+    const response = await proxyPlatformApi(request, [
+      "projects",
+      "01900000-0000-7000-8000-000000000002",
+      "rank-runs"
+    ]);
+
+    assert.equal(response.status, 202);
+    assert.equal(
+      upstreamUrl,
+      "http://localhost:4000/api/v1/projects/01900000-0000-7000-8000-000000000002/rank-runs"
+    );
+    const headers = new Headers(upstreamInit?.headers);
+    assert.equal(headers.get("idempotency-key"), "rank-run:command-1");
+    assert.equal(headers.get("x-csrf-token"), "csrf");
+    assert.equal(headers.get("cookie"), "seo_session=session");
+    assert.equal(
+      await new Response(upstreamInit?.body).text(),
+      body
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("forwards an exact empty cooperative rank cancel command", async () => {
+  const originalFetch = globalThis.fetch;
+  let upstreamUrl: string | undefined;
+  let upstreamInit: RequestInit | undefined;
+  globalThis.fetch = async (input, init) => {
+    upstreamUrl =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+    upstreamInit = init;
+    return Response.json({
+      data: {
+        id: "01900000-0000-7000-8000-000000000004",
+        status: "CANCEL_REQUESTED"
+      }
+    });
+  };
+
+  try {
+    const request = new NextRequest(
+      "http://localhost/app/api/projects/01900000-0000-7000-8000-000000000002/jobs/01900000-0000-7000-8000-000000000004/cancel",
+      {
+        method: "POST",
+        body: "{}",
+        headers: {
+          Cookie: "seo_session=session",
+          "Content-Type": "application/json",
+          "X-CSRF-Token": "csrf"
+        }
+      }
+    );
+    const response = await proxyPlatformApi(request, [
+      "projects",
+      "01900000-0000-7000-8000-000000000002",
+      "jobs",
+      "01900000-0000-7000-8000-000000000004",
+      "cancel"
+    ]);
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      upstreamUrl,
+      "http://localhost:4000/api/v1/projects/01900000-0000-7000-8000-000000000002/jobs/01900000-0000-7000-8000-000000000004/cancel"
+    );
+    const headers = new Headers(upstreamInit?.headers);
+    assert.equal(headers.get("x-csrf-token"), "csrf");
+    assert.equal(headers.get("idempotency-key"), null);
+    assert.equal(
+      await new Response(upstreamInit?.body).text(),
+      "{}"
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("forwards the original browser user agent to Platform API", async () => {
   const originalFetch = globalThis.fetch;
   let forwardedHeaders: Headers | undefined;

@@ -33,6 +33,7 @@ import {
   rankEstimateShortHash,
   type RankEstimateFeedback
 } from "../lib/rank-estimates";
+import { RankJobPanel } from "./rank-job-panel";
 
 interface EstimateResult {
   readonly contextSignature: string;
@@ -512,24 +513,22 @@ export function RankEstimatePanel({
             </section>
           )}
 
-          <footer className="rank-estimate-actions">
-            <span>
-              Эта оценка не разрешает фактический запуск. Перед съёмом сервер
-              повторно проверит версии, права, API-ключ и квоты. Обращение к
-              провайдеру выключено до завершения проверки контракта и
-              безопасности.
-            </span>
-            <button
-              className="primary-button"
-              disabled
-              title="Фактический запуск выключен до проверки контракта провайдера и безопасности"
-              type="button"
-            >
-              Запуск пока недоступен
-            </button>
-          </footer>
         </div>
       )}
+
+      <RankJobPanel
+        contextLoading={contextLoading}
+        contextSignature={signature}
+        estimate={estimate}
+        estimateCalculating={calculating}
+        estimateExpired={expired}
+        online={online}
+        onExplicitRecalculation={() => void calculate(true)}
+        projectId={projectId}
+        returnTo={returnTo}
+        trackingContextId={context.id}
+        workspaceId={context.workspaceId}
+      />
     </section>
   );
 }

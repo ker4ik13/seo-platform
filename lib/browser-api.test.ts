@@ -55,6 +55,59 @@ test("preserves request metadata from a standard API error", async () => {
   }
 });
 
+test("projects only exact allowlisted public conflict details", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const [details, expectedReason, expectedJobId] of [
+      [
+        {
+          reason: "EQUIVALENT_RUN_ACTIVE",
+          existingJobId: "01900000-0000-7000-8000-000000000004"
+        },
+        "EQUIVALENT_RUN_ACTIVE",
+        "01900000-0000-7000-8000-000000000004"
+      ],
+      [{ reason: "ESTIMATE_EXPIRED" }, "ESTIMATE_EXPIRED", undefined],
+      [
+        {
+          reason: "EQUIVALENT_RUN_ACTIVE",
+          existingJobId: "01900000-0000-7000-8000-000000000004",
+          privateDiagnostic: "must-not-be-projected"
+        },
+        undefined,
+        undefined
+      ],
+      [{ reason: "PRIVATE_UPSTREAM_REASON" }, undefined, undefined]
+    ] as const) {
+      globalThis.fetch = async () =>
+        Response.json(
+          {
+            error: {
+              code: "RESOURCE_STATE_CONFLICT",
+              message: "Conflict",
+              details
+            }
+          },
+          { status: 409 }
+        );
+
+      await assert.rejects(
+        browserApiRequest("/app/api/projects/project-id/rank-runs"),
+        (error: unknown) => {
+          assert.ok(error instanceof BrowserApiError);
+          assert.equal(error.reason, expectedReason);
+          assert.equal(error.existingJobId, expectedJobId);
+          assert.equal("details" in error, false);
+          assert.equal("privateDiagnostic" in error, false);
+          return true;
+        }
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("falls back to the response request id and status retryability", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>
