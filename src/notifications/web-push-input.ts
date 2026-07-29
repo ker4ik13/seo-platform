@@ -110,6 +110,7 @@ function endpointValue(value: unknown, config: AppConfig): string {
     endpoint.hash ||
     endpoint.port ||
     isIP(hostname) !== 0 ||
+    endpoint.href !== value ||
     !config.webPush.endpointOrigins.includes(endpoint.origin)
   ) {
     invalid(

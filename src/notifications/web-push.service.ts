@@ -119,7 +119,11 @@ export class WebPushService {
               current.registeredSessionFamilyId ===
                 input.sessionFamilyId &&
               current.applicationServerKeyVersion ===
-                input.applicationServerKeyVersion
+                input.applicationServerKeyVersion &&
+              current.encryptionKeyVersion ===
+                encrypted.encryptionKeyVersion &&
+              current.fingerprintKeyVersion ===
+                encrypted.fingerprintKeyVersion
             ) {
               return current;
             }

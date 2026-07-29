@@ -62,6 +62,38 @@ test("creates once and returns the same aggregate for an exact PUT replay", asyn
   assert.equal("materialCiphertext" in first, false);
 });
 
+test("re-encrypts an exact subscription when active key versions rotate", async () => {
+  let updateData: Readonly<Record<string, unknown>> | undefined;
+  const current = device({
+    encryptionKeyVersion: 2,
+    fingerprintKeyVersion: 6
+  });
+  const transaction = {
+    $queryRaw: async () => [],
+    webPushSubscription: {
+      findUnique: async () => current,
+      findFirst: async () => current,
+      update: async ({
+        data
+      }: {
+        data: Readonly<Record<string, unknown>>;
+      }) => {
+        updateData = data;
+        return device({ version: 2 });
+      }
+    }
+  };
+
+  const result = await serviceWith(transaction).upsert(
+    installationId,
+    input
+  );
+
+  assert.equal(result.version, 2);
+  assert.equal(updateData?.encryptionKeyVersion, 3);
+  assert.equal(updateData?.fingerprintKeyVersion, 7);
+});
+
 test("never reparents an endpoint already active on another account", async () => {
   const transaction = {
     $queryRaw: async () => [],

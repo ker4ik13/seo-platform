@@ -65,6 +65,20 @@ test("rejects unknown trusted fields and SSRF-shaped endpoints", () => {
           }
         },
         config
+    ),
+    BadRequestException
+  );
+  assert.throws(
+    () =>
+      webPushUpsertInput(
+        {
+          ...input,
+          subscription: {
+            ...input.subscription,
+            endpoint: "https://PUSH.example.test/send/opaque"
+          }
+        },
+        config
       ),
     BadRequestException
   );
