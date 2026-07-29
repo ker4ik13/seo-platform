@@ -11,6 +11,10 @@ export interface InternalActorContext {
   readonly actorId: string;
 }
 
+export interface InternalWebPushContext extends InternalActorContext {
+  readonly sessionFamilyId: string;
+}
+
 export interface InternalProjectContext extends InternalActorContext {
   readonly workspaceId: string;
   readonly projectId: string;
@@ -49,6 +53,18 @@ export function internalProjectContext(
     membershipVersion: internalPositiveInteger(
       internalHeader(headers, "x-membership-version"),
       "membershipVersion"
+    )
+  };
+}
+
+export function internalWebPushContext(
+  headers: InternalHeaders
+): InternalWebPushContext {
+  return {
+    ...internalActorContext(headers),
+    sessionFamilyId: internalUuid(
+      internalHeader(headers, "x-session-family-id"),
+      "sessionFamilyId"
     )
   };
 }

@@ -70,6 +70,26 @@ enum ProjectNotificationSubscriptionStatus {
   INACTIVE
 }
 
+enum WebPushSubscriptionStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+enum WebPushSubscriptionStatusReason {
+  USER_REVOKED
+  SESSION_REVOKED
+  PERMISSION_REVOKED
+  PUSH_SERVICE_GONE
+  ACCOUNT_CHANGED
+}
+
+enum WebPushDeliveryStatus {
+  NEVER
+  DELIVERED
+  FAILED
+}
+
 model CollaborationDocument {
   id                String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId       String   @map("workspace_id") @db.Uuid
@@ -203,6 +223,41 @@ model ProjectNotificationSubscription {
   @@index([workspaceId, projectId, status, userId], map: "project_notification_scope_status_user_idx")
   @@index([membershipId, status], map: "project_notification_subscriptions_membership_status_idx")
   @@map("project_notification_subscriptions")
+}
+
+model WebPushSubscription {
+  id                          String                           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId                      String                           @map("user_id") @db.Uuid
+  installationId              String                           @map("installation_id") @db.Uuid
+  registeredSessionFamilyId   String                           @map("registered_session_family_id") @db.Uuid
+  status                      WebPushSubscriptionStatus        @default(ACTIVE)
+  statusReason                WebPushSubscriptionStatusReason? @map("status_reason")
+  endpointFingerprint         Bytes?                           @map("endpoint_fingerprint")
+  materialFingerprint         Bytes?                           @map("material_fingerprint")
+  materialCiphertext          Bytes?                           @map("material_ciphertext")
+  materialNonce               Bytes?                           @map("material_nonce")
+  materialAuthTag             Bytes?                           @map("material_auth_tag")
+  encryptionKeyVersion        Int?                             @map("encryption_key_version")
+  fingerprintKeyVersion       Int?                             @map("fingerprint_key_version")
+  applicationServerKeyVersion Int                              @map("application_server_key_version")
+  label                       String                           @db.VarChar(80)
+  browser                     String                           @db.VarChar(32)
+  platform                    String                           @db.VarChar(32)
+  providerExpiresAt           DateTime?                        @map("provider_expires_at") @db.Timestamptz(6)
+  lastSeenAt                  DateTime                         @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  lastDeliveryStatus          WebPushDeliveryStatus            @default(NEVER) @map("last_delivery_status")
+  lastDeliveryAt              DateTime?                        @map("last_delivery_at") @db.Timestamptz(6)
+  lastDeliveryErrorCode       String?                          @map("last_delivery_error_code") @db.VarChar(64)
+  revokedAt                   DateTime?                        @map("revoked_at") @db.Timestamptz(6)
+  expiredAt                   DateTime?                        @map("expired_at") @db.Timestamptz(6)
+  version                     Int                              @default(1)
+  createdAt                   DateTime                         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                   DateTime                         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([userId, installationId], map: "web_push_subscriptions_user_installation_key")
+  @@index([userId, status, updatedAt(sort: Desc), id(sort: Desc)], map: "web_push_subscriptions_user_status_updated_idx")
+  @@index([status, providerExpiresAt], map: "web_push_subscriptions_status_expiry_idx")
+  @@map("web_push_subscriptions")
 }
 
 model InboxEvent {
