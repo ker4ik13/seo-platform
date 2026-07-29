@@ -66,6 +66,99 @@ export const rankJobFailureCodes = [
  */
 export type RankJobFailureCode = (typeof rankJobFailureCodes)[number];
 
+export const rankRunConflictReasons = [
+  "EQUIVALENT_RUN_ACTIVE",
+  "ESTIMATE_EXPIRED",
+  "ESTIMATE_STALE",
+  "EXECUTION_GRANT_DENIED"
+] as const;
+
+export type RankRunConflictReason =
+  (typeof rankRunConflictReasons)[number];
+
+/**
+ * Safe Jobs -> Platform API -> Web conflict details. An equivalent run is
+ * attachable through the ordinary tenant-scoped GET route; other conflicts
+ * never carry a Job locator.
+ */
+export type RankRunConflictDetails =
+  | {
+      readonly reason: "EQUIVALENT_RUN_ACTIVE";
+      readonly existingJobId: string;
+    }
+  | {
+      readonly reason: Exclude<
+        RankRunConflictReason,
+        "EQUIVALENT_RUN_ACTIVE"
+      >;
+      readonly existingJobId?: never;
+    };
+
+/**
+ * Internal and public conflict details deliberately share the same redacted
+ * shape. No tenant, estimate, binding, credential or provider identifiers
+ * are allowed.
+ */
+export type InternalRankRunConflictDetails = RankRunConflictDetails;
+
+const RANK_RUN_CONFLICT_REASONS: ReadonlySet<string> = new Set(
+  rankRunConflictReasons
+);
+const UUID_V7_LOWERCASE_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+/**
+ * Strict runtime parser/redactor for an error.details object.
+ */
+export function rankRunConflictDetails(
+  value: unknown
+): RankRunConflictDetails {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype ||
+    Object.getOwnPropertySymbols(value).length !== 0
+  ) {
+    return invalidRankRunConflictDetails();
+  }
+  const record = value as Readonly<Record<string, unknown>>;
+  const reason = record.reason;
+  if (
+    typeof reason !== "string" ||
+    !RANK_RUN_CONFLICT_REASONS.has(reason)
+  ) {
+    return invalidRankRunConflictDetails();
+  }
+
+  if (reason === "EQUIVALENT_RUN_ACTIVE") {
+    if (
+      !hasExactEnumerableDataKeys(record, [
+        "reason",
+        "existingJobId"
+      ]) ||
+      typeof record.existingJobId !== "string" ||
+      !UUID_V7_LOWERCASE_PATTERN.test(record.existingJobId)
+    ) {
+      return invalidRankRunConflictDetails();
+    }
+    return {
+      reason,
+      existingJobId: record.existingJobId
+    };
+  }
+
+  if (!hasExactEnumerableDataKeys(record, ["reason"])) {
+    return invalidRankRunConflictDetails();
+  }
+  return {
+    reason: reason as Exclude<
+      RankRunConflictReason,
+      "EQUIVALENT_RUN_ACTIVE"
+    >
+  };
+}
+
 export interface RankJobProgress {
   /**
    * Non-negative decimal integer. It must never exceed total.
@@ -467,6 +560,27 @@ function rankJobExecutionTimes(input: {
 
 function invalidRankJobLifecycle(): never {
   throw new TypeError("Invalid rank job lifecycle");
+}
+
+function hasExactEnumerableDataKeys(
+  value: Readonly<Record<string, unknown>>,
+  expectedKeys: readonly string[]
+): boolean {
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const keys = Object.keys(value);
+  return (
+    keys.length === expectedKeys.length &&
+    expectedKeys.every((key) => keys.includes(key)) &&
+    Object.getOwnPropertyNames(value).length === keys.length &&
+    Object.values(descriptors).every(
+      (descriptor) =>
+        descriptor.enumerable && Object.hasOwn(descriptor, "value")
+    )
+  );
+}
+
+function invalidRankRunConflictDetails(): never {
+  throw new TypeError("Invalid rank run conflict details");
 }
 
 /**
@@ -966,9 +1080,19 @@ export const normalizedRankDataQualityFlags = [
 export type NormalizedRankDataQualityFlag =
   (typeof normalizedRankDataQualityFlags)[number];
 
+export const rankResultChunkMaxCount = 250 as const;
+export const rankResultPairMaxCount = 1_000 as const;
+
 interface InternalNormalizedRankResultBase {
   readonly manifestEntryId: string;
   readonly keywordId: string;
+  /**
+   * Unique finite flags. The canonical ingest builder orders them by
+   * normalizedRankDataQualityFlags before hashing. For a found result each
+   * field-specific UNAVAILABLE flag is present if and only if its optional
+   * field is absent. A not-found result may carry only
+   * PROVIDER_OBSERVED_AT_UNAVAILABLE.
+   */
   readonly dataQualityFlags: readonly NormalizedRankDataQualityFlag[];
 }
 
@@ -1013,17 +1137,11 @@ export type InternalNormalizedRankResult =
   | InternalNormalizedRankNotFoundResult;
 
 /**
- * ingestEnvelopeHash is calculated from the complete canonical command
- * envelope under schemaVersion, excluding only the hash field itself. It
- * therefore covers tenant/job/item/manifest/chunk IDs, actor, provider,
- * providerRequestId, connectorVersion, observedAt and ordered normalized
- * results, but never raw provider bytes. Results are ordered by the sealed
- * manifest sequence; every dataQualityFlags array is sorted by the finite
- * normalizedRankDataQualityFlags vocabulary before hashing. Results must be
- * a complete one-to-one projection of the referenced manifest chunk:
- * missing and duplicate rows are rejected.
+ * Complete normalized command before its canonical envelope hash is added.
+ * Tenant and actor identity are supplied only by trusted internal callers;
+ * browser/public API bodies never contain them.
  */
-export interface InternalIngestRankChunkInput {
+export interface InternalRankChunkIngestCommand {
   readonly schemaVersion: "rank-ingest@1";
   readonly workspaceId: string;
   readonly projectId: string;
@@ -1032,6 +1150,12 @@ export interface InternalIngestRankChunkInput {
   readonly jobItemId: string;
   readonly manifestId: string;
   readonly chunkIndex: number;
+  /**
+   * Exact hash of the immutable sealed chunk. It binds normalized output to
+   * the content that was actually sent to the provider and is verified
+   * against SEO Data before persistence.
+   */
+  readonly manifestChunkHash: RankManifestHash;
   readonly provider: "ARSENKIN";
   readonly operation: "POSITIONS";
   /**
@@ -1045,23 +1169,56 @@ export interface InternalIngestRankChunkInput {
    * provider result.
    */
   readonly observedAt: string;
-  readonly ingestEnvelopeHash: RankManifestHash;
+  /**
+   * Exact full one-to-one projection of the sealed chunk in manifest
+   * sequence order. A provider omission is represented explicitly as
+   * found=false; missing, duplicate, foreign or reordered rows are invalid.
+   */
   readonly results: readonly InternalNormalizedRankResult[];
+}
+
+/**
+ * Exact JCS hash preimage. It is rebuilt through the server-only
+ * `@seo-platform/contracts/rank-results-canonical` subpath, which verifies
+ * the sealed chunk membership/order and rejects extra or non-canonical
+ * fields.
+ */
+export type InternalRankChunkIngestHashPreimage =
+  InternalRankChunkIngestCommand;
+
+/**
+ * ingestEnvelopeHash is SHA-256 over the complete exact command under the
+ * `rank-ingest@1` domain separator, excluding only the hash field itself.
+ * It covers tenant/job/item/manifest/chunk identity and hash, actor,
+ * providerRequestId, connectorVersion, observedAt and every normalized
+ * result, but never raw provider bytes.
+ */
+export interface InternalIngestRankChunkInput
+  extends InternalRankChunkIngestCommand {
+  readonly ingestEnvelopeHash: RankManifestHash;
 }
 
 /**
  * Exact replay returns the same receipt. The same manifest/chunk identity
  * with another hash is an idempotency conflict. currentSkippedCount records
- * observations that were older than the existing current projection.
+ * observations that lost the monotonic `(observedAt, snapshotId)` current
+ * projection comparison. All decimal counts are canonical non-negative
+ * integers bounded by 250.
  */
 export interface InternalRankChunkIngestReceipt {
   readonly schemaVersion: "rank-ingest@1";
   readonly workspaceId: string;
   readonly projectId: string;
+  /**
+   * Provenance of the first successful write. Exact replay returns this
+   * original value and never replaces it with the replaying actor.
+   */
+  readonly ingestedBy: string;
   readonly jobId: string;
   readonly jobItemId: string;
   readonly manifestId: string;
   readonly chunkIndex: number;
+  readonly manifestChunkHash: RankManifestHash;
   readonly providerRequestId: string;
   readonly connectorVersion: string;
   readonly observedAt: string;
@@ -1095,17 +1252,33 @@ export type RankCheckFinalStatus = (typeof rankCheckFinalStatuses)[number];
  * rejected, so terminal counts cannot change after publication.
  * COMPLETED is valid only when persistedCount=pairCount.
  * PARTIALLY_COMPLETED requires 0<persistedCount<pairCount.
- * ACTION_REQUIRED preserves SUBMIT_OUTCOME_UNKNOWN without emitting a
- * completed event. CANCELLED/FAILED may finalize after the manifest is
- * sealed but before any result/chunk persistence; their derived result
- * counts are then zero. A failure before manifest seal is finalized only in
- * Jobs and must not call this SEO Data finalization boundary.
+ * CANCELLED permits 0<=persistedCount<=pairCount because already accepted
+ * provider work is still persisted. FAILED requires persistedCount=0;
+ * otherwise the truthful status is PARTIALLY_COMPLETED. ACTION_REQUIRED
+ * preserves SUBMIT_OUTCOME_UNKNOWN without a completed event and requires
+ * persistedCount<pairCount, though other chunks may already be persisted.
+ * A failure before manifest seal is finalized only in Jobs and must not call
+ * this SEO Data finalization boundary.
  */
 export interface InternalFinalizeRankCheckInput {
   readonly schemaVersion: "rank-finalize@1";
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;
+  readonly jobId: string;
+  readonly manifestId: string;
+  readonly status: RankCheckFinalStatus;
+}
+
+/**
+ * Exact finalize idempotency identity. actorId is deliberately excluded:
+ * the first successful writer becomes immutable audit provenance and another
+ * authorized actor replaying job+manifest+status receives that receipt.
+ */
+export interface InternalRankCheckFinalizationHashPreimage {
+  readonly schemaVersion: "rank-finalize@1";
+  readonly workspaceId: string;
+  readonly projectId: string;
   readonly jobId: string;
   readonly manifestId: string;
   readonly status: RankCheckFinalStatus;
@@ -1121,6 +1294,11 @@ export interface InternalRankCheckFinalizationReceipt {
   readonly trackingContextId: string;
   readonly configurationVersion: number;
   readonly status: RankCheckFinalStatus;
+  /**
+   * Canonical non-negative decimal strings bounded by 1,000. pairCount is
+   * positive; persistedCount=foundCount+notFoundCount and
+   * missingCount=pairCount-persistedCount.
+   */
   readonly pairCount: string;
   readonly persistedCount: string;
   readonly foundCount: string;

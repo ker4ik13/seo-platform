@@ -14,6 +14,10 @@
     "./canonical-json": {
       "types": "./dist/canonical-json.d.ts",
       "import": "./dist/canonical-json.js"
+    },
+    "./rank-results-canonical": {
+      "types": "./dist/rank-results-canonical.d.ts",
+      "import": "./dist/rank-results-canonical.js"
     }
   },
   "scripts": {

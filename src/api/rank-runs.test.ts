@@ -7,6 +7,8 @@ import {
   rankJobFailureCodes,
   rankJobStages,
   rankJobStatuses,
+  rankRunConflictDetails,
+  rankRunConflictReasons,
   rankManifestChunkHashPreimage,
   rankManifestDeduplicationHashPreimage,
   rankManifestHashPreimage,
@@ -22,6 +24,7 @@ import {
   type InternalRankManifestChunk,
   type InternalRankManifestSeal,
   type InternalSealRankManifestInput,
+  type RankRunConflictDetails,
   type RankJobSummary
 } from "./rank-runs.js";
 import { canonicalJsonSha256 } from "../canonical-json.js";
@@ -85,6 +88,12 @@ test("rank run public vocabularies are finite and pin the first execution slice"
     "INTERNAL_ERROR",
     "SUBMIT_OUTCOME_UNKNOWN"
   ]);
+  assert.deepEqual(rankRunConflictReasons, [
+    "EQUIVALENT_RUN_ACTIVE",
+    "ESTIMATE_EXPIRED",
+    "ESTIMATE_STALE",
+    "EXECUTION_GRANT_DENIED"
+  ]);
   assert.deepEqual(normalizedRankResultTypes, ["ORGANIC"]);
   assert.deepEqual(normalizedRankDataQualityFlags, [
     "PROVIDER_OBSERVED_AT_UNAVAILABLE",
@@ -100,6 +109,55 @@ test("rank run public vocabularies are finite and pin the first execution slice"
     "FAILED",
     "ACTION_REQUIRED"
   ]);
+});
+
+test("rank run conflict details expose an attachable Job only for an equivalent run", () => {
+  const attachable = rankRunConflictDetails({
+    reason: "EQUIVALENT_RUN_ACTIVE",
+    existingJobId: ids.jobId
+  });
+  const expired = rankRunConflictDetails({
+    reason: "ESTIMATE_EXPIRED"
+  });
+
+  assert.deepEqual(attachable, {
+    reason: "EQUIVALENT_RUN_ACTIVE",
+    existingJobId: ids.jobId
+  } satisfies RankRunConflictDetails);
+  assert.deepEqual(expired, {
+    reason: "ESTIMATE_EXPIRED"
+  } satisfies RankRunConflictDetails);
+
+  for (const invalid of [
+    {
+      reason: "ESTIMATE_STALE",
+      existingJobId: ids.jobId
+    },
+    {
+      reason: "EQUIVALENT_RUN_ACTIVE"
+    },
+    {
+      reason: "EQUIVALENT_RUN_ACTIVE",
+      existingJobId:
+        "0190000a-0000-7000-8000-000000000006".toUpperCase()
+    },
+    {
+      reason: "EQUIVALENT_RUN_ACTIVE",
+      existingJobId: "not-a-uuid"
+    },
+    {
+      reason: "UNKNOWN_CONFLICT"
+    },
+    {
+      reason: "ESTIMATE_EXPIRED",
+      credentialId: "private-credential"
+    }
+  ]) {
+    assert.throws(
+      () => rankRunConflictDetails(invalid),
+      /Invalid rank run conflict details/u
+    );
+  }
 });
 
 test("public create body contains only immutable estimate identity", () => {
@@ -679,6 +737,7 @@ test("ingest and finalize DTOs are tenant-scoped, normalized and count-free on c
     jobItemId: ids.jobItemId,
     manifestId: ids.manifestId,
     chunkIndex: 0,
+    manifestChunkHash: hash("3"),
     provider: "ARSENKIN",
     operation: "POSITIONS",
     providerRequestId: "arsenkin-task-1",
