@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canonicalizeJson } from "./canonical-json.js";
+import {
+  canonicalizeJson,
+  canonicalJsonSha256,
+  utf8Sha256
+} from "./canonical-json.js";
 
 test("canonicalizes object keys recursively and preserves array order", () => {
   assert.equal(
@@ -62,6 +66,37 @@ test("matches RFC 8785 UTF-16 property ordering and UTF-8 encoding", () => {
       .toString("hex"),
     "7b22e282ac223a22f09f9880227d"
   );
+});
+
+test("hashes canonical JSON with an exact versioned domain separator", () => {
+  assert.equal(
+    canonicalJsonSha256("rank-manifest@1", { b: 2, a: 1 }),
+    "5a3bf33228e51309e5a144707611be5dd32a7b54cdbc85ccd2733e8ff257b52b"
+  );
+  assert.notEqual(
+    canonicalJsonSha256("rank-manifest@1", { a: 1, b: 2 }),
+    canonicalJsonSha256("rank-manifest-chunk@1", { a: 1, b: 2 })
+  );
+  for (const domain of [
+    "",
+    "Rank-Manifest@1",
+    "rank manifest@1",
+    `a${"b".repeat(128)}`
+  ]) {
+    assert.throws(
+      () => canonicalJsonSha256(domain, {}),
+      /Invalid canonical JSON hash domain/u
+    );
+  }
+});
+
+test("hashes exact raw UTF-8 string bytes without implicit normalization", () => {
+  assert.equal(
+    utf8Sha256("Keyword 1"),
+    "7acbafb5292fd9f277d97b65db34465d61ab779a234aa32832e6fbd7a7bba22c"
+  );
+  assert.notEqual(utf8Sha256("\u00e9"), utf8Sha256("e\u0301"));
+  assert.notEqual(utf8Sha256("value"), utf8Sha256("value\n"));
 });
 
 test("supports null-prototype JSON records", () => {

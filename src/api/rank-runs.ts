@@ -531,9 +531,13 @@ export type InternalCancelRankJobInput = InternalRankJobQuery;
 export interface RankManifestHash {
   readonly algorithm: "SHA_256";
   /**
-   * Lowercase 64-character hexadecimal SHA-256 value. "Canonical JSON" in
-   * every rank hash contract means RFC 8785 JCS encoded as UTF-8; producers
-   * and verifiers must use one shared implementation of that recipe.
+   * Lowercase 64-character hexadecimal SHA-256 value. Where a field names
+   * canonical JSON, it means RFC 8785 JCS encoded as UTF-8; producers and
+   * verifiers must use canonicalJsonSha256 from the server-only
+   * `@seo-platform/contracts/canonical-json` subpath. Its exact byte recipe
+   * is `seo-platform.${domain}\0${RFC8785(value)}`, where domain is the
+   * containing contract schema version (for example `rank-manifest@1`).
+   * Fields using another recipe document it explicitly.
    */
   readonly value: string;
 }
@@ -604,6 +608,10 @@ export interface InternalRankManifestSeal {
   readonly projectId: string;
   readonly jobId: string;
   readonly estimateId: string;
+  /**
+   * Audit actor that requested the immutable seal.
+   */
+  readonly sealedBy: string;
   readonly trackingContextId: string;
   readonly provider: "ARSENKIN";
   readonly operation: "POSITIONS";
@@ -620,20 +628,27 @@ export interface InternalRankManifestSeal {
   readonly hashSchemaVersion: "rank-manifest@1";
   /**
    * SHA-256 over canonical JSON under hashSchemaVersion. The preimage contains
-   * the complete immutable header (including run-specific IDs, sealedAt and
-   * deduplicationHash) plus ordered chunk hashes, and excludes only
-   * manifestHash itself.
+   * the complete immutable contract seal header (including run-specific IDs,
+   * sealedBy, sealedAt and deduplicationHash) plus ordered chunk hashes, and
+   * excludes manifestHash. Storage-only requestHash/createdAt are not contract
+   * header fields. Producers and verifiers must build it with
+   * rankManifestHashPreimage.
    */
   readonly manifestHash: RankManifestHash;
   /**
    * Semantic active-run deduplication hash. It covers tenant/project,
-   * project domain/version, trackingContextId/contextVersion,
-   * configurationVersion/configurationHash, semanticScopeHash/scopeHash,
-   * provider execution parameters, retention and ordered
-   * keywordId+keywordVersion+keywordTextHash+language entries. It excludes
-   * job/estimate/manifest/entry/assignment IDs, actor and timestamps, so a
-   * new idempotency key cannot bypass active
-   * project+provider+deduplicationHash protection.
+   * project domain, provider execution parameters, retention and ordered
+   * keywordId+keywordTextHash+language entries. The semantic order is
+   * ascending canonical lowercase keywordId text and is independent of
+   * assignment identity or lifecycle timestamps. It excludes tracking
+   * context identity, all logical revisions and configuration/scope evidence
+   * hashes, as well as run/estimate/manifest/entry/assignment IDs, actor and
+   * timestamps. Consequently cloning or renaming an equivalent context, a
+   * display-only region label, project/keyword metadata change,
+   * remove/reassign or a new idempotency key cannot bypass active
+   * project+provider+deduplicationHash protection when provider work is
+   * unchanged. Run-specific audit and evidence remain covered by the full
+   * manifestHash.
    */
   readonly deduplicationHash: RankManifestHash;
   readonly pairCount: string;
@@ -665,11 +680,23 @@ export interface InternalGetRankManifestChunkInput {
  */
 export interface InternalRankManifestEntry {
   readonly id: string;
+  /**
+   * Zero-based position assigned by ascending canonical lowercase keywordId.
+   */
   readonly sequence: number;
   readonly assignmentId: string;
   readonly keywordId: string;
   readonly keywordVersion: number;
+  /**
+   * Exact stored text, limited by the first Arsenkin slice to 500 Unicode
+   * code points and 2,000 UTF-8 bytes before it may be materialized.
+   */
   readonly keywordText: string;
+  /**
+   * SHA-256 over the exact raw UTF-8 bytes of keywordText, without Unicode
+   * normalization, JSON encoding, delimiter or newline. Producers and
+   * verifiers use utf8Sha256 from the server-only canonical-json subpath.
+   */
   readonly keywordTextHash: RankManifestHash;
   readonly language: string;
 }
@@ -682,16 +709,232 @@ export interface InternalRankManifestChunk {
   readonly chunkIndex: number;
   readonly hashSchemaVersion: "rank-manifest-chunk@1";
   /**
-   * SHA-256 over canonical JSON under hashSchemaVersion containing
-   * manifestId, chunk index and the ordered complete entry DTO, excluding
-   * only chunkHash itself. Semantic deduplication is calculated separately
-   * and must not reuse this run-specific hash.
+   * SHA-256 over the exact rankManifestChunkHashPreimage output: schema
+   * version, manifestId, chunkIndex and ordered complete entry DTOs. Tenant,
+   * Job and chunkHash fields are excluded. Semantic deduplication is
+   * calculated separately and must not reuse this run-specific hash.
    */
   readonly chunkHash: RankManifestHash;
   /**
    * Ordered by sequence, unique by entry/keyword and bounded to 250 rows.
    */
   readonly entries: readonly InternalRankManifestEntry[];
+}
+
+/**
+ * Exact, versioned preimage used for a rank manifest chunk hash. Tenant and
+ * Job identity are intentionally absent because they are covered by the full
+ * manifest hash.
+ */
+export interface InternalRankManifestChunkHashPreimage {
+  readonly hashSchemaVersion: "rank-manifest-chunk@1";
+  readonly manifestId: string;
+  readonly chunkIndex: number;
+  readonly entries: readonly InternalRankManifestEntry[];
+}
+
+export interface InternalRankManifestDeduplicationKeyword {
+  readonly keywordId: string;
+  readonly keywordTextHash: RankManifestHash;
+  readonly language: string;
+}
+
+/**
+ * Exact semantic preimage for active-run deduplication. The opaque estimate
+ * scopeHash and all run/assignment identities are deliberately absent.
+ */
+export interface InternalRankManifestDeduplicationHashPreimage {
+  readonly hashSchemaVersion: "rank-manifest@1";
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly project: {
+    readonly domain: string;
+  };
+  readonly provider: "ARSENKIN";
+  readonly operation: "POSITIONS";
+  readonly execution: InternalRankExecutionParameters;
+  readonly retention: {
+    readonly normalizedRankHistory: "LONG_TERM";
+    readonly rawSerp: "NOT_COLLECTED";
+  };
+  readonly keywords: readonly InternalRankManifestDeduplicationKeyword[];
+}
+
+export type InternalRankManifestSealWithoutHash = Omit<
+  InternalRankManifestSeal,
+  "manifestHash"
+>;
+
+/**
+ * Exact full-manifest preimage. It is the complete immutable seal header
+ * without manifestHash followed by chunk hashes in ascending chunkIndex.
+ */
+export type InternalRankManifestHashPreimage =
+  InternalRankManifestSealWithoutHash & {
+    readonly chunkHashes: readonly RankManifestHash[];
+  };
+
+/**
+ * Rebuilds the chunk preimage through an allowlist. Runtime-only extra fields
+ * on a structurally compatible DTO cannot silently change the hash recipe.
+ */
+export function rankManifestChunkHashPreimage(
+  input: Pick<
+    InternalRankManifestChunk,
+    "hashSchemaVersion" | "manifestId" | "chunkIndex" | "entries"
+  >
+): InternalRankManifestChunkHashPreimage {
+  return {
+    hashSchemaVersion: input.hashSchemaVersion,
+    manifestId: input.manifestId,
+    chunkIndex: input.chunkIndex,
+    entries: input.entries.map(copyRankManifestEntry)
+  };
+}
+
+/**
+ * Rebuilds and deterministically orders the semantic active-run preimage.
+ */
+export function rankManifestDeduplicationHashPreimage(
+  input: InternalSealRankManifestInput,
+  entries: readonly InternalRankManifestEntry[]
+): InternalRankManifestDeduplicationHashPreimage {
+  const keywords = [...entries]
+    .sort(compareRankManifestKeywordIds)
+    .map((entry) => ({
+      keywordId: entry.keywordId,
+      keywordTextHash: copyRankManifestHash(entry.keywordTextHash),
+      language: entry.language
+    }));
+
+  return {
+    hashSchemaVersion: "rank-manifest@1",
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    project: {
+      domain: input.project.domain
+    },
+    provider: input.provider,
+    operation: input.operation,
+    execution: copyRankExecutionParameters(input.execution),
+    retention: {
+      normalizedRankHistory: input.retention.normalizedRankHistory,
+      rawSerp: input.retention.rawSerp
+    },
+    keywords
+  };
+}
+
+/**
+ * Rebuilds the complete manifest preimage through an allowlist.
+ */
+export function rankManifestHashPreimage(
+  seal: InternalRankManifestSealWithoutHash,
+  chunkHashes: readonly RankManifestHash[]
+): InternalRankManifestHashPreimage {
+  return {
+    id: seal.id,
+    workspaceId: seal.workspaceId,
+    projectId: seal.projectId,
+    jobId: seal.jobId,
+    estimateId: seal.estimateId,
+    sealedBy: seal.sealedBy,
+    trackingContextId: seal.trackingContextId,
+    provider: seal.provider,
+    operation: seal.operation,
+    project: {
+      id: seal.project.id,
+      workspaceId: seal.project.workspaceId,
+      domain: seal.project.domain,
+      status: seal.project.status,
+      version: seal.project.version
+    },
+    contextVersion: seal.contextVersion,
+    configurationVersion: seal.configurationVersion,
+    configurationHash: copyRankManifestHash(seal.configurationHash),
+    semanticScopeHash: copyRankManifestHash(seal.semanticScopeHash),
+    scopeHash: copyRankManifestHash(seal.scopeHash),
+    hashSchemaVersion: seal.hashSchemaVersion,
+    deduplicationHash: copyRankManifestHash(seal.deduplicationHash),
+    pairCount: seal.pairCount,
+    chunkCount: seal.chunkCount,
+    chunkSize: seal.chunkSize,
+    execution: copyRankExecutionParameters(seal.execution),
+    retention: {
+      normalizedRankHistory: seal.retention.normalizedRankHistory,
+      rawSerp: seal.retention.rawSerp
+    },
+    status: seal.status,
+    sealedAt: seal.sealedAt,
+    chunkHashes: chunkHashes.map(copyRankManifestHash)
+  };
+}
+
+function copyRankManifestEntry(
+  entry: InternalRankManifestEntry
+): InternalRankManifestEntry {
+  return {
+    id: entry.id,
+    sequence: entry.sequence,
+    assignmentId: entry.assignmentId,
+    keywordId: entry.keywordId,
+    keywordVersion: entry.keywordVersion,
+    keywordText: entry.keywordText,
+    keywordTextHash: copyRankManifestHash(entry.keywordTextHash),
+    language: entry.language
+  };
+}
+
+function copyRankManifestHash(
+  hash: RankManifestHash
+): RankManifestHash {
+  return {
+    algorithm: hash.algorithm,
+    value: hash.value
+  };
+}
+
+function copyRankExecutionParameters(
+  execution: InternalRankExecutionParameters
+): InternalRankExecutionParameters {
+  const domainMatchRule: TrackingDomainMatchRule =
+    execution.domainMatchRule.mode === "SPECIFIC_URL" ||
+    execution.domainMatchRule.mode === "URL_PREFIX"
+      ? {
+          mode: execution.domainMatchRule.mode,
+          value: execution.domainMatchRule.value
+        }
+      : { mode: execution.domainMatchRule.mode };
+
+  return {
+    searchEngine: execution.searchEngine,
+    countryCode: execution.countryCode,
+    ...(execution.regionCode === undefined
+      ? {}
+      : { regionCode: execution.regionCode }),
+    language: execution.language,
+    device: execution.device,
+    depth: execution.depth,
+    domainMatchRule,
+    safeSearch: execution.safeSearch,
+    format: execution.format,
+    rawSerp: execution.rawSerp,
+    fallbackMode: execution.fallbackMode,
+    providerMappingVersion: execution.providerMappingVersion
+  };
+}
+
+function compareRankManifestKeywordIds(
+  left: InternalRankManifestEntry,
+  right: InternalRankManifestEntry
+): number {
+  const leftCanonical = left.keywordId.toLowerCase();
+  const rightCanonical = right.keywordId.toLowerCase();
+  if (leftCanonical < rightCanonical) return -1;
+  if (leftCanonical > rightCanonical) return 1;
+  if (left.keywordId < right.keywordId) return -1;
+  if (left.keywordId > right.keywordId) return 1;
+  return 0;
 }
 
 export const normalizedRankResultTypes = ["ORGANIC"] as const;

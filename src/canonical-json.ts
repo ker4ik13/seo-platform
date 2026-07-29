@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
 import { types as nodeTypes } from "node:util";
+
+const HASH_DOMAIN_PATTERN = /^[a-z0-9][a-z0-9@._-]{0,127}$/u;
 
 /**
  * Dependency-free, server-only RFC 8785 JSON Canonicalization Scheme
@@ -9,6 +12,37 @@ import { types as nodeTypes } from "node:util";
  */
 export function canonicalizeJson(value: unknown): string {
   return serialize(value, new Set<object>());
+}
+
+/**
+ * Shared versioned hash recipe for cross-service contracts.
+ *
+ * SHA-256 input is the UTF-8 sequence
+ * `seo-platform.${domain}\0${RFC8785(value)}`. Domain must include the
+ * contract version, for example `rank-manifest@1`.
+ */
+export function canonicalJsonSha256(
+  domain: string,
+  value: unknown
+): string {
+  if (!HASH_DOMAIN_PATTERN.test(domain)) {
+    throw new TypeError("Invalid canonical JSON hash domain");
+  }
+  return createHash("sha256")
+    .update(`seo-platform.${domain}\u0000`, "utf8")
+    .update(canonicalizeJson(value), "utf8")
+    .digest("hex");
+}
+
+/**
+ * Exact SHA-256 over the raw UTF-8 bytes of a string.
+ *
+ * No Unicode normalization, JSON serialization, delimiter or trailing
+ * newline is added. This is intentionally separate from canonical JSON
+ * hashing and is used only where the containing contract names that recipe.
+ */
+export function utf8Sha256(value: string): string {
+  return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
 function serialize(value: unknown, ancestors: Set<object>): string {

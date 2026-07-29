@@ -7,6 +7,9 @@ import {
   rankJobFailureCodes,
   rankJobStages,
   rankJobStatuses,
+  rankManifestChunkHashPreimage,
+  rankManifestDeduplicationHashPreimage,
+  rankManifestHashPreimage,
   redactRankJobSummary,
   type CreateRankRunInput,
   type InternalCreateRankRunInput,
@@ -21,6 +24,7 @@ import {
   type InternalSealRankManifestInput,
   type RankJobSummary
 } from "./rank-runs.js";
+import { canonicalJsonSha256 } from "../canonical-json.js";
 
 const ids = {
   workspaceId: "01900000-0000-7000-8000-000000000001",
@@ -424,6 +428,7 @@ test("manifest boundaries seal exact scope and keep keyword text internal", () =
     projectId: ids.projectId,
     jobId: ids.jobId,
     estimateId: ids.estimateId,
+    sealedBy: ids.actorId,
     trackingContextId: ids.trackingContextId,
     provider: "ARSENKIN",
     operation: "POSITIONS",
@@ -479,6 +484,127 @@ test("manifest boundaries seal exact scope and keep keyword text internal", () =
   assert.equal(chunk.entries[0]?.keywordText, "internal keyword");
   assert.equal("credentialId" in sealInput, false);
   assert.equal("bindingId" in sealInput, false);
+
+  const chunkPreimage = rankManifestChunkHashPreimage(chunk);
+  assert.deepEqual(Object.keys(chunkPreimage), [
+    "hashSchemaVersion",
+    "manifestId",
+    "chunkIndex",
+    "entries"
+  ]);
+  assert.deepEqual(Object.keys(chunkPreimage.entries[0] ?? {}), [
+    "id",
+    "sequence",
+    "assignmentId",
+    "keywordId",
+    "keywordVersion",
+    "keywordText",
+    "keywordTextHash",
+    "language"
+  ]);
+  assert.equal("workspaceId" in chunkPreimage, false);
+  assert.equal("projectId" in chunkPreimage, false);
+  assert.equal("jobId" in chunkPreimage, false);
+  assert.equal("chunkHash" in chunkPreimage, false);
+
+  const deduplicationPreimage =
+    rankManifestDeduplicationHashPreimage(sealInput, chunk.entries);
+  assert.deepEqual(Object.keys(deduplicationPreimage), [
+    "hashSchemaVersion",
+    "workspaceId",
+    "projectId",
+    "project",
+    "provider",
+    "operation",
+    "execution",
+    "retention",
+    "keywords"
+  ]);
+  assert.deepEqual(Object.keys(deduplicationPreimage.project), [
+    "domain"
+  ]);
+  assert.deepEqual(
+    Object.keys(deduplicationPreimage.keywords[0] ?? {}),
+    ["keywordId", "keywordTextHash", "language"]
+  );
+  const deduplicationJson = JSON.stringify(deduplicationPreimage);
+  for (const excludedField of [
+    "contextVersion",
+    "configurationVersion",
+    "configurationHash",
+    "semanticScopeHash",
+    "keywordVersion",
+    "scopeHash",
+    "jobId",
+    "estimateId",
+    "manifestId",
+    "entryId",
+    "assignmentId",
+    "actorId",
+    "sealedAt"
+  ]) {
+    assert.equal(deduplicationJson.includes(excludedField), false);
+  }
+  const mutatedDeduplicationPreimage =
+    rankManifestDeduplicationHashPreimage(
+      {
+        ...sealInput,
+        actorId: "01900000-0000-7000-8000-000000000090",
+        jobId: "01900000-0000-7000-8000-000000000091",
+        estimateId: "01900000-0000-7000-8000-000000000092",
+        project: {
+          ...sealInput.project,
+          version: 99
+        },
+        estimate: {
+          ...sealInput.estimate,
+          trackingContextId:
+            "01900000-0000-7000-8000-000000000095",
+          contextVersion: 98,
+          configurationVersion: 97,
+          configurationHash: hash("7"),
+          semanticScopeHash: hash("8"),
+          scopeHash: hash("9")
+        }
+      },
+      chunk.entries.map((entry) => ({
+        ...entry,
+        id: "01900000-0000-7000-8000-000000000093",
+        assignmentId: "01900000-0000-7000-8000-000000000094",
+        keywordVersion: 96
+      }))
+    );
+  assert.deepEqual(
+    mutatedDeduplicationPreimage,
+    deduplicationPreimage
+  );
+
+  const { manifestHash: storedManifestHash, ...sealWithoutHash } = seal;
+  assert.deepEqual(storedManifestHash, hash("d"));
+  const manifestPreimage = rankManifestHashPreimage(sealWithoutHash, [
+    chunk.chunkHash
+  ]);
+  assert.equal("manifestHash" in manifestPreimage, false);
+  assert.equal(manifestPreimage.jobId, ids.jobId);
+  assert.equal(manifestPreimage.sealedBy, ids.actorId);
+  assert.deepEqual(manifestPreimage.scopeHash, hash("c"));
+  assert.deepEqual(manifestPreimage.chunkHashes, [chunk.chunkHash]);
+
+  assert.equal(
+    canonicalJsonSha256("rank-manifest-chunk@1", chunkPreimage),
+    "6111d8d70f779230f122604bc0e911b1126f5c07e86a4a190c75cc641144360a"
+  );
+  assert.equal(
+    canonicalJsonSha256(
+      "rank-manifest@1",
+      deduplicationPreimage
+    ),
+    "4a00eec14217d038a594174867b352fc1d32854dea3a8bea39fe88f200a05005"
+  );
+  assert.equal(
+    canonicalJsonSha256("rank-manifest@1", manifestPreimage),
+    "381b9a258e705fd8625d684a9a4273ccfc65fc02b28a5c23f50a5baade3fd217"
+  );
 });
 
 test("normalized result union distinguishes found from valid not found", () => {
