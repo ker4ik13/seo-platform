@@ -1,8 +1,15 @@
-import { Controller, Get, Inject } from "@nestjs/common";
+import {
+  Controller,
+  Get,
+  HttpStatus,
+  Inject,
+  Res
+} from "@nestjs/common";
 import type {
   DependencyHealth,
   HealthResponse
 } from "@seo-platform/contracts";
+import type { FastifyReply } from "fastify";
 import { APP_CONFIG } from "../config/config.module.js";
 import type { AppConfig } from "../config/app-config.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -24,12 +31,17 @@ export class HealthController {
   }
 
   @Get(["health/ready", "internal/v1/health/ready"])
-  public async ready(): Promise<HealthResponse> {
+  public async ready(
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<HealthResponse> {
     const dependencyHealth = await this.readinessDependencies();
     const status = dependencyHealth.every(({ status }) => status === "ok")
       ? "ok"
       : "degraded";
 
+    reply.code(
+      status === "ok" ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE
+    );
     return this.response(status, dependencyHealth);
   }
 

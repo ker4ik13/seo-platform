@@ -19,7 +19,7 @@ export class DependencyHealthService {
     const startedAt = performance.now();
 
     try {
-      const response = await fetch(`${baseUrl}/internal/v1/health/live`, {
+      const response = await fetch(`${baseUrl}/internal/v1/health/ready`, {
         signal: AbortSignal.timeout(this.config.dependencyTimeoutMs)
       });
       const latencyMs = Math.round(performance.now() - startedAt);
@@ -33,6 +33,16 @@ export class DependencyHealthService {
         };
       }
 
+      const body: unknown = await response.json();
+      if (!isReadyHealthResponse(body)) {
+        return {
+          name,
+          status: "unavailable",
+          latencyMs,
+          message: "Dependency readiness response invalid"
+        };
+      }
+
       return { name, status: "ok", latencyMs };
     } catch {
       return {
@@ -43,4 +53,14 @@ export class DependencyHealthService {
       };
     }
   }
+}
+
+function isReadyHealthResponse(value: unknown): value is { status: "ok" } {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    "status" in value &&
+    value.status === "ok"
+  );
 }
