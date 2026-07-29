@@ -341,6 +341,18 @@ export function hasProjectAccessPermission(
   return projectManagerPermissions.has(permission);
 }
 
+export function hasEffectiveProjectPermission(
+  roleCode: string,
+  projectAccessLevel: ProjectAccessLevel | undefined,
+  permission: Permission
+): boolean {
+  return (
+    hasSystemPermission(roleCode, permission) &&
+    (projectAccessLevel === undefined ||
+      hasProjectAccessPermission(projectAccessLevel, permission))
+  );
+}
+
 export function isReadOnlySafePermission(permission: Permission): boolean {
   return readOnlySafePermissions.has(permission);
 }

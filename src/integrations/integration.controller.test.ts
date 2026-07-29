@@ -207,6 +207,7 @@ test("gets one credential validation through trusted workspace context", async (
   assert.deepEqual(capturedArguments?.[0], {
     tenant: {
       workspaceId,
+      workspaceStatus: "ACTIVE",
       roleCode: "OWNER"
     },
     actorId: principal.userId,
@@ -341,6 +342,7 @@ function tenantRequest(
     headers,
     tenantAuthorization: {
       workspaceId,
+      workspaceStatus: "ACTIVE",
       roleCode: "OWNER"
     }
   } as unknown as TenantRequest;

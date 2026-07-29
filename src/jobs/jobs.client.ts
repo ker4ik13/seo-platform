@@ -5,7 +5,9 @@ import {
   integrationCredentialStatuses,
   integrationCredentialValidationModes,
   integrationCredentialValidationStatuses,
-  integrationProviders
+  integrationProviders,
+  projectConnectorBindingAvailabilities,
+  projectConnectorRouteSourceKinds
 } from "@seo-platform/contracts";
 import type {
   CompleteUploadInput,
@@ -20,19 +22,29 @@ import type {
   IntegrationCredentialValidationSummary,
   IntegrationCredentialSummary,
   IntegrationProviderCatalogItem,
+  CreateProjectConnectorBindingInput,
   InternalCreateIntegrationCredentialInput,
   InternalCreateIntegrationCredentialValidationInput,
+  InternalCreateProjectConnectorBindingInput,
   InternalDeleteIntegrationCredentialInput,
+  InternalUpdateProjectConnectorBindingInput,
   InternalUpdateIntegrationCredentialInput,
   InternalCreateUploadInput,
   InternalCreateSemanticImportInput,
   InternalConfigureSemanticImportInput,
   InternalConfirmSemanticImportInput,
   InternalCancelSemanticImportInput,
+  ProjectConnectorBinding,
+  ProjectConnectorBindingsAggregate,
+  ProjectConnectorBudgetPolicy,
+  ProjectConnectorCredentialOption,
+  ProjectConnectorFallbackPolicy,
+  ProjectConnectorRoute,
   SemanticImportSummary,
   UploadPartUrls,
   UploadSummary,
-  UpdateIntegrationCredentialInput
+  UpdateIntegrationCredentialInput,
+  UpdateProjectConnectorBindingInput
 } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
@@ -61,6 +73,14 @@ const CREDENTIAL_VALIDATION_STATUSES = new Set<string>(
   integrationCredentialValidationStatuses
 );
 const PROVIDERS = new Set<string>(integrationProviders);
+const PROJECT_BINDING_AVAILABILITIES = new Set<string>(
+  projectConnectorBindingAvailabilities
+);
+const PROJECT_ROUTE_SOURCE_KINDS = new Set<string>(
+  projectConnectorRouteSourceKinds
+);
+const MAX_PROJECT_BINDINGS = integrationCapabilities.length;
+const MAX_PROJECT_CREDENTIAL_OPTIONS = 500;
 
 @Injectable()
 export class JobsClient {
@@ -358,6 +378,79 @@ export class JobsClient {
     }
   }
 
+  public async projectConnectorBindings(
+    context: InternalContext
+  ): Promise<ProjectConnectorBindingsAggregate> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.requestIntegration<unknown>(
+      "GET",
+      projectIntegrationPath(context, projectId),
+      context
+    );
+    return projectConnectorBindingsAggregate(
+      value,
+      context.tenant.workspaceId,
+      projectId
+    );
+  }
+
+  public async createProjectConnectorBinding(
+    context: InternalContext,
+    input: CreateProjectConnectorBindingInput,
+    idempotencyKey: string
+  ): Promise<ProjectConnectorBinding> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalCreateProjectConnectorBindingInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId,
+      idempotencyKey
+    };
+    const value = await this.requestIntegration<unknown>(
+      "POST",
+      projectIntegrationPath(context, projectId),
+      context,
+      body
+    );
+    return scopedProjectConnectorBinding(
+      value,
+      context.tenant.workspaceId,
+      projectId
+    );
+  }
+
+  public async updateProjectConnectorBinding(
+    context: InternalContext,
+    bindingId: string,
+    input: UpdateProjectConnectorBindingInput,
+    version: number
+  ): Promise<ProjectConnectorBinding> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalUpdateProjectConnectorBindingInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId,
+      version
+    };
+    const value = await this.requestIntegration<unknown>(
+      "PATCH",
+      `${projectIntegrationPath(
+        context,
+        projectId
+      )}/${encodeURIComponent(bindingId)}`,
+      context,
+      body
+    );
+    return scopedProjectConnectorBinding(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      bindingId
+    );
+  }
+
   private requestIntegration<Data>(
     method: "GET" | "POST" | "PATCH" | "DELETE",
     path: string,
@@ -412,7 +505,7 @@ export class JobsClient {
       throw dependencyUnavailable();
     }
     const payload = await response.json().catch(() => undefined);
-    if (!response.ok) throw upstreamError(response.status);
+    if (!response.ok) throw upstreamError(response.status, payload);
     if (
       typeof payload !== "object" ||
       payload === null ||
@@ -431,6 +524,15 @@ function integrationPath(
   return `/internal/v1/workspaces/${encodeURIComponent(
     context.tenant.workspaceId
   )}/integrations/${suffix}`;
+}
+
+function projectIntegrationPath(
+  context: InternalContext,
+  projectId: string
+): string {
+  return `/internal/v1/workspaces/${encodeURIComponent(
+    context.tenant.workspaceId
+  )}/projects/${encodeURIComponent(projectId)}/integration-settings`;
 }
 
 function requiredProjectId(tenant: TenantAuthorization): string {
@@ -458,7 +560,7 @@ function invalidJobsResponse(): DomainError {
   });
 }
 
-function upstreamError(status: number): DomainError {
+function upstreamError(status: number, payload: unknown): DomainError {
   if (status === 404) {
     return new DomainError({
       statusCode: 404,
@@ -467,10 +569,35 @@ function upstreamError(status: number): DomainError {
     });
   }
   if (status === 409) {
+    if (upstreamErrorCode(payload) === "IDEMPOTENCY_CONFLICT") {
+      return new DomainError({
+        statusCode: 409,
+        code: "IDEMPOTENCY_CONFLICT",
+        message: "Idempotency key was already used for another request"
+      });
+    }
+    if (upstreamErrorCode(payload) === "DUPLICATE") {
+      return new DomainError({
+        statusCode: 409,
+        code: "DUPLICATE",
+        message: "A project integration already exists"
+      });
+    }
     return new DomainError({
       statusCode: 409,
       code: "RESOURCE_STATE_CONFLICT",
       message: "Resource state does not allow this operation"
+    });
+  }
+  if (status === 412) {
+    const currentVersion = upstreamCurrentVersion(payload);
+    return new DomainError({
+      statusCode: 412,
+      code: "VERSION_CONFLICT",
+      message: "Resource version conflict",
+      ...(currentVersion === undefined
+        ? {}
+        : { details: { currentVersion } })
     });
   }
   if (status === 400 || status === 422) {
@@ -488,6 +615,352 @@ function upstreamError(status: number): DomainError {
     });
   }
   return dependencyUnavailable();
+}
+
+function upstreamErrorCode(payload: unknown): string | undefined {
+  const input = unknownRecord(payload);
+  if (typeof input?.code === "string") return input.code;
+  const error = unknownRecord(input?.error);
+  return typeof error?.code === "string" ? error.code : undefined;
+}
+
+function upstreamCurrentVersion(payload: unknown): number | undefined {
+  const input = unknownRecord(payload);
+  const direct = input?.currentVersion;
+  if (Number.isSafeInteger(direct) && Number(direct) > 0) {
+    return Number(direct);
+  }
+  const details = unknownRecord(unknownRecord(input?.error)?.details);
+  const nested = details?.currentVersion;
+  return Number.isSafeInteger(nested) && Number(nested) > 0
+    ? Number(nested)
+    : undefined;
+}
+
+function projectConnectorBindingsAggregate(
+  value: unknown,
+  workspaceId: string,
+  projectId: string
+): ProjectConnectorBindingsAggregate {
+  const input = exactRecord(value, [
+    "bindings",
+    "credentialOptions",
+    "credentialOptionsTruncated"
+  ]);
+  if (
+    !Array.isArray(input.bindings) ||
+    input.bindings.length > MAX_PROJECT_BINDINGS ||
+    !Array.isArray(input.credentialOptions) ||
+    input.credentialOptions.length > MAX_PROJECT_CREDENTIAL_OPTIONS ||
+    typeof input.credentialOptionsTruncated !== "boolean"
+  ) {
+    throw invalidJobsResponse();
+  }
+
+  const bindings = input.bindings.map((binding) =>
+    scopedProjectConnectorBinding(binding, workspaceId, projectId)
+  );
+  const credentialOptions = input.credentialOptions.map((credential) =>
+    projectConnectorCredentialOption(credential, workspaceId)
+  );
+  assertUnique(
+    bindings.map(({ id }) => id),
+    bindings.map(({ capability }) => capability),
+    credentialOptions.map(({ id }) => id)
+  );
+
+  const credentialsById = new Map(
+    credentialOptions.map((credential) => [credential.id, credential])
+  );
+  for (const binding of bindings) {
+    const credential = credentialsById.get(binding.route.credentialId);
+    if (
+      credential &&
+      (credential.provider !== binding.route.provider ||
+        credential.mode !== binding.route.credentialMode)
+    ) {
+      throw invalidJobsResponse();
+    }
+    if (
+      binding.availability !==
+      expectedProjectBindingAvailability(binding, credential)
+    ) {
+      throw invalidJobsResponse();
+    }
+  }
+  return {
+    bindings,
+    credentialOptions,
+    credentialOptionsTruncated: input.credentialOptionsTruncated
+  };
+}
+
+function expectedProjectBindingAvailability(
+  binding: ProjectConnectorBinding,
+  credential: ProjectConnectorCredentialOption | undefined
+): ProjectConnectorBinding["availability"] {
+  if (!binding.enabled) return "DISABLED";
+  if (!credential) return "CREDENTIAL_UNAVAILABLE";
+  if (credential.status === "PENDING_VERIFICATION") {
+    return "CREDENTIAL_PENDING";
+  }
+  if (
+    credential.status !== "ACTIVE" ||
+    credential.mode !== "BYOK_API_KEY"
+  ) {
+    return "CREDENTIAL_UNAVAILABLE";
+  }
+  return credential.capabilities.includes(binding.capability)
+    ? "READY"
+    : "CAPABILITY_MISMATCH";
+}
+
+function scopedProjectConnectorBinding(
+  value: unknown,
+  workspaceId: string,
+  projectId: string,
+  bindingId?: string
+): ProjectConnectorBinding {
+  const input = exactRecord(value, [
+    "id",
+    "workspaceId",
+    "projectId",
+    "capability",
+    "enabled",
+    "route",
+    "fallbackPolicy",
+    "budgetPolicy",
+    "availability",
+    "version",
+    "createdBy",
+    "updatedBy",
+    "createdAt",
+    "updatedAt"
+  ]);
+  const id = uuidValue(input.id);
+  const responseWorkspaceId = uuidValue(input.workspaceId);
+  const responseProjectId = uuidValue(input.projectId);
+  const capability = capabilityValue(input.capability);
+  const availability = projectBindingAvailabilityValue(
+    input.availability
+  );
+  const route = projectConnectorRoute(
+    input.route,
+    responseWorkspaceId,
+    responseProjectId,
+    id
+  );
+  const version = positiveInteger(input.version);
+  const createdBy = uuidValue(input.createdBy);
+  const updatedBy = uuidValue(input.updatedBy);
+  const createdAt = isoDateValue(input.createdAt);
+  const updatedAt = isoDateValue(input.updatedAt);
+  if (
+    responseWorkspaceId !== workspaceId ||
+    responseProjectId !== projectId ||
+    (bindingId !== undefined && id !== bindingId) ||
+    typeof input.enabled !== "boolean"
+  ) {
+    throw invalidJobsResponse();
+  }
+  return {
+    id,
+    workspaceId: responseWorkspaceId,
+    projectId: responseProjectId,
+    capability,
+    enabled: input.enabled,
+    route,
+    fallbackPolicy: projectFallbackPolicy(input.fallbackPolicy),
+    budgetPolicy: projectBudgetPolicy(input.budgetPolicy),
+    availability,
+    version,
+    createdBy,
+    updatedBy,
+    createdAt,
+    updatedAt
+  };
+}
+
+function projectConnectorRoute(
+  value: unknown,
+  workspaceId: string,
+  projectId: string,
+  bindingId: string
+): ProjectConnectorRoute {
+  const input = exactRecord(value, [
+    "id",
+    "bindingId",
+    "workspaceId",
+    "projectId",
+    "position",
+    "sourceKind",
+    "credentialId",
+    "provider",
+    "credentialMode",
+    "createdAt",
+    "updatedAt"
+  ]);
+  const routeWorkspaceId = uuidValue(input.workspaceId);
+  const routeProjectId = uuidValue(input.projectId);
+  const routeBindingId = uuidValue(input.bindingId);
+  const sourceKind = projectRouteSourceKindValue(input.sourceKind);
+  const credentialMode = credentialModeValue(input.credentialMode);
+  if (
+    routeWorkspaceId !== workspaceId ||
+    routeProjectId !== projectId ||
+    routeBindingId !== bindingId ||
+    input.position !== 0
+  ) {
+    throw invalidJobsResponse();
+  }
+  return {
+    id: uuidValue(input.id),
+    bindingId: routeBindingId,
+    workspaceId: routeWorkspaceId,
+    projectId: routeProjectId,
+    position: 0,
+    sourceKind,
+    credentialId: uuidValue(input.credentialId),
+    provider: providerValue(input.provider),
+    credentialMode,
+    createdAt: isoDateValue(input.createdAt),
+    updatedAt: isoDateValue(input.updatedAt)
+  };
+}
+
+function projectConnectorCredentialOption(
+  value: unknown,
+  workspaceId: string
+): ProjectConnectorCredentialOption {
+  const input = exactRecord(value, [
+    "id",
+    "workspaceId",
+    "provider",
+    "label",
+    "mode",
+    "status",
+    "capabilities"
+  ]);
+  const responseWorkspaceId = uuidValue(input.workspaceId);
+  const capabilities = stringArray(input.capabilities);
+  if (
+    responseWorkspaceId !== workspaceId ||
+    typeof input.label !== "string" ||
+    input.label.length === 0 ||
+    input.label.length > 160 ||
+    input.label !== input.label.trim() ||
+    capabilities.length > integrationCapabilities.length ||
+    new Set(capabilities).size !== capabilities.length ||
+    capabilities.some((capability) => !CAPABILITIES.has(capability))
+  ) {
+    throw invalidJobsResponse();
+  }
+  return {
+    id: uuidValue(input.id),
+    workspaceId: responseWorkspaceId,
+    provider: providerValue(input.provider),
+    label: input.label,
+    mode: credentialModeValue(input.mode),
+    status: credentialStatusValue(input.status),
+    capabilities:
+      capabilities as ProjectConnectorCredentialOption["capabilities"]
+  };
+}
+
+function projectFallbackPolicy(
+  value: unknown
+): ProjectConnectorFallbackPolicy {
+  const input = exactRecord(value, ["mode"]);
+  if (input.mode !== "NONE") throw invalidJobsResponse();
+  return { mode: "NONE" };
+}
+
+function projectBudgetPolicy(value: unknown): ProjectConnectorBudgetPolicy {
+  const input = exactRecord(value, ["mode"]);
+  if (input.mode !== "DISABLED") throw invalidJobsResponse();
+  return { mode: "DISABLED" };
+}
+
+function capabilityValue(
+  value: unknown
+): ProjectConnectorBinding["capability"] {
+  if (typeof value !== "string" || !CAPABILITIES.has(value)) {
+    throw invalidJobsResponse();
+  }
+  return value as ProjectConnectorBinding["capability"];
+}
+
+function projectBindingAvailabilityValue(
+  value: unknown
+): ProjectConnectorBinding["availability"] {
+  if (
+    typeof value !== "string" ||
+    !PROJECT_BINDING_AVAILABILITIES.has(value)
+  ) {
+    throw invalidJobsResponse();
+  }
+  return value as ProjectConnectorBinding["availability"];
+}
+
+function projectRouteSourceKindValue(
+  value: unknown
+): ProjectConnectorRoute["sourceKind"] {
+  if (
+    typeof value !== "string" ||
+    !PROJECT_ROUTE_SOURCE_KINDS.has(value)
+  ) {
+    throw invalidJobsResponse();
+  }
+  return value as ProjectConnectorRoute["sourceKind"];
+}
+
+function credentialModeValue(
+  value: unknown
+): ProjectConnectorCredentialOption["mode"] {
+  if (typeof value !== "string" || !CREDENTIAL_MODES.has(value)) {
+    throw invalidJobsResponse();
+  }
+  return value as ProjectConnectorCredentialOption["mode"];
+}
+
+function credentialStatusValue(
+  value: unknown
+): ProjectConnectorCredentialOption["status"] {
+  if (typeof value !== "string" || !CREDENTIAL_STATUSES.has(value)) {
+    throw invalidJobsResponse();
+  }
+  return value as ProjectConnectorCredentialOption["status"];
+}
+
+function uuidValue(value: unknown): string {
+  if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+    throw invalidJobsResponse();
+  }
+  return value.toLowerCase();
+}
+
+function isoDateValue(value: unknown): string {
+  if (typeof value !== "string" || !isIsoDate(value)) {
+    throw invalidJobsResponse();
+  }
+  return value;
+}
+
+function positiveInteger(value: unknown): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 1) {
+    throw invalidJobsResponse();
+  }
+  return Number(value);
+}
+
+function assertUnique(...collections: readonly (readonly string[])[]): void {
+  if (
+    collections.some(
+      (collection) => new Set(collection).size !== collection.length
+    )
+  ) {
+    throw invalidJobsResponse();
+  }
 }
 
 function providerCatalog(
@@ -740,4 +1213,29 @@ function record(value: unknown): Readonly<Record<string, unknown>> {
     throw invalidJobsResponse();
   }
   return value as Readonly<Record<string, unknown>>;
+}
+
+function exactRecord(
+  value: unknown,
+  fields: readonly string[]
+): Readonly<Record<string, unknown>> {
+  const input = record(value);
+  const allowed = new Set(fields);
+  if (
+    Object.keys(input).length !== fields.length ||
+    Object.keys(input).some((field) => !allowed.has(field))
+  ) {
+    throw invalidJobsResponse();
+  }
+  return input;
+}
+
+function unknownRecord(
+  value: unknown
+): Readonly<Record<string, unknown>> | undefined {
+  return typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : undefined;
 }

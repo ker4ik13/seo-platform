@@ -2,7 +2,11 @@ import { Injectable } from "@nestjs/common";
 import { DomainError } from "../common/domain-error.js";
 import { assertUuid } from "../common/identifier.js";
 import { PrismaService } from "../database/prisma.service.js";
-import type { TenantAuthorization } from "./authorization.types.js";
+import type {
+  AuthorizedProjectStatus,
+  AuthorizedWorkspaceStatus,
+  TenantAuthorization
+} from "./authorization.types.js";
 import {
   hasProjectAccessPermission,
   hasSystemPermission,
@@ -49,6 +53,9 @@ export class AuthorizationService {
     }
     return {
       workspaceId: membership.workspace.id,
+      workspaceStatus: authorizedWorkspaceStatus(
+        membership.workspace.status
+      ),
       roleCode: membership.roleCode
     };
   }
@@ -118,7 +125,11 @@ export class AuthorizationService {
 
     return {
       workspaceId: project.workspaceId,
+      workspaceStatus: authorizedWorkspaceStatus(
+        membership.workspace.status
+      ),
       projectId: project.id,
+      projectStatus: authorizedProjectStatus(project.status),
       roleCode: membership.roleCode,
       membershipId: membership.id,
       membershipVersion: membership.version,
@@ -162,4 +173,22 @@ export class AuthorizationService {
       message: "Resource not found"
     });
   }
+}
+
+function authorizedWorkspaceStatus(
+  status: string
+): AuthorizedWorkspaceStatus {
+  if (status === "ACTIVE" || status === "READ_ONLY") return status;
+  throw new Error("Unauthorized workspace status reached tenant context");
+}
+
+function authorizedProjectStatus(status: string): AuthorizedProjectStatus {
+  if (
+    status === "DRAFT" ||
+    status === "ACTIVE" ||
+    status === "ARCHIVED"
+  ) {
+    return status;
+  }
+  throw new Error("Unauthorized project status reached tenant context");
 }

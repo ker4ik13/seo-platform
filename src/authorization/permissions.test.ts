@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  hasEffectiveProjectPermission,
   hasProjectAccessPermission,
   hasSystemPermission,
   isReadOnlySafePermission
@@ -37,6 +38,41 @@ test("project assignment can only narrow workspace role permissions", () => {
   );
   assert.equal(
     hasProjectAccessPermission("MANAGER", "billing.manage_plan"),
+    false
+  );
+});
+
+test("effective project permission intersects system role and assignment", () => {
+  assert.equal(
+    hasEffectiveProjectPermission(
+      "ADMIN",
+      "MANAGER",
+      "integration.update"
+    ),
+    true
+  );
+  assert.equal(
+    hasEffectiveProjectPermission(
+      "ADMIN",
+      "VIEWER",
+      "integration.update"
+    ),
+    false
+  );
+  assert.equal(
+    hasEffectiveProjectPermission(
+      "SEO_LEAD",
+      "MANAGER",
+      "integration.update"
+    ),
+    false
+  );
+  assert.equal(
+    hasEffectiveProjectPermission(
+      "CUSTOM",
+      undefined,
+      "integration.view"
+    ),
     false
   );
 });
