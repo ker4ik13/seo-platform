@@ -1,0 +1,359 @@
+export const permissions = [
+  "workspace.view",
+  "workspace.update",
+  "workspace.delete",
+  "workspace.transfer_ownership",
+  "member.view",
+  "member.invite",
+  "member.update",
+  "member.remove",
+  "role.view",
+  "role.manage",
+  "audit.view",
+  "template.manage",
+  "project.create",
+  "project.view",
+  "project.update",
+  "project.archive",
+  "project.delete",
+  "project.restore",
+  "project.export",
+  "project.transfer",
+  "project.manage_access",
+  "semantic.view",
+  "semantic.create",
+  "semantic.update",
+  "semantic.delete",
+  "semantic.import",
+  "semantic.export",
+  "semantic.bulk_edit",
+  "semantic.cluster",
+  "semantic.assign_url",
+  "semantic.restore_version",
+  "semantic.manage_custom_columns",
+  "ranking.view",
+  "ranking.configure",
+  "ranking.run",
+  "ranking.export",
+  "collector.view",
+  "collector.run",
+  "collector.cancel",
+  "collector.retry",
+  "collector.approve_cost",
+  "serp.view_raw",
+  "competitor.view",
+  "competitor.manage",
+  "page.view",
+  "page.manage",
+  "content.view",
+  "content.edit",
+  "task.manage",
+  "knowledge.view",
+  "knowledge.edit",
+  "file.upload",
+  "file.download",
+  "file.delete",
+  "integration.view",
+  "integration.connect",
+  "integration.update",
+  "integration.delete",
+  "integration.test",
+  "integration.view_usage",
+  "integration.use_system_credentials",
+  "integration.manage_fallback",
+  "automation.view",
+  "automation.manage",
+  "automation.enable",
+  "report.view",
+  "report.create",
+  "report.manage",
+  "report.share",
+  "report.white_label",
+  "billing.view_plan",
+  "billing.manage_plan",
+  "billing.view_balance",
+  "billing.top_up",
+  "billing.view_transactions",
+  "billing.view_invoices",
+  "billing.manage_payment_methods",
+  "billing.set_budgets",
+  "comment.view",
+  "comment.create",
+  "comment.resolve",
+  "comment.delete_own",
+  "comment.moderate",
+  "presence.view",
+  "mention.use"
+] as const;
+
+export type Permission = (typeof permissions)[number];
+
+export const systemRoleCodes = [
+  "OWNER",
+  "ADMIN",
+  "SEO_LEAD",
+  "SEO_SPECIALIST",
+  "ANALYST",
+  "CONTENT_EDITOR",
+  "CLIENT",
+  "VIEWER"
+] as const;
+
+export type SystemRoleCode = (typeof systemRoleCodes)[number];
+
+export type ProjectAccessLevel = "NONE" | "VIEWER" | "MEMBER" | "MANAGER";
+
+const readOnlySafePermissions: ReadonlySet<Permission> = new Set([
+  ...permissions.filter((permission) => permission.endsWith(".view")),
+  "project.export",
+  "semantic.export",
+  "ranking.export",
+  "collector.cancel",
+  "file.download",
+  "billing.top_up",
+  "billing.manage_payment_methods"
+]);
+
+const viewPermissions: readonly Permission[] = [
+  "workspace.view",
+  "project.view",
+  "semantic.view",
+  "ranking.view",
+  "collector.view",
+  "competitor.view",
+  "page.view",
+  "content.view",
+  "knowledge.view",
+  "report.view",
+  "comment.view",
+  "presence.view",
+  "file.download"
+];
+
+const projectMemberPermissions: ReadonlySet<Permission> = new Set([
+  ...viewPermissions,
+  "project.export",
+  "semantic.create",
+  "semantic.update",
+  "semantic.delete",
+  "semantic.import",
+  "semantic.export",
+  "semantic.bulk_edit",
+  "semantic.cluster",
+  "semantic.assign_url",
+  "semantic.manage_custom_columns",
+  "ranking.configure",
+  "ranking.run",
+  "ranking.export",
+  "collector.run",
+  "collector.cancel",
+  "collector.retry",
+  "competitor.manage",
+  "page.manage",
+  "content.edit",
+  "task.manage",
+  "knowledge.edit",
+  "file.upload",
+  "file.delete",
+  "automation.view",
+  "report.create",
+  "comment.create",
+  "comment.resolve",
+  "comment.delete_own",
+  "mention.use"
+]);
+
+const projectManagerPermissions: ReadonlySet<Permission> = new Set([
+  ...projectMemberPermissions,
+  "project.update",
+  "project.archive",
+  "project.restore",
+  "project.manage_access",
+  "semantic.restore_version",
+  "collector.approve_cost",
+  "serp.view_raw",
+  "integration.view",
+  "integration.connect",
+  "integration.update",
+  "integration.test",
+  "integration.view_usage",
+  "integration.use_system_credentials",
+  "integration.manage_fallback",
+  "automation.manage",
+  "automation.enable",
+  "report.manage",
+  "report.share",
+  "report.white_label",
+  "comment.moderate"
+]);
+
+const rolePermissions: Readonly<
+  Record<Exclude<SystemRoleCode, "OWNER">, ReadonlySet<Permission>>
+> = {
+  ADMIN: new Set(
+    permissions.filter(
+      (permission) =>
+        ![
+          "workspace.delete",
+          "workspace.transfer_ownership",
+          "billing.manage_payment_methods"
+        ].includes(permission)
+    )
+  ),
+  SEO_LEAD: new Set([
+    ...viewPermissions,
+    "member.view",
+    "role.view",
+    "audit.view",
+    "project.create",
+    "project.update",
+    "project.archive",
+    "project.export",
+    "project.manage_access",
+    "semantic.create",
+    "semantic.update",
+    "semantic.delete",
+    "semantic.import",
+    "semantic.export",
+    "semantic.bulk_edit",
+    "semantic.cluster",
+    "semantic.assign_url",
+    "semantic.restore_version",
+    "semantic.manage_custom_columns",
+    "ranking.configure",
+    "ranking.run",
+    "ranking.export",
+    "collector.run",
+    "collector.cancel",
+    "collector.retry",
+    "collector.approve_cost",
+    "serp.view_raw",
+    "competitor.manage",
+    "page.manage",
+    "content.edit",
+    "task.manage",
+    "knowledge.edit",
+    "file.upload",
+    "integration.view",
+    "integration.test",
+    "integration.view_usage",
+    "integration.use_system_credentials",
+    "automation.view",
+    "automation.manage",
+    "automation.enable",
+    "report.create",
+    "report.manage",
+    "report.share",
+    "billing.view_plan",
+    "billing.view_balance",
+    "billing.view_transactions",
+    "billing.set_budgets",
+    "comment.create",
+    "comment.resolve",
+    "comment.delete_own",
+    "mention.use"
+  ]),
+  SEO_SPECIALIST: new Set([
+    ...viewPermissions,
+    "project.update",
+    "project.export",
+    "semantic.create",
+    "semantic.update",
+    "semantic.import",
+    "semantic.export",
+    "semantic.bulk_edit",
+    "semantic.cluster",
+    "semantic.assign_url",
+    "ranking.configure",
+    "ranking.run",
+    "ranking.export",
+    "collector.run",
+    "collector.cancel",
+    "collector.retry",
+    "competitor.manage",
+    "page.manage",
+    "content.edit",
+    "task.manage",
+    "knowledge.edit",
+    "file.upload",
+    "integration.view",
+    "integration.test",
+    "integration.use_system_credentials",
+    "automation.view",
+    "report.create",
+    "comment.create",
+    "comment.resolve",
+    "comment.delete_own",
+    "mention.use"
+  ]),
+  ANALYST: new Set([
+    ...viewPermissions,
+    "semantic.export",
+    "ranking.export",
+    "project.export",
+    "report.create",
+    "comment.create",
+    "mention.use"
+  ]),
+  CONTENT_EDITOR: new Set([
+    ...viewPermissions,
+    "content.edit",
+    "page.manage",
+    "knowledge.edit",
+    "file.upload",
+    "file.delete",
+    "comment.create",
+    "comment.resolve",
+    "comment.delete_own",
+    "mention.use"
+  ]),
+  CLIENT: new Set([
+    "workspace.view",
+    "project.view",
+    "report.view",
+    "comment.view",
+    "comment.create",
+    "file.download",
+    "presence.view",
+    "mention.use"
+  ]),
+  VIEWER: new Set(viewPermissions)
+};
+
+export function hasSystemPermission(
+  roleCode: string,
+  permission: Permission
+): boolean {
+  if (roleCode === "OWNER") return true;
+  if (!isSystemRoleCode(roleCode) || roleCode === "OWNER") return false;
+  return rolePermissions[roleCode].has(permission);
+}
+export function isSystemRoleCode(value: string): value is SystemRoleCode {
+  return (systemRoleCodes as readonly string[]).includes(value);
+}
+
+export function hasProjectAccessPermission(
+  level: ProjectAccessLevel,
+  permission: Permission
+): boolean {
+  if (level === "NONE") return false;
+  if (level === "VIEWER") return viewPermissions.includes(permission);
+  if (level === "MEMBER") return projectMemberPermissions.has(permission);
+  return projectManagerPermissions.has(permission);
+}
+
+export function hasEffectiveProjectPermission(
+  roleCode: string,
+  projectAccessLevel: ProjectAccessLevel | undefined,
+  permission: Permission
+): boolean {
+  return (
+    hasSystemPermission(roleCode, permission) &&
+    (projectAccessLevel === undefined ||
+      hasProjectAccessPermission(projectAccessLevel, permission))
+  );
+}
+
+export function isReadOnlySafePermission(permission: Permission): boolean {
+  return readOnlySafePermissions.has(permission);
+}

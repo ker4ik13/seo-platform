@@ -1,0 +1,12 @@
+import { Module } from "@nestjs/common";
+import { AuthorizationModule } from "../authorization/authorization.module.js";
+import { IdentityModule } from "../identity/identity.module.js";
+import { JobsModule } from "../jobs/jobs.module.js";
+import { IntegrationController } from "./integration.controller.js";
+import { ProjectIntegrationController } from "./project-integration.controller.js";
+
+@Module({
+  imports: [AuthorizationModule, IdentityModule, JobsModule],
+  controllers: [IntegrationController, ProjectIntegrationController]
+})
+export class IntegrationModule {}
