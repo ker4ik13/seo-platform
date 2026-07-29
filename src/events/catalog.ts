@@ -35,6 +35,12 @@ export const domainEventTypes = {
     "integration.project-connector-binding.created.v1",
   projectConnectorBindingUpdated:
     "integration.project-connector-binding.updated.v1",
+  trackingContextCreated: "seo.tracking-context.created.v1",
+  trackingContextUpdated: "seo.tracking-context.updated.v1",
+  trackingContextArchived: "seo.tracking-context.archived.v1",
+  trackingContextRestored: "seo.tracking-context.restored.v1",
+  trackingContextKeywordAssignmentChanged:
+    "seo.tracking-context.keyword-assignment.changed.v1",
   rankCheckCompleted: "seo.rank-check.completed.v1",
   billingReservationCreated: "billing.reservation.created.v1",
   billingReservationSettled: "billing.reservation.settled.v1"
