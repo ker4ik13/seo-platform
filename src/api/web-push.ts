@@ -168,6 +168,6 @@ export interface InternalRenameWebPushDeviceInput
 export interface WebPushRevokeResult {
   readonly installationId: string;
   readonly status: "REVOKED";
-  /** False only when the subscription was already in a terminal state. */
+  /** False only when the subscription was already revoked. */
   readonly revoked: boolean;
 }
