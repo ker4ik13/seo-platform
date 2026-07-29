@@ -202,6 +202,7 @@ test("preserves only the documented finite Web Push error catalog", async () => 
 
   try {
     const cases = [
+      [401, "UNAUTHENTICATED", 401, "UNAUTHENTICATED"],
       [404, "NOT_FOUND", 404, "NOT_FOUND"],
       [409, "VERSION_CONFLICT", 412, "VERSION_CONFLICT"],
       [

@@ -388,6 +388,14 @@ function pushUpstreamError(
   payload: unknown
 ): DomainError {
   const code = upstreamErrorCode(payload);
+  if (status === 401 && code === "UNAUTHENTICATED") {
+    return new DomainError({
+      statusCode: 401,
+      code,
+      message: "The session used for browser notifications was revoked",
+      retryable: false
+    });
+  }
   if (status === 404 && code === "NOT_FOUND") {
     return new DomainError({
       statusCode: 404,
@@ -476,6 +484,7 @@ function upstreamErrorCode(payload: unknown): ErrorCode | undefined {
   }
   const allowedCodes: readonly ErrorCode[] = [
     "VALIDATION_FAILED",
+    "UNAUTHENTICATED",
     "NOT_FOUND",
     "VERSION_CONFLICT",
     "VAPID_KEY_VERSION_CHANGED",
