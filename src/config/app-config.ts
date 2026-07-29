@@ -8,6 +8,7 @@ export interface AppConfig {
   readonly internalCommandTimeoutMs: number;
   readonly internalApiToken?: string;
   readonly integrationCredentialApiToken?: string;
+  readonly realtimeNotificationApiToken?: string;
   readonly corsOrigins: readonly string[];
   readonly nats: {
     readonly url: string;
@@ -85,6 +86,8 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const internalApiToken = env.INTERNAL_API_TOKEN?.trim();
   const integrationCredentialApiToken =
     env.PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN?.trim();
+  const realtimeNotificationApiToken =
+    env.PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN?.trim();
 
   if (!["development", "test", "production"].includes(nodeEnv)) {
     throw new Error("NODE_ENV must be development, test or production");
@@ -123,6 +126,15 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
   if (
+    nodeEnv === "production" &&
+    (!realtimeNotificationApiToken ||
+      realtimeNotificationApiToken.length < 32)
+  ) {
+    throw new Error(
+      "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN with at least 32 characters is required in production"
+    );
+  }
+  if (
     internalApiToken &&
     integrationCredentialApiToken &&
     internalApiToken === integrationCredentialApiToken
@@ -130,6 +142,14 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error(
       "Credential API token must differ from the shared internal API token"
     );
+  }
+  const internalTokens = [
+    internalApiToken,
+    integrationCredentialApiToken,
+    realtimeNotificationApiToken
+  ].filter((value): value is string => Boolean(value));
+  if (new Set(internalTokens).size !== internalTokens.length) {
+    throw new Error("Every internal API token must be distinct");
   }
 
   const exposeDevelopmentTokens = booleanValue(
@@ -167,6 +187,9 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(internalApiToken ? { internalApiToken } : {}),
     ...(integrationCredentialApiToken
       ? { integrationCredentialApiToken }
+      : {}),
+    ...(realtimeNotificationApiToken
+      ? { realtimeNotificationApiToken }
       : {}),
     corsOrigins: (env.CORS_ORIGINS ?? "")
       .split(",")

@@ -46,6 +46,7 @@ test("does not allow development tokens in production", () => {
         AUTH_DATA_ENCRYPTION_KEY: Buffer.alloc(32).toString("base64url"),
         INTERNAL_API_TOKEN: "x".repeat(32),
         PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
+        PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
         AUTH_EXPOSE_DEVELOPMENT_TOKENS: "true"
       }),
     {
@@ -64,6 +65,35 @@ test("keeps the credential caller token separate from shared service auth", () =
         PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "x".repeat(32)
       }),
     /must differ from the shared internal API token/u
+  );
+});
+
+test("keeps the notification caller token separate from every other internal token", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        INTERNAL_API_TOKEN: "x".repeat(32),
+        PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
+        PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "c".repeat(32)
+      }),
+    /Every internal API token must be distinct/u
+  );
+});
+
+test("requires the dedicated notification caller token in production", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: "postgresql://test",
+        AUTH_PASSWORD_PEPPER: "production-secret",
+        AUTH_DATA_ENCRYPTION_KEY: Buffer.alloc(32).toString("base64url"),
+        INTERNAL_API_TOKEN: "i".repeat(32),
+        PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32)
+      }),
+    /PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN/u
   );
 });
 

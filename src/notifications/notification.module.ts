@@ -7,13 +7,15 @@ import {
   NotificationPreferencesController,
   ProjectNotificationSubscriptionController
 } from "./notification.controller.js";
+import { WebPushSubscriptionController } from "./web-push.controller.js";
 
 @Module({
   imports: [AuthorizationModule, IdentityModule, RealtimeClientModule],
   controllers: [
     NotificationCenterController,
     NotificationPreferencesController,
-    ProjectNotificationSubscriptionController
+    ProjectNotificationSubscriptionController,
+    WebPushSubscriptionController
   ]
 })
 export class NotificationModule {}

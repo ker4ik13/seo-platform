@@ -1,5 +1,8 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type {
+  ErrorCode,
+  InternalRenameWebPushDeviceInput,
+  InternalUpsertWebPushSubscriptionInput,
   InternalUpdateNotificationPreferencesInput,
   InternalUpdateProjectNotificationSubscriptionInput,
   NotificationCollectionResponse,
@@ -8,8 +11,15 @@ import type {
   NotificationPreferencesSummary,
   NotificationReadAllResult,
   ProjectNotificationSubscriptionSummary,
+  RenameWebPushDeviceInput,
+  UpsertWebPushSubscriptionInput,
   UpdateNotificationPreferencesInput,
-  UpdateProjectNotificationSubscriptionInput
+  UpdateProjectNotificationSubscriptionInput,
+  WebPushBrowser,
+  WebPushDeviceSummary,
+  WebPushPlatform,
+  WebPushRevokeResult,
+  WebPushSubscriptionsState
 } from "@seo-platform/contracts";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
 import { DomainError } from "../common/domain-error.js";
@@ -22,6 +32,11 @@ import {
   notificationReadAllResult,
   projectNotificationSubscriptionSummary
 } from "../notifications/notification-mapper.js";
+import {
+  webPushDeviceSummary,
+  webPushRevokeResult,
+  webPushSubscriptionsState
+} from "../notifications/web-push-mapper.js";
 
 interface ActorContext {
   readonly actorId: string;
@@ -30,6 +45,15 @@ interface ActorContext {
 
 interface ProjectContext extends ActorContext {
   readonly tenant: TenantAuthorization;
+}
+
+interface PushActorContext extends ActorContext {
+  readonly sessionFamilyId: string;
+}
+
+interface WebPushUpsertMetadata {
+  readonly browser: WebPushBrowser;
+  readonly platform: WebPushPlatform;
 }
 
 @Injectable()
@@ -143,8 +167,78 @@ export class RealtimeClient {
     return projectNotificationSubscriptionSummary(data);
   }
 
+  public async getWebPushSubscriptions(
+    context: PushActorContext
+  ): Promise<WebPushSubscriptionsState> {
+    const { data } = await this.pushRequest(
+      "GET",
+      `/internal/v1/users/${encodeURIComponent(context.actorId)}/push-subscriptions`,
+      context
+    );
+    return webPushSubscriptionsState(data);
+  }
+
+  public async upsertWebPushSubscription(
+    context: PushActorContext,
+    installationId: string,
+    input: UpsertWebPushSubscriptionInput & WebPushUpsertMetadata
+  ): Promise<WebPushDeviceSummary> {
+    const body: InternalUpsertWebPushSubscriptionInput = {
+      ...input,
+      userId: context.actorId,
+      sessionFamilyId: context.sessionFamilyId
+    };
+    const ownerResponse = await this.pushRequest(
+      "PUT",
+      `/internal/v1/users/${encodeURIComponent(context.actorId)}/push-subscriptions/${encodeURIComponent(installationId)}`,
+      context,
+      body
+    );
+    const result = webPushDeviceSummary(ownerResponse.data);
+    if (ownerResponse.version !== result.version) {
+      throw invalidResponse();
+    }
+    return result;
+  }
+
+  public async renameWebPushDevice(
+    context: PushActorContext,
+    installationId: string,
+    input: RenameWebPushDeviceInput,
+    version: number
+  ): Promise<WebPushDeviceSummary> {
+    const body: InternalRenameWebPushDeviceInput = {
+      ...input,
+      userId: context.actorId,
+      version
+    };
+    const ownerResponse = await this.pushRequest(
+      "PATCH",
+      `/internal/v1/users/${encodeURIComponent(context.actorId)}/push-subscriptions/${encodeURIComponent(installationId)}`,
+      context,
+      body
+    );
+    const result = webPushDeviceSummary(ownerResponse.data);
+    if (ownerResponse.version !== result.version) {
+      throw invalidResponse();
+    }
+    return result;
+  }
+
+  public async revokeWebPushDevice(
+    context: PushActorContext,
+    installationId: string
+  ): Promise<WebPushRevokeResult> {
+    const { data } = await this.pushRequest(
+      "DELETE",
+      `/internal/v1/users/${encodeURIComponent(context.actorId)}/push-subscriptions/${encodeURIComponent(installationId)}`,
+      context
+    );
+    return webPushRevokeResult(data);
+  }
+
   private async request(
-    method: "GET" | "PATCH" | "POST",
+    method: HttpMethod,
     path: string,
     context: ActorContext | ProjectContext,
     body?: unknown
@@ -154,20 +248,46 @@ export class RealtimeClient {
     return payload.data;
   }
 
-  private async requestPayload(
-    method: "GET" | "PATCH" | "POST",
+  private async pushRequest(
+    method: HttpMethod,
     path: string,
-    context: ActorContext | ProjectContext,
+    context: PushActorContext,
     body?: unknown
+  ): Promise<PushOwnerResponse> {
+    const payload = await this.requestPayload(
+      method,
+      path,
+      context,
+      body,
+      "PUSH"
+    );
+    return pushOwnerResponse(payload, method);
+  }
+
+  private async requestPayload(
+    method: HttpMethod,
+    path: string,
+    context: ActorContext | ProjectContext | PushActorContext,
+    body?: unknown,
+    credential: "SHARED" | "PUSH" = "SHARED"
   ): Promise<Readonly<Record<string, unknown>>> {
-    const token = this.config.internalApiToken;
-    if (!token) throw dependencyUnavailable();
+    const token =
+      credential === "PUSH"
+        ? this.config.realtimeNotificationApiToken
+        : this.config.internalApiToken;
+    if (!token) {
+      if (credential === "PUSH") throw webPushUnavailable();
+      throw dependencyUnavailable();
+    }
     const headers = new Headers({
       Accept: "application/json",
       "X-Internal-Token": token,
       "X-Request-Id": context.requestId,
       "X-Actor-Id": context.actorId
     });
+    if (credential === "PUSH" && "sessionFamilyId" in context) {
+      headers.set("X-Session-Family-Id", context.sessionFamilyId);
+    }
     if ("tenant" in context) {
       headers.set("X-Workspace-Id", context.tenant.workspaceId);
       headers.set("X-Project-Id", requiredProjectId(context.tenant));
@@ -197,12 +317,24 @@ export class RealtimeClient {
       throw dependencyUnavailable();
     }
     const payload = await response.json().catch(() => undefined);
-    if (!response.ok) throw upstreamError(response.status);
+    if (!response.ok) {
+      if (credential === "PUSH") {
+        throw pushUpstreamError(response.status, payload);
+      }
+      throw upstreamError(response.status);
+    }
     if (typeof payload !== "object" || payload === null) {
       throw invalidResponse();
     }
     return payload as Readonly<Record<string, unknown>>;
   }
+}
+
+type HttpMethod = "DELETE" | "GET" | "PATCH" | "POST" | "PUT";
+
+interface PushOwnerResponse {
+  readonly data: unknown;
+  readonly version?: number;
 }
 
 function requiredProjectId(tenant: TenantAuthorization): string {
@@ -240,6 +372,165 @@ function dependencyUnavailable(): DomainError {
     message: "Notification settings are temporarily unavailable",
     retryable: true
   });
+}
+
+function webPushUnavailable(): DomainError {
+  return new DomainError({
+    statusCode: 503,
+    code: "WEB_PUSH_UNAVAILABLE",
+    message: "Browser notification registration is unavailable",
+    retryable: false
+  });
+}
+
+function pushUpstreamError(
+  status: number,
+  payload: unknown
+): DomainError {
+  const code = upstreamErrorCode(payload);
+  if (status === 404 && code === "NOT_FOUND") {
+    return new DomainError({
+      statusCode: 404,
+      code,
+      message: "Browser notification device was not found"
+    });
+  }
+  if (status === 400 || status === 422) {
+    return new DomainError({
+      statusCode: 422,
+      code: "VALIDATION_FAILED",
+      message: "Web Push subscription is invalid"
+    });
+  }
+  if (status === 409 && code === "VERSION_CONFLICT") {
+    return new DomainError({
+      statusCode: 412,
+      code,
+      message: "Browser notification device changed in another session"
+    });
+  }
+  if (
+    status === 409 &&
+    code === "VAPID_KEY_VERSION_CHANGED"
+  ) {
+    return new DomainError({
+      statusCode: 409,
+      code,
+      message: "Browser notification key changed; recreate the subscription"
+    });
+  }
+  if (
+    status === 409 &&
+    code === "PUSH_SUBSCRIPTION_ALREADY_BOUND"
+  ) {
+    return new DomainError({
+      statusCode: 409,
+      code,
+      message: "This browser subscription must be recreated"
+    });
+  }
+  if (
+    status === 409 &&
+    code === "PUSH_DEVICE_LIMIT_REACHED"
+  ) {
+    return new DomainError({
+      statusCode: 409,
+      code,
+      message: "The active browser notification device limit was reached"
+    });
+  }
+  if (
+    status === 409 &&
+    code === "EXPLICIT_ENABLE_REQUIRED"
+  ) {
+    return new DomainError({
+      statusCode: 409,
+      code,
+      message: "Browser notifications require an explicit enable action"
+    });
+  }
+  if (status === 503 && code === "WEB_PUSH_UNAVAILABLE") {
+    return webPushUnavailable();
+  }
+  return dependencyUnavailable();
+}
+
+function upstreamErrorCode(payload: unknown): ErrorCode | undefined {
+  if (
+    typeof payload !== "object" ||
+    payload === null ||
+    Array.isArray(payload)
+  ) {
+    return undefined;
+  }
+  const root = payload as Readonly<Record<string, unknown>>;
+  const nested = root.error;
+  const source =
+    typeof nested === "object" &&
+    nested !== null &&
+    !Array.isArray(nested)
+      ? (nested as Readonly<Record<string, unknown>>)
+      : root;
+  if (typeof source.code !== "string") {
+    return undefined;
+  }
+  const allowedCodes: readonly ErrorCode[] = [
+    "VALIDATION_FAILED",
+    "NOT_FOUND",
+    "VERSION_CONFLICT",
+    "VAPID_KEY_VERSION_CHANGED",
+    "PUSH_SUBSCRIPTION_ALREADY_BOUND",
+    "PUSH_DEVICE_LIMIT_REACHED",
+    "EXPLICIT_ENABLE_REQUIRED",
+    "WEB_PUSH_UNAVAILABLE"
+  ];
+  return allowedCodes.find((candidate) => candidate === source.code);
+}
+
+function pushOwnerResponse(
+  payload: Readonly<Record<string, unknown>>,
+  method: HttpMethod
+): PushOwnerResponse {
+  if (
+    !hasExactKeys(payload, ["data", "meta"]) ||
+    typeof payload.meta !== "object" ||
+    payload.meta === null ||
+    Array.isArray(payload.meta)
+  ) {
+    throw invalidResponse();
+  }
+  const meta = payload.meta as Readonly<Record<string, unknown>>;
+  const versioned = method === "PUT" || method === "PATCH";
+  if (
+    !hasExactKeys(
+      meta,
+      versioned ? ["requestId", "version"] : ["requestId"]
+    ) ||
+    typeof meta.requestId !== "string" ||
+    meta.requestId.length < 1 ||
+    meta.requestId.length > 200 ||
+    /[\u0000-\u001f\u007f]/u.test(meta.requestId) ||
+    (versioned &&
+      (!Number.isSafeInteger(meta.version) ||
+        Number(meta.version) < 1))
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    data: payload.data,
+    ...(versioned ? { version: Number(meta.version) } : {})
+  };
+}
+
+function hasExactKeys(
+  value: Readonly<Record<string, unknown>>,
+  expected: readonly string[]
+): boolean {
+  const actual = Object.keys(value);
+  return (
+    actual.length === expected.length &&
+    actual.every((key) => expected.includes(key))
+  );
 }
 
 function upstreamError(status: number): DomainError {
