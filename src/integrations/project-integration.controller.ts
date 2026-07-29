@@ -22,14 +22,20 @@ import type {
 import type { FastifyReply } from "fastify";
 import { AuditService } from "../audit/audit.service.js";
 import {
-  type TenantAuthorization,
   type TenantRequest
 } from "../authorization/authorization.types.js";
 import { hasEffectiveProjectPermission } from "../authorization/permissions.js";
+import {
+  internalProjectContext,
+  requiredMutableProjectTenant,
+  requiredProjectTenant,
+  type AuthorizedProjectTenant
+} from "../authorization/project-tenant.js";
 import { RequirePermission } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
 import { apiResponse } from "../common/api-response.js";
-import { DomainError } from "../common/domain-error.js";
+import { recordCommittedAudit } from "../common/committed-audit.js";
+import { setEntityVersion } from "../common/entity-version.js";
 import { requiredIdempotencyKey } from "../common/idempotency-key.js";
 import { assertUuid } from "../common/identifier.js";
 import { requiredVersion } from "../common/version-precondition.js";
@@ -67,7 +73,7 @@ export class ProjectIntegrationController {
   ): Promise<ApiResponse<ProjectConnectorSettings>> {
     const tenant = requiredProjectTenant(request);
     const aggregate = await this.jobs.projectConnectorBindings(
-      internalContext(request, principal, tenant)
+      internalProjectContext(request, principal, tenant)
     );
     return apiResponse(request, {
       ...aggregate,
@@ -102,11 +108,11 @@ export class ProjectIntegrationController {
       requestId: context.requestId
     });
     const result = await this.jobs.createProjectConnectorBinding(
-      internalContext(request, principal, tenant),
+      internalProjectContext(request, principal, tenant),
       input,
       idempotencyKey
     );
-    await this.recordSuccessfulMutation({
+    await recordCommittedAudit(this.audit, this.logger, {
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
       projectId: tenant.projectId,
@@ -147,12 +153,12 @@ export class ProjectIntegrationController {
       requestId: context.requestId
     });
     const result = await this.jobs.updateProjectConnectorBinding(
-      internalContext(request, principal, tenant),
+      internalProjectContext(request, principal, tenant),
       canonicalBindingId,
       input,
       version
     );
-    await this.recordSuccessfulMutation({
+    await recordCommittedAudit(this.audit, this.logger, {
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
       projectId: tenant.projectId,
@@ -165,30 +171,10 @@ export class ProjectIntegrationController {
     setEntityVersion(reply, result.version);
     return apiResponse(request, result, result.version);
   }
-
-  private async recordSuccessfulMutation(
-    input: Parameters<AuditService["record"]>[0]
-  ): Promise<void> {
-    try {
-      await this.audit.record(input);
-    } catch {
-      // The Jobs service has already committed the mutation and its
-      // transactional outbox event. Returning an error here would make a
-      // successful CAS update look failed and an exact retry impossible.
-      this.logger.error(
-        `Unable to persist success audit event action=${input.action} requestId=${input.requestId}`
-      );
-    }
-  }
 }
 
 function projectConnectorSettingsAccess(
-  tenant: TenantAuthorization & {
-    readonly projectId: string;
-    readonly projectStatus: NonNullable<
-      TenantAuthorization["projectStatus"]
-    >;
-  }
+  tenant: AuthorizedProjectTenant
 ): ProjectConnectorSettingsAccess {
   const restriction = mutationRestriction(tenant);
   const canUpdateBindings = restriction === "NONE";
@@ -220,11 +206,7 @@ function projectConnectorSettingsAccess(
 }
 
 function mutationRestriction(
-  tenant: TenantAuthorization & {
-    readonly projectStatus: NonNullable<
-      TenantAuthorization["projectStatus"]
-    >;
-  }
+  tenant: AuthorizedProjectTenant
 ): ProjectConnectorSettingsMutationRestriction {
   if (tenant.workspaceStatus === "READ_ONLY") {
     return "WORKSPACE_READ_ONLY";
@@ -242,59 +224,4 @@ function mutationRestriction(
     return "PROJECT_ARCHIVED";
   }
   return "NONE";
-}
-
-function internalContext(
-  request: TenantRequest,
-  principal: AuthenticatedPrincipal,
-  tenant: TenantAuthorization
-): {
-  readonly tenant: TenantAuthorization;
-  readonly actorId: string;
-  readonly requestId: string;
-} {
-  return {
-    tenant,
-    actorId: principal.userId,
-    requestId: requestContext(request).requestId
-  };
-}
-
-function requiredProjectTenant(
-  request: TenantRequest
-): TenantAuthorization & {
-  readonly projectId: string;
-  readonly projectStatus: NonNullable<
-    TenantAuthorization["projectStatus"]
-  >;
-} {
-  const tenant = request.tenantAuthorization;
-  if (!tenant?.projectId || !tenant.projectStatus) {
-    throw new Error("Project authorization is missing");
-  }
-  return tenant as TenantAuthorization & {
-    readonly projectId: string;
-    readonly projectStatus: NonNullable<
-      TenantAuthorization["projectStatus"]
-    >;
-  };
-}
-
-function requiredMutableProjectTenant(
-  request: TenantRequest
-): ReturnType<typeof requiredProjectTenant> {
-  const tenant = requiredProjectTenant(request);
-  if (tenant.projectStatus === "ARCHIVED") {
-    throw new DomainError({
-      statusCode: 409,
-      code: "RESOURCE_STATE_CONFLICT",
-      message: "Archived projects cannot be changed",
-      details: { projectStatus: tenant.projectStatus }
-    });
-  }
-  return tenant;
-}
-
-function setEntityVersion(reply: FastifyReply, version: number): void {
-  reply.header("ETag", `"v${version}"`);
 }
