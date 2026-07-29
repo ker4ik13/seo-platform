@@ -18,6 +18,10 @@ jobs:
     name: Typecheck, test and build
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    env:
+      # Prisma config validates only the URL shape during generate/validate;
+      # CI unit/type/build jobs do not connect to this placeholder database.
+      DATABASE_URL: postgresql://ci:ci@127.0.0.1:5432/ci
 
     steps:
       - name: Checkout

@@ -17,7 +17,8 @@ SEO-платформы. Публичный сайт, Toolbox, API docs и при
 4. Скопировать `.env.example` в `.env` на remote development VPS.
 5. Использовать Node.js 24 и включить Corepack.
 6. Установить зависимости: `corepack pnpm install --frozen-lockfile`.
-7. Сгенерировать Prisma clients: `pnpm prisma:generate`.
+7. Сгенерировать Prisma clients с валидным `DATABASE_URL`; для проверки без
+   подключения допустим локальный placeholder из `HANDOFF.md`.
 8. Запустить remote stack из `platform-infrastructure`.
 
 Локально не требуется держать все сервисы одновременно. Каждый пакет имеет

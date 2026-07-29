@@ -125,8 +125,8 @@ git clone https://github.com/ker4ik13/seo-platform.git
 cd seo-platform
 corepack enable
 corepack pnpm install --frozen-lockfile
-corepack pnpm prisma:generate
-corepack pnpm prisma:validate
+DATABASE_URL=postgresql://local:local@127.0.0.1:5432/local corepack pnpm prisma:generate
+DATABASE_URL=postgresql://local:local@127.0.0.1:5432/local corepack pnpm prisma:validate
 corepack pnpm typecheck
 corepack pnpm lint
 corepack pnpm test
