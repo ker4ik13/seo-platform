@@ -124,6 +124,16 @@ entitlement и quota возвращают честный `NOT_AVAILABLE`, пок
 Пользователь может создать только осознанный новый запуск с предупреждением о
 возможном повторном списании внешних лимитов.
 
+### 3.3. Зафиксированные execution-контракты
+
+До включения runtime реализованы exact contracts ручного запуска: public
+command принимает только `estimateId`; Job projection использует конечную
+матрицу status/stage; SEO Data boundary разделяет immutable manifest,
+bounded chunks, normalized found/not-found ingest и terminal finalize.
+Semantic active-run hash исключает run-specific IDs и timestamps, тогда как
+integrity hashes покрывают полный versioned RFC 8785 JCS preimage. Runtime
+manifest, Job orchestration и provider execution остаются следующими этапами.
+
 ## 4. Rank snapshot
 
 Сохраняются:

@@ -2,14 +2,16 @@
 
 Последнее обновление: 29 июля 2026 года
 
-Текущий инкремент: provider-free manual BYOK rank estimate
+Текущий инкремент: manual BYOK rank execution foundation
 Статус: versioned tracking context и provider-free оценка готовности
 завершены во всех слоях: contracts, SEO Data, Platform API,
 Jobs/integrations и Web. Immutable estimate хранится в `jobs_db`, доступен
 при read-only и не вызывает provider, decrypt, Job/BullMQ, списание или
-event. Provider execution и position history отсутствуют. Следующий
-execution slice следует ADR-2026-034; live Arsenkin submit остаётся
-выключенным до прохождения contract/security gates
+event. Exact contracts следующего execution-среза уже фиксируют public Job
+lifecycle, immutable manifest/chunks, normalized ingest/finalize и redacted
+`seo.rank-check.completed.v1`; их runtime ещё не реализован. Provider
+execution и position history отсутствуют. Срез следует ADR-2026-034; live
+Arsenkin submit остаётся выключенным до прохождения contract/security gates
 
 Параллельный dependency-free срез browser Web Push device lifecycle
 реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет
@@ -232,6 +234,9 @@ Backend convention:
   и point keyword assignments с `ranking.view/configure`, CSRF,
   idempotency/OCC и audit, а также provider-free rank estimate с
   `ranking.view` и trusted lifecycle/access snapshot;
+- `platform-contracts/src/api/rank-runs.ts` и `src/events/rankings.ts` —
+  exact manual-run lifecycle, manifest/chunk, normalized ingest/finalize и
+  redacted completion event contracts; это границы, а не готовый runtime;
 - `platform-api/src/seo-data` — строго валидируемый internal read/command
   client к владельцу semantic core и tracking contexts;
 - `platform-api/src/notifications` — public profile/project notification
@@ -598,6 +603,16 @@ replay после drift project/access/quota возвращает исходны
 `PROVIDER_EXECUTION_DISABLED`, ни provider call, ни Job/BullMQ, ни usage,
 reservation, outbox/event не создаются.
 
+Execution contract foundation для следующего этапа принимает в public create
+только `estimateId` и возвращает Job через конечную discriminated lifecycle
+матрицу. Internal contracts разделяют полный integrity hash manifest,
+semantic active-run deduplication hash, chunk hash и ingest-envelope hash;
+canonical JSON закреплён как RFC 8785 JCS. Finalize сериализуется с ingest на
+одном manifest lock, закрывает late ingest и только для валидного
+`COMPLETED/PARTIALLY_COMPLETED` допускает exact redacted
+`seo.rank-check.completed.v1`. Реализация endpoints/таблиц/worker ещё
+выполняется.
+
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
@@ -607,7 +622,7 @@ reservation, outbox/event не создаются.
 - SEO data unit tests: 28 pass, 0 fail.
 - Jobs/integrations unit tests: 154 pass, 0 fail.
 - Realtime unit tests: 12 pass, 0 fail.
-- Contracts unit tests: 9 pass, 0 fail.
+- Contracts unit tests: 27 pass, 0 fail.
 - Unified Web helper tests: 54 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
 - Unified Next.js production build: pass; проверены public site, Toolbox,
@@ -668,6 +683,11 @@ reservation, outbox/event не создаются.
   credential projection без secret columns, finite blockers, 1001 sentinel,
   TTL и redaction. Живой PostgreSQL 18 migration smoke и защищённый visual/e2e
   остаются staging gates.
+- Manual rank execution contracts: 11/11 targeted tests, strict typecheck,
+  production build и diff-check — pass. Независимый review не нашёл P0/P1;
+  проверены runtime finite lifecycle/status, public redaction,
+  semantic/integrity hash separation, canonical ingest provenance,
+  finalize/late-ingest ordering и terminal count invariants.
 - Identity session-family producer: Contracts 16/16 и Platform API 175/175
   tests, strict typecheck/build/diff-check, Prisma validate/generate — pass.
   Проверены exact redacted payload, whole-family/idempotent revoke, чужая
@@ -688,9 +708,10 @@ reservation, outbox/event не создаются.
 
 `manual BYOK rank job → position history`
 
-Provider-free estimate из ADR-2026-034 завершён. Следующий шаг — immutable
-execution manifest, authoritative one-time grant, scoped connector
-operations, ingest receipts и partial persistence. Live Arsenkin `set`
+Provider-free estimate из ADR-2026-034 завершён, exact execution contracts
+готовы. Следующий runtime-шаг — immutable execution manifest,
+authoritative one-time grant, scoped connector operations, ingest receipts
+и partial persistence. Live Arsenkin `set`
 выключен, пока нет recorded provider contract, безопасного
 `SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit и устранения global vault read.
 

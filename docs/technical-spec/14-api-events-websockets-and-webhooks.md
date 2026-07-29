@@ -510,6 +510,12 @@ Provider/credential/schedule не входят в tracking context по ADR-2026
 - `POST /api/v1/projects/{projectId}/rank-runs`;
 - `GET /api/v1/jobs/{jobId}` и cancel/retry-safe actions.
 
+DTO и event contracts этого этапа уже зафиксированы в
+`platform-contracts`: public create содержит только `estimateId`, public Job
+не раскрывает provider/credential/keyword/result internals, а internal
+границы описывают manifest seal/chunk, normalized ingest и monotonic
+finalize. Наличие контрактов не означает готовность перечисленных endpoints.
+
 Estimate body содержит только `trackingContextId`. Endpoint требует
 `ranking.view`, session, CSRF и `Idempotency-Key`, отвечает `201` immutable
 пяти­минутным receipt и не вызывает provider. Billing read-only, отсутствие
@@ -528,6 +534,10 @@ Jobs самостоятельно вызывает
 Run отвечает `202 + Location`. Перед каждым новым provider submit требуется
 одноразовый authoritative execution grant; неоднозначный submit имеет
 отдельный публично видимый status и не повторяется автоматически.
+
+`seo.rank-check.completed.v1` создаётся только для runtime-проверенного
+`COMPLETED` или `PARTIALLY_COMPLETED`; inconsistent counts и
+`ACTION_REQUIRED` отклоняются до публикации.
 
 ### 13.5. Imports/exports/jobs
 

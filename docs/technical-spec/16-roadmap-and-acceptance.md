@@ -200,7 +200,8 @@ immutable `rank_estimates` прошла schema/static review, но обе migrat
 должны быть повторно проверены на целевом PostgreSQL 18 staging.
 
 Архитектура первого Arsenkin manual rank job зафиксирована
-ADR-2026-034. Provider-free estimate из ADR уже реализован. Live `set`
+ADR-2026-034. Provider-free estimate и exact execution contracts из ADR уже
+реализованы; runtime manifest/Job/ingest ещё выполняются. Live `set`
 остаётся выключенным до recorded one-key contract или
 письменного подтверждения response/status/retry semantics, устранения global
 vault read, authoritative execution grant, manifest/ingest receipts и

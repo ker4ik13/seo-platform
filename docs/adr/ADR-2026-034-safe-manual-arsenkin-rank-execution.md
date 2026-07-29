@@ -119,8 +119,13 @@ quota и открытый provider/capability kill switch. Ответ — `202` 
 
 Точный повтор возвращает существующий Job. Другой command под тем же ключом
 возвращает `IDEMPOTENCY_CONFLICT`. Active deduplication по
-`project + manifest hash + provider` предотвращает второй submit через новый
-пользовательский ключ.
+`project + semantic deduplication hash + provider` предотвращает второй
+submit через новый пользовательский ключ.
+
+Первый contract-only инкремент уже фиксирует public create body только с
+`estimateId`, конечную discriminated lifecycle-матрицу Job и отдельный
+`ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`. Он не включает runtime endpoint,
+Job/JobItem или provider call.
 
 ## Immutable manifest
 
@@ -137,6 +142,13 @@ quota и открытый provider/capability kill switch. Ответ — `202` 
 Jobs хранит manifest reference/hash и execution snapshot: binding/version,
 credential material version, connector version, mode и format. Public DTO
 не раскрывает credential/binding internals.
+
+Contract разделяет full integrity `manifestHash` и semantic
+`deduplicationHash`: второй исключает run-specific IDs/время, поэтому новый
+idempotency key не обходит active dedup. Manifest/chunk/ingest hashes
+используют versioned preimage и RFC 8785 JCS; ingest hash покрывает всю
+provenance команды. Finalize и ingest сериализуются одним manifest lock,
+после terminal finalize late ingest запрещён.
 
 Создание — идемпотентная saga:
 
