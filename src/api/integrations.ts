@@ -45,12 +45,34 @@ export const integrationCredentialStatuses = [
 export type IntegrationCredentialStatus =
   (typeof integrationCredentialStatuses)[number];
 
+export const integrationCredentialValidationModes = [
+  "ACCOUNT_METADATA",
+  "PROVIDER_DOCUMENTATION_REQUIRED"
+] as const;
+
+export type IntegrationCredentialValidationMode =
+  (typeof integrationCredentialValidationModes)[number];
+
+export const integrationCredentialValidationStatuses = [
+  "QUEUED",
+  "RUNNING",
+  "RETRY_SCHEDULED",
+  "SUCCEEDED",
+  "FAILED_RETRYABLE",
+  "FAILED_FINAL",
+  "STALE"
+] as const;
+
+export type IntegrationCredentialValidationStatus =
+  (typeof integrationCredentialValidationStatuses)[number];
+
 export interface IntegrationProviderCatalogItem {
   readonly provider: IntegrationProvider;
   readonly displayName: string;
   readonly description: string;
   readonly capabilities: readonly IntegrationCapability[];
   readonly supportedModes: readonly IntegrationCredentialMode[];
+  readonly credentialValidationMode: IntegrationCredentialValidationMode;
   readonly requiresAccountIdentifier: boolean;
   readonly accountIdentifierLabel?: string;
   readonly subscriptionNotice: string;
@@ -68,9 +90,30 @@ export interface IntegrationCredentialSummary {
   readonly verifiedAt?: string;
   readonly lastSuccessAt?: string;
   readonly lastErrorAt?: string;
+  readonly lastErrorCode?: string;
+  /**
+   * Незавершённая проверка только текущей версии секретного материала.
+   * Partial unique constraint ограничивает значение одной job.
+   */
+  readonly activeValidation?: IntegrationCredentialValidationSummary;
   readonly version: number;
   readonly createdAt: string;
   readonly updatedAt: string;
+}
+
+export interface IntegrationCredentialValidationSummary {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly credentialId: string;
+  readonly credentialMaterialVersion: number;
+  readonly provider: IntegrationProvider;
+  readonly status: IntegrationCredentialValidationStatus;
+  readonly errorCode?: string;
+  readonly connectorVersion: string;
+  readonly requestedAt: string;
+  readonly startedAt?: string;
+  readonly retryAt?: string;
+  readonly finishedAt?: string;
 }
 
 export interface CreateIntegrationCredentialInput {
@@ -104,4 +147,10 @@ export interface InternalDeleteIntegrationCredentialInput {
   readonly workspaceId: string;
   readonly actorId: string;
   readonly version: number;
+}
+
+export interface InternalCreateIntegrationCredentialValidationInput {
+  readonly workspaceId: string;
+  readonly actorId: string;
+  readonly idempotencyKey: string;
 }
