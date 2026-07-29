@@ -108,6 +108,7 @@ const readOnlySafePermissions: ReadonlySet<Permission> = new Set([
   "project.export",
   "semantic.export",
   "ranking.export",
+  "collector.cancel",
   "file.download",
   "billing.top_up",
   "billing.manage_payment_methods"

@@ -27,6 +27,8 @@ import type {
   InternalCreateIntegrationCredentialValidationInput,
   InternalCreateProjectConnectorBindingInput,
   InternalCreateRankEstimateInput,
+  InternalCreateRankRunInput,
+  InternalCancelRankJobInput,
   InternalDeleteIntegrationCredentialInput,
   InternalUpdateProjectConnectorBindingInput,
   InternalUpdateIntegrationCredentialInput,
@@ -42,6 +44,7 @@ import type {
   ProjectConnectorFallbackPolicy,
   ProjectConnectorRoute,
   RankEstimate,
+  RankJobSummary,
   SemanticImportSummary,
   UploadPartUrls,
   UploadSummary,
@@ -52,6 +55,7 @@ import { DomainError } from "../common/domain-error.js";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import type { AppConfig } from "../config/app-config.js";
+import { scopedRankJobSummary } from "./rank-job-response.js";
 import { scopedRankEstimate } from "./rank-estimate-response.js";
 
 interface InternalContext {
@@ -84,6 +88,12 @@ const PROJECT_ROUTE_SOURCE_KINDS = new Set<string>(
 );
 const MAX_PROJECT_BINDINGS = integrationCapabilities.length;
 const MAX_PROJECT_CREDENTIAL_OPTIONS = 500;
+/**
+ * Existing Jobs collections are bounded to at most 500 safe summaries.
+ * Two MiB leaves ample room for them while preventing a compromised or
+ * misconfigured dependency from making Platform API buffer unbounded JSON.
+ */
+const MAX_JOBS_RESPONSE_BYTES = 2 * 1024 * 1024;
 
 @Injectable()
 export class JobsClient {
@@ -477,6 +487,82 @@ export class JobsClient {
     );
   }
 
+  public async createRankRun(
+    context: InternalContext,
+    input: InternalCreateRankRunInput,
+    idempotencyKey: string
+  ): Promise<RankJobSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.requestIntegration<unknown>(
+      "POST",
+      rankRunCollectionPath(
+        context.tenant.workspaceId,
+        projectId
+      ),
+      context,
+      input,
+      idempotencyKey
+    );
+    return scopedRankJobSummary(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      undefined,
+      input.billingCurrency
+    );
+  }
+
+  public async getRankJob(
+    context: InternalContext,
+    jobId: string
+  ): Promise<RankJobSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.requestIntegration<unknown>(
+      "GET",
+      rankJobPath(
+        context.tenant.workspaceId,
+        projectId,
+        jobId
+      ),
+      context
+    );
+    return scopedRankJobSummary(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      jobId
+    );
+  }
+
+  public async cancelRankJob(
+    context: InternalContext,
+    jobId: string
+  ): Promise<RankJobSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const input: InternalCancelRankJobInput = {
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId,
+      jobId
+    };
+    const value = await this.requestIntegration<unknown>(
+      "POST",
+      `${rankJobPath(
+        context.tenant.workspaceId,
+        projectId,
+        jobId
+      )}/cancel`,
+      context,
+      input
+    );
+    return scopedRankJobSummary(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      jobId
+    );
+  }
+
   private requestIntegration<Data>(
     method: "GET" | "POST" | "PATCH" | "DELETE",
     path: string,
@@ -530,13 +616,17 @@ export class JobsClient {
           method,
           headers,
           ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-          signal: AbortSignal.timeout(this.config.internalCommandTimeoutMs)
+          signal: AbortSignal.timeout(
+            method === "GET"
+              ? this.config.dependencyTimeoutMs
+              : this.config.internalCommandTimeoutMs
+          )
         }
       );
     } catch {
       throw dependencyUnavailable();
     }
-    const payload = await response.json().catch(() => undefined);
+    const payload = await boundedJobsJson(response);
     if (!response.ok) throw upstreamError(response.status, payload);
     if (
       typeof payload !== "object" ||
@@ -547,6 +637,55 @@ export class JobsClient {
     }
     return payload.data as Data;
   }
+}
+
+async function boundedJobsJson(response: Response): Promise<unknown> {
+  const advertisedLength = response.headers.get("content-length");
+  if (
+    advertisedLength !== null &&
+    (!/^(?:0|[1-9]\d{0,9})$/u.test(advertisedLength) ||
+      Number(advertisedLength) > MAX_JOBS_RESPONSE_BYTES)
+  ) {
+    await cancelResponseBody(response);
+    throw invalidJobsResponse();
+  }
+  if (!response.body) throw invalidJobsResponse();
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      if (!chunk.value) continue;
+      totalBytes += chunk.value.byteLength;
+      if (totalBytes > MAX_JOBS_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw invalidJobsResponse();
+      }
+      chunks.push(chunk.value);
+    }
+
+    const bytes = new Uint8Array(totalBytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    const json = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    return JSON.parse(json) as unknown;
+  } catch (error) {
+    if (error instanceof DomainError) throw error;
+    await reader.cancel().catch(() => undefined);
+    throw invalidJobsResponse();
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+async function cancelResponseBody(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
 }
 
 function integrationPath(
@@ -565,6 +704,27 @@ function projectIntegrationPath(
   return `/internal/v1/workspaces/${encodeURIComponent(
     context.tenant.workspaceId
   )}/projects/${encodeURIComponent(projectId)}/integration-settings`;
+}
+
+function rankRunCollectionPath(
+  workspaceId: string,
+  projectId: string
+): string {
+  return `/internal/v1/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/projects/${encodeURIComponent(projectId)}/rank-runs`;
+}
+
+function rankJobPath(
+  workspaceId: string,
+  projectId: string,
+  jobId: string
+): string {
+  return `/internal/v1/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/projects/${encodeURIComponent(
+    projectId
+  )}/jobs/${encodeURIComponent(jobId)}`;
 }
 
 function requiredProjectId(tenant: TenantAuthorization): string {
@@ -601,18 +761,27 @@ function upstreamError(status: number, payload: unknown): DomainError {
     });
   }
   if (status === 409) {
-    if (upstreamErrorCode(payload) === "IDEMPOTENCY_CONFLICT") {
+    const code = upstreamErrorCode(payload);
+    if (code === "IDEMPOTENCY_CONFLICT") {
       return new DomainError({
         statusCode: 409,
         code: "IDEMPOTENCY_CONFLICT",
         message: "Idempotency key was already used for another request"
       });
     }
-    if (upstreamErrorCode(payload) === "DUPLICATE") {
+    if (code === "DUPLICATE") {
       return new DomainError({
         statusCode: 409,
         code: "DUPLICATE",
         message: "A project integration already exists"
+      });
+    }
+    if (isRankRunConflictReason(code)) {
+      return new DomainError({
+        statusCode: 409,
+        code: "RESOURCE_STATE_CONFLICT",
+        message: "Manual rank Job cannot be created in the current state",
+        details: { reason: code }
       });
     }
     return new DomainError({
@@ -647,6 +816,19 @@ function upstreamError(status: number, payload: unknown): DomainError {
     });
   }
   return dependencyUnavailable();
+}
+
+const RANK_RUN_CONFLICT_REASONS: ReadonlySet<string> = new Set([
+  "ESTIMATE_EXPIRED",
+  "ESTIMATE_STALE",
+  "EQUIVALENT_RUN_ACTIVE",
+  "EXECUTION_GRANT_DENIED"
+]);
+
+function isRankRunConflictReason(
+  value: string | undefined
+): value is string {
+  return value !== undefined && RANK_RUN_CONFLICT_REASONS.has(value);
 }
 
 function upstreamErrorCode(payload: unknown): string | undefined {

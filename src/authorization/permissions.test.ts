@@ -81,6 +81,8 @@ test("read-only mode allows viewing, exporting and balance recovery only", () =>
   assert.equal(isReadOnlySafePermission("semantic.view"), true);
   assert.equal(isReadOnlySafePermission("semantic.export"), true);
   assert.equal(isReadOnlySafePermission("billing.top_up"), true);
+  assert.equal(isReadOnlySafePermission("collector.cancel"), true);
   assert.equal(isReadOnlySafePermission("semantic.import"), false);
   assert.equal(isReadOnlySafePermission("collector.run"), false);
+  assert.equal(isReadOnlySafePermission("ranking.run"), false);
 });
