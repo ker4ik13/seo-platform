@@ -7,7 +7,8 @@
 - NATS с JetStream;
 - четыре NestJS API, отдельные system, inspection, import, rank и connector
   workers;
-- единый web (`/`, `/tools`, `/docs`, `/app`), admin и Directus;
+- единый web (`/`, `/tools`, `/docs`, `/app`), internal-only admin shell и
+  Directus;
 - S3 и SMTP подключаются как внешние managed/hosted сервисы.
 
 ## Первый запуск
@@ -23,9 +24,35 @@
    примера могут ещё не содержать их.
 3. Сначала оставить `S3_ENABLED=false`, `EMAIL_ENABLED=false`,
    `DIRECTUS_STORAGE_DRIVER=local`.
-4. Привязать основной домен к `web:3000`, остальные домены к `admin:3002`,
-   `platform-api:4000`, `realtime:4003`, `directus:8055`.
+4. Привязать основной домен к `web:3000`, а нужные технические домены — к
+   `platform-api:4000`, `realtime:4003` и `directus:8055`. Не создавать
+   domain/route/port binding для `admin:3002`.
 5. Развернуть compose. Migration services завершаются до запуска приложений.
+
+## Web build-time public URL
+
+Next.js встраивает `NEXT_PUBLIC_SITE_URL` в build artifact; одного runtime env
+недостаточно для metadata, sitemap и robots. Compose поэтому fail-closed
+требует `WEB_PUBLIC_URL` и передаёт его как
+`NEXT_PUBLIC_SITE_URL` build arg только service `web`. Общий Web Dockerfile
+превращает arg в env до `pnpm build`. Runtime `NEXT_PUBLIC_SITE_URL` остаётся
+для согласованности запуска, но не исправляет artifact, собранный с неверным
+origin. Admin build намеренно не получает этот public Web arg.
+
+## Admin shell: только internal
+
+Текущий `platform-admin` — unauthenticated shell с демонстрационными данными,
+а не готовая operator surface. Compose может запускать его только в сети
+`internal` для build/runtime smoke; `expose: 3002` не является host publish и
+не разрешает внешний ingress. Service намеренно не подключён к `edge`.
+
+Запрещено добавлять `ADMIN_PUBLIC_URL`, Dokploy/Traefik domain, edge network
+или host port binding до реализации отдельной operator authentication
+session/audience, обязательной 2FA, platform-role authorization, audit
+опасных действий и server-backed non-demo данных. До прохождения этих gates
+Admin origin также запрещено добавлять в Platform API `CORS_ORIGINS` и
+Realtime `WEB_ORIGINS`; текущий Compose разрешает только `WEB_PUBLIC_URL`.
+Фальшивая auth-заглушка не является основанием для внешней публикации.
 
 ## Dedicated Jobs → SEO Data rank boundary
 
