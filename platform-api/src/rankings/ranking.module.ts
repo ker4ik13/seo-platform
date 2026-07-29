@@ -5,6 +5,7 @@ import { JobsModule } from "../jobs/jobs.module.js";
 import { SeoDataModule } from "../seo-data/seo-data.module.js";
 import { TenantModule } from "../tenants/tenant.module.js";
 import { RankEstimateController } from "./rank-estimate.controller.js";
+import { RankHistoryController } from "./rank-history.controller.js";
 import { RankRunController } from "./rank-run.controller.js";
 import { TrackingContextController } from "./tracking-context.controller.js";
 
@@ -18,6 +19,7 @@ import { TrackingContextController } from "./tracking-context.controller.js";
   ],
   controllers: [
     RankEstimateController,
+    RankHistoryController,
     RankRunController,
     TrackingContextController
   ]

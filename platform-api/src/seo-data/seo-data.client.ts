@@ -8,6 +8,7 @@ import {
   type InternalCreateTrackingContextInput,
   type InternalUpdateTrackingContextInput,
   type KeywordListQuery,
+  type RankHistoryQuery,
   type SemanticKeywordListItem,
   type TrackingContextCollection,
   type TrackingContextKeywordAssignmentState,
@@ -19,6 +20,10 @@ import type { TenantAuthorization } from "../authorization/authorization.types.j
 import { DomainError } from "../common/domain-error.js";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
+import {
+  rankHistoryPage as validateRankHistoryPage,
+  type RankHistoryPage
+} from "../rankings/rank-history-response.js";
 import {
   scopedTrackingContext,
   scopedTrackingContextKeywordState,
@@ -59,6 +64,40 @@ export class SeoDataClient {
 
     const payload = await this.request("GET", url, context);
     return semanticKeywordPage(payload);
+  }
+
+  public async listRankHistory(
+    context: InternalContext,
+    query: RankHistoryQuery
+  ): Promise<RankHistoryPage> {
+    const scope = trackingScope(context);
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(
+        scope.projectId
+      )}/rank-history`,
+      this.config.services.seoData
+    );
+    url.searchParams.set("observedFrom", query.observedFrom);
+    url.searchParams.set("observedBefore", query.observedBefore);
+    if (query.trackingContextId) {
+      url.searchParams.set(
+        "trackingContextId",
+        query.trackingContextId
+      );
+    }
+    if (query.keywordId) {
+      url.searchParams.set("keywordId", query.keywordId);
+    }
+    url.searchParams.set("limit", String(query.limit));
+    if (query.cursor) url.searchParams.set("cursor", query.cursor);
+
+    const payload = await this.request("GET", url, context);
+    return validateRankHistoryPage(
+      payload,
+      scope.workspaceId,
+      scope.projectId,
+      query
+    );
   }
 
   public async listTrackingContexts(
