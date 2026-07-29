@@ -6,6 +6,7 @@ export const domainEventTypes = {
   userPasswordChanged: "identity.user.password-changed.v1",
   userMfaEnabled: "identity.user.mfa-enabled.v1",
   userMfaDisabled: "identity.user.mfa-disabled.v1",
+  sessionFamilyRevoked: "identity.session-family.revoked.v1",
   workspaceCreated: "workspace.created.v1",
   workspaceUpdated: "workspace.updated.v1",
   workspaceInviteRequested: "workspace.invite.requested.v1",

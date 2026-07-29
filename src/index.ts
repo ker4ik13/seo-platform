@@ -10,6 +10,7 @@ export * from "./api/uploads.js";
 export * from "./api/web-push.js";
 export * from "./events/catalog.js";
 export * from "./events/envelope.js";
+export * from "./events/identity.js";
 export * from "./events/integrations.js";
 export * from "./events/tracking-contexts.js";
 export * from "./health.js";
