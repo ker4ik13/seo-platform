@@ -212,7 +212,12 @@
 - Browser Web Push subscription material использует отдельные от BYOK и auth
   versioned keyrings: AES-256-GCM для endpoint/keys и HMAC-SHA-256 для exact
   fingerprints. Key material между ними не переиспользуется; Realtime до
-  открытия HTTP агрегированно проверяет coverage active rows.
+  открытия HTTP агрегированно проверяет coverage active rows. Coverage
+  подтверждает только наличие version, а не неизменность bytes. До включения
+  production-регистрации обязателен persistent authenticated canary/manifest
+  каждой AES/HMAC version; same-version replacement запрещён. HMAC rotation
+  требует одинакового overlap keyring на всех replicas до drain старых
+  процессов и switch active version.
 - Управление push devices принимает только отдельный
   `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN`; общий internal credential не
   даёт доступ к этой границе. Endpoint принимается только по exact HTTPS

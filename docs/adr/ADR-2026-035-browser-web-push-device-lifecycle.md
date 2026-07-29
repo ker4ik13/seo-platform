@@ -55,10 +55,15 @@ tenant context, хранить открыто, логировать или пе�
   AES-256-GCM. AAD связывает ciphertext с subscription, user,
   installation, session family, VAPID version и encryption key version.
 - Поиск дубликата использует отдельный versioned HMAC-SHA-256 keyring.
-  Encryption и fingerprint key material никогда не совпадают.
+  Encryption и fingerprint key material никогда не совпадают. Partial unique
+  index защищает только конкретный HMAC digest, поэтому межверсионная
+  уникальность дополнительно требует all-keyring lookup под стабильным
+  endpoint advisory lock.
 - Startup coverage guard проверяет, что все используемые active rows имеют
   доступные encryption/fingerprint versions. Отображение
-  `keyVersion → key bytes` immutable, ротация выполняется expand-first.
+  `keyVersion → key bytes` immutable. Fingerprint-ротация выполняется строго
+  `expand одинакового overlap keyring на всех replicas → drain старых
+  replicas → switch active version`; mixed-keyring rollout небезопасен.
 - Один endpoint не может молча перейти к другому аккаунту. Endpoint conflict
   возвращается как нейтральная ошибка; пользователь должен отозвать browser
   subscription и создать новую.
@@ -90,6 +95,14 @@ HTTP lifecycle может быть включён через
 `deliveryAvailable=false` и `testDeliveryAvailable=false` до появления
 реального sender. UI не показывает успешную test/delivery.
 
+Текущий startup coverage guard проверяет наличие номеров key versions, но не
+неизменность bytes. Подмена AES/HMAC material под прежней version может
+сломать расшифровку и межверсионный поиск endpoint. Same-version replacement
+операционно запрещён; до `WEB_PUSH_REGISTRATION_ENABLED=true` в production
+нужен persistent authenticated canary/manifest для каждой encryption и
+fingerprint version. Staging lifecycle допускается только с immutable
+keyring и контролируемым rollout.
+
 Перед production-доставкой обязательны:
 
 1. durable identity event об отзыве session family и consumer, атомарно
@@ -99,7 +112,10 @@ HTTP lifecycle может быть включён через
 3. отдельный sender role с VAPID private key и повторной проверкой active
    generation непосредственно перед decrypt/send;
 4. обработка `404/410` push service как terminal expiry;
-5. явное одобрение production-зависимостей `@nats-io/jetstream` и `web-push`.
+5. bounded global sweeper для provider expiry; текущий lifecycle очищает due
+   rows только в user-scoped list/upsert;
+6. persistent key verifier/decrypt-canary, описанный выше;
+7. явное одобрение production-зависимостей `@nats-io/jetstream` и `web-push`.
 
 ## Последствия
 

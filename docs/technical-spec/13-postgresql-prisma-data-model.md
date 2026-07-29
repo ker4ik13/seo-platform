@@ -1376,14 +1376,21 @@ installation UUID, registration session-family snapshot, device label,
 version, optimistic `version`, provider expiry, last success/error и
 `active/revoked/expired` state. Endpoint, `p256dh` и `auth` сохраняются одним
 AES-256-GCM ciphertext с nonce/auth tag и encryption key version; отдельные
-versioned HMAC fingerprints обеспечивают active endpoint uniqueness и
+versioned HMAC fingerprints позволяют находить active endpoint и выполнять
 reconciliation без расшифровки. Encryption и fingerprint keyrings используют
 разный material. Active rows обязаны иметь полный crypto tuple, terminal rows
 не должны его иметь: revoke/expiry атомарно стирает ciphertext, nonce/tag и
 fingerprints, сохраняя безопасный tombstone. Unique
 `user_id + installation_id` не позволяет одному browser installation создать
-несколько устройств пользователя; partial unique active endpoint не допускает
-молчаливую передачу endpoint другому аккаунту. Active count bounded policy,
+несколько устройств пользователя. Partial unique index гарантирует
+уникальность только одного HMAC digest; одинаковый endpoint под разными
+fingerprint key versions имеет разные digests. Поэтому межверсионная
+уникальность обеспечивается сервисным поиском fingerprints по всему
+настроенному overlap keyring под стабильным advisory lock endpoint. Все
+Realtime replicas обязаны пройти rollout `expand одинакового keyring на всех
+replicas → drain старых replicas → switch active version`; смешанные keyrings
+не считаются безопасным состоянием. Endpoint conflict не приводит к
+молчаливой передаче endpoint другому аккаунту. Active count bounded policy,
 default 20. Cross-database FK на identity session family запрещён; lifecycle
 отзыва применяется через durable identity event до включения sender.
 

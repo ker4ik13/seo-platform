@@ -142,7 +142,9 @@ transport и health/readiness, таблицы outbox/inbox созданы. Durab
   jobs/integrations HTTP process.
 - `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` отличается от обоих
   предыдущих secrets и выдаётся только Platform API и Realtime HTTP для
-  управления browser Web Push devices.
+  управления browser Web Push devices. Пример намеренно пуст, runtime
+  отклоняет placeholder, а production Compose требует явно сгенерированное
+  значение.
 - Browser subscription material использует отдельные versioned keyrings
   `WEB_PUSH_SUBSCRIPTION_KEYS` (AES-256-GCM) и
   `WEB_PUSH_FINGERPRINT_KEYS` (HMAC-SHA-256). Их key material не
@@ -263,6 +265,8 @@ Backend convention:
 - `platform-realtime/src/notifications` — профильные правила, membership-bound
   проектные подписки, effective policy, user-scoped notification center и
   encrypted browser Web Push device lifecycle;
+- `platform-realtime/src/common/request-id.ts` — bounded correlation ID для
+  сквозной Platform API → Realtime трассировки с UUID fallback;
 - `platform-realtime/src/internal` — fail-closed internal HTTP authentication
   и проверенный actor/tenant/membership context;
 - `platform-web/app` — public, tools, docs и private `/app` App Router screens;
@@ -414,7 +418,12 @@ actor/session/status. Platform API инжектирует проверенную
 Installation UUID хранится Web в IndexedDB. Realtime принимает только exact
 HTTPS endpoint origins, шифрует endpoint/keys через versioned AES-256-GCM,
 использует независимый HMAC keyring для fingerprints, ограничивает active
-devices (default 20) и стирает secret material при terminal revoke/expiry.
+devices (default 20), возвращает active devices перед bounded tombstone
+history, очищает due subscriptions до list/upsert и стирает secret material
+при terminal revoke/expiry. Межсервисный request ID принимается только в
+bounded safe ASCII-формате, иначе заменяется локальным UUID. Partial unique
+index защищает один HMAC digest; межверсионная endpoint uniqueness требует
+all-keyring lookup и rollout `expand на всех replicas → drain → switch`.
 VAPID public key имеет immutable version; private key не поступает в HTTP/Web
 process. Service Worker работает в scope `/app/`, не содержит fetch handler и
 не кэширует private API. Registration честно возвращает
@@ -646,10 +655,15 @@ durable-доставка не реализована. OAuth/OIDC выполня�
   transactional outbox/durable consumer, email/Web Push adapters, digest
   scheduler, VAPID private-key sender и provider delivery history. Device
   lifecycle готов, но durable identity event об отзыве session family и его
-  consumer остаются release blocker перед внешней доставкой.
+  consumer, а также bounded global provider-expiry sweeper остаются release
+  blocker перед внешней доставкой. До sweeper due subscriptions безопасно
+  очищаются в user-scoped list/upsert.
 - `web_push_subscriptions` migration требует fresh apply и constraint-negative
   smoke на PostgreSQL 18 staging; VAPID/encryption/fingerprint key rollout
-  требует expand-first coverage review. Delivery/test остаются выключены.
+  требует expand-first coverage review. Startup guard видит только номера
+  versions, но не неизменность key bytes: persistent authenticated canary для
+  AES/HMAC keyrings обязателен до production-регистрации. Same-version key
+  replacement запрещён. Delivery/test остаются выключены.
 - Для rejected/quarantine objects ещё требуется production lifecycle policy и
   отдельный reconciliation/cleanup job; выдача и импорт таких объектов
   запрещены уже сейчас.
