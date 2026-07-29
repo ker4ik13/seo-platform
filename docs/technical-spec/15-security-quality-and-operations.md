@@ -144,14 +144,20 @@
 
 ### 8.2. Использование
 
-- Для provider execution decryption доступен только credential-capable
-  integration worker. Generic system/import/inspection workers и migration
-  process не получают credential keyring.
+- Provider request выполняет отдельный connector worker с credential role
+  `EXECUTION`. Он получает KEK, но не получает credential management API
+  token, fingerprint keyring, HTTP listener или полномочия create/rotate.
+  Generic system/import/inspection workers и migration process не получают
+  credential keyring. Runtime config guard работает fail-closed: `DISABLED`
+  отклоняет credential secrets, а `EXECUTION` — management/fingerprint/
+  internal/NATS и S3/SMTP secrets. Это защита от misconfiguration, а не
+  криптографическая граница.
 - Management API принимает только полную замену secret payload и не
-  расшифровывает прежнее значение. Foundation HTTP-процесс всё ещё получает
-  симметричный KEK для envelope encryption и поэтому технически обладает
-  decrypt capability; до production connector execution эта граница
-  выносится в credential broker/worker либо закрепляется отдельным ADR.
+  вызывает провайдера. HTTP-процесс получает симметричный KEK для envelope
+  encryption. Role guard запрещает штатный decrypt, но общий symmetric key не
+  является криптографической изоляцией при компрометации процесса; до
+  production эта граница выносится в KMS/asymmetric wrapping,
+  credential broker/HSM либо принимается отдельным ADR с threat model.
 - Plaintext существует в памяти минимально возможное время.
 - Credential не помещается в queue payload; передаётся credential reference.
 - Provider request logs проходят redaction.
@@ -159,6 +165,23 @@
 - Удаление проверяет активные jobs и предлагает безопасный переход.
 - Компрометированный ключ отключается и создаёт уведомление.
 - Platform credentials разделены по provider/environment и имеют минимальные provider permissions.
+- Management API и connector worker используют разные PostgreSQL logins.
+  Текущий execution login ограничен по DML, но имеет `SELECT` всех строк и
+  колонок `jobs` и `integration_credentials` внутри `jobs_db`; это не
+  tenant/secret isolation. Компрометация connector process раскрывает job
+  snapshots/metadata всех tenants и, поскольку process получает KEK, весь
+  BYOK vault этой database. До production это release blocker: нужна узкая
+  execution projection/table с server-side scope либо credential broker/KMS,
+  исключающий global vault read. Дополнительно обязательны fresh non-owner
+  role provisioning, cluster-wide grant audit и `pg_hba`/отдельный cluster
+  boundary; ownership объектов кластера script отклоняет fail-closed. Общий
+  Redis password текущего среза заменяется отдельным ACL/instance; DB
+  owner/superuser credential connector worker-у запрещён как production
+  invariant.
+- Перед включением внешних уведомлений terminal validation должен атомарно
+  писать только нормализованный error code и redacted outbox/audit event, но
+  не raw provider response; в первом validation slice terminal outbox ещё
+  отсутствует.
 
 ## 9. Шифрование и ключи
 
@@ -171,9 +194,19 @@
 - BYOK KEK и keyed idempotency fingerprint используют разные versioned
   keyrings и независимые rotation/retention lifecycle; повторное использование
   одного key material запрещено.
+- Отображение `keyVersion → key bytes` immutable. Новое key material получает
+  новую version; изменять значение уже выпущенной версии запрещено.
 - Credential-capable процесс до открытия HTTP агрегированно сверяет
   используемые KEK/fingerprint versions с keyrings и при пробеле завершается
   fail-closed.
+- KEK rollout выполняется в порядке expand keyring → startup decrypt-canary
+  verify каждой используемой версии → drain старых replicas → switch active.
+  Текущий coverage guard и missing-version retry проверяют наличие версии, но
+  не обнаруживают ошибочную замену bytes под прежним `keyVersion`. До
+  production обязательны startup canary/verifier и/или глобальный
+  decrypt-failure circuit breaker. Массовый системный mismatch должен
+  останавливать execution и создавать incident, а не переводить валидные
+  credentials в `DISABLED`.
 - Vault endpoints не принимают общий межсервисный token: отдельный caller
   secret доступен только Platform API и credential-capable HTTP process, до
   плановой замены на service JWT/mTLS.
@@ -221,6 +254,15 @@ VPS делятся на роли:
 - webhook endpoints проходят ту же проверку.
 
 Для crawler разрешён доступ только к публичным сайтам пользователя, не к внутренним сетям.
+
+Credential validation строже общего server-side fetch: URL, origin, method и
+auth header фиксированы versioned connector allowlist, redirect запрещён,
+успешный `2xx` обязан быть JSON, а non-2xx сохраняет безопасную
+status-классификацию даже при пустом/non-JSON body. Ответ ограничен по времени
+и фактически прочитанному размеру. Пользовательский base URL не принимается.
+Execution worker получает отдельный исходящий Docker route без опубликованных
+портов; до high-assurance production этот route дополнительно ограничивается
+host firewall или egress proxy по provider DNS/hostname allowlist.
 
 ## 12. Импорт и экспорт
 
@@ -918,6 +960,10 @@ Billing read-only не является стадией удаления. Око�
 
 - Автоматический cross-tenant test suite проходит для всех tenant resources.
 - Provider credentials не появляются в API responses, logs, traces, events и queue payload.
+- KEK rollout canary проверяет точное key material каждой используемой версии;
+  системный decrypt mismatch не изменяет статусы credentials.
+- Connector execution boundary не имеет global read всего multi-tenant BYOK
+  vault и job snapshot набора.
 - Restore drill подтверждает заявленный RPO/RTO.
 - Повтор платёжного события не изменяет ledger второй раз.
 - Импорт защищён от zip bomb, formula injection и вредоносного файла.

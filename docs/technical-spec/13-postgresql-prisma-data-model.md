@@ -956,9 +956,22 @@ Indexes:
 
 - workspace/project/status/created;
 - queue/status/priority;
-- idempotency;
+- unique workspace/idempotency scope/idempotency key;
+- partial unique active workspace/deduplication key;
+- type/status/lease expiry/created;
+- type/status/retry time/priority/created;
 - provider request ID;
 - schedule.
+
+Текущая `jobs` table хранит `idempotency_scope`, опциональную пару
+`idempotency_key + 32-byte request_hash`, `lease_owner`,
+`lease_expires_at`, `retry_at` и `updated_at`. DB CHECK запрещает только одну
+часть idempotency pair. Активный partial unique index охватывает `QUEUED`,
+`WAITING_RATE_LIMIT`, `RUNNING`, `RETRY_SCHEDULED`; terminal history не мешает
+новой команде. Worker получает lease условным update по прежним status/version,
+а потерявший lease worker не может записать terminal result. Dispatcher
+фильтрует по конкретному `type`, поэтому operational lease/retry indexes
+начинаются с `type`, а не с общего `status`.
 
 ### 6.2. Imports/exports
 
@@ -1039,11 +1052,13 @@ publishing. `semantic_import_validated_rows` hash-partitioned на 16 partitions
 - idempotency key;
 - keyed request fingerprint без plaintext secret;
 - fingerprint key version;
+- material version;
 - created_by;
 - updated_by;
 - verified_at;
 - last_success_at;
 - last_error_at;
+- last_error_code;
 - deleted_at;
 - version.
 
@@ -1063,10 +1078,14 @@ key с другим actor/payload возвращает conflict. Fingerprint с�
 credential и возвращает его текущее masked-представление. После revoke повтор
 получает conflict. Отделение `fingerprint_key_version` от `key_version`
 позволяет переоборачивать DEK и удалять старый KEK без зависимости от
-idempotency lifecycle. Все UUID канонизируются до lowercase до вычисления
-AAD/HMAC и совпадают с представлением PostgreSQL. Структурированный
-`last_error_code` и
-provider-specific expiry добавляются вместе с connector validation/history.
+idempotency lifecycle. Связь `key_version → KEK bytes` immutable: изменение
+key material требует новой версии; одноимённая замена существующего значения
+запрещена. Все UUID канонизируются до lowercase до вычисления AAD/HMAC и
+совпадают с представлением PostgreSQL. `material_version`
+увеличивается при полной замене secret payload и позволяет
+отбросить устаревший результат параллельной проверки. `last_error_code`
+хранит только allowlisted нормализованный код; provider-specific expiry будет
+добавлен вместе с connector history.
 
 Добавление `PENDING_VERIFICATION` вынесено в отдельную migration, чтобы новая
 PostgreSQL enum value была committed до использования в DEFAULT следующей
@@ -1077,6 +1096,24 @@ fail-closed precondition и одну явную транзакцию: pre-releas
 deploy: используется отдельный expand → application backfill → validate →
 contract план, а failed migration восстанавливается через документированный
 `prisma migrate resolve` workflow.
+
+Отдельная migration credential validation добавляет Job idempotency
+scope/hash, lease/retry timestamps, `material_version` и `last_error_code`.
+Она намеренно fail-closed останавливается при любой строке в pre-release
+`jobs`: безопасное значение обязательного `idempotency_scope` нельзя вывести
+универсально. Окружение с существующими jobs нельзя очищать ради deploy — для
+него заранее выпускается отдельная expand → application backfill → validate →
+contract migration.
+
+Execution DB role текущего validation slice ограничена по DML, но имеет
+`SELECT` всех строк и колонок `jobs` и `integration_credentials` внутри
+`jobs_db`. Это не является row-level tenant isolation или secret isolation.
+При компрометации connector process blast radius включает job
+snapshots/metadata всех tenants и, поскольку process получает KEK, весь
+encrypted BYOK vault этой database. До production схема доступа должна быть
+заменена узкой execution projection/table с server-side scope либо
+credential broker/KMS, исключающим global vault read; дополнительно
+обязательны cluster-wide grant audit и `pg_hba`/отдельная граница кластера.
 
 #### `project_connector_bindings`
 
@@ -1270,27 +1307,35 @@ model Keyword {
 }
 
 model Job {
-  id             String    @id @db.Uuid
-  workspaceId    String    @map("workspace_id") @db.Uuid
-  projectId      String?   @map("project_id") @db.Uuid
-  type           JobType
-  status         JobStatus
-  stage          String?   @db.VarChar(64)
-  priority       Int       @default(100)
-  idempotencyKey String?   @map("idempotency_key") @db.VarChar(128)
-  inputSnapshot  Json      @map("input_snapshot")
-  current        BigInt    @default(0)
-  total          BigInt?
-  attempt        Int       @default(0)
-  maxAttempts    Int       @default(3) @map("max_attempts")
-  version        Int       @default(1)
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  startedAt      DateTime? @map("started_at") @db.Timestamptz
-  finishedAt     DateTime? @map("finished_at") @db.Timestamptz
+  id               String    @id @db.Uuid
+  workspaceId      String    @map("workspace_id") @db.Uuid
+  projectId        String?   @map("project_id") @db.Uuid
+  type             JobType
+  status           JobStatus
+  stage            String?   @db.VarChar(64)
+  priority         Int       @default(100)
+  idempotencyScope String    @map("idempotency_scope") @db.VarChar(180)
+  idempotencyKey   String?   @map("idempotency_key") @db.VarChar(180)
+  requestHash      Bytes?    @map("request_hash")
+  inputSnapshot    Json      @map("input_snapshot")
+  current          BigInt    @default(0)
+  total            BigInt?
+  attempt          Int       @default(0)
+  maxAttempts      Int       @default(3) @map("max_attempts")
+  leaseOwner       String?   @map("lease_owner") @db.VarChar(100)
+  leaseExpiresAt   DateTime? @map("lease_expires_at") @db.Timestamptz
+  retryAt          DateTime? @map("retry_at") @db.Timestamptz
+  version          Int       @default(1)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  startedAt        DateTime? @map("started_at") @db.Timestamptz
+  finishedAt       DateTime? @map("finished_at") @db.Timestamptz
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  @@unique([workspaceId, idempotencyKey])
+  @@unique([workspaceId, idempotencyScope, idempotencyKey])
   @@index([workspaceId, projectId, status, createdAt])
   @@index([status, priority, createdAt])
+  @@index([type, status, leaseExpiresAt, createdAt])
+  @@index([type, status, retryAt, priority, createdAt])
   @@map("jobs")
 }
 ```

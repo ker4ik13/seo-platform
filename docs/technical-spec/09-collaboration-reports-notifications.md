@@ -343,10 +343,17 @@ Permission Web Push запрашивается только по нажатию 
 - явный пользовательский запрос browser permission без автоматического prompt;
 - loading, saving, saved, validation, conflict, error и blocked-channel states.
 
-В этом срезе разрешено не создавать фактическую доставку. Device registration,
-VAPID lifecycle, email/Web Push adapters, digest scheduler, retry и delivery
-history реализуются следующим delivery-срезом и не должны имитироваться
-успешными UI-сообщениями.
+Текущий repository slice реализует хранение и API профильных/проектных
+настроек, вычисление effective policy и in-app центр, но не создаёт
+фактические email/Web Push delivery attempts.
+
+Следующий обязательный вертикальный срез:
+`redacted domain event → transactional outbox → durable consumer → effective
+profile/project policy → idempotent Email/Web Push delivery attempt`. В него
+входят device registration, VAPID lifecycle, retry/DLQ, digest scheduler и
+delivery history. Production-зависимости `@nats-io/jetstream` и `web-push`
+ещё не одобрены; до их подтверждения adapters остаются портами, а UI не должен
+имитировать успешную внешнюю доставку.
 
 ## 13. Каналы
 

@@ -133,6 +133,7 @@ Database: `seo_db`.
 NestJS monorepo/repository с несколькими entrypoints:
 
 - job API;
+- credential management/validation command API;
 - scheduler;
 - import/export worker;
 - ranking/SERP worker;
@@ -145,12 +146,38 @@ NestJS monorepo/repository с несколькими entrypoints:
 - public Toolbox low-priority worker profile;
 - report worker;
 - connector registry;
+- credential validation connector worker;
 - credential broker client;
 - usage metering.
 
 Database: `jobs_db`; Redis/BullMQ; S3.
 
 Workers развёртываются независимо из одного репозитория и одного или нескольких image targets.
+
+В текущем срезе `src/main.ts` запускается с credential role `MANAGEMENT`, а
+`src/connector-worker.main.ts` — с role `EXECUTION`. HTTP-процесс принимает
+create/rotate/revoke/validation commands, но не обращается к provider;
+connector worker не открывает входящий HTTP listener и не получает credential
+API token или fingerprint keyring. Между ними передаётся только канонический
+PostgreSQL Job и BullMQ payload с `jobId`. Connector worker использует отдельный
+PostgreSQL login из `JOBS_CONNECTOR_DATABASE_USER` /
+`JOBS_CONNECTOR_DATABASE_PASSWORD`. Для freshly provisioned non-owner role
+permission component выдаёт только требуемые `SELECT` и перечисленные
+column-level `UPDATE` grants внутри `jobs_db`, не выдавая worker-у
+`INSERT`/`DELETE`/DDL.
+После jobs migration one-shot component `jobs-connector-db-permissions`
+идемпотентно создаёт/ужесточает эту роль через
+`postgres/permissions/jobs-connector.sql` и fail-closed отклоняет
+привилегированную роль, membership или ownership объектов кластера; worker
+стартует только после его успеха.
+Этот script гарантирует выданные privileges внутри `jobs_db`, но не является
+доказательством полной изоляции уже существующего login: `PUBLIC CONNECT` к
+другим databases и ранее выданные direct grants остаются residual risk.
+Production provisioning обязан создавать fresh non-owner role, выполнять
+cluster-wide grant audit и ограничивать доступ через `pg_hba` либо отдельную
+cluster boundary.
+Management и execution пока используют общий Redis password; до production
+для connector worker требуется отдельный Redis ACL либо изолированный instance.
 
 ### 3.6. `platform-realtime`
 
@@ -452,6 +479,12 @@ VPS 3:
 - Публичные domains настраиваются через Dokploy/Traefik.
 - Внутренние сервисы не публикуют host ports.
 - Используются private/isolated networks.
+- Jobs API/workers одновременно используют isolated internal network и
+  отдельную сеть без опубликованных портов для исходящих S3/SMTP/provider
+  соединений; подключение к ней не должно давать входящий public route.
+- Credential connector принимает только versioned application allowlist
+  provider origins; до high-assurance production outbound network
+  дополнительно ограничивается host firewall или egress proxy.
 - Images публикуются в private registry, например GHCR.
 - Tag immutable: git SHA + release version.
 - `latest` не используется для production deploy.

@@ -19,7 +19,9 @@
 - `scheduleId`;
 - `parentJobId`;
 - `deduplicationKey`;
+- `idempotencyScope`;
 - `idempotencyKey`;
+- `requestHash`;
 - `inputSnapshot`;
 - `scopeSnapshot`;
 - `progressCurrent`;
@@ -38,10 +40,18 @@
 - `startedAt`;
 - `finishedAt`;
 - `cancelRequestedAt`;
+- `leaseOwner`;
+- `leaseExpiresAt`;
+- `retryAt`;
 - `errorSummary`;
 - `resultSummary`;
 - `correlationId`;
-- `version`.
+- `version`;
+- `updatedAt`.
+
+`idempotencyScope + idempotencyKey + requestHash` образуют проверяемую
+идемпотентную команду. Lease хранится в PostgreSQL и меняется через CAS по
+`status + version + leaseOwner`; Redis/BullMQ не является источником истины.
 
 ## 3. Статусы Job
 
@@ -140,6 +150,7 @@
 - `analytics-sync`;
 - `reports`;
 - `notifications`;
+- `integration-credential-validation`;
 - `public-toolbox`;
 - `maintenance`.
 
@@ -351,58 +362,152 @@ Credentials и OAuth connections принадлежат workspace.
 
 Секрет после сохранения показывается только masked. Получить исходное значение нельзя; можно заменить.
 
-### 17.1. Реализованный vault foundation
+### 17.1. Реализованные vault и credential validation
 
-Первый dependency-safe срез реализует workspace-scoped BYOK vault для
-XMLStock, Arsenkin Tools и Keys.so:
+Текущий вертикальный срез реализует workspace-scoped BYOK vault для XMLStock,
+Arsenkin Tools и Keys.so и асинхронную read-only проверку ключей Arsenkin и
+Keys.so:
 
-- Platform API повторно проверяет session, CSRF и workspace permission;
+- Platform API повторно проверяет session, CSRF, recent authentication и
+  workspace permission;
 - vault endpoints принимают отдельный service token, доступный только
-  Platform API и credential-capable jobs HTTP process; общий internal token
+  Platform API и management-role jobs HTTP process; общий internal token
   других сервисов недостаточен;
-- jobs/integrations является единственным владельцем ciphertext;
+- jobs/integrations является единственным владельцем ciphertext и
+  канонического validation Job;
 - случайный per-record DEK шифрует payload через AES-256-GCM, а отдельный
-  версионируемый KEK шифрует DEK;
+  versioned KEK шифрует DEK;
 - payload AAD связывает ciphertext с workspace, provider и credential ID;
   AAD обёрнутого DEK дополнительно связывает его с KEK version;
 - migration, system, import и inspection processes не получают credential
-  keyring; capability включена только для jobs/integrations API и будущего
-  connector worker;
+  keyring. Management role получает KEK и отдельный fingerprint keyring,
+  execution role — только KEK для краткоживущей расшифровки перед provider
+  request. Runtime config guard fail-closed отклоняет credential secrets у
+  `DISABLED`, а у `EXECUTION` — management/fingerprint/internal/NATS и S3/SMTP
+  secrets;
 - response DTO, audit, events, queue и downstream job payload получают только
-  credential ID, metadata и masked hint. Plaintext существует только в памяти
-  аутентифицированного create/full-replacement request до немедленного
-  шифрования и не попадает в логи;
+  credential/job IDs и безопасную metadata. Plaintext существует только в
+  памяти create/full-replacement request или connector worker и не попадает в
+  логи;
 - XMLStock хранит `userId + apiKey` внутри одного зашифрованного payload;
 - исходный секрет нельзя прочитать через пользовательский API;
-- rotate заменяет ciphertext и возвращает статус
-  `PENDING_VERIFICATION`;
+- rotate заменяет ciphertext, увеличивает `material_version` и возвращает
+  статус `PENDING_VERIFICATION`;
 - revoke сразу soft-deletes запись и перезаписывает ciphertext случайными
   байтами;
-- provider/base URL не принимается от пользователя и позже выбирается только
-  из allowlisted connector configuration.
-- create требует `Idempotency-Key`; ключ резервируется в пределах workspace, а
-  actor и нормализованный request входят в keyed 32-byte fingerprint под
-  отдельным versioned fingerprint keyring. Точный повтор возвращает уже
-  созданный credential, а тот же ключ с другим actor/payload даёт conflict.
+- provider/base URL не принимается от пользователя;
+- create credential и запуск validation требуют собственный
+  `Idempotency-Key`. Для validation PostgreSQL хранит scope и 32-byte request
+  hash, а стабильный активный deduplication key включает credential и material
+  version. Partial unique index не допускает параллельный validation того же
+  материала даже с разными command keys;
 - workspace/actor/credential UUID канонизируются до lowercase до
   tenant-сравнения, AAD и fingerprint, чтобы PostgreSQL UUID round-trip не
-  изменял криптографический контекст.
+  менял криптографический контекст.
 
-`PENDING_VERIFICATION` не разрешает worker использовать credential. Настоящий
-provider-specific `validateCredential` и project binding являются следующим
-срезом; локальная успешная расшифровка не выдаётся пользователю за проверку
-внешнего API.
+Validation flow:
 
-Управление credential принимает только полную замену secret payload и не
-расшифровывает старое значение. Однако HTTP-процесс jobs/integrations пока
-получает симметричный KEK для envelope encryption и технически обладает
-decrypt capability. Это временная foundation boundary, а не целевая
-production-модель connector execution: provider request получает plaintext
-только внутри отдельного credential-capable connector worker/broker.
-Startup уже fail-closed агрегированно сверяет используемые в БД KEK и
-fingerprint key versions с независимыми keyrings. Автоматический bounded DEK
-rewrap и отдельная bounded-инвалидация fingerprints после retry window
-остаются обязательным operational hardening до удаления старых версий.
+1. `POST .../credentials/{id}/validations` создаёт или возвращает
+   идемпотентный Job со snapshot `credentialId + materialVersion +
+   connectorVersion`. Секрет в snapshot не помещается.
+   Receipt ищется до чтения изменяемого credential state; request hash
+   включает immutable command scope `workspace + actor + credentialId`, а
+   `materialVersion` используется только в execution snapshot и active
+   deduplication key. Поэтому точный replay после rotate/disable/revoke
+   возвращает исходный Job.
+2. BullMQ queue `integration-credential-validation` получает только `jobId`.
+3. Отдельный `connector-worker.main.ts` с
+   `INTEGRATION_CREDENTIAL_ROLE=EXECUTION` забирает PostgreSQL lease.
+4. Worker повторно проверяет workspace, credential state, material version и
+   зафиксированную connector version и только затем расшифровывает секрет.
+5. Arsenkin вызывает фиксированный
+   `https://arsenkin.ru/api/tools/info`, Keys.so —
+   `https://api.keys.so/limits/all`; пользователь не может изменить origin,
+   URL, method или headers.
+6. Provider request имеет timeout, `redirect: error` и ограничивает фактически
+   прочитанный body одним MiB. Успешный `2xx` обязан быть валидным JSON;
+   безопасный HTTP status и `Retry-After` неуспешного ответа классифицируются
+   даже при пустом/non-JSON body. Наружу возвращаются только нормализованные
+   status/error code и allowlisted account metadata.
+7. Terminal transaction применяет результат только при прежнем
+   `material_version`; rotate/revoke во время проверки даёт `STALE` и не
+   изменяет новый credential material.
+8. Retryable network/5xx/429 переводится в `RETRY_SCHEDULED`; `retryAt`
+   учитывает bounded `Retry-After`, а periodic dispatcher восстанавливает
+   пропущенные queue messages и просроченные leases. Его lease/retry indexes
+   начинаются с `job.type`, чтобы typed dispatcher не сканировал jobs других
+   типов.
+
+Публичные validation states: `QUEUED`, `RUNNING`, `RETRY_SCHEDULED`,
+`SUCCEEDED`, `FAILED_RETRYABLE`, `FAILED_FINAL`, `STALE`. Terminal states —
+`SUCCEEDED`, `FAILED_RETRYABLE`, `FAILED_FINAL`, `STALE`; UI продолжает poll
+для `RETRY_SCHEDULED` с учётом `retryAt`. GET результата требует
+`integration.view` и должен работать в billing read-only режиме, POST требует
+`integration.test` и блокируется, когда новые операции запрещены.
+
+Credential list может содержать опциональный `activeValidation`, но только
+для текущего `material_version`. Запрос фильтрует active statuses и stable
+deduplication keys всех видимых credentials; partial unique ограничивает
+результат одной job на credential, поэтому history не вычитывается в память.
+Web гидратирует эту job после reload/navigation и продолжает только GET poll.
+Если конкурентный участник создал job между list и POST, клиент после `409`
+обязан перечитать authoritative list и присоединиться к найденной active job;
+если она уже terminal, используются обновлённые credential status и безопасный
+`lastErrorCode`. `sessionStorage` не является источником истины validation.
+
+`PENDING_VERIFICATION` не разрешает SEO jobs использовать credential.
+Arsenkin/Keys.so переходят в `ACTIVE` только после реального provider response.
+XMLStock остаётся `PROVIDER_DOCUMENTATION_REQUIRED`: локальная расшифровка не
+выдаётся пользователю за внешний test до подтверждённого provider contract и
+redacted fixtures.
+
+Management API принимает только полную замену secret payload и не вызывает
+провайдера. Public decrypt adapter разрешён только role `EXECUTION`, однако
+оба процесса пока получают один symmetric KEK: компрометация management
+process технически позволяет выполнить unwrap вне adapter. До production
+нужна криптографическая граница через KMS/asymmetric wrapping либо отдельный
+credential broker, закреплённая ADR; execution process также не получает
+fingerprint keyring/credential API token. Connector worker уже использует
+отдельный PostgreSQL login с ограниченным DML, но текущий grant разрешает
+`SELECT` всех строк и колонок `jobs` и `integration_credentials` внутри
+`jobs_db`. Это не tenant/secret isolation: при компрометации execution process
+доступны job snapshots/metadata всех tenants и, с имеющимся KEK, весь BYOK
+vault database. До production широкий read grant блокирует release: нужна
+узкая execution projection/table с проверенным server-side scope либо
+credential broker/KMS, исключающий чтение всего vault. Отдельно обязательны
+fresh role provisioning, cluster-wide grant audit и
+`pg_hba`/отдельный cluster boundary; ownership объектов кластера script
+проверяет и отклоняет fail-closed. Отдельный Redis ACL/instance также остаётся
+обязательным.
+
+Startup fail-closed сверяет используемые в БД KEK/fingerprint versions с
+соответствующими keyrings. Автоматический bounded DEK rewrap и отдельная
+bounded-инвалидация fingerprints после retry window остаются обязательным
+operational hardening до удаления старых версий. Отображение
+`keyVersion → KEK bytes` immutable: новое значение всегда получает новую
+версию. Rollout выполняется только как expand keyring → startup canary verify
+каждой используемой версии → drain старых replicas → switch active.
+
+Текущий coverage guard проверяет наличие версии, а missing-version retry
+оставляет credential без изменений при её отсутствии. Они не обнаруживают
+неверные bytes, ошибочно записанные под существующим `keyVersion`. Startup
+decrypt-canary/verifier и/или глобальный decrypt-failure circuit breaker пока
+не реализованы и являются production release blocker: массовый системный
+mismatch должен останавливать execution и поднимать incident, а не переводить
+валидные credentials в `DISABLED`.
+
+Runtime validation ограничивает provider timeout диапазоном
+`1 000–120 000 ms`, lease — `10–600 s` и минимум `timeout + 5 s`,
+dispatcher — `5–300 s`, concurrency — `1–32`. Первый validation допускает
+не более трёх attempts; exponential delay ограничен 300 секундами, а
+provider `Retry-After` — 3 600 секундами.
+
+Первый worker имеет общий BullMQ limiter и DB-enforced single-active cap на
+credential/material. Перед multi-tenant beta обязательны server-side
+per-workspace/provider quotas и fair scheduling. Terminal validation result
+также должен записывать redacted
+transactional outbox event для durable audit и email/Web Push; audit записей
+`requested/queued` в Platform API для этого недостаточно.
 
 ## 18. OAuth connections
 
@@ -443,6 +548,13 @@ rewrap и отдельная bounded-инвалидация fingerprints пос�
 - Parser changes не меняют старые snapshots молча.
 - Возможен reparse raw response новым parser как отдельный job.
 - Deprecation провайдера сопровождается миграционным уведомлением.
+
+Первый credential-validation registry хранит только текущую версию и
+fail-closed завершает Job с `CONNECTOR_VERSION_CHANGED`, если snapshot не
+совпадает. Это безопасно, но не является production rollout strategy: до
+multi-replica deployment registry должен поддерживать N/N−1 до drain старых
+jobs либо rollout обязан сначала остановить новые команды и дождаться пустой
+очереди.
 
 ## 21. Начальные connectors
 

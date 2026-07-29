@@ -2,10 +2,10 @@
 
 Последнее обновление: 29 июля 2026 года
 
-Текущий инкремент: Integration credential vault foundation
-Статус: каталог XMLStock/Arsenkin/Keys.so и encrypted BYOK
-create/list/rotate/revoke реализованы; server-side provider test, project
-binding и rank jobs следуют отдельными вертикальными срезами
+Текущий инкремент: BYOK credential validation
+Статус: каталог и encrypted BYOK vault для XMLStock/Arsenkin/Keys.so, а также
+асинхронная server-side проверка Arsenkin/Keys.so реализованы; XMLStock
+validation, project binding и rank jobs следуют отдельными срезами
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -55,12 +55,13 @@ platform-admin ────┼──> platform-api
                                ├──> platform-jobs-integrations
                                └──> platform-realtime
 
-all backend services <──> NATS
+HTTP/domain backends <──> NATS
 jobs/realtime <──> Redis
 jobs <──> S3
 upload inspection worker ──> ClamAV
 import worker ──> S3 + partitioned staging in jobs_db
 import worker ──internal HTTP──> seo-data semantic core
+connector worker ──> jobs_db + BullMQ + allowlisted provider endpoints
 platform-web public/docs <──> Directus
 ```
 
@@ -70,6 +71,10 @@ Credential endpoints дополнительно используют отдел�
 `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`, доступный только Platform API и
 jobs-integrations HTTP; общий internal token остальных сервисов vault не
 открывает.
+Проверка credential создаётся как канонический `Job` в PostgreSQL; BullMQ
+получает только `jobId`. Отдельный execution-role connector worker забирает
+lease и перед вызовом провайдера повторно проверяет workspace, material
+version, connector version и состояние credential.
 Остальная межсервисная бизнес-коммуникация пока не включена: подключены
 transport и health/readiness, таблицы outbox/inbox созданы. Durable публикация
 событий начинается в следующем вертикальном срезе.
@@ -107,9 +112,26 @@ transport и health/readiness, таблицы outbox/inbox созданы. Durab
 - BYOK envelope encryption использует отдельный
   `INTEGRATION_CREDENTIAL_KEYS` KEK keyring; auth encryption key для него не
   переиспользуется. Request fingerprint использует второй независимый
-  `INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS` keyring. Оба получает только
-  credential-capable jobs/integrations process, но не generic
-  migration/system/import/inspection workers.
+  `INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS` keyring. Management-role HTTP
+  process получает оба keyring для create/rotate, execution-role connector
+  worker получает только KEK для расшифровки перед allowlisted provider call;
+  generic migration/system/import/inspection workers не получают ни один.
+  Привязка `keyVersion → KEK bytes` immutable: существующей версии запрещено
+  присваивать другое значение.
+- Runtime role guard работает fail-closed: `DISABLED` отклоняет credential
+  secrets, а `EXECUTION` — management/fingerprint/internal/NATS и S3/SMTP
+  secrets. Это проверка конфигурации, а не криптографическая изоляция.
+- Connector worker требует `INTEGRATION_CREDENTIAL_ROLE=EXECUTION` и
+  отдельные `JOBS_CONNECTOR_DATABASE_USER` /
+  `JOBS_CONNECTOR_DATABASE_PASSWORD`, а также
+  `INTEGRATION_VALIDATION_TIMEOUT_MS`, `INTEGRATION_VALIDATION_LEASE_SECONDS`,
+  `INTEGRATION_VALIDATION_DISPATCH_SECONDS`,
+  `INTEGRATION_VALIDATION_CONCURRENCY`. Lease должен быть строго длиннее
+  provider timeout с operational запасом; startup проверяет инвариант.
+- Jobs runtime processes используют `internal` для PostgreSQL/Redis/NATS и
+  отдельную непубликуемую `outbound` network для S3/SMTP/provider HTTPS.
+  Connector origins фиксированы в коде; production egress proxy/firewall
+  остаётся дополнительным сетевым allowlist.
 - `inspection` Compose profile запускает отдельные ClamAV и upload inspection
   worker; без доступного scanner файл fail-closed остаётся `UPLOADED`.
 
@@ -150,8 +172,9 @@ Backend convention:
   notification policy;
 - `platform-api/src/audit`, `src/outbox` — переиспользуемые transactional
   записи аудита и событий;
-- `platform-jobs-integrations/src/queue` — BullMQ connection, system queue и
-  идемпотентная `upload-inspection` queue;
+- `platform-jobs-integrations/src/queue` — BullMQ connection, system,
+  `upload-inspection` и идемпотентная
+  `integration-credential-validation` queues;
 - `platform-jobs-integrations/src/storage` — S3 port, disabled и S3 adapters;
 - `platform-jobs-integrations/src/malware` — scanner port, disabled adapter и
   потоковый `clamd` INSTREAM adapter;
@@ -166,8 +189,9 @@ Backend convention:
 - `platform-jobs-integrations/src/integrations` — allowlisted provider catalog,
   workspace-scoped envelope vault с per-record DEK, AES-256-GCM и versioned
   KEK, отдельный versioned HMAC fingerprint keyring, dedicated caller guard,
-  startup coverage guard, masked DTO, rotation и destructive secret overwrite
-  при revoke;
+  startup coverage guard, masked DTO, rotation, destructive secret overwrite
+  при revoke, connector registry и lease/CAS state machine проверки
+  credentials;
 - `platform-jobs-integrations/src/seo-data` — строго валидируемый internal
   HTTP client владельца semantic core;
 - `platform-seo-data/src/semantic-imports` — нормализация, import receipts,
@@ -189,7 +213,13 @@ Backend convention:
   refresh redirect;
 - `platform-*/lib` и `components` — adapters и переиспользуемые UI-части;
 - `platform-infrastructure/docker` — reusable backend/web images;
-- `platform-infrastructure/postgres/init` — создание service databases.
+- `platform-infrastructure/postgres/init` — создание service databases;
+- `platform-infrastructure/postgres/permissions` — идемпотентные fail-closed
+  grants внутри `jobs_db` после migrations; первый script создаёт/ужесточает
+  connector DB role и отклоняет ownership объектов кластера. DML ограничен,
+  но текущий `SELECT` охватывает все строки и колонки `jobs` и
+  `integration_credentials`, поэтому этот script не обеспечивает tenant/secret
+  isolation и сам по себе не доказывает cross-DB isolation.
 
 Entrypoints:
 
@@ -199,6 +229,11 @@ Entrypoints:
   `platform-jobs-integrations/src/inspection-worker.main.ts`;
 - semantic import worker:
   `platform-jobs-integrations/src/import-worker.main.ts`;
+- credential validation connector worker:
+  `platform-jobs-integrations/src/connector-worker.main.ts`;
+- connector DB permission init:
+  `platform-infrastructure/postgres/permissions/jobs-connector.sql`, one-shot
+  Compose service `jobs-connector-db-permissions`;
 - Next.js: App Router соответствующего frontend-пакета;
 - remote stack: `platform-infrastructure/compose.dokploy.yml`.
 
@@ -220,7 +255,7 @@ Entrypoints:
 | Workspaces/projects/team access | vertical slice |
 | Semantics/import | vertical slice: CSV/TSV → mapping → validation → publish → query |
 | Notifications | vertical slice: preferences → effective policy → read center |
-| Integrations | vertical slice: catalog + encrypted BYOK vault |
+| Integrations | vertical slice: catalog + encrypted BYOK vault + Arsenkin/Keys.so validation |
 | Rankings | planned |
 | Billing/YooKassa | planned |
 | Directus content | planned |
@@ -329,21 +364,51 @@ actor/payload. Fingerprint version не связан с KEK version, поэто�
 идемпотентности не блокирует будущий DEK rewrap. UUID канонизируются до
 lowercase до AAD/fingerprint и не меняются после PostgreSQL round-trip.
 
+`POST .../credentials/{id}/validations` требует `integration.test`, recent
+authentication, CSRF и `Idempotency-Key`; `GET .../validations/{validationId}`
+требует `integration.view` и остаётся доступным в billing read-only режиме.
+Credential list присоединяет только одну active validation текущего
+`material_version`; partial unique делает batch bounded. Поэтому после
+reload/navigation другой участник видит текущую job, а Web продолжает GET
+polling без повторного POST. Если job появилась между list и POST, `409`
+обрабатывается повторным чтением authoritative list и присоединением к ней;
+terminal history в credential list не загружается.
+Receipt точного повтора ищется до чтения изменяемого credential state:
+rotate/disable/revoke не меняют результат уже принятой job-команды, а
+`material_version` остаётся execution snapshot и active dedup boundary.
+PostgreSQL является источником истины для статусов, attempt, lease и
+`retryAt`; dispatcher восстанавливает потерянные сообщения BullMQ, а его
+lease/retry indexes начинаются с `job.type`. В очередь не попадает секрет.
+Execution worker расшифровывает его только в памяти и вызывает фиксированные
+HTTPS endpoints Arsenkin или Keys.so с timeout, запретом redirect, строгим
+JSON для `2xx`, body limit 1 MiB и нормализацией ошибок.
+Terminal update атомарно сверяет workspace и `material_version`: замена или
+revoke credential делает старую проверку `STALE`, не перезаписывая новый
+материал. Retry учитывает ограниченный `Retry-After`. XMLStock остаётся
+`PROVIDER_DOCUMENTATION_REQUIRED`, поэтому его проверка честно недоступна.
+Partial unique active dedup key ограничивает один validation на пару
+credential/material даже при разных `Idempotency-Key`.
+
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API unit tests: 65 pass, 0 fail.
+- Platform API unit tests: 78 pass, 0 fail.
 - SEO data unit tests: 10 pass, 0 fail.
-- Jobs/integrations unit tests: 64 pass, 0 fail.
+- Jobs/integrations unit tests: 116 pass, 0 fail.
 - Realtime unit tests: 12 pass, 0 fail.
 - Contracts unit tests: 1 pass, 0 fail.
-- Unified Web helper tests: 4 pass, 0 fail.
+- Unified Web helper tests: 13 pass, 0 fail.
 - NestJS production build: pass для 4 сервисов.
 - Unified Next.js production build: pass; проверены public site, Toolbox,
   API docs и private `/app`.
 - Compose config: pass с `.env.example`.
+- Jobs migrations и connector column grants: pass на локальном PostgreSQL 16;
+  отдельно проверены запреты `INSERT`, ciphertext/outbox access, ownership и
+  `BYPASSRLS`. Целевой PostgreSQL 18 повторяется в staging.
+- Resolved Compose topology: jobs runtimes имеют `internal,outbound`,
+  connector не публикует ports и не получает management/NATS credentials.
 - Visual QA: 1440, 1024 и 390 px; horizontal overflow не найден.
 - Semantics upload browser QA: 1280 px, runtime errors и horizontal overflow
   не найдены; устранён CSS conflict публичного `.brand` с app shell.
@@ -366,10 +431,14 @@ lowercase до AAD/fingerprint и не меняются после PostgreSQL ro
 
 ## 9. Следующий вертикальный срез
 
-`credential validation → project connector binding → XMLStock rank tracking`
+`project connector binding → XMLStock validation/rank tracking`
 
-Durable notification delivery остаётся параллельным следующим срезом после
-подтверждения `@nats-io/jetstream` и `web-push`. OAuth/OIDC выполняется после
+Параллельный обязательный следующий срез уведомлений:
+`profile/project effective policy → transactional outbox/durable consumer →
+email + Web Push delivery`. Он включает browser device/VAPID lifecycle,
+идемпотентные delivery attempts, retry/DLQ, digest и delivery history.
+Production-зависимости `@nats-io/jetstream` и `web-push` ещё не одобрены, а
+фактическая durable-доставка не реализована. OAuth/OIDC выполняется после
 подтверждения зависимости `jose`; QR для TOTP — после подтверждения `qrcode`.
 
 ## 10. Незавершённые риски
@@ -383,8 +452,8 @@ Durable notification delivery остаётся параллельным след
   receipt с применёнными chunks автоматически не удаляется.
 - Durable outbox/inbox publisher и consumers ещё не реализованы.
 - Notification preferences не создают deliveries сами по себе: отсутствуют
-  durable consumer, digest scheduler, Web Push device/VAPID lifecycle и
-  provider delivery history.
+  transactional outbox/durable consumer, email/Web Push adapters, digest
+  scheduler, Web Push device/VAPID lifecycle и provider delivery history.
 - Для rejected/quarantine objects ещё требуется production lifecycle policy и
   отдельный reconciliation/cleanup job; выдача и импорт таких объектов
   запрещены уже сейчас.
@@ -403,23 +472,58 @@ Durable notification delivery остаётся параллельным след
   coverage работает fail-closed; до rewrap старые используемые KEK запрещено
   удалять. Fingerprint keyring ротируется независимо; bounded-инвалидация
   старых fingerprints после retry window также ещё не реализована.
+- Coverage проверяет наличие версии, но не равенство её key material.
+  Missing-version retry не защищает от ошибочной замены bytes под прежним
+  `keyVersion`; такой системный mismatch нельзя превращать в массовый
+  `DISABLED` валидных credentials. До production обязательны startup
+  decrypt-canary/verifier для каждой используемой версии и/или глобальный
+  decrypt-failure circuit breaker. Rollout: expand keyring → canary verify
+  всех версий → drain старых replicas → switch active.
+- `MANAGEMENT` и `EXECUTION` процессы пока получают один symmetric KEK.
+  Role guard запрещает штатный decrypt в management adapter, но не даёт
+  криптографической изоляции при компрометации процесса; целевая граница —
+  KMS/asymmetric wrapping или отдельный credential broker.
 - Summary-list credentials пока без cursor pagination и tenant hard limit;
   перед массовыми provider pools нужен bounded endpoint, хотя ciphertext и
   wrapped DEK уже исключены Prisma `select`.
 - Foundation DDL migration vault обёрнута в явную транзакцию, а предшествующая
-  enum migration намеренно применяется отдельным committed шагом; обе
-  проверены `prisma validate`. Локальный Docker daemon недоступен: применение
-  и CHECK/UNIQUE/CAS на ephemeral PostgreSQL 18 остаётся обязательной
-  staging-проверкой.
+  enum migration намеренно применяется отдельным committed шагом; все
+  проверены `prisma validate`. Vault и credential-validation migrations,
+  включая CHECK/partial UNIQUE/CAS, успешно применены на локальном
+  PostgreSQL 16; повторная staging-проверка на целевом PostgreSQL 18 остаётся
+  обязательной.
+- Terminal credential validation пока не создаёт transactional outbox event:
+  email/Web Push и полный durable audit результата требуют отдельного
+  redacted события.
+- Credential validation имеет global BullMQ limiter и DB-enforced
+  per-credential/material single-active cap, но ещё не имеет server-side
+  per-workspace/provider quota и справедливого планирования между tenants.
+- Connector worker использует отдельный PostgreSQL login с ограниченным DML,
+  но сейчас имеет `SELECT` всех строк и колонок `jobs` и
+  `integration_credentials` внутри `jobs_db`. Компрометация execution
+  process раскрывает job snapshots/metadata всех tenants и, при доступном KEK,
+  весь BYOK vault этого database. До production это блокер: нужна узкая
+  execution projection/table с серверным scope либо credential broker/KMS,
+  исключающие глобальное чтение vault, а также fresh role provisioning,
+  cluster-wide grant audit и `pg_hba`/отдельный cluster boundary. Роль с
+  ownership объектов script уже отклоняет. Redis пока разделён только
+  логически и использует общий пароль; отдельный Redis ACL/instance также
+  остаётся production hardening.
+- Job idempotency/lease migration намеренно fail-closed требует пустую
+  pre-release таблицу `jobs`; для окружений с данными до deploy обязателен
+  отдельный expand → backfill → validate → contract план.
+- Validation registry пока хранит только текущую connector version: rolling
+  deploy между enqueue и execution может дать `CONNECTOR_VERSION_CHANGED`.
+  До production нужны N/N−1 version support либо queue drain перед rollout.
 - Directus collection schema и seed появятся вместе с CMS vertical slice.
 - Email-verification consumer ожидает подключения
   `@nats-io/jetstream`; plaintext verification token не логируется.
 - QR для TOTP пока представлен локальным `otpauth://` URI и ручным ключом;
   UI QR появится после подтверждения зависимости `qrcode`.
-- SEO connectors, тарификация и YooKassa пока присутствуют только в ТЗ/схемах.
-- Credential vault пока намеренно не имеет фиктивного «test»: XMLStock
-  validation требует allowlisted connector и redacted provider fixtures;
-  Arsenkin/Keys.so остаются `PENDING_VERIFICATION`.
+- Rank/frequency connectors, тарификация и YooKassa пока присутствуют только
+  в ТЗ/схемах. Реализованные Arsenkin/Keys.so connectors сейчас выполняют
+  только read-only credential validation; XMLStock ждёт подтверждённого
+  provider contract и redacted fixtures.
 - `platform-app` сохранён как legacy Git-источник до проверки переноса; новая
   функциональность добавляется только в `platform-web`.
 

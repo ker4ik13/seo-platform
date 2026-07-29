@@ -148,11 +148,32 @@
 
 В P2 XMLStock, Arsenkin Tools и Keys.so запускаются с BYOK. Platform-paid XMLStock допускается после developer/commercial согласования. Platform-paid Arsenkin и Keys.so не являются exit requirement P2.
 
-Промежуточно реализован encrypted workspace vault и каталог первой тройки:
-create/list/rotate/revoke, masked DTO, optimistic concurrency и
-`PENDING_VERIFICATION`. Это закрывает хранение BYOK, но не считается
-выполненным P2 до server-side provider test, project binding, tracking
-context и реального rank job.
+Промежуточно реализованы encrypted workspace vault и каталог первой тройки,
+create/list/rotate/revoke, masked DTO, optimistic concurrency, а также
+асинхронный provider-specific validation для Arsenkin и Keys.so с
+идемпотентным PostgreSQL Job, lease/retry и отдельным connector worker.
+XMLStock validation остаётся заблокированным до подтверждённого provider
+contract. Профильные и membership-bound проектные настройки уведомлений и
+in-app центр уже реализованы, но durable email/Web Push delivery ещё нет.
+Следующий обязательный notification-срез должен провести redacted terminal
+event через transactional outbox/durable consumer, effective policy и
+идемпотентные delivery attempts; `@nats-io/jetstream` и `web-push` требуют
+отдельного одобрения production-зависимостей. P2 не считается выполненным до
+project binding, tracking context, реального rank job, multi-tenant queue
+fairness, terminal outbox/delivery и security/load/restore gates.
+
+До production rollout BYOK дополнительно блокируют две границы текущего
+validation slice:
+
+- `keyVersion` immutable, а смена active выполняется только после expand,
+  startup decrypt-canary проверки точного key material всех используемых
+  версий и drain старых replicas. Текущий missing-version retry не обнаруживает
+  ошибочную замену bytes; системный mismatch не должен массово делать валидные
+  credentials `DISABLED`;
+- широкий `SELECT` execution DB role должен быть устранён: до exit gate
+  используется узкая execution projection/table с server-side scope либо
+  credential broker/KMS, а также пройдены cluster-wide grant audit и
+  `pg_hba`/cluster isolation.
 
 #### Exit gate
 
@@ -856,7 +877,11 @@ Staging game day имитирует потерю основной базы.
 - import/SSRF testing;
 - logging redaction;
 - backup restore;
-- incident runbooks.
+- incident runbooks;
+- KEK startup canary/verifier или эквивалентный global decrypt-failure circuit
+  breaker проверен fault-injection тестом;
+- connector execution DB/KMS boundary не допускает global read multi-tenant
+  jobs и BYOK vault; cluster-wide grants и `pg_hba` проверены.
 
 До P3:
 

@@ -239,6 +239,7 @@ Cursor:
 - запуска automation вручную;
 - создания export/report snapshot;
 - создания workspace credential;
+- запуска проверки workspace credential;
 - повторной доставки внешнего webhook, если операция изменяет состояние.
 
 Правила:
@@ -259,6 +260,12 @@ keyed fingerprint под отдельным versioned keyring. Точный по
 или тот же ключ с другим actor/body возвращает `IDEMPOTENCY_CONFLICT`. Это
 явное исключение для resource-backed idempotency и не меняет требование
 хранить исходный immutable response для финансовых и job-команд.
+
+Credential validation является job-командой: её receipt lookup выполняется до
+проверки текущего состояния credential, а request hash не включает изменяемые
+provider/material version. Точный replay после rotate, disable или revoke
+возвращает исходный validation Job; новый command key создаёт проверку уже
+актуального material snapshot.
 
 ## 10. Optimistic concurrency
 
@@ -495,14 +502,38 @@ internal token плюс точным совпадением trusted tenant/actor
 - `GET /api/v1/workspaces/{workspaceId}/integrations/credentials`;
 - `POST /api/v1/workspaces/{workspaceId}/integrations/credentials`;
 - `PATCH /api/v1/workspaces/{workspaceId}/integrations/credentials/{id}`;
-- `DELETE /api/v1/workspaces/{workspaceId}/integrations/credentials/{id}`.
+- `DELETE /api/v1/workspaces/{workspaceId}/integrations/credentials/{id}`;
+- `POST /api/v1/workspaces/{workspaceId}/integrations/credentials/{id}/validations`;
+- `GET /api/v1/workspaces/{workspaceId}/integrations/credentials/{id}/validations/{validationId}`.
 
 Read требует `integration.view`, mutations соответственно
 `integration.connect`, `integration.update`, `integration.delete`, session,
 CSRF и проверенный workspace context. PATCH/DELETE требуют `If-Match`.
-Исходный API key и account identifier отсутствуют в response contract.
-`POST .../{id}/test` появится только вместе с provider-specific connector:
-проверку локальной криптографии нельзя выдавать за внешний credential test.
+Запуск validation требует `integration.test`, recent authentication, CSRF и
+`Idempotency-Key`, отвечает `202 Accepted`; чтение validation требует
+`integration.view` и остаётся доступно в billing read-only режиме. Исходный
+API key и account identifier отсутствуют в response contract.
+Credential summary в list может включать `activeValidation` только текущего
+material version. Это bounded projection active statuses, а не встроенная
+история: partial unique гарантирует не более одной строки на
+credential/material. Клиент использует её для возобновления GET polling после
+reload и для присоединения к командной job после конкурентного `409`;
+terminal результат читается из обычного credential status/`lastErrorCode`.
+Точный повтор с тем же `Idempotency-Key` возвращает тот же Job. Пока для
+текущего `credentialMaterialVersion` есть active Job, новый command key
+получает `409 RESOURCE_STATE_CONFLICT`; после terminal state разрешён новый
+validation.
+
+Validation response содержит только `id`, workspace/credential IDs,
+`credentialMaterialVersion`, provider, connector version, timestamps,
+опциональные allowlisted `errorCode`/`retryAt` и один из статусов:
+`QUEUED`, `RUNNING`, `RETRY_SCHEDULED`, `SUCCEEDED`,
+`FAILED_RETRYABLE`, `FAILED_FINAL`, `STALE`. Клиент не считает
+`RETRY_SCHEDULED` terminal. Rotate/revoke во время исполнения не позволяет
+старому validation изменить credential и завершает его как `STALE`.
+Server-side test сейчас доступен только для Arsenkin и Keys.so; XMLStock
+возвращает нормализованную ошибку недоступной проверки до подтверждённого
+provider contract.
 
 ### 13.7. Collaboration и reports
 
@@ -749,6 +780,7 @@ Publisher отправляет событие в NATS JetStream и помеча�
 - `job.progressed.v1`;
 - `job.completed.v1`;
 - `job.failed.v1`;
+- `integration.credential-validation.finished.v1`;
 - `semantic.import.created.v1`;
 - `semantic.import.parsed.v1`;
 - `semantic.import.validated.v1`;
@@ -765,6 +797,12 @@ Publisher отправляет событие в NATS JetStream и помеча�
 - `audit.security-event.recorded.v1`.
 
 Частый progress не отправляется в durable bus на каждую строку; worker агрегирует обновления.
+`integration.credential-validation.finished.v1` содержит только workspace,
+credential/job IDs, provider, material/connector versions, terminal status и
+allowlisted error code. Secret, provider response и account identifier
+запрещены. Событие записывается transactional outbox одновременно с terminal
+Job/credential update; текущий первый validation slice ещё должен добавить
+эту запись перед включением email/Web Push.
 
 ## 18. NATS subjects и consumers
 
@@ -991,6 +1029,22 @@ Normalized error classes:
 - permanent unknown.
 
 Provider-specific поля допускаются в namespaced `metadata`, но продуктовые экраны работают на нормализованной модели.
+
+Credential validation connector дополнительно обязан:
+
+- выбирать origin, path, method и auth header только из versioned allowlist;
+- запрещать пользовательский base URL и redirect;
+- использовать HTTPS, короткий timeout и bounded retry;
+- для `2xx` принимать только валидный JSON; для non-2xx сохранять безопасную
+  status-классификацию даже при пустом/non-JSON body;
+- ограничивать `Content-Length` и фактически прочитанный body;
+- нормализовать `Retry-After` и ограничивать максимальную задержку;
+- не возвращать raw body, provider headers или request с credential в API,
+  логи, traces, queue или events.
+
+Текущий Arsenkin/Keys.so validation использует лимит ответа 1 MiB и фиксированные
+read-only account/limits endpoints. Это не даёт connector права выполнять
+другие provider operations без отдельного capability и contract tests.
 
 ## 24. Rate limiting и abuse protection
 
