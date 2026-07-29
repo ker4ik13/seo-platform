@@ -70,7 +70,11 @@ session-expiry sweeper ещё отсутствуют.
 
 ## 2. Development workspace
 
-Корневая папка координирует локальную разработку. Каждый `platform-*` каталог является независимой deployable/repository boundary и в дальнейшем может быть вынесен в отдельный Git-репозиторий.
+Канонический source хранится в одном GitHub monorepo по ADR-2026-037. Каждый
+`platform-*` каталог остаётся независимой package/deployable/data-ownership
+boundary и при реальной операционной необходимости может быть снова выделен
+через `git subtree split`. Общий Git не разрешает межсервисный доступ к БД или
+импорт доменной реализации вместо contracts.
 
 | Каталог | Ответственность | Deployable |
 |---|---|---|
@@ -82,6 +86,7 @@ session-expiry sweeper ещё отсутствуют.
 | `platform-web` | public site, Toolbox, API docs и приложение `/app` | да |
 | `platform-admin` | внутренняя административная панель | да |
 | `platform-infrastructure` | Compose/Dokploy, monitoring, runbooks | конфигурация |
+| `.github/workflows/ci.yml` | Node.js 24 workspace quality gate | GitHub Actions |
 | `docs/technical-spec` | нормативное ТЗ | нет |
 | `semaflow-seo-platform-design` | исходный статический дизайн-прототип | нет |
 

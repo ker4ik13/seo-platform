@@ -50,6 +50,16 @@ flowchart LR
 
 ## 3. Репозитории
 
+Канонический исходный код хранится в одном GitHub monorepo. Каталоги ниже
+являются package, deployable и data-ownership boundaries, а не вложенными
+Git-репозиториями или submodules. Существовавшие до консолидации истории
+импортированы без squash; решение и обратный путь через `git subtree split`
+зафиксированы в `ADR-2026-037`.
+
+Общий репозиторий не разрешает прямые межсервисные импорты доменной логики,
+доступ к чужой БД или совместные migrations. Независимая сборка и
+масштабирование процессов сохраняются.
+
 ### 3.1. `platform-web`
 
 - единый Next.js web-продукт;
@@ -202,7 +212,8 @@ Database: `realtime_db`; Redis; S3.
 
 ### 3.7. `platform-contracts`
 
-Отдельный versioned repository/package registry:
+Отдельный versioned package внутри monorepo, готовый к публикации в package
+registry:
 
 - OpenAPI specs;
 - AsyncAPI/event schemas;
@@ -228,7 +239,9 @@ Database: `realtime_db`; Redis; S3.
 
 `platform-marketing` и `platform-app` являются миграционными источниками до
 завершения переноса в `platform-web`. Новая функциональность в них не
-добавляется. Их Git history сохраняется до верифицированной консолидации.
+добавляется. История `platform-app` сохранена в общем Git graph после
+верифицированной консолидации; каталог можно удалить только отдельным
+решением после проверки переноса нужных артефактов.
 
 ## 4. Почему сервисов четыре
 
