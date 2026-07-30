@@ -1,11 +1,18 @@
-import { Inject, Injectable, type OnModuleDestroy } from "@nestjs/common";
+import {
+  Inject,
+  Injectable,
+  type OnApplicationShutdown
+} from "@nestjs/common";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import type { AppConfig } from "../config/app-config.js";
 
 @Injectable()
-export class PrismaService extends PrismaClient implements OnModuleDestroy {
+export class PrismaService
+  extends PrismaClient
+  implements OnApplicationShutdown
+{
   public constructor(@Inject(APP_CONFIG) config: AppConfig) {
     const adapter = new PrismaPg({
       connectionString: config.databaseUrl,
@@ -17,7 +24,7 @@ export class PrismaService extends PrismaClient implements OnModuleDestroy {
     super({ adapter });
   }
 
-  public async onModuleDestroy(): Promise<void> {
+  public async onApplicationShutdown(): Promise<void> {
     await this.$disconnect();
   }
 

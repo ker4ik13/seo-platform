@@ -84,7 +84,34 @@ export class HealthController {
       };
     }
 
-    return [database, nats, ...(await this.dependencies.checkAll())];
+    const jetStream = await this.jetStreamReadiness();
+    return [
+      database,
+      nats,
+      ...(jetStream ? [jetStream] : []),
+      ...(await this.dependencies.checkAll())
+    ];
+  }
+
+  private async jetStreamReadiness(): Promise<DependencyHealth | undefined> {
+    if (!this.config.outboxPublisher.enabled) return undefined;
+
+    const startedAt = performance.now();
+    try {
+      await this.nats.assertOutboxStream();
+      return {
+        name: "nats-jetstream",
+        status: "ok",
+        latencyMs: Math.round(performance.now() - startedAt)
+      };
+    } catch {
+      return {
+        name: "nats-jetstream",
+        status: "unavailable",
+        latencyMs: Math.round(performance.now() - startedAt),
+        message: "JetStream outbox stream check failed"
+      };
+    }
   }
 
   private response(

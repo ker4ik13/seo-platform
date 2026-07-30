@@ -1,3 +1,5 @@
+import { sessionFamilyRevokedEventSubjectV1 } from "@seo-platform/contracts";
+
 export interface AppConfig {
   readonly nodeEnv: "development" | "test" | "production";
   readonly port: number;
@@ -17,6 +19,17 @@ export interface AppConfig {
     readonly url: string;
     readonly user?: string;
     readonly password?: string;
+  };
+  readonly outboxPublisher: {
+    readonly enabled: boolean;
+    readonly eventEnvironment?: string;
+    readonly streamName?: string;
+    readonly pollIntervalMs: number;
+    readonly batchSize: number;
+    readonly maxAttempts: number;
+    readonly retryBaseMs: number;
+    readonly retryMaxMs: number;
+    readonly publishTimeoutMs: number;
   };
   readonly services: {
     readonly seoData: string;
@@ -63,6 +76,20 @@ function positiveInteger(
     throw new Error(`${key} must be a positive integer`);
   }
 
+  return parsed;
+}
+
+function integerInRange(
+  value: string | undefined,
+  fallback: number,
+  key: string,
+  minimum: number,
+  maximum: number
+): number {
+  const parsed = positiveInteger(value, fallback, key);
+  if (parsed < minimum || parsed > maximum) {
+    throw new Error(`${key} must be between ${minimum} and ${maximum}`);
+  }
   return parsed;
 }
 
@@ -142,9 +169,48 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     env,
     "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN"
   );
+  const outboxPublisherEnabled = booleanValue(
+    env.OUTBOX_PUBLISHER_ENABLED,
+    false,
+    "OUTBOX_PUBLISHER_ENABLED"
+  );
+  const eventEnvironment = optionalPublisherEnvironment(
+    env.NATS_EVENT_ENVIRONMENT
+  );
+  const outboxStreamName = optionalOutboxStreamName(env.NATS_EVENT_STREAM);
+  const outboxRetryBaseMs = integerInRange(
+    env.OUTBOX_PUBLISH_RETRY_BASE_MS,
+    1_000,
+    "OUTBOX_PUBLISH_RETRY_BASE_MS",
+    100,
+    60_000
+  );
+  const outboxRetryMaxMs = integerInRange(
+    env.OUTBOX_PUBLISH_RETRY_MAX_MS,
+    300_000,
+    "OUTBOX_PUBLISH_RETRY_MAX_MS",
+    100,
+    3_600_000
+  );
 
   if (!["development", "test", "production"].includes(nodeEnv)) {
     throw new Error("NODE_ENV must be development, test or production");
+  }
+
+  if (outboxPublisherEnabled && !eventEnvironment) {
+    throw new Error(
+      "NATS_EVENT_ENVIRONMENT is required when the outbox publisher is enabled"
+    );
+  }
+  if (outboxPublisherEnabled && !outboxStreamName) {
+    throw new Error(
+      "NATS_EVENT_STREAM is required when the outbox publisher is enabled"
+    );
+  }
+  if (outboxRetryMaxMs < outboxRetryBaseMs) {
+    throw new Error(
+      "OUTBOX_PUBLISH_RETRY_MAX_MS must be greater than or equal to OUTBOX_PUBLISH_RETRY_BASE_MS"
+    );
   }
 
   if (nodeEnv === "production" && !passwordPepper) {
@@ -253,6 +319,9 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "AUTH_EXPOSE_DEVELOPMENT_TOKENS cannot be enabled in production"
     );
   }
+  if (nodeEnv === "production" && !outboxPublisherEnabled) {
+    throw new Error("OUTBOX_PUBLISHER_ENABLED=true is required in production");
+  }
 
   return {
     nodeEnv: nodeEnv as AppConfig["nodeEnv"],
@@ -294,6 +363,41 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       url: env.NATS_URL?.trim() || "nats://localhost:4222",
       ...(natsUser ? { user: natsUser } : {}),
       ...(natsPassword ? { password: natsPassword } : {})
+    },
+    outboxPublisher: {
+      enabled: outboxPublisherEnabled,
+      ...(eventEnvironment ? { eventEnvironment } : {}),
+      ...(outboxStreamName ? { streamName: outboxStreamName } : {}),
+      pollIntervalMs: integerInRange(
+        env.OUTBOX_PUBLISH_INTERVAL_MS,
+        1_000,
+        "OUTBOX_PUBLISH_INTERVAL_MS",
+        100,
+        60_000
+      ),
+      batchSize: integerInRange(
+        env.OUTBOX_PUBLISH_BATCH_SIZE,
+        20,
+        "OUTBOX_PUBLISH_BATCH_SIZE",
+        1,
+        100
+      ),
+      maxAttempts: integerInRange(
+        env.OUTBOX_PUBLISH_MAX_ATTEMPTS,
+        10,
+        "OUTBOX_PUBLISH_MAX_ATTEMPTS",
+        1,
+        100
+      ),
+      retryBaseMs: outboxRetryBaseMs,
+      retryMaxMs: outboxRetryMaxMs,
+      publishTimeoutMs: integerInRange(
+        env.OUTBOX_PUBLISH_ACK_TIMEOUT_MS,
+        5_000,
+        "OUTBOX_PUBLISH_ACK_TIMEOUT_MS",
+        100,
+        30_000
+      )
     },
     services: {
       seoData:
@@ -354,4 +458,39 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       exposeDevelopmentTokens
     }
   };
+}
+
+function optionalPublisherEnvironment(
+  value: string | undefined
+): string | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (value !== value.trim() || isPlaceholderSecret(value)) {
+    throw new Error(
+      "NATS_EVENT_ENVIRONMENT must be an explicit safe environment identifier"
+    );
+  }
+  try {
+    sessionFamilyRevokedEventSubjectV1(value);
+  } catch {
+    throw new Error(
+      "NATS_EVENT_ENVIRONMENT must be an explicit safe environment identifier"
+    );
+  }
+  return value;
+}
+
+function optionalOutboxStreamName(
+  value: string | undefined
+): string | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (
+    value !== value.trim() ||
+    isPlaceholderSecret(value) ||
+    !/^[A-Za-z0-9_-]{1,64}$/u.test(value)
+  ) {
+    throw new Error(
+      "NATS_EVENT_STREAM must contain 1 to 64 ASCII letters, digits, underscores or hyphens"
+    );
+  }
+  return value;
 }

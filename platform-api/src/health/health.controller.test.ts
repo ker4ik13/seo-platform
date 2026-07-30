@@ -46,6 +46,25 @@ test("returns HTTP 503 while preserving a degraded body for an unavailable depen
   assert.equal(body.dependencies?.[2]?.status, "unavailable");
 });
 
+test("requires the configured JetStream stream when the outbox publisher is enabled", async () => {
+  const response = reply();
+  const controller = healthController({
+    outboxPublisherEnabled: true,
+    jetStreamError: new Error("credential=must-not-leak")
+  });
+
+  const body = await controller.ready(response.value);
+
+  assert.deepEqual(response.codes, [503]);
+  const jetStream = body.dependencies?.find(
+    ({ name }) => name === "nats-jetstream"
+  );
+  assert.equal(jetStream?.status, "unavailable");
+  assert.equal(jetStream?.message, "JetStream outbox stream check failed");
+  assert.ok((jetStream?.latencyMs ?? -1) >= 0);
+  assert.doesNotMatch(JSON.stringify(jetStream), /credential=must-not-leak/u);
+});
+
 test("keeps both liveness routes on the default GET 200 response", () => {
   const controller = healthController();
 
@@ -64,6 +83,8 @@ function healthController(
   options: {
     readonly databaseError?: Error;
     readonly natsError?: Error;
+    readonly jetStreamError?: Error;
+    readonly outboxPublisherEnabled?: boolean;
     readonly downstream?: readonly DependencyHealth[];
   } = {}
 ): HealthController {
@@ -77,6 +98,10 @@ function healthController(
     ping: () =>
       options.natsError
         ? Promise.reject(options.natsError)
+        : Promise.resolve(),
+    assertOutboxStream: () =>
+      options.jetStreamError
+        ? Promise.reject(options.jetStreamError)
         : Promise.resolve()
   } as unknown as NatsService;
   const dependencies = {
@@ -84,7 +109,12 @@ function healthController(
   } as unknown as DependencyHealthService;
 
   return new HealthController(
-    { version: "test-version" } as AppConfig,
+    {
+      version: "test-version",
+      outboxPublisher: {
+        enabled: options.outboxPublisherEnabled ?? false
+      }
+    } as AppConfig,
     prisma,
     nats,
     dependencies

@@ -11,6 +11,7 @@ import { UploadModule } from "./uploads/upload.module.js";
 import { SemanticImportModule } from "./imports/semantic-import.module.js";
 import { SemanticModule } from "./semantics/semantic.module.js";
 import { NotificationModule } from "./notifications/notification.module.js";
+import { OutboxModule } from "./outbox/outbox.module.js";
 import { RankingModule } from "./rankings/ranking.module.js";
 
 @Module({
@@ -18,6 +19,7 @@ import { RankingModule } from "./rankings/ranking.module.js";
     ConfigModule,
     DatabaseModule,
     MessagingModule,
+    OutboxModule,
     HealthModule,
     IdentityModule,
     IntegrationModule,

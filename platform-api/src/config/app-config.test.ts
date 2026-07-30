@@ -15,6 +15,7 @@ test("loads explicit service configuration", () => {
   assert.equal(config.nodeEnv, "test");
   assert.equal(config.port, 4100);
   assert.equal(config.services.seoData, "http://seo");
+  assert.equal(config.outboxPublisher.enabled, false);
 });
 
 test("rejects an absent database URL", () => {
@@ -245,3 +246,138 @@ test("requires a valid data encryption key in production", () => {
     }
   );
 });
+
+test("requires the outbox publisher to be explicitly enabled in production", () => {
+  assert.throws(() => loadAppConfig(productionEnvironment()), {
+    message: "OUTBOX_PUBLISHER_ENABLED=true is required in production"
+  });
+});
+
+test("requires exact JetStream routing when the outbox publisher is enabled", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        OUTBOX_PUBLISHER_ENABLED: "true"
+      }),
+    /NATS_EVENT_ENVIRONMENT is required/u
+  );
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        OUTBOX_PUBLISHER_ENABLED: "true",
+        NATS_EVENT_ENVIRONMENT: "test"
+      }),
+    /NATS_EVENT_STREAM is required/u
+  );
+
+  const config = loadAppConfig({
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    OUTBOX_PUBLISHER_ENABLED: "true",
+    NATS_EVENT_ENVIRONMENT: "test-eu1",
+    NATS_EVENT_STREAM: "IDENTITY_EVENTS"
+  });
+  assert.deepEqual(config.outboxPublisher, {
+    enabled: true,
+    eventEnvironment: "test-eu1",
+    streamName: "IDENTITY_EVENTS",
+    pollIntervalMs: 1_000,
+    batchSize: 20,
+    maxAttempts: 10,
+    retryBaseMs: 1_000,
+    retryMaxMs: 300_000,
+    publishTimeoutMs: 5_000
+  });
+});
+
+test("rejects placeholder and ambiguous JetStream routing identifiers", () => {
+  for (const environment of [
+    "replace-me",
+    "Prod",
+    "prod.eu",
+    " prod",
+    "prod "
+  ]) {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          NATS_EVENT_ENVIRONMENT: environment
+        }),
+      /NATS_EVENT_ENVIRONMENT must be an explicit safe environment identifier/u
+    );
+  }
+  for (const stream of [
+    "replace-me",
+    "PLATFORM.EVENTS",
+    "PLATFORM EVENTS",
+    "*",
+    "a".repeat(65)
+  ]) {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          NATS_EVENT_STREAM: stream
+        }),
+      /NATS_EVENT_STREAM must contain 1 to 64 ASCII/u
+    );
+  }
+});
+
+test("enforces bounded outbox polling, retry and PubAck settings", () => {
+  const invalidValues = [
+    ["OUTBOX_PUBLISH_INTERVAL_MS", "99"],
+    ["OUTBOX_PUBLISH_BATCH_SIZE", "101"],
+    ["OUTBOX_PUBLISH_MAX_ATTEMPTS", "0"],
+    ["OUTBOX_PUBLISH_RETRY_BASE_MS", "60001"],
+    ["OUTBOX_PUBLISH_RETRY_MAX_MS", "3600001"],
+    ["OUTBOX_PUBLISH_ACK_TIMEOUT_MS", "30001"]
+  ] as const;
+  for (const [key, value] of invalidValues) {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          [key]: value
+        }),
+      new RegExp(key, "u")
+    );
+  }
+
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        OUTBOX_PUBLISH_RETRY_BASE_MS: "2000",
+        OUTBOX_PUBLISH_RETRY_MAX_MS: "1000"
+      }),
+    /OUTBOX_PUBLISH_RETRY_MAX_MS must be greater/u
+  );
+});
+
+function productionEnvironment(
+  overrides: NodeJS.ProcessEnv = {}
+): NodeJS.ProcessEnv {
+  return {
+    NODE_ENV: "production",
+    DATABASE_URL: "postgresql://test",
+    AUTH_PASSWORD_PEPPER: "production-secret",
+    AUTH_DATA_ENCRYPTION_KEY: Buffer.alloc(32).toString("base64url"),
+    PLATFORM_API_TO_SEO_DATA_TOKEN: "s".repeat(32),
+    PLATFORM_API_TO_JOBS_TOKEN: "j".repeat(32),
+    PLATFORM_API_TO_REALTIME_TOKEN: "r".repeat(32),
+    PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
+    PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
+    JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: "g".repeat(32),
+    ...overrides
+  };
+}
