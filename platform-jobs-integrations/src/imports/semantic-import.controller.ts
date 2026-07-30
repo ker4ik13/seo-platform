@@ -18,7 +18,7 @@ import {
   internalCommandContext,
   internalUuid
 } from "../internal/internal-command-context.js";
-import { InternalApiGuard } from "../internal/internal-api.guard.js";
+import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import {
   internalCancelSemanticImportInput,
   internalConfigureSemanticImportInput,
@@ -28,7 +28,7 @@ import {
 import { SemanticImportService } from "./semantic-import.service.js";
 
 @Controller("internal/v1/imports")
-@UseGuards(InternalApiGuard)
+@UseGuards(PlatformApiGuard)
 export class SemanticImportController {
   public constructor(
     private readonly semanticImports: SemanticImportService

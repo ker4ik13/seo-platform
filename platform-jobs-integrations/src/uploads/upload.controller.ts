@@ -24,7 +24,7 @@ import {
   internalCommandContext,
   internalUuid
 } from "../internal/internal-command-context.js";
-import { InternalApiGuard } from "../internal/internal-api.guard.js";
+import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import {
   completeUploadInput,
   createUploadPartUrlsInput,
@@ -33,7 +33,7 @@ import {
 import { UploadService } from "./upload.service.js";
 
 @Controller("internal/v1/uploads")
-@UseGuards(InternalApiGuard)
+@UseGuards(PlatformApiGuard)
 export class UploadController {
   public constructor(
     private readonly uploads: UploadService,

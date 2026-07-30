@@ -3,7 +3,7 @@ import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
 import { GUARDS_METADATA } from "@nestjs/common/constants.js";
 import type { FastifyRequest } from "fastify";
-import { InternalApiGuard } from "../internal/internal-api.guard.js";
+import { JobsApiGuard } from "../internal/jobs-api.guard.js";
 import { RankScopeController } from "./rank-scope.controller.js";
 import type { RankScopeService } from "./rank-scope.service.js";
 
@@ -26,7 +26,7 @@ const headers = {
 test("protects the rank scope boundary with internal authentication", () => {
   assert.deepEqual(
     Reflect.getMetadata(GUARDS_METADATA, RankScopeController),
-    [InternalApiGuard]
+    [JobsApiGuard]
   );
 });
 

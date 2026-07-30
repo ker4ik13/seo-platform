@@ -25,7 +25,7 @@ import {
   internalProjectContext,
   internalUuid
 } from "../internal/internal-context.js";
-import { InternalApiGuard } from "../internal/internal-api.guard.js";
+import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import {
   notificationPreferencesInput,
   projectNotificationSubscriptionInput
@@ -39,7 +39,7 @@ type InternalHeaders = Readonly<
 >;
 
 @Controller("internal/v1")
-@UseGuards(InternalApiGuard)
+@UseGuards(PlatformApiGuard)
 export class NotificationController {
   public constructor(
     private readonly center: NotificationCenterService,

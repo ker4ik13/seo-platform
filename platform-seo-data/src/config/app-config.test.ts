@@ -12,14 +12,14 @@ test("uses the SEO service default port", () => {
   assert.equal(config.nats.url, "nats://localhost:4222");
 });
 
-test("requires internal authentication in production", () => {
+test("requires every inbound audience credential in production", () => {
   assert.throws(
     () =>
       loadAppConfig({
         NODE_ENV: "production",
         DATABASE_URL: "postgresql://test"
       }),
-    /INTERNAL_API_TOKEN/u
+    /PLATFORM_API_TO_SEO_DATA_TOKEN/u
   );
 
   assert.throws(
@@ -27,9 +27,9 @@ test("requires internal authentication in production", () => {
       loadAppConfig({
         NODE_ENV: "production",
         DATABASE_URL: "postgresql://test",
-        INTERNAL_API_TOKEN: "i".repeat(32)
+        PLATFORM_API_TO_SEO_DATA_TOKEN: "p".repeat(32)
       }),
-    /JOBS_TO_SEO_RANK_TOKEN/u
+    /JOBS_TO_SEO_DATA_TOKEN/u
   );
 
   assert.throws(
@@ -37,7 +37,8 @@ test("requires internal authentication in production", () => {
       loadAppConfig({
         NODE_ENV: "production",
         DATABASE_URL: "postgresql://test",
-        INTERNAL_API_TOKEN: "i".repeat(32),
+        PLATFORM_API_TO_SEO_DATA_TOKEN: "p".repeat(32),
+        JOBS_TO_SEO_DATA_TOKEN: "j".repeat(32),
         JOBS_TO_SEO_RANK_TOKEN: "r".repeat(32)
       }),
     /JOBS_TO_SEO_RANK_RESULT_TOKEN/u
@@ -48,7 +49,8 @@ test("requires internal authentication in production", () => {
       loadAppConfig({
         NODE_ENV: "production",
         DATABASE_URL: "postgresql://test",
-        INTERNAL_API_TOKEN: "i".repeat(32),
+        PLATFORM_API_TO_SEO_DATA_TOKEN: "p".repeat(32),
+        JOBS_TO_SEO_DATA_TOKEN: "j".repeat(32),
         JOBS_TO_SEO_RANK_TOKEN: "r".repeat(32),
         JOBS_TO_SEO_RANK_RESULT_TOKEN: "d".repeat(32)
       }),
@@ -56,13 +58,14 @@ test("requires internal authentication in production", () => {
   );
 });
 
-test("keeps generic, preparation and result rank tokens distinct", () => {
+test("keeps all caller/audience and rank tokens distinct", () => {
   assert.throws(
     () =>
       loadAppConfig({
         NODE_ENV: "production",
         DATABASE_URL: "postgresql://test",
-        INTERNAL_API_TOKEN: "s".repeat(32),
+        PLATFORM_API_TO_SEO_DATA_TOKEN: "s".repeat(32),
+        JOBS_TO_SEO_DATA_TOKEN: "j".repeat(32),
         JOBS_TO_SEO_RANK_TOKEN: "s".repeat(32),
         JOBS_TO_SEO_RANK_RESULT_TOKEN: "x".repeat(32),
         RANK_HISTORY_CURSOR_KEY: "c".repeat(32)
@@ -73,7 +76,8 @@ test("keeps generic, preparation and result rank tokens distinct", () => {
   const config = loadAppConfig({
     NODE_ENV: "production",
     DATABASE_URL: "postgresql://test",
-    INTERNAL_API_TOKEN: "i".repeat(32),
+    PLATFORM_API_TO_SEO_DATA_TOKEN: "p".repeat(32),
+    JOBS_TO_SEO_DATA_TOKEN: "j".repeat(32),
     JOBS_TO_SEO_RANK_TOKEN: "r".repeat(32),
     JOBS_TO_SEO_RANK_RESULT_TOKEN: "d".repeat(32),
     RANK_HISTORY_CURSOR_KEY: "c".repeat(32)
@@ -86,11 +90,77 @@ test("keeps generic, preparation and result rank tokens distinct", () => {
       loadAppConfig({
         NODE_ENV: "production",
         DATABASE_URL: "postgresql://test",
-        INTERNAL_API_TOKEN: "i".repeat(32),
+        PLATFORM_API_TO_SEO_DATA_TOKEN: "p".repeat(32),
+        JOBS_TO_SEO_DATA_TOKEN: "j".repeat(32),
         JOBS_TO_SEO_RANK_TOKEN: "r".repeat(32),
         JOBS_TO_SEO_RANK_RESULT_TOKEN: "r".repeat(32),
         RANK_HISTORY_CURSOR_KEY: "c".repeat(32)
       }),
     /must differ/u
   );
+
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        PLATFORM_API_TO_SEO_DATA_TOKEN: "x".repeat(32),
+        JOBS_TO_SEO_DATA_TOKEN: "x".repeat(32)
+      }),
+    /must differ/u
+  );
+});
+
+test("rejects the retired shared internal token", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        INTERNAL_API_TOKEN: "i".repeat(32)
+      }),
+    /INTERNAL_API_TOKEN is no longer supported/u
+  );
+});
+
+test("rejects documented placeholders and unsafe service-secret values", () => {
+  const placeholders = {
+    PLATFORM_API_TO_SEO_DATA_TOKEN:
+      "replace-with-a-distinct-random-platform-api-token",
+    JOBS_TO_SEO_DATA_TOKEN: "replace-with-a-distinct-random-jobs-token",
+    JOBS_TO_SEO_RANK_TOKEN:
+      "replace-with-a-distinct-random-rank-worker-token",
+    JOBS_TO_SEO_RANK_RESULT_TOKEN:
+      "replace-with-a-distinct-random-rank-result-token",
+    RANK_HISTORY_CURSOR_KEY: "replace-with-at-least-32-random-bytes"
+  } as const;
+
+  for (const [key, value] of Object.entries(placeholders)) {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          [key]: value
+        }),
+      new RegExp(`${key}.*example placeholder`, "u")
+    );
+  }
+
+  for (const value of [
+    `${"x".repeat(31)} `,
+    `${"x".repeat(31)},`,
+    `${"x".repeat(31)}\n`,
+    "x".repeat(513)
+  ]) {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          JOBS_TO_SEO_DATA_TOKEN: value
+        }),
+      /visible ASCII characters without whitespace or commas/u
+    );
+  }
 });

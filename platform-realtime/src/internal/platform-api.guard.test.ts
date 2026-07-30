@@ -1,0 +1,86 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  ServiceUnavailableException,
+  UnauthorizedException,
+  type ExecutionContext
+} from "@nestjs/common";
+import { GUARDS_METADATA } from "@nestjs/common/constants.js";
+import type { AppConfig } from "../config/app-config.js";
+import { NotificationController } from "../notifications/notification.controller.js";
+import { PlatformApiGuard } from "./platform-api.guard.js";
+
+const platformToken = "p".repeat(32);
+const notificationToken = "n".repeat(32);
+
+test("protects the general notification routes with Platform API auth", () => {
+  assert.deepEqual(
+    Reflect.getMetadata(GUARDS_METADATA, NotificationController),
+    [PlatformApiGuard]
+  );
+});
+
+test("rejects dedicated, duplicate and malformed tokens on general routes", () => {
+  const guard = new PlatformApiGuard(config(platformToken));
+  assert.equal(guard.canActivate(context(platformToken)), true);
+  for (const token of [notificationToken, "short", ` ${platformToken}`]) {
+    assert.throws(
+      () => guard.canActivate(context(token)),
+      UnauthorizedException
+    );
+  }
+  assert.throws(
+    () =>
+      guard.canActivate(
+        context(platformToken, [
+          "X-Internal-Token",
+          platformToken,
+          "x-internal-token",
+          platformToken
+        ])
+      ),
+    UnauthorizedException
+  );
+});
+
+test("fails closed without general audience configuration", () => {
+  assert.throws(
+    () => new PlatformApiGuard(config()).canActivate(context(platformToken)),
+    ServiceUnavailableException
+  );
+});
+
+function config(platformApiToken?: string): AppConfig {
+  return {
+    nodeEnv: "test",
+    port: 4003,
+    version: "test",
+    databaseUrl: "postgresql://test",
+    databasePoolMax: 1,
+    redisUrl: "redis://test",
+    ...(platformApiToken ? { platformApiToken } : {}),
+    nats: { url: "nats://test" },
+    webOrigins: ["https://app.example.test"],
+    webPush: {
+      registrationEnabled: false,
+      endpointOrigins: [],
+      subscriptionKeys: new Map(),
+      fingerprintKeys: new Map(),
+      maxActiveDevices: 20
+    }
+  };
+}
+
+function context(
+  token: string,
+  rawHeaders?: readonly string[]
+): ExecutionContext {
+  return {
+    switchToHttp: () => ({
+      getRequest: () => ({
+        headers: { "x-internal-token": token },
+        ...(rawHeaders ? { raw: { rawHeaders } } : {})
+      })
+    })
+  } as unknown as ExecutionContext;
+}

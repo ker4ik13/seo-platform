@@ -1,10 +1,10 @@
 import "dotenv/config";
 import { Worker } from "bullmq";
 import { Redis } from "ioredis";
-import { loadAppConfig } from "./config/app-config.js";
+import { loadSystemWorkerConfig } from "./config/app-config.js";
 import { SYSTEM_QUEUE } from "./queue/queue.service.js";
 
-const config = loadAppConfig();
+const config = loadSystemWorkerConfig();
 const connection = new Redis(config.redisUrl, {
   maxRetriesPerRequest: null,
   enableReadyCheck: true
@@ -18,7 +18,7 @@ const worker = new Worker(
   }),
   {
     connection,
-    concurrency: 2
+    concurrency: config.concurrency
   }
 );
 

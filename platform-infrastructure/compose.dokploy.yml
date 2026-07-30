@@ -17,13 +17,14 @@ x-common-backend-env: &common-backend-env
   NATS_URL: nats://nats:4222
   NATS_USER: ${NATS_USER:?NATS_USER is required}
   NATS_PASSWORD: ${NATS_PASSWORD:?NATS_PASSWORD is required}
-  INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
 
-x-jobs-env: &jobs-env
+x-jobs-runtime-env: &jobs-runtime-env
+  NODE_ENV: production
+  SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
   DATABASE_URL: postgresql://jobs_runtime:${JOBS_DATABASE_PASSWORD:?JOBS_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
   REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-  SEO_DATA_COMMAND_TIMEOUT_MS: ${SEO_DATA_COMMAND_TIMEOUT_MS:-60000}
-  SEO_DATA_URL: http://seo-data:4001
+
+x-jobs-s3-env: &jobs-s3-env
   S3_ENABLED: ${S3_ENABLED:-false}
   S3_ENDPOINT: ${S3_ENDPOINT:-}
   S3_REGION: ${S3_REGION:-ru-central1}
@@ -33,18 +34,24 @@ x-jobs-env: &jobs-env
   S3_BUCKET_ARTIFACTS: ${S3_BUCKET_ARTIFACTS:-}
   S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
   S3_SIGNED_URL_TTL_SECONDS: ${S3_SIGNED_URL_TTL_SECONDS:-900}
+
+x-jobs-upload-command-env: &jobs-upload-command-env
   UPLOAD_MAX_SIZE_BYTES: ${UPLOAD_MAX_SIZE_BYTES:-5368709120}
   UPLOAD_PART_SIZE_BYTES: ${UPLOAD_PART_SIZE_BYTES:-8388608}
   UPLOAD_EXPIRES_HOURS: ${UPLOAD_EXPIRES_HOURS:-24}
+
+x-jobs-inspection-env: &jobs-inspection-env
   UPLOAD_INSPECTION_LEASE_MINUTES: ${UPLOAD_INSPECTION_LEASE_MINUTES:-30}
   UPLOAD_INSPECTION_DISPATCH_SECONDS: ${UPLOAD_INSPECTION_DISPATCH_SECONDS:-30}
   UPLOAD_INSPECTION_HEARTBEAT_SECONDS: ${UPLOAD_INSPECTION_HEARTBEAT_SECONDS:-60}
   UPLOAD_INSPECTION_CONCURRENCY: ${UPLOAD_INSPECTION_CONCURRENCY:-2}
-  MALWARE_SCANNER_ENABLED: ${MALWARE_SCANNER_ENABLED:-false}
-  MALWARE_SCANNER_HOST: ${MALWARE_SCANNER_HOST:-}
-  MALWARE_SCANNER_PORT: ${MALWARE_SCANNER_PORT:-3310}
+  MALWARE_SCANNER_ENABLED: "true"
+  MALWARE_SCANNER_HOST: clamav
+  MALWARE_SCANNER_PORT: 3310
   MALWARE_SCANNER_CONNECT_TIMEOUT_MS: ${MALWARE_SCANNER_CONNECT_TIMEOUT_MS:-5000}
   MALWARE_SCANNER_SCAN_TIMEOUT_MS: ${MALWARE_SCANNER_SCAN_TIMEOUT_MS:-900000}
+
+x-jobs-import-env: &jobs-import-env
   IMPORT_PARSE_LEASE_MINUTES: ${IMPORT_PARSE_LEASE_MINUTES:-30}
   IMPORT_PARSE_DISPATCH_SECONDS: ${IMPORT_PARSE_DISPATCH_SECONDS:-30}
   IMPORT_PARSE_HEARTBEAT_SECONDS: ${IMPORT_PARSE_HEARTBEAT_SECONDS:-30}
@@ -52,10 +59,13 @@ x-jobs-env: &jobs-env
   IMPORT_STAGING_BATCH_ROWS: ${IMPORT_STAGING_BATCH_ROWS:-1000}
   IMPORT_PREVIEW_ROWS: ${IMPORT_PREVIEW_ROWS:-20}
   IMPORT_PUBLISH_BATCH_ROWS: ${IMPORT_PUBLISH_BATCH_ROWS:-200}
-  INTEGRATION_VALIDATION_TIMEOUT_MS: ${INTEGRATION_VALIDATION_TIMEOUT_MS:-10000}
-  INTEGRATION_VALIDATION_LEASE_SECONDS: ${INTEGRATION_VALIDATION_LEASE_SECONDS:-120}
-  INTEGRATION_VALIDATION_DISPATCH_SECONDS: ${INTEGRATION_VALIDATION_DISPATCH_SECONDS:-15}
-  INTEGRATION_VALIDATION_CONCURRENCY: ${INTEGRATION_VALIDATION_CONCURRENCY:-2}
+
+x-jobs-seo-data-env: &jobs-seo-data-env
+  SEO_DATA_COMMAND_TIMEOUT_MS: ${SEO_DATA_COMMAND_TIMEOUT_MS:-60000}
+  SEO_DATA_URL: http://seo-data:4001
+  JOBS_TO_SEO_DATA_TOKEN: ${JOBS_TO_SEO_DATA_TOKEN:?JOBS_TO_SEO_DATA_TOKEN is required}
+
+x-jobs-email-env: &jobs-email-env
   EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
   EMAIL_FROM: ${EMAIL_FROM:-}
   SMTP_HOST: ${SMTP_HOST:-}
@@ -403,6 +413,9 @@ services:
       REALTIME_INTERNAL_URL: http://realtime:4003
       INTERNAL_REQUEST_TIMEOUT_MS: 1500
       INTERNAL_COMMAND_TIMEOUT_MS: ${INTERNAL_COMMAND_TIMEOUT_MS:-15000}
+      PLATFORM_API_TO_SEO_DATA_TOKEN: ${PLATFORM_API_TO_SEO_DATA_TOKEN:?PLATFORM_API_TO_SEO_DATA_TOKEN is required}
+      PLATFORM_API_TO_JOBS_TOKEN: ${PLATFORM_API_TO_JOBS_TOKEN:?PLATFORM_API_TO_JOBS_TOKEN is required}
+      PLATFORM_API_TO_REALTIME_TOKEN: ${PLATFORM_API_TO_REALTIME_TOKEN:?PLATFORM_API_TO_REALTIME_TOKEN is required}
       JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: ${JOBS_TO_PLATFORM_RANK_GRANT_TOKEN:?JOBS_TO_PLATFORM_RANK_GRANT_TOKEN is required}
       PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: ${PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN:?PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN is required}
       PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: ${PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN:?PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN is required}
@@ -458,6 +471,8 @@ services:
       PORT: 4001
       DATABASE_URL: postgresql://seo_runtime:${SEO_DATABASE_PASSWORD:?SEO_DATABASE_PASSWORD is required}@postgres:5432/seo_db
       DATABASE_POOL_MAX: ${SEO_DATA_DATABASE_POOL_MAX:-30}
+      PLATFORM_API_TO_SEO_DATA_TOKEN: ${PLATFORM_API_TO_SEO_DATA_TOKEN:?PLATFORM_API_TO_SEO_DATA_TOKEN is required}
+      JOBS_TO_SEO_DATA_TOKEN: ${JOBS_TO_SEO_DATA_TOKEN:?JOBS_TO_SEO_DATA_TOKEN is required}
       JOBS_TO_SEO_RANK_TOKEN: ${JOBS_TO_SEO_RANK_TOKEN:?JOBS_TO_SEO_RANK_TOKEN is required}
       JOBS_TO_SEO_RANK_RESULT_TOKEN: ${JOBS_TO_SEO_RANK_RESULT_TOKEN:?JOBS_TO_SEO_RANK_RESULT_TOKEN is required}
       RANK_HISTORY_CURSOR_KEY: ${RANK_HISTORY_CURSOR_KEY:?RANK_HISTORY_CURSOR_KEY is required}
@@ -490,9 +505,10 @@ services:
       args:
         PACKAGE_NAME: "@seo-platform/jobs-integrations"
     environment:
-      <<: [*common-backend-env, *jobs-env, *integration-credential-management-env]
+      <<: [*common-backend-env, *jobs-runtime-env, *jobs-s3-env, *jobs-upload-command-env, *jobs-seo-data-env, *jobs-email-env, *integration-credential-management-env]
       PORT: 4002
       DATABASE_POOL_MAX: ${JOBS_DATABASE_POOL_MAX:-30}
+      PLATFORM_API_TO_JOBS_TOKEN: ${PLATFORM_API_TO_JOBS_TOKEN:?PLATFORM_API_TO_JOBS_TOKEN is required}
     expose:
       - "4002"
     networks:
@@ -528,17 +544,14 @@ services:
         PACKAGE_NAME: "@seo-platform/jobs-integrations"
     command: ["node", "dist/worker.main.js"]
     environment:
-      <<: [*common-backend-env, *jobs-env]
-      DATABASE_POOL_MAX: ${JOBS_DATABASE_POOL_MAX:-20}
+      NODE_ENV: production
+      SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      SYSTEM_WORKER_CONCURRENCY: ${SYSTEM_WORKER_CONCURRENCY:-2}
     networks:
       - internal
-      - outbound
     depends_on:
-      jobs-runtime-db-permissions:
-        condition: service_completed_successfully
       redis:
-        condition: service_healthy
-      nats:
         condition: service_healthy
 
   upload-inspection-worker:
@@ -553,11 +566,8 @@ services:
         PACKAGE_NAME: "@seo-platform/jobs-integrations"
     command: ["node", "dist/inspection-worker.main.js"]
     environment:
-      <<: [*common-backend-env, *jobs-env]
+      <<: [*jobs-runtime-env, *jobs-s3-env, *jobs-inspection-env]
       DATABASE_POOL_MAX: ${JOBS_INSPECTION_DATABASE_POOL_MAX:-10}
-      MALWARE_SCANNER_ENABLED: "true"
-      MALWARE_SCANNER_HOST: clamav
-      MALWARE_SCANNER_PORT: 3310
     networks:
       - internal
       - outbound
@@ -579,7 +589,7 @@ services:
         PACKAGE_NAME: "@seo-platform/jobs-integrations"
     command: ["node", "dist/import-worker.main.js"]
     environment:
-      <<: [*common-backend-env, *jobs-env]
+      <<: [*jobs-runtime-env, *jobs-s3-env, *jobs-import-env, *jobs-seo-data-env]
       DATABASE_POOL_MAX: ${JOBS_IMPORT_DATABASE_POOL_MAX:-10}
     networks:
       - internal
@@ -588,6 +598,8 @@ services:
       jobs-runtime-db-permissions:
         condition: service_completed_successfully
       redis:
+        condition: service_healthy
+      seo-data:
         condition: service_healthy
 
   rank-worker:
@@ -685,6 +697,7 @@ services:
       DATABASE_POOL_MAX: ${REALTIME_DATABASE_POOL_MAX:-20}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       WEB_ORIGINS: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required}
+      PLATFORM_API_TO_REALTIME_TOKEN: ${PLATFORM_API_TO_REALTIME_TOKEN:?PLATFORM_API_TO_REALTIME_TOKEN is required}
       PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: ${PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN:?PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN is required}
       WEB_PUSH_REGISTRATION_ENABLED: ${WEB_PUSH_REGISTRATION_ENABLED:-false}
       WEB_PUSH_VAPID_PUBLIC_KEY: ${WEB_PUSH_VAPID_PUBLIC_KEY:-}

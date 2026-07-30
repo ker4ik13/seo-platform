@@ -14,7 +14,7 @@ test("accepts only the dedicated notification token", () => {
     loadAppConfig({
       NODE_ENV: "test",
       DATABASE_URL: "postgresql://test",
-      INTERNAL_API_TOKEN: "i".repeat(32),
+      PLATFORM_API_TO_REALTIME_TOKEN: "i".repeat(32),
       PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: dedicatedToken
     })
   );

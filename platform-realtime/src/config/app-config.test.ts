@@ -36,7 +36,7 @@ describe("loadAppConfig", () => {
           NODE_ENV: "production",
           DATABASE_URL: "postgresql://test:test@localhost:5432/test"
         }),
-      /INTERNAL_API_TOKEN/
+      /PLATFORM_API_TO_REALTIME_TOKEN/
     );
   });
 
@@ -100,6 +100,66 @@ describe("loadAppConfig", () => {
             "replace-with-a-distinct-random-notification-token"
         }),
       /must be a generated distinct token/u
+    );
+  });
+
+  it("rejects every documented general token placeholder and unsafe value", () => {
+    const placeholders = {
+      PLATFORM_API_TO_REALTIME_TOKEN:
+        "replace-with-a-distinct-random-platform-api-token",
+      PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN:
+        "replace-with-a-distinct-random-notification-token"
+    } as const;
+
+    for (const [key, value] of Object.entries(placeholders)) {
+      assert.throws(
+        () =>
+          loadAppConfig({
+            NODE_ENV: "test",
+            DATABASE_URL: "postgresql://test",
+            [key]: value
+          }),
+        new RegExp(`${key}.*example placeholder`, "u")
+      );
+    }
+
+    for (const value of [
+      `${"x".repeat(31)} `,
+      `${"x".repeat(31)},`,
+      `${"x".repeat(31)}\n`,
+      "x".repeat(513)
+    ]) {
+      assert.throws(
+        () =>
+          loadAppConfig({
+            NODE_ENV: "test",
+            DATABASE_URL: "postgresql://test",
+            PLATFORM_API_TO_REALTIME_TOKEN: value
+          }),
+        /visible ASCII characters without whitespace or commas/u
+      );
+    }
+  });
+
+  it("rejects reused and retired general service tokens", () => {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          PLATFORM_API_TO_REALTIME_TOKEN: "x".repeat(32),
+          PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "x".repeat(32)
+        }),
+      /generated distinct token/u
+    );
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          INTERNAL_API_TOKEN: "x".repeat(32)
+        }),
+      /INTERNAL_API_TOKEN is no longer supported/u
     );
   });
 

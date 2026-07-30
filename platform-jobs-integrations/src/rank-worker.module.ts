@@ -8,7 +8,7 @@ import { SeoDataModule } from "./seo-data/seo-data.module.js";
 
 @Module({
   imports: [
-    ConfigModule,
+    ConfigModule.forRole("RANK_WORKER"),
     DatabaseModule,
     PlatformApiModule,
     SeoDataModule

@@ -13,8 +13,9 @@ const context = {
   importId: "01900000-0000-7000-8000-000000000004"
 } as const;
 
+const seoDataApiToken = "s".repeat(32);
 const config = {
-  internalApiToken: "trusted-internal-token",
+  seoDataApiToken,
   internalCommandTimeoutMs: 1_000,
   services: {
     seoData: "http://seo-data:4001"
@@ -24,8 +25,10 @@ const config = {
 test("accepts a complete normalized batch and forwards trusted context", async () => {
   const originalFetch = globalThis.fetch;
   let observedHeaders: Headers | undefined;
+  let observedRedirect: RequestInit["redirect"];
   globalThis.fetch = (async (_input, init) => {
     observedHeaders = new Headers(init?.headers);
+    observedRedirect = init?.redirect;
     return Response.json({
       data: {
         rows: [
@@ -53,8 +56,9 @@ test("accepts a complete normalized batch and forwards trusted context", async (
     );
     assert.equal(
       observedHeaders?.get("X-Internal-Token"),
-      "trusted-internal-token"
+      seoDataApiToken
     );
+    assert.equal(observedRedirect, "error");
   } finally {
     globalThis.fetch = originalFetch;
   }

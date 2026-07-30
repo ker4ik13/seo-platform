@@ -6,7 +6,9 @@ export interface AppConfig {
   readonly databasePoolMax: number;
   readonly dependencyTimeoutMs: number;
   readonly internalCommandTimeoutMs: number;
-  readonly internalApiToken?: string;
+  readonly seoDataApiToken?: string;
+  readonly jobsApiToken?: string;
+  readonly realtimeApiToken?: string;
   readonly integrationCredentialApiToken?: string;
   readonly realtimeNotificationApiToken?: string;
   readonly rankExecutionGrantApiToken?: string;
@@ -81,8 +83,36 @@ function booleanValue(
 function isPlaceholderSecret(value: string | undefined): boolean {
   return (
     value !== undefined &&
-    /^(?:replace-me|replace-with-)/iu.test(value)
+    /^(?:replace-me|replace-with-|example(?:-|$)|change-?me|your[-_])/iu.test(
+      value
+    )
   );
+}
+
+function serviceToken(
+  env: NodeJS.ProcessEnv,
+  key: string
+): string | undefined {
+  const value = env[key];
+  if (value === undefined || value === "") return undefined;
+  if (isPlaceholderSecret(value)) {
+    throw new Error(
+      `${key} must be a generated distinct token and must not use an example placeholder`
+    );
+  }
+  if (
+    value.length < 32 ||
+    value.length > 512 ||
+    [...value].some((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return code < 0x21 || code > 0x7e || character === ",";
+    })
+  ) {
+    throw new Error(
+      `${key} must contain 32 to 512 visible ASCII characters without whitespace or commas`
+    );
+  }
+  return value;
 }
 
 export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
@@ -91,13 +121,27 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const natsPassword = env.NATS_PASSWORD?.trim();
   const passwordPepper = env.AUTH_PASSWORD_PEPPER?.trim();
   const dataEncryptionKey = env.AUTH_DATA_ENCRYPTION_KEY?.trim();
-  const internalApiToken = env.INTERNAL_API_TOKEN?.trim();
-  const integrationCredentialApiToken =
-    env.PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN?.trim();
-  const realtimeNotificationApiToken =
-    env.PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN?.trim();
-  const rankExecutionGrantApiToken =
-    env.JOBS_TO_PLATFORM_RANK_GRANT_TOKEN?.trim();
+  const seoDataApiToken = serviceToken(
+    env,
+    "PLATFORM_API_TO_SEO_DATA_TOKEN"
+  );
+  const jobsApiToken = serviceToken(env, "PLATFORM_API_TO_JOBS_TOKEN");
+  const realtimeApiToken = serviceToken(
+    env,
+    "PLATFORM_API_TO_REALTIME_TOKEN"
+  );
+  const integrationCredentialApiToken = serviceToken(
+    env,
+    "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN"
+  );
+  const realtimeNotificationApiToken = serviceToken(
+    env,
+    "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN"
+  );
+  const rankExecutionGrantApiToken = serviceToken(
+    env,
+    "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN"
+  );
 
   if (!["development", "test", "production"].includes(nodeEnv)) {
     throw new Error("NODE_ENV must be development, test or production");
@@ -120,10 +164,26 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (
     nodeEnv === "production" &&
-    (!internalApiToken || internalApiToken.length < 32)
+    (!seoDataApiToken || seoDataApiToken.length < 32)
   ) {
     throw new Error(
-      "INTERNAL_API_TOKEN with at least 32 characters is required in production"
+      "PLATFORM_API_TO_SEO_DATA_TOKEN with at least 32 characters is required in production"
+    );
+  }
+  if (
+    nodeEnv === "production" &&
+    (!jobsApiToken || jobsApiToken.length < 32)
+  ) {
+    throw new Error(
+      "PLATFORM_API_TO_JOBS_TOKEN with at least 32 characters is required in production"
+    );
+  }
+  if (
+    nodeEnv === "production" &&
+    (!realtimeApiToken || realtimeApiToken.length < 32)
+  ) {
+    throw new Error(
+      "PLATFORM_API_TO_REALTIME_TOKEN with at least 32 characters is required in production"
     );
   }
   if (
@@ -165,17 +225,15 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN must not use an example placeholder"
     );
   }
-  if (
-    internalApiToken &&
-    integrationCredentialApiToken &&
-    internalApiToken === integrationCredentialApiToken
-  ) {
+  if (env.INTERNAL_API_TOKEN?.trim()) {
     throw new Error(
-      "Credential API token must differ from the shared internal API token"
+      "INTERNAL_API_TOKEN is no longer supported; configure caller/audience tokens"
     );
   }
   const internalTokens = [
-    internalApiToken,
+    seoDataApiToken,
+    jobsApiToken,
+    realtimeApiToken,
     integrationCredentialApiToken,
     realtimeNotificationApiToken,
     rankExecutionGrantApiToken
@@ -216,7 +274,9 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       15_000,
       "INTERNAL_COMMAND_TIMEOUT_MS"
     ),
-    ...(internalApiToken ? { internalApiToken } : {}),
+    ...(seoDataApiToken ? { seoDataApiToken } : {}),
+    ...(jobsApiToken ? { jobsApiToken } : {}),
+    ...(realtimeApiToken ? { realtimeApiToken } : {}),
     ...(integrationCredentialApiToken
       ? { integrationCredentialApiToken }
       : {}),

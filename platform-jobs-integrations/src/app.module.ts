@@ -16,7 +16,7 @@ import { SemanticImportModule } from "./imports/semantic-import.module.js";
 
 @Module({
   imports: [
-    ConfigModule,
+    ConfigModule.forRole("HTTP"),
     DatabaseModule,
     MessagingModule,
     QueueModule,

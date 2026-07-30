@@ -4,7 +4,8 @@ export interface AppConfig {
   readonly version: string;
   readonly databaseUrl: string;
   readonly databasePoolMax: number;
-  readonly internalApiToken?: string;
+  readonly platformApiToken?: string;
+  readonly jobsApiToken?: string;
   readonly jobsToSeoRankToken?: string;
   readonly jobsToSeoRankResultToken?: string;
   readonly rankHistoryCursorKey?: string;
@@ -33,6 +34,38 @@ function positiveInteger(
   return parsed;
 }
 
+function isPlaceholderSecret(value: string): boolean {
+  return /^(?:replace-me|replace-with-|example(?:-|$)|change-?me|your[-_])/iu.test(
+    value
+  );
+}
+
+function serviceSecret(
+  env: NodeJS.ProcessEnv,
+  key: string
+): string | undefined {
+  const value = env[key];
+  if (value === undefined || value === "") return undefined;
+  if (isPlaceholderSecret(value)) {
+    throw new Error(
+      `${key} must be generated and must not use an example placeholder`
+    );
+  }
+  if (
+    value.length < 32 ||
+    value.length > 512 ||
+    [...value].some((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return code < 0x21 || code > 0x7e || character === ",";
+    })
+  ) {
+    throw new Error(
+      `${key} must contain 32 to 512 visible ASCII characters without whitespace or commas`
+    );
+  }
+  return value;
+}
+
 export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const nodeEnv = env.NODE_ENV ?? "development";
   if (!["development", "test", "production"].includes(nodeEnv)) {
@@ -41,18 +74,42 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   const user = env.NATS_USER?.trim();
   const password = env.NATS_PASSWORD?.trim();
-  const internalApiToken = env.INTERNAL_API_TOKEN?.trim();
-  const jobsToSeoRankToken = env.JOBS_TO_SEO_RANK_TOKEN?.trim();
-  const jobsToSeoRankResultToken =
-    env.JOBS_TO_SEO_RANK_RESULT_TOKEN?.trim();
-  const rankHistoryCursorKey =
-    env.RANK_HISTORY_CURSOR_KEY?.trim();
+  const platformApiToken = serviceSecret(
+    env,
+    "PLATFORM_API_TO_SEO_DATA_TOKEN"
+  );
+  const jobsApiToken = serviceSecret(env, "JOBS_TO_SEO_DATA_TOKEN");
+  const jobsToSeoRankToken = serviceSecret(
+    env,
+    "JOBS_TO_SEO_RANK_TOKEN"
+  );
+  const jobsToSeoRankResultToken = serviceSecret(
+    env,
+    "JOBS_TO_SEO_RANK_RESULT_TOKEN"
+  );
+  const rankHistoryCursorKey = serviceSecret(
+    env,
+    "RANK_HISTORY_CURSOR_KEY"
+  );
   if (
     nodeEnv === "production" &&
-    (!internalApiToken || internalApiToken.length < 32)
+    (!platformApiToken || platformApiToken.length < 32)
   ) {
     throw new Error(
-      "INTERNAL_API_TOKEN with at least 32 characters is required in production"
+      "PLATFORM_API_TO_SEO_DATA_TOKEN with at least 32 characters is required in production"
+    );
+  }
+  if (
+    nodeEnv === "production" &&
+    (!jobsApiToken || jobsApiToken.length < 32)
+  ) {
+    throw new Error(
+      "JOBS_TO_SEO_DATA_TOKEN with at least 32 characters is required in production"
+    );
+  }
+  if (env.INTERNAL_API_TOKEN?.trim()) {
+    throw new Error(
+      "INTERNAL_API_TOKEN is no longer supported; configure caller/audience tokens"
     );
   }
   if (
@@ -81,7 +138,8 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
   assertDistinctServiceTokens({
-    INTERNAL_API_TOKEN: internalApiToken,
+    PLATFORM_API_TO_SEO_DATA_TOKEN: platformApiToken,
+    JOBS_TO_SEO_DATA_TOKEN: jobsApiToken,
     JOBS_TO_SEO_RANK_TOKEN: jobsToSeoRankToken,
     JOBS_TO_SEO_RANK_RESULT_TOKEN: jobsToSeoRankResultToken,
     RANK_HISTORY_CURSOR_KEY: rankHistoryCursorKey
@@ -97,7 +155,8 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       20,
       "DATABASE_POOL_MAX"
     ),
-    ...(internalApiToken ? { internalApiToken } : {}),
+    ...(platformApiToken ? { platformApiToken } : {}),
+    ...(jobsApiToken ? { jobsApiToken } : {}),
     ...(jobsToSeoRankToken ? { jobsToSeoRankToken } : {}),
     ...(jobsToSeoRankResultToken
       ? { jobsToSeoRankResultToken }

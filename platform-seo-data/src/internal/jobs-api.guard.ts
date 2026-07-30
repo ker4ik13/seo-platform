@@ -9,28 +9,31 @@ import {
 import type { FastifyRequest } from "fastify";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
-import { internalTokensEqual } from "./internal-token.js";
+import {
+  internalTokensEqual,
+  singleServiceTokenHeader
+} from "./internal-token.js";
 
 @Injectable()
-export class InternalApiGuard implements CanActivate {
+export class JobsApiGuard implements CanActivate {
   public constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig
   ) {}
 
   public canActivate(context: ExecutionContext): boolean {
-    const expected = this.config.internalApiToken;
+    const expected = this.config.jobsApiToken;
     if (!expected) {
       throw new ServiceUnavailableException(
-        "Internal API authentication is not configured"
+        "Jobs API authentication is not configured"
       );
     }
     const request = context.switchToHttp().getRequest<FastifyRequest>();
-    const provided = request.headers["x-internal-token"];
-    if (
-      typeof provided !== "string" ||
-      !internalTokensEqual(expected, provided)
-    ) {
-      throw new UnauthorizedException("Internal authentication failed");
+    const provided = singleServiceTokenHeader(
+      request,
+      "x-internal-token"
+    );
+    if (!provided || !internalTokensEqual(expected, provided)) {
+      throw new UnauthorizedException("Jobs API authentication failed");
     }
     return true;
   }

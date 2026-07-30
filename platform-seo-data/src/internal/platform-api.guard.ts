@@ -14,36 +14,27 @@ import {
   singleServiceTokenHeader
 } from "./internal-token.js";
 
-/**
- * Dedicated write boundary for normalized rank results. Preparation workers
- * can read manifest text but cannot persist observations, while result
- * workers can persist only already-normalized data and never read plaintext
- * keyword chunks through this credential.
- */
 @Injectable()
-export class RankResultApiGuard implements CanActivate {
+export class PlatformApiGuard implements CanActivate {
   public constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig
   ) {}
 
   public canActivate(context: ExecutionContext): boolean {
-    const expected = this.config.jobsToSeoRankResultToken;
+    const expected = this.config.platformApiToken;
     if (!expected) {
       throw new ServiceUnavailableException(
-        "Rank result authentication is not configured"
+        "Platform API authentication is not configured"
       );
     }
     const request = context.switchToHttp().getRequest<FastifyRequest>();
     const provided = singleServiceTokenHeader(
       request,
-      "x-rank-result-token"
+      "x-internal-token"
     );
-    if (
-      !provided ||
-      !internalTokensEqual(expected, provided)
-    ) {
+    if (!provided || !internalTokensEqual(expected, provided)) {
       throw new UnauthorizedException(
-        "Rank result authentication failed"
+        "Platform API authentication failed"
       );
     }
     return true;

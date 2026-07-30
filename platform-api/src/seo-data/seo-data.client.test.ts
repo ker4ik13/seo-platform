@@ -240,6 +240,7 @@ test("forwards an idempotent create through trusted tenant headers and body", as
   let capturedUrl: URL | undefined;
   let capturedHeaders: Headers | undefined;
   let capturedBody: Readonly<Record<string, unknown>> | undefined;
+  let capturedRedirect: RequestInit["redirect"];
   globalThis.fetch = (async (
     input: string | URL | Request,
     init?: RequestInit
@@ -248,6 +249,7 @@ test("forwards an idempotent create through trusted tenant headers and body", as
       input instanceof Request ? input.url : input.toString()
     );
     capturedHeaders = new Headers(init?.headers);
+    capturedRedirect = init?.redirect;
     capturedBody = JSON.parse(String(init?.body)) as Readonly<
       Record<string, unknown>
     >;
@@ -296,6 +298,7 @@ test("forwards an idempotent create through trusted tenant headers and body", as
       actorId,
       idempotencyKey: "tracking-context-create-001"
     });
+    assert.equal(capturedRedirect, "error");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -358,7 +361,7 @@ function client(): SeoDataClient {
     loadAppConfig({
       NODE_ENV: "test",
       DATABASE_URL: "postgresql://test",
-      INTERNAL_API_TOKEN: "i".repeat(32),
+      PLATFORM_API_TO_SEO_DATA_TOKEN: "i".repeat(32),
       SEO_DATA_INTERNAL_URL: "http://seo-data.test:4001"
     })
   );

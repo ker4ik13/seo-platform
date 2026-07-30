@@ -12,7 +12,7 @@ import type {
   InternalRankHistoryCollection
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
-import { InternalApiGuard } from "../internal/internal-api.guard.js";
+import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import {
   rankManifestRouteContext,
   type RankManifestInternalHeaders
@@ -21,7 +21,7 @@ import { RankHistoryService } from "./rank-history.service.js";
 import { rankHistoryQuery } from "./rank-history-query.js";
 
 @Controller("internal/v1/projects/:projectId/rank-history")
-@UseGuards(InternalApiGuard)
+@UseGuards(PlatformApiGuard)
 export class RankHistoryController {
   public constructor(private readonly history: RankHistoryService) {}
 

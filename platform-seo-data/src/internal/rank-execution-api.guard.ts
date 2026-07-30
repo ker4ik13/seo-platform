@@ -9,7 +9,10 @@ import {
 import type { FastifyRequest } from "fastify";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
-import { internalTokensEqual } from "./internal-token.js";
+import {
+  internalTokensEqual,
+  singleServiceTokenHeader
+} from "./internal-token.js";
 
 /**
  * Dedicated secret-bearing boundary for rank workers. The generic internal
@@ -29,9 +32,12 @@ export class RankExecutionApiGuard implements CanActivate {
       );
     }
     const request = context.switchToHttp().getRequest<FastifyRequest>();
-    const provided = request.headers["x-rank-execution-token"];
+    const provided = singleServiceTokenHeader(
+      request,
+      "x-rank-execution-token"
+    );
     if (
-      typeof provided !== "string" ||
+      !provided ||
       !internalTokensEqual(expected, provided)
     ) {
       throw new UnauthorizedException(

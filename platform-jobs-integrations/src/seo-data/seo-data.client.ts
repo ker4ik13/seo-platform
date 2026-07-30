@@ -199,11 +199,12 @@ export class SeoDataClient {
       readonly actorId: string;
     }
   ): Promise<Response> {
-    const token = this.config.internalApiToken;
+    const token = this.config.seoDataApiToken;
     if (!token) throw new SeoDataClientError("UNAVAILABLE", true);
     try {
       return await fetch(new URL(path, this.config.services.seoData), {
         method: "POST",
+        redirect: "error",
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",

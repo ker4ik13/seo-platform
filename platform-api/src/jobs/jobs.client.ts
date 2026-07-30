@@ -595,7 +595,7 @@ export class JobsClient {
     const token =
       authentication === "integration-credential"
         ? this.config.integrationCredentialApiToken
-        : this.config.internalApiToken;
+        : this.config.jobsApiToken;
     if (!token) throw dependencyUnavailable();
     const headers = new Headers({
       Accept: "application/json",
@@ -619,6 +619,7 @@ export class JobsClient {
         {
           method,
           headers,
+          redirect: "error",
           ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
           signal: AbortSignal.timeout(
             method === "GET"

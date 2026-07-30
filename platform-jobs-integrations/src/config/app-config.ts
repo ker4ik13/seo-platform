@@ -35,6 +35,14 @@ export type IntegrationCredentialRole =
   | "MANAGEMENT"
   | "EXECUTION";
 
+export type JobsProcessRole =
+  | "HTTP"
+  | "SYSTEM_WORKER"
+  | "IMPORT_WORKER"
+  | "INSPECTION_WORKER"
+  | "RANK_WORKER"
+  | "CONNECTOR_WORKER";
+
 export interface IntegrationCredentialEncryptionConfig {
   readonly enabled: boolean;
   readonly role: IntegrationCredentialRole;
@@ -45,13 +53,15 @@ export interface IntegrationCredentialEncryptionConfig {
 }
 
 export interface AppConfig {
+  readonly processRole: JobsProcessRole;
   readonly nodeEnv: "development" | "test" | "production";
   readonly port: number;
   readonly version: string;
   readonly databaseUrl: string;
   readonly databasePoolMax: number;
   readonly redisUrl: string;
-  readonly internalApiToken?: string;
+  readonly platformApiToken?: string;
+  readonly seoDataApiToken?: string;
   readonly integrationCredentialApiToken?: string;
   readonly rankManifestApiToken?: string;
   readonly rankGrantApiToken?: string;
@@ -106,6 +116,81 @@ export interface AppConfig {
   };
 }
 
+export interface SystemWorkerConfig {
+  readonly nodeEnv: "development" | "test" | "production";
+  readonly redisUrl: string;
+  readonly concurrency: number;
+}
+
+const SERVICE_TOKEN_ENVIRONMENT_VARIABLES = [
+  "PLATFORM_API_TO_JOBS_TOKEN",
+  "JOBS_TO_SEO_DATA_TOKEN",
+  "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN",
+  "JOBS_TO_SEO_RANK_TOKEN",
+  "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN"
+] as const;
+
+const SYSTEM_WORKER_FORBIDDEN_ENVIRONMENT_VARIABLES = [
+  "DATABASE_URL",
+  "DATABASE_POOL_MAX",
+  "PGUSER",
+  "PGPASSWORD",
+  "POSTGRES_USER",
+  "POSTGRES_PASSWORD",
+  "POSTGRES_DB",
+  "JOBS_DATABASE_PASSWORD",
+  "JOBS_DATABASE_OWNER_PASSWORD",
+  "JOBS_CONNECTOR_DATABASE_USER",
+  "JOBS_CONNECTOR_DATABASE_PASSWORD",
+  "NATS_URL",
+  "NATS_USER",
+  "NATS_PASSWORD",
+  "S3_ENABLED",
+  "S3_ENDPOINT",
+  "S3_REGION",
+  "S3_ACCESS_KEY_ID",
+  "S3_SECRET_ACCESS_KEY",
+  "S3_BUCKET_UPLOADS",
+  "S3_BUCKET_ARTIFACTS",
+  "S3_FORCE_PATH_STYLE",
+  "S3_SIGNED_URL_TTL_SECONDS",
+  "EMAIL_ENABLED",
+  "EMAIL_FROM",
+  "SMTP_HOST",
+  "SMTP_PORT",
+  "SMTP_SECURE",
+  "SMTP_USER",
+  "SMTP_PASSWORD",
+  "MALWARE_SCANNER_ENABLED",
+  "MALWARE_SCANNER_HOST",
+  "MALWARE_SCANNER_PORT",
+  "MALWARE_SCANNER_CONNECT_TIMEOUT_MS",
+  "MALWARE_SCANNER_SCAN_TIMEOUT_MS",
+  "INTEGRATION_CREDENTIAL_ROLE",
+  "INTEGRATION_CREDENTIALS_ENABLED",
+  "INTEGRATION_CREDENTIAL_KEYS",
+  "INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION",
+  "INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS",
+  "INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION",
+  "INTEGRATION_VALIDATION_TIMEOUT_MS",
+  "INTEGRATION_VALIDATION_LEASE_SECONDS",
+  "INTEGRATION_VALIDATION_DISPATCH_SECONDS",
+  "INTEGRATION_VALIDATION_CONCURRENCY",
+  "RANK_PREPARATION_ENABLED",
+  "RANK_PREPARATION_LEASE_SECONDS",
+  "RANK_PREPARATION_DISPATCH_SECONDS",
+  "RANK_PREPARATION_CONCURRENCY",
+  "RANK_PROVIDER_SUBMIT_ENABLED",
+  "RANK_PROVIDER_KILL_SWITCH_VERSION",
+  "SEO_DATA_URL",
+  "SEO_DATA_COMMAND_TIMEOUT_MS",
+  "PLATFORM_API_URL",
+  "PLATFORM_API_COMMAND_TIMEOUT_MS",
+  "INTERNAL_API_TOKEN",
+  "JOBS_TO_SEO_RANK_RESULT_TOKEN",
+  ...SERVICE_TOKEN_ENVIRONMENT_VARIABLES
+] as const;
+
 function bool(value: string | undefined, fallback = false): boolean {
   if (value === undefined) return fallback;
   if (value === "true") return true;
@@ -152,6 +237,36 @@ function required(env: NodeJS.ProcessEnv, key: string): string {
 function optional(env: NodeJS.ProcessEnv, key: string): string | undefined {
   const value = env[key]?.trim();
   return value || undefined;
+}
+
+function serviceToken(
+  env: NodeJS.ProcessEnv,
+  key: (typeof SERVICE_TOKEN_ENVIRONMENT_VARIABLES)[number]
+): string | undefined {
+  const value = env[key];
+  if (value === undefined || value.trim() === "") return undefined;
+  const normalized = value.toLowerCase();
+  if (
+    value.length < 32 ||
+    value.length > 512 ||
+    [...value].some((character) => {
+      const codePoint = character.codePointAt(0);
+      return (
+        codePoint === undefined ||
+        codePoint <= 0x20 ||
+        codePoint >= 0x7f ||
+        character === ","
+      );
+    }) ||
+    /(replace|placeholder|example|change[-_]?me|insert[-_]?here|your[-_])/u.test(
+      normalized
+    )
+  ) {
+    throw new Error(
+      `${key} must be a non-placeholder ASCII service token between 32 and 512 characters without whitespace, commas or control characters`
+    );
+  }
+  return value;
 }
 
 function positiveInteger(
@@ -245,7 +360,41 @@ function keyVersion(
   return version;
 }
 
-export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
+export function loadSystemWorkerConfig(
+  env: NodeJS.ProcessEnv = process.env
+): SystemWorkerConfig {
+  const nodeEnv = env.NODE_ENV ?? "development";
+  if (!["development", "test", "production"].includes(nodeEnv)) {
+    throw new Error("NODE_ENV must be development, test or production");
+  }
+  for (const key of SYSTEM_WORKER_FORBIDDEN_ENVIRONMENT_VARIABLES) {
+    if (env[key]?.trim()) {
+      throw new Error(
+        `SYSTEM_WORKER must not receive ${key}; its runtime capability is Redis only`
+      );
+    }
+  }
+  const redisUrl = optional(env, "REDIS_URL");
+  if (nodeEnv === "production" && !redisUrl) {
+    throw new Error("REDIS_URL is required by SYSTEM_WORKER in production");
+  }
+  return {
+    nodeEnv: nodeEnv as SystemWorkerConfig["nodeEnv"],
+    redisUrl: redisUrl ?? "redis://localhost:6379",
+    concurrency: boundedInteger(
+      env.SYSTEM_WORKER_CONCURRENCY,
+      2,
+      "SYSTEM_WORKER_CONCURRENCY",
+      1,
+      32
+    )
+  };
+}
+
+export function loadAppConfig(
+  env: NodeJS.ProcessEnv = process.env,
+  requestedProcessRole?: JobsProcessRole
+): AppConfig {
   const nodeEnv = env.NODE_ENV ?? "development";
   if (!["development", "test", "production"].includes(nodeEnv)) {
     throw new Error("NODE_ENV must be development, test or production");
@@ -256,6 +405,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const malwareScannerEnabled = bool(env.MALWARE_SCANNER_ENABLED);
   const natsUser = optional(env, "NATS_USER");
   const natsPassword = optional(env, "NATS_PASSWORD");
+  const natsUrl = optional(env, "NATS_URL");
   const s3Endpoint = optional(env, "S3_ENDPOINT");
   const s3AccessKeyId = optional(env, "S3_ACCESS_KEY_ID");
   const s3SecretAccessKey = optional(env, "S3_SECRET_ACCESS_KEY");
@@ -265,16 +415,20 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const smtpHost = optional(env, "SMTP_HOST");
   const smtpUser = optional(env, "SMTP_USER");
   const smtpPassword = optional(env, "SMTP_PASSWORD");
-  const internalApiToken = optional(env, "INTERNAL_API_TOKEN");
-  const integrationCredentialApiToken = optional(
+  const platformApiToken = serviceToken(
+    env,
+    "PLATFORM_API_TO_JOBS_TOKEN"
+  );
+  const seoDataApiToken = serviceToken(env, "JOBS_TO_SEO_DATA_TOKEN");
+  const integrationCredentialApiToken = serviceToken(
     env,
     "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN"
   );
-  const rankManifestApiToken = optional(
+  const rankManifestApiToken = serviceToken(
     env,
     "JOBS_TO_SEO_RANK_TOKEN"
   );
-  const rankGrantApiToken = optional(
+  const rankGrantApiToken = serviceToken(
     env,
     "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN"
   );
@@ -300,6 +454,18 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const integrationCredentialsEnabled = credentialRole !== "DISABLED";
   const credentialManagementEnabled = credentialRole === "MANAGEMENT";
   const credentialExecutionEnabled = credentialRole === "EXECUTION";
+  const processRole =
+    requestedProcessRole ??
+    (rankPreparationEnabled
+      ? "RANK_WORKER"
+      : credentialExecutionEnabled
+        ? "CONNECTOR_WORKER"
+        : "HTTP");
+  if (processRole === "SYSTEM_WORKER") {
+    throw new Error(
+      "SYSTEM_WORKER must use loadSystemWorkerConfig to avoid receiving database and application capabilities"
+    );
+  }
   const integrationCredentialActiveKeyVersion =
     env.INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION
       ? keyVersion(
@@ -366,6 +532,11 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   ) {
     throw new Error("S3 is enabled but credentials or buckets are incomplete");
   }
+  if (!s3Enabled && (s3AccessKeyId || s3SecretAccessKey)) {
+    throw new Error(
+      "S3 credentials must be absent when S3_ENABLED is false"
+    );
+  }
 
   if (
     emailEnabled &&
@@ -373,19 +544,129 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   ) {
     throw new Error("Email is enabled but SMTP configuration is incomplete");
   }
+  if (!emailEnabled && (smtpUser || smtpPassword)) {
+    throw new Error(
+      "SMTP credentials must be absent when EMAIL_ENABLED is false"
+    );
+  }
   if (malwareScannerEnabled && !malwareScannerHost) {
     throw new Error(
       "Malware scanner is enabled but MALWARE_SCANNER_HOST is missing"
     );
   }
+  if (!malwareScannerEnabled && malwareScannerHost) {
+    throw new Error(
+      "MALWARE_SCANNER_HOST must be absent when MALWARE_SCANNER_ENABLED is false"
+    );
+  }
+  if (env.INTERNAL_API_TOKEN?.trim()) {
+    throw new Error(
+      "INTERNAL_API_TOKEN is no longer supported; configure caller/audience tokens"
+    );
+  }
+  if ((natsUser === undefined) !== (natsPassword === undefined)) {
+    throw new Error(
+      "NATS_USER and NATS_PASSWORD must be configured together"
+    );
+  }
+  if (natsUrl?.includes("@")) {
+    throw new Error(
+      "NATS_URL must not contain credentials; use NATS_USER and NATS_PASSWORD"
+    );
+  }
   if (
     nodeEnv === "production" &&
-    !credentialExecutionEnabled &&
-    !rankPreparationEnabled &&
-    (!internalApiToken || internalApiToken.length < 32)
+    processRole === "HTTP" &&
+    (!platformApiToken || platformApiToken.length < 32)
   ) {
     throw new Error(
-      "INTERNAL_API_TOKEN with at least 32 characters is required in production"
+      "PLATFORM_API_TO_JOBS_TOKEN with at least 32 characters is required by the Jobs HTTP process"
+    );
+  }
+  if (
+    nodeEnv === "production" &&
+    (processRole === "HTTP" || processRole === "IMPORT_WORKER") &&
+    (!seoDataApiToken || seoDataApiToken.length < 32)
+  ) {
+    throw new Error(
+      "JOBS_TO_SEO_DATA_TOKEN with at least 32 characters is required by Jobs callers of SEO Data"
+    );
+  }
+  if (
+    nodeEnv === "production" &&
+    processRole === "HTTP" &&
+    (!natsUser || !natsPassword)
+  ) {
+    throw new Error(
+      "NATS_USER and NATS_PASSWORD are required by the Jobs HTTP process in production"
+    );
+  }
+  if (processRole !== "HTTP" && platformApiToken) {
+    throw new Error(
+      "Only the Jobs HTTP process may receive PLATFORM_API_TO_JOBS_TOKEN"
+    );
+  }
+  if (
+    processRole !== "HTTP" &&
+    processRole !== "IMPORT_WORKER" &&
+    seoDataApiToken
+  ) {
+    throw new Error(
+      "Only the Jobs HTTP and import-worker processes may receive JOBS_TO_SEO_DATA_TOKEN"
+    );
+  }
+  assertProcessAdapterCapabilities(env, processRole, {
+    s3Enabled,
+    emailEnabled,
+    malwareScannerEnabled
+  });
+  if (
+    processRole === "RANK_WORKER" &&
+    !rankPreparationEnabled
+  ) {
+    throw new Error(
+      "The rank-worker process requires RANK_PREPARATION_ENABLED=true"
+    );
+  }
+  if (
+    processRole !== "RANK_WORKER" &&
+    rankPreparationEnabled
+  ) {
+    throw new Error(
+      "Only the rank-worker process may enable rank preparation"
+    );
+  }
+  if (
+    processRole === "CONNECTOR_WORKER" &&
+    !credentialExecutionEnabled
+  ) {
+    throw new Error(
+      "The connector-worker process requires the EXECUTION credential role"
+    );
+  }
+  if (
+    processRole !== "CONNECTOR_WORKER" &&
+    credentialExecutionEnabled
+  ) {
+    throw new Error(
+      "Only the connector-worker process may use the EXECUTION credential role"
+    );
+  }
+  if (
+    processRole !== "HTTP" &&
+    credentialManagementEnabled
+  ) {
+    throw new Error(
+      "Only the Jobs HTTP process may use the MANAGEMENT credential role"
+    );
+  }
+  if (
+    nodeEnv === "production" &&
+    processRole === "HTTP" &&
+    !credentialManagementEnabled
+  ) {
+    throw new Error(
+      "The production Jobs HTTP process requires the MANAGEMENT credential role"
     );
   }
   if (
@@ -445,17 +726,9 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
   if (
-    internalApiToken &&
-    integrationCredentialApiToken &&
-    internalApiToken === integrationCredentialApiToken
-  ) {
-    throw new Error(
-      "Credential API token must differ from the shared internal API token"
-    );
-  }
-  if (
     rankManifestApiToken &&
-    (rankManifestApiToken === internalApiToken ||
+    (rankManifestApiToken === platformApiToken ||
+      rankManifestApiToken === seoDataApiToken ||
       rankManifestApiToken === integrationCredentialApiToken ||
       rankManifestApiToken === rankGrantApiToken)
   ) {
@@ -465,7 +738,8 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (
     rankGrantApiToken &&
-    (rankGrantApiToken === internalApiToken ||
+    (rankGrantApiToken === platformApiToken ||
+      rankGrantApiToken === seoDataApiToken ||
       rankGrantApiToken === integrationCredentialApiToken)
   ) {
     throw new Error(
@@ -486,7 +760,8 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     credentialExecutionEnabled &&
     (integrationCredentialFingerprintKeys.size > 0 ||
       integrationCredentialApiToken ||
-      internalApiToken ||
+      platformApiToken ||
+      seoDataApiToken ||
       natsUser ||
       natsPassword ||
       s3AccessKeyId ||
@@ -500,7 +775,8 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (
     rankPreparationEnabled &&
-    (internalApiToken ||
+    (platformApiToken ||
+      seoDataApiToken ||
       integrationCredentialApiToken ||
       natsUser ||
       natsPassword ||
@@ -575,7 +851,17 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
 
+  assertDistinctServiceTokens({
+    PLATFORM_API_TO_JOBS_TOKEN: platformApiToken,
+    JOBS_TO_SEO_DATA_TOKEN: seoDataApiToken,
+    PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN:
+      integrationCredentialApiToken,
+    JOBS_TO_SEO_RANK_TOKEN: rankManifestApiToken,
+    JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankGrantApiToken
+  });
+
   return {
+    processRole,
     nodeEnv: nodeEnv as AppConfig["nodeEnv"],
     port: positiveInteger(env.PORT, 4002, "PORT"),
     version: optional(env, "SERVICE_VERSION") || "0.1.0",
@@ -586,7 +872,8 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "DATABASE_POOL_MAX"
     ),
     redisUrl: env.REDIS_URL?.trim() || "redis://localhost:6379",
-    ...(internalApiToken ? { internalApiToken } : {}),
+    ...(platformApiToken ? { platformApiToken } : {}),
+    ...(seoDataApiToken ? { seoDataApiToken } : {}),
     ...(integrationCredentialApiToken
       ? { integrationCredentialApiToken }
       : {}),
@@ -601,7 +888,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         optional(env, "PLATFORM_API_URL") || "http://localhost:4000"
     },
     nats: {
-      url: env.NATS_URL?.trim() || "nats://localhost:4222",
+      url: natsUrl || "nats://localhost:4222",
       ...(natsUser ? { user: natsUser } : {}),
       ...(natsPassword ? { password: natsPassword } : {})
     },
@@ -780,4 +1067,82 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       )
     }
   };
+}
+
+function assertDistinctServiceTokens(
+  tokens: Readonly<Record<string, string | undefined>>
+): void {
+  const configured = Object.entries(tokens).filter(
+    (entry): entry is [string, string] => entry[1] !== undefined
+  );
+  for (let index = 0; index < configured.length; index += 1) {
+    const current = configured[index];
+    if (!current) continue;
+    for (
+      let otherIndex = index + 1;
+      otherIndex < configured.length;
+      otherIndex += 1
+    ) {
+      const other = configured[otherIndex];
+      if (other && current[1] === other[1]) {
+        throw new Error(
+          `${current[0]} must differ from ${other[0]}`
+        );
+      }
+    }
+  }
+}
+
+function assertProcessAdapterCapabilities(
+  env: NodeJS.ProcessEnv,
+  processRole: Exclude<JobsProcessRole, "SYSTEM_WORKER">,
+  enabled: {
+    readonly s3Enabled: boolean;
+    readonly emailEnabled: boolean;
+    readonly malwareScannerEnabled: boolean;
+  }
+): void {
+  const natsConfigured = [
+    "NATS_URL",
+    "NATS_USER",
+    "NATS_PASSWORD"
+  ].some((key) => optional(env, key) !== undefined);
+  if (processRole !== "HTTP" && natsConfigured) {
+    throw new Error(
+      `${processRole} must not receive NATS configuration or credentials`
+    );
+  }
+
+  const s3CredentialConfigured =
+    optional(env, "S3_ACCESS_KEY_ID") !== undefined ||
+    optional(env, "S3_SECRET_ACCESS_KEY") !== undefined;
+  if (
+    !["HTTP", "IMPORT_WORKER", "INSPECTION_WORKER"].includes(processRole) &&
+    (enabled.s3Enabled || s3CredentialConfigured)
+  ) {
+    throw new Error(
+      `${processRole} must not receive S3 credentials or enable S3`
+    );
+  }
+
+  const smtpCredentialConfigured =
+    optional(env, "SMTP_USER") !== undefined ||
+    optional(env, "SMTP_PASSWORD") !== undefined;
+  if (
+    processRole !== "HTTP" &&
+    (enabled.emailEnabled || smtpCredentialConfigured)
+  ) {
+    throw new Error(
+      `${processRole} must not receive SMTP credentials or enable email`
+    );
+  }
+
+  const malwareConfigured =
+    enabled.malwareScannerEnabled ||
+    optional(env, "MALWARE_SCANNER_HOST") !== undefined;
+  if (processRole !== "INSPECTION_WORKER" && malwareConfigured) {
+    throw new Error(
+      `${processRole} must not receive malware scanner configuration or enable malware scanning`
+    );
+  }
 }

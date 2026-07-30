@@ -201,6 +201,7 @@ function storage(
 
 function config(): AppConfig {
   return {
+    processRole: "HTTP",
     nodeEnv: "test",
     port: 4002,
     version: "test",

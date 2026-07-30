@@ -44,7 +44,9 @@ test("does not allow development tokens in production", () => {
         DATABASE_URL: "postgresql://test",
         AUTH_PASSWORD_PEPPER: "production-secret",
         AUTH_DATA_ENCRYPTION_KEY: Buffer.alloc(32).toString("base64url"),
-        INTERNAL_API_TOKEN: "x".repeat(32),
+        PLATFORM_API_TO_SEO_DATA_TOKEN: "s".repeat(32),
+        PLATFORM_API_TO_JOBS_TOKEN: "j".repeat(32),
+        PLATFORM_API_TO_REALTIME_TOKEN: "r".repeat(32),
         PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
         PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
         JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: "g".repeat(32),
@@ -56,16 +58,27 @@ test("does not allow development tokens in production", () => {
   );
 });
 
-test("keeps the credential caller token separate from shared service auth", () => {
+test("keeps every caller/audience token distinct", () => {
   assert.throws(
     () =>
       loadAppConfig({
         NODE_ENV: "test",
         DATABASE_URL: "postgresql://test",
-        INTERNAL_API_TOKEN: "x".repeat(32),
+        PLATFORM_API_TO_JOBS_TOKEN: "x".repeat(32),
         PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "x".repeat(32)
       }),
-    /must differ from the shared internal API token/u
+    /Every internal API token must be distinct/u
+  );
+
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        PLATFORM_API_TO_SEO_DATA_TOKEN: "x".repeat(32),
+        PLATFORM_API_TO_REALTIME_TOKEN: "x".repeat(32)
+      }),
+    /Every internal API token must be distinct/u
   );
 });
 
@@ -75,7 +88,7 @@ test("keeps the notification caller token separate from every other internal tok
       loadAppConfig({
         NODE_ENV: "test",
         DATABASE_URL: "postgresql://test",
-        INTERNAL_API_TOKEN: "x".repeat(32),
+        PLATFORM_API_TO_SEO_DATA_TOKEN: "s".repeat(32),
         PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
         PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "c".repeat(32)
       }),
@@ -91,7 +104,9 @@ test("requires the dedicated notification caller token in production", () => {
         DATABASE_URL: "postgresql://test",
         AUTH_PASSWORD_PEPPER: "production-secret",
         AUTH_DATA_ENCRYPTION_KEY: Buffer.alloc(32).toString("base64url"),
-        INTERNAL_API_TOKEN: "i".repeat(32),
+        PLATFORM_API_TO_SEO_DATA_TOKEN: "s".repeat(32),
+        PLATFORM_API_TO_JOBS_TOKEN: "j".repeat(32),
+        PLATFORM_API_TO_REALTIME_TOKEN: "r".repeat(32),
         PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32)
       }),
     /PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN/u
@@ -119,7 +134,9 @@ test("requires the dedicated rank grant caller token in production", () => {
         DATABASE_URL: "postgresql://test",
         AUTH_PASSWORD_PEPPER: "production-secret",
         AUTH_DATA_ENCRYPTION_KEY: Buffer.alloc(32).toString("base64url"),
-        INTERNAL_API_TOKEN: "i".repeat(32),
+        PLATFORM_API_TO_SEO_DATA_TOKEN: "s".repeat(32),
+        PLATFORM_API_TO_JOBS_TOKEN: "j".repeat(32),
+        PLATFORM_API_TO_REALTIME_TOKEN: "r".repeat(32),
         PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
         PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32)
       }),
@@ -140,18 +157,76 @@ test("rejects the documented rank grant token placeholder", () => {
   );
 });
 
+test("rejects every documented service-token placeholder and unsafe header value", () => {
+  const placeholders = {
+    PLATFORM_API_TO_SEO_DATA_TOKEN:
+      "replace-with-a-distinct-random-seo-data-token",
+    PLATFORM_API_TO_JOBS_TOKEN:
+      "replace-with-a-distinct-random-jobs-token",
+    PLATFORM_API_TO_REALTIME_TOKEN:
+      "replace-with-a-distinct-random-realtime-token",
+    PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN:
+      "replace-with-a-distinct-random-credential-token",
+    PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN:
+      "replace-with-a-distinct-random-notification-token",
+    JOBS_TO_PLATFORM_RANK_GRANT_TOKEN:
+      "replace-with-a-distinct-random-rank-grant-token"
+  } as const;
+
+  for (const [key, value] of Object.entries(placeholders)) {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          [key]: value
+        }),
+      new RegExp(`${key}.*example placeholder`, "u")
+    );
+  }
+
+  for (const value of [
+    `${"x".repeat(31)} `,
+    `${"x".repeat(31)},`,
+    `${"x".repeat(31)}\n`,
+    "x".repeat(513)
+  ]) {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          PLATFORM_API_TO_JOBS_TOKEN: value
+        }),
+      /visible ASCII characters without whitespace or commas/u
+    );
+  }
+});
+
 test("keeps the rank grant token separate from other internal tokens", () => {
   assert.throws(
     () =>
       loadAppConfig({
         NODE_ENV: "test",
         DATABASE_URL: "postgresql://test",
-        INTERNAL_API_TOKEN: "i".repeat(32),
+        PLATFORM_API_TO_SEO_DATA_TOKEN: "i".repeat(32),
         PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
         PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
         JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: "n".repeat(32)
       }),
     /Every internal API token must be distinct/u
+  );
+});
+
+test("rejects the retired shared internal token", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        INTERNAL_API_TOKEN: "i".repeat(32)
+      }),
+    /INTERNAL_API_TOKEN is no longer supported/u
   );
 });
 

@@ -9,7 +9,10 @@ import {
 import type { FastifyRequest } from "fastify";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
-import { internalTokensEqual } from "../internal/internal-api.guard.js";
+import {
+  internalTokensEqual,
+  singleServiceTokenHeader
+} from "../internal/service-token.js";
 
 @Injectable()
 export class IntegrationCredentialApiGuard implements CanActivate {
@@ -30,9 +33,12 @@ export class IntegrationCredentialApiGuard implements CanActivate {
       );
     }
     const request = context.switchToHttp().getRequest<FastifyRequest>();
-    const provided = request.headers["x-internal-token"];
+    const provided = singleServiceTokenHeader(
+      request,
+      "x-internal-token"
+    );
     if (
-      typeof provided !== "string" ||
+      !provided ||
       !internalTokensEqual(expected, provided)
     ) {
       throw new UnauthorizedException(

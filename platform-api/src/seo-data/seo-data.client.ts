@@ -286,7 +286,7 @@ export class SeoDataClient {
     context: InternalContext,
     body?: unknown
   ): Promise<unknown> {
-    const token = this.config.internalApiToken;
+    const token = this.config.seoDataApiToken;
     if (!token) throw dependencyUnavailable();
 
     const headers = new Headers({
@@ -304,6 +304,7 @@ export class SeoDataClient {
       response = await fetch(url, {
         method,
         headers,
+        redirect: "error",
         ...(body === undefined
           ? {}
           : { body: JSON.stringify(body) }),

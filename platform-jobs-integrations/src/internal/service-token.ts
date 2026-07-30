@@ -1,5 +1,12 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 
+interface ServiceTokenRequest {
+  readonly headers: Readonly<
+    Record<string, string | readonly string[] | undefined>
+  >;
+  readonly raw?: { readonly rawHeaders?: readonly string[] };
+}
+
 export function internalTokensEqual(
   expected: string,
   provided: string
@@ -7,13 +14,6 @@ export function internalTokensEqual(
   const left = createHash("sha256").update(expected).digest();
   const right = createHash("sha256").update(provided).digest();
   return timingSafeEqual(left, right);
-}
-
-interface ServiceTokenRequest {
-  readonly headers: Readonly<
-    Record<string, string | readonly string[] | undefined>
-  >;
-  readonly raw?: { readonly rawHeaders?: readonly string[] };
 }
 
 export function singleServiceTokenHeader(
@@ -30,7 +30,6 @@ export function singleServiceTokenHeader(
   ) {
     return undefined;
   }
-
   const rawHeaders = request.raw?.rawHeaders;
   if (rawHeaders === undefined) return value;
   if (rawHeaders.length % 2 !== 0) return undefined;

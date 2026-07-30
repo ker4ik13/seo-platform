@@ -21,7 +21,7 @@ import {
   internalCommandContext,
   internalUuid
 } from "../internal/internal-command-context.js";
-import { InternalApiGuard } from "../internal/internal-api.guard.js";
+import { JobsApiGuard } from "../internal/jobs-api.guard.js";
 import {
   applySemanticImportChunkInput,
   beginSemanticImportInput,
@@ -31,7 +31,7 @@ import {
 import { SemanticImportService } from "./semantic-import.service.js";
 
 @Controller("internal/v1/semantic-imports/:importId")
-@UseGuards(InternalApiGuard)
+@UseGuards(JobsApiGuard)
 export class SemanticImportController {
   public constructor(
     private readonly semanticImports: SemanticImportService

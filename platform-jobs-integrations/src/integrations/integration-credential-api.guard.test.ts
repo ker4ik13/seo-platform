@@ -16,7 +16,7 @@ test("accepts only the dedicated Platform API credential token", () => {
     loadAppConfig({
       NODE_ENV: "test",
       DATABASE_URL: "postgresql://test",
-      INTERNAL_API_TOKEN: "i".repeat(32),
+      PLATFORM_API_TO_JOBS_TOKEN: "i".repeat(32),
       PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: dedicatedToken,
       INTEGRATION_CREDENTIAL_ROLE: "MANAGEMENT",
       INTEGRATION_CREDENTIAL_KEYS: `1:${encryptionKey}`,

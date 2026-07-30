@@ -274,7 +274,7 @@ export class RealtimeClient {
     const token =
       credential === "PUSH"
         ? this.config.realtimeNotificationApiToken
-        : this.config.internalApiToken;
+        : this.config.realtimeApiToken;
     if (!token) {
       if (credential === "PUSH") throw webPushUnavailable();
       throw dependencyUnavailable();
@@ -309,6 +309,7 @@ export class RealtimeClient {
         {
           method,
           headers,
+          redirect: "error",
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
           signal: AbortSignal.timeout(this.config.dependencyTimeoutMs)
         }

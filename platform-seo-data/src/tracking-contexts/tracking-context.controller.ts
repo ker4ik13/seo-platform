@@ -23,7 +23,7 @@ import type {
   TrackingContextSummary
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
-import { InternalApiGuard } from "../internal/internal-api.guard.js";
+import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import {
   assertInternalContext,
   internalCommandContext,
@@ -40,7 +40,7 @@ import {
 import { TrackingContextService } from "./tracking-context.service.js";
 
 @Controller("internal/v1/projects/:projectId/tracking-contexts")
-@UseGuards(InternalApiGuard)
+@UseGuards(PlatformApiGuard)
 export class TrackingContextController {
   public constructor(
     private readonly trackingContexts: TrackingContextService

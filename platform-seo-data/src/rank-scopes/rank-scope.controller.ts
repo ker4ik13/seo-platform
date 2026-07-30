@@ -15,7 +15,7 @@ import type {
   InternalRankEstimateScope
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
-import { InternalApiGuard } from "../internal/internal-api.guard.js";
+import { JobsApiGuard } from "../internal/jobs-api.guard.js";
 import {
   assertInternalContext,
   internalCommandContext,
@@ -29,7 +29,7 @@ type InternalHeaders = Readonly<
 >;
 
 @Controller("internal/v1/projects/:projectId/rank-estimate-scopes")
-@UseGuards(InternalApiGuard)
+@UseGuards(JobsApiGuard)
 export class RankScopeController {
   public constructor(private readonly rankScopes: RankScopeService) {}
 

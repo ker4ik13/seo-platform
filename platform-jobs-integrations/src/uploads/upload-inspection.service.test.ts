@@ -192,6 +192,7 @@ function uploadRecord(): Upload {
 
 function configFixture(): AppConfig {
   return {
+    processRole: "INSPECTION_WORKER",
     nodeEnv: "test",
     port: 4002,
     version: "test",

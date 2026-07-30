@@ -17,12 +17,12 @@ import {
   internalCommandContext,
   internalUuid
 } from "../internal/internal-command-context.js";
-import { InternalApiGuard } from "../internal/internal-api.guard.js";
+import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import { keywordListQuery } from "./keyword-query.js";
 import { KeywordService } from "./keyword.service.js";
 
 @Controller("internal/v1/projects/:projectId/keywords")
-@UseGuards(InternalApiGuard)
+@UseGuards(PlatformApiGuard)
 export class KeywordController {
   public constructor(private readonly keywords: KeywordService) {}
 

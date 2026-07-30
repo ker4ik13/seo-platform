@@ -62,7 +62,7 @@ function client(): JobsClient {
     loadAppConfig({
       NODE_ENV: "test",
       DATABASE_URL: "postgresql://test",
-      INTERNAL_API_TOKEN: "i".repeat(32),
+      PLATFORM_API_TO_JOBS_TOKEN: "i".repeat(32),
       PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
       JOBS_INTERNAL_URL: "http://jobs.test:4002"
     })

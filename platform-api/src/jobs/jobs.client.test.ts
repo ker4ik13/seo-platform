@@ -16,11 +16,13 @@ test("forwards a credential idempotency key with trusted workspace context", asy
   const originalFetch = globalThis.fetch;
   let capturedBody: Readonly<Record<string, unknown>> | undefined;
   let capturedHeaders: Headers | undefined;
+  let capturedRedirect: RequestInit["redirect"];
   globalThis.fetch = (async (
     _input: string | URL | Request,
     init?: RequestInit
   ): Promise<Response> => {
     capturedHeaders = new Headers(init?.headers);
+    capturedRedirect = init?.redirect;
     assert.equal(typeof init?.body, "string");
     capturedBody = JSON.parse(String(init?.body)) as Readonly<
       Record<string, unknown>
@@ -57,7 +59,7 @@ test("forwards a credential idempotency key with trusted workspace context", asy
       loadAppConfig({
         NODE_ENV: "test",
         DATABASE_URL: "postgresql://test",
-        INTERNAL_API_TOKEN: "i".repeat(32),
+        PLATFORM_API_TO_JOBS_TOKEN: "i".repeat(32),
         PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
         JOBS_INTERNAL_URL: "http://jobs.test:4002"
       })
@@ -93,6 +95,7 @@ test("forwards a credential idempotency key with trusted workspace context", asy
       capturedHeaders?.get("x-internal-token"),
       "c".repeat(32)
     );
+    assert.equal(capturedRedirect, "error");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -581,7 +584,7 @@ function client(): JobsClient {
     loadAppConfig({
       NODE_ENV: "test",
       DATABASE_URL: "postgresql://test",
-      INTERNAL_API_TOKEN: "i".repeat(32),
+      PLATFORM_API_TO_JOBS_TOKEN: "i".repeat(32),
       PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
       JOBS_INTERNAL_URL: "http://jobs.test:4002"
     })

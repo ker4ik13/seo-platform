@@ -15,7 +15,9 @@ test("accepts only the dedicated Jobs rank grant token", () => {
     loadAppConfig({
       NODE_ENV: "test",
       DATABASE_URL: "postgresql://test",
-      INTERNAL_API_TOKEN: "i".repeat(32),
+      PLATFORM_API_TO_SEO_DATA_TOKEN: "s".repeat(32),
+      PLATFORM_API_TO_JOBS_TOKEN: "j".repeat(32),
+      PLATFORM_API_TO_REALTIME_TOKEN: "r".repeat(32),
       PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
       PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
       JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: dedicatedToken

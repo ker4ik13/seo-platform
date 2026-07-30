@@ -8,7 +8,7 @@ import { IntegrationCredentialKeyCoverageService } from "./integrations/integrat
 import { IntegrationCredentialValidationWorkerService } from "./integrations/integration-credential-validation-worker.service.js";
 
 @Module({
-  imports: [ConfigModule, DatabaseModule],
+  imports: [ConfigModule.forRole("CONNECTOR_WORKER"), DatabaseModule],
   providers: [
     IntegrationCredentialConnectorRegistry,
     IntegrationCredentialCryptoService,

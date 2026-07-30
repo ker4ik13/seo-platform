@@ -5,7 +5,7 @@ import { SemanticImportParserModule } from "./imports/semantic-import-parser.mod
 
 @Module({
   imports: [
-    ConfigModule,
+    ConfigModule.forRole("IMPORT_WORKER"),
     DatabaseModule,
     SemanticImportParserModule
   ]

@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { loadAppConfig } from "./app-config.js";
+import {
+  loadAppConfig,
+  loadSystemWorkerConfig,
+  type JobsProcessRole
+} from "./app-config.js";
 
 const credentialApiToken = "c".repeat(32);
 const rankManifestApiToken = "m".repeat(32);
@@ -83,7 +87,8 @@ test("loads an isolated rank preparation worker", () => {
   assert.equal(config.services.platformApi, "http://platform-api:4000");
   assert.equal(config.platformApiCommandTimeoutMs, 2_500);
   assert.equal(config.integrationCredentials.role, "DISABLED");
-  assert.equal(config.internalApiToken, undefined);
+  assert.equal(config.platformApiToken, undefined);
+  assert.equal(config.seoDataApiToken, undefined);
 });
 
 test("rejects rank tokens outside the isolated rank worker", () => {
@@ -133,9 +138,9 @@ test("rejects unrelated secrets and short leases on rank workers", () => {
     () =>
       loadAppConfig({
         ...base,
-        INTERNAL_API_TOKEN: "i".repeat(32)
+        PLATFORM_API_TO_JOBS_TOKEN: "i".repeat(32)
       }),
-    /Rank preparation workers must not receive/u
+    /Only the Jobs HTTP process may receive/u
   );
   assert.throws(
     () =>
@@ -159,18 +164,6 @@ test("keeps every rank service token distinct", () => {
         JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankManifestApiToken
       }),
     /Rank manifest token must differ/u
-  );
-  assert.throws(
-    () =>
-      loadAppConfig({
-        NODE_ENV: "test",
-        DATABASE_URL: "postgresql://test",
-        RANK_PREPARATION_ENABLED: "true",
-        JOBS_TO_SEO_RANK_TOKEN: rankManifestApiToken,
-        JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankGrantApiToken,
-        INTERNAL_API_TOKEN: rankGrantApiToken
-      }),
-    /Rank grant token must differ/u
   );
 });
 
@@ -273,24 +266,26 @@ test("requires credential encryption keys when the vault is enabled", () => {
       loadAppConfig({
         NODE_ENV: "production",
         DATABASE_URL: "postgresql://test",
-        INTERNAL_API_TOKEN: "i".repeat(32),
+        PLATFORM_API_TO_JOBS_TOKEN: "p".repeat(32),
+        JOBS_TO_SEO_DATA_TOKEN: "s".repeat(32),
+        NATS_USER: "jobs-http",
+        NATS_PASSWORD: "secret",
         INTEGRATION_CREDENTIALS_ENABLED: "true"
       }),
     /INTEGRATION_CREDENTIAL_KEYS/u
   );
 });
 
-test("allows a production worker without credential decryption capability", () => {
-  const config = loadAppConfig({
+test("loads the system worker from a Redis-only config boundary", () => {
+  const config = loadSystemWorkerConfig({
     NODE_ENV: "production",
-    DATABASE_URL: "postgresql://test",
-    INTERNAL_API_TOKEN: "i".repeat(32)
+    REDIS_URL: "redis://:secret@redis:6379",
+    SYSTEM_WORKER_CONCURRENCY: "7"
   });
 
-  assert.equal(config.integrationCredentials.enabled, false);
-  assert.equal(config.integrationCredentials.role, "DISABLED");
-  assert.equal(config.integrationCredentials.keys.size, 0);
-  assert.equal(config.integrationCredentials.fingerprintKeys.size, 0);
+  assert.equal(config.nodeEnv, "production");
+  assert.equal(config.redisUrl, "redis://:secret@redis:6379");
+  assert.equal(config.concurrency, 7);
 });
 
 test("rejects credential secrets on a credential-disabled process", () => {
@@ -357,7 +352,8 @@ test("allows a production execution worker without internal API or NATS credenti
   });
 
   assert.equal(config.integrationCredentials.role, "EXECUTION");
-  assert.equal(config.internalApiToken, undefined);
+  assert.equal(config.platformApiToken, undefined);
+  assert.equal(config.seoDataApiToken, undefined);
   assert.equal(config.nats.user, undefined);
   assert.equal(config.nats.password, undefined);
 });
@@ -374,7 +370,7 @@ test("rejects unrelated secrets on an execution-only worker", () => {
       PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32)
     },
     {
-      INTERNAL_API_TOKEN: "i".repeat(32)
+      PLATFORM_API_TO_JOBS_TOKEN: "i".repeat(32)
     },
     {
       NATS_USER: "connector-worker"
@@ -409,12 +405,12 @@ test("rejects unrelated secrets on an execution-only worker", () => {
           INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1",
           ...extra
         }),
-      /must not receive management, internal API, NATS, S3 or SMTP credentials/u
+      /Only the Jobs HTTP process may receive|must not receive management, internal API, NATS, S3 or SMTP credentials|must not receive (?:NATS|S3|SMTP)|must be configured together/u
     );
   }
 });
 
-test("still requires the internal API token for a production management process", () => {
+test("requires both caller/audience tokens for the production HTTP process", () => {
   const encryptionKey = Buffer.alloc(32, 1).toString("base64url");
   const fingerprintKey = Buffer.alloc(32, 2).toString("base64url");
 
@@ -430,7 +426,7 @@ test("still requires the internal API token for a production management process"
         INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION: "2",
         PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32)
       }),
-    /INTERNAL_API_TOKEN/u
+    /PLATFORM_API_TO_JOBS_TOKEN/u
   );
 });
 
@@ -526,7 +522,7 @@ test("requires a dedicated Platform API caller token for the vault", () => {
   );
 });
 
-test("keeps the credential caller token separate from shared service auth", () => {
+test("keeps the credential caller token separate from HTTP audience auth", () => {
   const encryptionKey = Buffer.alloc(32, 1).toString("base64url");
   const fingerprintKey = Buffer.alloc(32, 2).toString("base64url");
   const reusedToken = "x".repeat(32);
@@ -540,10 +536,103 @@ test("keeps the credential caller token separate from shared service auth", () =
         INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1",
         INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS: `2:${fingerprintKey}`,
         INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION: "2",
-        INTERNAL_API_TOKEN: reusedToken,
+        PLATFORM_API_TO_JOBS_TOKEN: reusedToken,
+        JOBS_TO_SEO_DATA_TOKEN: "s".repeat(32),
         PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: reusedToken
       }),
-    /must differ from the shared internal API token/u
+    /must differ/u
+  );
+});
+
+test("allows SEO Data auth only on HTTP and import-worker roles", () => {
+  const token = "s".repeat(32);
+  const importConfig = loadAppConfig(
+    {
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://test",
+      JOBS_TO_SEO_DATA_TOKEN: token
+    },
+    "IMPORT_WORKER"
+  );
+  assert.equal(importConfig.seoDataApiToken, token);
+  assert.equal(importConfig.platformApiToken, undefined);
+
+  for (const role of [
+    "INSPECTION_WORKER",
+    "CONNECTOR_WORKER"
+  ] as const) {
+    assert.throws(
+      () =>
+        loadAppConfig(
+          {
+            NODE_ENV: "test",
+            DATABASE_URL: "postgresql://test",
+            JOBS_TO_SEO_DATA_TOKEN: token
+          },
+          role
+        ),
+      /Only the Jobs HTTP and import-worker processes/u
+    );
+  }
+  assert.throws(
+    () =>
+      loadSystemWorkerConfig({
+        NODE_ENV: "test",
+        REDIS_URL: "redis://test",
+        JOBS_TO_SEO_DATA_TOKEN: token
+      }),
+    /SYSTEM_WORKER must not receive JOBS_TO_SEO_DATA_TOKEN/u
+  );
+});
+
+test("rejects process-role and capability-role mismatches", () => {
+  assert.throws(
+    () =>
+      loadAppConfig(
+        {
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test"
+        },
+        "RANK_WORKER"
+      ),
+    /requires RANK_PREPARATION_ENABLED=true/u
+  );
+  assert.throws(
+    () =>
+      loadAppConfig(
+        {
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          RANK_PREPARATION_ENABLED: "true",
+          JOBS_TO_SEO_RANK_TOKEN: rankManifestApiToken,
+          JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankGrantApiToken
+        },
+        "HTTP"
+      ),
+    /Only the rank-worker process/u
+  );
+  assert.throws(
+    () =>
+      loadAppConfig(
+        {
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test"
+        },
+        "CONNECTOR_WORKER"
+      ),
+    /requires the EXECUTION credential role/u
+  );
+});
+
+test("rejects the retired shared internal token", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        INTERNAL_API_TOKEN: "i".repeat(32)
+      }),
+    /INTERNAL_API_TOKEN is no longer supported/u
   );
 });
 
@@ -592,4 +681,296 @@ test("rejects an encryption key version outside PostgreSQL integer range", () =>
       }),
     /INTEGRATION_CREDENTIAL_KEYS/u
   );
+});
+
+test("rejects every package env example service-token placeholder", () => {
+  const placeholders = [
+    [
+      "PLATFORM_API_TO_JOBS_TOKEN",
+      "replace-with-a-distinct-random-platform-api-token"
+    ],
+    [
+      "JOBS_TO_SEO_DATA_TOKEN",
+      "replace-with-a-distinct-random-seo-data-token"
+    ],
+    [
+      "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN",
+      "replace-with-a-distinct-random-credential-token"
+    ]
+  ] as const;
+
+  for (const [key, value] of placeholders) {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          [key]: value
+        }),
+      new RegExp(`${key} must be a non-placeholder ASCII service token`, "u")
+    );
+  }
+});
+
+test("validates the finite service-token format for every Jobs boundary", () => {
+  const keys = [
+    "PLATFORM_API_TO_JOBS_TOKEN",
+    "JOBS_TO_SEO_DATA_TOKEN",
+    "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN",
+    "JOBS_TO_SEO_RANK_TOKEN",
+    "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN"
+  ] as const;
+  const invalidTokens = [
+    "x".repeat(31),
+    "x".repeat(513),
+    `${"x".repeat(32)} `,
+    `${"x".repeat(32)},`,
+    `${"x".repeat(32)}\u0000`,
+    `${"x".repeat(31)}я`,
+    "example-service-token-that-is-not-secret"
+  ] as const;
+
+  for (const key of keys) {
+    for (const value of invalidTokens) {
+      assert.throws(
+        () =>
+          loadAppConfig({
+            NODE_ENV: "test",
+            DATABASE_URL: "postgresql://test",
+            [key]: value
+          }),
+        new RegExp(`${key} must be a non-placeholder ASCII service token`, "u")
+      );
+    }
+  }
+});
+
+test("rejects all application, database and adapter capabilities on the Redis-only system worker", () => {
+  const forbidden = [
+    ["DATABASE_URL", "postgresql://secret@postgres/jobs_db"],
+    ["DATABASE_POOL_MAX", "20"],
+    ["PGPASSWORD", "secret"],
+    ["POSTGRES_PASSWORD", "secret"],
+    ["JOBS_DATABASE_PASSWORD", "secret"],
+    ["JOBS_CONNECTOR_DATABASE_PASSWORD", "secret"],
+    ["NATS_URL", "nats://nats:4222"],
+    ["NATS_USER", "system"],
+    ["NATS_PASSWORD", "secret"],
+    ["S3_ENABLED", "false"],
+    ["S3_ACCESS_KEY_ID", "access"],
+    ["S3_SECRET_ACCESS_KEY", "secret"],
+    ["EMAIL_ENABLED", "false"],
+    ["SMTP_USER", "system"],
+    ["SMTP_PASSWORD", "secret"],
+    ["MALWARE_SCANNER_ENABLED", "false"],
+    ["MALWARE_SCANNER_HOST", "clamav"],
+    ["INTEGRATION_CREDENTIAL_ROLE", "DISABLED"],
+    ["INTEGRATION_CREDENTIAL_KEYS", "secret"],
+    ["RANK_PREPARATION_ENABLED", "false"],
+    ["SEO_DATA_URL", "http://seo-data:4001"],
+    ["PLATFORM_API_URL", "http://platform-api:4000"],
+    ["PLATFORM_API_TO_JOBS_TOKEN", "p".repeat(32)],
+    ["JOBS_TO_SEO_DATA_TOKEN", "s".repeat(32)],
+    ["PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN", "c".repeat(32)],
+    ["JOBS_TO_SEO_RANK_TOKEN", "m".repeat(32)],
+    ["JOBS_TO_PLATFORM_RANK_GRANT_TOKEN", "g".repeat(32)],
+    ["JOBS_TO_SEO_RANK_RESULT_TOKEN", "r".repeat(32)]
+  ] as const;
+
+  for (const [key, value] of forbidden) {
+    assert.throws(
+      () =>
+        loadSystemWorkerConfig({
+          NODE_ENV: "test",
+          REDIS_URL: "redis://test",
+          [key]: value
+        }),
+      new RegExp(`SYSTEM_WORKER must not receive ${key}`, "u")
+    );
+  }
+  assert.throws(
+    () =>
+      loadAppConfig(
+        { NODE_ENV: "test", DATABASE_URL: "postgresql://test" },
+        "SYSTEM_WORKER"
+      ),
+    /must use loadSystemWorkerConfig/u
+  );
+  assert.throws(
+    () => loadSystemWorkerConfig({ NODE_ENV: "production" }),
+    /REDIS_URL is required/u
+  );
+});
+
+test("rejects incomplete and URL-embedded NATS credentials", () => {
+  for (const extra of [
+    { NATS_USER: "jobs" },
+    { NATS_PASSWORD: "secret" },
+    { NATS_URL: "nats://jobs:secret@nats:4222" }
+  ]) {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          ...extra
+        }),
+      /must be configured together|must not contain credentials/u
+    );
+  }
+});
+
+test("loads only the declared adapter capabilities for HTTP, import and inspection", () => {
+  const s3 = {
+    S3_ENABLED: "true",
+    S3_ACCESS_KEY_ID: "access",
+    S3_SECRET_ACCESS_KEY: "secret",
+    S3_BUCKET_UPLOADS: "uploads",
+    S3_BUCKET_ARTIFACTS: "artifacts"
+  } as const;
+  const http = loadAppConfig(
+    {
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      NATS_URL: "nats://nats:4222",
+      NATS_USER: "jobs-http",
+      NATS_PASSWORD: "secret",
+      PLATFORM_API_TO_JOBS_TOKEN: "p".repeat(32),
+      JOBS_TO_SEO_DATA_TOKEN: "s".repeat(32),
+      INTEGRATION_CREDENTIAL_ROLE: "MANAGEMENT",
+      INTEGRATION_CREDENTIAL_KEYS: `1:${Buffer.alloc(32, 1).toString("base64url")}`,
+      INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1",
+      INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS: `2:${Buffer.alloc(32, 2).toString("base64url")}`,
+      INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION: "2",
+      PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
+      EMAIL_ENABLED: "true",
+      EMAIL_FROM: "jobs@example.test",
+      SMTP_HOST: "smtp.example.test",
+      SMTP_USER: "jobs",
+      SMTP_PASSWORD: "secret",
+      ...s3
+    },
+    "HTTP"
+  );
+  assert.equal(http.nats.user, "jobs-http");
+  assert.equal(http.s3.enabled, true);
+  assert.equal(http.email.enabled, true);
+  assert.equal(http.integrationCredentials.role, "MANAGEMENT");
+
+  const importWorker = loadAppConfig(
+    {
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      JOBS_TO_SEO_DATA_TOKEN: "s".repeat(32),
+      ...s3
+    },
+    "IMPORT_WORKER"
+  );
+  assert.equal(importWorker.s3.enabled, true);
+  assert.equal(importWorker.seoDataApiToken, "s".repeat(32));
+
+  const inspectionWorker = loadAppConfig(
+    {
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      MALWARE_SCANNER_ENABLED: "true",
+      MALWARE_SCANNER_HOST: "clamav",
+      ...s3
+    },
+    "INSPECTION_WORKER"
+  );
+  assert.equal(inspectionWorker.s3.enabled, true);
+  assert.equal(inspectionWorker.malwareScanner.enabled, true);
+});
+
+test("rejects every undeclared adapter capability by process role", () => {
+  const connectorKey = Buffer.alloc(32, 1).toString("base64url");
+  const roleBases: Readonly<Record<Exclude<JobsProcessRole, "SYSTEM_WORKER">, NodeJS.ProcessEnv>> = {
+    HTTP: { NODE_ENV: "test", DATABASE_URL: "postgresql://test" },
+    IMPORT_WORKER: { NODE_ENV: "test", DATABASE_URL: "postgresql://test" },
+    INSPECTION_WORKER: { NODE_ENV: "test", DATABASE_URL: "postgresql://test" },
+    RANK_WORKER: {
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      RANK_PREPARATION_ENABLED: "true",
+      JOBS_TO_SEO_RANK_TOKEN: "m".repeat(32),
+      JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: "g".repeat(32)
+    },
+    CONNECTOR_WORKER: {
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      INTEGRATION_CREDENTIAL_ROLE: "EXECUTION",
+      INTEGRATION_CREDENTIAL_KEYS: `1:${connectorKey}`,
+      INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1"
+    }
+  };
+  const cases = [
+    {
+      roles: ["IMPORT_WORKER", "INSPECTION_WORKER", "RANK_WORKER", "CONNECTOR_WORKER"],
+      extra: { NATS_URL: "nats://nats:4222" },
+      error: /must not receive NATS/u
+    },
+    {
+      roles: ["RANK_WORKER", "CONNECTOR_WORKER"],
+      extra: {
+        S3_ENABLED: "true",
+        S3_ACCESS_KEY_ID: "access",
+        S3_SECRET_ACCESS_KEY: "secret",
+        S3_BUCKET_UPLOADS: "uploads",
+        S3_BUCKET_ARTIFACTS: "artifacts"
+      },
+      error: /must not receive S3/u
+    },
+    {
+      roles: ["IMPORT_WORKER", "INSPECTION_WORKER", "RANK_WORKER", "CONNECTOR_WORKER"],
+      extra: {
+        EMAIL_ENABLED: "true",
+        EMAIL_FROM: "jobs@example.test",
+        SMTP_HOST: "smtp.example.test",
+        SMTP_USER: "jobs",
+        SMTP_PASSWORD: "secret"
+      },
+      error: /must not receive SMTP|Execution-only credential workers/u
+    },
+    {
+      roles: ["HTTP", "IMPORT_WORKER", "RANK_WORKER", "CONNECTOR_WORKER"],
+      extra: {
+        MALWARE_SCANNER_ENABLED: "true",
+        MALWARE_SCANNER_HOST: "clamav"
+      },
+      error: /must not receive malware scanner/u
+    }
+  ] as const;
+
+  for (const boundary of cases) {
+    for (const role of boundary.roles) {
+      assert.throws(
+        () => loadAppConfig({ ...roleBases[role], ...boundary.extra }, role),
+        boundary.error
+      );
+    }
+  }
+});
+
+test("rejects adapter credentials left behind while the capability is disabled", () => {
+  for (const [extra, error] of [
+    [{ S3_ACCESS_KEY_ID: "access" }, /S3 credentials must be absent/u],
+    [{ S3_SECRET_ACCESS_KEY: "secret" }, /S3 credentials must be absent/u],
+    [{ SMTP_USER: "jobs" }, /SMTP credentials must be absent/u],
+    [{ SMTP_PASSWORD: "secret" }, /SMTP credentials must be absent/u],
+    [
+      { MALWARE_SCANNER_HOST: "clamav" },
+      /MALWARE_SCANNER_HOST must be absent/u
+    ]
+  ] as const) {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          ...extra
+        }),
+      error
+    );
+  }
 });

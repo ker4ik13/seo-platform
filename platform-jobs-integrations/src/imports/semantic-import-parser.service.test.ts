@@ -223,6 +223,7 @@ function uploadRecord(): Upload {
 
 function configFixture(): AppConfig {
   return {
+    processRole: "IMPORT_WORKER",
     nodeEnv: "test",
     port: 4002,
     version: "test",

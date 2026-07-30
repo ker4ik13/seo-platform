@@ -8,7 +8,7 @@ export interface AppConfig {
   readonly databaseUrl: string;
   readonly databasePoolMax: number;
   readonly redisUrl: string;
-  readonly internalApiToken?: string;
+  readonly platformApiToken?: string;
   readonly notificationApiToken?: string;
   readonly nats: {
     readonly url: string;
@@ -62,8 +62,36 @@ function optional(env: NodeJS.ProcessEnv, key: string): string | undefined {
 function isPlaceholderSecret(value: string | undefined): boolean {
   return (
     value !== undefined &&
-    /^(?:replace-me|replace-with-)/iu.test(value)
+    /^(?:replace-me|replace-with-|example(?:-|$)|change-?me|your[-_])/iu.test(
+      value
+    )
   );
+}
+
+function serviceToken(
+  env: NodeJS.ProcessEnv,
+  key: string
+): string | undefined {
+  const value = env[key];
+  if (value === undefined || value === "") return undefined;
+  if (isPlaceholderSecret(value)) {
+    throw new Error(
+      `${key} must be a generated distinct token and must not use an example placeholder`
+    );
+  }
+  if (
+    value.length < 32 ||
+    value.length > 512 ||
+    [...value].some((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return code < 0x21 || code > 0x7e || character === ",";
+    })
+  ) {
+    throw new Error(
+      `${key} must contain 32 to 512 visible ASCII characters without whitespace or commas`
+    );
+  }
+  return value;
 }
 
 function boundedPositiveInteger(
@@ -208,8 +236,11 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   const natsUser = optional(env, "NATS_USER");
   const natsPassword = optional(env, "NATS_PASSWORD");
-  const internalApiToken = optional(env, "INTERNAL_API_TOKEN");
-  const notificationApiToken = optional(
+  const platformApiToken = serviceToken(
+    env,
+    "PLATFORM_API_TO_REALTIME_TOKEN"
+  );
+  const notificationApiToken = serviceToken(
     env,
     "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN"
   );
@@ -250,10 +281,15 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (
     nodeEnv === "production" &&
-    (!internalApiToken || internalApiToken.length < 32)
+    (!platformApiToken || platformApiToken.length < 32)
   ) {
     throw new Error(
-      "INTERNAL_API_TOKEN with at least 32 characters is required in production"
+      "PLATFORM_API_TO_REALTIME_TOKEN with at least 32 characters is required in production"
+    );
+  }
+  if (env.INTERNAL_API_TOKEN?.trim()) {
+    throw new Error(
+      "INTERNAL_API_TOKEN is no longer supported; configure caller/audience tokens"
     );
   }
   if (
@@ -269,7 +305,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (
     notificationApiToken &&
     (notificationApiToken.length < 32 ||
-      notificationApiToken === internalApiToken ||
+      notificationApiToken === platformApiToken ||
       isPlaceholderSecret(notificationApiToken))
   ) {
     throw new Error(
@@ -314,7 +350,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "DATABASE_POOL_MAX"
     ),
     redisUrl: env.REDIS_URL?.trim() || "redis://localhost:6379",
-    ...(internalApiToken ? { internalApiToken } : {}),
+    ...(platformApiToken ? { platformApiToken } : {}),
     ...(notificationApiToken ? { notificationApiToken } : {}),
     nats: {
       url: env.NATS_URL?.trim() || "nats://localhost:4222",

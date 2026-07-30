@@ -17,11 +17,13 @@ const applicationServerKey = keyAgreement
 test("uses only the dedicated notification credential and session family for device reads", async () => {
   const originalFetch = globalThis.fetch;
   let capturedHeaders: Headers | undefined;
+  let capturedRedirect: RequestInit["redirect"];
   globalThis.fetch = (async (
     _input: string | URL | Request,
     init?: RequestInit
   ): Promise<Response> => {
     capturedHeaders = new Headers(init?.headers);
+    capturedRedirect = init?.redirect;
     return response({ registration: disabledRegistration(), devices: [] });
   }) as typeof fetch;
 
@@ -39,6 +41,7 @@ test("uses only the dedicated notification credential and session family for dev
       sessionFamilyId
     );
     assert.equal(capturedHeaders?.get("x-request-id"), "request-push-001");
+    assert.equal(capturedRedirect, "error");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -337,7 +340,7 @@ test("does not fall back to the shared credential when push auth is absent", asy
     loadAppConfig({
       NODE_ENV: "test",
       DATABASE_URL: "postgresql://test",
-      INTERNAL_API_TOKEN: "i".repeat(32),
+      PLATFORM_API_TO_REALTIME_TOKEN: "i".repeat(32),
       REALTIME_INTERNAL_URL: "http://realtime.test:4003"
     })
   );
@@ -363,7 +366,7 @@ function client(): RealtimeClient {
     loadAppConfig({
       NODE_ENV: "test",
       DATABASE_URL: "postgresql://test",
-      INTERNAL_API_TOKEN: "i".repeat(32),
+      PLATFORM_API_TO_REALTIME_TOKEN: "i".repeat(32),
       PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
       PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
       REALTIME_INTERNAL_URL: "http://realtime.test:4003"

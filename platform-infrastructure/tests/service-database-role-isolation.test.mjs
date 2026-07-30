@@ -118,12 +118,11 @@ test("Compose splits migration owners from fixed runtime roles", async () => {
 
   assert.match(
     compose,
-    /x-jobs-env:[\s\S]*?DATABASE_URL: postgresql:\/\/jobs_runtime:\$\{JOBS_DATABASE_PASSWORD:\?[^}]+\}@postgres:5432\/jobs_db/u
+    /x-jobs-runtime-env:[\s\S]*?DATABASE_URL: postgresql:\/\/jobs_runtime:\$\{JOBS_DATABASE_PASSWORD:\?[^}]+\}@postgres:5432\/jobs_db/u
   );
 
   for (const serviceName of [
     "jobs-integrations",
-    "system-worker",
     "upload-inspection-worker",
     "import-worker"
   ]) {
@@ -134,6 +133,9 @@ test("Compose splits migration owners from fixed runtime roles", async () => {
       /jobs-runtime-db-permissions:\s+condition: service_completed_successfully/u
     );
   }
+
+  const systemWorker = serviceBlock(compose, "system-worker");
+  assert.doesNotMatch(systemWorker, /DATABASE_URL|jobs-runtime-db-permissions/u);
 
   const connector = serviceBlock(compose, "connector-worker");
   assert.match(connector, /postgresql:\/\/jobs_connector:/u);
