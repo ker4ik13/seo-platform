@@ -59,6 +59,7 @@ export interface SemanticKeywordListItem {
   readonly targetUrl?: string;
   readonly tags: readonly string[];
   readonly tagsTruncated: boolean;
+  readonly customValues?: readonly import("./semantic-custom-columns.js").SemanticKeywordCustomValue[];
   readonly sourceMode: SemanticKeywordSourceMode;
   readonly createdAt: string;
   readonly updatedAt: string;

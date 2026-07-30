@@ -12,12 +12,15 @@ import {
   type BrowserCursorPage
 } from "../lib/browser-api";
 import { SemanticBulkEditor } from "./semantic-bulk-editor";
+import type { SemanticCustomColumn } from "./semantic-custom-column-types";
+import { SemanticCustomValueEditor } from "./semantic-custom-value-editor";
 import { SemanticSavedViews } from "./semantic-saved-views";
 import {
   defaultSemanticViewConfig,
   type SemanticKeywordIntent,
   type SemanticSavedView,
   type SemanticSystemColumn,
+  type SemanticViewColumn,
   type SemanticViewConfig,
   type SemanticViewFilters
 } from "./semantic-view-types";
@@ -37,6 +40,12 @@ interface SemanticKeyword {
   readonly targetUrl?: string;
   readonly tags: readonly string[];
   readonly tagsTruncated: boolean;
+  readonly customValues?: readonly Readonly<{
+    columnId: string;
+    value: string | number | boolean | readonly string[];
+    version: number;
+    updatedAt: string;
+  }>[];
   readonly sourceMode: "BYOK" | "PLATFORM" | "IMPORT" | "MANUAL";
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -74,12 +83,14 @@ type KeywordEditor =
     }>;
 
 interface SemanticCoreTableProps {
+  readonly columnRefreshVersion: number;
   readonly projectId: string;
   readonly refreshVersion: number;
   readonly groupRefreshVersion: number;
 }
 
 export function SemanticCoreTable({
+  columnRefreshVersion,
   projectId,
   refreshVersion,
   groupRefreshVersion
@@ -102,6 +113,13 @@ export function SemanticCoreTable({
   const [saving, setSaving] = useState(false);
   const [mutationError, setMutationError] = useState<string>();
   const [groups, setGroups] = useState<readonly SemanticKeywordGroup[]>([]);
+  const [customColumns, setCustomColumns] = useState<
+    readonly SemanticCustomColumn[]
+  >([]);
+  const [customValueEditor, setCustomValueEditor] = useState<Readonly<{
+    keyword: SemanticKeyword;
+    column: SemanticCustomColumn;
+  }>>();
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set()
   );
@@ -149,6 +167,23 @@ export function SemanticCoreTable({
       });
     return () => controller.abort();
   }, [groupRefreshVersion, projectId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void browserApiRequest<readonly SemanticCustomColumn[]>(
+      `/app/api/projects/${encodeURIComponent(
+        projectId
+      )}/semantic-custom-columns`,
+      { signal: controller.signal }
+    )
+      .then((result) => {
+        if (!controller.signal.aborted) setCustomColumns(result);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setCustomColumns([]);
+      });
+    return () => controller.abort();
+  }, [columnRefreshVersion, projectId]);
 
   function submitFilters(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
@@ -226,7 +261,7 @@ export function SemanticCoreTable({
     });
   }
 
-  function toggleColumn(column: SemanticSystemColumn): void {
+  function toggleColumn(column: SemanticViewColumn): void {
     if (column === "query") return;
     setDraftConfig((current) => ({
       ...current,
@@ -588,7 +623,13 @@ export function SemanticCoreTable({
         <details className="semantic-column-picker">
           <summary>Колонки и плотность</summary>
           <div>
-            {semanticColumns.map((column) => (
+            {[
+              ...semanticColumns,
+              ...customColumns.map((column) => ({
+                key: `custom:${column.id}` as const,
+                label: column.name
+              }))
+            ].map((column) => (
               <label key={column.key}>
                 <input
                   checked={draftConfig.columns.includes(column.key)}
@@ -810,6 +851,23 @@ export function SemanticCoreTable({
         />
       )}
 
+      {customValueEditor && (
+        <SemanticCustomValueEditor
+          column={customValueEditor.column}
+          existing={customValueEditor.keyword.customValues?.find(
+            ({ columnId }) => columnId === customValueEditor.column.id
+          )}
+          keywordId={customValueEditor.keyword.id}
+          keywordText={customValueEditor.keyword.textOriginal}
+          onCancel={() => setCustomValueEditor(undefined)}
+          onCompleted={() => {
+            setCustomValueEditor(undefined);
+            setRetryVersion((value) => value + 1);
+          }}
+          projectId={projectId}
+        />
+      )}
+
       {bulkNotice && (
         <div className="inline-alert success semantic-table-alert" role="status">
           <span>{bulkNotice}</span>
@@ -889,7 +947,9 @@ export function SemanticCoreTable({
                     />
                   </th>
                   {viewConfig.columns.map((column) => (
-                    <th key={column}>{columnLabel(column)}</th>
+                    <th key={column}>
+                      {columnLabel(column, customColumns)}
+                    </th>
                   ))}
                   <th aria-label="Действия" />
                 </tr>
@@ -907,7 +967,16 @@ export function SemanticCoreTable({
                     </td>
                     {viewConfig.columns.map((column) => (
                       <td className={`semantic-column-${column}`} key={column}>
-                        {keywordColumn(item, column)}
+                        {keywordColumn(
+                          item,
+                          column,
+                          customColumns,
+                          (customColumn) =>
+                            setCustomValueEditor({
+                              keyword: item,
+                              column: customColumn
+                            })
+                        )}
                       </td>
                     ))}
                     <td>
@@ -1000,7 +1069,16 @@ const semanticColumns: readonly Readonly<{
   { key: "updatedAt", label: "Обновлён" }
 ];
 
-function columnLabel(column: SemanticSystemColumn): string {
+function columnLabel(
+  column: SemanticViewColumn,
+  customColumns: readonly SemanticCustomColumn[]
+): string {
+  if (column.startsWith("custom:")) {
+    return (
+      customColumns.find(({ id }) => `custom:${id}` === column)?.name ??
+      "Удалённая колонка"
+    );
+  }
   return (
     semanticColumns.find(({ key }) => key === column)?.label ?? column
   );
@@ -1008,8 +1086,30 @@ function columnLabel(column: SemanticSystemColumn): string {
 
 function keywordColumn(
   item: SemanticKeyword,
-  column: SemanticSystemColumn
+  column: SemanticViewColumn,
+  customColumns: readonly SemanticCustomColumn[],
+  onEditCustom: (column: SemanticCustomColumn) => void
 ) {
+  if (column.startsWith("custom:")) {
+    const customColumn = customColumns.find(
+      ({ id }) => `custom:${id}` === column
+    );
+    if (!customColumn) return "—";
+    const value = item.customValues?.find(
+      ({ columnId }) => columnId === customColumn.id
+    );
+    return (
+      <button
+        className="semantic-custom-value-button"
+        onClick={() => onEditCustom(customColumn)}
+        type="button"
+      >
+        {value
+          ? formatCustomValue(customColumn, value.value)
+          : "Добавить значение"}
+      </button>
+    );
+  }
   switch (column) {
     case "query":
       return (
@@ -1058,6 +1158,28 @@ function keywordColumn(
         <time dateTime={item.updatedAt}>{formatDate(item.updatedAt)}</time>
       );
   }
+}
+
+function formatCustomValue(
+  column: SemanticCustomColumn,
+  value: string | number | boolean | readonly string[]
+): string {
+  if (typeof value === "boolean") return value ? "Да" : "Нет";
+  if (Array.isArray(value)) {
+    return value
+      .map(
+        (item) =>
+          column.config.options?.find(({ id }) => id === item)?.label ?? item
+      )
+      .join(", ");
+  }
+  if (column.type === "SELECT" || column.type === "STATUS") {
+    return (
+      column.config.options?.find(({ id }) => id === value)?.label ??
+      String(value)
+    );
+  }
+  return String(value);
 }
 
 function hasActiveFilters(config: SemanticViewConfig): boolean {

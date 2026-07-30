@@ -3,6 +3,7 @@ import {
   semanticKeywordIntents,
   semanticKeywordSourceModes,
   semanticKeywordSorts,
+  semanticCustomColumnTypes,
   semanticSavedViewDensities,
   semanticSavedViewScopes,
   semanticSystemColumnKeys,
@@ -15,8 +16,13 @@ import {
   type InternalDeleteSemanticKeywordGroupInput,
   type InternalSemanticKeywordBulkInput,
   type InternalCreateSemanticSavedViewInput,
+  type InternalCreateSemanticCustomColumnInput,
   type InternalDeleteSemanticSavedViewInput,
+  type InternalDeleteSemanticCustomColumnInput,
+  type InternalDeleteSemanticKeywordCustomValueInput,
+  type InternalSetSemanticKeywordCustomValueInput,
   type InternalUpdateSemanticSavedViewInput,
+  type InternalUpdateSemanticCustomColumnInput,
   type InternalUpdateSemanticKeywordInput,
   type InternalUpdateSemanticKeywordGroupInput,
   type CreateTrackingContextInput,
@@ -32,9 +38,15 @@ import {
   type SemanticKeywordGroup,
   type SemanticKeywordListItem,
   type CreateSemanticSavedViewInput,
+  type CreateSemanticCustomColumnInput,
+  type SemanticCustomColumn,
+  type SemanticCustomColumnConfig,
+  type SemanticKeywordCustomValue,
   type SemanticSavedView,
   type SemanticSavedViewConfig,
   type UpdateSemanticSavedViewInput,
+  type SetSemanticKeywordCustomValueInput,
+  type UpdateSemanticCustomColumnInput,
   type TrackingContextCollection,
   type TrackingContextKeywordAssignmentState,
   type TrackingContextKeywordQuery,
@@ -274,6 +286,141 @@ export class SeoDataClient {
       context
     );
     return semanticSavedViews(responseData(payload));
+  }
+
+  public async listSemanticCustomColumns(
+    context: InternalContext
+  ): Promise<readonly SemanticCustomColumn[]> {
+    const payload = await this.request(
+      "GET",
+      semanticCustomColumnUrl(context, this.config.services.seoData),
+      context
+    );
+    return semanticCustomColumns(responseData(payload));
+  }
+
+  public async createSemanticCustomColumn(
+    context: InternalContext,
+    input: CreateSemanticCustomColumnInput
+  ): Promise<SemanticCustomColumn> {
+    const scope = trackingScope(context);
+    const body: InternalCreateSemanticCustomColumnInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      semanticCustomColumnUrl(context, this.config.services.seoData),
+      context,
+      body
+    );
+    return semanticCustomColumn(responseData(payload));
+  }
+
+  public async updateSemanticCustomColumn(
+    context: InternalContext,
+    columnId: string,
+    input: UpdateSemanticCustomColumnInput,
+    version: number
+  ): Promise<SemanticCustomColumn> {
+    const scope = trackingScope(context);
+    const body: InternalUpdateSemanticCustomColumnInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    const payload = await this.request(
+      "PATCH",
+      semanticCustomColumnUrl(
+        context,
+        this.config.services.seoData,
+        columnId
+      ),
+      context,
+      body
+    );
+    return semanticCustomColumn(responseData(payload));
+  }
+
+  public async deleteSemanticCustomColumn(
+    context: InternalContext,
+    columnId: string,
+    version: number
+  ): Promise<void> {
+    const scope = trackingScope(context);
+    const body: InternalDeleteSemanticCustomColumnInput = {
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    await this.request(
+      "DELETE",
+      semanticCustomColumnUrl(
+        context,
+        this.config.services.seoData,
+        columnId
+      ),
+      context,
+      body
+    );
+  }
+
+  public async setSemanticKeywordCustomValue(
+    context: InternalContext,
+    keywordId: string,
+    columnId: string,
+    input: SetSemanticKeywordCustomValueInput
+  ): Promise<SemanticKeywordCustomValue> {
+    const scope = trackingScope(context);
+    const body: InternalSetSemanticKeywordCustomValueInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "PUT",
+      semanticCustomValueUrl(
+        context,
+        this.config.services.seoData,
+        keywordId,
+        columnId
+      ),
+      context,
+      body
+    );
+    return semanticKeywordCustomValue(responseData(payload));
+  }
+
+  public async deleteSemanticKeywordCustomValue(
+    context: InternalContext,
+    keywordId: string,
+    columnId: string,
+    version: number
+  ): Promise<void> {
+    const scope = trackingScope(context);
+    const body: InternalDeleteSemanticKeywordCustomValueInput = {
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    await this.request(
+      "DELETE",
+      semanticCustomValueUrl(
+        context,
+        this.config.services.seoData,
+        keywordId,
+        columnId
+      ),
+      context,
+      body
+    );
   }
 
   public async createSemanticSavedView(
@@ -646,6 +793,7 @@ export function semanticKeywordItem(
   if (!item) throw invalidResponse();
 
   const tags = item.tags;
+  const customValues = item.customValues ?? [];
   const sourceMode = item.sourceMode;
   if (
     !requiredString(item.id) ||
@@ -664,6 +812,7 @@ export function semanticKeywordItem(
     (item.targetUrl !== undefined && typeof item.targetUrl !== "string") ||
     !Array.isArray(tags) ||
     !tags.every((tag) => typeof tag === "string") ||
+    !Array.isArray(customValues) ||
     typeof item.tagsTruncated !== "boolean" ||
     typeof sourceMode !== "string" ||
     !semanticKeywordSourceModes.some((mode) => mode === sourceMode) ||
@@ -702,6 +851,7 @@ export function semanticKeywordItem(
       : {}),
     tags: tags as string[],
     tagsTruncated: item.tagsTruncated,
+    customValues: customValues.map(semanticKeywordCustomValue),
     sourceMode:
       sourceMode as SemanticKeywordListItem["sourceMode"],
     createdAt: item.createdAt as string,
@@ -886,6 +1036,182 @@ function keywordGroupUrl(
   );
 }
 
+export function semanticCustomColumns(
+  value: unknown
+): readonly SemanticCustomColumn[] {
+  if (!Array.isArray(value) || value.length > 500) {
+    throw invalidResponse();
+  }
+  const columns = value.map(semanticCustomColumn);
+  if (new Set(columns.map(({ id }) => id)).size !== columns.length) {
+    throw invalidResponse();
+  }
+  return columns;
+}
+
+export function semanticCustomColumn(value: unknown): SemanticCustomColumn {
+  const column = exactRecord(value, [
+    "id",
+    "name",
+    "description",
+    "type",
+    "config",
+    "version",
+    "createdAt",
+    "updatedAt"
+  ]);
+  if (
+    !requiredString(column.id) ||
+    !requiredString(column.name) ||
+    (column.description !== undefined &&
+      typeof column.description !== "string") ||
+    typeof column.type !== "string" ||
+    !semanticCustomColumnTypes.some((type) => type === column.type) ||
+    !Number.isSafeInteger(column.version) ||
+    Number(column.version) < 1 ||
+    !validDate(column.createdAt) ||
+    !validDate(column.updatedAt)
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    id: column.id,
+    name: column.name,
+    ...(typeof column.description === "string"
+      ? { description: column.description }
+      : {}),
+    type: column.type as SemanticCustomColumn["type"],
+    config: semanticCustomColumnConfig(column.config, column.type),
+    version: column.version as number,
+    createdAt: column.createdAt as string,
+    updatedAt: column.updatedAt as string
+  };
+}
+
+export function semanticKeywordCustomValue(
+  value: unknown
+): SemanticKeywordCustomValue {
+  const item = exactRecord(value, [
+    "columnId",
+    "value",
+    "version",
+    "updatedAt"
+  ]);
+  if (
+    !requiredString(item.columnId) ||
+    !validCustomValue(item.value) ||
+    !Number.isSafeInteger(item.version) ||
+    Number(item.version) < 1 ||
+    !validDate(item.updatedAt)
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    columnId: item.columnId,
+    value: item.value,
+    version: item.version as number,
+    updatedAt: item.updatedAt as string
+  };
+}
+
+function semanticCustomColumnConfig(
+  value: unknown,
+  type: unknown
+): SemanticCustomColumnConfig {
+  const config = exactRecord(value, ["required", "options"]);
+  if (typeof config.required !== "boolean") throw invalidResponse();
+  const optionType = ["SELECT", "MULTI_SELECT", "STATUS"].includes(
+    String(type)
+  );
+  if (
+    optionType !== (config.options !== undefined) ||
+    (config.options !== undefined && !Array.isArray(config.options))
+  ) {
+    throw invalidResponse();
+  }
+  const options =
+    config.options === undefined
+      ? undefined
+      : config.options.map((value) => {
+          const option = exactRecord(value, ["id", "label", "color"]);
+          if (
+            !requiredString(option.id) ||
+            !requiredString(option.label) ||
+            (option.color !== undefined &&
+              (typeof option.color !== "string" ||
+                !/^#[0-9a-f]{6}$/iu.test(option.color)))
+          ) {
+            throw invalidResponse();
+          }
+          return {
+            id: option.id,
+            label: option.label,
+            ...(typeof option.color === "string"
+              ? { color: option.color }
+              : {})
+          };
+        });
+  if (
+    options &&
+    (options.length < 1 ||
+      options.length > 100 ||
+      new Set(options.map(({ id }) => id)).size !== options.length)
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    required: config.required,
+    ...(options ? { options } : {})
+  };
+}
+
+function validCustomValue(
+  value: unknown
+): value is SemanticKeywordCustomValue["value"] {
+  return (
+    typeof value === "string" ||
+    typeof value === "boolean" ||
+    (typeof value === "number" && Number.isSafeInteger(value)) ||
+    (Array.isArray(value) &&
+      value.length >= 1 &&
+      value.length <= 100 &&
+      value.every((item) => typeof item === "string") &&
+      new Set(value).size === value.length)
+  );
+}
+
+function semanticCustomColumnUrl(
+  context: InternalContext,
+  baseUrl: string,
+  columnId?: string
+): URL {
+  const projectId = requiredProjectId(context.tenant);
+  const base = `/internal/v1/projects/${encodeURIComponent(
+    projectId
+  )}/semantic-custom-columns`;
+  return new URL(
+    columnId ? `${base}/${encodeURIComponent(columnId)}` : base,
+    baseUrl
+  );
+}
+
+function semanticCustomValueUrl(
+  context: InternalContext,
+  baseUrl: string,
+  keywordId: string,
+  columnId: string
+): URL {
+  const projectId = requiredProjectId(context.tenant);
+  return new URL(
+    `/internal/v1/projects/${encodeURIComponent(
+      projectId
+    )}/keywords/${encodeURIComponent(
+      keywordId
+    )}/custom-values/${encodeURIComponent(columnId)}`,
+    baseUrl
+  );
+}
+
 export function semanticSavedViews(
   value: unknown
 ): readonly SemanticSavedView[] {
@@ -963,11 +1289,14 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     ) ||
     !Array.isArray(config.columns) ||
     config.columns.length < 1 ||
-    config.columns.length > semanticSystemColumnKeys.length ||
+    config.columns.length > 108 ||
     !config.columns.every(
       (column) =>
         typeof column === "string" &&
-        semanticSystemColumnKeys.some((key) => key === column)
+        (semanticSystemColumnKeys.some((key) => key === column) ||
+          /^custom:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+            column
+          ))
     ) ||
     new Set(config.columns).size !== config.columns.length ||
     !config.columns.includes("query") ||

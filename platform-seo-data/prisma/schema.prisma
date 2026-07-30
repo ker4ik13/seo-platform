@@ -77,6 +77,21 @@ enum SemanticSavedViewScope {
   PROJECT_SHARED
 }
 
+enum SemanticCustomColumnType {
+  TEXT
+  LONG_TEXT
+  INTEGER
+  DECIMAL
+  BOOLEAN
+  DATE
+  DATETIME
+  SELECT
+  MULTI_SELECT
+  URL
+  USER
+  STATUS
+}
+
 model Keyword {
   id             String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId    String         @map("workspace_id") @db.Uuid
@@ -108,6 +123,7 @@ model Keyword {
   trackingAssignments TrackingContextKeywordAssignment[]
   rankManifestEntries RankExecutionManifestEntry[]
   rankSnapshots       RankSnapshot[] @relation("RankSnapshotKeyword")
+  typedCustomValues   SemanticKeywordCustomValue[]
 
   @@unique([projectId, language, normalizedHash])
   @@unique([workspaceId, projectId, id], map: "keywords_tenant_project_id_key")
@@ -122,6 +138,62 @@ model Keyword {
   @@index([projectId, targetPageId, id])
   @@index([projectId, isTracked, id])
   @@map("keywords")
+}
+
+model SemanticCustomColumn {
+  id             String                   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId    String                   @map("workspace_id") @db.Uuid
+  projectId      String                   @map("project_id") @db.Uuid
+  name           String                   @db.VarChar(160)
+  normalizedName String                   @map("normalized_name") @db.VarChar(160)
+  description    String?                  @db.Text
+  type           SemanticCustomColumnType
+  config         Json
+  status         EntityStatus             @default(ACTIVE)
+  version        Int                      @default(1)
+  createdBy      String                   @map("created_by") @db.Uuid
+  updatedBy      String                   @map("updated_by") @db.Uuid
+  createdAt      DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt      DateTime?                @map("deleted_at") @db.Timestamptz(6)
+
+  values SemanticKeywordCustomValue[]
+
+  @@unique([workspaceId, projectId, id], map: "semantic_custom_columns_tenant_project_id_key")
+  @@index([workspaceId, projectId, status, name, id], map: "semantic_custom_columns_project_status_name_idx")
+  @@map("semantic_custom_columns")
+}
+
+model SemanticKeywordCustomValue {
+  workspaceId      String    @map("workspace_id") @db.Uuid
+  projectId        String    @map("project_id") @db.Uuid
+  keywordId        String    @map("keyword_id") @db.Uuid
+  columnId         String    @map("column_id") @db.Uuid
+  textValue        String?   @map("text_value") @db.Text
+  integerValue     BigInt?   @map("integer_value")
+  decimalValue     Decimal?  @map("decimal_value") @db.Decimal(30, 10)
+  booleanValue     Boolean?  @map("boolean_value")
+  dateValue        DateTime? @map("date_value") @db.Date
+  datetimeValue    DateTime? @map("datetime_value") @db.Timestamptz(6)
+  stringArrayValue String[]  @default([]) @map("string_array_value")
+  userId           String?   @map("user_id") @db.Uuid
+  version          Int       @default(1)
+  updatedBy        String    @map("updated_by") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  keyword Keyword              @relation(fields: [workspaceId, projectId, keywordId], references: [workspaceId, projectId, id], onDelete: Cascade)
+  column  SemanticCustomColumn @relation(fields: [workspaceId, projectId, columnId], references: [workspaceId, projectId, id], onDelete: Restrict)
+
+  @@id([keywordId, columnId])
+  @@index([workspaceId, projectId, columnId, textValue], map: "semantic_keyword_custom_values_text_idx")
+  @@index([workspaceId, projectId, columnId, integerValue], map: "semantic_keyword_custom_values_integer_idx")
+  @@index([workspaceId, projectId, columnId, decimalValue], map: "semantic_keyword_custom_values_decimal_idx")
+  @@index([workspaceId, projectId, columnId, booleanValue], map: "semantic_keyword_custom_values_boolean_idx")
+  @@index([workspaceId, projectId, columnId, dateValue], map: "semantic_keyword_custom_values_date_idx")
+  @@index([workspaceId, projectId, columnId, datetimeValue], map: "semantic_keyword_custom_values_datetime_idx")
+  @@index([workspaceId, projectId, columnId, userId], map: "semantic_keyword_custom_values_user_idx")
+  @@map("semantic_keyword_custom_values")
 }
 
 model SemanticSavedView {

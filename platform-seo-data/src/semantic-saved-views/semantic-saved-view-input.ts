@@ -152,17 +152,24 @@ function requiredColumns(value: unknown): SemanticSavedViewConfig["columns"] {
   if (
     !Array.isArray(value) ||
     value.length < 1 ||
-    value.length > semanticSystemColumnKeys.length
+    value.length > 108
   ) {
     invalid("config.columns");
   }
-  const columns = value.map((column, index) =>
-    requiredEnum(
-      column,
-      semanticSystemColumnKeys,
-      `config.columns[${index}]`
-    )
-  );
+  const columns = value.map((column, index) => {
+    if (
+      typeof column !== "string" ||
+      (!semanticSystemColumnKeys.includes(
+        column as (typeof semanticSystemColumnKeys)[number]
+      ) &&
+        !/^custom:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+          column
+        ))
+    ) {
+      invalid(`config.columns[${index}]`);
+    }
+    return column as SemanticSavedViewConfig["columns"][number];
+  });
   if (new Set(columns).size !== columns.length || !columns.includes("query")) {
     invalid("config.columns");
   }

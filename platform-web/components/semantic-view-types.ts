@@ -23,6 +23,10 @@ export type SemanticSystemColumn =
   | "source"
   | "updatedAt";
 
+export type SemanticViewColumn =
+  | SemanticSystemColumn
+  | `custom:${string}`;
+
 export interface SemanticViewFilters {
   readonly search?: string;
   readonly intent?: SemanticKeywordIntent;
@@ -37,7 +41,7 @@ export interface SemanticViewConfig {
   readonly schemaVersion: 1;
   readonly filters: SemanticViewFilters;
   readonly sort: SemanticKeywordSort;
-  readonly columns: readonly SemanticSystemColumn[];
+  readonly columns: readonly SemanticViewColumn[];
   readonly density: "COMFORTABLE" | "COMPACT";
 }
 

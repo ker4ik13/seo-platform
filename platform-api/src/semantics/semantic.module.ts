@@ -6,6 +6,7 @@ import { KeywordController } from "./keyword.controller.js";
 import { KeywordGroupController } from "./keyword-group.controller.js";
 import { SemanticBulkController } from "./semantic-bulk.controller.js";
 import { SemanticSavedViewController } from "./semantic-saved-view.controller.js";
+import { SemanticCustomColumnController } from "./semantic-custom-column.controller.js";
 
 @Module({
   imports: [AuthorizationModule, IdentityModule, SeoDataModule],
@@ -13,6 +14,7 @@ import { SemanticSavedViewController } from "./semantic-saved-view.controller.js
     KeywordController,
     KeywordGroupController,
     SemanticBulkController,
+    SemanticCustomColumnController,
     SemanticSavedViewController
   ]
 })

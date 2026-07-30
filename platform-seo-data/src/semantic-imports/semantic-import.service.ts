@@ -191,6 +191,11 @@ export class SemanticImportService {
       const pages = await ensurePages(transaction, input, rowsToApply);
       const groups = await ensureGroups(transaction, input, rowsToApply);
       const tags = await ensureTags(transaction, input, rowsToApply);
+      const customColumns = await ensureCustomColumns(
+        transaction,
+        input,
+        rowsToApply
+      );
       if (newRows.length > 0) {
         await transaction.keyword.createMany({
           data: newRows.map((row) => ({
@@ -365,6 +370,13 @@ export class SemanticImportService {
           skipDuplicates: true
         });
       }
+      await applyTypedCustomValues(
+        transaction,
+        input,
+        processedRows,
+        keywordByKey,
+        customColumns
+      );
       const metricSnapshots = processedRows.flatMap((row) => {
         const keyword = keywordByKey.get(
           keywordKey(row.language, row.normalizedHash)
@@ -544,6 +556,131 @@ export class SemanticImportService {
     }
     return receipt;
   }
+}
+
+async function ensureCustomColumns(
+  transaction: Prisma.TransactionClient,
+  input: InternalApplySemanticImportChunkInput,
+  rows: readonly SemanticImportPublishRow[]
+): Promise<ReadonlyMap<string, string>> {
+  const names = new Map<string, string>();
+  for (const row of rows) {
+    for (const name of Object.keys(row.customValues)) {
+      names.set(normalizeCustomColumnName(name), name.normalize("NFKC").trim());
+    }
+  }
+  if (names.size === 0) return new Map();
+  const normalizedNames = [...names.keys()];
+  const existing = await transaction.semanticCustomColumn.findMany({
+    where: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      status: "ACTIVE",
+      normalizedName: { in: normalizedNames }
+    },
+    select: { id: true, normalizedName: true, type: true }
+  });
+  if (existing.some(({ type }) => type !== "LONG_TEXT")) {
+    throw new ConflictException(
+      "Imported custom column conflicts with an existing typed column"
+    );
+  }
+  const existingNames = new Set(
+    existing.map(({ normalizedName }) => normalizedName)
+  );
+  await transaction.semanticCustomColumn.createMany({
+    data: [...names.entries()]
+      .filter(([normalizedName]) => !existingNames.has(normalizedName))
+      .map(([normalizedName, name]) => ({
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        name,
+        normalizedName,
+        description: "Создано из импорта",
+        type: "LONG_TEXT" as const,
+        config: json({ required: false }),
+        createdBy: input.actorId,
+        updatedBy: input.actorId
+      })),
+    skipDuplicates: true
+  });
+  const final = await transaction.semanticCustomColumn.findMany({
+    where: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      status: "ACTIVE",
+      normalizedName: { in: normalizedNames }
+    },
+    select: { id: true, normalizedName: true, type: true }
+  });
+  if (
+    final.length !== normalizedNames.length ||
+    final.some(({ type }) => type !== "LONG_TEXT")
+  ) {
+    throw new ConflictException(
+      "Imported custom columns could not be resolved safely"
+    );
+  }
+  return new Map(final.map(({ normalizedName, id }) => [normalizedName, id]));
+}
+
+async function applyTypedCustomValues(
+  transaction: Prisma.TransactionClient,
+  input: InternalApplySemanticImportChunkInput,
+  rows: readonly SemanticImportPublishRow[],
+  keywordByKey: ReadonlyMap<string, Keyword>,
+  columns: ReadonlyMap<string, string>
+): Promise<void> {
+  for (const row of rows) {
+    const keyword = keywordByKey.get(
+      keywordKey(row.language, row.normalizedHash)
+    );
+    if (!keyword) continue;
+    for (const [name, value] of Object.entries(row.customValues)) {
+      const columnId = columns.get(normalizeCustomColumnName(name));
+      if (!columnId) {
+        throw new Error("Imported custom column was not persisted");
+      }
+      if (input.duplicatePolicy === "MERGE_NON_EMPTY") {
+        await transaction.semanticKeywordCustomValue.createMany({
+          data: [
+            {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              keywordId: keyword.id,
+              columnId,
+              textValue: value,
+              updatedBy: input.actorId
+            }
+          ],
+          skipDuplicates: true
+        });
+        continue;
+      }
+      await transaction.semanticKeywordCustomValue.upsert({
+        where: {
+          keywordId_columnId: { keywordId: keyword.id, columnId }
+        },
+        create: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          keywordId: keyword.id,
+          columnId,
+          textValue: value,
+          updatedBy: input.actorId
+        },
+        update: {
+          textValue: value,
+          updatedBy: input.actorId,
+          version: { increment: 1 }
+        }
+      });
+    }
+  }
+}
+
+function normalizeCustomColumnName(value: string): string {
+  return value.normalize("NFKC").toLowerCase().trim();
 }
 
 interface EnsuredEntities {

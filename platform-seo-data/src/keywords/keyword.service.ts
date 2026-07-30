@@ -51,6 +51,12 @@ const KEYWORD_INCLUDE = {
         select: { name: true }
       }
     }
+  },
+  typedCustomValues: {
+    where: { column: { status: "ACTIVE" as const } },
+    orderBy: { columnId: "asc" as const },
+    take: 500,
+    include: { column: { select: { type: true } } }
   }
 } satisfies Prisma.KeywordInclude;
 
@@ -698,11 +704,50 @@ function keywordItem(
     ...(targetUrl ? { targetUrl } : {}),
     tags,
     tagsTruncated: row.tags.length > 50,
+    customValues: (row.typedCustomValues ?? []).map(keywordCustomValue),
     sourceMode: row.sourceMode,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     version: row.version
   };
+}
+
+function keywordCustomValue(
+  row: KeywordAggregate["typedCustomValues"][number]
+) {
+  return {
+    columnId: row.columnId,
+    value: keywordCustomValueData(row),
+    version: row.version,
+    updatedAt: row.updatedAt.toISOString()
+  };
+}
+
+function keywordCustomValueData(
+  row: KeywordAggregate["typedCustomValues"][number]
+) {
+  switch (row.column.type) {
+    case "TEXT":
+    case "LONG_TEXT":
+    case "SELECT":
+    case "STATUS":
+    case "URL":
+      return row.textValue!;
+    case "INTEGER":
+      return Number(row.integerValue!);
+    case "DECIMAL":
+      return row.decimalValue!.toString();
+    case "BOOLEAN":
+      return row.booleanValue!;
+    case "DATE":
+      return row.dateValue!.toISOString().slice(0, 10);
+    case "DATETIME":
+      return row.datetimeValue!.toISOString();
+    case "MULTI_SELECT":
+      return row.stringArrayValue;
+    case "USER":
+      return row.userId!;
+  }
 }
 
 function assertKeywordVersion(current: number, expected: number): void {

@@ -11,6 +11,8 @@ import {
   semanticKeywordGroups,
   semanticKeywordBulkResult,
   semanticKeywordPage,
+  semanticCustomColumns,
+  semanticKeywordCustomValue,
   semanticSavedViews,
   SeoDataClient
 } from "./seo-data.client.js";
@@ -205,6 +207,41 @@ test("validates versioned semantic saved views and rejects DSL drift", () => {
   );
   assert.throws(
     () => semanticSavedViews([view, view]),
+    DomainError
+  );
+});
+
+test("validates typed custom column definitions and values", () => {
+  const column = {
+    id: "01900000-0000-7000-8000-000000000050",
+    name: "Этап",
+    type: "STATUS",
+    config: {
+      required: true,
+      options: [
+        { id: "new", label: "Новый" },
+        { id: "done", label: "Готово", color: "#22aa66" }
+      ]
+    },
+    version: 1,
+    createdAt: "2026-07-30T10:00:00.000Z",
+    updatedAt: "2026-07-30T10:00:00.000Z"
+  };
+  assert.equal(semanticCustomColumns([column])[0]?.type, "STATUS");
+  assert.deepEqual(
+    semanticKeywordCustomValue({
+      columnId: column.id,
+      value: "new",
+      version: 2,
+      updatedAt: "2026-07-30T11:00:00.000Z"
+    }).value,
+    "new"
+  );
+  assert.throws(
+    () =>
+      semanticCustomColumns([
+        { ...column, config: { required: true } }
+      ]),
     DomainError
   );
 });

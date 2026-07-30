@@ -2103,6 +2103,43 @@ svg { display: block; }
 .semantic-column-picker label { align-items: center; display: flex; font-size: 10px; gap: 6px; }
 .semantic-column-picker input { accent-color: var(--accent); }
 .semantic-column-picker .secondary-button { grid-column: 1 / -1; }
+.semantic-custom-columns { display: grid; gap: 14px; }
+.semantic-custom-column-editor { align-items: end; background: #fafafd; border: 1px solid var(--line); border-radius: 11px; display: grid; gap: 10px; grid-template-columns: minmax(180px, 1fr) minmax(150px, .7fr) minmax(220px, 1.2fr); padding: 13px; }
+.semantic-custom-column-editor label { display: grid; gap: 6px; }
+.semantic-custom-column-editor label > span,
+.semantic-custom-value-editor label > span { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.semantic-custom-column-editor input:not([type="checkbox"]),
+.semantic-custom-column-editor select,
+.semantic-custom-column-editor textarea,
+.semantic-custom-value-editor input:not([type="checkbox"]),
+.semantic-custom-value-editor select,
+.semantic-custom-value-editor textarea { background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); font: inherit; min-height: 38px; padding: 8px 10px; width: 100%; }
+.semantic-custom-description { grid-column: span 1; }
+.semantic-custom-options { grid-column: 1 / -1; }
+.semantic-custom-required { align-items: center; display: flex !important; gap: 7px !important; padding-bottom: 10px; }
+.semantic-custom-required input { accent-color: var(--accent); }
+.semantic-custom-required > span { color: var(--text) !important; font-size: 11px !important; letter-spacing: 0 !important; text-transform: none !important; }
+.semantic-custom-column-editor .semantic-editor-actions { grid-column: 1 / -1; }
+.semantic-custom-column-list { border: 1px solid var(--line); border-radius: 10px; display: grid; max-height: 300px; overflow: auto; }
+.semantic-custom-column-list article { align-items: center; border-bottom: 1px solid var(--line); display: grid; gap: 9px; grid-template-columns: minmax(0, 1fr) auto auto; min-height: 48px; padding: 8px 12px; }
+.semantic-custom-column-list article:last-child { border-bottom: 0; }
+.semantic-custom-column-list strong,
+.semantic-custom-column-list span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.semantic-custom-column-list strong { font-size: 11px; }
+.semantic-custom-column-list span { color: var(--muted); font-size: 10px; margin-top: 3px; }
+.semantic-custom-value-editor { align-items: end; background: #f7f6ff; border: 1px solid #d8d3ff; border-radius: 12px; display: grid; gap: 12px; grid-template-columns: minmax(170px, .8fr) minmax(260px, 1.5fr); padding: 14px; }
+.semantic-custom-value-editor > div:first-child strong,
+.semantic-custom-value-editor > div:first-child span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.semantic-custom-value-editor > div:first-child strong { font-size: 12px; }
+.semantic-custom-value-editor > div:first-child span { color: var(--muted); font-size: 10px; margin-top: 4px; }
+.semantic-custom-value-editor label { display: grid; gap: 6px; }
+.semantic-custom-value-editor fieldset { border: 1px solid var(--line); border-radius: 8px; display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 8px 10px; }
+.semantic-custom-value-editor fieldset legend { color: var(--muted); font-size: 9px; font-weight: 700; padding: 0 4px; text-transform: uppercase; }
+.semantic-custom-value-editor fieldset label { align-items: center; display: flex; font-size: 10px; gap: 5px; }
+.semantic-custom-value-editor fieldset input { accent-color: var(--accent); }
+.semantic-custom-value-editor .inline-alert,
+.semantic-custom-value-editor .semantic-editor-actions { grid-column: 1 / -1; }
+.semantic-custom-value-button { background: transparent; border: 0; color: var(--brand); cursor: pointer; font: inherit; max-width: 100%; overflow: hidden; padding: 2px 0; text-overflow: ellipsis; white-space: nowrap; }
 .semantic-editor { background: #fafafd; border: 1px solid var(--line); border-radius: 12px; display: grid; gap: 14px; padding: 16px; }
 .semantic-editor-heading { align-items: flex-start; display: flex; gap: 16px; justify-content: space-between; }
 .semantic-editor-heading strong,
@@ -2545,6 +2582,9 @@ svg { display: block; }
   .semantic-search label { flex-basis: 100%; }
   .semantic-filter-bar { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .semantic-saved-views { min-width: min(100%, 420px); }
+  .semantic-custom-column-editor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .semantic-custom-value-editor { grid-template-columns: 1fr; }
+  .semantic-custom-value-editor > * { grid-column: 1 !important; }
   .semantic-editor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .semantic-editor-query,
   .semantic-editor-tags,
@@ -2795,6 +2835,8 @@ svg { display: block; }
   .semantic-filter-bar .text-button { min-height: 38px; }
   .semantic-view-toolbar > details { width: 100%; }
   .semantic-saved-views form { grid-template-columns: 1fr; }
+  .semantic-custom-column-editor { grid-template-columns: 1fr; }
+  .semantic-custom-column-editor > * { grid-column: 1 !important; }
   .semantic-editor-grid { grid-template-columns: 1fr; }
   .semantic-editor-query,
   .semantic-editor-tags,

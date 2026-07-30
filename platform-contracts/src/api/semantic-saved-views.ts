@@ -33,6 +33,10 @@ export const semanticSystemColumnKeys = [
 export type SemanticSystemColumnKey =
   (typeof semanticSystemColumnKeys)[number];
 
+export type SemanticSavedViewColumnKey =
+  | SemanticSystemColumnKey
+  | `custom:${string}`;
+
 export interface SemanticSavedViewFilters {
   readonly search?: string;
   readonly intent?: SemanticKeywordIntent;
@@ -47,7 +51,7 @@ export interface SemanticSavedViewConfig {
   readonly schemaVersion: 1;
   readonly filters: SemanticSavedViewFilters;
   readonly sort: SemanticKeywordSort;
-  readonly columns: readonly SemanticSystemColumnKey[];
+  readonly columns: readonly SemanticSavedViewColumnKey[];
   readonly density: SemanticSavedViewDensity;
 }
 

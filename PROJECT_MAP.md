@@ -15,12 +15,20 @@ workspace/actor из browser body; Web использует same-origin BFF и �
 failed/conflicted partition и позволяет массово менять приоритет, избранное,
 intent, группу, target URL и теги без blind overwrite. Текущий slice ещё не считается
 завершённым до полного lint/test/build и живого PostgreSQL E2E. Следом в P1:
-custom columns, versions/undo, export и collaboration. Серверный keyword read
+versions/undo, export и collaboration. Серверный keyword read
 model уже поддерживает allowlisted intent/group/favorite/tracked/priority
 filters и пять стабильных keyset sorts; cursor криптографически связан с
 фильтрами и сортировкой через SHA-256 fingerprint. Private и project-shared saved views сохраняют
 строго валидируемый versioned DSL (фильтры, сортировка, видимость/порядок
 колонок и плотность), имеют owner boundary, CAS, soft delete и browser UI.
+Custom columns базовых типов реализованы отдельными tenant-scoped definitions
+и typed EAV values: text/long text/integer/decimal/boolean/date/datetime/
+select/multi-select/URL/user/status. Каждая ячейка имеет CAS; PostgreSQL
+constraint и trigger обеспечивают ровно одно значение правильного типа,
+tenant-prefixed btree/GIN indexes делают значения фильтруемыми без JSON-only
+storage. Web создаёт/настраивает колонки и редактирует ячейки; import mapping
+создаёт LONG_TEXT definitions и typed values, а migration backfill-ит legacy
+JSON только при доказуемой actor provenance.
 
 Предыдущий P2 foundation: versioned tracking context, provider-free оценка и immutable
 execution manifest в SEO Data завершены. Estimate хранится в `jobs_db`,
@@ -483,8 +491,9 @@ Backend convention:
   `semantic.import`/`semantic.view`;
 - `platform-api/src/semantics` — public project-scoped keyword read/create/
   update/delete, bounded explicit-ID bulk, иерархические groups и versioned
-  private/project-shared saved views; reads используют `semantic.view`,
-  mutations — отдельные semantic permissions, CSRF, tenant lifecycle,
+  private/project-shared saved views, а также typed custom column/value CRUD;
+  reads используют `semantic.view`, definitions защищены
+  `semantic.manage_custom_columns`, mutations — CSRF, tenant lifecycle,
   optimistic locking и audit;
 - `platform-api/src/rankings` — public tracking context CRUD/archive/restore
   и point keyword assignments с `ranking.view/configure`, CSRF,
@@ -623,6 +632,13 @@ Backend convention:
   same-origin BFF;
 - migration `20260730170500_keyword_filter_indexes` — tenant-prefixed btree
   indexes для updated/text/priority/intent keyset filter/sort paths;
+- `platform-seo-data/src/semantic-custom-columns` и migration
+  `20260730190000_semantic_custom_columns` — definitions двенадцати базовых
+  типов, indexed typed EAV values, composite tenant FK, DB type trigger,
+  per-cell CAS, option-removal race guard и fail-closed legacy JSON backfill;
+- `platform-seo-data/src/semantic-imports` создаёт import-mapped LONG_TEXT
+  definitions/values в typed storage, сохраняя legacy JSON только как
+  переходную совместимость;
 - `platform-seo-data/prisma/migrations/20260730110000_keyword_editor_fields`
   — `keywords.is_favorite`, allowlisted `intent` и active favorite index;
 - `platform-seo-data/src/tracking-contexts` — logical context,
@@ -1393,6 +1409,11 @@ caller, recorded connector wire submission/status и normalized result producer 
   typecheck, root strict lint, tests, production build, SEO Data Prisma
   validate/generate и `git diff --check` проходят. Живое применение migration
   остаётся отдельным gate до доступного PostgreSQL runtime.
+- P1 typed custom columns gate 2026-07-30: SEO Data 113/113, Platform API
+  375 pass + 4 opt-in PostgreSQL skips, Web 149/149; root strict lint,
+  affected-package typecheck/tests, Prisma validate/generate, production
+  build всех пакетов и `git diff --check` проходят. Live PostgreSQL migration
+  и browser E2E остаются невыданным gate на текущем VPS.
 - Live HTTPS preview 2026-07-30: Caddy short-lived IP TLS → loopback router →
   production Web/API/SEO Data/Jobs/Realtime; все обязательные readiness
   dependencies имеют `ok`. Реальный same-origin login вернул secure
@@ -1408,7 +1429,7 @@ caller, recorded connector wire submission/status и normalized result producer 
 
 Сначала закрывается пользовательский P1-контур:
 
-`custom columns → versions/undo/export → comments/presence`
+`versions/undo/export → comments/presence`
 
 Критерий — не наличие controller/service файлов, а browser E2E на живом
 PostgreSQL: пользователь создаёт проект и структуру групп, добавляет и
