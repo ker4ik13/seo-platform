@@ -1,0 +1,46 @@
+{
+  "asyncapi": "2.6.0",
+  "info": {
+    "title": "SEO Platform identity events",
+    "version": "1.0.0",
+    "description": "Minimal contract for durable terminal session-family revocation delivery over environment-isolated NATS JetStream."
+  },
+  "defaultContentType": "application/json",
+  "channels": {
+    "{environment}.identity.session-family.revoked.v1": {
+      "description": "Platform API publishes; the Realtime durable consumer acknowledges only after its inbox and revocation transaction commits.",
+      "parameters": {
+        "environment": {
+          "description": "Lowercase deployment environment token. Production and staging use separate accounts and streams.",
+          "schema": {
+            "type": "string",
+            "pattern": "^[a-z](?:[a-z0-9-]{0,30}[a-z0-9])?$"
+          }
+        }
+      },
+      "publish": {
+        "operationId": "publishIdentitySessionFamilyRevokedV1",
+        "message": {
+          "$ref": "#/components/messages/identitySessionFamilyRevokedV1"
+        }
+      }
+    }
+  },
+  "components": {
+    "messages": {
+      "identitySessionFamilyRevokedV1": {
+        "name": "identity.session-family.revoked.v1",
+        "title": "Session family revoked",
+        "contentType": "application/json",
+        "payload": {
+          "$ref": "./identity.session-family.revoked.v1.schema.json"
+        },
+        "x-producer": "platform-api",
+        "x-consumer": "realtime.session-family-revocation.v1",
+        "x-delivery": "at-least-once",
+        "x-secrets": false,
+        "x-direct-pii": false
+      }
+    }
+  }
+}

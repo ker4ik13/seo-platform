@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "files": [
-    "dist"
+    "dist",
+    "schemas"
   ],
   "exports": {
     ".": {
@@ -18,7 +19,11 @@
     "./rank-results-canonical": {
       "types": "./dist/rank-results-canonical.d.ts",
       "import": "./dist/rank-results-canonical.js"
-    }
+    },
+    "./schemas/identity.session-family.revoked.v1.schema.json":
+      "./schemas/identity.session-family.revoked.v1.schema.json",
+    "./schemas/identity.session-family.revoked.v1.asyncapi.json":
+      "./schemas/identity.session-family.revoked.v1.asyncapi.json"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@fastify/cookie": "11.1.2",
+    "@nats-io/jetstream": "3.4.0",
     "@nats-io/transport-node": "3.4.0",
     "@nestjs/common": "11.1.28",
     "@nestjs/core": "11.1.28",

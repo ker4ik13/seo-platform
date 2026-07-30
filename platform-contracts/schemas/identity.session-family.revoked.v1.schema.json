@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:seo-platform:event:identity.session-family.revoked.v1",
+  "title": "identity.session-family.revoked.v1",
+  "description": "Redacted terminal session-family revocation fact. Direct PII, reasons, session details, network fingerprints and token material are forbidden.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "eventType",
+    "occurredAt",
+    "producer",
+    "traceId",
+    "aggregate",
+    "data",
+    "metadata"
+  ],
+  "properties": {
+    "eventId": {
+      "$ref": "#/$defs/canonicalUuid"
+    },
+    "eventType": {
+      "const": "identity.session-family.revoked.v1"
+    },
+    "occurredAt": {
+      "$ref": "#/$defs/isoMillisUtc"
+    },
+    "producer": {
+      "const": "platform-api"
+    },
+    "traceId": {
+      "$ref": "#/$defs/safeContextId"
+    },
+    "aggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "id",
+        "version"
+      ],
+      "properties": {
+        "type": {
+          "const": "session-family"
+        },
+        "id": {
+          "$ref": "#/$defs/canonicalUuid"
+        },
+        "version": {
+          "const": 1
+        }
+      }
+    },
+    "data": {
+      "description": "Contains pseudonymous identifiers only; no direct PII or secrets.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "userId",
+        "sessionFamilyId",
+        "revokedAt"
+      ],
+      "properties": {
+        "userId": {
+          "$ref": "#/$defs/canonicalUuid"
+        },
+        "sessionFamilyId": {
+          "$ref": "#/$defs/canonicalUuid"
+        },
+        "revokedAt": {
+          "$ref": "#/$defs/isoMillisUtc"
+        }
+      },
+      "x-data-classification": "pseudonymous-identifiers"
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "correlationId": {
+          "$ref": "#/$defs/safeContextId"
+        },
+        "causationId": {
+          "$ref": "#/$defs/safeContextId"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "canonicalUuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "isoMillisUtc": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$"
+    },
+    "safeContextId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+    }
+  },
+  "x-secrets": false,
+  "x-direct-pii": false
+}
