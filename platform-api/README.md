@@ -69,10 +69,26 @@ worker как ссылка на одноразовую запись: откры�
 восстанавливается внутри доверенного контура и не попадает в outbox или логи.
 То же правило применяется к приглашениям в workspace и восстановлению пароля.
 
-Для внутренних upload-команд Platform API и jobs API используют отдельный
-`INTERNAL_API_TOKEN`. Он обязателен и должен содержать не менее 32 символов в
-production. При read-only billing state просмотр и разрешённый экспорт
-остаются доступны, а создание нового импорта блокируется.
+Legacy `INTERNAL_API_TOKEN` выведен из эксплуатации: наличие этой переменной
+останавливает startup. Обычные синхронные вызовы используют отдельные
+caller/audience credentials:
+
+- `PLATFORM_API_TO_SEO_DATA_TOKEN` — только Platform API и SEO Data;
+- `PLATFORM_API_TO_JOBS_TOKEN` — только Platform API и Jobs HTTP;
+- `PLATFORM_API_TO_REALTIME_TOKEN` — только Platform API и Realtime.
+
+Vault/binding boundary продолжает использовать отдельный
+`PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`, browser device lifecycle —
+`PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN`, а issuer execution grant —
+`JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`. Эти credentials не заменяют друг друга.
+Production требует каждое используемое значение; startup отклоняет известные
+placeholders, whitespace/control/comma, длину вне `32..512` visible ASCII и
+повторное использование одного значения между настроенными service tokens.
+Internal clients запрещают HTTP redirects (`redirect: "error"`), поэтому
+`X-Internal-Token` не пересылается на другой origin.
+
+При read-only billing state просмотр и разрешённый экспорт остаются доступны,
+а создание нового импорта блокируется.
 
 Production дополнительно требует отдельный 32-байтный
 `AUTH_DATA_ENCRYPTION_KEY` в Base64URL для TOTP secrets. Смена этого ключа

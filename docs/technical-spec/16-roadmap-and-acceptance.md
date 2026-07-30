@@ -226,6 +226,19 @@ production-зависимостей. P2 не считается
 выполненным до реального rank job, multi-tenant queue fairness, terminal
 outbox/delivery и security/load/restore gates.
 
+Межсервисный hardening уже удалил legacy `INTERNAL_API_TOKEN`, разделил
+четыре general caller/audience credentials и сохранил отдельные vault,
+notification и rank boundaries. Compose запускает network-less read-only
+one-shot `service-token-preflight` до шести token-bearing processes: девять
+service tokens и `RANK_HISTORY_CURSOR_KEY` должны быть глобально pairwise
+distinct, без placeholders и соответствовать deploy-алфавиту
+`[A-Za-z0-9._~-]` при длине `32..512`. Runtime намеренно сохраняет более
+широкий контракт visible ASCII без whitespace/control/comma. Jobs HTTP,
+import, inspection, system, rank и connector используют отдельные process
+roles/env allowlists. Эти gates уменьшают secret fan-out и ошибку конфигурации,
+но не закрывают P2: остаются provider runtime, durable delivery, Redis/egress,
+observability, target-environment rollout и load/restore evidence.
+
 Preparation runtime имеет bounded `maxAttempts=20`. До internal seal вызова
 sidecar переходит в `OUTCOME_UNKNOWN`; только доказанное отсутствие manifest
 разрешает `NOT_SEALED`. Retryable transport/service ambiguity повторяет exact
@@ -340,12 +353,16 @@ validation slice:
 - валидный grant атомарно получает `CONSUMED` только вместе с единственной
   secret-free `READY_TO_SUBMIT` execution row; deferred invariant запрещает
   commit любой половины;
-- dispatcher/provider path service не вызывает, scoped credential claim не
-  существует, production submit flag fail-closed выключен;
-- schema/static tests не заменяют обязательные PostgreSQL 18 fresh/negative/
-  race tests для intent/consume migrations;
-- приёмка этого slice не закрывает SECURITY DEFINER connector claim, provider
-  contract, normalized producer, vault isolation и production security gates.
+- dispatcher/provider path service не вызывает; default-closed
+  `SECURITY DEFINER` claim/authorize и exact connector grants существуют, но
+  runtime caller ещё не подключён к scoped role, а production submit
+  fail-closed выключен;
+- PostgreSQL 18 fresh/negative/race и upgrade ACL tests для
+  intent/consume/claim/authorize пройдены; target-environment login/rollout и
+  provider lifecycle evidence остаются обязательными;
+- приёмка этого slice не закрывает подключение connector runtime к scoped
+  role, provider contract, normalized producer, vault isolation и production
+  security gates.
 
 #### Промежуточная приёмка public history read
 

@@ -6,6 +6,28 @@ const composeUrl = new URL("../compose.dokploy.yml", import.meta.url);
 const rootEnvUrl = new URL("../../.env.example", import.meta.url);
 const packageUrl = new URL("../../package.json", import.meta.url);
 
+const globallyDistinctDeployCredentials = [
+  "PLATFORM_API_TO_SEO_DATA_TOKEN",
+  "PLATFORM_API_TO_JOBS_TOKEN",
+  "JOBS_TO_SEO_DATA_TOKEN",
+  "PLATFORM_API_TO_REALTIME_TOKEN",
+  "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN",
+  "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN",
+  "JOBS_TO_SEO_RANK_TOKEN",
+  "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
+  "JOBS_TO_SEO_RANK_RESULT_TOKEN",
+  "RANK_HISTORY_CURSOR_KEY"
+];
+
+const tokenBearingServices = [
+  "platform-api",
+  "seo-data",
+  "jobs-integrations",
+  "import-worker",
+  "rank-worker",
+  "realtime"
+];
+
 const callerAudienceBoundaries = new Map([
   [
     "PLATFORM_API_TO_SEO_DATA_TOKEN",
@@ -199,6 +221,74 @@ test("dedicated credential, notification and rank tokens keep narrow scopes", as
   }
 });
 
+test("isolated deploy preflight receives only all globally distinct credentials", async () => {
+  const compose = await readFile(composeUrl, "utf8");
+  const document = parseYamlMappings(compose);
+  const preflight = serviceMapping(document, "service-token-preflight");
+  const environment = serviceEnvironment(
+    document,
+    "service-token-preflight"
+  );
+
+  assert.deepEqual(
+    sorted(environment.keys()),
+    sorted(globallyDistinctDeployCredentials)
+  );
+  for (const token of globallyDistinctDeployCredentials) {
+    assertRequiredSelfInterpolation(
+      environment.get(token),
+      token,
+      "service-token-preflight"
+    );
+  }
+
+  const resolved = resolveMapping(preflight, document);
+  assert.equal(resolved.get("image"), "postgres:18.3-alpine3.23");
+  assert.equal(stripMatchingQuotes(resolved.get("restart")), "no");
+  assert.equal(resolved.get("init"), "true");
+  assert.equal(stripMatchingQuotes(resolved.get("user")), "65534:65534");
+  assert.equal(stripMatchingQuotes(resolved.get("network_mode")), "none");
+  assert.equal(resolved.get("read_only"), "true");
+  assert.equal(
+    resolved.get("entrypoint"),
+    '["/bin/sh", "/security/validate-service-tokens.sh"]'
+  );
+  assert.equal(resolved.get("cap_drop"), '["ALL"]');
+  assert.equal(
+    resolved.get("security_opt"),
+    '["no-new-privileges:true"]'
+  );
+  assert.equal(resolved.has("networks"), false);
+});
+
+test("every token-bearing runtime waits for successful deploy preflight", async () => {
+  const compose = await readFile(composeUrl, "utf8");
+  const document = parseYamlMappings(compose);
+
+  for (const serviceName of tokenBearingServices) {
+    const service = resolveMapping(
+      serviceMapping(document, serviceName),
+      document
+    );
+    const dependencies = service.get("depends_on");
+    assert.ok(
+      isMapping(dependencies),
+      `${serviceName} must declare dependencies`
+    );
+    const preflight = resolveMapping(dependencies, document).get(
+      "service-token-preflight"
+    );
+    assert.ok(
+      isMapping(preflight),
+      `${serviceName} must depend on service-token-preflight`
+    );
+    assert.equal(
+      resolveMapping(preflight, document).get("condition"),
+      "service_completed_successfully"
+    );
+  }
+});
+
 test("Jobs HTTP receives only its declared application capabilities", async () => {
   const compose = await readFile(composeUrl, "utf8");
   const document = parseYamlMappings(compose);
@@ -249,6 +339,7 @@ test("inspection worker receives only DB, Redis, S3 and malware capabilities", a
 function assertTokenBoundary(document, token, expectedServices) {
   const actualServices = [];
   for (const serviceName of serviceNames(document)) {
+    if (serviceName === "service-token-preflight") continue;
     const environment = serviceEnvironment(document, serviceName, false);
     if (!environment?.has(token)) continue;
     actualServices.push(serviceName);
@@ -295,6 +386,16 @@ function serviceNames(document) {
 }
 
 function serviceEnvironment(document, serviceName, required = true) {
+  const service = serviceMapping(document, serviceName);
+  const environment = resolveMapping(service, document).get("environment");
+  if (!isMapping(environment)) {
+    if (!required) return undefined;
+    assert.fail(`${serviceName} must have an environment mapping`);
+  }
+  return resolveMapping(environment, document);
+}
+
+function serviceMapping(document, serviceName) {
   const services = mappingValue(
     resolveMapping(document.root, document),
     "services",
@@ -302,12 +403,7 @@ function serviceEnvironment(document, serviceName, required = true) {
   );
   const service = resolveMapping(services, document).get(serviceName);
   assert.ok(isMapping(service), `${serviceName} service must exist`);
-  const environment = resolveMapping(service, document).get("environment");
-  if (!isMapping(environment)) {
-    if (!required) return undefined;
-    assert.fail(`${serviceName} must have an environment mapping`);
-  }
-  return resolveMapping(environment, document);
+  return service;
 }
 
 function parseEnvExample(source) {

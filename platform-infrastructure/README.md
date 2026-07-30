@@ -21,11 +21,16 @@
    Пароли PostgreSQL для bootstrap administrator, четырёх migration owners,
    четырёх runtime roles, Directus и connector должны быть независимыми,
    URL-safe и длиной не менее 32 символов.
-   Отдельно обязательно задать `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`,
-   `JOBS_TO_SEO_RANK_TOKEN`, `JOBS_TO_SEO_RANK_RESULT_TOKEN` и
-   `RANK_HISTORY_CURSOR_KEY`: grant, result и cursor secrets намеренно
-   оставлены пустыми в корневом примере, а старые копии примера могут ещё не
-   содержать их.
+   Отдельно обязательно сгенерировать четыре caller/audience credentials:
+   `PLATFORM_API_TO_SEO_DATA_TOKEN`, `PLATFORM_API_TO_JOBS_TOKEN`,
+   `JOBS_TO_SEO_DATA_TOKEN`, `PLATFORM_API_TO_REALTIME_TOKEN`, а также
+   dedicated `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`,
+   `JOBS_TO_SEO_RANK_TOKEN`, `JOBS_TO_SEO_RANK_RESULT_TOKEN`,
+   `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`,
+   `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` и
+   `RANK_HISTORY_CURSOR_KEY`. Пустые значения в корневом примере —
+   намеренный предохранитель; одно значение нельзя переиспользовать между
+   границами.
 3. Сначала оставить `S3_ENABLED=false`, `EMAIL_ENABLED=false`,
    `DIRECTUS_STORAGE_DRIVER=local`.
 4. Привязать основной домен к `web:3000`, а нужные технические домены — к
@@ -60,13 +65,68 @@ Admin origin также запрещено добавлять в Platform API `C
 Realtime `WEB_ORIGINS`; текущий Compose разрешает только `WEB_PUBLIC_URL`.
 Фальшивая auth-заглушка не является основанием для внешней публикации.
 
+## Caller/audience service authentication
+
+Legacy `INTERNAL_API_TOKEN` полностью удалён из Compose и корневого
+`.env.example`; все четыре backend-приложения fail-closed отклоняют его при
+startup. Обычные internal HTTP-вызовы разделены так:
+
+| Credential | Caller | Audience |
+|---|---|---|
+| `PLATFORM_API_TO_SEO_DATA_TOKEN` | `platform-api` | `seo-data` |
+| `PLATFORM_API_TO_JOBS_TOKEN` | `platform-api` | `jobs-integrations` HTTP |
+| `JOBS_TO_SEO_DATA_TOKEN` | `jobs-integrations` HTTP и `import-worker` | `seo-data` |
+| `PLATFORM_API_TO_REALTIME_TOKEN` | `platform-api` | `realtime` general HTTP |
+
+Credential vault, Web Push device lifecycle, rank manifest/result и rank
+grant используют отдельные narrow credentials и не принимают general token.
+Runtime требует один exact `X-Internal-Token`: duplicate/array/comma,
+whitespace/control, не-ASCII, длина вне `32..512`, известный placeholder или
+повторное использование настроенного значения останавливаются либо
+отклоняются на trust boundary. Internal clients используют
+`redirect: "error"`, поэтому credential не переносится на redirect origin.
+Compose static regression проверяет exact effective recipients каждого
+credential и запрещает встроенные значения вместо required deploy variable.
+
+Перед запуском шести process types, которые реально получают service
+credentials (`platform-api`, `seo-data`, `jobs-integrations`, `import-worker`,
+`rank-worker`, `realtime`), Compose обязательно завершает one-shot
+`service-token-preflight`. Он получает все девять service tokens и отдельный
+`RANK_HISTORY_CURSOR_KEY`, проверяет их глобальную pairwise distinctness,
+отсутствие placeholders и длину `32..512`. Deploy-проверка намеренно строже
+runtime: допускается только URL-safe алфавит `[A-Za-z0-9._~-]`, тогда как
+runtime-контракт принимает visible ASCII без whitespace/control/comma.
+Preflight запускается без сети (`network_mode: none`), с read-only filesystem,
+`cap_drop: ALL` и `no-new-privileges`; он не выводит значения или хэши, а при
+ошибке называет только переменные. Это ранний fail-closed deploy gate, а не
+замена runtime guards, secret storage, ротации или остальных production gates.
+
+Jobs process capabilities также задаются exact env allowlist, а не общим
+anchor со всеми секретами:
+
+| Process | Runtime capabilities |
+|---|---|
+| `jobs-integrations` | DB/Redis, NATS, S3, SMTP, general tokens и credential management/keyrings |
+| `import-worker` | DB/Redis/S3 и SEO Data URL + `JOBS_TO_SEO_DATA_TOKEN` |
+| `upload-inspection-worker` | DB/Redis/S3 и malware scanner |
+| `system-worker` | только Redis и concurrency |
+| `rank-worker` | DB/Redis, SEO rank manifest и Platform rank grant; остальное запрещено |
+| `connector-worker` | `jobs_connector`, Redis и execution KEK; management/general/NATS/S3/SMTP запрещены |
+
+Config loader получает явную process role; `system-worker` использует
+отдельный Redis-only loader. Поэтому случайно добавленная DB URL, service
+token, adapter credential или enable flag для чужой роли останавливает
+процесс. Эта misconfiguration boundary уже реализована, но не заменяет
+оставшиеся Redis ACL, egress, observability, backup/restore и provider-runtime
+release gates.
+
 ## Dedicated Jobs → Platform API rank grant boundary
 
 `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` защищает internal issuer endpoint
 execution grant. Это отдельный случайный service credential длиной не менее
-32 символов; он обязан отличаться от `INTERNAL_API_TOKEN`, rank manifest/result
-tokens, credential-vault и notification tokens, encryption keys и provider
-credentials.
+32 символов; он обязан отличаться от всех четырёх general caller/audience
+tokens, rank manifest/result tokens, credential-vault и notification tokens,
+encryption keys и provider credentials.
 
 Compose передаёт этот secret ровно двум process types: HTTP-процессу
 `platform-api`, который валидирует запрос и сохраняет immutable решение, и
@@ -91,9 +151,9 @@ redeploy всех реплик `platform-api` и `rank-worker`.
 
 `JOBS_TO_SEO_RANK_TOKEN` защищает внутренние операции immutable rank
 manifest и чтение их plaintext chunks. Это отдельный случайный service
-credential длиной не менее 32 символов. Он обязан отличаться от
-`INTERNAL_API_TOKEN`, credential-vault token, notification token, encryption
-keys и provider credentials.
+credential длиной не менее 32 символов. Он обязан отличаться от general
+caller/audience tokens, credential-vault token, notification token,
+encryption keys и provider credentials.
 
 Compose передаёт этот secret ровно двум process types:
 
@@ -105,8 +165,9 @@ Compose передаёт этот secret ровно двум process types:
 `upload-inspection-worker`, `connector-worker`, migrations, Platform API,
 Realtime, Web и Admin. Наличие переменной в Dokploy project environment не
 означает её передачу контейнеру: контейнер получает secret только через
-явную запись в своём `environment`. Добавлять token в общие anchors
-`x-common-backend-env` или `x-jobs-env` запрещено.
+явную запись в своём `environment`. Добавлять token в
+`x-common-backend-env`, `x-jobs-runtime-env` или другой общий anchor
+запрещено.
 
 ### Rank-worker process
 
@@ -124,8 +185,9 @@ Realtime, Web и Admin. Наличие переменной в Dokploy project e
   `RANK_PREPARATION_CONCURRENCY`;
 - `INTEGRATION_CREDENTIAL_ROLE=DISABLED`.
 
-Процесс не получает `INTERNAL_API_TOKEN`, credential management/execution
-keyrings, NATS, S3 или SMTP credentials. Он подключён только к сети
+Процесс не получает `PLATFORM_API_TO_JOBS_TOKEN`,
+`JOBS_TO_SEO_DATA_TOKEN`, credential management/execution keyrings, NATS,
+S3 или SMTP credentials. Он подключён только к сети
 `internal`, не имеет `ports`/`expose` и не получает маршрут `outbound`.
 Startup ждёт успешную Jobs migration, здоровые Redis, `seo-data` и
 `platform-api`.
@@ -170,9 +232,9 @@ anchor запрещено.
 migration и остальные API не должны его видеть.
 
 Оба значения генерируются случайно, имеют длину не менее 32 символов и должны
-отличаться друг от друга, `JOBS_TO_SEO_RANK_TOKEN`, `INTERNAL_API_TOKEN`,
-остальных service credentials, encryption/fingerprint keyrings и provider
-credentials. Пустые строки в `.env.example` — намеренный fail-closed
+отличаться друг от друга, `JOBS_TO_SEO_RANK_TOKEN`, всех general и dedicated
+service credentials, encryption/fingerprint keyrings и provider credentials.
+Пустые строки в `.env.example` — намеренный fail-closed
 предохранитель: перед первым deploy оператор обязан создать новые значения в
 secret storage Dokploy.
 
@@ -291,23 +353,25 @@ master keys (KEK) для BYOK-секретов. Сгенерировать пе�
 сгенерировать другое случайное значение той же длины; KEK повторно
 использовать запрещено.
 `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN` — отдельный service credential для
-этого vault. Он должен отличаться от `INTERNAL_API_TOKEN` и передаётся только
-`platform-api` и HTTP-процессу `jobs-integrations`; generic workers,
-realtime, seo-data и migration services его не получают.
+этого vault. Он должен отличаться от `PLATFORM_API_TO_JOBS_TOKEN` и всех
+остальных service credentials и передаётся только `platform-api` и
+HTTP-процессу `jobs-integrations`; workers, realtime, seo-data и migration
+services его не получают.
 
 Compose передаёт полный management keyring только HTTP-процессу
 `jobs-integrations`. Migration service, `system-worker`, `import-worker` и
 `upload-inspection-worker` не получают `INTEGRATION_CREDENTIAL_*` и запускаются
 с ролью `DISABLED`. `connector-worker` получает только роль `EXECUTION`,
 encryption KEK и его active version: fingerprint keyring и dedicated
-management token ему намеренно недоступны. Общий `INTERNAL_API_TOKEN` и
+management token ему намеренно недоступны. General caller/audience tokens и
 учётные данные NATS этому процессу также не передаются.
 Runtime config guard подтверждает это fail-closed: роль `DISABLED` не стартует
 при наличии credential secrets, а `EXECUTION` отклоняет
 management/fingerprint/internal/NATS и S3/SMTP secrets. Guard уменьшает риск
 ошибочной доставки секретов, но не заменяет process/database/KMS isolation.
-Даже процесс с общим internal token не может вызвать list/create/rotate/revoke
-credential: эти endpoints принимают только dedicated caller token.
+Даже процесс с `PLATFORM_API_TO_JOBS_TOKEN` не может вызвать
+list/create/rotate/revoke credential: эти endpoints принимают только
+dedicated caller token.
 
 Compose фиксирует immutable username отдельной PostgreSQL-роли как
 `jobs_connector`; ротируется только `JOBS_CONNECTOR_DATABASE_PASSWORD`.
@@ -563,7 +627,8 @@ HTTP lifecycle browser-устройств включается отдельно 
 
 - `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` — отдельный случайный секрет
   длиной не менее 32 символов только для `platform-api` и `realtime`; он не
-  должен совпадать с `INTERNAL_API_TOKEN`;
+  должен совпадать с `PLATFORM_API_TO_REALTIME_TOKEN` или другим service
+  credential;
 - `WEB_PUSH_VAPID_PUBLIC_KEY` и его immutable
   `WEB_PUSH_VAPID_KEY_VERSION` описывают только публичный application server
   key;
@@ -639,9 +704,10 @@ cleanup; публичные download/import endpoints их не выдают.
 `IMPORT_PARSE_CONCURRENCY`, `IMPORT_STAGING_BATCH_ROWS` и
 `IMPORT_PUBLISH_BATCH_ROWS`.
 
-Вызовы jobs → `seo-data` используют `SEO_DATA_URL`, общий
-`INTERNAL_API_TOKEN`, trusted tenant/actor headers и отдельный timeout
-`SEO_DATA_COMMAND_TIMEOUT_MS`. Jobs не получает доступ к `seo_db`.
+Вызовы jobs → `seo-data` используют `SEO_DATA_URL`, отдельный
+`JOBS_TO_SEO_DATA_TOKEN`, trusted tenant/actor headers и timeout
+`SEO_DATA_COMMAND_TIMEOUT_MS`. Token получают только Jobs HTTP/import и SEO
+Data; Jobs не получает доступ к `seo_db` и не следует HTTP redirects.
 Повтор chunk безопасен благодаря receipt/payload hash; рестарт после
 кооперативной отмены завершает partial semantic version.
 

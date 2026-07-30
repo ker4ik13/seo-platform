@@ -195,11 +195,13 @@ constraint trigger запрещает committed `BUILDING`; прямой insert
 возвращает unavailable hash и не загружает большие тексты в Node.
 
 Secret-bearing endpoints seal/chunk используют отдельный
-`JOBS_TO_SEO_RANK_TOKEN` и header `x-rank-execution-token`; общий
-`INTERNAL_API_TOKEN` их не открывает. Пока Jobs PREPARING runtime не
-реализован, этот token получает только SEO Data для валидации. При добавлении
-caller secret передаётся только конкретному Jobs HTTP/rank process, не
-generic/import/connector workers и не queue payload.
+`JOBS_TO_SEO_RANK_TOKEN` и header `x-rank-execution-token`; ни один general
+caller/audience credential их не открывает, а legacy `INTERNAL_API_TOKEN`
+удалён. После реализации Jobs PREPARING runtime этот token получают только
+SEO Data для валидации и отдельный rank-worker как caller. Jobs HTTP,
+generic/import/inspection/system/connector workers и queue payload secret не
+получают. Rank client запрещает HTTP redirects, чтобы credential не мог быть
+перенесён на другой origin.
 
 Создание — идемпотентная saga:
 

@@ -6,7 +6,7 @@ const secretName = "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN";
 const expectedAssignment =
   "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: ${JOBS_TO_PLATFORM_RANK_GRANT_TOKEN:?JOBS_TO_PLATFORM_RANK_GRANT_TOKEN is required}";
 
-test("rank grant token is required only by Platform API and rank worker", async () => {
+test("rank grant token reaches isolated preflight, Platform API and rank worker", async () => {
   const composeUrl = new URL("../compose.dokploy.yml", import.meta.url);
   const lines = (await readFile(composeUrl, "utf8")).split(/\r?\n/u);
   const occurrences = [];
@@ -41,12 +41,12 @@ test("rank grant token is required only by Platform API and rank worker", async 
 
   assert.deepEqual(
     occurrences.map(({ service }) => service),
-    ["platform-api", "rank-worker"],
-    `${secretName} must not reach shared anchors, migrations, Jobs HTTP or unrelated workers`
+    ["service-token-preflight", "platform-api", "rank-worker"],
+    `${secretName} must not reach shared anchors, migrations, Jobs HTTP or unrelated runtime workers`
   );
   assert.deepEqual(
     occurrences.map(({ line }) => line),
-    [expectedAssignment, expectedAssignment]
+    [expectedAssignment, expectedAssignment, expectedAssignment]
   );
 });
 

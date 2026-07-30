@@ -37,7 +37,8 @@ tenant context, хранить открыто, логировать или пе�
   внутреннюю границу. Публичное body не может задавать actor/session/status.
 - Внутренний lifecycle принимает только отдельный
   `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN`, отличный от общего
-  `INTERNAL_API_TOKEN`. Секрет выдают только Platform API и Realtime.
+  `PLATFORM_API_TO_REALTIME_TOKEN`; legacy `INTERNAL_API_TOKEN` удалён и
+  отклоняется при startup. Секрет выдают только Platform API и Realtime.
 
 ### Validation и хранение
 
@@ -129,7 +130,8 @@ keyring и контролируемым rollout.
 
 - Dependency-free lifecycle можно развернуть и проверить без имитации
   внешней доставки.
-- Компрометация общего internal token не открывает управление push devices.
+- Компрометация general `PLATFORM_API_TO_REALTIME_TOKEN` не открывает
+  управление push devices.
 - Потеря encryption key делает active subscription невосстановимой; удалять
   используемую key version до coverage=0 запрещено.
 - До реализации session-family revoke event и sender внешняя доставка остаётся

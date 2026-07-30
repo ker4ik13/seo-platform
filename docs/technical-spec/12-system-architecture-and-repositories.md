@@ -191,6 +191,24 @@ login smoke и TLS/source-CIDR при межхостовом соединени�
 Management и execution пока используют общий Redis password; до production
 для connector worker требуется отдельный Redis ACL либо изолированный instance.
 
+Остальные entrypoints того же image также имеют явную process role и
+fail-closed capability validation:
+
+| Process | Разрешённые зависимости и credentials |
+|---|---|
+| Jobs HTTP | `jobs_db`, Redis, NATS, S3, SMTP, `PLATFORM_API_TO_JOBS_TOKEN`, `JOBS_TO_SEO_DATA_TOKEN`, credential-management token/keyrings |
+| import worker | `jobs_db`, Redis, S3, SEO Data URL и `JOBS_TO_SEO_DATA_TOKEN` |
+| inspection worker | `jobs_db`, Redis, S3 и malware scanner |
+| system worker | Redis и bounded concurrency; DB и остальные capabilities запрещены |
+| rank worker | `jobs_db`, Redis, dedicated manifest/grant tokens |
+| connector worker | `jobs_connector`, Redis и execution KEK |
+
+ConfigModule получает role явно для каждого Nest entrypoint, а system worker
+использует отдельный Redis-only loader. Поэтому общий env anchor не может
+безошибочно выдать worker-у NATS/S3/SMTP/service/vault secret: лишняя
+capability останавливает startup. Rank и connector сохраняют более строгие
+границы, описанные ниже.
+
 `src/rank-worker.main.ts` является отдельным preparation/recovery process:
 credential role `DISABLED`, только `jobs_db`, Redis, internal SEO Data URL и
 выделенные `JOBS_TO_SEO_RANK_TOKEN` и
@@ -366,6 +384,17 @@ migration step.
 - correlation ID;
 - service authentication;
 - no long-running synchronous calls.
+
+В текущей symmetric-token реализации legacy `INTERNAL_API_TOKEN` удалён и
+его наличие отклоняется startup. General route groups используют отдельные
+caller/audience credentials: `PLATFORM_API_TO_SEO_DATA_TOKEN` (Platform API →
+SEO Data), `PLATFORM_API_TO_JOBS_TOKEN` (Platform API → Jobs HTTP),
+`JOBS_TO_SEO_DATA_TOKEN` (Jobs HTTP/import → SEO Data) и
+`PLATFORM_API_TO_REALTIME_TOKEN` (Platform API → Realtime). Vault, Web Push
+device, rank manifest/result и rank grant credentials остаются отдельными.
+Runtime отклоняет placeholders, unsafe/short/long и reused values, guard
+принимает один exact header, а internal clients запрещают redirect. Это
+промежуточный hardening до service JWT/mTLS, а не отказ от целевой identity.
 
 ## 8. Асинхронные события
 

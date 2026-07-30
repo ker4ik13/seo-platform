@@ -104,8 +104,9 @@ preflight также `Access-Control-Request-Headers` и
 
 До перехода на service JWT/mTLS sensitive credential vault использует
 отдельный high-entropy caller token только для пары
-`platform-api → jobs-integrations HTTP`. Общий internal token, migration и
-generic worker credentials не дают доступа к credential endpoints.
+`platform-api → jobs-integrations HTTP`. General
+`PLATFORM_API_TO_JOBS_TOKEN`, migration и worker credentials не дают доступа
+к credential endpoints.
 
 ## 4. Авторизация запроса
 
@@ -419,7 +420,8 @@ Resumable upload должен переживать перезагрузку вк
 - `POST /internal/v1/semantic-imports/{importId}/complete`.
 
 Все команды bounded, повторно валидируются владельцем данных и защищены
-internal token плюс точным совпадением trusted tenant/actor headers с body.
+`JOBS_TO_SEO_DATA_TOKEN` плюс точным совпадением trusted tenant/actor headers
+с body. Token получают только Jobs HTTP/import и SEO Data.
 
 ## 13. Основные группы endpoint
 
@@ -607,9 +609,10 @@ decision — `201`, exact replay — `200`, conflict — `409`. TTL `GRANTED` р
 часам `jobs_db`, сохраняет решение и атомарно связывает неистёкший grant с
 secret-free `CONSUMED/READY_TO_SUBMIT` execution row. Request/response не
 содержат binding/credential IDs или secrets, production policy пока сохраняет
-только `DENIED`. SECURITY DEFINER connector claim ещё отсутствует. Глобальный
-fail-safe `onSend` сохраняет private/no-store boundary также для
-parser/guard/404 errors до controller.
+только `DENIED`. Default-closed SECURITY DEFINER connector claim/authorize и
+exact grants уже реализованы, но runtime caller/provider request ещё
+отсутствуют. Глобальный fail-safe `onSend` сохраняет private/no-store boundary
+также для parser/guard/404 errors до controller.
 
 Публичный Location первого rank slice всегда project-scoped. GET требует
 `ranking.view`; cancel — `collector.cancel`, CSRF и пустой exact body.
@@ -802,7 +805,8 @@ Platform API передаёт realtime-сервису только провер�
 Platform API вызывает
 `/internal/v1/users/{userId}/push-subscriptions/{installationId}` через
 отдельный `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN`, который должен
-отличаться от общего `INTERNAL_API_TOKEN`. Он инжектирует проверенные
+отличаться от general `PLATFORM_API_TO_REALTIME_TOKEN`. Он инжектирует
+проверенные
 `X-Actor-Id`, `X-Session-Family-Id`, request ID и нормализованную user-agent
 metadata. Realtime повторно проверяет actor/route и exact endpoint origin
 allowlist; endpoint/key material и dedicated token запрещены в logs, audit,
@@ -923,6 +927,24 @@ Bulk update принимает:
 - service JWT короткоживущий и audience-bound;
 - отсутствие каскада длиннее двух синхронных переходов;
 - пользовательская операция не должна зависеть от ответа аналитического background consumer.
+
+Текущий symmetric-token срез использует exact caller/audience matrix:
+
+| Credential | Caller | Audience |
+|---|---|---|
+| `PLATFORM_API_TO_SEO_DATA_TOKEN` | Platform API | SEO Data general routes |
+| `PLATFORM_API_TO_JOBS_TOKEN` | Platform API | Jobs HTTP general routes |
+| `JOBS_TO_SEO_DATA_TOKEN` | Jobs HTTP/import worker | SEO Data Jobs routes |
+| `PLATFORM_API_TO_REALTIME_TOKEN` | Platform API | Realtime general routes |
+
+Legacy `INTERNAL_API_TOKEN` удалён из deploy configuration; его наличие
+останавливает backend startup. Vault, rank manifest/result/grant и Web Push
+device endpoints сохраняют отдельные dedicated credentials. Service-token
+config принимает только distinct generated `32..512` visible ASCII без
+whitespace/control/comma и example placeholders. Guard требует один exact
+header и отклоняет duplicate/array/combined форму. Internal clients запрещают
+redirect, поэтому authorization credential не переносится на другой origin.
+Service JWT/mTLS остаётся целевой следующей identity boundary.
 
 ## 17. Доменные события
 

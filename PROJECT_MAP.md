@@ -60,6 +60,23 @@ revoke и fail-closed tombstone check при upsert используют оди�
 lock. Durable JetStream publisher/transport subscription и global
 session-expiry sweeper ещё отсутствуют.
 
+Межсервисный HTTP hardening удалил legacy `INTERNAL_API_TOKEN`: каждый
+обычный caller/audience pair теперь имеет отдельный credential, а legacy env
+останавливает startup. Dedicated vault, rank manifest/result/grant и Web Push
+device boundaries сохранены отдельно. Все internal clients запрещают
+redirect, а service-token guards требуют один strict header. Перед шестью
+process types, которые получают service credentials (`platform-api`,
+`seo-data`, Jobs HTTP, import, rank и realtime), Compose выполняет
+network-less one-shot `service-token-preflight`: он глобально проверяет девять
+service tokens и `RANK_HISTORY_CURSOR_KEY` на pairwise distinct без вывода
+значений или хэшей. Jobs image дополнительно получил явные process roles:
+HTTP имеет полный management-набор только для своей роли, import —
+DB/Redis/S3/SEO Data, inspection —
+DB/Redis/S3/malware, system — Redis-only; rank и connector сохраняют прежние
+строгие specialized allowlists. Это закрывает credential fan-out через env,
+но не означает полной production готовности: Redis ACL/observability,
+durable events, provider runtime и остальные release gates остаются.
+
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
 ## 1. Инварианты
@@ -133,12 +150,12 @@ connector worker ──> jobs_db + BullMQ + allowlisted provider endpoints
 platform-web public/docs <──> Directus
 ```
 
-Platform API синхронно передаёт upload-команды в jobs-integrations через
-internal HTTP с отдельным shared token и проверенным tenant/actor context.
-Credential endpoints дополнительно используют отдельный
+Platform API синхронно передаёт обычные upload/import-команды в
+jobs-integrations через internal HTTP с
+`PLATFORM_API_TO_JOBS_TOKEN` и проверенным tenant/actor context. Credential,
+binding и связанные rank command endpoints используют отдельный
 `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`, доступный только Platform API и
-jobs-integrations HTTP; общий internal token остальных сервисов vault не
-открывает.
+jobs-integrations HTTP; general token vault не открывает.
 Проверка credential создаётся как канонический `Job` в PostgreSQL; BullMQ
 получает только `jobId`. Отдельный execution-role connector worker забирает
 lease и перед вызовом провайдера повторно проверяет workspace, material
@@ -154,8 +171,12 @@ Project binding читается и изменяется через Platform API
 scope/safe response перед возвратом в Web.
 Tracking context читается и изменяется через Platform API, а хранится только
 в SEO Data. Platform API передаёт проверенный tenant/actor context по internal
-HTTP; SEO Data повторно сверяет route/project scope и атомарно пишет redacted
-outbox event вместе с domain change.
+HTTP с `PLATFORM_API_TO_SEO_DATA_TOKEN`; SEO Data повторно сверяет
+route/project scope и атомарно пишет redacted outbox event вместе с domain
+change. Jobs HTTP и import обращаются к SEO Data только с отдельным
+`JOBS_TO_SEO_DATA_TOKEN`. Realtime general HTTP принимает от Platform API
+`PLATFORM_API_TO_REALTIME_TOKEN`, а browser device lifecycle — отдельный
+notification credential.
 Оценка готовности позиций вызывается Web через Platform API. Platform API
 загружает trusted project/workspace/access snapshot и передаёт команду в
 Jobs/integrations через dedicated credential boundary. Jobs запрашивает у
@@ -222,9 +243,26 @@ transport и health/readiness, таблицы outbox/inbox созданы. Durab
 - Directus использует local media volume до переключения
   `DIRECTUS_STORAGE_DRIVER=s3`; application uploads сразу имеют S3 adapter.
 - Production secrets задаются только в Dokploy.
-- `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN` отличается от
-  `INTERNAL_API_TOKEN` и выдаётся только Platform API и credential-capable
-  jobs/integrations HTTP process.
+- Legacy `INTERNAL_API_TOKEN` удалён из deploy input и отклоняется startup
+  всех четырёх backend. General internal HTTP разделён на exact pairs:
+  `PLATFORM_API_TO_SEO_DATA_TOKEN` (Platform API → SEO Data),
+  `PLATFORM_API_TO_JOBS_TOKEN` (Platform API → Jobs HTTP),
+  `JOBS_TO_SEO_DATA_TOKEN` (Jobs HTTP/import → SEO Data) и
+  `PLATFORM_API_TO_REALTIME_TOKEN` (Platform API → Realtime).
+- `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN` отличается от general tokens и
+  выдаётся только Platform API и credential-capable jobs/integrations HTTP
+  process.
+- Service-token validation принимает только `32..512` visible ASCII без
+  whitespace/control/comma, отклоняет example placeholders и reused values.
+  Guard принимает один exact header и сравнивает credential timing-safe;
+  internal clients используют `redirect: "error"`.
+- Deploy-level `service-token-preflight` намеренно строже runtime validation:
+  до запуска шести token-bearing processes он требует все девять service
+  tokens и `RANK_HISTORY_CURSOR_KEY`, проверяет их глобальную pairwise
+  distinctness и допускает только URL-safe `[A-Za-z0-9._~-]` длиной
+  `32..512`. One-shot container не имеет сети, работает read-only с
+  `cap_drop: ALL` и `no-new-privileges` и не пишет в output значения либо их
+  хэши; ошибки называют только переменные.
 - `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` защищает только internal issuer
   execution grants и отличается от всех остальных service tokens. Текущий
   Compose передаёт его только Platform API и выделенному rank-worker с
@@ -247,6 +285,11 @@ transport и health/readiness, таблицы outbox/inbox созданы. Durab
   lease/dispatch/concurrency settings и lease минимум на пять секунд длиннее
   SEO Data timeout. Он запускается отдельным Dokploy process из того же image
   и fail-closed отклоняет generic/credential/NATS/S3/SMTP secrets.
+- Jobs process roles проверяются config loader-ом fail-closed. HTTP получает
+  DB/Redis/NATS/S3/SMTP, два нужных general tokens и management vault; import
+  — DB/Redis/S3/SEO token; inspection — DB/Redis/S3/malware; system — только
+  Redis. Rank и connector используют прежние strict allowlists и не получают
+  general tokens.
 - `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` отличается от остальных
   service secrets и выдаётся только Platform API и Realtime HTTP для
   управления browser Web Push devices. Пример намеренно пуст, runtime
@@ -326,7 +369,8 @@ Backend convention:
 - `platform-api/src/tenants/team.*` — приглашения, участники и проектные
   ограничения доступа;
 - `platform-api/src/uploads` — project-scoped public upload commands;
-- `platform-api/src/jobs` — общий internal HTTP client к jobs-integrations;
+- `platform-api/src/jobs` — internal HTTP client к jobs-integrations с
+  отдельным general и credential audience token и запретом redirect;
 - `platform-api/src/integrations` — workspace-scoped public catalog/credential
   commands и project-scoped connector settings с RBAC, CSRF, audit intent,
   idempotency и optimistic locking;
@@ -398,8 +442,8 @@ Backend convention:
 - `platform-jobs-integrations/src/storage` — S3 port, disabled и S3 adapters;
 - `platform-jobs-integrations/src/malware` — scanner port, disabled adapter и
   потоковый `clamd` INSTREAM adapter;
-- `platform-jobs-integrations/src/internal` — fail-closed авторизация
-  внутренних HTTP-команд;
+- `platform-jobs-integrations/src/internal` — strict single-header
+  `PlatformApiGuard` для general Platform API → Jobs HTTP-команд;
 - `platform-jobs-integrations/src/uploads` — multipart lifecycle, opaque
   object keys, size verification, lease/heartbeat inspection и upload outbox
   events;
@@ -444,8 +488,8 @@ Backend convention:
 - `platform-seo-data/src/rank-scopes` — атомарный bounded snapshot контекста,
   конфигурации и temporal assignments с domain-separated semantic hash без
   передачи keyword IDs/text;
-- `platform-seo-data/src/internal` — fail-closed авторизация внутренних
-  tenant/actor команд;
+- `platform-seo-data/src/internal` — отдельные `PlatformApiGuard` и
+  `JobsApiGuard` для general route groups плюс dedicated rank guards;
 - `platform-jobs-integrations/src/email` — email port, disabled и SMTP adapters;
 - `platform-realtime/src/realtime` — Socket.IO gateway и Redis adapter;
 - `platform-realtime/src/notifications` — профильные правила, membership-bound
@@ -453,8 +497,8 @@ Backend convention:
   encrypted browser Web Push device lifecycle;
 - `platform-realtime/src/common/request-id.ts` — bounded correlation ID для
   сквозной Platform API → Realtime трассировки с UUID fallback;
-- `platform-realtime/src/internal` — fail-closed internal HTTP authentication
-  и проверенный actor/tenant/membership context;
+- `platform-realtime/src/internal` — `PlatformApiGuard` general HTTP audience,
+  отдельный Web Push guard и проверенный actor/tenant/membership context;
 - `platform-web/app` — public, tools, docs и private `/app` App Router screens;
 - `platform-web/lib/http-security-policy.ts` + `next.config.ts` — общие
   nosniff/frame/referrer/permissions headers без изменения public marketing
@@ -497,6 +541,13 @@ Backend convention:
   resources, migration/Redis/SEO Data/Platform API dependencies, двумя
   dedicated rank tokens, forced-disabled provider submit и без
   ports/outbound;
+- тот же Compose разделяет Jobs HTTP, Redis-only system, import и inspection
+  env allowlists; static regression проверяет exact recipients четырёх
+  caller/audience и dedicated service tokens и запрещает legacy env;
+- `platform-infrastructure/security/validate-service-tokens.sh` — one-shot
+  fail-closed deploy preflight для глобальной проверки всех девяти service
+  tokens и `RANK_HISTORY_CURSOR_KEY`; шесть token-bearing processes зависят от
+  его успешного завершения;
 - тот же Compose fail-closed требует `JOBS_TO_SEO_RANK_RESULT_TOKEN` и
   `RANK_HISTORY_CURSOR_KEY` только для `seo-data`; regression test запрещает
   их случайную выдачу остальным runtime processes;
@@ -820,11 +871,11 @@ replay после drift project/access/quota возвращает исходны
 reservation, outbox/event не создаются.
 
 Secret-bearing rank manifest endpoints принадлежат SEO Data и защищены
-отдельным `JOBS_TO_SEO_RANK_TOKEN`; общий internal token не даёт читать
-keyword text chunks. Secret получает только SEO Data validator и отдельный
-rank-worker Jobs; generic HTTP, connector/import/inspection/system workers
-secret не получают. Клиент запрещает HTTP redirects, ограничивает размер
-ответа и принимает только exact tenant-bound receipt.
+отдельным `JOBS_TO_SEO_RANK_TOKEN`; general caller/audience tokens не дают
+читать keyword text chunks. Secret получает только SEO Data validator и
+отдельный rank-worker Jobs; generic HTTP, connector/import/inspection/system
+workers secret не получают. Клиент запрещает HTTP redirects, ограничивает
+размер ответа и принимает только exact tenant-bound receipt.
 
 Execution contract foundation принимает в public create только `estimateId`
 и возвращает Job через конечную discriminated lifecycle матрицу. SEO Data

@@ -49,7 +49,7 @@ function interpolationSource(assignment) {
   return match[1];
 }
 
-test("rank result token is a distinct credential passed only to seo-data", async () => {
+test("rank result token reaches isolated preflight and seo-data only", async () => {
   const composeUrl = new URL("../compose.dokploy.yml", import.meta.url);
   const compose = await readFile(composeUrl, "utf8");
   const preparationOccurrences = secretOccurrences(
@@ -60,20 +60,22 @@ test("rank result token is a distinct credential passed only to seo-data", async
 
   assert.deepEqual(
     resultOccurrences.map(({ service }) => service),
-    ["seo-data"],
-    `${resultTokenName} must not reach anchors, workers or migrations`
+    ["service-token-preflight", "seo-data"],
+    `${resultTokenName} must not reach anchors, runtime workers or migrations`
   );
   assert.deepEqual(
     resultOccurrences.map(({ line }) => line),
-    [
+    Array(2).fill(
       `${resultTokenName}: \${${resultTokenName}:?${resultTokenName} is required}`
-    ]
+    )
   );
 
   const preparationInSeoData = preparationOccurrences.find(
     ({ service }) => service === "seo-data"
   );
-  const resultInSeoData = resultOccurrences[0];
+  const resultInSeoData = resultOccurrences.find(
+    ({ service }) => service === "seo-data"
+  );
   assert.ok(preparationInSeoData);
   assert.ok(resultInSeoData);
   assert.equal(
@@ -91,21 +93,21 @@ test("rank result token is a distinct credential passed only to seo-data", async
   );
 });
 
-test("rank history cursor key is passed only to seo-data", async () => {
+test("rank history cursor key reaches isolated preflight and seo-data only", async () => {
   const composeUrl = new URL("../compose.dokploy.yml", import.meta.url);
   const compose = await readFile(composeUrl, "utf8");
   const occurrences = secretOccurrences(compose, cursorKeyName);
 
   assert.deepEqual(
     occurrences.map(({ service }) => service),
-    ["seo-data"],
-    `${cursorKeyName} must not reach anchors, workers or migrations`
+    ["service-token-preflight", "seo-data"],
+    `${cursorKeyName} must not reach anchors, runtime workers or migrations`
   );
   assert.deepEqual(
     occurrences.map(({ line }) => line),
-    [
+    Array(2).fill(
       `${cursorKeyName}: \${${cursorKeyName}:?${cursorKeyName} is required}`
-    ]
+    )
   );
 });
 

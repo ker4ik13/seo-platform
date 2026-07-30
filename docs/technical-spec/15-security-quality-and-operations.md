@@ -258,10 +258,10 @@
   атомарно. Dispatcher/provider path к service не подключён.
 - Plaintext keyword manifest boundary использует отдельный
   `JOBS_TO_SEO_RANK_TOKEN` и `x-rank-execution-token`. Он обязан отличаться
-  от `INTERNAL_API_TOKEN` и credential/realtime tokens. Generic internal
-  callers, connector/import/system workers, Web, queue payload и логи его не
-  получают. В реализованном PREPARING runtime secret получают только SEO
-  Data validator и выделенный `rank-worker.main.ts`; Jobs HTTP и остальные
+  от всех general caller/audience, credential/realtime и result tokens.
+  Generic callers, connector/import/system workers, Web, queue payload и логи
+  его не получают. В реализованном PREPARING runtime secret получают только
+  SEO Data validator и выделенный `rank-worker.main.ts`; Jobs HTTP и остальные
   process types его не получают. Клиент запрещает HTTP redirects, ограничивает
   body и строго валидирует tenant-bound seal/finalization receipts.
   Ротация выполняется совместимым expand → switch caller → retire old
@@ -302,6 +302,44 @@
   self-migrates. Оно не даёт cluster privileges/cross-DB access и должно быть
   разделено после выделения поддерживаемого migration step.
 
+### 8.4. Межсервисные symmetric credentials
+
+Legacy `INTERNAL_API_TOKEN` удалён из deployment configuration и обязан
+fail-closed останавливать startup при наличии. До перехода на service
+JWT/mTLS действуют независимые caller/audience credentials:
+
+| Credential | Разрешённые process types |
+|---|---|
+| `PLATFORM_API_TO_SEO_DATA_TOKEN` | Platform API и SEO Data |
+| `PLATFORM_API_TO_JOBS_TOKEN` | Platform API и Jobs HTTP |
+| `JOBS_TO_SEO_DATA_TOKEN` | Jobs HTTP, import worker и SEO Data |
+| `PLATFORM_API_TO_REALTIME_TOKEN` | Platform API и Realtime general HTTP |
+
+Dedicated `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`,
+`PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN`, `JOBS_TO_SEO_RANK_TOKEN`,
+`JOBS_TO_SEO_RANK_RESULT_TOKEN` и `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`
+сохраняют отдельные audiences. Наличие general credential не разрешает
+вызов dedicated route group.
+
+Service token должен быть generated distinct значением длиной `32..512`
+visible ASCII без whitespace, control characters и comma. Известные example
+placeholders и повтор одного значения между configured tokens отклоняются на
+startup. HTTP guard принимает один exact header, отклоняет duplicate, array и
+combined значения и сравнивает token timing-safe. Любой internal client,
+который передаёт credential, обязан запрещать redirect; реализованные clients
+используют `redirect: "error"`, чтобы token не попадал на другой origin.
+
+Deploy дополнительно обязан выполнить один общий fail-closed preflight до
+старта любого token-bearing process. Текущий Compose one-shot
+`service-token-preflight` получает девять перечисленных service tokens и
+`RANK_HISTORY_CURSOR_KEY`, проверяет все десять значений на глобальную
+pairwise distinctness и отклоняет placeholders. В отличие от runtime-
+контракта он намеренно допускает только URL-safe `[A-Za-z0-9._~-]` длиной
+`32..512`. Контейнер работает без сети, read-only, с `cap_drop: ALL` и
+`no-new-privileges`, не выводит значения/хэши и сообщает только имена
+конфликтующих либо неверных переменных. `platform-api`, `seo-data`, Jobs HTTP,
+import, rank и realtime стартуют только после его успешного завершения.
+
 ## 9. Шифрование и ключи
 
 - TLS 1.2+; предпочтительно TLS 1.3.
@@ -328,9 +366,10 @@
   требует одинакового overlap keyring на всех replicas до drain старых
   процессов и switch active version.
 - Управление push devices принимает только отдельный
-  `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN`; общий internal credential не
-  даёт доступ к этой границе. Endpoint принимается только по exact HTTPS
-  origin allowlist без IP literals, credentials, fragment и custom ports.
+  `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN`; general
+  `PLATFORM_API_TO_REALTIME_TOKEN` не даёт доступ к этой границе. Endpoint
+  принимается только по exact HTTPS origin allowlist без IP literals,
+  credentials, fragment и custom ports.
 - VAPID private key запрещён в Platform API, Realtime management HTTP, Web,
   browser bundle, Compose текущего среза, logs и обычных application config
   dumps. Его получает только будущий sender role; резервная копия допустима
@@ -356,9 +395,9 @@
   job-only bounded retry без изменения credential при runtime decrypt failure,
   поэтому не создаёт массовый `DISABLED`. Cluster-wide circuit breaker и
   incident alert после startup ещё не реализованы.
-- Vault endpoints не принимают общий межсервисный token: отдельный caller
-  secret доступен только Platform API и credential-capable HTTP process, до
-  плановой замены на service JWT/mTLS.
+- Vault endpoints не принимают general `PLATFORM_API_TO_JOBS_TOKEN`:
+  отдельный caller secret доступен только Platform API и credential-capable
+  HTTP process, до плановой замены на service JWT/mTLS.
 - Потеря master key рассматривается в DR runbook.
 - Secret rotation проверяется минимум дважды в год.
 
@@ -1119,6 +1158,31 @@ Radar/crawler capacity:
   реализованы provider request/status/result, DB persistence для pure
   lifecycle, остальные scoped operations, normalized ingest и provider
   contract gates.
+
+### 34.3. Jobs process capability isolation
+
+Один Jobs image разворачивается с отдельными commands и exact env allowlists:
+
+- HTTP получает DB/Redis, NATS, S3, SMTP, general Platform API/SEO Data
+  tokens и credential management token/keyrings;
+- import получает DB/Redis/S3 и только SEO Data URL/token;
+- inspection получает DB/Redis/S3 и malware scanner;
+- system worker получает только Redis и concurrency, без DB и service secrets;
+- rank получает DB/Redis и два dedicated rank credentials;
+- connector получает `jobs_connector`, Redis и execution KEK.
+
+Явная process role проверяется до создания application/worker dependencies.
+Лишний NATS/S3/SMTP/malware/service/vault credential либо enable flag
+останавливает process. Static Compose regression проверяет exact effective env
+keys и recipients, включая отсутствие legacy credential. Эта защита
+закрывает accidental secret fan-out, но не заменяет container/DB/Redis ACL,
+host egress policy, runtime authorization и incident controls.
+
+Шесть process types с service credentials дополнительно зависят от успешного
+one-shot `service-token-preflight`; Redis-only system, inspection и connector
+не получают эти credentials и не добавляются в зависимость ради формального
+старта. Preflight проверяет deploy input, а process-role loaders продолжают
+независимо проверять собственный effective env.
 
 ## 35. Maintenance
 

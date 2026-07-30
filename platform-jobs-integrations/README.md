@@ -16,13 +16,42 @@
 Worker entrypoints разделяются по профилю нагрузки и набору секретов, а не по
 каждой операции.
 
+## Межсервисная и process capability граница
+
+Legacy `INTERNAL_API_TOKEN` удалён и при наличии fail-closed отклоняется на
+startup. Обычный Jobs HTTP принимает только
+`PLATFORM_API_TO_JOBS_TOKEN` от Platform API, а исходящие Jobs HTTP/import
+вызовы SEO Data используют `JOBS_TO_SEO_DATA_TOKEN`. Vault и project binding
+остаются за отдельным `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`; rank manifest,
+grant и result boundaries не переиспользуют general credentials.
+
+Текущий один image запускается с точными ролями и наборами возможностей:
+
+| Process | Разрешённые runtime capabilities |
+|---|---|
+| `jobs-integrations` HTTP | Jobs DB, Redis, NATS, S3, SMTP, general Platform API/SEO Data tokens и credential-management token/keyrings |
+| `import-worker` | Jobs DB, Redis, S3 и `JOBS_TO_SEO_DATA_TOKEN` для semantic publish |
+| `upload-inspection-worker` | Jobs DB, Redis, S3 и malware scanner |
+| `system-worker` | только Redis и bounded concurrency; без DB и service/provider secrets |
+| `rank-worker` | Jobs DB, Redis, SEO rank-manifest token и Platform rank-grant token; без general/NATS/S3/SMTP/vault capabilities |
+| `connector-worker` | `jobs_connector` DB boundary, Redis и execution KEK; без general/management/NATS/S3/SMTP tokens |
+
+Каждый Nest entrypoint передаёт явную process role в config loader, а system
+worker использует отдельный минимальный loader. Лишний enable flag, adapter
+credential или service token останавливает процесс. Service tokens должны
+содержать `32..512` visible ASCII символов без whitespace/control/comma;
+example placeholders и повторно используемые значения отклоняются. Internal
+HTTP clients используют `redirect: "error"`, поэтому credential не следует за
+redirect на другой origin.
+
 ## Подготовка ручного съёма позиций
 
 Internal HTTP API создаёт ручной запуск через
 `POST /internal/v1/workspaces/:workspaceId/projects/:projectId/rank-runs`,
 возвращает его через project-scoped `GET .../jobs/:jobId` и принимает
 cooperative cancel через `POST .../jobs/:jobId/cancel`. Caller передаёт
-проверенный tenant/actor context и dedicated credential API token; публичный
+проверенный tenant/actor context и
+`PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`; публичный
 клиент обращается к этим маршрутам только через Platform API.
 
 PostgreSQL является источником истины. До обращения к SEO Data сервис одной
@@ -123,8 +152,9 @@ fail-closed.
 - `INTEGRATION_CREDENTIAL_ROLE=DISABLED`.
 
 Lease обязан превышать timeout команды SEO Data минимум на пять секунд.
-Rank-worker не должен получать `INTERNAL_API_TOKEN`,
-`PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`, `JOBS_TO_SEO_RANK_RESULT_TOKEN`,
+Rank-worker не должен получать `PLATFORM_API_TO_JOBS_TOKEN`,
+`JOBS_TO_SEO_DATA_TOKEN`, `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`,
+`JOBS_TO_SEO_RANK_RESULT_TOKEN`,
 `RANK_HISTORY_CURSOR_KEY`, credential keyrings, NATS credentials, S3 access
 keys или SMTP credentials. `JOBS_TO_SEO_RANK_TOKEN`
 также запрещён HTTP, generic, import, inspection и connector processes,

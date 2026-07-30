@@ -212,6 +212,25 @@ import, inspection и system workers этот token не получают. BullM
 получать scoped execution через SECURITY DEFINER operations, а не global read
 Job и credential tables.
 
+Реализованный config/Compose дополнительно фиксирует полный process matrix
+одного Jobs image:
+
+- HTTP: Jobs DB, Redis, NATS, S3, SMTP, general Platform API/SEO Data tokens,
+  credential-management token и keyrings;
+- import worker: Jobs DB, Redis, S3 и `JOBS_TO_SEO_DATA_TOKEN` для SEO Data;
+- inspection worker: Jobs DB, Redis, S3 и malware scanner;
+- system worker: только Redis и bounded concurrency, без DB, NATS, S3, SMTP,
+  malware, service tokens и credential material;
+- rank worker: Jobs DB, Redis, `JOBS_TO_SEO_RANK_TOKEN` и
+  `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`, без general/management/adapters;
+- connector worker: `jobs_connector`, Redis и execution KEK, без
+  general/management/NATS/S3/SMTP credentials.
+
+Nest entrypoints передают явную process role в config loader, system worker
+использует отдельный Redis-only loader. Чужой enable flag, service token или
+adapter credential останавливает процесс fail-closed. Эта env boundary не
+заменяет DB grants, Redis ACL, egress policy и runtime provider gates.
+
 Rate limiting настраивается по provider и credential. Нельзя полагаться только на общий limiter очереди; connector поддерживает распределённые quota buckets.
 
 ## 9. Приоритеты и справедливость
@@ -421,8 +440,9 @@ Keys.so:
 - Platform API повторно проверяет session, CSRF, recent authentication и
   workspace permission;
 - vault endpoints принимают отдельный service token, доступный только
-  Platform API и management-role jobs HTTP process; общий internal token
-  других сервисов недостаточен;
+  Platform API и management-role jobs HTTP process;
+  `PLATFORM_API_TO_JOBS_TOKEN` и остальные general audience credentials эту
+  границу не открывают;
 - jobs/integrations является единственным владельцем ciphertext и
   канонического validation Job;
 - случайный per-record DEK шифрует payload через AES-256-GCM, а отдельный
@@ -874,6 +894,29 @@ DB wrapper. Retryable submit outcome не возвращает ту же executi
 provider request/status/result и normalized result producer остаётся
 открытым. Credential validation worker/KEK canary уже не требуют global vault
 read.
+
+### 17.8. Реализованная caller/audience service authentication
+
+Legacy `INTERNAL_API_TOKEN` выведен из эксплуатации и отклоняется startup.
+Обычные internal HTTP route groups используют четыре независимые границы:
+
+- `PLATFORM_API_TO_SEO_DATA_TOKEN`: Platform API → SEO Data;
+- `PLATFORM_API_TO_JOBS_TOKEN`: Platform API → Jobs HTTP;
+- `JOBS_TO_SEO_DATA_TOKEN`: Jobs HTTP/import worker → SEO Data;
+- `PLATFORM_API_TO_REALTIME_TOKEN`: Platform API → Realtime general HTTP.
+
+`PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`, `JOBS_TO_SEO_RANK_TOKEN`,
+`JOBS_TO_SEO_RANK_RESULT_TOKEN`, `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` и
+`PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` остаются отдельными dedicated
+credentials своих узких границ. General token не расширяет их permissions.
+
+Runtime принимает только generated distinct tokens длиной `32..512` visible
+ASCII без whitespace, control characters и comma; example placeholders и
+reused values отклоняются. Guard требует один exact header и не принимает
+duplicate/array/combined значения. Все реализованные internal fetch clients
+задают `redirect: "error"`, поэтому credential не пересылается на другой
+origin. Это symmetric-token hardening текущего среза, а не замена целевой
+service JWT/mTLS identity и не доказательство полной production готовности.
 
 ## 18. OAuth connections
 
