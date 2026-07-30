@@ -112,6 +112,20 @@ export interface UpdateWorkspaceMemberInput {
   readonly projectAccesses: readonly ProjectAccessAssignment[];
 }
 
+export interface WorkspaceTeamListQuery {
+  readonly limit: number;
+  readonly cursor?: string;
+}
+
+export const workspaceInviteListStatuses = ["PENDING", "ALL"] as const;
+
+export type WorkspaceInviteListStatus =
+  (typeof workspaceInviteListStatuses)[number];
+
+export interface WorkspaceInviteListQuery extends WorkspaceTeamListQuery {
+  readonly status: WorkspaceInviteListStatus;
+}
+
 export interface ProjectSummary {
   readonly id: string;
   readonly workspaceId: string;
@@ -121,6 +135,7 @@ export interface ProjectSummary {
   readonly locale: string;
   readonly timezone: string;
   readonly status: "DRAFT" | "ACTIVE" | "ARCHIVED";
+  readonly projectAccessLevel?: ProjectAccessLevel;
   readonly version: number;
   readonly createdAt: string;
 }

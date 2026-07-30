@@ -32,6 +32,9 @@ export default async function ProjectNotificationSettingsPage({
       </section>
       <SettingsTabs
         active="project-notifications"
+        {...(project.projectAccessLevel
+          ? { projectAccessLevel: project.projectAccessLevel }
+          : {})}
         projectId={project.id}
         workspaceRoleCode={context.workspace?.roleCode}
       />

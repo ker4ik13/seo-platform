@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   canManageWorkspaceIntegrations,
   canTestWorkspaceIntegrations,
+  canUpdateProject,
+  canViewProjectIntegrations,
   canViewWorkspaceIntegrations
 } from "./app-permissions.ts";
 
@@ -29,4 +31,15 @@ test("SEO roles can run credential checks", () => {
   for (const role of ["ANALYST", "CONTENT_EDITOR", "CLIENT", "VIEWER"]) {
     assert.equal(canTestWorkspaceIntegrations(role), false);
   }
+});
+
+test("project permissions intersect the workspace role with explicit access", () => {
+  assert.equal(canUpdateProject("OWNER"), true);
+  assert.equal(canUpdateProject("OWNER", "VIEWER"), false);
+  assert.equal(canUpdateProject("OWNER", "MEMBER"), false);
+  assert.equal(canUpdateProject("SEO_SPECIALIST", "MANAGER"), true);
+  assert.equal(canUpdateProject("VIEWER", "MANAGER"), false);
+  assert.equal(canViewProjectIntegrations("SEO_LEAD", "MANAGER"), true);
+  assert.equal(canViewProjectIntegrations("SEO_LEAD", "MEMBER"), false);
+  assert.equal(canViewProjectIntegrations("ANALYST", "MANAGER"), false);
 });

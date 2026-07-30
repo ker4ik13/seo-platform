@@ -398,6 +398,7 @@ svg { display: block; }
 .security-flow > .primary-button, .security-flow > .secondary-button { justify-self: start; }
 .security-actions { display: flex; flex-wrap: wrap; gap: 9px; }
 .danger-button { background: var(--red); border-radius: 9px; color: white; font-size: 12px; font-weight: 650; min-height: 40px; padding: 0 15px; }
+.danger-button:hover { background: #b72f43; color: white; }
 .danger-button:disabled { opacity: .6; }
 .setup-link { align-items: center; display: inline-flex; justify-content: center; justify-self: start; }
 .secret-value { background: #f3f4f7; border: 1px solid var(--line); border-radius: 9px; display: block; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; padding: 11px 12px; user-select: all; }
@@ -1653,11 +1654,13 @@ svg { display: block; }
   flex-wrap: wrap;
   gap: 8px;
 }
-.danger-button {
+.secondary-button.danger-button {
+  background: white;
   border-color: #e7b8c0;
   color: var(--red);
 }
-.danger-button:hover {
+.secondary-button.danger-button:hover {
+  background: #fff3f5;
   border-color: var(--red);
   color: #b72f43;
 }

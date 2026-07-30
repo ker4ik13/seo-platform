@@ -1,4 +1,5 @@
 import type {
+  ProjectAccessLevel,
   ProjectSummary,
   WorkspaceSummary
 } from "@seo-platform/contracts";
@@ -31,7 +32,10 @@ export function toWorkspaceSummary(
   };
 }
 
-export function toProjectSummary(project: Project): ProjectSummary {
+export function toProjectSummary(
+  project: Project,
+  projectAccessLevel?: ProjectAccessLevel
+): ProjectSummary {
   return {
     id: project.id,
     workspaceId: project.workspaceId,
@@ -46,6 +50,7 @@ export function toProjectSummary(project: Project): ProjectSummary {
         : project.status === "ACTIVE"
           ? "ACTIVE"
           : "DRAFT",
+    ...(projectAccessLevel ? { projectAccessLevel } : {}),
     version: project.version,
     createdAt: project.createdAt.toISOString()
   };

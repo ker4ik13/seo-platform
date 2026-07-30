@@ -558,6 +558,11 @@ Backend convention:
   непроверенных script/style directives;
 - `platform-web/app/app/api` — same-origin browser BFF только к
   `/api/v1` Platform API;
+- `platform-web/app/app/(protected)/settings/workspace` и
+  `projects/[projectId]/settings/general`, `components/*-settings.tsx`,
+  `lib/tenant-settings.ts` — private/noindex workspace/project settings с
+  role/read-only guards, `If-Match`, draft-preserving `412` recovery,
+  explicit duplicate-domain retry и exact-name archive/restore confirmation;
 - `platform-web/components/browser-push-settings.tsx`,
   `lib/browser-push.ts`, `lib/push-installation.ts`,
   `lib/push-registration-reconciliation.ts` и
@@ -731,8 +736,11 @@ Private Web содержит same-origin BFF, регистрацию/вход/п
 выбор workspace/project, MFA challenge и экран безопасности профиля с полным
 пагинируемым списком active sessions/revoke. BFF передаёт Platform API только
 один canonical IPv4/IPv6 от ближайшего proxy и fail-closed отклоняет chain,
-malformed и zone-id значения. До появления SEO-данных dashboard показывает
-empty states, а не демонстрационные значения.
+malformed и zone-id значения. Workspace/project settings редактируют только
+разрешённые поля через OCC, показывают read-only/suspended/archived состояния
+и сохраняют данные при archive/restore; delete flow намеренно отсутствует. До
+появления SEO-данных dashboard показывает empty states, а не демонстрационные
+значения.
 
 Первый import slice содержит публичные project upload endpoints, внутренний
 multipart lifecycle в jobs database, прямую browser → S3 загрузку частей,
@@ -1155,6 +1163,11 @@ caller, connector submission/status и normalized result producer ещё не
   diff-check и live PostgreSQL 18 migration smoke — pass. Проверены immutable
   family TTL/recent-auth, encrypted user-bound cursor, полный Web pagination
   без partial fallback, 401 refresh и canonical single-hop BFF client IP.
+- Workspace/project settings Web: typecheck, scoped lint, 139/139 tests,
+  production build с обоими private routes и diff-check — pass. Проверены
+  permission/read-only/offline/error states, `If-Match`, draft-preserving
+  conflict recovery, duplicate-domain confirmation и archive/restore без
+  delete path.
 - Identity durable transport/expiry: targeted Platform API publisher,
   bounded global sweeper, Realtime consumer и infrastructure topology/ACL
   suites проходят. Полный root lint/typecheck/test/build для общего текущего

@@ -249,10 +249,19 @@ export class TenantService {
               }
             })
       },
+      include: {
+        memberAccesses: {
+          where: { memberId: membership.id },
+          select: { level: true },
+          take: 1
+        }
+      },
       orderBy: { createdAt: "asc" },
       take: 1_000
     });
-    return projects.map(toProjectSummary);
+    return projects.map(({ memberAccesses, ...project }) =>
+      toProjectSummary(project, memberAccesses[0]?.level)
+    );
   }
 
   public async createProject(

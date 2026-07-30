@@ -1,16 +1,16 @@
 import type { Metadata } from "next";
 import { AppShell } from "../../../../../../../components/app-shell";
-import { ProjectIntegrationSettings } from "../../../../../../../components/project-integration-settings";
+import { ProjectSettings } from "../../../../../../../components/project-settings";
 import { SettingsTabs } from "../../../../../../../components/settings-tabs";
 import { requireProtectedProjectAppContext } from "../../../../../../../lib/protected-app";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Источники данных проекта"
+  title: "Настройки проекта"
 };
 
-export default async function ProjectIntegrationSettingsPage({
+export default async function ProjectSettingsPage({
   params
 }: Readonly<{
   params: Promise<{ readonly projectId: string }>;
@@ -33,36 +33,29 @@ export default async function ProjectIntegrationSettingsPage({
         <span aria-hidden="true">/</span>
         <span>{project.name}</span>
         <span aria-hidden="true">/</span>
-        <span aria-current="page">Источники данных</span>
+        <span aria-current="page">Настройки</span>
       </nav>
-      <section className="page-heading project-integration-heading">
+      <section className="page-heading">
         <div>
           <p className="eyebrow">Проект · {project.name}</p>
-          <h1>Источники данных проекта</h1>
+          <h1>Основные настройки проекта</h1>
           <p>
-            Выберите проверенное workspace-подключение для съёма позиций.
-            Секреты остаются в зашифрованном vault и не копируются в проект.
+            Изменяйте домен и региональные параметры, архивируйте или
+            восстанавливайте проект без удаления данных.
           </p>
         </div>
-        <a
-          className="secondary-button setup-link"
-          href="/app/settings/integrations"
-        >
-          Ключи workspace
-        </a>
       </section>
       <SettingsTabs
-        active="project-integrations"
+        active="project"
         {...(project.projectAccessLevel
           ? { projectAccessLevel: project.projectAccessLevel }
           : {})}
         projectId={project.id}
         workspaceRoleCode={workspace.roleCode}
       />
-      <ProjectIntegrationSettings
-        projectId={project.id}
-        projectName={project.name}
-        projectStatus={project.status}
+      <ProjectSettings
+        project={project}
+        workspaceRoleCode={workspace.roleCode}
         workspaceStatus={workspace.status}
       />
     </AppShell>

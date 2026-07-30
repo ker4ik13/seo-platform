@@ -154,7 +154,11 @@ export class TenantController {
   ): Promise<ApiResponse<ProjectSummary>> {
     const project = await this.tenants.getProject(requiredProjectId(request));
     setEntityVersion(reply, project.version);
-    return apiResponse(request, project, project.version);
+    return apiResponse(
+      request,
+      authorizedProjectSummary(request, project),
+      project.version
+    );
   }
 
   @Patch("projects/:projectId")
@@ -174,7 +178,11 @@ export class TenantController {
       requestContext(request)
     );
     setEntityVersion(reply, project.version);
-    return apiResponse(request, project, project.version);
+    return apiResponse(
+      request,
+      authorizedProjectSummary(request, project),
+      project.version
+    );
   }
 
   @Post("projects/:projectId/archive")
@@ -193,7 +201,11 @@ export class TenantController {
       requestContext(request)
     );
     setEntityVersion(reply, project.version);
-    return apiResponse(request, project, project.version);
+    return apiResponse(
+      request,
+      authorizedProjectSummary(request, project),
+      project.version
+    );
   }
 
   @Post("projects/:projectId/restore")
@@ -212,7 +224,11 @@ export class TenantController {
       requestContext(request)
     );
     setEntityVersion(reply, project.version);
-    return apiResponse(request, project, project.version);
+    return apiResponse(
+      request,
+      authorizedProjectSummary(request, project),
+      project.version
+    );
   }
 }
 function requiredWorkspaceId(request: TenantRequest): string {
@@ -225,6 +241,17 @@ function requiredProjectId(request: TenantRequest): string {
   const projectId = request.tenantAuthorization?.projectId;
   if (!projectId) throw new Error("Project authorization is missing");
   return projectId;
+}
+
+function authorizedProjectSummary(
+  request: TenantRequest,
+  project: ProjectSummary
+): ProjectSummary {
+  const projectAccessLevel = request.tenantAuthorization?.projectAccessLevel;
+  return {
+    ...project,
+    ...(projectAccessLevel ? { projectAccessLevel } : {})
+  };
 }
 
 function setEntityVersion(reply: FastifyReply, version: number): void {

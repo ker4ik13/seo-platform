@@ -1,3 +1,5 @@
+import type { ProjectAccessLevel } from "@seo-platform/contracts";
+
 export interface AppUser {
   readonly id: string;
   readonly email: string;
@@ -11,6 +13,8 @@ export interface AppWorkspace {
   readonly id: string;
   readonly name: string;
   readonly slug: string;
+  readonly locale: string;
+  readonly timezone: string;
   readonly status: "ACTIVE" | "READ_ONLY" | "SUSPENDED";
   readonly roleCode: string;
   readonly version: number;
@@ -22,7 +26,10 @@ export interface AppProject {
   readonly name: string;
   readonly slug: string;
   readonly domain: string;
+  readonly locale: string;
+  readonly timezone: string;
   readonly status: "DRAFT" | "ACTIVE" | "ARCHIVED";
+  readonly projectAccessLevel?: ProjectAccessLevel;
   readonly version: number;
 }
 

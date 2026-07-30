@@ -37,6 +37,9 @@ export default async function IntegrationSettingsPage() {
       </section>
       <SettingsTabs
         active="integrations"
+        {...(context.project?.projectAccessLevel
+          ? { projectAccessLevel: context.project.projectAccessLevel }
+          : {})}
         {...(context.project ? { projectId: context.project.id } : {})}
         workspaceRoleCode={context.workspace?.roleCode}
       />

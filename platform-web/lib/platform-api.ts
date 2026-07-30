@@ -1,3 +1,4 @@
+import { projectAccessLevels } from "@seo-platform/contracts";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import type {
@@ -214,6 +215,8 @@ function appWorkspace(payload: unknown): AppWorkspace {
   return {
     id: stringValue(workspace.id),
     name: stringValue(workspace.name),
+    locale: stringValue(workspace.locale),
+    timezone: stringValue(workspace.timezone),
     slug: stringValue(workspace.slug),
     status: status as AppWorkspace["status"],
     roleCode: stringValue(workspace.roleCode),
@@ -227,15 +230,34 @@ function appProject(payload: unknown): AppProject {
   if (!["DRAFT", "ACTIVE", "ARCHIVED"].includes(status)) {
     throw invalidResponse();
   }
+  const projectAccessLevel = appProjectAccessLevel(
+    project.projectAccessLevel
+  );
   return {
     id: stringValue(project.id),
     workspaceId: stringValue(project.workspaceId),
     name: stringValue(project.name),
     slug: stringValue(project.slug),
+    locale: stringValue(project.locale),
+    timezone: stringValue(project.timezone),
     domain: stringValue(project.domain),
     status: status as AppProject["status"],
+    ...(projectAccessLevel ? { projectAccessLevel } : {}),
     version: numberValue(project.version)
   };
+}
+
+function appProjectAccessLevel(
+  value: unknown
+): AppProject["projectAccessLevel"] {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "string" ||
+    !projectAccessLevels.some((level) => level === value)
+  ) {
+    throw invalidResponse();
+  }
+  return value as AppProject["projectAccessLevel"];
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> {

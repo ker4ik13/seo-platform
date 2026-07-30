@@ -22,6 +22,9 @@ export default async function SecuritySettingsPage() {
       </section>
       <SettingsTabs
         active="security"
+        {...(context.project?.projectAccessLevel
+          ? { projectAccessLevel: context.project.projectAccessLevel }
+          : {})}
         {...(context.project ? { projectId: context.project.id } : {})}
         workspaceRoleCode={context.workspace?.roleCode}
       />
