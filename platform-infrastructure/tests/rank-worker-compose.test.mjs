@@ -56,6 +56,11 @@ test("rank worker has an explicit least-capability runtime boundary", async () =
 
   assert.deepEqual(environmentKeys, expectedEnvironment);
   assert.match(rankWorker, /command: \["node", "dist\/rank-worker\.main\.js"\]/u);
+  assert.match(
+    environment,
+    /DATABASE_URL: postgresql:\/\/jobs_rank_runtime:\$\{JOBS_RANK_DATABASE_PASSWORD:\?JOBS_RANK_DATABASE_PASSWORD is required\}@postgres:5432\/jobs_db/u
+  );
+  assert.doesNotMatch(environment, /JOBS_DATABASE_PASSWORD/u);
   assert.match(environment, /RANK_PREPARATION_ENABLED: "true"/u);
   assert.match(environment, /RANK_PROVIDER_SUBMIT_ENABLED: "false"/u);
   assert.match(

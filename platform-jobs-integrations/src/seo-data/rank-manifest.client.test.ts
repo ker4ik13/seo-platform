@@ -1,10 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type {
-  InternalFinalizeRankCheckInput,
-  InternalSealRankManifestInput
+import {
+  rankManifestChunkHashPreimage,
+  type InternalFinalizeRankCheckInput,
+  type InternalGetRankManifestChunkInput,
+  type InternalRankManifestChunk,
+  type InternalRankManifestEntry,
+  type InternalSealRankManifestInput
 } from "@seo-platform/contracts";
-import { canonicalJsonSha256 } from "@seo-platform/contracts/canonical-json";
+import {
+  canonicalJsonSha256,
+  utf8Sha256
+} from "@seo-platform/contracts/canonical-json";
 import type { AppConfig } from "../config/app-config.js";
 import {
   RankManifestClient,
@@ -18,7 +25,10 @@ const ids = {
   jobId: "01900000-0000-7000-8000-000000000004",
   estimateId: "01900000-0000-7000-8000-000000000005",
   contextId: "01900000-0000-7000-8000-000000000006",
-  manifestId: "01900000-0000-7000-8000-000000000007"
+  manifestId: "01900000-0000-7000-8000-000000000007",
+  entryId: "01900000-0000-7000-8000-000000000008",
+  assignmentId: "01900000-0000-7000-8000-000000000009",
+  keywordId: "01900000-0000-7000-8000-00000000000a"
 } as const;
 
 const config = {
@@ -55,6 +65,201 @@ test("uses only the dedicated token and accepts an exact seal receipt", async ()
     );
     assert.equal(headers?.get("X-Internal-Token"), null);
     assert.equal(redirect, "error");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("gets an exact bounded manifest chunk through the dedicated boundary", async () => {
+  const originalFetch = globalThis.fetch;
+  const expected = chunkReceipt();
+  let body: unknown;
+  let headers: Headers | undefined;
+  let method: string | undefined;
+  let redirect: string | undefined;
+  let url = "";
+  globalThis.fetch = (async (request, init) => {
+    url = String(request);
+    body = init?.body;
+    headers = new Headers(init?.headers);
+    method = init?.method;
+    redirect = init?.redirect;
+    return Response.json({
+      data: expected,
+      meta: { requestId: "seo-rank-chunk-1" }
+    });
+  }) as typeof fetch;
+  try {
+    const result = await new RankManifestClient(config).getChunk(
+      chunkCommand(),
+      ids.actorId
+    );
+    assert.deepEqual(result, expected);
+    assert.equal(
+      url,
+      `http://seo-data:4001/internal/v1/projects/${ids.projectId}/rank-manifests/${ids.manifestId}/chunks/0?jobId=${ids.jobId}`
+    );
+    assert.equal(method, "GET");
+    assert.equal(body, undefined);
+    assert.equal(redirect, "error");
+    assert.equal(headers?.get("Content-Type"), null);
+    assert.equal(headers?.get("X-Rank-Execution-Token"), "rank-secret");
+    assert.equal(headers?.get("X-Workspace-Id"), ids.workspaceId);
+    assert.equal(headers?.get("X-Project-Id"), ids.projectId);
+    assert.equal(headers?.get("X-Actor-Id"), ids.actorId);
+    assert.equal(headers?.get("X-Internal-Token"), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects tampered manifest entry and canonical chunk hashes", async () => {
+  const originalFetch = globalThis.fetch;
+  const exact = chunkReceipt();
+  const changedText = {
+    ...exact.entries[0],
+    keywordText: "tampered keyword"
+  };
+  const changedEntryWithValidTextHash = {
+    ...changedText,
+    keywordTextHash: sha256(changedText.keywordText)
+  };
+  const invalid = [
+    { ...exact, entries: [changedText] },
+    { ...exact, entries: [changedEntryWithValidTextHash] },
+    { ...exact, chunkHash: hash("f") }
+  ];
+  try {
+    for (const candidate of invalid) {
+      globalThis.fetch = (async () =>
+        Response.json({
+          data: candidate,
+          meta: { requestId: "seo-rank-chunk-tampered" }
+        })) as typeof fetch;
+      await assert.rejects(
+        () =>
+          new RankManifestClient(config).getChunk(
+            chunkCommand(),
+            ids.actorId
+          ),
+        unavailable
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects non-canonical, oversized and extensible manifest entries", async () => {
+  const originalFetch = globalThis.fetch;
+  const exact = chunkReceipt();
+  const entry = exact.entries[0] as InternalRankManifestEntry;
+  const oversizedText = "x".repeat(501);
+  const invalid = [
+    { ...entry, language: "EN" },
+    { ...entry, keywordText: oversizedText, keywordTextHash: sha256(oversizedText) },
+    { ...entry, id: "550e8400-e29b-41d4-a716-446655440000" },
+    { ...entry, rawProviderPayload: "must-not-cross" }
+  ];
+  try {
+    for (const candidate of invalid) {
+      globalThis.fetch = (async () =>
+        Response.json({
+          data: { ...exact, entries: [candidate] },
+          meta: { requestId: "seo-rank-chunk-entry-invalid" }
+        })) as typeof fetch;
+      await assert.rejects(
+        () =>
+          new RankManifestClient(config).getChunk(
+            chunkCommand(),
+            ids.actorId
+          ),
+        unavailable
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects cross-scope manifest chunks", async () => {
+  const originalFetch = globalThis.fetch;
+  const exact = chunkReceipt();
+  try {
+    for (const candidate of [
+      { ...exact, workspaceId: ids.actorId },
+      { ...exact, projectId: ids.actorId },
+      { ...exact, jobId: ids.actorId },
+      { ...exact, manifestId: ids.actorId }
+    ]) {
+      globalThis.fetch = (async () =>
+        Response.json({
+          data: candidate,
+          meta: { requestId: "seo-rank-chunk-cross-scope" }
+        })) as typeof fetch;
+      await assert.rejects(
+        () =>
+          new RankManifestClient(config).getChunk(
+            chunkCommand(),
+            ids.actorId
+          ),
+        unavailable
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects oversized and non-json manifest chunk responses", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const response of [
+      new Response("{}", {
+        headers: {
+          "content-type": "application/json",
+          "content-length": String(1_024 * 1_024 + 1)
+        }
+      }),
+      new Response("not-json", {
+        headers: { "content-type": "text/plain" }
+      })
+    ]) {
+      globalThis.fetch = (async () => response) as typeof fetch;
+      await assert.rejects(
+        () =>
+          new RankManifestClient(config).getChunk(
+            chunkCommand(),
+            ids.actorId
+          ),
+        unavailable
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects invalid chunk requests before network access", async () => {
+  const originalFetch = globalThis.fetch;
+  let called = false;
+  globalThis.fetch = (async () => {
+    called = true;
+    throw new Error("must not fetch");
+  }) as typeof fetch;
+  try {
+    await assert.rejects(
+      () =>
+        new RankManifestClient(config).getChunk(
+          { ...chunkCommand(), chunkIndex: 4 },
+          ids.actorId
+        ),
+      (error: unknown) =>
+        error instanceof RankManifestClientError &&
+        error.code === "INVALID_COMMAND" &&
+        !error.retryable
+    );
+    assert.equal(called, false);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -239,6 +444,49 @@ function command(): InternalSealRankManifestInput {
   };
 }
 
+function chunkCommand(): InternalGetRankManifestChunkInput {
+  return {
+    workspaceId: ids.workspaceId,
+    projectId: ids.projectId,
+    jobId: ids.jobId,
+    manifestId: ids.manifestId,
+    chunkIndex: 0
+  };
+}
+
+function chunkEntry(): InternalRankManifestEntry {
+  const keywordText = "rank tracking";
+  return {
+    id: ids.entryId,
+    sequence: 0,
+    assignmentId: ids.assignmentId,
+    keywordId: ids.keywordId,
+    keywordVersion: 2,
+    keywordText,
+    keywordTextHash: sha256(keywordText),
+    language: "en"
+  };
+}
+
+function chunkReceipt(): InternalRankManifestChunk {
+  const chunk: InternalRankManifestChunk = {
+    ...chunkCommand(),
+    hashSchemaVersion: "rank-manifest-chunk@1",
+    chunkHash: hash("0"),
+    entries: [chunkEntry()]
+  };
+  return {
+    ...chunk,
+    chunkHash: {
+      algorithm: "SHA_256",
+      value: canonicalJsonSha256(
+        "rank-manifest-chunk@1",
+        rankManifestChunkHashPreimage(chunk)
+      )
+    }
+  };
+}
+
 function receipt() {
   const input = command();
   return {
@@ -319,4 +567,19 @@ function hash(value: string) {
     algorithm: "SHA_256" as const,
     value: value.repeat(64)
   };
+}
+
+function sha256(value: string) {
+  return {
+    algorithm: "SHA_256" as const,
+    value: utf8Sha256(value)
+  };
+}
+
+function unavailable(error: unknown): boolean {
+  return (
+    error instanceof RankManifestClientError &&
+    error.code === "UNAVAILABLE" &&
+    error.retryable
+  );
 }

@@ -22,6 +22,10 @@ const runtimeSqlUrl = new URL(
   "../postgres/permissions/service-runtime.sql",
   import.meta.url
 );
+const rankRuntimeBoundaryMigrationUrl = new URL(
+  "../../platform-jobs-integrations/prisma/migrations/20260730120100_rank_runtime_database_boundary/migration.sql",
+  import.meta.url
+);
 const extensionSqlUrl = new URL(
   "../postgres/permissions/seo-extension-runtime.sql",
   import.meta.url
@@ -57,6 +61,12 @@ const mappings = [
     runtimeSecret: "REALTIME_DATABASE_PASSWORD"
   }
 ];
+
+const rankRuntime = {
+  database: "jobs_db",
+  runtime: "jobs_rank_runtime",
+  runtimeSecret: "JOBS_RANK_DATABASE_PASSWORD"
+};
 
 function compact(value) {
   return value.replace(/\s+/gu, " ").trim();
@@ -101,7 +111,7 @@ test("Compose splits migration owners from fixed runtime roles", async () => {
   const directRuntimeServices = [
     ["platform-api", mappings[0]],
     ["seo-data", mappings[1]],
-    ["rank-worker", mappings[2]],
+    ["rank-worker", rankRuntime],
     ["realtime", mappings[3]]
   ];
   for (const [serviceName, mapping] of directRuntimeServices) {
@@ -119,6 +129,12 @@ test("Compose splits migration owners from fixed runtime roles", async () => {
   assert.match(
     compose,
     /x-jobs-runtime-env:[\s\S]*?DATABASE_URL: postgresql:\/\/jobs_runtime:\$\{JOBS_DATABASE_PASSWORD:\?[^}]+\}@postgres:5432\/jobs_db/u
+  );
+
+  const roleProvisioner = serviceBlock(compose, "service-database-roles");
+  assert.match(
+    roleProvisioner,
+    /JOBS_RANK_DATABASE_PASSWORD: \$\{JOBS_RANK_DATABASE_PASSWORD:\?JOBS_RANK_DATABASE_PASSWORD is required\}/u
   );
 
   for (const serviceName of [
@@ -161,11 +177,19 @@ test("Compose splits migration owners from fixed runtime roles", async () => {
 });
 
 test("bootstrap and post-migration provisioners are secret-safe and fail closed", async () => {
-  const [bootstrapSql, provisioner, runtimeSql, extensionSql, env] =
+  const [
+    bootstrapSql,
+    provisioner,
+    runtimeSql,
+    rankRuntimeBoundaryMigration,
+    extensionSql,
+    env
+  ] =
     await Promise.all([
       readFile(roleBootstrapSqlUrl, "utf8"),
       readFile(roleProvisionerUrl, "utf8"),
       readFile(runtimeSqlUrl, "utf8"),
+      readFile(rankRuntimeBoundaryMigrationUrl, "utf8"),
       readFile(extensionSqlUrl, "utf8"),
       readFile(envUrl, "utf8")
     ]);
@@ -173,6 +197,7 @@ test("bootstrap and post-migration provisioners are secret-safe and fail closed"
 
   assert.doesNotMatch(bootstrapSql, /\bPASSWORD\b/u);
   assert.match(provisioner, /unset PLATFORM_DATABASE_OWNER_PASSWORD/u);
+  assert.match(provisioner, /unset JOBS_RANK_DATABASE_PASSWORD/u);
   assert.match(provisioner, /unset DIRECTUS_DATABASE_PASSWORD/u);
   assert.match(provisioner, /service database passwords must be URL-safe/u);
   assert.match(provisioner, /service database passwords must be pairwise distinct/u);
@@ -189,6 +214,12 @@ test("bootstrap and post-migration provisioners are secret-safe and fail closed"
     assert.match(env, new RegExp(`^${mapping.ownerSecret}=`, "mu"));
     assert.match(env, new RegExp(`^${mapping.runtimeSecret}=`, "mu"));
   }
+  assert.match(bootstrapSql, /'jobs_rank_runtime'/u);
+  assert.match(env, /^JOBS_RANK_DATABASE_PASSWORD=/mu);
+  assert.match(
+    provisioner,
+    /set_role_password jobs_rank_runtime "\$jobs_rank_runtime_password"/u
+  );
   assert.match(bootstrapSql, /'directus_runtime_owner'/u);
   assert.match(env, /^DIRECTUS_DATABASE_PASSWORD=/mu);
   assert.match(
@@ -210,6 +241,69 @@ test("bootstrap and post-migration provisioners are secret-safe and fail closed"
   assert.match(normalizedRuntimeSql, /relation\.relname <> '_prisma_migrations'/u);
   assert.match(normalizedRuntimeSql, /runtime service role retained DDL privileges/u);
   assert.match(normalizedRuntimeSql, /must not access Prisma migration history/u);
+  assert.match(
+    normalizedRuntimeSql,
+    /relation\.relname = 'rank_provider_request_intents'/u
+  );
+  assert.match(
+    normalizedRuntimeSql,
+    /GRANT SELECT, INSERT ON TABLE public\.rank_provider_request_intents TO %I/u
+  );
+  assert.match(
+    normalizedRuntimeSql,
+    /generic jobs runtime must not access rank provider request intents/u
+  );
+  assert.match(
+    normalizedRuntimeSql,
+    /rank runtime must have only SELECT and INSERT on provider request intents/u
+  );
+  const rankTableGrants = [...normalizedRuntimeSql.matchAll(
+    /'GRANT ([^']+) ON TABLE public\.([a-z_]+) TO %I', :'rank_runtime_role'/gu
+  )]
+    .map((match) => `${match[2]}:${match[1]?.replace(/\s+/gu, " ")}`)
+    .sort();
+  assert.deepEqual(rankTableGrants, [
+    "integration_credentials:SELECT ( id, workspace_id, provider, mode, status, capabilities, material_version, version, verified_at, last_success_at, deleted_at )",
+    "integration_credentials:UPDATE (id)",
+    "job_items:SELECT, INSERT",
+    "job_items:UPDATE (id)",
+    "jobs:SELECT",
+    "jobs:UPDATE ( status, stage, progress_current, attempt, error_summary, result_summary, version, queued_at, finished_at, lease_owner, lease_expires_at, retry_at, updated_at )",
+    "project_connector_bindings:SELECT",
+    "project_connector_bindings:UPDATE (id)",
+    "project_connector_routes:SELECT",
+    "project_connector_routes:UPDATE (id)",
+    "rank_connector_executions:SELECT, INSERT",
+    "rank_estimates:SELECT",
+    "rank_execution_grant_attempts:SELECT, INSERT, UPDATE",
+    "rank_job_runs:SELECT, UPDATE",
+    "rank_provider_request_intents:SELECT, INSERT"
+  ]);
+  for (const forbiddenTable of [
+    "uploads",
+    "semantic_imports",
+    "semantic_import_staging_rows",
+    "semantic_import_validated_rows",
+    "outbox_events",
+    "integration_credential_kek_canaries"
+  ]) {
+    assert.equal(
+      rankTableGrants.some((grant) => grant.startsWith(`${forbiddenTable}:`)),
+      false
+    );
+  }
+  assert.doesNotMatch(
+    normalizedRuntimeSql,
+    /GRANT USAGE, SELECT ON SEQUENCE [^']+ TO %I', [^']*:'rank_runtime_role'/u
+  );
+  assert.doesNotMatch(
+    normalizedRuntimeSql,
+    /ALTER DEFAULT PRIVILEGES[^']+ GRANT [^']+ TO %I', :'expected_owner', :'rank_runtime_role'/u
+  );
+  assert.doesNotMatch(
+    rankTableGrants.join("\n"),
+    /ciphertext|encrypted_data_key|nonce|auth_tag|data_key_/u
+  );
   assert.doesNotMatch(normalizedRuntimeSql, /GRANT (?:CREATE|TEMPORARY|TRUNCATE|REFERENCES|TRIGGER)/u);
   assert.doesNotMatch(normalizedRuntimeSql, /GRANT ALL/u);
   assert.match(
@@ -219,6 +313,69 @@ test("bootstrap and post-migration provisioners are secret-safe and fail closed"
   assert.match(
     normalizedRuntimeSql,
     /public\.register_integration_credential_kek_canary/u
+  );
+
+  const normalizedBoundaryMigration = compact(rankRuntimeBoundaryMigration);
+  for (const table of [
+    "jobs",
+    "job_items",
+    "project_connector_bindings",
+    "project_connector_routes",
+    "integration_credentials"
+  ]) {
+    assert.match(
+      normalizedBoundaryMigration,
+      new RegExp(`ALTER TABLE public\\.${table} ENABLE ROW LEVEL SECURITY`, "u")
+    );
+  }
+  assert.equal(
+    normalizedBoundaryMigration.match(
+      /USING \(current_user = 'jobs_runtime'\) WITH CHECK \(current_user = 'jobs_runtime'\)/gu
+    )?.length,
+    5
+  );
+  assert.doesNotMatch(
+    normalizedBoundaryMigration,
+    /current_user <> 'jobs_rank_runtime'/u
+  );
+  assert.match(
+    normalizedBoundaryMigration,
+    /current_user = 'jobs_rank_runtime' AND "type" IN \( 'MANUAL_RANK_CHECK', 'INTEGRATION_CREDENTIAL_VALIDATE' \)/u
+  );
+  assert.match(
+    normalizedBoundaryMigration,
+    /CREATE POLICY "jobs_rank_runtime_update"[\s\S]*WITH CHECK \( current_user = 'jobs_rank_runtime' AND "type" = 'MANUAL_RANK_CHECK' \)/u
+  );
+  assert.match(
+    normalizedBoundaryMigration,
+    /"capability" = 'SERP_RANK_TRACKING'/u
+  );
+  assert.match(
+    normalizedBoundaryMigration,
+    /CREATE FUNCTION public\.reject_jobs_rank_runtime_id_update\(\)[\s\S]*IF current_user = 'jobs_rank_runtime' OR session_user = 'jobs_rank_runtime' THEN RAISE EXCEPTION 'jobs_rank_runtime cannot update lock-only rows'/u
+  );
+  for (const table of [
+    "job_items",
+    "integration_credentials",
+    "project_connector_bindings",
+    "project_connector_routes"
+  ]) {
+    assert.match(
+      normalizedBoundaryMigration,
+      new RegExp(`BEFORE UPDATE ON public\\.${table}`, "u")
+    );
+  }
+  assert.match(
+    normalizedBoundaryMigration,
+    /CREATE FUNCTION public\.reject_jobs_rank_runtime_non_rank_job_update\(\)[\s\S]*current_user = 'jobs_rank_runtime' OR session_user = 'jobs_rank_runtime'[\s\S]*OLD\."type" <> 'MANUAL_RANK_CHECK'/u
+  );
+  assert.match(
+    normalizedBoundaryMigration,
+    /REVOKE ALL ON FUNCTION public\.reject_jobs_rank_runtime_id_update\(\) FROM PUBLIC/u
+  );
+  assert.doesNotMatch(
+    normalizedBoundaryMigration,
+    /TO jobs_rank_runtime|'jobs_rank_runtime'::regrole|FROM pg_roles/u
   );
 
   assert.match(extensionSql, /extension_record\.extname = 'pg_trgm'/u);
@@ -285,6 +442,23 @@ test("generated HBA permits only exact own-database roles before family rejects"
     assert.ok(hostRuntimeAllow >= 0 && hostRuntimeAllow < hostFamilyReject);
   }
 
+  const localRankAllow = generated.stdout.search(
+    /^local\s+jobs_db\s+"jobs_rank_runtime"\s+scram-sha-256$/mu
+  );
+  const hostRankAllow = generated.stdout.search(
+    /^host\s+jobs_db\s+"jobs_rank_runtime"\s+all\s+scram-sha-256$/mu
+  );
+  const localRankReject = generated.stdout.search(
+    /^local\s+all\s+\/\^jobs_rank_runtime\(_\[a-z0-9_\]\+\)\?\$\s+reject$/mu
+  );
+  const hostRankReject = generated.stdout.search(
+    /^host\s+all\s+\/\^jobs_rank_runtime\(_\[a-z0-9_\]\+\)\?\$\s+all\s+reject$/mu
+  );
+  assert.ok(localRankAllow >= 0 && localRankAllow < localRankReject);
+  assert.ok(hostRankAllow >= 0 && hostRankAllow < hostRankReject);
+  assert.ok(localGeneral > localRankReject);
+  assert.ok(hostGeneral > hostRankReject);
+
   const directusAllow = generated.stdout.search(
     /^host\s+directus_db\s+"directus_runtime_owner"\s+all\s+scram-sha-256$/mu
   );
@@ -300,6 +474,7 @@ test("generated HBA permits only exact own-database roles before family rejects"
     "platform_owner",
     "seo_runtime",
     "jobs_owner",
+    "jobs_rank_runtime",
     "realtime_runtime",
     "directus_runtime_owner"
   ]) {

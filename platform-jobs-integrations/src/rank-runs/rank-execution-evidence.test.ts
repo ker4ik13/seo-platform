@@ -4,11 +4,11 @@ import {
   ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION,
   rankExecutionEvidence,
   rankExecutionEvidenceHash,
-  type RankExecutionEvidenceV1
+  type RankExecutionEvidenceV2
 } from "./rank-execution-evidence.js";
 
 const ids = Array.from(
-  { length: 9 },
+  { length: 10 },
   (_, index) =>
     `01900000-0000-7000-8000-${String(index + 1).padStart(12, "0")}`
 );
@@ -48,6 +48,13 @@ test("rejects extensible, disabled and malformed execution evidence", () => {
     },
     {
       ...value,
+      providerRequestIntent: {
+        ...value.providerRequestIntent,
+        schemaVersion: "rank-provider-request-intent@2"
+      }
+    },
+    {
+      ...value,
       credential: {
         ...value.credential,
         verifiedAt: "2026-07-29T12:00:00Z"
@@ -66,9 +73,9 @@ test("rejects extensible, disabled and malformed execution evidence", () => {
   }
 });
 
-function evidence(): RankExecutionEvidenceV1 {
+function evidence(): RankExecutionEvidenceV2 {
   return {
-    schemaVersion: "rank-execution-evidence@1",
+    schemaVersion: "rank-execution-evidence@2",
     workspaceId: ids[0] as string,
     projectId: ids[1] as string,
     jobId: ids[2] as string,
@@ -79,6 +86,12 @@ function evidence(): RankExecutionEvidenceV1 {
       id: ids[5] as string,
       hash: hash("a"),
       chunkIndex: 0
+    },
+    providerRequestIntent: {
+      id: ids[9] as string,
+      schemaVersion: "rank-provider-request-intent@1",
+      requestHash: hash("c"),
+      manifestChunkHash: hash("d")
     },
     binding: {
       id: ids[6] as string,

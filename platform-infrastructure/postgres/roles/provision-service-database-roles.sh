@@ -8,6 +8,7 @@ set -eu
 : "${SEO_DATABASE_PASSWORD:?SEO_DATABASE_PASSWORD is required}"
 : "${JOBS_DATABASE_OWNER_PASSWORD:?JOBS_DATABASE_OWNER_PASSWORD is required}"
 : "${JOBS_DATABASE_PASSWORD:?JOBS_DATABASE_PASSWORD is required}"
+: "${JOBS_RANK_DATABASE_PASSWORD:?JOBS_RANK_DATABASE_PASSWORD is required}"
 : "${REALTIME_DATABASE_OWNER_PASSWORD:?REALTIME_DATABASE_OWNER_PASSWORD is required}"
 : "${REALTIME_DATABASE_PASSWORD:?REALTIME_DATABASE_PASSWORD is required}"
 : "${DIRECTUS_DATABASE_PASSWORD:?DIRECTUS_DATABASE_PASSWORD is required}"
@@ -18,6 +19,7 @@ seo_owner_password=$SEO_DATABASE_OWNER_PASSWORD
 seo_runtime_password=$SEO_DATABASE_PASSWORD
 jobs_owner_password=$JOBS_DATABASE_OWNER_PASSWORD
 jobs_runtime_password=$JOBS_DATABASE_PASSWORD
+jobs_rank_runtime_password=$JOBS_RANK_DATABASE_PASSWORD
 realtime_owner_password=$REALTIME_DATABASE_OWNER_PASSWORD
 realtime_runtime_password=$REALTIME_DATABASE_PASSWORD
 directus_runtime_owner_password=$DIRECTUS_DATABASE_PASSWORD
@@ -28,6 +30,7 @@ unset SEO_DATABASE_OWNER_PASSWORD
 unset SEO_DATABASE_PASSWORD
 unset JOBS_DATABASE_OWNER_PASSWORD
 unset JOBS_DATABASE_PASSWORD
+unset JOBS_RANK_DATABASE_PASSWORD
 unset REALTIME_DATABASE_OWNER_PASSWORD
 unset REALTIME_DATABASE_PASSWORD
 unset DIRECTUS_DATABASE_PASSWORD
@@ -74,6 +77,7 @@ for database_password in \
   "$seo_runtime_password" \
   "$jobs_owner_password" \
   "$jobs_runtime_password" \
+  "$jobs_rank_runtime_password" \
   "$realtime_owner_password" \
   "$realtime_runtime_password" \
   "$directus_runtime_owner_password"
@@ -88,6 +92,7 @@ ensure_distinct_passwords \
   "$seo_runtime_password" \
   "$jobs_owner_password" \
   "$jobs_runtime_password" \
+  "$jobs_rank_runtime_password" \
   "$realtime_owner_password" \
   "$realtime_runtime_password" \
   "$directus_runtime_owner_password"
@@ -136,6 +141,7 @@ set_role_password seo_owner "$seo_owner_password"
 set_role_password seo_runtime "$seo_runtime_password"
 set_role_password jobs_owner "$jobs_owner_password"
 set_role_password jobs_runtime "$jobs_runtime_password"
+set_role_password jobs_rank_runtime "$jobs_rank_runtime_password"
 set_role_password realtime_owner "$realtime_owner_password"
 set_role_password realtime_runtime "$realtime_runtime_password"
 set_role_password directus_runtime_owner "$directus_runtime_owner_password"
@@ -146,6 +152,7 @@ unset seo_owner_password
 unset seo_runtime_password
 unset jobs_owner_password
 unset jobs_runtime_password
+unset jobs_rank_runtime_password
 unset realtime_owner_password
 unset realtime_runtime_password
 unset directus_runtime_owner_password

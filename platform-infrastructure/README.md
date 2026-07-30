@@ -20,8 +20,9 @@
    юридических документов. Пустые обязательные service secrets нужно
    сгенерировать отдельно; копировать примеры как реальные секреты запрещено.
    Пароли PostgreSQL для bootstrap administrator, четырёх migration owners,
-   четырёх runtime roles, Directus и connector должны быть независимыми,
-   URL-safe и длиной не менее 32 символов.
+   четырёх general runtime roles, отдельного `jobs_rank_runtime`, Directus и
+   connector должны быть независимыми, URL-safe и длиной не менее 32
+   символов.
    Отдельно обязательно сгенерировать четыре caller/audience credentials:
    `PLATFORM_API_TO_SEO_DATA_TOKEN`, `PLATFORM_API_TO_JOBS_TOKEN`,
    `JOBS_TO_SEO_DATA_TOKEN`, `PLATFORM_API_TO_REALTIME_TOKEN`, а также
@@ -132,7 +133,7 @@ anchor со всеми секретами:
 | `import-worker` | DB/Redis/S3 и SEO Data URL + `JOBS_TO_SEO_DATA_TOKEN` |
 | `upload-inspection-worker` | DB/Redis/S3 и malware scanner |
 | `system-worker` | только Redis и concurrency |
-| `rank-worker` | DB/Redis, SEO rank manifest и Platform rank grant; остальное запрещено |
+| `rank-worker` | Отдельный `jobs_rank_runtime`, Redis, SEO rank manifest и Platform rank grant; остальное запрещено |
 | `connector-worker` | `jobs_connector`, Redis и execution KEK; management/general/NATS/S3/SMTP запрещены |
 
 Config loader получает явную process role; `system-worker` использует
@@ -385,6 +386,17 @@ exception messages, queue/event payloads или диагностические a
 | `jobs_db` | `jobs_owner` | `jobs_runtime` |
 | `realtime_db` | `realtime_owner` | `realtime_runtime` |
 
+Для privacy-sensitive rank path существует дополнительный login
+`jobs_rank_runtime`. Его получает только `rank-worker`: exact table/verb
+allowlist разрешает необходимый Job/rank graph, `SELECT, INSERT` на
+`rank_provider_request_intents` и только `UPDATE(id)` на четырёх lock-only
+таблицах; DB guards отклоняют любой фактический UPDATE этих строк. RLS
+показывает роли только manual rank/validation и `SERP_RANK_TRACKING` graph, а
+credential column grant исключает ciphertext, DEK, nonce и auth tag. General
+`jobs_runtime` не имеет ни одного table privilege на intent, а rank-role не
+получает uploads/imports/outbox/canary tables, sequences, default privileges,
+DDL или доступ к соседним databases.
+
 Одноразовый `service-database-roles` создаёт эти роли без superuser,
 `CREATEDB`, `CREATEROLE`, inheritance, replication, `BYPASSRLS` и membership,
 устанавливает SCRAM verifiers через stdin и закрепляет каждую database за её
@@ -568,10 +580,10 @@ direct grant. Широкий vault/table read grant больше не являе
 дополнительно требует `JOBS_CONNECTOR_PERMISSION_TEST_EXPECT_HBA=true`;
 cluster обязан быть одноразовым, потому что тест создаёт и удаляет canonical
 role и synthetic stale family-role.
-`connector-worker` запускается
-только после его успешного завершения. Jobs HTTP/workers используют
-`jobs_runtime`, migrations — `jobs_owner`, а execution worker не получает ни
-один из этих паролей.
+`connector-worker` запускается только после его успешного завершения. Jobs
+HTTP и general workers используют `jobs_runtime`, rank worker — только
+`jobs_rank_runtime`, migrations — `jobs_owner`, а execution worker не
+получает ни один из этих паролей.
 После каждой migration проверяется diff требуемых worker-запросов: добавлять
 широкие `ALL TABLES`, разрешающие `PUBLIC` default privileges или права
 изменения ciphertext запрещено.

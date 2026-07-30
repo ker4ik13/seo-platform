@@ -139,14 +139,22 @@ Integrity hashes покрывают полный versioned RFC 8785 JCS preimage
 preparation/cancel и public Job lifecycle, а также SEO Data normalized
 ingest/finalize/current/internal history реализованы. Jobs теперь также
 атомарно связывает `CONSUMED` grant с единственной secret-free
-`rank_connector_executions/READY_TO_SUBMIT`. Следующий forward slice добавил
-default-closed `SECURITY DEFINER` claim: он под canonical locks повторно
-проверяет current graph и переводит ровно одну строку в pre-network
-`CLAIMED`, возвращая только scoped encrypted credential projection.
-`PUBLIC` execute отозван, deploy-time connector grant и runtime caller пока
-отсутствуют. `CLAIMED` не разрешает provider call; следующими остаются
-authorize/`SUBMITTING`, provider submit/status и producer нормализованных
-результатов.
+`rank_connector_executions/READY_TO_SUBMIT`. До grant rank-worker дважды
+проверяет locked Job/Run/Item graph вокруг dedicated-auth чтения exact sealed
+chunk и сохраняет единственный append-only
+`rank_provider_request_intents` snapshot. Snapshot содержит private keyword
+text, но не credential identity/material; grant evidence v2 и составной FK
+связывают его ID, request hash и manifest/chunk hashes с execution. Exact
+replay снова проверяет authoritative SEO Data chunk, поэтому self-consistent
+локальная подмена не принимается.
+
+Default-closed `SECURITY DEFINER` claim под canonical locks повторно проверяет
+current graph и переводит ровно одну строку в pre-network `CLAIMED`, возвращая
+только scoped encrypted credential projection. `PUBLIC` execute отозван, а
+authorize повторно проверяет graph/lease/control fence и атомарно фиксирует
+`SUBMITTING` до возможных network bytes. `CLAIMED` сам по себе не разрешает
+provider call; следующими остаются runtime caller, recorded Arsenkin wire
+contract, provider submit/status и producer нормализованных результатов.
 
 Platform API issuer foundation уже принимает exact Jobs request без
 binding/credential IDs, повторно проверяет owned lifecycle/RBAC state и
@@ -158,9 +166,10 @@ ledger не реализован. Jobs bounded client уже сохраняет 
 положительное решение под повторной проверкой graph атомарно создаёт
 secret-free scoped execution и становится `CONSUMED`. Dispatcher path
 по-прежнему не вызывает service. DB-control claim по умолчанию закрыт,
-использованные kill-switch versions immutable и не переиспользуются, а
-connector role ещё не получил `EXECUTE`. Поэтому foundation не разрешает
-provider submit.
+использованные kill-switch versions immutable и не переиспользуются.
+Connector permission allowlist выдаёт только exact claim/authorize execute,
+но runtime caller отсутствует. Поэтому foundation не разрешает provider
+submit.
 
 ### 3.4. Реализованный read slice истории
 

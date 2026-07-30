@@ -173,6 +173,7 @@ model Job {
   items                             JobItem[]
   rankRun                           RankJobRun?
   rankExecutionGrantAttempts        RankExecutionGrantAttempt[]
+  rankProviderRequestIntents        RankProviderRequestIntent[]
   rankConnectorExecutions           RankConnectorExecution[]    @relation("RankConnectorExecutionJob")
   rankConnectorValidationExecutions RankConnectorExecution[]    @relation("RankConnectorExecutionValidationJob")
 
@@ -206,6 +207,7 @@ model JobItem {
 
   job                        Job                         @relation(fields: [workspaceId, jobId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "job_items_job_tenant_fkey")
   rankExecutionGrantAttempts RankExecutionGrantAttempt[]
+  rankProviderRequestIntents RankProviderRequestIntent[]
   rankConnectorExecutions    RankConnectorExecution[]
 
   @@unique([jobId, sequence])
@@ -415,6 +417,7 @@ model RankJobRun {
   job                        Job                         @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "rank_job_runs_job_tenant_fkey")
   estimate                   RankEstimate                @relation(fields: [workspaceId, projectId, estimateId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "rank_job_runs_estimate_tenant_fkey")
   rankExecutionGrantAttempts RankExecutionGrantAttempt[]
+  rankProviderRequestIntents RankProviderRequestIntent[]
   rankConnectorExecutions    RankConnectorExecution[]
 
   @@unique([workspaceId, projectId, estimateId], map: "rank_job_runs_tenant_estimate_key")
@@ -457,6 +460,32 @@ model RankExecutionGrantAttempt {
   @@map("rank_execution_grant_attempts")
 }
 
+model RankProviderRequestIntent {
+  id                 String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId        String   @map("workspace_id") @db.Uuid
+  projectId          String   @map("project_id") @db.Uuid
+  jobId              String   @map("job_id") @db.Uuid
+  jobItemId          String   @map("job_item_id") @db.Uuid
+  manifestId         String   @map("manifest_id") @db.Uuid
+  manifestHash       Bytes    @map("manifest_hash")
+  manifestChunkIndex Int      @map("manifest_chunk_index")
+  manifestChunkHash  Bytes    @map("manifest_chunk_hash")
+  schemaVersion      String   @map("schema_version") @db.VarChar(64)
+  requestSnapshot    Json     @map("request_snapshot")
+  requestHash        Bytes    @map("request_hash")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  job                 Job                      @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_provider_request_intents_job_tenant_fkey")
+  rankRun             RankJobRun               @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, jobId], onDelete: Restrict, onUpdate: Restrict, map: "rank_provider_request_intents_rank_run_tenant_fkey")
+  jobItem             JobItem                  @relation(fields: [workspaceId, projectId, jobId, jobItemId], references: [workspaceId, projectId, jobId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_provider_request_intents_job_item_tenant_fkey")
+  connectorExecutions RankConnectorExecution[]
+
+  @@unique([workspaceId, projectId, jobId, jobItemId], map: "rank_provider_request_intents_tenant_job_item_key")
+  @@unique([workspaceId, projectId, jobId, jobItemId, id, requestHash, manifestId, manifestHash, manifestChunkIndex, manifestChunkHash], map: "rank_provider_request_intents_execution_key")
+  @@index([workspaceId, projectId, jobId, createdAt], map: "rank_provider_request_intents_job_created_idx")
+  @@map("rank_provider_request_intents")
+}
+
 model RankConnectorExecution {
   id                                   String                       @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId                          String                       @map("workspace_id") @db.Uuid
@@ -470,6 +499,9 @@ model RankConnectorExecution {
   manifestId                           String                       @map("manifest_id") @db.Uuid
   manifestHash                         Bytes                        @map("manifest_hash")
   manifestChunkIndex                   Int                          @map("manifest_chunk_index")
+  providerRequestIntentId              String                       @map("provider_request_intent_id") @db.Uuid
+  providerRequestIntentHash            Bytes                        @map("provider_request_intent_hash")
+  providerRequestIntentChunkHash       Bytes                        @map("provider_request_intent_chunk_hash")
   bindingId                            String                       @map("binding_id") @db.Uuid
   bindingVersion                       Int                          @map("binding_version")
   routeId                              String                       @map("route_id") @db.Uuid
@@ -498,14 +530,15 @@ model RankConnectorExecution {
   createdAt                            DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                            DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  job           Job                       @relation("RankConnectorExecutionJob", fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_job_tenant_fkey")
-  rankRun       RankJobRun                @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, jobId], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_rank_run_tenant_fkey")
-  jobItem       JobItem                   @relation(fields: [workspaceId, projectId, jobId, jobItemId], references: [workspaceId, projectId, jobId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_job_item_tenant_fkey")
-  grantAttempt  RankExecutionGrantAttempt @relation(fields: [grantAttemptId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_grant_attempt_fkey")
-  binding       ProjectConnectorBinding   @relation(fields: [workspaceId, projectId, bindingId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_binding_tenant_fkey")
-  route         ProjectConnectorRoute     @relation(fields: [routeId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_route_fkey")
-  credential    IntegrationCredential     @relation(fields: [workspaceId, credentialId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_credential_tenant_fkey")
-  validationJob Job                       @relation("RankConnectorExecutionValidationJob", fields: [workspaceId, credentialValidationId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_validation_job_tenant_fkey")
+  job                   Job                       @relation("RankConnectorExecutionJob", fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_job_tenant_fkey")
+  rankRun               RankJobRun                @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, jobId], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_rank_run_tenant_fkey")
+  jobItem               JobItem                   @relation(fields: [workspaceId, projectId, jobId, jobItemId], references: [workspaceId, projectId, jobId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_job_item_tenant_fkey")
+  grantAttempt          RankExecutionGrantAttempt @relation(fields: [grantAttemptId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_grant_attempt_fkey")
+  providerRequestIntent RankProviderRequestIntent @relation(fields: [workspaceId, projectId, jobId, jobItemId, providerRequestIntentId, providerRequestIntentHash, manifestId, manifestHash, manifestChunkIndex, providerRequestIntentChunkHash], references: [workspaceId, projectId, jobId, jobItemId, id, requestHash, manifestId, manifestHash, manifestChunkIndex, manifestChunkHash], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_provider_request_intent_fkey")
+  binding               ProjectConnectorBinding   @relation(fields: [workspaceId, projectId, bindingId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_binding_tenant_fkey")
+  route                 ProjectConnectorRoute     @relation(fields: [routeId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_route_fkey")
+  credential            IntegrationCredential     @relation(fields: [workspaceId, credentialId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_credential_tenant_fkey")
+  validationJob         Job                       @relation("RankConnectorExecutionValidationJob", fields: [workspaceId, credentialValidationId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_validation_job_tenant_fkey")
 
   @@unique([workspaceId, jobItemId, executionAttempt], map: "rank_connector_executions_workspace_item_attempt_key")
   @@index([workspaceId, projectId, jobId, createdAt], map: "rank_connector_executions_job_created_idx")

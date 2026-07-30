@@ -19,6 +19,10 @@ import {
   RankExecutionGrantAttemptService,
   type RankExecutionGrantAttemptResult
 } from "./rank-execution-grant-attempt.service.js";
+import {
+  RankProviderRequestIntentError,
+  type RankProviderRequestIntentService
+} from "./rank-provider-request-intent.service.js";
 
 const jobItemId = "01900000-0000-7000-8000-000000000004";
 
@@ -46,6 +50,48 @@ test("rejects malformed request context before durable preparation", async () =>
   assert.deepEqual(fixture.events, []);
 });
 
+test("does not prepare or issue after terminal local intent drift", async () => {
+  const fixture = service(
+    true,
+    undefined,
+    "REQUESTED",
+    deniedDecision(),
+    new RankProviderRequestIntentError(
+      "LOCAL_STATE_INVALID",
+      false
+    )
+  );
+  await assert.rejects(
+    fixture.service.issueForItem(jobItemId, "request-1"),
+    (error: unknown) =>
+      error instanceof RankExecutionGrantAttemptError &&
+      error.code === "LOCAL_STATE_INVALID" &&
+      !error.retryable
+  );
+  assert.deepEqual(fixture.events, ["intent"]);
+});
+
+test("keeps manifest dependency failure retryable before issuer", async () => {
+  const fixture = service(
+    true,
+    undefined,
+    "REQUESTED",
+    deniedDecision(),
+    new RankProviderRequestIntentError(
+      "DEPENDENCY_UNAVAILABLE",
+      true
+    )
+  );
+  await assert.rejects(
+    fixture.service.issueForItem(jobItemId, "request-1"),
+    (error: unknown) =>
+      error instanceof RankExecutionGrantAttemptError &&
+      error.code === "DEPENDENCY_UNAVAILABLE" &&
+      error.retryable
+  );
+  assert.deepEqual(fixture.events, ["intent"]);
+});
+
 test("commits preparation before calling the issuer and then settles", async () => {
   const fixture = service(true);
   const result = await fixture.service.issueForItem(
@@ -53,7 +99,12 @@ test("commits preparation before calling the issuer and then settles", async () 
     "request-1"
   );
 
-  assert.deepEqual(fixture.events, ["prepare", "issue", "record"]);
+  assert.deepEqual(fixture.events, [
+    "intent",
+    "prepare",
+    "issue",
+    "record"
+  ]);
   assert.equal(result.status, "DENIED");
 });
 
@@ -69,7 +120,7 @@ test("keeps REQUESTED untouched after retryable transport ambiguity", async () =
       error.code === "DEPENDENCY_UNAVAILABLE" &&
       error.retryable
   );
-  assert.deepEqual(fixture.events, ["prepare", "issue"]);
+  assert.deepEqual(fixture.events, ["intent", "prepare", "issue"]);
 });
 
 test("terminally rejects a non-retryable issuer response", async () => {
@@ -84,7 +135,12 @@ test("terminally rejects a non-retryable issuer response", async () => {
       error.code === "DECISION_REJECTED" &&
       !error.retryable
   );
-  assert.deepEqual(fixture.events, ["prepare", "issue", "reject"]);
+  assert.deepEqual(fixture.events, [
+    "intent",
+    "prepare",
+    "issue",
+    "reject"
+  ]);
 });
 
 test("does not call the issuer for an already settled attempt", async () => {
@@ -94,7 +150,7 @@ test("does not call the issuer for an already settled attempt", async () => {
     "request-1"
   );
   assert.equal(result.status, "DENIED");
-  assert.deepEqual(fixture.events, ["prepare"]);
+  assert.deepEqual(fixture.events, ["intent", "prepare"]);
 });
 
 test("atomically consumes a granted decision into scoped execution state", async () => {
@@ -111,6 +167,7 @@ test("atomically consumes a granted decision into scoped execution state", async
 
   assert.equal(result.status, "CONSUMED");
   assert.deepEqual(fixture.events, [
+    "intent",
     "prepare",
     "issue",
     "record",
@@ -130,14 +187,15 @@ test("resumes a pending consume without another issuer request", async () => {
   );
 
   assert.equal(result.status, "CONSUMED");
-  assert.deepEqual(fixture.events, ["prepare", "consume"]);
+  assert.deepEqual(fixture.events, ["intent", "prepare", "consume"]);
 });
 
 function service(
   submitEnabled: boolean,
   clientError?: Error,
   status: RankExecutionGrantAttemptStatus = "REQUESTED",
-  clientDecision: InternalRankExecutionGrantDecisionV1 = deniedDecision()
+  clientDecision: InternalRankExecutionGrantDecisionV1 = deniedDecision(),
+  intentError?: RankProviderRequestIntentError
 ): {
   readonly service: RankExecutionGrantAttemptService;
   readonly events: string[];
@@ -150,9 +208,17 @@ function service(
       return clientDecision;
     }
   } as unknown as RankExecutionGrantClient;
+  const requestIntents = {
+    ensureForItem: async () => {
+      events.push("intent");
+      if (intentError) throw intentError;
+      return {};
+    }
+  } as unknown as RankProviderRequestIntentService;
   const instance = new RankExecutionGrantAttemptService(
     {} as PrismaService,
     client,
+    requestIntents,
     {
       rankExecution: {
         submitEnabled,

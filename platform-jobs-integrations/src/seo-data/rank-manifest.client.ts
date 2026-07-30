@@ -1,21 +1,33 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type {
-  InternalFinalizeRankCheckInput,
-  InternalRankCheckFinalizationReceipt,
-  InternalRankExecutionParameters,
-  InternalRankManifestSeal,
-  InternalRankRunProjectSnapshot,
-  InternalSealRankManifestInput,
-  RankManifestHash
+import {
+  rankManifestChunkHashPreimage,
+  type InternalFinalizeRankCheckInput,
+  type InternalGetRankManifestChunkInput,
+  type InternalRankCheckFinalizationReceipt,
+  type InternalRankExecutionParameters,
+  type InternalRankManifestChunk,
+  type InternalRankManifestEntry,
+  type InternalRankManifestSeal,
+  type InternalRankRunProjectSnapshot,
+  type InternalSealRankManifestInput,
+  type RankManifestHash
 } from "@seo-platform/contracts";
 import {
   canonicalJsonSha256,
-  canonicalizeJson
+  canonicalizeJson,
+  utf8Sha256
 } from "@seo-platform/contracts/canonical-json";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 
 const RESPONSE_MAX_BYTES = 64 * 1_024;
+const CHUNK_RESPONSE_MAX_BYTES = 1_024 * 1_024;
+const MANIFEST_CHUNK_SIZE = 250;
+const MAX_MANIFEST_CHUNK_INDEX = 3;
+const MAX_KEYWORD_CODE_POINTS = 500;
+const MAX_KEYWORD_CODE_UNITS = MAX_KEYWORD_CODE_POINTS * 2;
+const MAX_KEYWORD_UTF8_BYTES = 2_000;
+const MAX_LANGUAGE_LENGTH = 16;
 
 export type RankManifestClientErrorCode =
   | "INVALID_COMMAND"
@@ -60,6 +72,28 @@ export class RankManifestClient {
     return seal;
   }
 
+  public async getChunk(
+    input: InternalGetRankManifestChunkInput,
+    actorId: string
+  ): Promise<InternalRankManifestChunk> {
+    const command = rankManifestChunkRequest(input, actorId);
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(command.input.projectId)}/rank-manifests/${encodeURIComponent(command.input.manifestId)}/chunks/${command.input.chunkIndex}`,
+      this.config.services.seoData
+    );
+    url.searchParams.set("jobId", command.input.jobId);
+    const response = await this.read(url, {
+      workspaceId: command.input.workspaceId,
+      projectId: command.input.projectId,
+      actorId: command.actorId
+    });
+    const chunk = rankManifestChunk(response, command.input);
+    if (!chunk) {
+      throw new RankManifestClientError("UNAVAILABLE", true);
+    }
+    return chunk;
+  }
+
   public async finalize(
     input: InternalFinalizeRankCheckInput,
     expected: {
@@ -80,6 +114,22 @@ export class RankManifestClient {
     return receipt;
   }
 
+  private async read(
+    url: URL,
+    context: {
+      readonly workspaceId: string;
+      readonly projectId: string;
+      readonly actorId: string;
+    }
+  ): Promise<unknown> {
+    return this.send(
+      "GET",
+      url,
+      context,
+      CHUNK_RESPONSE_MAX_BYTES
+    );
+  }
+
   private async request(
     path: string,
     body: unknown,
@@ -89,31 +139,51 @@ export class RankManifestClient {
       readonly actorId: string;
     }
   ): Promise<unknown> {
+    return this.send(
+      "POST",
+      new URL(path, this.config.services.seoData),
+      context,
+      RESPONSE_MAX_BYTES,
+      body
+    );
+  }
+
+  private async send(
+    method: "GET" | "POST",
+    url: URL,
+    context: {
+      readonly workspaceId: string;
+      readonly projectId: string;
+      readonly actorId: string;
+    },
+    maximumBytes: number,
+    body?: unknown
+  ): Promise<unknown> {
     const token = this.config.rankManifestApiToken;
     if (!token) {
       throw new RankManifestClientError("UNAVAILABLE", true);
     }
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      "X-Rank-Execution-Token": token,
+      "X-Workspace-Id": context.workspaceId,
+      "X-Project-Id": context.projectId,
+      "X-Actor-Id": context.actorId
+    };
+    if (method === "POST") {
+      headers["Content-Type"] = "application/json";
+    }
     let response: Response;
     try {
-      response = await fetch(
-        new URL(path, this.config.services.seoData),
-        {
-          method: "POST",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-            "X-Rank-Execution-Token": token,
-            "X-Workspace-Id": context.workspaceId,
-            "X-Project-Id": context.projectId,
-            "X-Actor-Id": context.actorId
-          },
-          body: JSON.stringify(body),
-          redirect: "error",
-          signal: AbortSignal.timeout(
-            this.config.internalCommandTimeoutMs
-          )
-        }
-      );
+      response = await fetch(url, {
+        method,
+        headers,
+        ...(method === "POST" ? { body: JSON.stringify(body) } : {}),
+        redirect: "error",
+        signal: AbortSignal.timeout(
+          this.config.internalCommandTimeoutMs
+        )
+      });
     } catch {
       throw new RankManifestClientError("UNAVAILABLE", true);
     }
@@ -131,12 +201,12 @@ export class RankManifestClient {
     if (
       contentLength !== null &&
       (!/^(?:0|[1-9]\d*)$/u.test(contentLength) ||
-        Number(contentLength) > RESPONSE_MAX_BYTES)
+        Number(contentLength) > maximumBytes)
     ) {
       await response.body?.cancel().catch(() => undefined);
       throw new RankManifestClientError("UNAVAILABLE", true);
     }
-    const payload = await boundedJson(response, RESPONSE_MAX_BYTES);
+    const payload = await boundedJson(response, maximumBytes);
     if (!response.ok) {
       throw responseError(response.status, payload);
     }
@@ -155,6 +225,166 @@ export class RankManifestClient {
     }
     return envelope.data;
   }
+}
+
+function rankManifestChunkRequest(
+  value: InternalGetRankManifestChunkInput,
+  actorId: string
+): {
+  readonly input: InternalGetRankManifestChunkInput;
+  readonly actorId: string;
+} {
+  const input = exactRecord(value, [
+    "workspaceId",
+    "projectId",
+    "jobId",
+    "manifestId",
+    "chunkIndex"
+  ]);
+  if (
+    !input ||
+    !uuidV7(input.workspaceId) ||
+    !uuidV7(input.projectId) ||
+    !uuidV7(input.jobId) ||
+    !uuidV7(input.manifestId) ||
+    !chunkIndex(input.chunkIndex) ||
+    !uuidV7(actorId)
+  ) {
+    throw new RankManifestClientError("INVALID_COMMAND", false);
+  }
+  return {
+    input: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      jobId: input.jobId,
+      manifestId: input.manifestId,
+      chunkIndex: input.chunkIndex
+    },
+    actorId
+  };
+}
+
+function rankManifestChunk(
+  value: unknown,
+  command: InternalGetRankManifestChunkInput
+): InternalRankManifestChunk | undefined {
+  const input = exactRecord(value, [
+    "workspaceId",
+    "projectId",
+    "jobId",
+    "manifestId",
+    "chunkIndex",
+    "hashSchemaVersion",
+    "chunkHash",
+    "entries"
+  ]);
+  const chunkHash = input ? manifestHash(input.chunkHash) : undefined;
+  if (
+    !input ||
+    !uuidV7(input.workspaceId) ||
+    !uuidV7(input.projectId) ||
+    !uuidV7(input.jobId) ||
+    !uuidV7(input.manifestId) ||
+    input.workspaceId !== command.workspaceId ||
+    input.projectId !== command.projectId ||
+    input.jobId !== command.jobId ||
+    input.manifestId !== command.manifestId ||
+    input.chunkIndex !== command.chunkIndex ||
+    !chunkIndex(input.chunkIndex) ||
+    input.hashSchemaVersion !== "rank-manifest-chunk@1" ||
+    !chunkHash ||
+    !Array.isArray(input.entries) ||
+    input.entries.length < 1 ||
+    input.entries.length > MANIFEST_CHUNK_SIZE
+  ) {
+    return undefined;
+  }
+
+  const entries: InternalRankManifestEntry[] = [];
+  const entryIds = new Set<string>();
+  const assignmentIds = new Set<string>();
+  const keywordIds = new Set<string>();
+  for (let offset = 0; offset < input.entries.length; offset += 1) {
+    const entry = rankManifestEntry(
+      input.entries[offset],
+      input.chunkIndex * MANIFEST_CHUNK_SIZE + offset
+    );
+    if (
+      !entry ||
+      entryIds.has(entry.id) ||
+      assignmentIds.has(entry.assignmentId) ||
+      keywordIds.has(entry.keywordId)
+    ) {
+      return undefined;
+    }
+    entryIds.add(entry.id);
+    assignmentIds.add(entry.assignmentId);
+    keywordIds.add(entry.keywordId);
+    entries.push(entry);
+  }
+
+  const chunk: InternalRankManifestChunk = {
+    workspaceId: command.workspaceId,
+    projectId: command.projectId,
+    jobId: command.jobId,
+    manifestId: command.manifestId,
+    chunkIndex: command.chunkIndex,
+    hashSchemaVersion: "rank-manifest-chunk@1",
+    chunkHash,
+    entries
+  };
+  try {
+    const expectedHash = canonicalJsonSha256(
+      "rank-manifest-chunk@1",
+      rankManifestChunkHashPreimage(chunk)
+    );
+    return chunkHash.value === expectedHash ? chunk : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function rankManifestEntry(
+  value: unknown,
+  expectedSequence: number
+): InternalRankManifestEntry | undefined {
+  const input = exactRecord(value, [
+    "id",
+    "sequence",
+    "assignmentId",
+    "keywordId",
+    "keywordVersion",
+    "keywordText",
+    "keywordTextHash",
+    "language"
+  ]);
+  const keywordTextHash = input
+    ? manifestHash(input.keywordTextHash)
+    : undefined;
+  if (
+    !input ||
+    !uuidV7(input.id) ||
+    input.sequence !== expectedSequence ||
+    !uuidV7(input.assignmentId) ||
+    !uuidV7(input.keywordId) ||
+    !positiveInteger(input.keywordVersion) ||
+    !boundedKeywordText(input.keywordText) ||
+    !keywordTextHash ||
+    keywordTextHash.value !== utf8Sha256(input.keywordText) ||
+    !canonicalLanguage(input.language)
+  ) {
+    return undefined;
+  }
+  return {
+    id: input.id,
+    sequence: expectedSequence,
+    assignmentId: input.assignmentId,
+    keywordId: input.keywordId,
+    keywordVersion: input.keywordVersion,
+    keywordText: input.keywordText,
+    keywordTextHash,
+    language: input.language
+  };
 }
 
 function rankFinalizationReceipt(
@@ -601,18 +831,43 @@ function exactFields(
   return (
     Object.keys(input).length === fields.length &&
     Object.keys(input).every((field) => allowed.has(field)) &&
-    fields.every((field) => field in input)
+    fields.every((field) => Object.hasOwn(input, field))
   );
 }
 
 function record(
   value: unknown
 ): Readonly<Record<string, unknown>> | undefined {
-  return typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : undefined;
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    return undefined;
+  }
+  try {
+    const prototype = Object.getPrototypeOf(value);
+    if (
+      (prototype !== Object.prototype && prototype !== null) ||
+      Object.getOwnPropertySymbols(value).length !== 0
+    ) {
+      return undefined;
+    }
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    const keys = Object.keys(value);
+    if (
+      Object.getOwnPropertyNames(value).length !== keys.length ||
+      Object.values(descriptors).some(
+        (descriptor) =>
+          !descriptor.enumerable || !Object.hasOwn(descriptor, "value")
+      )
+    ) {
+      return undefined;
+    }
+    return value as Readonly<Record<string, unknown>>;
+  } catch {
+    return undefined;
+  }
 }
 
 function hasField(value: unknown, field: string): boolean {
@@ -628,7 +883,57 @@ function uuid(value: unknown): value is string {
   );
 }
 
-function positiveInteger(value: unknown): boolean {
+function uuidV7(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      value
+    )
+  );
+}
+
+function chunkIndex(value: unknown): value is number {
+  return (
+    Number.isSafeInteger(value) &&
+    Number(value) >= 0 &&
+    Number(value) <= MAX_MANIFEST_CHUNK_INDEX
+  );
+}
+
+function boundedKeywordText(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > MAX_KEYWORD_CODE_UNITS
+  ) {
+    return false;
+  }
+  let codePointCount = 0;
+  for (const codePoint of value) {
+    codePointCount += codePoint.length > 0 ? 1 : 0;
+    if (codePointCount > MAX_KEYWORD_CODE_POINTS) return false;
+  }
+  return (
+    new TextEncoder().encode(value).byteLength <= MAX_KEYWORD_UTF8_BYTES
+  );
+}
+
+function canonicalLanguage(value: unknown): value is string {
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > MAX_LANGUAGE_LENGTH
+  ) {
+    return false;
+  }
+  try {
+    return Intl.getCanonicalLocales(value)[0] === value;
+  } catch {
+    return false;
+  }
+}
+
+function positiveInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && Number(value) > 0;
 }
 

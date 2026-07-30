@@ -15,7 +15,8 @@ import type {
   RankEstimate,
   RankExecutionGrantAttempt,
   RankExecutionGrantAttemptStatus,
-  RankJobRun
+  RankJobRun,
+  RankProviderRequestIntent
 } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import {
@@ -40,6 +41,9 @@ import {
   storedRankExecutionGrantRequest
 } from "./rank-execution-grant-attempt.js";
 import {
+  ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION
+} from "./rank-execution-evidence.js";
+import {
   buildRankExecutionGrantRequest,
   type BuiltRankExecutionGrantRequest,
   type RankExecutionGrantRequestFacts
@@ -53,6 +57,12 @@ import {
   type RankExecutionProjectionIdentity
 } from "./rank-job-lock.js";
 import { rankJobItemReference } from "./rank-job-item.js";
+import {
+  RankProviderRequestIntentError,
+  RankProviderRequestIntentService,
+  storedRankProviderRequestIntent,
+  type RankProviderRequestIntentBinding
+} from "./rank-provider-request-intent.service.js";
 import {
   MANUAL_RANK_CHECK_JOB_TYPE,
   rankJobAuthorizationSnapshot
@@ -109,6 +119,7 @@ interface LockedRankExecutionGraph {
   readonly identity: LockedRankJobIdentity;
   readonly job: RankGrantJobGraph;
   readonly item: JobItem;
+  readonly requestIntent: RankProviderRequestIntent | null;
   readonly projectionIdentity: RankExecutionProjectionIdentity;
   readonly projection: ExecutionProjection;
   readonly databaseNow: Date;
@@ -119,6 +130,7 @@ export class RankExecutionGrantAttemptService {
   public constructor(
     private readonly prisma: PrismaService,
     private readonly client: RankExecutionGrantClient,
+    private readonly requestIntents: RankProviderRequestIntentService,
     @Inject(APP_CONFIG) private readonly config: AppConfig
   ) {}
 
@@ -140,6 +152,15 @@ export class RankExecutionGrantAttemptService {
     }
     if (!REQUEST_ID_PATTERN.test(requestId)) {
       throw failure("INVALID_REQUEST", false);
+    }
+
+    try {
+      await this.requestIntents.ensureForItem(jobItemId);
+    } catch (error) {
+      if (error instanceof RankProviderRequestIntentError) {
+        throw failure(error.code, error.retryable);
+      }
+      throw failure("DEPENDENCY_UNAVAILABLE", true);
     }
 
     const prepared = await this.prepare(jobItemId);
@@ -587,6 +608,16 @@ export class RankExecutionGrantAttemptService {
               "hex"
             ),
             manifestChunkIndex: evidence.manifest.chunkIndex,
+            providerRequestIntentId:
+              evidence.providerRequestIntent.id,
+            providerRequestIntentHash: Buffer.from(
+              evidence.providerRequestIntent.requestHash.value,
+              "hex"
+            ),
+            providerRequestIntentChunkHash: Buffer.from(
+              evidence.providerRequestIntent.manifestChunkHash.value,
+              "hex"
+            ),
             bindingId: evidence.binding.id,
             bindingVersion: evidence.binding.version,
             routeId: evidence.route.id,
@@ -653,6 +684,15 @@ async function lockedExecutionGraph(
     where: { id: jobItemId }
   });
   if (!job || !item) throw failure("ITEM_NOT_FOUND", false);
+  const requestIntent =
+    await transaction.rankProviderRequestIntent.findFirst({
+      where: {
+        workspaceId: identity.workspaceId,
+        projectId: identity.projectId,
+        jobId,
+        jobItemId
+      }
+    });
   const graph = job as RankGrantJobGraph;
   const projectionIdentity = executionProjectionIdentity(graph, item);
   const projectionLocked = await lockRankExecutionProjection(
@@ -669,12 +709,19 @@ async function lockedExecutionGraph(
     throw failure("LOCAL_STATE_INVALID", false);
   }
   if (requireCurrent) {
-    validateLockedGraph(graph, item, projection, databaseNow);
+    validateLockedGraph(
+      graph,
+      item,
+      requestIntent,
+      projection,
+      databaseNow
+    );
   }
   return {
     identity,
     job: graph,
     item,
+    requestIntent,
     projectionIdentity,
     projection,
     databaseNow
@@ -713,6 +760,7 @@ function executionProjectionIdentity(
 function validateLockedGraph(
   job: RankGrantJobGraph,
   item: JobItem,
+  requestIntent: RankProviderRequestIntent | null,
   projection: ExecutionProjection,
   databaseNow: Date
 ): void {
@@ -744,9 +792,14 @@ function validateLockedGraph(
     run.manifestHashSchema !== "rank-manifest@1" ||
     run.manifestId === null ||
     run.manifestHash === null ||
+    run.manifestPairCount === null ||
+    run.manifestPairCount !== estimate.keywordCount ||
+    run.manifestPairCount < 1 ||
+    run.manifestPairCount > 1_000 ||
     run.manifestChunkCount === null ||
     run.manifestChunkCount < 1 ||
     run.manifestChunkCount > 4 ||
+    run.manifestChunkSize !== 250 ||
     run.finalizationStatus !== null ||
     run.finalizedAt !== null ||
     run.cancelRequestedBy !== null ||
@@ -781,6 +834,15 @@ function validateLockedGraph(
   if (!verified.execution || verified.summary.status !== "READY") {
     throw failure("LOCAL_STATE_INVALID", false);
   }
+  validateProviderRequestIntent(
+    job,
+    item,
+    run,
+    estimate,
+    verified.execution,
+    reference.chunkIndex,
+    requestIntent
+  );
   try {
     assertExecutionProjectionCurrent(
       estimate,
@@ -819,6 +881,7 @@ function requestForLockedGraph(
     validateLockedGraph(
       locked.job,
       locked.item,
+      locked.requestIntent,
       locked.projection,
       locked.databaseNow
     );
@@ -830,6 +893,8 @@ function requestForLockedGraph(
     );
     const reference = rankJobItemReference(locked.item.inputReference);
     const current = credentialSnapshot(locked.projection);
+    const requestIntent = locked.requestIntent;
+    if (!requestIntent) throw failure("LOCAL_STATE_INVALID", false);
     const facts = requestFacts(
       locked.job,
       locked.item,
@@ -837,6 +902,7 @@ function requestForLockedGraph(
       estimate,
       authorization,
       reference.chunkIndex,
+      requestIntent,
       current,
       executionAttempt,
       config
@@ -854,6 +920,7 @@ function requestFacts(
   estimate: RankEstimate,
   authorization: ReturnType<typeof rankJobAuthorizationSnapshot>,
   manifestChunkIndex: number,
+  requestIntent: RankProviderRequestIntent,
   current: CredentialSnapshot,
   executionAttempt: number,
   config: AppConfig
@@ -893,6 +960,9 @@ function requestFacts(
     manifestId: run.manifestId,
     manifestHash: run.manifestHash,
     manifestChunkIndex,
+    providerRequestIntentId: requestIntent.id,
+    providerRequestIntentHash: requestIntent.requestHash,
+    manifestChunkHash: requestIntent.manifestChunkHash,
     bindingId: current.bindingId,
     bindingVersion: current.bindingVersion,
     routeId: current.routeId,
@@ -908,6 +978,50 @@ function requestFacts(
     providerPolicyVersion: estimate.providerPolicyVersion,
     killSwitchVersion: config.rankExecution.killSwitchVersion
   };
+}
+
+function validateProviderRequestIntent(
+  job: RankGrantJobGraph,
+  item: JobItem,
+  run: RankJobRun,
+  estimate: RankEstimate,
+  execution: RankProviderRequestIntentBinding["execution"],
+  manifestChunkIndex: number,
+  requestIntent: RankProviderRequestIntent | null
+): void {
+  if (
+    !requestIntent ||
+    job.projectId === null ||
+    job.actorId === null ||
+    run.manifestId === null ||
+    run.manifestHash === null ||
+    run.manifestPairCount === null
+  ) {
+    throw failure("LOCAL_STATE_INVALID", false);
+  }
+  const binding: RankProviderRequestIntentBinding = {
+    workspaceId: job.workspaceId,
+    projectId: job.projectId,
+    actorId: job.actorId,
+    jobId: job.id,
+    jobItemId: item.id,
+    estimateId: estimate.id,
+    projectDomain: run.projectDomain,
+    projectVersion: run.projectVersion,
+    execution,
+    manifestId: run.manifestId,
+    manifestHash: run.manifestHash,
+    manifestPairCount: run.manifestPairCount,
+    manifestChunkIndex,
+    executionConnectorVersion:
+      ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION,
+    providerPolicyVersion: estimate.providerPolicyVersion
+  };
+  try {
+    storedRankProviderRequestIntent(requestIntent, binding);
+  } catch {
+    throw failure("LOCAL_STATE_INVALID", false);
+  }
 }
 
 function grantableJobState(job: Job): boolean {

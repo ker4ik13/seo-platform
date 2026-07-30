@@ -7,7 +7,7 @@ import {
   ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION,
   rankExecutionEvidence,
   rankExecutionEvidenceHash,
-  type RankExecutionEvidenceV1
+  type RankExecutionEvidenceV2
 } from "./rank-execution-evidence.js";
 
 export interface RankExecutionGrantRequestFacts {
@@ -26,6 +26,9 @@ export interface RankExecutionGrantRequestFacts {
   readonly manifestId: string;
   readonly manifestHash: Uint8Array;
   readonly manifestChunkIndex: number;
+  readonly providerRequestIntentId: string;
+  readonly providerRequestIntentHash: Uint8Array;
+  readonly manifestChunkHash: Uint8Array;
   readonly bindingId: string;
   readonly bindingVersion: number;
   readonly routeId: string;
@@ -43,7 +46,7 @@ export interface RankExecutionGrantRequestFacts {
 
 export interface BuiltRankExecutionGrantRequest {
   readonly request: InternalIssueRankExecutionGrantInputV1;
-  readonly evidence: RankExecutionEvidenceV1;
+  readonly evidence: RankExecutionEvidenceV2;
   readonly evidenceHash: RankManifestHash;
 }
 
@@ -58,7 +61,7 @@ export function buildRankExecutionGrantRequest(
 ): BuiltRankExecutionGrantRequest {
   const manifestHash = hash(facts.manifestHash);
   const evidence = rankExecutionEvidence({
-    schemaVersion: "rank-execution-evidence@1",
+    schemaVersion: "rank-execution-evidence@2",
     workspaceId: facts.workspaceId,
     projectId: facts.projectId,
     jobId: facts.jobId,
@@ -69,6 +72,12 @@ export function buildRankExecutionGrantRequest(
       id: facts.manifestId,
       hash: manifestHash,
       chunkIndex: facts.manifestChunkIndex
+    },
+    providerRequestIntent: {
+      id: facts.providerRequestIntentId,
+      schemaVersion: "rank-provider-request-intent@1",
+      requestHash: hash(facts.providerRequestIntentHash),
+      manifestChunkHash: hash(facts.manifestChunkHash)
     },
     binding: {
       id: facts.bindingId,

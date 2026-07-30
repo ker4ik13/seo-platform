@@ -221,7 +221,8 @@ Job и credential tables.
 - inspection worker: Jobs DB, Redis, S3 и malware scanner;
 - system worker: только Redis и bounded concurrency, без DB, NATS, S3, SMTP,
   malware, service tokens и credential material;
-- rank worker: Jobs DB, Redis, `JOBS_TO_SEO_RANK_TOKEN` и
+- rank worker: отдельный least-privilege `jobs_rank_runtime`, Redis,
+  `JOBS_TO_SEO_RANK_TOKEN` и
   `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`, без general/management/adapters;
 - connector worker: `jobs_connector`, Redis и execution KEK, без
   general/management/NATS/S3/SMTP credentials.
@@ -795,8 +796,13 @@ expand/concurrent-index rollout.
 Public Platform API routes и Web Job flow для create/get/cancel подключены;
 normalized ingest/finalize, internal/public history и completion outbox также
 реализованы. Jobs-side bounded grant client и durable intent/decision
-history реализованы; валидный grant теперь атомарно получает `CONSUMED`
-вместе с secret-free `rank_connector_executions/READY_TO_SUBMIT`.
+history реализованы. До grant отдельный rank-worker читает authoritative
+sealed manifest chunk, сохраняет immutable exact provider request intent и
+повторно сверяет тот же chunk/graph при replay; keyword text не попадает в
+queue/log/event и не смешивается с credential material. Валидный grant теперь
+атомарно получает `CONSUMED` вместе с secret-free
+`rank_connector_executions/READY_TO_SUBMIT`, а execution обязан ссылаться на
+совпадающие intent/request/manifest/chunk hashes.
 Default-closed SECURITY DEFINER claim DDL уже добавляет bounded lease,
 pre-network `CLAIMED`, full current-graph recheck и единственную scoped
 encrypted credential projection. `PUBLIC` execute отозван; connector
@@ -831,8 +837,9 @@ binding/route/credential IDs или secrets. Bounded Jobs client и durable
 attempt table реализованы fail-closed и строго проверяют request/scope hashes,
 exact decision envelope и expiry. Неистёкший grant уже атомарно связывается с
 secret-free scoped execution под повторной проверкой Job/item/credential
-projection. Connector permission script выдаёт exact `EXECUTE` на public
-SECURITY DEFINER claim и authorize: claim возвращает только одну current
+projection и exact provider request intent. Connector permission script
+выдаёт exact `EXECUTE` на public SECURITY DEFINER claim и authorize: claim
+возвращает только одну current
 credential projection и оставляет execution в pre-network `CLAIMED`.
 Authorize под canonical locks повторно проверяет current graph,
 owner/token/generation fence, ожидаемые execution и control versions,
@@ -841,6 +848,25 @@ Runtime caller и outbound provider request всё ещё не реализов�
 provider submit запрещён.
 
 ### 17.7. Jobs-owned execution grant intent и atomic consume
+
+Перед grant Jobs materialize-ит точный private adapter command в
+`rank_provider_request_intents`. Rank-worker под `Job → RankJobRun → JobItem`
+locks проверяет sealed command/reference, отпускает locks на время bounded
+dedicated-auth GET manifest chunk, затем повторно блокирует и сверяет graph до
+append-only INSERT. Snapshot канонизирован RFC 8785 JCS, ограничен одним
+chunk/250 keywords и содержит domain/execution/keyword text/hash/language,
+но принципиально не может содержать credential ID, ciphertext, API key или
+raw provider response. Existing replay снова получает authoritative chunk и
+сравнивает полный snapshot. Execution evidence `rank-execution-evidence@2`
+и tenant-safe FK связывают intent ID/request hash с exact manifest/chunk
+hashes; mutation/delete/truncate запрещены. Таблица недоступна general
+`jobs_runtime`: только отдельный rank-worker login имеет `SELECT, INSERT`, без
+sequences/default privileges или доступа к upload/import/outbox/canary data.
+RLS ограничивает видимость manual rank/validation и
+`SERP_RANK_TRACKING` graph; vault читается только по metadata column allowlist
+без ciphertext/DEK/nonces/tags. Минимальный `UPDATE(id)` нужен PostgreSQL для
+row locks, но owner-owned guards отклоняют любой фактический write в эти
+lock-only rows.
 
 Перед первым HTTP к issuer Jobs в одной транзакции блокирует граф в порядке
 `Job → RankJobRun → JobItem → credential → validation Job → binding → route`,

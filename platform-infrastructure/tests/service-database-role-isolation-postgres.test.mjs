@@ -73,6 +73,22 @@ const mappings = [
   }
 ];
 
+const rankBoundaryFixture = Object.freeze({
+  workspaceId: "00000000-0000-7000-8000-000000000101",
+  projectId: "00000000-0000-7000-8000-000000000102",
+  actorId: "00000000-0000-7000-8000-000000000103",
+  trackingContextId: "00000000-0000-7000-8000-000000000104",
+  validationJobId: "00000000-0000-7000-8000-000000000105",
+  credentialId: "00000000-0000-7000-8000-000000000106",
+  bindingId: "00000000-0000-7000-8000-000000000107",
+  routeId: "00000000-0000-7000-8000-000000000108",
+  estimateId: "00000000-0000-7000-8000-000000000109",
+  manualJobId: "00000000-0000-7000-8000-000000000110",
+  manualItemId: "00000000-0000-7000-8000-000000000111",
+  unrelatedJobId: "00000000-0000-7000-8000-000000000112",
+  unrelatedItemId: "00000000-0000-7000-8000-000000000113"
+});
+
 test(
   "PostgreSQL 18 isolates migration owners, service runtimes, connector and Directus",
   { skip: adminUrl === undefined, timeout: 240_000 },
@@ -89,13 +105,14 @@ test(
           mapping.runtimeSecret
         ]),
         "DIRECTUS_DATABASE_PASSWORD",
+        "JOBS_RANK_DATABASE_PASSWORD",
         "JOBS_CONNECTOR_DATABASE_PASSWORD"
       ].map((secretName) => [
         secretName,
         `${secretName.toLowerCase().replaceAll("_", "-")}-${randomBytes(24).toString("base64url")}`
       ])
     );
-    assert.equal(new Set(Object.values(passwords)).size, 10);
+    assert.equal(new Set(Object.values(passwords)).size, 11);
 
     let originalHba;
     let hbaPath;
@@ -246,7 +263,9 @@ async function assertFreshPostgres18Administrator(admin) {
       `SELECT count(*)
        FROM pg_roles
        WHERE rolname ~ '^(platform|seo|jobs|realtime)_(owner|runtime)$'
-          OR rolname IN ('directus_runtime_owner', 'jobs_connector')`
+          OR rolname IN (
+            'jobs_rank_runtime', 'directus_runtime_owner', 'jobs_connector'
+          )`
     ),
     "0",
     "the opt-in cluster must not contain canonical service roles"
@@ -302,7 +321,7 @@ async function assertRoleCatalog(admin) {
        WHERE rolname IN (
          'platform_owner', 'platform_runtime',
          'seo_owner', 'seo_runtime',
-         'jobs_owner', 'jobs_runtime',
+         'jobs_owner', 'jobs_runtime', 'jobs_rank_runtime',
          'realtime_owner', 'realtime_runtime',
          'directus_runtime_owner', 'jobs_connector'
        )
@@ -314,7 +333,7 @@ async function assertRoleCatalog(admin) {
          AND NOT rolreplication
          AND NOT rolbypassrls`
     ),
-    "10"
+    "11"
   );
   assert.equal(
     await checkedPsql(
@@ -326,7 +345,7 @@ async function assertRoleCatalog(admin) {
          WHERE rolname IN (
            'platform_owner', 'platform_runtime',
            'seo_owner', 'seo_runtime',
-           'jobs_owner', 'jobs_runtime',
+           'jobs_owner', 'jobs_runtime', 'jobs_rank_runtime',
            'realtime_owner', 'realtime_runtime',
            'directus_runtime_owner', 'jobs_connector'
          )
@@ -335,7 +354,7 @@ async function assertRoleCatalog(admin) {
          WHERE rolname IN (
            'platform_owner', 'platform_runtime',
            'seo_owner', 'seo_runtime',
-           'jobs_owner', 'jobs_runtime',
+           'jobs_owner', 'jobs_runtime', 'jobs_rank_runtime',
            'realtime_owner', 'realtime_runtime',
            'directus_runtime_owner', 'jobs_connector'
          )
@@ -356,6 +375,17 @@ async function assertRoleCatalog(admin) {
       "0"
     );
   }
+  assert.equal(
+    await checkedPsql(
+      admin,
+      `SELECT count(*)
+       FROM pg_shdepend
+       WHERE refclassid = 'pg_authid'::regclass
+         AND refobjid = 'jobs_rank_runtime'::regrole
+         AND deptype = 'o'`
+    ),
+    "0"
+  );
 }
 
 async function createFutureRuntimeProbes(admin, passwords) {
@@ -461,6 +491,455 @@ async function assertRuntimeCrudAndBoundaries(admin, passwords) {
     ),
     "0"
   );
+  await assertPsqlDenied(
+    jobsRuntime,
+    "SELECT count(*) FROM public.rank_provider_request_intents"
+  );
+
+  const rankRuntime = roleEnvironment(
+    admin,
+    "jobs_rank_runtime",
+    "jobs_db",
+    passwords.JOBS_RANK_DATABASE_PASSWORD
+  );
+  assert.equal(
+    await checkedPsql(
+      rankRuntime,
+      "SELECT count(*) FROM public.rank_provider_request_intents"
+    ),
+    "0"
+  );
+
+  for (const forbiddenTable of [
+    "uploads",
+    "semantic_imports",
+    "semantic_import_staging_rows",
+    "semantic_import_validated_rows",
+    "outbox_events",
+    "integration_credential_kek_canaries",
+    "runtime_permission_probe"
+  ]) {
+    await assertPsqlDenied(
+      rankRuntime,
+      `SELECT count(*) FROM public.${forbiddenTable}`
+    );
+  }
+
+  assert.equal(
+    await checkedPsql(
+      { ...admin, PGDATABASE: "jobs_db" },
+      `SELECT concat_ws(',',
+         has_table_privilege(
+           'jobs_runtime',
+           'public.rank_provider_request_intents',
+           'SELECT'
+         ),
+         has_table_privilege(
+           'jobs_runtime',
+           'public.rank_provider_request_intents',
+           'INSERT'
+         ),
+         has_table_privilege(
+           'jobs_rank_runtime',
+           'public.rank_provider_request_intents',
+           'SELECT'
+         ),
+         has_table_privilege(
+           'jobs_rank_runtime',
+           'public.rank_provider_request_intents',
+           'INSERT'
+         ),
+         has_table_privilege(
+           'jobs_rank_runtime',
+           'public.rank_provider_request_intents',
+           'UPDATE'
+         ),
+         has_table_privilege(
+           'jobs_rank_runtime',
+           'public.rank_provider_request_intents',
+           'DELETE'
+         ),
+         has_table_privilege(
+           'jobs_rank_runtime',
+           'public.rank_provider_request_intents',
+           'TRUNCATE'
+         )
+       )`
+    ),
+    "f,f,t,t,f,f,f"
+  );
+
+  assert.equal(
+    await checkedPsql(
+      { ...admin, PGDATABASE: "jobs_db" },
+      `SELECT count(*)
+       FROM pg_default_acl default_acl
+       CROSS JOIN LATERAL aclexplode(default_acl.defaclacl) privilege
+       WHERE privilege.grantee = 'jobs_rank_runtime'::regrole`
+    ),
+    "0"
+  );
+
+  assert.equal(
+    await checkedPsql(
+      { ...admin, PGDATABASE: "jobs_db" },
+      `SELECT count(*)
+       FROM pg_class sequence
+       JOIN pg_namespace namespace ON namespace.oid = sequence.relnamespace
+       WHERE namespace.nspname = 'public'
+         AND sequence.relkind = 'S'
+         AND (
+           has_sequence_privilege(
+             'jobs_rank_runtime', sequence.oid, 'USAGE'
+           )
+           OR has_sequence_privilege(
+             'jobs_rank_runtime', sequence.oid, 'SELECT'
+           )
+           OR has_sequence_privilege(
+             'jobs_rank_runtime', sequence.oid, 'UPDATE'
+           )
+         )`
+    ),
+    "0"
+  );
+
+  for (const lockOnlyTable of [
+    "job_items",
+    "integration_credentials",
+    "project_connector_bindings",
+    "project_connector_routes"
+  ]) {
+    assert.equal(
+      await checkedPsql(
+        { ...admin, PGDATABASE: "jobs_db" },
+        `SELECT has_column_privilege(
+           'jobs_rank_runtime',
+           'public.${lockOnlyTable}',
+           'id',
+           'UPDATE'
+         )`
+      ),
+      "t"
+    );
+    assert.equal(
+      await checkedPsql(
+        { ...admin, PGDATABASE: "jobs_db" },
+        `SELECT count(*)
+         FROM pg_attribute attribute
+         WHERE attribute.attrelid = 'public.${lockOnlyTable}'::regclass
+           AND attribute.attnum > 0
+           AND NOT attribute.attisdropped
+           AND attribute.attname <> 'id'
+           AND has_column_privilege(
+             'jobs_rank_runtime',
+             attribute.attrelid,
+             attribute.attnum,
+             'UPDATE'
+           )`
+      ),
+      "0"
+    );
+  }
+
+  await assertRankRuntimeDomainBoundary(admin, passwords);
+}
+
+async function assertRankRuntimeDomainBoundary(admin, passwords) {
+  const fixture = rankBoundaryFixture;
+  const owner = roleEnvironment(
+    admin,
+    "jobs_owner",
+    "jobs_db",
+    passwords.JOBS_DATABASE_OWNER_PASSWORD
+  );
+  await checkedPsql(
+    owner,
+    `BEGIN;
+     INSERT INTO public.jobs (
+       id, workspace_id, project_id, type, status, stage,
+       idempotency_scope, input_snapshot, scope_snapshot,
+       credential_mode, provider, correlation_id, version, finished_at,
+       updated_at
+     ) VALUES (
+       '${fixture.validationJobId}'::uuid,
+       '${fixture.workspaceId}'::uuid,
+       '${fixture.projectId}'::uuid,
+       'INTEGRATION_CREDENTIAL_VALIDATE', 'COMPLETED', 'FINISHED',
+       'rank-boundary-validation', jsonb_build_object(
+         'kind', 'integration.credential.validation.v1',
+         'credentialId', '${fixture.credentialId}',
+         'credentialMaterialVersion', 1,
+         'connectorVersion', 'rank-boundary@1'
+       ), '{}'::jsonb, 'BYOK_API_KEY', 'ARSENKIN',
+       'rank-boundary-validation', 1,
+       '2026-07-30 00:00:00+00'::timestamptz, clock_timestamp()
+     );
+     INSERT INTO public.integration_credentials (
+       id, workspace_id, provider, label, mode, status, ciphertext,
+       nonce, auth_tag, encrypted_data_key, data_key_nonce,
+       data_key_auth_tag, key_version, capabilities, idempotency_key,
+       request_fingerprint, fingerprint_key_version, material_version,
+       verified_at, version, updated_at
+     ) VALUES (
+       '${fixture.credentialId}'::uuid,
+       '${fixture.workspaceId}'::uuid,
+       'ARSENKIN', 'Rank boundary fixture', 'BYOK_API_KEY', 'ACTIVE',
+       decode('01', 'hex'), decode(repeat('02', 12), 'hex'),
+       decode(repeat('03', 16), 'hex'), decode('04', 'hex'),
+       decode(repeat('05', 12), 'hex'),
+       decode(repeat('06', 16), 'hex'), 1,
+       '["SERP_RANK_TRACKING"]'::jsonb, 'rank-boundary-credential',
+       decode(repeat('07', 32), 'hex'), 1, 1,
+       '2026-07-30 00:00:00+00'::timestamptz, 1, clock_timestamp()
+     );
+     INSERT INTO public.project_connector_bindings (
+       id, workspace_id, project_id, capability, enabled,
+       created_by, updated_by, version, updated_at
+     ) VALUES (
+       '${fixture.bindingId}'::uuid,
+       '${fixture.workspaceId}'::uuid,
+       '${fixture.projectId}'::uuid,
+       'SERP_RANK_TRACKING', TRUE, '${fixture.actorId}'::uuid,
+       '${fixture.actorId}'::uuid, 1, clock_timestamp()
+     );
+     INSERT INTO public.project_connector_routes (
+       id, workspace_id, project_id, binding_id, position,
+       source_kind, credential_id, updated_at
+     ) VALUES (
+       '${fixture.routeId}'::uuid,
+       '${fixture.workspaceId}'::uuid,
+       '${fixture.projectId}'::uuid,
+       '${fixture.bindingId}'::uuid, 0, 'WORKSPACE_CREDENTIAL',
+       '${fixture.credentialId}'::uuid, clock_timestamp()
+     );
+     INSERT INTO public.rank_estimates (
+       id, workspace_id, project_id, actor_id, tracking_context_id,
+       idempotency_scope, idempotency_key, request_hash,
+       project_version, project_domain_hash, context_version,
+       configuration_version, configuration_hash, semantic_scope_hash,
+       scope_hash, provider, credential_mode, provider_policy_version,
+       keyword_count, provider_task_count, minimum_submit_request_count,
+       minimum_check_request_count, minimum_get_request_count, blockers,
+       response_snapshot, execution_snapshot, execution_snapshot_hash,
+       calculated_at, expires_at
+     ) VALUES (
+       '${fixture.estimateId}'::uuid,
+       '${fixture.workspaceId}'::uuid,
+       '${fixture.projectId}'::uuid,
+       '${fixture.actorId}'::uuid,
+       '${fixture.trackingContextId}'::uuid,
+       'rank-boundary-estimate', 'rank-boundary-estimate',
+       decode(repeat('11', 32), 'hex'), 1,
+       decode(repeat('12', 32), 'hex'), 1, 1,
+       decode(repeat('13', 32), 'hex'),
+       decode(repeat('14', 32), 'hex'),
+       decode(repeat('15', 32), 'hex'),
+       'ARSENKIN', 'BYOK_API_KEY', 'rank-boundary@1',
+       1, 1, 1, 1, 1, '[]'::jsonb, '{}'::jsonb, '{}'::jsonb,
+       decode(repeat('16', 32), 'hex'),
+       '2026-07-30 00:00:00+00'::timestamptz,
+       '2026-07-30 00:05:00+00'::timestamptz
+     );
+     INSERT INTO public.jobs (
+       id, workspace_id, project_id, type, status, stage, actor_id,
+       deduplication_key, idempotency_scope, idempotency_key,
+       request_hash, input_snapshot, scope_snapshot, progress_current,
+       progress_total, progress_unit, estimated_cost_micro, currency,
+       credential_mode, provider, max_attempts, correlation_id, version,
+       updated_at
+     ) VALUES (
+       '${fixture.manualJobId}'::uuid,
+       '${fixture.workspaceId}'::uuid,
+       '${fixture.projectId}'::uuid,
+       'MANUAL_RANK_CHECK', 'PREPARING', 'PREPARING_SCOPE',
+       '${fixture.actorId}'::uuid, 'rank-boundary-manual',
+       'rank-boundary-manual', 'rank-boundary-manual',
+       decode(repeat('11', 32), 'hex'), '{}'::jsonb, '{}'::jsonb,
+       0, 1, 'KEYWORD', 0, 'RUB', 'BYOK_API_KEY', 'ARSENKIN', 3,
+       'rank-boundary-manual', 1, clock_timestamp()
+     );
+     INSERT INTO public.rank_job_runs (
+       job_id, workspace_id, project_id, estimate_id,
+       tracking_context_id, project_domain, project_status,
+       project_version, manifest_command, manifest_command_hash,
+       updated_at
+     ) VALUES (
+       '${fixture.manualJobId}'::uuid,
+       '${fixture.workspaceId}'::uuid,
+       '${fixture.projectId}'::uuid,
+       '${fixture.estimateId}'::uuid,
+       '${fixture.trackingContextId}'::uuid,
+       'example.test', 'ACTIVE', 1, '{}'::jsonb,
+       decode(repeat('17', 32), 'hex'), clock_timestamp()
+     );
+     INSERT INTO public.jobs (
+       id, workspace_id, project_id, type, status, idempotency_scope,
+       input_snapshot, scope_snapshot, credential_mode, correlation_id,
+       updated_at
+     ) VALUES (
+       '${fixture.unrelatedJobId}'::uuid,
+       '${fixture.workspaceId}'::uuid,
+       '${fixture.projectId}'::uuid,
+       'SITE_AUDIT', 'DRAFT', 'rank-boundary-unrelated', '{}'::jsonb,
+       '{}'::jsonb, 'PLATFORM_INCLUDED', 'rank-boundary-unrelated',
+       clock_timestamp()
+     );
+     INSERT INTO public.job_items (
+       id, workspace_id, project_id, job_id, sequence, status,
+       input_reference, updated_at
+     ) VALUES
+       (
+         '${fixture.manualItemId}'::uuid,
+         '${fixture.workspaceId}'::uuid,
+         '${fixture.projectId}'::uuid,
+         '${fixture.manualJobId}'::uuid, 0, 'PENDING', '{}'::jsonb,
+         clock_timestamp()
+       ),
+       (
+         '${fixture.unrelatedItemId}'::uuid,
+         '${fixture.workspaceId}'::uuid,
+         '${fixture.projectId}'::uuid,
+         '${fixture.unrelatedJobId}'::uuid, 0, 'PENDING', '{}'::jsonb,
+         clock_timestamp()
+       );
+     COMMIT;`
+  );
+
+  const rank = roleEnvironment(
+    admin,
+    "jobs_rank_runtime",
+    "jobs_db",
+    passwords.JOBS_RANK_DATABASE_PASSWORD
+  );
+  assert.equal(
+    await checkedPsql(
+      rank,
+      "SELECT string_agg(type, ',' ORDER BY type) FROM public.jobs"
+    ),
+    "INTEGRATION_CREDENTIAL_VALIDATE,MANUAL_RANK_CHECK"
+  );
+  assert.equal(
+    await checkedPsql(rank, "SELECT count(*) FROM public.job_items"),
+    "1"
+  );
+  assert.equal(
+    await checkedPsql(
+      rank,
+      `WITH hidden AS (
+         SELECT id FROM public.jobs
+         WHERE id = '${fixture.unrelatedJobId}'::uuid FOR UPDATE
+       ) SELECT count(*) FROM hidden`
+    ),
+    "0"
+  );
+  assert.equal(
+    await checkedPsql(
+      rank,
+      `BEGIN;
+       SELECT id FROM public.jobs
+       WHERE id = '${fixture.validationJobId}'::uuid FOR UPDATE;
+       ROLLBACK;`
+    ),
+    fixture.validationJobId
+  );
+  assert.equal(
+    await checkedPsql(
+      rank,
+      `SELECT concat_ws(',',
+         (SELECT count(*) FROM public.project_connector_bindings),
+         (SELECT count(*) FROM public.project_connector_routes),
+         (SELECT count(id) FROM public.integration_credentials))`
+    ),
+    "1,1,1"
+  );
+  assert.equal(
+    await checkedPsql(
+      { ...admin, PGDATABASE: "jobs_db" },
+      `SELECT string_agg(attribute.attname, ',' ORDER BY attribute.attname)
+       FROM pg_attribute attribute
+       WHERE attribute.attrelid = 'public.integration_credentials'::regclass
+         AND attribute.attnum > 0
+         AND NOT attribute.attisdropped
+         AND has_column_privilege(
+           'jobs_rank_runtime', attribute.attrelid, attribute.attnum, 'SELECT'
+         )`
+    ),
+    "capabilities,deleted_at,id,last_success_at,material_version,mode,provider,status,verified_at,version,workspace_id"
+  );
+  await assertPsqlDenied(
+    rank,
+    `SELECT ciphertext FROM public.integration_credentials
+     WHERE id = '${fixture.credentialId}'::uuid`
+  );
+
+  const validationUpdate = await runPsql(rank, [
+    "--command",
+    `UPDATE public.jobs SET version = version + 1,
+       updated_at = clock_timestamp()
+     WHERE id = '${fixture.validationJobId}'::uuid`
+  ]);
+  assert.notEqual(validationUpdate.code, 0);
+  assert.match(
+    validationUpdate.stderr,
+    /cannot update non-rank jobs|violates row-level security/u
+  );
+
+  for (const [table, id] of [
+    ["job_items", fixture.manualItemId],
+    ["integration_credentials", fixture.credentialId],
+    ["project_connector_bindings", fixture.bindingId],
+    ["project_connector_routes", fixture.routeId]
+  ]) {
+    const noOpUpdate = await runPsql(rank, [
+      "--command",
+      `UPDATE public.${table} SET id = id WHERE id = '${id}'::uuid`
+    ]);
+    assert.notEqual(noOpUpdate.code, 0);
+    assert.match(noOpUpdate.stderr, /cannot update lock-only rows/u);
+  }
+
+  assert.equal(
+    await checkedPsql(
+      rank,
+      `UPDATE public.jobs
+       SET version = version + 1, updated_at = clock_timestamp()
+       WHERE id = '${fixture.manualJobId}'::uuid
+       RETURNING version`
+    ),
+    "2"
+  );
+  await assertPsqlDenied(
+    rank,
+    `UPDATE public.jobs SET priority = priority
+     WHERE id = '${fixture.manualJobId}'::uuid`
+  );
+
+  const generic = roleEnvironment(
+    admin,
+    "jobs_runtime",
+    "jobs_db",
+    passwords.JOBS_DATABASE_PASSWORD
+  );
+  assert.equal(
+    await checkedPsql(
+      generic,
+      `UPDATE public.jobs SET priority = priority + 1
+       WHERE id = '${fixture.unrelatedJobId}'::uuid
+       RETURNING priority`
+    ),
+    "101"
+  );
+  assert.equal(
+    await checkedPsql(
+      generic,
+      `SELECT concat_ws(',',
+         (SELECT count(*) FROM public.jobs),
+         (SELECT octet_length(ciphertext)
+          FROM public.integration_credentials
+          WHERE id = '${fixture.credentialId}'::uuid))`
+    ),
+    "3,1"
+  );
 }
 
 async function assertOwnerAndDirectusBoundaries(admin, passwords) {
@@ -482,6 +961,18 @@ async function assertOwnerAndDirectusBoundaries(admin, passwords) {
       /permission denied for database|pg_hba\.conf rejects connection|no pg_hba\.conf entry/u
     );
   }
+
+  const rankRuntime = roleEnvironment(
+    admin,
+    "jobs_rank_runtime",
+    "jobs_db",
+    passwords.JOBS_RANK_DATABASE_PASSWORD
+  );
+  assert.equal(await checkedPsql(rankRuntime, "SELECT current_database()"), "jobs_db");
+  await assertConnectionDenied(
+    { ...rankRuntime, PGDATABASE: "platform_db" },
+    /permission denied for database|pg_hba\.conf rejects connection|no pg_hba\.conf entry/u
+  );
 
   const directus = roleEnvironment(
     admin,
@@ -766,6 +1257,7 @@ async function cleanup(admin) {
     "seo_runtime",
     "seo_owner",
     "jobs_runtime",
+    "jobs_rank_runtime",
     "jobs_owner",
     "realtime_runtime",
     "realtime_owner",

@@ -3,7 +3,7 @@
 set -eu
 
 connector_user=jobs_connector
-service_roles='platform_owner platform_runtime seo_owner seo_runtime jobs_owner jobs_runtime realtime_owner realtime_runtime directus_runtime_owner'
+service_roles='platform_owner platform_runtime seo_owner seo_runtime jobs_owner jobs_runtime jobs_rank_runtime realtime_owner realtime_runtime directus_runtime_owner'
 
 if [ "${JOBS_CONNECTOR_DATABASE_USER:-$connector_user}" != "$connector_user" ]; then
   echo "JOBS_CONNECTOR_DATABASE_USER is immutable and must equal jobs_connector" >&2
@@ -31,12 +31,15 @@ write_hba() {
   echo 'local   seo_db       "seo_runtime"                       scram-sha-256'
   echo 'local   jobs_db      "jobs_owner"                        scram-sha-256'
   echo 'local   jobs_db      "jobs_runtime"                      scram-sha-256'
+  echo 'local   jobs_db      "jobs_rank_runtime"                 scram-sha-256'
   echo 'local   realtime_db  "realtime_owner"                    scram-sha-256'
   echo 'local   realtime_db  "realtime_runtime"                  scram-sha-256'
   echo 'local   directus_db  "directus_runtime_owner"            scram-sha-256'
   printf 'local   jobs_db      "%s"                         scram-sha-256\n' "$connector_user"
   echo 'local   replication  /^(platform|seo|jobs|realtime)_(owner|runtime)(_[a-z0-9_]+)?$  reject'
   echo 'local   all          /^(platform|seo|jobs|realtime)_(owner|runtime)(_[a-z0-9_]+)?$  reject'
+  echo 'local   replication  /^jobs_rank_runtime(_[a-z0-9_]+)?$             reject'
+  echo 'local   all          /^jobs_rank_runtime(_[a-z0-9_]+)?$             reject'
   echo 'local   replication  /^directus_runtime_owner(_[a-z0-9_]+)?$          reject'
   echo 'local   all          /^directus_runtime_owner(_[a-z0-9_]+)?$          reject'
   echo "local   replication  /^jobs_connector(_[a-z0-9_]+)?$             reject"
@@ -47,12 +50,15 @@ write_hba() {
   echo 'host    seo_db       "seo_runtime"                       all      scram-sha-256'
   echo 'host    jobs_db      "jobs_owner"                        all      scram-sha-256'
   echo 'host    jobs_db      "jobs_runtime"                      all      scram-sha-256'
+  echo 'host    jobs_db      "jobs_rank_runtime"                 all      scram-sha-256'
   echo 'host    realtime_db  "realtime_owner"                    all      scram-sha-256'
   echo 'host    realtime_db  "realtime_runtime"                  all      scram-sha-256'
   echo 'host    directus_db  "directus_runtime_owner"            all      scram-sha-256'
   printf 'host    jobs_db      "%s"                 all      scram-sha-256\n' "$connector_user"
   echo 'host    replication  /^(platform|seo|jobs|realtime)_(owner|runtime)(_[a-z0-9_]+)?$  all      reject'
   echo 'host    all          /^(platform|seo|jobs|realtime)_(owner|runtime)(_[a-z0-9_]+)?$  all      reject'
+  echo 'host    replication  /^jobs_rank_runtime(_[a-z0-9_]+)?$             all      reject'
+  echo 'host    all          /^jobs_rank_runtime(_[a-z0-9_]+)?$             all      reject'
   echo 'host    replication  /^directus_runtime_owner(_[a-z0-9_]+)?$          all      reject'
   echo 'host    all          /^directus_runtime_owner(_[a-z0-9_]+)?$          all      reject'
   echo "host    replication  /^jobs_connector(_[a-z0-9_]+)?$     all      reject"

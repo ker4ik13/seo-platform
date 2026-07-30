@@ -226,7 +226,15 @@
   `EXECUTE` только на public claim и authorize functions. `CLAIMED` не разрешает
   network. Authorize повторно проверяет полный current graph, lease fence и
   ожидаемые execution/control versions, атомарно устанавливает `SUBMITTING`
-  и durable may-have-started marker. Runtime caller, provider
+  и durable may-have-started marker. До grant отдельная append-only private
+  intent row повторно сверяется с authoritative sealed chunk и связывается с
+  execution по request/manifest/chunk hashes; credential material в неё не
+  входит. Таблица исключена из прав general `jobs_runtime`; только выделенный
+  `jobs_rank_runtime` имеет exact `SELECT, INSERT`, без DDL, sequences,
+  default privileges и чужих Jobs data domains. RLS ограничивает manual
+  rank/validation/`SERP_RANK_TRACKING` graph, credential projection исключает
+  ciphertext/DEK/nonces/tags, а DB guards запрещают фактические writes через
+  lock-only column privileges. Runtime caller, recorded provider wire
   request/status/result и остальные scoped operations ещё не реализованы.
   Retryable submit создаёт новый grant и monotonic execution attempt; исходная
   execution не возвращается в `READY_TO_SUBMIT`.

@@ -23,10 +23,17 @@ test("builds the exact public grant request from private evidence", () => {
     built.evidenceHash.value
   );
   assert.equal(built.evidence.credential.id, ids[10]);
+  assert.equal(built.evidence.providerRequestIntent.id, ids[12]);
   assert.equal(built.evidence.killSwitch.enabled, true);
 
   const requestJson = JSON.stringify(built.request);
-  for (const privateValue of [ids[8], ids[9], ids[10], ids[11]]) {
+  for (const privateValue of [
+    ids[8],
+    ids[9],
+    ids[10],
+    ids[11],
+    ids[12]
+  ]) {
     assert.equal(requestJson.includes(privateValue as string), false);
   }
 });
@@ -36,7 +43,9 @@ test("binds material, validation and kill-switch versions independently", () => 
   for (const override of [
     { credentialMaterialVersion: 5 },
     { credentialValidationVersion: 6 },
-    { killSwitchVersion: "arsenkin-positions@2" }
+    { killSwitchVersion: "arsenkin-positions@2" },
+    { providerRequestIntentHash: Buffer.alloc(32, 9) },
+    { manifestChunkHash: Buffer.alloc(32, 8) }
   ]) {
     const changed = buildRankExecutionGrantRequest({
       ...facts(),
@@ -77,6 +86,9 @@ function facts(): RankExecutionGrantRequestFacts {
     manifestId: ids[7] as string,
     manifestHash: Buffer.alloc(32, 2),
     manifestChunkIndex: 1,
+    providerRequestIntentId: ids[12] as string,
+    providerRequestIntentHash: Buffer.alloc(32, 4),
+    manifestChunkHash: Buffer.alloc(32, 5),
     bindingId: ids[8] as string,
     bindingVersion: 3,
     routeId: ids[9] as string,

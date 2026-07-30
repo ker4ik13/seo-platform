@@ -20,6 +20,13 @@ Project connector binding и versioned tracking contexts позволяют вы
 - однозначную семантику Яндекса: текст и пример документации расходятся по
   `type`.
 
+Повторная проверка официальных страниц API 30 июля 2026 года подтвердила:
+общая документация по-прежнему описывает только `set → check → get`, лимиты и
+ошибку `429`, а страница `positions` — request example без полной response
+schema, exhaustive status vocabulary и idempotency/recovery contract. Поэтому
+внешний contract gate остаётся открытым, даже если request projection уже
+можно построить локально.
+
 Автоматический повтор неоднозначного `set` может повторно списать лимиты
 пользователя. Локальный request hash не превращает внешний вызов в
 идемпотентный.
@@ -238,6 +245,28 @@ request разрешено `check/get` и сохранить. Security suspensio
 rotation запрещают дальнейшее использование старого secret.
 
 ## Execution isolation
+
+Jobs остаётся владельцем всех таблиц и миграций, но rank-worker использует
+отдельный login `jobs_rank_runtime`, а не general `jobs_runtime`. Это
+capability/domain boundary внутри `jobs_db`, а не перенос ownership и не
+замена tenant-проверкам приложения:
+
+- private `rank_provider_request_intents` полностью недоступна general
+  runtime; rank-role имеет только `SELECT, INSERT`;
+- row-level policies оставляют rank-role только manual rank Jobs, связанные
+  JobItems, credential-validation proof и connector graph capability
+  `SERP_RANK_TRACKING`;
+- credential projection выдаётся по column allowlist без ciphertext,
+  encrypted DEK, nonce или auth tag;
+- фактический UPDATE validation Job и canonical IDs запрещён DB guards;
+  минимальный `UPDATE(id)` существует только для PostgreSQL row locks;
+- rank-role не получает DDL, sequences, default privileges, uploads, imports,
+  outbox или KEK canary tables.
+
+RLS ограничивает domain видимых строк для shared service login, но не кодирует
+workspace в PostgreSQL session. Поэтому каждый runtime query по-прежнему
+обязан начинаться с проверенного workspace/project/job context и exact
+composite relations; наличие DB-role не считается tenant authorization.
 
 Текущий connector login с global `SELECT` jobs и credential vault является
 release blocker. До live submit вводятся scoped `connector_executions`,

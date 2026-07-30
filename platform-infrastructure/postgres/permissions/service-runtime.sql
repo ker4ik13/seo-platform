@@ -16,6 +16,10 @@ CASE current_database()
   WHEN 'realtime_db' THEN 'realtime_runtime'
   ELSE NULL
 END AS runtime_role,
+CASE current_database()
+  WHEN 'jobs_db' THEN 'jobs_rank_runtime'
+  ELSE ''
+END AS rank_runtime_role,
 current_database() AS database_name
 \gset
 
@@ -24,13 +28,21 @@ SELECT set_config(
   :'runtime_role',
   false
 );
+SELECT set_config(
+  'seo_platform.jobs_rank_runtime_role',
+  :'rank_runtime_role',
+  false
+);
 
 DO $$
 DECLARE
   database_owner_id OID;
   expected_owner TEXT := current_setting('seo_platform.expected_owner', TRUE);
-  runtime_role TEXT := current_setting('seo_platform.service_runtime_role');
-  runtime_role_id OID;
+  role_id OID;
+  role_name TEXT;
+  runtime_roles TEXT[] := ARRAY[
+    current_setting('seo_platform.service_runtime_role')
+  ];
 BEGIN
   expected_owner := CASE current_database()
     WHEN 'platform_db' THEN 'platform_owner'
@@ -57,49 +69,59 @@ BEGIN
       'service database is not owned by the canonical migration owner';
   END IF;
 
-  SELECT oid
-  INTO STRICT runtime_role_id
-  FROM pg_roles
-  WHERE rolname = runtime_role;
+  IF current_database() = 'jobs_db' THEN
+    runtime_roles := array_append(
+      runtime_roles,
+      current_setting('seo_platform.jobs_rank_runtime_role')
+    );
+  END IF;
 
-  IF EXISTS (
-    SELECT 1
+  FOREACH role_name IN ARRAY runtime_roles
+  LOOP
+    SELECT oid
+    INTO STRICT role_id
     FROM pg_roles
-    WHERE oid = runtime_role_id
-      AND (
-        NOT rolcanlogin
-        OR rolsuper
-        OR rolcreatedb
-        OR rolcreaterole
-        OR rolinherit
-        OR rolreplication
-        OR rolbypassrls
-      )
-  ) THEN
-    RAISE EXCEPTION
-      'runtime service role has unsafe attributes';
-  END IF;
+    WHERE rolname = role_name;
 
-  IF EXISTS (
-    SELECT 1
-    FROM pg_auth_members
-    WHERE member = runtime_role_id
-       OR roleid = runtime_role_id
-  ) THEN
-    RAISE EXCEPTION
-      'runtime service role must not have membership edges';
-  END IF;
+    IF EXISTS (
+      SELECT 1
+      FROM pg_roles
+      WHERE oid = role_id
+        AND (
+          NOT rolcanlogin
+          OR rolsuper
+          OR rolcreatedb
+          OR rolcreaterole
+          OR rolinherit
+          OR rolreplication
+          OR rolbypassrls
+        )
+    ) THEN
+      RAISE EXCEPTION
+        'runtime service role % has unsafe attributes', role_name;
+    END IF;
 
-  IF EXISTS (
-    SELECT 1
-    FROM pg_shdepend
-    WHERE refclassid = 'pg_authid'::regclass
-      AND refobjid = runtime_role_id
-      AND deptype = 'o'
-  ) THEN
-    RAISE EXCEPTION
-      'runtime service role must not own database objects';
-  END IF;
+    IF EXISTS (
+      SELECT 1
+      FROM pg_auth_members
+      WHERE member = role_id
+         OR roleid = role_id
+    ) THEN
+      RAISE EXCEPTION
+        'runtime service role % must not have membership edges', role_name;
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM pg_shdepend
+      WHERE refclassid = 'pg_authid'::regclass
+        AND refobjid = role_id
+        AND deptype = 'o'
+    ) THEN
+      RAISE EXCEPTION
+        'runtime service role % must not own database objects', role_name;
+    END IF;
+  END LOOP;
 
   IF NOT EXISTS (
     SELECT 1
@@ -205,9 +227,39 @@ REVOKE ALL PRIVILEGES ON DATABASE :"database_name" FROM :"runtime_role";
 REVOKE CONNECT, TEMPORARY ON DATABASE :"database_name" FROM PUBLIC;
 GRANT CONNECT ON DATABASE :"database_name" TO :"runtime_role";
 
+SELECT format(
+  'REVOKE ALL PRIVILEGES ON DATABASE %I FROM %I',
+  current_database(),
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT CONNECT ON DATABASE %I TO %I',
+  current_database(),
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
 REVOKE ALL PRIVILEGES ON SCHEMA public FROM :"runtime_role";
 REVOKE ALL PRIVILEGES ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO :"runtime_role";
+
+SELECT format(
+  'REVOKE ALL PRIVILEGES ON SCHEMA public FROM %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT USAGE ON SCHEMA public TO %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
 
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM :"runtime_role";
 REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM PUBLIC;
@@ -224,11 +276,160 @@ JOIN pg_namespace namespace
 WHERE namespace.nspname = 'public'
   AND relation.relkind IN ('r', 'p', 'v', 'm', 'f')
   AND relation.relname <> '_prisma_migrations'
+  AND NOT (
+    current_database() = 'jobs_db'
+    AND relation.relname = 'rank_provider_request_intents'
+  )
 ORDER BY relation.oid
+\gexec
+
+SELECT format(
+  'REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT SELECT ON TABLE public.jobs TO %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT UPDATE (
+    status,
+    stage,
+    progress_current,
+    attempt,
+    error_summary,
+    result_summary,
+    version,
+    queued_at,
+    finished_at,
+    lease_owner,
+    lease_expires_at,
+    retry_at,
+    updated_at
+  ) ON TABLE public.jobs TO %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT SELECT, INSERT ON TABLE public.job_items TO %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT UPDATE (id) ON TABLE public.job_items TO %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT SELECT, UPDATE ON TABLE public.rank_job_runs TO %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT SELECT ON TABLE public.rank_estimates TO %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT SELECT, INSERT, UPDATE ON TABLE public.rank_execution_grant_attempts TO %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT SELECT, INSERT ON TABLE public.rank_provider_request_intents TO %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT SELECT, INSERT ON TABLE public.rank_connector_executions TO %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT SELECT (
+    id,
+    workspace_id,
+    provider,
+    mode,
+    status,
+    capabilities,
+    material_version,
+    version,
+    verified_at,
+    last_success_at,
+    deleted_at
+  ) ON TABLE public.integration_credentials TO %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT UPDATE (id) ON TABLE public.integration_credentials TO %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT SELECT ON TABLE public.project_connector_bindings TO %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT UPDATE (id) ON TABLE public.project_connector_bindings TO %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT SELECT ON TABLE public.project_connector_routes TO %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT UPDATE (id) ON TABLE public.project_connector_routes TO %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
 \gexec
 
 REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM :"runtime_role";
 REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC;
+
+SELECT format(
+  'REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM %I',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
 
 SELECT format(
   'GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I',
@@ -253,6 +454,27 @@ FROM pg_proc routine
 JOIN pg_namespace namespace
   ON namespace.oid = routine.pronamespace
 WHERE namespace.nspname = 'public'
+  AND routine.prokind = 'f'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM pg_depend dependency
+    WHERE dependency.classid = 'pg_proc'::regclass
+      AND dependency.objid = routine.oid
+      AND dependency.deptype = 'e'
+  )
+ORDER BY routine.oid
+\gexec
+
+SELECT format(
+  'REVOKE ALL PRIVILEGES ON FUNCTION %s FROM %I',
+  routine.oid::regprocedure,
+  :'rank_runtime_role'
+)
+FROM pg_proc routine
+JOIN pg_namespace namespace
+  ON namespace.oid = routine.pronamespace
+WHERE current_database() = 'jobs_db'
+  AND namespace.nspname = 'public'
   AND routine.prokind = 'f'
   AND NOT EXISTS (
     SELECT 1
@@ -307,6 +529,20 @@ END) AS required_routine(routine_signature)
 ORDER BY routine_signature
 \gexec
 
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION %s TO %I',
+  routine_signature,
+  :'rank_runtime_role'
+)
+FROM unnest(ARRAY[
+  'public.manual_rank_job_state_is_coherent(public."JobStatus",public."RankManifestSealState",public."RankCheckFinalStatus")',
+  'public.rank_execution_grant_request_is_exact(jsonb,uuid,uuid,uuid,uuid,integer,integer,bytea)',
+  'public.rank_execution_grant_decision_is_exact(jsonb,text,bytea,bytea,timestamp with time zone,timestamp with time zone)'
+]) AS rank_required_routine(routine_signature)
+WHERE current_database() = 'jobs_db'
+ORDER BY routine_signature
+\gexec
+
 ALTER DEFAULT PRIVILEGES FOR ROLE :"expected_owner"
   REVOKE ALL PRIVILEGES ON TABLES FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES FOR ROLE :"expected_owner"
@@ -318,6 +554,33 @@ ALTER DEFAULT PRIVILEGES FOR ROLE :"expected_owner"
 ALTER DEFAULT PRIVILEGES FOR ROLE :"expected_owner"
   GRANT USAGE, SELECT ON SEQUENCES TO :"runtime_role";
 
+SELECT format(
+  'ALTER DEFAULT PRIVILEGES FOR ROLE %I
+    REVOKE ALL PRIVILEGES ON TABLES FROM %I',
+  :'expected_owner',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'ALTER DEFAULT PRIVILEGES FOR ROLE %I
+    REVOKE ALL PRIVILEGES ON SEQUENCES FROM %I',
+  :'expected_owner',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'ALTER DEFAULT PRIVILEGES FOR ROLE %I
+    REVOKE EXECUTE ON FUNCTIONS FROM %I',
+  :'expected_owner',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
 ALTER DEFAULT PRIVILEGES FOR ROLE :"expected_owner" IN SCHEMA public
   REVOKE ALL PRIVILEGES ON TABLES FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES FOR ROLE :"expected_owner" IN SCHEMA public
@@ -328,6 +591,33 @@ ALTER DEFAULT PRIVILEGES FOR ROLE :"expected_owner" IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO :"runtime_role";
 ALTER DEFAULT PRIVILEGES FOR ROLE :"expected_owner" IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO :"runtime_role";
+
+SELECT format(
+  'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public
+    REVOKE ALL PRIVILEGES ON TABLES FROM %I',
+  :'expected_owner',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public
+    REVOKE ALL PRIVILEGES ON SEQUENCES FROM %I',
+  :'expected_owner',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public
+    REVOKE EXECUTE ON FUNCTIONS FROM %I',
+  :'expected_owner',
+  :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
 
 DO $$
 DECLARE
@@ -336,22 +626,105 @@ DECLARE
     FROM pg_roles
     WHERE rolname = current_setting('seo_platform.service_runtime_role')
   );
+  rank_runtime_role_id OID := (
+    SELECT oid
+    FROM pg_roles
+    WHERE rolname = NULLIF(
+      current_setting('seo_platform.jobs_rank_runtime_role'),
+      ''
+    )
+  );
+  role_id OID;
 BEGIN
-  IF has_database_privilege(runtime_role_id, current_database(), 'CREATE')
-    OR has_database_privilege(runtime_role_id, current_database(), 'TEMPORARY')
-    OR has_schema_privilege(runtime_role_id, 'public', 'CREATE')
-  THEN
-    RAISE EXCEPTION
-      'runtime service role retained DDL privileges';
-  END IF;
+  FOREACH role_id IN ARRAY array_remove(
+    ARRAY[runtime_role_id, rank_runtime_role_id],
+    NULL
+  )
+  LOOP
+    IF has_database_privilege(role_id, current_database(), 'CREATE')
+      OR has_database_privilege(role_id, current_database(), 'TEMPORARY')
+      OR has_schema_privilege(role_id, 'public', 'CREATE')
+    THEN
+      RAISE EXCEPTION
+        'runtime service role retained DDL privileges';
+    END IF;
 
-  IF has_table_privilege(
-    runtime_role_id,
-    'public._prisma_migrations',
-    'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
-  ) THEN
-    RAISE EXCEPTION
-      'runtime service role must not access Prisma migration history';
+    IF has_table_privilege(
+      role_id,
+      'public._prisma_migrations',
+      'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+    ) THEN
+      RAISE EXCEPTION
+        'runtime service role must not access Prisma migration history';
+    END IF;
+  END LOOP;
+
+  IF current_database() = 'jobs_db' THEN
+    IF has_table_privilege(
+      runtime_role_id,
+      'public.rank_provider_request_intents',
+      'SELECT'
+    ) OR has_table_privilege(
+      runtime_role_id,
+      'public.rank_provider_request_intents',
+      'INSERT'
+    ) OR has_table_privilege(
+      runtime_role_id,
+      'public.rank_provider_request_intents',
+      'UPDATE'
+    ) OR has_table_privilege(
+      runtime_role_id,
+      'public.rank_provider_request_intents',
+      'DELETE'
+    ) OR has_table_privilege(
+      runtime_role_id,
+      'public.rank_provider_request_intents',
+      'TRUNCATE'
+    ) OR has_table_privilege(
+      runtime_role_id,
+      'public.rank_provider_request_intents',
+      'REFERENCES'
+    ) OR has_table_privilege(
+      runtime_role_id,
+      'public.rank_provider_request_intents',
+      'TRIGGER'
+    ) THEN
+      RAISE EXCEPTION
+        'generic jobs runtime must not access rank provider request intents';
+    END IF;
+
+    IF NOT has_table_privilege(
+      rank_runtime_role_id,
+      'public.rank_provider_request_intents',
+      'SELECT'
+    ) OR NOT has_table_privilege(
+      rank_runtime_role_id,
+      'public.rank_provider_request_intents',
+      'INSERT'
+    ) OR has_table_privilege(
+      rank_runtime_role_id,
+      'public.rank_provider_request_intents',
+      'UPDATE'
+    ) OR has_table_privilege(
+      rank_runtime_role_id,
+      'public.rank_provider_request_intents',
+      'DELETE'
+    ) OR has_table_privilege(
+      rank_runtime_role_id,
+      'public.rank_provider_request_intents',
+      'TRUNCATE'
+    ) OR has_table_privilege(
+      rank_runtime_role_id,
+      'public.rank_provider_request_intents',
+      'REFERENCES'
+    ) OR has_table_privilege(
+      rank_runtime_role_id,
+      'public.rank_provider_request_intents',
+      'TRIGGER'
+    ) THEN
+      RAISE EXCEPTION
+        'rank runtime must have only SELECT and INSERT on provider request intents';
+    END IF;
   END IF;
 END
 $$;

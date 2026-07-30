@@ -2,12 +2,12 @@ import type { RankManifestHash } from "@seo-platform/contracts";
 import { canonicalJsonSha256 } from "@seo-platform/contracts/canonical-json";
 
 export const RANK_EXECUTION_EVIDENCE_SCHEMA =
-  "rank-execution-evidence@1" as const;
+  "rank-execution-evidence@2" as const;
 export const ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION =
   "arsenkin-positions@1.0.0" as const;
 
-export interface RankExecutionEvidenceV1 {
-  readonly schemaVersion: "rank-execution-evidence@1";
+export interface RankExecutionEvidenceV2 {
+  readonly schemaVersion: "rank-execution-evidence@2";
   readonly workspaceId: string;
   readonly projectId: string;
   readonly jobId: string;
@@ -18,6 +18,12 @@ export interface RankExecutionEvidenceV1 {
     readonly id: string;
     readonly hash: RankManifestHash;
     readonly chunkIndex: number;
+  };
+  readonly providerRequestIntent: {
+    readonly id: string;
+    readonly schemaVersion: "rank-provider-request-intent@1";
+    readonly requestHash: RankManifestHash;
+    readonly manifestChunkHash: RankManifestHash;
   };
   readonly binding: {
     readonly id: string;
@@ -57,7 +63,7 @@ const VERSION_PATTERN = /^[a-z0-9][a-z0-9@._-]{0,63}$/u;
  */
 export function rankExecutionEvidence(
   value: unknown
-): RankExecutionEvidenceV1 {
+): RankExecutionEvidenceV2 {
   const input = exactRecord(value, [
     "schemaVersion",
     "workspaceId",
@@ -67,6 +73,7 @@ export function rankExecutionEvidence(
     "executionAttempt",
     "estimateId",
     "manifest",
+    "providerRequestIntent",
     "binding",
     "route",
     "credential",
@@ -80,6 +87,10 @@ export function rankExecutionEvidence(
     "hash",
     "chunkIndex"
   ]);
+  const providerRequestIntent = exactRecord(
+    input.providerRequestIntent,
+    ["id", "schemaVersion", "requestHash", "manifestChunkHash"]
+  );
   const binding = exactRecord(input.binding, ["id", "version"]);
   const route = exactRecord(input.route, ["id"]);
   const credential = exactRecord(input.credential, [
@@ -98,6 +109,8 @@ export function rankExecutionEvidence(
 
   if (
     input.schemaVersion !== RANK_EXECUTION_EVIDENCE_SCHEMA ||
+    providerRequestIntent.schemaVersion !==
+      "rank-provider-request-intent@1" ||
     !boundedInteger(input.executionAttempt, 1, 1_000) ||
     !boundedInteger(manifest.chunkIndex, 0, 3) ||
     typeof input.executionConnectorVersion !== "string" ||
@@ -126,6 +139,14 @@ export function rankExecutionEvidence(
       hash: hash(manifest.hash),
       chunkIndex: Number(manifest.chunkIndex)
     },
+    providerRequestIntent: {
+      id: uuidV7(providerRequestIntent.id),
+      schemaVersion: "rank-provider-request-intent@1",
+      requestHash: hash(providerRequestIntent.requestHash),
+      manifestChunkHash: hash(
+        providerRequestIntent.manifestChunkHash
+      )
+    },
     binding: {
       id: uuidV7(binding.id),
       version: positiveInteger(binding.version)
@@ -152,7 +173,7 @@ export function rankExecutionEvidence(
 }
 
 export function rankExecutionEvidenceHash(
-  value: RankExecutionEvidenceV1
+  value: RankExecutionEvidenceV2
 ): RankManifestHash {
   return {
     algorithm: "SHA_256",

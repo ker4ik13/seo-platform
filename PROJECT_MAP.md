@@ -28,15 +28,20 @@ durable intent/consume: exact `REQUESTED` записывается до HTTP, re
 переходит в `CONSUMED` вместе с единственным secret-free
 `rank_connector_executions/READY_TO_SUBMIT`. Строка связывает exact
 Job/item/grant/manifest/binding/route/credential-version evidence, но не
-содержит credential material. Default-closed SECURITY DEFINER claim DDL уже
+содержит credential material. Перед grant Jobs теперь дважды проверяет
+locked Job/Run/Item graph вокруг bounded чтения sealed manifest chunk,
+сохраняет единственный append-only privacy-sensitive, но secret-free
+`rank_provider_request_intents` snapshot и связывает его ID, request hash и
+chunk hash с private execution evidence и connector execution FK.
+Default-closed SECURITY DEFINER claim DDL уже
 переводит eligible row в bounded pre-network `CLAIMED` и возвращает только
 одну exact encrypted credential projection после full current-graph recheck.
 Exact deploy-time connector permissions теперь выдают только broker/claim/
 authorize signatures без table DML. Submit authorization повторно блокирует
 полный current graph, сверяет owner/token/lease generation/row version и
 атомарно фиксирует `SUBMITTING` с durable marker до возможных network bytes.
-Runtime caller, immutable provider request, submit/status/fetch persistence и
-normalized result producer ещё отсутствуют.
+Runtime caller, recorded Arsenkin wire request, submit/status/fetch
+persistence и normalized result producer ещё отсутствуют.
 Production policy и submit gate остаются fail-closed; live Arsenkin submit
 выключен до прохождения contract/security gates ADR-2026-034.
 
@@ -451,6 +456,14 @@ Backend convention:
   и `20260730101800_rank_connector_submit_authorization` — отдельный enum
   expansion, monotonic lease generation, one-way `CLAIMED → SUBMITTING`,
   full graph/control/fence authorization и durable may-have-started marker;
+- `platform-jobs-integrations/prisma/migrations/20260730120000_rank_provider_request_intents`
+  — один append-only exact provider request intent на JobItem, bounded JSONB,
+  tenant-safe Job/Run/Item FK, update/delete/truncate guards и обязательный
+  составной execution FK по intent/request/manifest/chunk hashes;
+- `platform-jobs-integrations/prisma/migrations/20260730120100_rank_runtime_database_boundary`
+  — fail-closed RLS domain scope для выделенного `jobs_rank_runtime`,
+  column-level vault projection без ciphertext/DEK и DB guards, запрещающие
+  реальные writes в validation/lock-only rows при сохранении `FOR UPDATE`;
 - `platform-contracts/src/api/rank-runs.ts` и `src/events/rankings.ts` —
   exact manual-run lifecycle, manifest/chunk, normalized ingest/finalize и
   redacted completion event contracts; manifest preimage builders
@@ -507,10 +520,11 @@ Backend convention:
   projection и finite blockers без provider call/decrypt/queue;
 - `platform-jobs-integrations/src/rank-runs` — internal create/get/cancel,
   immutable manifest command/hash, `rank_job_runs` sidecar, явная Job/seal
-  state machine, canonical `Job → RankJobRun → JobItem → credential →
-  validation Job → binding → route → grant attempt` lock order, bounded
-  recovery, public-safe Job projection и durable execution-grant
-  intent/consume; dependency-free provider lifecycle reducer фиксирует
+  state machine, canonical `Job → RankJobRun → JobItem → provider intent →
+  credential → validation Job → binding → route → grant attempt` lock order,
+  bounded recovery, public-safe Job projection, exact private provider
+  request intent и durable execution-grant intent/consume; dependency-free
+  provider lifecycle reducer фиксирует
   конечную state/event matrix и запрет auto-resubmit после ambiguous submit,
   но его DB persistence/runtime wiring ещё отсутствуют;
 - `platform-jobs-integrations/src/platform-api` — bounded/no-redirect client
@@ -635,8 +649,8 @@ Backend convention:
 - `platform-infrastructure/compose.dokploy.yml` — отдельный internal-only
   `rank-worker` process того же Jobs image с exact env allowlist, bounded
   resources, migration/Redis/SEO Data/Platform API dependencies, двумя
-  dedicated rank tokens, forced-disabled provider submit и без
-  ports/outbound;
+  dedicated rank tokens, отдельным `jobs_rank_runtime`, forced-disabled
+  provider submit и без ports/outbound;
 - тот же Compose разделяет Jobs HTTP, Redis-only system, import и inspection
   env allowlists и подключает каждый процесс только к его named Redis user и
   isolated network; static regression проверяет exact recipients четырёх
@@ -651,9 +665,10 @@ Backend convention:
   их случайную выдачу остальным runtime processes;
 - `platform-infrastructure/postgres/init` — создание service databases;
 - `platform-infrastructure/postgres/roles` — fail-closed cluster bootstrap
-  canonical `platform/seo/jobs/realtime` migration-owner и runtime roles,
-  SCRAM password provisioning через stdin, безопасная передача только пустых
-  legacy databases и cluster-wide ownership/membership/ACL audit;
+  canonical `platform/seo/jobs/realtime` migration-owner/general runtime
+  roles и scoped `jobs_rank_runtime`, SCRAM password provisioning через
+  stdin, безопасная передача только пустых legacy databases и cluster-wide
+  ownership/membership/ACL audit;
 - `platform-infrastructure/postgres/config/start-postgres.sh` — generated
   first-match HBA для всех canonical owner/runtime, Directus и connector
   logins: SCRAM разрешён только в exact собственной database, replication,
@@ -661,8 +676,12 @@ Backend convention:
   rules;
 - `platform-infrastructure/postgres/permissions` — идемпотентные fail-closed
   post-migration grants. `service-runtime.sql` проверяет canonical database/
-  schema/object owner, запрещает runtime membership/ownership и выдаёт только
-  CRUD без `_prisma_migrations`/`TRUNCATE`, sequence use и точные routines;
+  schema/object owner, запрещает runtime membership/ownership, полностью
+  закрывает private provider intents от `jobs_runtime` и выдаёт rank-role
+  exact table/verb/column allowlist без vault ciphertext, sequences/default
+  privileges; RLS оставляет только manual rank/validation и
+  `SERP_RANK_TRACKING` graph. General роли получают CRUD без
+  `_prisma_migrations`/`TRUNCATE`, sequence use и точные routines;
   default ACL сохраняют правило для будущих объектов. Отдельный audited
   `seo-extension-runtime.sql` закрывает `PUBLIC` у member functions exact
   `pg_trgm` и открывает их только `seo_runtime`. Connector DDL создаёт/
@@ -998,8 +1017,10 @@ Secret-bearing rank manifest endpoints принадлежат SEO Data и защ
 отдельным `JOBS_TO_SEO_RANK_TOKEN`; general caller/audience tokens не дают
 читать keyword text chunks. Secret получает только SEO Data validator и
 отдельный rank-worker Jobs; generic HTTP, connector/import/inspection/system
-workers secret не получают. Клиент запрещает HTTP redirects, ограничивает
-размер ответа и принимает только exact tenant-bound receipt.
+workers secret не получают. Rank worker дополнительно использует отдельный
+`jobs_rank_runtime`; generic `jobs_runtime` не может читать private intent
+table. Клиент запрещает HTTP redirects, ограничивает размер ответа и принимает
+только exact tenant-bound receipt.
 
 Execution contract foundation принимает в public create только `estimateId`
 и возвращает Job через конечную discriminated lifecycle матрицу. SEO Data
@@ -1039,11 +1060,14 @@ authoritative entitlement/quota implementation. Jobs bounded client и durable
 grant intent/decision history реализованы как fail-closed foundation: network intent
 записывается первым, exact replay сохраняется, а неистёкшее положительное
 решение атомарно связывается с secret-free scoped connector execution и
-становится `CONSUMED`. SECURITY DEFINER claim, scoped encrypted credential
+становится `CONSUMED`. До grant immutable adapter request строится только из
+verified sealed command/chunk, сохраняется один раз без credential material и
+через evidence v2/FK связывается с execution по request/manifest/chunk hashes.
+SECURITY DEFINER claim, scoped encrypted credential
 projection и exact connector permissions реализованы; `CLAIMED` остаётся
 pre-network. Authorize повторно проверяет весь current graph и атомарно
 фиксирует `SUBMITTING`/single-attempt marker до secret-free permit. Runtime
-caller, connector submission/status и normalized result producer ещё не
+caller, recorded connector wire submission/status и normalized result producer ещё не
 реализованы, поэтому production worker не создаёт provider snapshots.
 
 ## 8. Проверенное состояние
@@ -1245,7 +1269,7 @@ caller, connector submission/status и normalized result producer ещё не
 
 ## 9. Следующий вертикальный срез
 
-`durable provider request intent/runtime → submit/status/fetch persistence →
+`provider runtime caller → submit/status/fetch persistence →
 normalized result producer/ingest receipts`
 
 Provider-free estimate и SEO Data immutable manifest из ADR-2026-034
@@ -1256,10 +1280,12 @@ cancel, public/Web Job lifecycle и normalized SEO Data result persistence
 Platform-owned issuer/receipt, Jobs-owned intent/decision и атомарный
 `CONSUMED ↔ rank_connector_executions/READY_TO_SUBMIT`. Scoped broker/claim,
 exact connector permission и атомарный authorize/`SUBMITTING` уже готовы и
-прошли fresh PostgreSQL 18 permission/race/upgrade proof. Следующим нужны
-immutable exact request intent до grant, runtime caller, durable provider
-submit/status/fetch state и producer нормализованных результатов с ingest
-receipts. Live Arsenkin `set` выключен, пока нет recorded provider contract,
+прошли fresh PostgreSQL 18 permission/race/upgrade proof. Immutable exact
+provider request intent до grant теперь также хранится append-only, повторно
+проверяется при grant replay и обязательно связан с connector execution.
+Следующими нужны runtime caller, durable provider submit/status/fetch state и
+producer нормализованных результатов с ingest receipts. Live Arsenkin `set`
+выключен, пока нет recorded provider wire contract,
 полного persisted provider lifecycle, fairness/circuit breaker и production
 environment evidence.
 Неоднозначность manifest preparation уже fail-closed переходит в
