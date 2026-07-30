@@ -10,8 +10,10 @@ import type {
   ApiCollectionResponse,
   InternalCreateSemanticKeywordInput,
   InternalDeleteSemanticKeywordInput,
+  InternalSemanticKeywordBulkInput,
   InternalUpdateSemanticKeywordInput,
   KeywordListQuery,
+  SemanticKeywordBulkResult,
   SemanticKeywordIntent,
   SemanticKeywordListItem
 } from "@seo-platform/contracts";
@@ -376,7 +378,16 @@ export class KeywordService {
                 result.targetPageId
               )
             : (input.targetUrl ?? undefined);
-        return keywordItem(result, targetUrl, false);
+        return keywordItem(
+          result,
+          targetUrl,
+          await isKeywordTracked(
+            transaction,
+            input.workspaceId,
+            input.projectId,
+            keywordId
+          )
+        );
       });
     } catch (error) {
       if (isUniqueConstraintError(error)) throw duplicateKeyword();
@@ -414,6 +425,74 @@ export class KeywordService {
       });
     });
   }
+
+  public async bulkUpdate(
+    input: InternalSemanticKeywordBulkInput
+  ): Promise<SemanticKeywordBulkResult> {
+    const updatedItems: SemanticKeywordListItem[] = [];
+    const conflictedIds: string[] = [];
+    const skippedIds: string[] = [];
+    const failedIds: string[] = [];
+    for (const item of input.items) {
+      try {
+        updatedItems.push(
+          await this.update(item.id, {
+            ...input.patch,
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            actorId: input.actorId,
+            version: item.version
+          })
+        );
+      } catch (error) {
+        if (!(error instanceof HttpException)) throw error;
+        const status = error.getStatus();
+        if (status === HttpStatus.PRECONDITION_FAILED) {
+          conflictedIds.push(item.id);
+        } else if (status === HttpStatus.NOT_FOUND) {
+          skippedIds.push(item.id);
+        } else if (
+          status === HttpStatus.BAD_REQUEST ||
+          status === HttpStatus.CONFLICT
+        ) {
+          failedIds.push(item.id);
+        } else {
+          throw error;
+        }
+      }
+    }
+    return {
+      selected: input.items.length,
+      changed: updatedItems.length,
+      skipped: skippedIds.length,
+      failed: failedIds.length,
+      conflicted: conflictedIds.length,
+      updatedItems,
+      conflictedIds,
+      skippedIds,
+      failedIds
+    };
+  }
+}
+
+async function isKeywordTracked(
+  transaction: Prisma.TransactionClient,
+  workspaceId: string,
+  projectId: string,
+  keywordId: string
+): Promise<boolean> {
+  const assignment =
+    await transaction.trackingContextKeywordAssignment.findFirst({
+      where: {
+        workspaceId,
+        projectId,
+        keywordId,
+        removedAt: null,
+        context: { status: "ACTIVE" }
+      },
+      select: { id: true }
+    });
+  return Boolean(assignment);
 }
 
 async function requiredKeyword(

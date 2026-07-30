@@ -9,6 +9,7 @@ import {
   type InternalCreateSemanticKeywordGroupInput,
   type InternalDeleteSemanticKeywordInput,
   type InternalDeleteSemanticKeywordGroupInput,
+  type InternalSemanticKeywordBulkInput,
   type InternalUpdateSemanticKeywordInput,
   type InternalUpdateSemanticKeywordGroupInput,
   type CreateTrackingContextInput,
@@ -19,6 +20,8 @@ import {
   type KeywordListQuery,
   type RankHistoryQuery,
   type SemanticKeywordIntent,
+  type SemanticKeywordBulkInput,
+  type SemanticKeywordBulkResult,
   type SemanticKeywordGroup,
   type SemanticKeywordListItem,
   type TrackingContextCollection,
@@ -140,6 +143,26 @@ export class SeoDataClient {
       context,
       body
     );
+  }
+
+  public async bulkUpdateKeywords(
+    context: InternalContext,
+    input: SemanticKeywordBulkInput
+  ): Promise<SemanticKeywordBulkResult> {
+    const scope = trackingScope(context);
+    const body: InternalSemanticKeywordBulkInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      keywordUrl(context, this.config.services.seoData, "bulk"),
+      context,
+      body
+    );
+    return semanticKeywordBulkResult(responseData(payload), input);
   }
 
   public async listKeywordGroups(
@@ -614,6 +637,92 @@ export function semanticKeywordGroups(
     throw invalidResponse();
   }
   return groups;
+}
+
+export function semanticKeywordBulkResult(
+  value: unknown,
+  input: SemanticKeywordBulkInput
+): SemanticKeywordBulkResult {
+  const result = objectValue(value);
+  const keys = [
+    "selected",
+    "changed",
+    "skipped",
+    "failed",
+    "conflicted",
+    "updatedItems",
+    "conflictedIds",
+    "skippedIds",
+    "failedIds"
+  ];
+  if (
+    !result ||
+    Object.keys(result).some((key) => !keys.includes(key))
+  ) {
+    throw invalidResponse();
+  }
+  const counts = [
+    result.selected,
+    result.changed,
+    result.skipped,
+    result.failed,
+    result.conflicted
+  ];
+  if (
+    counts.some(
+      (count) => !Number.isSafeInteger(count) || Number(count) < 0
+    ) ||
+    result.selected !== input.items.length ||
+    Number(result.changed) +
+      Number(result.skipped) +
+      Number(result.failed) +
+      Number(result.conflicted) !==
+      Number(result.selected) ||
+    !Array.isArray(result.updatedItems) ||
+    result.updatedItems.length !== result.changed
+  ) {
+    throw invalidResponse();
+  }
+  const updatedItems = result.updatedItems.map(semanticKeywordItem);
+  const allowedIds = new Set(input.items.map(({ id }) => id));
+  const idLists = [
+    result.conflictedIds,
+    result.skippedIds,
+    result.failedIds
+  ];
+  if (
+    idLists.some(
+      (ids) =>
+        !Array.isArray(ids) ||
+        ids.some((id) => typeof id !== "string" || !allowedIds.has(id))
+    ) ||
+    updatedItems.some(({ id }) => !allowedIds.has(id))
+  ) {
+    throw invalidResponse();
+  }
+  const allIds = [
+    ...updatedItems.map(({ id }) => id),
+    ...(result.conflictedIds as string[]),
+    ...(result.skippedIds as string[]),
+    ...(result.failedIds as string[])
+  ];
+  if (
+    allIds.length !== input.items.length ||
+    new Set(allIds).size !== allIds.length
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    selected: result.selected as number,
+    changed: result.changed as number,
+    skipped: result.skipped as number,
+    failed: result.failed as number,
+    conflicted: result.conflicted as number,
+    updatedItems,
+    conflictedIds: result.conflictedIds as string[],
+    skippedIds: result.skippedIds as string[],
+    failedIds: result.failedIds as string[]
+  };
 }
 
 export function semanticKeywordGroup(value: unknown): SemanticKeywordGroup {

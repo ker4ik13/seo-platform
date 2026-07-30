@@ -2,6 +2,8 @@ import { Buffer } from "node:buffer";
 import {
   semanticKeywordIntents,
   type CreateSemanticKeywordInput,
+  type SemanticKeywordBulkInput,
+  type SemanticKeywordBulkPatch,
   type SemanticKeywordIntent,
   type UpdateSemanticKeywordInput
 } from "@seo-platform/contracts";
@@ -48,6 +50,63 @@ export function updateSemanticKeywordInput(
     ...(input.isFavorite === undefined
       ? {}
       : { isFavorite: booleanValue(input.isFavorite, "isFavorite") }),
+    ...optionalIntent(input.intent, true),
+    ...optionalGroupId(input.groupId, true),
+    ...optionalTargetUrl(input.targetUrl, true),
+    ...(input.tagNames === undefined
+      ? {}
+      : { tagNames: tagNames(input.tagNames) })
+  };
+}
+
+export function semanticKeywordBulkInput(
+  value: unknown
+): SemanticKeywordBulkInput {
+  const input = exactRecord(value, ["items", "patch"], "$");
+  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 200) {
+    invalid("items", "Must select between 1 and 200 keywords");
+  }
+  const items = input.items.map((value, index) => {
+    const item = exactRecord(value, ["id", "version"], `items.${index}`);
+    if (typeof item.id !== "string" || !UUID_PATTERN.test(item.id)) {
+      invalid(`items.${index}.id`, "Must be a UUID");
+    }
+    if (!Number.isSafeInteger(item.version) || Number(item.version) < 1) {
+      invalid(`items.${index}.version`, "Must be a positive integer");
+    }
+    return { id: item.id.toLowerCase(), version: Number(item.version) };
+  });
+  if (new Set(items.map(({ id }) => id)).size !== items.length) {
+    invalid("items", "Cannot contain duplicate keywords");
+  }
+  return { items, patch: semanticKeywordBulkPatch(input.patch) };
+}
+
+function semanticKeywordBulkPatch(
+  value: unknown
+): SemanticKeywordBulkPatch {
+  const input = exactRecord(
+    value,
+    [
+      "priority",
+      "isFavorite",
+      "intent",
+      "groupId",
+      "targetUrl",
+      "tagNames"
+    ],
+    "patch"
+  );
+  if (Object.keys(input).length === 0) {
+    invalid("patch", "At least one bulk change is required");
+  }
+  return {
+    ...(input.priority === undefined
+      ? {}
+      : { priority: priority(input.priority) }),
+    ...(input.isFavorite === undefined
+      ? {}
+      : { isFavorite: booleanValue(input.isFavorite, "patch.isFavorite") }),
     ...optionalIntent(input.intent, true),
     ...optionalGroupId(input.groupId, true),
     ...optionalTargetUrl(input.targetUrl, true),

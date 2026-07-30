@@ -137,3 +137,41 @@ export interface InternalDeleteSemanticKeywordGroupInput {
   readonly actorId: string;
   readonly version: number;
 }
+
+export interface SemanticKeywordBulkSelection {
+  readonly id: string;
+  readonly version: number;
+}
+
+export interface SemanticKeywordBulkPatch {
+  readonly priority?: number;
+  readonly isFavorite?: boolean;
+  readonly intent?: SemanticKeywordIntent | null;
+  readonly groupId?: string | null;
+  readonly targetUrl?: string | null;
+  readonly tagNames?: readonly string[];
+}
+
+export interface SemanticKeywordBulkInput {
+  readonly items: readonly SemanticKeywordBulkSelection[];
+  readonly patch: SemanticKeywordBulkPatch;
+}
+
+export interface InternalSemanticKeywordBulkInput
+  extends SemanticKeywordBulkInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+}
+
+export interface SemanticKeywordBulkResult {
+  readonly selected: number;
+  readonly changed: number;
+  readonly skipped: number;
+  readonly failed: number;
+  readonly conflicted: number;
+  readonly updatedItems: readonly SemanticKeywordListItem[];
+  readonly conflictedIds: readonly string[];
+  readonly skippedIds: readonly string[];
+  readonly failedIds: readonly string[];
+}

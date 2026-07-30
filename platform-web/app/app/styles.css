@@ -2113,6 +2113,21 @@ svg { display: block; }
 .semantic-group-empty { align-items: center; color: var(--muted); display: flex; flex-direction: column; font-size: 11px; gap: 5px; padding: 25px; text-align: center; }
 .semantic-group-empty strong { color: var(--text); font-size: 12px; }
 .semantic-group-skeleton { color: var(--muted); font-size: 11px; padding: 20px; text-align: center; }
+.semantic-bulk-editor { background: #f7f6ff; border: 1px solid #d8d3ff; border-radius: 12px; display: grid; gap: 14px; padding: 15px; }
+.semantic-bulk-heading { align-items: flex-start; display: flex; gap: 14px; justify-content: space-between; }
+.semantic-bulk-heading strong,
+.semantic-bulk-heading span { display: block; }
+.semantic-bulk-heading strong { font-size: 13px; }
+.semantic-bulk-heading span { color: var(--muted); font-size: 11px; margin-top: 4px; }
+.semantic-bulk-grid { display: grid; gap: 10px; grid-template-columns: repeat(5, minmax(120px, 1fr)); }
+.semantic-bulk-grid label { display: grid; gap: 6px; }
+.semantic-bulk-grid label > span { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.semantic-bulk-grid input:not([type="checkbox"]),
+.semantic-bulk-grid select { background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; min-height: 38px; padding: 0 10px; width: 100%; }
+.semantic-bulk-tags,
+.semantic-bulk-url { grid-column: span 2; }
+.semantic-bulk-tags > span { align-items: center; display: flex; gap: 6px; }
+.semantic-bulk-tags input[type="checkbox"] { accent-color: var(--accent); }
 .semantic-table-alert { align-items: center; display: flex; justify-content: space-between; }
 .semantic-table-alert .text-button { color: inherit; flex: 0 0 auto; margin-left: 12px; }
 .semantic-table-wrap { border: 1px solid var(--line); border-radius: 11px; max-width: 100%; overflow: auto; }
@@ -2122,9 +2137,11 @@ svg { display: block; }
 .semantic-table th { background: #f8f8fa; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .025em; position: sticky; text-transform: uppercase; top: 0; z-index: 1; }
 .semantic-table tbody tr:last-child td { border-bottom: 0; }
 .semantic-table tbody tr:hover td { background: #fafafd; }
-.semantic-table td:first-child { min-width: 230px; }
-.semantic-table td:nth-child(2) { min-width: 160px; }
-.semantic-table td:nth-child(3) { min-width: 210px; }
+.semantic-table .semantic-select-cell { max-width: 42px; min-width: 42px; text-align: center; width: 42px; }
+.semantic-select-cell input { accent-color: var(--accent); height: 15px; width: 15px; }
+.semantic-table td:nth-child(2) { min-width: 230px; }
+.semantic-table td:nth-child(3) { min-width: 160px; }
+.semantic-table td:nth-child(4) { min-width: 210px; }
 .semantic-table td strong,
 .semantic-table td small { display: block; overflow: hidden; text-overflow: ellipsis; }
 .semantic-table td strong { color: var(--text); font-size: 12px; }
@@ -2497,6 +2514,7 @@ svg { display: block; }
   .semantic-editor-url { grid-column: span 2; }
   .semantic-group-editor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .semantic-group-editor-actions { justify-content: flex-end; }
+  .semantic-bulk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .notification-channel-grid,
   .project-notification-mode { grid-template-columns: 1fr; }
   .notification-time-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -2746,6 +2764,9 @@ svg { display: block; }
   .semantic-group-editor-actions .primary-button { flex: 1; }
   .semantic-group-row { grid-template-columns: 8px minmax(0, 1fr) auto; }
   .semantic-group-row .danger-text { grid-column: 2 / 4; justify-self: end; }
+  .semantic-bulk-grid { grid-template-columns: 1fr; }
+  .semantic-bulk-tags,
+  .semantic-bulk-url { grid-column: span 1; }
   .notification-time-grid { grid-template-columns: 1fr; }
   .browser-push-heading,
   .browser-push-current,

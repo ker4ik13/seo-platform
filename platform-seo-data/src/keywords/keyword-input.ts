@@ -4,6 +4,7 @@ import {
   semanticKeywordIntents,
   type InternalCreateSemanticKeywordInput,
   type InternalDeleteSemanticKeywordInput,
+  type InternalSemanticKeywordBulkInput,
   type InternalUpdateSemanticKeywordInput,
   type SemanticKeywordIntent
 } from "@seo-platform/contracts";
@@ -75,6 +76,61 @@ export function internalDeleteSemanticKeywordInput(
   return {
     ...scope(input),
     version: positiveInteger(input.version, "version")
+  };
+}
+
+export function internalSemanticKeywordBulkInput(
+  value: unknown
+): InternalSemanticKeywordBulkInput {
+  const input = exactRecord(value, [
+    ...scopeFields(),
+    "items",
+    "patch"
+  ]);
+  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 200) {
+    invalid("items");
+  }
+  const items = input.items.map((value) => {
+    const item = exactRecord(value, ["id", "version"]);
+    return {
+      id: uuid(item.id, "items.id"),
+      version: positiveInteger(item.version, "items.version")
+    };
+  });
+  if (new Set(items.map(({ id }) => id)).size !== items.length) {
+    invalid("items");
+  }
+  const patch = exactRecord(input.patch, [
+    "priority",
+    "isFavorite",
+    "intent",
+    "groupId",
+    "targetUrl",
+    "tagNames"
+  ]);
+  if (Object.keys(patch).length === 0) invalid("patch");
+  return {
+    ...scope(input),
+    items,
+    patch: {
+      ...(patch.priority === undefined
+        ? {}
+        : { priority: priority(patch.priority) }),
+      ...(patch.isFavorite === undefined
+        ? {}
+        : {
+            isFavorite: booleanValue(
+              patch.isFavorite,
+              "patch.isFavorite"
+            )
+          }),
+      ...optionalIntent(patch.intent, true),
+      ...optionalGroupId(patch.groupId, true),
+      ...optionalTargetUrl(patch.targetUrl, true),
+      ...(patch.tagNames === undefined
+        ? {}
+        : { tagNames: tagNames(patch.tagNames) })
+    }
   };
 }
 

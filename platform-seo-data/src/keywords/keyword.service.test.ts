@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { BadRequestException } from "@nestjs/common";
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus
+} from "@nestjs/common";
+import type {
+  InternalUpdateSemanticKeywordInput,
+  SemanticKeywordListItem
+} from "@seo-platform/contracts";
 import type { PrismaService } from "../database/prisma.service.js";
 import { KeywordService } from "./keyword.service.js";
 
@@ -71,6 +79,44 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
   );
 });
 
+test("bulk update partitions changed, conflicted and skipped rows", async () => {
+  const changedId = "01900000-0000-7000-8000-000000000040";
+  const conflictId = "01900000-0000-7000-8000-000000000041";
+  const skippedId = "01900000-0000-7000-8000-000000000042";
+  const service = new KeywordService({} as PrismaService);
+  service.update = async (
+    id: string,
+    input: InternalUpdateSemanticKeywordInput
+  ) => {
+    assert.equal(input.priority, 15);
+    if (id === conflictId) {
+      throw new HttpException({}, HttpStatus.PRECONDITION_FAILED);
+    }
+    if (id === skippedId) {
+      throw new HttpException({}, HttpStatus.NOT_FOUND);
+    }
+    return semanticItem(id);
+  };
+
+  const result = await service.bulkUpdate({
+    workspaceId,
+    projectId,
+    actorId: "01900000-0000-7000-8000-000000000003",
+    items: [
+      { id: changedId, version: 1 },
+      { id: conflictId, version: 2 },
+      { id: skippedId, version: 3 }
+    ],
+    patch: { priority: 15 }
+  });
+
+  assert.equal(result.selected, 3);
+  assert.equal(result.changed, 1);
+  assert.equal(result.conflicted, 1);
+  assert.equal(result.skipped, 1);
+  assert.deepEqual(result.conflictedIds, [conflictId]);
+});
+
 function keyword(id: string, createdAt: string) {
   return {
     id,
@@ -106,5 +152,23 @@ function keyword(id: string, createdAt: string) {
       }
     ],
     tags: [{ tag: { name: "Приоритет" } }]
+  };
+}
+
+function semanticItem(id: string): SemanticKeywordListItem {
+  return {
+    id,
+    textOriginal: "SEO аудит",
+    textNormalized: "seo аудит",
+    language: "ru",
+    priority: 15,
+    isFavorite: false,
+    isTracked: false,
+    tags: [],
+    tagsTruncated: false,
+    sourceMode: "MANUAL",
+    createdAt: "2026-07-30T10:00:00.000Z",
+    updatedAt: "2026-07-30T10:00:00.000Z",
+    version: 2
   };
 }

@@ -10,7 +10,10 @@ BCP-47 язык, приоритет, избранное, intent, группа, t
 Группы имеют вложенность, защищённый перенос без циклов, CAS и запрет удаления
 непустой группы. Platform API валидирует публичный ввод и никогда не принимает
 workspace/actor из browser body; Web использует same-origin BFF и показывает
-конфликты версии без silent overwrite. Текущий slice ещё не считается
+конфликты версии без silent overwrite. Bounded bulk-команда принимает 1–200
+явных keyword ID с отдельной ожидаемой версией, возвращает changed/skipped/
+failed/conflicted partition и позволяет массово менять приоритет, избранное,
+intent, группу, target URL и теги без blind overwrite. Текущий slice ещё не считается
 завершённым до полного lint/test/build и живого PostgreSQL E2E. Следом в P1:
 bulk edits, saved views, custom columns, versions/undo, export и collaboration.
 
@@ -474,7 +477,7 @@ Backend convention:
 - `platform-api/src/imports` — project-scoped create/read orchestration с
   `semantic.import`/`semantic.view`;
 - `platform-api/src/semantics` — public project-scoped keyword read/create/
-  update/delete и иерархические groups; reads используют `semantic.view`,
+  update/delete, bounded explicit-ID bulk и иерархические groups; reads используют `semantic.view`,
   mutations — отдельные semantic permissions, CSRF, tenant lifecycle,
   optimistic locking и audit;
 - `platform-api/src/rankings` — public tracking context CRUD/archive/restore
@@ -1365,8 +1368,8 @@ caller, recorded connector wire submission/status и normalized result producer 
   production SMTP credentials на текущем хосте отсутствуют, поэтому Compose
   render, disposable DB/Redis smokes и внешний SMTP canary остаются
   CI/staging/operator gates, а не заменяются unit-тестами.
-- P1 semantic editor gate 2026-07-30: contracts 97/97, SEO Data 101/101,
-  Platform API 367 pass + 4 opt-in PostgreSQL skips, Web 149/149,
+- P1 semantic editor gate 2026-07-30: contracts 97/97, SEO Data 104/104,
+  Platform API 369 pass + 4 opt-in PostgreSQL skips, Web 149/149,
   infrastructure 80 pass + 5 optional PostgreSQL/Redis skips; root lint,
   typecheck, tests, production build, SEO Data Prisma validate/generate и
   `git diff --check` проходят. Живой migration/E2E на этом VPS пока блокирует
@@ -1387,7 +1390,7 @@ caller, recorded connector wire submission/status и normalized result producer 
 
 Сначала закрывается пользовательский P1-контур:
 
-`keyword/group CRUD → bulk edit → custom columns/saved views →
+`custom columns/saved views →
 versions/undo/export → comments/presence`
 
 Критерий — не наличие controller/service файлов, а browser E2E на живом

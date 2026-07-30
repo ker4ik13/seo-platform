@@ -9,6 +9,7 @@ import {
 } from "../rankings/tracking-context-response.js";
 import {
   semanticKeywordGroups,
+  semanticKeywordBulkResult,
   semanticKeywordPage,
   SeoDataClient
 } from "./seo-data.client.js";
@@ -130,6 +131,45 @@ test("validates a complete semantic group tree", () => {
       semanticKeywordGroups([
         { ...groups[1], parentId: "01900000-0000-7000-8000-000000000099" }
       ]),
+    DomainError
+  );
+});
+
+test("validates a complete semantic bulk result partition", () => {
+  const first = validItem.id;
+  const second = "01900000-0000-7000-8000-000000000030";
+  const input = {
+    items: [
+      { id: first, version: 1 },
+      { id: second, version: 2 }
+    ],
+    patch: { priority: 10 }
+  };
+  const result = semanticKeywordBulkResult(
+    {
+      selected: 2,
+      changed: 1,
+      skipped: 0,
+      failed: 0,
+      conflicted: 1,
+      updatedItems: [validItem],
+      conflictedIds: [second],
+      skippedIds: [],
+      failedIds: []
+    },
+    input
+  );
+  assert.equal(result.changed, 1);
+  assert.throws(
+    () =>
+      semanticKeywordBulkResult(
+        {
+          ...result,
+          changed: 2,
+          updatedItems: [validItem]
+        },
+        input
+      ),
     DomainError
   );
 });

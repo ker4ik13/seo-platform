@@ -17,6 +17,7 @@ import {
 import type {
   ApiCollectionResponse,
   ApiResponse,
+  SemanticKeywordBulkResult,
   SemanticKeywordListItem
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
@@ -29,6 +30,7 @@ import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import {
   internalCreateSemanticKeywordInput,
   internalDeleteSemanticKeywordInput,
+  internalSemanticKeywordBulkInput,
   internalUpdateSemanticKeywordInput
 } from "./keyword-input.js";
 import { keywordListQuery } from "./keyword-query.js";
@@ -71,6 +73,21 @@ export class KeywordController {
     assertMutationContext(projectId, headers, input);
     const result = await this.keywords.create(input);
     return response(request, result);
+  }
+
+  @Post("bulk")
+  public async bulkUpdate(
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticKeywordBulkResult>> {
+    const input = internalSemanticKeywordBulkInput(body);
+    assertMutationContext(projectId, headers, input);
+    return {
+      data: await this.keywords.bulkUpdate(input),
+      meta: { requestId: request.id }
+    };
   }
 
   @Patch(":keywordId")

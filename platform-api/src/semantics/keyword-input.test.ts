@@ -3,6 +3,7 @@ import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
 import {
   createSemanticKeywordInput,
+  semanticKeywordBulkInput,
   updateSemanticKeywordInput
 } from "./keyword-input.js";
 import {
@@ -64,6 +65,35 @@ test("normalizes nested group create and nullable update", () => {
   );
   assert.throws(
     () => createSemanticKeywordGroupInput({ name: "SEO / PPC" }),
+    DomainError
+  );
+});
+
+test("requires exact versions for every bounded bulk selection", () => {
+  const id = "01900000-0000-7000-8000-000000000020";
+  assert.deepEqual(
+    semanticKeywordBulkInput({
+      items: [{ id, version: 3 }],
+      patch: { isFavorite: true, intent: null, tagNames: [] }
+    }),
+    {
+      items: [{ id, version: 3 }],
+      patch: { isFavorite: true, intent: null, tagNames: [] }
+    }
+  );
+  assert.throws(
+    () =>
+      semanticKeywordBulkInput({
+        items: [
+          { id, version: 1 },
+          { id, version: 2 }
+        ],
+        patch: { priority: 1 }
+      }),
+    DomainError
+  );
+  assert.throws(
+    () => semanticKeywordBulkInput({ items: [{ id, version: 1 }], patch: {} }),
     DomainError
   );
 });

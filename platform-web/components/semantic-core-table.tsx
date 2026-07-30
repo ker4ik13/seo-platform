@@ -11,6 +11,7 @@ import {
   browserApiRequest,
   type BrowserCursorPage
 } from "../lib/browser-api";
+import { SemanticBulkEditor } from "./semantic-bulk-editor";
 
 type SemanticKeywordIntent =
   | "INFORMATIONAL"
@@ -96,9 +97,14 @@ export function SemanticCoreTable({
   const [saving, setSaving] = useState(false);
   const [mutationError, setMutationError] = useState<string>();
   const [groups, setGroups] = useState<readonly SemanticKeywordGroup[]>([]);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
+    new Set()
+  );
+  const [bulkNotice, setBulkNotice] = useState<string>();
 
   useEffect(() => {
     const controller = new AbortController();
+    setSelectedIds(new Set());
     setLoading(true);
     setError(undefined);
     void loadKeywordPage(projectId, search, undefined, controller.signal)
@@ -170,6 +176,8 @@ export function SemanticCoreTable({
   }
 
   function openCreate(): void {
+    setSelectedIds(new Set());
+    setBulkNotice(undefined);
     setMutationError(undefined);
     setEditor({
       mode: "create",
@@ -187,6 +195,8 @@ export function SemanticCoreTable({
   }
 
   function openEdit(item: SemanticKeyword): void {
+    setSelectedIds(new Set());
+    setBulkNotice(undefined);
     setMutationError(undefined);
     setEditor({
       mode: "edit",
@@ -306,6 +316,32 @@ export function SemanticCoreTable({
     } catch (requestError) {
       setMutationError(keywordMutationError(requestError));
     }
+  }
+
+  function toggleSelection(keywordId: string): void {
+    setBulkNotice(undefined);
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(keywordId)) next.delete(keywordId);
+      else next.add(keywordId);
+      return next;
+    });
+  }
+
+  function toggleVisibleSelection(): void {
+    setBulkNotice(undefined);
+    const visibleIds = items.map(({ id }) => id);
+    const allSelected =
+      visibleIds.length > 0 &&
+      visibleIds.every((id) => selectedIds.has(id));
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      for (const id of visibleIds) {
+        if (allSelected) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
   }
 
   const total = page.totalApprox;
@@ -514,6 +550,40 @@ export function SemanticCoreTable({
         </div>
       )}
 
+      {!editor && selectedIds.size > 0 && (
+        <SemanticBulkEditor
+          groups={groups}
+          onCancel={() => setSelectedIds(new Set())}
+          onCompleted={(result) => {
+            setSelectedIds(new Set());
+            setBulkNotice(
+              `Массовое изменение: обновлено ${result.changed} из ${result.selected}` +
+                (result.conflicted > 0
+                  ? `, конфликтов ${result.conflicted}`
+                  : "")
+            );
+            setRetryVersion((value) => value + 1);
+          }}
+          projectId={projectId}
+          selections={items
+            .filter(({ id }) => selectedIds.has(id))
+            .map(({ id, version }) => ({ id, version }))}
+        />
+      )}
+
+      {bulkNotice && (
+        <div className="inline-alert success semantic-table-alert" role="status">
+          <span>{bulkNotice}</span>
+          <button
+            className="text-button"
+            onClick={() => setBulkNotice(undefined)}
+            type="button"
+          >
+            Закрыть
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="inline-alert danger semantic-table-alert" role="alert">
           <span>{error}</span>
@@ -566,6 +636,17 @@ export function SemanticCoreTable({
             <table className="semantic-table">
               <thead>
                 <tr>
+                  <th className="semantic-select-cell">
+                    <input
+                      aria-label="Выбрать все показанные запросы"
+                      checked={
+                        items.length > 0 &&
+                        items.every(({ id }) => selectedIds.has(id))
+                      }
+                      onChange={toggleVisibleSelection}
+                      type="checkbox"
+                    />
+                  </th>
                   <th>Запрос</th>
                   <th>Группа</th>
                   <th>Целевая страница</th>
@@ -579,6 +660,14 @@ export function SemanticCoreTable({
               <tbody>
                 {items.map((item) => (
                   <tr key={item.id}>
+                    <td className="semantic-select-cell">
+                      <input
+                        aria-label={`Выбрать запрос ${item.textOriginal}`}
+                        checked={selectedIds.has(item.id)}
+                        onChange={() => toggleSelection(item.id)}
+                        type="checkbox"
+                      />
+                    </td>
                     <td>
                       <strong title={item.textOriginal}>
                         {item.isFavorite ? "★ " : ""}
