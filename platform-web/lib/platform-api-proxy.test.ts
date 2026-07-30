@@ -434,3 +434,73 @@ test("rejects chained or malformed forwarded client addresses before upstream", 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("forwards only the exact same browser Origin required by realtime tickets", async () => {
+  const originalFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  let upstreamHeaders: Headers | undefined;
+  globalThis.fetch = async (_input, init) => {
+    upstreamCalls += 1;
+    upstreamHeaders = new Headers(init?.headers);
+    return Response.json({ data: { ok: true } });
+  };
+
+  try {
+    const accepted = await proxyPlatformApi(
+      new NextRequest(
+        "https://app.example.test/app/api/projects/01900000-0000-7000-8000-000000000001/realtime-tickets",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Origin: "https://app.example.test"
+          },
+          body: JSON.stringify({
+            clientInstanceId:
+              "01900000-0000-7000-8000-000000000002"
+          })
+        }
+      ),
+      [
+        "projects",
+        "01900000-0000-7000-8000-000000000001",
+        "realtime-tickets"
+      ]
+    );
+    assert.equal(accepted.status, 200);
+    assert.equal(
+      upstreamHeaders?.get("origin"),
+      "https://app.example.test"
+    );
+
+    for (const origin of [
+      "https://attacker.example.test",
+      "https://app.example.test/",
+      "null"
+    ]) {
+      const rejected = await proxyPlatformApi(
+        new NextRequest(
+          "https://app.example.test/app/api/projects/01900000-0000-7000-8000-000000000001/realtime-tickets",
+          {
+            method: "POST",
+            headers: { Origin: origin },
+            body: "{}"
+          }
+        ),
+        [
+          "projects",
+          "01900000-0000-7000-8000-000000000001",
+          "realtime-tickets"
+        ]
+      );
+      assert.equal(rejected.status, 403);
+      assert.equal(
+        rejected.headers.get("cache-control"),
+        "private, no-store"
+      );
+    }
+    assert.equal(upstreamCalls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

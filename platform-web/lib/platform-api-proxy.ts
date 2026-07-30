@@ -53,6 +53,18 @@ export async function proxyPlatformApi(
       "Forwarded client address is invalid"
     );
   }
+  const browserOrigin = request.headers.get("origin");
+  const sameOrigin =
+    browserOrigin === null
+      ? undefined
+      : canonicalSameOrigin(browserOrigin, request.nextUrl.origin);
+  if (browserOrigin !== null && sameOrigin === undefined) {
+    return errorResponse(
+      403,
+      "FORBIDDEN",
+      "Cross-origin browser API requests are not allowed"
+    );
+  }
   const maxBodyBytes = browserApiBodyLimit(pathSegments);
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (
@@ -70,6 +82,7 @@ export async function proxyPlatformApi(
     if (value) headers.set(name, value);
   }
   if (clientIp) headers.set("x-forwarded-for", clientIp);
+  if (sameOrigin) headers.set("origin", sameOrigin);
   if (options.csrfFromCookie && !headers.has("x-csrf-token")) {
     const csrfName =
       process.env.AUTH_CSRF_COOKIE_NAME ?? "seo_csrf";
@@ -143,6 +156,28 @@ export function canonicalForwardedClientIp(
   if (version === 4) return candidate;
   const hostname = new URL(`http://[${candidate}]/`).hostname;
   return hostname.slice(1, -1);
+}
+
+export function canonicalSameOrigin(
+  value: string,
+  expectedOrigin: string
+): string | undefined {
+  if (value.length === 0 || value.length > 512) return undefined;
+  try {
+    const parsed = new URL(value);
+    if (
+      (parsed.protocol !== "https:" && parsed.protocol !== "http:") ||
+      parsed.username ||
+      parsed.password ||
+      parsed.origin !== value ||
+      value !== expectedOrigin
+    ) {
+      return undefined;
+    }
+    return value;
+  } catch {
+    return undefined;
+  }
 }
 
 async function readBoundedRequestBody(
