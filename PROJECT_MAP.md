@@ -538,8 +538,16 @@ Backend convention:
 - `platform-realtime/src/realtime` — Socket.IO gateway и namespace-only Redis
   adapter для `/collaboration` с versioned channel prefix
   `seo-platform:realtime:v1`, specific response channels и без Redis
-  key/presence access; root namespace остаётся in-memory и не создаёт
-  запрещённые Redis subscriptions;
+  key/presence access; gateway принимает только одноразовый 256-bit ticket с
+  exact browser Origin, сам выводит user/project rooms из trusted snapshot и
+  завершает соединение по bounded authorization lease; root namespace
+  остаётся in-memory и не создаёт запрещённые Redis subscriptions;
+- `platform-realtime/src/realtime-auth` — hash-only project ticket owner:
+  атомарная 30-секундная one-time consume, origin binding, session-family
+  tombstone, per-user issue/connection limits и 60-секундная authorization
+  lease. Platform API повторно проверяет membership/RBAC до выдачи; изменение
+  membership уже подключённого клиента не даёт instant disconnect, а
+  ограничено сроком lease;
 - `platform-realtime/src/notifications` — профильные правила, membership-bound
   проектные подписки, effective policy, user-scoped notification center и
   encrypted browser Web Push device lifecycle;
@@ -582,6 +590,11 @@ Backend convention:
 - Web image получает обязательный `WEB_PUBLIC_URL` как
   `NEXT_PUBLIC_SITE_URL` до `next build`, чтобы canonical metadata, robots и
   sitemap не зависели от запоздалого runtime env;
+- Platform API и Realtime принимают только явный `BIND_ADDRESS` из
+  `127.0.0.1|0.0.0.0`: local development по умолчанию остаётся на loopback,
+  а Compose явно выбирает `0.0.0.0` только внутри изолированной container
+  network. Realtime development origin совпадает с Web на
+  `http://localhost:3000`;
 - незавершённый `platform-admin` остаётся только в Compose-сети `internal`,
   без `edge`, host port и browser CORS/WebSocket allowlist. Публичный ingress
   запрещён до отдельной operator auth session/audience, обязательной 2FA,
@@ -736,7 +749,10 @@ Private Web содержит same-origin BFF, регистрацию/вход/п
 выбор workspace/project, MFA challenge и экран безопасности профиля с полным
 пагинируемым списком active sessions/revoke. BFF передаёт Platform API только
 один canonical IPv4/IPv6 от ближайшего proxy и fail-closed отклоняет chain,
-malformed и zone-id значения. Workspace/project settings редактируют только
+malformed и zone-id значения. Для Realtime ticket BFF передаёт browser
+`Origin` только при exact canonical совпадении с текущим Web origin и
+отклоняет cross-origin запрос до Platform API. Workspace/project settings
+редактируют только
 разрешённые поля через OCC, показывают read-only/suspended/archived состояния
 и сохраняют данные при archive/restore; delete flow намеренно отсутствует. До
 появления SEO-данных dashboard показывает empty states, а не демонстрационные
@@ -1182,6 +1198,13 @@ caller, connector submission/status и normalized result producer ещё не
   scope collision, rollback и сохранение валидного delivery snapshot.
   Platform API targeted mapping tests 8/8 и typecheck — pass. Fresh migration
   и реальные concurrent transactions остаются PostgreSQL 18 staging gate.
+- Realtime project authorization: browser-safe contracts, Platform API
+  CSRF/session/`presence.view` boundary, hash-only ticket owner и Socket.IO
+  server-derived rooms проверены. Realtime Prisma validate/generate,
+  typecheck, scoped lint, 112/112 tests и production build — pass; targeted
+  Platform API tests 8/8 и BFF tests 11/11 — pass. Migration
+  `20260730170000_realtime_project_tickets` успешно применена на локальном
+  PostgreSQL 18.4; target-volume concurrency/restore остаются release gate.
 - HTTP response security policy: Platform API 278 executable tests pass и 3
   opt-in PostgreSQL tests skipped, Web 105/105, Admin 2/2; strict typecheck,
   root lint и production builds всех трёх packages — pass. Fastify injection

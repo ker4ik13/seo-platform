@@ -273,6 +273,33 @@ model RevokedSessionFamilyTombstone {
   @@map("revoked_session_family_tombstones")
 }
 
+model RealtimeProjectTicket {
+  id                     String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  ticketHash             Bytes     @unique(map: "realtime_project_tickets_ticket_hash_key") @map("ticket_hash")
+  originHash             Bytes     @map("origin_hash")
+  userId                 String    @map("user_id") @db.Uuid
+  sessionId              String    @map("session_id") @db.Uuid
+  sessionFamilyId        String    @map("session_family_id") @db.Uuid
+  workspaceId            String    @map("workspace_id") @db.Uuid
+  projectId              String    @map("project_id") @db.Uuid
+  membershipId           String    @map("membership_id") @db.Uuid
+  membershipVersion      Int       @map("membership_version")
+  clientInstanceId       String    @map("client_instance_id") @db.Uuid
+  sessionExpiresAt       DateTime  @map("session_expires_at") @db.Timestamptz(6)
+  issuedAt               DateTime  @map("issued_at") @db.Timestamptz(6)
+  expiresAt              DateTime  @map("expires_at") @db.Timestamptz(6)
+  authorizationExpiresAt DateTime  @map("authorization_expires_at") @db.Timestamptz(6)
+  invalidatedAt          DateTime? @map("invalidated_at") @db.Timestamptz(6)
+  consumedAt             DateTime? @map("consumed_at") @db.Timestamptz(6)
+  connectionId           String?   @map("connection_id") @db.VarChar(64)
+  disconnectedAt         DateTime? @map("disconnected_at") @db.Timestamptz(6)
+
+  @@index([userId, issuedAt(sort: Desc)], map: "realtime_project_tickets_user_issued_idx")
+  @@index([userId, sessionFamilyId, authorizationExpiresAt], map: "realtime_project_tickets_family_lease_idx")
+  @@index([authorizationExpiresAt, id], map: "realtime_project_tickets_retention_idx")
+  @@map("realtime_project_tickets")
+}
+
 model InboxEvent {
   eventId     String   @id @map("event_id") @db.Uuid
   eventType   String   @map("event_type") @db.VarChar(160)

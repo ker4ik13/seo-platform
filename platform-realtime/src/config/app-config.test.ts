@@ -12,6 +12,36 @@ const vapidPublicKey = vapidKeyPair
   .toString("base64url");
 
 describe("loadAppConfig", () => {
+  it("uses safe local defaults for development networking", () => {
+    const config = loadAppConfig({
+      NODE_ENV: "development",
+      DATABASE_URL: "postgresql://test"
+    });
+
+    assert.equal(config.bindAddress, "127.0.0.1");
+    assert.deepEqual(config.webOrigins, ["http://localhost:3000"]);
+  });
+
+  it("allows only explicit loopback or all-interface bind addresses", () => {
+    assert.equal(
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        BIND_ADDRESS: "0.0.0.0"
+      }).bindAddress,
+      "0.0.0.0"
+    );
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          BIND_ADDRESS: "localhost"
+        }),
+      /BIND_ADDRESS must be 127\.0\.0\.1 or 0\.0\.0\.0/u
+    );
+  });
+
   it("parses allowed browser origins", () => {
     const config = loadAppConfig({
       NODE_ENV: "test",
@@ -34,7 +64,8 @@ describe("loadAppConfig", () => {
       () =>
         loadAppConfig({
           NODE_ENV: "production",
-          DATABASE_URL: "postgresql://test:test@localhost:5432/test"
+          DATABASE_URL: "postgresql://test:test@localhost:5432/test",
+          WEB_ORIGINS: "https://app.example.test"
         }),
       /PLATFORM_API_TO_REALTIME_TOKEN/
     );
@@ -66,6 +97,23 @@ describe("loadAppConfig", () => {
     assert.equal(config.webPush.subscriptionKeys.get(4)?.length, 32);
     assert.equal(config.webPush.fingerprintKeys.get(7)?.length, 32);
     assert.equal(config.webPush.maxActiveDevices, 12);
+  });
+
+  it("rejects non-canonical, duplicate and insecure production Web origins", () => {
+    for (const value of [
+      "https://app.example.test/path",
+      "https://app.example.test,https://app.example.test",
+      "http://app.example.test"
+    ]) {
+      assert.throws(
+        () =>
+          loadAppConfig({
+            ...productionEventEnv(),
+            WEB_ORIGINS: value
+          }),
+        /WEB_ORIGINS/u
+      );
+    }
   });
 
   it("fails closed for incomplete or reused Web Push key material", () => {
@@ -204,6 +252,7 @@ describe("loadAppConfig", () => {
     );
 
     const config = loadAppConfig(productionEventEnv());
+    assert.equal(config.bindAddress, "0.0.0.0");
     assert.deepEqual(config.eventConsumer, {
       enabled: true,
       environment: "prod",
@@ -301,6 +350,7 @@ function productionEventEnv(
   return {
     NODE_ENV: "production",
     DATABASE_URL: "postgresql://test",
+    WEB_ORIGINS: "https://app.example.test",
     PLATFORM_API_TO_REALTIME_TOKEN: "p".repeat(32),
     PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
     NATS_EVENT_CONSUMER_ENABLED: "true",

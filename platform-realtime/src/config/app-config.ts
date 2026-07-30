@@ -4,6 +4,7 @@ import { sessionFamilyRevokedEventSubjectV1 } from "@seo-platform/contracts";
 
 export interface AppConfig {
   readonly nodeEnv: "development" | "test" | "production";
+  readonly bindAddress: "127.0.0.1" | "0.0.0.0";
   readonly port: number;
   readonly version: string;
   readonly databaseUrl: string;
@@ -87,6 +88,18 @@ function positiveInteger(
     throw new Error(`${key} must be a positive integer`);
   }
   return parsed;
+}
+
+function bindAddress(
+  value: string | undefined,
+  nodeEnv: AppConfig["nodeEnv"]
+): AppConfig["bindAddress"] {
+  const fallback = nodeEnv === "production" ? "0.0.0.0" : "127.0.0.1";
+  const address = value?.trim() || fallback;
+  if (address !== "127.0.0.1" && address !== "0.0.0.0") {
+    throw new Error("BIND_ADDRESS must be 127.0.0.1 or 0.0.0.0");
+  }
+  return address;
 }
 
 function optional(env: NodeJS.ProcessEnv, key: string): string | undefined {
@@ -387,6 +400,45 @@ function pushEndpointOrigins(value: string | undefined): readonly string[] {
   return origins;
 }
 
+function allowedWebOrigins(
+  value: string | undefined,
+  nodeEnv: AppConfig["nodeEnv"]
+): readonly string[] {
+  const origins = (value ?? "http://localhost:3000")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      let parsed: URL;
+      try {
+        parsed = new URL(entry);
+      } catch {
+        throw new Error(
+          "WEB_ORIGINS must contain canonical HTTP(S) origins"
+        );
+      }
+      if (
+        (parsed.protocol !== "https:" && parsed.protocol !== "http:") ||
+        (nodeEnv === "production" && parsed.protocol !== "https:") ||
+        parsed.username ||
+        parsed.password ||
+        parsed.origin !== entry
+      ) {
+        throw new Error(
+          "WEB_ORIGINS must contain canonical HTTP(S) origins and use HTTPS in production"
+        );
+      }
+      return entry;
+    });
+  if (origins.length === 0) {
+    throw new Error("WEB_ORIGINS must contain at least one origin");
+  }
+  if (new Set(origins).size !== origins.length) {
+    throw new Error("WEB_ORIGINS must contain unique origins");
+  }
+  return origins;
+}
+
 function applicationServerKey(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
   if (!/^[A-Za-z0-9_-]{87}$/u.test(value)) {
@@ -464,14 +516,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const endpointOrigins = pushEndpointOrigins(
     env.WEB_PUSH_ENDPOINT_ORIGINS
   );
-  const webOrigins = (env.WEB_ORIGINS ?? "http://localhost:3001")
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-
-  if (webOrigins.length === 0) {
-    throw new Error("WEB_ORIGINS must contain at least one origin");
-  }
+  const webOrigins = allowedWebOrigins(env.WEB_ORIGINS, typedNodeEnv);
   if (
     nodeEnv === "production" &&
     (!platformApiToken || platformApiToken.length < 32)
@@ -535,6 +580,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   return {
     nodeEnv: typedNodeEnv,
+    bindAddress: bindAddress(env.BIND_ADDRESS, typedNodeEnv),
     port: positiveInteger(env.PORT, 4003, "PORT"),
     version: env.SERVICE_VERSION?.trim() || "0.1.0",
     databaseUrl: required(env, "DATABASE_URL"),

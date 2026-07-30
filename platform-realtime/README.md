@@ -41,4 +41,9 @@ bounded env-настройки из `.env.example`. Shutdown закрывает 
 fetch до drain NATS и после конечного grace оставляет незавершённый source
 unacked вместо бесконечной блокировки остановки процесса.
 
-Entrypoint: `src/main.ts`, порт по умолчанию `4003`.
+Entrypoint: `src/main.ts`, порт по умолчанию `4003`. В development Realtime
+по умолчанию слушает только `127.0.0.1`; `BIND_ADDRESS` принимает только
+`127.0.0.1` или `0.0.0.0`. Контейнерный Compose явно задаёт `0.0.0.0` внутри
+изолированной сети, а host-preview обязан оставаться на loopback. Если
+`WEB_ORIGINS` не задан вне production, разрешён только канонический локальный
+Web origin `http://localhost:3000`.

@@ -64,6 +64,25 @@ test("admin stays internal-only while web remains attached to edge", async () =>
   );
 });
 
+test("realtime binds explicitly inside its isolated container network", async () => {
+  const compose = await infrastructureFile("compose.dokploy.yml");
+  const realtimeEnvironment = nestedBlock(
+    serviceBlock(compose, "realtime"),
+    "environment"
+  );
+  const realtimeExample = await workspaceFile(
+    "platform-realtime/.env.example"
+  );
+
+  assert.ok(
+    realtimeEnvironment
+      .split(/\r?\n/u)
+      .includes("      BIND_ADDRESS: 0.0.0.0"),
+    "Realtime container must opt into all-interface binding explicitly"
+  );
+  assert.match(realtimeExample, /^BIND_ADDRESS=127\.0\.0\.1$/mu);
+});
+
 test("admin origin is absent from external browser allowlists", async () => {
   const compose = await infrastructureFile("compose.dokploy.yml");
   const apiEnvironment = nestedBlock(

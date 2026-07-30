@@ -21,6 +21,14 @@ import type {
   WebPushRevokeResult,
   WebPushSubscriptionsState
 } from "@seo-platform/contracts";
+import {
+  InvalidRealtimeTicketContractError,
+  realtimeProjectTicket,
+  realtimeTicketRequestSchemaVersion,
+  type InternalIssueRealtimeProjectTicketInput,
+  type IssueRealtimeProjectTicketInput,
+  type RealtimeProjectTicket
+} from "@seo-platform/contracts";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
 import { DomainError } from "../common/domain-error.js";
 import type { AppConfig } from "../config/app-config.js";
@@ -51,6 +59,12 @@ interface PushActorContext extends ActorContext {
   readonly sessionFamilyId: string;
 }
 
+interface RealtimeSessionContext {
+  readonly sessionId: string;
+  readonly sessionFamilyId: string;
+  readonly sessionExpiresAt: string;
+}
+
 interface WebPushUpsertMetadata {
   readonly browser: WebPushBrowser;
   readonly platform: WebPushPlatform;
@@ -71,6 +85,42 @@ export class RealtimeClient {
       context
     );
     return notificationPreferencesSummary(data);
+  }
+
+  public async issueProjectTicket(
+    context: ProjectContext,
+    session: RealtimeSessionContext,
+    input: IssueRealtimeProjectTicketInput,
+    origin: string
+  ): Promise<RealtimeProjectTicket> {
+    const body: InternalIssueRealtimeProjectTicketInput = {
+      schemaVersion: realtimeTicketRequestSchemaVersion,
+      userId: context.actorId,
+      sessionId: session.sessionId,
+      sessionFamilyId: session.sessionFamilyId,
+      sessionExpiresAt: session.sessionExpiresAt,
+      workspaceId: context.tenant.workspaceId,
+      projectId: requiredProjectId(context.tenant),
+      membershipId: requiredMembershipId(context.tenant),
+      membershipVersion: requiredMembershipVersion(context.tenant),
+      clientInstanceId: input.clientInstanceId,
+      origin
+    };
+    const data = await this.request(
+      "POST",
+      `/internal/v1/projects/${encodeURIComponent(body.projectId)}/realtime-tickets`,
+      context,
+      body,
+      "TICKET"
+    );
+    try {
+      return realtimeProjectTicket(data);
+    } catch (error) {
+      if (error instanceof InvalidRealtimeTicketContractError) {
+        throw invalidResponse();
+      }
+      throw error;
+    }
   }
 
   public async listNotifications(
@@ -241,9 +291,16 @@ export class RealtimeClient {
     method: HttpMethod,
     path: string,
     context: ActorContext | ProjectContext,
-    body?: unknown
+    body?: unknown,
+    credential: "SHARED" | "TICKET" = "SHARED"
   ): Promise<unknown> {
-    const payload = await this.requestPayload(method, path, context, body);
+    const payload = await this.requestPayload(
+      method,
+      path,
+      context,
+      body,
+      credential
+    );
     if (!("data" in payload)) throw invalidResponse();
     return payload.data;
   }
@@ -269,7 +326,7 @@ export class RealtimeClient {
     path: string,
     context: ActorContext | ProjectContext | PushActorContext,
     body?: unknown,
-    credential: "SHARED" | "PUSH" = "SHARED"
+    credential: "SHARED" | "PUSH" | "TICKET" = "SHARED"
   ): Promise<Readonly<Record<string, unknown>>> {
     const token =
       credential === "PUSH"
@@ -277,6 +334,7 @@ export class RealtimeClient {
         : this.config.realtimeApiToken;
     if (!token) {
       if (credential === "PUSH") throw webPushUnavailable();
+      if (credential === "TICKET") throw realtimeUnavailable();
       throw dependencyUnavailable();
     }
     const headers = new Headers({
@@ -315,12 +373,17 @@ export class RealtimeClient {
         }
       );
     } catch {
+      if (credential === "PUSH") throw webPushUnavailable();
+      if (credential === "TICKET") throw realtimeUnavailable();
       throw dependencyUnavailable();
     }
     const payload = await response.json().catch(() => undefined);
     if (!response.ok) {
       if (credential === "PUSH") {
         throw pushUpstreamError(response.status, payload);
+      }
+      if (credential === "TICKET") {
+        throw ticketUpstreamError(response.status);
       }
       throw upstreamError(response.status);
     }
@@ -382,6 +445,41 @@ function webPushUnavailable(): DomainError {
     message: "Browser notification registration is unavailable",
     retryable: false
   });
+}
+
+function realtimeUnavailable(): DomainError {
+  return new DomainError({
+    statusCode: 503,
+    code: "DEPENDENCY_UNAVAILABLE",
+    message: "Realtime authorization is temporarily unavailable",
+    retryable: true
+  });
+}
+
+function ticketUpstreamError(status: number): DomainError {
+  if (status === 401) {
+    return new DomainError({
+      statusCode: 401,
+      code: "UNAUTHENTICATED",
+      message: "The authenticated session is no longer active"
+    });
+  }
+  if (status === 403) {
+    return new DomainError({
+      statusCode: 403,
+      code: "FORBIDDEN",
+      message: "Realtime access is not allowed"
+    });
+  }
+  if (status === 429) {
+    return new DomainError({
+      statusCode: 429,
+      code: "RATE_LIMITED",
+      message: "Too many realtime authorization attempts",
+      retryable: true
+    });
+  }
+  return realtimeUnavailable();
 }
 
 function pushUpstreamError(

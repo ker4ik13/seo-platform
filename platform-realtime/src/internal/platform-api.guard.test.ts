@@ -53,6 +53,7 @@ test("fails closed without general audience configuration", () => {
 function config(platformApiToken?: string): AppConfig {
   return {
     nodeEnv: "test",
+    bindAddress: "127.0.0.1",
     port: 4003,
     version: "test",
     databaseUrl: "postgresql://test",
