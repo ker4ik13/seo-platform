@@ -193,14 +193,17 @@ Management и execution пока используют общий Redis password;
 
 `src/rank-worker.main.ts` является отдельным preparation/recovery process:
 credential role `DISABLED`, только `jobs_db`, Redis, internal SEO Data URL и
-выделенный `JOBS_TO_SEO_RANK_TOKEN`. Он не получает HTTP/internal/vault,
-NATS, S3, SMTP или provider credentials, не публикует port и в текущем
-Dokploy Compose подключён только к `internal`. Перед live provider execution
-для него дополнительно создаётся минимальная отдельная PostgreSQL role.
-Dedicated `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` текущего issuer foundation
-передаётся только Platform API; rank-worker получит его одновременно с
-bounded grant client/acceptance implementation. Env изоляция сама по себе не
-заменяет DB grants.
+выделенные `JOBS_TO_SEO_RANK_TOKEN` и
+`JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`. Последний также получает только
+Platform API; generic Jobs HTTP и остальные worker processes его не получают.
+Rank-worker не получает HTTP/internal/vault, NATS, S3, SMTP или provider
+credentials, не публикует port и в текущем Dokploy Compose подключён только к
+`internal`. Его bounded grant client сохраняет intent/decision и атомарно
+создаёт secret-free `CONSUMED/READY_TO_SUBMIT` scoped execution, но dispatcher
+его ещё не вызывает, connector claim отсутствует и live submit явно выключен.
+Перед live provider execution для connector process создаётся минимальная
+отдельная PostgreSQL role с SECURITY DEFINER-only access. Env изоляция сама
+по себе не заменяет DB grants.
 
 ### 3.6. `platform-realtime`
 

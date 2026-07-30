@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { InternalCreateRankRunInput } from "@seo-platform/contracts";
 import {
+  rankJobAuthorizationSnapshot,
   rankJobInputJson,
   rankJobScopeJson,
   rankRunRequestHash,
@@ -193,6 +194,27 @@ test("persists only bounded audit and scope snapshots in the generic Job", () =>
     projectId,
     trackingContextId
   });
+  assert.deepEqual(
+    rankJobAuthorizationSnapshot(rankJobInputJson(input)),
+    {
+      estimateId,
+      membershipId: input.access.membershipId,
+      membershipVersion: 3,
+      projectVersion: 4
+    }
+  );
+  assert.throws(
+    () =>
+      rankJobAuthorizationSnapshot({
+        schemaVersion: "manual-rank-check@1",
+        estimateId,
+        membershipId: input.access.membershipId,
+        membershipVersion: 3,
+        projectVersion: 4,
+        credentialId: "must-not-cross"
+      }),
+    /Invalid stored manual rank Job/u
+  );
 });
 
 function rankRunInput(): InternalCreateRankRunInput {

@@ -118,5 +118,5 @@ function redis(url: string): Redis {
 
 void bootstrap().catch(() => {
   logger.error("Rank preparation worker failed to start");
-  process.exitCode = 1;
+  process.exit(1);
 });

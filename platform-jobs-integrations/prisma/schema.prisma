@@ -112,6 +112,20 @@ enum RankCheckFinalStatus {
   ACTION_REQUIRED
 }
 
+enum RankExecutionGrantAttemptStatus {
+  REQUESTED
+  DENIED
+  GRANTED_PENDING_CONSUME
+  EXPIRED
+  CONSUMED
+  REJECTED_LOCAL
+}
+
+enum RankConnectorExecutionStatus {
+  READY_TO_SUBMIT
+  CLAIMED
+}
+
 model Job {
   id                 String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId        String         @map("workspace_id") @db.Uuid
@@ -154,10 +168,14 @@ model Job {
   retryAt            DateTime?      @map("retry_at") @db.Timestamptz(6)
   updatedAt          DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  items   JobItem[]
-  rankRun RankJobRun?
+  items                      JobItem[]
+  rankRun                    RankJobRun?
+  rankExecutionGrantAttempts RankExecutionGrantAttempt[]
+  rankConnectorExecutions           RankConnectorExecution[] @relation("RankConnectorExecutionJob")
+  rankConnectorValidationExecutions RankConnectorExecution[] @relation("RankConnectorExecutionValidationJob")
 
   @@unique([workspaceId, idempotencyScope, idempotencyKey])
+  @@unique([workspaceId, id], map: "jobs_tenant_id_key")
   @@unique([workspaceId, projectId, id], map: "jobs_tenant_project_id_key")
   @@index([workspaceId, projectId, status, createdAt])
   @@index([status, priority, createdAt])
@@ -184,9 +202,12 @@ model JobItem {
   createdAt         DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  job                        Job                         @relation(fields: [workspaceId, jobId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "job_items_job_tenant_fkey")
+  rankExecutionGrantAttempts RankExecutionGrantAttempt[]
+  rankConnectorExecutions    RankConnectorExecution[]
 
   @@unique([jobId, sequence])
+  @@unique([workspaceId, projectId, jobId, id], map: "job_items_tenant_job_id_key")
   @@index([workspaceId, status, retryAt])
   @@map("job_items")
 }
@@ -223,7 +244,8 @@ model IntegrationCredential {
   updatedAt             DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt             DateTime?        @map("deleted_at") @db.Timestamptz(6)
 
-  connectorRoutes ProjectConnectorRoute[]
+  connectorRoutes         ProjectConnectorRoute[]
+  rankConnectorExecutions RankConnectorExecution[]
 
   @@unique([workspaceId, idempotencyKey])
   @@unique([workspaceId, id])
@@ -246,8 +268,9 @@ model ProjectConnectorBinding {
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  routes        ProjectConnectorRoute[]
-  createReceipt ProjectConnectorBindingCreateReceipt?
+  routes                  ProjectConnectorRoute[]
+  createReceipt           ProjectConnectorBindingCreateReceipt?
+  rankConnectorExecutions RankConnectorExecution[]
 
   @@unique([workspaceId, projectId, capability], map: "project_connector_bindings_tenant_project_capability_key")
   @@unique([workspaceId, projectId, id], map: "project_connector_bindings_tenant_project_id_key")
@@ -282,8 +305,9 @@ model ProjectConnectorRoute {
   createdAt    DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime                        @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  binding    ProjectConnectorBinding @relation(fields: [workspaceId, projectId, bindingId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "project_connector_routes_binding_tenant_fkey")
-  credential IntegrationCredential   @relation(fields: [workspaceId, credentialId], references: [workspaceId, id], onDelete: Restrict, map: "project_connector_routes_credential_tenant_fkey")
+  binding                 ProjectConnectorBinding  @relation(fields: [workspaceId, projectId, bindingId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "project_connector_routes_binding_tenant_fkey")
+  credential              IntegrationCredential    @relation(fields: [workspaceId, credentialId], references: [workspaceId, id], onDelete: Restrict, map: "project_connector_routes_credential_tenant_fkey")
+  rankConnectorExecutions RankConnectorExecution[]
 
   @@unique([workspaceId, projectId, bindingId, position], map: "project_connector_routes_tenant_project_binding_position_key")
   @@index([workspaceId, credentialId], map: "project_connector_routes_tenant_credential_idx")
@@ -345,42 +369,163 @@ model RankEstimate {
 }
 
 model RankJobRun {
-  jobId                    String                @id @map("job_id") @db.Uuid
-  workspaceId              String                @map("workspace_id") @db.Uuid
-  projectId                String                @map("project_id") @db.Uuid
-  estimateId               String                @map("estimate_id") @db.Uuid
-  trackingContextId        String                @map("tracking_context_id") @db.Uuid
-  projectDomain            String                @map("project_domain") @db.Text
-  projectStatus            String                @map("project_status") @db.VarChar(16)
-  projectVersion           Int                   @map("project_version")
-  manifestCommand          Json                  @map("manifest_command")
-  manifestCommandHash      Bytes                 @map("manifest_command_hash")
-  sealState                RankManifestSealState @default(PENDING) @map("seal_state")
-  sealAttemptCount         Int                   @default(0) @map("seal_attempt_count")
-  lastSealAttemptAt        DateTime?             @map("last_seal_attempt_at") @db.Timestamptz(6)
-  manifestId               String?               @map("manifest_id") @db.Uuid
-  manifestHashSchema       String?               @map("manifest_hash_schema") @db.VarChar(64)
-  manifestHash             Bytes?                @map("manifest_hash")
-  manifestDeduplicationHash Bytes?               @map("manifest_deduplication_hash")
-  manifestPairCount        Int?                  @map("manifest_pair_count")
-  manifestChunkCount       Int?                  @map("manifest_chunk_count")
-  manifestChunkSize        Int?                  @map("manifest_chunk_size")
-  manifestSealedAt         DateTime?             @map("manifest_sealed_at") @db.Timestamptz(6)
-  finalizationStatus       RankCheckFinalStatus? @map("finalization_status")
-  finalizationRequestHash  Bytes?                @map("finalization_request_hash")
-  finalizedAt              DateTime?             @map("finalized_at") @db.Timestamptz(6)
-  cancelRequestedBy        String?               @map("cancel_requested_by") @db.Uuid
-  createdAt                DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  jobId                     String                @id @map("job_id") @db.Uuid
+  workspaceId               String                @map("workspace_id") @db.Uuid
+  projectId                 String                @map("project_id") @db.Uuid
+  estimateId                String                @map("estimate_id") @db.Uuid
+  trackingContextId         String                @map("tracking_context_id") @db.Uuid
+  projectDomain             String                @map("project_domain") @db.Text
+  projectStatus             String                @map("project_status") @db.VarChar(16)
+  projectVersion            Int                   @map("project_version")
+  manifestCommand           Json                  @map("manifest_command")
+  manifestCommandHash       Bytes                 @map("manifest_command_hash")
+  sealState                 RankManifestSealState @default(PENDING) @map("seal_state")
+  sealAttemptCount          Int                   @default(0) @map("seal_attempt_count")
+  lastSealAttemptAt         DateTime?             @map("last_seal_attempt_at") @db.Timestamptz(6)
+  manifestId                String?               @map("manifest_id") @db.Uuid
+  manifestHashSchema        String?               @map("manifest_hash_schema") @db.VarChar(64)
+  manifestHash              Bytes?                @map("manifest_hash")
+  manifestDeduplicationHash Bytes?                @map("manifest_deduplication_hash")
+  manifestPairCount         Int?                  @map("manifest_pair_count")
+  manifestChunkCount        Int?                  @map("manifest_chunk_count")
+  manifestChunkSize         Int?                  @map("manifest_chunk_size")
+  manifestSealedAt          DateTime?             @map("manifest_sealed_at") @db.Timestamptz(6)
+  finalizationStatus        RankCheckFinalStatus? @map("finalization_status")
+  finalizationRequestHash   Bytes?                @map("finalization_request_hash")
+  finalizedAt               DateTime?             @map("finalized_at") @db.Timestamptz(6)
+  cancelRequestedBy         String?               @map("cancel_requested_by") @db.Uuid
+  createdAt                 DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  job      Job          @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "rank_job_runs_job_tenant_fkey")
-  estimate RankEstimate @relation(fields: [workspaceId, projectId, estimateId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "rank_job_runs_estimate_tenant_fkey")
+  job                        Job                         @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "rank_job_runs_job_tenant_fkey")
+  estimate                   RankEstimate                @relation(fields: [workspaceId, projectId, estimateId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "rank_job_runs_estimate_tenant_fkey")
+  rankExecutionGrantAttempts RankExecutionGrantAttempt[]
+  rankConnectorExecutions    RankConnectorExecution[]
 
   @@unique([workspaceId, projectId, estimateId], map: "rank_job_runs_tenant_estimate_key")
   @@unique([workspaceId, projectId, jobId], map: "rank_job_runs_tenant_job_key")
   @@unique([manifestId], map: "rank_job_runs_manifest_id_key")
   @@index([sealState, lastSealAttemptAt, createdAt], map: "rank_job_runs_seal_recovery_idx")
   @@map("rank_job_runs")
+}
+
+model RankExecutionGrantAttempt {
+  id                    String                          @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId           String                          @map("workspace_id") @db.Uuid
+  projectId             String                          @map("project_id") @db.Uuid
+  jobId                 String                          @map("job_id") @db.Uuid
+  jobItemId             String                          @map("job_item_id") @db.Uuid
+  executionAttempt      Int                             @map("execution_attempt")
+  jobVersion            Int                             @map("job_version")
+  idempotencyKey        String                          @map("idempotency_key") @db.VarChar(180)
+  requestSnapshot       Json                            @map("request_snapshot")
+  requestHash           Bytes                           @map("request_hash")
+  scopeHash             Bytes                           @map("scope_hash")
+  executionEvidenceHash Bytes                           @map("execution_evidence_hash")
+  decisionSnapshot      Json?                           @map("decision_snapshot")
+  status                RankExecutionGrantAttemptStatus @default(REQUESTED)
+  decidedAt             DateTime?                       @map("decided_at") @db.Timestamptz(6)
+  expiresAt             DateTime?                       @map("expires_at") @db.Timestamptz(6)
+  terminalAt            DateTime?                       @map("terminal_at") @db.Timestamptz(6)
+  createdAt             DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                        @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  job                Job                     @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_grant_attempts_job_tenant_fkey")
+  rankRun            RankJobRun              @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, jobId], onDelete: Restrict, onUpdate: Restrict, map: "rank_grant_attempts_rank_run_tenant_fkey")
+  jobItem            JobItem                 @relation(fields: [workspaceId, projectId, jobId, jobItemId], references: [workspaceId, projectId, jobId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_grant_attempts_job_item_tenant_fkey")
+  connectorExecution RankConnectorExecution?
+
+  @@unique([workspaceId, jobItemId, executionAttempt], map: "rank_grant_attempts_workspace_item_attempt_key")
+  @@unique([workspaceId, idempotencyKey], map: "rank_grant_attempts_workspace_idempotency_key")
+  @@index([workspaceId, projectId, jobId, createdAt], map: "rank_grant_attempts_job_created_idx")
+  @@index([status, expiresAt, createdAt], map: "rank_grant_attempts_status_expiry_idx")
+  @@map("rank_execution_grant_attempts")
+}
+
+model RankConnectorExecution {
+  id                                   String                       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId                          String                       @map("workspace_id") @db.Uuid
+  projectId                            String                       @map("project_id") @db.Uuid
+  jobId                                String                       @map("job_id") @db.Uuid
+  jobItemId                            String                       @map("job_item_id") @db.Uuid
+  grantAttemptId                       String                       @unique(map: "rank_connector_executions_grant_attempt_key") @map("grant_attempt_id") @db.Uuid
+  executionAttempt                     Int                          @map("execution_attempt")
+  jobVersion                           Int                          @map("job_version")
+  estimateId                           String                       @map("estimate_id") @db.Uuid
+  manifestId                           String                       @map("manifest_id") @db.Uuid
+  manifestHash                         Bytes                        @map("manifest_hash")
+  manifestChunkIndex                   Int                          @map("manifest_chunk_index")
+  bindingId                            String                       @map("binding_id") @db.Uuid
+  bindingVersion                       Int                          @map("binding_version")
+  routeId                              String                       @map("route_id") @db.Uuid
+  credentialId                         String                       @map("credential_id") @db.Uuid
+  credentialVersion                    Int                          @map("credential_version")
+  credentialMaterialVersion            Int                          @map("credential_material_version")
+  credentialValidationId               String                       @map("credential_validation_id") @db.Uuid
+  credentialValidationVersion          Int                          @map("credential_validation_version")
+  credentialValidationConnectorVersion String                       @map("credential_validation_connector_version") @db.VarChar(64)
+  credentialVerifiedAt                 DateTime                     @map("credential_verified_at") @db.Timestamptz(6)
+  estimateExecutionHash                Bytes                        @map("estimate_execution_hash")
+  executionEvidenceHash                Bytes                        @map("execution_evidence_hash")
+  executionConnectorVersion            String                       @map("execution_connector_version") @db.VarChar(64)
+  providerPolicyVersion                String                       @map("provider_policy_version") @db.VarChar(64)
+  killSwitchVersion                    String                       @map("kill_switch_version") @db.VarChar(64)
+  authorizationExpiresAt               DateTime                     @map("authorization_expires_at") @db.Timestamptz(6)
+  status                               RankConnectorExecutionStatus @default(READY_TO_SUBMIT)
+  leaseOwner                           String?                      @map("lease_owner") @db.VarChar(100)
+  leaseToken                           String?                      @map("lease_token") @db.Uuid
+  leaseExpiresAt                       DateTime?                    @map("lease_expires_at") @db.Timestamptz(6)
+  claimedAt                            DateTime?                    @map("claimed_at") @db.Timestamptz(6)
+  version                              Int                          @default(1)
+  createdAt                            DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                            DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  job          Job                       @relation("RankConnectorExecutionJob", fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_job_tenant_fkey")
+  rankRun      RankJobRun                @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, jobId], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_rank_run_tenant_fkey")
+  jobItem      JobItem                   @relation(fields: [workspaceId, projectId, jobId, jobItemId], references: [workspaceId, projectId, jobId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_job_item_tenant_fkey")
+  grantAttempt RankExecutionGrantAttempt @relation(fields: [grantAttemptId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_grant_attempt_fkey")
+  binding      ProjectConnectorBinding   @relation(fields: [workspaceId, projectId, bindingId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_binding_tenant_fkey")
+  route        ProjectConnectorRoute     @relation(fields: [routeId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_route_fkey")
+  credential   IntegrationCredential     @relation(fields: [workspaceId, credentialId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_credential_tenant_fkey")
+  validationJob Job                       @relation("RankConnectorExecutionValidationJob", fields: [workspaceId, credentialValidationId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_validation_job_tenant_fkey")
+
+  @@unique([workspaceId, jobItemId, executionAttempt], map: "rank_connector_executions_workspace_item_attempt_key")
+  @@index([workspaceId, projectId, jobId, createdAt], map: "rank_connector_executions_job_created_idx")
+  @@index([status, authorizationExpiresAt, leaseExpiresAt, createdAt, id], map: "rank_connector_executions_claim_due_idx")
+  @@map("rank_connector_executions")
+}
+
+model RankConnectorExecutionControl {
+  provider                  String   @db.VarChar(64)
+  capability                String   @db.VarChar(100)
+  submitEnabled             Boolean  @default(false) @map("submit_enabled")
+  executionConnectorVersion String   @map("execution_connector_version") @db.VarChar(64)
+  providerPolicyVersion     String   @map("provider_policy_version") @db.VarChar(64)
+  killSwitchVersion         String   @map("kill_switch_version") @db.VarChar(64)
+  version                   Int      @default(1)
+  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                 DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  versions RankConnectorExecutionControlVersion[]
+
+  @@id([provider, capability], map: "rank_connector_execution_controls_pkey")
+  @@map("rank_connector_execution_controls")
+}
+
+model RankConnectorExecutionControlVersion {
+  provider                  String   @db.VarChar(64)
+  capability                String   @db.VarChar(100)
+  killSwitchVersion         String   @map("kill_switch_version") @db.VarChar(64)
+  submitEnabled             Boolean  @map("submit_enabled")
+  executionConnectorVersion String   @map("execution_connector_version") @db.VarChar(64)
+  providerPolicyVersion     String   @map("provider_policy_version") @db.VarChar(64)
+  controlVersion            Int      @map("control_version")
+  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  control RankConnectorExecutionControl @relation(fields: [provider, capability], references: [provider, capability], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_execution_control_versions_control_fkey")
+
+  @@id([provider, capability, killSwitchVersion], map: "rank_connector_execution_control_versions_pkey")
+  @@map("rank_connector_execution_control_versions")
 }
 
 model ProviderUsage {

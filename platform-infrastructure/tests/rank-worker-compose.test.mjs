@@ -6,11 +6,16 @@ const expectedEnvironment = [
   "DATABASE_POOL_MAX",
   "DATABASE_URL",
   "INTEGRATION_CREDENTIAL_ROLE",
+  "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
   "JOBS_TO_SEO_RANK_TOKEN",
+  "PLATFORM_API_COMMAND_TIMEOUT_MS",
+  "PLATFORM_API_URL",
   "RANK_PREPARATION_CONCURRENCY",
   "RANK_PREPARATION_DISPATCH_SECONDS",
   "RANK_PREPARATION_ENABLED",
   "RANK_PREPARATION_LEASE_SECONDS",
+  "RANK_PROVIDER_KILL_SWITCH_VERSION",
+  "RANK_PROVIDER_SUBMIT_ENABLED",
   "REDIS_URL",
   "SEO_DATA_COMMAND_TIMEOUT_MS",
   "SEO_DATA_URL"
@@ -52,7 +57,21 @@ test("rank worker has an explicit least-capability runtime boundary", async () =
   assert.deepEqual(environmentKeys, expectedEnvironment);
   assert.match(rankWorker, /command: \["node", "dist\/rank-worker\.main\.js"\]/u);
   assert.match(environment, /RANK_PREPARATION_ENABLED: "true"/u);
+  assert.match(environment, /RANK_PROVIDER_SUBMIT_ENABLED: "false"/u);
+  assert.match(
+    environment,
+    /RANK_PROVIDER_KILL_SWITCH_VERSION: \$\{RANK_PROVIDER_KILL_SWITCH_VERSION:-arsenkin-positions@1\}/u
+  );
   assert.match(environment, /INTEGRATION_CREDENTIAL_ROLE: DISABLED/u);
+  assert.match(environment, /PLATFORM_API_URL: http:\/\/platform-api:4000/u);
+  assert.match(
+    environment,
+    /PLATFORM_API_COMMAND_TIMEOUT_MS: \$\{PLATFORM_API_COMMAND_TIMEOUT_MS:-5000\}/u
+  );
+  assert.match(
+    environment,
+    /JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: \$\{JOBS_TO_PLATFORM_RANK_GRANT_TOKEN:\?JOBS_TO_PLATFORM_RANK_GRANT_TOKEN is required\}/u
+  );
 
   for (const forbidden of [
     "INTERNAL_API_TOKEN",
@@ -91,6 +110,7 @@ test("rank worker is bounded, internal-only and starts after required dependenci
   );
   assert.match(dependencies, /redis:\n        condition: service_healthy/u);
   assert.match(dependencies, /seo-data:\n        condition: service_healthy/u);
+  assert.match(dependencies, /platform-api:\n        condition: service_healthy/u);
   assert.doesNotMatch(dependencies, /\bnats:/u);
   assert.match(healthcheck, /\[r\]ank-worker\.main\.js/u);
   assert.match(rankWorker, /^    cpus: /mu);

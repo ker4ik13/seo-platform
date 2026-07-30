@@ -1409,6 +1409,97 @@ budget либо non-retryable неоднозначность не маркиру
 `PREPARING/CANCEL_REQUESTED` graph и восстанавливает потерянное BullMQ
 сообщение, в котором находится только `jobId`.
 
+#### `rank_execution_grant_attempts`
+
+Jobs-owned durable history намерения получить execution grant хранит:
+
+- tenant/project/Job/JobItem и monotonic execution attempt;
+- immutable Job version и stable idempotency key;
+- exact private request snapshot;
+- независимые 32-byte request/scope hashes и execution-evidence hash;
+- optional exact issuer decision snapshot, `decided_at`, 30-секундный
+  `expires_at` и terminal timestamp;
+- состояние `REQUESTED`, `DENIED`, `GRANTED_PENDING_CONSUME`, `EXPIRED`,
+  `CONSUMED` либо `REJECTED_LOCAL`.
+
+Новая строка всегда начинается exact `REQUESTED` до HTTP. Unique
+`workspace_id + job_item_id + execution_attempt` и
+`workspace_id + idempotency_key` не позволяют двум конкурентам создать
+разные identities одной попытки. Retryable transport ambiguity оставляет
+строку `REQUESTED` и повторяет сохранённые request/idempotency key, а не
+строит новый scope из mutable state.
+
+Перед insert и при записи decision Jobs использует canonical lock order
+`Job → RankJobRun → JobItem → credential → validation Job → binding → route
+→ RankExecutionGrantAttempt`, DB clock и exact revalidation execution graph.
+Состояния `DENIED`, `EXPIRED` и `REJECTED_LOCAL` terminal. Валидный
+неистёкший grant сохраняется как `GRANTED_PENDING_CONSUME` и сам по себе не
+разрешает provider call. Повторная проверка current graph до expiry атомарно
+создаёт единственную `rank_connector_executions` row и переводит attempt в
+`CONSUMED`. После `GRANTED_PENDING_CONSUME` decision/expiry immutable,
+физические delete/truncate запрещены.
+
+Tenant-composite FK связывают attempt с `jobs`, `rank_job_runs` и
+`job_items`. Та же migration fail-closed проверяет legacy JobItem scope,
+заменяет прежнюю parent FK на tenant-safe связи и добавляет trigger, который
+не допускает расхождение `workspace/project/job` с parent Job. Migration
+`20260729230100_rank_execution_grant_attempts` имеет schema/static coverage;
+fresh full-chain apply, constraint-negative grant/consume и конкурентный
+single-consumer smoke пройдены на PostgreSQL 18. Production-role permission
+proof и гонки с будущим provider lifecycle остаются release gate.
+
+#### `rank_connector_executions`
+
+Secret-free scoped execution принадлежит `jobs_db` и хранит:
+
+- exact tenant/Job/JobItem/grant attempt/execution attempt;
+- estimate, manifest/hash/chunk и execution-evidence hash;
+- binding/route/credential/validation IDs и их immutable versions;
+- versioned execution connector, provider policy и kill switch;
+- исходный grant expiry, состояния `READY_TO_SUBMIT → CLAIMED`, bounded
+  lease owner/token/expiry, claim timestamp, monotonic row version и
+  timestamps.
+
+Ciphertext, wrapped DEK, nonce/tag, plaintext secret и provider request в эту
+таблицу не копируются. Insert разрешён только для неистёкшего
+`GRANTED_PENDING_CONSUME` под current Job/item/manifest/binding/route/
+credential/validation evidence. Tenant-safe FK и trigger повторно проверяют
+ACTIVE credential, COMPLETED validation, отсутствие cancel, SEALED manifest и
+exact estimate projection.
+
+Одна транзакция сначала создаёт scoped execution, затем переводит grant
+attempt в `CONSUMED`. Два deferred constraint triggers требуют на commit
+exact one-to-one `CONSUMED ↔ READY_TO_SUBMIT/CLAIMED` и запрещают любую
+половину. Execution identity остаётся immutable; разрешён только точный
+`READY_TO_SUBMIT → CLAIMED` либо reclaim истёкшего `CLAIMED → CLAIMED` с
+новым token, увеличением version и lease, не выходящим за grant expiry.
+Delete/truncate запрещены.
+
+`rank_connector_execution_controls` хранит default-closed submit flag и
+exact connector/policy/kill-switch versions. Каждая использованная
+kill-switch version навсегда резервируется в immutable
+`rank_connector_execution_control_versions`, включая initial version новых
+control rows; поэтому rollback `A → B → A` отклоняется атомарно.
+
+`claim_rank_connector_execution` — `SECURITY DEFINER` функция с
+`search_path = pg_catalog, pg_temp`. Она сначала ищет весь eligible current
+graph, чтобы stale ранняя row не блокировала очередь, затем удерживает locks
+строго в порядке `Job → RankJobRun → JobItem → credential → validation Job →
+binding → route → grant → execution → control` и после ожиданий повторно
+проверяет execution version/state, Job/cancel, credential, grant expiry и
+control versions. Возвращается только одна exact encrypted credential
+projection и lease identity; provider payload или HTTP отсутствуют.
+`CLAIMED` является pre-network состоянием: до отдельной authorize/
+`SUBMITTING` операции отправлять provider bytes запрещено.
+
+Migration `20260730101500_rank_connector_execution_claim` отозвала
+`PUBLIC EXECUTE`; deploy-time grant connector role и runtime caller намеренно
+не добавлены, поэтому boundary остаётся default-closed. Fresh полный migration
+apply и реальные concurrent claim/reclaim/stale-head/cancel/credential/
+kill-switch проверки прошли на PostgreSQL 18. Это не доказывает production
+vault isolation: существующий validation worker/KEK canary пока требуют
+global read grants, а authorize/provider lifecycle отсутствуют.
+
 #### `rank_execution_manifests`
 
 Immutable pre-provider scope принадлежит `seo_db`. Header содержит:

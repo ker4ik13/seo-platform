@@ -159,17 +159,11 @@ export class IntegrationCredentialValidationWorkerService {
         encryptedCredential(credential)
       );
     } catch {
-      return toValidationSummary(
-        await this.finishFailure(
-          job,
-          credential,
-          leaseOwner,
-          {
-            errorCode: "CREDENTIAL_DECRYPTION_FAILED",
-            retryable: false,
-            credentialStatus: "DISABLED"
-          }
-        )
+      return this.finishJobOnlyRetry(
+        job,
+        leaseOwner,
+        "CREDENTIAL_DECRYPTION_FAILED",
+        60
       );
     }
 

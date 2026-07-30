@@ -89,7 +89,7 @@ export class RankManifestClient {
       readonly actorId: string;
     }
   ): Promise<unknown> {
-    const token = this.config.rankExecutionApiToken;
+    const token = this.config.rankManifestApiToken;
     if (!token) {
       throw new RankManifestClientError("UNAVAILABLE", true);
     }

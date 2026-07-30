@@ -53,10 +53,13 @@ export interface AppConfig {
   readonly redisUrl: string;
   readonly internalApiToken?: string;
   readonly integrationCredentialApiToken?: string;
-  readonly rankExecutionApiToken?: string;
+  readonly rankManifestApiToken?: string;
+  readonly rankGrantApiToken?: string;
   readonly internalCommandTimeoutMs: number;
+  readonly platformApiCommandTimeoutMs: number;
   readonly services: {
     readonly seoData: string;
+    readonly platformApi: string;
   };
   readonly nats: {
     readonly url: string;
@@ -78,6 +81,10 @@ export interface AppConfig {
     readonly leaseSeconds: number;
     readonly dispatchSeconds: number;
     readonly concurrency: number;
+  };
+  readonly rankExecution: {
+    readonly submitEnabled: boolean;
+    readonly killSwitchVersion: string;
   };
   readonly uploads: {
     readonly maxSizeBytes: number;
@@ -175,6 +182,20 @@ function boundedInteger(
   return parsed;
 }
 
+function boundedVersion(
+  value: string | undefined,
+  fallback: string,
+  key: string
+): string {
+  const parsed = value === undefined ? fallback : value.trim();
+  if (!/^[a-z0-9][a-z0-9@._-]{0,63}$/u.test(parsed)) {
+    throw new Error(
+      `${key} must be a lowercase version identifier up to 64 characters`
+    );
+  }
+  return parsed;
+}
+
 function versionedKeyring(
   value: string | undefined,
   environmentVariable: string
@@ -249,11 +270,23 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     env,
     "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN"
   );
-  const rankExecutionApiToken = optional(
+  const rankManifestApiToken = optional(
     env,
     "JOBS_TO_SEO_RANK_TOKEN"
   );
+  const rankGrantApiToken = optional(
+    env,
+    "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN"
+  );
   const rankPreparationEnabled = bool(env.RANK_PREPARATION_ENABLED);
+  const rankProviderSubmitEnabled = bool(
+    env.RANK_PROVIDER_SUBMIT_ENABLED
+  );
+  const rankProviderKillSwitchVersion = boundedVersion(
+    env.RANK_PROVIDER_KILL_SWITCH_VERSION,
+    "arsenkin-positions@1",
+    "RANK_PROVIDER_KILL_SWITCH_VERSION"
+  );
   const malwareScannerHost = optional(env, "MALWARE_SCANNER_HOST");
   const integrationCredentialKeys = versionedKeyring(
     env.INTEGRATION_CREDENTIAL_KEYS,
@@ -294,17 +327,28 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "Credential-disabled processes must not receive credential keyrings or the dedicated credential API token"
     );
   }
-  if (rankExecutionApiToken && !rankPreparationEnabled) {
+  if (
+    (rankManifestApiToken || rankGrantApiToken) &&
+    !rankPreparationEnabled
+  ) {
     throw new Error(
-      "Only the enabled rank preparation worker may receive JOBS_TO_SEO_RANK_TOKEN"
+      "Only the enabled rank preparation worker may receive rank execution service tokens"
     );
   }
   if (
     rankPreparationEnabled &&
-    (!rankExecutionApiToken || rankExecutionApiToken.length < 32)
+    (!rankManifestApiToken || rankManifestApiToken.length < 32)
   ) {
     throw new Error(
       "JOBS_TO_SEO_RANK_TOKEN with at least 32 characters is required by the rank preparation worker"
+    );
+  }
+  if (
+    rankPreparationEnabled &&
+    (!rankGrantApiToken || rankGrantApiToken.length < 32)
+  ) {
+    throw new Error(
+      "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN with at least 32 characters is required by the rank preparation worker"
     );
   }
   if (rankPreparationEnabled && credentialRole !== "DISABLED") {
@@ -410,12 +454,32 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
   if (
-    rankExecutionApiToken &&
-    (rankExecutionApiToken === internalApiToken ||
-      rankExecutionApiToken === integrationCredentialApiToken)
+    rankManifestApiToken &&
+    (rankManifestApiToken === internalApiToken ||
+      rankManifestApiToken === integrationCredentialApiToken ||
+      rankManifestApiToken === rankGrantApiToken)
   ) {
     throw new Error(
-      "Rank execution token must differ from all other service tokens"
+      "Rank manifest token must differ from all other service tokens"
+    );
+  }
+  if (
+    rankGrantApiToken &&
+    (rankGrantApiToken === internalApiToken ||
+      rankGrantApiToken === integrationCredentialApiToken)
+  ) {
+    throw new Error(
+      "Rank grant token must differ from all other service tokens"
+    );
+  }
+  if (rankProviderSubmitEnabled && !rankPreparationEnabled) {
+    throw new Error(
+      "RANK_PROVIDER_SUBMIT_ENABLED may be enabled only for the rank worker"
+    );
+  }
+  if (nodeEnv === "production" && rankProviderSubmitEnabled) {
+    throw new Error(
+      "RANK_PROVIDER_SUBMIT_ENABLED cannot be enabled in production before the recorded provider contract gate is complete"
     );
   }
   if (
@@ -475,6 +539,13 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     60_000,
     "SEO_DATA_COMMAND_TIMEOUT_MS"
   );
+  const platformApiCommandTimeoutMs = boundedInteger(
+    env.PLATFORM_API_COMMAND_TIMEOUT_MS,
+    5_000,
+    "PLATFORM_API_COMMAND_TIMEOUT_MS",
+    500,
+    10_000
+  );
   if (
     rankPreparationEnabled &&
     rankPreparationLeaseSeconds * 1_000 <
@@ -519,11 +590,15 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(integrationCredentialApiToken
       ? { integrationCredentialApiToken }
       : {}),
-    ...(rankExecutionApiToken ? { rankExecutionApiToken } : {}),
+    ...(rankManifestApiToken ? { rankManifestApiToken } : {}),
+    ...(rankGrantApiToken ? { rankGrantApiToken } : {}),
     internalCommandTimeoutMs,
+    platformApiCommandTimeoutMs,
     services: {
       seoData:
-        optional(env, "SEO_DATA_URL") || "http://localhost:4001"
+        optional(env, "SEO_DATA_URL") || "http://localhost:4001",
+      platformApi:
+        optional(env, "PLATFORM_API_URL") || "http://localhost:4000"
     },
     nats: {
       url: env.NATS_URL?.trim() || "nats://localhost:4222",
@@ -625,6 +700,10 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         1,
         16
       )
+    },
+    rankExecution: {
+      submitEnabled: rankProviderSubmitEnabled,
+      killSwitchVersion: rankProviderKillSwitchVersion
     },
     uploads: {
       maxSizeBytes: positiveInteger(

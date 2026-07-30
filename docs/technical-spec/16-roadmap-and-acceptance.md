@@ -170,23 +170,31 @@ capability в текущем allowlist, а существующий ключ п�
 успешной повторной provider validation. Binding сам по себе не запускает
 provider operation. Versioned tracking context, provider-free оценка,
 immutable SEO Data execution manifest и durable Jobs PREPARING runtime уже
-реализованы. Jobs предоставляет только internal create/get/cancel:
-DB-first сохраняет exact manifest command/hash, создаёт `rank_job_runs`,
-проверяет его tenant/job/estimate binding перед HTTP, восстанавливает
-потерянные BullMQ notifications PostgreSQL dispatcher-ом и сериализует
-cancel/worker через lock order `Job → RankJobRun`. Redis producer работает
-bounded best effort, а DB triggers защищают exact initial state, monotonic
-attempt/version и committed Job/Run/Estimate coherence. Public Platform API
-routes и восстанавливаемый Web Job flow реализованы. SEO Data уже принимает
+реализованы. Внешне Jobs по-прежнему предоставляет только internal
+create/get/cancel, а rank-worker дополнительно содержит не подключённый к
+dispatcher/provider path grant intent/consume service. DB-first сохраняет exact
+manifest command/hash, создаёт `rank_job_runs`, проверяет его
+tenant/job/estimate binding перед HTTP, восстанавливает потерянные BullMQ
+notifications PostgreSQL dispatcher-ом и сериализует cancel/worker через lock
+order `Job → RankJobRun`. Grant service до своего HTTP сохраняет exact
+`REQUESTED`, а затем фиксирует `DENIED`, `EXPIRED`,
+`GRANTED_PENDING_CONSUME` либо `REJECTED_LOCAL`; валидный grant под повторной
+проверкой graph атомарно создаёт secret-free
+`rank_connector_executions/READY_TO_SUBMIT` и становится `CONSUMED`.
+Redis producer работает bounded best effort, а DB triggers защищают exact
+initial state, monotonic attempt/version и committed Job/Run/Estimate
+coherence. Public Platform API routes и восстанавливаемый Web Job flow
+реализованы. SEO Data уже принимает
 exact normalized chunks, сохраняет append-only snapshots/current projection,
 атомарно завершает successful/partial manifest с redacted outbox и
 предоставляет internal keyset history. Public
 `GET /api/v1/projects/:projectId/rank-history` и private/noindex Web route
 `/app/projects/:projectId/rankings` уже реализованы с bounded UTC range,
 optional context/keyword filters, opaque cursor/load-more и archived/read-only
-states. Provider execution, Jobs grant acceptance/consumption, scoped
-connector submit/status, normalized result producer и schedule остаются
-следующими вертикальными срезами. Оценка сохраняется в Jobs как immutable idempotency receipt, доступна в read-only и не вызывает
+states. Provider execution, SECURITY DEFINER connector claim, scoped
+credential material, submit/status, normalized result producer и schedule
+остаются следующими вертикальными срезами. Оценка сохраняется в Jobs как
+immutable idempotency receipt, доступна в read-only и не вызывает
 провайдера, BullMQ, списание, usage, outbox или event. Профильные и
 membership-bound проектные настройки уведомлений, in-app центр и
 dependency-free lifecycle browser devices уже реализованы. Endpoint/browser
@@ -248,6 +256,12 @@ Jobs migration fail-closed проверяет legacy manual rows/active dedup
 conflicts; первый rollout требует worker drain/maintenance window для
 обычного unique-index rebuild, а large live database — отдельный
 expand/concurrent-index план.
+Migrations `20260729230100_rank_execution_grant_attempts`,
+`20260729230200_rank_connector_executions` и scoped-claim migration имеют
+schema/static coverage, tenant-safe JobItem hardening и deferred atomic
+consume invariant. Fresh full-chain apply, grant/consume negative/concurrency
+и claim/reclaim/stale-head/drift smoke пройдены на PostgreSQL 18; production
+role permission proof и provider lifecycle races остаются release gates.
 Target runtime — Node.js 24; текущий полный lint/typecheck/test/build baseline
 проверен на Node.js 24.18.1.
 
@@ -255,15 +269,18 @@ Target runtime — Node.js 24; текущий полный lint/typecheck/test/b
 ADR-2026-034. Provider-free estimate и exact execution contracts из ADR уже
 реализованы; immutable SEO Data manifest, protected result ingest/finalize,
 durable Jobs preparation, public/Web Job lifecycle, normalized SEO Data
-history/outbox и public history API/UI готовы. Provider execution, Jobs grant
-consumption, scoped connector submit/status и normalized result producer ещё
-не реализованы. Platform API issuer foundation уже сохраняет immutable exact
-30-секундные decisions под lifecycle/RBAC locks, но production policy остаётся
-fail-closed, а Jobs client/acceptance/consume отсутствуют; это ещё не provider
-execution. Live `set` остаётся выключенным до recorded one-key contract или
+history/outbox и public history API/UI готовы. Jobs bounded grant client и
+durable intent/decision history тоже реализованы; atomic
+`CONSUMED ↔ READY_TO_SUBMIT` foundation готов, но provider execution,
+SECURITY DEFINER connector claim, scoped credential material и normalized
+result producer ещё отсутствуют. Platform API issuer foundation сохраняет
+immutable exact 30-секундные decisions под lifecycle/RBAC locks, production
+policy остаётся fail-closed, а Jobs не выдаёт credential или provider action;
+это ещё не provider execution. Live `set` остаётся выключенным до recorded
+one-key contract или
 письменного подтверждения response/status/retry semantics, устранения global
-vault read, authoritative grant acceptance/consumption, producer-side
-обработки ingest receipts и `SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit. Наличие working
+vault read, SECURITY DEFINER connector claim, producer-side обработки ingest
+receipts и `SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit. Наличие working
 credential validation и capability в binding не считается доказательством рабочего
 `positions` execution.
 
@@ -272,9 +289,12 @@ validation slice:
 
 - `keyVersion` immutable, а смена active выполняется только после expand,
   startup decrypt-canary проверки точного key material всех используемых
-  версий и drain старых replicas. Текущий missing-version retry не обнаруживает
-  ошибочную замену bytes; системный mismatch не должен массово делать валидные
-  credentials `DISABLED`;
+  версий и drain старых replicas. Такой canary теперь запускается до создания
+  queue worker на каждой `EXECUTION` replica и проверяет один persistent
+  authenticated sample каждой реально используемой версии; missing/corrupt
+  sample останавливает startup. Decrypt failure после startup даёт job-only
+  bounded retry без изменения credential. До beta ещё нужны cluster-wide
+  circuit breaker и incident alert для runtime-всплеска;
 - широкий `SELECT` execution DB role должен быть устранён: до exit gate
   используется узкая execution projection/table с server-side scope либо
   credential broker/KMS, а также пройдены cluster-wide grant audit и
@@ -294,6 +314,25 @@ validation slice:
   `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`;
 - готовые public Job/history read routes и Web UI сами по себе не объявляют
   provider execution готовым.
+
+#### Промежуточная приёмка execution grant intent/consume
+
+- dedicated Jobs → Platform token получают только Platform API и rank-worker;
+  generic Jobs HTTP и остальные workers/processes его не получают;
+- до issuer HTTP в PostgreSQL записывается exact `REQUESTED` с immutable
+  request/scope/evidence hashes и stable idempotency key;
+- retryable ambiguity повторяет сохранённый request, а решение под canonical
+  locks и DB clock становится `DENIED`, `EXPIRED`,
+  `GRANTED_PENDING_CONSUME` либо `REJECTED_LOCAL`;
+- валидный grant атомарно получает `CONSUMED` только вместе с единственной
+  secret-free `READY_TO_SUBMIT` execution row; deferred invariant запрещает
+  commit любой половины;
+- dispatcher/provider path service не вызывает, scoped credential claim не
+  существует, production submit flag fail-closed выключен;
+- schema/static tests не заменяют обязательные PostgreSQL 18 fresh/negative/
+  race tests для intent/consume migrations;
+- приёмка этого slice не закрывает SECURITY DEFINER connector claim, provider
+  contract, normalized producer, vault isolation и production security gates.
 
 #### Промежуточная приёмка public history read
 
@@ -1029,6 +1068,9 @@ Staging game day имитирует потерю основной базы.
 - на PostgreSQL 18 пройдены manual rank races
   `claim ↔ cancel ↔ persist/finalize`, negative trigger tests и recovery
   после потерянного BullMQ notification;
+- на PostgreSQL 18 пройдены grant-intent races
+  `request ↔ exact replay ↔ decision/expiry ↔ consume` и negative tenant/
+  state-matrix tests;
 - все production packages собраны и проверены на Node.js 24; локальный
   Node.js 22 engine warning этот gate не заменяет.
 

@@ -101,5 +101,5 @@ function redis(url: string): Redis {
 
 void bootstrap().catch(() => {
   logger.error("Upload inspection worker failed to start");
-  process.exitCode = 1;
+  process.exit(1);
 });

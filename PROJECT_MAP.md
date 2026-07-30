@@ -1,6 +1,6 @@
 # Карта проекта
 
-Последнее обновление: 29 июля 2026 года
+Последнее обновление: 30 июля 2026 года
 
 Текущий инкремент: manual BYOK rank execution foundation
 Статус: versioned tracking context, provider-free оценка и immutable
@@ -20,10 +20,21 @@ keyset history. Platform API публикует bounded read-only history proxy,
 — private/noindex экран с фильтрами и cursor-дозагрузкой. Platform API теперь
 имеет protected issuer foundation одноразового 30-секундного execution grant:
 он повторно проверяет owned lifecycle/RBAC state под row locks и сохраняет
-immutable exact decision receipt. Production policy остаётся fail-closed,
-Jobs grant client/import/consume и provider execution ещё отсутствуют. Срез
-следует ADR-2026-034; live Arsenkin submit остаётся выключенным до прохождения
-contract/security gates.
+immutable exact decision receipt. Jobs добавил bounded issuer client и
+durable intent/consume: exact `REQUESTED` записывается до HTTP, retryable ambiguity
+повторяет тот же request/idempotency key, а решение сохраняется как `DENIED`,
+`EXPIRED`, `GRANTED_PENDING_CONSUME` либо `REJECTED_LOCAL`. Неистёкшее
+положительное решение теперь под тем же canonical lock order атомарно
+переходит в `CONSUMED` вместе с единственным secret-free
+`rank_connector_executions/READY_TO_SUBMIT`. Строка связывает exact
+Job/item/grant/manifest/binding/route/credential-version evidence, но не
+содержит credential material. Default-closed SECURITY DEFINER claim DDL уже
+переводит eligible row в bounded pre-network `CLAIMED` и возвращает только
+одну exact encrypted credential projection после full current-graph recheck.
+`PUBLIC EXECUTE` отозван; deploy-time connector grant, runtime caller,
+authorize/`SUBMITTING`, provider request и result producer ещё отсутствуют.
+Production policy и submit gate остаются fail-closed; live Arsenkin submit
+выключен до прохождения contract/security gates ADR-2026-034.
 
 Параллельный dependency-free срез browser Web Push device lifecycle
 реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет
@@ -148,8 +159,17 @@ execution grant.
 Issuer требует exact single-value request/tenant/actor/idempotency headers,
 сверяет их с path/body и сохраняет immutable decision в
 `platform_db.rank_execution_grant_receipts`. Exact replay возвращает исходный
-receipt даже после expiry; проверка TTL и атомарное потребление вместе с
-Jobs-owned Job/item/credential state относятся к следующему Jobs-срезу.
+receipt даже после expiry. Jobs теперь до вызова issuer сохраняет exact
+request/scope/evidence и stable idempotency key в
+`jobs_db.rank_execution_grant_attempts`, а затем под теми же canonical graph
+locks проверяет решение и DB clock. Отказы заканчиваются persisted
+`DENIED/EXPIRED/REJECTED_LOCAL`; валидный grant проходит промежуточный
+`GRANTED_PENDING_CONSUME` и атомарно создаёт единственную scoped
+`rank_connector_executions` row вместе с `CONSUMED`. Ни эта row, ни consume
+не разрешают provider call. Подготовленный SECURITY DEFINER claim повторно
+проверяет lifecycle/credential/control и создаёт только pre-network lease;
+он закрыт для connector role и не заменяет будущую authorize/`SUBMITTING`
+операцию либо отдельный connector process path.
 Глобальный route-specific `onSend` сохраняет `Cache-Control: no-store` также
 для parser/guard errors, которые возникают до входа в controller.
 История позиций читается Web только через same-origin BFF и public Platform
@@ -193,10 +213,10 @@ transport и health/readiness, таблицы outbox/inbox созданы. Durab
   jobs/integrations HTTP process.
 - `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` защищает только internal issuer
   execution grants и отличается от всех остальных service tokens. Текущий
-  Compose передаёт его только Platform API; rank-worker получит secret лишь
-  одновременно с реализацией bounded Jobs grant client. Generic Jobs HTTP,
-  connector/import/inspection/system/migration, Web и остальные сервисы его
-  не получают.
+  Compose передаёт его только Platform API и выделенному rank-worker с
+  bounded Jobs grant client. Generic Jobs HTTP, connector/import/inspection/
+  system/migration, Web и остальные сервисы его не получают. Production
+  Compose фиксирует `RANK_PROVIDER_SUBMIT_ENABLED=false`.
 - `JOBS_TO_SEO_RANK_TOKEN` отличается от всех остальных service tokens и
   защищает seal/chunk boundary с plaintext keyword snapshots. До появления
   provider execution его получают только SEO Data HTTP и отдельный
@@ -297,6 +317,18 @@ Backend convention:
 - `platform-api/prisma/migrations/20260729230000_rank_execution_grant_receipts`
   — immutable issuer decisions, exact idempotency/item-attempt keys,
   authoritative quota reservation и update/delete/truncate guards;
+- `platform-jobs-integrations/prisma/migrations/20260729230100_rank_execution_grant_attempts`
+  — durable exact Jobs intent/decision history, tenant-safe Job/Run/Item FK,
+  immutable request identity, state matrix и delete/truncate guards;
+- `platform-jobs-integrations/prisma/migrations/20260729230200_rank_connector_executions`
+  — secret-free scoped execution rows, tenant Job/item/grant/connector FK,
+  current-graph insert guard и deferred one-to-one atomic
+  `CONSUMED ↔ READY_TO_SUBMIT` invariant;
+- `platform-jobs-integrations/prisma/migrations/20260730101500_rank_connector_execution_claim`
+  — default-closed control и immutable kill-switch version history, bounded
+  `READY_TO_SUBMIT → CLAIMED` lease, full eligible-graph/canonical-lock
+  SECURITY DEFINER claim и exact encrypted credential projection; `PUBLIC`
+  execute отозван, connector grant/runtime отсутствуют;
 - `platform-contracts/src/api/rank-runs.ts` и `src/events/rankings.ts` —
   exact manual-run lifecycle, manifest/chunk, normalized ingest/finalize и
   redacted completion event contracts; manifest preimage builders
@@ -349,11 +381,17 @@ Backend convention:
   projection и finite blockers без provider call/decrypt/queue;
 - `platform-jobs-integrations/src/rank-runs` — internal create/get/cancel,
   immutable manifest command/hash, `rank_job_runs` sidecar, явная Job/seal
-  state machine, единый `Job → RankJobRun` lock order, bounded recovery и
-  public-safe Job projection;
+  state machine, canonical `Job → RankJobRun → JobItem → credential →
+  validation Job → binding → route → grant attempt` lock order, bounded
+  recovery, public-safe Job projection и durable execution-grant
+  intent/consume;
+- `platform-jobs-integrations/src/platform-api` — bounded/no-redirect client
+  issuer-а с dedicated token, exact envelope/request/scope hash validation,
+  no-store check, response size и timeout limits;
 - `platform-jobs-integrations/src/rank-worker.main.ts` — изолированный
   rank-preparation entrypoint с per-delivery lease owner, PostgreSQL
-  dispatcher recovery и единственным выделенным SEO rank token;
+  dispatcher recovery и двумя выделенными manifest/grant rank tokens; grant
+  service пока не подключён к dispatcher/provider execution;
 - `platform-jobs-integrations/src/seo-data` — строго валидируемый internal
   HTTP client владельца semantic core и bounded rank-estimate scope;
 - `platform-seo-data/src/semantic-imports` — нормализация, import receipts,
@@ -410,7 +448,9 @@ Backend convention:
 - `platform-infrastructure/docker` — reusable backend/web images;
 - `platform-infrastructure/compose.dokploy.yml` — отдельный internal-only
   `rank-worker` process того же Jobs image с exact env allowlist, bounded
-  resources, migration/Redis/SEO Data dependencies и без ports/outbound;
+  resources, migration/Redis/SEO Data/Platform API dependencies, двумя
+  dedicated rank tokens, forced-disabled provider submit и без
+  ports/outbound;
 - тот же Compose fail-closed требует `JOBS_TO_SEO_RANK_RESULT_TOKEN` и
   `RANK_HISTORY_CURSOR_KEY` только для `seo-data`; regression test запрещает
   их случайную выдачу остальным runtime processes;
@@ -751,9 +791,15 @@ redact-ит ответ SEO Data и отдаёт collection envelope. Private/noi
 экран использует bounded UTC range, optional context/keyword filters и
 load-more. Platform API execution-grant issuer foundation реализован, но
 production policy выдаёт только persisted `DENIED`, пока отсутствует
-authoritative entitlement/quota implementation. Jobs client, atomic grant
-acceptance/consumption, scoped connector submission/status и normalized result
-producer ещё не реализованы, поэтому production worker пока не создаёт эти
+authoritative entitlement/quota implementation. Jobs bounded client и durable
+grant intent/decision history реализованы как fail-closed foundation: network intent
+записывается первым, exact replay сохраняется, а неистёкшее положительное
+решение атомарно связывается с secret-free scoped connector execution и
+становится `CONSUMED`. Default-closed SECURITY DEFINER claim и scoped
+encrypted credential projection реализованы как DDL boundary, но connector
+role/runtime к ним не подключены, а `CLAIMED` не разрешает network.
+Authorize/`SUBMITTING`, connector submission/status и normalized result
+producer ещё не реализованы, поэтому production worker не создаёт provider
 snapshots.
 
 ## 8. Проверенное состояние
@@ -764,14 +810,15 @@ snapshots.
 - Platform API tests: 273 pass, 0 fail, 3 opt-in PostgreSQL 18 tests skipped
   без отдельного disposable database URL.
 - SEO data unit tests: 89 pass, 0 fail.
-- Jobs/integrations tests: 219 pass, 0 fail, 2 disposable-DB tests skipped
-  в обычном запуске; оба DB tests отдельно проходят.
+- Jobs/integrations tests: 271 pass, 0 fail, 6 disposable-DB tests skipped
+  в обычном запуске; startup decrypt-canary targeted suite — 7/7 pass.
 - Realtime unit tests: 50 pass, 0 fail.
 - Contracts unit tests: 64 pass, 0 fail.
 - Unified Web helper tests: 101 pass, 0 fail.
-- Infrastructure static tests: 12 pass, 0 fail.
-- Full monorepo test gate: 808 pass, 0 fail, 5 disposable/opt-in DB tests
-  skipped.
+- Infrastructure static tests: 13 pass, 0 fail.
+- Полный root `pnpm test` после startup-canary и scoped claim: pass без
+  failures; обычный запуск безопасно пропускает opt-in disposable-DB tests.
+  Отдельный fresh PostgreSQL 18 gate для Jobs grant/claim: 4/4 pass.
 - Root lint: pass на pinned Oxlint 1.76.0 с Import, React, Promise и Node
   plugins и `--deny-warnings`.
 - NestJS production build: pass для 4 сервисов.
@@ -791,8 +838,9 @@ snapshots.
   `internal,outbound`; connector не публикует ports и не получает
   management/NATS credentials.
 - Rank-worker Dokploy topology: 3/3 static tests и Compose config pass;
-  process использует только `internal`, 11 allowlisted env keys, отдельный
-  rank token и не получает ports/outbound/NATS/S3/SMTP/vault credentials.
+  process использует только `internal`, 16 allowlisted env keys, отдельные
+  manifest/grant rank tokens, принудительный disabled submit и не получает
+  ports/outbound/NATS/S3/SMTP/vault credentials.
 - Visual QA: 1440, 1024 и 390 px; horizontal overflow не найден.
 - Semantics upload browser QA: 1280 px, runtime errors и horizontal overflow
   не найдены; устранён CSS conflict публичного `.brand` с app shell.
@@ -863,6 +911,16 @@ snapshots.
   validate/generate, strict typecheck, lint, production build и diff-check —
   pass. Review findings по usable TTL, early-error `no-store`, exact expired
   replay, reservation coherence и production secret scope устранены.
+- Jobs grant intent/consume foundation: bounded client/config/lock/evidence/
+  state unit, secret-free connector execution и static migration coverage
+  добавлены. Prisma validate/generate, strict typecheck, 271 executable tests,
+  lint, production build и diff-check — pass; обычный suite дополнительно
+  содержит два skipped disposable-DB tests. Fresh full migration chain,
+  claim-specific concurrent claim/reclaim, stale-head, cancel, credential и
+  immutable kill-switch regression прошли на PostgreSQL 18. Остальные
+  negative/race smoke migrations
+  `20260729230100_rank_execution_grant_attempts` и
+  `20260729230200_rank_connector_executions` учитываются отдельным gate.
 - Shared canonical JSON: official RFC 8785 primitive/key-order/UTF-8 vectors,
   hostile values/accessors/cycles/Proxy fail-closed; server-only subpath
   resolution из SEO Data проверен. Production dependencies не добавлялись.
@@ -884,7 +942,7 @@ snapshots.
 
 ## 9. Следующий вертикальный срез
 
-`Jobs grant client/acceptance → scoped connector boundary → provider
+`connector permission/runtime boundary → authorize/SUBMITTING → provider
 submit/status → normalized result producer/ingest receipts`
 
 Provider-free estimate и SEO Data immutable manifest из ADR-2026-034
@@ -892,12 +950,14 @@ Provider-free estimate и SEO Data immutable manifest из ADR-2026-034
 cancel, public/Web Job lifecycle и normalized SEO Data result persistence
 также готовы. Public bounded history proxy и private/noindex Web UI уже
 подключены к internal read model. Authoritative one-time grant уже имеет
-Platform-owned issuer/receipt foundation; следующим нужно импортировать и
-атомарно потреблять его в Jobs вместе с Job/item/credential state, затем
-добавить scoped connector operations, provider submit/status и producer
-нормализованных результатов с сохранением ingest receipts. Live Arsenkin
-`set` выключен, пока нет recorded provider contract и устранения global vault
-read.
+Platform-owned issuer/receipt, Jobs-owned intent/decision и атомарный
+`CONSUMED ↔ rank_connector_executions/READY_TO_SUBMIT`. Следующим нужно
+выдать отдельной connector role только подготовленный SECURITY DEFINER claim,
+подключить runtime caller и добавить authorize/`SUBMITTING`, которая повторно
+проверяет lease/control непосредственно перед bytes. Затем нужны provider
+submit/status и producer нормализованных результатов с ingest receipts. Live
+Arsenkin `set` выключен, пока нет recorded provider contract и устранения
+global vault read validation-worker/KEK-canary path.
 Неоднозначность manifest preparation уже fail-closed переходит в
 `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN` без бесконечного auto-retry.
 
@@ -967,13 +1027,18 @@ durable-доставка не реализована. OAuth/OIDC выполня�
   coverage работает fail-closed; до rewrap старые используемые KEK запрещено
   удалять. Fingerprint keyring ротируется независимо; bounded-инвалидация
   старых fingerprints после retry window также ещё не реализована.
-- Coverage проверяет наличие версии, но не равенство её key material.
-  Missing-version retry не защищает от ошибочной замены bytes под прежним
-  `keyVersion`; такой системный mismatch нельзя превращать в массовый
-  `DISABLED` валидных credentials. До production обязательны startup
-  decrypt-canary/verifier для каждой используемой версии и/или глобальный
-  decrypt-failure circuit breaker. Rollout: expand keyring → canary verify
-  всех версий → drain старых replicas → switch active.
+- Номерная coverage сама по себе проверяет наличие версии, но не равенство её
+  key material. `EXECUTION` startup теперь для каждой реально используемой версии
+  authenticated-decrypt-ит один детерминированный неудалённый credential с
+  точным AAD и останавливает replica до создания BullMQ worker при
+  missing/corrupt sample; пустой vault допустим. `MANAGEMENT` сохраняет
+  encryption/fingerprint coverage без decrypt. Validation worker оставляет
+  credential без изменений и делает job-only bounded retry при любом
+  последующем decrypt failure, поэтому mismatch не превращается в массовый
+  `DISABLED`. Cluster-wide circuit breaker/incident alert после startup ещё
+  отсутствуют; canary использует текущий read grant и не снимает blocker
+  global vault isolation. Rollout: expand keyring → canary verify всех версий
+  → drain старых replicas → switch active.
 - `MANAGEMENT` и `EXECUTION` процессы пока получают один symmetric KEK.
   Role guard запрещает штатный decrypt в management adapter, но не даёт
   криптографической изоляции при компрометации процесса; целевая граница —
@@ -1008,13 +1073,20 @@ durable-доставка не реализована. OAuth/OIDC выполня�
   fresh/constraint-negative smoke на PostgreSQL 15. Обычный rebuild unique
   index требует worker drain/maintenance window; для большой live-БД нужен
   expand/concurrent-index план. PostgreSQL 18 smoke обязателен до deploy.
-- `rank_execution_grant_receipts` требуют fresh migration/constraint/race
-  smoke на PostgreSQL 18. Opt-in suite проверяет quota/TTL/immutability,
-  concurrent exact winner и lifecycle race; без отдельного disposable
+- `rank_execution_grant_receipts` прошли fresh migration и opt-in
+  quota/TTL/immutability, concurrent exact winner и lifecycle race smoke на
+  PostgreSQL 18. В обычном suite без отдельного disposable
   `PLATFORM_API_RANK_GRANT_TEST_DATABASE_URL` эти тесты безопасно пропускаются.
-- Issuer receipt сам не авторизует provider call: до Jobs-owned
-  `rank_execution_grant_acceptances`, atomic consume и exact expiry/scope
-  validation любой submit остаётся запрещён.
+- `rank_execution_grant_attempts`, `rank_connector_executions` и claim
+  migration прошли fresh full-chain apply на PostgreSQL 18; claim-specific
+  concurrent/reclaim/stale-head/drift regression также пройден. Tenant-FK,
+  grant replay/decision/expiry/consume и production non-owner permission
+  evidence остаются отдельными release gates.
+- Issuer receipt и Jobs-owned `CONSUMED/READY_TO_SUBMIT` сами не авторизуют
+  provider call. SECURITY DEFINER claim уже создаёт bounded pre-network lease,
+  но закрыт для connector role и не авторизует bytes; до отдельной authorize/
+  `SUBMITTING` проверки Job/cancel/credential/kill-switch любой submit
+  остаётся запрещён.
 - Проверка lifecycle проекта сейчас авторитетна в Platform API, но между ней и
   commit в jobs database остаётся межсервисное TOCTOU. До первого исполняемого
   rank job jobs/integrations обязан получить project/workspace lifecycle

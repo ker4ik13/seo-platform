@@ -222,26 +222,58 @@ test("maps a provider authentication failure to an invalid credential", async ()
   assert.ok(fixture.store.credential.lastErrorAt instanceof Date);
 });
 
-test("fails closed and disables a credential whose ciphertext cannot be decrypted", async () => {
+test("retries a decrypt failure without mutating credential state", async () => {
   const fixture = workerFixture({
     credential: {
       authTag: Uint8Array.from({ length: 16 }, () => 0)
     },
     result: { ok: true }
   });
+  const credentialBefore = { ...fixture.store.credential };
+
+  await assert.rejects(
+    fixture.worker.process(validationId, leaseOwner),
+    (error: unknown) =>
+      error instanceof Error &&
+      error.name === "CredentialValidationRetryError" &&
+      error.message === "CREDENTIAL_DECRYPTION_FAILED"
+  );
+
+  assert.equal(fixture.store.job.status, "RETRY_SCHEDULED");
+  assert.equal(
+    object(fixture.store.job.errorSummary)?.code,
+    "CREDENTIAL_DECRYPTION_FAILED"
+  );
+  assert.ok(fixture.store.job.retryAt instanceof Date);
+  assert.deepEqual(fixture.store.credential, credentialBefore);
+  assert.deepEqual(fixture.observedSecrets, []);
+});
+
+test("exhausts decrypt retries without mutating credential state", async () => {
+  const fixture = workerFixture({
+    credential: {
+      authTag: Uint8Array.from({ length: 16 }, () => 0)
+    },
+    job: {
+      attempt: 2,
+      maxAttempts: 3
+    },
+    result: { ok: true }
+  });
+  const credentialBefore = { ...fixture.store.credential };
 
   const summary = await fixture.worker.process(
     validationId,
     leaseOwner
   );
 
-  assert.equal(summary.status, "FAILED_FINAL");
+  assert.equal(summary.status, "FAILED_RETRYABLE");
   assert.equal(summary.errorCode, "CREDENTIAL_DECRYPTION_FAILED");
-  assert.equal(fixture.store.credential.status, "DISABLED");
-  assert.equal(
-    fixture.store.credential.lastErrorCode,
-    "CREDENTIAL_DECRYPTION_FAILED"
-  );
+  assert.equal(fixture.store.job.status, "FAILED_RETRYABLE");
+  assert.equal(fixture.store.job.attempt, 3);
+  assert.equal(fixture.store.job.retryAt, null);
+  assert.ok(fixture.store.job.finishedAt instanceof Date);
+  assert.deepEqual(fixture.store.credential, credentialBefore);
   assert.deepEqual(fixture.observedSecrets, []);
 });
 

@@ -26,6 +26,13 @@ export type StoredRankJob = Job & {
   readonly rankRun: RankJobRun | null;
 };
 
+export interface RankJobAuthorizationSnapshot {
+  readonly estimateId: string;
+  readonly membershipId: string;
+  readonly membershipVersion: number;
+  readonly projectVersion: number;
+}
+
 export function rankRunIdempotencyScope(projectId: string): string {
   return `rank-run:${projectId}`;
 }
@@ -84,6 +91,33 @@ export function rankJobScopeJson(
     projectId: input.projectId,
     trackingContextId
   });
+}
+
+export function rankJobAuthorizationSnapshot(
+  value: unknown
+): RankJobAuthorizationSnapshot {
+  const input = exactRecord(value, [
+    "schemaVersion",
+    "estimateId",
+    "membershipId",
+    "membershipVersion",
+    "projectVersion"
+  ]);
+  if (
+    input.schemaVersion !== RANK_JOB_INPUT_SCHEMA ||
+    !Number.isSafeInteger(input.membershipVersion) ||
+    Number(input.membershipVersion) < 1 ||
+    !Number.isSafeInteger(input.projectVersion) ||
+    Number(input.projectVersion) < 1
+  ) {
+    invalid();
+  }
+  return {
+    estimateId: storedUuid(input.estimateId),
+    membershipId: storedUuid(input.membershipId),
+    membershipVersion: Number(input.membershipVersion),
+    projectVersion: Number(input.projectVersion)
+  };
 }
 
 export function rankJobFailureJson(
@@ -332,6 +366,18 @@ function json(value: unknown): Prisma.InputJsonValue {
 
 function decimal(value: unknown): string {
   if (typeof value !== "string" || !/^(?:0|[1-9]\d*)$/u.test(value)) {
+    invalid();
+  }
+  return value;
+}
+
+function storedUuid(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(
+      value
+    )
+  ) {
     invalid();
   }
   return value;

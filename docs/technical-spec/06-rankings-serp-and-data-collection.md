@@ -137,17 +137,30 @@ found/not-found ingest и terminal finalize. Manifest seal/chunk runtime уже
 реализован с immutable DB state machine и content-only active dedup.
 Integrity hashes покрывают полный versioned RFC 8785 JCS preimage. Jobs
 preparation/cancel и public Job lifecycle, а также SEO Data normalized
-ingest/finalize/current/internal history реализованы. Следующими остаются
-Jobs-side grant import/consume, scoped connector submit/status и provider-side
-producer нормализованных результатов.
+ingest/finalize/current/internal history реализованы. Jobs теперь также
+атомарно связывает `CONSUMED` grant с единственной secret-free
+`rank_connector_executions/READY_TO_SUBMIT`. Следующий forward slice добавил
+default-closed `SECURITY DEFINER` claim: он под canonical locks повторно
+проверяет current graph и переводит ровно одну строку в pre-network
+`CLAIMED`, возвращая только scoped encrypted credential projection.
+`PUBLIC` execute отозван, deploy-time connector grant и runtime caller пока
+отсутствуют. `CLAIMED` не разрешает provider call; следующими остаются
+authorize/`SUBMITTING`, provider submit/status и producer нормализованных
+результатов.
 
 Platform API issuer foundation уже принимает exact Jobs request без
 binding/credential IDs, повторно проверяет owned lifecycle/RBAC state и
 сохраняет immutable 30-секундный decision receipt с exact replay. Production
 policy пока всегда fail-closed, потому что authoritative entitlement/quota
-ledger не реализован. Jobs ещё не вызывает endpoint, не проверяет expiry и не
-потребляет grant атомарно с локальным execution state, поэтому foundation не
-разрешает provider submit.
+ledger не реализован. Jobs bounded client уже сохраняет durable `REQUESTED`
+до HTTP, делает exact replay и по часам `jobs_db` фиксирует
+`DENIED`/`EXPIRED`/`GRANTED_PENDING_CONSUME`/`REJECTED_LOCAL`; валидное
+положительное решение под повторной проверкой graph атомарно создаёт
+secret-free scoped execution и становится `CONSUMED`. Dispatcher path
+по-прежнему не вызывает service. DB-control claim по умолчанию закрыт,
+использованные kill-switch versions immutable и не переиспользуются, а
+connector role ещё не получил `EXECUTE`. Поэтому foundation не разрешает
+provider submit.
 
 ### 3.4. Реализованный read slice истории
 
@@ -174,9 +187,10 @@ Private/noindex Web route
 `/app/projects/:projectId/rankings` показывает UTC date range,
 context/keyword filters, load-more, loading/empty/error/offline states и
 явные archived/read-only пояснения. Экран не доказывает готовность сбора:
-Jobs grant acceptance/consumption, scoped connector boundary, live provider
-submit/status и normalized result producer отсутствуют, поэтому до trusted
-ingest история остаётся пустой. Live Arsenkin `set` работает fail-closed.
+claim DDL остаётся default-closed и не подключён к worker; authorize/
+`SUBMITTING`, полная scoped credential boundary, live provider submit/status
+и normalized result producer отсутствуют, поэтому до trusted ingest история
+остаётся пустой. Live Arsenkin `set` работает fail-closed.
 
 ## 4. Rank snapshot
 

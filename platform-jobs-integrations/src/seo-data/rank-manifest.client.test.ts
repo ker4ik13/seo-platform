@@ -22,7 +22,7 @@ const ids = {
 } as const;
 
 const config = {
-  rankExecutionApiToken: "rank-secret",
+  rankManifestApiToken: "rank-secret",
   internalCommandTimeoutMs: 1_000,
   services: { seoData: "http://seo-data:4001" }
 } as AppConfig;

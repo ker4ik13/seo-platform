@@ -203,22 +203,36 @@
   poll, stage normalized rows и finish/fail. Прямой global read jobs/vault
   execution-role запрещён. Claim повторно проверяет tenant/job/item, lease,
   одноразовый lifecycle grant, binding/material/connector versions и kill
-  switch.
+  switch. Default-closed `claim_rank_connector_execution` уже реализован:
+  `PUBLIC EXECUTE` отозван, connector-role grant/runtime caller отсутствуют,
+  а `CLAIMED` не разрешает network. Перед bytes нужна отдельная authorize/
+  `SUBMITTING` operation; остальные scoped operations ещё не реализованы.
 - Platform API issuer защищён отдельным
   `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`, который не переиспользуется как
   internal/credential/realtime/SEO rank token. Текущий Compose передаёт его
-  только Platform API; rank-worker получит secret только одновременно с Jobs
-  grant client. Token отсутствует у generic Jobs HTTP, connector/import/
-  inspection/system/migration, Web и остальных сервисов. Internal endpoint
-  требует exact single-value request/tenant/actor/idempotency headers,
-  `no-store` и path/header/body coherence.
+  только Platform API и rank-worker с bounded grant client. Token отсутствует
+  у generic Jobs HTTP, connector/import/inspection/system/migration, Web и
+  остальных сервисов. Internal endpoint требует exact single-value
+  request/tenant/actor/idempotency headers, `no-store` и path/header/body
+  coherence.
 - Issuer сериализует owned authorization rows в порядке
   workspace → project → user → membership → project access и сохраняет
   immutable decision в той же transaction, где policy создаёт authoritative
   quota reservation. Production policy не имеет runtime/env bypass и не
   выдаёт `GRANTED` без reservation ID. Expired exact replay не переписывается;
-  future Jobs consumer обязан проверить TTL/hash/scope и атомарно consume-ить
-  grant с локальным execution state.
+  Jobs client проверяет TTL/hash/scope, сохраняет exact decision и атомарно
+  создаёт secret-free scoped execution вместе с `CONSUMED`. Эта row сама не
+  выдаёт credential material. Подготовленная SECURITY DEFINER claim-функция
+  возвращает exact encrypted projection только после повторной проверки
+  current graph, но пока недоступна connector role и не подключена к runtime.
+- До HTTP Jobs записывает immutable exact `REQUESTED` intent и stable
+  idempotency key в `rank_execution_grant_attempts`. Retryable ambiguity
+  повторяет сохранённый request; response под canonical graph locks и DB
+  clock становится `DENIED`, `EXPIRED`, `GRANTED_PENDING_CONSUME` либо
+  `REJECTED_LOCAL`. `GRANTED_PENDING_CONSUME` не является execution claim;
+  только повторно проверенная one-to-one
+  `CONSUMED ↔ rank_connector_executions/READY_TO_SUBMIT` пара фиксируется
+  атомарно. Dispatcher/provider path к service не подключён.
 - Plaintext keyword manifest boundary использует отдельный
   `JOBS_TO_SEO_RANK_TOKEN` и `x-rank-execution-token`. Он обязан отличаться
   от `INTERNAL_API_TOKEN` и credential/realtime tokens. Generic internal
@@ -273,12 +287,16 @@
   subscription обязательны до включения внешней доставки.
 - KEK rollout выполняется в порядке expand keyring → startup decrypt-canary
   verify каждой используемой версии → drain старых replicas → switch active.
-  Текущий coverage guard и missing-version retry проверяют наличие версии, но
-  не обнаруживают ошибочную замену bytes под прежним `keyVersion`. До
-  production обязательны startup canary/verifier и/или глобальный
-  decrypt-failure circuit breaker. Массовый системный mismatch должен
-  останавливать execution и создавать incident, а не переводить валидные
-  credentials в `DISABLED`.
+  `EXECUTION` replica до создания queue worker проверяет coverage, затем для
+  каждой используемой версии расшифровывает один детерминированный
+  неудалённый sample через штатный adapter с точным AAD; пустой vault допустим,
+  а missing/corrupt sample останавливает startup. Ошибка содержит только
+  `keyVersion`, но не tenant, credential, provider или secret. `MANAGEMENT`
+  проверяет encryption/fingerprint coverage без decrypt. Validation worker
+  выполняет job-only bounded retry без изменения credential при runtime
+  decrypt failure, поэтому не создаёт массовый `DISABLED`. Cluster-wide
+  circuit breaker и incident alert для отказов после startup ещё не
+  реализованы; startup canary не заменяет scoped connector DB boundary.
 - Vault endpoints не принимают общий межсервисный token: отдельный caller
   secret доступен только Platform API и credential-capable HTTP process, до
   плановой замены на service JWT/mTLS.
@@ -782,6 +800,15 @@ Merge запрещён при failed required checks. Исключение уя�
   conflicts; обычный unique-index rebuild выполняется после worker drain в
   maintenance window. Для большой live-БД заранее готовится отдельный
   expand/concurrent-index план.
+- `20260729230100_rank_execution_grant_attempts`,
+  `20260729230200_rank_connector_executions` и
+  `20260730101500_rank_connector_execution_claim` требуют fresh apply,
+  tenant-FK/state-matrix/deferred one-to-one negative smoke и реальные
+  concurrent request/replay/decision/expiry/consume проверки на PostgreSQL
+  18. Fresh полный chain и claim-specific concurrent claim/reclaim,
+  stale-head, cancel, credential и kill-switch regression уже прошли на
+  PostgreSQL 18. Grant request/replay/decision/consume evidence и production
+  non-owner permission/runtime boundary проверяются отдельно.
 - Jobs/integrations и SEO Data release проверяется на Node.js 24; локальный
   Node.js 22 engine warning не принимается как production runtime evidence.
 - Автоматический rollback допускается только если не усугубит уже применённую migration.
@@ -957,10 +984,12 @@ Radar/crawler capacity:
 ### 34.2. Manual rank preparation contour
 
 - `rank-worker.main.ts` разворачивается отдельным process type и получает
-  только необходимые PostgreSQL/Redis настройки и
-  `JOBS_TO_SEO_RANK_TOKEN`;
-- token отсутствует у Jobs HTTP, generic system, connector, import,
-  inspection, migration, Web и Platform API processes;
+  только необходимые PostgreSQL/Redis/SEO Data/Platform API настройки,
+  `JOBS_TO_SEO_RANK_TOKEN` для manifest boundary и отдельный
+  `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` для issuer;
+- manifest token отсутствует у Jobs HTTP, generic system, connector, import,
+  inspection, migration, Web и Platform API processes; grant token получают
+  только Platform API и rank-worker и не получают остальные process types;
 - BullMQ `rank-preparation` передаёт только `jobId`; exact manifest command,
   hash, attempts, lease и receipts остаются в PostgreSQL;
 - dispatcher периодически восстанавливает due `PREPARING/CANCEL_REQUESTED`
@@ -973,8 +1002,14 @@ Radar/crawler capacity:
   Перед live provider execution нужна отдельная минимальная DB role с
   проверенными grants; общий Jobs DB user не считается окончательной
   least-privilege boundary;
-- live Arsenkin submit остаётся выключенным, пока не реализованы Jobs-side
-  grant acceptance/consumption, узкая vault boundary, normalized ingest и
+- grant service сохраняет intent/decision и атомарную secret-free
+  `CONSUMED/READY_TO_SUBMIT` пару, но не вызывается dispatcher-ом. Production
+  runtime отклоняет включённый submit, а Compose фиксирует
+  `RANK_PROVIDER_SUBMIT_ENABLED=false`;
+- default-closed SECURITY DEFINER claim DDL реализован, но `PUBLIC EXECUTE`
+  отозван и connector role/runtime caller не подключены. Live Arsenkin submit
+  остаётся выключенным, пока не реализованы authorize/`SUBMITTING`, остальные
+  scoped operations, узкая end-to-end vault boundary, normalized ingest и
   provider contract gates.
 
 ## 35. Maintenance

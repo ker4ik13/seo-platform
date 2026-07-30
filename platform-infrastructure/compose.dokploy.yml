@@ -470,6 +470,9 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/jobs_db
       DATABASE_POOL_MAX: ${JOBS_RANK_DATABASE_POOL_MAX:-10}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      PLATFORM_API_URL: http://platform-api:4000
+      PLATFORM_API_COMMAND_TIMEOUT_MS: ${PLATFORM_API_COMMAND_TIMEOUT_MS:-5000}
+      JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: ${JOBS_TO_PLATFORM_RANK_GRANT_TOKEN:?JOBS_TO_PLATFORM_RANK_GRANT_TOKEN is required}
       SEO_DATA_URL: http://seo-data:4001
       SEO_DATA_COMMAND_TIMEOUT_MS: ${SEO_DATA_COMMAND_TIMEOUT_MS:-60000}
       RANK_PREPARATION_ENABLED: "true"
@@ -477,6 +480,8 @@ services:
       RANK_PREPARATION_LEASE_SECONDS: ${RANK_PREPARATION_LEASE_SECONDS:-120}
       RANK_PREPARATION_DISPATCH_SECONDS: ${RANK_PREPARATION_DISPATCH_SECONDS:-15}
       RANK_PREPARATION_CONCURRENCY: ${RANK_PREPARATION_CONCURRENCY:-2}
+      RANK_PROVIDER_SUBMIT_ENABLED: "false"
+      RANK_PROVIDER_KILL_SWITCH_VERSION: ${RANK_PROVIDER_KILL_SWITCH_VERSION:-arsenkin-positions@1}
       INTEGRATION_CREDENTIAL_ROLE: DISABLED
     cpus: "${JOBS_RANK_CPU_LIMIT:-1.0}"
     mem_limit: "${JOBS_RANK_MEMORY_LIMIT:-512M}"
@@ -489,6 +494,8 @@ services:
       redis:
         condition: service_healthy
       seo-data:
+        condition: service_healthy
+      platform-api:
         condition: service_healthy
     healthcheck:
       test:

@@ -79,24 +79,16 @@ export function arsenkinResult(
     if (providerCode === "429") return rateLimited();
     return requestRejected();
   }
-  if (providerStatus !== "success") return unavailable();
-
   const limitsTotal = nonNegativeSafeNumber(body.limits_total);
-  const limitsUsed = nonNegativeSafeNumber(
-    body.limits_used ?? body.limits_spent
-  );
+  if (
+    limitsTotal === undefined ||
+    (providerStatus !== undefined && providerStatus !== "success")
+  ) {
+    return unavailable();
+  }
   return {
     ok: true,
-    ...(
-      limitsTotal !== undefined || limitsUsed !== undefined
-        ? {
-            providerMeta: {
-              ...(limitsTotal !== undefined ? { limitsTotal } : {}),
-              ...(limitsUsed !== undefined ? { limitsUsed } : {})
-            }
-          }
-        : {}
-    )
+    providerMeta: { limitsTotal }
   };
 }
 

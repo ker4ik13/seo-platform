@@ -19,9 +19,7 @@ test("validates Arsenkin through the read-only limits endpoint", async () => {
         query: "limits"
       });
       return Response.json({
-        status: "Success",
-        limits_total: 1_000,
-        limits_used: 25
+        limits_total: 1_000
       });
     }
   );
@@ -30,7 +28,7 @@ test("validates Arsenkin through the read-only limits endpoint", async () => {
     await connector.validate({ apiKey: "secret-token" }, 1_000),
     {
       ok: true,
-      providerMeta: { limitsTotal: 1_000, limitsUsed: 25 }
+      providerMeta: { limitsTotal: 1_000 }
     }
   );
   assert.equal(receivedUrl, "https://arsenkin.ru/api/tools/info");
@@ -64,4 +62,23 @@ test("normalizes Arsenkin authentication and rate limit errors", () => {
     retryable: true,
     credentialStatus: "DEGRADED"
   });
+  assert.deepEqual(
+    arsenkinResult(200, {
+      status: "Success",
+      limits_total: 5_000
+    }),
+    {
+      ok: true,
+      providerMeta: { limitsTotal: 5_000 }
+    }
+  );
+  assert.deepEqual(
+    arsenkinResult(200, { status: "Success" }),
+    {
+      ok: false,
+      errorCode: "PROVIDER_UNAVAILABLE",
+      retryable: true,
+      credentialStatus: "DEGRADED"
+    }
+  );
 });

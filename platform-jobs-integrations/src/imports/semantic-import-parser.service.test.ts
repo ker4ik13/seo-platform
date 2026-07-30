@@ -230,7 +230,11 @@ function configFixture(): AppConfig {
     databasePoolMax: 1,
     redisUrl: "redis://unused",
     internalCommandTimeoutMs: 60_000,
-    services: { seoData: "http://seo-data" },
+    platformApiCommandTimeoutMs: 5_000,
+    services: {
+      seoData: "http://seo-data",
+      platformApi: "http://platform-api"
+    },
     nats: { url: "nats://unused" },
     s3: {
       enabled: true,
@@ -263,6 +267,10 @@ function configFixture(): AppConfig {
       leaseSeconds: 120,
       dispatchSeconds: 15,
       concurrency: 2
+    },
+    rankExecution: {
+      submitEnabled: false,
+      killSwitchVersion: "arsenkin-positions@1"
     },
     uploads: {
       maxSizeBytes: 5 * 1_024 * 1_024 * 1_024,

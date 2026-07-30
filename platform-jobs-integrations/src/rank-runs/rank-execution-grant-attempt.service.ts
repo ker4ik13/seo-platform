@@ -1,0 +1,1045 @@
+import { timingSafeEqual } from "node:crypto";
+import { Inject, Injectable } from "@nestjs/common";
+import {
+  internalRankExecutionGrantDecision,
+  type InternalIssueRankExecutionGrantInputV1,
+  type InternalRankExecutionGrantDecisionV1
+} from "@seo-platform/contracts";
+import { canonicalizeJson } from "@seo-platform/contracts/canonical-json";
+import type { AppConfig } from "../config/app-config.js";
+import { APP_CONFIG } from "../config/config.module.js";
+import { Prisma } from "../generated/prisma/client.js";
+import type {
+  Job,
+  JobItem,
+  RankEstimate,
+  RankExecutionGrantAttempt,
+  RankExecutionGrantAttemptStatus,
+  RankJobRun
+} from "../generated/prisma/client.js";
+import { PrismaService } from "../database/prisma.service.js";
+import {
+  RankExecutionGrantClient,
+  RankExecutionGrantClientError
+} from "../platform-api/rank-execution-grant.client.js";
+import {
+  RANK_ESTIMATE_POLICY_VERSION,
+  credentialSnapshot,
+  executionProjection,
+  rankEstimateProjectDomainHash,
+  verifiedRankEstimate,
+  type CredentialSnapshot,
+  type ExecutionProjection
+} from "../rank-estimates/rank-estimate.service.js";
+import {
+  rankExecutionGrantAttemptIdempotencyKey,
+  rankExecutionGrantDecisionJson,
+  rankExecutionGrantDecisionTransition,
+  rankExecutionGrantHashes,
+  rankExecutionGrantRequestJson,
+  storedRankExecutionGrantRequest
+} from "./rank-execution-grant-attempt.js";
+import {
+  buildRankExecutionGrantRequest,
+  type BuiltRankExecutionGrantRequest,
+  type RankExecutionGrantRequestFacts
+} from "./rank-execution-grant-request.js";
+import {
+  lockRankExecutionGrantAttempt,
+  lockRankExecutionProjection,
+  lockRankJobGraph,
+  lockRankJobItem,
+  type LockedRankJobIdentity,
+  type RankExecutionProjectionIdentity
+} from "./rank-job-lock.js";
+import { rankJobItemReference } from "./rank-job-item.js";
+import {
+  MANUAL_RANK_CHECK_JOB_TYPE,
+  rankJobAuthorizationSnapshot
+} from "./rank-job-record.js";
+import { assertExecutionProjectionCurrent } from "./rank-run.service.js";
+
+const UUID_V7_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$/u;
+
+export type RankExecutionGrantAttemptErrorCode =
+  | "SUBMIT_DISABLED"
+  | "INVALID_REQUEST"
+  | "ITEM_NOT_FOUND"
+  | "LOCAL_STATE_INVALID"
+  | "ATTEMPT_TERMINAL"
+  | "DEPENDENCY_UNAVAILABLE"
+  | "DECISION_REJECTED";
+
+export class RankExecutionGrantAttemptError extends Error {
+  public constructor(
+    public readonly code: RankExecutionGrantAttemptErrorCode,
+    public readonly retryable: boolean
+  ) {
+    super(code);
+    this.name = "RankExecutionGrantAttemptError";
+  }
+}
+
+export interface RankExecutionGrantAttemptResult {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly jobId: string;
+  readonly jobItemId: string;
+  readonly executionAttempt: number;
+  readonly status: RankExecutionGrantAttemptStatus;
+  readonly expiresAt?: string;
+  readonly decision?: InternalRankExecutionGrantDecisionV1;
+}
+
+type RankGrantJobGraph = Job & {
+  readonly rankRun:
+    | (RankJobRun & { readonly estimate: RankEstimate })
+    | null;
+};
+
+interface PreparedRankExecutionGrantAttempt {
+  readonly attempt: RankExecutionGrantAttempt;
+  readonly request: InternalIssueRankExecutionGrantInputV1;
+}
+
+interface LockedRankExecutionGraph {
+  readonly identity: LockedRankJobIdentity;
+  readonly job: RankGrantJobGraph;
+  readonly item: JobItem;
+  readonly projectionIdentity: RankExecutionProjectionIdentity;
+  readonly projection: ExecutionProjection;
+  readonly databaseNow: Date;
+}
+
+@Injectable()
+export class RankExecutionGrantAttemptService {
+  public constructor(
+    private readonly prisma: PrismaService,
+    private readonly client: RankExecutionGrantClient,
+    @Inject(APP_CONFIG) private readonly config: AppConfig
+  ) {}
+
+  /**
+   * Persists the exact authorization intent before crossing the network.
+   * A positive decision is consumed only with a secret-free scoped connector
+   * execution in a second local transaction. No provider action is exposed by
+   * this service.
+   */
+  public async issueForItem(
+    jobItemId: string,
+    requestId: string
+  ): Promise<RankExecutionGrantAttemptResult> {
+    if (!this.config.rankExecution.submitEnabled) {
+      throw failure("SUBMIT_DISABLED", false);
+    }
+    if (!UUID_V7_PATTERN.test(jobItemId)) {
+      throw failure("ITEM_NOT_FOUND", false);
+    }
+    if (!REQUEST_ID_PATTERN.test(requestId)) {
+      throw failure("INVALID_REQUEST", false);
+    }
+
+    const prepared = await this.prepare(jobItemId);
+    if (prepared.attempt.status === "GRANTED_PENDING_CONSUME") {
+      return this.consumePending(prepared.attempt);
+    }
+    if (prepared.attempt.status !== "REQUESTED") {
+      return attemptResult(prepared.attempt);
+    }
+
+    let decision: InternalRankExecutionGrantDecisionV1;
+    try {
+      decision = await this.client.issue(prepared.request, {
+        requestId,
+        idempotencyKey: prepared.attempt.idempotencyKey
+      });
+    } catch (error) {
+      if (
+        error instanceof RankExecutionGrantClientError &&
+        error.retryable
+      ) {
+        throw failure("DEPENDENCY_UNAVAILABLE", true);
+      }
+      try {
+        await this.rejectPending(prepared.attempt);
+      } catch {
+        throw failure("DEPENDENCY_UNAVAILABLE", true);
+      }
+      throw failure("DECISION_REJECTED", false);
+    }
+
+    const recorded = await this.recordDecision(
+      prepared.attempt,
+      decision
+    );
+    return recorded.status === "GRANTED_PENDING_CONSUME"
+      ? this.consumePending(prepared.attempt)
+      : recorded;
+  }
+
+  private async prepare(
+    jobItemId: string
+  ): Promise<PreparedRankExecutionGrantAttempt> {
+    const pointer = await this.prisma.jobItem.findUnique({
+      where: { id: jobItemId },
+      select: {
+        jobId: true,
+        workspaceId: true,
+        projectId: true
+      }
+    });
+    if (!pointer?.projectId) throw failure("ITEM_NOT_FOUND", false);
+
+    return this.prisma.$transaction(
+      async (transaction) => {
+        const locked = await lockedExecutionGraph(
+          transaction,
+          pointer.jobId,
+          jobItemId,
+          false
+        );
+        if (
+          locked.identity.workspaceId !== pointer.workspaceId ||
+          locked.identity.projectId !== pointer.projectId
+        ) {
+          throw failure("ITEM_NOT_FOUND", false);
+        }
+
+        const latest =
+          await transaction.rankExecutionGrantAttempt.findFirst({
+            where: {
+              workspaceId: locked.identity.workspaceId,
+              jobItemId
+            },
+            orderBy: { executionAttempt: "desc" }
+          });
+        const clock = locked.databaseNow;
+        let executionAttempt = 1;
+
+        if (latest) {
+          if (latest.status === "REQUESTED") {
+            try {
+              const built = requestForLockedGraph(
+                locked,
+                latest.executionAttempt,
+                this.config
+              );
+              assertExactAttempt(latest, built);
+              return { attempt: latest, request: built.request };
+            } catch {
+              return {
+                attempt: await rejectLocal(
+                  transaction,
+                  latest,
+                  clock
+                ),
+                request: storedRankExecutionGrantRequest(
+                  latest.requestSnapshot
+                )
+              };
+            }
+          }
+          if (latest.status === "GRANTED_PENDING_CONSUME") {
+            if (!latest.expiresAt) {
+              throw failure("LOCAL_STATE_INVALID", false);
+            }
+            if (clock.getTime() < latest.expiresAt.getTime()) {
+              return {
+                attempt: latest,
+                request: storedRankExecutionGrantRequest(
+                  latest.requestSnapshot
+                )
+              };
+            }
+            const expired =
+              await transaction.rankExecutionGrantAttempt.update({
+                where: { id: latest.id },
+                data: {
+                  status: "EXPIRED",
+                  terminalAt: clock
+                }
+              });
+            executionAttempt = expired.executionAttempt + 1;
+          } else if (latest.status === "EXPIRED") {
+            executionAttempt = latest.executionAttempt + 1;
+          } else {
+            return {
+              attempt: latest,
+              request: storedRankExecutionGrantRequest(
+                latest.requestSnapshot
+              )
+            };
+          }
+        }
+
+        if (executionAttempt > 1_000) {
+          throw failure("ATTEMPT_TERMINAL", false);
+        }
+        const built = requestForLockedGraph(
+          locked,
+          executionAttempt,
+          this.config
+        );
+        const hashes = rankExecutionGrantHashes(built.request);
+        const idempotencyKey =
+          rankExecutionGrantAttemptIdempotencyKey(
+            jobItemId,
+            executionAttempt
+          );
+        const attempt =
+          await transaction.rankExecutionGrantAttempt.create({
+            data: {
+              workspaceId: locked.identity.workspaceId,
+              projectId: locked.identity.projectId,
+              jobId: locked.identity.jobId,
+              jobItemId,
+              executionAttempt,
+              jobVersion: locked.job.version,
+              idempotencyKey,
+              requestSnapshot: rankExecutionGrantRequestJson(
+                built.request
+              ),
+              requestHash: Uint8Array.from(hashes.requestHash),
+              scopeHash: Uint8Array.from(hashes.scopeHash),
+              executionEvidenceHash: Uint8Array.from(
+                Buffer.from(built.evidenceHash.value, "hex")
+              )
+            }
+          });
+        return { attempt, request: built.request };
+      },
+      { isolationLevel: "ReadCommitted" }
+    );
+  }
+
+  private async recordDecision(
+    prepared: RankExecutionGrantAttempt,
+    value: InternalRankExecutionGrantDecisionV1
+  ): Promise<RankExecutionGrantAttemptResult> {
+    return this.prisma.$transaction(
+      async (transaction) => {
+        const locked = await lockedExecutionGraph(
+          transaction,
+          prepared.jobId,
+          prepared.jobItemId,
+          false
+        );
+        if (
+          locked.identity.workspaceId !== prepared.workspaceId ||
+          locked.identity.projectId !== prepared.projectId ||
+          !(await lockRankExecutionGrantAttempt(
+            transaction,
+            locked.identity,
+            prepared.jobItemId,
+            prepared.id
+          ))
+        ) {
+          throw failure("LOCAL_STATE_INVALID", false);
+        }
+        const current =
+          await transaction.rankExecutionGrantAttempt.findUnique({
+            where: { id: prepared.id }
+          });
+        if (!current) throw failure("LOCAL_STATE_INVALID", false);
+        if (current.status !== "REQUESTED") {
+          assertSettledDecision(current, value);
+          return attemptResult(current);
+        }
+
+        const request = storedRankExecutionGrantRequest(
+          current.requestSnapshot
+        );
+        const decision = internalRankExecutionGrantDecision(value);
+        const clock = await databaseClock(transaction);
+        let transition: ReturnType<
+          typeof rankExecutionGrantDecisionTransition
+        >;
+        try {
+          transition = rankExecutionGrantDecisionTransition(
+            request,
+            decision,
+            clock
+          );
+        } catch {
+          return attemptResult(
+            await rejectLocal(transaction, current, clock)
+          );
+        }
+
+        if (transition.status === "DENIED") {
+          return attemptResult(
+            await transaction.rankExecutionGrantAttempt.update({
+              where: { id: current.id },
+              data: {
+                status: "DENIED",
+                decisionSnapshot: rankExecutionGrantDecisionJson(
+                  transition.decision
+                ),
+                decidedAt: new Date(transition.decision.decidedAt),
+                terminalAt: clock
+              }
+            })
+          );
+        }
+        if (transition.status === "EXPIRED") {
+          return attemptResult(
+            await transaction.rankExecutionGrantAttempt.update({
+              where: { id: current.id },
+              data: {
+                status: "EXPIRED",
+                decisionSnapshot: rankExecutionGrantDecisionJson(
+                  transition.decision
+                ),
+                decidedAt: new Date(transition.decision.decidedAt),
+                expiresAt: transition.expiresAt,
+                terminalAt: clock
+              }
+            })
+          );
+        }
+
+        try {
+          const rebuilt = requestForLockedGraph(
+            { ...locked, databaseNow: clock },
+            current.executionAttempt,
+            this.config
+          );
+          assertExactAttempt(current, rebuilt);
+        } catch {
+          return attemptResult(
+            await rejectLocal(
+              transaction,
+              current,
+              clock,
+              transition.decision,
+              transition.expiresAt
+            )
+          );
+        }
+
+        return attemptResult(
+          await transaction.rankExecutionGrantAttempt.update({
+            where: { id: current.id },
+            data: {
+              status: "GRANTED_PENDING_CONSUME",
+              decisionSnapshot: rankExecutionGrantDecisionJson(
+                transition.decision
+              ),
+              decidedAt: new Date(transition.decision.decidedAt),
+              expiresAt: transition.expiresAt
+            }
+          })
+        );
+      },
+      { isolationLevel: "ReadCommitted" }
+    );
+  }
+
+  private async rejectPending(
+    prepared: RankExecutionGrantAttempt
+  ): Promise<void> {
+    await this.prisma.$transaction(
+      async (transaction) => {
+        const locked = await lockedExecutionGraph(
+          transaction,
+          prepared.jobId,
+          prepared.jobItemId,
+          false
+        );
+        if (
+          locked.identity.workspaceId !== prepared.workspaceId ||
+          locked.identity.projectId !== prepared.projectId ||
+          !(await lockRankExecutionGrantAttempt(
+            transaction,
+            locked.identity,
+            prepared.jobItemId,
+            prepared.id
+          ))
+        ) {
+          throw failure("LOCAL_STATE_INVALID", false);
+        }
+        const current =
+          await transaction.rankExecutionGrantAttempt.findUnique({
+            where: { id: prepared.id }
+          });
+        if (!current || current.status !== "REQUESTED") return;
+        await rejectLocal(
+          transaction,
+          current,
+          await databaseClock(transaction)
+        );
+      },
+      { isolationLevel: "ReadCommitted" }
+    );
+  }
+
+  /**
+   * Consumes the one-time grant only while the complete private graph is
+   * locked and current. The same transaction creates the sole scoped
+   * connector execution. It does not expose credential material, enqueue a
+   * connector worker or call the provider.
+   */
+  private async consumePending(
+    prepared: RankExecutionGrantAttempt
+  ): Promise<RankExecutionGrantAttemptResult> {
+    return this.prisma.$transaction(
+      async (transaction) => {
+        const locked = await lockedExecutionGraph(
+          transaction,
+          prepared.jobId,
+          prepared.jobItemId,
+          false
+        );
+        if (
+          locked.identity.workspaceId !== prepared.workspaceId ||
+          locked.identity.projectId !== prepared.projectId ||
+          !(await lockRankExecutionGrantAttempt(
+            transaction,
+            locked.identity,
+            prepared.jobItemId,
+            prepared.id
+          ))
+        ) {
+          throw failure("LOCAL_STATE_INVALID", false);
+        }
+        const current =
+          await transaction.rankExecutionGrantAttempt.findUnique({
+            where: { id: prepared.id }
+          });
+        if (!current) throw failure("LOCAL_STATE_INVALID", false);
+        if (current.status !== "GRANTED_PENDING_CONSUME") {
+          return attemptResult(current);
+        }
+        if (
+          current.decisionSnapshot === null ||
+          current.expiresAt === null
+        ) {
+          throw failure("LOCAL_STATE_INVALID", false);
+        }
+
+        const clock = await databaseClock(transaction);
+        if (clock.getTime() >= current.expiresAt.getTime()) {
+          return attemptResult(
+            await transaction.rankExecutionGrantAttempt.update({
+              where: { id: current.id },
+              data: {
+                status: "EXPIRED",
+                terminalAt: clock
+              }
+            })
+          );
+        }
+
+        let rebuilt: BuiltRankExecutionGrantRequest;
+        try {
+          rebuilt = requestForLockedGraph(
+            { ...locked, databaseNow: clock },
+            current.executionAttempt,
+            this.config
+          );
+          assertExactAttempt(current, rebuilt);
+          const transition = rankExecutionGrantDecisionTransition(
+            rebuilt.request,
+            current.decisionSnapshot,
+            clock
+          );
+          if (
+            transition.status !== "GRANTED_PENDING_CONSUME" ||
+            transition.expiresAt.getTime() !==
+              current.expiresAt.getTime()
+          ) {
+            throw failure("LOCAL_STATE_INVALID", false);
+          }
+        } catch {
+          return attemptResult(
+            await rejectLocal(
+              transaction,
+              current,
+              clock,
+              internalRankExecutionGrantDecision(
+                current.decisionSnapshot
+              ) as Extract<
+                InternalRankExecutionGrantDecisionV1,
+                { readonly status: "GRANTED" }
+              >,
+              current.expiresAt
+            )
+          );
+        }
+
+        const evidence = rebuilt.evidence;
+        await transaction.rankConnectorExecution.create({
+          data: {
+            workspaceId: current.workspaceId,
+            projectId: current.projectId,
+            jobId: current.jobId,
+            jobItemId: current.jobItemId,
+            grantAttemptId: current.id,
+            executionAttempt: current.executionAttempt,
+            jobVersion: current.jobVersion,
+            estimateId: evidence.estimateId,
+            manifestId: evidence.manifest.id,
+            manifestHash: Buffer.from(
+              evidence.manifest.hash.value,
+              "hex"
+            ),
+            manifestChunkIndex: evidence.manifest.chunkIndex,
+            bindingId: evidence.binding.id,
+            bindingVersion: evidence.binding.version,
+            routeId: evidence.route.id,
+            credentialId: evidence.credential.id,
+            credentialVersion: evidence.credential.version,
+            credentialMaterialVersion:
+              evidence.credential.materialVersion,
+            credentialValidationId:
+              evidence.credential.validationId,
+            credentialValidationVersion:
+              evidence.credential.validationVersion,
+            credentialValidationConnectorVersion:
+              evidence.credential.validationConnectorVersion,
+            credentialVerifiedAt: new Date(
+              evidence.credential.verifiedAt
+            ),
+            estimateExecutionHash: Buffer.from(
+              evidence.estimateExecutionHash.value,
+              "hex"
+            ),
+            executionEvidenceHash: Buffer.from(
+              rebuilt.evidenceHash.value,
+              "hex"
+            ),
+            executionConnectorVersion:
+              evidence.executionConnectorVersion,
+            providerPolicyVersion: evidence.providerPolicyVersion,
+            killSwitchVersion: evidence.killSwitch.version,
+            authorizationExpiresAt: current.expiresAt,
+            createdAt: clock,
+            updatedAt: clock
+          }
+        });
+        return attemptResult(
+          await transaction.rankExecutionGrantAttempt.update({
+            where: { id: current.id },
+            data: {
+              status: "CONSUMED",
+              terminalAt: clock
+            }
+          })
+        );
+      },
+      { isolationLevel: "ReadCommitted" }
+    );
+  }
+}
+
+async function lockedExecutionGraph(
+  transaction: Prisma.TransactionClient,
+  jobId: string,
+  jobItemId: string,
+  requireCurrent = true
+): Promise<LockedRankExecutionGraph> {
+  const identity = await lockRankJobGraph(transaction, jobId);
+  if (!identity || !(await lockRankJobItem(transaction, identity, jobItemId))) {
+    throw failure("ITEM_NOT_FOUND", false);
+  }
+  const job = await transaction.job.findUnique({
+    where: { id: jobId },
+    include: { rankRun: { include: { estimate: true } } }
+  });
+  const item = await transaction.jobItem.findUnique({
+    where: { id: jobItemId }
+  });
+  if (!job || !item) throw failure("ITEM_NOT_FOUND", false);
+  const graph = job as RankGrantJobGraph;
+  const projectionIdentity = executionProjectionIdentity(graph, item);
+  const projectionLocked = await lockRankExecutionProjection(
+    transaction,
+    projectionIdentity
+  );
+  const projection = await executionProjection(
+    transaction,
+    identity.workspaceId,
+    identity.projectId
+  );
+  const databaseNow = await databaseClock(transaction);
+  if (requireCurrent && !projectionLocked) {
+    throw failure("LOCAL_STATE_INVALID", false);
+  }
+  if (requireCurrent) {
+    validateLockedGraph(graph, item, projection, databaseNow);
+  }
+  return {
+    identity,
+    job: graph,
+    item,
+    projectionIdentity,
+    projection,
+    databaseNow
+  };
+}
+
+function executionProjectionIdentity(
+  job: RankGrantJobGraph,
+  item: JobItem
+): RankExecutionProjectionIdentity {
+  const run = job.rankRun;
+  const estimate = run?.estimate;
+  if (
+    !run ||
+    !estimate ||
+    !estimate.credentialId ||
+    !estimate.credentialValidationId ||
+    !estimate.bindingId ||
+    !estimate.routeId ||
+    job.projectId === null
+  ) {
+    throw failure("LOCAL_STATE_INVALID", false);
+  }
+  return {
+    jobId: job.id,
+    jobItemId: item.id,
+    workspaceId: job.workspaceId,
+    projectId: job.projectId,
+    credentialId: estimate.credentialId,
+    validationJobId: estimate.credentialValidationId,
+    bindingId: estimate.bindingId,
+    routeId: estimate.routeId
+  };
+}
+
+function validateLockedGraph(
+  job: RankGrantJobGraph,
+  item: JobItem,
+  projection: ExecutionProjection,
+  databaseNow: Date
+): void {
+  const run = job.rankRun;
+  const estimate = run?.estimate;
+  const reference = rankJobItemReference(item.inputReference);
+  if (
+    !run ||
+    !estimate ||
+    job.type !== MANUAL_RANK_CHECK_JOB_TYPE ||
+    job.projectId === null ||
+    job.actorId === null ||
+    job.provider !== "ARSENKIN" ||
+    job.credentialMode !== "BYOK_API_KEY" ||
+    !grantableJobState(job) ||
+    item.workspaceId !== job.workspaceId ||
+    item.projectId !== job.projectId ||
+    item.jobId !== job.id ||
+    item.status !== "QUEUED" ||
+    item.providerRequestId !== null ||
+    item.outputReference !== null ||
+    item.actualCostMicro !== null ||
+    item.error !== null ||
+    item.attempt !== 0 ||
+    item.retryAt !== null ||
+    run.workspaceId !== job.workspaceId ||
+    run.projectId !== job.projectId ||
+    run.sealState !== "SEALED" ||
+    run.manifestHashSchema !== "rank-manifest@1" ||
+    run.manifestId === null ||
+    run.manifestHash === null ||
+    run.manifestChunkCount === null ||
+    run.manifestChunkCount < 1 ||
+    run.manifestChunkCount > 4 ||
+    run.finalizationStatus !== null ||
+    run.finalizedAt !== null ||
+    run.cancelRequestedBy !== null ||
+    reference.manifestId !== run.manifestId ||
+    reference.chunkIndex !== item.sequence ||
+    reference.chunkIndex >= run.manifestChunkCount ||
+    estimate.id !== run.estimateId ||
+    estimate.workspaceId !== job.workspaceId ||
+    estimate.projectId !== job.projectId ||
+    estimate.provider !== "ARSENKIN" ||
+    estimate.credentialMode !== "BYOK_API_KEY" ||
+    estimate.providerPolicyVersion !== RANK_ESTIMATE_POLICY_VERSION ||
+    estimate.executionSnapshotHash === null ||
+    run.projectStatus !== "ACTIVE" ||
+    run.projectVersion !== estimate.projectVersion ||
+    !bytesEqual(
+      rankEstimateProjectDomainHash(run.projectDomain),
+      estimate.projectDomainHash
+    )
+  ) {
+    throw failure("LOCAL_STATE_INVALID", false);
+  }
+
+  const authorization = rankJobAuthorizationSnapshot(job.inputSnapshot);
+  if (
+    authorization.estimateId !== estimate.id ||
+    authorization.projectVersion !== run.projectVersion
+  ) {
+    throw failure("LOCAL_STATE_INVALID", false);
+  }
+  const verified = verifiedRankEstimate(estimate);
+  if (!verified.execution || verified.summary.status !== "READY") {
+    throw failure("LOCAL_STATE_INVALID", false);
+  }
+  try {
+    assertExecutionProjectionCurrent(
+      estimate,
+      credentialSnapshot(projection),
+      databaseNow
+    );
+  } catch {
+    throw failure("LOCAL_STATE_INVALID", false);
+  }
+
+  const binding = projection.binding;
+  const route = binding?.routes[0];
+  if (
+    !binding ||
+    !binding.enabled ||
+    binding.capability !== "SERP_RANK_TRACKING" ||
+    binding.routes.length !== 1 ||
+    !route ||
+    route.position !== 0 ||
+    route.sourceKind !== "WORKSPACE_CREDENTIAL" ||
+    route.credential.provider !== "ARSENKIN" ||
+    route.credential.mode !== "BYOK_API_KEY" ||
+    route.credential.status !== "ACTIVE" ||
+    route.credential.deletedAt !== null
+  ) {
+    throw failure("LOCAL_STATE_INVALID", false);
+  }
+}
+
+function requestForLockedGraph(
+  locked: LockedRankExecutionGraph,
+  executionAttempt: number,
+  config: AppConfig
+): BuiltRankExecutionGrantRequest {
+  try {
+    validateLockedGraph(
+      locked.job,
+      locked.item,
+      locked.projection,
+      locked.databaseNow
+    );
+    const run = locked.job.rankRun;
+    if (!run) throw failure("LOCAL_STATE_INVALID", false);
+    const estimate = run.estimate;
+    const authorization = rankJobAuthorizationSnapshot(
+      locked.job.inputSnapshot
+    );
+    const reference = rankJobItemReference(locked.item.inputReference);
+    const current = credentialSnapshot(locked.projection);
+    const facts = requestFacts(
+      locked.job,
+      locked.item,
+      run,
+      estimate,
+      authorization,
+      reference.chunkIndex,
+      current,
+      executionAttempt,
+      config
+    );
+    return buildRankExecutionGrantRequest(facts);
+  } catch {
+    throw failure("LOCAL_STATE_INVALID", false);
+  }
+}
+
+function requestFacts(
+  job: RankGrantJobGraph,
+  item: JobItem,
+  run: RankJobRun,
+  estimate: RankEstimate,
+  authorization: ReturnType<typeof rankJobAuthorizationSnapshot>,
+  manifestChunkIndex: number,
+  current: CredentialSnapshot,
+  executionAttempt: number,
+  config: AppConfig
+): RankExecutionGrantRequestFacts {
+  if (
+    job.projectId === null ||
+    job.actorId === null ||
+    run.manifestId === null ||
+    run.manifestHash === null ||
+    estimate.executionSnapshotHash === null ||
+    current.bindingId === undefined ||
+    current.bindingVersion === undefined ||
+    current.routeId === undefined ||
+    current.credentialId === undefined ||
+    current.credentialVersion === undefined ||
+    current.credentialMaterialVersion === undefined ||
+    current.validationId === undefined ||
+    current.validationVersion === undefined ||
+    current.validationConnectorVersion === undefined ||
+    current.verifiedAt === undefined
+  ) {
+    throw failure("LOCAL_STATE_INVALID", false);
+  }
+  return {
+    workspaceId: job.workspaceId,
+    projectId: job.projectId,
+    actorId: job.actorId,
+    membershipId: authorization.membershipId,
+    membershipVersion: authorization.membershipVersion,
+    projectVersion: authorization.projectVersion,
+    projectDomainHash: rankEstimateProjectDomainHash(run.projectDomain),
+    jobId: job.id,
+    jobItemId: item.id,
+    jobVersion: job.version,
+    executionAttempt,
+    estimateId: estimate.id,
+    manifestId: run.manifestId,
+    manifestHash: run.manifestHash,
+    manifestChunkIndex,
+    bindingId: current.bindingId,
+    bindingVersion: current.bindingVersion,
+    routeId: current.routeId,
+    credentialId: current.credentialId,
+    credentialVersion: current.credentialVersion,
+    credentialMaterialVersion: current.credentialMaterialVersion,
+    credentialValidationId: current.validationId,
+    credentialValidationVersion: current.validationVersion,
+    credentialValidationConnectorVersion:
+      current.validationConnectorVersion,
+    credentialVerifiedAt: current.verifiedAt,
+    estimateExecutionHash: estimate.executionSnapshotHash,
+    providerPolicyVersion: estimate.providerPolicyVersion,
+    killSwitchVersion: config.rankExecution.killSwitchVersion
+  };
+}
+
+function grantableJobState(job: Job): boolean {
+  return (
+    (job.status === "QUEUED" && job.stage === "WAITING_FOR_QUEUE") ||
+    (job.status === "RUNNING" &&
+      job.stage === "WAITING_EXECUTION_GRANT")
+  );
+}
+
+function assertExactAttempt(
+  attempt: RankExecutionGrantAttempt,
+  built: BuiltRankExecutionGrantRequest
+): void {
+  const stored = storedRankExecutionGrantRequest(
+    attempt.requestSnapshot
+  );
+  const hashes = rankExecutionGrantHashes(built.request);
+  if (
+    canonicalizeJson(stored) !== canonicalizeJson(built.request) ||
+    attempt.jobVersion !== built.request.jobVersion ||
+    attempt.executionAttempt !== built.request.executionAttempt ||
+    attempt.idempotencyKey !==
+      rankExecutionGrantAttemptIdempotencyKey(
+        attempt.jobItemId,
+        attempt.executionAttempt
+      ) ||
+    !bytesEqual(attempt.requestHash, hashes.requestHash) ||
+    !bytesEqual(attempt.scopeHash, hashes.scopeHash) ||
+    !bytesEqual(
+      attempt.executionEvidenceHash,
+      Buffer.from(built.evidenceHash.value, "hex")
+    )
+  ) {
+    throw failure("LOCAL_STATE_INVALID", false);
+  }
+}
+
+async function rejectLocal(
+  transaction: Prisma.TransactionClient,
+  attempt: RankExecutionGrantAttempt,
+  clock: Date,
+  decision?: Extract<
+    InternalRankExecutionGrantDecisionV1,
+    { readonly status: "GRANTED" }
+  >,
+  expiresAt?: Date
+): Promise<RankExecutionGrantAttempt> {
+  if (decision && !expiresAt) {
+    throw failure("LOCAL_STATE_INVALID", false);
+  }
+  return transaction.rankExecutionGrantAttempt.update({
+    where: { id: attempt.id },
+    data: {
+      status: "REJECTED_LOCAL",
+      ...(decision
+        ? {
+            decisionSnapshot: rankExecutionGrantDecisionJson(decision),
+            decidedAt: new Date(decision.decidedAt),
+            expiresAt: expiresAt as Date
+          }
+        : {}),
+      terminalAt: clock
+    }
+  });
+}
+
+async function databaseClock(
+  transaction: Prisma.TransactionClient
+): Promise<Date> {
+  const [clock] = await transaction.$queryRaw<
+    readonly { readonly now: Date }[]
+  >`SELECT clock_timestamp() AS "now"`;
+  if (
+    !clock?.now ||
+    !(clock.now instanceof Date) ||
+    Number.isNaN(clock.now.getTime())
+  ) {
+    throw new Error("Unable to read Jobs database clock");
+  }
+  return clock.now;
+}
+
+function attemptResult(
+  attempt: RankExecutionGrantAttempt
+): RankExecutionGrantAttemptResult {
+  const decision =
+    attempt.decisionSnapshot === null
+      ? undefined
+      : internalRankExecutionGrantDecision(attempt.decisionSnapshot);
+  return {
+    id: attempt.id,
+    workspaceId: attempt.workspaceId,
+    projectId: attempt.projectId,
+    jobId: attempt.jobId,
+    jobItemId: attempt.jobItemId,
+    executionAttempt: attempt.executionAttempt,
+    status: attempt.status,
+    ...(attempt.expiresAt
+      ? { expiresAt: attempt.expiresAt.toISOString() }
+      : {}),
+    ...(decision ? { decision } : {})
+  };
+}
+
+function assertSettledDecision(
+  attempt: RankExecutionGrantAttempt,
+  value: InternalRankExecutionGrantDecisionV1
+): void {
+  if (attempt.decisionSnapshot === null) return;
+  const stored = internalRankExecutionGrantDecision(
+    attempt.decisionSnapshot
+  );
+  const incoming = internalRankExecutionGrantDecision(value);
+  if (canonicalizeJson(stored) !== canonicalizeJson(incoming)) {
+    throw failure("LOCAL_STATE_INVALID", false);
+  }
+}
+
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  const first = Buffer.from(left);
+  const second = Buffer.from(right);
+  return (
+    first.length === second.length &&
+    first.length === 32 &&
+    timingSafeEqual(first, second)
+  );
+}
+
+function failure(
+  code: RankExecutionGrantAttemptErrorCode,
+  retryable: boolean
+): RankExecutionGrantAttemptError {
+  return new RankExecutionGrantAttemptError(code, retryable);
+}

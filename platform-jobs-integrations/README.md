@@ -52,12 +52,33 @@ seal либо идемпотентно finalizes manifest в SEO Data, и лиш
 `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN` для reconciliation оператором.
 Retry delay и BullMQ delivery backoff используют bounded jitter. Cancel и
 worker всегда блокируют строки в порядке `Job → RankJobRun`.
-Этот entrypoint пока не вызывает Arsenkin и не включает live provider
+Bounded Platform API client проверяет exact grant request/scope hashes,
+запрещает redirect и ограничивает timeout/размер ответа. Принятый grant
+не разрешает provider call сам по себе. Dark service сначала под canonical
+locks сохраняет в `rank_execution_grant_attempts` immutable exact
+`REQUESTED` intent и лишь затем пересекает HTTP boundary. Retryable ambiguity
+оставляет тот же intent для exact replay с прежними request и idempotency key;
+ответ фиксируется как `DENIED`, `EXPIRED`, `GRANTED_PENDING_CONSUME` либо
+`REJECTED_LOCAL`. Неистёкший `GRANTED_PENDING_CONSUME` под повторной
+проверкой exact graph атомарно переходит в `CONSUMED` только вместе с
+единственной secret-free `rank_connector_executions/READY_TO_SUBMIT`.
+Connector credential material в эту row не копируется. Service credential
+доступен только rank-worker, но dispatcher этот path пока не вызывает.
+Entry point по-прежнему не вызывает Arsenkin и не включает live provider
 submit: соответствующие release gates из ADR-2026-034 остаются обязательными.
-Следующий связный runtime-путь — authoritative execution grant → scoped
-connector boundary → provider submit/status → normalized result producer с
-сохранением ingest receipts. Public history API/UI уже готовы и не входят в
-этот следующий шаг.
+Forward migration `20260730101500_rank_connector_execution_claim` добавляет
+pre-network `CLAIMED` lease и hardened `SECURITY DEFINER` claim. Candidate
+сначала non-locking проверяет весь current graph, затем блокирует его в
+canonical порядке и возвращает только одну encrypted credential projection.
+Versioned DB-control по умолчанию закрыт; использованные kill-switch versions
+хранятся immutable и не могут быть активированы повторно. `PUBLIC` execute
+отозван, deploy-time `EXECUTE` connector role пока не выдан, поэтому runtime
+не может вызвать claim. Даже после wiring `CLAIMED` не разрешает provider
+network bytes: следующим обязательным переходом остаётся отдельный
+authorize/`SUBMITTING`, затем provider status и normalized result producer.
+Validation worker и KEK canary всё ещё используют текущий global credential
+read; их scoped broker/refactor и отзыв широких grants остаются production
+blocker. Public history API/UI уже готовы и в этот следующий шаг не входят.
 
 Result producer в Jobs пока отсутствует. Поэтому текущие Jobs HTTP/workers,
 включая rank-worker и connector-worker, не получают
@@ -78,6 +99,9 @@ fail-closed.
 набор переменных:
 
 - `DATABASE_URL`, `DATABASE_POOL_MAX`, `REDIS_URL`;
+- `PLATFORM_API_URL`, `PLATFORM_API_COMMAND_TIMEOUT_MS`;
+- `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` длиной не менее 32 символов,
+  совпадающий только с issuer token в Platform API;
 - `SEO_DATA_URL`, `SEO_DATA_COMMAND_TIMEOUT_MS`;
 - `RANK_PREPARATION_ENABLED=true`;
 - `JOBS_TO_SEO_RANK_TOKEN` длиной не менее 32 символов, совпадающий только с
@@ -99,10 +123,22 @@ queue payload, логам и application data. Поэтому нельзя вк�
 Токен ротируется процедурой expand → switch caller → retire old, без
 переиспользования generic или credential service secrets.
 
+`JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` также запрещён Jobs HTTP, generic,
+connector/import/inspection/system workers, migrations, queue payload, логам
+и application data. Compose фиксирует `PLATFORM_API_URL` внутренним адресом
+`http://platform-api:4000`, а timeout grant command по умолчанию равен пяти
+секундам.
+
 DB-backed проверка порядка блокировок запускается только на disposable
 database с уже применёнными migrations:
 
 `JOBS_RANK_TEST_DATABASE_URL=postgresql://... node --import tsx --test src/rank-runs/rank-job-lock.integration.test.ts`
+
+Migration `20260729230100_rank_execution_grant_attempts` добавляет durable
+intent history и tenant-safe связи `JobItem → Job`. Fresh full-chain apply,
+constraint-negative grant/consume и конкурентный single-consumer smoke
+пройдены на PostgreSQL 18. Отдельными release gates остаются production-role
+permission proof и гонки с будущим provider lifecycle.
 
 Миграция rank preparation fail-closed останавливается при legacy
 `MANUAL_RANK_CHECK` без sidecar или конфликтующих active deduplication keys.
@@ -136,7 +172,11 @@ HTTP-процесс запускается с `INTEGRATION_CREDENTIAL_ROLE=MANAG
 независимый fingerprint keyring и dedicated internal token.
 `connector-worker` запускается с ролью `EXECUTION` и получает только KEK для
 расшифровки. Конфигурация fail-closed отклоняет fingerprint keys и management
-token у execution worker.
+token у execution worker. До создания Redis/BullMQ worker он сверяет KEK
+coverage и authenticated decrypt/AAD одного детерминированного неудалённого
+credential sample для каждой используемой версии; пустой vault допустим, а
+missing/corrupt sample останавливает startup без изменения credential rows.
+Management process сохраняет fingerprint coverage и этот decrypt не выполняет.
 
 Arsenkin Tools и Keys.so проверяются асинхронно через документированные
 read-only account/limits endpoints. PostgreSQL `Job` — источник истины,

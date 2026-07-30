@@ -467,7 +467,7 @@ function assertExecutableEstimate(
   }
 }
 
-function assertExecutionProjectionCurrent(
+export function assertExecutionProjectionCurrent(
   estimate: RankEstimate,
   current: CredentialSnapshot,
   now: Date

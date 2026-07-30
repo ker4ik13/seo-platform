@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - develop
 
 permissions:
   contents: read
@@ -58,3 +59,95 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  postgres-18:
+    name: PostgreSQL 18 migrations and races
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18.4
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      PLATFORM_API_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/seo_platform_test
+      SEO_DATA_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/seo_data_test
+      JOBS_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/seo_jobs_test
+      REALTIME_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/seo_realtime_test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Enable pinned pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared contracts
+        run: pnpm --filter @seo-platform/contracts build
+
+      - name: Generate Prisma clients
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+        run: pnpm prisma:generate
+
+      - name: Create disposable service databases
+        run: |
+          docker exec "${{ job.services.postgres.id }}" createdb -U postgres seo_platform_test
+          docker exec "${{ job.services.postgres.id }}" createdb -U postgres seo_data_test
+          docker exec "${{ job.services.postgres.id }}" createdb -U postgres seo_jobs_test
+          docker exec "${{ job.services.postgres.id }}" createdb -U postgres seo_realtime_test
+
+      - name: Apply Platform API migrations
+        working-directory: platform-api
+        env:
+          DATABASE_URL: ${{ env.PLATFORM_API_DATABASE_URL }}
+        run: pnpm prisma:migrate:deploy
+
+      - name: Apply SEO Data migrations
+        working-directory: platform-seo-data
+        env:
+          DATABASE_URL: ${{ env.SEO_DATA_DATABASE_URL }}
+        run: pnpm prisma:migrate:deploy
+
+      - name: Apply Jobs migrations
+        working-directory: platform-jobs-integrations
+        env:
+          DATABASE_URL: ${{ env.JOBS_DATABASE_URL }}
+        run: pnpm prisma:migrate:deploy
+
+      - name: Apply Realtime migrations
+        working-directory: platform-realtime
+        env:
+          DATABASE_URL: ${{ env.REALTIME_DATABASE_URL }}
+        run: pnpm prisma:migrate:deploy
+
+      - name: Run Platform API PostgreSQL races
+        working-directory: platform-api
+        env:
+          DATABASE_URL: ${{ env.PLATFORM_API_DATABASE_URL }}
+          PLATFORM_API_RANK_GRANT_TEST_DATABASE_URL: ${{ env.PLATFORM_API_DATABASE_URL }}
+        run: pnpm test
+
+      - name: Run Jobs PostgreSQL races
+        working-directory: platform-jobs-integrations
+        env:
+          DATABASE_URL: ${{ env.JOBS_DATABASE_URL }}
+          JOBS_RANK_TEST_DATABASE_URL: ${{ env.JOBS_DATABASE_URL }}
+        run: pnpm test

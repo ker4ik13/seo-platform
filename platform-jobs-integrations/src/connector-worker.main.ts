@@ -130,5 +130,5 @@ function redis(url: string): Redis {
 
 void bootstrap().catch(() => {
   logger.error("Integration connector worker failed to start");
-  process.exitCode = 1;
+  process.exit(1);
 });

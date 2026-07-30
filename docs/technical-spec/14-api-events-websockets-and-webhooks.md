@@ -583,9 +583,12 @@ Endpoint защищён отдельным `X-Rank-Grant-Token`, требует 
 `X-Request-Id`, tenant/actor headers и `Idempotency-Key` и сверяет их с
 path/body. Response всегда имеет `Cache-Control: no-store`; новый immutable
 decision — `201`, exact replay — `200`, conflict — `409`. TTL `GRANTED` ровно
-30 секунд. Expired replay остаётся exact; expiry проверяет будущий Jobs
-consumer. Request/response не содержат binding/credential IDs или secrets,
-production policy пока сохраняет только `DENIED`. Route-specific global
+30 секунд. Expired replay остаётся exact; Jobs client перепроверяет expiry по
+часам `jobs_db`, сохраняет решение и атомарно связывает неистёкший grant с
+secret-free `CONSUMED/READY_TO_SUBMIT` execution row. Request/response не
+содержат binding/credential IDs или secrets, production policy пока сохраняет
+только `DENIED`. SECURITY DEFINER connector claim ещё отсутствует.
+Route-specific global
 `onSend` добавляет `no-store` также к parser/guard errors до controller.
 
 Публичный Location первого rank slice всегда project-scoped. GET требует

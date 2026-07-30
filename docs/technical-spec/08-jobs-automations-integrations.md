@@ -542,13 +542,20 @@ operational hardening до удаления старых версий. Отоб�
 версию. Rollout выполняется только как expand keyring → startup canary verify
 каждой используемой версии → drain старых replicas → switch active.
 
-Текущий coverage guard проверяет наличие версии, а missing-version retry
-оставляет credential без изменений при её отсутствии. Они не обнаруживают
-неверные bytes, ошибочно записанные под существующим `keyVersion`. Startup
-decrypt-canary/verifier и/или глобальный decrypt-failure circuit breaker пока
-не реализованы и являются production release blocker: массовый системный
-mismatch должен останавливать execution и поднимать incident, а не переводить
-валидные credentials в `DISABLED`.
+Coverage guard проверяет наличие версии, а missing-version retry оставляет
+credential без изменений при её отсутствии. `EXECUTION` replica до создания
+BullMQ worker дополнительно выбирает детерминированно минимальный по UUID
+неудалённый credential каждой реально используемой `keyVersion` и выполняет
+через штатный execution adapter authenticated decrypt обоих AES-GCM слоёв с
+точным workspace/provider/credential/version AAD. Пустая БД допустима;
+отсутствующий либо повреждённый sample останавливает startup fail-closed, а
+ошибка содержит только номера версий. `MANAGEMENT` сохраняет агрегированную
+проверку encryption/fingerprint coverage и plaintext не расшифровывает.
+Validation worker по-прежнему обрабатывает любой runtime decrypt failure как
+job-only bounded retry без изменения credential status. Cluster-wide circuit
+breaker и incident alert для ошибок после startup ещё не реализованы; canary
+также не заменяет обязательный scoped connector claim и отзыв global vault
+read.
 
 Runtime validation ограничивает provider timeout диапазоном
 `1 000–120 000 ms`, lease — `10–600 s` и минимум `timeout + 5 s`,
@@ -752,10 +759,16 @@ expand/concurrent-index rollout.
 
 Public Platform API routes и Web Job flow для create/get/cancel подключены;
 normalized ingest/finalize, internal/public history и completion outbox также
-реализованы. Provider-effective execution, Jobs-side grant acceptance,
-scoped Arsenkin submit/poll/get и schedules ещё отсутствуют. Live Arsenkin
-execution остаётся выключенным; готовые PREPARING и issuer runtimes не
-являются доказательством рабочего съёма позиций.
+реализованы. Jobs-side bounded grant client и durable intent/decision
+history реализованы; валидный grant теперь атомарно получает `CONSUMED`
+вместе с secret-free `rank_connector_executions/READY_TO_SUBMIT`.
+Default-closed SECURITY DEFINER claim DDL уже добавляет bounded lease,
+pre-network `CLAIMED`, full current-graph recheck и единственную scoped
+encrypted credential projection. `PUBLIC` execute отозван; deploy-time grant,
+runtime caller, authorize/`SUBMITTING`, Arsenkin submit/poll/get и schedules
+ещё отсутствуют. Live Arsenkin execution остаётся выключенным;
+готовые PREPARING, issuer, intent и consume runtimes не являются
+доказательством рабочего съёма позиций.
 
 ### 17.6. Platform-owned execution grant issuer foundation
 
@@ -775,10 +788,63 @@ key/scope — `409`. Replay всегда возвращает сохранённ
 30-секундный grant уже истёк.
 
 Request несёт только opaque `executionEvidenceHash`, но не
-binding/route/credential IDs или secrets. Jobs client и таблица acceptance
-ещё не реализованы: следующий slice обязан строго проверить request/scope
-hashes и expiry, затем атомарно потребить grant вместе с Job/item/credential
-state. До этого provider submit запрещён.
+binding/route/credential IDs или secrets. Bounded Jobs client и durable
+attempt table реализованы fail-closed и строго проверяют request/scope hashes,
+exact decision envelope и expiry. Неистёкший grant уже атомарно связывается с
+secret-free scoped execution под повторной проверкой Job/item/credential
+projection. Следующий slice обязан выдать connector process только одну
+current credential projection через уже подготовленный SECURITY DEFINER
+claim, но deploy-time `EXECUTE` пока не выдан. Даже после wiring `CLAIMED`
+остаётся pre-network состоянием: отдельный authorize/`SUBMITTING` обязан ещё
+раз проверить lease/control перед отправкой bytes. До этого provider submit
+запрещён.
+
+### 17.7. Jobs-owned execution grant intent и atomic consume
+
+Перед первым HTTP к issuer Jobs в одной транзакции блокирует граф в порядке
+`Job → RankJobRun → JobItem → credential → validation Job → binding → route`,
+повторно сверяет sealed manifest/chunk, immutable authorization snapshot,
+estimate execution evidence, текущие binding/material/validation/connector
+versions и kill-switch version, затем сохраняет immutable exact `REQUESTED`
+в `rank_execution_grant_attempts`. Request snapshot, независимые request/scope
+hashes, execution-evidence hash, Job version, execution attempt и stable
+idempotency key записываются до network boundary.
+
+Retryable transport ambiguity не создаёт новый intent: повтор использует тот
+же exact request и idempotency key. После ответа Jobs снова удерживает
+canonical graph locks и attempt row, использует database clock, повторно
+сверяет локальный execution graph и сохраняет одно из состояний:
+
+- `DENIED` — issuer отказал, decision snapshot terminal и immutable;
+- `EXPIRED` — exact `GRANTED` уже истёк по DB clock;
+- `GRANTED_PENDING_CONSUME` — grant валиден, но ещё ничего не авторизует;
+- `REJECTED_LOCAL` — ответ или изменившийся локальный graph не прошёл exact
+  fail-closed проверку.
+
+`GRANTED_PENDING_CONSUME` повторно проверяется под тем же graph lock order.
+До истечения grant одна транзакция создаёт единственную secret-free
+`rank_connector_executions/READY_TO_SUBMIT` и переводит attempt в
+`CONSUMED`; deferred constraint запрещает commit любой половины этой пары.
+Execution row содержит tenant/job/item/manifest и версии
+binding/route/credential/validation/connector/kill-switch, но не ciphertext,
+wrapped DEK или provider payload. Service зарегистрирован только в
+rank-worker module, но dispatcher/provider execution к нему ещё не подключены.
+Dedicated
+`JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` получают только Platform API и
+rank-worker; generic Jobs HTTP, connector/import/inspection/system/migration,
+Web и остальные сервисы token не получают. Production runtime дополнительно
+отклоняет включение `RANK_PROVIDER_SUBMIT_ENABLED`, а Compose фиксирует его в
+`false`.
+
+Migrations `20260729230100_rank_execution_grant_attempts`,
+`20260729230200_rank_connector_executions` и
+`20260730101500_rank_connector_execution_claim` прошли fresh apply на
+PostgreSQL 18. Claim regression проверяет default-closed control, stale-head
+skip, двух concurrent claimers без дубля, lease reclaim с новым token,
+credential/cancel/kill-switch drift и запрет повторного использования
+kill-switch version. Это не закрывает production gate: connector permission/
+runtime wiring, authorize и весь provider lifecycle отсутствуют, а текущие
+validation worker/KEK canary всё ещё требуют global vault read.
 
 ## 18. OAuth connections
 

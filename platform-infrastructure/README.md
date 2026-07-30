@@ -63,18 +63,24 @@ execution grant. Это отдельный случайный service credential
 tokens, credential-vault и notification tokens, encryption keys и provider
 credentials.
 
-В текущем issuer foundation Compose передаёт этот secret только HTTP-процессу
-`platform-api`, который валидирует запрос и сохраняет immutable решение.
-`rank-worker`, Jobs HTTP и остальные процессы его пока не получают. Добавлять
-его в `rank-worker` можно только одновременно с реализацией Jobs grant client,
-его acceptance/consume boundary и обновлением scope regression test. Передача
-через общие anchors запрещена.
+Compose передаёт этот secret ровно двум process types: HTTP-процессу
+`platform-api`, который валидирует запрос и сохраняет immutable решение, и
+отдельному `rank-worker`, где bounded Jobs client проверяет exact response, а
+Jobs-owned fail-closed boundary до HTTP сохраняет immutable `REQUESTED` intent,
+повторяет только exact request с тем же idempotency key и фиксирует
+`DENIED`, `EXPIRED`, `GRANTED_PENDING_CONSUME` либо `REJECTED_LOCAL`.
+Валидный grant атомарно получает `CONSUMED` только вместе с secret-free
+scoped `rank_connector_executions/READY_TO_SUBMIT`; credential material и
+provider request не создаются. SECURITY DEFINER connector claim и provider
+submit пока не реализованы, production submit остаётся явно выключенным.
+Jobs HTTP, connector/import/inspection/system workers, migrations и остальные
+сервисы secret не получают. Передача через общие anchors запрещена.
 
 Корневой `.env.example` оставляет значение пустым намеренно: перед первым
 deploy оператор создаёт новый URL-safe secret в secret storage Dokploy.
 Секрет нельзя писать в Git, URL, логи, traces, queue/event payload или
-диагностические artifacts. До появления Jobs-клиента ротация требует только
-замены secret и redeploy всех реплик `platform-api`.
+диагностические artifacts. Ротация требует согласованной замены secret и
+redeploy всех реплик `platform-api` и `rank-worker`.
 
 ## Dedicated Jobs → SEO Data rank boundary
 
@@ -103,6 +109,8 @@ Realtime, Web и Admin. Наличие переменной в Dokploy project e
 отдельный command и минимальный allowlist конфигурации:
 
 - `DATABASE_URL`, `DATABASE_POOL_MAX`, `REDIS_URL`;
+- `PLATFORM_API_URL`, `PLATFORM_API_COMMAND_TIMEOUT_MS`;
+- `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`;
 - `SEO_DATA_URL`, `SEO_DATA_COMMAND_TIMEOUT_MS`;
 - `RANK_PREPARATION_ENABLED=true`;
 - `JOBS_TO_SEO_RANK_TOKEN`;
@@ -114,7 +122,8 @@ Realtime, Web и Admin. Наличие переменной в Dokploy project e
 Процесс не получает `INTERNAL_API_TOKEN`, credential management/execution
 keyrings, NATS, S3 или SMTP credentials. Он подключён только к сети
 `internal`, не имеет `ports`/`expose` и не получает маршрут `outbound`.
-Startup ждёт успешную Jobs migration, здоровые Redis и `seo-data`.
+Startup ждёт успешную Jobs migration, здоровые Redis, `seo-data` и
+`platform-api`.
 Container healthcheck проверяет только liveness entrypoint; operational
 readiness определяется queue lag, lease recovery и dependency metrics.
 
@@ -125,7 +134,10 @@ readiness определяется queue lag, lease recovery и dependency metri
 `JOBS_RANK_PIDS_LIMIT`. Concurrency увеличивается только после проверки
 PostgreSQL/Redis/SEO Data saturation. Lease обязан превышать
 `SEO_DATA_COMMAND_TIMEOUT_MS` минимум на пять секунд; runtime проверяет этот
-инвариант fail-closed.
+инвариант fail-closed. Grant client использует отдельный bounded
+`PLATFORM_API_COMMAND_TIMEOUT_MS` с default `5000`; URL Platform API в
+Compose фиксирован внутренним `http://platform-api:4000` и не управляется
+операторским input.
 
 Пошаговый rollout, безопасная проверка и rollback описаны в
 [`runbooks/jobs-to-seo-rank-token.md`](./runbooks/jobs-to-seo-rank-token.md).
@@ -255,8 +267,13 @@ Startup credential-capable процесса проверяет формат keyr
 version и соответствующих 32-byte keys. Management-процесс до открытия HTTP
 агрегированно сверяет все `key_version` и `fingerprint_key_version`
 неудалённых credentials с PostgreSQL; execution worker сверяет только
-`key_version`. При недостающей версии процесс завершается fail-closed. Перед
-каждым rollout дополнительно получить безопасные счётчики:
+`key_version`, затем до создания BullMQ worker расшифровывает один
+детерминированный минимальный по UUID неудалённый sample каждой используемой
+версии через штатный execution adapter. Проверяются оба AES-GCM auth tag и
+точный workspace/provider/credential/version AAD; пустой vault допустим.
+Missing/corrupt sample завершает startup fail-closed, а ошибка содержит только
+номер версии. Management plaintext не расшифровывает. Перед каждым rollout
+дополнительно получить безопасные счётчики:
 
 ```sql
 SELECT 'encryption' AS keyring, key_version AS version,
@@ -309,14 +326,15 @@ validation получает retryable platform error и не меняет ста
 Это страховка от отсутствующей версии при rollout race, а не проверка
 правильности bytes и не замена обязательному expand-first шагу.
 
-Startup decrypt-canary/verifier пока не реализован. Coverage guard видит
-наличие `keyVersion`, но не обнаруживает ошибочную замену значения под
-существующей версией; missing-version retry тоже от этого не защищает. До
-production обязательны verifier и/или глобальный decrypt-failure circuit
-breaker: всплеск authentication/decrypt failures одной версии должен
-остановить execution и поднять incident, а не массово переводить валидные
-credentials в `DISABLED`. До реализации этого барьера production-ротация KEK
-запрещена.
+Startup decrypt-canary реализован для каждой `EXECUTION` replica и обнаруживает
+неверные bytes под существующей версией по authenticated persistent sample до
+обслуживания jobs. Validation worker при любом последующем decrypt failure
+делает только bounded job retry и не меняет credential status. Canary
+проверяет по одной строке на версию, поэтому не является аудитом каждой записи;
+cluster-wide circuit breaker и incident alert для runtime-всплеска ещё нужны.
+Он также выполняется через текущий read grant и не снимает отдельный blocker
+global vault isolation: до live provider execution остаются обязательны
+SECURITY DEFINER projection/claim и отзыв прямого чтения vault.
 
 Fingerprint keyring ротируется отдельно: старая и новая версии сначала
 работают одновременно, затем active version переключается на новую. Старый
