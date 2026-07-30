@@ -4,7 +4,17 @@ import "./styles.css";
 
 export const metadata: Metadata = {
   title: "Operations · SEO Workspace",
-  description: "Внутренняя административная панель платформы"
+  description: "Внутренняя административная панель платформы",
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: {
+      index: false,
+      follow: false,
+      noarchive: true
+    }
+  }
 };
 
 export const viewport: Viewport = {

@@ -64,6 +64,24 @@
 
 Workspace и project не принимаются «на доверии». Они извлекаются из URL и проверяются против прав текущего principal.
 
+### 2.4. Cache и защитные response headers
+
+Platform API использует fail-safe policy на глобальном Fastify `onSend`, а
+не controller-local headers. Exact public allowlist состоит только из
+`GET/HEAD /health/live`, `GET/HEAD /health/ready` и
+`GET/HEAD /api/v1/system`; policy не навязывает им private cache semantics.
+Все остальные ответы, включая auth, tenant и internal routes, неизвестные
+пути, а также parser/guard/exception/404 до controller, принудительно
+получают `Cache-Control: private, no-store`. Controller не может ослабить эту
+policy публичным cache header.
+
+Для private response глобальная граница объединяет, а не перезаписывает
+существующий `Vary`: обязательны `Authorization`, `Cookie` и `Origin`, а для
+preflight также `Access-Control-Request-Headers` и
+`Access-Control-Request-Method`. Поэтому CORS и compression dimensions не
+теряются. Security headers и production HTTPS/HSTS semantics определены в
+разделе 15.
+
 ## 3. Аутентификация API
 
 Поддерживаются:
@@ -583,15 +601,15 @@ Jobs самостоятельно вызывает
 
 Endpoint защищён отдельным `X-Rank-Grant-Token`, требует single-value
 `X-Request-Id`, tenant/actor headers и `Idempotency-Key` и сверяет их с
-path/body. Response всегда имеет `Cache-Control: no-store`; новый immutable
+path/body. Response всегда имеет `Cache-Control: private, no-store`; новый immutable
 decision — `201`, exact replay — `200`, conflict — `409`. TTL `GRANTED` ровно
 30 секунд. Expired replay остаётся exact; Jobs client перепроверяет expiry по
 часам `jobs_db`, сохраняет решение и атомарно связывает неистёкший grant с
 secret-free `CONSUMED/READY_TO_SUBMIT` execution row. Request/response не
 содержат binding/credential IDs или secrets, production policy пока сохраняет
-только `DENIED`. SECURITY DEFINER connector claim ещё отсутствует.
-Route-specific global
-`onSend` добавляет `no-store` также к parser/guard errors до controller.
+только `DENIED`. SECURITY DEFINER connector claim ещё отсутствует. Глобальный
+fail-safe `onSend` сохраняет private/no-store boundary также для
+parser/guard/404 errors до controller.
 
 Публичный Location первого rank slice всегда project-scoped. GET требует
 `ranking.view`; cancel — `collector.cancel`, CSRF и пустой exact body.

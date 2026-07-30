@@ -428,9 +428,36 @@ host firewall или egress proxy по provider DNS/hostname allowlist.
 - server-only Directus/application clients не попадают в browser bundle;
 - единый основной домен не означает общий cache: public и `/app` имеют
   разные cache keys/policies и automated tenant leak tests.
+- Текущая общая Next.js policy Web устанавливает `nosniff`, `DENY`/
+  `frame-ancestors 'none'`, `strict-origin-when-cross-origin` и отключает
+  ненужные camera/geolocation/microphone/payment/USB capabilities. Она не
+  задаёт `Cache-Control` или `X-Robots-Tag` публичному marketing/Toolbox
+  дереву; отдельный `/app/:path*` rule задаёт private/no-store/noindex, а
+  Service Worker остаётся `no-cache` и ограничен scope `/app/`.
+- Текущий CSP намеренно содержит только безопасный независимый directive
+  `frame-ancestors 'none'`: script/style CSP нельзя угадывать без полного
+  inventory Next/Directus assets. Полный nonce/hash CSP без `unsafe-eval`
+  остаётся отдельным release gate.
+- Admin shell независимо от metadata для всех путей возвращает
+  private/no-store/noindex и более строгий `no-referrer`; отсутствие
+  публичного ingress остаётся обязательной первой границей.
+- Production Web/Admin artifacts добавляют HSTS на год с
+  `includeSubDomains`, без `preload`. Заголовок имеет силу для браузера только
+  поверх HTTPS; включение требует предварительной проверки всех поддоменов.
 
 ## 14. API security
 
+- Platform API применяет до controller глобальный fail-safe response policy:
+  кроме exact public GET/HEAD health/system allowlist, auth, tenant, internal,
+  parser/guard/exception и 404 responses всегда получают
+  `Cache-Control: private, no-store` и объединённый
+  `Vary: Authorization, Cookie, Origin` с preflight dimensions.
+- Все Platform API responses получают `nosniff`, `DENY`/
+  `frame-ancestors 'none'`, `no-referrer` и отключение ненужных browser
+  capabilities. В production HSTS добавляется только когда effective
+  Fastify protocol является HTTPS. Backend доверяет ровно одному ближайшему
+  reverse-proxy hop, а не произвольной forwarded chain; прямой internal HTTP
+  не маскируется под TLS.
 - DTO schema validation с запретом неизвестных чувствительных полей.
 - Mass assignment исключён явным mapping.
 - Parameterized queries через Prisma; raw SQL только reviewed и parameterized.

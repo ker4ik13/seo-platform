@@ -180,8 +180,12 @@ lifecycle/credential/control и создаёт только pre-network lease. E
 authorize operation повторяет full graph/control/fence recheck и commit-ит
 `SUBMITTING` с one-way marker; permission script выдаёт обе функции connector
 login, но runtime process path их пока не вызывает.
-Глобальный route-specific `onSend` сохраняет `Cache-Control: no-store` также
-для parser/guard errors, которые возникают до входа в controller.
+Platform API теперь имеет глобальную fail-safe HTTP response policy: кроме
+exact public GET/HEAD health/system allowlist, auth/tenant/internal, unknown,
+parser/guard/exception/404 ответы принудительно получают
+`Cache-Control: private, no-store` и merge-safe `Vary`. Все ответы получают
+nosniff/frame/referrer/permissions headers; production HSTS зависит от
+effective HTTPS через ровно один доверенный reverse-proxy hop.
 История позиций читается Web только через same-origin BFF и public Platform
 API `GET /api/v1/projects/:projectId/rank-history`. Platform API проверяет
 session, `ranking.view` и tenant scope, затем передаёт trusted context и
@@ -301,6 +305,10 @@ Backend convention:
   advisory lock, whole-family terminal revoke/outbox и CSRF guards;
 - `platform-api/src/common/uuid-v7.ts` — dependency-free RFC 9562 UUIDv7 для
   новых межсервисных session-family aggregate IDs;
+- `platform-api/src/common/http-response-policy.ts` — глобальная exact-public-
+  allowlist response boundary: private/no-store и merge-safe Vary для всех
+  остальных route/error paths, общие security headers и production HSTS
+  только при effective HTTPS от ближайшего доверенного proxy hop;
 - `platform-api/src/identity/mfa.*`, `totp.*` — TOTP lifecycle, login
   challenge и recovery codes;
 - `platform-api/src/authorization` — default-deny permission catalog и
@@ -439,6 +447,11 @@ Backend convention:
 - `platform-realtime/src/internal` — fail-closed internal HTTP authentication
   и проверенный actor/tenant/membership context;
 - `platform-web/app` — public, tools, docs и private `/app` App Router screens;
+- `platform-web/lib/http-security-policy.ts` + `next.config.ts` — общие
+  nosniff/frame/referrer/permissions headers без изменения public marketing
+  cache, production HSTS и отдельные private/no-store/noindex rules для
+  `/app`; CSP пока ограничен безопасным `frame-ancestors 'none'` без
+  непроверенных script/style directives;
 - `platform-web/app/app/api` — same-origin browser BFF только к
   `/api/v1` Platform API;
 - `platform-web/components/browser-push-settings.tsx`,
@@ -463,7 +476,9 @@ Backend convention:
 - незавершённый `platform-admin` остаётся только в Compose-сети `internal`,
   без `edge`, host port и browser CORS/WebSocket allowlist. Публичный ingress
   запрещён до отдельной operator auth session/audience, обязательной 2FA,
-  platform-role authorization, audit и server-backed non-demo data;
+  platform-role authorization, audit и server-backed non-demo data. Его
+  Next policy уже выставляет private/no-store/noindex и строгие security
+  headers для любого route;
 - `platform-web/lib/protected-app.ts` — server-side session gate и безопасный
   refresh redirect;
 - `platform-*/lib` и `components` — adapters и переиспользуемые UI-части;
@@ -971,6 +986,14 @@ caller, connector submission/status и normalized result producer ещё не
   Platform API targeted mapping tests 8/8 и typecheck — pass. Fresh migration
   и реальные concurrent transactions остаются PostgreSQL 18 staging gate;
   JetStream publisher/subscription в этот dependency-free срез не входят.
+- HTTP response security policy: Platform API 278 executable tests pass и 3
+  opt-in PostgreSQL tests skipped, Web 105/105, Admin 2/2; strict typecheck,
+  root lint и production builds всех трёх packages — pass. Fastify injection
+  покрывает private override/Vary merge, parser/guard/404/internal paths и
+  proxy-aware HSTS. Next production manifests подтверждают общие security
+  headers, отдельный `/app`/Admin private-noindex policy и отсутствие
+  public marketing cache override. Full script/style CSP и HTTPS smoke через
+  фактический production proxy остаются release gates.
 - Target runtime: Node.js 24. Текущий полный lint/typecheck/test/build baseline
   проверен на Node.js 24.18.1; контейнеры также используют Node.js 24.
 

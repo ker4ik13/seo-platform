@@ -7,14 +7,17 @@ import {
 } from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module.js";
 import { ApiExceptionFilter } from "./common/api-exception.filter.js";
+import {
+  installHttpResponsePolicy,
+  TRUSTED_PROXY_HOPS
+} from "./common/http-response-policy.js";
 import { loadAppConfig } from "./config/app-config.js";
-import { applyRankExecutionGrantNoStore } from "./rankings/rank-execution-grant-http.js";
 
 async function bootstrap(): Promise<void> {
   const config = loadAppConfig();
   const adapter = new FastifyAdapter({
     logger: config.nodeEnv !== "test",
-    trustProxy: true,
+    trustProxy: TRUSTED_PROXY_HOPS,
     requestIdHeader: "x-request-id"
   });
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -26,8 +29,8 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new ApiExceptionFilter());
   app.enableShutdownHooks();
 
+  installHttpResponsePolicy(adapter.getInstance(), config.nodeEnv);
   adapter.getInstance().addHook("onSend", async (request, reply, payload) => {
-    applyRankExecutionGrantNoStore(request, reply);
     reply.header("X-Request-Id", request.id);
     reply.header("X-API-Version", "v1");
     return payload;
