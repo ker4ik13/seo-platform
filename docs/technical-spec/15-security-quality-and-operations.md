@@ -337,8 +337,9 @@ Deploy дополнительно обязан выполнить один об�
 проверяет все 22 credentials на глобальную pairwise distinctness и отклоняет
 placeholders.
 Для каждого NATS client password deploy также обязан предоставить canonical
-bcrypt verifier с cost `11`; четыре verifier записи должны быть разными, а broker не
-должен получать plaintext passwords. Четыре NATS usernames отдельно
+bcrypt verifier с canonical `$2a$` prefix и cost `11`; четыре verifier
+записи должны быть разными, а broker не должен получать plaintext passwords.
+Четыре NATS usernames отдельно
 проверяются на unique ASCII identifier и несовпадение с любым credential. В
 отличие от runtime-контракта secrets
 допускают только URL-safe `[A-Za-z0-9._~-]` длиной `32..512`; NATS password

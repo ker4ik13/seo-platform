@@ -6,7 +6,11 @@ import {
   type CreateWorkspaceInviteInput,
   type ProjectAccessAssignment,
   type ProjectAccessLevel,
-  type UpdateWorkspaceMemberInput
+  type UpdateWorkspaceMemberInput,
+  type WorkspaceInviteListQuery,
+  workspaceInviteListStatuses,
+  type WorkspaceInviteListStatus,
+  type WorkspaceTeamListQuery
 } from "@seo-platform/contracts";
 import { assertUuid } from "../common/identifier.js";
 import {
@@ -19,6 +23,39 @@ import {
 import { validationError } from "../common/domain-error.js";
 
 const MAX_PROJECT_OVERRIDES = 2_000;
+const DEFAULT_TEAM_LIST_LIMIT = 50;
+const MAX_TEAM_LIST_LIMIT = 100;
+const TEAM_CURSOR_PATTERN = /^[A-Za-z0-9_-]{40,1024}$/u;
+
+export function workspaceMemberListQuery(
+  value: unknown
+): WorkspaceTeamListQuery {
+  return teamListQuery(value, false);
+}
+
+export function workspaceInviteListQuery(
+  value: unknown
+): WorkspaceInviteListQuery {
+  const query = teamListQuery(value, true);
+  const record = value as Readonly<Record<string, unknown>>;
+  const rawStatus = optionalSingleQueryString(record.status, "status");
+  const status = rawStatus ?? "ALL";
+  if (
+    !workspaceInviteListStatuses.includes(
+      status as WorkspaceInviteListStatus
+    )
+  ) {
+    throw validationError(
+      "status",
+      "INVALID_FILTER",
+      "Invitation status must be PENDING or ALL"
+    );
+  }
+  return {
+    ...query,
+    status: status as WorkspaceInviteListStatus
+  };
+}
 
 export function createWorkspaceInviteInput(
   value: unknown
@@ -162,4 +199,77 @@ function optionalInteger(
     );
   }
   return value as number;
+}
+
+function teamListQuery(
+  value: unknown,
+  allowStatus: boolean
+): WorkspaceTeamListQuery {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    throw validationError(
+      "query",
+      "OBJECT_REQUIRED",
+      "Team list query must be an object"
+    );
+  }
+  const query = value as Readonly<Record<string, unknown>>;
+  const unsupported = Object.keys(query).find(
+    (key) =>
+      key !== "limit" &&
+      key !== "cursor" &&
+      !(allowStatus && key === "status")
+  );
+  if (unsupported) {
+    throw validationError(
+      unsupported,
+      "UNKNOWN_QUERY_PARAMETER",
+      "Unknown team list query parameter"
+    );
+  }
+
+  const rawLimit = optionalSingleQueryString(query.limit, "limit");
+  const cursor = optionalSingleQueryString(query.cursor, "cursor");
+  const limit =
+    rawLimit === undefined ? DEFAULT_TEAM_LIST_LIMIT : Number(rawLimit);
+  if (
+    !Number.isSafeInteger(limit) ||
+    limit < 1 ||
+    limit > MAX_TEAM_LIST_LIMIT
+  ) {
+    throw validationError(
+      "limit",
+      "OUT_OF_RANGE",
+      `Team list limit must be an integer between 1 and ${MAX_TEAM_LIST_LIMIT}`
+    );
+  }
+  if (cursor !== undefined && !TEAM_CURSOR_PATTERN.test(cursor)) {
+    throw validationError(
+      "cursor",
+      "INVALID_CURSOR",
+      "Team list cursor is invalid"
+    );
+  }
+  return {
+    limit,
+    ...(cursor === undefined ? {} : { cursor })
+  };
+}
+
+function optionalSingleQueryString(
+  value: unknown,
+  path: string
+): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw validationError(
+      path,
+      "SINGLE_VALUE_REQUIRED",
+      "Query parameter must be a single non-empty string"
+    );
+  }
+  return value.trim();
 }

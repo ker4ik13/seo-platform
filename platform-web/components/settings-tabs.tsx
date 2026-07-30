@@ -1,5 +1,6 @@
 import {
   canViewProjectIntegrations,
+  canViewWorkspaceTeam,
   canViewWorkspaceIntegrations
 } from "../lib/app-permissions";
 import type { AppProject } from "../lib/app-types";
@@ -12,6 +13,7 @@ export function SettingsTabs({
 }: Readonly<{
   active:
     | "workspace"
+    | "team"
     | "project"
     | "security"
     | "notifications"
@@ -38,6 +40,15 @@ export function SettingsTabs({
           href={`/app/projects/${encodeURIComponent(projectId)}/settings/general`}
         >
           Проект
+        </a>
+      )}
+      {canViewWorkspaceTeam(workspaceRoleCode) && (
+        <a
+          aria-current={active === "team" ? "page" : undefined}
+          className={active === "team" ? "active" : undefined}
+          href="/app/settings/team"
+        >
+          Команда
         </a>
       )}
       <a

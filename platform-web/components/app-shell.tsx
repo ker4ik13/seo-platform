@@ -139,7 +139,7 @@ export function AppShell({
           className={
             activeSection === "settings" ? "nav-item active" : "nav-item"
           }
-          href="/app/settings/security"
+          href="/app/settings/workspace"
         >
           <Icon name="settings" />
           <span>Настройки</span>

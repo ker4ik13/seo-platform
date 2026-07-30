@@ -127,8 +127,8 @@ for hash_name in $nats_password_hash_names; do
   hash_value=${hash_value%x}
   hash_value=${hash_value%?}
 
-  if ! printf '%s' "$hash_value" | grep -Eq '^\$2[aby]\$11\$[./A-Za-z0-9]{53}$'; then
-    echo "service-token-preflight: $hash_name must be a canonical bcrypt cost-11 verifier" >&2
+  if ! printf '%s' "$hash_value" | grep -Eq '^\$2a\$11\$[./A-Za-z0-9]{53}$'; then
+    echo "service-token-preflight: $hash_name must be a canonical NATS bcrypt 2a cost-11 verifier" >&2
     exit 1
   fi
 

@@ -8,6 +8,8 @@ const INTEGRATION_VIEW_ROLES = new Set([
 ]);
 
 const INTEGRATION_MANAGE_ROLES = new Set(["OWNER", "ADMIN"]);
+const TEAM_VIEW_ROLES = new Set(["OWNER", "ADMIN", "SEO_LEAD"]);
+const TEAM_MANAGE_ROLES = new Set(["OWNER", "ADMIN"]);
 const WORKSPACE_UPDATE_ROLES = new Set(["OWNER", "ADMIN"]);
 const PROJECT_UPDATE_ROLES = new Set([
   "OWNER",
@@ -49,6 +51,18 @@ export function canTestWorkspaceIntegrations(
   roleCode: string | undefined
 ): boolean {
   return canViewWorkspaceIntegrations(roleCode);
+}
+
+export function canViewWorkspaceTeam(
+  roleCode: string | undefined
+): boolean {
+  return Boolean(roleCode && TEAM_VIEW_ROLES.has(roleCode));
+}
+
+export function canManageWorkspaceTeam(
+  roleCode: string | undefined
+): boolean {
+  return Boolean(roleCode && TEAM_MANAGE_ROLES.has(roleCode));
 }
 
 export function canUpdateWorkspace(

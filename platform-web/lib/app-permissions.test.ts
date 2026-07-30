@@ -1,12 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  canManageWorkspaceTeam,
   canManageWorkspaceIntegrations,
   canTestWorkspaceIntegrations,
   canUpdateProject,
+  canViewWorkspaceTeam,
   canViewProjectIntegrations,
   canViewWorkspaceIntegrations
 } from "./app-permissions.ts";
+
+test("team navigation and mutations follow member permissions", () => {
+  for (const role of ["OWNER", "ADMIN", "SEO_LEAD"]) {
+    assert.equal(canViewWorkspaceTeam(role), true);
+  }
+  for (const role of ["SEO_SPECIALIST", "ANALYST", "CLIENT", "VIEWER"]) {
+    assert.equal(canViewWorkspaceTeam(role), false);
+  }
+  assert.equal(canManageWorkspaceTeam("OWNER"), true);
+  assert.equal(canManageWorkspaceTeam("ADMIN"), true);
+  assert.equal(canManageWorkspaceTeam("SEO_LEAD"), false);
+  assert.equal(canManageWorkspaceTeam(undefined), false);
+});
 
 test("integration navigation follows the current system role matrix", () => {
   for (const role of ["OWNER", "ADMIN", "SEO_LEAD", "SEO_SPECIALIST"]) {

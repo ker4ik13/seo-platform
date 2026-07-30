@@ -23,6 +23,8 @@ const suspendedWorkspace: AppWorkspace = {
   id: "suspended-workspace",
   name: "Suspended",
   slug: "suspended",
+  locale: "ru",
+  timezone: "Europe/Moscow",
   status: "SUSPENDED",
   roleCode: "OWNER",
   version: 1
@@ -34,6 +36,8 @@ const targetWorkspace: AppWorkspace = {
   slug: "target",
   status: "ACTIVE",
   roleCode: "OWNER",
+  locale: "ru",
+  timezone: "Europe/Moscow",
   version: 1
 };
 
@@ -43,6 +47,8 @@ const project: AppProject = {
   name: "Target project",
   slug: "target-project",
   domain: "example.test",
+  locale: "ru",
+  timezone: "Europe/Moscow",
   status: "ACTIVE",
   version: 1
 };

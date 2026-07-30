@@ -6,6 +6,7 @@ import {
   HttpCode,
   Patch,
   Post,
+  Query,
   Req,
   Res,
   UseGuards
@@ -37,7 +38,9 @@ import {
 import {
   acceptWorkspaceInviteInput,
   createWorkspaceInviteInput,
-  updateWorkspaceMemberInput
+  updateWorkspaceMemberInput,
+  workspaceInviteListQuery,
+  workspaceMemberListQuery
 } from "./team-input.js";
 import { TeamService } from "./team.service.js";
 
@@ -49,11 +52,17 @@ export class TeamController {
   @RequirePermission("member.view")
   @UseGuards(SessionAuthGuard, TenantPermissionGuard)
   public async members(
+    @Query() query: unknown,
     @Req() request: TenantRequest
   ): Promise<ApiCollectionResponse<WorkspaceMemberSummary>> {
+    const result = await this.team.listMembers(
+      requiredWorkspaceId(request),
+      workspaceMemberListQuery(query)
+    );
     return collectionResponse(
       request,
-      await this.team.listMembers(requiredWorkspaceId(request))
+      result.data,
+      result.page
     );
   }
 
@@ -102,11 +111,17 @@ export class TeamController {
   @RequirePermission("member.view")
   @UseGuards(SessionAuthGuard, TenantPermissionGuard)
   public async invites(
+    @Query() query: unknown,
     @Req() request: TenantRequest
   ): Promise<ApiCollectionResponse<WorkspaceInviteSummary>> {
+    const result = await this.team.listInvites(
+      requiredWorkspaceId(request),
+      workspaceInviteListQuery(query)
+    );
     return collectionResponse(
       request,
-      await this.team.listInvites(requiredWorkspaceId(request))
+      result.data,
+      result.page
     );
   }
 

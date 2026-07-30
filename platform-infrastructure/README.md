@@ -44,7 +44,10 @@
    являются secrets, но не переиспользуются между ролями. Для каждого
    plaintext client password также сохранить соответствующий bcrypt verifier
    в `NATS_{RUNTIME,PLATFORM_PUBLISHER,REALTIME_CONSUMER,PROVISIONER}_PASSWORD_HASH`.
-   Verifier создаётся официальным `nats server passwd` с exact cost `11`;
+   Verifier создаётся официальным `nats server passwd` с exact cost `11` и
+   canonical prefix `$2a$`; `$2b$`/`$2y$` не принимаются, поскольку broker
+   2.12.12 не распознаёт их как bcrypt credentials. Config подставляет hash
+   только внутри quoted value, чтобы `$` не стал повторной env-ссылкой;
    password и verifier являются одной парой, но broker получает только
    `*_PASSWORD_HASH`, а приложения — только свой `*_PASSWORD`.
 3. Сначала оставить `S3_ENABLED=false`, `EMAIL_ENABLED=false`,

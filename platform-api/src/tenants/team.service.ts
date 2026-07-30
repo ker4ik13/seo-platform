@@ -1,12 +1,15 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
   domainEventTypes,
+  type CursorPage,
   type CreateWorkspaceInviteInput,
   type CreateWorkspaceInviteResult,
   type ProjectAccessAssignment,
   type UpdateWorkspaceMemberInput,
+  type WorkspaceInviteListQuery,
   type WorkspaceInviteSummary,
-  type WorkspaceMemberSummary
+  type WorkspaceMemberSummary,
+  type WorkspaceTeamListQuery
 } from "@seo-platform/contracts";
 import { AuditService } from "../audit/audit.service.js";
 import { APP_CONFIG } from "../config/config.module.js";
@@ -23,12 +26,22 @@ import { AuthCryptoService } from "../identity/auth-crypto.service.js";
 import type { RequestContext } from "../identity/identity.types.js";
 import { OutboxService } from "../outbox/outbox.service.js";
 import {
+  openWorkspaceTeamCursor,
+  sealWorkspaceTeamCursor,
+  type WorkspaceTeamCursorContext
+} from "./team-cursor.js";
+import {
   storedProjectAccesses,
   toWorkspaceInviteSummary,
   toWorkspaceMemberSummary
 } from "./team.mapper.js";
 
 const ACTIVE_INVITE_STATUSES = ["SENT", "DELIVERED"] as const;
+
+interface TeamListResult<Data> {
+  readonly data: readonly Data[];
+  readonly page: CursorPage;
+}
 
 @Injectable()
 export class TeamService {
@@ -41,13 +54,20 @@ export class TeamService {
   ) {}
 
   public async listMembers(
-    workspaceId: string
-  ): Promise<readonly WorkspaceMemberSummary[]> {
-    assertUuid(workspaceId, "workspaceId");
+    workspaceId: string,
+    query: WorkspaceTeamListQuery
+  ): Promise<TeamListResult<WorkspaceMemberSummary>> {
+    const normalizedWorkspaceId = assertUuid(workspaceId, "workspaceId");
+    const cursorContext = {
+      scope: "members",
+      workspaceId: normalizedWorkspaceId
+    } as const satisfies WorkspaceTeamCursorContext;
+    const lastId = this.listCursor(query.cursor, cursorContext);
     const members = await this.prisma.workspaceMember.findMany({
       where: {
-        workspaceId,
-        status: { in: ["ACTIVE", "SUSPENDED"] }
+        workspaceId: normalizedWorkspaceId,
+        status: { in: ["ACTIVE", "SUSPENDED"] },
+        ...(lastId ? { id: { lt: lastId } } : {})
       },
       include: {
         user: true,
@@ -55,23 +75,56 @@ export class TeamService {
           orderBy: { projectId: "asc" }
         }
       },
-      orderBy: [{ joinedAt: "asc" }, { createdAt: "asc" }],
-      take: 2_000
+      orderBy: { id: "desc" },
+      take: query.limit + 1
     });
-    return members.map(toWorkspaceMemberSummary);
+    const pageMembers = members.slice(0, query.limit);
+    return {
+      data: pageMembers.map(toWorkspaceMemberSummary),
+      page: this.listPage(
+        pageMembers,
+        members.length > query.limit,
+        cursorContext
+      )
+    };
   }
 
   public async listInvites(
-    workspaceId: string
-  ): Promise<readonly WorkspaceInviteSummary[]> {
-    assertUuid(workspaceId, "workspaceId");
-    await this.expireInvites(workspaceId);
+    workspaceId: string,
+    query: WorkspaceInviteListQuery
+  ): Promise<TeamListResult<WorkspaceInviteSummary>> {
+    const normalizedWorkspaceId = assertUuid(workspaceId, "workspaceId");
+    const cursorContext = {
+      scope: "invites",
+      workspaceId: normalizedWorkspaceId,
+      status: query.status
+    } as const satisfies WorkspaceTeamCursorContext;
+    const lastId = this.listCursor(query.cursor, cursorContext);
+    const now = new Date();
+    await this.expireInvites(normalizedWorkspaceId, now);
     const invites = await this.prisma.workspaceInvite.findMany({
-      where: { workspaceId },
-      orderBy: { createdAt: "desc" },
-      take: 2_000
+      where: {
+        workspaceId: normalizedWorkspaceId,
+        ...(query.status === "PENDING"
+          ? {
+              status: { in: [...ACTIVE_INVITE_STATUSES] },
+              expiresAt: { gt: now }
+            }
+          : {}),
+        ...(lastId ? { id: { lt: lastId } } : {})
+      },
+      orderBy: { id: "desc" },
+      take: query.limit + 1
     });
-    return invites.map(toWorkspaceInviteSummary);
+    const pageInvites = invites.slice(0, query.limit);
+    return {
+      data: pageInvites.map(toWorkspaceInviteSummary),
+      page: this.listPage(
+        pageInvites,
+        invites.length > query.limit,
+        cursorContext
+      )
+    };
   }
 
   public async createInvite(
@@ -614,15 +667,54 @@ export class TeamService {
     }
   }
 
-  private async expireInvites(workspaceId: string): Promise<void> {
+  private async expireInvites(
+    workspaceId: string,
+    now = new Date()
+  ): Promise<void> {
     await this.prisma.workspaceInvite.updateMany({
       where: {
         workspaceId,
         status: { in: [...ACTIVE_INVITE_STATUSES] },
-        expiresAt: { lte: new Date() }
+        expiresAt: { lte: now }
       },
       data: { status: "EXPIRED" }
     });
+  }
+
+  private listCursor(
+    value: string | undefined,
+    context: WorkspaceTeamCursorContext
+  ): string | undefined {
+    if (!value) return undefined;
+    try {
+      return openWorkspaceTeamCursor(this.crypto, value, context);
+    } catch {
+      throw validationError(
+        "cursor",
+        "INVALID_CURSOR",
+        "Team list cursor is invalid"
+      );
+    }
+  }
+
+  private listPage(
+    items: readonly { readonly id: string }[],
+    hasNext: boolean,
+    context: WorkspaceTeamCursorContext
+  ): CursorPage {
+    const last = hasNext ? items[items.length - 1] : undefined;
+    return {
+      hasNext,
+      ...(last
+        ? {
+            nextCursor: sealWorkspaceTeamCursor(
+              this.crypto,
+              context,
+              last.id
+            )
+          }
+        : {})
+    };
   }
 
   private async memberById(

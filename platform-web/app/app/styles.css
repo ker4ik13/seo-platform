@@ -436,6 +436,18 @@ svg { display: block; }
 .session-metadata dd { font-size: 11px; font-weight: 650; line-height: 1.45; margin: 4px 0 0; overflow-wrap: anywhere; }
 .session-network-metadata { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 11px; gap: 6px 14px; }
 .session-network-metadata span { overflow-wrap: anywhere; }
+.team-project-access { background: #fafafd; border: 1px solid var(--line); border-radius: 12px; display: grid; gap: 14px; margin: 0; min-width: 0; padding: 16px; }
+.team-project-access:focus { border-color: #aaa1f4; box-shadow: 0 0 0 3px rgba(103, 88, 239, .1); outline: 0; }
+.team-project-access > legend { font-size: 12px; font-weight: 750; padding: 0 7px; }
+.team-project-access-toggle > span { min-width: 0; }
+.team-project-access-toggle strong, .team-project-access-toggle small { display: block; }
+.team-project-access-toggle small { color: var(--muted); font-size: 11px; line-height: 1.45; margin-top: 3px; }
+.team-project-access-summary { margin: 0; }
+.team-project-access-list { background: white; border: 1px solid var(--line); border-radius: 11px; list-style: none; margin: 0; max-height: min(56vh, 560px); overflow: auto; padding: 0 12px; }
+.team-project-access-row { align-items: end; border-top: 1px solid var(--line); display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr) minmax(180px, 230px); padding: 13px 0; }
+.team-project-access-row:first-child { border-top: 0; }
+.team-project-access-copy { display: grid; gap: 7px; min-width: 0; }
+.team-project-access-row .form-field { align-self: end; }
 .session-row > .secondary-button, .session-row > .danger-button { min-width: 92px; }
 .session-privacy-note { background: #f8f9fb; border-radius: 10px; padding: 11px 12px; }
 .session-privacy-note strong { font-size: 11px; }
@@ -2413,6 +2425,7 @@ svg { display: block; }
   .session-alert { align-items: flex-start; flex-direction: column; gap: 8px; }
   .session-alert .inline-alert-action { min-height: 44px; }
   .session-row { grid-template-columns: auto minmax(0, 1fr); }
+  .team-project-access-row { align-items: stretch; grid-template-columns: 1fr; }
   .session-row > .secondary-button, .session-row > .danger-button { grid-column: 2; justify-self: start; min-height: 44px; }
   .session-metadata { grid-template-columns: 1fr; }
   .session-dialog-actions .secondary-button, .session-dialog-actions .danger-button { min-height: 44px; }

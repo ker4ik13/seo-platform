@@ -1,6 +1,7 @@
 import type {
   ApiCollectionResponse,
-  ApiResponse
+  ApiResponse,
+  CursorPage
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
 
@@ -20,11 +21,12 @@ export function apiResponse<Data>(
 
 export function collectionResponse<Data>(
   request: FastifyRequest,
-  data: readonly Data[]
+  data: readonly Data[],
+  page?: CursorPage
 ): ApiCollectionResponse<Data> {
   return {
     data,
-    page: {
+    page: page ?? {
       hasNext: false,
       totalApprox: data.length
     },

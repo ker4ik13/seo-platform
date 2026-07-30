@@ -272,9 +272,10 @@ event families пока имеют только локальные outbox/inbox 
   до запуска credential-bearing processes он проверяет 22 deploy credentials
   (девять service tokens, `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и
   четыре NATS passwords)
-  на глобальную pairwise distinctness, четыре NATS bcrypt verifier с cost
-  `11` на canonical format/раздельность и четыре NATS username на отдельную
-  уникальность и несовпадение с credentials. Secrets допускают только
+  на глобальную pairwise distinctness, четыре NATS bcrypt verifier с
+  canonical `$2a$` prefix/cost `11` на format/раздельность и четыре NATS
+  username на отдельную уникальность и несовпадение с credentials. Secrets
+  допускают только
   URL-safe `[A-Za-z0-9._~-]` длиной `32..512`; NATS password начинается с
   ASCII letter, username является ASCII identifier длиной `3..64`. One-shot
   container не имеет сети, работает read-only с `cap_drop: ALL` и
@@ -407,8 +408,8 @@ Backend convention:
 - `platform-api/src/authorization` — default-deny permission catalog и
   проверка tenant context;
 - `platform-api/src/tenants` — workspace/project commands и queries;
-- `platform-api/src/tenants/team.*` — приглашения, участники и проектные
-  ограничения доступа;
+- `platform-api/src/tenants/team.*` — tenant-bound cursor pagination,
+  приглашения, участники и проектные ограничения доступа;
 - `platform-api/src/uploads` — project-scoped public upload commands;
 - `platform-api/src/jobs` — internal HTTP client к jobs-integrations с
   отдельным general и credential audience token и запретом redirect;
@@ -571,6 +572,11 @@ Backend convention:
   `lib/tenant-settings.ts` — private/noindex workspace/project settings с
   role/read-only guards, `If-Match`, draft-preserving `412` recovery,
   explicit duplicate-domain retry и exact-name archive/restore confirmation;
+- `platform-web/app/app/(protected)/settings/team`,
+  `components/team-management.tsx`, `lib/team-management.ts` — private/noindex
+  bounded team/invite lists, owner/admin mutations с `If-Match`, явный
+  all-projects либо searchable project-level access editor и полные
+  loading/empty/error/offline/degraded/permission states;
 - `platform-web/components/browser-push-settings.tsx`,
   `lib/browser-push.ts`, `lib/push-installation.ts`,
   `lib/push-registration-reconciliation.ts` и
@@ -607,7 +613,10 @@ Backend convention:
 - `platform-infrastructure/docker` — reusable backend/web images;
 - `platform-infrastructure/nats/nats-server.conf` — bounded JetStream store и
   exact deny-by-default ACL для generic runtime, Platform API publisher,
-  Realtime consumer и topology provisioner;
+  Realtime consumer и topology provisioner; `start-nats.sh` fail-closed
+  валидирует canonical `$2a$` cost-11 verifier, подставляет exact markers в
+  приватный mode-600 config внутри runtime tmpfs, удаляет credential env перед
+  `exec` и не допускает повторного `$`-разыменования broker config;
 - `platform-infrastructure/nats/provisioner.mjs` + `topology.mjs` — one-shot
   non-root/read-only provisioner exact `IDENTITY_EVENTS`,
   `DOMAIN_EVENTS_DLQ` и `realtime_session_family_revoked_v1`; создаёт

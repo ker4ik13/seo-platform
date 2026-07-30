@@ -1,0 +1,197 @@
+#!/bin/sh
+set -eu
+
+template=${1:-/etc/nats/nats-server.conf}
+runtime_directory=${2:-/run/nats-runtime}
+runtime_config=$runtime_directory/nats-server.conf
+temporary_config=${runtime_config}.tmp.$$
+
+fail() {
+  printf '%s\n' "nats-runtime-config: $1" >&2
+  exit 1
+}
+
+cleanup() {
+  if [ -n "$temporary_config" ] && [ -e "$temporary_config" ]; then
+    rm -f "$temporary_config"
+  fi
+}
+
+trap cleanup 0 1 2 15
+
+if [ "$#" -gt 2 ]; then
+  fail 'expected at most template and runtime-directory arguments'
+fi
+case "$template" in
+  /*) ;;
+  *) fail 'template path must be absolute' ;;
+esac
+case "$runtime_directory" in
+  /*) ;;
+  *) fail 'runtime directory must be absolute' ;;
+esac
+if [ ! -f "$template" ] || [ ! -r "$template" ]; then
+  fail 'template must be a readable regular file'
+fi
+if [ "$template" = "$runtime_config" ]; then
+  fail 'template and runtime config must be different files'
+fi
+
+umask 077
+mkdir -p "$runtime_directory"
+chmod 700 "$runtime_directory"
+
+required_names='NATS_RUNTIME_USER
+NATS_RUNTIME_PASSWORD_HASH
+NATS_PLATFORM_PUBLISHER_USER
+NATS_PLATFORM_PUBLISHER_PASSWORD_HASH
+NATS_REALTIME_CONSUMER_USER
+NATS_REALTIME_CONSUMER_PASSWORD_HASH
+NATS_PROVISIONER_USER
+NATS_PROVISIONER_PASSWORD_HASH
+NATS_IDENTITY_EVENT_SUBJECT
+NATS_IDENTITY_EVENT_DLQ_SUBJECT'
+
+for required_name in $required_names; do
+  if ! printenv "$required_name" >/dev/null 2>&1; then
+    fail "$required_name is required"
+  fi
+done
+
+username_names='NATS_RUNTIME_USER
+NATS_PLATFORM_PUBLISHER_USER
+NATS_REALTIME_CONSUMER_USER
+NATS_PROVISIONER_USER'
+hash_names='NATS_RUNTIME_PASSWORD_HASH
+NATS_PLATFORM_PUBLISHER_PASSWORD_HASH
+NATS_REALTIME_CONSUMER_PASSWORD_HASH
+NATS_PROVISIONER_PASSWORD_HASH'
+marker_names="$required_names"
+
+for marker_name in $marker_names; do
+  marker="__${marker_name}__"
+  marker_count=$(
+    awk -v marker="$marker" '
+      {
+        remaining = $0
+        while ((position = index(remaining, marker)) > 0) {
+          count += 1
+          remaining = substr(remaining, position + length(marker))
+        }
+      }
+      END { print count + 0 }
+    ' "$template"
+  )
+  if [ "$marker_count" -ne 1 ]; then
+    fail "template marker $marker_name must occur exactly once"
+  fi
+done
+
+validated_usernames=''
+for username_name in $username_names; do
+  username_value=$(printenv "$username_name")
+  if ! printf '%s' "$username_value" | grep -Eq '^[A-Za-z][A-Za-z0-9._~-]{2,63}$'; then
+    fail "$username_name must be a canonical NATS username"
+  fi
+  for previous_name in $validated_usernames; do
+    if [ "$username_value" = "$(printenv "$previous_name")" ]; then
+      fail "$username_name must differ from $previous_name"
+    fi
+  done
+  validated_usernames="$validated_usernames $username_name"
+  unset username_value
+done
+
+validated_hashes=''
+for hash_name in $hash_names; do
+  hash_value=$(printenv "$hash_name")
+  if ! printf '%s' "$hash_value" | grep -Eq '^\$2a\$11\$[./A-Za-z0-9]{53}$'; then
+    fail "$hash_name must be a canonical NATS bcrypt 2a cost-11 verifier"
+  fi
+  for previous_name in $validated_hashes; do
+    if [ "$hash_value" = "$(printenv "$previous_name")" ]; then
+      fail "$hash_name must differ from $previous_name"
+    fi
+  done
+  validated_hashes="$validated_hashes $hash_name"
+  unset hash_value
+done
+
+identity_subject=$(printenv NATS_IDENTITY_EVENT_SUBJECT)
+dlq_subject=$(printenv NATS_IDENTITY_EVENT_DLQ_SUBJECT)
+if ! printf '%s' "$identity_subject" | grep -Eq '^[a-z][a-z0-9_-]{0,31}\.identity\.session-family\.revoked\.v1$'; then
+  fail 'NATS_IDENTITY_EVENT_SUBJECT is invalid'
+fi
+if ! printf '%s' "$dlq_subject" | grep -Eq '^[a-z][a-z0-9_-]{0,31}\.dlq\.realtime\.identity\.session-family\.revoked\.v1$'; then
+  fail 'NATS_IDENTITY_EVENT_DLQ_SUBJECT is invalid'
+fi
+identity_environment=${identity_subject%.identity.session-family.revoked.v1}
+dlq_environment=${dlq_subject%.dlq.realtime.identity.session-family.revoked.v1}
+if [ "$identity_environment" != "$dlq_environment" ]; then
+  fail 'NATS identity and DLQ subjects must use the same environment'
+fi
+
+: > "$temporary_config"
+chmod 600 "$temporary_config"
+while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in
+    '      user: "__NATS_RUNTIME_USER__"')
+      printf '      user: "%s"\n' "$NATS_RUNTIME_USER"
+      ;;
+    '      password: "__NATS_RUNTIME_PASSWORD_HASH__"')
+      printf '      password: "%s"\n' "$NATS_RUNTIME_PASSWORD_HASH"
+      ;;
+    '      user: "__NATS_PLATFORM_PUBLISHER_USER__"')
+      printf '      user: "%s"\n' "$NATS_PLATFORM_PUBLISHER_USER"
+      ;;
+    '      password: "__NATS_PLATFORM_PUBLISHER_PASSWORD_HASH__"')
+      printf '      password: "%s"\n' "$NATS_PLATFORM_PUBLISHER_PASSWORD_HASH"
+      ;;
+    '            "__NATS_IDENTITY_EVENT_SUBJECT__",')
+      printf '            "%s",\n' "$identity_subject"
+      ;;
+    '      user: "__NATS_REALTIME_CONSUMER_USER__"')
+      printf '      user: "%s"\n' "$NATS_REALTIME_CONSUMER_USER"
+      ;;
+    '      password: "__NATS_REALTIME_CONSUMER_PASSWORD_HASH__"')
+      printf '      password: "%s"\n' "$NATS_REALTIME_CONSUMER_PASSWORD_HASH"
+      ;;
+    '            "__NATS_IDENTITY_EVENT_DLQ_SUBJECT__"')
+      printf '            "%s"\n' "$dlq_subject"
+      ;;
+    '      user: "__NATS_PROVISIONER_USER__"')
+      printf '      user: "%s"\n' "$NATS_PROVISIONER_USER"
+      ;;
+    '      password: "__NATS_PROVISIONER_PASSWORD_HASH__"')
+      printf '      password: "%s"\n' "$NATS_PROVISIONER_PASSWORD_HASH"
+      ;;
+    *)
+      printf '%s\n' "$line"
+      ;;
+  esac
+done < "$template" > "$temporary_config"
+
+if grep -q '__NATS_' "$temporary_config"; then
+  fail 'template contains an unresolved runtime marker'
+fi
+mv "$temporary_config" "$runtime_config"
+temporary_config=''
+chmod 600 "$runtime_config"
+
+unset \
+  NATS_RUNTIME_USER \
+  NATS_RUNTIME_PASSWORD_HASH \
+  NATS_PLATFORM_PUBLISHER_USER \
+  NATS_PLATFORM_PUBLISHER_PASSWORD_HASH \
+  NATS_REALTIME_CONSUMER_USER \
+  NATS_REALTIME_CONSUMER_PASSWORD_HASH \
+  NATS_PROVISIONER_USER \
+  NATS_PROVISIONER_PASSWORD_HASH \
+  NATS_IDENTITY_EVENT_SUBJECT \
+  NATS_IDENTITY_EVENT_DLQ_SUBJECT \
+  identity_subject dlq_subject identity_environment dlq_environment \
+  validated_usernames validated_hashes required_names username_names hash_names \
+  marker_names marker_name marker marker_count required_name username_name \
+  hash_name previous_name
+
+exec nats-server --config "$runtime_config"

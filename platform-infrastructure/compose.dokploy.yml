@@ -293,7 +293,7 @@ services:
   nats:
     image: nats:2.12.12-alpine
     restart: unless-stopped
-    command: ["--config", "/etc/nats/nats-server.conf"]
+    entrypoint: ["/bin/sh", "/etc/nats/start-nats.sh"]
     environment:
       NATS_RUNTIME_USER: ${NATS_RUNTIME_USER:?NATS_RUNTIME_USER is required}
       NATS_RUNTIME_PASSWORD_HASH: ${NATS_RUNTIME_PASSWORD_HASH:?NATS_RUNTIME_PASSWORD_HASH is required}
@@ -308,6 +308,14 @@ services:
     volumes:
       - nats_data:/data
       - ./nats/nats-server.conf:/etc/nats/nats-server.conf:ro
+      - ./nats/start-nats.sh:/etc/nats/start-nats.sh:ro
+    read_only: true
+    tmpfs:
+      - /run/nats-runtime:rw,noexec,nosuid,size=1m,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     networks:
       - internal
     depends_on:

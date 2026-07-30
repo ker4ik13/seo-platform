@@ -14,6 +14,7 @@ import {
 
 const composeUrl = new URL("../compose.dokploy.yml", import.meta.url);
 const natsConfigUrl = new URL("../nats/nats-server.conf", import.meta.url);
+const natsEntrypointUrl = new URL("../nats/start-nats.sh", import.meta.url);
 const rootEnvUrl = new URL("../../.env.example", import.meta.url);
 const packageUrl = new URL("../../package.json", import.meta.url);
 const dockerfileUrl = new URL("../docker/backend.Dockerfile", import.meta.url);
@@ -42,27 +43,36 @@ const natsPasswordHashes = [
   "NATS_PROVISIONER_PASSWORD_HASH"
 ];
 
-test("NATS server uses mounted config, bounded storage and no CLI secrets", async () => {
-  const [compose, config] = await Promise.all([
+test("NATS server renders a private config inside a hardened container", async () => {
+  const [compose, config, entrypoint] = await Promise.all([
     readFile(composeUrl, "utf8"),
-    readFile(natsConfigUrl, "utf8")
+    readFile(natsConfigUrl, "utf8"),
+    readFile(natsEntrypointUrl, "utf8")
   ]);
   const document = parseYamlMappings(compose);
   const nats = resolveMapping(serviceMapping(document, "nats"), document);
+  const block = serviceBlock(compose, "nats");
 
   assert.equal(nats.get("image"), "nats:2.12.12-alpine");
   assert.equal(
-    nats.get("command"),
-    '["--config", "/etc/nats/nats-server.conf"]'
+    nats.get("entrypoint"),
+    '["/bin/sh", "/etc/nats/start-nats.sh"]'
   );
+  assert.equal(nats.has("command"), false);
+  assert.equal(nats.get("read_only"), "true");
   assert.doesNotMatch(
-    String(nats.get("command")),
+    String(nats.get("entrypoint")),
     /--(?:user|pass|password|auth|token)/u
   );
-  assert.match(
-    serviceBlock(compose, "nats"),
-    /\.\/nats\/nats-server\.conf:\/etc\/nats\/nats-server\.conf:ro/u
-  );
+  assert.match(block, /\.\/nats\/nats-server\.conf:\/etc\/nats\/nats-server\.conf:ro/u);
+  assert.match(block, /\.\/nats\/start-nats\.sh:\/etc\/nats\/start-nats\.sh:ro/u);
+  assert.match(block, /^\s{6}- \/run\/nats-runtime:rw,noexec,nosuid,size=1m,mode=0700$/mu);
+  assert.match(block, /^\s{4}cap_drop:\s*\n\s{6}- ALL$/mu);
+  assert.match(block, /^\s{6}- no-new-privileges:true$/mu);
+  assert.doesNotMatch(block, /^\s{4}(?:ports|expose):/mu);
+  assert.match(entrypoint, /^template=\$\{1:-\/etc\/nats\/nats-server\.conf\}$/mu);
+  assert.match(entrypoint, /^runtime_directory=\$\{2:-\/run\/nats-runtime\}$/mu);
+  assert.match(entrypoint, /^exec nats-server --config "\$runtime_config"$/mu);
   assert.match(config, /^max_payload:\s*64KB$/mu);
   assert.match(config, /^\s*max_mem_store:\s*64MB$/mu);
   assert.match(config, /^\s*max_file_store:\s*1GB$/mu);
@@ -71,7 +81,10 @@ test("NATS server uses mounted config, bounded storage and no CLI secrets", asyn
   assert.equal(balanced(config, "[", "]"), true);
   assert.doesNotMatch(config, /password:\s*\$NATS_(?:RUNTIME|PLATFORM_PUBLISHER|REALTIME_CONSUMER|PROVISIONER)_PASSWORD(?:\s|$)/u);
   for (const hashName of natsPasswordHashes) {
-    assert.match(config, new RegExp(`password:\\s*\\$${hashName}\\b`, "u"));
+    assert.match(
+      config,
+      new RegExp(`password:\\s*"__${hashName}__"`, "u")
+    );
   }
   assertDependency(document, "nats", "service-token-preflight");
 });
@@ -275,7 +288,7 @@ test("example validation supplies distinct generated NATS inputs", async () => {
     const unquoted = stripMatchingQuotes(value);
     assert.match(
       unquoted,
-      /^\$2[aby]\$11\$[./A-Za-z0-9]{53}$/u
+      /^\$2a\$11\$[./A-Za-z0-9]{53}$/u
     );
     return unquoted;
   });
@@ -310,13 +323,15 @@ function permissionSubjects(user, permission) {
   const subjects = [];
   const pattern = /"([^"]+)"|(\$NATS_[A-Z_]+)/gu;
   for (const match of block.matchAll(pattern)) {
-    subjects.push(match[1] ?? match[2]);
+    const subject = match[1] ?? match[2];
+    const marker = /^__([A-Z][A-Z0-9_]*)__$/u.exec(subject);
+    subjects.push(marker ? `$${marker[1]}` : subject);
   }
   return sorted(subjects);
 }
 
 function userBlock(config, userVariable) {
-  return enclosingBlock(config, `user: $${userVariable}`);
+  return enclosingBlock(config, `user: "__${userVariable}__"`);
 }
 
 function blockAfter(source, marker) {

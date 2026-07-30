@@ -176,7 +176,7 @@ test("preflight rejects missing malformed or reused NATS bcrypt verifiers", asyn
   const malformedFailure = await captureFailure(malformed);
   assert.match(
     malformedFailure.stderr,
-    /must be a canonical bcrypt cost-11 verifier/u
+    /must be a canonical NATS bcrypt 2a cost-11 verifier/u
   );
   assertDoesNotExposeCredentials(malformedFailure.stderr, malformed);
 
@@ -186,9 +186,24 @@ test("preflight rejects missing malformed or reused NATS bcrypt verifiers", asyn
   const unsafeCostFailure = await captureFailure(unsafeCost);
   assert.match(
     unsafeCostFailure.stderr,
-    /must be a canonical bcrypt cost-11 verifier/u
+    /must be a canonical NATS bcrypt 2a cost-11 verifier/u
   );
   assertDoesNotExposeCredentials(unsafeCostFailure.stderr, unsafeCost);
+
+  const incompatibleVariant = validEnvironment();
+  incompatibleVariant.NATS_REALTIME_CONSUMER_PASSWORD_HASH =
+    "$2b$11$biu94pm9wRs6z9rIuer3letiCffv/X59tkqkxr7oWhaiUMdKsV/DK";
+  const incompatibleVariantFailure = await captureFailure(
+    incompatibleVariant
+  );
+  assert.match(
+    incompatibleVariantFailure.stderr,
+    /must be a canonical NATS bcrypt 2a cost-11 verifier/u
+  );
+  assertDoesNotExposeCredentials(
+    incompatibleVariantFailure.stderr,
+    incompatibleVariant
+  );
 
   const reused = validEnvironment();
   reused.NATS_PROVISIONER_PASSWORD_HASH = reused.NATS_RUNTIME_PASSWORD_HASH;
