@@ -2,6 +2,7 @@ import "dotenv/config";
 import { Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { loadSystemWorkerConfig } from "./config/app-config.js";
+import { bullMqConnectionOptions } from "./queue/bullmq-keyspace.js";
 import { SYSTEM_QUEUE } from "./queue/queue.service.js";
 
 const config = loadSystemWorkerConfig();
@@ -17,7 +18,7 @@ const worker = new Worker(
     processedAt: new Date().toISOString()
   }),
   {
-    connection,
+    ...bullMqConnectionOptions(connection),
     concurrency: config.concurrency
   }
 );

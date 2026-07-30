@@ -8,6 +8,7 @@ import { Queue } from "bullmq";
 import { Redis } from "ioredis";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
+import { bullMqConnectionOptions } from "./bullmq-keyspace.js";
 import {
   enqueueUploadInspection,
   UPLOAD_INSPECTION_QUEUE,
@@ -57,22 +58,26 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       commandTimeout: QUEUE_PRODUCER_COMMAND_TIMEOUT_MS
     });
     await this.connection.connect();
-    this.systemQueue = new Queue(SYSTEM_QUEUE, {
-      connection: this.connection
-    });
-    this.uploadInspectionQueue = new Queue(UPLOAD_INSPECTION_QUEUE, {
-      connection: this.connection
-    });
-    this.semanticImportQueue = new Queue(SEMANTIC_IMPORT_QUEUE, {
-      connection: this.connection
-    });
+    this.systemQueue = new Queue(
+      SYSTEM_QUEUE,
+      bullMqConnectionOptions(this.connection)
+    );
+    this.uploadInspectionQueue = new Queue(
+      UPLOAD_INSPECTION_QUEUE,
+      bullMqConnectionOptions(this.connection)
+    );
+    this.semanticImportQueue = new Queue(
+      SEMANTIC_IMPORT_QUEUE,
+      bullMqConnectionOptions(this.connection)
+    );
     this.integrationCredentialValidationQueue = new Queue(
       INTEGRATION_CREDENTIAL_VALIDATION_QUEUE,
-      { connection: this.connection }
+      bullMqConnectionOptions(this.connection)
     );
-    this.rankPreparationQueue = new Queue(RANK_PREPARATION_QUEUE, {
-      connection: this.connection
-    });
+    this.rankPreparationQueue = new Queue(
+      RANK_PREPARATION_QUEUE,
+      bullMqConnectionOptions(this.connection)
+    );
   }
 
   public async onModuleDestroy(): Promise<void> {

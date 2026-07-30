@@ -9,6 +9,7 @@ import { ImportWorkerModule } from "./import-worker.module.js";
 import { SemanticImportParserService } from "./imports/semantic-import-parser.service.js";
 import { SemanticImportPublisherService } from "./imports/semantic-import-publisher.service.js";
 import { SemanticImportValidatorService } from "./imports/semantic-import-validator.service.js";
+import { bullMqConnectionOptions } from "./queue/bullmq-keyspace.js";
 import {
   enqueueSemanticImport,
   enqueueSemanticImportPublish,
@@ -37,7 +38,7 @@ async function bootstrap(): Promise<void> {
   const queueConnection = redis(config.redisUrl);
   const queue = new Queue<SemanticImportJobData>(
     SEMANTIC_IMPORT_QUEUE,
-    { connection: queueConnection }
+    bullMqConnectionOptions(queueConnection)
   );
   const worker = new Worker<SemanticImportJobData>(
     SEMANTIC_IMPORT_QUEUE,
@@ -57,7 +58,7 @@ async function bootstrap(): Promise<void> {
       throw new Error("Unknown semantic import job");
     },
     {
-      connection: workerConnection,
+      ...bullMqConnectionOptions(workerConnection),
       concurrency: config.imports.parseConcurrency
     }
   );

@@ -8,6 +8,7 @@ import type { AppConfig } from "./config/app-config.js";
 import { APP_CONFIG } from "./config/config.module.js";
 import { ConnectorWorkerModule } from "./connector-worker.module.js";
 import { IntegrationCredentialValidationWorkerService } from "./integrations/integration-credential-validation-worker.service.js";
+import { bullMqConnectionOptions } from "./queue/bullmq-keyspace.js";
 import {
   enqueueIntegrationCredentialValidation,
   INTEGRATION_CREDENTIAL_VALIDATION_JOB,
@@ -37,7 +38,7 @@ async function bootstrap(): Promise<void> {
   const queueConnection = redis(config.redisUrl);
   const queue = new Queue<IntegrationCredentialValidationJobData>(
     INTEGRATION_CREDENTIAL_VALIDATION_QUEUE,
-    { connection: queueConnection }
+    bullMqConnectionOptions(queueConnection)
   );
   const leaseOwner = `connector-${randomUUID()}`;
   const worker = new Worker<IntegrationCredentialValidationJobData>(
@@ -55,7 +56,7 @@ async function bootstrap(): Promise<void> {
       );
     },
     {
-      connection: workerConnection,
+      ...bullMqConnectionOptions(workerConnection),
       concurrency:
         config.integrationCredentialValidation.concurrency,
       limiter: {

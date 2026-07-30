@@ -6,6 +6,7 @@ import { Queue, Worker } from "bullmq";
 import { Redis } from "ioredis";
 import type { AppConfig } from "./config/app-config.js";
 import { APP_CONFIG } from "./config/config.module.js";
+import { bullMqConnectionOptions } from "./queue/bullmq-keyspace.js";
 import {
   enqueueRankPreparation,
   RANK_PREPARATION_JOB,
@@ -33,7 +34,7 @@ async function bootstrap(): Promise<void> {
   const queueConnection = redis(config.redisUrl);
   const queue = new Queue<RankPreparationJobData>(
     RANK_PREPARATION_QUEUE,
-    { connection: queueConnection }
+    bullMqConnectionOptions(queueConnection)
   );
   const worker = new Worker<RankPreparationJobData>(
     RANK_PREPARATION_QUEUE,
@@ -50,7 +51,7 @@ async function bootstrap(): Promise<void> {
       );
     },
     {
-      connection: workerConnection,
+      ...bullMqConnectionOptions(workerConnection),
       concurrency: config.rankPreparation.concurrency
     }
   );

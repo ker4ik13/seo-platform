@@ -6,6 +6,7 @@ import { Redis } from "ioredis";
 import type { AppConfig } from "./config/app-config.js";
 import { APP_CONFIG } from "./config/config.module.js";
 import { InspectionWorkerModule } from "./inspection-worker.module.js";
+import { bullMqConnectionOptions } from "./queue/bullmq-keyspace.js";
 import {
   enqueueUploadInspection,
   UPLOAD_INSPECTION_JOB,
@@ -29,7 +30,7 @@ async function bootstrap(): Promise<void> {
   const queueConnection = redis(config.redisUrl);
   const queue = new Queue<UploadInspectionJobData>(
     UPLOAD_INSPECTION_QUEUE,
-    { connection: queueConnection }
+    bullMqConnectionOptions(queueConnection)
   );
   const worker = new Worker<UploadInspectionJobData>(
     UPLOAD_INSPECTION_QUEUE,
@@ -43,7 +44,7 @@ async function bootstrap(): Promise<void> {
       return inspections.inspect(job.data.uploadId);
     },
     {
-      connection: workerConnection,
+      ...bullMqConnectionOptions(workerConnection),
       concurrency: config.uploads.inspectionConcurrency
     }
   );
