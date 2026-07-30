@@ -9,27 +9,23 @@ import {
   Param,
   Patch,
   Post,
-  Query,
   Req,
   Res,
   UseGuards
 } from "@nestjs/common";
 import type {
-  ApiCollectionResponse,
   ApiResponse,
-  SemanticKeywordListItem
+  SemanticKeywordGroup
 } from "@seo-platform/contracts";
 import type { FastifyReply } from "fastify";
 import { AuditService } from "../audit/audit.service.js";
-import { RequirePermission } from "../authorization/require-permission.js";
-import type {
-  TenantRequest
-} from "../authorization/authorization.types.js";
+import type { TenantRequest } from "../authorization/authorization.types.js";
 import {
   internalProjectContext,
   requiredMutableProjectTenant,
   requiredProjectTenant
 } from "../authorization/project-tenant.js";
+import { RequirePermission } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
 import { apiResponse } from "../common/api-response.js";
 import { recordCommittedAudit } from "../common/committed-audit.js";
@@ -46,14 +42,13 @@ import {
 } from "../identity/session-auth.guard.js";
 import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import {
-  createSemanticKeywordInput,
-  updateSemanticKeywordInput
-} from "./keyword-input.js";
-import { keywordListQuery } from "./keyword-query.js";
+  createSemanticKeywordGroupInput,
+  updateSemanticKeywordGroupInput
+} from "./keyword-group-input.js";
 
-@Controller("api/v1/projects/:projectId/keywords")
-export class KeywordController {
-  private readonly logger = new Logger(KeywordController.name);
+@Controller("api/v1/projects/:projectId/keyword-groups")
+export class KeywordGroupController {
+  private readonly logger = new Logger(KeywordGroupController.name);
 
   public constructor(
     private readonly seoData: SeoDataClient,
@@ -64,46 +59,41 @@ export class KeywordController {
   @RequirePermission("semantic.view")
   @UseGuards(SessionAuthGuard, TenantPermissionGuard)
   public async list(
-    @Query() query: unknown,
     @Req() request: TenantRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
-  ): Promise<ApiCollectionResponse<SemanticKeywordListItem>> {
-    const context = requestContext(request);
+  ): Promise<ApiResponse<readonly SemanticKeywordGroup[]>> {
     const tenant = requiredProjectTenant(request);
-    const result = await this.seoData.listKeywords(
-      internalProjectContext(request, principal, tenant),
-      keywordListQuery(query)
+    return apiResponse(
+      request,
+      await this.seoData.listKeywordGroups(
+        internalProjectContext(request, principal, tenant)
+      )
     );
-    return {
-      data: result.data,
-      page: result.page,
-      meta: { requestId: context.requestId }
-    };
   }
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @RequirePermission("semantic.create")
+  @RequirePermission("semantic.update")
   @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
   public async create(
     @Body() body: unknown,
     @Req() request: TenantRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
-  ): Promise<ApiResponse<SemanticKeywordListItem>> {
+  ): Promise<ApiResponse<SemanticKeywordGroup>> {
     const tenant = requiredMutableProjectTenant(request);
     const context = requestContext(request);
-    const input = createSemanticKeywordInput(body);
+    const input = createSemanticKeywordGroupInput(body);
     await this.audit.record({
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
       projectId: tenant.projectId,
-      action: "semantic.keyword.create_requested",
-      resourceType: "semantic_keyword",
+      action: "semantic.group.create_requested",
+      resourceType: "semantic_group",
       outcome: "REQUESTED",
       requestId: context.requestId
     });
-    const result = await this.seoData.createKeyword(
+    const result = await this.seoData.createKeywordGroup(
       internalProjectContext(request, principal, tenant),
       input
     );
@@ -111,8 +101,8 @@ export class KeywordController {
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
       projectId: tenant.projectId,
-      action: "semantic.keyword.created",
-      resourceType: "semantic_keyword",
+      action: "semantic.group.created",
+      resourceType: "semantic_group",
       resourceId: result.id,
       outcome: "SUCCESS",
       requestId: context.requestId
@@ -121,34 +111,34 @@ export class KeywordController {
     return apiResponse(request, result, result.version);
   }
 
-  @Patch(":keywordId")
+  @Patch(":groupId")
   @RequirePermission("semantic.update")
   @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
   public async update(
-    @Param("keywordId") keywordId: string,
+    @Param("groupId") groupId: string,
     @Body() body: unknown,
     @Req() request: TenantRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
-  ): Promise<ApiResponse<SemanticKeywordListItem>> {
+  ): Promise<ApiResponse<SemanticKeywordGroup>> {
     const tenant = requiredMutableProjectTenant(request);
-    const canonicalKeywordId = assertUuid(keywordId, "keywordId");
+    const canonicalGroupId = assertUuid(groupId, "groupId");
     const context = requestContext(request);
     const version = requiredVersion(headerValue(request, "if-match"));
-    const input = updateSemanticKeywordInput(body);
+    const input = updateSemanticKeywordGroupInput(body);
     await this.audit.record({
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
       projectId: tenant.projectId,
-      action: "semantic.keyword.update_requested",
-      resourceType: "semantic_keyword",
-      resourceId: canonicalKeywordId,
+      action: "semantic.group.update_requested",
+      resourceType: "semantic_group",
+      resourceId: canonicalGroupId,
       outcome: "REQUESTED",
       requestId: context.requestId
     });
-    const result = await this.seoData.updateKeyword(
+    const result = await this.seoData.updateKeywordGroup(
       internalProjectContext(request, principal, tenant),
-      canonicalKeywordId,
+      canonicalGroupId,
       input,
       version
     );
@@ -156,9 +146,9 @@ export class KeywordController {
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
       projectId: tenant.projectId,
-      action: "semantic.keyword.updated",
-      resourceType: "semantic_keyword",
-      resourceId: canonicalKeywordId,
+      action: "semantic.group.updated",
+      resourceType: "semantic_group",
+      resourceId: canonicalGroupId,
       outcome: "SUCCESS",
       requestId: context.requestId
     });
@@ -166,41 +156,41 @@ export class KeywordController {
     return apiResponse(request, result, result.version);
   }
 
-  @Delete(":keywordId")
+  @Delete(":groupId")
   @HttpCode(HttpStatus.NO_CONTENT)
-  @RequirePermission("semantic.delete")
+  @RequirePermission("semantic.update")
   @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
   public async delete(
-    @Param("keywordId") keywordId: string,
+    @Param("groupId") groupId: string,
     @Req() request: TenantRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<void> {
     const tenant = requiredMutableProjectTenant(request);
-    const canonicalKeywordId = assertUuid(keywordId, "keywordId");
+    const canonicalGroupId = assertUuid(groupId, "groupId");
     const context = requestContext(request);
     const version = requiredVersion(headerValue(request, "if-match"));
     await this.audit.record({
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
       projectId: tenant.projectId,
-      action: "semantic.keyword.delete_requested",
-      resourceType: "semantic_keyword",
-      resourceId: canonicalKeywordId,
+      action: "semantic.group.delete_requested",
+      resourceType: "semantic_group",
+      resourceId: canonicalGroupId,
       outcome: "REQUESTED",
       requestId: context.requestId
     });
-    await this.seoData.deleteKeyword(
+    await this.seoData.deleteKeywordGroup(
       internalProjectContext(request, principal, tenant),
-      canonicalKeywordId,
+      canonicalGroupId,
       version
     );
     await recordCommittedAudit(this.audit, this.logger, {
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
       projectId: tenant.projectId,
-      action: "semantic.keyword.deleted",
-      resourceType: "semantic_keyword",
-      resourceId: canonicalKeywordId,
+      action: "semantic.group.deleted",
+      resourceType: "semantic_group",
+      resourceId: canonicalGroupId,
       outcome: "SUCCESS",
       requestId: context.requestId
     });

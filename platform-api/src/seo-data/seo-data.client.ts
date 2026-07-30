@@ -1,7 +1,16 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
+  semanticKeywordIntents,
   semanticKeywordSourceModes,
   type ApiCollectionResponse,
+  type CreateSemanticKeywordInput,
+  type CreateSemanticKeywordGroupInput,
+  type InternalCreateSemanticKeywordInput,
+  type InternalCreateSemanticKeywordGroupInput,
+  type InternalDeleteSemanticKeywordInput,
+  type InternalDeleteSemanticKeywordGroupInput,
+  type InternalUpdateSemanticKeywordInput,
+  type InternalUpdateSemanticKeywordGroupInput,
   type CreateTrackingContextInput,
   type InternalChangeTrackingContextKeywordInput,
   type InternalChangeTrackingContextStatusInput,
@@ -9,11 +18,15 @@ import {
   type InternalUpdateTrackingContextInput,
   type KeywordListQuery,
   type RankHistoryQuery,
+  type SemanticKeywordIntent,
+  type SemanticKeywordGroup,
   type SemanticKeywordListItem,
   type TrackingContextCollection,
   type TrackingContextKeywordAssignmentState,
   type TrackingContextKeywordQuery,
   type TrackingContextSummary,
+  type UpdateSemanticKeywordInput,
+  type UpdateSemanticKeywordGroupInput,
   type UpdateTrackingContextInput
 } from "@seo-platform/contracts";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
@@ -64,6 +77,143 @@ export class SeoDataClient {
 
     const payload = await this.request("GET", url, context);
     return semanticKeywordPage(payload);
+  }
+
+  public async createKeyword(
+    context: InternalContext,
+    input: CreateSemanticKeywordInput
+  ): Promise<SemanticKeywordListItem> {
+    const scope = trackingScope(context);
+    const body: InternalCreateSemanticKeywordInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      keywordUrl(context, this.config.services.seoData),
+      context,
+      body
+    );
+    return semanticKeywordItem(responseData(payload));
+  }
+
+  public async updateKeyword(
+    context: InternalContext,
+    keywordId: string,
+    input: UpdateSemanticKeywordInput,
+    version: number
+  ): Promise<SemanticKeywordListItem> {
+    const scope = trackingScope(context);
+    const body: InternalUpdateSemanticKeywordInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    const payload = await this.request(
+      "PATCH",
+      keywordUrl(context, this.config.services.seoData, keywordId),
+      context,
+      body
+    );
+    return semanticKeywordItem(responseData(payload));
+  }
+
+  public async deleteKeyword(
+    context: InternalContext,
+    keywordId: string,
+    version: number
+  ): Promise<void> {
+    const scope = trackingScope(context);
+    const body: InternalDeleteSemanticKeywordInput = {
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    await this.request(
+      "DELETE",
+      keywordUrl(context, this.config.services.seoData, keywordId),
+      context,
+      body
+    );
+  }
+
+  public async listKeywordGroups(
+    context: InternalContext
+  ): Promise<readonly SemanticKeywordGroup[]> {
+    const payload = await this.request(
+      "GET",
+      keywordGroupUrl(context, this.config.services.seoData),
+      context
+    );
+    return semanticKeywordGroups(responseData(payload));
+  }
+
+  public async createKeywordGroup(
+    context: InternalContext,
+    input: CreateSemanticKeywordGroupInput
+  ): Promise<SemanticKeywordGroup> {
+    const scope = trackingScope(context);
+    const body: InternalCreateSemanticKeywordGroupInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      keywordGroupUrl(context, this.config.services.seoData),
+      context,
+      body
+    );
+    return semanticKeywordGroup(responseData(payload));
+  }
+
+  public async updateKeywordGroup(
+    context: InternalContext,
+    groupId: string,
+    input: UpdateSemanticKeywordGroupInput,
+    version: number
+  ): Promise<SemanticKeywordGroup> {
+    const scope = trackingScope(context);
+    const body: InternalUpdateSemanticKeywordGroupInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    const payload = await this.request(
+      "PATCH",
+      keywordGroupUrl(context, this.config.services.seoData, groupId),
+      context,
+      body
+    );
+    return semanticKeywordGroup(responseData(payload));
+  }
+
+  public async deleteKeywordGroup(
+    context: InternalContext,
+    groupId: string,
+    version: number
+  ): Promise<void> {
+    const scope = trackingScope(context);
+    const body: InternalDeleteSemanticKeywordGroupInput = {
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    await this.request(
+      "DELETE",
+      keywordGroupUrl(context, this.config.services.seoData, groupId),
+      context,
+      body
+    );
   }
 
   public async listRankHistory(
@@ -343,7 +493,7 @@ export function semanticKeywordPage(payload: unknown): KeywordPage {
     throw invalidResponse();
   }
 
-  const items = data.map(keywordItem);
+  const items = data.map(semanticKeywordItem);
   return {
     data: items,
     page: {
@@ -358,7 +508,9 @@ export function semanticKeywordPage(payload: unknown): KeywordPage {
   };
 }
 
-function keywordItem(value: unknown): SemanticKeywordListItem {
+export function semanticKeywordItem(
+  value: unknown
+): SemanticKeywordListItem {
   const item = objectValue(value);
   if (!item) throw invalidResponse();
 
@@ -370,8 +522,14 @@ function keywordItem(value: unknown): SemanticKeywordListItem {
     !requiredString(item.textNormalized) ||
     !requiredString(item.language) ||
     !Number.isSafeInteger(item.priority) ||
+    typeof item.isFavorite !== "boolean" ||
     typeof item.isTracked !== "boolean" ||
+    (item.intent !== undefined &&
+      (typeof item.intent !== "string" ||
+        !semanticKeywordIntents.some((intent) => intent === item.intent))) ||
+    (item.groupId !== undefined && !requiredString(item.groupId)) ||
     (item.groupPath !== undefined && typeof item.groupPath !== "string") ||
+    (item.targetPageId !== undefined && !requiredString(item.targetPageId)) ||
     (item.targetUrl !== undefined && typeof item.targetUrl !== "string") ||
     !Array.isArray(tags) ||
     !tags.every((tag) => typeof tag === "string") ||
@@ -392,12 +550,24 @@ function keywordItem(value: unknown): SemanticKeywordListItem {
     textNormalized: item.textNormalized,
     language: item.language,
     priority: item.priority as number,
+    isFavorite: item.isFavorite,
     isTracked: item.isTracked,
+    ...(typeof item.intent === "string"
+      ? {
+          intent: item.intent as SemanticKeywordIntent
+        }
+      : {}),
+    ...(typeof item.groupId === "string"
+      ? { groupId: item.groupId }
+      : {}),
     ...(typeof item.groupPath === "string"
       ? { groupPath: item.groupPath }
       : {}),
     ...(typeof item.targetUrl === "string"
       ? { targetUrl: item.targetUrl }
+      : {}),
+    ...(typeof item.targetPageId === "string"
+      ? { targetPageId: item.targetPageId }
       : {}),
     tags: tags as string[],
     tagsTruncated: item.tagsTruncated,
@@ -407,6 +577,96 @@ function keywordItem(value: unknown): SemanticKeywordListItem {
     updatedAt: item.updatedAt as string,
     version: item.version as number
   };
+}
+
+function keywordUrl(
+  context: InternalContext,
+  baseUrl: string,
+  keywordId?: string
+): URL {
+  const projectId = requiredProjectId(context.tenant);
+  const base = `/internal/v1/projects/${encodeURIComponent(
+    projectId
+  )}/keywords`;
+  return new URL(
+    keywordId ? `${base}/${encodeURIComponent(keywordId)}` : base,
+    baseUrl
+  );
+}
+
+export function semanticKeywordGroups(
+  value: unknown
+): readonly SemanticKeywordGroup[] {
+  if (!Array.isArray(value) || value.length > 2_000) {
+    throw invalidResponse();
+  }
+  const groups = value.map(semanticKeywordGroup);
+  if (new Set(groups.map(({ id }) => id)).size !== groups.length) {
+    throw invalidResponse();
+  }
+  const ids = new Set(groups.map(({ id }) => id));
+  if (
+    groups.some(
+      ({ parentId, id }) =>
+        parentId !== undefined && (parentId === id || !ids.has(parentId))
+    )
+  ) {
+    throw invalidResponse();
+  }
+  return groups;
+}
+
+export function semanticKeywordGroup(value: unknown): SemanticKeywordGroup {
+  const group = objectValue(value);
+  if (
+    !group ||
+    !requiredString(group.id) ||
+    !requiredString(group.name) ||
+    !requiredString(group.path) ||
+    (group.parentId !== undefined && !requiredString(group.parentId)) ||
+    (group.color !== undefined &&
+      (typeof group.color !== "string" ||
+        !/^#[0-9a-f]{6}$/iu.test(group.color))) ||
+    !Number.isSafeInteger(group.position) ||
+    Number(group.position) < 0 ||
+    !Number.isSafeInteger(group.keywordCount) ||
+    Number(group.keywordCount) < 0 ||
+    !Number.isSafeInteger(group.version) ||
+    Number(group.version) < 1 ||
+    !validDate(group.createdAt) ||
+    !validDate(group.updatedAt)
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    id: group.id,
+    ...(typeof group.parentId === "string"
+      ? { parentId: group.parentId }
+      : {}),
+    name: group.name,
+    path: group.path,
+    ...(typeof group.color === "string" ? { color: group.color } : {}),
+    position: group.position as number,
+    keywordCount: group.keywordCount as number,
+    version: group.version as number,
+    createdAt: group.createdAt as string,
+    updatedAt: group.updatedAt as string
+  };
+}
+
+function keywordGroupUrl(
+  context: InternalContext,
+  baseUrl: string,
+  groupId?: string
+): URL {
+  const projectId = requiredProjectId(context.tenant);
+  const base = `/internal/v1/projects/${encodeURIComponent(
+    projectId
+  )}/keyword-groups`;
+  return new URL(
+    groupId ? `${base}/${encodeURIComponent(groupId)}` : base,
+    baseUrl
+  );
 }
 
 function objectValue(

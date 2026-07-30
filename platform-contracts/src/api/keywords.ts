@@ -8,6 +8,18 @@ export const semanticKeywordSourceModes = [
 export type SemanticKeywordSourceMode =
   (typeof semanticKeywordSourceModes)[number];
 
+export const semanticKeywordIntents = [
+  "INFORMATIONAL",
+  "NAVIGATIONAL",
+  "COMMERCIAL",
+  "TRANSACTIONAL",
+  "LOCAL",
+  "MIXED"
+] as const;
+
+export type SemanticKeywordIntent =
+  (typeof semanticKeywordIntents)[number];
+
 export interface KeywordListQuery {
   readonly limit: number;
   readonly cursor?: string;
@@ -20,13 +32,108 @@ export interface SemanticKeywordListItem {
   readonly textNormalized: string;
   readonly language: string;
   readonly priority: number;
+  readonly isFavorite: boolean;
   readonly isTracked: boolean;
+  readonly intent?: SemanticKeywordIntent;
+  readonly groupId?: string;
   readonly groupPath?: string;
+  readonly targetPageId?: string;
   readonly targetUrl?: string;
   readonly tags: readonly string[];
   readonly tagsTruncated: boolean;
   readonly sourceMode: SemanticKeywordSourceMode;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly version: number;
+}
+
+export interface CreateSemanticKeywordInput {
+  readonly text: string;
+  readonly language: string;
+  readonly priority: number;
+  readonly isFavorite: boolean;
+  readonly intent?: SemanticKeywordIntent;
+  readonly groupId?: string;
+  readonly targetUrl?: string;
+  readonly tagNames: readonly string[];
+}
+
+export interface UpdateSemanticKeywordInput {
+  readonly text?: string;
+  readonly language?: string;
+  readonly priority?: number;
+  readonly isFavorite?: boolean;
+  readonly intent?: SemanticKeywordIntent | null;
+  readonly groupId?: string | null;
+  readonly targetUrl?: string | null;
+  readonly tagNames?: readonly string[];
+}
+
+export interface InternalCreateSemanticKeywordInput
+  extends CreateSemanticKeywordInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+}
+
+export interface InternalUpdateSemanticKeywordInput
+  extends UpdateSemanticKeywordInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly version: number;
+}
+
+export interface InternalDeleteSemanticKeywordInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly version: number;
+}
+
+export interface SemanticKeywordGroup {
+  readonly id: string;
+  readonly parentId?: string;
+  readonly name: string;
+  readonly path: string;
+  readonly color?: string;
+  readonly position: number;
+  readonly keywordCount: number;
+  readonly version: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface CreateSemanticKeywordGroupInput {
+  readonly name: string;
+  readonly parentId?: string;
+  readonly color?: string;
+}
+
+export interface UpdateSemanticKeywordGroupInput {
+  readonly name: string;
+  readonly parentId?: string | null;
+  readonly color?: string | null;
+}
+
+export interface InternalCreateSemanticKeywordGroupInput
+  extends CreateSemanticKeywordGroupInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+}
+
+export interface InternalUpdateSemanticKeywordGroupInput
+  extends UpdateSemanticKeywordGroupInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly version: number;
+}
+
+export interface InternalDeleteSemanticKeywordGroupInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
   readonly version: number;
 }

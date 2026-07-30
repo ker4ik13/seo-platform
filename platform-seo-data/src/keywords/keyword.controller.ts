@@ -1,23 +1,36 @@
 import {
   BadRequestException,
+  Body,
   Controller,
+  Delete,
   Get,
   Headers,
+  HttpCode,
+  HttpStatus,
   Param,
+  Patch,
+  Post,
   Query,
   Req,
   UseGuards
 } from "@nestjs/common";
 import type {
   ApiCollectionResponse,
+  ApiResponse,
   SemanticKeywordListItem
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
 import {
+  assertInternalContext,
   internalCommandContext,
   internalUuid
 } from "../internal/internal-command-context.js";
 import { PlatformApiGuard } from "../internal/platform-api.guard.js";
+import {
+  internalCreateSemanticKeywordInput,
+  internalDeleteSemanticKeywordInput,
+  internalUpdateSemanticKeywordInput
+} from "./keyword-input.js";
 import { keywordListQuery } from "./keyword-query.js";
 import { KeywordService } from "./keyword.service.js";
 
@@ -46,4 +59,75 @@ export class KeywordController {
       request.id
     );
   }
+
+  @Post()
+  public async create(
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticKeywordListItem>> {
+    const input = internalCreateSemanticKeywordInput(body);
+    assertMutationContext(projectId, headers, input);
+    const result = await this.keywords.create(input);
+    return response(request, result);
+  }
+
+  @Patch(":keywordId")
+  public async update(
+    @Param("projectId") projectId: string,
+    @Param("keywordId") keywordId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticKeywordListItem>> {
+    const input = internalUpdateSemanticKeywordInput(body);
+    assertMutationContext(projectId, headers, input);
+    const result = await this.keywords.update(
+      internalUuid(keywordId, "keywordId"),
+      input
+    );
+    return response(request, result);
+  }
+
+  @Delete(":keywordId")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  public async delete(
+    @Param("projectId") projectId: string,
+    @Param("keywordId") keywordId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>
+  ): Promise<void> {
+    const input = internalDeleteSemanticKeywordInput(body);
+    assertMutationContext(projectId, headers, input);
+    await this.keywords.delete(internalUuid(keywordId, "keywordId"), input);
+  }
+}
+
+function assertMutationContext(
+  projectId: string,
+  headers: Readonly<Record<string, string | string[] | undefined>>,
+  input: {
+    readonly workspaceId: string;
+    readonly projectId: string;
+    readonly actorId: string;
+  }
+): void {
+  const context = internalCommandContext(headers);
+  if (internalUuid(projectId, "projectId") !== context.projectId) {
+    throw new BadRequestException(
+      "Route project identifier does not match trusted context"
+    );
+  }
+  assertInternalContext(context, input);
+}
+
+function response(
+  request: FastifyRequest,
+  data: SemanticKeywordListItem
+): ApiResponse<SemanticKeywordListItem> {
+  return {
+    data,
+    meta: { requestId: request.id, version: data.version }
+  };
 }

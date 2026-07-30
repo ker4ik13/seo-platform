@@ -81,6 +81,8 @@ function keyword(id: string, createdAt: string) {
     normalizedHash: "a".repeat(64),
     language: "ru",
     priority: 0,
+    isFavorite: false,
+    intent: null,
     status: "ACTIVE" as const,
     clusterId: null,
     targetPageId: "01900000-0000-7000-8000-000000000020",
@@ -97,6 +99,7 @@ function keyword(id: string, createdAt: string) {
     memberships: [
       {
         group: {
+          id: "01900000-0000-7000-8000-000000000030",
           path: "Услуги / SEO",
           name: "SEO"
         }

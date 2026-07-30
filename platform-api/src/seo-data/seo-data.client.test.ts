@@ -8,6 +8,7 @@ import {
   trackingContextKeywordPage
 } from "../rankings/tracking-context-response.js";
 import {
+  semanticKeywordGroups,
   semanticKeywordPage,
   SeoDataClient
 } from "./seo-data.client.js";
@@ -18,8 +19,12 @@ const validItem = {
   textNormalized: "seo аудит",
   language: "ru",
   priority: 0,
+  isFavorite: true,
   isTracked: false,
+  intent: "COMMERCIAL",
+  groupId: "01900000-0000-7000-8000-000000000011",
   groupPath: "Услуги / SEO",
+  targetPageId: "01900000-0000-7000-8000-000000000012",
   targetUrl: "https://example.com/seo",
   tags: ["Приоритет"],
   tagsTruncated: false,
@@ -88,6 +93,43 @@ test("rejects malformed SEO data responses", () => {
         data: [validItem],
         page: { hasNext: "false" }
       }),
+    DomainError
+  );
+});
+
+test("validates a complete semantic group tree", () => {
+  const parentId = "01900000-0000-7000-8000-000000000020";
+  const childId = "01900000-0000-7000-8000-000000000021";
+  const groups = semanticKeywordGroups([
+    {
+      id: parentId,
+      name: "Услуги",
+      path: "Услуги",
+      color: "#6758ef",
+      position: 0,
+      keywordCount: 1,
+      version: 1,
+      createdAt: "2026-07-30T10:00:00.000Z",
+      updatedAt: "2026-07-30T10:00:00.000Z"
+    },
+    {
+      id: childId,
+      parentId,
+      name: "SEO",
+      path: "Услуги / SEO",
+      position: 0,
+      keywordCount: 2,
+      version: 1,
+      createdAt: "2026-07-30T10:00:00.000Z",
+      updatedAt: "2026-07-30T10:00:00.000Z"
+    }
+  ]);
+  assert.equal(groups[1]?.parentId, parentId);
+  assert.throws(
+    () =>
+      semanticKeywordGroups([
+        { ...groups[1], parentId: "01900000-0000-7000-8000-000000000099" }
+      ]),
     DomainError
   );
 });

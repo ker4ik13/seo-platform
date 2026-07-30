@@ -2,9 +2,19 @@
 
 Последнее обновление: 30 июля 2026 года
 
-Текущий инкремент: manual BYOK rank execution foundation и transactional
-auth-email delivery
-Статус: versioned tracking context, provider-free оценка и immutable
+Текущий инкремент: P1 production vertical — редактирование семантического ядра
+Статус: ручной CRUD запросов и иерархических групп реализуется поверх
+tenant-scoped SEO Data owner с optimistic locking, RBAC/CSRF и audit.
+Запрос уже можно создать, изменить и soft-delete; поддерживаются текст,
+BCP-47 язык, приоритет, избранное, intent, группа, target URL и теги.
+Группы имеют вложенность, защищённый перенос без циклов, CAS и запрет удаления
+непустой группы. Platform API валидирует публичный ввод и никогда не принимает
+workspace/actor из browser body; Web использует same-origin BFF и показывает
+конфликты версии без silent overwrite. Текущий slice ещё не считается
+завершённым до полного lint/test/build и живого PostgreSQL E2E. Следом в P1:
+bulk edits, saved views, custom columns, versions/undo, export и collaboration.
+
+Предыдущий P2 foundation: versioned tracking context, provider-free оценка и immutable
 execution manifest в SEO Data завершены. Estimate хранится в `jobs_db`,
 доступен при read-only и не вызывает provider, decrypt, Job/BullMQ, списание
 или event. SEO Data уже атомарно seal-ит bounded keyword snapshots в
@@ -463,8 +473,10 @@ Backend convention:
   idempotency и optimistic locking;
 - `platform-api/src/imports` — project-scoped create/read orchestration с
   `semantic.import`/`semantic.view`;
-- `platform-api/src/semantics` — public project-scoped keyword queries с
-  `semantic.view`;
+- `platform-api/src/semantics` — public project-scoped keyword read/create/
+  update/delete и иерархические groups; reads используют `semantic.view`,
+  mutations — отдельные semantic permissions, CSRF, tenant lifecycle,
+  optimistic locking и audit;
 - `platform-api/src/rankings` — public tracking context CRUD/archive/restore
   и point keyword assignments с `ranking.view/configure`, CSRF,
   idempotency/OCC и audit, а также provider-free rank estimate с
@@ -588,9 +600,15 @@ Backend convention:
   HTTP client владельца semantic core и bounded rank-estimate scope;
 - `platform-seo-data/src/semantic-imports` — нормализация, import receipts,
   идемпотентное применение chunks и semantic version;
-- `platform-seo-data/src/keywords` — tenant-scoped keyword read model,
-  trigram search, cursor pagination и derived `isTracked` по активным
-  temporal assignments;
+- `platform-seo-data/src/keywords` — tenant-scoped keyword read model и
+  manual command owner: trigram search, cursor pagination, CRUD с CAS,
+  group/tag/page relations и derived `isTracked` по активным temporal
+  assignments;
+- `platform-seo-data/src/keyword-groups` — bounded tree query, nested create,
+  rename/move с cycle guard и descendant path rewrite, CAS и безопасное
+  удаление только пустой группы;
+- `platform-seo-data/prisma/migrations/20260730110000_keyword_editor_fields`
+  — `keywords.is_favorite`, allowlisted `intent` и active favorite index;
 - `platform-seo-data/src/tracking-contexts` — logical context,
   immutable configuration versions, temporal keyword assignments,
   create receipts и transactional redacted outbox events;
@@ -1347,6 +1365,13 @@ caller, recorded connector wire submission/status и normalized result producer 
   production SMTP credentials на текущем хосте отсутствуют, поэтому Compose
   render, disposable DB/Redis smokes и внешний SMTP canary остаются
   CI/staging/operator gates, а не заменяются unit-тестами.
+- P1 semantic editor gate 2026-07-30: contracts 97/97, SEO Data 101/101,
+  Platform API 367 pass + 4 opt-in PostgreSQL skips, Web 149/149,
+  infrastructure 80 pass + 5 optional PostgreSQL/Redis skips; root lint,
+  typecheck, tests, production build, SEO Data Prisma validate/generate и
+  `git diff --check` проходят. Живой migration/E2E на этом VPS пока блокирует
+  отсутствие container runtime и passwordless sudo; кодовый slice остаётся
+  готовым к применению в Compose, но не выдаётся за live production proof.
 - Live HTTPS preview 2026-07-30: Caddy short-lived IP TLS → loopback router →
   production Web/API/SEO Data/Jobs/Realtime; все обязательные readiness
   dependencies имеют `ok`. Реальный same-origin login вернул secure
@@ -1359,6 +1384,18 @@ caller, recorded connector wire submission/status и normalized result producer 
   проверен на Node.js 24.18.1; контейнеры также используют Node.js 24.
 
 ## 9. Следующий вертикальный срез
+
+Сначала закрывается пользовательский P1-контур:
+
+`keyword/group CRUD → bulk edit → custom columns/saved views →
+versions/undo/export → comments/presence`
+
+Критерий — не наличие controller/service файлов, а browser E2E на живом
+PostgreSQL: пользователь создаёт проект и структуру групп, добавляет и
+редактирует запросы, выполняет bulk-команду, сохраняет view, экспортирует и
+восстанавливает версию без tenant/permission leak и silent overwrite.
+
+После P1 продолжается P2:
 
 `provider runtime caller → submit/status/fetch persistence →
 normalized result producer/ingest receipts`

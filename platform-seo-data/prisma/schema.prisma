@@ -81,6 +81,8 @@ model Keyword {
   normalizedHash String         @map("normalized_hash") @db.Char(64)
   language       String         @default("und") @db.VarChar(16)
   priority       Int            @default(0)
+  isFavorite     Boolean        @default(false) @map("is_favorite")
+  intent         String?        @db.VarChar(32)
   status         EntityStatus   @default(ACTIVE)
   clusterId      String?        @map("cluster_id") @db.Uuid
   targetPageId   String?        @map("target_page_id") @db.Uuid
