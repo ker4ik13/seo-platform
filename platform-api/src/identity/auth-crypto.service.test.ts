@@ -121,3 +121,27 @@ test("encrypts MFA secrets with authenticated encryption", () => {
     { message: "Invalid encrypted MFA secret" }
   );
 });
+
+test("seals session cursors without exposing family identity and rejects tampering", () => {
+  const payload = JSON.stringify({
+    version: 1,
+    userId: "01900000-0000-7000-8000-000000000001",
+    familyId: "01900000-0000-7000-8000-000000000002",
+    id: "01900000-0000-7000-8000-000000000003"
+  });
+  const cursor = cryptoService.sealSessionListCursor(payload);
+
+  assert.match(cursor, /^[A-Za-z0-9_-]{40,1024}$/u);
+  assert.equal(cursor.includes("01900000"), false);
+  assert.equal(cryptoService.openSessionListCursor(cursor), payload);
+
+  const tampered = Buffer.from(cursor, "base64url");
+  tampered[tampered.length - 1] = tampered.at(-1)! ^ 1;
+  assert.throws(
+    () =>
+      cryptoService.openSessionListCursor(
+        tampered.toString("base64url")
+      ),
+    { message: "Invalid session list cursor" }
+  );
+});

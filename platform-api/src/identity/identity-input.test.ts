@@ -8,6 +8,7 @@ import {
   registerInput,
   requestPasswordResetInput,
   resetPasswordInput,
+  userSessionListQuery,
   verifyMfaChallengeInput
 } from "./identity-input.js";
 
@@ -123,4 +124,29 @@ test("preserves current password material when disabling MFA", () => {
     }).password,
     "  current password  "
   );
+});
+
+test("parses a bounded single-value active-session list query", () => {
+  assert.deepEqual(userSessionListQuery({}), { limit: 100 });
+  assert.deepEqual(
+    userSessionListQuery({ limit: "25", cursor: "opaque_cursor_123" }),
+    { limit: 25, cursor: "opaque_cursor_123" }
+  );
+
+  for (const invalid of [
+    { limit: "0" },
+    { limit: "101" },
+    { limit: "1.5" },
+    { limit: ["10", "20"] },
+    { cursor: "bad cursor" },
+    { cursor: ["opaque_cursor_1", "opaque_cursor_2"] },
+    { offset: "10" }
+  ]) {
+    assert.throws(
+      () => userSessionListQuery(invalid),
+      (error: unknown) =>
+        error instanceof DomainError &&
+        error.code === "VALIDATION_FAILED"
+    );
+  }
 });

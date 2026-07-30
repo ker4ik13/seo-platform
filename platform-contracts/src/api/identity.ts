@@ -25,6 +25,11 @@ export interface UserSessionSummary extends SessionSummary {
   readonly createdAt: string;
 }
 
+export interface UserSessionListQuery {
+  readonly limit: number;
+  readonly cursor?: string;
+}
+
 export interface AuthenticationResult {
   readonly user: UserSummary;
   readonly session?: SessionSummary;

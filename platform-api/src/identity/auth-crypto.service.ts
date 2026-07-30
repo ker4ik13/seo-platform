@@ -24,6 +24,14 @@ const PASSWORD_OPTIONS = {
   hashLength: 32
 } as const;
 const MFA_SECRET_AAD = Buffer.from("mfa-secret:v1", "utf8");
+const SESSION_LIST_CURSOR_AAD = Buffer.from(
+  "session-list-cursor:v1",
+  "utf8"
+);
+const SESSION_CURSOR_VERSION = 1;
+const SESSION_CURSOR_IV_BYTES = 12;
+const SESSION_CURSOR_TAG_BYTES = 16;
+const MAX_SESSION_CURSOR_PAYLOAD_BYTES = 512;
 
 @Injectable()
 export class AuthCryptoService {
@@ -146,6 +154,79 @@ export class AuthCryptoService {
       ]).toString("utf8");
     } catch {
       throw new Error("Invalid encrypted MFA secret");
+    }
+  }
+
+  public sealSessionListCursor(payload: string): string {
+    const plaintext = Buffer.from(payload, "utf8");
+    if (
+      plaintext.length === 0 ||
+      plaintext.length > MAX_SESSION_CURSOR_PAYLOAD_BYTES
+    ) {
+      throw new Error("Invalid session list cursor payload");
+    }
+    const initializationVector = randomBytes(SESSION_CURSOR_IV_BYTES);
+    const cipher = createCipheriv(
+      "aes-256-gcm",
+      this.dataEncryptionKey(),
+      initializationVector
+    );
+    cipher.setAAD(SESSION_LIST_CURSOR_AAD);
+    const encrypted = Buffer.concat([
+      cipher.update(plaintext),
+      cipher.final()
+    ]);
+    return Buffer.concat([
+      Buffer.from([SESSION_CURSOR_VERSION]),
+      initializationVector,
+      cipher.getAuthTag(),
+      encrypted
+    ]).toString("base64url");
+  }
+
+  public openSessionListCursor(value: string): string {
+    try {
+      if (!/^[A-Za-z0-9_-]{40,1024}$/u.test(value)) {
+        throw new Error("invalid encoding");
+      }
+      const packed = Buffer.from(value, "base64url");
+      if (
+        packed.toString("base64url") !== value ||
+        packed[0] !== SESSION_CURSOR_VERSION ||
+        packed.length <=
+          1 + SESSION_CURSOR_IV_BYTES + SESSION_CURSOR_TAG_BYTES ||
+        packed.length >
+          1 +
+            SESSION_CURSOR_IV_BYTES +
+            SESSION_CURSOR_TAG_BYTES +
+            MAX_SESSION_CURSOR_PAYLOAD_BYTES
+      ) {
+        throw new Error("invalid envelope");
+      }
+      const initializationVector = packed.subarray(
+        1,
+        1 + SESSION_CURSOR_IV_BYTES
+      );
+      const authenticationTag = packed.subarray(
+        1 + SESSION_CURSOR_IV_BYTES,
+        1 + SESSION_CURSOR_IV_BYTES + SESSION_CURSOR_TAG_BYTES
+      );
+      const encrypted = packed.subarray(
+        1 + SESSION_CURSOR_IV_BYTES + SESSION_CURSOR_TAG_BYTES
+      );
+      const decipher = createDecipheriv(
+        "aes-256-gcm",
+        this.dataEncryptionKey(),
+        initializationVector
+      );
+      decipher.setAAD(SESSION_LIST_CURSOR_AAD);
+      decipher.setAuthTag(authenticationTag);
+      return Buffer.concat([
+        decipher.update(encrypted),
+        decipher.final()
+      ]).toString("utf8");
+    } catch {
+      throw new Error("Invalid session list cursor");
     }
   }
 

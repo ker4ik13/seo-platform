@@ -4,6 +4,8 @@ import {
   sessionFamilyRevokedEventDataV1,
   type AuthenticationResult,
   type CurrentAccount,
+  type CursorPage,
+  type UserSessionListQuery,
   type UserSessionSummary
 } from "@seo-platform/contracts";
 import type {
@@ -12,7 +14,10 @@ import type {
   User
 } from "../generated/prisma/client.js";
 import { AuditService } from "../audit/audit.service.js";
-import { DomainError } from "../common/domain-error.js";
+import {
+  DomainError,
+  validationError
+} from "../common/domain-error.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import type { AppConfig } from "../config/app-config.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -33,6 +38,16 @@ import type {
 export interface SessionIssue {
   readonly session: Session;
   readonly credentials: SessionCredentials;
+}
+
+interface SessionIssueLineage {
+  readonly authenticatedAt: Date;
+  readonly expiresAt: Date;
+}
+
+export interface UserSessionListResult {
+  readonly data: readonly UserSessionSummary[];
+  readonly page: CursorPage;
 }
 
 export interface AuthenticatedSession {
@@ -60,6 +75,16 @@ type SessionWithUser = Prisma.SessionGetPayload<{
   include: { user: true };
 }>;
 
+interface UserSessionCursor {
+  readonly version: 1;
+  readonly userId: string;
+  readonly familyId: string;
+  readonly id: string;
+}
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
 type RotationTransactionResult =
   | {
       readonly kind: "ROTATED";
@@ -84,17 +109,25 @@ export class SessionService {
     transaction: Prisma.TransactionClient,
     user: Pick<User, "id" | "version">,
     context: RequestContext,
-    familyId = this.crypto.randomFamilyId()
+    familyId = this.crypto.randomFamilyId(),
+    lineage?: SessionIssueLineage
   ): Promise<SessionIssue> {
     await this.assertSessionLifecycleUser(transaction, user);
     const accessToken = this.crypto.randomToken();
     const refreshToken = this.crypto.randomToken();
     const csrfToken = this.crypto.randomToken();
+    const expiresAt =
+      lineage?.expiresAt ??
+      new Date(
+        Date.now() +
+          this.config.auth.sessionTtlDays * 24 * 60 * 60 * 1_000
+      );
     const accessExpiresAt = new Date(
-      Date.now() + this.config.auth.accessTokenTtlMinutes * 60 * 1_000
-    );
-    const expiresAt = new Date(
-      Date.now() + this.config.auth.sessionTtlDays * 24 * 60 * 60 * 1_000
+      Math.min(
+        Date.now() +
+          this.config.auth.accessTokenTtlMinutes * 60 * 1_000,
+        expiresAt.getTime()
+      )
     );
     const session = await transaction.session.create({
       data: {
@@ -103,6 +136,9 @@ export class SessionService {
         refreshTokenHash: this.crypto.hashOpaqueToken(refreshToken),
         csrfTokenHash: this.crypto.hashOpaqueToken(csrfToken),
         familyId,
+        ...(lineage
+          ? { authenticatedAt: lineage.authenticatedAt }
+          : {}),
         accessExpiresAt,
         expiresAt,
         ...(context.userAgent ? { userAgent: context.userAgent } : {}),
@@ -212,7 +248,11 @@ export class SessionService {
         transaction,
         current.user,
         context,
-        current.familyId
+        current.familyId,
+        {
+          authenticatedAt: current.authenticatedAt,
+          expiresAt: current.expiresAt
+        }
       );
       const rotatedAt = new Date();
       const revoked = await transaction.session.updateMany({
@@ -312,20 +352,58 @@ export class SessionService {
   }
 
   public async list(
-    principal: AuthenticatedPrincipal
-  ): Promise<readonly UserSessionSummary[]> {
+    principal: AuthenticatedPrincipal,
+    query: UserSessionListQuery
+  ): Promise<UserSessionListResult> {
+    const cursor = query.cursor
+      ? decodeUserSessionCursor(
+          this.crypto,
+          query.cursor,
+          principal.userId
+        )
+      : undefined;
     const sessions = await this.prisma.session.findMany({
       where: {
         userId: principal.userId,
         revokedAt: null,
-        expiresAt: { gt: new Date() }
+        expiresAt: { gt: new Date() },
+        ...(cursor
+          ? {
+              OR: [
+                { familyId: { lt: cursor.familyId } },
+                {
+                  familyId: cursor.familyId,
+                  id: { lt: cursor.id }
+                }
+              ]
+            }
+          : {})
       },
-      orderBy: { lastUsedAt: "desc" },
-      take: 100
+      orderBy: [{ familyId: "desc" }, { id: "desc" }],
+      take: query.limit + 1
     });
-    return sessions.map((session) =>
-      toUserSessionSummary(session, principal.sessionId)
-    );
+    const pageSessions = sessions.slice(0, query.limit);
+    const hasNext = sessions.length > query.limit;
+    const last = hasNext
+      ? pageSessions[pageSessions.length - 1]
+      : undefined;
+    return {
+      data: pageSessions.map((session) =>
+        toUserSessionSummary(session, principal.sessionId)
+      ),
+      page: {
+        hasNext,
+        ...(last
+          ? {
+              nextCursor: encodeUserSessionCursor(
+                this.crypto,
+                principal.userId,
+                last
+              )
+            }
+          : {})
+      }
+    };
   }
 
   public async revoke(
@@ -615,4 +693,77 @@ export class SessionService {
       });
     }
   }
+}
+
+function encodeUserSessionCursor(
+  crypto: AuthCryptoService,
+  userId: string,
+  session: Pick<Session, "familyId" | "id">
+): string {
+  return crypto.sealSessionListCursor(
+    JSON.stringify({
+      version: 1,
+      userId,
+      familyId: session.familyId,
+      id: session.id
+    })
+  );
+}
+
+function decodeUserSessionCursor(
+  crypto: AuthCryptoService,
+  value: string,
+  expectedUserId: string
+): UserSessionCursor {
+  if (!/^[A-Za-z0-9_-]{8,512}$/u.test(value)) invalidSessionCursor();
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(crypto.openSessionListCursor(value));
+  } catch {
+    invalidSessionCursor();
+  }
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    Array.isArray(parsed) ||
+    Object.getPrototypeOf(parsed) !== Object.prototype
+  ) {
+    invalidSessionCursor();
+  }
+  const cursor = parsed as Readonly<Record<string, unknown>>;
+  const keys = Object.keys(cursor);
+  if (
+    keys.length !== 4 ||
+    !keys.includes("version") ||
+    !keys.includes("userId") ||
+    !keys.includes("familyId") ||
+    !keys.includes("id") ||
+    cursor.version !== 1 ||
+    typeof cursor.userId !== "string" ||
+    typeof cursor.familyId !== "string" ||
+    typeof cursor.id !== "string" ||
+    !UUID_PATTERN.test(cursor.userId) ||
+    !UUID_PATTERN.test(cursor.familyId) ||
+    !UUID_PATTERN.test(cursor.id)
+  ) {
+    invalidSessionCursor();
+  }
+  if (cursor.userId.toLowerCase() !== expectedUserId.toLowerCase()) {
+    invalidSessionCursor();
+  }
+  return {
+    version: 1,
+    userId: cursor.userId.toLowerCase(),
+    familyId: cursor.familyId.toLowerCase(),
+    id: cursor.id.toLowerCase()
+  };
+}
+
+function invalidSessionCursor(): never {
+  throw validationError(
+    "cursor",
+    "INVALID_CURSOR",
+    "Session list cursor is invalid"
+  );
 }

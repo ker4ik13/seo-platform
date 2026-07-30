@@ -1,3 +1,4 @@
+import { isIP } from "node:net";
 import type { NextRequest } from "next/server";
 import { isSafeBrowserApiPath } from "./app-path.ts";
 
@@ -40,6 +41,18 @@ export async function proxyPlatformApi(
   ) {
     return errorResponse(404, "NOT_FOUND", "API route not found");
   }
+  const forwardedFor = request.headers.get("x-forwarded-for");
+  const clientIp =
+    forwardedFor === null
+      ? undefined
+      : canonicalForwardedClientIp(forwardedFor);
+  if (forwardedFor !== null && clientIp === undefined) {
+    return errorResponse(
+      400,
+      "VALIDATION_FAILED",
+      "Forwarded client address is invalid"
+    );
+  }
   const maxBodyBytes = browserApiBodyLimit(pathSegments);
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (
@@ -56,6 +69,7 @@ export async function proxyPlatformApi(
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
+  if (clientIp) headers.set("x-forwarded-for", clientIp);
   if (options.csrfFromCookie && !headers.has("x-csrf-token")) {
     const csrfName =
       process.env.AUTH_CSRF_COOKIE_NAME ?? "seo_csrf";
@@ -110,6 +124,25 @@ export async function proxyPlatformApi(
     status: upstream.status,
     headers: responseHeaders
   });
+}
+
+export function canonicalForwardedClientIp(
+  value: string
+): string | undefined {
+  const candidate = value.trim();
+  const version = isIP(candidate);
+  if (
+    candidate.length === 0 ||
+    candidate.length > 45 ||
+    candidate.includes(",") ||
+    candidate.includes("%") ||
+    version === 0
+  ) {
+    return undefined;
+  }
+  if (version === 4) return candidate;
+  const hostname = new URL(`http://[${candidate}]/`).hostname;
+  return hostname.slice(1, -1);
 }
 
 async function readBoundedRequestBody(

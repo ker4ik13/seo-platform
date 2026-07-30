@@ -406,6 +406,46 @@ svg { display: block; }
 .security-facts strong { color: var(--text); }
 .recovery-code-grid { background: #f8f9fb; border: 1px solid var(--line); border-radius: 12px; display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 14px; }
 .recovery-code-grid code { font-size: 13px; font-weight: 650; letter-spacing: .04em; }
+.session-card { position: relative; }
+.session-card-heading { align-items: center; }
+.session-heading-actions { align-items: center; display: flex; flex: 0 0 auto; gap: 10px; }
+.session-alert { align-items: center; display: flex; gap: 16px; justify-content: space-between; }
+.session-alert > span { min-width: 0; }
+.session-loading { align-items: center; display: flex; gap: 13px; min-height: 150px; padding: 12px; }
+.session-loading .spinner { flex: 0 0 auto; }
+.session-loading strong { font-size: 13px; }
+.session-loading p { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 5px; }
+.session-empty { background: var(--panel-muted); border-radius: 12px; }
+.session-empty .secondary-button { margin-top: 18px; }
+.session-list { display: grid; list-style: none; margin: 0; padding: 0; }
+.session-row { align-items: start; border-top: 1px solid var(--line); display: grid; gap: 13px; grid-template-columns: auto minmax(0, 1fr) auto; padding: 17px 0; }
+.session-row:first-child { border-top: 0; padding-top: 2px; }
+.session-row:last-child { padding-bottom: 2px; }
+.session-row.current { background: linear-gradient(90deg, rgba(103, 88, 239, .045), transparent 62%); border-radius: 11px; margin-inline: -9px; padding-inline: 9px; }
+.session-device-mark { align-items: center; background: #f0efff; border: 1px solid #dedaff; border-radius: 11px; color: var(--brand); display: flex; font-size: 10px; font-weight: 800; height: 42px; justify-content: center; letter-spacing: -.02em; width: 42px; }
+.session-device-mark.mobile { background: #edf7ff; border-color: #d4e7fa; color: var(--blue); }
+.session-device-mark.tablet { background: #eef9f4; border-color: #d2ebdf; color: var(--green); }
+.session-device-mark.unknown { background: #f3f4f6; border-color: var(--line); color: var(--muted); }
+.session-row-copy { display: grid; gap: 11px; min-width: 0; }
+.session-row-title { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; min-height: 27px; }
+.session-row-title > strong { font-size: 13px; line-height: 1.4; overflow-wrap: anywhere; }
+.session-metadata { display: grid; gap: 1px; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; overflow: hidden; }
+.session-metadata > div { background: var(--panel-muted); min-width: 0; padding: 9px 10px; }
+.session-metadata dt { color: var(--muted); font-size: 10px; }
+.session-metadata dd { font-size: 11px; font-weight: 650; line-height: 1.45; margin: 4px 0 0; overflow-wrap: anywhere; }
+.session-network-metadata { color: var(--muted); display: flex; flex-wrap: wrap; font-size: 11px; gap: 6px 14px; }
+.session-network-metadata span { overflow-wrap: anywhere; }
+.session-row > .secondary-button, .session-row > .danger-button { min-width: 92px; }
+.session-privacy-note { background: #f8f9fb; border-radius: 10px; padding: 11px 12px; }
+.session-privacy-note strong { font-size: 11px; }
+.session-privacy-note p { color: var(--muted); font-size: 11px; line-height: 1.55; margin-top: 4px; }
+.session-dialog-backdrop { align-items: center; background: rgba(18, 20, 29, .46); display: flex; inset: 0; justify-content: center; padding: 20px; position: fixed; z-index: 80; }
+.session-dialog { background: white; border: 1px solid var(--line); border-radius: 16px; box-shadow: 0 24px 80px rgba(21, 24, 34, .25); display: grid; gap: 16px; grid-template-columns: auto minmax(0, 1fr); max-width: 480px; padding: 22px; width: 100%; }
+.session-dialog-mark { align-items: center; background: #fff0f2; border-radius: 10px; color: var(--red); display: flex; font-size: 17px; font-weight: 850; height: 38px; justify-content: center; width: 38px; }
+.session-dialog h3 { font-size: 16px; margin: 1px 0 0; }
+.session-dialog p { color: var(--muted); font-size: 12px; line-height: 1.55; margin-top: 7px; }
+.session-dialog-error { grid-column: 1 / -1; }
+.session-dialog-actions { display: flex; gap: 9px; grid-column: 1 / -1; justify-content: flex-end; }
 .settings-tabs { display: flex; gap: 5px; margin: -10px 0 18px; overflow-x: auto; padding: 3px; }
 .settings-tabs a { align-items: center; border-radius: 8px; color: var(--muted); display: inline-flex; flex: 0 0 auto; font-size: 12px; font-weight: 650; min-height: 32px; padding: 8px 11px; }
 .settings-tabs a:hover { background: #efeff4; color: var(--text); }
@@ -2365,6 +2405,14 @@ svg { display: block; }
   .avatar-copy { display: none; }
   .topbar-actions { gap: 4px; }
   .content { padding: 24px 16px 90px; }
+  .session-card-heading { align-items: flex-start; flex-direction: column; }
+  .session-heading-actions { justify-content: space-between; width: 100%; }
+  .session-alert { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .session-alert .inline-alert-action { min-height: 44px; }
+  .session-row { grid-template-columns: auto minmax(0, 1fr); }
+  .session-row > .secondary-button, .session-row > .danger-button { grid-column: 2; justify-self: start; min-height: 44px; }
+  .session-metadata { grid-template-columns: 1fr; }
+  .session-dialog-actions .secondary-button, .session-dialog-actions .danger-button { min-height: 44px; }
   .page-heading { align-items: flex-start; gap: 18px; }
   .page-heading h1 { font-size: 23px; }
   .page-heading .primary-button { font-size: 0; min-width: 40px; padding: 0; }
@@ -2628,6 +2676,14 @@ svg { display: block; }
   .browser-push-test .secondary-button { width: 100%; }
   .browser-device-actions { align-items: stretch; flex-direction: column; }
   .browser-device-actions .text-button { min-height: 44px; text-align: left; }
+  .session-heading-actions { align-items: stretch; flex-direction: column; }
+  .session-heading-actions .secondary-button { min-height: 44px; width: 100%; }
+  .session-row { grid-template-columns: 1fr; }
+  .session-device-mark { grid-row: auto; }
+  .session-row > .secondary-button, .session-row > .danger-button { grid-column: 1; width: 100%; }
+  .session-dialog { grid-template-columns: 1fr; padding: 18px; }
+  .session-dialog-actions { align-items: stretch; flex-direction: column-reverse; grid-column: 1; }
+  .session-dialog-actions .secondary-button, .session-dialog-actions .danger-button { width: 100%; }
   .browser-device-rename { align-items: stretch; flex-direction: column; }
   .browser-device-rename input { min-height: 44px; width: 100%; }
   .browser-push-error { align-items: flex-start; flex-direction: column; }

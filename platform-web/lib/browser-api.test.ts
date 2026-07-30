@@ -157,3 +157,58 @@ test("forwards PUT for naturally idempotent resource assignment", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("sends session revoke through same-origin BFF with only the public CSRF value", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDocument = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "document"
+  );
+  const originalCookieName =
+    process.env.NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME;
+  let target: string | URL | Request | undefined;
+  let request: RequestInit | undefined;
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: {
+      cookie:
+        "custom_csrf=public-csrf-value; seo_session=must-not-be-copied"
+    }
+  });
+  process.env.NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME = "custom_csrf";
+  globalThis.fetch = async (input, init) => {
+    target = input;
+    request = init;
+    return new Response(null, { status: 204 });
+  };
+
+  try {
+    await browserApiRequest<void>(
+      "/app/api/sessions/01900000-0000-7000-8000-000000000001",
+      { method: "DELETE" }
+    );
+    assert.equal(
+      target,
+      "/app/api/sessions/01900000-0000-7000-8000-000000000001"
+    );
+    assert.equal(request?.method, "DELETE");
+    assert.equal(request?.credentials, "same-origin");
+    assert.equal(request?.cache, "no-store");
+    const headers = new Headers(request?.headers);
+    assert.equal(headers.get("x-csrf-token"), "public-csrf-value");
+    assert.equal(headers.get("cookie"), null);
+    assert.equal(headers.get("authorization"), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalDocument) {
+      Object.defineProperty(globalThis, "document", originalDocument);
+    } else {
+      Reflect.deleteProperty(globalThis, "document");
+    }
+    if (originalCookieName === undefined) {
+      delete process.env.NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME;
+    } else {
+      process.env.NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME = originalCookieName;
+    }
+  }
+});

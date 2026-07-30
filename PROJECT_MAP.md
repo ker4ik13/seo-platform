@@ -110,7 +110,8 @@ terminal identity pipeline, provider runtime и остальные release gates
   события/канал, но не получает endpoint или browser keys.
 - Terminal session revoke применяется ко всей refresh family и атомарно пишет
   `identity.session-family.revoked.v1`; обычная rotation и access-token TTL
-  terminal event не создают.
+  terminal event не создают. Rotation сохраняет исходные `authenticatedAt` и
+  absolute `expiresAt` family и зажимает новый access TTL этим сроком.
 - Tracking context не хранит provider/credential/schedule: его immutable
   search configuration принадлежит SEO data, routing — Jobs, schedule —
   automation.
@@ -380,7 +381,12 @@ Backend convention:
 
 - `platform-api/src/identity` — account/session lifecycle, user-scoped
   advisory lock, whole-family terminal revoke/outbox, bounded global
-  refresh-family expiry sweeper и CSRF guards;
+  refresh-family expiry sweeper, encrypted user-bound keyset pagination
+  активных сессий и CSRF guards;
+- `platform-api/prisma/migrations/20260730160000_preserve_session_family_lineage`
+  — atomic user+family backfill исторических rotation rows до минимальных
+  `authenticated_at`/`expires_at`, чтобы legacy family не обходила recent-auth
+  и absolute TTL;
 - `platform-api/src/common/uuid-v7.ts` — dependency-free RFC 9562 UUIDv7 для
   новых межсервисных session-family aggregate IDs;
 - `platform-api/src/common/http-response-policy.ts` — глобальная exact-public-
@@ -709,8 +715,11 @@ exact stream PubAck и хранит bounded retry/terminal failure в outbox.
 Password reset дополнительно инвалидирует outstanding login MFA challenges;
 session issue повторно проверяет ожидаемую версию active user под lock.
 MFA setup/activation/disable и revoke-others повторно валидируют exact
-active/unexpired principal session под тем же lock. Новые family IDs — UUIDv7;
-legacy UUIDv4 продолжают читаться без backfill.
+active/unexpired principal session под тем же lock. Refresh rotation наследует
+исходные family `authenticatedAt`/`expiresAt`, а migration консервативно
+исправляет legacy rows. Session inventory имеет bounded encrypted user-bound
+keyset cursor без раскрытия family ID. Новые family IDs — UUIDv7; legacy UUIDv4
+продолжают читаться без смены identifier.
 
 Tenant core содержит workspace/project CRUD, системную RBAC-матрицу,
 одноразовые workspace invitations, optimistic locking участников и
@@ -719,9 +728,11 @@ Tenant core содержит workspace/project CRUD, системную RBAC-м�
 
 Private Web содержит same-origin BFF, регистрацию/вход/подтверждение email,
 запрос и установку нового пароля, refresh/logout, session gate, создание и
-выбор workspace/project, MFA challenge и экран безопасности профиля. До
-появления SEO-данных dashboard показывает empty states, а не демонстрационные
-значения.
+выбор workspace/project, MFA challenge и экран безопасности профиля с полным
+пагинируемым списком active sessions/revoke. BFF передаёт Platform API только
+один canonical IPv4/IPv6 от ближайшего proxy и fail-closed отклоняет chain,
+malformed и zone-id значения. До появления SEO-данных dashboard показывает
+empty states, а не демонстрационные значения.
 
 Первый import slice содержит публичные project upload endpoints, внутренний
 multipart lifecycle в jobs database, прямую browser → S3 загрузку частей,
@@ -1139,6 +1150,11 @@ caller, connector submission/status и normalized result producer ещё не
   session, stale principal/version, refresh reuse/expiry commit-before-401,
   reset и MFA ordering. Реальные PostgreSQL 18 race/outbox rollback tests
   остаются staging gate; Prisma schema/migration в этом срезе не менялись.
+- Identity session-lineage/inventory: Platform API 329 pass + 4 opt-in skips,
+  Web 131/131 и Contracts 76/76; typecheck/lint/build, Prisma validate/generate,
+  diff-check и live PostgreSQL 18 migration smoke — pass. Проверены immutable
+  family TTL/recent-auth, encrypted user-bound cursor, полный Web pagination
+  без partial fallback, 401 refresh и canonical single-hop BFF client IP.
 - Identity durable transport/expiry: targeted Platform API publisher,
   bounded global sweeper, Realtime consumer и infrastructure topology/ACL
   suites проходят. Полный root lint/typecheck/test/build для общего текущего

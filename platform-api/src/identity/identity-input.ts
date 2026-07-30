@@ -6,6 +6,7 @@ import type {
   RequestPasswordResetInput,
   ResendEmailVerificationInput,
   ResetPasswordInput,
+  UserSessionListQuery,
   VerifyMfaChallengeInput,
   VerifyEmailInput
 } from "@seo-platform/contracts";
@@ -26,6 +27,7 @@ const COMMON_PASSWORDS = new Set([
   "administrator",
   "letmeinplease"
 ]);
+const USER_SESSION_CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,512}$/u;
 
 export function registerInput(value: unknown): RegisterAccountInput {
   const input = inputObject(value);
@@ -151,6 +153,68 @@ export function disableTotpInput(value: unknown): DisableTotpInput {
     password: passwordField(input, "password", false),
     code: stringField(input, "code", { min: 6, max: 32 })
   };
+}
+
+export function userSessionListQuery(value: unknown): UserSessionListQuery {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value)
+  ) {
+    throw validationError(
+      "query",
+      "OBJECT_REQUIRED",
+      "Session list query must be an object"
+    );
+  }
+  const query = value as Readonly<Record<string, unknown>>;
+  const unsupported = Object.keys(query).find(
+    (key) => key !== "limit" && key !== "cursor"
+  );
+  if (unsupported) {
+    throw validationError(
+      unsupported,
+      "UNKNOWN_QUERY_PARAMETER",
+      "Unknown session list query parameter"
+    );
+  }
+
+  const rawLimit = optionalSingleQueryString(query.limit, "limit");
+  const cursor = optionalSingleQueryString(query.cursor, "cursor");
+  const limit = rawLimit === undefined ? 100 : Number(rawLimit);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+    throw validationError(
+      "limit",
+      "OUT_OF_RANGE",
+      "Session list limit must be an integer between 1 and 100"
+    );
+  }
+  if (cursor !== undefined && !USER_SESSION_CURSOR_PATTERN.test(cursor)) {
+    throw validationError(
+      "cursor",
+      "INVALID_CURSOR",
+      "Session list cursor is invalid"
+    );
+  }
+  return {
+    limit,
+    ...(cursor === undefined ? {} : { cursor })
+  };
+}
+
+function optionalSingleQueryString(
+  value: unknown,
+  path: string
+): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw validationError(
+      path,
+      "SINGLE_VALUE_REQUIRED",
+      "Query parameter must be a single non-empty string"
+    );
+  }
+  return value.trim();
 }
 
 function passwordField(

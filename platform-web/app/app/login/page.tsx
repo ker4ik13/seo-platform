@@ -26,6 +26,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           mode="login"
           returnTo={safeAppReturnTo(params.returnTo)}
           sessionExpired={params.reason === "session-expired"}
+          sessionRevoked={params.reason === "session-revoked"}
         />
       </section>
     </main>

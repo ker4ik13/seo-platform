@@ -6,6 +6,7 @@ import {
   HttpCode,
   Param,
   Post,
+  Query,
   Req,
   Res,
   UseGuards
@@ -21,10 +22,7 @@ import type {
   UserSessionSummary
 } from "@seo-platform/contracts";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import {
-  apiResponse,
-  collectionResponse
-} from "../common/api-response.js";
+import { apiResponse } from "../common/api-response.js";
 import { DomainError } from "../common/domain-error.js";
 import { assertUuid } from "../common/identifier.js";
 import { CurrentPrincipal } from "./current-principal.js";
@@ -34,6 +32,7 @@ import {
   requestPasswordResetInput,
   resetPasswordInput,
   resendVerificationInput,
+  userSessionListQuery,
   verifyEmailInput
 } from "./identity-input.js";
 import { IdentityService } from "./identity.service.js";
@@ -189,13 +188,19 @@ export class IdentityController {
   @Get("sessions")
   @UseGuards(SessionAuthGuard)
   public async sessions(
+    @Query() query: unknown,
     @Req() request: FastifyRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiCollectionResponse<UserSessionSummary>> {
-    return collectionResponse(
-      request,
-      await this.sessionsService.list(principal)
+    const result = await this.sessionsService.list(
+      principal,
+      userSessionListQuery(query)
     );
+    return {
+      data: result.data,
+      page: result.page,
+      meta: { requestId: request.id }
+    };
   }
 
   @Delete("sessions/others")

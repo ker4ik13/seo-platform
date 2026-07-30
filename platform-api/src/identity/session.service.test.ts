@@ -424,9 +424,11 @@ test("inactive account refresh lazily commits terminal family revoke", async () 
 });
 
 test("successful refresh rotation stays in-family without a terminal event", async () => {
+  const familyExpiresAt = new Date(Date.now() + 5 * 60 * 1_000);
   const current = sessionRecord({
     id: "01900000-0000-7000-8000-000000000106",
-    familyId: CURRENT_FAMILY_ID
+    familyId: CURRENT_FAMILY_ID,
+    expiresAt: familyExpiresAt
   });
   const replacement = sessionRecord({
     id: "01900000-0000-7000-8000-000000000107",
@@ -441,13 +443,22 @@ test("successful refresh rotation stays in-family without a terminal event", asy
   const transaction = fakeSessionStore([mutableCurrent]).transaction;
   const transactionSession = transaction.session as unknown as {
     findFirst: () => Promise<Session & { user: User }>;
-    create: () => Promise<Session>;
+    create: (args: Prisma.SessionCreateArgs) => Promise<Session>;
   };
+  let replacementCreateData: Prisma.SessionCreateArgs["data"] | undefined;
   transactionSession.findFirst = async () => ({
     ...current,
     user: userRecord()
   });
-  transactionSession.create = async () => replacement;
+  transactionSession.create = async (args) => {
+    replacementCreateData = args.data;
+    return {
+      ...replacement,
+      authenticatedAt: args.data.authenticatedAt as Date,
+      accessExpiresAt: args.data.accessExpiresAt as Date,
+      expiresAt: args.data.expiresAt as Date
+    };
+  };
   const prisma = {
     session: {
       findUnique: async () => ({
@@ -465,8 +476,132 @@ test("successful refresh rotation stays in-family without a terminal event", asy
 
   assert.ok(result.response.session);
   assert.equal(result.response.session.id, replacement.id);
+  assert.equal(
+    result.response.session.authenticatedAt,
+    current.authenticatedAt.toISOString()
+  );
+  assert.equal(
+    result.response.session.expiresAt,
+    current.expiresAt.toISOString()
+  );
+  assert.equal(
+    result.response.session.accessExpiresAt,
+    familyExpiresAt.toISOString()
+  );
+  assert.ok(replacementCreateData);
+  assert.equal(
+    replacementCreateData.authenticatedAt,
+    current.authenticatedAt
+  );
+  assert.equal(replacementCreateData.expiresAt, current.expiresAt);
+  assert.equal(
+    (replacementCreateData.accessExpiresAt as Date).getTime(),
+    familyExpiresAt.getTime()
+  );
   assert.ok(mutableCurrent.revokedAt);
   assert.equal(events.length, 0);
+});
+
+test("lists every active session through a stable encrypted family keyset", async () => {
+  const first = sessionRecord({
+    id: "01900000-0000-7000-8000-000000000201",
+    familyId: "01900000-0000-7000-8000-000000000030"
+  });
+  const second = sessionRecord({
+    id: "01900000-0000-7000-8000-000000000202",
+    familyId: OTHER_FAMILY_ID
+  });
+  const third = sessionRecord({
+    id: "01900000-0000-7000-8000-000000000203",
+    familyId: CURRENT_FAMILY_ID
+  });
+  const calls: Prisma.SessionFindManyArgs[] = [];
+  let callIndex = 0;
+  const prisma = {
+    session: {
+      findMany: async (args: Prisma.SessionFindManyArgs) => {
+        calls.push(args);
+        callIndex += 1;
+        return callIndex === 1 ? [first, second, third] : [third];
+      }
+    }
+  } as unknown as PrismaService;
+  const service = sessionService({
+    prisma,
+    transaction: fakeSessionStore([]).transaction,
+    events: []
+  });
+  const principal = {
+    ...principalFor(first.familyId),
+    sessionId: first.id
+  };
+
+  const firstPage = await service.list(principal, { limit: 2 });
+  assert.deepEqual(
+    firstPage.data.map(({ id }) => id),
+    [first.id, second.id]
+  );
+  assert.equal(firstPage.data[0]?.current, true);
+  assert.equal(firstPage.page.hasNext, true);
+  assert.ok(firstPage.page.nextCursor);
+
+  const secondPage = await service.list(principal, {
+    limit: 2,
+    cursor: firstPage.page.nextCursor
+  });
+  assert.deepEqual(
+    secondPage.data.map(({ id }) => id),
+    [third.id]
+  );
+  assert.deepEqual(secondPage.page, { hasNext: false });
+  assert.equal(calls[0]?.take, 3);
+  assert.deepEqual(calls[0]?.orderBy, [
+    { familyId: "desc" },
+    { id: "desc" }
+  ]);
+  assert.deepEqual(calls[1]?.where?.OR, [
+    { familyId: { lt: second.familyId } },
+    { familyId: second.familyId, id: { lt: second.id } }
+  ]);
+  await assert.rejects(
+    service.list(
+      { ...principal, userId: OTHER_USER_ID },
+      { limit: 2, cursor: firstPage.page.nextCursor }
+    ),
+    (error: unknown) =>
+      error instanceof DomainError &&
+      error.fieldErrors?.[0]?.code === "INVALID_CURSOR"
+  );
+  assert.equal(calls.length, 2);
+});
+
+test("rejects a malformed session cursor before querying PostgreSQL", async () => {
+  let queried = false;
+  const prisma = {
+    session: {
+      findMany: async () => {
+        queried = true;
+        return [];
+      }
+    }
+  } as unknown as PrismaService;
+  const service = sessionService({
+    prisma,
+    transaction: fakeSessionStore([]).transaction,
+    events: []
+  });
+
+  await assert.rejects(
+    service.list(principalFor(CURRENT_FAMILY_ID), {
+      limit: 100,
+      cursor: "aaaaaaaa"
+    }),
+    (error: unknown) =>
+      error instanceof DomainError &&
+      error.code === "VALIDATION_FAILED" &&
+      error.fieldErrors?.[0]?.code === "INVALID_CURSOR"
+  );
+  assert.equal(queried, false);
 });
 
 test("outbox failures are propagated so the surrounding transaction can roll back", async () => {
@@ -520,7 +655,11 @@ function sessionService(input: {
     randomFamilyId: () => CURRENT_FAMILY_ID,
     randomToken: () => "opaque-token",
     hashOpaqueToken: (value: string) => `hash:${value}`,
-    tokensEqual: (left: string, right: string) => left === right
+    tokensEqual: (left: string, right: string) => left === right,
+    sealSessionListCursor: (payload: string) =>
+      Buffer.from(payload, "utf8").toString("base64url"),
+    openSessionListCursor: (cursor: string) =>
+      Buffer.from(cursor, "base64url").toString("utf8")
   } as unknown as AuthCryptoService;
   const audit = {
     record: async () => undefined

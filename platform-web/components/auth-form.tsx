@@ -21,11 +21,13 @@ interface MfaChallengeResult {
 export function AuthForm({
   mode,
   returnTo = "/app",
-  sessionExpired = false
+  sessionExpired = false,
+  sessionRevoked = false
 }: Readonly<{
   mode: "login" | "register";
   returnTo?: string;
   sessionExpired?: boolean;
+  sessionRevoked?: boolean;
 }>) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -134,6 +136,11 @@ export function AuthForm({
       {sessionExpired && (
         <div className="inline-alert warning" role="status">
           Сессия истекла. Войдите снова — ваши проекты и результаты сохранены.
+        </div>
+      )}
+      {sessionRevoked && (
+        <div className="inline-alert success" role="status">
+          Сессия на этом устройстве завершена. Для продолжения войдите снова.
         </div>
       )}
       {error && (

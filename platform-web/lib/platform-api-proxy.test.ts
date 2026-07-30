@@ -311,3 +311,126 @@ test("forwards a bounded request body after measuring it", async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test("proxies session revoke with server-only cookies and returns cookie clearing", async () => {
+  const originalFetch = globalThis.fetch;
+  let upstreamUrl: string | undefined;
+  let upstreamInit: RequestInit | undefined;
+  globalThis.fetch = async (input, init) => {
+    upstreamUrl =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+    upstreamInit = init;
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "Set-Cookie":
+          "seo_session=; Path=/app; Max-Age=0; HttpOnly; Secure; SameSite=Lax"
+      }
+    });
+  };
+
+  try {
+    const sessionId = "01900000-0000-7000-8000-000000000001";
+    const request = new NextRequest(
+      `http://localhost/app/api/sessions/${sessionId}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: "test-only-authorization-header",
+          Cookie: "seo_session=server-only-session",
+          "X-CSRF-Token": "public-csrf-value"
+        }
+      }
+    );
+    const response = await proxyPlatformApi(request, [
+      "sessions",
+      sessionId
+    ]);
+
+    assert.equal(response.status, 204);
+    assert.equal(
+      upstreamUrl,
+      `http://localhost:4000/api/v1/sessions/${sessionId}`
+    );
+    assert.equal(upstreamInit?.method, "DELETE");
+    assert.equal(upstreamInit?.redirect, "manual");
+    const headers = new Headers(upstreamInit?.headers);
+    assert.equal(headers.get("cookie"), "seo_session=server-only-session");
+    assert.equal(headers.get("x-csrf-token"), "public-csrf-value");
+    assert.equal(headers.get("authorization"), null);
+    assert.match(response.headers.get("set-cookie") ?? "", /HttpOnly/u);
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("forwards only one validated edge client IP to Platform API", async () => {
+  const originalFetch = globalThis.fetch;
+  const forwarded: Headers[] = [];
+  globalThis.fetch = async (_input, init) => {
+    forwarded.push(new Headers(init?.headers));
+    return Response.json({ data: [] });
+  };
+
+  try {
+    for (const [input, expected] of [
+      ["203.0.113.19", "203.0.113.19"],
+      ["2001:DB8::A", "2001:db8::a"],
+      ["2001:0DB8:0:0:0:0:0:A", "2001:db8::a"]
+    ] as const) {
+      const request = new NextRequest(
+        "http://localhost/app/api/sessions?limit=100",
+        {
+          headers: {
+            Forwarded: "for=198.51.100.8",
+            "X-Forwarded-For": input,
+            "X-Real-IP": "198.51.100.9"
+          }
+        }
+      );
+      const response = await proxyPlatformApi(request, ["sessions"]);
+      assert.equal(response.status, 200);
+      const headers = forwarded.at(-1)!;
+      assert.equal(headers.get("x-forwarded-for"), expected);
+      assert.equal(headers.get("forwarded"), null);
+      assert.equal(headers.get("x-real-ip"), null);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects chained or malformed forwarded client addresses before upstream", async () => {
+  const originalFetch = globalThis.fetch;
+  let upstreamCalls = 0;
+  globalThis.fetch = async () => {
+    upstreamCalls += 1;
+    return Response.json({ data: [] });
+  };
+
+  try {
+    for (const value of [
+      "203.0.113.19, 10.0.0.1",
+      "unknown",
+      "[2001:db8::1]",
+      "fe80::1%eth0",
+      "999.1.1.1"
+    ]) {
+      const request = new NextRequest(
+        "http://localhost/app/api/sessions",
+        { headers: { "X-Forwarded-For": value } }
+      );
+      const response = await proxyPlatformApi(request, ["sessions"]);
+      assert.equal(response.status, 400);
+      assert.equal(response.headers.get("cache-control"), "private, no-store");
+    }
+    assert.equal(upstreamCalls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

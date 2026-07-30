@@ -1,5 +1,6 @@
 import { AppShell } from "../../../../../components/app-shell";
 import { MfaSettings } from "../../../../../components/mfa-settings";
+import { SessionSettings } from "../../../../../components/session-settings";
 import { SettingsTabs } from "../../../../../components/settings-tabs";
 import { requireProtectedAppContext } from "../../../../../lib/protected-app";
 
@@ -14,8 +15,8 @@ export default async function SecuritySettingsPage() {
           <p className="eyebrow">Профиль · Безопасность</p>
           <h1>Безопасность аккаунта</h1>
           <p>
-            Управляйте двухфакторной защитой. Настройки сессий и способов входа
-            будут находиться здесь же.
+            Управляйте двухфакторной защитой и активными входами на всех
+            устройствах.
           </p>
         </div>
       </section>
@@ -25,6 +26,7 @@ export default async function SecuritySettingsPage() {
         workspaceRoleCode={context.workspace?.roleCode}
       />
       <div className="settings-stack">
+        <SessionSettings />
         <MfaSettings />
       </div>
     </AppShell>
