@@ -504,3 +504,47 @@ test("forwards only the exact same browser Origin required by realtime tickets",
     globalThis.fetch = originalFetch;
   }
 });
+
+test("accepts the configured public Origin behind a reverse proxy", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  let upstreamHeaders: Headers | undefined;
+  globalThis.fetch = async (_input, init) => {
+    upstreamHeaders = new Headers(init?.headers);
+    return Response.json({ data: { ok: true } });
+  };
+  process.env.NEXT_PUBLIC_SITE_URL = "https://app.example.test:8443";
+
+  try {
+    const response = await proxyPlatformApi(
+      new NextRequest(
+        "http://localhost:3100/app/api/auth/login",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Origin: "https://app.example.test:8443"
+          },
+          body: JSON.stringify({
+            email: "preview@example.test",
+            password: "not-a-real-password"
+          })
+        }
+      ),
+      ["auth", "login"]
+    );
+
+    assert.equal(response.status, 200);
+    assert.equal(
+      upstreamHeaders?.get("origin"),
+      "https://app.example.test:8443"
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalSiteUrl === undefined) {
+      delete process.env.NEXT_PUBLIC_SITE_URL;
+    } else {
+      process.env.NEXT_PUBLIC_SITE_URL = originalSiteUrl;
+    }
+  }
+});

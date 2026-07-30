@@ -54,10 +54,13 @@ export async function proxyPlatformApi(
     );
   }
   const browserOrigin = request.headers.get("origin");
+  const expectedOrigin = configuredBrowserOrigin(request.nextUrl.origin);
   const sameOrigin =
     browserOrigin === null
       ? undefined
-      : canonicalSameOrigin(browserOrigin, request.nextUrl.origin);
+      : expectedOrigin === undefined
+        ? undefined
+        : canonicalSameOrigin(browserOrigin, expectedOrigin);
   if (browserOrigin !== null && sameOrigin === undefined) {
     return errorResponse(
       403,
@@ -175,6 +178,32 @@ export function canonicalSameOrigin(
       return undefined;
     }
     return value;
+  } catch {
+    return undefined;
+  }
+}
+
+function configuredBrowserOrigin(
+  requestOrigin: string
+): string | undefined {
+  const configured = process.env.NEXT_PUBLIC_SITE_URL;
+  if (configured === undefined || configured.length === 0) {
+    return requestOrigin;
+  }
+  if (configured !== configured.trim()) return undefined;
+  try {
+    const parsed = new URL(configured);
+    if (
+      (parsed.protocol !== "https:" && parsed.protocol !== "http:") ||
+      parsed.username ||
+      parsed.password ||
+      parsed.pathname !== "/" ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      return undefined;
+    }
+    return parsed.origin;
   } catch {
     return undefined;
   }

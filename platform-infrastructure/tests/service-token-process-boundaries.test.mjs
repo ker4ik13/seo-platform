@@ -115,6 +115,7 @@ const s3Environment = [
 const expectedJobsHttpEnvironment = sorted([
   ...jobsRuntimeEnvironment,
   ...s3Environment,
+  "BIND_ADDRESS",
   "EMAIL_ENABLED",
   "EMAIL_FROM",
   "INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION",

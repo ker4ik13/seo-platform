@@ -596,6 +596,11 @@ Backend convention:
 - Web image получает обязательный `WEB_PUBLIC_URL` как
   `NEXT_PUBLIC_SITE_URL` до `next build`, чтобы canonical metadata, robots и
   sitemap не зависели от запоздалого runtime env;
+- browser BFF использует тот же валидированный `NEXT_PUBLIC_SITE_URL` как
+  trusted exact origin: deployment за reverse proxy не сравнивает внешний
+  browser Origin с внутренним `next start` URL, а отсутствующая конфигурация
+  сохраняет безопасный local fallback. Неканоничный URL, path, credentials,
+  query или fragment дают fail-closed `403` до Platform API;
 - Platform API, SEO Data, Jobs HTTP и Realtime принимают только явный `BIND_ADDRESS` из
   `127.0.0.1|0.0.0.0`: local development по умолчанию остаётся на loopback,
   а Compose явно выбирает `0.0.0.0` только внутри изолированной container
@@ -1220,8 +1225,21 @@ caller, connector submission/status и normalized result producer ещё не
   покрывает private override/Vary merge, parser/guard/404/internal paths и
   proxy-aware HSTS. Next production manifests подтверждают общие security
   headers, отдельный `/app`/Admin private-noindex policy и отсутствие
-  public marketing cache override. Full script/style CSP и HTTPS smoke через
-  фактический production proxy остаются release gates.
+  public marketing cache override. Full script/style CSP и повторный HTTPS
+  smoke через фактический target production proxy остаются release gates.
+- Integrated preview gate 2026-07-30: root typecheck и strict lint проходят;
+  полный root test проходит, включая Platform API 339 pass + 4 opt-in skips,
+  Jobs 334 pass + 9 opt-in skips и infrastructure 74 pass + 5 opt-in skips;
+  Web 144/144 tests и production build всех пакетов проходят на Node.js
+  24.18.1. Локальный PostgreSQL 18.4 принял все четыре migration chains.
+- Live HTTPS preview 2026-07-30: Caddy short-lived IP TLS → loopback router →
+  production Web/API/SEO Data/Jobs/Realtime; все обязательные readiness
+  dependencies имеют `ok`. Реальный same-origin login вернул secure
+  access/session/CSRF cookies, `/app`, `/app/settings/team` и workspace BFF
+  ответили `200` с private/no-store/noindex, а внешний Socket.IO WebSocket
+  upgrade ответил `101`. Preview использует disposable PostgreSQL и
+  намеренно выключенные S3/ClamAV/email/Web Push/provider-submit adapters;
+  это интеграционный smoke, а не production deploy.
 - Target runtime: Node.js 24. Текущий полный lint/typecheck/test/build baseline
   проверен на Node.js 24.18.1; контейнеры также используют Node.js 24.
 
