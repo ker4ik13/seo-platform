@@ -1,0 +1,36 @@
+name: seonorita-landing
+
+services:
+  landing:
+    restart: unless-stopped
+    init: true
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/web.Dockerfile
+      args:
+        PACKAGE_NAME: "@seo-platform/web"
+        PACKAGE_PATH: platform-web
+        NEXT_PUBLIC_SITE_URL: ${LANDING_PUBLIC_URL:?LANDING_PUBLIC_URL is required}
+        NEXT_PUBLIC_TELEGRAM_CHANNEL_URL: ${TELEGRAM_CHANNEL_URL:-https://t.me/ker4ik13}
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-ru}
+      NEXT_PUBLIC_SITE_URL: ${LANDING_PUBLIC_URL}
+      NEXT_PUBLIC_TELEGRAM_CHANNEL_URL: ${TELEGRAM_CHANNEL_URL:-https://t.me/ker4ik13}
+    ports:
+      - "${LANDING_BIND_ADDRESS:-127.0.0.1}:${LANDING_PORT:-3000}:3000"
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/ru').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s

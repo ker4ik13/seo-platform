@@ -7,6 +7,13 @@
 - API-документация в `/docs/api`;
 - защищённое, неиндексируемое приложение в `/app`.
 
+Публичная главная в ветке `codex/seonorita-landing` оформлена как
+двуязычный pre-launch лендинг бренда **SEOньорита / SEOnorita**. Она
+показывает целевую карту возможностей и честный roadmap, не объявляя ещё не
+выпущенные функции готовыми. Telegram CTA задаётся через
+`NEXT_PUBLIC_TELEGRAM_CHANNEL_URL`; инструкция автономного запуска на VPS и
+Caddy находится в [`LANDING_DEPLOYMENT.md`](./LANDING_DEPLOYMENT.md).
+
 Контент читается из Directus с типизированным fallback. Directus не имеет
 доступа к данным приложения. Public/project Toolbox и публичный API используют
 общий capability registry и backend handlers.

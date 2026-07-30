@@ -45,6 +45,16 @@ persistence и normalized result producer ещё отсутствуют.
 Production policy и submit gate остаются fail-closed; live Arsenkin submit
 выключен до прохождения contract/security gates ADR-2026-034.
 
+В отдельной ветке `codex/seonorita-landing` public Web получил автономный
+pre-launch лендинг бренда **SEOньорита / SEOnorita**. Локализованные `/ru` и
+`/en` статически описывают целевую ценность, все планируемые продуктовые
+модули, интеграции, аудитории, принципы и roadmap с честной пометкой стадии
+разработки. CTA ведёт в allowlisted Telegram URL из build-time config, а при
+его отсутствии — на контакт разработчика. Добавлены брендовый favicon,
+manifest, Open Graph image, locale metadata/hreflang, JSON-LD и отдельный
+least-exposed Compose profile, который слушает loopback для публикации через
+Caddy и не требует запуска backend-контуров.
+
 Параллельный dependency-free срез browser Web Push device lifecycle
 реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет
 ими через отдельный Realtime token, secret material хранится в
@@ -140,7 +150,7 @@ boundary и при реальной операционной необходим�
 | `platform-realtime` | WebSocket presence/collaboration delivery | да |
 | `platform-web` | public site, Toolbox, API docs и приложение `/app` | да |
 | `platform-admin` | незавершённый internal-only административный shell | да, без внешнего ingress |
-| `platform-infrastructure` | Compose/Dokploy, monitoring, runbooks | конфигурация |
+| `platform-infrastructure` | Compose/Dokploy, автономный landing Compose, monitoring, runbooks | конфигурация |
 | `.github/workflows/ci.yml` | Node.js 24 workspace quality gate | GitHub Actions |
 | `docs/technical-spec` | нормативное ТЗ | нет |
 | `semaflow-seo-platform-design` | исходный статический дизайн-прототип | нет |

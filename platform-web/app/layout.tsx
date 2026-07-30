@@ -6,13 +6,26 @@ export const metadata: Metadata = {
   metadataBase: new URL(
     process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
   ),
-  title: "SEO Workspace",
-  description: "Единое рабочее пространство для SEO-команд"
+  applicationName: "SEOньорита / SEOnorita",
+  title: {
+    default: "SEOньорита — единая платформа для системного SEO",
+    template: "%s · SEOньорита"
+  },
+  description:
+    "Будущая SEO-платформа для семантики, позиций, SERP, контента, аналитики, автоматизаций и командной работы.",
+  category: "technology",
+  creator: "@ker4ik13",
+  publisher: "SEOньорита",
+  formatDetection: {
+    address: false,
+    email: false,
+    telephone: false
+  }
 };
 
 export const viewport: Viewport = {
   colorScheme: "light",
-  themeColor: "#fafaf8"
+  themeColor: "#f5f1e8"
 };
 
 export default function RootLayout({
