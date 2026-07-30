@@ -3,7 +3,7 @@
 set -eu
 
 connector_user=jobs_connector
-service_roles='platform_owner platform_runtime seo_owner seo_runtime jobs_owner jobs_runtime jobs_rank_runtime realtime_owner realtime_runtime directus_runtime_owner'
+service_roles='platform_owner platform_runtime seo_owner seo_runtime jobs_owner jobs_runtime jobs_rank_runtime jobs_auth_email_runtime realtime_owner realtime_runtime directus_runtime_owner'
 
 if [ "${JOBS_CONNECTOR_DATABASE_USER:-$connector_user}" != "$connector_user" ]; then
   echo "JOBS_CONNECTOR_DATABASE_USER is immutable and must equal jobs_connector" >&2
@@ -32,6 +32,7 @@ write_hba() {
   echo 'local   jobs_db      "jobs_owner"                        scram-sha-256'
   echo 'local   jobs_db      "jobs_runtime"                      scram-sha-256'
   echo 'local   jobs_db      "jobs_rank_runtime"                 scram-sha-256'
+  echo 'local   jobs_db      "jobs_auth_email_runtime"           scram-sha-256'
   echo 'local   realtime_db  "realtime_owner"                    scram-sha-256'
   echo 'local   realtime_db  "realtime_runtime"                  scram-sha-256'
   echo 'local   directus_db  "directus_runtime_owner"            scram-sha-256'
@@ -40,6 +41,8 @@ write_hba() {
   echo 'local   all          /^(platform|seo|jobs|realtime)_(owner|runtime)(_[a-z0-9_]+)?$  reject'
   echo 'local   replication  /^jobs_rank_runtime(_[a-z0-9_]+)?$             reject'
   echo 'local   all          /^jobs_rank_runtime(_[a-z0-9_]+)?$             reject'
+  echo 'local   replication  /^jobs_auth_email_runtime(_[a-z0-9_]+)?$       reject'
+  echo 'local   all          /^jobs_auth_email_runtime(_[a-z0-9_]+)?$       reject'
   echo 'local   replication  /^directus_runtime_owner(_[a-z0-9_]+)?$          reject'
   echo 'local   all          /^directus_runtime_owner(_[a-z0-9_]+)?$          reject'
   echo "local   replication  /^jobs_connector(_[a-z0-9_]+)?$             reject"
@@ -51,6 +54,7 @@ write_hba() {
   echo 'host    jobs_db      "jobs_owner"                        all      scram-sha-256'
   echo 'host    jobs_db      "jobs_runtime"                      all      scram-sha-256'
   echo 'host    jobs_db      "jobs_rank_runtime"                 all      scram-sha-256'
+  echo 'host    jobs_db      "jobs_auth_email_runtime"           all      scram-sha-256'
   echo 'host    realtime_db  "realtime_owner"                    all      scram-sha-256'
   echo 'host    realtime_db  "realtime_runtime"                  all      scram-sha-256'
   echo 'host    directus_db  "directus_runtime_owner"            all      scram-sha-256'
@@ -59,6 +63,8 @@ write_hba() {
   echo 'host    all          /^(platform|seo|jobs|realtime)_(owner|runtime)(_[a-z0-9_]+)?$  all      reject'
   echo 'host    replication  /^jobs_rank_runtime(_[a-z0-9_]+)?$             all      reject'
   echo 'host    all          /^jobs_rank_runtime(_[a-z0-9_]+)?$             all      reject'
+  echo 'host    replication  /^jobs_auth_email_runtime(_[a-z0-9_]+)?$       all      reject'
+  echo 'host    all          /^jobs_auth_email_runtime(_[a-z0-9_]+)?$       all      reject'
   echo 'host    replication  /^directus_runtime_owner(_[a-z0-9_]+)?$          all      reject'
   echo 'host    all          /^directus_runtime_owner(_[a-z0-9_]+)?$          all      reject'
   echo "host    replication  /^jobs_connector(_[a-z0-9_]+)?$     all      reject"
@@ -73,6 +79,35 @@ if [ "${1:-}" = "--print-hba" ]; then
   write_hba
   exit 0
 fi
+
+: "${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}"
+postgres_password_length=${#POSTGRES_PASSWORD}
+if [ "$postgres_password_length" -lt 32 ] ||
+  [ "$postgres_password_length" -gt 512 ]
+then
+  echo "POSTGRES_PASSWORD must contain 32..512 characters" >&2
+  exit 1
+fi
+printable_postgres_password=$(
+  printf '%s' "$POSTGRES_PASSWORD" | LC_ALL=C tr -d '[:cntrl:]'
+)
+if [ "$printable_postgres_password" != "$POSTGRES_PASSWORD" ]; then
+  echo "POSTGRES_PASSWORD must not contain control characters" >&2
+  exit 1
+fi
+lowercase_postgres_password=$(
+  printf '%s' "$POSTGRES_PASSWORD" | tr '[:upper:]' '[:lower:]'
+)
+case $lowercase_postgres_password in
+  replace-*|change-*|changeme*|example*|dummy-*|placeholder*|test-*|your-*|your_*)
+    echo "POSTGRES_PASSWORD must not use an example placeholder" >&2
+    exit 1
+    ;;
+esac
+unset \
+  postgres_password_length \
+  printable_postgres_password \
+  lowercase_postgres_password
 
 hba_path=/tmp/seo-platform-pg_hba.conf
 write_hba > "$hba_path"

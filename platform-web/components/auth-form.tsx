@@ -91,6 +91,10 @@ export function AuthForm({
       }
       if (result.emailVerificationRequired) {
         sessionStorage.setItem("pending-verification-email", email);
+        sessionStorage.setItem(
+          "pending-verification-return-to",
+          safeAppReturnTo(returnTo)
+        );
         if (result.verificationTokenForDevelopment) {
           sessionStorage.setItem(
             "development-verification-token",
@@ -98,7 +102,9 @@ export function AuthForm({
           );
         }
         window.location.assign(
-          `/app/verify-email?email=${encodeURIComponent(email)}`
+          `/app/verify-email?email=${encodeURIComponent(email)}&returnTo=${encodeURIComponent(
+            safeAppReturnTo(returnTo)
+          )}`
         );
         return;
       }
@@ -111,8 +117,14 @@ export function AuthForm({
           requestError.code === "RESOURCE_STATE_CONFLICT"
         ) {
           sessionStorage.setItem("pending-verification-email", email);
+          sessionStorage.setItem(
+            "pending-verification-return-to",
+            safeAppReturnTo(returnTo)
+          );
           window.location.assign(
-            `/app/verify-email?email=${encodeURIComponent(email)}`
+            `/app/verify-email?email=${encodeURIComponent(email)}&returnTo=${encodeURIComponent(
+              safeAppReturnTo(returnTo)
+            )}`
           );
           return;
         }

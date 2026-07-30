@@ -409,6 +409,7 @@ test("rejects unrelated secrets on an execution-only worker", () => {
     {
       EMAIL_ENABLED: "true",
       EMAIL_FROM: "no-reply@example.test",
+      EMAIL_MESSAGE_ID_DOMAIN: "mail.example.test",
       SMTP_HOST: "smtp.example.test",
       SMTP_USER: "connector-smtp-user",
       SMTP_PASSWORD: "connector-smtp-password"
@@ -426,7 +427,7 @@ test("rejects unrelated secrets on an execution-only worker", () => {
           INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1",
           ...extra
         }),
-      /Only the Jobs HTTP process may receive|must not receive management, internal API, NATS, S3 or SMTP credentials|must not receive (?:NATS|S3|SMTP)|must be configured together/u
+      /Only the (?:Jobs HTTP|auth-email worker) process may receive|must not receive management, internal API, NATS, S3 or SMTP credentials|must not receive (?:NATS|S3|SMTP)|must be configured together/u
     );
   }
 });
@@ -864,19 +865,37 @@ test("loads only the declared adapter capabilities for HTTP, import and inspecti
       INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS: `2:${Buffer.alloc(32, 2).toString("base64url")}`,
       INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION: "2",
       PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
-      EMAIL_ENABLED: "true",
-      EMAIL_FROM: "jobs@example.test",
-      SMTP_HOST: "smtp.example.test",
-      SMTP_USER: "jobs",
-      SMTP_PASSWORD: "secret",
       ...s3
     },
     "HTTP"
   );
   assert.equal(http.nats.user, "jobs-http");
   assert.equal(http.s3.enabled, true);
-  assert.equal(http.email.enabled, true);
+  assert.equal(http.email.enabled, false);
   assert.equal(http.integrationCredentials.role, "MANAGEMENT");
+
+  const authEmailWorker = loadAppConfig(
+    {
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      NATS_URL: "nats://nats:4222",
+      NATS_USER: "jobs-auth-email",
+      NATS_PASSWORD: "nats-secret",
+      AUTH_EMAIL_EVENT_ENVIRONMENT: "test",
+      JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: "e".repeat(32),
+      EMAIL_ENABLED: "true",
+      EMAIL_FROM: "jobs@example.test",
+      EMAIL_MESSAGE_ID_DOMAIN: "mail.example.test",
+      SMTP_HOST: "smtp.example.test",
+      SMTP_USER: "jobs",
+      SMTP_PASSWORD: "smtp-secret"
+    },
+    "AUTH_EMAIL_WORKER"
+  );
+  assert.equal(authEmailWorker.authEmail.enabled, true);
+  assert.equal(authEmailWorker.authEmail.environment, "test");
+  assert.equal(authEmailWorker.email.enabled, true);
+  assert.equal(authEmailWorker.authEmailApiToken, "e".repeat(32));
 
   const importWorker = loadAppConfig(
     {
@@ -923,6 +942,20 @@ test("rejects every undeclared adapter capability by process role", () => {
       INTEGRATION_CREDENTIAL_ROLE: "EXECUTION",
       INTEGRATION_CREDENTIAL_KEYS: `1:${connectorKey}`,
       INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1"
+    },
+    AUTH_EMAIL_WORKER: {
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      NATS_USER: "jobs-auth-email",
+      NATS_PASSWORD: "nats-secret",
+      AUTH_EMAIL_EVENT_ENVIRONMENT: "test",
+      JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: "e".repeat(32),
+      EMAIL_ENABLED: "true",
+      EMAIL_FROM: "jobs@example.test",
+      EMAIL_MESSAGE_ID_DOMAIN: "mail.example.test",
+      SMTP_HOST: "smtp.example.test",
+      SMTP_USER: "jobs",
+      SMTP_PASSWORD: "smtp-secret"
     }
   };
   const cases = [
@@ -932,7 +965,7 @@ test("rejects every undeclared adapter capability by process role", () => {
       error: /must not receive NATS/u
     },
     {
-      roles: ["RANK_WORKER", "CONNECTOR_WORKER"],
+      roles: ["RANK_WORKER", "CONNECTOR_WORKER", "AUTH_EMAIL_WORKER"],
       extra: {
         S3_ENABLED: "true",
         S3_ACCESS_KEY_ID: "access",
@@ -943,18 +976,19 @@ test("rejects every undeclared adapter capability by process role", () => {
       error: /must not receive S3/u
     },
     {
-      roles: ["IMPORT_WORKER", "INSPECTION_WORKER", "RANK_WORKER", "CONNECTOR_WORKER"],
+      roles: ["HTTP", "IMPORT_WORKER", "INSPECTION_WORKER", "RANK_WORKER", "CONNECTOR_WORKER"],
       extra: {
         EMAIL_ENABLED: "true",
         EMAIL_FROM: "jobs@example.test",
+        EMAIL_MESSAGE_ID_DOMAIN: "mail.example.test",
         SMTP_HOST: "smtp.example.test",
         SMTP_USER: "jobs",
         SMTP_PASSWORD: "secret"
       },
-      error: /must not receive SMTP|Execution-only credential workers/u
+      error: /must not receive SMTP|Only the auth-email worker|Execution-only credential workers/u
     },
     {
-      roles: ["HTTP", "IMPORT_WORKER", "RANK_WORKER", "CONNECTOR_WORKER"],
+      roles: ["HTTP", "IMPORT_WORKER", "RANK_WORKER", "CONNECTOR_WORKER", "AUTH_EMAIL_WORKER"],
       extra: {
         MALWARE_SCANNER_ENABLED: "true",
         MALWARE_SCANNER_HOST: "clamav"
@@ -995,3 +1029,115 @@ test("rejects adapter credentials left behind while the capability is disabled",
     );
   }
 });
+
+test("enforces the isolated auth-email worker environment and timeout budget", () => {
+  const base = {
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    NATS_URL: "nats://nats:4222",
+    NATS_USER: "jobs-auth-email",
+    NATS_PASSWORD: "nats-secret",
+    AUTH_EMAIL_EVENT_ENVIRONMENT: "test",
+    JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: "e".repeat(32),
+    EMAIL_ENABLED: "true",
+    EMAIL_FROM: "jobs@example.test",
+    EMAIL_MESSAGE_ID_DOMAIN: "mail.example.test",
+    SMTP_HOST: "smtp.example.test",
+    SMTP_USER: "jobs",
+    SMTP_PASSWORD: "smtp-secret"
+  };
+
+  for (const environment of ["bad_env", "-bad", "bad-"]) {
+    assert.throws(
+      () =>
+        loadAppConfig(
+          { ...base, AUTH_EMAIL_EVENT_ENVIRONMENT: environment },
+          "AUTH_EMAIL_WORKER"
+        ),
+      /AUTH_EMAIL_EVENT_ENVIRONMENT must be/u
+    );
+  }
+  assert.throws(
+    () =>
+      loadAppConfig(
+        {
+          ...base,
+          AUTH_EMAIL_LEASE_SECONDS: "30",
+          PLATFORM_API_COMMAND_TIMEOUT_MS: "10000",
+          SMTP_CONNECTION_TIMEOUT_MS: "30000",
+          SMTP_SOCKET_TIMEOUT_MS: "120000"
+        },
+        "AUTH_EMAIL_WORKER"
+      ),
+    /AUTH_EMAIL_LEASE_SECONDS must cover/u
+  );
+  assert.throws(
+    () =>
+      loadAppConfig(
+        {
+          ...base,
+          AUTH_EMAIL_LEASE_SECONDS: "100",
+          AUTH_EMAIL_PUBLISH_TIMEOUT_MS: "10000"
+        },
+        "AUTH_EMAIL_WORKER"
+      ),
+    /DLQ publish timeouts/u
+  );
+  assert.throws(
+    () =>
+      loadAppConfig(
+        { ...base, REDIS_URL: "redis://redis:6379" },
+        "AUTH_EMAIL_WORKER"
+    ),
+    /must not receive Redis/u
+  );
+
+  for (const [extra, error] of [
+    [
+      { EMAIL_FROM: "jobs@example.test\r\nBcc: victim@example.test" },
+      /EMAIL_FROM must be/u
+    ],
+    [{ EMAIL_FROM: "Display Name <jobs@example.test>" }, /EMAIL_FROM must be/u],
+    [{ SMTP_HOST: "smtp://smtp.example.test" }, /SMTP_HOST must be/u],
+    [{ SMTP_HOST: "user@smtp.example.test" }, /SMTP_HOST must be/u],
+    [{ SMTP_USER: "jobs\nadmin" }, /SMTP_USER must contain/u],
+    [{ SMTP_PASSWORD: "secret\r\nvalue" }, /SMTP_PASSWORD must contain/u],
+    [{ SMTP_PORT: "65536" }, /SMTP_PORT must be between/u],
+    [
+      { EMAIL_MESSAGE_ID_DOMAIN: oversizedMessageIdDomain() },
+      /EMAIL_MESSAGE_ID_DOMAIN must be/u
+    ]
+  ] as const) {
+    assert.throws(
+      () =>
+        loadAppConfig({ ...base, ...extra }, "AUTH_EMAIL_WORKER"),
+      error
+    );
+  }
+
+  const rawCredentials = loadAppConfig(
+    {
+      ...base,
+      SMTP_USER: "tenant/jobs+auth=mail@example.test",
+      SMTP_PASSWORD: " leading and trailing password "
+    },
+    "AUTH_EMAIL_WORKER"
+  );
+  assert.equal(
+    rawCredentials.email.user,
+    "tenant/jobs+auth=mail@example.test"
+  );
+  assert.equal(
+    rawCredentials.email.password,
+    " leading and trailing password "
+  );
+});
+
+function oversizedMessageIdDomain(): string {
+  return [
+    "a".repeat(63),
+    "b".repeat(63),
+    "c".repeat(63),
+    "d".repeat(14)
+  ].join(".");
+}

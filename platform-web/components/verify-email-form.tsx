@@ -1,10 +1,21 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent
+} from "react";
 import {
   browserApiRequest,
   BrowserApiError
 } from "../lib/browser-api";
+import { safeAppReturnTo } from "../lib/app-path";
+import {
+  fragmentFreeBrowserPath,
+  readOneTimeTokenFragment
+} from "../lib/one-time-link";
 
 interface VerificationResult {
   readonly emailVerificationRequired: boolean;
@@ -16,52 +27,94 @@ interface AcceptedOperation {
 }
 
 export function VerifyEmailForm({
-  initialEmail
-}: Readonly<{ initialEmail: string | undefined }>) {
+  initialEmail,
+  initialReturnTo
+}: Readonly<{
+  initialEmail: string | undefined;
+  initialReturnTo: string;
+}>) {
   const [email, setEmail] = useState(initialEmail ?? "");
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [resending, setResending] = useState(false);
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
+  const automaticVerificationStarted = useRef(false);
+  const verificationInFlight = useRef(false);
+
+  const confirmToken = useCallback(
+    async (tokenValue: string): Promise<void> => {
+      if (verificationInFlight.current || !tokenValue) return;
+      verificationInFlight.current = true;
+      setBusy(true);
+      setError(undefined);
+      try {
+        const result = await browserApiRequest<VerificationResult>(
+          "/app/api/auth/email-verification/verify",
+          {
+            method: "POST",
+            body: { token: tokenValue }
+          }
+        );
+        if (!result.emailVerificationRequired) {
+          sessionStorage.removeItem("development-verification-token");
+          sessionStorage.removeItem("pending-verification-email");
+          const pendingInvite = sessionStorage.getItem(
+            "pending-workspace-invite-token"
+          );
+          const storedReturnTo = sessionStorage.getItem(
+            "pending-verification-return-to"
+          );
+          sessionStorage.removeItem("pending-verification-return-to");
+          window.location.assign(
+            pendingInvite
+              ? "/app/workspace-invites/accept"
+              : safeAppReturnTo(storedReturnTo, initialReturnTo)
+          );
+          return;
+        }
+        setError("Подтверждение не завершено. Запросите новую ссылку.");
+      } catch (requestError) {
+        setError(
+          requestError instanceof BrowserApiError &&
+            requestError.code === "RESOURCE_STATE_CONFLICT"
+            ? "Ссылка недействительна или уже использована."
+            : "Не удалось подтвердить email. Проверьте ссылку и повторите."
+        );
+      } finally {
+        verificationInFlight.current = false;
+        setBusy(false);
+      }
+    },
+    [initialReturnTo]
+  );
 
   useEffect(() => {
     setEmail(
       (value) =>
         value || sessionStorage.getItem("pending-verification-email") || ""
     );
-    setToken(
-      sessionStorage.getItem("development-verification-token") ?? ""
+    const fragment = readOneTimeTokenFragment(window.location.hash, 256);
+    if (fragment.shouldScrub) {
+      window.history.replaceState(
+        null,
+        "",
+        fragmentFreeBrowserPath(window.location)
+      );
+    }
+    const developmentToken = sessionStorage.getItem(
+      "development-verification-token"
     );
-  }, []);
+    setToken(developmentToken || "");
+    if (fragment.token && !automaticVerificationStarted.current) {
+      automaticVerificationStarted.current = true;
+      void confirmToken(fragment.token);
+    }
+  }, [confirmToken]);
 
   async function verify(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (busy) return;
-    setBusy(true);
-    setError(undefined);
-    try {
-      const result = await browserApiRequest<VerificationResult>(
-        "/app/api/auth/email-verification/verify",
-        {
-          method: "POST",
-          body: { token: token.trim() }
-        }
-      );
-      if (!result.emailVerificationRequired) {
-        sessionStorage.removeItem("development-verification-token");
-        sessionStorage.removeItem("pending-verification-email");
-        window.location.assign("/app");
-      }
-    } catch (requestError) {
-      setBusy(false);
-      setError(
-        requestError instanceof BrowserApiError &&
-          requestError.code === "RESOURCE_STATE_CONFLICT"
-          ? "Ссылка недействительна или уже использована."
-          : "Не удалось подтвердить email. Проверьте ссылку и повторите."
-      );
-    }
+    await confirmToken(token.trim());
   }
 
   async function resend(): Promise<void> {

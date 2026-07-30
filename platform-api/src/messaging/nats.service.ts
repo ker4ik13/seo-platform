@@ -15,7 +15,11 @@ import {
   type JetStreamManager,
   type PubAck
 } from "@nats-io/jetstream";
-import { sessionFamilyRevokedEventSubjectV1 } from "@seo-platform/contracts";
+import {
+  sessionFamilyRevokedEventSubjectV1,
+  transactionalEmailEventSubjectV1,
+  transactionalEmailEventTypesV1
+} from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 
@@ -65,43 +69,79 @@ export class NatsService implements OnModuleInit, OnApplicationShutdown {
   public async assertOutboxStream(): Promise<void> {
     if (!this.config.outboxPublisher.enabled) return;
     const streamName = this.config.outboxPublisher.streamName;
+    const authEmailStreamName =
+      this.config.outboxPublisher.authEmailStreamName;
     const eventEnvironment = this.config.outboxPublisher.eventEnvironment;
-    if (!streamName || !eventEnvironment || !this.jetStreamManager) {
+    if (
+      !streamName ||
+      !authEmailStreamName ||
+      !eventEnvironment ||
+      !this.jetStreamManager
+    ) {
       throw new Error("JetStream outbox publisher is not initialized");
     }
+    if (streamName === authEmailStreamName) {
+      throw new Error("JetStream outbox streams must be independent");
+    }
 
-    const info = await this.jetStreamManager.streams.info(streamName);
-    if (info.config.name !== streamName) {
-      throw new Error("JetStream outbox stream identity mismatch");
-    }
-    const subject = sessionFamilyRevokedEventSubjectV1(eventEnvironment);
-    if (
-      info.config.subjects?.length !== 1 ||
-      info.config.subjects[0] !== subject
-    ) {
-      throw new Error("JetStream outbox stream subject scope mismatch");
-    }
+    await this.assertStream(streamName, [
+      sessionFamilyRevokedEventSubjectV1(eventEnvironment)
+    ]);
+    await this.assertStream(
+      authEmailStreamName,
+      Object.values(transactionalEmailEventTypesV1).map((eventType) =>
+        transactionalEmailEventSubjectV1(eventEnvironment, eventType)
+      )
+    );
   }
 
   public async publishOutboxEvent(
     subject: string,
     payload: string,
-    eventId: string
+    eventId: string,
+    expectedStreamName: string
   ): Promise<PubAck> {
-    const streamName = this.config.outboxPublisher.streamName;
     if (
       !this.config.outboxPublisher.enabled ||
-      !streamName ||
       !this.jetStream
     ) {
       throw new Error("JetStream outbox publisher is not initialized");
+    }
+    if (
+      expectedStreamName !== this.config.outboxPublisher.streamName &&
+      expectedStreamName !==
+        this.config.outboxPublisher.authEmailStreamName
+    ) {
+      throw new Error("JetStream expected stream is not configured");
     }
 
     return this.jetStream.publish(subject, payload, {
       msgID: eventId,
       timeout: this.config.outboxPublisher.publishTimeoutMs,
-      expect: { streamName }
+      expect: { streamName: expectedStreamName }
     });
+  }
+
+  private async assertStream(
+    streamName: string,
+    expectedSubjects: readonly string[]
+  ): Promise<void> {
+    if (!this.jetStreamManager) {
+      throw new Error("JetStream outbox publisher is not initialized");
+    }
+    const info = await this.jetStreamManager.streams.info(streamName);
+    if (info.config.name !== streamName) {
+      throw new Error("JetStream outbox stream identity mismatch");
+    }
+    const actualSubjects = info.config.subjects;
+    if (
+      actualSubjects?.length !== expectedSubjects.length ||
+      expectedSubjects.some(
+        (subject, index) => actualSubjects[index] !== subject
+      )
+    ) {
+      throw new Error("JetStream outbox stream subject scope mismatch");
+    }
   }
 
   public async onApplicationShutdown(): Promise<void> {

@@ -31,6 +31,10 @@ const natsCredentialMappings = new Map([
     ["NATS_REALTIME_CONSUMER_USER", "NATS_REALTIME_CONSUMER_PASSWORD"]
   ],
   [
+    "auth-email-worker",
+    ["NATS_AUTH_EMAIL_CONSUMER_USER", "NATS_AUTH_EMAIL_CONSUMER_PASSWORD"]
+  ],
+  [
     "nats-topology-provisioner",
     ["NATS_PROVISIONER_USER", "NATS_PROVISIONER_PASSWORD"]
   ]
@@ -40,6 +44,7 @@ const natsPasswordHashes = [
   "NATS_RUNTIME_PASSWORD_HASH",
   "NATS_PLATFORM_PUBLISHER_PASSWORD_HASH",
   "NATS_REALTIME_CONSUMER_PASSWORD_HASH",
+  "NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH",
   "NATS_PROVISIONER_PASSWORD_HASH"
 ];
 
@@ -79,7 +84,7 @@ test("NATS server renders a private config inside a hardened container", async (
   assert.match(config, /^\s*store_dir:\s*"\/data"$/mu);
   assert.equal(balanced(config, "{", "}"), true);
   assert.equal(balanced(config, "[", "]"), true);
-  assert.doesNotMatch(config, /password:\s*\$NATS_(?:RUNTIME|PLATFORM_PUBLISHER|REALTIME_CONSUMER|PROVISIONER)_PASSWORD(?:\s|$)/u);
+  assert.doesNotMatch(config, /password:\s*\$NATS_(?:RUNTIME|PLATFORM_PUBLISHER|REALTIME_CONSUMER|AUTH_EMAIL_CONSUMER|PROVISIONER)_PASSWORD(?:\s|$)/u);
   for (const hashName of natsPasswordHashes) {
     assert.match(
       config,
@@ -94,6 +99,7 @@ test("NATS ACL grants exact runtime publisher consumer and provisioner subjects"
   const runtime = userBlock(config, "NATS_RUNTIME_USER");
   const publisher = userBlock(config, "NATS_PLATFORM_PUBLISHER_USER");
   const consumer = userBlock(config, "NATS_REALTIME_CONSUMER_USER");
+  const authEmailConsumer = userBlock(config, "NATS_AUTH_EMAIL_CONSUMER_USER");
   const provisioner = userBlock(config, "NATS_PROVISIONER_USER");
 
   assert.deepEqual(permissionSubjects(runtime, "publish"), [">"]);
@@ -103,8 +109,12 @@ test("NATS ACL grants exact runtime publisher consumer and provisioner subjects"
 
   assert.deepEqual(permissionSubjects(publisher, "publish"), sorted([
     "$NATS_IDENTITY_EVENT_SUBJECT",
+    "$NATS_EMAIL_VERIFICATION_EVENT_SUBJECT",
+    "$NATS_PASSWORD_RESET_EVENT_SUBJECT",
+    "$NATS_WORKSPACE_INVITE_EVENT_SUBJECT",
     "$JS.API.INFO",
-    "$JS.API.STREAM.INFO.IDENTITY_EVENTS"
+    "$JS.API.STREAM.INFO.IDENTITY_EVENTS",
+    "$JS.API.STREAM.INFO.AUTH_EMAIL_EVENTS"
   ]));
   assert.deepEqual(permissionSubjects(publisher, "subscribe"), ["_INBOX.>"]);
 
@@ -119,20 +129,38 @@ test("NATS ACL grants exact runtime publisher consumer and provisioner subjects"
   ]));
   assert.deepEqual(permissionSubjects(consumer, "subscribe"), ["_INBOX.>"]);
 
+  assert.deepEqual(permissionSubjects(authEmailConsumer, "publish"), sorted([
+    "$JS.API.INFO",
+    "$JS.API.STREAM.INFO.AUTH_EMAIL_EVENTS",
+    "$JS.API.STREAM.INFO.DOMAIN_EVENTS_DLQ",
+    "$JS.API.CONSUMER.INFO.AUTH_EMAIL_EVENTS.jobs_auth_email_v1",
+    "$JS.API.CONSUMER.MSG.NEXT.AUTH_EMAIL_EVENTS.jobs_auth_email_v1",
+    "$JS.ACK.AUTH_EMAIL_EVENTS.jobs_auth_email_v1.>",
+    "$NATS_AUTH_EMAIL_DLQ_SUBJECT"
+  ]));
+  assert.deepEqual(permissionSubjects(authEmailConsumer, "subscribe"), [
+    "_INBOX.>"
+  ]);
+
   assert.deepEqual(permissionSubjects(provisioner, "publish"), sorted([
     "$JS.API.INFO",
     "$JS.API.STREAM.INFO.IDENTITY_EVENTS",
     "$JS.API.STREAM.CREATE.IDENTITY_EVENTS",
     "$JS.API.STREAM.UPDATE.IDENTITY_EVENTS",
+    "$JS.API.STREAM.INFO.AUTH_EMAIL_EVENTS",
+    "$JS.API.STREAM.CREATE.AUTH_EMAIL_EVENTS",
+    "$JS.API.STREAM.UPDATE.AUTH_EMAIL_EVENTS",
     "$JS.API.STREAM.INFO.DOMAIN_EVENTS_DLQ",
     "$JS.API.STREAM.CREATE.DOMAIN_EVENTS_DLQ",
     "$JS.API.STREAM.UPDATE.DOMAIN_EVENTS_DLQ",
     "$JS.API.CONSUMER.INFO.IDENTITY_EVENTS.realtime_session_family_revoked_v1",
-    "$JS.API.CONSUMER.CREATE.IDENTITY_EVENTS.realtime_session_family_revoked_v1.>"
+    "$JS.API.CONSUMER.CREATE.IDENTITY_EVENTS.realtime_session_family_revoked_v1.>",
+    "$JS.API.CONSUMER.INFO.AUTH_EMAIL_EVENTS.jobs_auth_email_v1",
+    "$JS.API.CONSUMER.CREATE.AUTH_EMAIL_EVENTS.jobs_auth_email_v1.>"
   ]));
   assert.deepEqual(permissionSubjects(provisioner, "subscribe"), ["_INBOX.>"]);
 
-  for (const block of [publisher, consumer]) {
+  for (const block of [publisher, consumer, authEmailConsumer]) {
     assert.doesNotMatch(block, /\.CREATE\.|\.UPDATE\.|\.DELETE\./u);
   }
   assert.doesNotMatch(provisioner, /\.DELETE\.|\.PURGE\.|\.MSG\.GET\./u);
@@ -170,15 +198,22 @@ test("Compose maps each NATS identity only to its exact runtime audience", async
     "NATS_PLATFORM_PUBLISHER_PASSWORD_HASH",
     "NATS_REALTIME_CONSUMER_USER",
     "NATS_REALTIME_CONSUMER_PASSWORD_HASH",
+    "NATS_AUTH_EMAIL_CONSUMER_USER",
+    "NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH",
     "NATS_PROVISIONER_USER",
     "NATS_PROVISIONER_PASSWORD_HASH",
     "NATS_IDENTITY_EVENT_SUBJECT",
-    "NATS_IDENTITY_EVENT_DLQ_SUBJECT"
+    "NATS_IDENTITY_EVENT_DLQ_SUBJECT",
+    "NATS_EMAIL_VERIFICATION_EVENT_SUBJECT",
+    "NATS_PASSWORD_RESET_EVENT_SUBJECT",
+    "NATS_WORKSPACE_INVITE_EVENT_SUBJECT",
+    "NATS_AUTH_EMAIL_DLQ_SUBJECT"
   ]));
   for (const passwordName of [
     "NATS_RUNTIME_PASSWORD",
     "NATS_PLATFORM_PUBLISHER_PASSWORD",
     "NATS_REALTIME_CONSUMER_PASSWORD",
+    "NATS_AUTH_EMAIL_CONSUMER_PASSWORD",
     "NATS_PROVISIONER_PASSWORD"
   ]) {
     assert.equal(natsEnvironment.has(passwordName), false);
@@ -193,6 +228,7 @@ test("publisher and consumer receive canonical topology and wait for provisioner
 
   assert.equal(stripMatchingQuotes(platformApi.get("OUTBOX_PUBLISHER_ENABLED")), "true");
   assert.equal(platformApi.get("NATS_EVENT_STREAM"), "IDENTITY_EVENTS");
+  assert.equal(platformApi.get("NATS_AUTH_EMAIL_STREAM"), "AUTH_EMAIL_EVENTS");
   assertInterpolation(platformApi.get("NATS_EVENT_ENVIRONMENT"), "NATS_EVENT_ENVIRONMENT");
 
   assert.equal(stripMatchingQuotes(realtime.get("NATS_EVENT_CONSUMER_ENABLED")), "true");
@@ -208,7 +244,13 @@ test("publisher and consumer receive canonical topology and wait for provisioner
     "${NATS_EVENT_SHUTDOWN_GRACE_MS:-10000}"
   );
 
-  for (const serviceName of ["platform-api", "realtime"]) {
+  const authEmailWorker = serviceEnvironment(document, "auth-email-worker");
+  assertInterpolation(
+    authEmailWorker.get("AUTH_EMAIL_EVENT_ENVIRONMENT"),
+    "NATS_EVENT_ENVIRONMENT"
+  );
+
+  for (const serviceName of ["platform-api", "realtime", "auth-email-worker"]) {
     assertDependency(document, serviceName, "service-token-preflight");
     assertDependency(document, serviceName, "nats", "service_healthy");
     assertDependency(document, serviceName, "nats-topology-provisioner");
@@ -266,22 +308,24 @@ test("example validation supplies distinct generated NATS inputs", async () => {
     "NATS_RUNTIME_USER",
     "NATS_PLATFORM_PUBLISHER_USER",
     "NATS_REALTIME_CONSUMER_USER",
+    "NATS_AUTH_EMAIL_CONSUMER_USER",
     "NATS_PROVISIONER_USER"
   ];
   const passwords = [
     "NATS_RUNTIME_PASSWORD",
     "NATS_PLATFORM_PUBLISHER_PASSWORD",
     "NATS_REALTIME_CONSUMER_PASSWORD",
+    "NATS_AUTH_EMAIL_CONSUMER_PASSWORD",
     "NATS_PROVISIONER_PASSWORD"
   ];
-  assert.equal(new Set(names.map((name) => assignments.get(name))).size, 4);
+  assert.equal(new Set(names.map((name) => assignments.get(name))).size, 5);
   const passwordValues = passwords.map((name) => assignments.get(name));
   for (const value of passwordValues) {
     assert.equal(typeof value, "string");
     assert.ok(value.length >= 32);
     assert.match(value, /^[A-Za-z][-A-Za-z0-9._~]+$/u);
   }
-  assert.equal(new Set(passwordValues).size, 4);
+  assert.equal(new Set(passwordValues).size, 5);
   const hashValues = natsPasswordHashes.map((name) => {
     const value = assignments.get(name);
     assert.equal(typeof value, "string");
@@ -292,7 +336,7 @@ test("example validation supplies distinct generated NATS inputs", async () => {
     );
     return unquoted;
   });
-  assert.equal(new Set(hashValues).size, 4);
+  assert.equal(new Set(hashValues).size, 5);
   assert.equal(assignments.get("NATS_EVENT_ENVIRONMENT"), "ci");
 });
 

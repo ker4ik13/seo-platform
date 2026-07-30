@@ -47,10 +47,16 @@ NATS_PLATFORM_PUBLISHER_USER
 NATS_PLATFORM_PUBLISHER_PASSWORD_HASH
 NATS_REALTIME_CONSUMER_USER
 NATS_REALTIME_CONSUMER_PASSWORD_HASH
+NATS_AUTH_EMAIL_CONSUMER_USER
+NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH
 NATS_PROVISIONER_USER
 NATS_PROVISIONER_PASSWORD_HASH
 NATS_IDENTITY_EVENT_SUBJECT
-NATS_IDENTITY_EVENT_DLQ_SUBJECT'
+NATS_IDENTITY_EVENT_DLQ_SUBJECT
+NATS_EMAIL_VERIFICATION_EVENT_SUBJECT
+NATS_PASSWORD_RESET_EVENT_SUBJECT
+NATS_WORKSPACE_INVITE_EVENT_SUBJECT
+NATS_AUTH_EMAIL_DLQ_SUBJECT'
 
 for required_name in $required_names; do
   if ! printenv "$required_name" >/dev/null 2>&1; then
@@ -61,10 +67,12 @@ done
 username_names='NATS_RUNTIME_USER
 NATS_PLATFORM_PUBLISHER_USER
 NATS_REALTIME_CONSUMER_USER
+NATS_AUTH_EMAIL_CONSUMER_USER
 NATS_PROVISIONER_USER'
 hash_names='NATS_RUNTIME_PASSWORD_HASH
 NATS_PLATFORM_PUBLISHER_PASSWORD_HASH
 NATS_REALTIME_CONSUMER_PASSWORD_HASH
+NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH
 NATS_PROVISIONER_PASSWORD_HASH'
 marker_names="$required_names"
 
@@ -119,17 +127,45 @@ done
 
 identity_subject=$(printenv NATS_IDENTITY_EVENT_SUBJECT)
 dlq_subject=$(printenv NATS_IDENTITY_EVENT_DLQ_SUBJECT)
+email_verification_subject=$(printenv NATS_EMAIL_VERIFICATION_EVENT_SUBJECT)
+password_reset_subject=$(printenv NATS_PASSWORD_RESET_EVENT_SUBJECT)
+workspace_invite_subject=$(printenv NATS_WORKSPACE_INVITE_EVENT_SUBJECT)
+auth_email_dlq_subject=$(printenv NATS_AUTH_EMAIL_DLQ_SUBJECT)
 if ! printf '%s' "$identity_subject" | grep -Eq '^[a-z][a-z0-9_-]{0,31}\.identity\.session-family\.revoked\.v1$'; then
   fail 'NATS_IDENTITY_EVENT_SUBJECT is invalid'
 fi
 if ! printf '%s' "$dlq_subject" | grep -Eq '^[a-z][a-z0-9_-]{0,31}\.dlq\.realtime\.identity\.session-family\.revoked\.v1$'; then
   fail 'NATS_IDENTITY_EVENT_DLQ_SUBJECT is invalid'
 fi
+if ! printf '%s' "$email_verification_subject" | grep -Eq '^[a-z][a-z0-9_-]{0,31}\.email\.identity\.email-verification\.requested\.v1$'; then
+  fail 'NATS_EMAIL_VERIFICATION_EVENT_SUBJECT is invalid'
+fi
+if ! printf '%s' "$password_reset_subject" | grep -Eq '^[a-z][a-z0-9_-]{0,31}\.email\.identity\.password-reset\.requested\.v1$'; then
+  fail 'NATS_PASSWORD_RESET_EVENT_SUBJECT is invalid'
+fi
+if ! printf '%s' "$workspace_invite_subject" | grep -Eq '^[a-z][a-z0-9_-]{0,31}\.email\.workspace\.invite\.requested\.v1$'; then
+  fail 'NATS_WORKSPACE_INVITE_EVENT_SUBJECT is invalid'
+fi
+if ! printf '%s' "$auth_email_dlq_subject" | grep -Eq '^[a-z][a-z0-9_-]{0,31}\.dlq\.jobs\.transactional-email\.v1$'; then
+  fail 'NATS_AUTH_EMAIL_DLQ_SUBJECT is invalid'
+fi
 identity_environment=${identity_subject%.identity.session-family.revoked.v1}
 dlq_environment=${dlq_subject%.dlq.realtime.identity.session-family.revoked.v1}
-if [ "$identity_environment" != "$dlq_environment" ]; then
-  fail 'NATS identity and DLQ subjects must use the same environment'
-fi
+email_verification_environment=${email_verification_subject%.email.identity.email-verification.requested.v1}
+password_reset_environment=${password_reset_subject%.email.identity.password-reset.requested.v1}
+workspace_invite_environment=${workspace_invite_subject%.email.workspace.invite.requested.v1}
+auth_email_dlq_environment=${auth_email_dlq_subject%.dlq.jobs.transactional-email.v1}
+for event_environment in \
+  "$dlq_environment" \
+  "$email_verification_environment" \
+  "$password_reset_environment" \
+  "$workspace_invite_environment" \
+  "$auth_email_dlq_environment"
+do
+  if [ "$identity_environment" != "$event_environment" ]; then
+    fail 'NATS event and DLQ subjects must use the same environment'
+  fi
+done
 
 : > "$temporary_config"
 chmod 600 "$temporary_config"
@@ -150,6 +186,15 @@ while IFS= read -r line || [ -n "$line" ]; do
     '            "__NATS_IDENTITY_EVENT_SUBJECT__",')
       printf '            "%s",\n' "$identity_subject"
       ;;
+    '            "__NATS_EMAIL_VERIFICATION_EVENT_SUBJECT__",')
+      printf '            "%s",\n' "$email_verification_subject"
+      ;;
+    '            "__NATS_PASSWORD_RESET_EVENT_SUBJECT__",')
+      printf '            "%s",\n' "$password_reset_subject"
+      ;;
+    '            "__NATS_WORKSPACE_INVITE_EVENT_SUBJECT__",')
+      printf '            "%s",\n' "$workspace_invite_subject"
+      ;;
     '      user: "__NATS_REALTIME_CONSUMER_USER__"')
       printf '      user: "%s"\n' "$NATS_REALTIME_CONSUMER_USER"
       ;;
@@ -158,6 +203,15 @@ while IFS= read -r line || [ -n "$line" ]; do
       ;;
     '            "__NATS_IDENTITY_EVENT_DLQ_SUBJECT__"')
       printf '            "%s"\n' "$dlq_subject"
+      ;;
+    '      user: "__NATS_AUTH_EMAIL_CONSUMER_USER__"')
+      printf '      user: "%s"\n' "$NATS_AUTH_EMAIL_CONSUMER_USER"
+      ;;
+    '      password: "__NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH__"')
+      printf '      password: "%s"\n' "$NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH"
+      ;;
+    '            "__NATS_AUTH_EMAIL_DLQ_SUBJECT__"')
+      printf '            "%s"\n' "$auth_email_dlq_subject"
       ;;
     '      user: "__NATS_PROVISIONER_USER__"')
       printf '      user: "%s"\n' "$NATS_PROVISIONER_USER"
@@ -185,11 +239,21 @@ unset \
   NATS_PLATFORM_PUBLISHER_PASSWORD_HASH \
   NATS_REALTIME_CONSUMER_USER \
   NATS_REALTIME_CONSUMER_PASSWORD_HASH \
+  NATS_AUTH_EMAIL_CONSUMER_USER \
+  NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH \
   NATS_PROVISIONER_USER \
   NATS_PROVISIONER_PASSWORD_HASH \
   NATS_IDENTITY_EVENT_SUBJECT \
   NATS_IDENTITY_EVENT_DLQ_SUBJECT \
-  identity_subject dlq_subject identity_environment dlq_environment \
+  NATS_EMAIL_VERIFICATION_EVENT_SUBJECT \
+  NATS_PASSWORD_RESET_EVENT_SUBJECT \
+  NATS_WORKSPACE_INVITE_EVENT_SUBJECT \
+  NATS_AUTH_EMAIL_DLQ_SUBJECT \
+  identity_subject dlq_subject email_verification_subject \
+  password_reset_subject workspace_invite_subject auth_email_dlq_subject \
+  identity_environment dlq_environment email_verification_environment \
+  password_reset_environment workspace_invite_environment \
+  auth_email_dlq_environment event_environment \
   validated_usernames validated_hashes required_names username_names hash_names \
   marker_names marker_name marker marker_count required_name username_name \
   hash_name previous_name

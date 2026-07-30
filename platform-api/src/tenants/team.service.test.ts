@@ -16,6 +16,11 @@ import { TeamService } from "./team.service.js";
 
 const WORKSPACE_ID = "01900000-0000-7000-8000-000000000001";
 const OTHER_WORKSPACE_ID = "01900000-0000-7000-8000-000000000002";
+const USER_ID = "01900000-0000-7000-8000-000000000003";
+const INVITE_ID = "01900000-0000-7000-8000-000000000004";
+const ACCEPTED_MEMBER_ID = "01900000-0000-7000-8000-000000000005";
+const INVITE_TOKEN = "workspace-invite-test-token";
+const REQUEST_CONTEXT = { requestId: "team-service-test-request" } as const;
 const CONFIG = loadAppConfig({
   NODE_ENV: "test",
   DATABASE_URL: "postgresql://test",
@@ -115,6 +120,188 @@ test("lists only active unexpired pending invitations with a bounded page", asyn
     (where?.expiresAt as { readonly gt?: unknown } | undefined)?.gt instanceof
       Date
   );
+});
+
+test("locks the account, workspace and invitation before rejecting an unverified account", async () => {
+  const queries: string[] = [];
+  let invitationRead = false;
+  const transaction = {
+    $queryRaw: async (parts: TemplateStringsArray) => {
+      queries.push(parts.join("?"));
+      return [{ id: USER_ID }];
+    },
+    user: {
+      findUnique: async () => ({
+        ...member(USER_ID, "invite@example.com").user,
+        emailVerifiedAt: null
+      })
+    },
+    workspaceInvite: {
+      findUnique: async () => {
+        invitationRead = true;
+        return null;
+      }
+    }
+  };
+  const prisma = {
+    workspaceInvite: {
+      findUnique: async () => ({ id: INVITE_ID, workspaceId: WORKSPACE_ID })
+    },
+    $transaction: async <T>(
+      operation: (value: typeof transaction) => Promise<T>
+    ) => operation(transaction)
+  } as unknown as PrismaService;
+
+  await assert.rejects(
+    teamService(prisma).acceptInvite(USER_ID, INVITE_TOKEN, REQUEST_CONTEXT),
+    (error: unknown) =>
+      error instanceof DomainError &&
+      error.statusCode === 409 &&
+      error.code === "EMAIL_VERIFICATION_REQUIRED"
+  );
+  assert.equal(invitationRead, false);
+  assert.equal(queries.length, 3);
+  assert.match(queries[0] ?? "", /FROM users/);
+  assert.match(queries[1] ?? "", /FROM workspaces/);
+  assert.match(queries[2] ?? "", /FROM workspace_invites/);
+});
+
+test("returns a dedicated error when a valid invitation belongs to another verified account", async () => {
+  const now = new Date("2026-07-30T12:00:00.000Z");
+  const tokenHash = new AuthCryptoService(CONFIG).hashOpaqueToken(INVITE_TOKEN);
+  const queries: string[] = [];
+  const transaction = {
+    $queryRaw: async (parts: TemplateStringsArray) => {
+      const query = parts.join("?");
+      queries.push(query);
+      return query.includes("clock_timestamp")
+        ? [{ now }]
+        : [{ id: USER_ID }];
+    },
+    user: {
+      findUnique: async () => member(USER_ID, "signed-in@example.com").user
+    },
+    workspaceInvite: {
+      findUnique: async () => ({
+        ...invite(INVITE_ID, "invite@example.com"),
+        tokenHash,
+        workspace: { status: "ACTIVE" }
+      })
+    }
+  };
+  const prisma = {
+    workspaceInvite: {
+      findUnique: async () => ({ id: INVITE_ID, workspaceId: WORKSPACE_ID })
+    },
+    $transaction: async <T>(
+      operation: (value: typeof transaction) => Promise<T>
+    ) => operation(transaction)
+  } as unknown as PrismaService;
+
+  await assert.rejects(
+    teamService(prisma).acceptInvite(USER_ID, INVITE_TOKEN, REQUEST_CONTEXT),
+    (error: unknown) =>
+      error instanceof DomainError &&
+      error.statusCode === 403 &&
+      error.code === "INVITATION_ACCOUNT_MISMATCH"
+  );
+  assert.equal(queries.length, 4);
+  assert.match(queries[3] ?? "", /clock_timestamp/);
+});
+
+test("accepts a matching verified invitation in one authoritative transaction", async () => {
+  const now = new Date("2026-07-30T12:00:00.000Z");
+  const crypto = new AuthCryptoService(CONFIG);
+  const tokenHash = crypto.hashOpaqueToken(INVITE_TOKEN);
+  const activeUser = member(USER_ID, "invite@example.com").user;
+  const acceptedMember = {
+    ...member(ACCEPTED_MEMBER_ID, "invite@example.com"),
+    userId: USER_ID,
+    roleCode: "VIEWER",
+    user: activeUser
+  };
+  const queries: string[] = [];
+  const auditCalls: unknown[] = [];
+  const outboxCalls: unknown[] = [];
+  let accessDeletes = 0;
+  let inviteTransitions = 0;
+  const transaction = {
+    $queryRaw: async (parts: TemplateStringsArray) => {
+      const query = parts.join("?");
+      queries.push(query);
+      return query.includes("clock_timestamp")
+        ? [{ now }]
+        : [{ id: USER_ID }];
+    },
+    user: {
+      findUnique: async () => activeUser
+    },
+    workspaceInvite: {
+      findUnique: async () => ({
+        ...invite(INVITE_ID, "invite@example.com"),
+        tokenHash,
+        workspace: { status: "ACTIVE" }
+      }),
+      updateMany: async () => {
+        inviteTransitions += 1;
+        return { count: 1 };
+      }
+    },
+    workspaceMember: {
+      findUnique: async (input: {
+        readonly where: Readonly<Record<string, unknown>>;
+      }) => (Object.hasOwn(input.where, "id") ? acceptedMember : null),
+      upsert: async () => acceptedMember
+    },
+    projectMemberAccess: {
+      deleteMany: async () => {
+        accessDeletes += 1;
+        return { count: 0 };
+      },
+      createMany: async () => {
+        throw new Error("empty project access must not create rows");
+      }
+    }
+  };
+  const prisma = {
+    workspaceInvite: {
+      findUnique: async () => ({ id: INVITE_ID, workspaceId: WORKSPACE_ID })
+    },
+    $transaction: async <T>(
+      operation: (value: typeof transaction) => Promise<T>
+    ) => operation(transaction)
+  } as unknown as PrismaService;
+  const audit = {
+    record: async (input: unknown) => {
+      auditCalls.push(input);
+    }
+  } as unknown as AuditService;
+  const outbox = {
+    event: async (_transaction: unknown, input: unknown) => {
+      outboxCalls.push(input);
+    }
+  } as unknown as OutboxService;
+  const service = new TeamService(prisma, audit, outbox, crypto, CONFIG);
+
+  const result = await service.acceptInvite(
+    USER_ID,
+    INVITE_TOKEN,
+    REQUEST_CONTEXT
+  );
+
+  assert.equal(result.id, ACCEPTED_MEMBER_ID);
+  assert.equal(result.userId, USER_ID);
+  assert.equal(result.roleCode, "VIEWER");
+  assert.equal(inviteTransitions, 1);
+  assert.equal(accessDeletes, 1);
+  assert.equal(auditCalls.length, 1);
+  assert.equal(outboxCalls.length, 2);
+  assert.doesNotMatch(JSON.stringify(outboxCalls), /workspace-invite-test-token/u);
+  assert.match(queries[0] ?? "", /FROM users/);
+  assert.match(queries[1] ?? "", /FROM workspaces/);
+  assert.match(queries[2] ?? "", /FROM workspace_invites/);
+  assert.match(queries[3] ?? "", /clock_timestamp/);
+  assert.match(queries[4] ?? "", /FROM workspace_members/);
 });
 
 function teamService(prisma: PrismaService): TeamService {

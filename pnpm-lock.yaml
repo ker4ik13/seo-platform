@@ -122,6 +122,9 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: 3.1096.0
         version: 3.1096.0
+      '@nats-io/jetstream':
+        specifier: 3.4.0
+        version: 3.4.0
       '@nats-io/transport-node':
         specifier: 3.4.0
         version: 3.4.0

@@ -1,3 +1,4 @@
+export * from "./api/auth-email-deliveries.js";
 export * from "./api/identity.js";
 export * from "./api/integrations.js";
 export * from "./api/keywords.js";
@@ -18,6 +19,7 @@ export * from "./events/identity.js";
 export * from "./events/integrations.js";
 export * from "./events/rankings.js";
 export * from "./events/tracking-contexts.js";
+export * from "./events/transactional-email.js";
 export * from "./health.js";
 export * from "./http/errors.js";
 export * from "./http/responses.js";

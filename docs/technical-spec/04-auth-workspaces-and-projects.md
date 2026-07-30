@@ -61,6 +61,8 @@
 - rate limit по IP, email и device fingerprint;
 - email подтверждается одноразовой ссылкой;
 - ссылка одноразовая и имеет срок действия;
+- одноразовый token передаётся только во fragment `#token=...`, а Web удаляет
+  fragment из browser history до вызова same-origin BFF;
 - повторная отправка ограничена.
 
 ### 2.1.1. Восстановление пароля
@@ -83,6 +85,32 @@
   password snapshot, не создаёт сессию после reset.
 - Просроченная, использованная или отозванная ссылка возвращает безопасное
   состояние без раскрытия дополнительных данных аккаунта.
+
+### 2.1.2. Transactional auth-email delivery
+
+Подтверждение email, password reset и workspace invite используют выделенный
+поток ADR-2026-038, независимый от notification preferences, quiet hours и
+digest:
+
+- domain transaction пишет только secret-free intent event;
+- event не содержит recipient, plaintext token, action URL, subject или body;
+- worker непосредственно перед SMTP запрашивает у Platform API JIT material;
+- Platform API повторно проверяет authoritative user/token/invite/workspace
+  state и возвращает `SKIPPED/NOT_DELIVERABLE` для stale, revoked, consumed или
+  expired intent;
+- plaintext token восстанавливается только в памяти, передаётся в action URL
+  только во fragment и не сохраняется в outbox, NATS, Jobs DB, queue или
+  логах;
+- source delivery at-least-once, а одна durable Jobs attempt определяется
+  exact source event ID/type/hash;
+- SMTP accept не атомарен с PostgreSQL. Crash до durable receipt может дать
+  повторное письмо со стабильным `Message-ID`; exactly-once не заявляется.
+
+Production SMTP account, sender domain и credentials настраиваются оператором
+в защищённом deployment secret store. Их отсутствие в repository является
+ожидаемым; без полной конфигурации auth-email worker обязан fail-closed не
+стартовать. Он получает только `AUTH_EMAIL_SMTP_*`; отдельные
+`DIRECTUS_SMTP_*` не переиспользуются.
 
 ### 2.2. OAuth/OIDC
 
@@ -280,7 +308,16 @@
 - повторное приглашение не создаёт дублирующее активное членство;
 - приглашение можно отозвать;
 - принятие приглашения новым пользователем включает регистрацию;
-- email приглашения и аккаунта должен совпадать либо пользователь подтверждает смену;
+- invitation link использует только fragment token и отдельный Web route
+  `/app/workspace-invites/accept`; fragment немедленно удаляется из history;
+- перед отправкой Platform API JIT повторно требует актуальное состояние
+  `SENT`, точный workspace и неистёкший invite, иначе доставка отменяется;
+- подтверждённая отправка идемпотентно переводит только актуальный
+  `SENT → DELIVERED`; принятие, отзыв или expiry имеют приоритет;
+- hard recipient rejection после durable redacted DLQ идемпотентно переводит
+  только актуальный `SENT → BOUNCED`;
+- приглашение принимает только активный аккаунт с подтверждённым email,
+  который точно совпадает с email приглашения;
 - удаление участника немедленно отзывает доступ и WebSocket rooms;
 - пользовательские данные автора в исторических записях сохраняются.
 

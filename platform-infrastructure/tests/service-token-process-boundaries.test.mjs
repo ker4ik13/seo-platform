@@ -16,6 +16,7 @@ const globallyDistinctDeployCredentials = [
   "JOBS_TO_SEO_RANK_TOKEN",
   "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
   "JOBS_TO_SEO_RANK_RESULT_TOKEN",
+  "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN",
   "RANK_HISTORY_CURSOR_KEY",
   "REDIS_JOBS_API_PASSWORD",
   "REDIS_JOBS_SYSTEM_PASSWORD",
@@ -28,6 +29,7 @@ const globallyDistinctDeployCredentials = [
   "NATS_RUNTIME_PASSWORD",
   "NATS_PLATFORM_PUBLISHER_PASSWORD",
   "NATS_REALTIME_CONSUMER_PASSWORD",
+  "NATS_AUTH_EMAIL_CONSUMER_PASSWORD",
   "NATS_PROVISIONER_PASSWORD"
 ];
 
@@ -35,6 +37,7 @@ const natsUsernameInputs = [
   "NATS_RUNTIME_USER",
   "NATS_PLATFORM_PUBLISHER_USER",
   "NATS_REALTIME_CONSUMER_USER",
+  "NATS_AUTH_EMAIL_CONSUMER_USER",
   "NATS_PROVISIONER_USER"
 ];
 
@@ -42,8 +45,35 @@ const natsPasswordHashInputs = [
   "NATS_RUNTIME_PASSWORD_HASH",
   "NATS_PLATFORM_PUBLISHER_PASSWORD_HASH",
   "NATS_REALTIME_CONSUMER_PASSWORD_HASH",
+  "NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH",
   "NATS_PROVISIONER_PASSWORD_HASH"
 ];
+
+const smtpPreflightInputs = [
+  "AUTH_EMAIL_SMTP_USER",
+  "AUTH_EMAIL_SMTP_PASSWORD",
+  "DIRECTUS_SMTP_USER",
+  "DIRECTUS_SMTP_PASSWORD"
+];
+
+const emailDeployInputBoundaries = new Map([
+  ["AUTH_EMAIL_FROM", ["auth-email-worker"]],
+  ["AUTH_EMAIL_MESSAGE_ID_DOMAIN", ["auth-email-worker"]],
+  ["AUTH_EMAIL_SMTP_HOST", ["auth-email-worker"]],
+  ["AUTH_EMAIL_SMTP_PORT", ["auth-email-worker"]],
+  ["AUTH_EMAIL_SMTP_SECURE", ["auth-email-worker"]],
+  ["AUTH_EMAIL_SMTP_USER", ["auth-email-worker"]],
+  ["AUTH_EMAIL_SMTP_PASSWORD", ["auth-email-worker"]],
+  ["AUTH_EMAIL_SMTP_CONNECTION_TIMEOUT_MS", ["auth-email-worker"]],
+  ["AUTH_EMAIL_SMTP_SOCKET_TIMEOUT_MS", ["auth-email-worker"]],
+  ["DIRECTUS_EMAIL_TRANSPORT", ["directus"]],
+  ["DIRECTUS_EMAIL_FROM", ["directus"]],
+  ["DIRECTUS_SMTP_HOST", ["directus"]],
+  ["DIRECTUS_SMTP_PORT", ["directus"]],
+  ["DIRECTUS_SMTP_SECURE", ["directus"]],
+  ["DIRECTUS_SMTP_USER", ["directus"]],
+  ["DIRECTUS_SMTP_PASSWORD", ["directus"]]
+]);
 
 const tokenBearingServices = [
   "platform-api",
@@ -51,6 +81,7 @@ const tokenBearingServices = [
   "jobs-integrations",
   "import-worker",
   "rank-worker",
+  "auth-email-worker",
   "realtime"
 ];
 
@@ -89,6 +120,10 @@ const dedicatedBoundaries = new Map([
   [
     "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
     ["platform-api", "rank-worker"]
+  ],
+  [
+    "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN",
+    ["auth-email-worker", "platform-api"]
   ]
 ]);
 
@@ -116,8 +151,6 @@ const expectedJobsHttpEnvironment = sorted([
   ...jobsRuntimeEnvironment,
   ...s3Environment,
   "BIND_ADDRESS",
-  "EMAIL_ENABLED",
-  "EMAIL_FROM",
   "INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION",
   "INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION",
   "INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS",
@@ -132,14 +165,42 @@ const expectedJobsHttpEnvironment = sorted([
   "PORT",
   "SEO_DATA_COMMAND_TIMEOUT_MS",
   "SEO_DATA_URL",
+  "UPLOAD_EXPIRES_HOURS",
+  "UPLOAD_MAX_SIZE_BYTES",
+  "UPLOAD_PART_SIZE_BYTES"
+]);
+
+const expectedAuthEmailWorkerEnvironment = sorted([
+  "AUTH_EMAIL_DISPATCH_MS",
+  "AUTH_EMAIL_EVENT_ENVIRONMENT",
+  "AUTH_EMAIL_FETCH_EXPIRES_MS",
+  "AUTH_EMAIL_LEASE_SECONDS",
+  "AUTH_EMAIL_MAX_ATTEMPTS",
+  "AUTH_EMAIL_MAX_PAYLOAD_BYTES",
+  "AUTH_EMAIL_PUBLISH_TIMEOUT_MS",
+  "AUTH_EMAIL_RETRY_BASE_MS",
+  "AUTH_EMAIL_RETRY_MAX_MS",
+  "AUTH_EMAIL_SHUTDOWN_GRACE_MS",
+  "DATABASE_POOL_MAX",
+  "DATABASE_URL",
+  "EMAIL_ENABLED",
+  "EMAIL_FROM",
+  "EMAIL_MESSAGE_ID_DOMAIN",
+  "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN",
+  "NATS_PASSWORD",
+  "NATS_URL",
+  "NATS_USER",
+  "NODE_ENV",
+  "PLATFORM_API_COMMAND_TIMEOUT_MS",
+  "PLATFORM_API_URL",
+  "SERVICE_VERSION",
+  "SMTP_CONNECTION_TIMEOUT_MS",
   "SMTP_HOST",
   "SMTP_PASSWORD",
   "SMTP_PORT",
   "SMTP_SECURE",
-  "SMTP_USER",
-  "UPLOAD_EXPIRES_HOURS",
-  "UPLOAD_MAX_SIZE_BYTES",
-  "UPLOAD_PART_SIZE_BYTES"
+  "SMTP_SOCKET_TIMEOUT_MS",
+  "SMTP_USER"
 ]);
 
 const expectedSystemWorkerEnvironment = sorted([
@@ -237,6 +298,26 @@ test("example Compose validation supplies all distinct CI-only deploy credential
     values.push(value);
   }
   assert.equal(new Set(values).size, values.length);
+
+  for (const input of [
+    "AUTH_EMAIL_FROM",
+    "AUTH_EMAIL_MESSAGE_ID_DOMAIN",
+    "AUTH_EMAIL_SMTP_HOST",
+    "AUTH_EMAIL_SMTP_USER",
+    "AUTH_EMAIL_SMTP_PASSWORD"
+  ]) {
+    assert.ok(
+      assignments.get(input)?.length > 0,
+      `${input} must be supplied for Docker-independent example validation`
+    );
+  }
+  for (const retiredInput of ["EMAIL_FROM", "SMTP_HOST", "SMTP_PASSWORD"]) {
+    assert.equal(
+      assignments.has(retiredInput),
+      false,
+      `${retiredInput} generic example input must stay retired`
+    );
+  }
 });
 
 test("dedicated credential, notification and rank tokens keep narrow scopes", async () => {
@@ -245,6 +326,77 @@ test("dedicated credential, notification and rank tokens keep narrow scopes", as
 
   for (const [token, expectedServices] of dedicatedBoundaries) {
     assertTokenBoundary(document, token, expectedServices);
+  }
+});
+
+test("auth-email and Directus deploy inputs have exact isolated recipients", async () => {
+  const [compose, rootEnv] = await Promise.all([
+    readFile(composeUrl, "utf8"),
+    readFile(rootEnvUrl, "utf8")
+  ]);
+  const document = parseYamlMappings(compose);
+  const envExample = parseEnvExample(rootEnv);
+
+  for (const [input, expectedServices] of emailDeployInputBoundaries) {
+    assert.equal(
+      envExample.get(input)?.length,
+      1,
+      `${input} must be documented exactly once`
+    );
+    assertDeployInputBoundary(document, input, expectedServices);
+  }
+
+  for (const retiredInput of [
+    "EMAIL_ENABLED",
+    "EMAIL_PROVIDER",
+    "EMAIL_FROM",
+    "EMAIL_MESSAGE_ID_DOMAIN",
+    "SMTP_HOST",
+    "SMTP_PORT",
+    "SMTP_SECURE",
+    "SMTP_USER",
+    "SMTP_PASSWORD",
+    "SMTP_CONNECTION_TIMEOUT_MS",
+    "SMTP_SOCKET_TIMEOUT_MS"
+  ]) {
+    assert.equal(
+      envExample.has(retiredInput),
+      false,
+      `${retiredInput} generic deploy input must stay retired`
+    );
+    assert.doesNotMatch(
+      compose,
+      new RegExp(`\\$\\{${retiredInput}(?=[:}])`, "u"),
+      `${retiredInput} must not be used as a Compose deploy input`
+    );
+  }
+
+  const worker = serviceEnvironment(document, "auth-email-worker");
+  for (const [runtimeKey, deployInput] of [
+    ["EMAIL_FROM", "AUTH_EMAIL_FROM"],
+    ["EMAIL_MESSAGE_ID_DOMAIN", "AUTH_EMAIL_MESSAGE_ID_DOMAIN"],
+    ["SMTP_HOST", "AUTH_EMAIL_SMTP_HOST"],
+    ["SMTP_PORT", "AUTH_EMAIL_SMTP_PORT"],
+    ["SMTP_SECURE", "AUTH_EMAIL_SMTP_SECURE"],
+    ["SMTP_USER", "AUTH_EMAIL_SMTP_USER"],
+    ["SMTP_PASSWORD", "AUTH_EMAIL_SMTP_PASSWORD"],
+    ["SMTP_CONNECTION_TIMEOUT_MS", "AUTH_EMAIL_SMTP_CONNECTION_TIMEOUT_MS"],
+    ["SMTP_SOCKET_TIMEOUT_MS", "AUTH_EMAIL_SMTP_SOCKET_TIMEOUT_MS"]
+  ]) {
+    assertInterpolationSource(worker.get(runtimeKey), deployInput);
+  }
+
+  const directus = serviceEnvironment(document, "directus");
+  for (const [runtimeKey, deployInput] of [
+    ["EMAIL_TRANSPORT", "DIRECTUS_EMAIL_TRANSPORT"],
+    ["EMAIL_FROM", "DIRECTUS_EMAIL_FROM"],
+    ["EMAIL_SMTP_HOST", "DIRECTUS_SMTP_HOST"],
+    ["EMAIL_SMTP_PORT", "DIRECTUS_SMTP_PORT"],
+    ["EMAIL_SMTP_SECURE", "DIRECTUS_SMTP_SECURE"],
+    ["EMAIL_SMTP_USER", "DIRECTUS_SMTP_USER"],
+    ["EMAIL_SMTP_PASSWORD", "DIRECTUS_SMTP_PASSWORD"]
+  ]) {
+    assertInterpolationSource(directus.get(runtimeKey), deployInput);
   }
 });
 
@@ -262,7 +414,8 @@ test("isolated deploy preflight receives only all globally distinct credentials"
     sorted([
       ...globallyDistinctDeployCredentials,
       ...natsUsernameInputs,
-      ...natsPasswordHashInputs
+      ...natsPasswordHashInputs,
+      ...smtpPreflightInputs
     ])
   );
   for (const token of [
@@ -275,6 +428,16 @@ test("isolated deploy preflight receives only all globally distinct credentials"
       token,
       "service-token-preflight"
     );
+  }
+  for (const input of smtpPreflightInputs.slice(0, 2)) {
+    assertRequiredSelfInterpolation(
+      environment.get(input),
+      input,
+      "service-token-preflight"
+    );
+  }
+  for (const input of smtpPreflightInputs.slice(2)) {
+    assertInterpolationSource(environment.get(input), input);
   }
 
   const resolved = resolveMapping(preflight, document);
@@ -346,6 +509,30 @@ test("generic Jobs worker is a Redis-only process", async () => {
   );
 });
 
+test("auth email worker receives only delivery DB, NATS, Platform and SMTP capabilities", async () => {
+  const compose = await readFile(composeUrl, "utf8");
+  const document = parseYamlMappings(compose);
+  const environment = serviceEnvironment(document, "auth-email-worker");
+
+  assert.deepEqual(
+    sorted(environment.keys()),
+    expectedAuthEmailWorkerEnvironment
+  );
+  assert.match(
+    stripMatchingQuotes(environment.get("DATABASE_URL")),
+    /^postgresql:\/\/jobs_auth_email_runtime:\$\{JOBS_AUTH_EMAIL_DATABASE_PASSWORD:\?[^}]+\}@postgres:5432\/jobs_db$/u
+  );
+  for (const forbidden of [
+    "REDIS_URL",
+    "S3_SECRET_ACCESS_KEY",
+    "INTEGRATION_CREDENTIAL_KEYS",
+    "PLATFORM_API_TO_JOBS_TOKEN",
+    "JOBS_TO_SEO_DATA_TOKEN"
+  ]) {
+    assert.equal(environment.has(forbidden), false);
+  }
+});
+
 test("import worker receives only DB, Redis, S3 and SEO publication capabilities", async () => {
   const compose = await readFile(composeUrl, "utf8");
   const document = parseYamlMappings(compose);
@@ -392,6 +579,27 @@ function assertTokenBoundary(document, token, expectedServices) {
   );
 }
 
+function assertDeployInputBoundary(document, input, expectedServices) {
+  const actualServices = [];
+  for (const serviceName of serviceNames(document)) {
+    if (serviceName === "service-token-preflight") continue;
+    const environment = serviceEnvironment(document, serviceName, false);
+    if (!environment) continue;
+    const receivesInput = [...environment.values()].some(
+      (value) =>
+        typeof value === "string" &&
+        interpolationSources(value).includes(input)
+    );
+    if (receivesInput) actualServices.push(serviceName);
+  }
+
+  assert.deepEqual(
+    sorted(actualServices),
+    sorted(expectedServices),
+    `${input} has an unexpected effective Compose audience`
+  );
+}
+
 function assertRequiredSelfInterpolation(value, token, serviceName) {
   assert.equal(
     typeof value,
@@ -408,6 +616,17 @@ function assertRequiredSelfInterpolation(value, token, serviceName) {
     interpolation[1],
     token,
     `${serviceName} must not reuse another service credential for ${token}`
+  );
+}
+
+function assertInterpolationSource(value, expectedInput) {
+  assert.equal(typeof value, "string");
+  assert.deepEqual(interpolationSources(value), [expectedInput]);
+}
+
+function interpolationSources(value) {
+  return [...value.matchAll(/\$\{([A-Z][A-Z0-9_]*)(?=[:}])/gu)].map(
+    (match) => match[1]
   );
 }
 

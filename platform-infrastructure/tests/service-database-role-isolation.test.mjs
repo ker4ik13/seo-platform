@@ -68,6 +68,24 @@ const rankRuntime = {
   runtimeSecret: "JOBS_RANK_DATABASE_PASSWORD"
 };
 
+const authEmailRuntime = {
+  database: "jobs_db",
+  runtime: "jobs_auth_email_runtime",
+  runtimeSecret: "JOBS_AUTH_EMAIL_DATABASE_PASSWORD"
+};
+
+const databasePasswordPlaceholders = Object.freeze([
+  `replace-${"a".repeat(32)}`,
+  `CHANGE-${"b".repeat(32)}`,
+  `ChangeMe${"c".repeat(32)}`,
+  `Example${"d".repeat(32)}`,
+  `DUMMY-${"e".repeat(32)}`,
+  `Placeholder${"f".repeat(32)}`,
+  `TEST-${"g".repeat(32)}`,
+  `Your-${"h".repeat(32)}`,
+  `YOUR_${"i".repeat(32)}`
+]);
+
 function compact(value) {
   return value.replace(/\s+/gu, " ").trim();
 }
@@ -112,6 +130,7 @@ test("Compose splits migration owners from fixed runtime roles", async () => {
     ["platform-api", mappings[0]],
     ["seo-data", mappings[1]],
     ["rank-worker", rankRuntime],
+    ["auth-email-worker", authEmailRuntime],
     ["realtime", mappings[3]]
   ];
   for (const [serviceName, mapping] of directRuntimeServices) {
@@ -135,6 +154,10 @@ test("Compose splits migration owners from fixed runtime roles", async () => {
   assert.match(
     roleProvisioner,
     /JOBS_RANK_DATABASE_PASSWORD: \$\{JOBS_RANK_DATABASE_PASSWORD:\?JOBS_RANK_DATABASE_PASSWORD is required\}/u
+  );
+  assert.match(
+    roleProvisioner,
+    /JOBS_AUTH_EMAIL_DATABASE_PASSWORD: \$\{JOBS_AUTH_EMAIL_DATABASE_PASSWORD:\?JOBS_AUTH_EMAIL_DATABASE_PASSWORD is required\}/u
   );
 
   for (const serviceName of [
@@ -198,6 +221,7 @@ test("bootstrap and post-migration provisioners are secret-safe and fail closed"
   assert.doesNotMatch(bootstrapSql, /\bPASSWORD\b/u);
   assert.match(provisioner, /unset PLATFORM_DATABASE_OWNER_PASSWORD/u);
   assert.match(provisioner, /unset JOBS_RANK_DATABASE_PASSWORD/u);
+  assert.match(provisioner, /unset JOBS_AUTH_EMAIL_DATABASE_PASSWORD/u);
   assert.match(provisioner, /unset DIRECTUS_DATABASE_PASSWORD/u);
   assert.match(provisioner, /service database passwords must be URL-safe/u);
   assert.match(provisioner, /service database passwords must be pairwise distinct/u);
@@ -219,6 +243,12 @@ test("bootstrap and post-migration provisioners are secret-safe and fail closed"
   assert.match(
     provisioner,
     /set_role_password jobs_rank_runtime "\$jobs_rank_runtime_password"/u
+  );
+  assert.match(bootstrapSql, /'jobs_auth_email_runtime'/u);
+  assert.match(env, /^JOBS_AUTH_EMAIL_DATABASE_PASSWORD=/mu);
+  assert.match(
+    provisioner,
+    /set_role_password jobs_auth_email_runtime "\$jobs_auth_email_runtime_password"/u
   );
   assert.match(bootstrapSql, /'directus_runtime_owner'/u);
   assert.match(env, /^DIRECTUS_DATABASE_PASSWORD=/mu);
@@ -243,7 +273,7 @@ test("bootstrap and post-migration provisioners are secret-safe and fail closed"
   assert.match(normalizedRuntimeSql, /must not access Prisma migration history/u);
   assert.match(
     normalizedRuntimeSql,
-    /relation\.relname = 'rank_provider_request_intents'/u
+    /relation\.relname IN \( 'rank_provider_request_intents', 'auth_email_delivery_attempts' \)/u
   );
   assert.match(
     normalizedRuntimeSql,
@@ -256,6 +286,22 @@ test("bootstrap and post-migration provisioners are secret-safe and fail closed"
   assert.match(
     normalizedRuntimeSql,
     /rank runtime must have only SELECT and INSERT on provider request intents/u
+  );
+  assert.match(
+    normalizedRuntimeSql,
+    /GRANT SELECT, INSERT, UPDATE ON TABLE public\.auth_email_delivery_attempts TO %I/u
+  );
+  assert.match(
+    normalizedRuntimeSql,
+    /generic jobs runtime must not access auth email delivery attempts/u
+  );
+  assert.match(
+    normalizedRuntimeSql,
+    /auth email runtime must have only SELECT, INSERT and UPDATE on delivery attempts/u
+  );
+  assert.match(
+    normalizedRuntimeSql,
+    /auth email runtime must not access other jobs tables/u
   );
   const rankTableGrants = [...normalizedRuntimeSql.matchAll(
     /'GRANT ([^']+) ON TABLE public\.([a-z_]+) TO %I', :'rank_runtime_role'/gu
@@ -384,6 +430,68 @@ test("bootstrap and post-migration provisioners are secret-safe and fail closed"
   assert.match(extensionSql, /acl\.grantee = 0/u);
 });
 
+test("PostgreSQL startup rejects known password placeholders and unsafe bootstrap passwords without exposing values", async () => {
+  const roleProvisionerPath = fileURLToPath(roleProvisionerUrl);
+  const entrypointPath = fileURLToPath(entrypointUrl);
+
+  for (const placeholder of databasePasswordPlaceholders) {
+    const environment = serviceDatabasePasswordEnvironment();
+    environment.JOBS_AUTH_EMAIL_DATABASE_PASSWORD = placeholder;
+    const failure = await runProcess(
+      "/bin/sh",
+      [roleProvisionerPath],
+      environment
+    );
+
+    assert.notEqual(failure.code, 0);
+    assert.equal(failure.signal, null);
+    assert.equal(failure.stdout, "");
+    assert.equal(
+      failure.stderr,
+      "service database passwords must not use an example placeholder\n"
+    );
+    assert.equal(failure.stderr.includes(placeholder), false);
+  }
+
+  const invalidBootstrapPasswords = [
+    ...databasePasswordPlaceholders.map((value) => ({
+      value,
+      message: "POSTGRES_PASSWORD must not use an example placeholder\n"
+    })),
+    {
+      value: "too-short",
+      message: "POSTGRES_PASSWORD must contain 32..512 characters\n"
+    },
+    {
+      value: "z".repeat(513),
+      message: "POSTGRES_PASSWORD must contain 32..512 characters\n"
+    },
+    {
+      value: `${"k".repeat(32)}\nunsafe`,
+      message: "POSTGRES_PASSWORD must not contain control characters\n"
+    }
+  ];
+
+  for (const { value, message } of invalidBootstrapPasswords) {
+    const failure = await runProcess(
+      "/bin/sh",
+      [entrypointPath],
+      {
+        ...process.env,
+        POSTGRES_USER: "cluster_bootstrap",
+        POSTGRES_PASSWORD: value,
+        JOBS_CONNECTOR_DATABASE_USER: "jobs_connector"
+      }
+    );
+
+    assert.notEqual(failure.code, 0);
+    assert.equal(failure.signal, null);
+    assert.equal(failure.stdout, "");
+    assert.equal(failure.stderr, message);
+    assert.equal(failure.stderr.includes(value), false);
+  }
+});
+
 test("generated HBA permits only exact own-database roles before family rejects", async () => {
   const generated = await runProcess(
     "/bin/sh",
@@ -459,6 +567,27 @@ test("generated HBA permits only exact own-database roles before family rejects"
   assert.ok(localGeneral > localRankReject);
   assert.ok(hostGeneral > hostRankReject);
 
+  const localAuthEmailAllow = generated.stdout.search(
+    /^local\s+jobs_db\s+"jobs_auth_email_runtime"\s+scram-sha-256$/mu
+  );
+  const hostAuthEmailAllow = generated.stdout.search(
+    /^host\s+jobs_db\s+"jobs_auth_email_runtime"\s+all\s+scram-sha-256$/mu
+  );
+  const localAuthEmailReject = generated.stdout.search(
+    /^local\s+all\s+\/\^jobs_auth_email_runtime\(_\[a-z0-9_\]\+\)\?\$\s+reject$/mu
+  );
+  const hostAuthEmailReject = generated.stdout.search(
+    /^host\s+all\s+\/\^jobs_auth_email_runtime\(_\[a-z0-9_\]\+\)\?\$\s+all\s+reject$/mu
+  );
+  assert.ok(
+    localAuthEmailAllow >= 0 && localAuthEmailAllow < localAuthEmailReject
+  );
+  assert.ok(
+    hostAuthEmailAllow >= 0 && hostAuthEmailAllow < hostAuthEmailReject
+  );
+  assert.ok(localGeneral > localAuthEmailReject);
+  assert.ok(hostGeneral > hostAuthEmailReject);
+
   const directusAllow = generated.stdout.search(
     /^host\s+directus_db\s+"directus_runtime_owner"\s+all\s+scram-sha-256$/mu
   );
@@ -475,6 +604,7 @@ test("generated HBA permits only exact own-database roles before family rejects"
     "seo_runtime",
     "jobs_owner",
     "jobs_rank_runtime",
+    "jobs_auth_email_runtime",
     "realtime_runtime",
     "directus_runtime_owner"
   ]) {
@@ -513,4 +643,29 @@ function runProcess(command, args, environment) {
       resolve({ code, signal, stdout, stderr });
     });
   });
+}
+
+function serviceDatabasePasswordEnvironment() {
+  const names = [
+    "PLATFORM_DATABASE_OWNER_PASSWORD",
+    "PLATFORM_DATABASE_PASSWORD",
+    "SEO_DATABASE_OWNER_PASSWORD",
+    "SEO_DATABASE_PASSWORD",
+    "JOBS_DATABASE_OWNER_PASSWORD",
+    "JOBS_DATABASE_PASSWORD",
+    "JOBS_RANK_DATABASE_PASSWORD",
+    "JOBS_AUTH_EMAIL_DATABASE_PASSWORD",
+    "REALTIME_DATABASE_OWNER_PASSWORD",
+    "REALTIME_DATABASE_PASSWORD",
+    "DIRECTUS_DATABASE_PASSWORD"
+  ];
+  return {
+    ...process.env,
+    ...Object.fromEntries(
+      names.map((name, index) => [
+        name,
+        `DatabaseRole-${index}-${"x".repeat(32)}`
+      ])
+    )
+  };
 }

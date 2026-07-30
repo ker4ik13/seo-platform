@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 export interface S3Config {
   readonly enabled: boolean;
   readonly endpoint?: string;
@@ -15,11 +17,14 @@ export interface S3Config {
 export interface EmailConfig {
   readonly enabled: boolean;
   readonly from?: string;
+  readonly messageIdDomain?: string;
   readonly host?: string;
   readonly port: number;
   readonly secure: boolean;
   readonly user?: string;
   readonly password?: string;
+  readonly connectionTimeoutMs: number;
+  readonly socketTimeoutMs: number;
 }
 
 export interface MalwareScannerConfig {
@@ -41,7 +46,8 @@ export type JobsProcessRole =
   | "IMPORT_WORKER"
   | "INSPECTION_WORKER"
   | "RANK_WORKER"
-  | "CONNECTOR_WORKER";
+  | "CONNECTOR_WORKER"
+  | "AUTH_EMAIL_WORKER";
 
 export interface IntegrationCredentialEncryptionConfig {
   readonly enabled: boolean;
@@ -66,6 +72,7 @@ export interface AppConfig {
   readonly integrationCredentialApiToken?: string;
   readonly rankManifestApiToken?: string;
   readonly rankGrantApiToken?: string;
+  readonly authEmailApiToken?: string;
   readonly internalCommandTimeoutMs: number;
   readonly platformApiCommandTimeoutMs: number;
   readonly services: {
@@ -96,6 +103,22 @@ export interface AppConfig {
   readonly rankExecution: {
     readonly submitEnabled: boolean;
     readonly killSwitchVersion: string;
+  };
+  readonly authEmail: {
+    readonly enabled: boolean;
+    readonly environment?: string;
+    readonly streamName: "AUTH_EMAIL_EVENTS";
+    readonly durableName: "jobs_auth_email_v1";
+    readonly deadLetterStreamName: "DOMAIN_EVENTS_DLQ";
+    readonly maxAttempts: number;
+    readonly leaseSeconds: number;
+    readonly dispatchMs: number;
+    readonly fetchExpiresMs: number;
+    readonly publishTimeoutMs: number;
+    readonly retryBaseMs: number;
+    readonly retryMaxMs: number;
+    readonly maxPayloadBytes: number;
+    readonly shutdownGraceMs: number;
   };
   readonly uploads: {
     readonly maxSizeBytes: number;
@@ -140,7 +163,24 @@ const SERVICE_TOKEN_ENVIRONMENT_VARIABLES = [
   "JOBS_TO_SEO_DATA_TOKEN",
   "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN",
   "JOBS_TO_SEO_RANK_TOKEN",
-  "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN"
+  "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
+  "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN"
+] as const;
+
+const AUTH_EMAIL_ONLY_ENVIRONMENT_VARIABLES = [
+  "AUTH_EMAIL_EVENT_ENVIRONMENT",
+  "AUTH_EMAIL_MAX_ATTEMPTS",
+  "AUTH_EMAIL_LEASE_SECONDS",
+  "AUTH_EMAIL_DISPATCH_MS",
+  "AUTH_EMAIL_FETCH_EXPIRES_MS",
+  "AUTH_EMAIL_PUBLISH_TIMEOUT_MS",
+  "AUTH_EMAIL_RETRY_BASE_MS",
+  "AUTH_EMAIL_RETRY_MAX_MS",
+  "AUTH_EMAIL_MAX_PAYLOAD_BYTES",
+  "AUTH_EMAIL_SHUTDOWN_GRACE_MS",
+  "EMAIL_MESSAGE_ID_DOMAIN",
+  "SMTP_CONNECTION_TIMEOUT_MS",
+  "SMTP_SOCKET_TIMEOUT_MS"
 ] as const;
 
 const SYSTEM_WORKER_FORBIDDEN_ENVIRONMENT_VARIABLES = [
@@ -201,6 +241,19 @@ const SYSTEM_WORKER_FORBIDDEN_ENVIRONMENT_VARIABLES = [
   "PLATFORM_API_COMMAND_TIMEOUT_MS",
   "INTERNAL_API_TOKEN",
   "JOBS_TO_SEO_RANK_RESULT_TOKEN",
+  "AUTH_EMAIL_EVENT_ENVIRONMENT",
+  "AUTH_EMAIL_MAX_ATTEMPTS",
+  "AUTH_EMAIL_LEASE_SECONDS",
+  "AUTH_EMAIL_DISPATCH_MS",
+  "AUTH_EMAIL_FETCH_EXPIRES_MS",
+  "AUTH_EMAIL_PUBLISH_TIMEOUT_MS",
+  "AUTH_EMAIL_RETRY_BASE_MS",
+  "AUTH_EMAIL_RETRY_MAX_MS",
+  "AUTH_EMAIL_MAX_PAYLOAD_BYTES",
+  "AUTH_EMAIL_SHUTDOWN_GRACE_MS",
+  "EMAIL_MESSAGE_ID_DOMAIN",
+  "SMTP_CONNECTION_TIMEOUT_MS",
+  "SMTP_SOCKET_TIMEOUT_MS",
   ...SERVICE_TOKEN_ENVIRONMENT_VARIABLES
 ] as const;
 
@@ -324,6 +377,105 @@ function boundedVersion(
   return parsed;
 }
 
+function eventEnvironment(value: string | undefined): string | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  const parsed = value.trim();
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/u.test(parsed)) {
+    throw new Error(
+      "AUTH_EMAIL_EVENT_ENVIRONMENT must be a lowercase NATS token without underscores or edge hyphens"
+    );
+  }
+  return parsed;
+}
+
+function messageIdDomain(value: string | undefined): string | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  const parsed = value.trim().toLowerCase();
+  if (
+    parsed.length > 205 ||
+    !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(
+      parsed
+    )
+  ) {
+    throw new Error(
+      "EMAIL_MESSAGE_ID_DOMAIN must be a valid DNS name that keeps Message-ID within 255 characters"
+    );
+  }
+  return parsed;
+}
+
+function emailMailbox(value: string | undefined): string | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  const parsed = value.trim();
+  if (
+    parsed.length > 254 ||
+    /[\r\n]/u.test(parsed)
+  ) {
+    throw new Error("EMAIL_FROM must be one bounded mailbox address");
+  }
+  const separator = parsed.lastIndexOf("@");
+  const local = parsed.slice(0, separator);
+  const domain = parsed.slice(separator + 1).toLowerCase();
+  const atom = "[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+";
+  if (
+    separator < 1 ||
+    local.length > 64 ||
+    !new RegExp(`^${atom}(?:\\.${atom})*$`, "u").test(local) ||
+    !/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(
+      domain
+    )
+  ) {
+    throw new Error("EMAIL_FROM must be one bounded mailbox address");
+  }
+  return `${local}@${domain}`;
+}
+
+function smtpHostname(value: string | undefined): string | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  const parsed = value.trim().toLowerCase();
+  if (isIP(parsed) !== 0) return parsed;
+  if (
+    parsed.length > 253 ||
+    !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/u.test(
+      parsed
+    )
+  ) {
+    throw new Error("SMTP_HOST must be a bounded DNS hostname or IP address");
+  }
+  return parsed;
+}
+
+function smtpUsername(value: string | undefined): string | undefined {
+  if (value === undefined || value.length === 0) return undefined;
+  if (
+    value.length > 320 ||
+    [...value].some((character) => {
+      const codePoint = character.codePointAt(0);
+      return codePoint === undefined || codePoint < 0x21 || codePoint > 0x7e;
+    })
+  ) {
+    throw new Error(
+      "SMTP_USER must contain 1 to 320 visible ASCII characters"
+    );
+  }
+  return value;
+}
+
+function smtpSecret(value: string | undefined): string | undefined {
+  if (value === undefined || value.length === 0) return undefined;
+  if (
+    value.length > 1_024 ||
+    value.includes("\u0000") ||
+    value.includes("\r") ||
+    value.includes("\n")
+  ) {
+    throw new Error(
+      "SMTP_PASSWORD must contain 1 to 1024 characters without NUL or line breaks"
+    );
+  }
+  return value;
+}
+
 function versionedKeyring(
   value: string | undefined,
   environmentVariable: string
@@ -424,10 +576,13 @@ export function loadAppConfig(
   const s3SecretAccessKey = optional(env, "S3_SECRET_ACCESS_KEY");
   const uploadsBucket = optional(env, "S3_BUCKET_UPLOADS");
   const artifactsBucket = optional(env, "S3_BUCKET_ARTIFACTS");
-  const emailFrom = optional(env, "EMAIL_FROM");
-  const smtpHost = optional(env, "SMTP_HOST");
-  const smtpUser = optional(env, "SMTP_USER");
-  const smtpPassword = optional(env, "SMTP_PASSWORD");
+  const emailFrom = emailMailbox(env.EMAIL_FROM);
+  const smtpHost = smtpHostname(env.SMTP_HOST);
+  const smtpUser = smtpUsername(env.SMTP_USER);
+  const smtpPassword = smtpSecret(env.SMTP_PASSWORD);
+  const emailMessageIdDomain = messageIdDomain(
+    env.EMAIL_MESSAGE_ID_DOMAIN
+  );
   const platformApiToken = serviceToken(
     env,
     "PLATFORM_API_TO_JOBS_TOKEN"
@@ -444,6 +599,10 @@ export function loadAppConfig(
   const rankGrantApiToken = serviceToken(
     env,
     "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN"
+  );
+  const authEmailApiToken = serviceToken(
+    env,
+    "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN"
   );
   const rankPreparationEnabled = bool(env.RANK_PREPARATION_ENABLED);
   const rankProviderSubmitEnabled = bool(
@@ -553,11 +712,22 @@ export function loadAppConfig(
 
   if (
     emailEnabled &&
-    (!emailFrom || !smtpHost || !smtpUser || !smtpPassword)
+    (!emailFrom ||
+      !emailMessageIdDomain ||
+      !smtpHost ||
+      !smtpUser ||
+      !smtpPassword)
   ) {
     throw new Error("Email is enabled but SMTP configuration is incomplete");
   }
-  if (!emailEnabled && (smtpUser || smtpPassword)) {
+  if (
+    !emailEnabled &&
+    (emailFrom ||
+      emailMessageIdDomain ||
+      smtpHost ||
+      smtpUser ||
+      smtpPassword)
+  ) {
     throw new Error(
       "SMTP credentials must be absent when EMAIL_ENABLED is false"
     );
@@ -607,11 +777,11 @@ export function loadAppConfig(
   }
   if (
     nodeEnv === "production" &&
-    processRole === "HTTP" &&
+    (processRole === "HTTP" || processRole === "AUTH_EMAIL_WORKER") &&
     (!natsUser || !natsPassword)
   ) {
     throw new Error(
-      "NATS_USER and NATS_PASSWORD are required by the Jobs HTTP process in production"
+      "NATS_USER and NATS_PASSWORD are required by NATS-capable Jobs processes in production"
     );
   }
   if (processRole !== "HTTP" && platformApiToken) {
@@ -627,6 +797,21 @@ export function loadAppConfig(
     throw new Error(
       "Only the Jobs HTTP and import-worker processes may receive JOBS_TO_SEO_DATA_TOKEN"
     );
+  }
+  if (processRole !== "AUTH_EMAIL_WORKER" && authEmailApiToken) {
+    throw new Error(
+      "Only the auth-email worker process may receive JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN"
+    );
+  }
+  if (processRole !== "AUTH_EMAIL_WORKER") {
+    const leakedSetting = AUTH_EMAIL_ONLY_ENVIRONMENT_VARIABLES.find(
+      (key) => optional(env, key) !== undefined
+    );
+    if (leakedSetting) {
+      throw new Error(
+        `Only the auth-email worker process may receive ${leakedSetting}`
+      );
+    }
   }
   assertProcessAdapterCapabilities(env, processRole, {
     s3Enabled,
@@ -672,6 +857,36 @@ export function loadAppConfig(
     throw new Error(
       "Only the Jobs HTTP process may use the MANAGEMENT credential role"
     );
+  }
+  if (processRole === "AUTH_EMAIL_WORKER") {
+    const environment = eventEnvironment(
+      env.AUTH_EMAIL_EVENT_ENVIRONMENT
+    );
+    if (!environment) {
+      throw new Error(
+        "AUTH_EMAIL_EVENT_ENVIRONMENT is required by the auth-email worker"
+      );
+    }
+    if (!authEmailApiToken) {
+      throw new Error(
+        "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN is required by the auth-email worker"
+      );
+    }
+    if (!emailEnabled) {
+      throw new Error(
+        "EMAIL_ENABLED=true is required by the auth-email worker"
+      );
+    }
+    if (!natsUser || !natsPassword) {
+      throw new Error(
+        "NATS_USER and NATS_PASSWORD are required by the auth-email worker"
+      );
+    }
+    if (optional(env, "REDIS_URL")) {
+      throw new Error(
+        "AUTH_EMAIL_WORKER must not receive Redis configuration"
+      );
+    }
   }
   if (
     nodeEnv === "production" &&
@@ -835,6 +1050,69 @@ export function loadAppConfig(
     500,
     10_000
   );
+  const authEmailEnvironment = eventEnvironment(
+    env.AUTH_EMAIL_EVENT_ENVIRONMENT
+  );
+  const authEmailPublishTimeoutMs = boundedInteger(
+    env.AUTH_EMAIL_PUBLISH_TIMEOUT_MS,
+    5_000,
+    "AUTH_EMAIL_PUBLISH_TIMEOUT_MS",
+    250,
+    10_000
+  );
+  const authEmailLeaseSeconds = boundedInteger(
+    env.AUTH_EMAIL_LEASE_SECONDS,
+    120,
+    "AUTH_EMAIL_LEASE_SECONDS",
+    30,
+    600
+  );
+  const authEmailRetryBaseMs = boundedInteger(
+    env.AUTH_EMAIL_RETRY_BASE_MS,
+    5_000,
+    "AUTH_EMAIL_RETRY_BASE_MS",
+    1_000,
+    60_000
+  );
+  const authEmailRetryMaxMs = boundedInteger(
+    env.AUTH_EMAIL_RETRY_MAX_MS,
+    6 * 60 * 60 * 1_000,
+    "AUTH_EMAIL_RETRY_MAX_MS",
+    60_000,
+    24 * 60 * 60 * 1_000
+  );
+  const smtpConnectionTimeoutMs = boundedInteger(
+    env.SMTP_CONNECTION_TIMEOUT_MS,
+    10_000,
+    "SMTP_CONNECTION_TIMEOUT_MS",
+    1_000,
+    30_000
+  );
+  const smtpSocketTimeoutMs = boundedInteger(
+    env.SMTP_SOCKET_TIMEOUT_MS,
+    60_000,
+    "SMTP_SOCKET_TIMEOUT_MS",
+    5_000,
+    120_000
+  );
+  if (authEmailRetryBaseMs > authEmailRetryMaxMs) {
+    throw new Error(
+      "AUTH_EMAIL_RETRY_BASE_MS must not exceed AUTH_EMAIL_RETRY_MAX_MS"
+    );
+  }
+  if (
+    processRole === "AUTH_EMAIL_WORKER" &&
+    authEmailLeaseSeconds * 1_000 <
+      platformApiCommandTimeoutMs * 2 +
+        smtpConnectionTimeoutMs * 2 +
+        smtpSocketTimeoutMs +
+        authEmailPublishTimeoutMs +
+        5_000
+  ) {
+    throw new Error(
+      "AUTH_EMAIL_LEASE_SECONDS must cover two HTTP calls, SMTP connect, greeting, socket and DLQ publish timeouts plus 5 seconds"
+    );
+  }
   if (
     rankPreparationEnabled &&
     rankPreparationLeaseSeconds * 1_000 <
@@ -870,7 +1148,8 @@ export function loadAppConfig(
     PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN:
       integrationCredentialApiToken,
     JOBS_TO_SEO_RANK_TOKEN: rankManifestApiToken,
-    JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankGrantApiToken
+    JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankGrantApiToken,
+    JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: authEmailApiToken
   });
 
   return {
@@ -896,6 +1175,7 @@ export function loadAppConfig(
       : {}),
     ...(rankManifestApiToken ? { rankManifestApiToken } : {}),
     ...(rankGrantApiToken ? { rankGrantApiToken } : {}),
+    ...(authEmailApiToken ? { authEmailApiToken } : {}),
     internalCommandTimeoutMs,
     platformApiCommandTimeoutMs,
     services: {
@@ -929,11 +1209,16 @@ export function loadAppConfig(
     email: {
       enabled: emailEnabled,
       ...(emailFrom ? { from: emailFrom } : {}),
+      ...(emailMessageIdDomain
+        ? { messageIdDomain: emailMessageIdDomain }
+        : {}),
       ...(smtpHost ? { host: smtpHost } : {}),
-      port: positiveInteger(env.SMTP_PORT, 587, "SMTP_PORT"),
+      port: boundedInteger(env.SMTP_PORT, 587, "SMTP_PORT", 1, 65_535),
       secure: bool(env.SMTP_SECURE),
       ...(smtpUser ? { user: smtpUser } : {}),
-      ...(smtpPassword ? { password: smtpPassword } : {})
+      ...(smtpPassword ? { password: smtpPassword } : {}),
+      connectionTimeoutMs: smtpConnectionTimeoutMs,
+      socketTimeoutMs: smtpSocketTimeoutMs
     },
     malwareScanner: {
       enabled: malwareScannerEnabled,
@@ -1008,6 +1293,54 @@ export function loadAppConfig(
     rankExecution: {
       submitEnabled: rankProviderSubmitEnabled,
       killSwitchVersion: rankProviderKillSwitchVersion
+    },
+    authEmail: {
+      enabled: processRole === "AUTH_EMAIL_WORKER",
+      ...(authEmailEnvironment
+        ? { environment: authEmailEnvironment }
+        : {}),
+      streamName: "AUTH_EMAIL_EVENTS",
+      durableName: "jobs_auth_email_v1",
+      deadLetterStreamName: "DOMAIN_EVENTS_DLQ",
+      maxAttempts: boundedInteger(
+        env.AUTH_EMAIL_MAX_ATTEMPTS,
+        6,
+        "AUTH_EMAIL_MAX_ATTEMPTS",
+        1,
+        20
+      ),
+      leaseSeconds: authEmailLeaseSeconds,
+      dispatchMs: boundedInteger(
+        env.AUTH_EMAIL_DISPATCH_MS,
+        1_000,
+        "AUTH_EMAIL_DISPATCH_MS",
+        250,
+        60_000
+      ),
+      fetchExpiresMs: boundedInteger(
+        env.AUTH_EMAIL_FETCH_EXPIRES_MS,
+        1_000,
+        "AUTH_EMAIL_FETCH_EXPIRES_MS",
+        250,
+        30_000
+      ),
+      publishTimeoutMs: authEmailPublishTimeoutMs,
+      retryBaseMs: authEmailRetryBaseMs,
+      retryMaxMs: authEmailRetryMaxMs,
+      maxPayloadBytes: boundedInteger(
+        env.AUTH_EMAIL_MAX_PAYLOAD_BYTES,
+        65_536,
+        "AUTH_EMAIL_MAX_PAYLOAD_BYTES",
+        1_024,
+        65_536
+      ),
+      shutdownGraceMs: boundedInteger(
+        env.AUTH_EMAIL_SHUTDOWN_GRACE_MS,
+        10_000,
+        "AUTH_EMAIL_SHUTDOWN_GRACE_MS",
+        1_000,
+        30_000
+      )
     },
     uploads: {
       maxSizeBytes: positiveInteger(
@@ -1124,7 +1457,11 @@ function assertProcessAdapterCapabilities(
     "NATS_USER",
     "NATS_PASSWORD"
   ].some((key) => optional(env, key) !== undefined);
-  if (processRole !== "HTTP" && natsConfigured) {
+  if (
+    processRole !== "HTTP" &&
+    processRole !== "AUTH_EMAIL_WORKER" &&
+    natsConfigured
+  ) {
     throw new Error(
       `${processRole} must not receive NATS configuration or credentials`
     );
@@ -1146,7 +1483,7 @@ function assertProcessAdapterCapabilities(
     optional(env, "SMTP_USER") !== undefined ||
     optional(env, "SMTP_PASSWORD") !== undefined;
   if (
-    processRole !== "HTTP" &&
+    processRole !== "AUTH_EMAIL_WORKER" &&
     (enabled.emailEnabled || smtpCredentialConfigured)
   ) {
     throw new Error(

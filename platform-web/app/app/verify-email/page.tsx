@@ -1,15 +1,17 @@
 import { VerifyEmailForm } from "../../../components/verify-email-form";
+import { safeAppReturnTo } from "../../../lib/app-path";
 
 interface VerifyEmailPageProps {
   readonly searchParams: Promise<{
     readonly email?: string;
+    readonly returnTo?: string;
   }>;
 }
 
 export default async function VerifyEmailPage({
   searchParams
 }: VerifyEmailPageProps) {
-  const { email } = await searchParams;
+  const { email, returnTo } = await searchParams;
   return (
     <main className="auth-page">
       <a className="auth-brand" href="/">
@@ -25,7 +27,10 @@ export default async function VerifyEmailPage({
             защищённая сессия.
           </p>
         </header>
-        <VerifyEmailForm initialEmail={email} />
+        <VerifyEmailForm
+          initialEmail={email}
+          initialReturnTo={safeAppReturnTo(returnTo)}
+        />
       </section>
     </main>
   );

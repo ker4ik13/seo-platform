@@ -214,7 +214,13 @@ function configFixture(): AppConfig {
       signedUrlTtlSeconds: 900,
       buckets: { uploads: "uploads", artifacts: "artifacts" }
     },
-    email: { enabled: false, port: 587, secure: false },
+    email: {
+      enabled: false,
+      port: 587,
+      secure: false,
+      connectionTimeoutMs: 10_000,
+      socketTimeoutMs: 60_000
+    },
     malwareScanner: {
       enabled: true,
       host: "clamav",
@@ -244,6 +250,7 @@ function configFixture(): AppConfig {
       submitEnabled: false,
       killSwitchVersion: "arsenkin-positions@1"
     },
+    authEmail: disabledAuthEmailConfig(),
     uploads: {
       maxSizeBytes: 5 * 1_024 * 1_024 * 1_024,
       partSizeBytes: 8 * 1_024 * 1_024,
@@ -262,6 +269,24 @@ function configFixture(): AppConfig {
       previewRows: 20,
       publishBatchRows: 200
     }
+  };
+}
+
+function disabledAuthEmailConfig(): AppConfig["authEmail"] {
+  return {
+    enabled: false,
+    streamName: "AUTH_EMAIL_EVENTS",
+    durableName: "jobs_auth_email_v1",
+    deadLetterStreamName: "DOMAIN_EVENTS_DLQ",
+    maxAttempts: 6,
+    leaseSeconds: 120,
+    dispatchMs: 1_000,
+    fetchExpiresMs: 1_000,
+    publishTimeoutMs: 5_000,
+    retryBaseMs: 5_000,
+    retryMaxMs: 21_600_000,
+    maxPayloadBytes: 65_536,
+    shutdownGraceMs: 10_000
   };
 }
 

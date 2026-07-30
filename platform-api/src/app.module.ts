@@ -13,6 +13,7 @@ import { SemanticModule } from "./semantics/semantic.module.js";
 import { NotificationModule } from "./notifications/notification.module.js";
 import { OutboxModule } from "./outbox/outbox.module.js";
 import { RankingModule } from "./rankings/ranking.module.js";
+import { AuthEmailDeliveryModule } from "./auth-email/auth-email-delivery.module.js";
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { RankingModule } from "./rankings/ranking.module.js";
     DatabaseModule,
     MessagingModule,
     OutboxModule,
+    AuthEmailDeliveryModule,
     HealthModule,
     IdentityModule,
     IntegrationModule,

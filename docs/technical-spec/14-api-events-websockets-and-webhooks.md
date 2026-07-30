@@ -423,6 +423,19 @@ Resumable upload должен переживать перезагрузку вк
 `JOBS_TO_SEO_DATA_TOKEN` плюс точным совпадением trusted tenant/actor headers
 с body. Token получают только Jobs HTTP/import и SEO Data.
 
+Внутренний transactional auth-email contract:
+
+- `POST /internal/v1/auth-email-deliveries/{eventId}/material`;
+- `POST /internal/v1/auth-email-deliveries/{eventId}/complete`.
+
+Routes защищены отдельным `JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN`, требуют один
+exact request ID, bounded exact body и `no-store`. Material возвращает только
+`READY` с JIT recipient/locale/expiry/fragment-only action URL либо
+`SKIPPED/NOT_DELIVERABLE` после повторной authoritative проверки. Completion
+принимает только `DELIVERED` или `BOUNCED`; general Jobs credential эти routes
+не открывает. `BOUNCED` для invite допустим только после hard recipient
+rejection и подтверждённого redacted DLQ PubAck.
+
 ## 13. Основные группы endpoint
 
 Полная OpenAPI-спецификация создаётся в `platform-contracts`. Обязательные группы:
@@ -936,6 +949,7 @@ Bulk update принимает:
 | `PLATFORM_API_TO_JOBS_TOKEN` | Platform API | Jobs HTTP general routes |
 | `JOBS_TO_SEO_DATA_TOKEN` | Jobs HTTP/import worker | SEO Data Jobs routes |
 | `PLATFORM_API_TO_REALTIME_TOKEN` | Platform API | Realtime general routes |
+| `JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN` | Jobs auth-email worker | Platform API JIT material/completion |
 
 Legacy `INTERNAL_API_TOKEN` удалён из deploy configuration; его наличие
 останавливает backend startup. Vault, rank manifest/result/grant и Web Push
@@ -1003,6 +1017,7 @@ Publisher отправляет событие в NATS JetStream и помеча�
 ### 17.4. Обязательные события
 
 - `identity.user.created.v1`;
+- `identity.email-verification.requested.v1`;
 - `identity.password-reset.requested.v1`;
 - `identity.user.password-changed.v1`;
 - `identity.user.mfa-enabled.v1`;
@@ -1059,8 +1074,8 @@ ID, email, IP/user-agent и token material запрещены. Platform API пи
 Realtime consumer для этого exact event type реализованы. Platform API
 publisher выбирает только `PENDING` identity rows, заново валидирует envelope,
 публикует с event ID как deduplication ID и помечает `PUBLISHED` только после
-валидного PubAck `IDENTITY_EVENTS`. Остальные outbox event types этим
-publisher не доставляются.
+валидного PubAck `IDENTITY_EVENTS`. Этот identity allowlist не доставляет
+остальные event types.
 
 Realtime durable pull consumer одной транзакцией записывает inbox, durable
 revoked-family tombstone по `userId + sessionFamilyId` и terminal-отзывать
@@ -1070,6 +1085,17 @@ event-before-registration; простого `UPDATE active devices` недост
 Source ack разрешён только после commit. Retryable processing error получает
 bounded delayed NAK; permanent invalid или exhausted message сначала
 публикует redacted DLQ envelope и требует exact DLQ PubAck.
+
+Три transactional auth-email events типизированы в `platform-contracts` и
+не содержат recipient, plaintext token, action URL, subject или body.
+Identity payload содержит только `userId`, `oneTimeTokenId`, `locale`,
+`expiresAt`; invite payload — `inviteId`, `workspaceId`, `expiresAt`.
+Platform API публикует их в `{environment}.email.{eventType}` с outbox event
+ID как `Nats-Msg-Id` и помечает `PUBLISHED` только после exact PubAck
+`AUTH_EMAIL_EVENTS`. Jobs materialize-ит письмо JIT; source delivery остаётся
+at-least-once, а durable attempt идемпотентен по event ID/type/hash. SMTP
+accept не атомарен с DB receipt, поэтому stable `Message-ID` не является
+exactly-once гарантией.
 
 `integration.credential-validation.finished.v1` содержит только workspace,
 credential/job IDs, provider, material/connector versions, terminal status и
@@ -1137,12 +1163,13 @@ NATS.
   `max_ack_pending=1`, unlimited transport redelivery и file-backed state;
 - DLQ subject:
   `{environment}.dlq.realtime.identity.session-family.revoked.v1`;
-- DLQ stream: `DOMAIN_EVENTS_DLQ`, singleton subject и отдельная bounded
-  file/limits retention.
+- DLQ stream: `DOMAIN_EVENTS_DLQ` включает exact identity и auth-email DLQ
+  subjects с общей bounded file/limits retention.
 
 One-shot provisioner создаёт topology до runtime и не получает application/
-database secrets. Publisher, consumer, provisioner и generic NATS runtime
-используют четыре разные identities. Runtime ACL разрешают только exact
+database secrets. Publisher, Realtime consumer, Jobs auth-email consumer,
+provisioner и generic NATS runtime используют пять разных identities. Runtime
+ACL разрешают только exact
 event/API/request-reply/consumer fetch/source ack/DLQ subjects; CREATE и
 UPDATE доступны только provisioner, а DELETE/PURGE/MSG.GET не выдаются.
 Provisioner не исправляет unsafe identity/subject/transform/mirror/source/
@@ -1152,6 +1179,23 @@ Publisher/consumer config, retry, payload и shutdown bounds валидирую�
 startup; production запрещает отключить этот identity pipeline. Это не
 отменяет требования lag/redelivery/DLQ alerts и replay runbook в целевом
 окружении.
+
+Transactional auth-email topology:
+
+- stream `AUTH_EMAIL_EVENTS` содержит только три exact
+  `{environment}.email.{eventType}` subjects;
+- durable pull consumer `jobs_auth_email_v1` использует explicit ack и filter
+  `{environment}.email.>`;
+- redacted DLQ subject —
+  `{environment}.dlq.jobs.transactional-email.v1` в `DOMAIN_EVENTS_DLQ`;
+- отдельная `NATS_AUTH_EMAIL_CONSUMER_*` identity имеет только stream/
+  consumer fetch/ack, DLQ publish и reply permissions;
+- source ack выполняется после durable local outcome; invalid/exhausted
+  message ack-ится только после подтверждённого DLQ PubAck.
+
+Source/DLQ payload не переносит recipient/token/content или raw transport
+error. Runtime worker не создаёт topology; rollback сохраняет stream, durable
+consumer и pending attempts для replay/reconciliation.
 
 ## 19. WebSocket gateway
 

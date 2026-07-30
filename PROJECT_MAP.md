@@ -2,7 +2,8 @@
 
 Последнее обновление: 30 июля 2026 года
 
-Текущий инкремент: manual BYOK rank execution foundation
+Текущий инкремент: manual BYOK rank execution foundation и transactional
+auth-email delivery
 Статус: versioned tracking context, provider-free оценка и immutable
 execution manifest в SEO Data завершены. Estimate хранится в `jobs_db`,
 доступен при read-only и не вызывает provider, decrypt, Job/BullMQ, списание
@@ -52,7 +53,18 @@ Production policy и submit gate остаются fail-closed; live Arsenkin sub
 регистрирует Service Worker только для `/app/`. IndexedDB schema v2 хранит
 монотонные reconciliation generations; foreground завершает только exact
 generation через CAS и не теряет более новое изменение Service Worker/другой
-вкладки. Реальная email/Web Push доставка и test send остаются выключены.
+вкладки. Общая notification email/Web Push доставка и test send остаются
+выключены.
+
+Transactional auth-email срез по ADR-2026-038 реализует отдельный путь для
+подтверждения email, password reset и workspace invite. Platform API пишет
+secret-free events и публикует их в `AUTH_EMAIL_EVENTS`; отдельный
+`auth-email-worker` получает JIT recipient/action URL через защищённый
+Platform API boundary, отправляет SMTP и хранит только durable redacted state
+в `jobs_db.auth_email_delivery_attempts`. Одноразовый token не попадает в
+outbox/NATS/Jobs DB и передаётся Web только во fragment. Фактическая
+production-доставка остаётся operator gate: SMTP credentials/provider/sender
+в repository отсутствуют и должны быть отдельно настроены и проверены.
 
 Identity terminal-revoke pipeline по ADR-2026-036 теперь замкнут через
 durable transport для `identity.session-family.revoked.v1`. Platform API
@@ -68,9 +80,11 @@ envelope, commit-ит `inbox + tombstone + device revoke` до source ack,
 незавершённое сообщение unacked. One-shot provisioner создаёт exact singleton
 source/DLQ streams и durable consumer до старта приложений; publisher,
 consumer, provisioner и остальные NATS runtimes имеют разные credentials и
-least-privilege ACL. Broker получает только четыре bcrypt verifier записи,
-plain client passwords остаются у exact приложений/preflight. Внешний
-Email/Web Push sender по-прежнему отсутствует.
+least-privilege ACL. Broker получает только пять bcrypt verifier записей,
+plain client passwords остаются у exact приложений/preflight. Общий
+notification Email/Web Push sender по-прежнему отсутствует; выделенный
+transactional auth-email worker не использует notification preferences или
+digest.
 
 Межсервисный HTTP hardening удалил legacy `INTERNAL_API_TOKEN`: каждый
 обычный caller/audience pair теперь имеет отдельный credential, а legacy env
@@ -78,18 +92,19 @@ Email/Web Push sender по-прежнему отсутствует.
 device boundaries сохранены отдельно. Все internal clients запрещают
 redirect, а service-token guards требуют один strict header. До запуска
 credential-bearing processes и NATS Compose выполняет network-less one-shot
-`service-token-preflight`: он глобально проверяет 22 credentials и отдельно
-четыре NATS bcrypt verifier и четыре usernames без вывода значений или хэшей.
+`service-token-preflight`: он глобально проверяет 24 credentials и отдельно
+пять NATS bcrypt verifier и пять usernames без вывода значений или хэшей.
 Jobs image дополнительно
 получил явные process roles:
 HTTP имеет полный management-набор только для своей роли, import —
 DB/Redis/S3/SEO Data, inspection —
 DB/Redis/S3/malware, system — Redis-only; rank и connector сохраняют прежние
-строгие specialized allowlists. Это закрывает credential fan-out через env,
+строгие specialized allowlists, а auth-email worker получает только
+`jobs_auth_email_runtime`, dedicated NATS/Platform credentials и SMTP без
+Redis/general Jobs capabilities. Это закрывает credential fan-out через env,
 но не означает полной production готовности: source-built Redis compatibility
-подтверждена, но pinned OCI startup, observability, durable events кроме
-terminal identity pipeline, provider runtime и остальные release gates
-остаются.
+подтверждена, однако pinned OCI startup, observability, общий notification
+sender, provider runtime и остальные release gates остаются.
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -102,7 +117,9 @@ terminal identity pipeline, provider runtime и остальные release gates
 - Синхронные связи — internal HTTP; надёжные события — NATS JetStream + outbox/inbox.
 - Долгие операции — BullMQ/Redis.
 - Большие файлы — S3-compatible object storage.
-- Email подключается через port/adapter и может быть выключен.
+- Общий notification email подключается через port/adapter и может быть
+  выключен; выделенный production auth-email worker запускается только с
+  полной operator-managed SMTP configuration.
 - Frontend не обращается к domain services напрямую: публичный вход — platform API.
 - Platform-paid SEO API запрещён без price book, budget и коммерческого права.
 - Основной домен обслуживает единый `platform-web`; `/app` private/noindex.
@@ -162,6 +179,8 @@ upload inspection worker ──> ClamAV
 import worker ──> S3 + partitioned staging in jobs_db
 import worker ──internal HTTP──> seo-data semantic core
 connector worker ──> jobs_db + BullMQ + allowlisted provider endpoints
+platform-api outbox ──> AUTH_EMAIL_EVENTS ──> auth-email worker ──> SMTP
+auth-email worker ──internal HTTP/JIT──> platform-api
 platform-web public/docs <──> Directus
 ```
 
@@ -230,8 +249,11 @@ bounded UTC/filter/cursor query во внутренний read model SEO Data. �
 Для `identity.session-family.revoked.v1` межсервисный transport включён:
 Platform API durable publisher, JetStream topology и Realtime durable consumer
 проверяют exact subject/stream/consumer и fail-closed readiness. Остальные
-event families пока имеют только локальные outbox/inbox foundations либо
-собственные producer rows; этот publisher намеренно их не выбирает.
+event families этот identity consumer намеренно не получает. Тот же Platform
+outbox publisher отдельным allowlist публикует три transactional auth-email
+event type в `AUTH_EMAIL_EVENTS`; durable `jobs_auth_email_v1` обрабатывает их
+отдельным worker. Остальные event families пока имеют только локальные
+outbox/inbox foundations либо собственные producer rows.
 
 ## 4. Порты по умолчанию
 
@@ -269,16 +291,20 @@ event families пока имеют только локальные outbox/inbox 
 - `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN` отличается от general tokens и
   выдаётся только Platform API и credential-capable jobs/integrations HTTP
   process.
+- `JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN` отличается от general/rank/
+  notification credentials и выдаётся только Platform API и
+  `auth-email-worker`. Он защищает только JIT material/completion routes и не
+  даёт Jobs читать `platform_db` напрямую.
 - Service-token validation принимает только `32..512` visible ASCII без
   whitespace/control/comma, отклоняет example placeholders и reused values.
   Guard принимает один exact header и сравнивает credential timing-safe;
   internal clients используют `redirect: "error"`.
 - Deploy-level `service-token-preflight` намеренно строже runtime validation:
-  до запуска credential-bearing processes он проверяет 22 deploy credentials
-  (девять service tokens, `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и
-  четыре NATS passwords)
-  на глобальную pairwise distinctness, четыре NATS bcrypt verifier с
-  canonical `$2a$` prefix/cost `11` на format/раздельность и четыре NATS
+  до запуска credential-bearing processes он проверяет 24 deploy credentials
+  (десять service tokens, `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и
+  пять NATS passwords)
+  на глобальную pairwise distinctness, пять NATS bcrypt verifier с
+  canonical `$2a$` prefix/cost `11` на format/раздельность и пять NATS
   username на отдельную уникальность и несовпадение с credentials. Secrets
   допускают только
   URL-safe `[A-Za-z0-9._~-]` длиной `32..512`; NATS password начинается с
@@ -287,7 +313,8 @@ event families пока имеют только локальные outbox/inbox 
   `no-new-privileges` и не пишет в output значения либо их хэши; ошибки
   называют только переменные.
 - NATS deploy identities разделены на deny-all generic runtime,
-  `platform-api` publisher, Realtime consumer и one-shot topology provisioner.
+  `platform-api` publisher, Realtime consumer, Jobs auth-email consumer и
+  one-shot topology provisioner.
   Apps получают привычные `NATS_USER/NATS_PASSWORD` только через exact Compose
   mapping, тогда как broker получает только соответствующие bcrypt verifier
   env. Production требует explicit safe `NATS_EVENT_ENVIRONMENT`, а
@@ -329,7 +356,9 @@ event families пока имеют только локальные outbox/inbox 
   DB/Redis/NATS/S3/SMTP, два нужных general tokens и management vault; import
   — DB/Redis/S3/SEO token; inspection — DB/Redis/S3/malware; system — только
   Redis. Rank и connector используют прежние strict allowlists и не получают
-  general tokens.
+  general tokens. Auth-email получает только scoped Jobs DB, dedicated NATS/
+  Platform credentials и SMTP; Redis, general tokens, vault, S3 и malware
+  configuration запрещены.
 - `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` отличается от остальных
   service secrets и выдаётся только Platform API и Realtime HTTP для
   управления browser Web Push devices. Пример намеренно пуст, runtime
@@ -369,6 +398,10 @@ event families пока имеют только локальные outbox/inbox 
   S3/SMTP/provider HTTPS.
   Connector origins фиксированы в коде; production egress proxy/firewall
   остаётся дополнительным сетевым allowlist.
+- SMTP deploy inputs разделены: только `AUTH_EMAIL_SMTP_*` маппятся в
+  process-local `SMTP_*` auth-email worker, а Directus получает только
+  `DIRECTUS_SMTP_*`. Общие SMTP credentials и выдача обоих наборов одному
+  process запрещены.
 - `inspection` Compose profile запускает отдельные ClamAV и upload inspection
   worker; без доступного scanner файл fail-closed остаётся `UPLOADED`.
 
@@ -410,6 +443,13 @@ Backend convention:
   ближайшего из одного доверенного proxy hop;
 - `platform-api/src/identity/mfa.*`, `totp.*` — TOTP lifecycle, login
   challenge и recovery codes;
+- `platform-contracts/src/events/transactional-email.ts` и
+  `src/api/auth-email-deliveries.ts` — exact secret-free auth-email events,
+  subjects/redacted DLQ и JIT material/completion contracts;
+- `platform-api/src/auth-email` — dedicated guard/controller и authoritative
+  JIT materializer: повторная проверка user/token/invite/workspace state,
+  восстановление token только в памяти, fragment-only action URL и
+  idempotent invite completion;
 - `platform-api/src/authorization` — default-deny permission catalog и
   проверка tenant context;
 - `platform-api/src/tenants` — workspace/project commands и queries;
@@ -490,8 +530,9 @@ Backend convention:
 - `platform-api/src/realtime` — строго валидируемый internal client владельца
   notification policy и encrypted browser subscription storage;
 - `platform-api/src/audit`, `src/outbox` — переиспользуемые transactional
-  записи аудита и событий; текущий durable publisher выбирает только exact
-  `identity.session-family.revoked.v1`, проверяет PubAck и сохраняет bounded
+  записи аудита и событий; текущий durable publisher выбирает exact terminal
+  identity event в `IDENTITY_EVENTS` и три auth-email events в
+  `AUTH_EMAIL_EVENTS`, проверяет expected stream PubAck и сохраняет bounded
   retry/terminal status в той же outbox;
 - `platform-jobs-integrations/src/queue` — BullMQ connection с единым
   versioned key prefix `seo-platform:jobs:v1`, system, `upload-inspection`,
@@ -530,6 +571,15 @@ Backend convention:
 - `platform-jobs-integrations/src/platform-api` — bounded/no-redirect client
   issuer-а с dedicated token, exact envelope/request/scope hash validation,
   no-store check, response size и timeout limits;
+- `platform-jobs-integrations/src/auth-email`,
+  `src/auth-email-worker.main.ts` и `src/auth-email-worker.module.ts` —
+  отдельный JetStream/SMTP worker без Redis: exact source validation,
+  canonical event hash/idempotency, DB lease/state recovery, JIT Platform
+  material/completion, localized templates, bounded retry и redacted DLQ;
+- `platform-jobs-integrations/prisma/migrations/20260730130000_auth_email_delivery_attempts`
+  — Jobs-owned `auth_email_delivery_attempts` без recipient/token/content,
+  unique source event identity, bounded attempt/lease/status matrix,
+  immutable SMTP receipt/terminal guards и запрет destructive mutation;
 - `platform-jobs-integrations/src/rank-worker.main.ts` — изолированный
   rank-preparation entrypoint с per-delivery lease owner, PostgreSQL
   dispatcher recovery и двумя выделенными manifest/grant rank tokens; grant
@@ -598,6 +648,9 @@ Backend convention:
   IndexedDB installation UUID/schema v2 generation-CAS, causal reconciliation,
   device list/rename/revoke/reconcile, явное recovery повреждённой/future
   local record и Service Worker со scope `/app/` без fetch cache;
+- `platform-web/lib/one-time-link.ts`, verification/password recovery forms и
+  `app/app/workspace-invites/accept` — строгий single-token fragment parser,
+  немедленное удаление fragment из history и same-origin acceptance flow;
 - `platform-web/app/app/(protected)/projects/[projectId]/rankings/contexts` —
   private/noindex экран контекстов позиций; UI-компоненты находятся в
   `platform-web/components/tracking-context-*`, provider-free estimate —
@@ -632,13 +685,15 @@ Backend convention:
 - `platform-infrastructure/docker` — reusable backend/web images;
 - `platform-infrastructure/nats/nats-server.conf` — bounded JetStream store и
   exact deny-by-default ACL для generic runtime, Platform API publisher,
-  Realtime consumer и topology provisioner; `start-nats.sh` fail-closed
+  Realtime consumer, Jobs auth-email consumer и topology provisioner;
+  `start-nats.sh` fail-closed
   валидирует canonical `$2a$` cost-11 verifier, подставляет exact markers в
   приватный mode-600 config внутри runtime tmpfs, удаляет credential env перед
   `exec` и не допускает повторного `$`-разыменования broker config;
 - `platform-infrastructure/nats/provisioner.mjs` + `topology.mjs` — one-shot
   non-root/read-only provisioner exact `IDENTITY_EVENTS`,
-  `DOMAIN_EVENTS_DLQ` и `realtime_session_family_revoked_v1`; создаёт
+  `AUTH_EMAIL_EVENTS`, shared `DOMAIN_EVENTS_DLQ`,
+  `realtime_session_family_revoked_v1` и `jobs_auth_email_v1`; создаёт
   отсутствующие ресурсы, безопасно reconciles только allowlisted limits и
   fail-closed останавливается при identity/subject/transform drift;
 - `platform-infrastructure/redis` — pinned Redis 8 configs, secret-safe
@@ -651,14 +706,20 @@ Backend convention:
   resources, migration/Redis/SEO Data/Platform API dependencies, двумя
   dedicated rank tokens, отдельным `jobs_rank_runtime`, forced-disabled
   provider submit и без ports/outbound;
+- тот же Compose запускает `auth-email-worker` отдельным process того же Jobs
+  image с `jobs_auth_email_runtime`, dedicated NATS identity и Platform token,
+  SMTP-only outbound capability, bounded resources/timeouts и без Redis/
+  general/vault/rank/S3 secrets; container-local readiness marker появляется
+  после bootstrap и удаляется до drain, а `stop_grace_period` строго больше
+  worst-case `AUTH_EMAIL_SHUTDOWN_GRACE_MS` budget;
 - тот же Compose разделяет Jobs HTTP, Redis-only system, import и inspection
   env allowlists и подключает каждый процесс только к его named Redis user и
   isolated network; static regression проверяет exact recipients четырёх
   caller/audience, dedicated service tokens и восьми Redis credentials и
   запрещает legacy env;
 - `platform-infrastructure/security/validate-service-tokens.sh` — one-shot
-  fail-closed deploy preflight для глобальной проверки 22 credentials и
-  четырёх отдельных NATS bcrypt verifier/usernames; credential-bearing
+  fail-closed deploy preflight для глобальной проверки 24 credentials и
+  пяти отдельных NATS bcrypt verifier/usernames; credential-bearing
   processes и NATS зависят от его успешного завершения;
 - тот же Compose fail-closed требует `JOBS_TO_SEO_RANK_RESULT_TOKEN` и
   `RANK_HISTORY_CURSOR_KEY` только для `seo-data`; regression test запрещает
@@ -666,7 +727,7 @@ Backend convention:
 - `platform-infrastructure/postgres/init` — создание service databases;
 - `platform-infrastructure/postgres/roles` — fail-closed cluster bootstrap
   canonical `platform/seo/jobs/realtime` migration-owner/general runtime
-  roles и scoped `jobs_rank_runtime`, SCRAM password provisioning через
+  roles и scoped `jobs_rank_runtime`/`jobs_auth_email_runtime`, SCRAM password provisioning через
   stdin, безопасная передача только пустых legacy databases и cluster-wide
   ownership/membership/ACL audit;
 - `platform-infrastructure/postgres/config/start-postgres.sh` — generated
@@ -679,7 +740,9 @@ Backend convention:
   schema/object owner, запрещает runtime membership/ownership, полностью
   закрывает private provider intents от `jobs_runtime` и выдаёт rank-role
   exact table/verb/column allowlist без vault ciphertext, sequences/default
-  privileges; RLS оставляет только manual rank/validation и
+  privileges; auth-email role получает только `SELECT/INSERT/UPDATE`
+  `auth_email_delivery_attempts`, а general Jobs role этой таблицы не видит;
+  RLS оставляет только manual rank/validation и
   `SERP_RANK_TRACKING` graph. General роли получают CRUD без
   `_prisma_migrations`/`TRUNCATE`, sequence use и точные routines;
   default ACL сохраняют правило для будущих объектов. Отдельный audited
@@ -705,6 +768,8 @@ Entrypoints:
   `platform-jobs-integrations/src/rank-worker.main.ts`;
 - credential validation connector worker:
   `platform-jobs-integrations/src/connector-worker.main.ts`;
+- transactional auth-email worker:
+  `platform-jobs-integrations/src/auth-email-worker.main.ts`;
 - connector DB permission init:
   `platform-infrastructure/postgres/permissions/provision-jobs-connector-role.sh`
   + `jobs-connector.sql`, one-shot Compose service
@@ -715,8 +780,8 @@ Entrypoints:
   one-shot Compose services `service-database-roles` и
   `*-runtime-db-permissions`;
 - NATS topology init: `platform-infrastructure/nats/provisioner.mjs`, one-shot
-  Compose service `nats-topology-provisioner`; Platform API и Realtime ждут
-  его `service_completed_successfully`;
+  Compose service `nats-topology-provisioner`; Platform API, Realtime и
+  auth-email worker ждут его `service_completed_successfully`;
 - Redis ACL init: `platform-infrastructure/redis/start-redis.sh` вызывает
   `render-acl.sh` до `redis-server`, удаляет plaintext secrets из child
   environment, копирует config и атомарно передаёт hashed ACL через
@@ -733,13 +798,13 @@ Entrypoints:
 | Contracts | foundation |
 | Service health/readiness | foundation |
 | Prisma schemas | foundation |
-| NATS/Redis wiring | vertical slice: durable terminal identity NATS pipeline + isolated versioned Redis ACL topology; source-built Redis 8.8.1 live smoke пройден, target Docker image остаётся gate |
-| S3/email ports | foundation |
+| NATS/Redis wiring | vertical slice: durable terminal identity + transactional auth-email NATS pipelines и isolated versioned Redis ACL topology; source-built Redis 8.8.1 live smoke пройден, target Docker image остаётся gate |
+| S3/email ports | vertical slice: S3 foundation + выделенный auth-email SMTP worker; общий notification sender не реализован, production SMTP остаётся operator gate |
 | Realtime public gateway | foundation |
 | Unified Web/private app shell | vertical slice |
 | Admin shell | vertical slice |
-| Auth core | vertical slice |
-| Workspaces/projects/team access | vertical slice |
+| Auth core | vertical slice: identity lifecycle + transactional verification/reset email transport |
+| Workspaces/projects/team access | vertical slice: включая transactional invite email/fragment acceptance |
 | Semantics/import | vertical slice: CSV/TSV → mapping → validation → publish → query |
 | Notifications | vertical slice: preferences → effective policy → read center → encrypted browser device lifecycle |
 | Integrations | vertical slice: catalog + encrypted BYOK vault + validation + project binding |
@@ -760,9 +825,10 @@ terminal revoke сериализуется advisory lock по user, меняет
 families и пишет exact redacted `identity.session-family.revoked.v1`.
 Bounded global expiry sweeper выбирает просроченные active families малыми
 batches, повторно проверяет due state под тем же lock и вызывает общий
-revoke/outbox helper; production config требует sweeper включённым. Durable
-Platform API publisher обрабатывает только этот exact event type, подтверждает
-exact stream PubAck и хранит bounded retry/terminal failure в outbox.
+revoke/outbox helper; production config требует sweeper включённым. Для
+`IDENTITY_EVENTS` Platform API publisher обрабатывает только этот exact event
+type, подтверждает exact stream PubAck и хранит bounded retry/terminal failure
+в outbox.
 Password reset дополнительно инвалидирует outstanding login MFA challenges;
 session issue повторно проверяет ожидаемую версию active user под lock.
 MFA setup/activation/disable и revoke-others повторно валидируют exact
@@ -771,6 +837,18 @@ active/unexpired principal session под тем же lock. Refresh rotation н�
 исправляет legacy rows. Session inventory имеет bounded encrypted user-bound
 keyset cursor без раскрытия family ID. Новые family IDs — UUIDv7; legacy UUIDv4
 продолжают читаться без смены identifier.
+
+Регистрация/resend verification, password reset request и workspace invite
+атомарно создают secret-free auth-email outbox events. Publisher валидирует
+их отдельно от terminal identity event и отправляет в `AUTH_EMAIL_EVENTS`.
+Jobs durable attempt дедуплицируется по source event ID/hash; JIT material
+повторно проверяет authoritative Platform state непосредственно перед SMTP.
+Устаревший token/invite даёт `SKIPPED/NOT_DELIVERABLE`, а успешный invite
+completion переводит только актуальный `SENT` в `DELIVERED`; hard recipient
+rejection после redacted DLQ PubAck переводит только актуальный `SENT` в
+`BOUNCED`. SMTP и Jobs DB не
+транзакционны: crash после SMTP accept и до durable receipt может вызвать
+повтор со стабильным `Message-ID`, поэтому exactly-once не заявляется.
 
 Tenant core содержит workspace/project CRUD, системную RBAC-матрицу,
 одноразовые workspace invitations, optimistic locking участников и
@@ -782,7 +860,10 @@ Private Web содержит same-origin BFF, регистрацию/вход/п
 выбор workspace/project, MFA challenge и экран безопасности профиля с полным
 пагинируемым списком active sessions/revoke. BFF передаёт Platform API только
 один canonical IPv4/IPv6 от ближайшего proxy и fail-closed отклоняет chain,
-malformed и zone-id значения. Для Realtime ticket BFF передаёт browser
+malformed и zone-id значения. Verification/password/invite links принимают
+token только во fragment, немедленно очищают browser history и передают его
+Platform API только через same-origin BFF; invite acceptance доступен по
+`/app/workspace-invites/accept`. Для Realtime ticket BFF передаёт browser
 `Origin` только при exact canonical совпадении с текущим Web origin и
 отклоняет cross-origin запрос до Platform API. Workspace/project settings
 редактируют только
@@ -874,7 +955,9 @@ browser state. Запоздалый PUT после локальной смены
 installation UUID; перенос между аккаунтами запрещён. Registration честно
 возвращает
 `deliveryAvailable=false` и `testDeliveryAvailable=false`: email/Web Push
-sender, digest и delivery history пока отсутствуют.
+notification sender, digest и delivery history пока отсутствуют. Это не
+отключает отдельный ADR-2026-038 transactional auth-email path, который не
+использует notification profile/project policy.
 
 Handler `identity.session-family.revoked.v1` атомарно
 сохраняет versioned inbox scope, durable tombstone и отзывает только active
@@ -1256,6 +1339,14 @@ caller, recorded connector wire submission/status и normalized result producer 
   Jobs 334 pass + 9 opt-in skips и infrastructure 74 pass + 5 opt-in skips;
   Web 144/144 tests и production build всех пакетов проходят на Node.js
   24.18.1. Локальный PostgreSQL 18.4 принял все четыре migration chains.
+- Transactional auth-email gate 2026-07-30: contracts 97/97, Platform API
+  363 pass + 4 opt-in PostgreSQL skips, Jobs 389 pass + 9 opt-in PostgreSQL
+  skips, Web 149/149 и infrastructure 80 pass + 5 optional PostgreSQL/Redis
+  skips; полный root lint/typecheck/test/build, Prisma validate/generate и
+  `git diff --check` проходят. Docker, локальные PostgreSQL/Redis binaries и
+  production SMTP credentials на текущем хосте отсутствуют, поэтому Compose
+  render, disposable DB/Redis smokes и внешний SMTP canary остаются
+  CI/staging/operator gates, а не заменяются unit-тестами.
 - Live HTTPS preview 2026-07-30: Caddy short-lived IP TLS → loopback router →
   production Web/API/SEO Data/Jobs/Realtime; все обязательные readiness
   dependencies имеют `ok`. Реальный same-origin login вернул secure
@@ -1298,7 +1389,9 @@ lifecycle реализован по ADR-2026-035, а terminal session-family pro
 durable JetStream publisher/consumer, retry/DLQ и global session-expiry
 sweeper — по ADR-2026-036. Следующему срезу остаются VAPID private-key sender,
 `web-push`, delivery attempts/history, digest и transport для остальных
-notification events; фактическая внешняя доставка всё ещё выключена.
+notification events; фактическая внешняя доставка общего notification
+контура всё ещё выключена. Выделенный transactional auth-email transport по
+ADR-2026-038 реализован отдельно и не закрывает этот срез.
 OAuth/OIDC выполняется после подтверждения зависимости `jose`; QR для TOTP —
 после подтверждения `qrcode`.
 
@@ -1311,9 +1404,10 @@ OAuth/OIDC выполняется после подтверждения зави
   отдельного data-quality audit.
 - `semantic_import_receipts` без chunks требуют bounded reconciliation/retention;
   receipt с применёнными chunks автоматически не удаляется.
-- Durable publisher/consumer реализованы только для
-  `identity.session-family.revoked.v1`; остальные event families требуют
-  собственных allowlisted publishers/consumers, retention и replay runbooks.
+- Durable publisher/consumer реализованы для
+  `identity.session-family.revoked.v1` и трёх transactional auth-email events;
+  остальные event families требуют собственных allowlisted publishers/
+  consumers, retention и replay runbooks.
 - `rank_estimates` требуют bounded maintenance/retention после окна
   идемпотентных повторов и диагностики; expiry пока только запрещает считать
   receipt актуальным и сам не удаляет строку.
@@ -1322,12 +1416,17 @@ OAuth/OIDC выполняется после подтверждения зави
   representative history load test. Public history proxy/UI уже доступны,
   но не заменяют эти storage/load release gates.
 - Notification preferences не создают deliveries сами по себе: отсутствуют
-  durable transport остальных notification events, email/Web Push adapters,
+  durable transport остальных notification events, общий email/Web Push sender,
   digest scheduler, VAPID private-key sender и provider delivery history.
   Identity producer/publisher/consumer, Realtime tombstone handler и
   fail-closed device-upsert check готовы; bounded global provider-expiry
   sweeper остаётся отдельным blocker перед внешней доставкой.
   До sweeper due subscriptions безопасно очищаются в user-scoped list/upsert.
+- Transactional auth-email worker требует operator-managed production SMTP
+  account/sender/credentials и canary evidence: этих секретов в repository
+  нет. SMTP accept не атомарен с Jobs DB; crash до durable receipt может дать
+  повтор со стабильным `Message-ID`, поэтому нужны ambiguity metric,
+  reconciliation/runbook и fault-injection перед production.
 - Identity terminal lifecycle ещё требует PostgreSQL 18 staging race tests
   `rotate ↔ rotate`, `login ↔ password reset`,
   `MFA challenge/confirm/disable ↔ reset`, outbox rollback, future

@@ -33,6 +33,7 @@ test("uses only explicit loopback or container bind addresses", () => {
         OUTBOX_PUBLISHER_ENABLED: "true",
         NATS_EVENT_ENVIRONMENT: "production",
         NATS_EVENT_STREAM: "IDENTITY_EVENTS",
+        NATS_AUTH_EMAIL_STREAM: "AUTH_EMAIL_EVENTS",
         SESSION_EXPIRY_SWEEPER_ENABLED: "true"
       })
     ).bindAddress,
@@ -90,6 +91,8 @@ test("does not allow development tokens in production", () => {
         PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
         PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
         JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: "g".repeat(32),
+        JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: "e".repeat(32),
+        WEB_PUBLIC_URL: "https://example.test",
         AUTH_EXPOSE_DEVELOPMENT_TOKENS: "true"
       }),
     {
@@ -210,7 +213,9 @@ test("rejects every documented service-token placeholder and unsafe header value
     PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN:
       "replace-with-a-distinct-random-notification-token",
     JOBS_TO_PLATFORM_RANK_GRANT_TOKEN:
-      "replace-with-a-distinct-random-rank-grant-token"
+      "replace-with-a-distinct-random-rank-grant-token",
+    JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN:
+      "replace-with-a-distinct-random-auth-email-token"
   } as const;
 
   for (const [key, value] of Object.entries(placeholders)) {
@@ -258,6 +263,45 @@ test("keeps the rank grant token separate from other internal tokens", () => {
   );
 });
 
+test("requires a distinct auth-email token and exact public origin", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        PLATFORM_API_TO_JOBS_TOKEN: "e".repeat(32),
+        JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: "e".repeat(32),
+        WEB_PUBLIC_URL: "https://example.test"
+      }),
+    /Every internal API token must be distinct/u
+  );
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: "e".repeat(32)
+      }),
+    /WEB_PUBLIC_URL is required/u
+  );
+  for (const value of [
+    "https://example.test/",
+    "https://example.test/path",
+    "https://example.test?query=1",
+    "https://user@example.test"
+  ]) {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          WEB_PUBLIC_URL: value
+        }),
+      /WEB_PUBLIC_URL must be an explicit canonical origin/u
+    );
+  }
+});
+
 test("rejects the retired shared internal token", () => {
   assert.throws(
     () =>
@@ -296,7 +340,8 @@ test("requires the session expiry sweeper to be explicitly enabled in production
   const productionWithPublisher = productionEnvironment({
     OUTBOX_PUBLISHER_ENABLED: "true",
     NATS_EVENT_ENVIRONMENT: "production",
-    NATS_EVENT_STREAM: "IDENTITY_EVENTS"
+    NATS_EVENT_STREAM: "IDENTITY_EVENTS",
+    NATS_AUTH_EMAIL_STREAM: "AUTH_EMAIL_EVENTS"
   });
 
   assert.throws(() => loadAppConfig(productionWithPublisher), {
@@ -386,18 +431,31 @@ test("requires exact JetStream routing when the outbox publisher is enabled", ()
       }),
     /NATS_EVENT_STREAM is required/u
   );
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        OUTBOX_PUBLISHER_ENABLED: "true",
+        NATS_EVENT_ENVIRONMENT: "test",
+        NATS_EVENT_STREAM: "IDENTITY_EVENTS"
+      }),
+    /NATS_AUTH_EMAIL_STREAM is required/u
+  );
 
   const config = loadAppConfig({
     NODE_ENV: "test",
     DATABASE_URL: "postgresql://test",
     OUTBOX_PUBLISHER_ENABLED: "true",
     NATS_EVENT_ENVIRONMENT: "test-eu1",
-    NATS_EVENT_STREAM: "IDENTITY_EVENTS"
+    NATS_EVENT_STREAM: "IDENTITY_EVENTS",
+    NATS_AUTH_EMAIL_STREAM: "AUTH_EMAIL_EVENTS"
   });
   assert.deepEqual(config.outboxPublisher, {
     enabled: true,
     eventEnvironment: "test-eu1",
     streamName: "IDENTITY_EVENTS",
+    authEmailStreamName: "AUTH_EMAIL_EVENTS",
     pollIntervalMs: 1_000,
     batchSize: 20,
     maxAttempts: 10,
@@ -405,6 +463,18 @@ test("requires exact JetStream routing when the outbox publisher is enabled", ()
     retryMaxMs: 300_000,
     publishTimeoutMs: 5_000
   });
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        OUTBOX_PUBLISHER_ENABLED: "true",
+        NATS_EVENT_ENVIRONMENT: "test",
+        NATS_EVENT_STREAM: "IDENTITY_EVENTS",
+        NATS_AUTH_EMAIL_STREAM: "IDENTITY_EVENTS"
+      }),
+    /must be distinct/u
+  );
 });
 
 test("rejects placeholder and ambiguous JetStream routing identifiers", () => {
@@ -491,6 +561,8 @@ function productionEnvironment(
     PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
     PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
     JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: "g".repeat(32),
+    JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: "e".repeat(32),
+    WEB_PUBLIC_URL: "https://example.test",
     ...overrides
   };
 }

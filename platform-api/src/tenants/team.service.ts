@@ -264,74 +264,103 @@ export class TeamService {
     token: string,
     context: RequestContext
   ): Promise<WorkspaceMemberSummary> {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId }
+    const tokenHash = this.crypto.hashOpaqueToken(token);
+    const candidate = await this.prisma.workspaceInvite.findUnique({
+      where: { tokenHash },
+      select: { id: true, workspaceId: true }
     });
-    if (!user || user.status !== "ACTIVE") {
-      throw new DomainError({
-        statusCode: 403,
-        code: "FORBIDDEN",
-        message: "An active account is required"
-      });
-    }
-    if (!user.emailVerifiedAt) {
-      throw new DomainError({
-        statusCode: 403,
-        code: "FORBIDDEN",
-        message: "Verify the account email before accepting an invitation"
-      });
-    }
+    if (!candidate) throw this.inviteNotFound();
 
-    const invite = await this.prisma.workspaceInvite.findUnique({
-      where: { tokenHash: this.crypto.hashOpaqueToken(token) },
-      include: { workspace: true }
-    });
-    if (
-      !invite ||
-      !ACTIVE_INVITE_STATUSES.includes(
-        invite.status as (typeof ACTIVE_INVITE_STATUSES)[number]
-      )
-    ) {
-      throw this.inviteNotFound();
-    }
-    if (invite.expiresAt <= new Date()) {
-      await this.prisma.workspaceInvite.updateMany({
-        where: {
-          id: invite.id,
-          status: { in: [...ACTIVE_INVITE_STATUSES] }
-        },
-        data: { status: "EXPIRED" }
+    const result = await this.prisma.$transaction(async (transaction) => {
+      await this.lockInviteAcceptanceRows(
+        transaction,
+        userId,
+        candidate.workspaceId,
+        candidate.id
+      );
+      const user = await transaction.user.findUnique({
+        where: { id: userId }
       });
-      throw this.inviteNotFound();
-    }
-    if (invite.emailNormalized !== user.emailNormalized) {
-      throw new DomainError({
-        statusCode: 403,
-        code: "FORBIDDEN",
-        message: "The invitation belongs to another verified email"
-      });
-    }
-    if (
-      ["SUSPENDED", "DELETING", "DELETED"].includes(invite.workspace.status)
-    ) {
-      throw new DomainError({
-        statusCode: 409,
-        code: "RESOURCE_STATE_CONFLICT",
-        message: "The workspace cannot accept invitations"
-      });
-    }
+      if (!user || user.status !== "ACTIVE") {
+        throw new DomainError({
+          statusCode: 403,
+          code: "FORBIDDEN",
+          message: "An active account is required"
+        });
+      }
+      if (!user.emailVerifiedAt) {
+        throw new DomainError({
+          statusCode: 409,
+          code: "EMAIL_VERIFICATION_REQUIRED",
+          message: "Verify the account email before accepting an invitation"
+        });
+      }
 
-    const assignments = storedProjectAccesses(invite.projectAccesses);
-    const memberId = await this.prisma.$transaction(async (transaction) => {
+      const invite = await transaction.workspaceInvite.findUnique({
+        where: { id: candidate.id },
+        include: { workspace: true }
+      });
+      if (
+        !invite ||
+        invite.workspaceId !== candidate.workspaceId ||
+        invite.tokenHash !== tokenHash ||
+        !ACTIVE_INVITE_STATUSES.includes(
+          invite.status as (typeof ACTIVE_INVITE_STATUSES)[number]
+        )
+      ) {
+        throw this.inviteNotFound();
+      }
+
+      const now = await this.databaseNow(transaction);
+      if (invite.expiresAt <= now) {
+        await transaction.workspaceInvite.updateMany({
+          where: {
+            id: invite.id,
+            tokenHash,
+            status: { in: [...ACTIVE_INVITE_STATUSES] },
+            expiresAt: { lte: now }
+          },
+          data: { status: "EXPIRED" }
+        });
+        return { kind: "EXPIRED" } as const;
+      }
+      if (invite.emailNormalized !== user.emailNormalized) {
+        throw new DomainError({
+          statusCode: 403,
+          code: "INVITATION_ACCOUNT_MISMATCH",
+          message: "The invitation belongs to another verified account"
+        });
+      }
+      if (
+        ["SUSPENDED", "DELETING", "DELETED"].includes(
+          invite.workspace.status
+        )
+      ) {
+        throw new DomainError({
+          statusCode: 409,
+          code: "RESOURCE_STATE_CONFLICT",
+          message: "The workspace cannot accept invitations"
+        });
+      }
+
+      await transaction.$queryRaw<readonly { id: string }[]>`
+        SELECT id
+        FROM workspace_members
+        WHERE workspace_id = ${invite.workspaceId}::uuid
+          AND user_id = ${userId}::uuid
+        FOR UPDATE
+      `;
+      const assignments = storedProjectAccesses(invite.projectAccesses);
       const accepted = await transaction.workspaceInvite.updateMany({
         where: {
           id: invite.id,
+          tokenHash,
           status: { in: [...ACTIVE_INVITE_STATUSES] },
-          expiresAt: { gt: new Date() }
+          expiresAt: { gt: now }
         },
         data: {
           status: "ACCEPTED",
-          acceptedAt: new Date()
+          acceptedAt: now
         }
       });
       if (accepted.count !== 1) throw this.inviteNotFound();
@@ -369,14 +398,14 @@ export class TeamService {
           allProjects: invite.allProjects,
           status: "ACTIVE",
           invitedBy: invite.invitedBy,
-          joinedAt: new Date()
+          joinedAt: now
         },
         update: {
           roleCode: invite.roleCode,
           allProjects: invite.allProjects,
           status: "ACTIVE",
           invitedBy: invite.invitedBy,
-          joinedAt: new Date(),
+          joinedAt: now,
           version: { increment: 1 }
         }
       });
@@ -431,10 +460,21 @@ export class TeamService {
         },
         context.requestId
       );
-      return member.id;
+      const summary = await transaction.workspaceMember.findUnique({
+        where: { id: member.id },
+        include: {
+          user: true,
+          projectAccesses: { orderBy: { projectId: "asc" } }
+        }
+      });
+      if (!summary) throw this.memberNotFound();
+      return {
+        kind: "ACCEPTED",
+        member: toWorkspaceMemberSummary(summary)
+      } as const;
     });
-
-    return this.memberById(invite.workspaceId, memberId);
+    if (result.kind === "EXPIRED") throw this.inviteNotFound();
+    return result.member;
   }
 
   public async updateMember(
@@ -642,6 +682,47 @@ export class TeamService {
       return updated;
     });
     return toWorkspaceInviteSummary(invite);
+  }
+
+  private async lockInviteAcceptanceRows(
+    transaction: Parameters<OutboxService["event"]>[0],
+    userId: string,
+    workspaceId: string,
+    inviteId: string
+  ): Promise<void> {
+    // Canonical order: user lifecycle -> workspace lifecycle -> invitation.
+    // Every authoritative row is re-read after these locks are held.
+    await transaction.$queryRaw<readonly { id: string }[]>`
+      SELECT id
+      FROM users
+      WHERE id = ${userId}::uuid
+      FOR UPDATE
+    `;
+    await transaction.$queryRaw<readonly { id: string }[]>`
+      SELECT id
+      FROM workspaces
+      WHERE id = ${workspaceId}::uuid
+      FOR UPDATE
+    `;
+    await transaction.$queryRaw<readonly { id: string }[]>`
+      SELECT id
+      FROM workspace_invites
+      WHERE id = ${inviteId}::uuid
+      FOR UPDATE
+    `;
+  }
+
+  private async databaseNow(
+    transaction: Parameters<OutboxService["event"]>[0]
+  ): Promise<Date> {
+    const rows = await transaction.$queryRaw<readonly { now: Date }[]>`
+      SELECT clock_timestamp() AS "now"
+    `;
+    const now = rows[0]?.now;
+    if (!(now instanceof Date) || !Number.isFinite(now.getTime())) {
+      throw new Error("Database clock returned an invalid value");
+    }
+    return now;
   }
 
   private async validateProjectAccesses(

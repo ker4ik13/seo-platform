@@ -22,9 +22,30 @@ test("topology is exact, bounded and compatible with app-level retry/DLQ", () =>
     "prod-eu1.dlq.realtime.identity.session-family.revoked.v1"
   );
   assert.deepEqual(topology.sourceStream.subjects, [topology.sourceSubject]);
-  assert.deepEqual(topology.dlqStream.subjects, [topology.dlqSubject]);
+  assert.deepEqual(topology.authEmailSubjects, [
+    "prod-eu1.email.identity.email-verification.requested.v1",
+    "prod-eu1.email.identity.password-reset.requested.v1",
+    "prod-eu1.email.workspace.invite.requested.v1"
+  ]);
+  assert.equal(topology.authEmailFilterSubject, "prod-eu1.email.>");
+  assert.equal(
+    topology.authEmailDlqSubject,
+    "prod-eu1.dlq.jobs.transactional-email.v1"
+  );
+  assert.deepEqual(
+    topology.authEmailStream.subjects,
+    topology.authEmailSubjects
+  );
+  assert.deepEqual(topology.dlqStream.subjects, [
+    topology.dlqSubject,
+    topology.authEmailDlqSubject
+  ]);
 
-  for (const stream of [topology.sourceStream, topology.dlqStream]) {
+  for (const stream of [
+    topology.sourceStream,
+    topology.authEmailStream,
+    topology.dlqStream
+  ]) {
     assert.equal(stream.storage, "file");
     assert.equal(stream.retention, "limits");
     assert.equal(stream.discard, "new");
@@ -54,6 +75,16 @@ test("topology is exact, bounded and compatible with app-level retry/DLQ", () =>
   assert.equal(topology.consumer.mem_storage, false);
   assert.equal("deliver_subject" in topology.consumer, false);
   assert.equal("backoff" in topology.consumer, false);
+  assert.equal(topology.authEmailStream.name, "AUTH_EMAIL_EVENTS");
+  assert.equal(topology.authEmailStream.max_consumers, 2);
+  assert.equal(topology.authEmailConsumer.durable_name, "jobs_auth_email_v1");
+  assert.equal(
+    topology.authEmailConsumer.filter_subject,
+    topology.authEmailFilterSubject
+  );
+  assert.equal(topology.authEmailConsumer.max_ack_pending, 16);
+  assert.equal(topology.authEmailConsumer.max_deliver, -1);
+  assert.equal("deliver_subject" in topology.authEmailConsumer, false);
 });
 
 test("provisioner creates exact resources then becomes idempotent", async () => {
@@ -63,17 +94,23 @@ test("provisioner creates exact resources then becomes idempotent", async () => 
     await provisionNatsTopology({ manager, environment }),
     {
       sourceStream: "created",
+      authEmailStream: "created",
       dlqStream: "created",
-      consumer: "created"
+      consumer: "created",
+      authEmailConsumer: "created"
     }
   );
   assert.deepEqual(manager.calls, [
     "stream.info:IDENTITY_EVENTS",
     "stream.add:IDENTITY_EVENTS",
+    "stream.info:AUTH_EMAIL_EVENTS",
+    "stream.add:AUTH_EMAIL_EVENTS",
     "stream.info:DOMAIN_EVENTS_DLQ",
     "stream.add:DOMAIN_EVENTS_DLQ",
     "consumer.info:IDENTITY_EVENTS:realtime_session_family_revoked_v1",
-    "consumer.add:IDENTITY_EVENTS:realtime_session_family_revoked_v1"
+    "consumer.add:IDENTITY_EVENTS:realtime_session_family_revoked_v1",
+    "consumer.info:AUTH_EMAIL_EVENTS:jobs_auth_email_v1",
+    "consumer.add:AUTH_EMAIL_EVENTS:jobs_auth_email_v1"
   ]);
 
   manager.calls.length = 0;
@@ -81,14 +118,18 @@ test("provisioner creates exact resources then becomes idempotent", async () => 
     await provisionNatsTopology({ manager, environment }),
     {
       sourceStream: "unchanged",
+      authEmailStream: "unchanged",
       dlqStream: "unchanged",
-      consumer: "unchanged"
+      consumer: "unchanged",
+      authEmailConsumer: "unchanged"
     }
   );
   assert.deepEqual(manager.calls, [
     "stream.info:IDENTITY_EVENTS",
+    "stream.info:AUTH_EMAIL_EVENTS",
     "stream.info:DOMAIN_EVENTS_DLQ",
-    "consumer.info:IDENTITY_EVENTS:realtime_session_family_revoked_v1"
+    "consumer.info:IDENTITY_EVENTS:realtime_session_family_revoked_v1",
+    "consumer.info:AUTH_EMAIL_EVENTS:jobs_auth_email_v1"
   ]);
 });
 
@@ -96,7 +137,11 @@ test("server-omitted false stream defaults remain idempotent", async () => {
   const manager = fakeManager();
   await provisionNatsTopology({ manager, environment });
 
-  for (const streamName of ["IDENTITY_EVENTS", "DOMAIN_EVENTS_DLQ"]) {
+  for (const streamName of [
+    "IDENTITY_EVENTS",
+    "AUTH_EMAIL_EVENTS",
+    "DOMAIN_EVENTS_DLQ"
+  ]) {
     const config = manager.streamRecords.get(streamName);
     delete config.no_ack;
     delete config.allow_rollup_hdrs;
@@ -109,8 +154,10 @@ test("server-omitted false stream defaults remain idempotent", async () => {
     await provisionNatsTopology({ manager, environment }),
     {
       sourceStream: "unchanged",
+      authEmailStream: "unchanged",
       dlqStream: "unchanged",
-      consumer: "unchanged"
+      consumer: "unchanged",
+      authEmailConsumer: "unchanged"
     }
   );
   assert.equal(
@@ -134,18 +181,38 @@ test("provisioner reconciles only allowlisted mutable drift", async () => {
     await provisionNatsTopology({ manager, environment }),
     {
       sourceStream: "updated",
+      authEmailStream: "unchanged",
       dlqStream: "updated",
-      consumer: "updated"
+      consumer: "updated",
+      authEmailConsumer: "unchanged"
     }
   );
   assert.deepEqual(manager.calls, [
     "stream.info:IDENTITY_EVENTS",
     "stream.update:IDENTITY_EVENTS",
+    "stream.info:AUTH_EMAIL_EVENTS",
     "stream.info:DOMAIN_EVENTS_DLQ",
     "stream.update:DOMAIN_EVENTS_DLQ",
     "consumer.info:IDENTITY_EVENTS:realtime_session_family_revoked_v1",
-    "consumer.update:IDENTITY_EVENTS:realtime_session_family_revoked_v1"
+    "consumer.update:IDENTITY_EVENTS:realtime_session_family_revoked_v1",
+    "consumer.info:AUTH_EMAIL_EVENTS:jobs_auth_email_v1"
   ]);
+});
+
+test("provisioner permits only the known additive DLQ subject migration", async () => {
+  const manager = fakeManager();
+  await provisionNatsTopology({ manager, environment });
+  manager.streamRecords.get("DOMAIN_EVENTS_DLQ").subjects = [
+    "prod-eu1.dlq.realtime.identity.session-family.revoked.v1"
+  ];
+  manager.calls.length = 0;
+
+  const result = await provisionNatsTopology({ manager, environment });
+  assert.equal(result.dlqStream, "updated");
+  assert.deepEqual(
+    manager.streamRecords.get("DOMAIN_EVENTS_DLQ").subjects,
+    buildNatsTopology(environment).dlqStream.subjects
+  );
 });
 
 test("provisioner fails closed on unsafe stream identity or transform drift", async () => {
@@ -238,6 +305,7 @@ test("partial failure remains retryable and never exposes the underlying error",
   assert.ok(failure instanceof NatsTopologyError);
   assert.equal(failure.code, "STREAM_CREATE_FAILED");
   assert.equal(manager.streamRecords.has("IDENTITY_EVENTS"), true);
+  assert.equal(manager.streamRecords.has("AUTH_EMAIL_EVENTS"), true);
   assert.equal(manager.streamRecords.has("DOMAIN_EVENTS_DLQ"), false);
   assert.equal(manager.consumerRecords.size, 0);
   const output = safeProvisionerFailure(failure);

@@ -215,7 +215,7 @@ Job и credential tables.
 Реализованный config/Compose дополнительно фиксирует полный process matrix
 одного Jobs image:
 
-- HTTP: Jobs DB, Redis, NATS, S3, SMTP, general Platform API/SEO Data tokens,
+- HTTP: Jobs DB, Redis, NATS, S3, general Platform API/SEO Data tokens,
   credential-management token и keyrings;
 - import worker: Jobs DB, Redis, S3 и `JOBS_TO_SEO_DATA_TOKEN` для SEO Data;
 - inspection worker: Jobs DB, Redis, S3 и malware scanner;
@@ -225,7 +225,10 @@ Job и credential tables.
   `JOBS_TO_SEO_RANK_TOKEN` и
   `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`, без general/management/adapters;
 - connector worker: `jobs_connector`, Redis и execution KEK, без
-  general/management/NATS/S3/SMTP credentials.
+  general/management/NATS/S3/SMTP credentials;
+- auth-email worker: отдельный `jobs_auth_email_runtime`, dedicated NATS
+  consumer и Platform JIT token, SMTP и outbound; без Redis, general/vault/
+  rank/S3/malware capabilities.
 
 Nest entrypoints передают явную process role в config loader, system worker
 использует отдельный Redis-only loader. Чужой enable flag, service token или
@@ -233,6 +236,47 @@ adapter credential останавливает процесс fail-closed. Эта
 заменяет DB grants, Redis ACL, egress policy и runtime provider gates.
 
 Rate limiting настраивается по provider и credential. Нельзя полагаться только на общий limiter очереди; connector поддерживает распределённые quota buckets.
+
+### 8.1. Transactional auth-email worker
+
+Отдельный `auth-email-worker.main.ts` обрабатывает только три secret-free
+source events из `AUTH_EMAIL_EVENTS`: email verification, password reset и
+workspace invite. Он не является общей notification/digest очередью.
+
+PostgreSQL `auth_email_delivery_attempts` является источником истины для
+delivery lifecycle:
+
+- unique source event ID плюс immutable event type/canonical SHA-256 не дают
+  reuse одного ID с другим payload;
+- recipient, plaintext token, action URL, subject и body не сохраняются;
+- versioned CAS, lease и DB clock защищают повторный claim/recovery;
+- retryable failure получает bounded exponential backoff с deterministic
+  jitter; terminal invalid material отменяется без SMTP;
+- exhausted attempt остаётся `DLQ_PENDING`, пока redacted DLQ PubAck не
+  подтверждён;
+- hard recipient rejection только после подтверждённого DLQ PubAck вызывает
+  идемпотентный Platform completion `BOUNCED` до terminal local commit;
+- source ack разрешён после durable local outcome, а graceful shutdown
+  оставляет незавершённый source доступным для redelivery.
+
+Перед каждой первой SMTP-отправкой worker получает JIT material из Platform
+API по dedicated credential. После durable `SMTP_ACCEPTED` повторяет только
+invite completion/local finalization, но не SMTP. Сохраняется только bounded
+provider message ID. Crash после SMTP accept и до записи `SMTP_ACCEPTED`
+остаётся неоднозначным и может дать повтор после lease expiry. Stable
+`Message-ID` является best-effort dedup hint, а не exactly-once гарантией.
+
+DB login `jobs_auth_email_runtime` имеет только `SELECT/INSERT/UPDATE`
+`auth_email_delivery_attempts`; general Jobs runtime не имеет доступа к этой
+таблице. Worker не получает Redis, поэтому recovery выполняется bounded scan
+PostgreSQL, а не queue payload.
+
+На deploy boundary worker получает только `AUTH_EMAIL_SMTP_*`, которые
+маппятся в его process-local `SMTP_*`. Directus получает только отдельные
+`DIRECTUS_SMTP_*`; общий SMTP credential set запрещён. Readiness marker
+создаётся после bootstrap и удаляется до drain, а container
+`stop_grace_period` обязан быть строго больше worst-case bounded shutdown
+budget, включая `AUTH_EMAIL_SHUTDOWN_GRACE_MS`.
 
 ## 9. Приоритеты и справедливость
 
@@ -1118,11 +1162,19 @@ Connector учитывает provider quotas и не подменяет офиц
 ### 21.11. Email
 
 - transactional provider abstraction;
-- рекомендуемый первый transport — Unisender Go через API/SMTP;
+- реализованный auth-email transport — выделенный SMTP worker по ADR-2026-038;
 - templates by locale;
+- verification/reset/invite token передаётся только во fragment и
+  materialize-ится JIT из authoritative Platform state;
+- production SMTP provider/account/sender/credentials задаются оператором и
+  не хранятся в repository;
 - bounce/complaint handling;
 - unsubscribe for non-transactional messages;
 - delivery events.
+
+Bounce/complaint handling, unsubscribe, digest и delivery history относятся к
+общему notification email sender и ещё не считаются реализованными
+transactional auth-email срезом.
 
 ### 21.12. Webhooks
 

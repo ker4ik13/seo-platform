@@ -13,6 +13,9 @@ import {
 const EVENT_ID = "01900000-0000-7000-8000-000000000101";
 const USER_ID = "01900000-0000-7000-8000-000000000102";
 const FAMILY_ID = "01900000-0000-7000-8000-000000000103";
+const TOKEN_ID = "01900000-0000-7000-8000-000000000105";
+const WORKSPACE_ID = "01900000-0000-7000-8000-000000000106";
+const INVITE_ID = "01900000-0000-7000-8000-000000000107";
 
 test("drains the publisher before the later database and NATS shutdown phase", () => {
   assert.equal(
@@ -53,12 +56,16 @@ test("claims one row with SKIP LOCKED and publishes the exact shared envelope", 
   assert.match(fixture.selectSql, /available_at <= CURRENT_TIMESTAMP/u);
   assert.match(fixture.selectSql, /ORDER BY available_at ASC, created_at ASC, id ASC/u);
   assert.deepEqual(fixture.selectValues, [
-    "identity.session-family.revoked.v1"
+    "identity.session-family.revoked.v1",
+    "identity.email-verification.requested.v1",
+    "identity.password-reset.requested.v1",
+    "workspace.invite.requested.v1"
   ]);
   assert.equal(fixture.publishCalls.length, 1);
   assert.deepEqual(fixture.publishCalls[0], {
     subject: "test-eu1.identity.session-family.revoked.v1",
     eventId: EVENT_ID,
+    streamName: "IDENTITY_EVENTS",
     payload: {
       eventId: EVENT_ID,
       eventType: "identity.session-family.revoked.v1",
@@ -83,6 +90,52 @@ test("claims one row with SKIP LOCKED and publishes the exact shared envelope", 
   assert.match(fixture.updateCalls[0]?.sql ?? "", /status = 'PUBLISHED'/u);
   assert.match(fixture.updateCalls[0]?.sql ?? "", /published_at = CURRENT_TIMESTAMP/u);
   assert.deepEqual(fixture.updateCalls[0]?.values, [EVENT_ID]);
+});
+
+test("publishes all three redacted transactional-email envelopes only to AUTH_EMAIL_EVENTS", async () => {
+  for (const row of [
+    authIdentityOutboxRow("identity.email-verification.requested.v1"),
+    authIdentityOutboxRow("identity.password-reset.requested.v1"),
+    authInviteOutboxRow()
+  ]) {
+    const fixture = publisherFixture({ row });
+    assert.equal(await fixture.service.runOnce(), 1);
+    assert.equal(fixture.publishCalls.length, 1);
+    const published = fixture.publishCalls[0];
+    assert.equal(published?.streamName, "AUTH_EMAIL_EVENTS");
+    assert.equal(
+      published?.subject,
+      `test-eu1.email.${row.event_type}`
+    );
+    const serialized = JSON.stringify(published?.payload);
+    assert.doesNotMatch(
+      serialized,
+      /recipient|emailDisplay|emailNormalized|actionUrl|tokenHash|\.signature|secret/u
+    );
+    assert.match(fixture.updateCalls[0]?.sql ?? "", /'PUBLISHED'/u);
+  }
+});
+
+test("never publishes poisoned auth-email material and consumes the retry budget", async () => {
+  const row = authIdentityOutboxRow(
+    "identity.email-verification.requested.v1"
+  );
+  const fixture = publisherFixture({
+    row: {
+      ...row,
+      payload: {
+        ...(row.payload as Readonly<Record<string, unknown>>),
+        token: "must-never-enter-the-event"
+      }
+    }
+  });
+  assert.equal(await fixture.service.runOnce(), 1);
+  assert.equal(fixture.publishCalls.length, 0);
+  assert.match(fixture.updateCalls[0]?.sql ?? "", /attempts =/u);
+  assert.doesNotMatch(
+    JSON.stringify(fixture.updateCalls),
+    /must-never-enter-the-event/u
+  );
 });
 
 test("treats a duplicate PubAck as a successful durable publication", async () => {
@@ -139,10 +192,11 @@ test("records bounded retry from the database clock without echoing the transpor
 });
 
 test("moves the row to terminal FAILED after the configured failure budget", async () => {
+  const secret = "token=must-not-be-persisted";
   const fixture = publisherFixture({
     row: outboxRow({ attempts: 2 }),
     maxAttempts: 3,
-    publishError: new Error("token=must-not-be-persisted")
+    publishError: new Error(secret)
   });
 
   assert.equal(await fixture.service.runOnce(), 1);
@@ -150,7 +204,10 @@ test("moves the row to terminal FAILED after the configured failure budget", asy
   assert.match(fixture.updateCalls[0]?.sql ?? "", /status = 'FAILED'/u);
   assert.match(fixture.updateCalls[0]?.sql ?? "", /available_at = CURRENT_TIMESTAMP/u);
   assert.deepEqual(fixture.updateCalls[0]?.values, [3, EVENT_ID]);
-  assert.deepEqual(fixture.logs, []);
+  assert.deepEqual(fixture.logs, [
+    "OUTBOX_PUBLISHER_EVENT_FAILED_FINAL"
+  ]);
+  assert.doesNotMatch(JSON.stringify(fixture.logs), /must-not-be-persisted/u);
 });
 
 test("rejects an acknowledgement from another stream and retries the row", async () => {
@@ -160,6 +217,23 @@ test("rejects an acknowledgement from another stream and retries the row", async
   });
 
   assert.equal(await fixture.service.runOnce(), 1);
+  assert.match(fixture.updateCalls[0]?.sql ?? "", /attempts =/u);
+  assert.doesNotMatch(fixture.updateCalls[0]?.sql ?? "", /PUBLISHED/u);
+});
+
+test("requires AUTH_EMAIL_EVENTS PubAck for an auth-email event", async () => {
+  const fixture = publisherFixture({
+    row: authIdentityOutboxRow(
+      "identity.email-verification.requested.v1"
+    ),
+    acknowledgement: {
+      stream: "IDENTITY_EVENTS",
+      seq: 1,
+      duplicate: false
+    }
+  });
+  assert.equal(await fixture.service.runOnce(), 1);
+  assert.equal(fixture.publishCalls[0]?.streamName, "AUTH_EMAIL_EVENTS");
   assert.match(fixture.updateCalls[0]?.sql ?? "", /attempts =/u);
   assert.doesNotMatch(fixture.updateCalls[0]?.sql ?? "", /PUBLISHED/u);
 });
@@ -219,7 +293,7 @@ test("never publishes a tenant-tagged corruption as a global identity event", as
 });
 
 test("coalesces overlapping ticks into one active database run", async () => {
-  const transaction = deferred<number>();
+  const transaction = deferred<TransactionOutcome>();
   const fixture = publisherFixture({ transactionOverride: transaction.promise });
 
   const first = fixture.service.runOnce();
@@ -227,7 +301,7 @@ test("coalesces overlapping ticks into one active database run", async () => {
   assert.strictEqual(first, second);
   assert.equal(fixture.transactionCalls, 1);
 
-  transaction.resolve(0);
+  transaction.resolve("EMPTY");
   assert.equal(await first, 0);
 });
 
@@ -248,7 +322,7 @@ test("isolates a fatal tick, reschedules it and logs only a fixed message code",
 });
 
 test("the early shutdown phase cancels the timer and waits for an in-flight bounded run", async () => {
-  const transaction = deferred<number>();
+  const transaction = deferred<TransactionOutcome>();
   const fixture = publisherFixture({ transactionOverride: transaction.promise });
   fixture.service.onApplicationBootstrap();
   const active = fixture.service.runOnce();
@@ -260,7 +334,7 @@ test("the early shutdown phase cancels the timer and waits for an in-flight boun
   await Promise.resolve();
   assert.equal(shutdownFinished, false);
   assert.equal(fixture.cancelCalls, 1);
-  transaction.resolve(0);
+  transaction.resolve("EMPTY");
   await active;
   await shutdown;
   assert.equal(shutdownFinished, true);
@@ -315,9 +389,44 @@ function outboxRow(overrides: Partial<RawOutboxRow> = {}): RawOutboxRow {
   };
 }
 
+function authIdentityOutboxRow(
+  eventType:
+    | "identity.email-verification.requested.v1"
+    | "identity.password-reset.requested.v1"
+): RawOutboxRow {
+  return outboxRow({
+    event_type: eventType,
+    aggregate_type: "user",
+    aggregate_id: USER_ID,
+    aggregate_version: 3,
+    payload: {
+      userId: USER_ID,
+      oneTimeTokenId: TOKEN_ID,
+      locale: "ru",
+      expiresAt: "2026-07-30T10:30:00.000Z"
+    }
+  });
+}
+
+function authInviteOutboxRow(): RawOutboxRow {
+  return outboxRow({
+    event_type: "workspace.invite.requested.v1",
+    aggregate_type: "workspaceInvite",
+    aggregate_id: INVITE_ID,
+    aggregate_version: 1,
+    workspace_id: WORKSPACE_ID,
+    payload: {
+      inviteId: INVITE_ID,
+      workspaceId: WORKSPACE_ID,
+      expiresAt: "2026-08-06T10:00:00.000Z"
+    }
+  });
+}
+
 interface PublishCall {
   readonly subject: string;
   readonly eventId: string;
+  readonly streamName: string;
   readonly payload: Readonly<Record<string, unknown>>;
 }
 
@@ -325,6 +434,8 @@ interface SqlCall {
   readonly sql: string;
   readonly values: readonly unknown[];
 }
+
+type TransactionOutcome = "EMPTY" | "PROCESSED" | "FAILED_FINAL";
 
 function publisherFixture(options: {
   readonly row?: RawOutboxRow;
@@ -337,7 +448,7 @@ function publisherFixture(options: {
   readonly publishError?: Error;
   readonly transactionError?: Error;
   readonly transactionCommitError?: Error;
-  readonly transactionOverride?: Promise<number>;
+  readonly transactionOverride?: Promise<TransactionOutcome>;
 } = {}): {
   readonly service: OutboxPublisherService;
   readonly publishCalls: PublishCall[];
@@ -365,7 +476,7 @@ function publisherFixture(options: {
       selectSql = normalizeSql(strings);
       selectValues = values;
       const row = options.row;
-      return row && row.event_type === values[0] ? [row] : [];
+      return row && values.includes(row.event_type) ? [row] : [];
     },
     $executeRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
       updateCalls.push({ sql: normalizeSql(strings), values });
@@ -374,8 +485,8 @@ function publisherFixture(options: {
   };
   const prisma = {
     $transaction: async (
-      operation: (value: typeof transaction) => Promise<boolean>
-    ): Promise<boolean | number> => {
+      operation: (value: typeof transaction) => Promise<TransactionOutcome>
+    ): Promise<TransactionOutcome> => {
       transactionCalls += 1;
       if (options.transactionOverride) return options.transactionOverride;
       if (options.transactionError) throw options.transactionError;
@@ -391,17 +502,19 @@ function publisherFixture(options: {
     publishOutboxEvent: async (
       subject: string,
       payload: string,
-      eventId: string
+      eventId: string,
+      streamName: string
     ) => {
       publishCalls.push({
         subject,
         eventId,
+        streamName,
         payload: JSON.parse(payload) as Readonly<Record<string, unknown>>
       });
       if (options.publishError) throw options.publishError;
       return (
         options.acknowledgement ?? {
-          stream: "IDENTITY_EVENTS",
+          stream: streamName,
           seq: 70,
           duplicate: false
         }
@@ -426,6 +539,7 @@ function publisherFixture(options: {
       enabled: true,
       eventEnvironment: "test-eu1",
       streamName: "IDENTITY_EVENTS",
+      authEmailStreamName: "AUTH_EMAIL_EVENTS",
       pollIntervalMs: 1_000,
       batchSize: 1,
       maxAttempts: options.maxAttempts ?? 5,

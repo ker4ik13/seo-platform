@@ -129,6 +129,15 @@ exception и connector exact allowlist. Перед конкретным producti
 - support выполняется внутренней командой;
 - guest reports отключены.
 
+Transactional verification/reset/invite email path реализован отдельным
+vertical slice ADR-2026-038: secret-free Platform outbox →
+`AUTH_EMAIL_EVENTS` → durable Jobs attempt → JIT Platform material → SMTP.
+Это закрывает code path, но не production availability: operator должен
+настроить SMTP account/sender и отдельные `AUTH_EMAIL_SMTP_*`, не смешивая их
+с `DIRECTUS_SMTP_*`, и пройти canary, topology/ACL,
+PostgreSQL role/migration, restart/DLQ и crash-after-SMTP reconciliation
+gates. Общий notification email/Web Push sender остаётся в P2.
+
 ### P2. Private beta: позиции и BYOK
 
 #### Пользовательский результат
@@ -229,16 +238,16 @@ security/load/restore gates.
 четыре general caller/audience credentials и сохранил отдельные vault,
 notification и rank boundaries. Compose запускает network-less read-only
 one-shot `service-token-preflight` до credential-bearing processes и NATS:
-девять service tokens, `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и
-четыре NATS passwords
+десять service tokens, `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и
+пять NATS passwords
 должны быть глобально pairwise distinct, без placeholders и соответствовать
-deploy-алфавиту `[A-Za-z0-9._~-]` при длине `32..512`; четыре соответствующих
-bcrypt verifier записи с canonical `$2a$` prefix и cost `11` и четыре NATS
+deploy-алфавиту `[A-Za-z0-9._~-]` при длине `32..512`; пять соответствующих
+bcrypt verifier записей с canonical `$2a$` prefix и cost `11` и пять NATS
 usernames проверяются отдельно, а broker не получает plaintext client
 passwords. Runtime намеренно сохраняет
 более широкий HTTP-контракт
 visible ASCII без whitespace/control/comma. Jobs HTTP,
-import, inspection, system, rank и connector используют отдельные process
+import, inspection, system, rank, connector и auth-email используют отдельные process
 roles/env allowlists. Эти gates уменьшают secret fan-out и ошибку конфигурации,
 но не закрывают P2: остаются provider runtime, durable delivery, egress,
 observability, target-environment rollout и load/restore evidence.
@@ -716,6 +725,10 @@ Backlog ведётся по потокам:
 
 - принимает актуальные Terms/Privacy;
 - получает verification;
+- verification/reset link содержит token только во fragment, Web удаляет его
+  из history до same-origin BFF request;
+- duplicate JetStream delivery использует одну durable attempt; stale/
+  consumed/expired JIT material не отправляется;
 - создаёт сессию только по правилам security;
 - выбирает timezone/country;
 - видит английский onboarding;
@@ -741,6 +754,12 @@ Owner создаёт workspace, приглашает Admin, SEO Specialist и Cl
 
 - invitation lifecycle;
 - истечение/отзыв;
+- invite link принимает один fragment token через
+  `/app/workspace-invites/accept`, а JIT stale invite даёт
+  `SKIPPED/NOT_DELIVERABLE`;
+- подтверждённая SMTP отправка переводит только актуальный `SENT → DELIVERED`;
+- hard recipient rejection после подтверждённого redacted DLQ переводит
+  только актуальный `SENT → BOUNCED`;
 - project restrictions;
 - Client не видит credentials, costs и внутренние notes;
 - SEO Specialist не меняет billing без permission;
@@ -1122,6 +1141,15 @@ Staging game day имитирует потерю основной базы.
   `login ↔ password reset`,
   `MFA challenge/confirm/disable ↔ password reset`, а также
   rollback terminal revoke при ошибке outbox;
+- auth-email source/event/JIT/DLQ проверены без recipient/token/content в
+  durable storage/logs; `jobs_auth_email_runtime` доказан как exact one-table
+  role, а general Jobs role доступа не имеет;
+- fault-injection покрывает crash до/после `SMTP_ACCEPTED`, completion replay,
+  lease recovery, DLQ PubAck и replay `BOUNCED` completion. Stable
+  `Message-ID` не считается exactly-once;
+- production SMTP provider/sender/`AUTH_EMAIL_SMTP_*` и canary evidence
+  предоставлены оператором через защищённый secret store, а не Git; Directus
+  использует только отдельные `DIRECTUS_SMTP_*`;
 - на PostgreSQL 18 пройдены manual rank races
   `claim ↔ cancel ↔ persist/finalize`, negative trigger tests и recovery
   после потерянного BullMQ notification;

@@ -20,6 +20,10 @@ CASE current_database()
   WHEN 'jobs_db' THEN 'jobs_rank_runtime'
   ELSE ''
 END AS rank_runtime_role,
+CASE current_database()
+  WHEN 'jobs_db' THEN 'jobs_auth_email_runtime'
+  ELSE ''
+END AS auth_email_runtime_role,
 current_database() AS database_name
 \gset
 
@@ -31,6 +35,11 @@ SELECT set_config(
 SELECT set_config(
   'seo_platform.jobs_rank_runtime_role',
   :'rank_runtime_role',
+  false
+);
+SELECT set_config(
+  'seo_platform.jobs_auth_email_runtime_role',
+  :'auth_email_runtime_role',
   false
 );
 
@@ -73,6 +82,10 @@ BEGIN
     runtime_roles := array_append(
       runtime_roles,
       current_setting('seo_platform.jobs_rank_runtime_role')
+    );
+    runtime_roles := array_append(
+      runtime_roles,
+      current_setting('seo_platform.jobs_auth_email_runtime_role')
     );
   END IF;
 
@@ -243,6 +256,22 @@ SELECT format(
 WHERE current_database() = 'jobs_db'
 \gexec
 
+SELECT format(
+  'REVOKE ALL PRIVILEGES ON DATABASE %I FROM %I',
+  current_database(),
+  :'auth_email_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT CONNECT ON DATABASE %I TO %I',
+  current_database(),
+  :'auth_email_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
 REVOKE ALL PRIVILEGES ON SCHEMA public FROM :"runtime_role";
 REVOKE ALL PRIVILEGES ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO :"runtime_role";
@@ -257,6 +286,20 @@ WHERE current_database() = 'jobs_db'
 SELECT format(
   'GRANT USAGE ON SCHEMA public TO %I',
   :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'REVOKE ALL PRIVILEGES ON SCHEMA public FROM %I',
+  :'auth_email_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT USAGE ON SCHEMA public TO %I',
+  :'auth_email_runtime_role'
 )
 WHERE current_database() = 'jobs_db'
 \gexec
@@ -278,7 +321,10 @@ WHERE namespace.nspname = 'public'
   AND relation.relname <> '_prisma_migrations'
   AND NOT (
     current_database() = 'jobs_db'
-    AND relation.relname = 'rank_provider_request_intents'
+    AND relation.relname IN (
+      'rank_provider_request_intents',
+      'auth_email_delivery_attempts'
+    )
   )
 ORDER BY relation.oid
 \gexec
@@ -286,6 +332,20 @@ ORDER BY relation.oid
 SELECT format(
   'REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM %I',
   :'rank_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM %I',
+  :'auth_email_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'GRANT SELECT, INSERT, UPDATE ON TABLE public.auth_email_delivery_attempts TO %I',
+  :'auth_email_runtime_role'
 )
 WHERE current_database() = 'jobs_db'
 \gexec
@@ -432,6 +492,13 @@ WHERE current_database() = 'jobs_db'
 \gexec
 
 SELECT format(
+  'REVOKE ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public FROM %I',
+  :'auth_email_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
   'GRANT USAGE, SELECT ON SEQUENCE %I.%I TO %I',
   namespace.nspname,
   sequence.relname,
@@ -454,6 +521,27 @@ FROM pg_proc routine
 JOIN pg_namespace namespace
   ON namespace.oid = routine.pronamespace
 WHERE namespace.nspname = 'public'
+  AND routine.prokind = 'f'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM pg_depend dependency
+    WHERE dependency.classid = 'pg_proc'::regclass
+      AND dependency.objid = routine.oid
+      AND dependency.deptype = 'e'
+  )
+ORDER BY routine.oid
+\gexec
+
+SELECT format(
+  'REVOKE ALL PRIVILEGES ON FUNCTION %s FROM %I',
+  routine.oid::regprocedure,
+  :'auth_email_runtime_role'
+)
+FROM pg_proc routine
+JOIN pg_namespace namespace
+  ON namespace.oid = routine.pronamespace
+WHERE current_database() = 'jobs_db'
+  AND namespace.nspname = 'public'
   AND routine.prokind = 'f'
   AND NOT EXISTS (
     SELECT 1
@@ -565,6 +653,33 @@ WHERE current_database() = 'jobs_db'
 
 SELECT format(
   'ALTER DEFAULT PRIVILEGES FOR ROLE %I
+    REVOKE ALL PRIVILEGES ON TABLES FROM %I',
+  :'expected_owner',
+  :'auth_email_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'ALTER DEFAULT PRIVILEGES FOR ROLE %I
+    REVOKE ALL PRIVILEGES ON SEQUENCES FROM %I',
+  :'expected_owner',
+  :'auth_email_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'ALTER DEFAULT PRIVILEGES FOR ROLE %I
+    REVOKE EXECUTE ON FUNCTIONS FROM %I',
+  :'expected_owner',
+  :'auth_email_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'ALTER DEFAULT PRIVILEGES FOR ROLE %I
     REVOKE ALL PRIVILEGES ON SEQUENCES FROM %I',
   :'expected_owner',
   :'rank_runtime_role'
@@ -603,6 +718,33 @@ WHERE current_database() = 'jobs_db'
 
 SELECT format(
   'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public
+    REVOKE ALL PRIVILEGES ON TABLES FROM %I',
+  :'expected_owner',
+  :'auth_email_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public
+    REVOKE ALL PRIVILEGES ON SEQUENCES FROM %I',
+  :'expected_owner',
+  :'auth_email_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public
+    REVOKE EXECUTE ON FUNCTIONS FROM %I',
+  :'expected_owner',
+  :'auth_email_runtime_role'
+)
+WHERE current_database() = 'jobs_db'
+\gexec
+
+SELECT format(
+  'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public
     REVOKE ALL PRIVILEGES ON SEQUENCES FROM %I',
   :'expected_owner',
   :'rank_runtime_role'
@@ -634,10 +776,22 @@ DECLARE
       ''
     )
   );
+  auth_email_runtime_role_id OID := (
+    SELECT oid
+    FROM pg_roles
+    WHERE rolname = NULLIF(
+      current_setting('seo_platform.jobs_auth_email_runtime_role'),
+      ''
+    )
+  );
   role_id OID;
 BEGIN
   FOREACH role_id IN ARRAY array_remove(
-    ARRAY[runtime_role_id, rank_runtime_role_id],
+    ARRAY[
+      runtime_role_id,
+      rank_runtime_role_id,
+      auth_email_runtime_role_id
+    ],
     NULL
   )
   LOOP
@@ -660,6 +814,54 @@ BEGIN
   END LOOP;
 
   IF current_database() = 'jobs_db' THEN
+    IF has_table_privilege(
+      runtime_role_id,
+      'public.auth_email_delivery_attempts',
+      'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+    ) THEN
+      RAISE EXCEPTION
+        'generic jobs runtime must not access auth email delivery attempts';
+    END IF;
+
+    IF NOT has_table_privilege(
+      auth_email_runtime_role_id,
+      'public.auth_email_delivery_attempts',
+      'SELECT'
+    ) OR NOT has_table_privilege(
+      auth_email_runtime_role_id,
+      'public.auth_email_delivery_attempts',
+      'INSERT'
+    ) OR NOT has_table_privilege(
+      auth_email_runtime_role_id,
+      'public.auth_email_delivery_attempts',
+      'UPDATE'
+    ) OR has_table_privilege(
+      auth_email_runtime_role_id,
+      'public.auth_email_delivery_attempts',
+      'DELETE,TRUNCATE,REFERENCES,TRIGGER'
+    ) THEN
+      RAISE EXCEPTION
+        'auth email runtime must have only SELECT, INSERT and UPDATE on delivery attempts';
+    END IF;
+
+    IF EXISTS (
+      SELECT 1
+      FROM pg_class relation
+      JOIN pg_namespace namespace
+        ON namespace.oid = relation.relnamespace
+      WHERE namespace.nspname = 'public'
+        AND relation.relkind IN ('r', 'p', 'v', 'm', 'f')
+        AND relation.relname <> 'auth_email_delivery_attempts'
+        AND has_table_privilege(
+          auth_email_runtime_role_id,
+          relation.oid,
+          'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+        )
+    ) THEN
+      RAISE EXCEPTION
+        'auth email runtime must not access other jobs tables';
+    END IF;
+
     IF has_table_privilege(
       runtime_role_id,
       'public.rank_provider_request_intents',

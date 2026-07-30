@@ -326,7 +326,8 @@ JWT/mTLS действуют независимые caller/audience credentials:
 
 Dedicated `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`,
 `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN`, `JOBS_TO_SEO_RANK_TOKEN`,
-`JOBS_TO_SEO_RANK_RESULT_TOKEN` и `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`
+`JOBS_TO_SEO_RANK_RESULT_TOKEN`, `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` и
+`JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN`
 сохраняют отдельные audiences. Наличие general credential не разрешает
 вызов dedicated route group.
 
@@ -340,14 +341,14 @@ combined значения и сравнивает token timing-safe. Любой 
 
 Deploy дополнительно обязан выполнить один общий fail-closed preflight до
 старта credential-bearing processes. Текущий Compose one-shot
-`service-token-preflight` получает девять service tokens,
-`RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и четыре NATS passwords,
-проверяет все 22 credentials на глобальную pairwise distinctness и отклоняет
+`service-token-preflight` получает десять service tokens,
+`RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и пять NATS passwords,
+проверяет все 24 credentials на глобальную pairwise distinctness и отклоняет
 placeholders.
 Для каждого NATS client password deploy также обязан предоставить canonical
-bcrypt verifier с canonical `$2a$` prefix и cost `11`; четыре verifier
+bcrypt verifier с canonical `$2a$` prefix и cost `11`; пять verifier
 записи должны быть разными, а broker не должен получать plaintext passwords.
-Четыре NATS usernames отдельно
+Пять NATS usernames отдельно
 проверяются на unique ASCII identifier и несовпадение с любым credential. В
 отличие от runtime-контракта secrets
 допускают только URL-safe `[A-Za-z0-9._~-]` длиной `32..512`; NATS password
@@ -368,7 +369,8 @@ processes и NATS стартуют только после его успешно
   access, Directus имеет отдельный cache user. ACL содержит только password
   hashes и генерируется в tmpfs до старта server.
 - NATS использует разные deny-by-default identities для generic runtime,
-  Platform API publisher, Realtime consumer и topology provisioner. Runtime
+  Platform API publisher, Realtime consumer, Jobs auth-email consumer и
+  topology provisioner. Runtime
   apps получают только exact event/API/request-reply/fetch/ack/DLQ rights;
   topology CREATE/UPDATE принадлежит one-shot provisioner, а DELETE/PURGE/
   raw message read не выдаются.
@@ -407,6 +409,15 @@ processes и NATS стартуют только после его успешно
   реализованы по ADR-2026-036. Source ack происходит после local commit;
   exhausted/permanent failure использует redacted DLQ. Этот identity safety
   pipeline не содержит VAPID private key и не включает внешнюю доставку.
+- Transactional auth-email source events не содержат recipient, plaintext
+  token, action URL или content. JIT material доступен только отдельному
+  `JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN`; action token находится во fragment и
+  не сохраняется в Jobs DB/NATS/logs. `jobs_auth_email_runtime` получает
+  только `SELECT/INSERT/UPDATE` одной delivery table, а worker — dedicated
+  NATS/Platform/SMTP capabilities без Redis/general/vault/rank/S3 secrets.
+  Deploy передаёт ему только `AUTH_EMAIL_SMTP_*`, маппинг в локальные
+  `SMTP_*` выполняется на process boundary. Directus получает только
+  `DIRECTUS_SMTP_*`; общий SMTP credential set запрещён.
 - KEK rollout выполняется в порядке expand keyring → startup decrypt-canary
   verify configured ∪ used versions → drain старых replicas → switch active.
   `MANAGEMENT` создаёт отдельный synthetic known-plaintext envelope каждой
@@ -1201,13 +1212,15 @@ Radar/crawler capacity:
 
 Один Jobs image разворачивается с отдельными commands и exact env allowlists:
 
-- HTTP получает DB/Redis, NATS, S3, SMTP, general Platform API/SEO Data
+- HTTP получает DB/Redis, NATS, S3, general Platform API/SEO Data
   tokens и credential management token/keyrings;
 - import получает DB/Redis/S3 и только SEO Data URL/token;
 - inspection получает DB/Redis/S3 и malware scanner;
 - system worker получает только Redis и concurrency, без DB и service secrets;
 - rank получает DB/Redis и два dedicated rank credentials;
-- connector получает `jobs_connector`, Redis и execution KEK.
+- connector получает `jobs_connector`, Redis и execution KEK;
+- auth-email получает `jobs_auth_email_runtime`, dedicated NATS consumer,
+  Platform JIT token и SMTP; Redis и остальные capabilities запрещены.
 
 Явная process role проверяется до создания application/worker dependencies.
 Лишний NATS/S3/SMTP/malware/service/vault credential либо enable flag
@@ -1224,6 +1237,19 @@ system, inspection и connector transitively не стартуют до пров
 получая при этом чужие credentials. Preflight проверяет deploy input, а
 process-role loaders продолжают независимо проверять собственный effective
 env.
+
+Auth-email rollout выполняется expand-first: contracts/migration/DB grants и
+NATS topology, затем Platform JIT/publisher, затем worker только после
+operator-managed SMTP canary. Production SMTP secrets в repository
+отсутствуют. Rollback сначала останавливает новые publish/send и drain-ит
+worker, но не удаляет stream, durable consumer, outbox или delivery attempts.
+SMTP accept не атомарен с DB: crash до durable `SMTP_ACCEPTED` может дать
+повтор со stable `Message-ID`; обязательны ambiguity alert, reconciliation и
+fault-injection runbook, а exactly-once запрещено заявлять.
+Readiness marker создаётся только после успешного worker bootstrap и
+удаляется до прекращения fetch/drain. `stop_grace_period` должен быть строго
+больше worst-case bounded shutdown budget, включая
+`AUTH_EMAIL_SHUTDOWN_GRACE_MS`.
 
 ## 35. Maintenance
 

@@ -30,6 +30,7 @@ BEGIN
     'jobs_owner',
     'jobs_runtime',
     'jobs_rank_runtime',
+    'jobs_auth_email_runtime',
     'realtime_owner',
     'realtime_runtime',
     'directus_runtime_owner',
@@ -47,6 +48,7 @@ BEGIN
     'jobs_owner',
     'jobs_runtime',
     'jobs_rank_runtime',
+    'jobs_auth_email_runtime',
     'realtime_owner',
     'realtime_runtime',
     'directus_runtime_owner'
@@ -84,6 +86,7 @@ FROM unnest(ARRAY[
   'jobs_owner',
   'jobs_runtime',
   'jobs_rank_runtime',
+  'jobs_auth_email_runtime',
   'realtime_owner',
   'realtime_runtime',
   'directus_runtime_owner'
@@ -107,6 +110,7 @@ FROM unnest(ARRAY[
   'jobs_owner',
   'jobs_runtime',
   'jobs_rank_runtime',
+  'jobs_auth_email_runtime',
   'realtime_owner',
   'realtime_runtime',
   'directus_runtime_owner'
@@ -126,6 +130,7 @@ BEGIN
     'jobs_owner',
     'jobs_runtime',
     'jobs_rank_runtime',
+    'jobs_auth_email_runtime',
     'realtime_owner',
     'realtime_runtime',
     'directus_runtime_owner'

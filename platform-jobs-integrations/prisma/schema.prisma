@@ -127,6 +127,17 @@ enum RankConnectorExecutionStatus {
   SUBMITTING
 }
 
+enum AuthEmailDeliveryStatus {
+  PENDING
+  SENDING
+  RETRY_SCHEDULED
+  SMTP_ACCEPTED
+  DLQ_PENDING
+  COMPLETED
+  CANCELLED
+  FAILED_FINAL
+}
+
 model Job {
   id                   String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId          String         @map("workspace_id") @db.Uuid
@@ -751,6 +762,31 @@ model InboxEvent {
 
   @@index([consumer, processedAt])
   @@map("inbox_events")
+}
+
+model AuthEmailDeliveryAttempt {
+  id                String                  @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  sourceEventId     String                  @unique(map: "auth_email_delivery_attempts_source_event_id_key") @map("source_event_id") @db.Uuid
+  eventType         String                  @map("event_type") @db.VarChar(160)
+  sourceEventHash   Bytes                   @map("source_event_hash")
+  status            AuthEmailDeliveryStatus @default(PENDING)
+  attempts          Int                     @default(0)
+  leaseOwner        String?                 @map("lease_owner") @db.VarChar(100)
+  leaseToken        String?                 @map("lease_token") @db.Uuid
+  leaseExpiresAt    DateTime?               @map("lease_expires_at") @db.Timestamptz(6)
+  retryAt           DateTime?               @map("retry_at") @db.Timestamptz(6)
+  providerMessageId String?                 @map("provider_message_id") @db.VarChar(255)
+  lastErrorCode     String?                 @map("last_error_code") @db.VarChar(64)
+  smtpAcceptedAt    DateTime?               @map("smtp_accepted_at") @db.Timestamptz(6)
+  completedAt       DateTime?               @map("completed_at") @db.Timestamptz(6)
+  cancelledAt       DateTime?               @map("cancelled_at") @db.Timestamptz(6)
+  failedAt          DateTime?               @map("failed_at") @db.Timestamptz(6)
+  version           Int                     @default(1)
+  createdAt         DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([status, retryAt, leaseExpiresAt, createdAt], map: "auth_email_delivery_attempts_dispatch_idx")
+  @@map("auth_email_delivery_attempts")
 }
 
 model OutboxEvent {

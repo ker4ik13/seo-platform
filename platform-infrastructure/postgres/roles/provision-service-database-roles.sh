@@ -9,6 +9,7 @@ set -eu
 : "${JOBS_DATABASE_OWNER_PASSWORD:?JOBS_DATABASE_OWNER_PASSWORD is required}"
 : "${JOBS_DATABASE_PASSWORD:?JOBS_DATABASE_PASSWORD is required}"
 : "${JOBS_RANK_DATABASE_PASSWORD:?JOBS_RANK_DATABASE_PASSWORD is required}"
+: "${JOBS_AUTH_EMAIL_DATABASE_PASSWORD:?JOBS_AUTH_EMAIL_DATABASE_PASSWORD is required}"
 : "${REALTIME_DATABASE_OWNER_PASSWORD:?REALTIME_DATABASE_OWNER_PASSWORD is required}"
 : "${REALTIME_DATABASE_PASSWORD:?REALTIME_DATABASE_PASSWORD is required}"
 : "${DIRECTUS_DATABASE_PASSWORD:?DIRECTUS_DATABASE_PASSWORD is required}"
@@ -20,6 +21,7 @@ seo_runtime_password=$SEO_DATABASE_PASSWORD
 jobs_owner_password=$JOBS_DATABASE_OWNER_PASSWORD
 jobs_runtime_password=$JOBS_DATABASE_PASSWORD
 jobs_rank_runtime_password=$JOBS_RANK_DATABASE_PASSWORD
+jobs_auth_email_runtime_password=$JOBS_AUTH_EMAIL_DATABASE_PASSWORD
 realtime_owner_password=$REALTIME_DATABASE_OWNER_PASSWORD
 realtime_runtime_password=$REALTIME_DATABASE_PASSWORD
 directus_runtime_owner_password=$DIRECTUS_DATABASE_PASSWORD
@@ -31,6 +33,7 @@ unset SEO_DATABASE_PASSWORD
 unset JOBS_DATABASE_OWNER_PASSWORD
 unset JOBS_DATABASE_PASSWORD
 unset JOBS_RANK_DATABASE_PASSWORD
+unset JOBS_AUTH_EMAIL_DATABASE_PASSWORD
 unset REALTIME_DATABASE_OWNER_PASSWORD
 unset REALTIME_DATABASE_PASSWORD
 unset DIRECTUS_DATABASE_PASSWORD
@@ -54,6 +57,15 @@ validate_password() {
       exit 1
       ;;
   esac
+
+  lowercase_password=$(printf '%s' "$password" | tr '[:upper:]' '[:lower:]')
+  case $lowercase_password in
+    replace-*|change-*|changeme*|example*|dummy-*|placeholder*|test-*|your-*|your_*)
+      echo "service database passwords must not use an example placeholder" >&2
+      exit 1
+      ;;
+  esac
+  unset lowercase_password
 }
 
 ensure_distinct_passwords() {
@@ -78,6 +90,7 @@ for database_password in \
   "$jobs_owner_password" \
   "$jobs_runtime_password" \
   "$jobs_rank_runtime_password" \
+  "$jobs_auth_email_runtime_password" \
   "$realtime_owner_password" \
   "$realtime_runtime_password" \
   "$directus_runtime_owner_password"
@@ -93,6 +106,7 @@ ensure_distinct_passwords \
   "$jobs_owner_password" \
   "$jobs_runtime_password" \
   "$jobs_rank_runtime_password" \
+  "$jobs_auth_email_runtime_password" \
   "$realtime_owner_password" \
   "$realtime_runtime_password" \
   "$directus_runtime_owner_password"
@@ -142,6 +156,7 @@ set_role_password seo_runtime "$seo_runtime_password"
 set_role_password jobs_owner "$jobs_owner_password"
 set_role_password jobs_runtime "$jobs_runtime_password"
 set_role_password jobs_rank_runtime "$jobs_rank_runtime_password"
+set_role_password jobs_auth_email_runtime "$jobs_auth_email_runtime_password"
 set_role_password realtime_owner "$realtime_owner_password"
 set_role_password realtime_runtime "$realtime_runtime_password"
 set_role_password directus_runtime_owner "$directus_runtime_owner_password"
@@ -153,6 +168,7 @@ unset seo_runtime_password
 unset jobs_owner_password
 unset jobs_runtime_password
 unset jobs_rank_runtime_password
+unset jobs_auth_email_runtime_password
 unset realtime_owner_password
 unset realtime_runtime_password
 unset directus_runtime_owner_password

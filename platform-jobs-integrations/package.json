@@ -10,6 +10,7 @@
     "dev:worker:import": "tsx watch src/import-worker.main.ts",
     "dev:worker:connector": "tsx watch src/connector-worker.main.ts",
     "dev:worker:rank": "tsx watch src/rank-worker.main.ts",
+    "dev:worker:auth-email": "tsx watch src/auth-email-worker.main.ts",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
     "start:worker:system": "node dist/worker.main.js",
@@ -17,6 +18,7 @@
     "start:worker:import": "node dist/import-worker.main.js",
     "start:worker:connector": "node dist/connector-worker.main.js",
     "start:worker:rank": "node dist/rank-worker.main.js",
+    "start:worker:auth-email": "node dist/auth-email-worker.main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test 'src/**/*.test.ts'",
     "prisma:generate": "prisma generate",
@@ -24,6 +26,7 @@
     "prisma:migrate:deploy": "prisma migrate deploy"
   },
   "dependencies": {
+    "@nats-io/jetstream": "3.4.0",
     "@aws-sdk/client-s3": "3.1096.0",
     "@aws-sdk/s3-request-presigner": "3.1096.0",
     "@nestjs/common": "11.1.28",

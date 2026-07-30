@@ -11,7 +11,9 @@
 - `src/rank-worker.main.ts` — DB-first подготовка immutable rank manifest,
   восстановление потерянных queue messages и cooperative cancel;
 - `src/connector-worker.main.ts` — provider calls с минимальной
-  `EXECUTION`-ролью credential vault.
+  `EXECUTION`-ролью credential vault;
+- `src/auth-email-worker.main.ts` — transactional verification/reset/invite
+  SMTP delivery с durable PostgreSQL recovery и без Redis.
 
 Worker entrypoints разделяются по профилю нагрузки и набору секретов, а не по
 каждой операции.
@@ -23,18 +25,20 @@ startup. Обычный Jobs HTTP принимает только
 `PLATFORM_API_TO_JOBS_TOKEN` от Platform API, а исходящие Jobs HTTP/import
 вызовы SEO Data используют `JOBS_TO_SEO_DATA_TOKEN`. Vault и project binding
 остаются за отдельным `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`; rank manifest,
-grant и result boundaries не переиспользуют general credentials.
+grant/result и auth-email JIT boundaries не переиспользуют general
+credentials. Последний защищён только `JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN`.
 
 Текущий один image запускается с точными ролями и наборами возможностей:
 
 | Process | Разрешённые runtime capabilities |
 |---|---|
-| `jobs-integrations` HTTP | Jobs DB, Redis, NATS, S3, SMTP, general Platform API/SEO Data tokens и credential-management token/keyrings |
+| `jobs-integrations` HTTP | Jobs DB, Redis, NATS, S3, general Platform API/SEO Data tokens и credential-management token/keyrings |
 | `import-worker` | Jobs DB, Redis, S3 и `JOBS_TO_SEO_DATA_TOKEN` для semantic publish |
 | `upload-inspection-worker` | Jobs DB, Redis, S3 и malware scanner |
 | `system-worker` | только Redis и bounded concurrency; без DB и service/provider secrets |
 | `rank-worker` | Jobs DB, Redis, SEO rank-manifest token и Platform rank-grant token; без general/NATS/S3/SMTP/vault capabilities |
 | `connector-worker` | `jobs_connector` DB boundary, Redis и execution KEK; без general/management/NATS/S3/SMTP tokens |
+| `auth-email-worker` | `jobs_auth_email_runtime`, dedicated NATS consumer, Platform JIT token и SMTP; без Redis/general/vault/rank/S3 capabilities |
 
 Каждый Nest entrypoint передаёт явную process role в config loader, а system
 worker использует отдельный минимальный loader. Лишний enable flag, adapter
@@ -191,10 +195,43 @@ request/status/result и durable DB-backed lifecycle после `SUBMITTING`.
 должен перейти на отдельный expand/concurrent-index план. PostgreSQL 18
 fresh/negative/race rehearsal остаётся обязательным staging gate.
 
+## Transactional auth-email worker
+
+Worker принимает только три exact secret-free events из
+`AUTH_EMAIL_EVENTS`, сохраняет одну `auth_email_delivery_attempts` row по
+source event ID/type/canonical hash и перед SMTP получает JIT material из
+Platform API. Recipient, plaintext token, action URL, subject и body в Jobs
+DB/NATS/queue/logs не сохраняются. Stale/expired/consumed material даёт
+terminal `CANCELLED`, retryable failure — bounded backoff, exhausted attempt
+сначала остаётся `DLQ_PENDING` до подтверждённого redacted DLQ PubAck.
+
+Source delivery at-least-once. После durable `SMTP_ACCEPTED` worker повторяет
+только invite completion/local commit. Crash после SMTP accept, но до этой
+записи может вызвать повтор со стабильным `Message-ID`; это best-effort
+dedup, а не exactly-once. Hard recipient rejection сначала требует
+подтверждённый redacted DLQ PubAck, затем идемпотентный Platform completion
+`BOUNCED`, и только после этого допускает terminal local commit. DB login
+`jobs_auth_email_runtime` получает только
+`SELECT/INSERT/UPDATE` этой таблицы, general Jobs role — нет.
+
+Production SMTP provider/sender/credentials отсутствуют в repository и
+задаются оператором. Rollout: migration/role/NATS topology → Platform
+JIT/publisher → canary worker. Rollback сохраняет stream, durable consumer,
+outbox и attempts; ручной resend требует reconciliation неоднозначных
+`SENDING` состояний.
+
+Deploy передаёт worker только `AUTH_EMAIL_SMTP_*`; Compose маппит их в
+process-local `SMTP_*`, которые читает config loader. Directus использует
+отдельные `DIRECTUS_SMTP_*`; shared SMTP credentials запрещены. Readiness
+marker создаётся только после bootstrap и удаляется до drain. Container
+`stop_grace_period` должен быть строго больше worst-case bounded shutdown
+budget, включая `AUTH_EMAIL_SHUTDOWN_GRACE_MS`.
+
 ## Адаптеры
 
 - S3 multipart полностью конфигурируется через env и по умолчанию выключен;
-- SMTP transactional email полностью конфигурируется через env и по умолчанию выключен;
+- SMTP доступен только auth-email process и требует полной operator-managed
+  конфигурации; при неполной worker fail-closed не стартует;
 - disabled adapters позволяют поднять foundation без внешних credentials;
 - включённый, но недоступный обязательный adapter виден в readiness.
 

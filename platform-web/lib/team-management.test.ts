@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { BrowserApiCollection } from "./browser-api.ts";
 import {
+  acceptedWorkspaceInviteMember,
   appendTeamCollection,
   canonicalTeamProjectAccesses,
   createdPendingWorkspaceInvite,
@@ -19,6 +20,7 @@ import {
   validateTeamInviteDraft,
   validateTeamProjectAccess,
   workspaceMemberPage,
+  workspaceInviteFailurePhase,
   workspaceTeamListPath
 } from "./team-management.ts";
 
@@ -52,6 +54,46 @@ test("parses member and pending invite pages within one workspace", () => {
     createdPendingWorkspaceInvite({ invite: invite(INVITE_ID) }, WORKSPACE_ID)
       .id,
     INVITE_ID
+  );
+  assert.equal(
+    acceptedWorkspaceInviteMember(member(MEMBER_ID)).workspaceId,
+    WORKSPACE_ID
+  );
+});
+
+test("maps invitation API failures to exact recoverable UI states", () => {
+  assert.equal(
+    workspaceInviteFailurePhase({ status: 401, code: "UNAUTHORIZED" }),
+    "authentication-required"
+  );
+  assert.equal(
+    workspaceInviteFailurePhase({
+      status: 409,
+      code: "EMAIL_VERIFICATION_REQUIRED"
+    }),
+    "verification-required"
+  );
+  assert.equal(
+    workspaceInviteFailurePhase({
+      status: 403,
+      code: "INVITATION_ACCOUNT_MISMATCH"
+    }),
+    "account-mismatch"
+  );
+  assert.equal(
+    workspaceInviteFailurePhase({
+      status: 409,
+      code: "RESOURCE_STATE_CONFLICT"
+    }),
+    "workspace-unavailable"
+  );
+  assert.equal(
+    workspaceInviteFailurePhase({ status: 404, code: "NOT_FOUND" }),
+    "invalid"
+  );
+  assert.equal(
+    workspaceInviteFailurePhase({ status: 503, code: "DEPENDENCY_UNAVAILABLE" }),
+    "error"
   );
 });
 

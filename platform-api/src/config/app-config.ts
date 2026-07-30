@@ -1,4 +1,7 @@
-import { sessionFamilyRevokedEventSubjectV1 } from "@seo-platform/contracts";
+import {
+  sessionFamilyRevokedEventSubjectV1,
+  transactionalEmailEventSubjectV1
+} from "@seo-platform/contracts";
 
 export interface AppConfig {
   readonly nodeEnv: "development" | "test" | "production";
@@ -15,6 +18,8 @@ export interface AppConfig {
   readonly integrationCredentialApiToken?: string;
   readonly realtimeNotificationApiToken?: string;
   readonly rankExecutionGrantApiToken?: string;
+  readonly authEmailApiToken?: string;
+  readonly webPublicUrl?: string;
   readonly corsOrigins: readonly string[];
   readonly nats: {
     readonly url: string;
@@ -25,6 +30,7 @@ export interface AppConfig {
     readonly enabled: boolean;
     readonly eventEnvironment?: string;
     readonly streamName?: string;
+    readonly authEmailStreamName?: string;
     readonly pollIntervalMs: number;
     readonly batchSize: number;
     readonly maxAttempts: number;
@@ -189,6 +195,14 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     env,
     "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN"
   );
+  const authEmailApiToken = serviceToken(
+    env,
+    "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN"
+  );
+  const webPublicUrl = optionalWebPublicUrl(
+    env.WEB_PUBLIC_URL,
+    nodeEnv as AppConfig["nodeEnv"]
+  );
   const outboxPublisherEnabled = booleanValue(
     env.OUTBOX_PUBLISHER_ENABLED,
     false,
@@ -198,6 +212,10 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     env.NATS_EVENT_ENVIRONMENT
   );
   const outboxStreamName = optionalOutboxStreamName(env.NATS_EVENT_STREAM);
+  const authEmailStreamName = optionalOutboxStreamName(
+    env.NATS_AUTH_EMAIL_STREAM,
+    "NATS_AUTH_EMAIL_STREAM"
+  );
   const outboxRetryBaseMs = integerInRange(
     env.OUTBOX_PUBLISH_RETRY_BASE_MS,
     1_000,
@@ -244,6 +262,19 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (outboxPublisherEnabled && !outboxStreamName) {
     throw new Error(
       "NATS_EVENT_STREAM is required when the outbox publisher is enabled"
+    );
+  }
+  if (outboxPublisherEnabled && !authEmailStreamName) {
+    throw new Error(
+      "NATS_AUTH_EMAIL_STREAM is required when the outbox publisher is enabled"
+    );
+  }
+  if (
+    outboxPublisherEnabled &&
+    outboxStreamName === authEmailStreamName
+  ) {
+    throw new Error(
+      "NATS_EVENT_STREAM and NATS_AUTH_EMAIL_STREAM must be distinct"
     );
   }
   if (outboxRetryMaxMs < outboxRetryBaseMs) {
@@ -335,6 +366,29 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN must not use an example placeholder"
     );
   }
+  if (
+    nodeEnv === "production" &&
+    (!authEmailApiToken ||
+      authEmailApiToken.length < 32 ||
+      isPlaceholderSecret(authEmailApiToken))
+  ) {
+    throw new Error(
+      "A generated JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN with at least 32 characters is required in production"
+    );
+  }
+  if (isPlaceholderSecret(authEmailApiToken)) {
+    throw new Error(
+      "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN must not use an example placeholder"
+    );
+  }
+  if (nodeEnv === "production" && !webPublicUrl) {
+    throw new Error("WEB_PUBLIC_URL is required in production");
+  }
+  if (authEmailApiToken && !webPublicUrl) {
+    throw new Error(
+      "WEB_PUBLIC_URL is required when auth-email delivery is configured"
+    );
+  }
   if (env.INTERNAL_API_TOKEN?.trim()) {
     throw new Error(
       "INTERNAL_API_TOKEN is no longer supported; configure caller/audience tokens"
@@ -346,7 +400,8 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     realtimeApiToken,
     integrationCredentialApiToken,
     realtimeNotificationApiToken,
-    rankExecutionGrantApiToken
+    rankExecutionGrantApiToken,
+    authEmailApiToken
   ].filter((value): value is string => Boolean(value));
   if (new Set(internalTokens).size !== internalTokens.length) {
     throw new Error("Every internal API token must be distinct");
@@ -408,6 +463,8 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ...(rankExecutionGrantApiToken
       ? { rankExecutionGrantApiToken }
       : {}),
+    ...(authEmailApiToken ? { authEmailApiToken } : {}),
+    ...(webPublicUrl ? { webPublicUrl } : {}),
     corsOrigins: (env.CORS_ORIGINS ?? "")
       .split(",")
       .map((origin) => origin.trim())
@@ -421,6 +478,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       enabled: outboxPublisherEnabled,
       ...(eventEnvironment ? { eventEnvironment } : {}),
       ...(outboxStreamName ? { streamName: outboxStreamName } : {}),
+      ...(authEmailStreamName ? { authEmailStreamName } : {}),
       pollIntervalMs: integerInRange(
         env.OUTBOX_PUBLISH_INTERVAL_MS,
         1_000,
@@ -543,6 +601,10 @@ function optionalPublisherEnvironment(
   }
   try {
     sessionFamilyRevokedEventSubjectV1(value);
+    transactionalEmailEventSubjectV1(
+      value,
+      "identity.email-verification.requested.v1"
+    );
   } catch {
     throw new Error(
       "NATS_EVENT_ENVIRONMENT must be an explicit safe environment identifier"
@@ -552,7 +614,8 @@ function optionalPublisherEnvironment(
 }
 
 function optionalOutboxStreamName(
-  value: string | undefined
+  value: string | undefined,
+  key = "NATS_EVENT_STREAM"
 ): string | undefined {
   if (value === undefined || value === "") return undefined;
   if (
@@ -561,8 +624,38 @@ function optionalOutboxStreamName(
     !/^[A-Za-z0-9_-]{1,64}$/u.test(value)
   ) {
     throw new Error(
-      "NATS_EVENT_STREAM must contain 1 to 64 ASCII letters, digits, underscores or hyphens"
+      `${key} must contain 1 to 64 ASCII letters, digits, underscores or hyphens`
     );
+  }
+  return value;
+}
+
+function optionalWebPublicUrl(
+  value: string | undefined,
+  nodeEnv: AppConfig["nodeEnv"]
+): string | undefined {
+  if (value === undefined || value === "") return undefined;
+  if (value !== value.trim() || isPlaceholderSecret(value)) {
+    throw new Error("WEB_PUBLIC_URL must be an explicit canonical origin");
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("WEB_PUBLIC_URL must be an explicit canonical origin");
+  }
+  if (
+    parsed.origin !== value ||
+    parsed.pathname !== "/" ||
+    parsed.search !== "" ||
+    parsed.hash !== "" ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    (nodeEnv === "production" && parsed.protocol !== "https:") ||
+    (parsed.protocol !== "https:" && parsed.protocol !== "http:")
+  ) {
+    throw new Error("WEB_PUBLIC_URL must be an explicit canonical origin");
   }
   return value;
 }

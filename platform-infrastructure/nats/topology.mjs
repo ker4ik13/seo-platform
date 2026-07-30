@@ -1,10 +1,19 @@
 const IDENTITY_EVENT_SUFFIX = "identity.session-family.revoked.v1";
 const IDENTITY_DLQ_SUFFIX =
   "dlq.realtime.identity.session-family.revoked.v1";
+const AUTH_EMAIL_EVENT_SUFFIXES = Object.freeze([
+  "identity.email-verification.requested.v1",
+  "identity.password-reset.requested.v1",
+  "workspace.invite.requested.v1"
+]);
+const AUTH_EMAIL_FILTER_SUFFIX = "email.>";
+const AUTH_EMAIL_DLQ_SUFFIX = "dlq.jobs.transactional-email.v1";
 
 const SOURCE_STREAM_NAME = "IDENTITY_EVENTS";
+const AUTH_EMAIL_STREAM_NAME = "AUTH_EMAIL_EVENTS";
 const DLQ_STREAM_NAME = "DOMAIN_EVENTS_DLQ";
 const CONSUMER_NAME = "realtime_session_family_revoked_v1";
+const AUTH_EMAIL_CONSUMER_NAME = "jobs_auth_email_v1";
 
 const MAX_MESSAGE_SIZE_BYTES = 64 * 1024;
 const SOURCE_MAX_AGE_NANOS = 30 * 24 * 60 * 60 * 1_000_000_000;
@@ -17,6 +26,7 @@ const environmentPattern =
 
 const safeStreamUpdateFields = Object.freeze([
   "description",
+  "subjects",
   "max_consumers",
   "max_msgs",
   "max_bytes",
@@ -70,6 +80,11 @@ export function buildNatsTopology(environment) {
 
   const sourceSubject = `${environment}.${IDENTITY_EVENT_SUFFIX}`;
   const dlqSubject = `${environment}.${IDENTITY_DLQ_SUFFIX}`;
+  const authEmailSubjects = Object.freeze(
+    AUTH_EMAIL_EVENT_SUFFIXES.map((suffix) => `${environment}.email.${suffix}`)
+  );
+  const authEmailFilterSubject = `${environment}.${AUTH_EMAIL_FILTER_SUFFIX}`;
+  const authEmailDlqSubject = `${environment}.${AUTH_EMAIL_DLQ_SUFFIX}`;
 
   const sourceStream = Object.freeze({
     name: SOURCE_STREAM_NAME,
@@ -97,7 +112,7 @@ export function buildNatsTopology(environment) {
   const dlqStream = Object.freeze({
     name: DLQ_STREAM_NAME,
     description: "Terminal domain-event dead letters",
-    subjects: Object.freeze([dlqSubject]),
+    subjects: Object.freeze([dlqSubject, authEmailDlqSubject]),
     retention: "limits",
     storage: "file",
     discard: "new",
@@ -133,12 +148,56 @@ export function buildNatsTopology(environment) {
     mem_storage: false
   });
 
+  const authEmailStream = Object.freeze({
+    name: AUTH_EMAIL_STREAM_NAME,
+    description: "Secret-free transactional authentication email intents",
+    subjects: authEmailSubjects,
+    retention: "limits",
+    storage: "file",
+    discard: "new",
+    max_consumers: 2,
+    max_msgs: 1_000_000,
+    max_bytes: 512 * 1024 * 1024,
+    max_age: SOURCE_MAX_AGE_NANOS,
+    max_msgs_per_subject: 500_000,
+    max_msg_size: MAX_MESSAGE_SIZE_BYTES,
+    duplicate_window: DUPLICATE_WINDOW_NANOS,
+    num_replicas: 1,
+    no_ack: false,
+    deny_delete: true,
+    deny_purge: true,
+    allow_rollup_hdrs: false,
+    allow_direct: false,
+    discard_new_per_subject: false
+  });
+
+  const authEmailConsumer = Object.freeze({
+    durable_name: AUTH_EMAIL_CONSUMER_NAME,
+    name: AUTH_EMAIL_CONSUMER_NAME,
+    description: "Jobs transactional authentication email consumer",
+    deliver_policy: "all",
+    ack_policy: "explicit",
+    ack_wait: CONSUMER_ACK_WAIT_NANOS,
+    max_deliver: -1,
+    filter_subject: authEmailFilterSubject,
+    replay_policy: "instant",
+    max_ack_pending: 16,
+    max_waiting: 32,
+    num_replicas: 1,
+    mem_storage: false
+  });
+
   return Object.freeze({
     sourceSubject,
     dlqSubject,
+    authEmailSubjects,
+    authEmailFilterSubject,
+    authEmailDlqSubject,
     sourceStream,
+    authEmailStream,
     dlqStream,
-    consumer
+    consumer,
+    authEmailConsumer
   });
 }
 
@@ -158,6 +217,10 @@ export async function provisionNatsTopology({
     manager.streams,
     topology.sourceStream
   );
+  const authEmailStream = await ensureStream(
+    manager.streams,
+    topology.authEmailStream
+  );
   const dlqStream = await ensureStream(
     manager.streams,
     topology.dlqStream
@@ -167,8 +230,19 @@ export async function provisionNatsTopology({
     topology.sourceStream.name,
     topology.consumer
   );
+  const authEmailConsumer = await ensureConsumer(
+    manager.consumers,
+    topology.authEmailStream.name,
+    topology.authEmailConsumer
+  );
 
-  return Object.freeze({ sourceStream, dlqStream, consumer });
+  return Object.freeze({
+    sourceStream,
+    authEmailStream,
+    dlqStream,
+    consumer,
+    authEmailConsumer
+  });
 }
 
 export function safeProvisionerFailure(error) {
@@ -258,13 +332,17 @@ async function ensureConsumer(consumers, streamName, desired) {
 }
 
 function assertSafeStreamIdentity(current, desired) {
+  const subjectsAreSafe =
+    sameStringArray(current?.subjects, desired.subjects) ||
+    (desired.name === DLQ_STREAM_NAME &&
+      sameStringArray(current?.subjects, [desired.subjects[0]]));
   const unsafe =
     current?.name !== desired.name ||
     current?.storage !== desired.storage ||
     current?.retention !== desired.retention ||
     current?.num_replicas !== desired.num_replicas ||
     current?.sealed === true ||
-    !sameStringArray(current?.subjects, desired.subjects) ||
+    !subjectsAreSafe ||
     current?.republish !== undefined ||
     current?.subject_transform !== undefined ||
     current?.mirror !== undefined ||

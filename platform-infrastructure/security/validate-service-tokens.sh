@@ -12,6 +12,7 @@ PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN
 JOBS_TO_SEO_RANK_TOKEN
 JOBS_TO_PLATFORM_RANK_GRANT_TOKEN
 JOBS_TO_SEO_RANK_RESULT_TOKEN
+JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN
 RANK_HISTORY_CURSOR_KEY
 REDIS_JOBS_API_PASSWORD
 REDIS_JOBS_SYSTEM_PASSWORD
@@ -24,6 +25,7 @@ REDIS_DIRECTUS_PASSWORD
 NATS_RUNTIME_PASSWORD
 NATS_PLATFORM_PUBLISHER_PASSWORD
 NATS_REALTIME_CONSUMER_PASSWORD
+NATS_AUTH_EMAIL_CONSUMER_PASSWORD
 NATS_PROVISIONER_PASSWORD
 "
 
@@ -31,6 +33,7 @@ nats_password_names="
 NATS_RUNTIME_PASSWORD
 NATS_PLATFORM_PUBLISHER_PASSWORD
 NATS_REALTIME_CONSUMER_PASSWORD
+NATS_AUTH_EMAIL_CONSUMER_PASSWORD
 NATS_PROVISIONER_PASSWORD
 "
 
@@ -38,6 +41,7 @@ username_names="
 NATS_RUNTIME_USER
 NATS_PLATFORM_PUBLISHER_USER
 NATS_REALTIME_CONSUMER_USER
+NATS_AUTH_EMAIL_CONSUMER_USER
 NATS_PROVISIONER_USER
 "
 
@@ -45,6 +49,7 @@ nats_password_hash_names="
 NATS_RUNTIME_PASSWORD_HASH
 NATS_PLATFORM_PUBLISHER_PASSWORD_HASH
 NATS_REALTIME_CONSUMER_PASSWORD_HASH
+NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH
 NATS_PROVISIONER_PASSWORD_HASH
 "
 
@@ -210,4 +215,75 @@ for username_name in $username_names; do
   unset username_value
 done
 
-echo "service-token-preflight: validated $validated_count distinct deploy credentials, $validated_nats_hash_count distinct NATS bcrypt verifiers and $validated_username_count distinct NATS usernames"
+for smtp_name in AUTH_EMAIL_SMTP_USER AUTH_EMAIL_SMTP_PASSWORD; do
+  if ! printenv "$smtp_name" >/dev/null; then
+    echo "service-token-preflight: $smtp_name is required" >&2
+    exit 1
+  fi
+done
+
+auth_email_smtp_user="$(printenv AUTH_EMAIL_SMTP_USER; printf 'x')"
+auth_email_smtp_user=${auth_email_smtp_user%x}
+auth_email_smtp_user=${auth_email_smtp_user%?}
+auth_email_smtp_password="$(printenv AUTH_EMAIL_SMTP_PASSWORD; printf 'x')"
+auth_email_smtp_password=${auth_email_smtp_password%x}
+auth_email_smtp_password=${auth_email_smtp_password%?}
+directus_smtp_user="$(printenv DIRECTUS_SMTP_USER; printf 'x')"
+directus_smtp_user=${directus_smtp_user%x}
+directus_smtp_user=${directus_smtp_user%?}
+directus_smtp_password="$(printenv DIRECTUS_SMTP_PASSWORD; printf 'x')"
+directus_smtp_password=${directus_smtp_password%x}
+directus_smtp_password=${directus_smtp_password%?}
+
+if [ -z "$auth_email_smtp_user" ] || [ ${#auth_email_smtp_user} -gt 320 ]; then
+  echo "service-token-preflight: AUTH_EMAIL_SMTP_USER must contain 1..320 characters" >&2
+  exit 1
+fi
+if [ -z "$auth_email_smtp_password" ] || [ ${#auth_email_smtp_password} -gt 1024 ]; then
+  echo "service-token-preflight: AUTH_EMAIL_SMTP_PASSWORD must contain 1..1024 characters" >&2
+  exit 1
+fi
+if [ -n "$directus_smtp_user" ]; then
+  if [ -z "$directus_smtp_password" ]; then
+    echo "service-token-preflight: DIRECTUS_SMTP_USER and DIRECTUS_SMTP_PASSWORD must be configured together" >&2
+    exit 1
+  fi
+elif [ -n "$directus_smtp_password" ]; then
+  echo "service-token-preflight: DIRECTUS_SMTP_USER and DIRECTUS_SMTP_PASSWORD must be configured together" >&2
+  exit 1
+fi
+if [ ${#directus_smtp_user} -gt 320 ]; then
+  echo "service-token-preflight: DIRECTUS_SMTP_USER must contain at most 320 characters" >&2
+  exit 1
+fi
+if [ ${#directus_smtp_password} -gt 1024 ]; then
+  echo "service-token-preflight: DIRECTUS_SMTP_PASSWORD must contain at most 1024 characters" >&2
+  exit 1
+fi
+
+if [ -n "$directus_smtp_user" ] && [ "$auth_email_smtp_user" = "$directus_smtp_user" ]; then
+  echo "service-token-preflight: DIRECTUS_SMTP_USER must differ from AUTH_EMAIL_SMTP_USER" >&2
+  exit 1
+fi
+if [ -n "$directus_smtp_password" ] && [ "$auth_email_smtp_password" = "$directus_smtp_password" ]; then
+  echo "service-token-preflight: DIRECTUS_SMTP_PASSWORD must differ from AUTH_EMAIL_SMTP_PASSWORD" >&2
+  exit 1
+fi
+
+for credential_name in $token_names; do
+  credential_value="$(printenv "$credential_name")"
+  if [ "$auth_email_smtp_password" = "$credential_value" ]; then
+    echo "service-token-preflight: AUTH_EMAIL_SMTP_PASSWORD must differ from $credential_name" >&2
+    exit 1
+  fi
+  if [ -n "$directus_smtp_password" ] && [ "$directus_smtp_password" = "$credential_value" ]; then
+    echo "service-token-preflight: DIRECTUS_SMTP_PASSWORD must differ from $credential_name" >&2
+    exit 1
+  fi
+  unset credential_value
+done
+
+unset auth_email_smtp_user auth_email_smtp_password
+unset directus_smtp_user directus_smtp_password smtp_name
+
+echo "service-token-preflight: validated $validated_count distinct deploy credentials, $validated_nats_hash_count distinct NATS bcrypt verifiers and $validated_username_count distinct NATS usernames; SMTP credential boundaries are isolated"

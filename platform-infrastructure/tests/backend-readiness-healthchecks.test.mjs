@@ -35,6 +35,26 @@ test("backend container healthchecks use dependency-aware readiness", async () =
   }
 });
 
+test("auth-email worker health requires readiness marker and live process", async () => {
+  const composeUrl = new URL("../compose.dokploy.yml", import.meta.url);
+  const compose = await readFile(composeUrl, "utf8");
+  const worker = serviceBlock(compose, "auth-email-worker");
+  const healthcheck = nestedBlock(worker, "healthcheck");
+
+  assert.match(
+    healthcheck,
+    /test -f \/tmp\/seo-platform-auth-email-worker\.ready && ps -o args \| grep -q '\[a\]uth-email-worker\.main\.js'/u
+  );
+
+  const graceSeconds = Number(
+    /^    stop_grace_period:\s*(\d+)s$/mu.exec(worker)?.[1]
+  );
+  assert.ok(
+    Number.isFinite(graceSeconds) && graceSeconds >= 70,
+    "auth-email worker stop_grace_period must leave at least 70 seconds for bounded drain"
+  );
+});
+
 function serviceBlock(compose, serviceName) {
   const lines = compose.split(/\r?\n/u);
   const start = lines.findIndex((line) => line === `  ${serviceName}:`);

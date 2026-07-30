@@ -28,10 +28,16 @@ const credentialNames = [
   "NATS_PLATFORM_PUBLISHER_PASSWORD_HASH",
   "NATS_REALTIME_CONSUMER_USER",
   "NATS_REALTIME_CONSUMER_PASSWORD_HASH",
+  "NATS_AUTH_EMAIL_CONSUMER_USER",
+  "NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH",
   "NATS_PROVISIONER_USER",
   "NATS_PROVISIONER_PASSWORD_HASH",
   "NATS_IDENTITY_EVENT_SUBJECT",
-  "NATS_IDENTITY_EVENT_DLQ_SUBJECT"
+  "NATS_IDENTITY_EVENT_DLQ_SUBJECT",
+  "NATS_EMAIL_VERIFICATION_EVENT_SUBJECT",
+  "NATS_PASSWORD_RESET_EVENT_SUBJECT",
+  "NATS_WORKSPACE_INVITE_EVENT_SUBJECT",
+  "NATS_AUTH_EMAIL_DLQ_SUBJECT"
 ];
 
 test("renderer writes a marker-free mode-600 config and scrubs exec env", async (t) => {
@@ -222,13 +228,24 @@ function validEnvironment() {
     NATS_REALTIME_CONSUMER_USER: "preview_realtime_consumer",
     NATS_REALTIME_CONSUMER_PASSWORD_HASH:
       "$2a$11$biu94pm9wRs6z9rIuer3letiCffv/X59tkqkxr7oWhaiUMdKsV/DK",
+    NATS_AUTH_EMAIL_CONSUMER_USER: "preview_auth_email_consumer",
+    NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH:
+      "$2a$11$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     NATS_PROVISIONER_USER: "preview_topology_provisioner",
     NATS_PROVISIONER_PASSWORD_HASH:
       "$2a$11$YSHwX16VLEEE/MFWc6s9auKSXYjddbpGTVlOuZpWZvuoIIYZ6aYP.",
     NATS_IDENTITY_EVENT_SUBJECT:
       "preview.identity.session-family.revoked.v1",
     NATS_IDENTITY_EVENT_DLQ_SUBJECT:
-      "preview.dlq.realtime.identity.session-family.revoked.v1"
+      "preview.dlq.realtime.identity.session-family.revoked.v1",
+    NATS_EMAIL_VERIFICATION_EVENT_SUBJECT:
+      "preview.email.identity.email-verification.requested.v1",
+    NATS_PASSWORD_RESET_EVENT_SUBJECT:
+      "preview.email.identity.password-reset.requested.v1",
+    NATS_WORKSPACE_INVITE_EVENT_SUBJECT:
+      "preview.email.workspace.invite.requested.v1",
+    NATS_AUTH_EMAIL_DLQ_SUBJECT:
+      "preview.dlq.jobs.transactional-email.v1"
   };
 }
 

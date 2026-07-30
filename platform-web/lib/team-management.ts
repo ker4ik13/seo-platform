@@ -77,6 +77,14 @@ export interface TeamProjectChoicePage {
   readonly truncated: boolean;
 }
 
+export type WorkspaceInviteFailurePhase =
+  | "authentication-required"
+  | "verification-required"
+  | "account-mismatch"
+  | "workspace-unavailable"
+  | "invalid"
+  | "error";
+
 export class TeamCollectionIntegrityError extends Error {
   public constructor() {
     super("Сервер вернул несогласованную страницу списка команды");
@@ -113,6 +121,31 @@ export function updatedWorkspaceMember(
   workspaceId: string
 ): WorkspaceMemberSummary {
   return workspaceMember(value, workspaceId);
+}
+
+export function acceptedWorkspaceInviteMember(
+  value: unknown
+): WorkspaceMemberSummary {
+  const member = record(value);
+  return workspaceMember(member, identifierValue(member.workspaceId));
+}
+
+export function workspaceInviteFailurePhase(error: {
+  readonly status: number;
+  readonly code: string;
+}): WorkspaceInviteFailurePhase {
+  if (error.status === 401) return "authentication-required";
+  if (error.code === "EMAIL_VERIFICATION_REQUIRED") {
+    return "verification-required";
+  }
+  if (error.code === "INVITATION_ACCOUNT_MISMATCH") {
+    return "account-mismatch";
+  }
+  if (error.status === 404 || error.status === 410) return "invalid";
+  if (error.code === "RESOURCE_STATE_CONFLICT") {
+    return "workspace-unavailable";
+  }
+  return "error";
 }
 
 export function createdPendingWorkspaceInvite(

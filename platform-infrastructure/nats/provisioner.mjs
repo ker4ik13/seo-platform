@@ -27,7 +27,7 @@ try {
     environment: configuration.environment
   });
   process.stdout.write(
-    `nats-topology-provisioner: source=${result.sourceStream} dlq=${result.dlqStream} consumer=${result.consumer}\n`
+    `nats-topology-provisioner: identity=${result.sourceStream} authEmail=${result.authEmailStream} dlq=${result.dlqStream} realtimeConsumer=${result.consumer} authEmailConsumer=${result.authEmailConsumer}\n`
   );
 } catch (error) {
   exitCode = 1;

@@ -6,8 +6,8 @@
 - три изолированных Redis: durable AOF для BullMQ, ephemeral Pub/Sub для
   Socket.IO и отдельный ephemeral Directus cache;
 - NATS с JetStream;
-- четыре NestJS API, отдельные system, inspection, import, rank и connector
-  workers;
+- четыре NestJS API, отдельные system, inspection, import, rank, connector и
+  transactional auth-email workers;
 - единый web (`/`, `/tools`, `/docs`, `/app`), internal-only admin shell и
   Directus;
 - S3 и SMTP подключаются как внешние managed/hosted сервисы.
@@ -20,14 +20,16 @@
    юридических документов. Пустые обязательные service secrets нужно
    сгенерировать отдельно; копировать примеры как реальные секреты запрещено.
    Пароли PostgreSQL для bootstrap administrator, четырёх migration owners,
-   четырёх general runtime roles, отдельного `jobs_rank_runtime`, Directus и
-   connector должны быть независимыми, URL-safe и длиной не менее 32
+   четырёх general runtime roles, отдельных `jobs_rank_runtime` и
+   `jobs_auth_email_runtime`, Directus и connector должны быть независимыми,
+   URL-safe и длиной не менее 32
    символов.
    Отдельно обязательно сгенерировать четыре caller/audience credentials:
    `PLATFORM_API_TO_SEO_DATA_TOKEN`, `PLATFORM_API_TO_JOBS_TOKEN`,
    `JOBS_TO_SEO_DATA_TOKEN`, `PLATFORM_API_TO_REALTIME_TOKEN`, а также
    dedicated `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`,
    `JOBS_TO_SEO_RANK_TOKEN`, `JOBS_TO_SEO_RANK_RESULT_TOKEN`,
+   `JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN`,
    `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN`,
    `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` и
    `RANK_HISTORY_CURSOR_KEY`. Пустые значения в корневом примере —
@@ -37,22 +39,29 @@
    `REDIS_JOBS_{API,SYSTEM,INSPECTION,IMPORT,RANK,CONNECTOR}_PASSWORD`,
    `REDIS_REALTIME_PASSWORD` и `REDIS_DIRECTUS_PASSWORD`. Они не совпадают с
    service/NATS credentials и соответствуют URL-safe deploy policy.
-   Отдельно сгенерировать четыре разные пары NATS identity:
+   Отдельно сгенерировать пять разных пар NATS identity:
    `NATS_RUNTIME_*`, `NATS_PLATFORM_PUBLISHER_*`,
-   `NATS_REALTIME_CONSUMER_*`, `NATS_PROVISIONER_*`, а также задать exact
+   `NATS_REALTIME_CONSUMER_*`, `NATS_AUTH_EMAIL_CONSUMER_*`,
+   `NATS_PROVISIONER_*`, а также задать exact
    lowercase `NATS_EVENT_ENVIRONMENT`. NATS passwords не совпадают ни с одним
    service credential и начинаются с ASCII letter; usernames уникальны и не
    являются secrets, но не переиспользуются между ролями. Для каждого
    plaintext client password также сохранить соответствующий bcrypt verifier
-   в `NATS_{RUNTIME,PLATFORM_PUBLISHER,REALTIME_CONSUMER,PROVISIONER}_PASSWORD_HASH`.
+   в соответствующей
+   `NATS_{RUNTIME,PLATFORM_PUBLISHER,REALTIME_CONSUMER,AUTH_EMAIL_CONSUMER,PROVISIONER}_PASSWORD_HASH`.
    Verifier создаётся официальным `nats server passwd` с exact cost `11` и
    canonical prefix `$2a$`; `$2b$`/`$2y$` не принимаются, поскольку broker
    2.12.12 не распознаёт их как bcrypt credentials. Config подставляет hash
    только внутри quoted value, чтобы `$` не стал повторной env-ссылкой;
    password и verifier являются одной парой, но broker получает только
    `*_PASSWORD_HASH`, а приложения — только свой `*_PASSWORD`.
-3. Сначала оставить `S3_ENABLED=false`, `EMAIL_ENABLED=false`,
-   `DIRECTUS_STORAGE_DRIVER=local`.
+3. Сначала можно оставить `S3_ENABLED=false` и
+   `DIRECTUS_STORAGE_DRIVER=local`. `auth-email-worker` не имеет disabled
+   режима: до его запуска оператор обязан задать `EMAIL_FROM`,
+   `EMAIL_MESSAGE_ID_DOMAIN`, `AUTH_EMAIL_SMTP_HOST`,
+   `AUTH_EMAIL_SMTP_USER`, `AUTH_EMAIL_SMTP_PASSWORD` и проверить
+   sender/provider. Если SMTP ещё не подготовлен, этот process не запускать;
+   остальные процессы не должны получать его credentials.
 4. Привязать основной домен к `web:3000`, а нужные технические домены — к
    `platform-api:4000`, `realtime:4003` и `directus:8055`. Не создавать
    domain/route/port binding для `admin:3002`.
@@ -97,9 +106,11 @@ startup. Обычные internal HTTP-вызовы разделены так:
 | `PLATFORM_API_TO_JOBS_TOKEN` | `platform-api` | `jobs-integrations` HTTP |
 | `JOBS_TO_SEO_DATA_TOKEN` | `jobs-integrations` HTTP и `import-worker` | `seo-data` |
 | `PLATFORM_API_TO_REALTIME_TOKEN` | `platform-api` | `realtime` general HTTP |
+| `JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN` | `auth-email-worker` | `platform-api` JIT material/completion |
 
-Credential vault, Web Push device lifecycle, rank manifest/result и rank
-grant используют отдельные narrow credentials и не принимают general token.
+Credential vault, Web Push device lifecycle, rank manifest/result/grant и
+auth-email JIT material/completion используют отдельные narrow credentials и
+не принимают general token.
 Runtime требует один exact `X-Internal-Token`: duplicate/array/comma,
 whitespace/control, не-ASCII, длина вне `32..512`, известный placeholder или
 повторное использование настроенного значения останавливаются либо
@@ -109,11 +120,11 @@ Compose static regression проверяет exact effective recipients кажд
 credential и запрещает встроенные значения вместо required deploy variable.
 
 Перед запуском credential-bearing processes, Redis servers и NATS Compose
-обязательно завершает one-shot `service-token-preflight`. Он получает девять
-service tokens, `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и четыре
-NATS passwords, проверяет все 22 credentials на глобальную pairwise
+обязательно завершает one-shot `service-token-preflight`. Он получает десять
+service tokens, `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и пять
+NATS passwords, проверяет все 24 credentials на глобальную pairwise
 distinctness, отсутствие placeholders и длину `32..512`. Дополнительно он
-проверяет четыре разные canonical bcrypt verifier записи и четыре NATS
+проверяет пять разных canonical bcrypt verifier записей и пять NATS
 usernames отдельно на уникальный
 ASCII identifier длиной `3..64` и несовпадение с credentials. Deploy-проверка
 намеренно строже runtime: secrets допускают только URL-safe алфавит
@@ -129,12 +140,13 @@ anchor со всеми секретами:
 
 | Process | Runtime capabilities |
 |---|---|
-| `jobs-integrations` | DB/Redis, NATS, S3, SMTP, general tokens и credential management/keyrings |
+| `jobs-integrations` | DB/Redis, NATS, S3, general tokens и credential management/keyrings |
 | `import-worker` | DB/Redis/S3 и SEO Data URL + `JOBS_TO_SEO_DATA_TOKEN` |
 | `upload-inspection-worker` | DB/Redis/S3 и malware scanner |
 | `system-worker` | только Redis и concurrency |
 | `rank-worker` | Отдельный `jobs_rank_runtime`, Redis, SEO rank manifest и Platform rank grant; остальное запрещено |
 | `connector-worker` | `jobs_connector`, Redis и execution KEK; management/general/NATS/S3/SMTP запрещены |
+| `auth-email-worker` | `jobs_auth_email_runtime`, dedicated NATS consumer, Platform JIT token и SMTP; Redis/general/vault/rank/S3 запрещены |
 
 Config loader получает явную process role; `system-worker` использует
 отдельный Redis-only loader. Поэтому случайно добавленная DB URL, service
@@ -182,24 +194,25 @@ official source Redis 8.8.1 прошёл 3/3: реальный BullMQ Queue/Work
 named key boundaries и Lua denial, exact Realtime Pub/Sub channels, cache
 CRUD, health/default-user boundary и запрет admin/dangerous commands.
 
-## NATS JetStream: terminal session-family pipeline
+## NATS JetStream: terminal identity и transactional auth-email
 
 Compose использует pinned `nats:2.12.12-alpine` и mounted
 `nats/nats-server.conf`; credentials не передаются аргументами command, а
-broker получает только четыре bcrypt verifier записи — plaintext client
+broker получает только пять bcrypt verifier записей — plaintext client
 passwords остаются у exact приложений и one-shot preflight. NATS не имеет
 внешнего port binding. Config ограничивает payload `64 KB`, memory store
-`64 MB` и file store `1 GB` и задаёт четыре deny-by-default identities:
+`64 MB` и file store `1 GB` и задаёт пять deny-by-default identities:
 
 | Identity | Получатель | Разрешения |
 |---|---|---|
 | `NATS_RUNTIME_*` | SEO Data и generic Jobs HTTP | deny all publish/subscribe до появления собственного event contract |
-| `NATS_PLATFORM_PUBLISHER_*` | Platform API | exact identity event publish, account/stream info и reply inbox |
+| `NATS_PLATFORM_PUBLISHER_*` | Platform API | exact identity/auth-email event publish, account/stream info и reply inbox |
 | `NATS_REALTIME_CONSUMER_*` | Realtime | exact stream/consumer info, pull fetch, source ack, DLQ publish и reply inbox |
+| `NATS_AUTH_EMAIL_CONSUMER_*` | `auth-email-worker` | exact auth-email stream/consumer info, pull fetch, source ack, auth-email DLQ publish и reply inbox |
 | `NATS_PROVISIONER_*` | one-shot provisioner | exact source/DLQ stream info/create/update и exact consumer info/create/update |
 
 Удаление/purge/raw message read не выдаются ни одной application identity.
-Platform API и Realtime не создают и не изменяют topology.
+Platform API, Realtime и auth-email worker не создают и не изменяют topology.
 
 `nats-topology-provisioner` работает internal-only, non-root, read-only, с
 `cap_drop: ALL`, `no-new-privileges`, без application/database/Redis secrets и
@@ -209,31 +222,72 @@ Platform API и Realtime не создают и не изменяют topology.
   `{environment}.identity.session-family.revoked.v1`, file/limits retention,
   `max_msg_size=65536`, `max_bytes=512 MiB`, `max_msgs=1 000 000`, age 30
   дней и duplicate window 2 часа;
-- `DOMAIN_EVENTS_DLQ` с единственным subject
-  `{environment}.dlq.realtime.identity.session-family.revoked.v1`, теми же
+- `DOMAIN_EVENTS_DLQ` с двумя exact subjects: identity DLQ и
+  `{environment}.dlq.jobs.transactional-email.v1`, теми же
   message/byte bounds, `max_msgs=100 000` и age 60 дней;
 - durable pull consumer `realtime_session_family_revoked_v1`: exact source
   filter, explicit ack, deliver all, instant replay, `ack_wait=60s`,
-  `max_ack_pending=1`, unlimited transport redelivery и file-backed state.
+  `max_ack_pending=1`, unlimited transport redelivery и file-backed state;
+- `AUTH_EMAIL_EVENTS` с тремя exact
+  `{environment}.email.{eventType}` subjects, теми же bounded source
+  retention/duplicate limits;
+- durable pull consumer `jobs_auth_email_v1` с filter
+  `{environment}.email.>`, explicit ack и bounded pending/fetch state.
 
-Оба stream запрещают delete/purge/direct/rollup и имеют `num_replicas=1` для
+Все три stream запрещают delete/purge/direct/rollup и имеют `num_replicas=1` для
 текущей single-node VPS topology. Provisioner создаёт отсутствующее,
 идемпотентно возвращает unchanged при exact config и изменяет только
 allowlisted bounded limits/description. Subject, storage, retention, replica,
 mirror/source, republish/transform или sealed drift останавливают startup;
-автоматического destructive repair нет. Platform API и Realtime ждут
-successful provisioner и healthy NATS.
+автоматического destructive repair нет. Platform API, Realtime и auth-email
+worker ждут successful provisioner и healthy NATS.
 
-Localhost smoke с реальным `nats-server` 2.12.12 подтвердил syntax config,
-bcrypt login всех runtime ролей, отсутствие plaintext-password warning,
-create → unchanged idempotence и фактические ACL publisher/consumer/
-provisioner. Docker на текущем хосте отсутствует, поэтому полный
+Предыдущий localhost smoke с реальным `nats-server` 2.12.12 подтвердил syntax
+config и четыре identity роли до auth-email расширения, отсутствие
+plaintext-password warning, create → unchanged idempotence и фактические ACL.
+Новая auth-email identity/topology покрыта static regression; её live smoke
+остаётся target-environment gate. Docker на текущем хосте отсутствует, поэтому полный
 `docker compose config`/image build остаётся CI и target-environment gate.
 Перед production также обязательны target PostgreSQL ACL/HBA/login evidence,
 NATS lag/redelivery/DLQ alerts и replay runbook, offsite backup/restore,
 representative load/capacity проверки, Redis live/rollout evidence и внешние
 provider/sender gates. Этот NATS slice сам по себе не делает платформу
 production-ready.
+
+## Transactional auth-email process
+
+`auth-email-worker` использует отдельный entrypoint, DB login
+`jobs_auth_email_runtime`, NATS identity и
+`JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN`. DB grants разрешают только
+`SELECT/INSERT/UPDATE` `auth_email_delivery_attempts`; general Jobs role не
+получает эту таблицу. Worker не получает Redis, general/vault/rank/S3 secrets
+или публичный port. SMTP egress доступен только через непубликуемую сеть
+`outbound`.
+
+Source event не содержит recipient/token/content. Worker materialize-ит их
+JIT через Platform API и хранит только source ID/type/hash, lease/status,
+safe error code и provider message ID. Delivery at-least-once; stable
+`Message-ID` поддерживает best-effort dedup. Crash после SMTP accept и до
+durable `SMTP_ACCEPTED` остаётся неоднозначным и может привести к повтору.
+
+Production SMTP secrets в Git и `.env.example` не поставляются. Оператор
+задаёт account/sender/credentials в Dokploy secret store, проверяет canary и
+no-secret logs. Rollout: contracts/migration/DB grants/NATS topology →
+Platform JIT/publisher → один worker → gradual scale. Rollback: остановить
+publisher, gracefully drain worker, сохранить stream/consumer/outbox/attempts
+для reconciliation; destructive migration/stream rollback запрещён.
+
+Compose принимает только `AUTH_EMAIL_SMTP_*` deploy inputs для этого worker и
+маппит их в ожидаемые приложением process-local `SMTP_*`. Directus получает
+отдельные `DIRECTUS_SMTP_*`, которые маппятся только в его `EMAIL_SMTP_*`.
+Общих `SMTP_*` deploy credentials и их повторного использования между
+processes быть не должно.
+
+Worker healthcheck использует container-local readiness marker: он появляется
+только после успешного bootstrap и удаляется до остановки fetch/drain.
+`stop_grace_period` обязан быть строго больше worst-case shutdown budget,
+включая `AUTH_EMAIL_SHUTDOWN_GRACE_MS`, чтобы runtime не получил force-kill
+до завершения bounded ack/lease cleanup.
 
 ## Dedicated Jobs → Platform API rank grant boundary
 
@@ -742,10 +796,13 @@ retention/удаление quarantine и временных объектов п�
 Периодический reconciliation job дополнительно закрывает просроченные записи
 и orphan objects; bucket lifecycle остаётся последней линией защиты.
 
-Для писем приложения заполнить SMTP-переменные и включить
-`EMAIL_ENABLED=true`. Для Directus дополнительно установить
-`DIRECTUS_EMAIL_TRANSPORT=smtp`. До этого оба контура остаются работоспособными,
-но не отправляют письма.
+Для transactional auth-email заполнить `EMAIL_FROM`,
+`EMAIL_MESSAGE_ID_DOMAIN` и полный `AUTH_EMAIL_SMTP_*` набор; Compose маппит
+его в process-local `SMTP_*` и передаёт `EMAIL_ENABLED=true` только этому
+worker. Без полной конфигурации он fail-closed не стартует, а не имитирует
+доставку. Для Directus отдельно задать `DIRECTUS_SMTP_*` и
+`DIRECTUS_EMAIL_TRANSPORT=smtp`; его SMTP lifecycle и credentials не связаны
+с ADR-2026-038.
 
 ## Регистрация browser Web Push
 

@@ -25,7 +25,8 @@ test("publishes with the outbox id, bounded PubAck timeout and expected stream",
   const acknowledgement = await service.publishOutboxEvent(
     "prod.identity.session-family.revoked.v1",
     '{"eventId":"01900000-0000-7000-8000-000000000101"}',
-    "01900000-0000-7000-8000-000000000101"
+    "01900000-0000-7000-8000-000000000101",
+    "IDENTITY_EVENTS"
   );
 
   assert.deepEqual(acknowledgement, {
@@ -56,7 +57,14 @@ test("readiness resolves the exact configured stream dynamically", async () => {
         return {
           config: {
             name: streamName,
-            subjects: ["prod.identity.session-family.revoked.v1"]
+            subjects:
+              streamName === "IDENTITY_EVENTS"
+                ? ["prod.identity.session-family.revoked.v1"]
+                : [
+                    "prod.email.identity.email-verification.requested.v1",
+                    "prod.email.identity.password-reset.requested.v1",
+                    "prod.email.workspace.invite.requested.v1"
+                  ]
           }
         };
       }
@@ -64,7 +72,7 @@ test("readiness resolves the exact configured stream dynamically", async () => {
   });
 
   await service.assertOutboxStream();
-  assert.deepEqual(requested, ["IDENTITY_EVENTS"]);
+  assert.deepEqual(requested, ["IDENTITY_EVENTS", "AUTH_EMAIL_EVENTS"]);
 });
 
 test("readiness rejects a mismatched stream identity", async () => {
@@ -106,12 +114,46 @@ test("readiness rejects wildcard, unrelated and additional stream subjects", asy
   }
 });
 
+test("readiness rejects a broadened or incomplete auth-email stream", async () => {
+  for (const subjects of [
+    ["prod.email.>"],
+    [
+      "prod.email.identity.email-verification.requested.v1",
+      "prod.email.identity.password-reset.requested.v1"
+    ]
+  ]) {
+    const service = serviceFixture();
+    setJetStreamManager(service, {
+      streams: {
+        info: async (streamName: string) => ({
+          config: {
+            name: streamName,
+            subjects:
+              streamName === "IDENTITY_EVENTS"
+                ? ["prod.identity.session-family.revoked.v1"]
+                : subjects
+          }
+        })
+      }
+    });
+    await assert.rejects(
+      service.assertOutboxStream(),
+      /stream subject scope mismatch/u
+    );
+  }
+});
+
 test("disabled publisher neither requires JetStream nor permits publishing", async () => {
   const service = serviceFixture(false);
 
   await service.assertOutboxStream();
   await assert.rejects(
-    service.publishOutboxEvent("test.subject", "{}", "event-id"),
+    service.publishOutboxEvent(
+      "test.subject",
+      "{}",
+      "event-id",
+      "IDENTITY_EVENTS"
+    ),
     /not initialized/u
   );
 });
@@ -123,7 +165,8 @@ function serviceFixture(enabled = true): NatsService {
       ...(enabled
         ? {
             eventEnvironment: "prod",
-            streamName: "IDENTITY_EVENTS"
+            streamName: "IDENTITY_EVENTS",
+            authEmailStreamName: "AUTH_EMAIL_EVENTS"
           }
         : {}),
       pollIntervalMs: 1_000,

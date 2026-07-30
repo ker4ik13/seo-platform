@@ -13,8 +13,15 @@ import {
   sessionFamilyRevokedEventProducerV1,
   sessionFamilyRevokedEventSubjectV1,
   sessionFamilyRevokedEventTypeV1,
+  transactionalEmailEventSubjectV1,
+  transactionalEmailEventTypesV1,
+  type TransactionalEmailEventEnvelopeV1,
   type SessionFamilyRevokedEventEnvelopeV1
 } from "@seo-platform/contracts";
+import {
+  transactionalEmailEnvelopeFromOutbox,
+  type AuthEmailOutboxRow
+} from "../auth-email/auth-email-outbox.js";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -35,19 +42,9 @@ export interface OutboxPublisherLogger {
   warn(message: string): void;
 }
 
-interface ClaimedOutboxEvent {
-  readonly id: string;
-  readonly event_type: string;
-  readonly aggregate_type: string;
-  readonly aggregate_id: string;
-  readonly aggregate_version: number;
-  readonly workspace_id: string | null;
-  readonly project_id: string | null;
-  readonly payload: unknown;
-  readonly metadata: unknown;
-  readonly attempts: number;
-  readonly created_at: Date;
-}
+interface ClaimedOutboxEvent extends AuthEmailOutboxRow {}
+
+type PublishOneOutcome = "EMPTY" | "PROCESSED" | "FAILED_FINAL";
 
 @Injectable()
 export class OutboxPublisherService
@@ -113,13 +110,12 @@ export class OutboxPublisherService
   }
 
   private async publishOne(): Promise<boolean> {
-    const streamName = this.config.outboxPublisher.streamName;
     const eventEnvironment = this.config.outboxPublisher.eventEnvironment;
-    if (!streamName || !eventEnvironment) {
+    if (!eventEnvironment) {
       throw new Error("Outbox publisher configuration is incomplete");
     }
 
-    return this.prisma.$transaction(
+    const outcome: PublishOneOutcome = await this.prisma.$transaction(
       async (transaction) => {
         const rows = await transaction.$queryRaw<ClaimedOutboxEvent[]>`
           SELECT
@@ -137,26 +133,33 @@ export class OutboxPublisherService
           FROM outbox_events
           WHERE status = 'PENDING'::"OutboxStatus"
             AND available_at <= CURRENT_TIMESTAMP
-            AND event_type = ${sessionFamilyRevokedEventTypeV1}
+            AND event_type IN (
+              ${sessionFamilyRevokedEventTypeV1},
+              ${transactionalEmailEventTypesV1.emailVerificationRequested},
+              ${transactionalEmailEventTypesV1.passwordResetRequested},
+              ${transactionalEmailEventTypesV1.workspaceInviteRequested}
+            )
           ORDER BY available_at ASC, created_at ASC, id ASC
           FOR UPDATE SKIP LOCKED
           LIMIT 1
         `;
         const row = rows[0];
-        if (!row) return false;
+        if (!row) return "EMPTY" as const;
 
         try {
-          const envelope = envelopeFromOutbox(row);
-          const subject = sessionFamilyRevokedEventSubjectV1(
-            eventEnvironment
+          const publication = publicationFromOutbox(
+            row,
+            eventEnvironment,
+            this.config
           );
           const acknowledgement = await this.nats.publishOutboxEvent(
-            subject,
-            JSON.stringify(envelope),
-            row.id
+            publication.subject,
+            JSON.stringify(publication.envelope),
+            row.id,
+            publication.streamName
           );
           if (
-            acknowledgement.stream !== streamName ||
+            acknowledgement.stream !== publication.streamName ||
             !Number.isSafeInteger(acknowledgement.seq) ||
             acknowledgement.seq <= 0
           ) {
@@ -175,22 +178,29 @@ export class OutboxPublisherService
             throw new Error("Outbox publish transition was not applied");
           }
         } catch {
-          await this.recordFailure(transaction, row);
+          const failedFinal = await this.recordFailure(transaction, row);
+          return failedFinal ? "FAILED_FINAL" : "PROCESSED";
         }
 
-        return true;
+        return "PROCESSED" as const;
       },
       {
         maxWait: 5_000,
         timeout: this.config.outboxPublisher.publishTimeoutMs + 5_000
       }
     );
+    if (outcome === "FAILED_FINAL") {
+      // Fixed code only: transport/provider errors can contain credentials.
+      // Operations can aggregate this warning as the terminal-failure metric.
+      this.logger.warn("OUTBOX_PUBLISHER_EVENT_FAILED_FINAL");
+    }
+    return outcome !== "EMPTY";
   }
 
   private async recordFailure(
     transaction: Prisma.TransactionClient,
     row: ClaimedOutboxEvent
-  ): Promise<void> {
+  ): Promise<boolean> {
     const attempts = row.attempts + 1;
     if (attempts >= this.config.outboxPublisher.maxAttempts) {
       const updated = await transaction.$executeRaw`
@@ -206,7 +216,7 @@ export class OutboxPublisherService
       if (updated !== 1) {
         throw new Error("Outbox terminal failure transition was not applied");
       }
-      return;
+      return true;
     }
 
     const retryDelayMs = boundedRetryDelayMs(
@@ -228,6 +238,7 @@ export class OutboxPublisherService
     if (updated !== 1) {
       throw new Error("Outbox retry transition was not applied");
     }
+    return false;
   }
 
   private scheduleNext(delayMs: number): void {
@@ -250,6 +261,46 @@ export class OutboxPublisherService
       }
     }
   }
+}
+
+interface OutboxPublication {
+  readonly subject: string;
+  readonly streamName: string;
+  readonly envelope:
+    | SessionFamilyRevokedEventEnvelopeV1
+    | TransactionalEmailEventEnvelopeV1;
+}
+
+function publicationFromOutbox(
+  row: ClaimedOutboxEvent,
+  eventEnvironment: string,
+  config: AppConfig
+): OutboxPublication {
+  if (row.event_type === sessionFamilyRevokedEventTypeV1) {
+    const streamName = config.outboxPublisher.streamName;
+    if (!streamName) {
+      throw new Error("Identity outbox stream is not configured");
+    }
+    return {
+      streamName,
+      subject: sessionFamilyRevokedEventSubjectV1(eventEnvironment),
+      envelope: envelopeFromOutbox(row)
+    };
+  }
+
+  const streamName = config.outboxPublisher.authEmailStreamName;
+  if (!streamName) {
+    throw new Error("Auth-email outbox stream is not configured");
+  }
+  const envelope = transactionalEmailEnvelopeFromOutbox(row);
+  return {
+    streamName,
+    subject: transactionalEmailEventSubjectV1(
+      eventEnvironment,
+      envelope.eventType
+    ),
+    envelope
+  };
 }
 
 function envelopeFromOutbox(

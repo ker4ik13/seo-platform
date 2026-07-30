@@ -31,6 +31,7 @@ BEGIN
       ('jobs_owner', 'jobs_db', TRUE),
       ('jobs_runtime', 'jobs_db', FALSE),
       ('jobs_rank_runtime', 'jobs_db', FALSE),
+      ('jobs_auth_email_runtime', 'jobs_db', FALSE),
       ('realtime_owner', 'realtime_db', TRUE),
       ('realtime_runtime', 'realtime_db', FALSE),
       ('directus_runtime_owner', 'directus_db', TRUE)

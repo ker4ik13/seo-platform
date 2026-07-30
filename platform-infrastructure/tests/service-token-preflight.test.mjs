@@ -20,6 +20,7 @@ const credentialNames = [
   "JOBS_TO_SEO_RANK_TOKEN",
   "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
   "JOBS_TO_SEO_RANK_RESULT_TOKEN",
+  "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN",
   "RANK_HISTORY_CURSOR_KEY",
   "REDIS_JOBS_API_PASSWORD",
   "REDIS_JOBS_SYSTEM_PASSWORD",
@@ -32,25 +33,35 @@ const credentialNames = [
   "NATS_RUNTIME_PASSWORD",
   "NATS_PLATFORM_PUBLISHER_PASSWORD",
   "NATS_REALTIME_CONSUMER_PASSWORD",
+  "NATS_AUTH_EMAIL_CONSUMER_PASSWORD",
   "NATS_PROVISIONER_PASSWORD"
 ];
 const usernameNames = [
   "NATS_RUNTIME_USER",
   "NATS_PLATFORM_PUBLISHER_USER",
   "NATS_REALTIME_CONSUMER_USER",
+  "NATS_AUTH_EMAIL_CONSUMER_USER",
   "NATS_PROVISIONER_USER"
 ];
 const natsPasswordHashNames = [
   "NATS_RUNTIME_PASSWORD_HASH",
   "NATS_PLATFORM_PUBLISHER_PASSWORD_HASH",
   "NATS_REALTIME_CONSUMER_PASSWORD_HASH",
+  "NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH",
   "NATS_PROVISIONER_PASSWORD_HASH"
 ];
 const natsPasswordHashes = [
   "$2a$11$SnmJ/ftus.QHSRgvQK4xkucVtf5ucK25GsOSsjVPJem9i2U5txZFK",
   "$2a$11$PDhMidnaWsRKmptE4e0hEeNHwtbSknwwAJMGSY4YxwW2gu03q.Ena",
   "$2a$11$biu94pm9wRs6z9rIuer3letiCffv/X59tkqkxr7oWhaiUMdKsV/DK",
+  "$2a$11$aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "$2a$11$YSHwX16VLEEE/MFWc6s9auKSXYjddbpGTVlOuZpWZvuoIIYZ6aYP."
+];
+const smtpCredentialNames = [
+  "AUTH_EMAIL_SMTP_USER",
+  "AUTH_EMAIL_SMTP_PASSWORD",
+  "DIRECTUS_SMTP_USER",
+  "DIRECTUS_SMTP_PASSWORD"
 ];
 
 test("preflight script is valid POSIX shell and accepts distinct credentials", async () => {
@@ -60,7 +71,7 @@ test("preflight script is valid POSIX shell and accepts distinct credentials", a
 
   assert.match(
     result.stdout,
-    /validated 22 distinct deploy credentials, 4 distinct NATS bcrypt verifiers and 4 distinct NATS usernames/u
+    /validated 24 distinct deploy credentials, 5 distinct NATS bcrypt verifiers and 5 distinct NATS usernames/u
   );
   assert.equal(result.stderr, "");
   assertDoesNotExposeCredentials(
@@ -130,6 +141,51 @@ test("preflight rejects Redis credential reuse across process boundaries", async
     /REDIS_JOBS_CONNECTOR_PASSWORD must differ from REDIS_JOBS_API_PASSWORD/u
   );
   assertDoesNotExposeCredentials(failure.stderr, environment);
+});
+
+test("preflight requires isolated auth-email and Directus SMTP credentials", async () => {
+  const missing = validEnvironment();
+  delete missing.AUTH_EMAIL_SMTP_PASSWORD;
+  const missingFailure = await captureFailure(missing);
+  assert.match(
+    missingFailure.stderr,
+    /AUTH_EMAIL_SMTP_PASSWORD is required/u
+  );
+  assertDoesNotExposeCredentials(missingFailure.stderr, missing);
+
+  const partialDirectus = validEnvironment();
+  partialDirectus.DIRECTUS_SMTP_PASSWORD = "";
+  const partialFailure = await captureFailure(partialDirectus);
+  assert.match(
+    partialFailure.stderr,
+    /DIRECTUS_SMTP_USER and DIRECTUS_SMTP_PASSWORD must be configured together/u
+  );
+  assertDoesNotExposeCredentials(partialFailure.stderr, partialDirectus);
+
+  for (const reusedName of ["DIRECTUS_SMTP_USER", "DIRECTUS_SMTP_PASSWORD"]) {
+    const reused = validEnvironment();
+    const authName = reusedName.replace("DIRECTUS", "AUTH_EMAIL");
+    reused[reusedName] = reused[authName];
+    const reusedFailure = await captureFailure(reused);
+    assert.match(
+      reusedFailure.stderr,
+      new RegExp(`${reusedName} must differ from ${authName}`, "u")
+    );
+    assertDoesNotExposeCredentials(reusedFailure.stderr, reused);
+  }
+
+  const serviceTokenReuse = validEnvironment();
+  serviceTokenReuse.AUTH_EMAIL_SMTP_PASSWORD =
+    serviceTokenReuse.PLATFORM_API_TO_JOBS_TOKEN;
+  const serviceTokenFailure = await captureFailure(serviceTokenReuse);
+  assert.match(
+    serviceTokenFailure.stderr,
+    /AUTH_EMAIL_SMTP_PASSWORD must differ from PLATFORM_API_TO_JOBS_TOKEN/u
+  );
+  assertDoesNotExposeCredentials(
+    serviceTokenFailure.stderr,
+    serviceTokenReuse
+  );
 });
 
 test("preflight rejects duplicate or unsafe NATS usernames", async () => {
@@ -297,12 +353,19 @@ function validEnvironment() {
     ),
     ...Object.fromEntries(
       natsPasswordHashNames.map((name, index) => [name, natsPasswordHashes[index]])
+    ),
+    ...Object.fromEntries(
+      smtpCredentialNames.map((name, index) => [
+        name,
+        `smtp-identity-${index}-${"z".repeat(24)}`
+      ])
     )
   };
 }
 
 function assertDoesNotExposeCredentials(output, environment) {
   for (const value of Object.values(environment)) {
+    if (value === "") continue;
     assert.equal(
       output.includes(value),
       false,

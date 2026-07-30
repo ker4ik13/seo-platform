@@ -1,10 +1,14 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   browserApiRequest,
   BrowserApiError
 } from "../lib/browser-api";
+import {
+  fragmentFreeBrowserPath,
+  readOneTimeTokenFragment
+} from "../lib/one-time-link";
 
 interface PasswordResetAccepted {
   readonly accepted: true;
@@ -94,21 +98,24 @@ export function RequestPasswordResetForm() {
 }
 
 export function ResetPasswordForm() {
-  const [token, setToken] = useState("");
+  const token = useRef("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [fieldError, setFieldError] = useState<string>();
 
   useEffect(() => {
-    const fragment = new URLSearchParams(window.location.hash.slice(1));
-    const fragmentToken = fragment.get("token")?.trim();
+    const fragment = readOneTimeTokenFragment(window.location.hash, 256);
+    if (fragment.shouldScrub) {
+      window.history.replaceState(
+        null,
+        "",
+        fragmentFreeBrowserPath(window.location)
+      );
+    }
     const developmentToken = sessionStorage.getItem(
       "development-password-reset-token"
     );
-    setToken(fragmentToken || developmentToken || "");
-    if (fragmentToken) {
-      window.history.replaceState(null, "", window.location.pathname);
-    }
+    token.current = fragment.token || developmentToken || "";
   }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -124,7 +131,7 @@ export function ResetPasswordForm() {
       setFieldError("Пароли не совпадают.");
       return;
     }
-    if (!token) {
+    if (!token.current) {
       setError("Ссылка восстановления неполная. Запросите новую.");
       return;
     }
@@ -133,7 +140,7 @@ export function ResetPasswordForm() {
     try {
       await browserApiRequest("/app/api/auth/password/reset", {
         method: "POST",
-        body: { token, password }
+        body: { token: token.current, password }
       });
       sessionStorage.removeItem("development-password-reset-token");
       window.location.assign("/app");
