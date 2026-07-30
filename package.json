@@ -7,7 +7,14 @@
     "node": ">=24.0.0"
   },
   "scripts": {
-    "build": "pnpm --filter @seo-platform/contracts build && pnpm --filter '!@seo-platform/contracts' --recursive --if-present run build",
+    "build": "pnpm run build:landing",
+    "build:all": "pnpm --filter @seo-platform/contracts build && pnpm --filter '!@seo-platform/contracts' --recursive --if-present run build",
+    "build:landing": "pnpm --filter @seo-platform/contracts build && pnpm --filter @seo-platform/web build",
+    "dev": "pnpm run dev:landing",
+    "dev:landing": "pnpm --filter @seo-platform/web dev",
+    "start": "pnpm --filter @seo-platform/web start",
+    "start:landing": "pnpm --filter @seo-platform/web start",
+    "check:landing": "pnpm --filter @seo-platform/contracts build && pnpm --filter @seo-platform/web typecheck && pnpm --filter @seo-platform/web test",
     "typecheck": "pnpm --filter @seo-platform/contracts build && pnpm --recursive --if-present run typecheck",
     "lint": "oxlint platform-contracts/src platform-api/src platform-seo-data/src platform-jobs-integrations/src platform-realtime/src platform-web/app platform-web/components platform-web/lib platform-web/next.config.ts platform-admin/app platform-admin/lib platform-admin/next.config.ts platform-infrastructure/tests --import-plugin --react-plugin --promise-plugin --node-plugin --deny-warnings",
     "test": "pnpm --recursive --if-present run test && pnpm infra:test",

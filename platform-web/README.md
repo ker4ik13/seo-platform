@@ -13,6 +13,9 @@
 выпущенные функции готовыми. Telegram CTA задаётся через
 `NEXT_PUBLIC_TELEGRAM_CHANNEL_URL`; инструкция автономного запуска на VPS и
 Caddy находится в [`LANDING_DEPLOYMENT.md`](./LANDING_DEPLOYMENT.md).
+Для Dokploy/Nixpacks из корня используются стандартные команды
+`npm run build` и `npm start`; Web читает назначенный платформой `PORT` без
+hard-coded CLI-флага. Полная monorepo-сборка сохранена как `npm run build:all`.
 
 Контент читается из Directus с типизированным fallback. Directus не имеет
 доступа к данным приложения. Public/project Toolbox и публичный API используют

@@ -53,7 +53,11 @@ pre-launch лендинг бренда **SEOньорита / SEOnorita**. Лок
 его отсутствии — на контакт разработчика. Добавлены брендовый favicon,
 manifest, Open Graph image, locale metadata/hreflang, JSON-LD и отдельный
 least-exposed Compose profile, который слушает loopback для публикации через
-Caddy и не требует запуска backend-контуров.
+Caddy и не требует запуска backend-контуров. В отдельной landing-ветке
+стандартные корневые scripts `build/dev/start` направлены в Web для
+автоопределения Dokploy Nixpacks, полный monorepo build сохранён как
+`build:all`, а `platform-web` принимает назначенный runtime `PORT` без
+hard-coded значения.
 
 Параллельный dependency-free срез browser Web Push device lifecycle
 реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет
