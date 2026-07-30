@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  browserApiDownload,
   browserApiRequest,
   BrowserApiError
 } from "./browser-api.ts";
@@ -209,6 +210,57 @@ test("sends session revoke through same-origin BFF with only the public CSRF val
       delete process.env.NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME;
     } else {
       process.env.NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME = originalCookieName;
+    }
+  }
+});
+
+test("downloads an audited semantic export through the same-origin BFF", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDocument = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "document"
+  );
+  let request: RequestInit | undefined;
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { cookie: "seo_csrf=public-csrf" }
+  });
+  globalThis.fetch = async (_input, init) => {
+    request = init;
+    return new Response("Query\r\nseo\r\n", {
+      headers: {
+        "Content-Disposition":
+          'attachment; filename="semantic-core-2026-07-30.csv"',
+        "Content-Type": "text/csv",
+        "X-Export-Row-Count": "1"
+      }
+    });
+  };
+
+  try {
+    const result = await browserApiDownload(
+      "/app/api/projects/project-id/exports",
+      {
+        body: {
+          format: "CSV",
+          scope: "FULL_CORE",
+          locale: "en",
+          columns: ["query"]
+        }
+      }
+    );
+    assert.equal(result.filename, "semantic-core-2026-07-30.csv");
+    assert.equal(result.rowCount, 1);
+    assert.equal(await result.blob.text(), "Query\r\nseo\r\n");
+    assert.equal(request?.method, "POST");
+    const headers = new Headers(request?.headers);
+    assert.equal(headers.get("x-csrf-token"), "public-csrf");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalDocument) {
+      Object.defineProperty(globalThis, "document", originalDocument);
+    } else {
+      Reflect.deleteProperty(globalThis, "document");
     }
   }
 });

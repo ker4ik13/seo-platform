@@ -20,8 +20,10 @@ const FORWARDED_REQUEST_HEADERS = [
 ] as const;
 const FORWARDED_RESPONSE_HEADERS = [
   "cache-control",
+  "content-disposition",
   "content-type",
   "etag",
+  "x-export-row-count",
   "x-api-version",
   "x-request-id",
   "x-trace-id"

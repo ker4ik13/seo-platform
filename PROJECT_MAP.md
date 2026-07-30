@@ -29,6 +29,16 @@ tenant-prefixed btree/GIN indexes делают значения фильтруе
 storage. Web создаёт/настраивает колонки и редактирует ячейки; import mapping
 создаёт LONG_TEXT definitions и typed values, а migration backfill-ит legacy
 JSON только при доказуемой actor provenance.
+Bounded semantic export доступен из таблицы и публичного project API:
+выбранные строки, текущий фильтр, поддерево группы и полное ядро до 2 000
+строк выгружаются с текущей сортировкой и видимыми/custom колонками в
+CSV/TSV/JSON/NDJSON или Google Sheets-safe CSV. Download проходит через
+same-origin streaming BFF, требует `semantic.export` и CSRF, сохраняет audit,
+не раскрывает tenant context из browser body и защищает Google CSV от formula
+injection. Табличные заголовки локализуются, CSV имеет RFC-совместимое
+экранирование, JSON сохраняет typed custom values. Следующий P1 slice:
+асинхронные большие XLSX/archive exports с S3 signed URL, затем
+semantic versions/preview/undo и collaboration.
 
 Предыдущий P2 foundation: versioned tracking context, provider-free оценка и immutable
 execution manifest в SEO Data завершены. Estimate хранится в `jobs_db`,

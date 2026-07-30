@@ -2077,6 +2077,8 @@ svg { display: block; }
 .semantic-filter-bar select { background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); font: inherit; min-height: 36px; min-width: 0; padding: 0 8px; width: 100%; }
 .semantic-filter-bar .secondary-button { min-height: 36px; padding-inline: 12px; }
 .semantic-view-toolbar { align-items: flex-start; display: flex; flex-wrap: wrap; gap: 9px; }
+.semantic-export-actions { align-items: center; display: flex; gap: 8px; }
+.semantic-export-actions select { background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); font: inherit; min-height: 36px; padding: 0 8px; }
 .semantic-saved-views,
 .semantic-column-picker { background: #fff; border: 1px solid var(--line); border-radius: 9px; min-width: min(100%, 250px); position: relative; }
 .semantic-saved-views > summary,
@@ -2834,6 +2836,7 @@ svg { display: block; }
   .semantic-filter-bar .secondary-button,
   .semantic-filter-bar .text-button { min-height: 38px; }
   .semantic-view-toolbar > details { width: 100%; }
+  .semantic-export-actions { align-items: stretch; flex-direction: column; width: 100%; }
   .semantic-saved-views form { grid-template-columns: 1fr; }
   .semantic-custom-column-editor { grid-template-columns: 1fr; }
   .semantic-custom-column-editor > * { grid-column: 1 !important; }

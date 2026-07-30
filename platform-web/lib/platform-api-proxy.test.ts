@@ -122,6 +122,46 @@ test("forwards a manual rank create with CSRF and Idempotency-Key", async () => 
   }
 });
 
+test("streams semantic export metadata without buffering the download", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () =>
+    new Response("Query\r\nseo\r\n", {
+      headers: {
+        "Content-Disposition":
+          'attachment; filename="semantic-core-2026-07-30.csv"',
+        "Content-Type": "text/csv; charset=utf-8",
+        "X-Export-Row-Count": "1"
+      }
+    });
+
+  try {
+    const request = new NextRequest(
+      "http://localhost/app/api/projects/project-id/exports",
+      {
+        method: "POST",
+        body: "{}",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": "csrf"
+        }
+      }
+    );
+    const response = await proxyPlatformApi(request, [
+      "projects",
+      "project-id",
+      "exports"
+    ]);
+    assert.equal(
+      response.headers.get("content-disposition"),
+      'attachment; filename="semantic-core-2026-07-30.csv"'
+    );
+    assert.equal(response.headers.get("x-export-row-count"), "1");
+    assert.equal(await response.text(), "Query\r\nseo\r\n");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("forwards an exact empty cooperative rank cancel command", async () => {
   const originalFetch = globalThis.fetch;
   let upstreamUrl: string | undefined;

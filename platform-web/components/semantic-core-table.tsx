@@ -7,6 +7,7 @@ import {
 } from "react";
 import {
   browserApiCollectionRequest,
+  browserApiDownload,
   BrowserApiError,
   browserApiRequest,
   type BrowserCursorPage
@@ -89,6 +90,13 @@ interface SemanticCoreTableProps {
   readonly groupRefreshVersion: number;
 }
 
+type SemanticExportFormat =
+  | "CSV"
+  | "TSV"
+  | "JSON"
+  | "NDJSON"
+  | "GOOGLE_CSV";
+
 export function SemanticCoreTable({
   columnRefreshVersion,
   projectId,
@@ -124,6 +132,10 @@ export function SemanticCoreTable({
     new Set()
   );
   const [bulkNotice, setBulkNotice] = useState<string>();
+  const [exportFormat, setExportFormat] =
+    useState<SemanticExportFormat>("CSV");
+  const [exporting, setExporting] = useState(false);
+  const [exportNotice, setExportNotice] = useState<string>();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -459,6 +471,42 @@ export function SemanticCoreTable({
     });
   }
 
+  async function downloadExport(): Promise<void> {
+    if (exporting) return;
+    setExporting(true);
+    setExportNotice(undefined);
+    setMutationError(undefined);
+    const selected = items
+      .filter(({ id }) => selectedIds.has(id))
+      .map(({ id }) => id);
+    try {
+      const download = await browserApiDownload(
+        `/app/api/projects/${encodeURIComponent(projectId)}/exports`,
+        {
+          body: {
+            format: exportFormat,
+            scope: selected.length > 0 ? "SELECTED" : "CURRENT_FILTER",
+            locale: "ru",
+            columns: viewConfig.columns,
+            ...(selected.length > 0
+              ? { keywordIds: selected }
+              : { filters: viewConfig.filters }),
+            sort: viewConfig.sort,
+            includeBom: exportFormat === "CSV" || exportFormat === "TSV"
+          }
+        }
+      );
+      saveBrowserDownload(download.blob, download.filename);
+      setExportNotice(
+        `Экспорт готов: ${formatInteger(download.rowCount ?? 0)} строк`
+      );
+    } catch (requestError) {
+      setMutationError(keywordErrorMessage(requestError));
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const total = page.totalApprox;
   return (
     <section className="panel semantic-core" aria-busy={loading}>
@@ -620,6 +668,39 @@ export function SemanticCoreTable({
           onApply={applySavedView}
           projectId={projectId}
         />
+        <div className="semantic-export-actions">
+          <label>
+            <span className="visually-hidden">Формат экспорта</span>
+            <select
+              aria-label="Формат экспорта"
+              disabled={exporting}
+              onChange={(event) =>
+                setExportFormat(
+                  event.target.value as SemanticExportFormat
+                )
+              }
+              value={exportFormat}
+            >
+              <option value="CSV">CSV</option>
+              <option value="TSV">TSV</option>
+              <option value="JSON">JSON</option>
+              <option value="NDJSON">NDJSON</option>
+              <option value="GOOGLE_CSV">CSV для Google Sheets</option>
+            </select>
+          </label>
+          <button
+            className="secondary-button"
+            disabled={exporting || (items.length === 0 && total === 0)}
+            onClick={() => void downloadExport()}
+            type="button"
+          >
+            {exporting
+              ? "Готовим…"
+              : selectedIds.size > 0
+                ? `Экспортировать выбранные (${selectedIds.size})`
+                : "Экспортировать фильтр"}
+          </button>
+        </div>
         <details className="semantic-column-picker">
           <summary>Колонки и плотность</summary>
           <div>
@@ -881,6 +962,19 @@ export function SemanticCoreTable({
         </div>
       )}
 
+      {exportNotice && (
+        <div className="inline-alert success semantic-table-alert" role="status">
+          <span>{exportNotice}</span>
+          <button
+            className="text-button"
+            onClick={() => setExportNotice(undefined)}
+            type="button"
+          >
+            Закрыть
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="inline-alert danger semantic-table-alert" role="alert">
           <span>{error}</span>
@@ -1022,6 +1116,18 @@ export function SemanticCoreTable({
       )}
     </section>
   );
+}
+
+function saveBrowserDownload(blob: Blob, filename: string): void {
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = filename;
+  link.rel = "noopener";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 async function loadKeywordPage(
