@@ -1,160 +1,89 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { IntegrationCredentialValidationSummary } from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
 import { loadAppConfig } from "../config/app-config.js";
-import type { PrismaService } from "../database/prisma.service.js";
-import {
-  Prisma,
-  type IntegrationCredential,
-  type Job
-} from "../generated/prisma/client.js";
 import type { IntegrationCredentialConnectorRegistry } from "./integration-credential-connector.registry.js";
-import { IntegrationCredentialCryptoService } from "./integration-credential-crypto.service.js";
 import {
-  INTEGRATION_CREDENTIAL_VALIDATION_INPUT_KIND,
-  INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE,
-  integrationCredentialValidationDeduplicationKey,
-  integrationCredentialValidationScope,
-  validationJobJson
-} from "./integration-credential-validation-job.js";
+  IntegrationCredentialCryptoService,
+  type EncryptedIntegrationCredential
+} from "./integration-credential-crypto.service.js";
+import type {
+  CredentialValidationClaim,
+  CredentialValidationJobErrorCode,
+  IntegrationCredentialExecutionBrokerService
+} from "./integration-credential-execution-broker.service.js";
 import { IntegrationCredentialValidationWorkerService } from "./integration-credential-validation-worker.service.js";
 import type { CredentialValidationResult } from "./integration-credential-validation.connector.js";
 
 const workspaceId = "0190abcd-0000-7000-8000-000000000001";
-const actorId = "0190abcd-0000-7000-8000-0000000000a2";
 const credentialId = "0190abcd-0000-7000-8000-0000000000b3";
 const validationId = "0190abcd-0000-7000-8000-0000000000c4";
+const leaseToken = "0190abcd-0000-7000-8000-0000000000d5";
 const leaseOwner = "connector-worker-1";
 
-test("claims, decrypts and completes a credential validation", async () => {
+test("uses only a claimed broker projection to decrypt and finish success", async () => {
   const fixture = workerFixture({
     result: {
       ok: true,
-      providerMeta: {
-        apiRequest: { limit: 100, usedLimit: 4 }
-      }
+      providerMeta: { apiRequest: { limit: 100, usedLimit: 4 } }
     }
   });
 
-  const summary = await fixture.worker.process(
-    validationId,
-    leaseOwner
-  );
+  const result = await fixture.worker.process(validationId, leaseOwner);
 
-  assert.equal(summary.status, "SUCCEEDED");
-  assert.equal(fixture.store.job.status, "COMPLETED");
-  assert.equal(fixture.store.job.attempt, 1);
-  assert.equal(fixture.store.job.progressCurrent, 1n);
-  assert.equal(fixture.store.job.leaseOwner, null);
-  assert.equal(fixture.store.credential.status, "ACTIVE");
-  assert.deepEqual(fixture.store.credential.capabilities, [
-    "KEYWORD_RESEARCH",
-    "COMPETITOR_RESEARCH",
-    "SERP_COLLECTION"
-  ]);
-  assert.ok(fixture.store.credential.verifiedAt instanceof Date);
-  assert.equal(fixture.store.credential.lastErrorCode, null);
-  assert.deepEqual(fixture.store.credential.providerMeta, {
-    accountIdentifierConfigured: false,
+  assert.equal(result.status, "SUCCEEDED");
+  assert.deepEqual(fixture.observedSecrets, [{ apiKey: "provider-api-key" }]);
+  assert.deepEqual(fixture.observedTimeouts, [10_000]);
+  assert.equal(fixture.calls.finishSuccess.length, 1);
+  assert.deepEqual(fixture.calls.finishSuccess[0]?.providerMeta, {
     apiRequest: { limit: 100, usedLimit: 4 }
   });
-  assert.deepEqual(fixture.observedSecrets, [
-    {
-      apiKey: "provider-api-key"
-    }
-  ]);
-  assert.deepEqual(fixture.observedTimeouts, [10_000]);
+  assert.deepEqual(fixture.calls.jobFailures, []);
+  assert.deepEqual(fixture.calls.providerFailures, []);
 });
 
-test("marks an old material-version validation stale without provider access", async () => {
+for (const scenario of [
+  ["STALE", "CREDENTIAL_CHANGED"],
+  ["DISABLED", "CREDENTIAL_DISABLED"],
+  ["MODE_UNSUPPORTED", "CREDENTIAL_MODE_UNSUPPORTED"]
+] as const) {
+  test(`terminalizes ${scenario[0]} scope without provider access`, async () => {
+    const fixture = workerFixture({
+      claim: nonReadyClaim(scenario[0]),
+      result: { ok: true }
+    });
+
+    const result = await fixture.worker.process(validationId, leaseOwner);
+
+    assert.equal(result.status, "FAILED_FINAL");
+    assert.equal(result.errorCode, scenario[1]);
+    assert.deepEqual(fixture.calls.jobFailures, [scenario[1]]);
+    assert.deepEqual(fixture.observedSecrets, []);
+  });
+}
+
+test("returns a safe duplicate summary without decrypting or finishing", async () => {
+  const summary = validationSummary({ status: "RUNNING" });
   const fixture = workerFixture({
-    credential: { materialVersion: 4 },
+    claim: {
+      outcome: "NOT_CLAIMABLE",
+      scopeState: "NOT_APPLICABLE",
+      summary,
+      jobVersion: 3
+    },
     result: { ok: true }
   });
 
-  const summary = await fixture.worker.process(
-    validationId,
-    leaseOwner
+  assert.deepEqual(
+    await fixture.worker.process(validationId, leaseOwner),
+    summary
   );
-
-  assert.equal(summary.status, "STALE");
-  assert.equal(summary.errorCode, "CREDENTIAL_CHANGED");
-  assert.equal(fixture.store.job.status, "FAILED_FINAL");
-  assert.equal(fixture.store.credential.status, "PENDING_VERIFICATION");
   assert.deepEqual(fixture.observedSecrets, []);
+  assert.deepEqual(fixture.calls.jobFailures, []);
 });
 
-test("throws sanitized retry errors and terminates the final retryable attempt", async () => {
-  const fixture = workerFixture({
-    result: {
-      ok: false,
-      errorCode: "PROVIDER_UNAVAILABLE",
-      retryable: true,
-      credentialStatus: "DEGRADED"
-    }
-  });
-
-  await assert.rejects(
-    fixture.worker.process(validationId, leaseOwner),
-    (error: unknown) =>
-      error instanceof Error &&
-      error.name === "CredentialValidationRetryError" &&
-      error.message === "PROVIDER_UNAVAILABLE"
-  );
-  assert.equal(fixture.store.job.status, "RETRY_SCHEDULED");
-  assert.equal(fixture.store.job.attempt, 1);
-  assert.equal(fixture.store.job.finishedAt, null);
-  assert.equal(
-    fixture.store.credential.status,
-    "PENDING_VERIFICATION"
-  );
-  assert.equal(
-    fixture.store.credential.lastErrorCode,
-    "PROVIDER_UNAVAILABLE"
-  );
-  assert.ok(fixture.store.job.retryAt instanceof Date);
-
-  const notDue = await fixture.worker.process(
-    validationId,
-    leaseOwner
-  );
-  assert.equal(notDue.status, "RETRY_SCHEDULED");
-  assert.equal(fixture.observedSecrets.length, 1);
-
-  fixture.store.job = {
-    ...fixture.store.job,
-    retryAt: new Date(0)
-  };
-  await assert.rejects(
-    fixture.worker.process(validationId, leaseOwner),
-    (error: unknown) =>
-      error instanceof Error &&
-      error.name === "CredentialValidationRetryError"
-  );
-  assert.equal(fixture.store.job.status, "RETRY_SCHEDULED");
-  assert.equal(fixture.store.job.attempt, 2);
-
-  fixture.store.job = {
-    ...fixture.store.job,
-    retryAt: new Date(0)
-  };
-  const terminal = await fixture.worker.process(
-    validationId,
-    leaseOwner
-  );
-  assert.equal(terminal.status, "FAILED_RETRYABLE");
-  assert.equal(terminal.errorCode, "PROVIDER_UNAVAILABLE");
-  assert.equal(fixture.store.job.status, "FAILED_RETRYABLE");
-  assert.equal(fixture.store.job.attempt, 3);
-  assert.ok(
-    ((fixture.store as WorkerStore).job.finishedAt as Date | null) instanceof
-      Date
-  );
-  assert.equal(fixture.observedSecrets.length, 3);
-  assert.equal(fixture.store.job.retryAt, null);
-});
-
-test("waits until provider Retry-After when rate limited", async () => {
+test("maps a finite provider rate-limit result through the atomic broker finish", async () => {
   const fixture = workerFixture({
     result: {
       ok: false,
@@ -162,7 +91,12 @@ test("waits until provider Retry-After when rate limited", async () => {
       retryable: true,
       retryAfterSeconds: 30,
       credentialStatus: "RATE_LIMITED"
-    }
+    },
+    providerFailureSummary: validationSummary({
+      status: "RETRY_SCHEDULED",
+      errorCode: "PROVIDER_RATE_LIMITED",
+      retryAt: "2026-07-30T10:01:00.000Z"
+    })
   });
 
   await assert.rejects(
@@ -172,64 +106,32 @@ test("waits until provider Retry-After when rate limited", async () => {
       error.name === "CredentialValidationRetryError" &&
       error.message === "PROVIDER_RATE_LIMITED"
   );
-
-  assert.equal(fixture.store.job.status, "WAITING_RATE_LIMIT");
-  assert.equal(
-    fixture.store.job.stage,
-    "credential_validation_waiting_rate_limit"
-  );
-  assert.ok(fixture.store.job.retryAt instanceof Date);
-  const remainingMs =
-    fixture.store.job.retryAt.getTime() - Date.now();
-  assert.ok(remainingMs >= 29_000);
-  assert.ok(remainingMs <= 30_000);
-  assert.equal(fixture.store.credential.status, "RATE_LIMITED");
-
-  const pending = await fixture.worker.process(
-    validationId,
-    leaseOwner
-  );
-  assert.equal(pending.status, "RETRY_SCHEDULED");
-  assert.equal(
-    pending.retryAt,
-    fixture.store.job.retryAt.toISOString()
-  );
-  assert.equal(fixture.observedSecrets.length, 1);
-});
-
-test("maps a provider authentication failure to an invalid credential", async () => {
-  const fixture = workerFixture({
-    result: {
-      ok: false,
-      errorCode: "INVALID_CREDENTIAL",
-      retryable: false,
-      credentialStatus: "INVALID"
+  assert.deepEqual(fixture.calls.providerFailures, [
+    {
+      errorCode: "PROVIDER_RATE_LIMITED",
+      credentialStatus: "RATE_LIMITED",
+      retryAfterSeconds: 30
     }
-  });
-
-  const summary = await fixture.worker.process(
-    validationId,
-    leaseOwner
-  );
-
-  assert.equal(summary.status, "FAILED_FINAL");
-  assert.equal(summary.errorCode, "INVALID_CREDENTIAL");
-  assert.equal(fixture.store.credential.status, "INVALID");
-  assert.equal(
-    fixture.store.credential.lastErrorCode,
-    "INVALID_CREDENTIAL"
-  );
-  assert.ok(fixture.store.credential.lastErrorAt instanceof Date);
+  ]);
+  assert.deepEqual(fixture.calls.jobFailures, []);
 });
 
-test("retries a decrypt failure without mutating credential state", async () => {
+test("keeps decrypt failures on the job-only finish path", async () => {
+  const encrypted = encryptedCredential();
   const fixture = workerFixture({
-    credential: {
-      authTag: Uint8Array.from({ length: 16 }, () => 0)
-    },
-    result: { ok: true }
+    claim: claimed({
+      encryptedCredential: {
+        ...encrypted,
+        authTag: Buffer.alloc(encrypted.authTag.length)
+      }
+    }),
+    result: { ok: true },
+    jobFailureSummary: validationSummary({
+      status: "RETRY_SCHEDULED",
+      errorCode: "CREDENTIAL_DECRYPTION_FAILED",
+      retryAt: "2026-07-30T10:01:00.000Z"
+    })
   });
-  const credentialBefore = { ...fixture.store.credential };
 
   await assert.rejects(
     fixture.worker.process(validationId, leaseOwner),
@@ -238,215 +140,153 @@ test("retries a decrypt failure without mutating credential state", async () => 
       error.name === "CredentialValidationRetryError" &&
       error.message === "CREDENTIAL_DECRYPTION_FAILED"
   );
-
-  assert.equal(fixture.store.job.status, "RETRY_SCHEDULED");
-  assert.equal(
-    object(fixture.store.job.errorSummary)?.code,
+  assert.deepEqual(fixture.calls.jobFailures, [
     "CREDENTIAL_DECRYPTION_FAILED"
-  );
-  assert.ok(fixture.store.job.retryAt instanceof Date);
-  assert.deepEqual(fixture.store.credential, credentialBefore);
+  ]);
+  assert.deepEqual(fixture.calls.providerFailures, []);
   assert.deepEqual(fixture.observedSecrets, []);
 });
 
-test("exhausts decrypt retries without mutating credential state", async () => {
-  const fixture = workerFixture({
-    credential: {
-      authTag: Uint8Array.from({ length: 16 }, () => 0)
-    },
-    job: {
-      attempt: 2,
-      maxAttempts: 3
-    },
-    result: { ok: true }
+for (const [name, leaseExpiresAt] of [
+  ["insufficient", new Date(Date.now() + 11_000).toISOString()],
+  ["invalid", "not-a-timestamp"]
+] as const) {
+  test(`does not call the provider with ${name} remaining lease budget`, async () => {
+    const fixture = workerFixture({
+      claim: claimed({ leaseExpiresAt }),
+      result: { ok: true }
+    });
+
+    await assert.rejects(
+      fixture.worker.process(validationId, leaseOwner),
+      (error: unknown) =>
+        error instanceof Error &&
+        error.name === "CredentialValidationRetryError" &&
+        error.message === "CREDENTIAL_VALIDATION_LEASE_BUDGET_EXHAUSTED"
+    );
+    assert.deepEqual(fixture.observedSecrets, []);
+    assert.deepEqual(fixture.observedTimeouts, []);
+    assert.deepEqual(fixture.calls.finishSuccess, []);
+    assert.deepEqual(fixture.calls.providerFailures, []);
   });
-  const credentialBefore = { ...fixture.store.credential };
+}
 
-  const summary = await fixture.worker.process(
-    validationId,
-    leaseOwner
-  );
-
-  assert.equal(summary.status, "FAILED_RETRYABLE");
-  assert.equal(summary.errorCode, "CREDENTIAL_DECRYPTION_FAILED");
-  assert.equal(fixture.store.job.status, "FAILED_RETRYABLE");
-  assert.equal(fixture.store.job.attempt, 3);
-  assert.equal(fixture.store.job.retryAt, null);
-  assert.ok(fixture.store.job.finishedAt instanceof Date);
-  assert.deepEqual(fixture.store.credential, credentialBefore);
-  assert.deepEqual(fixture.observedSecrets, []);
-});
-
-test("retries a missing KEK version without mutating the credential", async () => {
+test("fails closed on a provider response outside the finite vocabulary", async () => {
   const fixture = workerFixture({
-    credential: {
-      keyVersion: 2,
-      status: "ACTIVE",
-      verifiedAt: new Date("2026-07-29T08:00:00.000Z")
+    result: {
+      ok: false,
+      errorCode: "SOMETHING_NEW",
+      retryable: true,
+      credentialStatus: "DEGRADED"
     },
-    result: { ok: true }
+    jobFailureSummary: validationSummary({
+      status: "RETRY_SCHEDULED",
+      errorCode: "CREDENTIAL_VALIDATION_INTERNAL_ERROR",
+      retryAt: "2026-07-30T10:01:00.000Z"
+    })
   });
-  const credentialBefore = { ...fixture.store.credential };
 
   await assert.rejects(
     fixture.worker.process(validationId, leaseOwner),
-    (error: unknown) =>
-      error instanceof Error &&
-      error.name === "CredentialValidationRetryError" &&
-      error.message === "CREDENTIAL_KEY_VERSION_UNAVAILABLE"
+    /CREDENTIAL_VALIDATION_INTERNAL_ERROR/u
   );
-
-  assert.equal(fixture.store.job.status, "RETRY_SCHEDULED");
-  assert.equal(
-    object(fixture.store.job.errorSummary)?.code,
-    "CREDENTIAL_KEY_VERSION_UNAVAILABLE"
-  );
-  assert.ok(fixture.store.job.retryAt instanceof Date);
-  assert.deepEqual(fixture.store.credential, credentialBefore);
-  assert.deepEqual(fixture.observedSecrets, []);
+  assert.deepEqual(fixture.calls.jobFailures, [
+    "CREDENTIAL_VALIDATION_INTERNAL_ERROR"
+  ]);
+  assert.deepEqual(fixture.calls.providerFailures, []);
 });
 
-test("terminalizes an already disabled credential without mutating it", async () => {
-  const fixture = workerFixture({
-    credential: { status: "DISABLED", version: 7 },
-    result: { ok: true }
-  });
+test("delegates due-id discovery to the narrow broker", async () => {
+  const fixture = workerFixture({ result: { ok: true } });
 
-  const summary = await fixture.worker.process(
-    validationId,
-    leaseOwner
-  );
-
-  assert.equal(summary.status, "FAILED_FINAL");
-  assert.equal(summary.errorCode, "CREDENTIAL_DISABLED");
-  assert.equal(fixture.store.job.status, "FAILED_FINAL");
-  assert.equal(fixture.store.credential.status, "DISABLED");
-  assert.equal(fixture.store.credential.version, 7);
-  assert.deepEqual(fixture.observedSecrets, []);
+  assert.deepEqual(await fixture.worker.pendingValidationIds(5_000), [
+    validationId
+  ]);
+  assert.deepEqual(fixture.calls.pendingLimits, [5_000]);
 });
 
-test("does not exhaust a live running validation on duplicate delivery", async () => {
-  const fixture = workerFixture({
-    job: {
-      status: "RUNNING",
-      attempt: 3,
-      maxAttempts: 3,
-      leaseOwner: "another-worker",
-      leaseExpiresAt: new Date(Date.now() + 60_000),
-      startedAt: new Date()
-    },
-    result: { ok: true }
-  });
+test("rejects an unsafe lease owner before calling the broker", async () => {
+  const fixture = workerFixture({ result: { ok: true } });
 
-  const summary = await fixture.worker.process(
-    validationId,
-    leaseOwner
+  await assert.rejects(
+    fixture.worker.process(validationId, "owner with spaces"),
+    /Invalid credential validation lease owner/u
   );
-
-  assert.equal(summary.status, "RUNNING");
-  assert.equal(fixture.store.job.status, "RUNNING");
-  assert.equal(fixture.store.job.leaseOwner, "another-worker");
-  assert.deepEqual(fixture.observedSecrets, []);
+  assert.equal(fixture.calls.claims, 0);
 });
 
-test("terminalizes an exhausted due retry and clears scheduling state", async () => {
-  const fixture = workerFixture({
-    job: {
-      status: "RETRY_SCHEDULED",
-      attempt: 3,
-      maxAttempts: 3,
-      retryAt: new Date(0),
-      resultSummary: { obsolete: true }
-    },
-    result: { ok: true }
-  });
-
-  const summary = await fixture.worker.process(
-    validationId,
-    leaseOwner
-  );
-
-  assert.equal(summary.status, "FAILED_RETRYABLE");
-  assert.equal(summary.errorCode, "VALIDATION_ATTEMPTS_EXHAUSTED");
-  assert.equal(fixture.store.job.retryAt, null);
-  assert.equal(fixture.store.job.leaseOwner, null);
-  assert.equal(fixture.store.job.leaseExpiresAt, null);
-  assert.equal(fixture.store.job.resultSummary, null);
-  assert.deepEqual(fixture.observedSecrets, []);
-});
-
-test("returns only due queued/retry jobs and expired running validations", async () => {
-  let query: Readonly<Record<string, unknown>> | undefined;
-  const prisma = {
-    job: {
-      findMany: async (input: Readonly<Record<string, unknown>>) => {
-        query = input;
-        return [{ id: validationId }];
-      }
-    }
-  } as unknown as PrismaService;
-  const config = executionTestConfig();
-  const worker = new IntegrationCredentialValidationWorkerService(
-    prisma,
-    {} as IntegrationCredentialCryptoService,
-    {} as IntegrationCredentialConnectorRegistry,
-    config
-  );
-
-  const result = await worker.pendingValidationIds(5_000);
-
-  assert.deepEqual(result, [validationId]);
-  assert.ok(query);
-  assert.equal(query.take, 500);
-  const where = query.where as Readonly<Record<string, unknown>>;
-  const branches = where.OR as readonly Readonly<
-    Record<string, unknown>
-  >[];
-  assert.equal(
-    where.type,
-    INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE
-  );
-  const scheduled = branches[0];
-  assert.ok(scheduled);
-  assert.deepEqual(scheduled.status, {
-    in: [
-      "QUEUED",
-      "RETRY_SCHEDULED",
-      "WAITING_RATE_LIMIT"
-    ]
-  });
-  const due = scheduled.OR as readonly Readonly<
-    Record<string, unknown>
-  >[];
-  assert.deepEqual(due[0], { retryAt: null });
-  assert.ok(
-    object(object(due[1])?.retryAt)?.lte instanceof Date
-  );
-  assert.equal(branches[1]?.status, "RUNNING");
-});
-
-interface WorkerFixtureOptions {
-  readonly credential?: Partial<IntegrationCredential>;
-  readonly job?: Partial<Job>;
+interface FixtureOptions {
+  readonly claim?: CredentialValidationClaim;
   readonly result: CredentialValidationResult;
+  readonly jobFailureSummary?: IntegrationCredentialValidationSummary;
+  readonly providerFailureSummary?: IntegrationCredentialValidationSummary;
 }
 
-function workerFixture(options: WorkerFixtureOptions): {
+interface FixtureCalls {
+  claims: number;
+  readonly pendingLimits: number[];
+  readonly jobFailures: CredentialValidationJobErrorCode[];
+  readonly providerFailures: unknown[];
+  readonly finishSuccess: Array<{
+    readonly connectorVersion: string;
+    readonly providerMeta?: Readonly<Record<string, unknown>>;
+  }>;
+}
+
+function workerFixture(options: FixtureOptions): {
   readonly worker: IntegrationCredentialValidationWorkerService;
-  readonly store: WorkerStore;
+  readonly calls: FixtureCalls;
   readonly observedSecrets: unknown[];
   readonly observedTimeouts: number[];
 } {
-  const config = executionTestConfig();
-  const crypto = new IntegrationCredentialCryptoService(config);
-  const managerCrypto = new IntegrationCredentialCryptoService(
-    managementTestConfig()
-  );
-  const store: WorkerStore = {
-    job: jobRecord(options.job),
-    credential: credentialRecord(managerCrypto, options.credential)
+  const calls: FixtureCalls = {
+    claims: 0,
+    pendingLimits: [],
+    jobFailures: [],
+    providerFailures: [],
+    finishSuccess: []
   };
-  const prisma = workerPrisma(store);
+  const broker = {
+    claimValidation: async () => {
+      calls.claims += 1;
+      return options.claim ?? claimed();
+    },
+    pendingValidationIds: async (limit: number) => {
+      calls.pendingLimits.push(limit);
+      return [validationId];
+    },
+    finishJobFailure: async (
+      _claim: CredentialValidationClaim,
+      errorCode: CredentialValidationJobErrorCode
+    ) => {
+      calls.jobFailures.push(errorCode);
+      return (
+        options.jobFailureSummary ??
+        validationSummary({ status: "FAILED_FINAL", errorCode })
+      );
+    },
+    finishProviderFailure: async (
+      _claim: CredentialValidationClaim,
+      input: unknown
+    ) => {
+      calls.providerFailures.push(input);
+      return (
+        options.providerFailureSummary ??
+        validationSummary({ status: "FAILED_FINAL" })
+      );
+    },
+    finishSuccess: async (
+      _claim: CredentialValidationClaim,
+      connectorVersion: string,
+      providerMeta: Readonly<Record<string, unknown>> | undefined
+    ) => {
+      calls.finishSuccess.push({
+        connectorVersion,
+        ...(providerMeta ? { providerMeta } : {})
+      });
+      return validationSummary({ status: "SUCCEEDED" });
+    }
+  } as unknown as IntegrationCredentialExecutionBrokerService;
   const observedSecrets: unknown[] = [];
   const observedTimeouts: number[] = [];
   const connectors = {
@@ -461,283 +301,86 @@ function workerFixture(options: WorkerFixtureOptions): {
       return options.result;
     }
   } as unknown as IntegrationCredentialConnectorRegistry;
+  const config = executionConfig();
   return {
     worker: new IntegrationCredentialValidationWorkerService(
-      prisma,
-      crypto,
+      broker,
+      new IntegrationCredentialCryptoService(config),
       connectors,
       config
     ),
-    store,
+    calls,
     observedSecrets,
     observedTimeouts
   };
 }
 
-interface WorkerStore {
-  job: Job;
-  credential: IntegrationCredential;
-}
-
-function workerPrisma(store: WorkerStore): PrismaService {
-  const client = {
-    job: {
-      findFirst: async ({
-        where
-      }: {
-        where: Readonly<Record<string, unknown>>;
-      }) => (matchesJob(store.job, where) ? store.job : null),
-      findUnique: async ({
-        where
-      }: {
-        where: Readonly<Record<string, unknown>>;
-      }) => (where.id === store.job.id ? store.job : null),
-      updateMany: async ({
-        where,
-        data
-      }: {
-        where: Readonly<Record<string, unknown>>;
-        data: Readonly<Record<string, unknown>>;
-      }) => {
-        if (!matchesJob(store.job, where)) return { count: 0 };
-        store.job = applyRecordUpdate(store.job, data);
-        return { count: 1 };
-      }
-    },
-    integrationCredential: {
-      findFirst: async ({
-        where
-      }: {
-        where: Readonly<Record<string, unknown>>;
-      }) =>
-        matchesCredential(store.credential, where)
-          ? store.credential
-          : null,
-      updateMany: async ({
-        where,
-        data
-      }: {
-        where: Readonly<Record<string, unknown>>;
-        data: Readonly<Record<string, unknown>>;
-      }) => {
-        if (!matchesCredential(store.credential, where)) {
-          return { count: 0 };
-        }
-        store.credential = applyRecordUpdate(
-          store.credential,
-          data
-        );
-        return { count: 1 };
-      }
-    },
-    $transaction: async (
-      callback: (transaction: unknown) => Promise<unknown>
-    ) => callback(client)
-  };
-  return client as unknown as PrismaService;
-}
-
-function matchesJob(
-  job: Job,
-  where: Readonly<Record<string, unknown>>
-): boolean {
-  if (where.id !== undefined && where.id !== job.id) return false;
-  if (where.type !== undefined && where.type !== job.type) return false;
-  if (where.status !== undefined && where.status !== job.status) {
-    return false;
-  }
-  if (where.version !== undefined && where.version !== job.version) {
-    return false;
-  }
-  if (
-    where.leaseOwner !== undefined &&
-    where.leaseOwner !== job.leaseOwner
-  ) {
-    return false;
-  }
-  const attempt = object(where.attempt);
-  if (
-    attempt?.lt !== undefined &&
-    job.attempt >= Number(attempt.lt)
-  ) {
-    return false;
-  }
-  if (
-    attempt?.gte !== undefined &&
-    job.attempt < Number(attempt.gte)
-  ) {
-    return false;
-  }
-  return true;
-}
-
-function matchesCredential(
-  credential: IntegrationCredential,
-  where: Readonly<Record<string, unknown>>
-): boolean {
-  if (where.id !== undefined && where.id !== credential.id) return false;
-  if (
-    where.workspaceId !== undefined &&
-    where.workspaceId !== credential.workspaceId
-  ) {
-    return false;
-  }
-  if (
-    where.materialVersion !== undefined &&
-    where.materialVersion !== credential.materialVersion
-  ) {
-    return false;
-  }
-  if (where.deletedAt === null && credential.deletedAt !== null) {
-    return false;
-  }
-  const status = object(where.status);
-  if (
-    Array.isArray(status?.notIn) &&
-    status.notIn.includes(credential.status)
-  ) {
-    return false;
-  }
-  return true;
-}
-
-function applyRecordUpdate<RecordType extends object>(
-  record: RecordType,
-  data: Readonly<Record<string, unknown>>
-): RecordType {
-  const updated = { ...record } as Record<string, unknown>;
-  for (const [field, value] of Object.entries(data)) {
-    if (value === Prisma.DbNull) {
-      updated[field] = null;
-      continue;
-    }
-    const operation = object(value);
-    if (operation?.increment !== undefined) {
-      const current = updated[field];
-      updated[field] =
-        typeof current === "bigint"
-          ? current + BigInt(Number(operation.increment))
-          : Number(current) + Number(operation.increment);
-      continue;
-    }
-    updated[field] = value;
-  }
-  return updated as RecordType;
-}
-
-function jobRecord(overrides: Partial<Job> = {}): Job {
-  const now = new Date("2026-07-29T09:00:00.000Z");
+function claimed(
+  overrides: Partial<CredentialValidationClaim> = {}
+): CredentialValidationClaim {
   return {
-    id: validationId,
-    workspaceId,
-    projectId: null,
-    type: INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE,
-    status: "QUEUED",
-    stage: "credential_validation_queued",
-    priority: 10,
-    actorId,
-    scheduleId: null,
-    parentJobId: null,
-    deduplicationKey:
-      integrationCredentialValidationDeduplicationKey(
-        credentialId,
-        3
-      ),
-    idempotencyScope:
-      integrationCredentialValidationScope(credentialId),
-    idempotencyKey: "credential-validation-001",
-    requestHash: Uint8Array.from({ length: 32 }, () => 1),
-    inputSnapshot: validationJobJson({
-      kind: INTEGRATION_CREDENTIAL_VALIDATION_INPUT_KIND,
-      credentialId,
-      credentialMaterialVersion: 3,
-      connectorVersion: "keys-so@1.0.0"
-    }) as Prisma.JsonValue,
-    scopeSnapshot: validationJobJson({
-      workspaceId,
-      credentialId
-    }) as Prisma.JsonValue,
-    progressCurrent: 0n,
-    progressTotal: 1n,
-    progressUnit: "credential",
-    estimatedCostMicro: null,
-    reservedCostMicro: null,
-    actualCostMicro: null,
-    currency: null,
-    credentialMode: "BYOK_API_KEY",
-    provider: "KEYS_SO",
-    attempt: 0,
-    maxAttempts: 3,
-    errorSummary: null,
-    resultSummary: null,
-    correlationId: "request-1",
-    version: 1,
-    createdAt: now,
-    queuedAt: now,
-    startedAt: null,
-    finishedAt: null,
-    cancelRequestedAt: null,
-    leaseOwner: null,
-    leaseExpiresAt: null,
-    retryAt: null,
-    updatedAt: now,
+    outcome: "CLAIMED",
+    scopeState: "READY",
+    summary: validationSummary(),
+    leaseOwner,
+    leaseToken,
+    leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    jobVersion: 2,
+    encryptedCredential: encryptedCredential(),
     ...overrides
   };
 }
 
-function credentialRecord(
-  crypto: IntegrationCredentialCryptoService,
-  overrides: Partial<IntegrationCredential> = {}
-): IntegrationCredential {
-  const encrypted = crypto.encrypt(
+function nonReadyClaim(
+  scopeState: Extract<
+    CredentialValidationClaim["scopeState"],
+    "STALE" | "DISABLED" | "MODE_UNSUPPORTED"
+  >
+): CredentialValidationClaim {
+  return {
+    outcome: "CLAIMED",
+    scopeState,
+    summary: validationSummary(),
+    leaseOwner,
+    leaseToken,
+    leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+    jobVersion: 2
+  };
+}
+
+function validationSummary(
+  overrides: Partial<IntegrationCredentialValidationSummary> = {}
+): IntegrationCredentialValidationSummary {
+  return {
+    id: validationId,
+    workspaceId,
+    credentialId,
+    credentialMaterialVersion: 3,
+    provider: "KEYS_SO",
+    status: "RUNNING",
+    connectorVersion: "keys-so@1.0.0",
+    requestedAt: "2026-07-30T10:00:00.000Z",
+    startedAt: "2026-07-30T10:00:01.000Z",
+    ...overrides
+  };
+}
+
+function encryptedCredential(): EncryptedIntegrationCredential {
+  return new IntegrationCredentialCryptoService(managementConfig()).encrypt(
     workspaceId,
     "KEYS_SO",
     credentialId,
     { apiKey: "provider-api-key" }
   );
-  const now = new Date("2026-07-29T09:00:00.000Z");
-  return {
-    id: credentialId,
-    workspaceId,
-    provider: "KEYS_SO",
-    label: "Primary",
-    mode: "BYOK_API_KEY",
-    status: "PENDING_VERIFICATION",
-    ciphertext: Uint8Array.from(encrypted.ciphertext),
-    nonce: Uint8Array.from(encrypted.nonce),
-    authTag: Uint8Array.from(encrypted.authTag),
-    encryptedDataKey: Uint8Array.from(encrypted.encryptedDataKey),
-    dataKeyNonce: Uint8Array.from(encrypted.dataKeyNonce),
-    dataKeyAuthTag: Uint8Array.from(encrypted.dataKeyAuthTag),
-    keyVersion: encrypted.keyVersion,
-    displayHint: "••••-key",
-    capabilities: ["SERP_COLLECTION"],
-    providerMeta: { accountIdentifierConfigured: false },
-    idempotencyKey: "credential-create-001",
-    requestFingerprint: Uint8Array.from({ length: 32 }, () => 1),
-    fingerprintKeyVersion: 1,
-    materialVersion: 3,
-    createdBy: actorId,
-    updatedBy: actorId,
-    verifiedAt: null,
-    lastSuccessAt: null,
-    lastErrorAt: null,
-    lastErrorCode: null,
-    version: 1,
-    createdAt: now,
-    updatedAt: now,
-    deletedAt: null,
-    ...overrides
-  };
 }
 
-function managementTestConfig(): AppConfig {
+function managementConfig(): AppConfig {
   const encryptionKey = Buffer.alloc(32, 7).toString("base64url");
   const fingerprintKey = Buffer.alloc(32, 8).toString("base64url");
   return loadAppConfig({
     NODE_ENV: "test",
     DATABASE_URL: "postgresql://test",
-    INTEGRATION_CREDENTIALS_ENABLED: "true",
+    INTEGRATION_CREDENTIAL_ROLE: "MANAGEMENT",
     INTEGRATION_CREDENTIAL_KEYS: `1:${encryptionKey}`,
     INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1",
     INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS: `1:${fingerprintKey}`,
@@ -746,7 +389,7 @@ function managementTestConfig(): AppConfig {
   });
 }
 
-function executionTestConfig(): AppConfig {
+function executionConfig(): AppConfig {
   const encryptionKey = Buffer.alloc(32, 7).toString("base64url");
   return loadAppConfig({
     NODE_ENV: "test",
@@ -755,14 +398,4 @@ function executionTestConfig(): AppConfig {
     INTEGRATION_CREDENTIAL_KEYS: `1:${encryptionKey}`,
     INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1"
   });
-}
-
-function object(
-  value: unknown
-): Readonly<Record<string, unknown>> | undefined {
-  return typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : undefined;
 }

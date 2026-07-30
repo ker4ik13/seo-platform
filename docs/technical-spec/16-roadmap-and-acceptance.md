@@ -191,8 +191,9 @@ exact normalized chunks, сохраняет append-only snapshots/current projec
 `GET /api/v1/projects/:projectId/rank-history` и private/noindex Web route
 `/app/projects/:projectId/rankings` уже реализованы с bounded UTC range,
 optional context/keyword filters, opaque cursor/load-more и archived/read-only
-states. Provider execution, SECURITY DEFINER connector claim, scoped
-credential material, submit/status, normalized result producer и schedule
+states. Exact `SECURITY DEFINER` credential broker, rank claim и атомарная
+pre-network submit authorization уже реализованы. Runtime provider request,
+submit/status/fetch persistence, normalized result producer и schedule
 остаются следующими вертикальными срезами. Оценка сохраняется в Jobs как
 immutable idempotency receipt, доступна в read-only и не вызывает
 провайдера, BullMQ, списание, usage, outbox или event. Профильные и
@@ -257,11 +258,14 @@ conflicts; первый rollout требует worker drain/maintenance window �
 обычного unique-index rebuild, а large live database — отдельный
 expand/concurrent-index план.
 Migrations `20260729230100_rank_execution_grant_attempts`,
-`20260729230200_rank_connector_executions` и scoped-claim migration имеют
-schema/static coverage, tenant-safe JobItem hardening и deferred atomic
-consume invariant. Fresh full-chain apply, grant/consume negative/concurrency
-и claim/reclaim/stale-head/drift smoke пройдены на PostgreSQL 18; production
-role permission proof и provider lifecycle races остаются release gates.
+`20260729230200_rank_connector_executions`, scoped claim, split
+`SUBMITTING` enum и submit authorization имеют schema/static coverage,
+tenant-safe JobItem hardening и deferred atomic consume invariant. Fresh
+full-chain apply, grant/consume negative/concurrency, claim/reclaim/stale-head/
+drift, upgrade ACL и authorize/replay/rollback/expiry races пройдены на
+PostgreSQL 18. Exact provisioning script уже не выдаёт direct table DML;
+production cluster-wide role/`pg_hba` proof и provider lifecycle races
+остаются release gates.
 Target runtime — Node.js 24; текущий полный lint/typecheck/test/build baseline
 проверен на Node.js 24.18.1.
 
@@ -271,16 +275,16 @@ ADR-2026-034. Provider-free estimate и exact execution contracts из ADR уж�
 durable Jobs preparation, public/Web Job lifecycle, normalized SEO Data
 history/outbox и public history API/UI готовы. Jobs bounded grant client и
 durable intent/decision history тоже реализованы; atomic
-`CONSUMED ↔ READY_TO_SUBMIT` foundation готов, но provider execution,
-SECURITY DEFINER connector claim, scoped credential material и normalized
-result producer ещё отсутствуют. Platform API issuer foundation сохраняет
+`CONSUMED ↔ READY_TO_SUBMIT`, scoped credential broker, claim и атомарный
+`CLAIMED → SUBMITTING` foundation готовы, но provider request/status runtime и
+normalized result producer ещё отсутствуют. Platform API issuer foundation сохраняет
 immutable exact 30-секундные decisions под lifecycle/RBAC locks, production
 policy остаётся fail-closed, а Jobs не выдаёт credential или provider action;
 это ещё не provider execution. Live `set` остаётся выключенным до recorded
-one-key contract или
-письменного подтверждения response/status/retry semantics, устранения global
-vault read, SECURITY DEFINER connector claim, producer-side обработки ingest
-receipts и `SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit. Наличие working
+one-key contract или письменного подтверждения response/status/retry
+semantics, producer-side обработки ingest receipts, durable
+`SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit и production environment evidence.
+Наличие working
 credential validation и capability в binding не считается доказательством рабочего
 `positions` execution.
 

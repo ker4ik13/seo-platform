@@ -221,36 +221,95 @@ management/fingerprint/internal/NATS и S3/SMTP secrets. Guard уменьшае�
 Даже процесс с общим internal token не может вызвать list/create/rotate/revoke
 credential: эти endpoints принимают только dedicated caller token.
 
-`JOBS_CONNECTOR_DATABASE_USER` и `JOBS_CONNECTOR_DATABASE_PASSWORD` задают
-отдельную PostgreSQL-роль без superuser, role membership и ownership объектов
-кластера; скрипт не выдаёт ей `CREATE`, `INSERT` или `DELETE`. Пароль
+Compose фиксирует immutable username отдельной PostgreSQL-роли как
+`jobs_connector`; ротируется только `JOBS_CONNECTOR_DATABASE_PASSWORD`.
+Username override намеренно отсутствует, чтобы старая LOGIN-role не выпала из
+HBA boundary после «ротации» имени. Роль не имеет superuser, role membership
+или ownership объектов кластера; скрипт не выдаёт ей `CREATE`, `INSERT` или
+`DELETE`. Пароль
 генерируется URL-safe, например в base64url, потому что Compose подставляет
 его в DSN. После jobs migration одноразовый сервис
 `jobs-connector-db-permissions` идемпотентно создаёт/ужесточает роль и выдаёт
-`CONNECT` к `jobs_db`, `USAGE` на `public`, `SELECT` всех строк и колонок
-таблиц `jobs` и `integration_credentials`, а также `UPDATE` явно перечисленных
-колонок состояния. Это ограничивает DML, но **не** обеспечивает tenant/secret
-isolation: компрометированный execution process может прочитать job
-snapshots/metadata всех tenants и все encrypted credential rows, а вместе с
-KEK — весь BYOK vault этого database. Привилегированную существующую роль,
-роль с membership или ownership объектов скрипт fail-closed использовать
-отказывается; прежние прямые grants вне `jobs_db` и наследуемый через
-`PUBLIC` доступ требуют отдельного cluster-wide privilege audit.
+только `CONNECT` к `jobs_db`, `USAGE` на `public` и `EXECUTE` на точный набор
+broker/claim функций. Прямые `SELECT/INSERT/UPDATE/DELETE` на `jobs`,
+`integration_credentials`, synthetic canary и остальные таблицы отсутствуют.
+Пароль роли устанавливается отдельным `psql \password`: SCRAM verifier
+формируется клиентом, а cleartext передаётся только через stdin и не попадает
+в SQL literal, аргументы процесса или psql history. Wrapper до запуска `psql`
+удаляет password из inherited environment и хранит его только в non-exported
+shell variable; та же `psql` session перед `\\password` принудительно задаёт
+`password_encryption='scram-sha-256'`, поэтому legacy `PGOPTIONS` не может
+понизить verifier до MD5.
+Management-only функции покрытия keyring и регистрации canary execution-роли
+также недоступны. Каждый выданный `SECURITY DEFINER` boundary использует
+фиксированный `search_path`, полностью квалифицированные relation и повторно
+проверяет tenant/state/version/lease на стороне БД. Rank claim остаётся
+default-closed по versioned DB control и сам по себе не разрешает network.
 
-До production широкий read grant является release blocker. Нужны отдельная
-узкая execution projection/table со scope, который проверяется на стороне БД,
-либо credential broker/KMS, не позволяющий execution login читать весь vault.
-Дополнительно обязательны fresh non-owner role provisioning, cluster-wide
-grant audit и `pg_hba`/отдельный cluster boundary. Называть текущую роль
-tenant-isolated или least-read до этого запрещено.
+Привилегированную существующую роль, любую роль на любой стороне membership
+edge или с ownership объектов скрипт fail-closed использовать отказывается.
+Grant DDL выполняется одной транзакцией и через `pg_shdepend/pg_database`
+fail-closed отклоняет direct ACL роли в другой database/shared object либо вне
+exact `jobs_db/public` allowlist, включая column/default ACL. Чужие databases
+он не открывает и их ACL не переписывает. В текущей `jobs_db` catalog audit
+дополнительно отклоняет унаследованный через псевдороль `PUBLIC` доступ:
+любое effective `CREATE` или `USAGE` non-system schema блокирует provisioning,
+поэтому не остаются лазейки через operators и новые object kinds. Скрипт отзывает
+database/schema/object `PUBLIC` privileges только в принадлежащем Jobs schema
+`public`.
 
-Нормативный grant-скрипт:
-`postgres/permissions/jobs-connector.sql`. `connector-worker` запускается
+Provisioning обязан запускаться той же PostgreSQL-ролью, которая применяет
+Prisma migrations: owner `_prisma_migrations` и всех routines в `public`
+проверяется fail-closed. И global, и `IN SCHEMA public` default ACL отзывают
+`PUBLIC EXECUTE` у будущих functions/procedures и возможные `PUBLIC` grants у
+будущих tables/sequences. Существующие functions и procedures закрываются
+через `ALL ROUTINES`, после чего exact grants возвращаются только восьми
+allowlisted functions.
+
+Compose запускает PostgreSQL через
+`postgres/config/start-postgres.sh`. Он fail-closed принимает только canonical
+`jobs_connector`, запрещает совпадение с `POSTGRES_USER` и до official entrypoint
+генерирует first-match HBA: local/host `jobs_db + connector → scram-sha-256`,
+затем regex всей family `jobs_connector(_...)` отклоняет replication/all
+databases, и только затем идут общие правила. Поэтому старое family-имя и
+смена database в DSN не обходят boundary даже при оставшемся в соседней
+database `PUBLIC CONNECT`; ACL соседних сервисов не меняются.
+
+Остаточные ограничения точны: текущий Compose использует `host`, а не
+`hostssl`, и address `all`, потому что transport ограничен internal Docker
+network; TLS/mTLS и source-CIDR должны добавляться при межхостовом PostgreSQL.
+Внешний managed PostgreSQL обязан воспроизвести тот же порядок правил либо
+выделить connector отдельный cluster. HBA действует по первому совпадению,
+reload не завершает старые sessions, поэтому rollout требует restart/drain
+connector replicas, проверки `SHOW hba_file`/`pg_hba_file_rules` и реальной
+пары login smoke: `jobs_db` разрешён, соседняя database отклонена.
+До первого rollout нужно отдельно найти прежние connector LOGIN-roles с
+произвольными именами, не входящими в новую family, перевести их в `NOLOGIN`,
+завершить старые sessions и только затем revoke/drop; автоматически угадывать
+их provenance нельзя. После этого username не ротируется.
+
+Fresh 19-migration PostgreSQL 18 regression с synthetic login, non-public/
+cross-DB direct ACL, inherited PUBLIC schema, pre-existing procedure,
+global/schema defaults и будущими function/table/sequence подтверждает SCRAM,
+транзакционный fail-closed и exact allowlist. Отдельный temporary PostgreSQL 18
+HBA harness подтвердил реальный allow `jobs_db` и reject соседней database без
+direct grant. Широкий vault/table read grant больше не является частью
+штатной connector-роли.
+
+Нормативный provisioning wrapper:
+`postgres/permissions/provision-jobs-connector-role.sh`; точный grant DDL —
+`postgres/permissions/jobs-connector.sql`. Opt-in regression включается только
+с disposable `JOBS_CONNECTOR_PERMISSION_TEST_DATABASE_URL` на базе `jobs_db`
+и при необходимости явным `JOBS_CONNECTOR_PERMISSION_TEST_PSQL`. HBA e2e
+дополнительно требует `JOBS_CONNECTOR_PERMISSION_TEST_EXPECT_HBA=true`;
+cluster обязан быть одноразовым, потому что тест создаёт и удаляет canonical
+role и synthetic stale family-role.
+`connector-worker` запускается
 только после его успешного завершения. HTTP-процесс и migration продолжают
 использовать основную роль сервиса, а execution worker не получает её пароль.
 После каждой migration проверяется diff требуемых worker-запросов: добавлять
-широкие `ALL TABLES`, default privileges или права изменения ciphertext
-запрещено.
+широкие `ALL TABLES`, разрешающие `PUBLIC` default privileges или права
+изменения ciphertext запрещено.
 
 Каждый credential шифруется envelope-схемой:
 
@@ -303,8 +362,9 @@ ORDER BY keyring, version;
 2. С прежней active version развернуть расширенный keyring одновременно в
    management `jobs-integrations` и во **всех** репликах `connector-worker`.
 3. Startup canary/verifier должен выполнить безопасную authenticated
-   расшифровку canary каждой используемой версии во всех новых replicas.
-   Проверки только номера версии или длины ключа недостаточно.
+   расшифровку canary всех configured и реально используемых versions во всех
+   новых replicas. Это проверяет новый KEK до переключения active version;
+   проверки только номера версии или длины ключа недостаточно.
 4. После успешной canary-проверки drain-ить старые replicas и убедиться, что
    они больше не исполняют jobs.
 5. Только после подтверждения шагов 2–4 переключить active version в
@@ -328,13 +388,15 @@ validation получает retryable platform error и не меняет ста
 
 Startup decrypt-canary реализован для каждой `EXECUTION` replica и обнаруживает
 неверные bytes под существующей версией по authenticated persistent sample до
-обслуживания jobs. Validation worker при любом последующем decrypt failure
-делает только bounded job retry и не меняет credential status. Canary
-проверяет по одной строке на версию, поэтому не является аудитом каждой записи;
+обслуживания jobs. Replica передаёт broker не более 128 configured versions и
+получает их объединение с versions, реально используемыми credentials, плюс
+usage marker. Used-but-unconfigured и отсутствующий canary fail-closed видны
+как отдельные строки; retired unused unrequested historical canary исключён.
+Проверка выполняется через точный `SECURITY DEFINER` broker grant без прямого
+чтения vault. Validation worker при любом последующем decrypt failure делает
+только bounded job retry и не меняет credential status. Canary проверяет по
+одной строке на версию, поэтому не является аудитом каждой записи;
 cluster-wide circuit breaker и incident alert для runtime-всплеска ещё нужны.
-Он также выполняется через текущий read grant и не снимает отдельный blocker
-global vault isolation: до live provider execution остаются обязательны
-SECURITY DEFINER projection/claim и отзыв прямого чтения vault.
 
 Fingerprint keyring ротируется отдельно: старая и новая версии сначала
 работают одновременно, затем active version переключается на новую. Старый

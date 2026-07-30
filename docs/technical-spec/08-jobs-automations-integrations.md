@@ -467,9 +467,13 @@ Validation flow:
    возвращает исходный Job.
 2. BullMQ queue `integration-credential-validation` получает только `jobId`.
 3. Отдельный `connector-worker.main.ts` с
-   `INTEGRATION_CREDENTIAL_ROLE=EXECUTION` забирает PostgreSQL lease.
-4. Worker повторно проверяет workspace, credential state, material version и
-   зафиксированную connector version и только затем расшифровывает секрет.
+   `INTEGRATION_CREDENTIAL_ROLE=EXECUTION` получает due ID и забирает lease
+   только через allowlisted `SECURITY DEFINER` broker. Lease связан с exact
+   Job, owner, случайным token, Job version и DB deadline.
+4. Broker повторно проверяет workspace, provider, credential state, material
+   version и зафиксированную connector version и возвращает encrypted material
+   только для `READY`; arbitrary/другой Job UUID не создаёт existence oracle.
+   Worker только затем расшифровывает секрет.
 5. Arsenkin вызывает фиксированный
    `https://arsenkin.ru/api/tools/info`, Keys.so —
    `https://api.keys.so/limits/all`; пользователь не может изменить origin,
@@ -479,9 +483,12 @@ Validation flow:
    безопасный HTTP status и `Retry-After` неуспешного ответа классифицируются
    даже при пустом/non-JSON body. Наружу возвращаются только нормализованные
    status/error code и allowlisted account metadata.
-7. Terminal transaction применяет результат только при прежнем
+7. Три finish-функции принимают только действующие owner/token/version/lease.
+   Success и нормализованный provider failure атомарно блокируют Job, затем
+   exact tenant credential и применяют результат только при прежнем
    `material_version`; rotate/revoke во время проверки даёт `STALE` и не
-   изменяет новый credential material.
+   изменяет новый credential material. Missing KEK, decrypt и internal errors
+   проходят отдельный job-only finish и не меняют credential.
 8. Retryable network/5xx/429 переводится в `RETRY_SCHEDULED`; `retryAt`
    учитывает bounded `Retry-After`, а periodic dispatcher восстанавливает
    пропущенные queue messages и просроченные leases. Его lease/retry indexes
@@ -521,18 +528,20 @@ Management API принимает только полную замену secret 
 process технически позволяет выполнить unwrap вне adapter. До production
 нужна криптографическая граница через KMS/asymmetric wrapping либо отдельный
 credential broker, закреплённая ADR; execution process также не получает
-fingerprint keyring/credential API token. Connector worker уже использует
-отдельный PostgreSQL login с ограниченным DML, но текущий grant разрешает
-`SELECT` всех строк и колонок `jobs` и `integration_credentials` внутри
-`jobs_db`. Это не tenant/secret isolation: при компрометации execution process
-доступны job snapshots/metadata всех tenants и, с имеющимся KEK, весь BYOK
-vault database. До production широкий read grant блокирует release: нужна
-узкая execution projection/table с проверенным server-side scope либо
-credential broker/KMS, исключающий чтение всего vault. Отдельно обязательны
-fresh role provisioning, cluster-wide grant audit и
-`pg_hba`/отдельный cluster boundary; ownership объектов кластера script
-проверяет и отклоняет fail-closed. Отдельный Redis ACL/instance также остаётся
-обязательным.
+fingerprint keyring/credential API token.
+
+Connector PostgreSQL login больше не получает direct table DML: permissions
+script отзывает connector и `PUBLIC` privileges на schema/tables/sequences/
+functions, затем выдаёт только exact broker/rank-claim `EXECUTE`. Validation
+broker возвращает due IDs, exact claim projection и выполняет fenced atomic
+finish; `jobs`, `integration_credentials` и canary table напрямую недоступны.
+Fresh PostgreSQL 18 regression под `NOLOGIN` non-owner role проверяет direct/
+management denial, отсутствие `PUBLIC` bypass, arbitrary/non-validation UUID,
+concurrent claim, reclaim и stale finish, tenant/material drift, atomic result
+и `pg_temp` shadowing. Global vault read blocker внутри `jobs_db` закрыт.
+Перед production всё ещё обязательны provisioning тем же script в целевом
+окружении, cluster-wide grant audit, `pg_hba`/отдельный cluster boundary и
+отдельный Redis ACL/instance; owner/superuser runtime запрещён.
 
 Startup fail-closed сверяет используемые в БД KEK/fingerprint versions с
 соответствующими keyrings. Автоматический bounded DEK rewrap и отдельная
@@ -540,22 +549,28 @@ bounded-инвалидация fingerprints после retry window остают
 operational hardening до удаления старых версий. Отображение
 `keyVersion → KEK bytes` immutable: новое значение всегда получает новую
 версию. Rollout выполняется только как expand keyring → startup canary verify
-каждой используемой версии → drain старых replicas → switch active.
+configured ∪ used versions → drain старых replicas → switch active.
 
 Coverage guard проверяет наличие версии, а missing-version retry оставляет
-credential без изменений при её отсутствии. `EXECUTION` replica до создания
-BullMQ worker дополнительно выбирает детерминированно минимальный по UUID
-неудалённый credential каждой реально используемой `keyVersion` и выполняет
-через штатный execution adapter authenticated decrypt обоих AES-GCM слоёв с
-точным workspace/provider/credential/version AAD. Пустая БД допустима;
-отсутствующий либо повреждённый sample останавливает startup fail-closed, а
-ошибка содержит только номера версий. `MANAGEMENT` сохраняет агрегированную
-проверку encryption/fingerprint coverage и plaintext не расшифровывает.
+credential без изменений при её отсутствии. `MANAGEMENT` для каждой
+настроенной KEK version создаёт synthetic known-plaintext envelope с отдельным
+canary AAD и регистрирует его expand-only; существующую version нельзя
+перезаписать. `EXECUTION` replica до создания BullMQ worker получает через
+bounded broker canaries для объединения всех локально configured versions с
+versions, реально используемыми неудалёнными credentials; запрос ограничен
+128 уникальными canonical positive PostgreSQL integers, и итоговая projection
+также ограничена 128 target versions. Usage marker отличает
+used-but-unconfigured version, missing canary остаётся nullable строкой, а
+retired unused unrequested historical version не возвращается. Replica
+проверяет оба AES-GCM слоя каждого результата, включая новый ещё не active KEK.
+Canary table не содержит workspace, provider, credential ID или tenant secret.
+Пустая БД допустима; missing/corrupt/same-version-wrong-key canary
+останавливает startup fail-closed, а ошибка содержит только номера версий.
+`MANAGEMENT` также сохраняет агрегированную проверку encryption/fingerprint
+coverage.
 Validation worker по-прежнему обрабатывает любой runtime decrypt failure как
 job-only bounded retry без изменения credential status. Cluster-wide circuit
-breaker и incident alert для ошибок после startup ещё не реализованы; canary
-также не заменяет обязательный scoped connector claim и отзыв global vault
-read.
+breaker и incident alert для ошибок после startup ещё не реализованы.
 
 Runtime validation ограничивает provider timeout диапазоном
 `1 000–120 000 ms`, lease — `10–600 s` и минимум `timeout + 5 s`,
@@ -764,11 +779,15 @@ history реализованы; валидный grant теперь атомар
 вместе с secret-free `rank_connector_executions/READY_TO_SUBMIT`.
 Default-closed SECURITY DEFINER claim DDL уже добавляет bounded lease,
 pre-network `CLAIMED`, full current-graph recheck и единственную scoped
-encrypted credential projection. `PUBLIC` execute отозван; deploy-time grant,
-runtime caller, authorize/`SUBMITTING`, Arsenkin submit/poll/get и schedules
-ещё отсутствуют. Live Arsenkin execution остаётся выключенным;
-готовые PREPARING, issuer, intent и consume runtimes не являются
-доказательством рабочего съёма позиций.
+encrypted credential projection. `PUBLIC` execute отозван; connector
+permission allowlist выдаёт exact `EXECUTE` только на public claim и
+authorize. Authorize повторно проверяет полный current graph, lease fence и
+ожидаемые execution/control versions, затем атомарно переводит execution в
+`SUBMITTING` и фиксирует durable may-have-started marker. Runtime caller,
+Arsenkin request/status/result producer и schedules ещё отсутствуют. Live
+Arsenkin execution остаётся выключенным; готовые PREPARING, issuer, intent,
+consume, claim и authorize DDL не являются доказательством рабочего съёма
+позиций.
 
 ### 17.6. Platform-owned execution grant issuer foundation
 
@@ -792,12 +811,14 @@ binding/route/credential IDs или secrets. Bounded Jobs client и durable
 attempt table реализованы fail-closed и строго проверяют request/scope hashes,
 exact decision envelope и expiry. Неистёкший grant уже атомарно связывается с
 secret-free scoped execution под повторной проверкой Job/item/credential
-projection. Следующий slice обязан выдать connector process только одну
-current credential projection через уже подготовленный SECURITY DEFINER
-claim, но deploy-time `EXECUTE` пока не выдан. Даже после wiring `CLAIMED`
-остаётся pre-network состоянием: отдельный authorize/`SUBMITTING` обязан ещё
-раз проверить lease/control перед отправкой bytes. До этого provider submit
-запрещён.
+projection. Connector permission script выдаёт exact `EXECUTE` на public
+SECURITY DEFINER claim и authorize: claim возвращает только одну current
+credential projection и оставляет execution в pre-network `CLAIMED`.
+Authorize под canonical locks повторно проверяет current graph,
+owner/token/generation fence, ожидаемые execution и control versions,
+атомарно устанавливает `SUBMITTING` и durable may-have-started marker.
+Runtime caller и outbound provider request всё ещё не реализованы, поэтому
+provider submit запрещён.
 
 ### 17.7. Jobs-owned execution grant intent и atomic consume
 
@@ -837,14 +858,22 @@ Web и остальные сервисы token не получают. Production
 `false`.
 
 Migrations `20260729230100_rank_execution_grant_attempts`,
-`20260729230200_rank_connector_executions` и
-`20260730101500_rank_connector_execution_claim` прошли fresh apply на
-PostgreSQL 18. Claim regression проверяет default-closed control, stale-head
-skip, двух concurrent claimers без дубля, lease reclaim с новым token,
-credential/cancel/kill-switch drift и запрет повторного использования
-kill-switch version. Это не закрывает production gate: connector permission/
-runtime wiring, authorize и весь provider lifecycle отсутствуют, а текущие
-validation worker/KEK canary всё ещё требуют global vault read.
+`20260729230200_rank_connector_executions`,
+`20260730101500_rank_connector_execution_claim`,
+`20260730101700_rank_connector_submitting_enum` и
+`20260730101800_rank_connector_submit_authorization` прошли PostgreSQL 18
+fresh full-chain и upgrade rehearsal. Exact non-owner connector permissions,
+default-closed control, stale-head skip, concurrent claim/reclaim и
+claim/authorize fence races также проверены на PostgreSQL 18. Pure TypeScript
+lifecycle уже моделирует request/status/result transitions и трактует commit
+authorize как may-have-started boundary, но ещё не имеет DB persistence, не
+подключён к runtime/provider и сам по себе не является security boundary без
+DB wrapper. Retryable submit outcome не возвращает ту же execution в
+`READY_TO_SUBMIT`: scheduler обязан получить новый authoritative grant и
+создать следующий monotonic `execution_attempt`. Поэтому production gate для
+provider request/status/result и normalized result producer остаётся
+открытым. Credential validation worker/KEK canary уже не требуют global vault
+read.
 
 ## 18. OAuth connections
 

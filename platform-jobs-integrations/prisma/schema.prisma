@@ -124,55 +124,57 @@ enum RankExecutionGrantAttemptStatus {
 enum RankConnectorExecutionStatus {
   READY_TO_SUBMIT
   CLAIMED
+  SUBMITTING
 }
 
 model Job {
-  id                 String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId        String         @map("workspace_id") @db.Uuid
-  projectId          String?        @map("project_id") @db.Uuid
-  type               String         @db.VarChar(100)
-  status             JobStatus      @default(DRAFT)
-  stage              String?        @db.VarChar(64)
-  priority           Int            @default(100)
-  actorId            String?        @map("actor_id") @db.Uuid
-  scheduleId         String?        @map("schedule_id") @db.Uuid
-  parentJobId        String?        @map("parent_job_id") @db.Uuid
-  deduplicationKey   String?        @map("deduplication_key") @db.VarChar(180)
-  idempotencyScope   String         @map("idempotency_scope") @db.VarChar(180)
-  idempotencyKey     String?        @map("idempotency_key") @db.VarChar(180)
-  requestHash        Bytes?         @map("request_hash")
-  inputSnapshot      Json           @map("input_snapshot")
-  scopeSnapshot      Json           @map("scope_snapshot")
-  progressCurrent    BigInt         @default(0) @map("progress_current")
-  progressTotal      BigInt?        @map("progress_total")
-  progressUnit       String?        @map("progress_unit") @db.VarChar(32)
-  estimatedCostMicro BigInt?        @map("estimated_cost_micro")
-  reservedCostMicro  BigInt?        @map("reserved_cost_micro")
-  actualCostMicro    BigInt?        @map("actual_cost_micro")
-  currency           String?        @db.Char(3)
-  credentialMode     CredentialMode @map("credential_mode")
-  provider           String?        @db.VarChar(64)
-  attempt            Int            @default(0)
-  maxAttempts        Int            @default(3) @map("max_attempts")
-  errorSummary       Json?          @map("error_summary")
-  resultSummary      Json?          @map("result_summary")
-  correlationId      String         @map("correlation_id") @db.VarChar(100)
-  version            Int            @default(1)
-  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
-  queuedAt           DateTime?      @map("queued_at") @db.Timestamptz(6)
-  startedAt          DateTime?      @map("started_at") @db.Timestamptz(6)
-  finishedAt         DateTime?      @map("finished_at") @db.Timestamptz(6)
-  cancelRequestedAt  DateTime?      @map("cancel_requested_at") @db.Timestamptz(6)
-  leaseOwner         String?        @map("lease_owner") @db.VarChar(100)
-  leaseExpiresAt     DateTime?      @map("lease_expires_at") @db.Timestamptz(6)
-  retryAt            DateTime?      @map("retry_at") @db.Timestamptz(6)
-  updatedAt          DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id                   String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId          String         @map("workspace_id") @db.Uuid
+  projectId            String?        @map("project_id") @db.Uuid
+  type                 String         @db.VarChar(100)
+  status               JobStatus      @default(DRAFT)
+  stage                String?        @db.VarChar(64)
+  priority             Int            @default(100)
+  actorId              String?        @map("actor_id") @db.Uuid
+  scheduleId           String?        @map("schedule_id") @db.Uuid
+  parentJobId          String?        @map("parent_job_id") @db.Uuid
+  deduplicationKey     String?        @map("deduplication_key") @db.VarChar(180)
+  idempotencyScope     String         @map("idempotency_scope") @db.VarChar(180)
+  idempotencyKey       String?        @map("idempotency_key") @db.VarChar(180)
+  requestHash          Bytes?         @map("request_hash")
+  inputSnapshot        Json           @map("input_snapshot")
+  scopeSnapshot        Json           @map("scope_snapshot")
+  progressCurrent      BigInt         @default(0) @map("progress_current")
+  progressTotal        BigInt?        @map("progress_total")
+  progressUnit         String?        @map("progress_unit") @db.VarChar(32)
+  estimatedCostMicro   BigInt?        @map("estimated_cost_micro")
+  reservedCostMicro    BigInt?        @map("reserved_cost_micro")
+  actualCostMicro      BigInt?        @map("actual_cost_micro")
+  currency             String?        @db.Char(3)
+  credentialMode       CredentialMode @map("credential_mode")
+  provider             String?        @db.VarChar(64)
+  attempt              Int            @default(0)
+  maxAttempts          Int            @default(3) @map("max_attempts")
+  errorSummary         Json?          @map("error_summary")
+  resultSummary        Json?          @map("result_summary")
+  correlationId        String         @map("correlation_id") @db.VarChar(100)
+  version              Int            @default(1)
+  createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  queuedAt             DateTime?      @map("queued_at") @db.Timestamptz(6)
+  startedAt            DateTime?      @map("started_at") @db.Timestamptz(6)
+  finishedAt           DateTime?      @map("finished_at") @db.Timestamptz(6)
+  cancelRequestedAt    DateTime?      @map("cancel_requested_at") @db.Timestamptz(6)
+  leaseOwner           String?        @map("lease_owner") @db.VarChar(100)
+  leaseExpiresAt       DateTime?      @map("lease_expires_at") @db.Timestamptz(6)
+  validationLeaseToken String?        @map("validation_lease_token") @db.Uuid
+  retryAt              DateTime?      @map("retry_at") @db.Timestamptz(6)
+  updatedAt            DateTime       @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  items                      JobItem[]
-  rankRun                    RankJobRun?
-  rankExecutionGrantAttempts RankExecutionGrantAttempt[]
-  rankConnectorExecutions           RankConnectorExecution[] @relation("RankConnectorExecutionJob")
-  rankConnectorValidationExecutions RankConnectorExecution[] @relation("RankConnectorExecutionValidationJob")
+  items                             JobItem[]
+  rankRun                           RankJobRun?
+  rankExecutionGrantAttempts        RankExecutionGrantAttempt[]
+  rankConnectorExecutions           RankConnectorExecution[]    @relation("RankConnectorExecutionJob")
+  rankConnectorValidationExecutions RankConnectorExecution[]    @relation("RankConnectorExecutionValidationJob")
 
   @@unique([workspaceId, idempotencyScope, idempotencyKey])
   @@unique([workspaceId, id], map: "jobs_tenant_id_key")
@@ -254,6 +256,19 @@ model IntegrationCredential {
   @@index([keyVersion, deletedAt, id])
   @@index([fingerprintKeyVersion, deletedAt, id])
   @@map("integration_credentials")
+}
+
+model IntegrationCredentialKekCanary {
+  keyVersion       Int      @id @map("key_version")
+  ciphertext       Bytes
+  nonce            Bytes
+  authTag          Bytes    @map("auth_tag")
+  encryptedDataKey Bytes    @map("encrypted_data_key")
+  dataKeyNonce     Bytes    @map("data_key_nonce")
+  dataKeyAuthTag   Bytes    @map("data_key_auth_tag")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("integration_credential_kek_canaries")
 }
 
 model ProjectConnectorBinding {
@@ -476,17 +491,20 @@ model RankConnectorExecution {
   leaseToken                           String?                      @map("lease_token") @db.Uuid
   leaseExpiresAt                       DateTime?                    @map("lease_expires_at") @db.Timestamptz(6)
   claimedAt                            DateTime?                    @map("claimed_at") @db.Timestamptz(6)
+  leaseGeneration                      Int                          @default(0) @map("lease_generation")
+  submitAttemptCount                   Int                          @default(0) @map("submit_attempt_count")
+  submitBytesStartedAt                 DateTime?                    @map("submit_bytes_started_at") @db.Timestamptz(6)
   version                              Int                          @default(1)
   createdAt                            DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                            DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  job          Job                       @relation("RankConnectorExecutionJob", fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_job_tenant_fkey")
-  rankRun      RankJobRun                @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, jobId], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_rank_run_tenant_fkey")
-  jobItem      JobItem                   @relation(fields: [workspaceId, projectId, jobId, jobItemId], references: [workspaceId, projectId, jobId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_job_item_tenant_fkey")
-  grantAttempt RankExecutionGrantAttempt @relation(fields: [grantAttemptId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_grant_attempt_fkey")
-  binding      ProjectConnectorBinding   @relation(fields: [workspaceId, projectId, bindingId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_binding_tenant_fkey")
-  route        ProjectConnectorRoute     @relation(fields: [routeId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_route_fkey")
-  credential   IntegrationCredential     @relation(fields: [workspaceId, credentialId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_credential_tenant_fkey")
+  job           Job                       @relation("RankConnectorExecutionJob", fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_job_tenant_fkey")
+  rankRun       RankJobRun                @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, jobId], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_rank_run_tenant_fkey")
+  jobItem       JobItem                   @relation(fields: [workspaceId, projectId, jobId, jobItemId], references: [workspaceId, projectId, jobId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_job_item_tenant_fkey")
+  grantAttempt  RankExecutionGrantAttempt @relation(fields: [grantAttemptId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_grant_attempt_fkey")
+  binding       ProjectConnectorBinding   @relation(fields: [workspaceId, projectId, bindingId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_binding_tenant_fkey")
+  route         ProjectConnectorRoute     @relation(fields: [routeId], references: [id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_route_fkey")
+  credential    IntegrationCredential     @relation(fields: [workspaceId, credentialId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_credential_tenant_fkey")
   validationJob Job                       @relation("RankConnectorExecutionValidationJob", fields: [workspaceId, credentialValidationId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_connector_executions_validation_job_tenant_fkey")
 
   @@unique([workspaceId, jobItemId, executionAttempt], map: "rank_connector_executions_workspace_item_attempt_key")

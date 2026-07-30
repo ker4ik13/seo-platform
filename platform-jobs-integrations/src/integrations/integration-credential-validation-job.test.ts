@@ -157,6 +157,7 @@ function validationJob(overrides: Partial<Job> = {}): Job {
     finishedAt: null,
     cancelRequestedAt: null,
     leaseOwner: null,
+    validationLeaseToken: null,
     leaseExpiresAt: null,
     retryAt: null,
     updatedAt: now,

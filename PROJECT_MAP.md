@@ -31,8 +31,12 @@ Job/item/grant/manifest/binding/route/credential-version evidence, но не
 содержит credential material. Default-closed SECURITY DEFINER claim DDL уже
 переводит eligible row в bounded pre-network `CLAIMED` и возвращает только
 одну exact encrypted credential projection после full current-graph recheck.
-`PUBLIC EXECUTE` отозван; deploy-time connector grant, runtime caller,
-authorize/`SUBMITTING`, provider request и result producer ещё отсутствуют.
+Exact deploy-time connector permissions теперь выдают только broker/claim/
+authorize signatures без table DML. Submit authorization повторно блокирует
+полный current graph, сверяет owner/token/lease generation/row version и
+атомарно фиксирует `SUBMITTING` с durable marker до возможных network bytes.
+Runtime caller, immutable provider request, submit/status/fetch persistence и
+normalized result producer ещё отсутствуют.
 Production policy и submit gate остаются fail-closed; live Arsenkin submit
 выключен до прохождения contract/security gates ADR-2026-034.
 
@@ -139,6 +143,11 @@ jobs-integrations HTTP; общий internal token остальных серви�
 получает только `jobId`. Отдельный execution-role connector worker забирает
 lease и перед вызовом провайдера повторно проверяет workspace, material
 version, connector version и состояние credential.
+Execution login не читает `jobs` или `integration_credentials` напрямую:
+allowlisted `SECURITY DEFINER` broker выдаёт due IDs, lease с одноразовым
+token и только encrypted projection credential, привязанную к точной
+validation job. Success/provider failure завершают Job и credential атомарно,
+а local decrypt/KEK failures используют отдельный job-only finish.
 Project binding читается и изменяется через Platform API, а хранится только
 в jobs/integrations. Public body не задаёт tenant/actor context; Platform API
 передаёт его через тот же dedicated credential boundary и строго проверяет
@@ -166,10 +175,11 @@ locks проверяет решение и DB clock. Отказы заканчи
 `DENIED/EXPIRED/REJECTED_LOCAL`; валидный grant проходит промежуточный
 `GRANTED_PENDING_CONSUME` и атомарно создаёт единственную scoped
 `rank_connector_executions` row вместе с `CONSUMED`. Ни эта row, ни consume
-не разрешают provider call. Подготовленный SECURITY DEFINER claim повторно
-проверяет lifecycle/credential/control и создаёт только pre-network lease;
-он закрыт для connector role и не заменяет будущую authorize/`SUBMITTING`
-операцию либо отдельный connector process path.
+не разрешают provider call. SECURITY DEFINER claim повторно проверяет
+lifecycle/credential/control и создаёт только pre-network lease. Exact
+authorize operation повторяет full graph/control/fence recheck и commit-ит
+`SUBMITTING` с one-way marker; permission script выдаёт обе функции connector
+login, но runtime process path их пока не вызывает.
 Глобальный route-specific `onSend` сохраняет `Cache-Control: no-store` также
 для parser/guard errors, которые возникают до входа в controller.
 История позиций читается Web только через same-origin BFF и public Platform
@@ -254,17 +264,19 @@ transport и health/readiness, таблицы outbox/inbox созданы. Durab
   worker получает только KEK для расшифровки перед allowlisted provider call;
   generic migration/system/import/inspection workers не получают ни один.
   Привязка `keyVersion → KEK bytes` immutable: существующей версии запрещено
-  присваивать другое значение.
+  присваивать другое значение. Startup проверяет не tenant credential sample,
+  а immutable synthetic envelope из `integration_credential_kek_canaries`;
+  таблица не содержит workspace, provider или credential identity.
 - Runtime role guard работает fail-closed: `DISABLED` отклоняет credential
   secrets, а `EXECUTION` — management/fingerprint/internal/NATS и S3/SMTP
   secrets. Это проверка конфигурации, а не криптографическая изоляция.
 - Connector worker требует `INTEGRATION_CREDENTIAL_ROLE=EXECUTION` и
-  отдельные `JOBS_CONNECTOR_DATABASE_USER` /
+  canonical DB username `jobs_connector` с отдельным вращаемым
   `JOBS_CONNECTOR_DATABASE_PASSWORD`, а также
   `INTEGRATION_VALIDATION_TIMEOUT_MS`, `INTEGRATION_VALIDATION_LEASE_SECONDS`,
   `INTEGRATION_VALIDATION_DISPATCH_SECONDS`,
   `INTEGRATION_VALIDATION_CONCURRENCY`. Lease должен быть строго длиннее
-  provider timeout с operational запасом; startup проверяет инвариант.
+  provider timeout минимум на 2 секунды; startup проверяет инвариант.
 - Jobs runtime processes используют `internal` для PostgreSQL/Redis/NATS и
   отдельную непубликуемую `outbound` network для S3/SMTP/provider HTTPS.
   Connector origins фиксированы в коде; production egress proxy/firewall
@@ -328,7 +340,14 @@ Backend convention:
   — default-closed control и immutable kill-switch version history, bounded
   `READY_TO_SUBMIT → CLAIMED` lease, full eligible-graph/canonical-lock
   SECURITY DEFINER claim и exact encrypted credential projection; `PUBLIC`
-  execute отозван, connector grant/runtime отсутствуют;
+  execute отозван;
+- `platform-jobs-integrations/prisma/migrations/20260730101600_integration_credential_validation_broker`
+  — synthetic immutable KEK canaries и узкие SECURITY DEFINER due/claim/
+  finish boundaries, которые убирают direct global vault read connector роли;
+- `platform-jobs-integrations/prisma/migrations/20260730101700_rank_connector_submitting_enum`
+  и `20260730101800_rank_connector_submit_authorization` — отдельный enum
+  expansion, monotonic lease generation, one-way `CLAIMED → SUBMITTING`,
+  full graph/control/fence authorization и durable may-have-started marker;
 - `platform-contracts/src/api/rank-runs.ts` и `src/events/rankings.ts` —
   exact manual-run lifecycle, manifest/chunk, normalized ingest/finalize и
   redacted completion event contracts; manifest preimage builders
@@ -373,9 +392,10 @@ Backend convention:
 - `platform-jobs-integrations/src/integrations` — allowlisted provider catalog,
   workspace-scoped envelope vault с per-record DEK, AES-256-GCM и versioned
   KEK, отдельный versioned HMAC fingerprint keyring, dedicated caller guard,
-  startup coverage guard, masked DTO, rotation, destructive secret overwrite
-  при revoke, connector registry, lease/CAS state machine проверки credentials
-  и нормализованные project binding/route/create receipt;
+  synthetic immutable KEK canary, startup coverage guard, masked DTO,
+  rotation, destructive secret overwrite при revoke, connector registry,
+  narrow execution broker с token/version-fenced lease/finish operations и
+  нормализованные project binding/route/create receipt;
 - `platform-jobs-integrations/src/rank-estimates` — immutable provider-free
   estimate receipts, strict tenant/idempotency boundary, connector metadata
   projection и finite blockers без provider call/decrypt/queue;
@@ -384,7 +404,9 @@ Backend convention:
   state machine, canonical `Job → RankJobRun → JobItem → credential →
   validation Job → binding → route → grant attempt` lock order, bounded
   recovery, public-safe Job projection и durable execution-grant
-  intent/consume;
+  intent/consume; dependency-free provider lifecycle reducer фиксирует
+  конечную state/event matrix и запрет auto-resubmit после ambiguous submit,
+  но его DB persistence/runtime wiring ещё отсутствуют;
 - `platform-jobs-integrations/src/platform-api` — bounded/no-redirect client
   issuer-а с dedicated token, exact envelope/request/scope hash validation,
   no-store check, response size и timeout limits;
@@ -455,12 +477,23 @@ Backend convention:
   `RANK_HISTORY_CURSOR_KEY` только для `seo-data`; regression test запрещает
   их случайную выдачу остальным runtime processes;
 - `platform-infrastructure/postgres/init` — создание service databases;
+- `platform-infrastructure/postgres/config/start-postgres.sh` — generated
+  first-match HBA для connector login: SCRAM разрешён только в `jobs_db`,
+  replication и остальные databases отклоняются до общих local/host rules;
 - `platform-infrastructure/postgres/permissions` — идемпотентные fail-closed
-  grants внутри `jobs_db` после migrations; первый script создаёт/ужесточает
-  connector DB role и отклоняет ownership объектов кластера. DML ограничен,
-  но текущий `SELECT` охватывает все строки и колонки `jobs` и
-  `integration_credentials`, поэтому этот script не обеспечивает tenant/secret
-  isolation и сам по себе не доказывает cross-DB isolation.
+  grants внутри `jobs_db` после migrations; provisioning wrapper создаёт SCRAM
+  verifier через stdin без password SQL literal/child environment, а grant DDL
+  создаёт/ужесточает connector DB role и отклоняет обе стороны membership edge
+  и ownership объектов кластера. Прямые table, sequence и произвольные function
+  privileges отсутствуют; connector получает только exact `EXECUTE` allowlist
+  credential-validation broker, rank claim и pre-network authorize. DDL
+  транзакционно отзывает database/schema/object `PUBLIC` privileges,
+  проверяет единого Prisma/public-routine owner, global + schema-scoped
+  defaults и `ALL ROUTINES`. `pg_shdepend/pg_database` отклоняет direct ACL
+  вне exact allowlist/в других databases, а current-catalog audit — любое
+  effective `PUBLIC CREATE/USAGE` в non-system schema. SQL не меняет ACL
+  соседних сервисов; cross-DB PUBLIC CONNECT закрывает generated HBA. Target
+  environment всё равно требует проверки фактического HBA order и login smoke.
 
 Entrypoints:
 
@@ -475,8 +508,9 @@ Entrypoints:
 - credential validation connector worker:
   `platform-jobs-integrations/src/connector-worker.main.ts`;
 - connector DB permission init:
-  `platform-infrastructure/postgres/permissions/jobs-connector.sql`, one-shot
-  Compose service `jobs-connector-db-permissions`;
+  `platform-infrastructure/postgres/permissions/provision-jobs-connector-role.sh`
+  + `jobs-connector.sql`, one-shot Compose service
+  `jobs-connector-db-permissions`;
 - Next.js: App Router соответствующего frontend-пакета;
 - remote stack: `platform-infrastructure/compose.dokploy.yml`.
 
@@ -795,12 +829,12 @@ authoritative entitlement/quota implementation. Jobs bounded client и durable
 grant intent/decision history реализованы как fail-closed foundation: network intent
 записывается первым, exact replay сохраняется, а неистёкшее положительное
 решение атомарно связывается с secret-free scoped connector execution и
-становится `CONSUMED`. Default-closed SECURITY DEFINER claim и scoped
-encrypted credential projection реализованы как DDL boundary, но connector
-role/runtime к ним не подключены, а `CLAIMED` не разрешает network.
-Authorize/`SUBMITTING`, connector submission/status и normalized result
-producer ещё не реализованы, поэтому production worker не создаёт provider
-snapshots.
+становится `CONSUMED`. SECURITY DEFINER claim, scoped encrypted credential
+projection и exact connector permissions реализованы; `CLAIMED` остаётся
+pre-network. Authorize повторно проверяет весь current graph и атомарно
+фиксирует `SUBMITTING`/single-attempt marker до secret-free permit. Runtime
+caller, connector submission/status и normalized result producer ещё не
+реализованы, поэтому production worker не создаёт provider snapshots.
 
 ## 8. Проверенное состояние
 
@@ -942,8 +976,8 @@ snapshots.
 
 ## 9. Следующий вертикальный срез
 
-`connector permission/runtime boundary → authorize/SUBMITTING → provider
-submit/status → normalized result producer/ingest receipts`
+`durable provider request intent/runtime → submit/status/fetch persistence →
+normalized result producer/ingest receipts`
 
 Provider-free estimate и SEO Data immutable manifest из ADR-2026-034
 завершены; durable Jobs `PREPARING` saga, exact seal recovery, cooperative
@@ -951,13 +985,14 @@ cancel, public/Web Job lifecycle и normalized SEO Data result persistence
 также готовы. Public bounded history proxy и private/noindex Web UI уже
 подключены к internal read model. Authoritative one-time grant уже имеет
 Platform-owned issuer/receipt, Jobs-owned intent/decision и атомарный
-`CONSUMED ↔ rank_connector_executions/READY_TO_SUBMIT`. Следующим нужно
-выдать отдельной connector role только подготовленный SECURITY DEFINER claim,
-подключить runtime caller и добавить authorize/`SUBMITTING`, которая повторно
-проверяет lease/control непосредственно перед bytes. Затем нужны provider
-submit/status и producer нормализованных результатов с ingest receipts. Live
-Arsenkin `set` выключен, пока нет recorded provider contract и устранения
-global vault read validation-worker/KEK-canary path.
+`CONSUMED ↔ rank_connector_executions/READY_TO_SUBMIT`. Scoped broker/claim,
+exact connector permission и атомарный authorize/`SUBMITTING` уже готовы и
+прошли fresh PostgreSQL 18 permission/race/upgrade proof. Следующим нужны
+immutable exact request intent до grant, runtime caller, durable provider
+submit/status/fetch state и producer нормализованных результатов с ingest
+receipts. Live Arsenkin `set` выключен, пока нет recorded provider contract,
+полного persisted provider lifecycle, fairness/circuit breaker и production
+environment evidence.
 Неоднозначность manifest preparation уже fail-closed переходит в
 `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN` без бесконечного auto-retry.
 
@@ -1027,18 +1062,22 @@ durable-доставка не реализована. OAuth/OIDC выполня�
   coverage работает fail-closed; до rewrap старые используемые KEK запрещено
   удалять. Fingerprint keyring ротируется независимо; bounded-инвалидация
   старых fingerprints после retry window также ещё не реализована.
-- Номерная coverage сама по себе проверяет наличие версии, но не равенство её
-  key material. `EXECUTION` startup теперь для каждой реально используемой версии
-  authenticated-decrypt-ит один детерминированный неудалённый credential с
-  точным AAD и останавливает replica до создания BullMQ worker при
-  missing/corrupt sample; пустой vault допустим. `MANAGEMENT` сохраняет
-  encryption/fingerprint coverage без decrypt. Validation worker оставляет
-  credential без изменений и делает job-only bounded retry при любом
-  последующем decrypt failure, поэтому mismatch не превращается в массовый
-  `DISABLED`. Cluster-wide circuit breaker/incident alert после startup ещё
-  отсутствуют; canary использует текущий read grant и не снимает blocker
-  global vault isolation. Rollout: expand keyring → canary verify всех версий
-  → drain старых replicas → switch active.
+- Номерная coverage дополнена persistent authenticated canary для равенства
+  key material. `MANAGEMENT` expand-only регистрирует immutable synthetic
+  envelope каждой configured KEK version; `EXECUTION` передаёт broker все свои
+  configured versions (не более 128), а получает их объединение с versions,
+  реально используемыми неудалёнными credentials, и явный usage marker.
+  Поэтому новый ещё не active KEK проверяется на каждой replica до
+  переключения, used-but-unconfigured version останавливает startup, а retired
+  unused historical canary больше не требует сохранения ключа. Missing canary
+  остаётся nullable строкой и вместе с corrupt/wrong-key envelope блокирует
+  создание BullMQ worker. Canary не содержит tenant credential data; пустой
+  vault допустим. Validation worker оставляет credential без изменений и
+  делает job-only bounded retry при любом последующем decrypt failure, поэтому
+  mismatch не превращается в массовый `DISABLED`. Cluster-wide circuit
+  breaker/incident alert после startup ещё отсутствуют. Rollout: expand
+  keyring → canary verify configured ∪ used versions → drain старых replicas →
+  switch active.
 - `MANAGEMENT` и `EXECUTION` процессы пока получают один symmetric KEK.
   Role guard запрещает штатный decrypt в management adapter, но не даёт
   криптографической изоляции при компрометации процесса; целевая граница —
@@ -1077,16 +1116,17 @@ durable-доставка не реализована. OAuth/OIDC выполня�
   quota/TTL/immutability, concurrent exact winner и lifecycle race smoke на
   PostgreSQL 18. В обычном suite без отдельного disposable
   `PLATFORM_API_RANK_GRANT_TEST_DATABASE_URL` эти тесты безопасно пропускаются.
-- `rank_execution_grant_attempts`, `rank_connector_executions` и claim
-  migration прошли fresh full-chain apply на PostgreSQL 18; claim-specific
-  concurrent/reclaim/stale-head/drift regression также пройден. Tenant-FK,
-  grant replay/decision/expiry/consume и production non-owner permission
-  evidence остаются отдельными release gates.
+- `rank_execution_grant_attempts`, `rank_connector_executions`, claim и split
+  `SUBMITTING`/authorize migrations прошли fresh full-chain apply на
+  PostgreSQL 18. Grant/consume, claim/reclaim/stale-head/drift, authorize/
+  replay/rollback/expiry, upgrade ACL и exact non-owner permission regressions
+  пройдены. Production environment provisioning/cluster audit остаются gate.
 - Issuer receipt и Jobs-owned `CONSUMED/READY_TO_SUBMIT` сами не авторизуют
-  provider call. SECURITY DEFINER claim уже создаёт bounded pre-network lease,
-  но закрыт для connector role и не авторизует bytes; до отдельной authorize/
-  `SUBMITTING` проверки Job/cancel/credential/kill-switch любой submit
-  остаётся запрещён.
+  provider call. Claim создаёт bounded pre-network lease, а authorize только
+  после full Job/cancel/credential/grant/control/fence recheck commit-ит
+  `SUBMITTING` marker. Отправлять bytes до этой commit-точки запрещено; после
+  неё crash/ambiguity никогда не разрешают автоматический resubmit. Runtime
+  caller и дальнейшие durable provider states пока отсутствуют.
 - Проверка lifecycle проекта сейчас авторитетна в Platform API, но между ней и
   commit в jobs database остаётся межсервисное TOCTOU. До первого исполняемого
   rank job jobs/integrations обязан получить project/workspace lifecycle
@@ -1098,15 +1138,20 @@ durable-доставка не реализована. OAuth/OIDC выполня�
 - Credential validation имеет global BullMQ limiter и DB-enforced
   per-credential/material single-active cap, но ещё не имеет server-side
   per-workspace/provider quota и справедливого планирования между tenants.
-- Connector worker использует отдельный PostgreSQL login с ограниченным DML,
-  но сейчас имеет `SELECT` всех строк и колонок `jobs` и
-  `integration_credentials` внутри `jobs_db`. Компрометация execution
-  process раскрывает job snapshots/metadata всех tenants и, при доступном KEK,
-  весь BYOK vault этого database. До production это блокер: нужна узкая
-  execution projection/table с серверным scope либо credential broker/KMS,
-  исключающие глобальное чтение vault, а также fresh role provisioning,
-  cluster-wide grant audit и `pg_hba`/отдельный cluster boundary. Роль с
-  ownership объектов script уже отклоняет. Redis пока разделён только
+- Connector worker использует отдельный PostgreSQL login без direct table
+  DML; exact `SECURITY DEFINER` allowlist выдаёт только due IDs, одну
+  lease-bound encrypted projection и fenced finish. Claim держит credential
+  lock до свежих DB clock/token, возвращает `leaseExpiresAt`, а worker требует
+  запас lease не меньше provider timeout + 2 секунды; Arsenkin success metadata
+  проходит exact DB invariant. Fresh PG18 non-owner/lock-wait tests доказали
+  direct/Public denial, concurrency/reclaim/stale/material/pg_temp invariants.
+  Отдельный fresh 19-migration provisioning proof подтвердил SCRAM, обе стороны
+  membership fail-closed, cluster/current-schema ACL audits, отсутствие DML/
+  PUBLIC/management access и точный claim/authorize allowlist. Generated HBA
+  и fixed-role PG18 harness закрывают cross-DB `PUBLIC CONNECT`; global vault
+  read внутри `jobs_db` закрыт. До production нужен повтор permission/HBA/login
+  proof в целевом окружении. Роль с ownership объектов script отклоняет. Redis
+  пока разделён только
   логически и использует общий пароль; отдельный Redis ACL/instance также
   остаётся production hardening.
 - Job idempotency/lease migration намеренно fail-closed требует пустую

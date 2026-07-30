@@ -1,24 +1,41 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { Client } from "pg";
 
 const databaseUrl = process.env.JOBS_RANK_TEST_DATABASE_URL;
+const upgradeDatabaseUrl =
+  process.env.JOBS_RANK_SUBMIT_UPGRADE_TEST_DATABASE_URL;
+const enumMigration = readFile(
+  new URL(
+    "../../prisma/migrations/20260730101700_rank_connector_submitting_enum/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
+const authorizationMigration = readFile(
+  new URL(
+    "../../prisma/migrations/20260730101800_rank_connector_submit_authorization/migration.sql",
+    import.meta.url
+  ),
+  "utf8"
+);
 const CONNECTOR_VERSION = "arsenkin-positions@1.0.0";
 const POLICY_VERSION = "manual-arsenkin-positions@1.0.0";
 const VALIDATION_CONNECTOR_VERSION = "arsenkin@1.0.0";
 const HASH = {
-  request: "81".repeat(32),
-  scope: "82".repeat(32),
-  evidence: "83".repeat(32),
-  domain: "84".repeat(32),
-  manifest: "85".repeat(32),
-  manifestDeduplication: "86".repeat(32),
-  estimateExecution: "87".repeat(32)
+  request: "91".repeat(32),
+  scope: "92".repeat(32),
+  evidence: "93".repeat(32),
+  domain: "94".repeat(32),
+  manifest: "95".repeat(32),
+  manifestDeduplication: "96".repeat(32),
+  estimateExecution: "97".repeat(32)
 } as const;
 
 test(
-  "PostgreSQL 18 scopes concurrent claims, skips stale heads and rechecks lease/control drift",
-  { skip: databaseUrl === undefined, timeout: 30_000 },
+  "PostgreSQL 18 authorizes one exact pre-network submit and rejects stale leases/drift",
+  { skip: databaseUrl === undefined, timeout: 45_000 },
   async () => {
     assert.ok(databaseUrl);
     const setup = await connectedClient(databaseUrl);
@@ -26,11 +43,10 @@ test(
     const second = await connectedClient(databaseUrl);
     const attacker = await connectedClient(databaseUrl);
     const suffix = Date.now().toString(36);
-    const enabledKillSwitchVersion = `claim-enabled@${suffix}`;
-    const disabledKillSwitchVersion = `claim-disabled@${suffix}`;
-    const shadowKillSwitchVersion = `claim-shadow@${suffix}`;
-    const cleanupKillSwitchVersion = `claim-cleanup@${suffix}`;
-    const restrictedRoleName = `rank_claim_${suffix}`;
+    const enabledKillSwitchVersion = `authorize-enabled@${suffix}`;
+    const driftedKillSwitchVersion = `authorize-drifted@${suffix}`;
+    const cleanupKillSwitchVersion = `authorize-cleanup@${suffix}`;
+    const restrictedRoleName = `rank_authorize_${suffix}`;
     let restrictedRoleCreated = false;
 
     try {
@@ -45,259 +61,223 @@ test(
       );
       assert.equal(control.rows[0]?.submitEnabled, false);
 
-      const stale = await createClaimableExecution(
+      const exactFixture = await createClaimableExecution(
         setup,
         enabledKillSwitchVersion
       );
-      const firstFixture = await createClaimableExecution(
-        setup,
-        enabledKillSwitchVersion
-      );
-      const secondFixture = await createClaimableExecution(
-        setup,
-        enabledKillSwitchVersion
-      );
-      await driftCredential(setup, stale.credentialId);
-
       assert.equal(
-        (
-          await claim(
-            setup,
-            `closed-${suffix}`,
-            CONNECTOR_VERSION
-          )
-        ).length,
+        (await claim(setup, `closed-${suffix}`)).length,
         0
       );
 
-      await setControl(
-        setup,
-        true,
-        enabledKillSwitchVersion
+      await setControl(setup, true, enabledKillSwitchVersion);
+      const exactClaim = only(
+        await claim(setup, `exact-${suffix}`)
+      );
+      assert.equal(exactClaim.executionId, exactFixture.executionId);
+      assert.equal(exactClaim.leaseGeneration, 1);
+      assert.equal(exactClaim.executionVersion, 2);
+
+      await assert.rejects(
+        authorize(setup, exactFixture, exactClaim, {
+          leaseOwner: "bad owner"
+        }),
+        hasSqlState("22023")
       );
 
-      const claims = await Promise.all([
-        claim(first, `first-${suffix}`, CONNECTOR_VERSION),
-        claim(second, `second-${suffix}`, CONNECTOR_VERSION)
-      ]);
-      const winners = claims.flat();
-      assert.equal(winners.length, 2);
-      assert.deepEqual(
-        winners.map(({ executionId }) => executionId).sort(),
-        [firstFixture.executionId, secondFixture.executionId].sort()
+      const wrongWorkspaceId = await databaseUuidV7(setup);
+      const wrongLeaseToken = await databaseUuidV7(setup);
+      for (const override of [
+        { workspaceId: wrongWorkspaceId },
+        { leaseOwner: `wrong-${suffix}` },
+        { leaseToken: wrongLeaseToken },
+        { leaseGeneration: exactClaim.leaseGeneration + 1 },
+        { expectedVersion: exactClaim.executionVersion + 1 },
+        { connectorVersion: "arsenkin-positions@9.9.9" }
+      ] satisfies readonly AuthorizeOverrides[]) {
+        assert.equal(
+          (await authorize(setup, exactFixture, exactClaim, override)).length,
+          0
+        );
+      }
+
+      const permit = only(
+        await authorize(setup, exactFixture, exactClaim)
       );
-      assert.equal(
-        new Set(winners.map(({ leaseToken }) => leaseToken)).size,
-        2
-      );
-      const winner = winners.find(
-        ({ executionId }) => executionId === firstFixture.executionId
-      );
-      assert.ok(winner);
-      assert.deepEqual(Object.keys(winner).sort(), [
-        "authTag",
-        "ciphertext",
-        "credentialId",
-        "credentialMaterialVersion",
-        "dataKeyAuthTag",
-        "dataKeyNonce",
-        "encryptedDataKey",
+      assert.deepEqual(Object.keys(permit).sort(), [
+        "authorizationExpiresAt",
         "executionId",
         "executionVersion",
-        "keyVersion",
-        "leaseExpiresAt",
+        "jobId",
+        "jobItemId",
         "leaseGeneration",
-        "leaseToken",
-        "nonce",
-        "provider",
+        "submitAttemptCount",
+        "submitBytesStartedAt",
         "workspaceId"
       ]);
-      assert.equal(winner.executionId, firstFixture.executionId);
-      assert.equal(winner.workspaceId, firstFixture.workspaceId);
-      assert.equal(winner.credentialId, firstFixture.credentialId);
-      assert.equal(winner.provider, "ARSENKIN");
-      assert.equal(winner.credentialMaterialVersion, 1);
-      assert.deepEqual(winner.ciphertext, Buffer.from("01", "hex"));
-      assert.deepEqual(winner.nonce, Buffer.alloc(12, 2));
-      assert.deepEqual(winner.authTag, Buffer.alloc(16, 3));
-      assert.deepEqual(
-        winner.encryptedDataKey,
-        Buffer.from("04", "hex")
-      );
-      assert.deepEqual(winner.dataKeyNonce, Buffer.alloc(12, 5));
-      assert.deepEqual(winner.dataKeyAuthTag, Buffer.alloc(16, 6));
-      assert.equal(winner.keyVersion, 1);
-      assert.equal(winner.leaseGeneration, 1);
-      assert.equal(winner.executionVersion, 2);
+      assert.equal(permit.executionId, exactFixture.executionId);
+      assert.equal(permit.workspaceId, exactFixture.workspaceId);
+      assert.equal(permit.jobId, exactFixture.jobId);
+      assert.equal(permit.jobItemId, exactFixture.jobItemId);
+      assert.equal(permit.leaseGeneration, 1);
+      assert.equal(permit.executionVersion, 3);
+      assert.equal(permit.submitAttemptCount, 1);
+      assert.ok(permit.submitBytesStartedAt instanceof Date);
 
-      const stored = await setup.query<{
-        readonly status: string;
-        readonly version: number;
-        readonly leaseGeneration: number;
-        readonly leaseToken: string | null;
-      }>(
-        `SELECT status::text, version,
-                lease_generation AS "leaseGeneration",
-                lease_token::text AS "leaseToken"
-         FROM rank_connector_executions
-         WHERE id = $1::uuid`,
-        [firstFixture.executionId]
-      );
-      assert.deepEqual(stored.rows[0], {
-        status: "CLAIMED",
-        version: 2,
-        leaseGeneration: 1,
-        leaseToken: winner.leaseToken
-      });
-
+      const stored = await readExecution(setup, exactFixture.executionId);
+      assert.equal(stored.status, "SUBMITTING");
+      assert.equal(stored.leaseGeneration, 1);
+      assert.equal(stored.version, 3);
+      assert.equal(stored.submitAttemptCount, 1);
+      assert.ok(stored.submitBytesStartedAt instanceof Date);
       assert.equal(
-        (
-          await claim(
-            setup,
-            `duplicate-${suffix}`,
-            CONNECTOR_VERSION
-          )
-        ).length,
+        (await authorize(setup, exactFixture, exactClaim)).length,
         0
       );
 
-      await driftCredential(setup, firstFixture.credentialId);
-      await delay(5_200);
-
-      const secondInitial = winners.find(
-        ({ executionId }) => executionId === secondFixture.executionId
-      );
-      assert.ok(secondInitial);
-      const reclaimed = await claim(
+      const driftFixture = await createClaimableExecution(
         setup,
-        `reclaim-${suffix}`,
-        CONNECTOR_VERSION
+        enabledKillSwitchVersion
       );
-      assert.equal(reclaimed.length, 1);
-      assert.equal(reclaimed[0]?.executionId, secondFixture.executionId);
-      assert.notEqual(reclaimed[0]?.leaseToken, secondInitial.leaseToken);
-      assert.equal(reclaimed[0]?.leaseGeneration, 2);
-      assert.equal(reclaimed[0]?.executionVersion, 3);
-
-      await cancelRankJob(setup, secondFixture);
-      await delay(5_200);
+      const driftClaim = only(
+        await claim(setup, `credential-drift-${suffix}`)
+      );
+      assert.equal(driftClaim.executionId, driftFixture.executionId);
+      await driftCredential(setup, driftFixture.credentialId);
       assert.equal(
-        (
-          await claim(
-            setup,
-            `cancelled-${suffix}`,
-            CONNECTOR_VERSION
-          )
-        ).length,
+        (await authorize(setup, driftFixture, driftClaim)).length,
         0
       );
 
-      await setControl(setup, false, disabledKillSwitchVersion);
+      const concurrentFixture = await createClaimableExecution(
+        setup,
+        enabledKillSwitchVersion
+      );
+      const concurrentClaim = only(
+        await claim(setup, `concurrent-${suffix}`)
+      );
+      const concurrentPermits = (
+        await Promise.all([
+          authorize(first, concurrentFixture, concurrentClaim),
+          authorize(second, concurrentFixture, concurrentClaim)
+        ])
+      ).flat();
+      assert.equal(concurrentPermits.length, 1);
       assert.equal(
-        (
-          await claim(
-            setup,
-            `disabled-${suffix}`,
-            CONNECTOR_VERSION
-          )
-        ).length,
+        concurrentPermits[0]?.executionId,
+        concurrentFixture.executionId
+      );
+
+      const rollbackFixture = await createClaimableExecution(
+        setup,
+        enabledKillSwitchVersion
+      );
+      const rollbackClaim = only(
+        await claim(setup, `rollback-${suffix}`)
+      );
+      await setup.query("BEGIN");
+      try {
+        assert.equal(
+          (await authorize(setup, rollbackFixture, rollbackClaim)).length,
+          1
+        );
+        await setup.query("ROLLBACK");
+      } catch (error) {
+        await setup.query("ROLLBACK").catch(() => undefined);
+        throw error;
+      }
+      assert.deepEqual(
+        await readExecution(setup, rollbackFixture.executionId),
+        {
+          status: "CLAIMED",
+          leaseGeneration: 1,
+          version: 2,
+          submitAttemptCount: 0,
+          submitBytesStartedAt: null
+        }
+      );
+      assert.equal(
+        (await authorize(setup, rollbackFixture, rollbackClaim)).length,
+        1
+      );
+
+      const cancelledFixture = await createClaimableExecution(
+        setup,
+        enabledKillSwitchVersion
+      );
+      const cancelledClaim = only(
+        await claim(setup, `cancelled-${suffix}`)
+      );
+      await cancelRankJob(setup, cancelledFixture);
+      assert.equal(
+        (await authorize(setup, cancelledFixture, cancelledClaim)).length,
         0
-      );
-      await assert.rejects(
-        setControl(setup, true, enabledKillSwitchVersion),
-        hasSqlState("23505")
-      );
-
-      const futureProvider = `TEST_${suffix.toUpperCase()}`;
-      const initialFutureVersion = `initial@${suffix}`;
-      const advancedFutureVersion = `advanced@${suffix}`;
-      await setup.query(
-        `INSERT INTO rank_connector_execution_controls (
-           provider, capability, submit_enabled,
-           execution_connector_version, provider_policy_version,
-           kill_switch_version
-         ) VALUES ($1, 'TEST_CAPABILITY', false, $2, $3, $4)`,
-        [
-          futureProvider,
-          CONNECTOR_VERSION,
-          POLICY_VERSION,
-          initialFutureVersion
-        ]
-      );
-      const initialHistory = await setup.query<{ readonly count: string }>(
-        `SELECT count(*)::text AS count
-         FROM rank_connector_execution_control_versions
-         WHERE provider = $1
-           AND capability = 'TEST_CAPABILITY'
-           AND kill_switch_version = $2`,
-        [futureProvider, initialFutureVersion]
-      );
-      assert.equal(initialHistory.rows[0]?.count, "1");
-      await setup.query(
-        `UPDATE rank_connector_execution_controls
-         SET kill_switch_version = $2,
-             version = version + 1,
-             updated_at = clock_timestamp()
-         WHERE provider = $1
-           AND capability = 'TEST_CAPABILITY'`,
-        [futureProvider, advancedFutureVersion]
-      );
-      await assert.rejects(
-        setup.query(
-          `UPDATE rank_connector_execution_controls
-           SET kill_switch_version = $2,
-               version = version + 1,
-               updated_at = clock_timestamp()
-           WHERE provider = $1
-             AND capability = 'TEST_CAPABILITY'`,
-          [futureProvider, initialFutureVersion]
-        ),
-        hasSqlState("23505")
-      );
-
-      await assert.rejects(
-        setup.query(
-          `UPDATE rank_connector_executions
-           SET credential_id = uuidv7(), updated_at = clock_timestamp()
-           WHERE id = $1::uuid`,
-          [firstFixture.executionId]
-        ),
-        hasSqlState("55000")
       );
 
       const shadowFixture = await createClaimableExecution(
         setup,
-        shadowKillSwitchVersion
+        enabledKillSwitchVersion
       );
-      await setControl(setup, true, shadowKillSwitchVersion);
+      const shadowClaim = only(
+        await claim(setup, `shadow-${suffix}`)
+      );
       assert.match(restrictedRoleName, /^[a-z0-9_]+$/u);
       await setup.query(`CREATE ROLE "${restrictedRoleName}" NOLOGIN`);
       restrictedRoleCreated = true;
+      const publicExecute = await setup.query<{
+        readonly publicExecute: boolean;
+      }>(
+        `SELECT COALESCE(bool_or(
+           acl.grantee = 0 AND acl.privilege_type = 'EXECUTE'
+         ), false) AS "publicExecute"
+         FROM pg_proc procedure
+         LEFT JOIN LATERAL aclexplode(COALESCE(
+           procedure.proacl,
+           acldefault('f', procedure.proowner)
+         )) acl ON TRUE
+         WHERE procedure.oid =
+           'public.authorize_rank_connector_execution_submit(uuid,uuid,text,uuid,integer,integer,text)'::regprocedure`
+      );
+      assert.equal(publicExecute.rows[0]?.publicExecute, false);
       await setup.query(
         `GRANT EXECUTE ON FUNCTION
-           public.claim_rank_connector_execution(text, integer, text)
-         TO "${restrictedRoleName}"`
+           public.authorize_rank_connector_execution_submit(
+             uuid, uuid, text, uuid, integer, integer, text
+           ) TO "${restrictedRoleName}"`
       );
-
-      await attacker.query(
-        `CREATE TEMP TABLE rank_execution_grant_attempts (trap text)`
-      );
-      await attacker.query(
-        `CREATE TEMP TABLE rank_connector_executions (trap text)`
-      );
+      for (const relation of [
+        "jobs",
+        "rank_job_runs",
+        "job_items",
+        "integration_credentials",
+        "project_connector_bindings",
+        "project_connector_routes",
+        "rank_execution_grant_attempts",
+        "rank_connector_executions",
+        "rank_connector_execution_controls"
+      ]) {
+        assert.match(relation, /^[a-z_]+$/u);
+        await attacker.query(`CREATE TEMP TABLE ${relation} (trap text)`);
+      }
+      await attacker.query("BEGIN");
+      try {
+        await attacker.query(`SET LOCAL ROLE "${restrictedRoleName}"`);
+        await assert.rejects(
+          attacker.query(
+            "SELECT 1 FROM public.rank_connector_executions LIMIT 1"
+          ),
+          hasSqlState("42501")
+        );
+      } finally {
+        await attacker.query("ROLLBACK").catch(() => undefined);
+      }
       await attacker.query("BEGIN");
       try {
         await attacker.query(`SET LOCAL ROLE "${restrictedRoleName}"`);
         await attacker.query("SET LOCAL search_path = pg_temp, public");
-        const shadowClaim = await claim(
-          attacker,
-          `shadow-${suffix}`,
-          CONNECTOR_VERSION
-        );
-        assert.equal(shadowClaim.length, 1);
         assert.equal(
-          shadowClaim[0]?.executionId,
-          shadowFixture.executionId
+          (await authorize(attacker, shadowFixture, shadowClaim)).length,
+          1
         );
         await attacker.query("COMMIT");
       } catch (error) {
@@ -305,28 +285,44 @@ test(
         throw error;
       }
 
-      const shadowStored = await setup.query<{
-        readonly status: string;
-        readonly version: number;
-        readonly leaseGeneration: number;
-      }>(
-        `SELECT status::text, version,
-                lease_generation AS "leaseGeneration"
-         FROM public.rank_connector_executions
-         WHERE id = $1::uuid`,
-        [shadowFixture.executionId]
+      const controlDriftFixture = await createClaimableExecution(
+        setup,
+        enabledKillSwitchVersion
       );
-      assert.deepEqual(shadowStored.rows[0], {
-        status: "CLAIMED",
-        version: 2,
-        leaseGeneration: 1
-      });
+      const controlDriftClaim = only(
+        await claim(setup, `control-drift-${suffix}`)
+      );
+      await setControl(setup, true, driftedKillSwitchVersion);
+      assert.equal(
+        (
+          await authorize(
+            setup,
+            controlDriftFixture,
+            controlDriftClaim
+          )
+        ).length,
+        0
+      );
+
+      const expiredFixture = await createClaimableExecution(
+        setup,
+        driftedKillSwitchVersion
+      );
+      const expiredClaim = only(
+        await claim(setup, `expired-${suffix}`)
+      );
+      await delay(5_200);
+      assert.equal(
+        (await authorize(setup, expiredFixture, expiredClaim)).length,
+        0
+      );
     } finally {
       if (restrictedRoleCreated) {
         await setup.query(
           `REVOKE ALL ON FUNCTION
-             public.claim_rank_connector_execution(text, integer, text)
-           FROM "${restrictedRoleName}"`
+             public.authorize_rank_connector_execution_submit(
+               uuid, uuid, text, uuid, integer, integer, text
+             ) FROM "${restrictedRoleName}"`
         ).catch(() => undefined);
         await setup.query(
           `DROP ROLE IF EXISTS "${restrictedRoleName}"`
@@ -347,31 +343,140 @@ test(
   }
 );
 
+test(
+  "PostgreSQL 18 upgrade revokes every inherited claim EXECUTE ACL",
+  { skip: upgradeDatabaseUrl === undefined, timeout: 20_000 },
+  async () => {
+    assert.ok(upgradeDatabaseUrl);
+    const client = await connectedClient(upgradeDatabaseUrl);
+    const suffix = Date.now().toString(36);
+    const roleName = `rank_upgrade_${suffix}`;
+    let roleCreated = false;
+
+    try {
+      await assertPostgres18(client);
+      const precondition = await client.query<{
+        readonly oldClaim: string | null;
+        readonly privateClaim: string | null;
+      }>(
+        `SELECT
+           to_regprocedure(
+             'public.claim_rank_connector_execution(text,integer,text)'
+           )::text AS "oldClaim",
+           to_regprocedure(
+             'public.claim_rank_connector_execution_pre_authorization(text,integer,text)'
+           )::text AS "privateClaim"`
+      );
+      assert.ok(precondition.rows[0]?.oldClaim);
+      assert.equal(precondition.rows[0]?.privateClaim, null);
+
+      assert.match(roleName, /^[a-z0-9_]+$/u);
+      await client.query(`CREATE ROLE "${roleName}" NOLOGIN`);
+      roleCreated = true;
+      await client.query(
+        `GRANT EXECUTE ON FUNCTION
+           public.claim_rank_connector_execution(text, integer, text)
+         TO "${roleName}"`
+      );
+      assert.equal(
+        await hasFunctionPrivilege(
+          client,
+          roleName,
+          "public.claim_rank_connector_execution(text,integer,text)"
+        ),
+        true
+      );
+
+      await client.query(await enumMigration);
+      await client.query(await authorizationMigration);
+
+      assert.equal(
+        await hasFunctionPrivilege(
+          client,
+          roleName,
+          "public.claim_rank_connector_execution_pre_authorization(text,integer,text)"
+        ),
+        false
+      );
+      assert.equal(
+        await hasFunctionPrivilege(
+          client,
+          roleName,
+          "public.claim_rank_connector_execution(text,integer,text)"
+        ),
+        false
+      );
+
+      await client.query("BEGIN");
+      try {
+        await client.query(`SET LOCAL ROLE "${roleName}"`);
+        await assert.rejects(
+          client.query(
+            `SELECT * FROM
+             public.claim_rank_connector_execution_pre_authorization(
+               'upgrade-regression', 5, $1::text
+             )`,
+            [CONNECTOR_VERSION]
+          ),
+          hasSqlState("42501")
+        );
+      } finally {
+        await client.query("ROLLBACK").catch(() => undefined);
+      }
+    } finally {
+      if (roleCreated) {
+        await client.query(`DROP ROLE IF EXISTS "${roleName}"`)
+          .catch(() => undefined);
+      }
+      await client.end();
+    }
+  }
+);
+
 interface ClaimFixture {
   readonly workspaceId: string;
+  readonly actorId: string;
   readonly credentialId: string;
   readonly executionId: string;
   readonly jobId: string;
-  readonly actorId: string;
+  readonly jobItemId: string;
 }
 
 interface ClaimRow {
   readonly executionId: string;
   readonly leaseToken: string;
   readonly leaseExpiresAt: Date;
-  readonly workspaceId: string;
-  readonly provider: string;
-  readonly credentialId: string;
-  readonly credentialMaterialVersion: number;
-  readonly ciphertext: Buffer;
-  readonly nonce: Buffer;
-  readonly authTag: Buffer;
-  readonly encryptedDataKey: Buffer;
-  readonly dataKeyNonce: Buffer;
-  readonly dataKeyAuthTag: Buffer;
-  readonly keyVersion: number;
   readonly leaseGeneration: number;
   readonly executionVersion: number;
+}
+
+interface AuthorizeRow {
+  readonly executionId: string;
+  readonly workspaceId: string;
+  readonly jobId: string;
+  readonly jobItemId: string;
+  readonly leaseGeneration: number;
+  readonly executionVersion: number;
+  readonly submitAttemptCount: number;
+  readonly submitBytesStartedAt: Date;
+  readonly authorizationExpiresAt: Date;
+}
+
+interface AuthorizeOverrides {
+  readonly workspaceId?: string;
+  readonly leaseOwner?: string;
+  readonly leaseToken?: string;
+  readonly leaseGeneration?: number;
+  readonly expectedVersion?: number;
+  readonly connectorVersion?: string;
+}
+
+interface StoredExecution {
+  readonly status: string;
+  readonly leaseGeneration: number;
+  readonly version: number;
+  readonly submitAttemptCount: number;
+  readonly submitBytesStartedAt: Date | null;
 }
 
 async function createClaimableExecution(
@@ -433,14 +538,14 @@ async function createClaimableExecution(
            'credentialMaterialVersion', 1,
            'connectorVersion', $6::text
          ), '{}'::jsonb, 'BYOK_API_KEY', 'ARSENKIN',
-         'rank-claim-postgres-validation', 1, $7::timestamptz,
+         'rank-authorize-postgres-validation', 1, $7::timestamptz,
          clock_timestamp()
        )`,
       [
         validationJobId,
         workspaceId,
         projectId,
-        `rank-claim-validation:${validationJobId}`,
+        `rank-authorize-validation:${validationJobId}`,
         credentialId,
         VALIDATION_CONNECTOR_VERSION,
         verifiedAt
@@ -454,7 +559,7 @@ async function createClaimableExecution(
          request_fingerprint, fingerprint_key_version, material_version,
          verified_at, version, updated_at
        ) VALUES (
-         $1::uuid, $2::uuid, 'ARSENKIN', 'PostgreSQL claim fixture',
+         $1::uuid, $2::uuid, 'ARSENKIN', 'PostgreSQL authorize fixture',
          'BYOK_API_KEY', 'ACTIVE', decode('01', 'hex'),
          decode(repeat('02', 12), 'hex'),
          decode(repeat('03', 16), 'hex'), decode('04', 'hex'),
@@ -467,7 +572,7 @@ async function createClaimableExecution(
       [
         credentialId,
         workspaceId,
-        `rank-claim-credential:${credentialId}`,
+        `rank-authorize-credential:${credentialId}`,
         verifiedAt
       ]
     );
@@ -511,8 +616,8 @@ async function createClaimableExecution(
        ) VALUES (
          $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6, $7,
          decode($8, 'hex'), 1, decode($9, 'hex'), 1, 1,
-         decode(repeat('88', 32), 'hex'), decode(repeat('89', 32), 'hex'),
-         decode(repeat('8a', 32), 'hex'), $10::uuid, 1, $11::uuid,
+         decode(repeat('98', 32), 'hex'), decode(repeat('99', 32), 'hex'),
+         decode(repeat('9a', 32), 'hex'), $10::uuid, 1, $11::uuid,
          $12::uuid, 'ACTIVE', 1, 1, $13::uuid, 1, $14,
          $15::timestamptz, $15::timestamptz, 'ARSENKIN', 'BYOK_API_KEY',
          $16, 1, 1, 1, 1, 1, '[]'::jsonb, '{}'::jsonb,
@@ -525,8 +630,8 @@ async function createClaimableExecution(
         projectId,
         actorId,
         trackingContextId,
-        `rank-claim-estimate:${projectId}`,
-        `rank-claim-estimate:${estimateId}`,
+        `rank-authorize-estimate:${projectId}`,
+        `rank-authorize-estimate:${estimateId}`,
         HASH.request,
         HASH.domain,
         bindingId,
@@ -551,7 +656,7 @@ async function createClaimableExecution(
          $1::uuid, $2::uuid, $3::uuid, 'MANUAL_RANK_CHECK', 'PREPARING',
          'PREPARING_SCOPE', $4::uuid, $5, $6, $7, decode($8, 'hex'),
          '{}'::jsonb, '{}'::jsonb, 0, 1, 'KEYWORD', 0, 'RUB',
-         'BYOK_API_KEY', 'ARSENKIN', 20, 'rank-claim-postgres', 1,
+         'BYOK_API_KEY', 'ARSENKIN', 20, 'rank-authorize-postgres', 1,
          clock_timestamp()
        )`,
       [
@@ -559,7 +664,7 @@ async function createClaimableExecution(
         workspaceId,
         projectId,
         actorId,
-        `rank-claim-dedup:${jobId}`,
+        `rank-authorize-dedup:${jobId}`,
         `rank-run:${projectId}`,
         `rank-run:${jobId}`,
         HASH.request
@@ -574,7 +679,7 @@ async function createClaimableExecution(
        ) VALUES (
          $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
          'example.test', 'ACTIVE', 1, '{}'::jsonb,
-         decode(repeat('8b', 32), 'hex'), clock_timestamp()
+         decode(repeat('9b', 32), 'hex'), clock_timestamp()
        )`,
       [jobId, workspaceId, projectId, estimateId, trackingContextId]
     );
@@ -634,6 +739,15 @@ async function createClaimableExecution(
     throw error;
   }
 
+  await client.query(
+    `UPDATE jobs
+     SET status = 'RUNNING', stage = 'WAITING_EXECUTION_GRANT',
+         started_at = clock_timestamp(), version = version + 1,
+         updated_at = clock_timestamp()
+     WHERE id = $1::uuid`,
+    [jobId]
+  );
+
   const decidedAt = new Date();
   const authorizationExpiresAt = new Date(decidedAt.getTime() + 30_000);
   const requestSnapshot = {
@@ -648,7 +762,7 @@ async function createClaimableExecution(
     },
     jobId,
     jobItemId,
-    jobVersion: 2,
+    jobVersion: 3,
     executionAttempt: 1,
     purpose: "PROVIDER_SUBMIT",
     provider: "ARSENKIN",
@@ -691,7 +805,7 @@ async function createClaimableExecution(
          execution_attempt, job_version, idempotency_key, request_snapshot,
          request_hash, scope_hash, execution_evidence_hash, updated_at
        ) VALUES (
-         $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 1, 2,
+         $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, 1, 3,
          'rank-grant:' || $5::uuid::text || ':1', $6::jsonb,
          decode($7, 'hex'), decode($8, 'hex'), decode($9, 'hex'),
          clock_timestamp()
@@ -737,7 +851,7 @@ async function createClaimableExecution(
          kill_switch_version, authorization_expires_at, updated_at
        ) VALUES (
          $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6::uuid,
-         1, 2, $7::uuid, $8::uuid, decode($9, 'hex'), 0, $10::uuid, 1,
+         1, 3, $7::uuid, $8::uuid, decode($9, 'hex'), 0, $10::uuid, 1,
          $11::uuid, $12::uuid, 1, 1, $13::uuid, 1, $14,
          $15::timestamptz, decode($16, 'hex'), decode($17, 'hex'),
          $18, $19, $20, $21::timestamptz, clock_timestamp()
@@ -779,20 +893,63 @@ async function createClaimableExecution(
     throw error;
   }
 
-  return { workspaceId, credentialId, executionId, jobId, actorId };
+  return {
+    workspaceId,
+    actorId,
+    credentialId,
+    executionId,
+    jobId,
+    jobItemId
+  };
 }
 
 async function claim(
   client: Client,
-  leaseOwner: string,
-  connectorVersion: string
+  leaseOwner: string
 ): Promise<readonly ClaimRow[]> {
   const result = await client.query<ClaimRow>(
+    `SELECT "executionId", "leaseToken", "leaseExpiresAt",
+            "leaseGeneration", "executionVersion"
+     FROM public.claim_rank_connector_execution($1::text, 5, $2::text)`,
+    [leaseOwner, CONNECTOR_VERSION]
+  );
+  for (const row of result.rows) {
+    claimOwners.set(row.leaseToken, leaseOwner);
+  }
+  return result.rows;
+}
+
+async function authorize(
+  client: Client,
+  fixture: ClaimFixture,
+  claimed: ClaimRow,
+  override: AuthorizeOverrides = {}
+): Promise<readonly AuthorizeRow[]> {
+  const result = await client.query<AuthorizeRow>(
     `SELECT *
-     FROM claim_rank_connector_execution($1::text, 5, $2::text)`,
-    [leaseOwner, connectorVersion]
+     FROM public.authorize_rank_connector_execution_submit(
+       $1::uuid, $2::uuid, $3::text, $4::uuid,
+       $5::integer, $6::integer, $7::text
+     )`,
+    [
+      override.workspaceId ?? fixture.workspaceId,
+      fixture.executionId,
+      override.leaseOwner ?? claimedLeaseOwner(claimed),
+      override.leaseToken ?? claimed.leaseToken,
+      override.leaseGeneration ?? claimed.leaseGeneration,
+      override.expectedVersion ?? claimed.executionVersion,
+      override.connectorVersion ?? CONNECTOR_VERSION
+    ]
   );
   return result.rows;
+}
+
+const claimOwners = new Map<string, string>();
+
+function claimedLeaseOwner(claimed: ClaimRow): string {
+  const owner = claimOwners.get(claimed.leaseToken);
+  assert.ok(owner);
+  return owner;
 }
 
 async function setControl(
@@ -856,6 +1013,30 @@ async function cancelRankJob(
   }
 }
 
+async function readExecution(
+  client: Client,
+  executionId: string
+): Promise<StoredExecution> {
+  const result = await client.query<StoredExecution>(
+    `SELECT status::text,
+            lease_generation AS "leaseGeneration",
+            version,
+            submit_attempt_count AS "submitAttemptCount",
+            submit_bytes_started_at AS "submitBytesStartedAt"
+     FROM rank_connector_executions
+     WHERE id = $1::uuid`,
+    [executionId]
+  );
+  return only(result.rows);
+}
+
+function only<T>(rows: readonly T[]): T {
+  assert.equal(rows.length, 1);
+  const row = rows[0];
+  assert.ok(row);
+  return row;
+}
+
 async function delay(milliseconds: number): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -895,6 +1076,22 @@ async function databaseUuidV7s(
     [count]
   );
   return result.rows.map((row) => row.id);
+}
+
+async function hasFunctionPrivilege(
+  client: Client,
+  roleName: string,
+  signature: string
+): Promise<boolean> {
+  const result = await client.query<{ readonly allowed: boolean }>(
+    `SELECT has_function_privilege(
+       $1::name,
+       $2::text,
+       'EXECUTE'
+     ) AS allowed`,
+    [roleName, signature]
+  );
+  return result.rows[0]?.allowed ?? false;
 }
 
 function hasSqlState(expected: string): (error: unknown) => boolean {

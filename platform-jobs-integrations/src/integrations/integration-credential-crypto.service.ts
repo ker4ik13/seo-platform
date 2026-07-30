@@ -2,7 +2,8 @@ import {
   createCipheriv,
   createDecipheriv,
   createHmac,
-  randomBytes
+  randomBytes,
+  timingSafeEqual
 } from "node:crypto";
 import {
   Inject,
@@ -128,6 +129,85 @@ export class IntegrationCredentialCryptoService {
     }
   }
 
+  public createKekCanary(
+    keyVersion: number
+  ): EncryptedIntegrationCredential {
+    this.assertManagementRole();
+    const masterKey = this.config.integrationCredentials.keys.get(
+      keyVersion
+    );
+    if (!masterKey) throw encryptionUnavailable();
+    const dataKey = randomBytes(32);
+    try {
+      const payload = encryptBytes(
+        dataKey,
+        kekCanaryPlaintext(keyVersion),
+        kekCanaryPayloadAad(keyVersion)
+      );
+      const wrappedKey = encryptBytes(
+        masterKey,
+        dataKey,
+        kekCanaryDataKeyAad(keyVersion)
+      );
+      return {
+        ciphertext: payload.ciphertext,
+        nonce: payload.nonce,
+        authTag: payload.authTag,
+        encryptedDataKey: wrappedKey.ciphertext,
+        dataKeyNonce: wrappedKey.nonce,
+        dataKeyAuthTag: wrappedKey.authTag,
+        keyVersion
+      };
+    } finally {
+      dataKey.fill(0);
+    }
+  }
+
+  public verifyKekCanary(
+    encrypted: EncryptedIntegrationCredential
+  ): void {
+    this.assertCanaryRole();
+    const masterKey = this.config.integrationCredentials.keys.get(
+      encrypted.keyVersion
+    );
+    if (!masterKey) throw encryptionUnavailable();
+    let dataKey: Buffer | undefined;
+    let plaintext: Buffer | undefined;
+    try {
+      dataKey = decryptBytes(
+        masterKey,
+        {
+          ciphertext: encrypted.encryptedDataKey,
+          nonce: encrypted.dataKeyNonce,
+          authTag: encrypted.dataKeyAuthTag
+        },
+        kekCanaryDataKeyAad(encrypted.keyVersion)
+      );
+      if (dataKey.length !== 32) throw encryptionUnavailable();
+      plaintext = decryptBytes(
+        dataKey,
+        {
+          ciphertext: encrypted.ciphertext,
+          nonce: encrypted.nonce,
+          authTag: encrypted.authTag
+        },
+        kekCanaryPayloadAad(encrypted.keyVersion)
+      );
+      const expected = kekCanaryPlaintext(encrypted.keyVersion);
+      if (
+        plaintext.length !== expected.length ||
+        !timingSafeEqual(plaintext, expected)
+      ) {
+        throw encryptionUnavailable();
+      }
+    } catch {
+      throw encryptionUnavailable();
+    } finally {
+      dataKey?.fill(0);
+      plaintext?.fill(0);
+    }
+  }
+
   public requestFingerprint(
     input: IntegrationCredentialRequestFingerprintInput,
     keyVersion?: number
@@ -203,6 +283,15 @@ export class IntegrationCredentialCryptoService {
 
   private assertExecutionRole(): void {
     if (this.config.integrationCredentials.role !== "EXECUTION") {
+      throw encryptionUnavailable();
+    }
+  }
+
+  private assertCanaryRole(): void {
+    if (
+      this.config.integrationCredentials.role !== "MANAGEMENT" &&
+      this.config.integrationCredentials.role !== "EXECUTION"
+    ) {
       throw encryptionUnavailable();
     }
   }
@@ -287,6 +376,27 @@ function dataKeyAad(
 ): Buffer {
   return Buffer.from(
     `seo-platform:integration-credential:v1:${workspaceId}:${provider}:${credentialId}:data-key:${version}`,
+    "utf8"
+  );
+}
+
+function kekCanaryPlaintext(keyVersion: number): Buffer {
+  return Buffer.from(
+    `seo-platform:integration-credential-kek-canary:v1:${keyVersion}`,
+    "utf8"
+  );
+}
+
+function kekCanaryPayloadAad(keyVersion: number): Buffer {
+  return Buffer.from(
+    `seo-platform:integration-credential-kek-canary:v1:${keyVersion}:payload`,
+    "utf8"
+  );
+}
+
+function kekCanaryDataKeyAad(keyVersion: number): Buffer {
+  return Buffer.from(
+    `seo-platform:integration-credential-kek-canary:v1:${keyVersion}:data-key`,
     "utf8"
   );
 }

@@ -505,17 +505,17 @@ Provider/credential/schedule не входят в tracking context по ADR-2026
 
 - `POST /api/v1/projects/{projectId}/rank-estimates`;
 
-Публичный execution-этап Platform API ещё не добавлен. За ним зарезервированы:
+Публичный execution-этап Platform API реализован:
 
 - `POST /api/v1/projects/{projectId}/rank-runs`;
 - `GET /api/v1/projects/{projectId}/jobs/{jobId}`;
 - `POST /api/v1/projects/{projectId}/jobs/{jobId}/cancel`.
 
-DTO и event contracts этого этапа уже зафиксированы в
-`platform-contracts`: public create содержит только `estimateId`, public Job
-не раскрывает provider/credential/keyword/result internals, а internal
-границы описывают manifest seal/chunk, normalized ingest и monotonic
-finalize.
+DTO и event contracts зафиксированы в `platform-contracts`: public create
+содержит только `estimateId`, public Job не раскрывает provider/credential/
+keyword/result internals, а internal границы описывают manifest seal/chunk,
+normalized ingest и monotonic finalize. Platform API повторно проверяет
+session, CSRF и project permissions, а Web использует только same-origin BFF.
 
 Durable Jobs preparation уже доступен только по защищённым internal routes:
 
@@ -542,8 +542,10 @@ Cancel между seal request/response является единственны�
 drift. Retryable transport/service ambiguity повторяет только exact
 идемпотентную seal/finalize command в пределах 20 attempts; non-retryable
 ambiguity или исчерпание budget завершают Job как
-`ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`. Неидемпотентный provider submit
-ещё не реализован и автоматически не resubmit-ится.
+`ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`. Неидемпотентный provider submit ещё
+не подключён. Durable pre-network authorize уже атомарно фиксирует
+`SUBMITTING` и marker «bytes могли начаться»; после такой commit-точки
+автоматический resubmit запрещён.
 
 SEO Data manifest/finalize boundary уже реализована:
 

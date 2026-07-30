@@ -181,32 +181,54 @@
 - Компрометированный ключ отключается и создаёт уведомление.
 - Platform credentials разделены по provider/environment и имеют минимальные provider permissions.
 - Management API и connector worker используют разные PostgreSQL logins.
-  Текущий execution login ограничен по DML, но имеет `SELECT` всех строк и
-  колонок `jobs` и `integration_credentials` внутри `jobs_db`; это не
-  tenant/secret isolation. Компрометация connector process раскрывает job
-  snapshots/metadata всех tenants и, поскольку process получает KEK, весь
-  BYOK vault этой database. До production это release blocker: нужна узкая
-  execution projection/table с server-side scope либо credential broker/KMS,
-  исключающий global vault read. Дополнительно обязательны fresh non-owner
-  role provisioning, cluster-wide grant audit и `pg_hba`/отдельный cluster
-  boundary; ownership объектов кластера script отклоняет fail-closed. Общий
-  Redis password текущего среза заменяется отдельным ACL/instance; DB
-  owner/superuser credential connector worker-у запрещён как production
-  invariant.
+  Execution login не имеет прямого DML к `jobs`, `integration_credentials`
+  или canary table. Deploy-time script сначала отзывает connector и `PUBLIC`
+  privileges на database/schema/tables/sequences/functions и выдаёт exact `EXECUTE`
+  allowlist `SECURITY DEFINER` broker. Claim связывает одну validation Job с
+  owner/random token/version/live lease и возвращает secret projection только
+  после server-side tenant/material/state recheck; finish повторно проверяет
+  fence и атомарно применяет Job/credential result. Provisioning wrapper
+  удаляет password из child environment, принудительно создаёт SCRAM verifier
+  через stdin `psql \\password` и отклоняет role на любой стороне membership
+  edge. Grant DDL транзакционно сверяет cluster-wide direct ACL через
+  `pg_shdepend/pg_database`: любые grants в другой database/shared object и
+  вне exact current-DB allowlist блокируют provisioning, но ACL соседних
+  сервисов не изменяются. Current-catalog audit также блокирует любое
+  effective `PUBLIC CREATE/USAGE` в non-system schemas `jobs_db`, включая
+  доступ через object kinds вне основного table/routine набора.
+  Provisioning выполняется только от владельца Prisma migrations и всех
+  routines в `public`; global и `IN SCHEMA public` default ACL закрыты, а
+  существующие functions/procedures отзываются через `ALL ROUTINES` до exact
+  grants. Generated HBA до общих rules разрешает connector local/host только
+  в `jobs_db` по SCRAM и отклоняет replication/остальные databases, поэтому
+  соседний `PUBLIC CONNECT` не обходит границу сменой DSN.
+  PostgreSQL 18 regression проверяет non-public/cross-DB direct ACL,
+  inherited PUBLIC, procedure/default/future-object bypass, management
+  functions, concurrent reclaim, stale finisher, material drift и `pg_temp`
+  shadowing; отдельный fixed-role HBA harness проверяет реальный cross-DB
+  reject. Global vault read внутри `jobs_db` закрыт. В целевом окружении всё
+  равно обязательны fresh provisioning, проверка фактического HBA order и
+  login smoke; для межхостового PostgreSQL требуются TLS/source-CIDR либо
+  отдельный cluster. Redis требует отдельный ACL/instance;
+  DB owner/superuser runtime запрещён.
 - Перед включением внешних уведомлений terminal validation должен атомарно
   писать только нормализованный error code и redacted outbox/audit event, но
   не raw provider response; в первом validation slice terminal outbox ещё
   отсутствует.
 - Для manual rank execution применяется ADR-2026-034. До live submit
   connector получает только scoped execution claim через allowlisted
-  SECURITY DEFINER operations: authorize action, record submit, schedule
-  poll, stage normalized rows и finish/fail. Прямой global read jobs/vault
-  execution-role запрещён. Claim повторно проверяет tenant/job/item, lease,
-  одноразовый lifecycle grant, binding/material/connector versions и kill
-  switch. Default-closed `claim_rank_connector_execution` уже реализован:
-  `PUBLIC EXECUTE` отозван, connector-role grant/runtime caller отсутствуют,
-  а `CLAIMED` не разрешает network. Перед bytes нужна отдельная authorize/
-  `SUBMITTING` operation; остальные scoped operations ещё не реализованы.
+  SECURITY DEFINER operations. Прямой global read jobs/vault execution-role
+  запрещён. Claim повторно проверяет tenant/job/item, lease, одноразовый
+  lifecycle grant, binding/material/connector versions и kill switch.
+  Default-closed `claim_rank_connector_execution` уже реализован, а
+  `PUBLIC EXECUTE` отозван. Connector permission allowlist выдаёт exact
+  `EXECUTE` только на public claim и authorize functions. `CLAIMED` не разрешает
+  network. Authorize повторно проверяет полный current graph, lease fence и
+  ожидаемые execution/control versions, атомарно устанавливает `SUBMITTING`
+  и durable may-have-started marker. Runtime caller, provider
+  request/status/result и остальные scoped operations ещё не реализованы.
+  Retryable submit создаёт новый grant и monotonic execution attempt; исходная
+  execution не возвращается в `READY_TO_SUBMIT`.
 - Platform API issuer защищён отдельным
   `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`, который не переиспользуется как
   internal/credential/realtime/SEO rank token. Текущий Compose передаёт его
@@ -222,9 +244,10 @@
   выдаёт `GRANTED` без reservation ID. Expired exact replay не переписывается;
   Jobs client проверяет TTL/hash/scope, сохраняет exact decision и атомарно
   создаёт secret-free scoped execution вместе с `CONSUMED`. Эта row сама не
-  выдаёт credential material. Подготовленная SECURITY DEFINER claim-функция
-  возвращает exact encrypted projection только после повторной проверки
-  current graph, но пока недоступна connector role и не подключена к runtime.
+  выдаёт credential material. SECURITY DEFINER claim возвращает exact
+  encrypted projection только после повторной проверки current graph и
+  доступен connector role через exact permission grant; authorize имеет такой
+  же narrow grant. Ни одна из функций пока не вызывается runtime caller.
 - До HTTP Jobs записывает immutable exact `REQUESTED` intent и stable
   idempotency key в `rank_execution_grant_attempts`. Retryable ambiguity
   повторяет сохранённый request; response под canonical graph locks и DB
@@ -286,17 +309,21 @@
   tombstone и fail-closed upsert также готов. Outbox publisher и JetStream
   subscription обязательны до включения внешней доставки.
 - KEK rollout выполняется в порядке expand keyring → startup decrypt-canary
-  verify каждой используемой версии → drain старых replicas → switch active.
-  `EXECUTION` replica до создания queue worker проверяет coverage, затем для
-  каждой используемой версии расшифровывает один детерминированный
-  неудалённый sample через штатный adapter с точным AAD; пустой vault допустим,
-  а missing/corrupt sample останавливает startup. Ошибка содержит только
-  `keyVersion`, но не tenant, credential, provider или secret. `MANAGEMENT`
-  проверяет encryption/fingerprint coverage без decrypt. Validation worker
-  выполняет job-only bounded retry без изменения credential при runtime
-  decrypt failure, поэтому не создаёт массовый `DISABLED`. Cluster-wide
-  circuit breaker и incident alert для отказов после startup ещё не
-  реализованы; startup canary не заменяет scoped connector DB boundary.
+  verify configured ∪ used versions → drain старых replicas → switch active.
+  `MANAGEMENT` создаёт отдельный synthetic known-plaintext envelope каждой
+  configured KEK version и регистрирует его expand-only. Строка immutable и
+  не содержит tenant/provider/credential identity; повторная регистрация той
+  же version возвращает исходный ciphertext, поэтому replacement bytes не
+  могут подменить canary. `EXECUTION` до создания queue worker передаёт broker
+  все configured versions (не более 128) и получает их объединение с реально
+  используемыми versions и usage marker. Каждый configured, в том числе новый
+  ещё не active KEK, проверяется на каждой replica; used-but-unconfigured и
+  missing/corrupt/wrong-key canary останавливают startup. Retired unused
+  historical canary не возвращается и не удерживает старый ключ. Пустой vault
+  допустим. Ошибка содержит только `keyVersion`. Validation worker выполняет
+  job-only bounded retry без изменения credential при runtime decrypt failure,
+  поэтому не создаёт массовый `DISABLED`. Cluster-wide circuit breaker и
+  incident alert после startup ещё не реализованы.
 - Vault endpoints не принимают общий межсервисный token: отдельный caller
   secret доступен только Platform API и credential-capable HTTP process, до
   плановой замены на service JWT/mTLS.
@@ -801,14 +828,15 @@ Merge запрещён при failed required checks. Исключение уя�
   maintenance window. Для большой live-БД заранее готовится отдельный
   expand/concurrent-index план.
 - `20260729230100_rank_execution_grant_attempts`,
-  `20260729230200_rank_connector_executions` и
-  `20260730101500_rank_connector_execution_claim` требуют fresh apply,
-  tenant-FK/state-matrix/deferred one-to-one negative smoke и реальные
-  concurrent request/replay/decision/expiry/consume проверки на PostgreSQL
-  18. Fresh полный chain и claim-specific concurrent claim/reclaim,
-  stale-head, cancel, credential и kill-switch regression уже прошли на
-  PostgreSQL 18. Grant request/replay/decision/consume evidence и production
-  non-owner permission/runtime boundary проверяются отдельно.
+  `20260729230200_rank_connector_executions`,
+  `20260730101500_rank_connector_execution_claim`,
+  `20260730101700_rank_connector_submitting_enum` и
+  `20260730101800_rank_connector_submit_authorization` прошли PostgreSQL 18
+  fresh full-chain и upgrade rehearsal, tenant-FK/state-matrix/deferred
+  one-to-one negative smoke, exact non-owner permission proof и реальные
+  claim/authorize race checks. Runtime/provider request/status/result и
+  DB-backed lifecycle после `SUBMITTING` проверяются отдельным production
+  gate.
 - Jobs/integrations и SEO Data release проверяется на Node.js 24; локальный
   Node.js 22 engine warning не принимается как production runtime evidence.
 - Автоматический rollback допускается только если не усугубит уже применённую migration.
@@ -999,18 +1027,22 @@ Radar/crawler capacity:
   отдельные metrics/alerts до production; текущий runtime имеет только
   структурированные логи;
 - текущая изоляция обеспечена отдельным module/entrypoint и env allowlist.
-  Перед live provider execution нужна отдельная минимальная DB role с
-  проверенными grants; общий Jobs DB user не считается окончательной
+  Минимальная connector DB role и exact claim/authorize grants подготовлены и
+  проверены; перед live provider execution runtime caller должен быть
+  подключён именно к этой role. Общий Jobs DB user не считается окончательной
   least-privilege boundary;
 - grant service сохраняет intent/decision и атомарную secret-free
   `CONSUMED/READY_TO_SUBMIT` пару, но не вызывается dispatcher-ом. Production
   runtime отклоняет включённый submit, а Compose фиксирует
   `RANK_PROVIDER_SUBMIT_ENABLED=false`;
-- default-closed SECURITY DEFINER claim DDL реализован, но `PUBLIC EXECUTE`
-  отозван и connector role/runtime caller не подключены. Live Arsenkin submit
-  остаётся выключенным, пока не реализованы authorize/`SUBMITTING`, остальные
-  scoped operations, узкая end-to-end vault boundary, normalized ingest и
-  provider contract gates.
+- default-closed SECURITY DEFINER claim/authorize DDL реализован,
+  `PUBLIC EXECUTE` отозван, connector role получает exact grants, но runtime
+  caller не подключён. Authorize атомарно фиксирует `SUBMITTING` и durable
+  may-have-started marker. Pure reducer сам по себе не является security
+  boundary без DB wrapper. Live Arsenkin submit остаётся выключенным, пока не
+  реализованы provider request/status/result, DB persistence для pure
+  lifecycle, остальные scoped operations, normalized ingest и provider
+  contract gates.
 
 ## 35. Maintenance
 
@@ -1137,7 +1169,7 @@ Billing read-only не является стадией удаления. Око�
 
 - Автоматический cross-tenant test suite проходит для всех tenant resources.
 - Provider credentials не появляются в API responses, logs, traces, events и queue payload.
-- KEK rollout canary проверяет точное key material каждой используемой версии;
+- KEK rollout canary проверяет точное key material configured ∪ used versions;
   системный decrypt mismatch не изменяет статусы credentials.
 - Connector execution boundary не имеет global read всего multi-tenant BYOK
   vault и job snapshot набора.

@@ -66,19 +66,30 @@ Connector credential material в эту row не копируется. Service c
 доступен только rank-worker, но dispatcher этот path пока не вызывает.
 Entry point по-прежнему не вызывает Arsenkin и не включает live provider
 submit: соответствующие release gates из ADR-2026-034 остаются обязательными.
-Forward migration `20260730101500_rank_connector_execution_claim` добавляет
-pre-network `CLAIMED` lease и hardened `SECURITY DEFINER` claim. Candidate
-сначала non-locking проверяет весь current graph, затем блокирует его в
-canonical порядке и возвращает только одну encrypted credential projection.
-Versioned DB-control по умолчанию закрыт; использованные kill-switch versions
-хранятся immutable и не могут быть активированы повторно. `PUBLIC` execute
-отозван, deploy-time `EXECUTE` connector role пока не выдан, поэтому runtime
-не может вызвать claim. Даже после wiring `CLAIMED` не разрешает provider
-network bytes: следующим обязательным переходом остаётся отдельный
-authorize/`SUBMITTING`, затем provider status и normalized result producer.
-Validation worker и KEK canary всё ещё используют текущий global credential
-read; их scoped broker/refactor и отзыв широких grants остаются production
-blocker. Public history API/UI уже готовы и в этот следующий шаг не входят.
+Forward migrations `20260730101500_rank_connector_execution_claim`,
+`20260730101700_rank_connector_submitting_enum` и
+`20260730101800_rank_connector_submit_authorization` добавляют pre-network
+`CLAIMED` lease и hardened `SECURITY DEFINER` claim/authorize boundary.
+Candidate сначала non-locking проверяет весь current graph, затем блокирует
+его в canonical порядке и возвращает только одну encrypted credential
+projection. Versioned DB-control по умолчанию закрыт; использованные
+kill-switch versions хранятся immutable и не могут быть активированы
+повторно. `PUBLIC` execute отозван, а permission script выдаёт connector role
+exact `EXECUTE` только на public claim и authorize functions. `CLAIMED` не
+разрешает provider network bytes. Authorize повторно проверяет полный graph,
+lease fence и ожидаемые execution/control versions, затем атомарно переводит
+row в `SUBMITTING` и фиксирует durable may-have-started marker до возможного
+network boundary. TypeScript runtime caller, provider request/status/result
+producer и DB persistence для существующего pure lifecycle пока отсутствуют;
+pure reducer без DB wrapper не является security boundary. Retryable submit
+требует нового grant и monotonic execution attempt, а не повторного submit в
+той же execution. Live provider submit остаётся выключенным.
+Validation worker и KEK canary уже переведены на narrow
+`SECURITY DEFINER` broker; connector role не имеет прямого `SELECT/UPDATE`
+`jobs`, `integration_credentials` или canary table. Это закрывает global
+vault read внутри `jobs_db`, но не отменяет оставшиеся rank provider lifecycle,
+KMS/KEK, Redis ACL и фактические cluster/`pg_hba` release gates. Public history
+API/UI уже готовы и в этот следующий шаг не входят.
 
 Result producer в Jobs пока отсутствует. Поэтому текущие Jobs HTTP/workers,
 включая rank-worker и connector-worker, не получают
@@ -134,11 +145,14 @@ database с уже применёнными migrations:
 
 `JOBS_RANK_TEST_DATABASE_URL=postgresql://... node --import tsx --test src/rank-runs/rank-job-lock.integration.test.ts`
 
-Migration `20260729230100_rank_execution_grant_attempts` добавляет durable
-intent history и tenant-safe связи `JobItem → Job`. Fresh full-chain apply,
-constraint-negative grant/consume и конкурентный single-consumer smoke
-пройдены на PostgreSQL 18. Отдельными release gates остаются production-role
-permission proof и гонки с будущим provider lifecycle.
+Migrations `20260729230100_rank_execution_grant_attempts`,
+`20260729230200_rank_connector_executions`,
+`20260730101500_rank_connector_execution_claim`,
+`20260730101700_rank_connector_submitting_enum` и
+`20260730101800_rank_connector_submit_authorization` прошли PostgreSQL 18
+fresh/upgrade rehearsal, exact non-owner permission proof и claim/authorize
+race regression. Отдельными release gates остаются runtime wiring, provider
+request/status/result и durable DB-backed lifecycle после `SUBMITTING`.
 
 Миграция rank preparation fail-closed останавливается при legacy
 `MANUAL_RANK_CHECK` без sidecar или конфликтующих active deduplication keys.
@@ -172,11 +186,26 @@ HTTP-процесс запускается с `INTEGRATION_CREDENTIAL_ROLE=MANAG
 независимый fingerprint keyring и dedicated internal token.
 `connector-worker` запускается с ролью `EXECUTION` и получает только KEK для
 расшифровки. Конфигурация fail-closed отклоняет fingerprint keys и management
-token у execution worker. До создания Redis/BullMQ worker он сверяет KEK
-coverage и authenticated decrypt/AAD одного детерминированного неудалённого
-credential sample для каждой используемой версии; пустой vault допустим, а
-missing/corrupt sample останавливает startup без изменения credential rows.
-Management process сохраняет fingerprint coverage и этот decrypt не выполняет.
+token у execution worker. До создания Redis/BullMQ worker он через broker
+передаёт все configured KEK versions (максимум 128) и получает synthetic
+authenticated canaries для их объединения с versions, реально используемыми
+неудалёнными credentials, плюс явный usage marker. Поэтому ещё не active KEK
+проверяется на каждой replica до переключения, used-but-unconfigured version
+fail-closed обнаруживается, а retired unused historical canary не требует
+старого ключа. Missing canary возвращается nullable строкой и вместе с
+corrupt/wrong-key envelope останавливает startup. Canary не содержит tenant/
+provider/credential identity, создаётся management process один раз для каждой
+настроенной KEK version и затем immutable; повторная регистрация возвращает
+исходный envelope. Пустой vault допустим. Management process отдельно
+сохраняет fingerprint coverage.
+
+Очередь по-прежнему содержит только `jobId`. Dispatcher получает через broker
+только due validation IDs. Claim принимает точный validation ID и выдаёт
+random lease token, owner/version fence, безопасный summary и encrypted
+material только при совпавших workspace/provider/material/state. Arbitrary и
+не-validation UUID не раскрывают строки. Success и provider failure атомарно
+обновляют Job/credential; stale lease, token, version или material не могут
+применить результат, а decrypt/KEK/internal failures меняют только Job.
 
 Arsenkin Tools и Keys.so проверяются асинхронно через документированные
 read-only account/limits endpoints. PostgreSQL `Job` — источник истины,

@@ -82,13 +82,19 @@ services:
     image: postgres:18.3-alpine3.23
     restart: unless-stopped
     shm_size: 256mb
+    entrypoint:
+      ["/bin/sh", "/postgres-config/start-postgres.sh"]
+    command:
+      ["postgres", "-c", "hba_file=/tmp/seo-platform-pg_hba.conf"]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: postgres
+      JOBS_CONNECTOR_DATABASE_USER: jobs_connector
     volumes:
       - postgres_data:/var/lib/postgresql
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
+      - ./postgres/config/start-postgres.sh:/postgres-config/start-postgres.sh:ro
     networks:
       - internal
     healthcheck:
@@ -223,16 +229,16 @@ services:
       PGDATABASE: jobs_db
       PGUSER: ${POSTGRES_USER:?POSTGRES_USER is required}
       PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
-      JOBS_CONNECTOR_DATABASE_USER: ${JOBS_CONNECTOR_DATABASE_USER:-jobs_connector}
+      JOBS_CONNECTOR_DATABASE_USER: jobs_connector
       JOBS_CONNECTOR_DATABASE_PASSWORD: ${JOBS_CONNECTOR_DATABASE_PASSWORD:?JOBS_CONNECTOR_DATABASE_PASSWORD is required}
     command:
       [
-        "psql",
-        "--no-psqlrc",
-        "--file=/permissions/jobs-connector.sql"
+        "/bin/sh",
+        "/permissions/provision-jobs-connector-role.sh"
       ]
     volumes:
       - ./postgres/permissions/jobs-connector.sql:/permissions/jobs-connector.sql:ro
+      - ./postgres/permissions/provision-jobs-connector-role.sh:/permissions/provision-jobs-connector-role.sh:ro
     networks:
       - internal
     depends_on:
@@ -521,7 +527,7 @@ services:
       <<: *integration-credential-execution-env
       NODE_ENV: production
       SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
-      DATABASE_URL: postgresql://${JOBS_CONNECTOR_DATABASE_USER:-jobs_connector}:${JOBS_CONNECTOR_DATABASE_PASSWORD:?JOBS_CONNECTOR_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
+      DATABASE_URL: postgresql://jobs_connector:${JOBS_CONNECTOR_DATABASE_PASSWORD:?JOBS_CONNECTOR_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       DATABASE_POOL_MAX: ${JOBS_CONNECTOR_DATABASE_POOL_MAX:-10}
       INTEGRATION_VALIDATION_TIMEOUT_MS: ${INTEGRATION_VALIDATION_TIMEOUT_MS:-10000}

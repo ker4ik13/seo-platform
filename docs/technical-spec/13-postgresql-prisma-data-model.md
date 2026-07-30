@@ -1256,15 +1256,22 @@ scope/hash, lease/retry timestamps, `material_version` и `last_error_code`.
 него заранее выпускается отдельная expand → application backfill → validate →
 contract migration.
 
-Execution DB role текущего validation slice ограничена по DML, но имеет
-`SELECT` всех строк и колонок `jobs` и `integration_credentials` внутри
-`jobs_db`. Это не является row-level tenant isolation или secret isolation.
-При компрометации connector process blast radius включает job
-snapshots/metadata всех tenants и, поскольку process получает KEK, весь
-encrypted BYOK vault этой database. До production схема доступа должна быть
-заменена узкой execution projection/table с server-side scope либо
-credential broker/KMS, исключающим global vault read; дополнительно
-обязательны cluster-wide grant audit и `pg_hba`/отдельная граница кластера.
+Validation execution login больше не имеет direct table DML/`SELECT`:
+allowlisted `SECURITY DEFINER` broker выдаёт due IDs, exact lease-bound
+encrypted projection и принимает три fenced finish outcome. Каждая операция
+повторно проверяет тип Job, tenant, credential/material/connector versions,
+owner, случайный lease token, row version и DB deadline. Success boundary
+также валидирует provider metadata независимо от TypeScript connector:
+Arsenkin обязан передать объект ровно с одним неотрицательным safe-integer
+`limitsTotal`; SQL `NULL`, JSON `null`, `{}`, лишние ключи и некорректное
+число не могут активировать credential. Synthetic authenticated KEK canaries
+не содержат tenant material и проверяют все реально используемые версии до
+создания worker.
+
+Оставшиеся production gates для этой роли — cluster-wide direct-ACL audit,
+`pg_hba`/отдельная граница кластера, rollout старых replicas и circuit breaker.
+Сам symmetric KEK пока находится в execution process; дальнейшее уменьшение
+blast radius требует KMS/asymmetric unwrap или внешнего credential broker.
 
 #### `project_connector_bindings`
 
@@ -1456,9 +1463,12 @@ Secret-free scoped execution принадлежит `jobs_db` и хранит:
 - estimate, manifest/hash/chunk и execution-evidence hash;
 - binding/route/credential/validation IDs и их immutable versions;
 - versioned execution connector, provider policy и kill switch;
-- исходный grant expiry, состояния `READY_TO_SUBMIT → CLAIMED`, bounded
-  lease owner/token/expiry, claim timestamp, monotonic row version и
-  timestamps.
+- исходный grant expiry, состояния
+  `READY_TO_SUBMIT → CLAIMED → SUBMITTING`, bounded lease owner/token/expiry,
+  monotonic lease generation и row version;
+- единственную submit attempt и durable `submit_bytes_started_at`: после её
+  commit provider bytes могли начаться, поэтому автоматический повторный
+  submit запрещён.
 
 Ciphertext, wrapped DEK, nonce/tag, plaintext secret и provider request в эту
 таблицу не копируются. Insert разрешён только для неистёкшего
@@ -1469,11 +1479,12 @@ exact estimate projection.
 
 Одна транзакция сначала создаёт scoped execution, затем переводит grant
 attempt в `CONSUMED`. Два deferred constraint triggers требуют на commit
-exact one-to-one `CONSUMED ↔ READY_TO_SUBMIT/CLAIMED` и запрещают любую
-половину. Execution identity остаётся immutable; разрешён только точный
-`READY_TO_SUBMIT → CLAIMED` либо reclaim истёкшего `CLAIMED → CLAIMED` с
-новым token, увеличением version и lease, не выходящим за grant expiry.
-Delete/truncate запрещены.
+exact one-to-one `CONSUMED ↔ rank_connector_execution` во всех разрешённых
+состояниях и запрещают любую половину. Execution identity остаётся immutable;
+разрешены только точный `READY_TO_SUBMIT → CLAIMED`, reclaim истёкшего
+`CLAIMED → CLAIMED` с новым token/generation и однонаправленный
+`CLAIMED → SUBMITTING`. Lease не выходит за grant expiry. Delete/truncate
+запрещены.
 
 `rank_connector_execution_controls` хранит default-closed submit flag и
 exact connector/policy/kill-switch versions. Каждая использованная
@@ -1489,16 +1500,25 @@ binding → route → grant → execution → control` и после ожида�
 проверяет execution version/state, Job/cancel, credential, grant expiry и
 control versions. Возвращается только одна exact encrypted credential
 projection и lease identity; provider payload или HTTP отсутствуют.
-`CLAIMED` является pre-network состоянием: до отдельной authorize/
-`SUBMITTING` операции отправлять provider bytes запрещено.
+`CLAIMED` является pre-network состоянием. Отдельная
+`authorize_rank_connector_execution_submit` повторно блокирует и проверяет
+Job/run/item, credential/validation, binding/route, consumed grant, execution
+lease generation/version/owner/token, DB deadline и versioned control. Только
+после успешной проверки она атомарно фиксирует `SUBMITTING`, единственную
+attempt и `submit_bytes_started_at`, возвращая secret-free permit. Транзакция
+должна завершиться до отправки bytes; rollback не оставляет marker.
 
-Migration `20260730101500_rank_connector_execution_claim` отозвала
-`PUBLIC EXECUTE`; deploy-time grant connector role и runtime caller намеренно
-не добавлены, поэтому boundary остаётся default-closed. Fresh полный migration
-apply и реальные concurrent claim/reclaim/stale-head/cancel/credential/
-kill-switch проверки прошли на PostgreSQL 18. Это не доказывает production
-vault isolation: существующий validation worker/KEK canary пока требуют
-global read grants, а authorize/provider lifecycle отсутствуют.
+Migrations `20260730101500_rank_connector_execution_claim`,
+`20260730101700_rank_connector_submitting_enum` и
+`20260730101800_rank_connector_submit_authorization` отзывают `PUBLIC` и все
+legacy ACL приватного claim primitive. Deploy-time connector permissions
+выдают только exact public claim/authorize signatures без direct table DML.
+Fresh полный migration apply, upgrade-ACL и реальные concurrent claim/reclaim/
+authorize/replay/rollback/expiry/cancel/credential/control/`pg_temp` проверки
+прошли на PostgreSQL 18. Runtime caller и provider HTTP/result persistence ещё
+не подключены; live submit остаётся default-closed. Credential-validation
+broker уже исключает global vault read, но production role provisioning,
+cluster-wide ACL/`pg_hba` evidence остаются release gates.
 
 #### `rank_execution_manifests`
 

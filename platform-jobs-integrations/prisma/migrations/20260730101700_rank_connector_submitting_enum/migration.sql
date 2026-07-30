@@ -1,0 +1,2 @@
+ALTER TYPE "RankConnectorExecutionStatus"
+  ADD VALUE IF NOT EXISTS 'SUBMITTING';
