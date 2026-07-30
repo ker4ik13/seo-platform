@@ -309,6 +309,11 @@ Backend convention:
   allowlist response boundary: private/no-store и merge-safe Vary для всех
   остальных route/error paths, общие security headers и production HSTS
   только при effective HTTPS от ближайшего доверенного proxy hop;
+- `platform-jobs-integrations/src/internal/http-response-policy.ts` и
+  `platform-seo-data/src/internal/http-response-policy.ts` — fail-safe
+  private/no-store boundary для всех внутренних HTTP, parser/guard/error/404
+  ответов с merge-safe Vary и security headers; оба internal-only сервиса не
+  доверяют forwarded proxy headers;
 - `platform-api/src/identity/mfa.*`, `totp.*` — TOTP lifecycle, login
   challenge и recovery codes;
 - `platform-api/src/authorization` — default-deny permission catalog и

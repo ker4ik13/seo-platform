@@ -452,6 +452,12 @@ host firewall или egress proxy по provider DNS/hostname allowlist.
   parser/guard/exception и 404 responses всегда получают
   `Cache-Control: private, no-store` и объединённый
   `Vary: Authorization, Cookie, Origin` с preflight dimensions.
+- Jobs Integrations и SEO Data применяют ту же fail-safe границу ко всем
+  ответам без public allowlist: health, internal, parser/guard/error и 404
+  всегда `private, no-store`, а существующие cache/Vary headers нельзя
+  ослабить или потерять. Эти internal-only HTTP процессы не доверяют
+  `X-Forwarded-*`; proxy trust включается только для реально стоящего за
+  одним reverse proxy edge-сервиса.
 - Все Platform API responses получают `nosniff`, `DENY`/
   `frame-ancestors 'none'`, `no-referrer` и отключение ненужных browser
   capabilities. В production HSTS добавляется только когда effective
