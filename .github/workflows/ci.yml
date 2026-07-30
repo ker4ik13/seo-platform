@@ -36,6 +36,29 @@ jobs:
       - name: Enable pinned pnpm
         run: corepack enable
 
+      - name: Verify pinned Node.js and pnpm
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const manifest = require("./package.json");
+            const expectedNodeMajor = fs.readFileSync(".nvmrc", "utf8").trim();
+            const actualNodeMajor = process.versions.node.split(".")[0];
+            if (actualNodeMajor !== expectedNodeMajor) {
+              throw new Error(`Expected Node.js ${expectedNodeMajor}.x, got ${process.versions.node}`);
+            }
+            const packageManager = manifest.packageManager;
+            if (typeof packageManager !== "string" || !packageManager.startsWith("pnpm@")) {
+              throw new Error("package.json must pin pnpm via packageManager");
+            }
+            const expectedPnpm = packageManager.slice("pnpm@".length);
+            const actualPnpm = require("node:child_process")
+              .execFileSync("pnpm", ["--version"], { encoding: "utf8" })
+              .trim();
+            if (actualPnpm !== expectedPnpm) {
+              throw new Error(`Expected pnpm ${expectedPnpm}, got ${actualPnpm}`);
+            }
+          '
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -97,6 +120,29 @@ jobs:
 
       - name: Enable pinned pnpm
         run: corepack enable
+
+      - name: Verify pinned Node.js and pnpm
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const manifest = require("./package.json");
+            const expectedNodeMajor = fs.readFileSync(".nvmrc", "utf8").trim();
+            const actualNodeMajor = process.versions.node.split(".")[0];
+            if (actualNodeMajor !== expectedNodeMajor) {
+              throw new Error(`Expected Node.js ${expectedNodeMajor}.x, got ${process.versions.node}`);
+            }
+            const packageManager = manifest.packageManager;
+            if (typeof packageManager !== "string" || !packageManager.startsWith("pnpm@")) {
+              throw new Error("package.json must pin pnpm via packageManager");
+            }
+            const expectedPnpm = packageManager.slice("pnpm@".length);
+            const actualPnpm = require("node:child_process")
+              .execFileSync("pnpm", ["--version"], { encoding: "utf8" })
+              .trim();
+            if (actualPnpm !== expectedPnpm) {
+              throw new Error(`Expected pnpm ${expectedPnpm}, got ${actualPnpm}`);
+            }
+          '
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -161,6 +207,30 @@ jobs:
           DATABASE_URL: ${{ env.REALTIME_DATABASE_URL }}
         run: pnpm prisma:migrate:deploy
 
+      - name: Verify Platform API migration state
+        working-directory: platform-api
+        env:
+          DATABASE_URL: ${{ env.PLATFORM_API_DATABASE_URL }}
+        run: pnpm exec prisma migrate status
+
+      - name: Verify SEO Data migration state
+        working-directory: platform-seo-data
+        env:
+          DATABASE_URL: ${{ env.SEO_DATA_DATABASE_URL }}
+        run: pnpm exec prisma migrate status
+
+      - name: Verify Jobs migration state
+        working-directory: platform-jobs-integrations
+        env:
+          DATABASE_URL: ${{ env.JOBS_DATABASE_URL }}
+        run: pnpm exec prisma migrate status
+
+      - name: Verify Realtime migration state
+        working-directory: platform-realtime
+        env:
+          DATABASE_URL: ${{ env.REALTIME_DATABASE_URL }}
+        run: pnpm exec prisma migrate status
+
       - name: Run Platform API PostgreSQL races
         working-directory: platform-api
         env:
@@ -176,7 +246,23 @@ jobs:
           JOBS_RANK_SUBMIT_UPGRADE_TEST_DATABASE_URL: ${{ env.JOBS_UPGRADE_DATABASE_URL }}
         run: pnpm test
 
-      - name: Run connector-role PostgreSQL permission regression
+      - name: Install generated connector HBA policy
+        run: |
+          hba_path="$(
+            docker exec "${{ job.services.postgres.id }}" \
+              psql -v ON_ERROR_STOP=1 -At -U postgres -d postgres \
+              --command='SHOW hba_file'
+          )"
+          /bin/sh platform-infrastructure/postgres/config/start-postgres.sh \
+            --print-hba \
+            | docker exec -i "${{ job.services.postgres.id }}" \
+                sh -c 'cat > "$1"' sh "$hba_path"
+          docker exec "${{ job.services.postgres.id }}" \
+            psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
+            --command='SELECT pg_reload_conf()'
+
+      - name: Run connector-role and HBA PostgreSQL regression
         env:
           JOBS_CONNECTOR_PERMISSION_TEST_DATABASE_URL: ${{ env.JOBS_CONNECTOR_DATABASE_URL }}
+          JOBS_CONNECTOR_PERMISSION_TEST_EXPECT_HBA: "true"
         run: node --test platform-infrastructure/tests/jobs-connector-permissions-postgres.test.mjs
