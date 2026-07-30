@@ -13,6 +13,7 @@ test("loads explicit service configuration", () => {
   });
 
   assert.equal(config.nodeEnv, "test");
+  assert.equal(config.bindAddress, "127.0.0.1");
   assert.equal(config.port, 4100);
   assert.equal(config.services.seoData, "http://seo");
   assert.equal(config.outboxPublisher.enabled, false);
@@ -23,6 +24,37 @@ test("loads explicit service configuration", () => {
     transactionTimeoutMs: 10_000,
     lockTimeoutMs: 500
   });
+});
+
+test("uses only explicit loopback or container bind addresses", () => {
+  assert.equal(
+    loadAppConfig(
+      productionEnvironment({
+        OUTBOX_PUBLISHER_ENABLED: "true",
+        NATS_EVENT_ENVIRONMENT: "production",
+        NATS_EVENT_STREAM: "IDENTITY_EVENTS",
+        SESSION_EXPIRY_SWEEPER_ENABLED: "true"
+      })
+    ).bindAddress,
+    "0.0.0.0"
+  );
+  assert.equal(
+    loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      BIND_ADDRESS: "0.0.0.0"
+    }).bindAddress,
+    "0.0.0.0"
+  );
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        BIND_ADDRESS: "localhost"
+      }),
+    /BIND_ADDRESS must be 127\.0\.0\.1 or 0\.0\.0\.0/u
+  );
 });
 
 test("rejects an absent database URL", () => {
