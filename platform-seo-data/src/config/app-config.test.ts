@@ -9,7 +9,38 @@ test("uses the SEO service default port", () => {
   });
 
   assert.equal(config.port, 4001);
+  assert.equal(config.bindAddress, "127.0.0.1");
   assert.equal(config.nats.url, "nats://localhost:4222");
+});
+
+test("uses only explicit loopback or container bind addresses", () => {
+  const production = loadAppConfig({
+    NODE_ENV: "production",
+    DATABASE_URL: "postgresql://test",
+    PLATFORM_API_TO_SEO_DATA_TOKEN: "p".repeat(32),
+    JOBS_TO_SEO_DATA_TOKEN: "j".repeat(32),
+    JOBS_TO_SEO_RANK_TOKEN: "r".repeat(32),
+    JOBS_TO_SEO_RANK_RESULT_TOKEN: "d".repeat(32),
+    RANK_HISTORY_CURSOR_KEY: "c".repeat(32)
+  });
+  assert.equal(production.bindAddress, "0.0.0.0");
+  assert.equal(
+    loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      BIND_ADDRESS: "0.0.0.0"
+    }).bindAddress,
+    "0.0.0.0"
+  );
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        BIND_ADDRESS: "::"
+      }),
+    /BIND_ADDRESS must be 127\.0\.0\.1 or 0\.0\.0\.0/u
+  );
 });
 
 test("requires every inbound audience credential in production", () => {

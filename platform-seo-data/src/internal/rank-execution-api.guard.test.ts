@@ -41,6 +41,7 @@ test("fails closed when the rank execution secret is disabled", () => {
 function config(jobsToSeoRankToken?: string): AppConfig {
   return {
     nodeEnv: "test",
+    bindAddress: "127.0.0.1",
     port: 4001,
     version: "test",
     databaseUrl: "postgresql://test",

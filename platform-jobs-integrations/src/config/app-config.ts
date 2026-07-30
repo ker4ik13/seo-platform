@@ -55,6 +55,7 @@ export interface IntegrationCredentialEncryptionConfig {
 export interface AppConfig {
   readonly processRole: JobsProcessRole;
   readonly nodeEnv: "development" | "test" | "production";
+  readonly bindAddress: "127.0.0.1" | "0.0.0.0";
   readonly port: number;
   readonly version: string;
   readonly databaseUrl: string;
@@ -120,6 +121,18 @@ export interface SystemWorkerConfig {
   readonly nodeEnv: "development" | "test" | "production";
   readonly redisUrl: string;
   readonly concurrency: number;
+}
+
+function bindAddress(
+  value: string | undefined,
+  nodeEnv: AppConfig["nodeEnv"]
+): AppConfig["bindAddress"] {
+  const fallback = nodeEnv === "production" ? "0.0.0.0" : "127.0.0.1";
+  const address = value?.trim() || fallback;
+  if (address !== "127.0.0.1" && address !== "0.0.0.0") {
+    throw new Error("BIND_ADDRESS must be 127.0.0.1 or 0.0.0.0");
+  }
+  return address;
 }
 
 const SERVICE_TOKEN_ENVIRONMENT_VARIABLES = [
@@ -863,6 +876,10 @@ export function loadAppConfig(
   return {
     processRole,
     nodeEnv: nodeEnv as AppConfig["nodeEnv"],
+    bindAddress: bindAddress(
+      env.BIND_ADDRESS,
+      nodeEnv as AppConfig["nodeEnv"]
+    ),
     port: positiveInteger(env.PORT, 4002, "PORT"),
     version: optional(env, "SERVICE_VERSION") || "0.1.0",
     databaseUrl: required(env, "DATABASE_URL"),

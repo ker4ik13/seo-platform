@@ -17,6 +17,7 @@ test("keeps optional adapters disabled by default", () => {
   });
 
   assert.equal(config.s3.enabled, false);
+  assert.equal(config.bindAddress, "127.0.0.1");
   assert.equal(config.email.enabled, false);
   assert.equal(config.malwareScanner.enabled, false);
   assert.equal(config.integrationCredentials.enabled, false);
@@ -30,6 +31,26 @@ test("keeps optional adapters disabled by default", () => {
   assert.equal(
     config.rankExecution.killSwitchVersion,
     "arsenkin-positions@1"
+  );
+});
+
+test("uses only explicit loopback or container bind addresses", () => {
+  assert.equal(
+    loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      BIND_ADDRESS: "0.0.0.0"
+    }).bindAddress,
+    "0.0.0.0"
+  );
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        BIND_ADDRESS: "localhost"
+      }),
+    /BIND_ADDRESS must be 127\.0\.0\.1 or 0\.0\.0\.0/u
   );
 });
 

@@ -194,6 +194,7 @@ function configFixture(): AppConfig {
   return {
     processRole: "INSPECTION_WORKER",
     nodeEnv: "test",
+    bindAddress: "127.0.0.1",
     port: 4002,
     version: "test",
     databaseUrl: "postgresql://unused",

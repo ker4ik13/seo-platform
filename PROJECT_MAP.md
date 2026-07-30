@@ -596,7 +596,7 @@ Backend convention:
 - Web image получает обязательный `WEB_PUBLIC_URL` как
   `NEXT_PUBLIC_SITE_URL` до `next build`, чтобы canonical metadata, robots и
   sitemap не зависели от запоздалого runtime env;
-- Platform API и Realtime принимают только явный `BIND_ADDRESS` из
+- Platform API, SEO Data, Jobs HTTP и Realtime принимают только явный `BIND_ADDRESS` из
   `127.0.0.1|0.0.0.0`: local development по умолчанию остаётся на loopback,
   а Compose явно выбирает `0.0.0.0` только внутри изолированной container
   network. Realtime development origin совпадает с Web на

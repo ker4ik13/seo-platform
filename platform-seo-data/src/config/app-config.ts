@@ -1,5 +1,6 @@
 export interface AppConfig {
   readonly nodeEnv: "development" | "test" | "production";
+  readonly bindAddress: "127.0.0.1" | "0.0.0.0";
   readonly port: number;
   readonly version: string;
   readonly databaseUrl: string;
@@ -32,6 +33,18 @@ function positiveInteger(
     throw new Error(`${key} must be a positive integer`);
   }
   return parsed;
+}
+
+function bindAddress(
+  value: string | undefined,
+  nodeEnv: AppConfig["nodeEnv"]
+): AppConfig["bindAddress"] {
+  const fallback = nodeEnv === "production" ? "0.0.0.0" : "127.0.0.1";
+  const address = value?.trim() || fallback;
+  if (address !== "127.0.0.1" && address !== "0.0.0.0") {
+    throw new Error("BIND_ADDRESS must be 127.0.0.1 or 0.0.0.0");
+  }
+  return address;
 }
 
 function isPlaceholderSecret(value: string): boolean {
@@ -147,6 +160,10 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
 
   return {
     nodeEnv: nodeEnv as AppConfig["nodeEnv"],
+    bindAddress: bindAddress(
+      env.BIND_ADDRESS,
+      nodeEnv as AppConfig["nodeEnv"]
+    ),
     port: positiveInteger(env.PORT, 4001, "PORT"),
     version: env.SERVICE_VERSION?.trim() || "0.1.0",
     databaseUrl: required(env, "DATABASE_URL"),

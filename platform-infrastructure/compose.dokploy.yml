@@ -626,6 +626,7 @@ services:
         PACKAGE_NAME: "@seo-platform/seo-data"
     environment:
       <<: [*common-backend-env, *generic-nats-runtime-env]
+      BIND_ADDRESS: 0.0.0.0
       PORT: 4001
       DATABASE_URL: postgresql://seo_runtime:${SEO_DATABASE_PASSWORD:?SEO_DATABASE_PASSWORD is required}@postgres:5432/seo_db
       DATABASE_POOL_MAX: ${SEO_DATA_DATABASE_POOL_MAX:-30}
@@ -666,6 +667,7 @@ services:
         PACKAGE_NAME: "@seo-platform/jobs-integrations"
     environment:
       <<: [*common-backend-env, *generic-nats-runtime-env, *jobs-runtime-env, *jobs-s3-env, *jobs-upload-command-env, *jobs-seo-data-env, *jobs-email-env, *integration-credential-management-env]
+      BIND_ADDRESS: 0.0.0.0
       PORT: 4002
       DATABASE_POOL_MAX: ${JOBS_DATABASE_POOL_MAX:-30}
       REDIS_URL: redis://seo_jobs_api:${REDIS_JOBS_API_PASSWORD:?REDIS_JOBS_API_PASSWORD is required}@redis-jobs:6379

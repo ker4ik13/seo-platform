@@ -45,6 +45,7 @@ function config(
 ): AppConfig {
   return {
     nodeEnv: "test",
+    bindAddress: "127.0.0.1",
     port: 4001,
     version: "test",
     databaseUrl: "postgresql://test",

@@ -21,7 +21,7 @@ async function bootstrap(): Promise<void> {
 
   installPrivateHttpResponsePolicy(adapter.getInstance());
   app.enableShutdownHooks();
-  await app.listen(config.port, "0.0.0.0");
+  await app.listen(config.port, config.bindAddress);
 }
 
 void bootstrap();
