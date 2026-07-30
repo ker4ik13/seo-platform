@@ -16,6 +16,13 @@ test("loads explicit service configuration", () => {
   assert.equal(config.port, 4100);
   assert.equal(config.services.seoData, "http://seo");
   assert.equal(config.outboxPublisher.enabled, false);
+  assert.deepEqual(config.sessionExpirySweeper, {
+    enabled: false,
+    intervalMs: 60_000,
+    batchSize: 50,
+    transactionTimeoutMs: 10_000,
+    lockTimeoutMs: 500
+  });
 });
 
 test("rejects an absent database URL", () => {
@@ -251,6 +258,80 @@ test("requires the outbox publisher to be explicitly enabled in production", () 
   assert.throws(() => loadAppConfig(productionEnvironment()), {
     message: "OUTBOX_PUBLISHER_ENABLED=true is required in production"
   });
+});
+
+test("requires the session expiry sweeper to be explicitly enabled in production", () => {
+  const productionWithPublisher = productionEnvironment({
+    OUTBOX_PUBLISHER_ENABLED: "true",
+    NATS_EVENT_ENVIRONMENT: "production",
+    NATS_EVENT_STREAM: "IDENTITY_EVENTS"
+  });
+
+  assert.throws(() => loadAppConfig(productionWithPublisher), {
+    message:
+      "SESSION_EXPIRY_SWEEPER_ENABLED=true is required in production"
+  });
+  assert.throws(
+    () =>
+      loadAppConfig({
+        ...productionWithPublisher,
+        SESSION_EXPIRY_SWEEPER_ENABLED: "false"
+      }),
+    {
+      message:
+        "SESSION_EXPIRY_SWEEPER_ENABLED=true is required in production"
+    }
+  );
+
+  const config = loadAppConfig({
+    ...productionWithPublisher,
+    SESSION_EXPIRY_SWEEPER_ENABLED: "true"
+  });
+  assert.equal(config.sessionExpirySweeper.enabled, true);
+});
+
+test("enforces bounded session expiry polling and database waits", () => {
+  const invalidValues = [
+    ["SESSION_EXPIRY_SWEEPER_INTERVAL_MS", "999"],
+    ["SESSION_EXPIRY_SWEEPER_INTERVAL_MS", "3600001"],
+    ["SESSION_EXPIRY_SWEEPER_BATCH_SIZE", "0"],
+    ["SESSION_EXPIRY_SWEEPER_BATCH_SIZE", "101"],
+    ["SESSION_EXPIRY_SWEEPER_TRANSACTION_TIMEOUT_MS", "999"],
+    ["SESSION_EXPIRY_SWEEPER_TRANSACTION_TIMEOUT_MS", "60001"],
+    ["SESSION_EXPIRY_SWEEPER_LOCK_TIMEOUT_MS", "49"],
+    ["SESSION_EXPIRY_SWEEPER_LOCK_TIMEOUT_MS", "5001"]
+  ] as const;
+  for (const [key, value] of invalidValues) {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          [key]: value
+        }),
+      new RegExp(key, "u")
+    );
+  }
+
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        SESSION_EXPIRY_SWEEPER_TRANSACTION_TIMEOUT_MS: "1000",
+        SESSION_EXPIRY_SWEEPER_LOCK_TIMEOUT_MS: "1000"
+      }),
+    /SESSION_EXPIRY_SWEEPER_LOCK_TIMEOUT_MS must be less/u
+  );
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        SESSION_EXPIRY_SWEEPER_ENABLED: "sometimes"
+      }),
+    /SESSION_EXPIRY_SWEEPER_ENABLED must be true or false/u
+  );
 });
 
 test("requires exact JetStream routing when the outbox publisher is enabled", () => {

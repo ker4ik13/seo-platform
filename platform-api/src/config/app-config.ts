@@ -31,6 +31,13 @@ export interface AppConfig {
     readonly retryMaxMs: number;
     readonly publishTimeoutMs: number;
   };
+  readonly sessionExpirySweeper: {
+    readonly enabled: boolean;
+    readonly intervalMs: number;
+    readonly batchSize: number;
+    readonly transactionTimeoutMs: number;
+    readonly lockTimeoutMs: number;
+  };
   readonly services: {
     readonly seoData: string;
     readonly jobs: string;
@@ -192,6 +199,25 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     100,
     3_600_000
   );
+  const sessionExpirySweeperEnabled = booleanValue(
+    env.SESSION_EXPIRY_SWEEPER_ENABLED,
+    false,
+    "SESSION_EXPIRY_SWEEPER_ENABLED"
+  );
+  const sessionExpiryTransactionTimeoutMs = integerInRange(
+    env.SESSION_EXPIRY_SWEEPER_TRANSACTION_TIMEOUT_MS,
+    10_000,
+    "SESSION_EXPIRY_SWEEPER_TRANSACTION_TIMEOUT_MS",
+    1_000,
+    60_000
+  );
+  const sessionExpiryLockTimeoutMs = integerInRange(
+    env.SESSION_EXPIRY_SWEEPER_LOCK_TIMEOUT_MS,
+    500,
+    "SESSION_EXPIRY_SWEEPER_LOCK_TIMEOUT_MS",
+    50,
+    5_000
+  );
 
   if (!["development", "test", "production"].includes(nodeEnv)) {
     throw new Error("NODE_ENV must be development, test or production");
@@ -210,6 +236,11 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (outboxRetryMaxMs < outboxRetryBaseMs) {
     throw new Error(
       "OUTBOX_PUBLISH_RETRY_MAX_MS must be greater than or equal to OUTBOX_PUBLISH_RETRY_BASE_MS"
+    );
+  }
+  if (sessionExpiryLockTimeoutMs >= sessionExpiryTransactionTimeoutMs) {
+    throw new Error(
+      "SESSION_EXPIRY_SWEEPER_LOCK_TIMEOUT_MS must be less than SESSION_EXPIRY_SWEEPER_TRANSACTION_TIMEOUT_MS"
     );
   }
 
@@ -322,6 +353,11 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (nodeEnv === "production" && !outboxPublisherEnabled) {
     throw new Error("OUTBOX_PUBLISHER_ENABLED=true is required in production");
   }
+  if (nodeEnv === "production" && !sessionExpirySweeperEnabled) {
+    throw new Error(
+      "SESSION_EXPIRY_SWEEPER_ENABLED=true is required in production"
+    );
+  }
 
   return {
     nodeEnv: nodeEnv as AppConfig["nodeEnv"],
@@ -398,6 +434,25 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         100,
         30_000
       )
+    },
+    sessionExpirySweeper: {
+      enabled: sessionExpirySweeperEnabled,
+      intervalMs: integerInRange(
+        env.SESSION_EXPIRY_SWEEPER_INTERVAL_MS,
+        60_000,
+        "SESSION_EXPIRY_SWEEPER_INTERVAL_MS",
+        1_000,
+        3_600_000
+      ),
+      batchSize: integerInRange(
+        env.SESSION_EXPIRY_SWEEPER_BATCH_SIZE,
+        50,
+        "SESSION_EXPIRY_SWEEPER_BATCH_SIZE",
+        1,
+        100
+      ),
+      transactionTimeoutMs: sessionExpiryTransactionTimeoutMs,
+      lockTimeoutMs: sessionExpiryLockTimeoutMs
     },
     services: {
       seoData:
