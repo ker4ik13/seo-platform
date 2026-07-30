@@ -18,6 +18,9 @@
    обязательные placeholders (`replace-me`, `replace-with-*`), URL и версии
    юридических документов. Пустые обязательные service secrets нужно
    сгенерировать отдельно; копировать примеры как реальные секреты запрещено.
+   Пароли PostgreSQL для bootstrap administrator, четырёх migration owners,
+   четырёх runtime roles, Directus и connector должны быть независимыми,
+   URL-safe и длиной не менее 32 символов.
    Отдельно обязательно задать `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`,
    `JOBS_TO_SEO_RANK_TOKEN`, `JOBS_TO_SEO_RANK_RESULT_TOKEN` и
    `RANK_HISTORY_CURSOR_KEY`: grant, result и cursor secrets намеренно
@@ -28,7 +31,9 @@
 4. Привязать основной домен к `web:3000`, а нужные технические домены — к
    `platform-api:4000`, `realtime:4003` и `directus:8055`. Не создавать
    domain/route/port binding для `admin:3002`.
-5. Развернуть compose. Migration services завершаются до запуска приложений.
+5. Развернуть compose. Role bootstrap завершается до migrations, migrations —
+   до post-migration grants, а application processes стартуют только после
+   успешного privilege provisioning.
 
 ## Web build-time public URL
 
@@ -191,6 +196,89 @@ exception messages, queue/event payloads или диагностические a
 проверки конфигурации используется только `docker compose ... config --quiet`;
 полный rendered config нельзя печатать в CI logs или прикладывать к incident.
 
+## PostgreSQL service roles и ownership rollout
+
+`POSTGRES_USER` является только cluster bootstrap administrator. Его пароль не
+передаётся migrations или application processes. Compose использует
+фиксированное отображение:
+
+| Database | Migration owner | Application runtime |
+|---|---|---|
+| `platform_db` | `platform_owner` | `platform_runtime` |
+| `seo_db` | `seo_owner` | `seo_runtime` |
+| `jobs_db` | `jobs_owner` | `jobs_runtime` |
+| `realtime_db` | `realtime_owner` | `realtime_runtime` |
+
+Одноразовый `service-database-roles` создаёт эти роли без superuser,
+`CREATEDB`, `CREATEROLE`, inheritance, replication, `BYPASSRLS` и membership,
+устанавливает SCRAM verifiers через stdin и закрепляет каждую database за её
+canonical owner. Затем Prisma выполняется только owner-ролью. Отдельные
+`*-runtime-db-permissions` после migrations выдают runtime только `CONNECT`,
+`USAGE`, обычный CRUD без `TRUNCATE` и sequence usage в собственной database;
+`_prisma_migrations`, DDL, extensions, роли и чужие databases недоступны.
+Default privileges владельца сохраняют эту границу для будущих tables и
+sequences, а будущие routines остаются private до внесения в точный allowlist.
+
+`pg_trgm` является trusted extension, но его member functions в PostgreSQL
+остаются принадлежащими bootstrap superuser. Поэтому
+`seo-extension-db-permissions` — отдельный audited superuser one-shot: он
+принимает только extension `pg_trgm`, отзывает `PUBLIC EXECUTE` и выдаёт exact
+extension-function access только `seo_runtime`. Расширять этот allowlist без
+review запрещено.
+
+Directus сейчас самостоятельно применяет собственные schema migrations при
+старте. Для `directus_db` поэтому используется явно названное исключение
+`directus_runtime_owner`: одна combined owner/runtime роль может выполнять DDL
+только в `directus_db`, не имеет membership или cluster privileges и не может
+подключиться к service databases. После появления отдельного поддерживаемого
+Directus migration/snapshot deploy step исключение должно быть разделено на
+owner/runtime тем же способом.
+
+Generated first-match HBA сначала разрешает каждой canonical owner/runtime
+role только её точную database по SCRAM, затем отклоняет replication, любую
+другую database и stale family names до общих правил. Та же модель действует
+для `directus_runtime_owner` и `jobs_connector`. Это закрывает обход через
+оставшийся в соседней database `PUBLIC CONNECT`; provisioning дополнительно
+отзывает `PUBLIC` database/schema/object/default privileges в принадлежащей
+сервису границе. Для PostgreSQL между VPS всё равно обязательны TLS и точный
+source CIDR либо отдельный managed-cluster policy.
+
+### Существующий PostgreSQL volume
+
+Автоматически передаётся ownership только пустой legacy database. Если в ней
+уже есть objects старого bootstrap owner, `service-database-roles` намеренно
+останавливается: безопасно угадать происхождение всех объектов невозможно.
+Rollout выполняется так:
+
+1. остановить writers, сделать backup и подтвердить restore на отдельном
+   PostgreSQL 18;
+2. инвентаризировать database/schema/table/sequence/view/type/routine/
+   extension owners, grants, default ACL и активные sessions отдельно для
+   каждой из пяти databases;
+3. на восстановленной копии подготовить и проверить явный object-by-object
+   ownership handoff к canonical owner; не запускать широкий
+   `REASSIGN OWNED` от общего bootstrap user без отдельного review;
+4. повторить backup/check, применить утверждённый handoff в maintenance window,
+   затем запустить role bootstrap → migrations → runtime/connector grants;
+5. проверить `pg_hba_file_rules`, отсутствие membership/чужого ownership и
+   реальные login smoke: своя database разрешена, соседняя и replication
+   отклонены; только после этого возобновлять writers.
+
+Fresh PostgreSQL 18 regression
+`tests/service-database-role-isolation-postgres.test.mjs` применяет все 37
+Prisma migrations, проверяет runtime CRUD, UUIDv7 и constraint routines, а
+также отрицательные DDL/`_prisma_migrations`/cross-database/replication/
+membership/ownership/`PUBLIC` сценарии, Directus exception и connector exact
+allowlist. Тест разрешено запускать только на disposable fresh cluster:
+
+```sh
+SERVICE_DATABASE_ROLE_TEST_ADMIN_URL='postgresql://ADMIN:PASSWORD@HOST:PORT/postgres' \
+  pnpm infra:test
+```
+
+Тест удаляет созданные canonical databases/roles при cleanup; production или
+shared cluster в эту переменную передавать запрещено.
+
 ## BYOK vault и ротация ключей
 
 `INTEGRATION_CREDENTIAL_KEYS` — отдельный от auth версионируемый набор
@@ -268,12 +356,10 @@ allowlisted functions.
 
 Compose запускает PostgreSQL через
 `postgres/config/start-postgres.sh`. Он fail-closed принимает только canonical
-`jobs_connector`, запрещает совпадение с `POSTGRES_USER` и до official entrypoint
-генерирует first-match HBA: local/host `jobs_db + connector → scram-sha-256`,
-затем regex всей family `jobs_connector(_...)` отклоняет replication/all
-databases, и только затем идут общие правила. Поэтому старое family-имя и
-смена database в DSN не обходят boundary даже при оставшемся в соседней
-database `PUBLIC CONNECT`; ACL соседних сервисов не меняются.
+service и connector names, запрещает их совпадение с `POSTGRES_USER` и до
+official entrypoint генерирует описанный выше first-match HBA. Поэтому старое
+family-имя и смена database в DSN не обходят boundary даже при оставшемся в
+соседней database `PUBLIC CONNECT`; ACL соседних сервисов не меняются.
 
 Остаточные ограничения точны: текущий Compose использует `host`, а не
 `hostssl`, и address `all`, потому что transport ограничен internal Docker
@@ -305,8 +391,9 @@ direct grant. Широкий vault/table read grant больше не являе
 cluster обязан быть одноразовым, потому что тест создаёт и удаляет canonical
 role и synthetic stale family-role.
 `connector-worker` запускается
-только после его успешного завершения. HTTP-процесс и migration продолжают
-использовать основную роль сервиса, а execution worker не получает её пароль.
+только после его успешного завершения. Jobs HTTP/workers используют
+`jobs_runtime`, migrations — `jobs_owner`, а execution worker не получает ни
+один из этих паролей.
 После каждой migration проверяется diff требуемых worker-запросов: добавлять
 широкие `ALL TABLES`, разрешающие `PUBLIC` default privileges или права
 изменения ciphertext запрещено.
@@ -424,9 +511,9 @@ tool с security review; текущая сборка такого инструм
 а состояние Prisma migration восстанавливается через `prisma migrate resolve`
 только после документированного recovery review.
 
-PostgreSQL, Redis и NATS не публикуют порты наружу. В production рекомендуется
-разделить credentials баз данных по сервисам; один кластер на старте сохраняет
-изоляцию databases без лишней эксплуатационной нагрузки.
+PostgreSQL, Redis и NATS не публикуют порты наружу. Credentials database
+owners, runtimes, Directus и connector уже разделены; один cluster на старте
+сохраняет изоляцию databases через role ACL и first-match HBA.
 
 Jobs runtime processes подключены одновременно к изолированной сети
 `internal` и отдельной непубликуемой сети `outbound`. Она нужна для S3, SMTP и

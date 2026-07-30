@@ -20,7 +20,7 @@ x-common-backend-env: &common-backend-env
   INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:?INTERNAL_API_TOKEN is required}
 
 x-jobs-env: &jobs-env
-  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/jobs_db
+  DATABASE_URL: postgresql://jobs_runtime:${JOBS_DATABASE_PASSWORD:?JOBS_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
   REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
   SEO_DATA_COMMAND_TIMEOUT_MS: ${SEO_DATA_COMMAND_TIMEOUT_MS:-60000}
   SEO_DATA_URL: http://seo-data:4001
@@ -77,6 +77,21 @@ x-integration-credential-execution-env: &integration-credential-execution-env
   INTEGRATION_CREDENTIAL_KEYS: ${INTEGRATION_CREDENTIAL_KEYS:?INTEGRATION_CREDENTIAL_KEYS is required}
   INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: ${INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION:?INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION is required}
 
+x-service-runtime-permission-defaults: &service-runtime-permission-defaults
+  image: postgres:18.3-alpine3.23
+  restart: "no"
+  init: true
+  command:
+    [
+      "/bin/sh",
+      "/permissions/provision-service-runtime-role.sh"
+    ]
+  volumes:
+    - ./postgres/permissions/service-runtime.sql:/permissions/service-runtime.sql:ro
+    - ./postgres/permissions/provision-service-runtime-role.sh:/permissions/provision-service-runtime-role.sh:ro
+  networks:
+    - internal
+
 services:
   postgres:
     image: postgres:18.3-alpine3.23
@@ -107,6 +122,38 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+
+  service-database-roles:
+    image: postgres:18.3-alpine3.23
+    restart: "no"
+    init: true
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: postgres
+      PGUSER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      PLATFORM_DATABASE_OWNER_PASSWORD: ${PLATFORM_DATABASE_OWNER_PASSWORD:?PLATFORM_DATABASE_OWNER_PASSWORD is required}
+      PLATFORM_DATABASE_PASSWORD: ${PLATFORM_DATABASE_PASSWORD:?PLATFORM_DATABASE_PASSWORD is required}
+      SEO_DATABASE_OWNER_PASSWORD: ${SEO_DATABASE_OWNER_PASSWORD:?SEO_DATABASE_OWNER_PASSWORD is required}
+      SEO_DATABASE_PASSWORD: ${SEO_DATABASE_PASSWORD:?SEO_DATABASE_PASSWORD is required}
+      JOBS_DATABASE_OWNER_PASSWORD: ${JOBS_DATABASE_OWNER_PASSWORD:?JOBS_DATABASE_OWNER_PASSWORD is required}
+      JOBS_DATABASE_PASSWORD: ${JOBS_DATABASE_PASSWORD:?JOBS_DATABASE_PASSWORD is required}
+      REALTIME_DATABASE_OWNER_PASSWORD: ${REALTIME_DATABASE_OWNER_PASSWORD:?REALTIME_DATABASE_OWNER_PASSWORD is required}
+      REALTIME_DATABASE_PASSWORD: ${REALTIME_DATABASE_PASSWORD:?REALTIME_DATABASE_PASSWORD is required}
+      DIRECTUS_DATABASE_PASSWORD: ${DIRECTUS_DATABASE_PASSWORD:?DIRECTUS_DATABASE_PASSWORD is required}
+    command:
+      [
+        "/bin/sh",
+        "/database-roles/provision-service-database-roles.sh"
+      ]
+    volumes:
+      - ./postgres/roles:/database-roles:ro
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   redis:
     image: redis:8-alpine
@@ -190,8 +237,10 @@ services:
       args:
         PACKAGE_NAME: "@seo-platform/platform-api"
     environment:
-      <<: *common-backend-env
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/platform_db
+      DATABASE_URL: postgresql://platform_owner:${PLATFORM_DATABASE_OWNER_PASSWORD:?PLATFORM_DATABASE_OWNER_PASSWORD is required}@postgres:5432/platform_db
+    depends_on:
+      service-database-roles:
+        condition: service_completed_successfully
 
   seo-data-migrate:
     <<: *backend-defaults
@@ -203,8 +252,34 @@ services:
       args:
         PACKAGE_NAME: "@seo-platform/seo-data"
     environment:
-      <<: *common-backend-env
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/seo_db
+      DATABASE_URL: postgresql://seo_owner:${SEO_DATABASE_OWNER_PASSWORD:?SEO_DATABASE_OWNER_PASSWORD is required}@postgres:5432/seo_db
+    depends_on:
+      service-database-roles:
+        condition: service_completed_successfully
+
+  seo-extension-db-permissions:
+    image: postgres:18.3-alpine3.23
+    restart: "no"
+    init: true
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: seo_db
+      PGUSER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    command:
+      [
+        "psql",
+        "--no-psqlrc",
+        "--file=/permissions/seo-extension-runtime.sql"
+      ]
+    volumes:
+      - ./postgres/permissions/seo-extension-runtime.sql:/permissions/seo-extension-runtime.sql:ro
+    networks:
+      - internal
+    depends_on:
+      seo-data-migrate:
+        condition: service_completed_successfully
 
   jobs-integrations-migrate:
     <<: *backend-defaults
@@ -216,8 +291,46 @@ services:
       args:
         PACKAGE_NAME: "@seo-platform/jobs-integrations"
     environment:
-      <<: *common-backend-env
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/jobs_db
+      DATABASE_URL: postgresql://jobs_owner:${JOBS_DATABASE_OWNER_PASSWORD:?JOBS_DATABASE_OWNER_PASSWORD is required}@postgres:5432/jobs_db
+    depends_on:
+      service-database-roles:
+        condition: service_completed_successfully
+
+  platform-runtime-db-permissions:
+    <<: *service-runtime-permission-defaults
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: platform_db
+      PGUSER: platform_owner
+      PGPASSWORD: ${PLATFORM_DATABASE_OWNER_PASSWORD:?PLATFORM_DATABASE_OWNER_PASSWORD is required}
+    depends_on:
+      platform-api-migrate:
+        condition: service_completed_successfully
+
+  seo-runtime-db-permissions:
+    <<: *service-runtime-permission-defaults
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: seo_db
+      PGUSER: seo_owner
+      PGPASSWORD: ${SEO_DATABASE_OWNER_PASSWORD:?SEO_DATABASE_OWNER_PASSWORD is required}
+    depends_on:
+      seo-extension-db-permissions:
+        condition: service_completed_successfully
+
+  jobs-runtime-db-permissions:
+    <<: *service-runtime-permission-defaults
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: jobs_db
+      PGUSER: jobs_owner
+      PGPASSWORD: ${JOBS_DATABASE_OWNER_PASSWORD:?JOBS_DATABASE_OWNER_PASSWORD is required}
+    depends_on:
+      jobs-integrations-migrate:
+        condition: service_completed_successfully
 
   jobs-connector-db-permissions:
     image: postgres:18.3-alpine3.23
@@ -242,7 +355,7 @@ services:
     networks:
       - internal
     depends_on:
-      jobs-integrations-migrate:
+      jobs-runtime-db-permissions:
         condition: service_completed_successfully
 
   realtime-migrate:
@@ -255,8 +368,22 @@ services:
       args:
         PACKAGE_NAME: "@seo-platform/realtime"
     environment:
-      <<: *common-backend-env
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/realtime_db
+      DATABASE_URL: postgresql://realtime_owner:${REALTIME_DATABASE_OWNER_PASSWORD:?REALTIME_DATABASE_OWNER_PASSWORD is required}@postgres:5432/realtime_db
+    depends_on:
+      service-database-roles:
+        condition: service_completed_successfully
+
+  realtime-runtime-db-permissions:
+    <<: *service-runtime-permission-defaults
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: realtime_db
+      PGUSER: realtime_owner
+      PGPASSWORD: ${REALTIME_DATABASE_OWNER_PASSWORD:?REALTIME_DATABASE_OWNER_PASSWORD is required}
+    depends_on:
+      realtime-migrate:
+        condition: service_completed_successfully
 
   platform-api:
     <<: *backend-defaults
@@ -269,7 +396,7 @@ services:
     environment:
       <<: *common-backend-env
       PORT: 4000
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/platform_db
+      DATABASE_URL: postgresql://platform_runtime:${PLATFORM_DATABASE_PASSWORD:?PLATFORM_DATABASE_PASSWORD is required}@postgres:5432/platform_db
       DATABASE_POOL_MAX: ${PLATFORM_API_DATABASE_POOL_MAX:-20}
       SEO_DATA_INTERNAL_URL: http://seo-data:4001
       JOBS_INTERNAL_URL: http://jobs-integrations:4002
@@ -301,7 +428,7 @@ services:
       - internal
       - edge
     depends_on:
-      platform-api-migrate:
+      platform-runtime-db-permissions:
         condition: service_completed_successfully
       nats:
         condition: service_healthy
@@ -329,7 +456,7 @@ services:
     environment:
       <<: *common-backend-env
       PORT: 4001
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/seo_db
+      DATABASE_URL: postgresql://seo_runtime:${SEO_DATABASE_PASSWORD:?SEO_DATABASE_PASSWORD is required}@postgres:5432/seo_db
       DATABASE_POOL_MAX: ${SEO_DATA_DATABASE_POOL_MAX:-30}
       JOBS_TO_SEO_RANK_TOKEN: ${JOBS_TO_SEO_RANK_TOKEN:?JOBS_TO_SEO_RANK_TOKEN is required}
       JOBS_TO_SEO_RANK_RESULT_TOKEN: ${JOBS_TO_SEO_RANK_RESULT_TOKEN:?JOBS_TO_SEO_RANK_RESULT_TOKEN is required}
@@ -337,7 +464,7 @@ services:
     expose:
       - "4001"
     depends_on:
-      seo-data-migrate:
+      seo-runtime-db-permissions:
         condition: service_completed_successfully
       nats:
         condition: service_healthy
@@ -372,7 +499,7 @@ services:
       - internal
       - outbound
     depends_on:
-      jobs-integrations-migrate:
+      jobs-runtime-db-permissions:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -407,7 +534,7 @@ services:
       - internal
       - outbound
     depends_on:
-      jobs-integrations-migrate:
+      jobs-runtime-db-permissions:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -435,7 +562,7 @@ services:
       - internal
       - outbound
     depends_on:
-      jobs-integrations-migrate:
+      jobs-runtime-db-permissions:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -458,7 +585,7 @@ services:
       - internal
       - outbound
     depends_on:
-      jobs-integrations-migrate:
+      jobs-runtime-db-permissions:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -473,7 +600,7 @@ services:
         PACKAGE_NAME: "@seo-platform/jobs-integrations"
     command: ["node", "dist/rank-worker.main.js"]
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/jobs_db
+      DATABASE_URL: postgresql://jobs_runtime:${JOBS_DATABASE_PASSWORD:?JOBS_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
       DATABASE_POOL_MAX: ${JOBS_RANK_DATABASE_POOL_MAX:-10}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       PLATFORM_API_URL: http://platform-api:4000
@@ -495,7 +622,7 @@ services:
     networks:
       - internal
     depends_on:
-      jobs-integrations-migrate:
+      jobs-runtime-db-permissions:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -554,7 +681,7 @@ services:
     environment:
       <<: *common-backend-env
       PORT: 4003
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/realtime_db
+      DATABASE_URL: postgresql://realtime_runtime:${REALTIME_DATABASE_PASSWORD:?REALTIME_DATABASE_PASSWORD is required}@postgres:5432/realtime_db
       DATABASE_POOL_MAX: ${REALTIME_DATABASE_POOL_MAX:-20}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
       WEB_ORIGINS: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required}
@@ -574,7 +701,7 @@ services:
       - internal
       - edge
     depends_on:
-      realtime-migrate:
+      realtime-runtime-db-permissions:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -661,8 +788,8 @@ services:
       DB_HOST: postgres
       DB_PORT: 5432
       DB_DATABASE: directus_db
-      DB_USER: ${POSTGRES_USER}
-      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_USER: directus_runtime_owner
+      DB_PASSWORD: ${DIRECTUS_DATABASE_PASSWORD:?DIRECTUS_DATABASE_PASSWORD is required}
       CACHE_ENABLED: "true"
       CACHE_STORE: redis
       REDIS: redis://:${REDIS_PASSWORD}@redis:6379/1
@@ -691,8 +818,8 @@ services:
       - internal
       - edge
     depends_on:
-      postgres:
-        condition: service_healthy
+      service-database-roles:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
     healthcheck:

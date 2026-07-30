@@ -501,23 +501,29 @@ Backend convention:
   `RANK_HISTORY_CURSOR_KEY` только для `seo-data`; regression test запрещает
   их случайную выдачу остальным runtime processes;
 - `platform-infrastructure/postgres/init` — создание service databases;
+- `platform-infrastructure/postgres/roles` — fail-closed cluster bootstrap
+  canonical `platform/seo/jobs/realtime` migration-owner и runtime roles,
+  SCRAM password provisioning через stdin, безопасная передача только пустых
+  legacy databases и cluster-wide ownership/membership/ACL audit;
 - `platform-infrastructure/postgres/config/start-postgres.sh` — generated
-  first-match HBA для connector login: SCRAM разрешён только в `jobs_db`,
-  replication и остальные databases отклоняются до общих local/host rules;
+  first-match HBA для всех canonical owner/runtime, Directus и connector
+  logins: SCRAM разрешён только в exact собственной database, replication,
+  соседние databases и stale family names отклоняются до общих local/host
+  rules;
 - `platform-infrastructure/postgres/permissions` — идемпотентные fail-closed
-  grants внутри `jobs_db` после migrations; provisioning wrapper создаёт SCRAM
-  verifier через stdin без password SQL literal/child environment, а grant DDL
-  создаёт/ужесточает connector DB role и отклоняет обе стороны membership edge
-  и ownership объектов кластера. Прямые table, sequence и произвольные function
-  privileges отсутствуют; connector получает только exact `EXECUTE` allowlist
-  credential-validation broker, rank claim и pre-network authorize. DDL
-  транзакционно отзывает database/schema/object `PUBLIC` privileges,
-  проверяет единого Prisma/public-routine owner, global + schema-scoped
-  defaults и `ALL ROUTINES`. `pg_shdepend/pg_database` отклоняет direct ACL
-  вне exact allowlist/в других databases, а current-catalog audit — любое
-  effective `PUBLIC CREATE/USAGE` в non-system schema. SQL не меняет ACL
-  соседних сервисов; cross-DB PUBLIC CONNECT закрывает generated HBA. Target
-  environment всё равно требует проверки фактического HBA order и login smoke.
+  post-migration grants. `service-runtime.sql` проверяет canonical database/
+  schema/object owner, запрещает runtime membership/ownership и выдаёт только
+  CRUD без `_prisma_migrations`/`TRUNCATE`, sequence use и точные routines;
+  default ACL сохраняют правило для будущих объектов. Отдельный audited
+  `seo-extension-runtime.sql` закрывает `PUBLIC` у member functions exact
+  `pg_trgm` и открывает их только `seo_runtime`. Connector DDL создаёт/
+  ужесточает `jobs_connector`, отклоняет обе стороны membership edge,
+  cluster ownership/чужой ACL и выдаёт только exact `EXECUTE` allowlist
+  credential-validation broker, rank claim и pre-network authorize. Directus
+  имеет документированное combined owner/runtime исключение
+  `directus_runtime_owner` только для `directus_db`. Target environment всё
+  равно требует проверки фактического HBA order/login smoke, а непустой legacy
+  volume — reviewed object-by-object ownership handoff.
 
 Entrypoints:
 
@@ -535,6 +541,11 @@ Entrypoints:
   `platform-infrastructure/postgres/permissions/provision-jobs-connector-role.sh`
   + `jobs-connector.sql`, one-shot Compose service
   `jobs-connector-db-permissions`;
+- service DB role bootstrap и runtime permission init:
+  `platform-infrastructure/postgres/roles/provision-service-database-roles.sh`
+  + `platform-infrastructure/postgres/permissions/provision-service-runtime-role.sh`,
+  one-shot Compose services `service-database-roles` и
+  `*-runtime-db-permissions`;
 - Next.js: App Router соответствующего frontend-пакета;
 - remote stack: `platform-infrastructure/compose.dokploy.yml`.
 
@@ -873,7 +884,14 @@ caller, connector submission/status и normalized result producer ещё не
 - Realtime unit tests: 50 pass, 0 fail.
 - Contracts unit tests: 64 pass, 0 fail.
 - Unified Web helper tests: 101 pass, 0 fail.
-- Infrastructure static tests: 13 pass, 0 fail.
+- Infrastructure DB-role/connector и затронутый rank dependency targeted
+  scope: 9 pass, 0 fail; PostgreSQL regressions остаются opt-in в обычном
+  запуске.
+- Отдельный fresh PostgreSQL 18 service-role proof: pass; применены 37 Prisma
+  migrations четырёх сервисов, подтверждены runtime CRUD/UUIDv7/constraints,
+  запреты DDL/`_prisma_migrations`/`TRUNCATE`/membership/ownership/
+  cross-database/replication/`PUBLIC` bypass, Directus exception, exact
+  connector grants и реальный first-match HBA login/reject.
 - Полный root `pnpm test` после startup-canary и scoped claim: pass без
   failures; обычный запуск безопасно пропускает opt-in disposable-DB tests.
   Отдельный fresh PostgreSQL 18 gate для Jobs grant/claim: 4/4 pass.
@@ -1152,7 +1170,8 @@ durable-доставка не реализована. OAuth/OIDC выполня�
   `SUBMITTING`/authorize migrations прошли fresh full-chain apply на
   PostgreSQL 18. Grant/consume, claim/reclaim/stale-head/drift, authorize/
   replay/rollback/expiry, upgrade ACL и exact non-owner permission regressions
-  пройдены. Production environment provisioning/cluster audit остаются gate.
+  пройдены. Fresh cluster service-role provisioning/audit также пройден;
+  target-environment HBA order/login smoke остаётся deploy gate.
 - Issuer receipt и Jobs-owned `CONSUMED/READY_TO_SUBMIT` сами не авторизуют
   provider call. Claim создаёт bounded pre-network lease, а authorize только
   после full Job/cancel/credential/grant/control/fence recheck commit-ит

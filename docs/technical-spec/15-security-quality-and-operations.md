@@ -270,6 +270,38 @@
   `INVALID_RESPONSE`, не преобразуется эвристически в rank snapshots и не
   попадает в публичные ошибки, логи или events.
 
+### 8.3. PostgreSQL service credentials
+
+- `POSTGRES_USER` используется только как cluster bootstrap administrator и
+  не передаётся migrations/application runtimes. Каждая из `platform_db`,
+  `seo_db`, `jobs_db`, `realtime_db` имеет отдельные canonical migration owner
+  и runtime LOGIN-role с независимыми SCRAM secrets.
+- Service roles обязаны быть `NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT
+  NOREPLICATION NOBYPASSRLS`, без membership edges и cross-database ownership/
+  ACL. Runtime не владеет объектами и не получает `CREATE`, `TRUNCATE`,
+  extension/role management или доступ к `_prisma_migrations`.
+- Deploy order фиксирован: audited role/database bootstrap → owner-only Prisma
+  migration → extension ACL hardening → owner-run runtime grants → connector
+  grants → application startup. Пароли не помещаются в SQL literals, argv или
+  logs; SCRAM verifier устанавливается через stdin.
+- `PUBLIC CONNECT`, schema/object/routine privileges и global/schema default
+  ACL отзываются в каждой принадлежащей сервису database. Runtime получает
+  обычный CRUD/sequence access и только перечисленные callable routines;
+  новая routine остаётся private до review allowlist.
+- Generated first-match HBA разрешает canonical owner/runtime только в её
+  точную database по SCRAM и до общих rules отклоняет replication, соседние
+  databases и stale family names. Managed или межхостовой PostgreSQL обязан
+  воспроизвести порядок и дополнить его TLS/source-CIDR либо отдельным cluster.
+- Непустая legacy database со старым owner не передаётся автоматически:
+  обязателен backup/restore rehearsal, catalog inventory, reviewed явный
+  object ownership handoff и maintenance login smoke. Удалять данные или
+  применять широкий `REASSIGN OWNED` общего bootstrap user без review
+  запрещено.
+- `directus_runtime_owner` является временным документированным combined
+  owner/runtime исключением только для `directus_db`, поскольку Directus
+  self-migrates. Оно не даёт cluster privileges/cross-DB access и должно быть
+  разделено после выделения поддерживаемого migration step.
+
 ## 9. Шифрование и ключи
 
 - TLS 1.2+; предпочтительно TLS 1.3.
@@ -834,6 +866,9 @@ gate.
 - Node.js 24 engine/typecheck/test/build;
 - PostgreSQL 18 fresh migration и negative invariant smoke для новых
   trigger/partial-index state machines;
+- PostgreSQL 18 fresh service-role proof: runtime CRUD/UUIDv7/constraints,
+  отсутствие DDL/ownership/membership/`PUBLIC`/`_prisma_migrations`/
+  cross-database/replication bypass и точный HBA login smoke;
 - build;
 - dependency/security scan;
 - container build/scan;
@@ -1025,6 +1060,9 @@ Radar/crawler capacity:
 - Startup не объявляется ready до проверки обязательных dependencies, но не блокируется навсегда из-за необязательного provider.
 - Persistent volumes явно документированы.
 - Automated database migration не запускается конкурентно несколькими replicas.
+- Application process стартует только после успешных owner migration и
+  post-migration least-privilege grants; owner password application process не
+  получает.
 - Worker process types разворачиваются отдельно и масштабируются независимо.
 - Domains/TLS настраиваются через Dokploy reverse proxy.
 - Internal databases не получают public domain.

@@ -172,22 +172,22 @@ create/rotate/revoke/validation commands, но не обращается к prov
 connector worker не открывает входящий HTTP listener и не получает credential
 API token или fingerprint keyring. Между ними передаётся только канонический
 PostgreSQL Job и BullMQ payload с `jobId`. Connector worker использует отдельный
-PostgreSQL login из `JOBS_CONNECTOR_DATABASE_USER` /
-`JOBS_CONNECTOR_DATABASE_PASSWORD`. Для freshly provisioned non-owner role
-permission component выдаёт только требуемые `SELECT` и перечисленные
-column-level `UPDATE` grants внутри `jobs_db`, не выдавая worker-у
-`INSERT`/`DELETE`/DDL.
+фиксированный PostgreSQL login `jobs_connector` с отдельным
+`JOBS_CONNECTOR_DATABASE_PASSWORD`. Для этой non-owner role permission
+component не выдаёт direct table/sequence DML и предоставляет только
+`CONNECT`, schema `USAGE` и exact `EXECUTE` allowlist `SECURITY DEFINER`
+broker/claim/authorize functions внутри `jobs_db`.
 После jobs migration one-shot component `jobs-connector-db-permissions`
 идемпотентно создаёт/ужесточает эту роль через
 `postgres/permissions/jobs-connector.sql` и fail-closed отклоняет
 привилегированную роль, membership или ownership объектов кластера; worker
 стартует только после его успеха.
-Этот script гарантирует выданные privileges внутри `jobs_db`, но не является
-доказательством полной изоляции уже существующего login: `PUBLIC CONNECT` к
-другим databases и ранее выданные direct grants остаются residual risk.
-Production provisioning обязан создавать fresh non-owner role, выполнять
-cluster-wide grant audit и ограничивать доступ через `pg_hba` либо отдельную
-cluster boundary.
+Provisioning выполняет cluster-wide direct-ACL audit, закрывает `PUBLIC`
+schema/object/default privileges в `jobs_db`, а generated first-match HBA
+разрешает canonical login только в `jobs_db` и до общих rules отклоняет
+replication, соседние databases и stale family names. Для production target
+environment всё равно обязательны проверка фактического HBA order, fresh
+login smoke и TLS/source-CIDR при межхостовом соединении.
 Management и execution пока используют общий Redis password; до production
 для connector worker требуется отдельный Redis ACL либо изолированный instance.
 
@@ -200,10 +200,10 @@ Rank-worker не получает HTTP/internal/vault, NATS, S3, SMTP или pro
 credentials, не публикует port и в текущем Dokploy Compose подключён только к
 `internal`. Его bounded grant client сохраняет intent/decision и атомарно
 создаёт secret-free `CONSUMED/READY_TO_SUBMIT` scoped execution, но dispatcher
-его ещё не вызывает, connector claim отсутствует и live submit явно выключен.
-Перед live provider execution для connector process создаётся минимальная
-отдельная PostgreSQL role с SECURITY DEFINER-only access. Env изоляция сама
-по себе не заменяет DB grants.
+его ещё не вызывает; scoped claim/authorize SQL и exact grants уже существуют,
+но runtime caller и live submit явно выключены. Перед live provider execution
+connector process обязан продолжать использовать только `jobs_connector`, а
+не Jobs owner/runtime login. Env изоляция сама по себе не заменяет DB grants.
 
 ### 3.6. `platform-realtime`
 
@@ -333,6 +333,19 @@ Backend ограничивается:
 | subscriptions, ledger, plans | platform-api billing modules |
 | CMS content | Directus |
 
+В одном PostgreSQL cluster каждый backend использует две canonical LOGIN-role:
+`platform_owner/platform_runtime`, `seo_owner/seo_runtime`,
+`jobs_owner/jobs_runtime`, `realtime_owner/realtime_runtime`. Owner применяется
+только одноразовым `prisma migrate deploy` и владеет database/schema/objects;
+runtime не имеет ownership, membership, DDL, `TRUNCATE`, доступа к
+`_prisma_migrations`, replication или чужим databases и получает только
+необходимые CRUD/sequence/routine privileges после migrations. Cluster
+bootstrap administrator не передаётся этим process types. Directus временно
+использует явно ограниченную combined role `directus_runtime_owner`, потому
+что применяет собственные schema migrations при старте; роль ограничена
+только `directus_db` и разделяется после появления отдельного поддерживаемого
+migration step.
+
 Межсервисные IDs — UUIDv7. Внешняя ссылка не сопровождается DB foreign key между databases.
 
 ## 7. Синхронные вызовы
@@ -393,6 +406,11 @@ Backend ограничивается:
 
 - У каждого backend repository своя Prisma schema и migrations.
 - `prisma migrate deploy` выполняется отдельным release step.
+- Migration step подключается только canonical owner-ролью своего сервиса;
+  application runtime не получает owner password.
+- После migrations отдельный fail-closed permission step проверяет ownership,
+  extension allowlist, `PUBLIC`/default ACL и выдаёт runtime exact
+  least-privilege grants.
 - Production migrations не запускаются автоматически каждым replica.
 - Сгенерированные SQL migrations проверяются вручную.
 - Partitioning, indexes, extensions, triggers и views добавляются custom SQL.

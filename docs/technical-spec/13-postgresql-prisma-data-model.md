@@ -22,7 +22,18 @@
 - `realtime_db`;
 - `directus_db`.
 
-На старте базы могут находиться в одном PostgreSQL cluster, но используют отдельных пользователей и databases. Сервису запрещены credentials чужой базы.
+На старте базы могут находиться в одном PostgreSQL cluster, но используют
+отдельных пользователей и databases. Для четырёх application databases
+фиксированы пары `platform_owner/platform_runtime`, `seo_owner/seo_runtime`,
+`jobs_owner/jobs_runtime`, `realtime_owner/realtime_runtime`: owner применяется
+только к migrations, runtime не владеет объектами и получает после migration
+только CRUD/sequence и точные routine privileges без DDL, `TRUNCATE` и
+`_prisma_migrations`. Обе роли не имеют membership, cluster privileges,
+replication или `BYPASSRLS`. Cluster bootstrap credential сервисам запрещён.
+First-match HBA разрешает каждой family только точную собственную database и
+до общих rules отклоняет соседние databases и replication. Directus использует
+временное combined owner/runtime исключение `directus_runtime_owner` только в
+`directus_db`, пока его schema migrations выполняются самим runtime.
 
 ## 3. PostgreSQL extensions
 
@@ -565,7 +576,10 @@ Indexes:
 - partial issues indexes.
 
 Для trigram-поиска migration владельца `seo_db` включает PostgreSQL extension
-`pg_trgm`. Точный `count` выполняется только для первой страницы; cursor-page
+`pg_trgm`. Extension принадлежит `seo_owner`, а отдельный audited bootstrap
+step отзывает `PUBLIC EXECUTE` у member functions и выдаёт их только
+`seo_runtime`; произвольные public extensions запрещены. Точный `count`
+выполняется только для первой страницы; cursor-page
 не повторяет его. Каждый query одновременно фильтруется по `workspace_id`,
 `project_id` и активному status.
 
@@ -1268,8 +1282,10 @@ Arsenkin обязан передать объект ровно с одним н�
 не содержат tenant material и проверяют все реально используемые версии до
 создания worker.
 
-Оставшиеся production gates для этой роли — cluster-wide direct-ACL audit,
-`pg_hba`/отдельная граница кластера, rollout старых replicas и circuit breaker.
+Cluster-wide direct-ACL audit, `PUBLIC`/default ACL hardening и fixed-role HBA
+прошли fresh PostgreSQL 18 positive/negative regression. Оставшиеся production
+gates — повтор фактического HBA order/login smoke в target environment,
+rollout старых replicas, межхостовой TLS/source-CIDR и circuit breaker.
 Сам symmetric KEK пока находится в execution process; дальнейшее уменьшение
 blast radius требует KMS/asymmetric unwrap или внешнего credential broker.
 
@@ -1761,7 +1777,13 @@ Presence в PostgreSQL не хранится.
 
 ## 8. Directus DB
 
-Управляется Directus migrations/snapshots. Приложение сайта не пишет напрямую в БД и использует Directus API/SDK.
+Управляется Directus migrations/snapshots. Приложение сайта не пишет напрямую
+в БД и использует Directus API/SDK. Пока Directus изменяет schema при старте,
+его `directus_runtime_owner` является явно ограниченным combined owner/runtime
+исключением: без membership/cluster privileges и с HBA-доступом только к
+`directus_db`. После выделения поддерживаемого migration/snapshot release step
+роль должна быть разделена; это исключение нельзя переносить на backend
+services.
 
 ## 9. Prisma schema example
 

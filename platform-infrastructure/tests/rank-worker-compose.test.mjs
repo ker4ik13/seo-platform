@@ -106,7 +106,7 @@ test("rank worker is bounded, internal-only and starts after required dependenci
   assert.doesNotMatch(networks, /\b(?:edge|outbound)\b/u);
   assert.match(
     dependencies,
-    /jobs-integrations-migrate:\n        condition: service_completed_successfully/u
+    /jobs-runtime-db-permissions:\n        condition: service_completed_successfully/u
   );
   assert.match(dependencies, /redis:\n        condition: service_healthy/u);
   assert.match(dependencies, /seo-data:\n        condition: service_healthy/u);

@@ -69,6 +69,14 @@
 Representative history load test также не выполнен и остаётся последующим
 release gate.
 
+Отдельный fresh PostgreSQL 18 infrastructure proof применил все четыре Prisma
+migration chains под canonical owners и подтвердил runtime CRUD, UUIDv7,
+constraints, отсутствие runtime DDL/`_prisma_migrations`/membership/ownership,
+cross-database и replication reject, закрытый `PUBLIC` bypass, Directus
+exception и connector exact allowlist. Перед конкретным production deploy
+остаются target-environment HBA order/login smoke и reviewed ownership handoff,
+если volume уже содержит объекты старого owner.
+
 #### Не входит
 
 Публичный production, полноценный billing, все integrations и polished unified web.
@@ -264,7 +272,8 @@ tenant-safe JobItem hardening и deferred atomic consume invariant. Fresh
 full-chain apply, grant/consume negative/concurrency, claim/reclaim/stale-head/
 drift, upgrade ACL и authorize/replay/rollback/expiry races пройдены на
 PostgreSQL 18. Exact provisioning script уже не выдаёт direct table DML;
-production cluster-wide role/`pg_hba` proof и provider lifecycle races
+fresh cluster-wide service-role/`pg_hba` proof пройден. Target-environment
+HBA/login smoke, rollout старых sessions/roles и provider lifecycle races
 остаются release gates.
 Target runtime — Node.js 24; текущий полный lint/typecheck/test/build baseline
 проверен на Node.js 24.18.1.
@@ -1065,6 +1074,10 @@ Staging game day имитирует потерю основной базы.
   breaker проверен fault-injection тестом;
 - connector execution DB/KMS boundary не допускает global read multi-tenant
   jobs и BYOK vault; cluster-wide grants и `pg_hba` проверены.
+- все backend migration owners отделены от application runtimes; fresh
+  PostgreSQL 18 и target-environment smoke подтверждают отсутствие runtime
+  DDL, ownership/membership, `PUBLIC`, `_prisma_migrations`, cross-database и
+  replication bypass;
 - на PostgreSQL 18 пройдены реальные race tests `rotate ↔ rotate`,
   `login ↔ password reset`,
   `MFA challenge/confirm/disable ↔ password reset`, а также

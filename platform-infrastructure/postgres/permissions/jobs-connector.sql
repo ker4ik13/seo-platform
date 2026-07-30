@@ -12,15 +12,24 @@ BEGIN
       'connector permissions must be provisioned in jobs_db';
   END IF;
 
-  SELECT oid
-  INTO migration_owner_id
-  FROM pg_roles
-  WHERE rolname = current_user;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_roles
+    WHERE rolname = current_user
+      AND rolsuper
+  ) THEN
+    RAISE EXCEPTION
+      'connector role administration requires the cluster bootstrap administrator';
+  END IF;
 
-  -- Default privileges belong to the object-creating role. Compose runs this
-  -- script with the same login that applies Prisma migrations; fail closed if
-  -- that invariant has drifted, otherwise a later function owner could restore
-  -- implicit PUBLIC EXECUTE after this one-shot provisioner has completed.
+  SELECT oid
+  INTO STRICT migration_owner_id
+  FROM pg_roles
+  WHERE rolname = 'jobs_owner';
+
+  -- Default privileges belong to the object-creating role. Prisma migrations
+  -- run as jobs_owner, while this narrowly-scoped role administration step
+  -- uses the cluster bootstrap administrator to create/harden the login.
   IF NOT EXISTS (
     SELECT 1
     FROM pg_class relation
@@ -38,7 +47,7 @@ BEGIN
       AND routine.proowner <> migration_owner_id
   ) THEN
     RAISE EXCEPTION
-      'connector permissions must run as the Prisma migration and public routine owner';
+      'connector permissions require jobs_owner to own Prisma history and public routines';
   END IF;
 END
 $$;
@@ -183,7 +192,7 @@ REVOKE ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public FROM PUBLIC;
 SELECT format(
   'ALTER DEFAULT PRIVILEGES FOR ROLE %I
     REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC',
-  current_user
+  'jobs_owner'
 )
 \gexec
 
@@ -192,14 +201,14 @@ SELECT format(
 SELECT format(
   'ALTER DEFAULT PRIVILEGES FOR ROLE %I
     REVOKE ALL PRIVILEGES ON TABLES FROM PUBLIC',
-  current_user
+  'jobs_owner'
 )
 \gexec
 
 SELECT format(
   'ALTER DEFAULT PRIVILEGES FOR ROLE %I
     REVOKE ALL PRIVILEGES ON SEQUENCES FROM PUBLIC',
-  current_user
+  'jobs_owner'
 )
 \gexec
 
@@ -209,21 +218,21 @@ SELECT format(
 SELECT format(
   'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public
     REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC',
-  current_user
+  'jobs_owner'
 )
 \gexec
 
 SELECT format(
   'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public
     REVOKE ALL PRIVILEGES ON TABLES FROM PUBLIC',
-  current_user
+  'jobs_owner'
 )
 \gexec
 
 SELECT format(
   'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public
     REVOKE ALL PRIVILEGES ON SEQUENCES FROM PUBLIC',
-  current_user
+  'jobs_owner'
 )
 \gexec
 

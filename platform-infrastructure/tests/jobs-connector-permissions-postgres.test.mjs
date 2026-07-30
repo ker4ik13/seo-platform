@@ -95,6 +95,7 @@ test(
         "t",
         "the opt-in database URL must use a disposable cluster administrator"
       );
+      await assertCanonicalJobsDatabase(adminEnvironment);
       assert.notEqual(connectorRole, adminEnvironment.PGUSER);
 
       const wrongDatabase = await runPsql(
@@ -258,21 +259,23 @@ test(
 
       await checkedPsql(
         adminEnvironment,
-        `ALTER DEFAULT PRIVILEGES
+        `ALTER DEFAULT PRIVILEGES FOR ROLE jobs_owner
            GRANT SELECT ON TABLES TO PUBLIC;
-         ALTER DEFAULT PRIVILEGES
+         ALTER DEFAULT PRIVILEGES FOR ROLE jobs_owner
            GRANT USAGE ON SEQUENCES TO PUBLIC;
-         ALTER DEFAULT PRIVILEGES IN SCHEMA public
+         ALTER DEFAULT PRIVILEGES FOR ROLE jobs_owner IN SCHEMA public
            GRANT EXECUTE ON FUNCTIONS TO PUBLIC;
-         ALTER DEFAULT PRIVILEGES IN SCHEMA public
+         ALTER DEFAULT PRIVILEGES FOR ROLE jobs_owner IN SCHEMA public
            GRANT SELECT ON TABLES TO PUBLIC;
-         ALTER DEFAULT PRIVILEGES IN SCHEMA public
+         ALTER DEFAULT PRIVILEGES FOR ROLE jobs_owner IN SCHEMA public
            GRANT USAGE ON SEQUENCES TO PUBLIC;
+         SET ROLE jobs_owner;
          CREATE PROCEDURE public."${preexistingProcedure}"()
          LANGUAGE sql
          SECURITY DEFINER
          SET search_path = pg_catalog
          AS 'SELECT 1';
+         RESET ROLE;
          GRANT EXECUTE ON PROCEDURE public."${preexistingProcedure}"()
            TO "${connectorRole}";`
       );
@@ -408,19 +411,21 @@ test(
 
       await checkedPsql(
         adminEnvironment,
-        `CREATE FUNCTION public."${futureFunction}"()
+        `SET ROLE jobs_owner;
+         CREATE FUNCTION public."${futureFunction}"()
          RETURNS integer
          LANGUAGE sql
          IMMUTABLE
          SET search_path = pg_catalog
          AS 'SELECT 1';
          CREATE TABLE public."${futureTable}" (id integer);
-         CREATE SEQUENCE public."${futureSequence}";`
+         CREATE SEQUENCE public."${futureSequence}";
+         RESET ROLE;`
       );
       assert.equal(
         await checkedPsql(
           adminEnvironment,
-          `SELECT (routine.proowner = current_user::regrole)::text || '|' ||
+          `SELECT (routine.proowner = 'jobs_owner'::regrole)::text || '|' ||
                   has_function_privilege(
                     '${connectorRole}', routine.oid, 'EXECUTE'
                   )::text
@@ -606,6 +611,22 @@ async function assertPostgres18(environment) {
   assert.ok(version >= 180_000 && version < 190_000);
 }
 
+async function assertCanonicalJobsDatabase(environment) {
+  assert.equal(
+    await checkedPsql(
+      environment,
+      `SELECT (database.datdba = 'jobs_owner'::regrole)::text || '|' ||
+              (relation.relowner = 'jobs_owner'::regrole)::text
+       FROM pg_database database
+       JOIN pg_class relation
+         ON relation.oid = 'public._prisma_migrations'::regclass
+       WHERE database.datname = current_database()`
+    ),
+    "true|true",
+    "the opt-in jobs_db must be provisioned and migrated by canonical jobs_owner"
+  );
+}
+
 async function assertProvisioningRejected(
   environment,
   connectorRole,
@@ -641,7 +662,7 @@ async function assertMigrationOwnerRejected(
   assert.notEqual(rejected.code, 0);
   assert.match(
     `${rejected.stdout}\n${rejected.stderr}`,
-    /must run as the Prisma migration and public routine owner/u
+    /require jobs_owner to own Prisma history and public routines/u
   );
   assert.doesNotMatch(
     `${rejected.stdout}\n${rejected.stderr}`,
@@ -727,7 +748,7 @@ async function assertNoPublicPrivileges(environment) {
     `SELECT count(*)
      FROM pg_default_acl defaults
      CROSS JOIN LATERAL aclexplode(defaults.defaclacl) privilege
-     WHERE defaults.defaclrole = current_user::regrole
+     WHERE defaults.defaclrole = 'jobs_owner'::regrole
        AND defaults.defaclnamespace IN (0, 'public'::regnamespace)
        AND defaults.defaclobjtype IN ('r', 'S', 'f')
        AND privilege.grantee = 0`
@@ -869,15 +890,15 @@ async function cleanupTestFunctions(environment, functionNames) {
 async function cleanupPublicDefaultPrivileges(environment) {
   await checkedPsql(
     environment,
-    `ALTER DEFAULT PRIVILEGES
+    `ALTER DEFAULT PRIVILEGES FOR ROLE jobs_owner
        REVOKE SELECT ON TABLES FROM PUBLIC;
-     ALTER DEFAULT PRIVILEGES
+     ALTER DEFAULT PRIVILEGES FOR ROLE jobs_owner
        REVOKE USAGE ON SEQUENCES FROM PUBLIC;
-     ALTER DEFAULT PRIVILEGES IN SCHEMA public
+     ALTER DEFAULT PRIVILEGES FOR ROLE jobs_owner IN SCHEMA public
        REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
-     ALTER DEFAULT PRIVILEGES IN SCHEMA public
+     ALTER DEFAULT PRIVILEGES FOR ROLE jobs_owner IN SCHEMA public
        REVOKE SELECT ON TABLES FROM PUBLIC;
-     ALTER DEFAULT PRIVILEGES IN SCHEMA public
+     ALTER DEFAULT PRIVILEGES FOR ROLE jobs_owner IN SCHEMA public
        REVOKE USAGE ON SEQUENCES FROM PUBLIC;`
   );
 }
