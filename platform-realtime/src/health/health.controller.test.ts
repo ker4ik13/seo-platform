@@ -35,6 +35,18 @@ test("returns HTTP 503 and preserves the degraded body when Redis is unavailable
   assert.equal(body.dependencies?.[1]?.status, "unavailable");
 });
 
+test("returns HTTP 503 when exact JetStream consumer topology is unavailable", async () => {
+  const response = reply();
+  const body = await healthController({
+    natsError: new Error("event topology mismatch")
+  }).ready(response.value);
+
+  assert.deepEqual(response.codes, [503]);
+  assert.equal(body.status, "degraded");
+  assert.equal(body.dependencies?.[2]?.name, "nats");
+  assert.equal(body.dependencies?.[2]?.status, "unavailable");
+});
+
 test("keeps both liveness routes on the default GET 200 response", () => {
   const controller = healthController();
 

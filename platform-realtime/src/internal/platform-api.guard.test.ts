@@ -60,6 +60,16 @@ function config(platformApiToken?: string): AppConfig {
     redisUrl: "redis://test",
     ...(platformApiToken ? { platformApiToken } : {}),
     nats: { url: "nats://test" },
+    eventConsumer: {
+      enabled: false,
+      fetchExpiresMs: 1_000,
+      maxAttempts: 8,
+      retryBaseMs: 1_000,
+      retryMaxMs: 60_000,
+      publishTimeoutMs: 5_000,
+      maxPayloadBytes: 65_536,
+      shutdownGraceMs: 10_000
+    },
     webOrigins: ["https://app.example.test"],
     webPush: {
       registrationEnabled: false,

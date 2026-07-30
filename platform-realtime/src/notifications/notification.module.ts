@@ -21,6 +21,7 @@ import { WebPushService } from "./web-push.service.js";
     WebPushCryptoService,
     WebPushKeyCoverageService,
     WebPushService
-  ]
+  ],
+  exports: [SessionFamilyRevocationService]
 })
 export class NotificationModule {}

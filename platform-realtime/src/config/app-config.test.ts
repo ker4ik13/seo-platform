@@ -183,4 +183,134 @@ describe("loadAppConfig", () => {
       /public HTTPS origins/
     );
   });
+
+  it("keeps the durable event consumer disabled by default outside production", () => {
+    const config = loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test"
+    });
+
+    assert.equal(config.eventConsumer.enabled, false);
+    assert.equal(config.eventConsumer.fetchExpiresMs, 1_000);
+    assert.equal(config.eventConsumer.maxPayloadBytes, 65_536);
+  });
+
+  it("requires the durable event consumer and exact topology in production", () => {
+    assert.throws(
+      () => loadAppConfig(productionEventEnv({
+        NATS_EVENT_CONSUMER_ENABLED: "false"
+      })),
+      /NATS_EVENT_CONSUMER_ENABLED=true is required/u
+    );
+
+    const config = loadAppConfig(productionEventEnv());
+    assert.deepEqual(config.eventConsumer, {
+      enabled: true,
+      environment: "prod",
+      streamName: "IDENTITY_EVENTS",
+      durableName: "realtime_session_family_revoked_v1",
+      subject: "prod.identity.session-family.revoked.v1",
+      deadLetterStreamName: "DOMAIN_EVENTS_DLQ",
+      deadLetterSubject:
+        "prod.dlq.realtime.identity.session-family.revoked.v1",
+      fetchExpiresMs: 1_000,
+      maxAttempts: 8,
+      retryBaseMs: 1_000,
+      retryMaxMs: 60_000,
+      publishTimeoutMs: 5_000,
+      maxPayloadBytes: 65_536,
+      shutdownGraceMs: 10_000
+    });
+  });
+
+  it("rejects normalized, placeholder and non-canonical event topology identifiers", () => {
+    for (const [key, value] of [
+      ["NATS_EVENT_ENVIRONMENT", " prod "],
+      ["NATS_EVENT_STREAM", " IDENTITY_EVENTS"],
+      ["NATS_EVENT_CONSUMER_DURABLE", "realtime_session_family_revoked_v1 "],
+      ["NATS_EVENT_DLQ_STREAM", " DOMAIN_EVENTS_DLQ"],
+      [
+        "NATS_EVENT_DLQ_SUBJECT",
+        "prod.dlq.realtime.identity.session-family.revoked.v1 "
+      ]
+    ] as const) {
+      assert.throws(
+        () => loadAppConfig(productionEventEnv({ [key]: value })),
+        /surrounding whitespace/u
+      );
+    }
+
+    assert.throws(
+      () => loadAppConfig(productionEventEnv({
+        NATS_EVENT_ENVIRONMENT: "example"
+      })),
+      /canonical lowercase NATS token/u
+    );
+    assert.throws(
+      () => loadAppConfig(productionEventEnv({
+        NATS_EVENT_STREAM: "PLATFORM_EVENTS"
+      })),
+      /must be exactly IDENTITY_EVENTS/u
+    );
+    assert.throws(
+      () => loadAppConfig(productionEventEnv({
+        NATS_EVENT_DLQ_SUBJECT:
+          "prod.dlq.realtime.identity.other-event.v1"
+      })),
+      /NATS_EVENT_DLQ_SUBJECT must be exactly/u
+    );
+  });
+
+  it("enforces safe event timing and source payload bounds", () => {
+    for (const key of [
+      "NATS_EVENT_RETRY_BASE_MS",
+      "NATS_EVENT_RETRY_MAX_MS",
+      "NATS_EVENT_PUBLISH_TIMEOUT_MS",
+      "NATS_EVENT_SHUTDOWN_GRACE_MS"
+    ] as const) {
+      assert.throws(
+        () => loadAppConfig(productionEventEnv({ [key]: "99" })),
+        /must be at least 100/u
+      );
+    }
+    assert.throws(
+      () => loadAppConfig(productionEventEnv({
+        NATS_EVENT_FETCH_EXPIRES_MS: "999"
+      })),
+      /NATS_EVENT_FETCH_EXPIRES_MS must be at least 1000/u
+    );
+    assert.throws(
+      () => loadAppConfig(productionEventEnv({
+        NATS_EVENT_MAX_PAYLOAD_BYTES: "65537"
+      })),
+      /must be no greater than 65536/u
+    );
+    assert.throws(
+      () => loadAppConfig(productionEventEnv({
+        NATS_EVENT_RETRY_BASE_MS: "2000",
+        NATS_EVENT_RETRY_MAX_MS: "1000"
+      })),
+      /must be greater than or equal/u
+    );
+  });
 });
+
+function productionEventEnv(
+  overrides: NodeJS.ProcessEnv = {}
+): NodeJS.ProcessEnv {
+  return {
+    NODE_ENV: "production",
+    DATABASE_URL: "postgresql://test",
+    PLATFORM_API_TO_REALTIME_TOKEN: "p".repeat(32),
+    PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
+    NATS_EVENT_CONSUMER_ENABLED: "true",
+    NATS_EVENT_ENVIRONMENT: "prod",
+    NATS_EVENT_STREAM: "IDENTITY_EVENTS",
+    NATS_EVENT_CONSUMER_DURABLE:
+      "realtime_session_family_revoked_v1",
+    NATS_EVENT_DLQ_STREAM: "DOMAIN_EVENTS_DLQ",
+    NATS_EVENT_DLQ_SUBJECT:
+      "prod.dlq.realtime.identity.session-family.revoked.v1",
+    ...overrides
+  };
+}

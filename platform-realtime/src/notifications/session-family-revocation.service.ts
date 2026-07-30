@@ -1,22 +1,14 @@
 import { Injectable } from "@nestjs/common";
 import {
-  domainEventTypes,
-  type DomainEventEnvelope,
-  type SessionFamilyRevokedEventDataV1
+  InvalidSessionFamilyRevokedEventEnvelopeError,
+  parseSessionFamilyRevokedEventEnvelopeV1,
+  type SessionFamilyRevokedEventEnvelopeV1
 } from "@seo-platform/contracts";
 import type { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { acquireWebPushUserLock } from "./web-push-user-lock.js";
 
 const CONSUMER = "realtime.session-family-revocation.v1";
-const AGGREGATE_TYPE = "session-family";
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
-const ISO_TIMESTAMP_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
-const UNSAFE_CONTEXT_PATTERN =
-  // oxlint-disable-next-line no-control-regex -- Event context must reject C0/C1 controls and bidi isolates.
-  /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/u;
 
 export interface SessionFamilyRevocationResult {
   readonly status: "PROCESSED" | "DUPLICATE";
@@ -25,7 +17,7 @@ export interface SessionFamilyRevocationResult {
 
 interface ValidatedSessionFamilyRevokedEvent {
   readonly eventId: string;
-  readonly eventType: typeof domainEventTypes.sessionFamilyRevoked;
+  readonly eventType: SessionFamilyRevokedEventEnvelopeV1["eventType"];
   readonly userId: string;
   readonly sessionFamilyId: string;
   readonly revokedAt: Date;
@@ -167,158 +159,25 @@ function terminalSessionRevocation(
 function sessionFamilyRevokedEvent(
   input: unknown
 ): ValidatedSessionFamilyRevokedEvent {
-  const envelope = exactRecord(
-    input,
-    [
-      "eventId",
-      "eventType",
-      "occurredAt",
-      "producer",
-      "traceId",
-      "aggregate",
-      "data",
-      "metadata"
-    ],
-    "event"
-  );
-  const eventId = uuid(envelope.eventId, "event.eventId");
-  if (envelope.eventType !== domainEventTypes.sessionFamilyRevoked) {
-    invalid("event.eventType");
+  let envelope: SessionFamilyRevokedEventEnvelopeV1;
+  try {
+    envelope = parseSessionFamilyRevokedEventEnvelopeV1(input);
+  } catch (error) {
+    if (error instanceof InvalidSessionFamilyRevokedEventEnvelopeError) {
+      throw new InvalidSessionFamilyRevokedEventError(
+        "Invalid session-family revocation event"
+      );
+    }
+    throw error;
   }
-  if (envelope.producer !== "platform-api") {
-    invalid("event.producer");
-  }
-  timestamp(envelope.occurredAt, "event.occurredAt");
-  boundedContext(envelope.traceId, "event.traceId");
-
-  const aggregate = exactRecord(
-    envelope.aggregate,
-    ["type", "id", "version"],
-    "event.aggregate"
-  );
-  if (
-    aggregate.type !== AGGREGATE_TYPE ||
-    aggregate.version !== 1
-  ) {
-    invalid("event.aggregate");
-  }
-  const aggregateId = uuid(aggregate.id, "event.aggregate.id");
-
-  const data = exactRecord(
-    envelope.data,
-    ["userId", "sessionFamilyId", "revokedAt"],
-    "event.data"
-  );
-  const userId = uuid(data.userId, "event.data.userId");
-  const sessionFamilyId = uuid(
-    data.sessionFamilyId,
-    "event.data.sessionFamilyId"
-  );
-  if (aggregateId !== sessionFamilyId) {
-    invalid("event.aggregate.id");
-  }
-  const revokedAt = timestamp(
-    data.revokedAt,
-    "event.data.revokedAt"
-  );
-
-  const metadata = exactRecord(
-    envelope.metadata,
-    ["correlationId", "causationId"],
-    "event.metadata",
-    true
-  );
-  if (metadata.correlationId !== undefined) {
-    boundedContext(
-      metadata.correlationId,
-      "event.metadata.correlationId"
-    );
-  }
-  if (metadata.causationId !== undefined) {
-    boundedContext(
-      metadata.causationId,
-      "event.metadata.causationId"
-    );
-  }
+  const { userId, sessionFamilyId } = envelope.data;
 
   return {
-    eventId,
-    eventType: domainEventTypes.sessionFamilyRevoked,
+    eventId: envelope.eventId,
+    eventType: envelope.eventType,
     userId,
     sessionFamilyId,
-    revokedAt,
+    revokedAt: new Date(envelope.data.revokedAt),
     scopeKey: `${CONSUMER}:${userId}:${sessionFamilyId}`
   };
 }
-
-function exactRecord(
-  value: unknown,
-  allowedKeys: readonly string[],
-  field: string,
-  optionalKeys = false
-): Readonly<Record<string, unknown>> {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    Array.isArray(value)
-  ) {
-    invalid(field);
-  }
-  const record = value as Readonly<Record<string, unknown>>;
-  const keys = Object.keys(record);
-  if (
-    keys.some((key) => !allowedKeys.includes(key)) ||
-    (!optionalKeys &&
-      allowedKeys.some(
-        (key) => !Object.prototype.hasOwnProperty.call(record, key)
-      ))
-  ) {
-    invalid(field);
-  }
-  return record;
-}
-
-function uuid(value: unknown, field: string): string {
-  if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
-    invalid(field);
-  }
-  return value.toLowerCase();
-}
-
-function timestamp(value: unknown, field: string): Date {
-  if (
-    typeof value !== "string" ||
-    !ISO_TIMESTAMP_PATTERN.test(value)
-  ) {
-    invalid(field);
-  }
-  const parsed = new Date(value);
-  if (
-    Number.isNaN(parsed.getTime()) ||
-    parsed.toISOString() !== value
-  ) {
-    invalid(field);
-  }
-  return parsed;
-}
-
-function boundedContext(value: unknown, field: string): string {
-  if (
-    typeof value !== "string" ||
-    value.length < 1 ||
-    value.length > 200 ||
-    UNSAFE_CONTEXT_PATTERN.test(value)
-  ) {
-    invalid(field);
-  }
-  return value;
-}
-
-function invalid(field: string): never {
-  throw new InvalidSessionFamilyRevokedEventError(
-    `Invalid session-family revocation ${field}`
-  );
-}
-
-export type SessionFamilyRevokedEnvelope =
-  DomainEventEnvelope<SessionFamilyRevokedEventDataV1>;

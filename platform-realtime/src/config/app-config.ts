@@ -1,5 +1,6 @@
 import { ECDH } from "node:crypto";
 import { isIP } from "node:net";
+import { sessionFamilyRevokedEventSubjectV1 } from "@seo-platform/contracts";
 
 export interface AppConfig {
   readonly nodeEnv: "development" | "test" | "production";
@@ -15,6 +16,22 @@ export interface AppConfig {
     readonly user?: string;
     readonly password?: string;
   };
+  readonly eventConsumer: {
+    readonly enabled: boolean;
+    readonly environment?: string;
+    readonly streamName?: string;
+    readonly durableName?: string;
+    readonly subject?: string;
+    readonly deadLetterStreamName?: string;
+    readonly deadLetterSubject?: string;
+    readonly fetchExpiresMs: number;
+    readonly maxAttempts: number;
+    readonly retryBaseMs: number;
+    readonly retryMaxMs: number;
+    readonly publishTimeoutMs: number;
+    readonly maxPayloadBytes: number;
+    readonly shutdownGraceMs: number;
+  };
   readonly webOrigins: readonly string[];
   readonly webPush: {
     readonly registrationEnabled: boolean;
@@ -29,6 +46,13 @@ export interface AppConfig {
   };
 }
 
+const EVENT_STREAM_NAME = "IDENTITY_EVENTS";
+const EVENT_CONSUMER_DURABLE =
+  "realtime_session_family_revoked_v1";
+const EVENT_DEAD_LETTER_STREAM_NAME = "DOMAIN_EVENTS_DLQ";
+const EVENT_DEAD_LETTER_SUBJECT_SUFFIX =
+  "dlq.realtime.identity.session-family.revoked.v1";
+
 function bool(value: string | undefined, fallback = false): boolean {
   if (value === undefined) return fallback;
   if (value === "true") return true;
@@ -39,6 +63,17 @@ function bool(value: string | undefined, fallback = false): boolean {
 function required(env: NodeJS.ProcessEnv, key: string): string {
   const value = env[key]?.trim();
   if (!value) throw new Error(`Missing required environment variable: ${key}`);
+  return value;
+}
+
+function requiredExact(env: NodeJS.ProcessEnv, key: string): string {
+  const value = env[key];
+  if (value === undefined || value.length === 0) {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+  if (value !== value.trim()) {
+    throw new Error(`${key} must not contain surrounding whitespace`);
+  }
   return value;
 }
 
@@ -105,6 +140,163 @@ function boundedPositiveInteger(
     throw new Error(`${key} must be no greater than ${maximum}`);
   }
   return parsed;
+}
+
+function boundedIntegerRange(
+  value: string | undefined,
+  fallback: number,
+  key: string,
+  minimum: number,
+  maximum: number
+): number {
+  const parsed = boundedPositiveInteger(value, fallback, key, maximum);
+  if (parsed < minimum) {
+    throw new Error(`${key} must be at least ${minimum}`);
+  }
+  return parsed;
+}
+
+function boundedEventConsumerConfig(
+  env: NodeJS.ProcessEnv,
+  nodeEnv: AppConfig["nodeEnv"]
+): AppConfig["eventConsumer"] {
+  const enabled = bool(env.NATS_EVENT_CONSUMER_ENABLED);
+  if (nodeEnv === "production" && !enabled) {
+    throw new Error(
+      "NATS_EVENT_CONSUMER_ENABLED=true is required in production"
+    );
+  }
+
+  const fetchExpiresMs = boundedIntegerRange(
+    env.NATS_EVENT_FETCH_EXPIRES_MS,
+    1_000,
+    "NATS_EVENT_FETCH_EXPIRES_MS",
+    1_000,
+    30_000
+  );
+  const maxAttempts = boundedPositiveInteger(
+    env.NATS_EVENT_MAX_ATTEMPTS,
+    8,
+    "NATS_EVENT_MAX_ATTEMPTS",
+    100
+  );
+  const retryBaseMs = boundedIntegerRange(
+    env.NATS_EVENT_RETRY_BASE_MS,
+    1_000,
+    "NATS_EVENT_RETRY_BASE_MS",
+    100,
+    60_000
+  );
+  const retryMaxMs = boundedIntegerRange(
+    env.NATS_EVENT_RETRY_MAX_MS,
+    60_000,
+    "NATS_EVENT_RETRY_MAX_MS",
+    100,
+    600_000
+  );
+  const publishTimeoutMs = boundedIntegerRange(
+    env.NATS_EVENT_PUBLISH_TIMEOUT_MS,
+    5_000,
+    "NATS_EVENT_PUBLISH_TIMEOUT_MS",
+    100,
+    30_000
+  );
+  const maxPayloadBytes = boundedPositiveInteger(
+    env.NATS_EVENT_MAX_PAYLOAD_BYTES,
+    65_536,
+    "NATS_EVENT_MAX_PAYLOAD_BYTES",
+    65_536
+  );
+  const shutdownGraceMs = boundedIntegerRange(
+    env.NATS_EVENT_SHUTDOWN_GRACE_MS,
+    10_000,
+    "NATS_EVENT_SHUTDOWN_GRACE_MS",
+    100,
+    30_000
+  );
+  if (retryMaxMs < retryBaseMs) {
+    throw new Error(
+      "NATS_EVENT_RETRY_MAX_MS must be greater than or equal to NATS_EVENT_RETRY_BASE_MS"
+    );
+  }
+
+  if (!enabled) {
+    return {
+      enabled,
+      fetchExpiresMs,
+      maxAttempts,
+      retryBaseMs,
+      retryMaxMs,
+      publishTimeoutMs,
+      maxPayloadBytes,
+      shutdownGraceMs
+    };
+  }
+
+  const environment = requiredExact(env, "NATS_EVENT_ENVIRONMENT");
+  const streamName = requiredExact(env, "NATS_EVENT_STREAM");
+  const durableName = requiredExact(
+    env,
+    "NATS_EVENT_CONSUMER_DURABLE"
+  );
+  const deadLetterStreamName = requiredExact(
+    env,
+    "NATS_EVENT_DLQ_STREAM"
+  );
+  const deadLetterSubject = requiredExact(
+    env,
+    "NATS_EVENT_DLQ_SUBJECT"
+  );
+  const environmentPattern =
+    /^[a-z](?:[a-z0-9-]{0,30}[a-z0-9])?$/u;
+  if (
+    !environmentPattern.test(environment) ||
+    isPlaceholderSecret(environment)
+  ) {
+    throw new Error(
+      "NATS_EVENT_ENVIRONMENT must be a canonical lowercase NATS token"
+    );
+  }
+  if (streamName !== EVENT_STREAM_NAME) {
+    throw new Error(
+      `NATS_EVENT_STREAM must be exactly ${EVENT_STREAM_NAME}`
+    );
+  }
+  if (durableName !== EVENT_CONSUMER_DURABLE) {
+    throw new Error(
+      `NATS_EVENT_CONSUMER_DURABLE must be exactly ${EVENT_CONSUMER_DURABLE}`
+    );
+  }
+  if (deadLetterStreamName !== EVENT_DEAD_LETTER_STREAM_NAME) {
+    throw new Error(
+      `NATS_EVENT_DLQ_STREAM must be exactly ${EVENT_DEAD_LETTER_STREAM_NAME}`
+    );
+  }
+  const subject = sessionFamilyRevokedEventSubjectV1(environment);
+  const expectedDeadLetterSubject =
+    `${environment}.${EVENT_DEAD_LETTER_SUBJECT_SUFFIX}`;
+  if (deadLetterSubject !== expectedDeadLetterSubject) {
+    throw new Error(
+      `NATS_EVENT_DLQ_SUBJECT must be exactly ${expectedDeadLetterSubject}`
+    );
+  }
+
+  return {
+    enabled,
+    environment,
+    streamName,
+    durableName,
+    subject,
+    deadLetterStreamName,
+    deadLetterSubject,
+    fetchExpiresMs,
+    maxAttempts,
+    retryBaseMs,
+    retryMaxMs,
+    publishTimeoutMs,
+    maxPayloadBytes,
+    shutdownGraceMs
+  };
 }
 
 function keyVersion(
@@ -233,6 +425,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (!["development", "test", "production"].includes(nodeEnv)) {
     throw new Error("NODE_ENV must be development, test or production");
   }
+  const typedNodeEnv = nodeEnv as AppConfig["nodeEnv"];
 
   const natsUser = optional(env, "NATS_USER");
   const natsPassword = optional(env, "NATS_PASSWORD");
@@ -338,9 +531,10 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "Web Push encryption and fingerprint keyrings must use distinct key material"
     );
   }
+  const eventConsumer = boundedEventConsumerConfig(env, typedNodeEnv);
 
   return {
-    nodeEnv: nodeEnv as AppConfig["nodeEnv"],
+    nodeEnv: typedNodeEnv,
     port: positiveInteger(env.PORT, 4003, "PORT"),
     version: env.SERVICE_VERSION?.trim() || "0.1.0",
     databaseUrl: required(env, "DATABASE_URL"),
@@ -357,6 +551,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       ...(natsUser ? { user: natsUser } : {}),
       ...(natsPassword ? { password: natsPassword } : {})
     },
+    eventConsumer,
     webOrigins,
     webPush: {
       registrationEnabled,
