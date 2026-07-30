@@ -11,13 +11,13 @@ services:
         PACKAGE_NAME: "@seo-platform/web"
         PACKAGE_PATH: platform-web
         NEXT_PUBLIC_SITE_URL: ${LANDING_PUBLIC_URL:?LANDING_PUBLIC_URL is required}
-        NEXT_PUBLIC_TELEGRAM_CHANNEL_URL: ${TELEGRAM_CHANNEL_URL:-https://t.me/ker4ik13}
+        NEXT_PUBLIC_TELEGRAM_CHANNEL_URL: ${TELEGRAM_CHANNEL_URL:-https://t.me/seonorita_app}
     environment:
       NODE_ENV: production
       PORT: 3000
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-ru}
       NEXT_PUBLIC_SITE_URL: ${LANDING_PUBLIC_URL}
-      NEXT_PUBLIC_TELEGRAM_CHANNEL_URL: ${TELEGRAM_CHANNEL_URL:-https://t.me/ker4ik13}
+      NEXT_PUBLIC_TELEGRAM_CHANNEL_URL: ${TELEGRAM_CHANNEL_URL:-https://t.me/seonorita_app}
     ports:
       - "${LANDING_BIND_ADDRESS:-127.0.0.1}:${LANDING_PORT:-3000}:3000"
     security_opt:

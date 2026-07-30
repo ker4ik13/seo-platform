@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  developerTelegramUrl,
-  resolveTelegramChannelUrl
-} from "./telegram-channel.ts";
+import { resolveTelegramChannelUrl } from "./telegram-channel.ts";
 
-test("uses the developer Telegram contact until a channel is configured", () => {
-  assert.equal(resolveTelegramChannelUrl(undefined), developerTelegramUrl);
-  assert.equal(resolveTelegramChannelUrl(""), developerTelegramUrl);
+test("uses the official product channel until another channel is configured", () => {
+  assert.equal(
+    resolveTelegramChannelUrl(undefined),
+    "https://t.me/seonorita_app"
+  );
+  assert.equal(resolveTelegramChannelUrl(""), "https://t.me/seonorita_app");
 });
 
 test("accepts HTTPS Telegram channel and invite links", () => {
@@ -28,18 +28,18 @@ test("accepts HTTPS Telegram channel and invite links", () => {
 test("rejects unsafe or unrelated URLs", () => {
   assert.equal(
     resolveTelegramChannelUrl("http://t.me/seonorita"),
-    developerTelegramUrl
+    "https://t.me/seonorita_app"
   );
   assert.equal(
     resolveTelegramChannelUrl("https://example.com/seonorita"),
-    developerTelegramUrl
+    "https://t.me/seonorita_app"
   );
   assert.equal(
     resolveTelegramChannelUrl("javascript:alert(1)"),
-    developerTelegramUrl
+    "https://t.me/seonorita_app"
   );
   assert.equal(
     resolveTelegramChannelUrl("https://user:secret@t.me/seonorita"),
-    developerTelegramUrl
+    "https://t.me/seonorita_app"
   );
 });

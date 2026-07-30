@@ -10,7 +10,7 @@ Platform API, PostgreSQL, Redis или других сервисов для пу
 
 ```dotenv
 LANDING_PUBLIC_URL=https://example.com
-TELEGRAM_CHANNEL_URL=https://t.me/your_channel
+TELEGRAM_CHANNEL_URL=https://t.me/seonorita_app
 DEFAULT_LOCALE=ru
 LANDING_BIND_ADDRESS=127.0.0.1
 LANDING_PORT=3000
@@ -18,8 +18,9 @@ LANDING_PORT=3000
 
 `LANDING_PUBLIC_URL` используется для canonical, Open Graph, robots.txt и
 sitemap. После получения адреса Telegram-канала достаточно изменить
-`TELEGRAM_CHANNEL_URL` и пересобрать контейнер. До этого CTA безопасно ведёт
-на контакт разработчика `https://t.me/ker4ik13`.
+`TELEGRAM_CHANNEL_URL` и пересобрать контейнер. Production-default уже ведёт
+в официальный канал `https://t.me/seonorita_app`; контакт разработчика в
+футере остаётся отдельной ссылкой `https://t.me/ker4ik13`.
 
 ## 2. Запуск через Docker Compose
 

@@ -27,7 +27,7 @@ test("Telegram channel URL is embedded before the Web production build", async (
   const dockerfile = await infrastructureFile("docker/web.Dockerfile");
   const lines = dockerfile.split(/\r?\n/u);
   const argIndex = lines.indexOf(
-    "ARG NEXT_PUBLIC_TELEGRAM_CHANNEL_URL=https://t.me/ker4ik13"
+    "ARG NEXT_PUBLIC_TELEGRAM_CHANNEL_URL=https://t.me/seonorita_app"
   );
   const envIndex = lines.indexOf(
     "ENV NEXT_PUBLIC_TELEGRAM_CHANNEL_URL=$NEXT_PUBLIC_TELEGRAM_CHANNEL_URL"

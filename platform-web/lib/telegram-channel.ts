@@ -1,4 +1,4 @@
-const fallbackTelegramChannelUrl = "https://t.me/ker4ik13";
+const fallbackTelegramChannelUrl = "https://t.me/seonorita_app";
 const allowedTelegramHosts = new Set(["t.me", "telegram.me"]);
 
 export function resolveTelegramChannelUrl(
