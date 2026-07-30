@@ -8,19 +8,49 @@ import type {
 } from "../generated/prisma/client.js";
 import type { AuditService } from "../audit/audit.service.js";
 import { loadAppConfig } from "../config/app-config.js";
-import type { PrismaService } from "../database/prisma.service.js";
+import { PrismaService } from "../database/prisma.service.js";
 import type { OutboxService } from "../outbox/outbox.service.js";
 import type { AuthCryptoService } from "./auth-crypto.service.js";
 import type { AuthRateLimitService } from "./auth-rate-limit.service.js";
 import { IdentityService } from "./identity.service.js";
 import { MfaService } from "./mfa.service.js";
 import type { RecentAuthenticationService } from "./recent-authentication.service.js";
-import type { SessionService } from "./session.service.js";
+import { SessionService } from "./session.service.js";
 import { encodeBase32, totpCode } from "./totp.js";
 
 const USER_ID = "01900000-0000-7000-8000-000000000001";
 const CURRENT_FAMILY_ID = "01900000-0000-7000-8000-000000000010";
 const REQUEST = { requestId: "request-session-integration" };
+const sessionDatabaseUrl =
+  process.env.PLATFORM_API_SESSION_TEST_DATABASE_URL;
+
+test(
+  "Prisma PostgreSQL adapter acquires the session advisory lock",
+  { skip: sessionDatabaseUrl === undefined, timeout: 10_000 },
+  async () => {
+    assert.ok(sessionDatabaseUrl);
+    const config = loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: sessionDatabaseUrl
+    });
+    const prisma = new PrismaService(config);
+    const service = new SessionService(
+      prisma,
+      {} as AuthCryptoService,
+      {} as AuditService,
+      {} as OutboxService,
+      config
+    );
+
+    try {
+      await prisma.$transaction((transaction) =>
+        service.lockUserSessionLifecycle(transaction, USER_ID)
+      );
+    } finally {
+      await prisma.$disconnect();
+    }
+  }
+);
 
 test("password reset locks lifecycle, invalidates MFA challenges, revokes old families and only then issues a new family", async () => {
   const calls: string[] = [];

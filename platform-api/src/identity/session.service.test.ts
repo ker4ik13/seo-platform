@@ -211,6 +211,28 @@ test("issue acquires the same user advisory lock before creating a session", asy
   assert.deepEqual(calls, ["lock", "create"]);
 });
 
+test("advisory lock casts PostgreSQL void for Prisma driver adapters", async () => {
+  let sql = "";
+  let parameters: readonly unknown[] = [];
+  const transaction = {
+    $queryRaw: async (
+      strings: TemplateStringsArray,
+      ...values: readonly unknown[]
+    ) => {
+      sql = strings.join("?");
+      parameters = values;
+      return [{ lock_result: "" }];
+    }
+  } as unknown as Prisma.TransactionClient;
+  const service = sessionService({ transaction, events: [] });
+
+  await service.lockUserSessionLifecycle(transaction, USER_ID);
+
+  assert.match(sql, /pg_advisory_xact_lock/u);
+  assert.match(sql, /::text AS lock_result/u);
+  assert.deepEqual(parameters, [`identity-session-user:${USER_ID}`]);
+});
+
 test("issue rejects a stale user version after acquiring the lifecycle lock", async () => {
   const calls: string[] = [];
   const transaction = {

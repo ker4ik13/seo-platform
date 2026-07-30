@@ -476,7 +476,7 @@ export class SessionService {
     await transaction.$queryRaw`
       SELECT pg_advisory_xact_lock(
         hashtextextended(${"identity-session-user:" + userId}, 0)
-      )
+      )::text AS lock_result
     `;
   }
 
