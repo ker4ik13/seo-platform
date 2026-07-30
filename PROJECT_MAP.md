@@ -314,6 +314,10 @@ Backend convention:
   private/no-store boundary для всех внутренних HTTP, parser/guard/error/404
   ответов с merge-safe Vary и security headers; оба internal-only сервиса не
   доверяют forwarded proxy headers;
+- `platform-realtime/src/common/http-response-policy.ts` — edge HTTP/error/
+  preflight boundary Realtime с принудительным private/no-store, merge-safe
+  Vary, security headers и production HSTS только по effective HTTPS от
+  ближайшего из одного доверенного proxy hop;
 - `platform-api/src/identity/mfa.*`, `totp.*` — TOTP lifecycle, login
   challenge и recovery codes;
 - `platform-api/src/authorization` — default-deny permission catalog и

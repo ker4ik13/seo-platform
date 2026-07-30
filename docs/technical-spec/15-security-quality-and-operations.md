@@ -458,6 +458,11 @@ host firewall или egress proxy по provider DNS/hostname allowlist.
   ослабить или потерять. Эти internal-only HTTP процессы не доверяют
   `X-Forwarded-*`; proxy trust включается только для реально стоящего за
   одним reverse proxy edge-сервиса.
+- Realtime как edge HTTP/WebSocket process доверяет ровно одному ближайшему
+  reverse proxy hop. Его HTTP success/parser/guard/error/404 и CORS preflight
+  ответы также принудительно private/no-store с merge-safe Vary; production
+  HSTS выставляется только для effective HTTPS и удаляется с HTTP-ответа даже
+  при попытке controller задать его самостоятельно.
 - Все Platform API responses получают `nosniff`, `DENY`/
   `frame-ancestors 'none'`, `no-referrer` и отключение ненужных browser
   capabilities. В production HSTS добавляется только когда effective
