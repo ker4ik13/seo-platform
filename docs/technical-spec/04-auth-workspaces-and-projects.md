@@ -127,6 +127,11 @@
 - Refresh reuse, полное истечение refresh session и inactive account сначала
   commit-ят terminal revoke/outbox, затем возвращают unauthenticated. Истечение
   короткого access token не завершает family.
+- Bounded global expiry sweeper не полагается на предъявление cookie:
+  выбирает небольшой batch просроченных active families, повторно проверяет
+  exact `userId + familyId` под общим lifecycle lock и вызывает тот же
+  terminal revoke/outbox helper. Production startup запрещает отключать
+  sweeper; interval, batch, transaction и lock timeouts ограничены config.
 - Пользователь видит список устройств, IP, примерную географию и время активности.
 - Можно завершить отдельную или все другие сессии.
 - Опасные операции требуют recent authentication.

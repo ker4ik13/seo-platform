@@ -97,6 +97,38 @@ credential material запрещены. Контракт находится в `
 поскольку family становится межсервисным aggregate ID. Существующие UUIDv4
 остаются допустимыми lookup IDs и не требуют backfill/migration.
 
+### Durable transport и global expiry
+
+- Platform API publisher выбирает из outbox только exact
+  `identity.session-family.revoked.v1` через `FOR UPDATE SKIP LOCKED`, строит
+  envelope общим contract builder и fail-closed проверяет aggregate, scope и
+  metadata до network call.
+- JetStream publish использует exact subject
+  `{environment}.identity.session-family.revoked.v1`, `Nats-Msg-Id`, равный
+  outbox event ID, и expected stream `IDENTITY_EVENTS`. Outbox становится
+  `PUBLISHED` только после валидного PubAck этого stream; ошибки получают
+  bounded retry с jitter либо terminal `FAILED` после configured budget.
+- Realtime использует durable pull consumer
+  `realtime_session_family_revoked_v1`, получает не более одного сообщения и
+  ack-ит source только после commit локального handler. Временная ошибка даёт
+  bounded delayed NAK. Permanent invalid message либо exhausted application
+  attempts сначала получает redacted DLQ envelope в `DOMAIN_EVENTS_DLQ`, и
+  только подтверждённый DLQ PubAck разрешает source ack.
+- Runtime publisher/consumer не создают topology. Internal-only one-shot
+  provisioner до их старта идемпотентно создаёт exact source/DLQ streams и
+  durable consumer, reconciles только allowlisted limits и fail-closed
+  отклоняет identity, subject, transform, mirror/source либо sealed drift.
+  Publisher, consumer, provisioner и generic NATS runtime используют разные
+  deny-by-default credentials/ACL.
+- Bounded global session-expiry sweeper выбирает просроченные active families
+  небольшими batches, дедуплицирует `userId + familyId`, затем в отдельной
+  bounded transaction берёт тот же user lifecycle lock, повторно проверяет
+  due state и вызывает общий terminal revoke/outbox helper. Production
+  configuration требует publisher, consumer и sweeper включёнными.
+- Publisher, consumer и sweeper прекращают scheduling при shutdown и ждут
+  только bounded active operation. Realtime закрывает active fetch до NATS
+  drain; после shutdown grace незавершённое source сообщение остаётся unacked.
+
 ## Последствия
 
 - Terminal session state и producer outbox row фиксируются атомарно в
@@ -105,20 +137,20 @@ credential material запрещены. Контракт находится в `
   не была изменена.
 - Advisory lock сериализует lifecycle только одного пользователя и не создаёт
   глобальный bottleneck.
-- Producer-срез dependency-free: publisher JetStream не добавлен, поэтому
-  наличие outbox row ещё не означает автоматическую доставку события.
-- Realtime dependency-free application handler уже добавлен вместе с Prisma
-  migration: versioned inbox scope, durable revoked-family tombstone,
-  terminal device revoke и upsert guard используют один user advisory lock.
-  Handler ещё не подключён к durable transport subscription.
+- Для этого exact event type outbox row теперь автоматически проходит через
+  durable JetStream publisher и Realtime consumer. Остальные event types не
+  входят в allowlist этого publisher и не получают доставку автоматически.
+- Realtime application handler и transport связаны без изменения ownership:
+  versioned inbox scope, durable revoked-family tombstone, terminal device
+  revoke и upsert guard остаются одной локальной transaction boundary.
+- Lazy refresh path больше не является единственным механизмом expiry:
+  bounded global sweeper закрывает families, которые клиент не предъявил.
 
 ## Release blockers и проверка
 
-- Durable outbox publisher и JetStream subscription должны доставлять
-  validated envelope в готовый идемпотентный Realtime application handler до
-  включения Web Push sender. Handler атомарно записывает scoped inbox receipt,
-  durable revoked-family tombstone и переводит все active devices с
-  совпавшей session family в terminal state.
+- Durable outbox publisher и JetStream pull subscription реализованы. Handler
+  атомарно записывает scoped inbox receipt, durable revoked-family tombstone и
+  переводит active devices совпавшей session family в terminal state до ack.
 - Одного update существующих devices недостаточно: событие может быть
   обработано раньше запоздавшего registration request, уже
   аутентифицированного старой family. Realtime хранит tombstone по
@@ -137,11 +169,19 @@ credential material запрещены. Контракт находится в `
 - Future account suspend/deactivate/delete command обязан брать тот же
   lifecycle lock, terminal-отзывать все families и писать событие в своей
   транзакции.
-- Нужен bounded global session-expiry sweeper: lazy refresh покрывает только
-  предъявленную session.
+- Bounded global session-expiry sweeper реализован; до production остаются
+  PostgreSQL 18 concurrency и representative-volume/load checks для него.
 - Unit tests фиксируют exact payload, whole-family/idempotent revoke, чужую
   session, exclude current family, stale user version, commit-before-401,
   reset и MFA integration.
 - Реальные race tests `rotate ↔ rotate`, `login ↔ password reset`,
   `MFA challenge/confirm/disable ↔ password reset` и outbox rollback выполняются на
   PostgreSQL 18 staging; in-memory тест не считается заменой.
+- Localhost smoke с `nats-server` 2.12.12 подтвердил синтаксис config,
+  create → unchanged idempotence topology и exact ACL publisher/consumer/
+  provisioner. Compose render без Docker на текущем хосте не выполнен и
+  остаётся CI/target-environment gate.
+- До production сохраняются общеплатформенные gates: target PostgreSQL ACL/
+  HBA и race evidence, NATS lag/redelivery/DLQ observability и replay runbook,
+  backup/restore/load проверки и внешние provider/sender dependencies. Сам
+  durable identity pipeline не означает готовность всего продукта.

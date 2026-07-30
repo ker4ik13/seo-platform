@@ -103,12 +103,16 @@ test("rank worker is bounded, internal-only and starts after required dependenci
   const healthcheck = nestedBlock(rankWorker, "healthcheck");
 
   assert.match(networks, /^      - internal$/mu);
+  assert.match(networks, /^      - jobs-redis$/mu);
   assert.doesNotMatch(networks, /\b(?:edge|outbound)\b/u);
   assert.match(
     dependencies,
     /jobs-runtime-db-permissions:\n        condition: service_completed_successfully/u
   );
-  assert.match(dependencies, /redis:\n        condition: service_healthy/u);
+  assert.match(
+    dependencies,
+    /redis-jobs:\n        condition: service_healthy/u
+  );
   assert.match(dependencies, /seo-data:\n        condition: service_healthy/u);
   assert.match(dependencies, /platform-api:\n        condition: service_healthy/u);
   assert.doesNotMatch(dependencies, /\bnats:/u);

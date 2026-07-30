@@ -15,14 +15,15 @@ x-common-backend-env: &common-backend-env
   NODE_ENV: production
   SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
   NATS_URL: nats://nats:4222
-  NATS_USER: ${NATS_USER:?NATS_USER is required}
-  NATS_PASSWORD: ${NATS_PASSWORD:?NATS_PASSWORD is required}
+
+x-generic-nats-runtime-env: &generic-nats-runtime-env
+  NATS_USER: ${NATS_RUNTIME_USER:?NATS_RUNTIME_USER is required}
+  NATS_PASSWORD: ${NATS_RUNTIME_PASSWORD:?NATS_RUNTIME_PASSWORD is required}
 
 x-jobs-runtime-env: &jobs-runtime-env
   NODE_ENV: production
   SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
   DATABASE_URL: postgresql://jobs_runtime:${JOBS_DATABASE_PASSWORD:?JOBS_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
-  REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
 
 x-jobs-s3-env: &jobs-s3-env
   S3_ENABLED: ${S3_ENABLED:-false}
@@ -86,6 +87,33 @@ x-integration-credential-execution-env: &integration-credential-execution-env
   INTEGRATION_CREDENTIAL_ROLE: EXECUTION
   INTEGRATION_CREDENTIAL_KEYS: ${INTEGRATION_CREDENTIAL_KEYS:?INTEGRATION_CREDENTIAL_KEYS is required}
   INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: ${INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION:?INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION is required}
+
+x-redis-defaults: &redis-defaults
+  image: redis:8.8.1-alpine3.23
+  restart: unless-stopped
+  init: true
+  read_only: true
+  security_opt: ["no-new-privileges:true"]
+  depends_on:
+    service-token-preflight:
+      condition: service_completed_successfully
+  healthcheck:
+    test:
+      [
+        "CMD",
+        "redis-cli",
+        "-e",
+        "--user",
+        "seo_health",
+        "--pass",
+        "health",
+        "--no-auth-warning",
+        "ping"
+      ]
+    interval: 10s
+    timeout: 5s
+    retries: 10
+    start_period: 10s
 
 x-service-runtime-permission-defaults: &service-runtime-permission-defaults
   image: postgres:18.3-alpine3.23
@@ -186,53 +214,101 @@ services:
       JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: ${JOBS_TO_PLATFORM_RANK_GRANT_TOKEN:?JOBS_TO_PLATFORM_RANK_GRANT_TOKEN is required}
       JOBS_TO_SEO_RANK_RESULT_TOKEN: ${JOBS_TO_SEO_RANK_RESULT_TOKEN:?JOBS_TO_SEO_RANK_RESULT_TOKEN is required}
       RANK_HISTORY_CURSOR_KEY: ${RANK_HISTORY_CURSOR_KEY:?RANK_HISTORY_CURSOR_KEY is required}
+      REDIS_JOBS_API_PASSWORD: ${REDIS_JOBS_API_PASSWORD:?REDIS_JOBS_API_PASSWORD is required}
+      REDIS_JOBS_SYSTEM_PASSWORD: ${REDIS_JOBS_SYSTEM_PASSWORD:?REDIS_JOBS_SYSTEM_PASSWORD is required}
+      REDIS_JOBS_INSPECTION_PASSWORD: ${REDIS_JOBS_INSPECTION_PASSWORD:?REDIS_JOBS_INSPECTION_PASSWORD is required}
+      REDIS_JOBS_IMPORT_PASSWORD: ${REDIS_JOBS_IMPORT_PASSWORD:?REDIS_JOBS_IMPORT_PASSWORD is required}
+      REDIS_JOBS_RANK_PASSWORD: ${REDIS_JOBS_RANK_PASSWORD:?REDIS_JOBS_RANK_PASSWORD is required}
+      REDIS_JOBS_CONNECTOR_PASSWORD: ${REDIS_JOBS_CONNECTOR_PASSWORD:?REDIS_JOBS_CONNECTOR_PASSWORD is required}
+      REDIS_REALTIME_PASSWORD: ${REDIS_REALTIME_PASSWORD:?REDIS_REALTIME_PASSWORD is required}
+      REDIS_DIRECTUS_PASSWORD: ${REDIS_DIRECTUS_PASSWORD:?REDIS_DIRECTUS_PASSWORD is required}
+      NATS_RUNTIME_USER: ${NATS_RUNTIME_USER:?NATS_RUNTIME_USER is required}
+      NATS_RUNTIME_PASSWORD: ${NATS_RUNTIME_PASSWORD:?NATS_RUNTIME_PASSWORD is required}
+      NATS_PLATFORM_PUBLISHER_USER: ${NATS_PLATFORM_PUBLISHER_USER:?NATS_PLATFORM_PUBLISHER_USER is required}
+      NATS_PLATFORM_PUBLISHER_PASSWORD: ${NATS_PLATFORM_PUBLISHER_PASSWORD:?NATS_PLATFORM_PUBLISHER_PASSWORD is required}
+      NATS_REALTIME_CONSUMER_USER: ${NATS_REALTIME_CONSUMER_USER:?NATS_REALTIME_CONSUMER_USER is required}
+      NATS_REALTIME_CONSUMER_PASSWORD: ${NATS_REALTIME_CONSUMER_PASSWORD:?NATS_REALTIME_CONSUMER_PASSWORD is required}
+      NATS_PROVISIONER_USER: ${NATS_PROVISIONER_USER:?NATS_PROVISIONER_USER is required}
+      NATS_PROVISIONER_PASSWORD: ${NATS_PROVISIONER_PASSWORD:?NATS_PROVISIONER_PASSWORD is required}
     volumes:
       - ./security/validate-service-tokens.sh:/security/validate-service-tokens.sh:ro
 
-  redis:
-    image: redis:8-alpine
-    restart: unless-stopped
-    command:
-      [
-        "redis-server",
-        "--appendonly",
-        "yes",
-        "--requirepass",
-        "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
-      ]
+  redis-jobs:
+    <<: *redis-defaults
+    command: ["/bin/sh", "/redis/start-redis.sh", "jobs"]
+    environment:
+      REDIS_JOBS_API_PASSWORD: ${REDIS_JOBS_API_PASSWORD:?REDIS_JOBS_API_PASSWORD is required}
+      REDIS_JOBS_SYSTEM_PASSWORD: ${REDIS_JOBS_SYSTEM_PASSWORD:?REDIS_JOBS_SYSTEM_PASSWORD is required}
+      REDIS_JOBS_INSPECTION_PASSWORD: ${REDIS_JOBS_INSPECTION_PASSWORD:?REDIS_JOBS_INSPECTION_PASSWORD is required}
+      REDIS_JOBS_IMPORT_PASSWORD: ${REDIS_JOBS_IMPORT_PASSWORD:?REDIS_JOBS_IMPORT_PASSWORD is required}
+      REDIS_JOBS_RANK_PASSWORD: ${REDIS_JOBS_RANK_PASSWORD:?REDIS_JOBS_RANK_PASSWORD is required}
+      REDIS_JOBS_CONNECTOR_PASSWORD: ${REDIS_JOBS_CONNECTOR_PASSWORD:?REDIS_JOBS_CONNECTOR_PASSWORD is required}
     volumes:
-      - redis_data:/data
+      - redis_jobs_data:/data
+      - ./redis:/redis:ro
+    tmpfs:
+      - /run/redis-runtime:rw,noexec,nosuid,size=1m,mode=0700
     networks:
-      - internal
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "redis-cli",
-          "-a",
-          "${REDIS_PASSWORD}",
-          "--no-auth-warning",
-          "ping"
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 10
+      - jobs-redis
+    cpus: "1.0"
+    mem_limit: 768M
+    pids_limit: 128
+
+  redis-realtime:
+    <<: *redis-defaults
+    command: ["/bin/sh", "/redis/start-redis.sh", "realtime"]
+    environment:
+      REDIS_REALTIME_PASSWORD: ${REDIS_REALTIME_PASSWORD:?REDIS_REALTIME_PASSWORD is required}
+    volumes:
+      - ./redis:/redis:ro
+    tmpfs:
+      - /run/redis-runtime:rw,noexec,nosuid,size=1m,mode=0700
+      - /data:rw,noexec,nosuid,size=16m,mode=0750
+    networks:
+      - realtime-redis
+    cpus: "0.5"
+    mem_limit: 192M
+    pids_limit: 64
+
+  redis-directus:
+    <<: *redis-defaults
+    command: ["/bin/sh", "/redis/start-redis.sh", "directus"]
+    environment:
+      REDIS_DIRECTUS_PASSWORD: ${REDIS_DIRECTUS_PASSWORD:?REDIS_DIRECTUS_PASSWORD is required}
+    volumes:
+      - ./redis:/redis:ro
+    tmpfs:
+      - /run/redis-runtime:rw,noexec,nosuid,size=1m,mode=0700
+      - /data:rw,noexec,nosuid,size=16m,mode=0750
+    networks:
+      - directus-redis
+    cpus: "0.5"
+    mem_limit: 320M
+    pids_limit: 64
 
   nats:
-    image: nats:2.12-alpine
+    image: nats:2.12.12-alpine
     restart: unless-stopped
-    command:
-      [
-        "--jetstream",
-        "--store_dir=/data",
-        "--http_port=8222",
-        "--user=${NATS_USER:?NATS_USER is required}",
-        "--pass=${NATS_PASSWORD:?NATS_PASSWORD is required}"
-      ]
+    command: ["--config", "/etc/nats/nats-server.conf"]
+    environment:
+      NATS_RUNTIME_USER: ${NATS_RUNTIME_USER:?NATS_RUNTIME_USER is required}
+      NATS_RUNTIME_PASSWORD: ${NATS_RUNTIME_PASSWORD:?NATS_RUNTIME_PASSWORD is required}
+      NATS_PLATFORM_PUBLISHER_USER: ${NATS_PLATFORM_PUBLISHER_USER:?NATS_PLATFORM_PUBLISHER_USER is required}
+      NATS_PLATFORM_PUBLISHER_PASSWORD: ${NATS_PLATFORM_PUBLISHER_PASSWORD:?NATS_PLATFORM_PUBLISHER_PASSWORD is required}
+      NATS_REALTIME_CONSUMER_USER: ${NATS_REALTIME_CONSUMER_USER:?NATS_REALTIME_CONSUMER_USER is required}
+      NATS_REALTIME_CONSUMER_PASSWORD: ${NATS_REALTIME_CONSUMER_PASSWORD:?NATS_REALTIME_CONSUMER_PASSWORD is required}
+      NATS_PROVISIONER_USER: ${NATS_PROVISIONER_USER:?NATS_PROVISIONER_USER is required}
+      NATS_PROVISIONER_PASSWORD: ${NATS_PROVISIONER_PASSWORD:?NATS_PROVISIONER_PASSWORD is required}
+      NATS_IDENTITY_EVENT_SUBJECT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}.identity.session-family.revoked.v1
+      NATS_IDENTITY_EVENT_DLQ_SUBJECT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}.dlq.realtime.identity.session-family.revoked.v1
     volumes:
       - nats_data:/data
+      - ./nats/nats-server.conf:/etc/nats/nats-server.conf:ro
     networks:
       - internal
+    depends_on:
+      service-token-preflight:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [
@@ -242,6 +318,32 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+
+  nats-topology-provisioner:
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: nats-provisioner
+      args:
+        PACKAGE_NAME: "@seo-platform/platform-api"
+    restart: "no"
+    init: true
+    user: "1000:1000"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      NATS_URL: nats://nats:4222
+      NATS_USER: ${NATS_PROVISIONER_USER:?NATS_PROVISIONER_USER is required}
+      NATS_PASSWORD: ${NATS_PROVISIONER_PASSWORD:?NATS_PROVISIONER_PASSWORD is required}
+      NATS_EVENT_ENVIRONMENT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}
+    networks:
+      - internal
+    depends_on:
+      service-token-preflight:
+        condition: service_completed_successfully
+      nats:
+        condition: service_healthy
 
   clamav:
     image: clamav/clamav:1.5.3-debian13-slim
@@ -429,6 +531,22 @@ services:
         PACKAGE_NAME: "@seo-platform/platform-api"
     environment:
       <<: *common-backend-env
+      NATS_USER: ${NATS_PLATFORM_PUBLISHER_USER:?NATS_PLATFORM_PUBLISHER_USER is required}
+      NATS_PASSWORD: ${NATS_PLATFORM_PUBLISHER_PASSWORD:?NATS_PLATFORM_PUBLISHER_PASSWORD is required}
+      OUTBOX_PUBLISHER_ENABLED: "true"
+      NATS_EVENT_ENVIRONMENT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}
+      NATS_EVENT_STREAM: IDENTITY_EVENTS
+      OUTBOX_PUBLISH_INTERVAL_MS: ${OUTBOX_PUBLISH_INTERVAL_MS:-1000}
+      OUTBOX_PUBLISH_BATCH_SIZE: ${OUTBOX_PUBLISH_BATCH_SIZE:-20}
+      OUTBOX_PUBLISH_MAX_ATTEMPTS: ${OUTBOX_PUBLISH_MAX_ATTEMPTS:-10}
+      OUTBOX_PUBLISH_RETRY_BASE_MS: ${OUTBOX_PUBLISH_RETRY_BASE_MS:-1000}
+      OUTBOX_PUBLISH_RETRY_MAX_MS: ${OUTBOX_PUBLISH_RETRY_MAX_MS:-300000}
+      OUTBOX_PUBLISH_ACK_TIMEOUT_MS: ${OUTBOX_PUBLISH_ACK_TIMEOUT_MS:-5000}
+      SESSION_EXPIRY_SWEEPER_ENABLED: "true"
+      SESSION_EXPIRY_SWEEPER_INTERVAL_MS: ${SESSION_EXPIRY_SWEEPER_INTERVAL_MS:-60000}
+      SESSION_EXPIRY_SWEEPER_BATCH_SIZE: ${SESSION_EXPIRY_SWEEPER_BATCH_SIZE:-50}
+      SESSION_EXPIRY_SWEEPER_TRANSACTION_TIMEOUT_MS: ${SESSION_EXPIRY_SWEEPER_TRANSACTION_TIMEOUT_MS:-10000}
+      SESSION_EXPIRY_SWEEPER_LOCK_TIMEOUT_MS: ${SESSION_EXPIRY_SWEEPER_LOCK_TIMEOUT_MS:-500}
       PORT: 4000
       DATABASE_URL: postgresql://platform_runtime:${PLATFORM_DATABASE_PASSWORD:?PLATFORM_DATABASE_PASSWORD is required}@postgres:5432/platform_db
       DATABASE_POOL_MAX: ${PLATFORM_API_DATABASE_POOL_MAX:-20}
@@ -471,6 +589,8 @@ services:
         condition: service_completed_successfully
       nats:
         condition: service_healthy
+      nats-topology-provisioner:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [
@@ -493,7 +613,7 @@ services:
       args:
         PACKAGE_NAME: "@seo-platform/seo-data"
     environment:
-      <<: *common-backend-env
+      <<: [*common-backend-env, *generic-nats-runtime-env]
       PORT: 4001
       DATABASE_URL: postgresql://seo_runtime:${SEO_DATABASE_PASSWORD:?SEO_DATABASE_PASSWORD is required}@postgres:5432/seo_db
       DATABASE_POOL_MAX: ${SEO_DATA_DATABASE_POOL_MAX:-30}
@@ -533,21 +653,23 @@ services:
       args:
         PACKAGE_NAME: "@seo-platform/jobs-integrations"
     environment:
-      <<: [*common-backend-env, *jobs-runtime-env, *jobs-s3-env, *jobs-upload-command-env, *jobs-seo-data-env, *jobs-email-env, *integration-credential-management-env]
+      <<: [*common-backend-env, *generic-nats-runtime-env, *jobs-runtime-env, *jobs-s3-env, *jobs-upload-command-env, *jobs-seo-data-env, *jobs-email-env, *integration-credential-management-env]
       PORT: 4002
       DATABASE_POOL_MAX: ${JOBS_DATABASE_POOL_MAX:-30}
+      REDIS_URL: redis://seo_jobs_api:${REDIS_JOBS_API_PASSWORD:?REDIS_JOBS_API_PASSWORD is required}@redis-jobs:6379
       PLATFORM_API_TO_JOBS_TOKEN: ${PLATFORM_API_TO_JOBS_TOKEN:?PLATFORM_API_TO_JOBS_TOKEN is required}
     expose:
       - "4002"
     networks:
       - internal
       - outbound
+      - jobs-redis
     depends_on:
       jobs-runtime-db-permissions:
         condition: service_completed_successfully
       service-token-preflight:
         condition: service_completed_successfully
-      redis:
+      redis-jobs:
         condition: service_healthy
       nats:
         condition: service_healthy
@@ -576,12 +698,12 @@ services:
     environment:
       NODE_ENV: production
       SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      REDIS_URL: redis://seo_jobs_system:${REDIS_JOBS_SYSTEM_PASSWORD:?REDIS_JOBS_SYSTEM_PASSWORD is required}@redis-jobs:6379
       SYSTEM_WORKER_CONCURRENCY: ${SYSTEM_WORKER_CONCURRENCY:-2}
     networks:
-      - internal
+      - jobs-redis
     depends_on:
-      redis:
+      redis-jobs:
         condition: service_healthy
 
   upload-inspection-worker:
@@ -598,13 +720,15 @@ services:
     environment:
       <<: [*jobs-runtime-env, *jobs-s3-env, *jobs-inspection-env]
       DATABASE_POOL_MAX: ${JOBS_INSPECTION_DATABASE_POOL_MAX:-10}
+      REDIS_URL: redis://seo_jobs_inspection:${REDIS_JOBS_INSPECTION_PASSWORD:?REDIS_JOBS_INSPECTION_PASSWORD is required}@redis-jobs:6379
     networks:
       - internal
       - outbound
+      - jobs-redis
     depends_on:
       jobs-runtime-db-permissions:
         condition: service_completed_successfully
-      redis:
+      redis-jobs:
         condition: service_healthy
       clamav:
         condition: service_healthy
@@ -621,15 +745,17 @@ services:
     environment:
       <<: [*jobs-runtime-env, *jobs-s3-env, *jobs-import-env, *jobs-seo-data-env]
       DATABASE_POOL_MAX: ${JOBS_IMPORT_DATABASE_POOL_MAX:-10}
+      REDIS_URL: redis://seo_jobs_import:${REDIS_JOBS_IMPORT_PASSWORD:?REDIS_JOBS_IMPORT_PASSWORD is required}@redis-jobs:6379
     networks:
       - internal
       - outbound
+      - jobs-redis
     depends_on:
       jobs-runtime-db-permissions:
         condition: service_completed_successfully
       service-token-preflight:
         condition: service_completed_successfully
-      redis:
+      redis-jobs:
         condition: service_healthy
       seo-data:
         condition: service_healthy
@@ -646,7 +772,7 @@ services:
     environment:
       DATABASE_URL: postgresql://jobs_runtime:${JOBS_DATABASE_PASSWORD:?JOBS_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
       DATABASE_POOL_MAX: ${JOBS_RANK_DATABASE_POOL_MAX:-10}
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      REDIS_URL: redis://seo_jobs_rank:${REDIS_JOBS_RANK_PASSWORD:?REDIS_JOBS_RANK_PASSWORD is required}@redis-jobs:6379
       PLATFORM_API_URL: http://platform-api:4000
       PLATFORM_API_COMMAND_TIMEOUT_MS: ${PLATFORM_API_COMMAND_TIMEOUT_MS:-5000}
       JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: ${JOBS_TO_PLATFORM_RANK_GRANT_TOKEN:?JOBS_TO_PLATFORM_RANK_GRANT_TOKEN is required}
@@ -665,12 +791,13 @@ services:
     pids_limit: ${JOBS_RANK_PIDS_LIMIT:-128}
     networks:
       - internal
+      - jobs-redis
     depends_on:
       jobs-runtime-db-permissions:
         condition: service_completed_successfully
       service-token-preflight:
         condition: service_completed_successfully
-      redis:
+      redis-jobs:
         condition: service_healthy
       seo-data:
         condition: service_healthy
@@ -701,7 +828,7 @@ services:
       NODE_ENV: production
       SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
       DATABASE_URL: postgresql://jobs_connector:${JOBS_CONNECTOR_DATABASE_PASSWORD:?JOBS_CONNECTOR_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      REDIS_URL: redis://seo_jobs_connector:${REDIS_JOBS_CONNECTOR_PASSWORD:?REDIS_JOBS_CONNECTOR_PASSWORD is required}@redis-jobs:6379
       DATABASE_POOL_MAX: ${JOBS_CONNECTOR_DATABASE_POOL_MAX:-10}
       INTEGRATION_VALIDATION_TIMEOUT_MS: ${INTEGRATION_VALIDATION_TIMEOUT_MS:-10000}
       INTEGRATION_VALIDATION_LEASE_SECONDS: ${INTEGRATION_VALIDATION_LEASE_SECONDS:-120}
@@ -710,10 +837,11 @@ services:
     networks:
       - internal
       - outbound
+      - jobs-redis
     depends_on:
       jobs-connector-db-permissions:
         condition: service_completed_successfully
-      redis:
+      redis-jobs:
         condition: service_healthy
 
   realtime:
@@ -726,10 +854,25 @@ services:
         PACKAGE_NAME: "@seo-platform/realtime"
     environment:
       <<: *common-backend-env
+      NATS_USER: ${NATS_REALTIME_CONSUMER_USER:?NATS_REALTIME_CONSUMER_USER is required}
+      NATS_PASSWORD: ${NATS_REALTIME_CONSUMER_PASSWORD:?NATS_REALTIME_CONSUMER_PASSWORD is required}
+      NATS_EVENT_CONSUMER_ENABLED: "true"
+      NATS_EVENT_ENVIRONMENT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}
+      NATS_EVENT_STREAM: IDENTITY_EVENTS
+      NATS_EVENT_CONSUMER_DURABLE: realtime_session_family_revoked_v1
+      NATS_EVENT_DLQ_STREAM: DOMAIN_EVENTS_DLQ
+      NATS_EVENT_DLQ_SUBJECT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}.dlq.realtime.identity.session-family.revoked.v1
+      NATS_EVENT_FETCH_EXPIRES_MS: ${NATS_EVENT_FETCH_EXPIRES_MS:-30000}
+      NATS_EVENT_MAX_ATTEMPTS: ${NATS_EVENT_MAX_ATTEMPTS:-10}
+      NATS_EVENT_RETRY_BASE_MS: ${NATS_EVENT_RETRY_BASE_MS:-1000}
+      NATS_EVENT_RETRY_MAX_MS: ${NATS_EVENT_RETRY_MAX_MS:-300000}
+      NATS_EVENT_PUBLISH_TIMEOUT_MS: ${NATS_EVENT_PUBLISH_TIMEOUT_MS:-5000}
+      NATS_EVENT_MAX_PAYLOAD_BYTES: ${NATS_EVENT_MAX_PAYLOAD_BYTES:-65536}
+      NATS_EVENT_SHUTDOWN_GRACE_MS: ${NATS_EVENT_SHUTDOWN_GRACE_MS:-10000}
       PORT: 4003
       DATABASE_URL: postgresql://realtime_runtime:${REALTIME_DATABASE_PASSWORD:?REALTIME_DATABASE_PASSWORD is required}@postgres:5432/realtime_db
       DATABASE_POOL_MAX: ${REALTIME_DATABASE_POOL_MAX:-20}
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      REDIS_URL: redis://seo_realtime:${REDIS_REALTIME_PASSWORD:?REDIS_REALTIME_PASSWORD is required}@redis-realtime:6379
       WEB_ORIGINS: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required}
       PLATFORM_API_TO_REALTIME_TOKEN: ${PLATFORM_API_TO_REALTIME_TOKEN:?PLATFORM_API_TO_REALTIME_TOKEN is required}
       PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: ${PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN:?PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN is required}
@@ -747,15 +890,18 @@ services:
     networks:
       - internal
       - edge
+      - realtime-redis
     depends_on:
       realtime-runtime-db-permissions:
         condition: service_completed_successfully
       service-token-preflight:
         condition: service_completed_successfully
-      redis:
+      redis-realtime:
         condition: service_healthy
       nats:
         condition: service_healthy
+      nats-topology-provisioner:
+        condition: service_completed_successfully
     healthcheck:
       test:
         [
@@ -841,7 +987,9 @@ services:
       DB_PASSWORD: ${DIRECTUS_DATABASE_PASSWORD:?DIRECTUS_DATABASE_PASSWORD is required}
       CACHE_ENABLED: "true"
       CACHE_STORE: redis
-      REDIS: redis://:${REDIS_PASSWORD}@redis:6379/1
+      CACHE_NAMESPACE: seo-platform:directus:v1
+      CACHE_AUTO_PURGE: "true"
+      REDIS: redis://seo_directus:${REDIS_DIRECTUS_PASSWORD:?REDIS_DIRECTUS_PASSWORD is required}@redis-directus:6379
       STORAGE_LOCATIONS: media
       STORAGE_MEDIA_DRIVER: ${DIRECTUS_STORAGE_DRIVER:-local}
       STORAGE_MEDIA_ROOT: /directus/uploads
@@ -866,10 +1014,11 @@ services:
     networks:
       - internal
       - edge
+      - directus-redis
     depends_on:
       service-database-roles:
         condition: service_completed_successfully
-      redis:
+      redis-directus:
         condition: service_healthy
     healthcheck:
       test:
@@ -886,7 +1035,7 @@ services:
 
 volumes:
   postgres_data:
-  redis_data:
+  redis_jobs_data:
   nats_data:
   directus_uploads:
   directus_extensions:
@@ -894,6 +1043,12 @@ volumes:
 
 networks:
   internal:
+    internal: true
+  jobs-redis:
+    internal: true
+  realtime-redis:
+    internal: true
+  directus-redis:
     internal: true
   edge:
   outbound:

@@ -1725,9 +1725,10 @@ replicas → drain старых replicas → switch active version`; смеша�
 молчаливой передаче endpoint другому аккаунту. Active count bounded policy,
 default 20. Cross-database FK на identity session family запрещён; lifecycle
 отзыва применяется через durable identity event до включения sender.
-Platform API producer этого события реализован по ADR-2026-036; durable
-publisher и JetStream subscription к готовому Realtime application handler
-ещё обязательны.
+Platform API producer/publisher и Realtime durable pull consumer этого
+события реализованы по ADR-2026-036. Consumer ack-ит source только после
+commit локальных inbox/tombstone/device изменений; остальные event types не
+входят в allowlist identity publisher.
 
 До включения sender `realtime_db` получает
 `revoked_session_family_tombstones`:

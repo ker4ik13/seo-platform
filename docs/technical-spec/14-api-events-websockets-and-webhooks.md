@@ -1056,14 +1056,20 @@ ID, email, IP/user-agent и token material запрещены. Platform API пи
 одной транзакцией с условным terminal revoke только если реально изменена хотя
 бы одна строка family. Повтор и rotation внутри family event не создают.
 Точный payload типизирован в `platform-contracts`. Durable publisher и
-Realtime consumer в текущем срезе отсутствуют; outbox row не означает
-доставку.
+Realtime consumer для этого exact event type реализованы. Platform API
+publisher выбирает только `PENDING` identity rows, заново валидирует envelope,
+публикует с event ID как deduplication ID и помечает `PUBLISHED` только после
+валидного PubAck `IDENTITY_EVENTS`. Остальные outbox event types этим
+publisher не доставляются.
 
-Realtime consumer обязан одной транзакцией записывать inbox, durable
+Realtime durable pull consumer одной транзакцией записывает inbox, durable
 revoked-family tombstone по `userId + sessionFamilyId` и terminal-отзывать
 существующие devices. Device upsert проверяет tombstone под тем же
 user/device lock до записи. Это обязательная защита от reorder
 event-before-registration; простого `UPDATE active devices` недостаточно.
+Source ack разрешён только после commit. Retryable processing error получает
+bounded delayed NAK; permanent invalid или exhausted message сначала
+публикует redacted DLQ envelope и требует exact DLQ PubAck.
 
 `integration.credential-validation.finished.v1` содержит только workspace,
 credential/job IDs, provider, material/connector versions, terminal status и
@@ -1092,9 +1098,10 @@ URL, provider, credential, schedule, budget и raw configuration запреще�
 workspace/project/context/keyword IDs, операцию `ASSIGNED/REMOVED` и
 `changedBy`. Keyword text и значения колонок семантики в event не попадают.
 Точный payload обоих семейств типизирован в `platform-contracts`. В текущем
-срезе producer создаёт transactional outbox rows, но durable publisher и
-consumers ещё не включены; наличие строки outbox нельзя интерпретировать как
-доставку в NATS.
+срезе SEO Data producer создаёт transactional outbox rows, но publisher и
+consumers этих event families ещё не включены; identity publisher Platform
+API их не выбирает, а наличие строки нельзя интерпретировать как доставку в
+NATS.
 
 ## 18. NATS subjects и consumers
 
@@ -1118,6 +1125,33 @@ consumers ещё не включены; наличие строки outbox не�
 - replay procedure документирована;
 - replay не вызывает внешнее действие без идемпотентной защиты;
 - production и staging используют разные accounts/streams.
+
+Текущий exact identity topology:
+
+- source subject:
+  `{environment}.identity.session-family.revoked.v1`;
+- source stream: `IDENTITY_EVENTS`, singleton subject, file/limits retention,
+  max message `65536` bytes, bounded count/bytes/age и duplicate window;
+- consumer: `realtime_session_family_revoked_v1`, durable pull, explicit ack,
+  deliver all, instant replay, exact filter, `ack_wait=60s`,
+  `max_ack_pending=1`, unlimited transport redelivery и file-backed state;
+- DLQ subject:
+  `{environment}.dlq.realtime.identity.session-family.revoked.v1`;
+- DLQ stream: `DOMAIN_EVENTS_DLQ`, singleton subject и отдельная bounded
+  file/limits retention.
+
+One-shot provisioner создаёт topology до runtime и не получает application/
+database secrets. Publisher, consumer, provisioner и generic NATS runtime
+используют четыре разные identities. Runtime ACL разрешают только exact
+event/API/request-reply/consumer fetch/source ack/DLQ subjects; CREATE и
+UPDATE доступны только provisioner, а DELETE/PURGE/MSG.GET не выдаются.
+Provisioner не исправляет unsafe identity/subject/transform/mirror/source/
+sealed drift автоматически и завершает startup dependency ошибкой.
+
+Publisher/consumer config, retry, payload и shutdown bounds валидируются при
+startup; production запрещает отключить этот identity pipeline. Это не
+отменяет требования lag/redelivery/DLQ alerts и replay runbook в целевом
+окружении.
 
 ## 19. WebSocket gateway
 
@@ -1204,7 +1238,8 @@ Presence исчезает через 15–30 секунд без heartbeat. То
 
 ### 19.7. Масштабирование
 
-- Socket.IO Redis adapter;
+- Socket.IO Redis adapter применяется только к tenant collaboration namespace;
+  root namespace не создаёт Redis channels и остаётся in-memory;
 - sticky sessions, если transport допускает polling;
 - предпочтительно WebSocket-only после проверки сетевой совместимости;
 - drain connections при deployment;

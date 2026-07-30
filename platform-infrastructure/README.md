@@ -3,7 +3,8 @@
 `compose.dokploy.yml` — первый удалённый контур. Он рассчитан на одну VPS:
 
 - PostgreSQL 18 с отдельными databases для четырёх backend-контуров и Directus;
-- Redis с AOF для BullMQ, Socket.IO и cache;
+- три изолированных Redis: durable AOF для BullMQ, ephemeral Pub/Sub для
+  Socket.IO и отдельный ephemeral Directus cache;
 - NATS с JetStream;
 - четыре NestJS API, отдельные system, inspection, import, rank и connector
   workers;
@@ -31,6 +32,16 @@
    `RANK_HISTORY_CURSOR_KEY`. Пустые значения в корневом примере —
    намеренный предохранитель; одно значение нельзя переиспользовать между
    границами.
+   Сгенерировать восемь независимых Redis passwords:
+   `REDIS_JOBS_{API,SYSTEM,INSPECTION,IMPORT,RANK,CONNECTOR}_PASSWORD`,
+   `REDIS_REALTIME_PASSWORD` и `REDIS_DIRECTUS_PASSWORD`. Они не совпадают с
+   service/NATS credentials и соответствуют URL-safe deploy policy.
+   Отдельно сгенерировать четыре разные пары NATS identity:
+   `NATS_RUNTIME_*`, `NATS_PLATFORM_PUBLISHER_*`,
+   `NATS_REALTIME_CONSUMER_*`, `NATS_PROVISIONER_*`, а также задать exact
+   lowercase `NATS_EVENT_ENVIRONMENT`. NATS passwords не совпадают ни с одним
+   service credential и начинаются с ASCII letter; usernames уникальны и не
+   являются secrets, но не переиспользуются между ролями.
 3. Сначала оставить `S3_ENABLED=false`, `EMAIL_ENABLED=false`,
    `DIRECTUS_STORAGE_DRIVER=local`.
 4. Привязать основной домен к `web:3000`, а нужные технические домены — к
@@ -88,14 +99,16 @@ whitespace/control, не-ASCII, длина вне `32..512`, известный 
 Compose static regression проверяет exact effective recipients каждого
 credential и запрещает встроенные значения вместо required deploy variable.
 
-Перед запуском шести process types, которые реально получают service
-credentials (`platform-api`, `seo-data`, `jobs-integrations`, `import-worker`,
-`rank-worker`, `realtime`), Compose обязательно завершает one-shot
-`service-token-preflight`. Он получает все девять service tokens и отдельный
-`RANK_HISTORY_CURSOR_KEY`, проверяет их глобальную pairwise distinctness,
-отсутствие placeholders и длину `32..512`. Deploy-проверка намеренно строже
-runtime: допускается только URL-safe алфавит `[A-Za-z0-9._~-]`, тогда как
-runtime-контракт принимает visible ASCII без whitespace/control/comma.
+Перед запуском credential-bearing processes, Redis servers и NATS Compose
+обязательно завершает one-shot `service-token-preflight`. Он получает девять
+service tokens, `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и четыре
+NATS passwords, проверяет все 22 credentials на глобальную pairwise
+distinctness, отсутствие placeholders и длину `32..512`. Четыре NATS
+usernames проверяются отдельно на уникальный
+ASCII identifier длиной `3..64` и несовпадение с credentials. Deploy-проверка
+намеренно строже runtime: secrets допускают только URL-safe алфавит
+`[A-Za-z0-9._~-]`, а NATS password начинается с ASCII letter; runtime HTTP-
+контракт принимает visible ASCII без whitespace/control/comma.
 Preflight запускается без сети (`network_mode: none`), с read-only filesystem,
 `cap_drop: ALL` и `no-new-privileges`; он не выводит значения или хэши, а при
 ошибке называет только переменные. Это ранний fail-closed deploy gate, а не
@@ -117,8 +130,97 @@ Config loader получает явную process role; `system-worker` испо
 отдельный Redis-only loader. Поэтому случайно добавленная DB URL, service
 token, adapter credential или enable flag для чужой роли останавливает
 процесс. Эта misconfiguration boundary уже реализована, но не заменяет
-оставшиеся Redis ACL, egress, observability, backup/restore и provider-runtime
-release gates.
+target-image Redis compatibility, egress, observability, backup/restore и
+provider-runtime release gates.
+
+## Redis: isolated runtime topology
+
+Compose закрепляет `redis:8.8.1-alpine3.23` и не публикует Redis ports. Общий
+default user выключен; `seo_health` имеет только unauthenticated `PING` внутри
+isolated network. До старта `redis-server` wrapper копирует выбранный config и
+атомарно рендерит ACL в `/run/redis-runtime`, выставляет каталогу и файлам
+`redis:redis 0700/0600`, сохраняет только SHA-256 password hashes, удаляет
+plaintext variables из child environment и не передаёт secrets через argv.
+Это сохраняет читаемость config/ACL после privilege drop official entrypoint,
+даже если bind-mounted source checkout имеет restrictive file modes.
+
+| Instance | Storage policy | Runtime identities |
+|---|---|---|
+| `redis-jobs` / `jobs-redis` | AOF everysec, dedicated `redis_jobs_data`, `noeviction` | шесть named users, каждый ограничен exact `seo-platform:jobs:v1:<queue>:*`; Jobs HTTP получает только пять публичных queue keyspaces |
+| `redis-realtime` / `realtime-redis` | ephemeral tmpfs, Pub/Sub-only | `seo_realtime`, exact `seo-platform:realtime:v1` broadcast/request/response channels, без key access |
+| `redis-directus` / `directus-redis` | ephemeral tmpfs, `allkeys-lru` | отдельный `seo_directus`, cache namespace `seo-platform:directus:v1` |
+
+Runtime получает только свой named URL и подключён только к соответствующей
+internal-only network. ACL запрещает Jobs administrative/dangerous/scan
+commands; Realtime не может создавать keys или обращаться к presence channel.
+Directus отделён от queue и Pub/Sub failure domains, но exact command
+совместимость его pinned image должна быть подтверждена live smoke.
+
+Jobs ограничен `maxmemory 256mb` и container cap `768M`: запас учитывает
+fragmentation и возможное удвоение resident memory во время write-heavy AOF
+rewrite. До production нагрузочный gate должен подтвердить capacity, а
+monitoring — отслеживать `used_memory_rss`, `mem_not_counted_for_evict`, AOF
+copy-on-write/rewrite, `noeviction` errors и container OOM events.
+
+Старый volume `redis_data` намеренно не удаляется и не подключается к новой
+topology. Если в нём есть pending BullMQ state, перед rollout обязателен
+operator-reviewed stop producers → drain/replay/reconcile → switch plan.
+Удалять или silently переиспользовать legacy volume запрещено. На хосте нет
+Docker, поэтому pinned OCI image + Directus startup и queue-resume остаются
+target-environment gates. При этом opt-in regression на локально собранном из
+official source Redis 8.8.1 прошёл 3/3: реальный BullMQ Queue/Worker, все
+named key boundaries и Lua denial, exact Realtime Pub/Sub channels, cache
+CRUD, health/default-user boundary и запрет admin/dangerous commands.
+
+## NATS JetStream: terminal session-family pipeline
+
+Compose использует pinned `nats:2.12.12-alpine` и mounted
+`nats/nats-server.conf`; credentials не передаются аргументами command. NATS
+не имеет внешнего port binding. Config ограничивает payload `64 KB`, memory
+store `64 MB` и file store `1 GB` и задаёт четыре deny-by-default identities:
+
+| Identity | Получатель | Разрешения |
+|---|---|---|
+| `NATS_RUNTIME_*` | SEO Data и generic Jobs HTTP | deny all publish/subscribe до появления собственного event contract |
+| `NATS_PLATFORM_PUBLISHER_*` | Platform API | exact identity event publish, account/stream info и reply inbox |
+| `NATS_REALTIME_CONSUMER_*` | Realtime | exact stream/consumer info, pull fetch, source ack, DLQ publish и reply inbox |
+| `NATS_PROVISIONER_*` | one-shot provisioner | exact source/DLQ stream info/create/update и exact consumer info/create/update |
+
+Удаление/purge/raw message read не выдаются ни одной application identity.
+Platform API и Realtime не создают и не изменяют topology.
+
+`nats-topology-provisioner` работает internal-only, non-root, read-only, с
+`cap_drop: ALL`, `no-new-privileges`, без application/database/Redis secrets и
+завершается после одного reconcile. Он создаёт:
+
+- `IDENTITY_EVENTS` с единственным subject
+  `{environment}.identity.session-family.revoked.v1`, file/limits retention,
+  `max_msg_size=65536`, `max_bytes=512 MiB`, `max_msgs=1 000 000`, age 30
+  дней и duplicate window 2 часа;
+- `DOMAIN_EVENTS_DLQ` с единственным subject
+  `{environment}.dlq.realtime.identity.session-family.revoked.v1`, теми же
+  message/byte bounds, `max_msgs=100 000` и age 60 дней;
+- durable pull consumer `realtime_session_family_revoked_v1`: exact source
+  filter, explicit ack, deliver all, instant replay, `ack_wait=60s`,
+  `max_ack_pending=1`, unlimited transport redelivery и file-backed state.
+
+Оба stream запрещают delete/purge/direct/rollup и имеют `num_replicas=1` для
+текущей single-node VPS topology. Provisioner создаёт отсутствующее,
+идемпотентно возвращает unchanged при exact config и изменяет только
+allowlisted bounded limits/description. Subject, storage, retention, replica,
+mirror/source, republish/transform или sealed drift останавливают startup;
+автоматического destructive repair нет. Platform API и Realtime ждут
+successful provisioner и healthy NATS.
+
+Localhost smoke с реальным `nats-server` 2.12.12 подтвердил syntax config,
+create → unchanged idempotence и фактические ACL publisher/consumer/
+provisioner. Docker на текущем хосте отсутствует, поэтому полный
+`docker compose config`/image build остаётся CI и target-environment gate.
+Перед production также обязательны target PostgreSQL ACL/HBA/login evidence,
+NATS lag/redelivery/DLQ alerts и replay runbook, offsite backup/restore,
+representative load/capacity проверки, Redis live/rollout evidence и внешние
+provider/sender gates. Этот NATS slice сам по себе не делает платформу
+production-ready.
 
 ## Dedicated Jobs → Platform API rank grant boundary
 
@@ -669,8 +771,9 @@ VAPID private key намеренно отсутствует в текущих HT
 этом Compose. Он будет принадлежать отдельному sender process после включения
 durable delivery. Пока `deliveryAvailable=false` и
 `testDeliveryAvailable=false`: регистрация, переименование и отзыв устройства
-не означают, что внешняя доставка работает. Production-зависимости
-`@nats-io/jetstream` и `web-push` ещё не одобрены.
+не означают, что внешняя доставка работает. `@nats-io/jetstream` используется
+только для durable identity safety pipeline; sender и production dependency
+`web-push` ещё не подключены.
 
 ## Проверка загружаемых файлов
 

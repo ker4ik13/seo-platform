@@ -16,7 +16,26 @@ const globallyDistinctDeployCredentials = [
   "JOBS_TO_SEO_RANK_TOKEN",
   "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
   "JOBS_TO_SEO_RANK_RESULT_TOKEN",
-  "RANK_HISTORY_CURSOR_KEY"
+  "RANK_HISTORY_CURSOR_KEY",
+  "REDIS_JOBS_API_PASSWORD",
+  "REDIS_JOBS_SYSTEM_PASSWORD",
+  "REDIS_JOBS_INSPECTION_PASSWORD",
+  "REDIS_JOBS_IMPORT_PASSWORD",
+  "REDIS_JOBS_RANK_PASSWORD",
+  "REDIS_JOBS_CONNECTOR_PASSWORD",
+  "REDIS_REALTIME_PASSWORD",
+  "REDIS_DIRECTUS_PASSWORD",
+  "NATS_RUNTIME_PASSWORD",
+  "NATS_PLATFORM_PUBLISHER_PASSWORD",
+  "NATS_REALTIME_CONSUMER_PASSWORD",
+  "NATS_PROVISIONER_PASSWORD"
+];
+
+const natsUsernameInputs = [
+  "NATS_RUNTIME_USER",
+  "NATS_PLATFORM_PUBLISHER_USER",
+  "NATS_REALTIME_CONSUMER_USER",
+  "NATS_PROVISIONER_USER"
 ];
 
 const tokenBearingServices = [
@@ -187,7 +206,7 @@ test("caller/audience tokens are operator-generated and reach only exact peers",
   }
 });
 
-test("example Compose validation supplies distinct CI-only caller tokens", async () => {
+test("example Compose validation supplies all distinct CI-only deploy credentials", async () => {
   const packageJson = JSON.parse(await readFile(packageUrl, "utf8"));
   const command = packageJson.scripts?.["infra:validate:example"];
   assert.equal(typeof command, "string");
@@ -199,7 +218,7 @@ test("example Compose validation supplies distinct CI-only caller tokens", async
   );
   const values = [];
 
-  for (const token of callerAudienceBoundaries.keys()) {
+  for (const token of globallyDistinctDeployCredentials) {
     const value = assignments.get(token);
     assert.equal(
       typeof value,
@@ -232,9 +251,15 @@ test("isolated deploy preflight receives only all globally distinct credentials"
 
   assert.deepEqual(
     sorted(environment.keys()),
-    sorted(globallyDistinctDeployCredentials)
+    sorted([
+      ...globallyDistinctDeployCredentials,
+      ...natsUsernameInputs
+    ])
   );
-  for (const token of globallyDistinctDeployCredentials) {
+  for (const token of [
+    ...globallyDistinctDeployCredentials,
+    ...natsUsernameInputs
+  ]) {
     assertRequiredSelfInterpolation(
       environment.get(token),
       token,

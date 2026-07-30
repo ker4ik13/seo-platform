@@ -32,8 +32,9 @@ flowchart LR
 
     SEO --> SEODB[("seo_db")]
     JOB --> JOBDB[("jobs_db")]
-    JOB --> REDIS[("Redis / BullMQ")]
-    RT --> REDIS
+    JOB --> JOBREDIS[("Redis Jobs / BullMQ")]
+    RT --> RTREDIS[("Redis Realtime / PubSub")]
+    CMS["Directus"] --> CMSREDIS[("Redis Directus / cache")]
     RT --> RTDB[("realtime_db")]
 
     API <--> NATS["NATS JetStream"]
@@ -188,8 +189,11 @@ schema/object/default privileges в `jobs_db`, а generated first-match HBA
 replication, соседние databases и stale family names. Для production target
 environment всё равно обязательны проверка фактического HBA order, fresh
 login smoke и TLS/source-CIDR при межхостовом соединении.
-Management и execution пока используют общий Redis password; до production
-для connector worker требуется отдельный Redis ACL либо изолированный instance.
+Management и execution подключаются к одному durable Jobs instance через
+разные named Redis users. Jobs HTTP и каждый worker ограничены exact
+versioned BullMQ key pattern своей очереди; connector не может читать или
+изменять management/system/import/rank keys. Instance не публикует port,
+использует AOF + `noeviction`, default user выключен.
 
 Остальные entrypoints того же image также имеют явную process role и
 fail-closed capability validation:
@@ -216,7 +220,7 @@ credential role `DISABLED`, только `jobs_db`, Redis, internal SEO Data URL
 Platform API; generic Jobs HTTP и остальные worker processes его не получают.
 Rank-worker не получает HTTP/internal/vault, NATS, S3, SMTP или provider
 credentials, не публикует port и в текущем Dokploy Compose подключён только к
-`internal`. Его bounded grant client сохраняет intent/decision и атомарно
+`internal` и отдельной `jobs-redis`. Его bounded grant client сохраняет intent/decision и атомарно
 создаёт secret-free `CONSUMED/READY_TO_SUBMIT` scoped execution, но dispatcher
 его ещё не вызывает; scoped claim/authorize SQL и exact grants уже существуют,
 но runtime caller и live submit явно выключены. Перед live provider execution
@@ -226,7 +230,8 @@ connector process обязан продолжать использовать т�
 ### 3.6. `platform-realtime`
 
 - NestJS Socket.IO gateway;
-- Redis adapter;
+- Redis adapter только для namespace `/collaboration`, с versioned channel
+  prefix и отдельным channel-only ACL; root namespace остаётся in-memory;
 - presence;
 - collaborative table signals;
 - comments/notifications delivery;
@@ -431,6 +436,29 @@ Runtime отклоняет placeholders, unsafe/short/long и reused values, gua
 - Consumers идемпотентны.
 - DLQ и replay доступны operations.
 
+Текущий repository slice применяет эти правила к одному exact событию
+`identity.session-family.revoked.v1`:
+
+- `IDENTITY_EVENTS` хранит только
+  `{environment}.identity.session-family.revoked.v1`, file-backed, limits
+  retention, bounded message/count/bytes/age и duplicate window;
+- `DOMAIN_EVENTS_DLQ` хранит только
+  `{environment}.dlq.realtime.identity.session-family.revoked.v1` с отдельной
+  bounded retention;
+- durable pull consumer `realtime_session_family_revoked_v1` использует
+  explicit ack, deliver-all/instant replay, exact filter, `ack_wait=60s`,
+  `max_ack_pending=1` и file-backed state;
+- internal-only one-shot `nats-topology-provisioner` создаёт отсутствующие
+  ресурсы до старта Platform API/Realtime, безопасно reconciles только
+  allowlisted limits и fail-closed отклоняет unsafe topology drift;
+- Platform API publisher, Realtime consumer, provisioner и generic NATS
+  runtime имеют отдельные deny-by-default credentials с exact API/event/ack
+  permissions. App runtimes не получают CREATE/UPDATE/DELETE topology rights.
+
+Эта реализация не является общим publisher для остальных outbox event types.
+Для каждого следующего event family нужны собственные subject allowlist,
+consumer, retention/replay и operational alerts.
+
 ## 10. Prisma
 
 - У каждого backend repository своя Prisma schema и migrations.
@@ -481,6 +509,25 @@ Redis используется для:
 - distributed locks с ограниченным TTL.
 
 Кеш не является источником истины. Каждый key имеет namespace, version и TTL.
+
+Production Compose не использует общий Redis password/DB multiplexing:
+
+- `redis-jobs` — AOF, `noeviction`, отдельный volume и шесть queue-scoped
+  identities для HTTP/system/inspection/import/rank/connector;
+- `redis-realtime` — ephemeral Pub/Sub, без key access, только exact
+  `seo-platform:realtime:v1` Socket.IO channels;
+- `redis-directus` — отдельный ephemeral LRU cache с namespace
+  `seo-platform:directus:v1`.
+
+Все три instance находятся в отдельных internal-only networks. Default user
+выключен, health identity имеет только `PING`, password hashes атомарно
+рендерятся в tmpfs перед запуском. Выбранный config также копируется в этот
+owner-correct runtime tmpfs до privilege drop; source bind mount после этого
+не требуется Redis process. Plaintext credentials не передаются в
+`redis-server` argv и не записываются в ACL/config. Для write-heavy Jobs AOF
+`maxmemory` должен оставлять container/host headroom на fragmentation и до
+двукратного memory footprint во время rewrite; текущий single-VPS default —
+`256 MiB` при cap `768 MiB`.
 
 ## 13. Object storage
 

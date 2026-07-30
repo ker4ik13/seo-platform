@@ -29,22 +29,37 @@ async function bootstrap(): Promise<void> {
   const config = app.get<AppConfig>(APP_CONFIG);
   const websocketAdapter = new RedisIoAdapter(app, config.redisUrl);
 
-  await websocketAdapter.connect();
-  app.useWebSocketAdapter(websocketAdapter);
-  app.enableCors({
-    origin: [...config.webOrigins],
-    credentials: true
-  });
-  installHttpResponsePolicy(adapter.getInstance(), config.nodeEnv);
-  app.enableShutdownHooks();
+  try {
+    await websocketAdapter.connect();
+    app.useWebSocketAdapter(websocketAdapter);
+    app.enableCors({
+      origin: [...config.webOrigins],
+      credentials: true
+    });
+    installHttpResponsePolicy(
+      adapter.getInstance(),
+      config.nodeEnv
+    );
+    app.enableShutdownHooks();
 
-  const closeAdapter = async (): Promise<void> => {
-    await websocketAdapter.closeConnections();
-  };
-  process.once("SIGTERM", closeAdapter);
-  process.once("SIGINT", closeAdapter);
+    const closeAdapter = (): void => {
+      void websocketAdapter.closeConnections().catch(() => {
+        process.exitCode = 1;
+      });
+    };
+    process.once("SIGTERM", closeAdapter);
+    process.once("SIGINT", closeAdapter);
 
-  await app.listen(config.port, "0.0.0.0");
+    await app.init();
+    await websocketAdapter.waitUntilReady();
+    await app.listen(config.port, "0.0.0.0");
+  } catch (error) {
+    await websocketAdapter
+      .closeConnections()
+      .catch(() => undefined);
+    await app.close().catch(() => undefined);
+    throw error;
+  }
 }
 
 await bootstrap();

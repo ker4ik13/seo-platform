@@ -31,3 +31,11 @@ COPY --from=build --chown=node:node /deploy ./
 
 USER node
 CMD ["node", "dist/main.js"]
+
+FROM runtime AS nats-provisioner
+
+COPY --chown=node:node platform-infrastructure/nats/topology.mjs /app/nats/topology.mjs
+COPY --chown=node:node platform-infrastructure/nats/provisioner-config.mjs /app/nats/provisioner-config.mjs
+COPY --chown=node:node platform-infrastructure/nats/provisioner.mjs /app/nats/provisioner.mjs
+
+CMD ["node", "/app/nats/provisioner.mjs"]

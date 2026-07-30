@@ -212,32 +212,46 @@ dedicated Platform API → Realtime token, а Service Worker ограничен 
 `/app/` и не кэширует private API. Durable email/Web Push delivery ещё нет;
 registration честно возвращает `deliveryAvailable=false` и
 `testDeliveryAvailable=false`.
-Следующий обязательный notification-срез должен провести redacted terminal
-event через transactional outbox/durable consumer, effective policy и
-идемпотентные delivery attempts. До реальной отправки также обязателен durable
-identity lifecycle. Producer `identity.session-family.revoked.v1` уже
-реализован по ADR-2026-036 с atomic Platform API outbox, whole-family revoke,
-user advisory lock и stale-version recheck. Ещё отсутствуют durable publisher,
-JetStream subscription, global session-expiry sweeper и отдельный sender role
-с VAPID private key. Dependency-free Realtime handler с scoped inbox,
-revoked-family tombstone, terminal device revoke и fail-closed upsert уже
-реализован; `@nats-io/jetstream` и `web-push` требуют отдельного одобрения
-production-зависимостей. P2 не считается
-выполненным до реального rank job, multi-tenant queue fairness, terminal
-outbox/delivery и security/load/restore gates.
+Durable identity safety leg завершён по ADR-2026-036: atomic whole-family
+revoke/outbox, bounded global session-expiry sweeper, Platform API JetStream
+publisher, exact provisioned topology и Realtime durable pull consumer с
+commit-before-ack, bounded retry и redacted DLQ. Realtime сохраняет scoped
+inbox/tombstone, terminal-отзывает devices и fail-closed защищает upsert.
+
+Следующий notification-срез должен провести остальные redacted domain events
+через effective policy в идемпотентные delivery attempts и добавить отдельный
+sender role с VAPID private key, `web-push`, собственные delivery retry/DLQ,
+digest и delivery history. P2 не считается выполненным до реального rank job,
+multi-tenant queue fairness, фактической внешней notification delivery и
+security/load/restore gates.
 
 Межсервисный hardening уже удалил legacy `INTERNAL_API_TOKEN`, разделил
 четыре general caller/audience credentials и сохранил отдельные vault,
 notification и rank boundaries. Compose запускает network-less read-only
-one-shot `service-token-preflight` до шести token-bearing processes: девять
-service tokens и `RANK_HISTORY_CURSOR_KEY` должны быть глобально pairwise
-distinct, без placeholders и соответствовать deploy-алфавиту
-`[A-Za-z0-9._~-]` при длине `32..512`. Runtime намеренно сохраняет более
-широкий контракт visible ASCII без whitespace/control/comma. Jobs HTTP,
+one-shot `service-token-preflight` до credential-bearing processes и NATS:
+девять service tokens, `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и
+четыре NATS passwords
+должны быть глобально pairwise distinct, без placeholders и соответствовать
+deploy-алфавиту `[A-Za-z0-9._~-]` при длине `32..512`; четыре NATS usernames
+проверяются отдельно. Runtime намеренно сохраняет более широкий HTTP-контракт
+visible ASCII без whitespace/control/comma. Jobs HTTP,
 import, inspection, system, rank и connector используют отдельные process
 roles/env allowlists. Эти gates уменьшают secret fan-out и ошибку конфигурации,
-но не закрывают P2: остаются provider runtime, durable delivery, Redis/egress,
+но не закрывают P2: остаются provider runtime, durable delivery, egress,
 observability, target-environment rollout и load/restore evidence.
+
+Redis hardening теперь разделяет Jobs, Realtime и Directus на три
+internal-only instance/network. Jobs использует AOF + `noeviction` и шесть
+queue-scoped users с versioned BullMQ keyspaces; Realtime получает только
+versioned Socket.IO Pub/Sub channels namespace `/collaboration` без key access,
+а root namespace остаётся in-memory; Directus имеет отдельный ephemeral cache
+user. Default user выключен, health user ограничен `PING`, ACL
+и runtime config атомарно готовятся в owner-correct tmpfs с password hashes.
+Source-built Redis 8.8.1 live smoke 3/3 подтверждает BullMQ, ACL, Pub/Sub и
+cache command boundary; exit gate всё ещё требует startup pinned
+Redis/Directus images на Docker-host, representative AOF memory/load evidence,
+memory/ACL/latency alerts и reviewed drain/migration старого `redis_data` без
+удаления данных.
 
 Preparation runtime имеет bounded `maxAttempts=20`. До internal seal вызова
 sidecar переходит в `OUTCOME_UNKNOWN`; только доказанное отсутствие manifest
@@ -255,12 +269,13 @@ Provider-side producer этих normalized chunks/receipt acknowledgements ещ�
 реализован. Public/admin reconcile/acknowledge API, UI и политика безопасного
 resolution для terminal `ACTION_REQUIRED` ещё не реализованы.
 
-Realtime application-handler gate включает durable revoked-family tombstone,
-scoped inbox receipt и fail-closed проверку tombstone в device upsert; он
-реализован и тестирует оба порядка `registration → event` и
-`event → delayed registration`. Полный exit gate всё ещё требует durable
-publisher/subscription и PostgreSQL 18 concurrency smoke; update только
-существующих devices не принимается из-за resurrection race.
+Realtime identity gate включает durable revoked-family tombstone, scoped inbox
+receipt, fail-closed проверку tombstone в device upsert и durable pull
+subscription; он реализован и тестирует оба порядка `registration → event` и
+`event → delayed registration`. Полный exit gate всё ещё требует PostgreSQL
+18 concurrency/rollback и target-volume sweeper smoke, NATS operational
+alerts/replay evidence и backup/restore; update только существующих devices
+не принимается из-за resurrection race.
 
 Перед первым provider submit jobs/integrations должен повторно проверить
 workspace/project lifecycle и billing. Текущая проверка mutation в Platform
@@ -707,6 +722,11 @@ Backlog ведётся по потокам:
   user/password snapshot создать сессию после reset commit;
 - terminal logout/revoke/reset создаёт ровно одно redacted outbox event на
   каждую реально отозванную session family.
+- просроченная refresh family terminal-отзывается bounded global sweeper даже
+  без нового client refresh; повторный due scan не создаёт duplicate event;
+- Realtime применяет exact event одной локальной транзакцией и source ack
+  возможен только после committed inbox/tombstone/device revoke; permanent
+  failure не теряется без подтверждённого DLQ PubAck.
 
 Повторяется для Google, Яндекс и Telegram с безопасным linking.
 

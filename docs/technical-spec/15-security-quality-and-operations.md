@@ -209,7 +209,8 @@
   reject. Global vault read внутри `jobs_db` закрыт. В целевом окружении всё
   равно обязательны fresh provisioning, проверка фактического HBA order и
   login smoke; для межхостового PostgreSQL требуются TLS/source-CIDR либо
-  отдельный cluster. Redis требует отдельный ACL/instance;
+  отдельный cluster. Redis connector boundary использует отдельный named user
+  с exact queue keyspace в dedicated Jobs instance/network;
   DB owner/superuser runtime запрещён.
 - Перед включением внешних уведомлений terminal validation должен атомарно
   писать только нормализованный error code и redacted outbox/audit event, но
@@ -330,21 +331,35 @@ combined значения и сравнивает token timing-safe. Любой 
 используют `redirect: "error"`, чтобы token не попадал на другой origin.
 
 Deploy дополнительно обязан выполнить один общий fail-closed preflight до
-старта любого token-bearing process. Текущий Compose one-shot
-`service-token-preflight` получает девять перечисленных service tokens и
-`RANK_HISTORY_CURSOR_KEY`, проверяет все десять значений на глобальную
-pairwise distinctness и отклоняет placeholders. В отличие от runtime-
-контракта он намеренно допускает только URL-safe `[A-Za-z0-9._~-]` длиной
-`32..512`. Контейнер работает без сети, read-only, с `cap_drop: ALL` и
-`no-new-privileges`, не выводит значения/хэши и сообщает только имена
-конфликтующих либо неверных переменных. `platform-api`, `seo-data`, Jobs HTTP,
-import, rank и realtime стартуют только после его успешного завершения.
+старта credential-bearing processes. Текущий Compose one-shot
+`service-token-preflight` получает девять service tokens,
+`RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и четыре NATS passwords,
+проверяет все 22 credentials на глобальную pairwise distinctness и отклоняет
+placeholders.
+Четыре NATS usernames отдельно проверяются на unique ASCII identifier и
+несовпадение с любым credential. В отличие от runtime-контракта secrets
+допускают только URL-safe `[A-Za-z0-9._~-]` длиной `32..512`; NATS password
+дополнительно начинается с ASCII letter. Контейнер работает без сети,
+read-only, с `cap_drop: ALL` и `no-new-privileges`, не выводит значения/хэши и
+сообщает только имена конфликтующих либо неверных переменных. Application
+processes и NATS стартуют только после его успешного завершения.
 
 ## 9. Шифрование и ключи
 
 - TLS 1.2+; предпочтительно TLS 1.3.
 - Внутренний traffic не публикуется наружу; sensitive межхостовой traffic шифруется.
 - PostgreSQL, Redis, NATS и object storage требуют authentication.
+- Redis runtimes разделены на Jobs, Realtime и Directus instances с
+  independent internal-only networks. Default user выключен; health user
+  разрешён только `PING`. Jobs identities ограничены exact versioned BullMQ
+  key patterns, Realtime identity — exact versioned Socket.IO channels без key
+  access, Directus имеет отдельный cache user. ACL содержит только password
+  hashes и генерируется в tmpfs до старта server.
+- NATS использует разные deny-by-default identities для generic runtime,
+  Platform API publisher, Realtime consumer и topology provisioner. Runtime
+  apps получают только exact event/API/request-reply/fetch/ack/DLQ rights;
+  topology CREATE/UPDATE принадлежит one-shot provisioner, а DELETE/PURGE/
+  raw message read не выдаются.
 - Storage volumes и offsite backups шифруются.
 - Signed URL короткоживущие, scoped на object и operation.
 - Encryption keys имеют version и rotation procedure.
@@ -375,10 +390,11 @@ import, rank и realtime стартуют только после его усп�
   dumps. Его получает только будущий sender role; резервная копия допустима
   только внутри защищённого versioned secret store.
 - Revoke/expiry browser device обязан в одной транзакции очистить ciphertext,
-  nonce/tag и fingerprints. Producer durable session-family revoked event уже
-  реализован по ADR-2026-036; Realtime application handler с durable
-  tombstone и fail-closed upsert также готов. Outbox publisher и JetStream
-  subscription обязательны до включения внешней доставки.
+  nonce/tag и fingerprints. Producer, bounded Platform API outbox publisher,
+  Realtime durable JetStream consumer, tombstone и fail-closed upsert
+  реализованы по ADR-2026-036. Source ack происходит после local commit;
+  exhausted/permanent failure использует redacted DLQ. Этот identity safety
+  pipeline не содержит VAPID private key и не включает внешнюю доставку.
 - KEK rollout выполняется в порядке expand keyring → startup decrypt-canary
   verify configured ∪ used versions → drain старых replicas → switch active.
   `MANAGEMENT` создаёт отдельный synthetic known-plaintext envelope каждой
@@ -984,7 +1000,17 @@ Flag содержит:
 
 ### 29.2. Redis/NATS/object storage
 
-- Redis queue persistence настраивается, но Redis не считается единственным источником domain truth.
+- Jobs Redis использует AOF/everysec, dedicated volume и `noeviction`, но не
+  считается единственным источником domain truth; dispatcher восстанавливает
+  due work из PostgreSQL после потери notification. Write-heavy AOF rewrite
+  может приблизиться к двукратному normal memory footprint, поэтому текущие
+  defaults ограничивают data `maxmemory=256 MiB` при container cap `768 MiB`;
+  representative load и target-host OOM evidence остаются release gate.
+- Realtime Pub/Sub и Directus cache намеренно ephemeral. Их потеря не должна
+  уничтожать authoritative state; recovery должна проверяться
+  degraded/reconnect тестами.
+- Перед переключением legacy `redis_data` обязателен operator-reviewed
+  drain/migration plan; автоматическое удаление или silent reuse запрещены.
 - NATS JetStream хранит достаточно для replay по определённой политике.
 - Object storage versioning для критичных buckets.
 - Lifecycle не удаляет активный report/export/import раньше retention.
@@ -1176,13 +1202,16 @@ Radar/crawler capacity:
 останавливает process. Static Compose regression проверяет exact effective env
 keys и recipients, включая отсутствие legacy credential. Эта защита
 закрывает accidental secret fan-out, но не заменяет container/DB/Redis ACL,
-host egress policy, runtime authorization и incident controls.
+  target-image Redis/Directus startup compatibility, host egress policy,
+  runtime authorization
+  и incident controls.
 
-Шесть process types с service credentials дополнительно зависят от успешного
-one-shot `service-token-preflight`; Redis-only system, inspection и connector
-не получают эти credentials и не добавляются в зависимость ради формального
-старта. Preflight проверяет deploy input, а process-role loaders продолжают
-независимо проверять собственный effective env.
+Credential-bearing application processes и NATS зависят от успешного one-shot
+`service-token-preflight`. Redis servers сами ждут preflight, поэтому Redis-only
+system, inspection и connector transitively не стартуют до проверки, не
+получая при этом чужие credentials. Preflight проверяет deploy input, а
+process-role loaders продолжают независимо проверять собственный effective
+env.
 
 ## 35. Maintenance
 
@@ -1194,7 +1223,9 @@ one-shot `service-token-preflight`; Redis-only system, inspection и connector
 - expired uploads/exports cleanup;
 - old session/token cleanup;
 - bounded global refresh-session expiry sweeper, который использует тот же
-  family revoke/outbox helper; один lazy refresh path недостаточен;
+  family revoke/outbox helper; текущий Platform API runtime реализует его и
+  требует включённым в production, а target PostgreSQL load/concurrency smoke
+  остаётся release gate;
 - outbox/inbox cleanup после retention;
 - Yjs compaction;
 - orphan object reconciliation;

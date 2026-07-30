@@ -353,18 +353,19 @@ email/Web Push delivery attempts: registration state всегда явно во�
 sender.
 
 Следующий обязательный вертикальный срез:
-`redacted domain event → transactional outbox → durable consumer → effective
-profile/project policy → idempotent Email/Web Push delivery attempt`. В него
-входят VAPID private-key sender, retry/DLQ, digest scheduler и delivery
-history. Production-зависимости `@nats-io/jetstream` и `web-push` ещё не
-одобрены; до их подтверждения adapters остаются портами, а UI не должен
-имитировать успешную внешнюю доставку. Producer
-`identity.session-family.revoked.v1` уже атомарно пишет Platform API outbox по
-ADR-2026-036. Dependency-free Realtime application handler уже атомарно
-пишет scoped inbox receipt и revoked-family tombstone, terminal-отзывает
-devices и защищает upsert от event-before-registration. Durable publisher и
-JetStream subscription к handler остаются release blocker для реальной
-доставки.
+`остальные redacted domain events → effective profile/project policy →
+idempotent Email/Web Push delivery attempt`. В него входят VAPID private-key
+sender, `web-push`, собственные delivery retry/DLQ, digest scheduler и
+delivery history; UI до этого не должен имитировать успешную внешнюю доставку.
+
+Identity safety leg уже замкнут по ADR-2026-036. Platform API пишет
+`identity.session-family.revoked.v1` в той же транзакции с revoke, bounded
+publisher подтверждает exact JetStream PubAck, а Realtime durable pull
+consumer commit-ит scoped inbox, revoked-family tombstone и terminal device
+revoke до source ack. Временные ошибки используют bounded delayed NAK;
+permanent invalid либо exhausted messages переходят в redacted DLQ только
+после подтверждённого DLQ PubAck. Этот pipeline не создаёт delivery attempts
+и не означает, что email/Web Push sender уже включён.
 
 ## 13. Каналы
 
@@ -433,9 +434,9 @@ Device lifecycle следует ADR-2026-035:
 - Realtime handler `identity.session-family.revoked.v1` идемпотентно и в
   одной локальной транзакции записывает scoped inbox receipt и revoked-family
   tombstone, а также terminal-отзывает все active devices с совпавшими
-  `userId + registration session family`. Producer outbox без durable
-  publisher/JetStream subscription пока не считается автоматически
-  применённым отзывом.
+  `userId + registration session family`. Durable pull consumer вызывает
+  handler только для exact subject и ack-ит source после committed handler;
+  runtime fail-closed проверяет exact source/DLQ streams и consumer topology.
 - Device registration/upsert под тем же user/device lock проверяет durable
   tombstone до записи. Это закрывает reorder, когда event обработан раньше
   уже начатого запроса регистрации старой family; такой запрос fail-closed не

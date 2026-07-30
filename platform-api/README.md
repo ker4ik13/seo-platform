@@ -22,6 +22,8 @@
 - session-bound CSRF;
 - PostgreSQL rate limiting по IP/account fingerprint;
 - audit и transactional outbox;
+- durable JetStream publisher exact terminal session-family event;
+- bounded global refresh-session expiry sweeper;
 - workspace/project CRUD с project-scoped permission narrowing;
 - участники, одноразовые приглашения, отзыв доступа и optimistic locking;
 - project-scoped multipart upload API с проверкой `file.upload`,
@@ -86,6 +88,38 @@ placeholders, whitespace/control/comma, длину вне `32..512` visible ASCI
 повторное использование одного значения между настроенными service tokens.
 Internal clients запрещают HTTP redirects (`redirect: "error"`), поэтому
 `X-Internal-Token` не пересылается на другой origin.
+
+## Durable terminal session-family lifecycle
+
+Platform API публикует только `identity.session-family.revoked.v1` из общей
+outbox. Один bounded worker claim-ит due `PENDING` row через
+`FOR UPDATE SKIP LOCKED`, восстанавливает и повторно валидирует exact envelope
+из `platform-contracts`, затем публикует в
+`{NATS_EVENT_ENVIRONMENT}.identity.session-family.revoked.v1` с outbox ID как
+JetStream deduplication ID. Статус становится `PUBLISHED` только после
+валидного PubAck exact `NATS_EVENT_STREAM=IDENTITY_EVENTS`; transient failure
+получает bounded exponential retry с jitter, а исчерпание budget — terminal
+`FAILED`. Другие outbox event types этот publisher намеренно не выбирает.
+
+Global expiry sweeper небольшими batches находит active session families с
+`expires_at <= DB current time`, повторно проверяет due state под тем же
+user-scoped lifecycle advisory lock и вызывает общий whole-family
+revoke/outbox helper. Поэтому terminal event создаётся и без нового refresh
+request, а повторный scan идемпотентен. Interval, batch, transaction и lock
+timeouts bounded; shutdown прекращает scheduling и дожидается только текущей
+ограниченной операции.
+
+Production требует одновременно:
+
+- `OUTBOX_PUBLISHER_ENABLED=true`;
+- `SESSION_EXPIRY_SWEEPER_ENABLED=true`;
+- explicit safe `NATS_EVENT_ENVIRONMENT`;
+- `NATS_EVENT_STREAM=IDENTITY_EVENTS`;
+- отдельные `NATS_USER/NATS_PASSWORD`, выданные только publisher identity.
+
+Runtime не создаёт и не изменяет JetStream topology. Startup/readiness
+fail-closed требуют exact stream identity и singleton subject; полную topology
+создаёт и сверяет отдельный one-shot infrastructure provisioner до старта API.
 
 При read-only billing state просмотр и разрешённый экспорт остаются доступны,
 а создание нового импорта блокируется.

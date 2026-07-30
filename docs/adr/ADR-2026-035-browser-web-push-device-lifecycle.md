@@ -115,7 +115,8 @@ keyring и контролируемым rollout.
 Перед production-доставкой обязательны:
 
 1. durable identity event об отзыве session family и consumer, атомарно
-   переводящий связанные active devices в terminal state;
+   переводящий связанные active devices в terminal state — реализованы по
+   ADR-2026-036;
 2. transactional outbox, JetStream durable consumer, delivery snapshot,
    retry/DLQ и идемпотентные attempts;
 3. отдельный sender role с VAPID private key и повторной проверкой active
@@ -124,7 +125,8 @@ keyring и контролируемым rollout.
 5. bounded global sweeper для provider expiry; текущий lifecycle очищает due
    rows только в user-scoped list/upsert;
 6. persistent key verifier/decrypt-canary, описанный выше;
-7. явное одобрение production-зависимостей `@nats-io/jetstream` и `web-push`.
+7. явное одобрение production-зависимости `web-push`; `@nats-io/jetstream`
+   уже используется только для identity safety transport и не включает sender.
 
 ## Последствия
 
