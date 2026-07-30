@@ -3,6 +3,18 @@ import { createAdapter } from "@socket.io/redis-adapter";
 import { createClient, type RedisClientType } from "redis";
 import type { ServerOptions } from "socket.io";
 
+export const REALTIME_REDIS_ADAPTER_KEY = "seo-platform:realtime:v1";
+
+export function createRealtimeRedisAdapter(
+  publisher: RedisClientType,
+  subscriber: RedisClientType
+): ReturnType<typeof createAdapter> {
+  return createAdapter(publisher, subscriber, {
+    key: REALTIME_REDIS_ADAPTER_KEY,
+    publishOnSpecificResponseChannel: true
+  });
+}
+
 export class RedisIoAdapter extends IoAdapter {
   private readonly publisher: RedisClientType;
   private readonly subscriber: RedisClientType;
@@ -19,7 +31,10 @@ export class RedisIoAdapter extends IoAdapter {
       this.publisher.connect(),
       this.subscriber.connect()
     ]);
-    this.adapterConstructor = createAdapter(this.publisher, this.subscriber);
+    this.adapterConstructor = createRealtimeRedisAdapter(
+      this.publisher,
+      this.subscriber
+    );
   }
 
   public override createIOServer(
