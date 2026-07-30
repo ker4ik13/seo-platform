@@ -82,6 +82,8 @@ jobs:
       PLATFORM_API_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/seo_platform_test
       SEO_DATA_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/seo_data_test
       JOBS_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/seo_jobs_test
+      JOBS_UPGRADE_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/seo_jobs_upgrade_test
+      JOBS_CONNECTOR_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/jobs_db
       REALTIME_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/seo_realtime_test
 
     steps:
@@ -112,6 +114,8 @@ jobs:
           docker exec "${{ job.services.postgres.id }}" createdb -U postgres seo_platform_test
           docker exec "${{ job.services.postgres.id }}" createdb -U postgres seo_data_test
           docker exec "${{ job.services.postgres.id }}" createdb -U postgres seo_jobs_test
+          docker exec "${{ job.services.postgres.id }}" createdb -U postgres seo_jobs_upgrade_test
+          docker exec "${{ job.services.postgres.id }}" createdb -U postgres jobs_db
           docker exec "${{ job.services.postgres.id }}" createdb -U postgres seo_realtime_test
 
       - name: Apply Platform API migrations
@@ -132,6 +136,25 @@ jobs:
           DATABASE_URL: ${{ env.JOBS_DATABASE_URL }}
         run: pnpm prisma:migrate:deploy
 
+      - name: Apply Jobs pre-submit-authorization upgrade baseline
+        run: |
+          for migration in platform-jobs-integrations/prisma/migrations/*/migration.sql; do
+            case "$migration" in
+              *20260730101700_rank_connector_submitting_enum*|*20260730101800_rank_connector_submit_authorization*)
+                break
+                ;;
+            esac
+            docker exec -i "${{ job.services.postgres.id }}" \
+              psql -v ON_ERROR_STOP=1 -U postgres -d seo_jobs_upgrade_test \
+              < "$migration"
+          done
+
+      - name: Apply connector permission database migrations
+        working-directory: platform-jobs-integrations
+        env:
+          DATABASE_URL: ${{ env.JOBS_CONNECTOR_DATABASE_URL }}
+        run: pnpm prisma:migrate:deploy
+
       - name: Apply Realtime migrations
         working-directory: platform-realtime
         env:
@@ -150,4 +173,10 @@ jobs:
         env:
           DATABASE_URL: ${{ env.JOBS_DATABASE_URL }}
           JOBS_RANK_TEST_DATABASE_URL: ${{ env.JOBS_DATABASE_URL }}
+          JOBS_RANK_SUBMIT_UPGRADE_TEST_DATABASE_URL: ${{ env.JOBS_UPGRADE_DATABASE_URL }}
         run: pnpm test
+
+      - name: Run connector-role PostgreSQL permission regression
+        env:
+          JOBS_CONNECTOR_PERMISSION_TEST_DATABASE_URL: ${{ env.JOBS_CONNECTOR_DATABASE_URL }}
+        run: node --test platform-infrastructure/tests/jobs-connector-permissions-postgres.test.mjs
