@@ -232,8 +232,10 @@ one-shot `service-token-preflight` до credential-bearing processes и NATS:
 девять service tokens, `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и
 четыре NATS passwords
 должны быть глобально pairwise distinct, без placeholders и соответствовать
-deploy-алфавиту `[A-Za-z0-9._~-]` при длине `32..512`; четыре NATS usernames
-проверяются отдельно. Runtime намеренно сохраняет более широкий HTTP-контракт
+deploy-алфавиту `[A-Za-z0-9._~-]` при длине `32..512`; четыре соответствующих
+bcrypt verifier записи с cost `11` и четыре NATS usernames проверяются отдельно, а
+broker не получает plaintext client passwords. Runtime намеренно сохраняет
+более широкий HTTP-контракт
 visible ASCII без whitespace/control/comma. Jobs HTTP,
 import, inspection, system, rank и connector используют отдельные process
 roles/env allowlists. Эти gates уменьшают secret fan-out и ошибку конфигурации,

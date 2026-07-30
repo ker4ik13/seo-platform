@@ -63,7 +63,9 @@ envelope, commit-ит `inbox + tombstone + device revoke` до source ack,
 незавершённое сообщение unacked. One-shot provisioner создаёт exact singleton
 source/DLQ streams и durable consumer до старта приложений; publisher,
 consumer, provisioner и остальные NATS runtimes имеют разные credentials и
-least-privilege ACL. Внешний Email/Web Push sender по-прежнему отсутствует.
+least-privilege ACL. Broker получает только четыре bcrypt verifier записи,
+plain client passwords остаются у exact приложений/preflight. Внешний
+Email/Web Push sender по-прежнему отсутствует.
 
 Межсервисный HTTP hardening удалил legacy `INTERNAL_API_TOKEN`: каждый
 обычный caller/audience pair теперь имеет отдельный credential, а legacy env
@@ -72,7 +74,8 @@ device boundaries сохранены отдельно. Все internal clients �
 redirect, а service-token guards требуют один strict header. До запуска
 credential-bearing processes и NATS Compose выполняет network-less one-shot
 `service-token-preflight`: он глобально проверяет 22 credentials и отдельно
-четыре NATS usernames без вывода значений или хэшей. Jobs image дополнительно
+четыре NATS bcrypt verifier и четыре usernames без вывода значений или хэшей.
+Jobs image дополнительно
 получил явные process roles:
 HTTP имеет полный management-набор только для своей роли, import —
 DB/Redis/S3/SEO Data, inspection —
@@ -268,7 +271,8 @@ event families пока имеют только локальные outbox/inbox 
   до запуска credential-bearing processes он проверяет 22 deploy credentials
   (девять service tokens, `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и
   четыре NATS passwords)
-  на глобальную pairwise distinctness и четыре NATS username на отдельную
+  на глобальную pairwise distinctness, четыре NATS bcrypt verifier с cost
+  `11` на canonical format/раздельность и четыре NATS username на отдельную
   уникальность и несовпадение с credentials. Secrets допускают только
   URL-safe `[A-Za-z0-9._~-]` длиной `32..512`; NATS password начинается с
   ASCII letter, username является ASCII identifier длиной `3..64`. One-shot
@@ -278,7 +282,8 @@ event families пока имеют только локальные outbox/inbox 
 - NATS deploy identities разделены на deny-all generic runtime,
   `platform-api` publisher, Realtime consumer и one-shot topology provisioner.
   Apps получают привычные `NATS_USER/NATS_PASSWORD` только через exact Compose
-  mapping. Production требует explicit safe `NATS_EVENT_ENVIRONMENT`, а
+  mapping, тогда как broker получает только соответствующие bcrypt verifier
+  env. Production требует explicit safe `NATS_EVENT_ENVIRONMENT`, а
   publisher/consumer и bounded global session expiry sweeper нельзя отключить.
 - Redis разделён на три непубликуемых instance/network: durable
   `redis-jobs` с AOF и `noeviction`, ephemeral Pub/Sub `redis-realtime` и
@@ -601,8 +606,8 @@ Backend convention:
   запрещает legacy env;
 - `platform-infrastructure/security/validate-service-tokens.sh` — one-shot
   fail-closed deploy preflight для глобальной проверки 22 credentials и
-  четырёх отдельных NATS usernames; credential-bearing processes и NATS
-  зависят от его успешного завершения;
+  четырёх отдельных NATS bcrypt verifier/usernames; credential-bearing
+  processes и NATS зависят от его успешного завершения;
 - тот же Compose fail-closed требует `JOBS_TO_SEO_RANK_RESULT_TOKEN` и
   `RANK_HISTORY_CURSOR_KEY` только для `seo-data`; regression test запрещает
   их случайную выдачу остальным runtime processes;
@@ -1008,12 +1013,13 @@ caller, connector submission/status и normalized result producer ещё не
 - Infrastructure DB-role/connector и затронутый rank dependency targeted
   scope: 9 pass, 0 fail; PostgreSQL regressions остаются opt-in в обычном
   запуске.
-- Infrastructure suite после Redis/NATS hardening: 61 pass, 0 fail и пять
-  opt-in skips без disposable PostgreSQL/Redis binaries. Отдельный live smoke
+- Infrastructure suite после Redis/NATS hardening: 65 pass, 0 fail и два
+  opt-in PostgreSQL skips с локальным Redis 8.8.1 binary. Отдельный live smoke
   на source-built Redis 8.8.1: 3/3 pass; подтверждены BullMQ Queue/Worker,
   queue-key isolation и Lua denial, versioned Realtime Pub/Sub channels,
   Directus cache-команды, health/default users и запрет admin/dangerous
-  commands.
+  commands. Live NATS 2.12.12 smoke подтвердил четыре bcrypt identities,
+  отсутствие plaintext-password warning и topology create → unchanged.
 - Отдельный fresh PostgreSQL 18 service-role proof: pass; применены 37 Prisma
   migrations четырёх сервисов, подтверждены runtime CRUD/UUIDv7/constraints,
   запреты DDL/`_prisma_migrations`/`TRUNCATE`/membership/ownership/

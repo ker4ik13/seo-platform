@@ -35,6 +35,13 @@ const natsCredentialMappings = new Map([
   ]
 ]);
 
+const natsPasswordHashes = [
+  "NATS_RUNTIME_PASSWORD_HASH",
+  "NATS_PLATFORM_PUBLISHER_PASSWORD_HASH",
+  "NATS_REALTIME_CONSUMER_PASSWORD_HASH",
+  "NATS_PROVISIONER_PASSWORD_HASH"
+];
+
 test("NATS server uses mounted config, bounded storage and no CLI secrets", async () => {
   const [compose, config] = await Promise.all([
     readFile(composeUrl, "utf8"),
@@ -62,6 +69,10 @@ test("NATS server uses mounted config, bounded storage and no CLI secrets", asyn
   assert.match(config, /^\s*store_dir:\s*"\/data"$/mu);
   assert.equal(balanced(config, "{", "}"), true);
   assert.equal(balanced(config, "[", "]"), true);
+  assert.doesNotMatch(config, /password:\s*\$NATS_(?:RUNTIME|PLATFORM_PUBLISHER|REALTIME_CONSUMER|PROVISIONER)_PASSWORD(?:\s|$)/u);
+  for (const hashName of natsPasswordHashes) {
+    assert.match(config, new RegExp(`password:\\s*\\$${hashName}\\b`, "u"));
+  }
   assertDependency(document, "nats", "service-token-preflight");
 });
 
@@ -141,16 +152,24 @@ test("Compose maps each NATS identity only to its exact runtime audience", async
   const natsEnvironment = serviceEnvironment(document, "nats");
   assert.deepEqual(sorted(natsEnvironment.keys()), sorted([
     "NATS_RUNTIME_USER",
-    "NATS_RUNTIME_PASSWORD",
+    "NATS_RUNTIME_PASSWORD_HASH",
     "NATS_PLATFORM_PUBLISHER_USER",
-    "NATS_PLATFORM_PUBLISHER_PASSWORD",
+    "NATS_PLATFORM_PUBLISHER_PASSWORD_HASH",
     "NATS_REALTIME_CONSUMER_USER",
-    "NATS_REALTIME_CONSUMER_PASSWORD",
+    "NATS_REALTIME_CONSUMER_PASSWORD_HASH",
     "NATS_PROVISIONER_USER",
-    "NATS_PROVISIONER_PASSWORD",
+    "NATS_PROVISIONER_PASSWORD_HASH",
     "NATS_IDENTITY_EVENT_SUBJECT",
     "NATS_IDENTITY_EVENT_DLQ_SUBJECT"
   ]));
+  for (const passwordName of [
+    "NATS_RUNTIME_PASSWORD",
+    "NATS_PLATFORM_PUBLISHER_PASSWORD",
+    "NATS_REALTIME_CONSUMER_PASSWORD",
+    "NATS_PROVISIONER_PASSWORD"
+  ]) {
+    assert.equal(natsEnvironment.has(passwordName), false);
+  }
 });
 
 test("publisher and consumer receive canonical topology and wait for provisioner", async () => {
@@ -250,6 +269,17 @@ test("example validation supplies distinct generated NATS inputs", async () => {
     assert.match(value, /^[A-Za-z][-A-Za-z0-9._~]+$/u);
   }
   assert.equal(new Set(passwordValues).size, 4);
+  const hashValues = natsPasswordHashes.map((name) => {
+    const value = assignments.get(name);
+    assert.equal(typeof value, "string");
+    const unquoted = stripMatchingQuotes(value);
+    assert.match(
+      unquoted,
+      /^\$2[aby]\$11\$[./A-Za-z0-9]{53}$/u
+    );
+    return unquoted;
+  });
+  assert.equal(new Set(hashValues).size, 4);
   assert.equal(assignments.get("NATS_EVENT_ENVIRONMENT"), "ci");
 });
 

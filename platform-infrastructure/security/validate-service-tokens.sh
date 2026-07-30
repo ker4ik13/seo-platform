@@ -41,6 +41,13 @@ NATS_REALTIME_CONSUMER_USER
 NATS_PROVISIONER_USER
 "
 
+nats_password_hash_names="
+NATS_RUNTIME_PASSWORD_HASH
+NATS_PLATFORM_PUBLISHER_PASSWORD_HASH
+NATS_REALTIME_CONSUMER_PASSWORD_HASH
+NATS_PROVISIONER_PASSWORD_HASH
+"
+
 validated_names=""
 validated_count=0
 
@@ -108,6 +115,37 @@ for token_name in $token_names; do
   unset token_value
 done
 
+validated_nats_hashes=""
+validated_nats_hash_count=0
+
+for hash_name in $nats_password_hash_names; do
+  if ! printenv "$hash_name" >/dev/null; then
+    echo "service-token-preflight: $hash_name is required" >&2
+    exit 1
+  fi
+  hash_value="$(printenv "$hash_name"; printf 'x')"
+  hash_value=${hash_value%x}
+  hash_value=${hash_value%?}
+
+  if ! printf '%s' "$hash_value" | grep -Eq '^\$2[aby]\$11\$[./A-Za-z0-9]{53}$'; then
+    echo "service-token-preflight: $hash_name must be a canonical bcrypt cost-11 verifier" >&2
+    exit 1
+  fi
+
+  for previous_hash_name in $validated_nats_hashes; do
+    previous_hash_value="$(printenv "$previous_hash_name")"
+    if [ "$hash_value" = "$previous_hash_value" ]; then
+      echo "service-token-preflight: $hash_name must differ from $previous_hash_name" >&2
+      exit 1
+    fi
+    unset previous_hash_value
+  done
+
+  validated_nats_hashes="$validated_nats_hashes $hash_name"
+  validated_nats_hash_count=$((validated_nats_hash_count + 1))
+  unset hash_value
+done
+
 validated_usernames=""
 validated_username_count=0
 
@@ -172,4 +210,4 @@ for username_name in $username_names; do
   unset username_value
 done
 
-echo "service-token-preflight: validated $validated_count distinct deploy credentials and $validated_username_count distinct NATS usernames"
+echo "service-token-preflight: validated $validated_count distinct deploy credentials, $validated_nats_hash_count distinct NATS bcrypt verifiers and $validated_username_count distinct NATS usernames"

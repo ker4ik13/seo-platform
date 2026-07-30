@@ -40,6 +40,18 @@ const usernameNames = [
   "NATS_REALTIME_CONSUMER_USER",
   "NATS_PROVISIONER_USER"
 ];
+const natsPasswordHashNames = [
+  "NATS_RUNTIME_PASSWORD_HASH",
+  "NATS_PLATFORM_PUBLISHER_PASSWORD_HASH",
+  "NATS_REALTIME_CONSUMER_PASSWORD_HASH",
+  "NATS_PROVISIONER_PASSWORD_HASH"
+];
+const natsPasswordHashes = [
+  "$2a$11$SnmJ/ftus.QHSRgvQK4xkucVtf5ucK25GsOSsjVPJem9i2U5txZFK",
+  "$2a$11$PDhMidnaWsRKmptE4e0hEeNHwtbSknwwAJMGSY4YxwW2gu03q.Ena",
+  "$2a$11$biu94pm9wRs6z9rIuer3letiCffv/X59tkqkxr7oWhaiUMdKsV/DK",
+  "$2a$11$YSHwX16VLEEE/MFWc6s9auKSXYjddbpGTVlOuZpWZvuoIIYZ6aYP."
+];
 
 test("preflight script is valid POSIX shell and accepts distinct credentials", async () => {
   await execute("/bin/sh", ["-n", scriptPath]);
@@ -48,7 +60,7 @@ test("preflight script is valid POSIX shell and accepts distinct credentials", a
 
   assert.match(
     result.stdout,
-    /validated 22 distinct deploy credentials and 4 distinct NATS usernames/u
+    /validated 22 distinct deploy credentials, 4 distinct NATS bcrypt verifiers and 4 distinct NATS usernames/u
   );
   assert.equal(result.stderr, "");
   assertDoesNotExposeCredentials(
@@ -151,6 +163,43 @@ test("preflight rejects duplicate or unsafe NATS usernames", async () => {
   assertDoesNotExposeCredentials(reusedFailure.stderr, reusedAsPassword);
 });
 
+test("preflight rejects missing malformed or reused NATS bcrypt verifiers", async () => {
+  const missing = validEnvironment();
+  delete missing.NATS_RUNTIME_PASSWORD_HASH;
+  const missingFailure = await captureFailure(missing);
+  assert.match(missingFailure.stderr, /NATS_RUNTIME_PASSWORD_HASH is required/u);
+  assertDoesNotExposeCredentials(missingFailure.stderr, missing);
+
+  const malformed = validEnvironment();
+  malformed.NATS_REALTIME_CONSUMER_PASSWORD_HASH =
+    "$2a$03$not-a-production-bcrypt-verifier";
+  const malformedFailure = await captureFailure(malformed);
+  assert.match(
+    malformedFailure.stderr,
+    /must be a canonical bcrypt cost-11 verifier/u
+  );
+  assertDoesNotExposeCredentials(malformedFailure.stderr, malformed);
+
+  const unsafeCost = validEnvironment();
+  unsafeCost.NATS_REALTIME_CONSUMER_PASSWORD_HASH =
+    "$2a$10$biu94pm9wRs6z9rIuer3letiCffv/X59tkqkxr7oWhaiUMdKsV/DK";
+  const unsafeCostFailure = await captureFailure(unsafeCost);
+  assert.match(
+    unsafeCostFailure.stderr,
+    /must be a canonical bcrypt cost-11 verifier/u
+  );
+  assertDoesNotExposeCredentials(unsafeCostFailure.stderr, unsafeCost);
+
+  const reused = validEnvironment();
+  reused.NATS_PROVISIONER_PASSWORD_HASH = reused.NATS_RUNTIME_PASSWORD_HASH;
+  const reusedFailure = await captureFailure(reused);
+  assert.match(
+    reusedFailure.stderr,
+    /NATS_PROVISIONER_PASSWORD_HASH must differ from NATS_RUNTIME_PASSWORD_HASH/u
+  );
+  assertDoesNotExposeCredentials(reusedFailure.stderr, reused);
+});
+
 test("preflight rejects placeholders, unsafe characters and invalid length", async () => {
   const cases = [
     {
@@ -230,6 +279,9 @@ function validEnvironment() {
     ),
     ...Object.fromEntries(
       usernameNames.map((name, index) => [name, `nats_identity_${index}`])
+    ),
+    ...Object.fromEntries(
+      natsPasswordHashNames.map((name, index) => [name, natsPasswordHashes[index]])
     )
   };
 }

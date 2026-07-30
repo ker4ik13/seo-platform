@@ -336,8 +336,11 @@ Deploy дополнительно обязан выполнить один об�
 `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и четыре NATS passwords,
 проверяет все 22 credentials на глобальную pairwise distinctness и отклоняет
 placeholders.
-Четыре NATS usernames отдельно проверяются на unique ASCII identifier и
-несовпадение с любым credential. В отличие от runtime-контракта secrets
+Для каждого NATS client password deploy также обязан предоставить canonical
+bcrypt verifier с cost `11`; четыре verifier записи должны быть разными, а broker не
+должен получать plaintext passwords. Четыре NATS usernames отдельно
+проверяются на unique ASCII identifier и несовпадение с любым credential. В
+отличие от runtime-контракта secrets
 допускают только URL-safe `[A-Za-z0-9._~-]` длиной `32..512`; NATS password
 дополнительно начинается с ASCII letter. Контейнер работает без сети,
 read-only, с `cap_drop: ALL` и `no-new-privileges`, не выводит значения/хэши и

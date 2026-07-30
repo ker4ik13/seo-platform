@@ -41,7 +41,12 @@
    `NATS_REALTIME_CONSUMER_*`, `NATS_PROVISIONER_*`, а также задать exact
    lowercase `NATS_EVENT_ENVIRONMENT`. NATS passwords не совпадают ни с одним
    service credential и начинаются с ASCII letter; usernames уникальны и не
-   являются secrets, но не переиспользуются между ролями.
+   являются secrets, но не переиспользуются между ролями. Для каждого
+   plaintext client password также сохранить соответствующий bcrypt verifier
+   в `NATS_{RUNTIME,PLATFORM_PUBLISHER,REALTIME_CONSUMER,PROVISIONER}_PASSWORD_HASH`.
+   Verifier создаётся официальным `nats server passwd` с exact cost `11`;
+   password и verifier являются одной парой, но broker получает только
+   `*_PASSWORD_HASH`, а приложения — только свой `*_PASSWORD`.
 3. Сначала оставить `S3_ENABLED=false`, `EMAIL_ENABLED=false`,
    `DIRECTUS_STORAGE_DRIVER=local`.
 4. Привязать основной домен к `web:3000`, а нужные технические домены — к
@@ -103,8 +108,9 @@ credential и запрещает встроенные значения вмес�
 обязательно завершает one-shot `service-token-preflight`. Он получает девять
 service tokens, `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и четыре
 NATS passwords, проверяет все 22 credentials на глобальную pairwise
-distinctness, отсутствие placeholders и длину `32..512`. Четыре NATS
-usernames проверяются отдельно на уникальный
+distinctness, отсутствие placeholders и длину `32..512`. Дополнительно он
+проверяет четыре разные canonical bcrypt verifier записи и четыре NATS
+usernames отдельно на уникальный
 ASCII identifier длиной `3..64` и несовпадение с credentials. Deploy-проверка
 намеренно строже runtime: secrets допускают только URL-safe алфавит
 `[A-Za-z0-9._~-]`, а NATS password начинается с ASCII letter; runtime HTTP-
@@ -175,9 +181,11 @@ CRUD, health/default-user boundary и запрет admin/dangerous commands.
 ## NATS JetStream: terminal session-family pipeline
 
 Compose использует pinned `nats:2.12.12-alpine` и mounted
-`nats/nats-server.conf`; credentials не передаются аргументами command. NATS
-не имеет внешнего port binding. Config ограничивает payload `64 KB`, memory
-store `64 MB` и file store `1 GB` и задаёт четыре deny-by-default identities:
+`nats/nats-server.conf`; credentials не передаются аргументами command, а
+broker получает только четыре bcrypt verifier записи — plaintext client
+passwords остаются у exact приложений и one-shot preflight. NATS не имеет
+внешнего port binding. Config ограничивает payload `64 KB`, memory store
+`64 MB` и file store `1 GB` и задаёт четыре deny-by-default identities:
 
 | Identity | Получатель | Разрешения |
 |---|---|---|
@@ -213,6 +221,7 @@ mirror/source, republish/transform или sealed drift останавливаю�
 successful provisioner и healthy NATS.
 
 Localhost smoke с реальным `nats-server` 2.12.12 подтвердил syntax config,
+bcrypt login всех runtime ролей, отсутствие plaintext-password warning,
 create → unchanged idempotence и фактические ACL publisher/consumer/
 provisioner. Docker на текущем хосте отсутствует, поэтому полный
 `docker compose config`/image build остаётся CI и target-environment gate.

@@ -38,6 +38,13 @@ const natsUsernameInputs = [
   "NATS_PROVISIONER_USER"
 ];
 
+const natsPasswordHashInputs = [
+  "NATS_RUNTIME_PASSWORD_HASH",
+  "NATS_PLATFORM_PUBLISHER_PASSWORD_HASH",
+  "NATS_REALTIME_CONSUMER_PASSWORD_HASH",
+  "NATS_PROVISIONER_PASSWORD_HASH"
+];
+
 const tokenBearingServices = [
   "platform-api",
   "seo-data",
@@ -253,12 +260,14 @@ test("isolated deploy preflight receives only all globally distinct credentials"
     sorted(environment.keys()),
     sorted([
       ...globallyDistinctDeployCredentials,
-      ...natsUsernameInputs
+      ...natsUsernameInputs,
+      ...natsPasswordHashInputs
     ])
   );
   for (const token of [
     ...globallyDistinctDeployCredentials,
-    ...natsUsernameInputs
+    ...natsUsernameInputs,
+    ...natsPasswordHashInputs
   ]) {
     assertRequiredSelfInterpolation(
       environment.get(token),
