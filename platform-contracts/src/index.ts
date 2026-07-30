@@ -12,6 +12,7 @@ export * from "./api/semantic-imports.js";
 export * from "./api/semantic-exports.js";
 export * from "./api/semantic-custom-columns.js";
 export * from "./api/semantic-saved-views.js";
+export * from "./api/semantic-versions.js";
 export * from "./api/tenants.js";
 export * from "./api/tracking-contexts.js";
 export * from "./api/uploads.js";

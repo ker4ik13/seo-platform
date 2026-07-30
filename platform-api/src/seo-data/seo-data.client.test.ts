@@ -510,6 +510,46 @@ test("preserves only the safe current version from an upstream conflict", async 
   }
 });
 
+test("forwards the semantic undo idempotency key inside the trusted command", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedBody: Readonly<Record<string, unknown>> | undefined;
+  globalThis.fetch = (async (
+    _input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> => {
+    capturedBody = JSON.parse(String(init?.body)) as Readonly<
+      Record<string, unknown>
+    >;
+    return jsonResponse({
+      data: {
+        sourceVersionId: contextId,
+        applied: 0,
+        conflicted: 0,
+        unsupported: 0,
+        changes: []
+      }
+    });
+  }) as typeof fetch;
+
+  try {
+    const result = await client().undoSemanticVersion(
+      internalContext(),
+      contextId,
+      "semantic-undo-client-0001"
+    );
+
+    assert.equal(result.sourceVersionId, contextId);
+    assert.deepEqual(capturedBody, {
+      workspaceId,
+      projectId,
+      actorId,
+      idempotencyKey: "semantic-undo-client-0001"
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function client(): SeoDataClient {
   return new SeoDataClient(
     loadAppConfig({

@@ -5,6 +5,7 @@ import { SemanticCoreTable } from "./semantic-core-table";
 import { SemanticCustomColumnManager } from "./semantic-custom-column-manager";
 import { SemanticGroupManager } from "./semantic-group-manager";
 import { SemanticUpload } from "./semantic-upload";
+import { SemanticVersionHistory } from "./semantic-version-history";
 
 export function SemanticsWorkspace({
   projectId
@@ -29,6 +30,11 @@ export function SemanticsWorkspace({
       <SemanticCoreTable
         columnRefreshVersion={columnRefreshVersion}
         groupRefreshVersion={groupRefreshVersion}
+        projectId={projectId}
+        refreshVersion={refreshVersion}
+      />
+      <SemanticVersionHistory
+        onRestored={() => setRefreshVersion((value) => value + 1)}
         projectId={projectId}
         refreshVersion={refreshVersion}
       />

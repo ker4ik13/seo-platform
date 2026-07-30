@@ -13,6 +13,7 @@ import { RankManifestModule } from "./rank-manifests/rank-manifest.module.js";
 import { RankResultModule } from "./rank-results/rank-result.module.js";
 import { SemanticSavedViewModule } from "./semantic-saved-views/semantic-saved-view.module.js";
 import { SemanticCustomColumnModule } from "./semantic-custom-columns/semantic-custom-column.module.js";
+import { SemanticVersionModule } from "./semantic-versions/semantic-version.module.js";
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { SemanticCustomColumnModule } from "./semantic-custom-columns/semantic-c
     KeywordGroupModule,
     SemanticCustomColumnModule,
     SemanticSavedViewModule,
+    SemanticVersionModule,
     TrackingContextModule,
     RankScopeModule,
     RankManifestModule,

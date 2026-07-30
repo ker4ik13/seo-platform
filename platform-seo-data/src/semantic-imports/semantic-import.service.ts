@@ -134,7 +134,7 @@ export class SemanticImportService {
     return this.prisma.$transaction(async (transaction) => {
       await transaction.$executeRaw`
         SELECT pg_advisory_xact_lock(
-          hashtextextended(${input.projectId}, 0)
+          hashtextextended(${`semantic-keyword-write:${input.projectId}`}, 0)
         )
       `;
       const concurrentChunk =
@@ -431,7 +431,7 @@ export class SemanticImportService {
     return this.prisma.$transaction(async (transaction) => {
       await transaction.$executeRaw`
         SELECT pg_advisory_xact_lock(
-          hashtextextended(${input.projectId}, 0)
+          hashtextextended(${`semantic-version:${input.projectId}`}, 0)
         )
       `;
       const receipt = await transaction.semanticImportReceipt.findUnique({
@@ -477,15 +477,26 @@ export class SemanticImportService {
           projectId: input.projectId
         },
         orderBy: { number: "desc" },
-        select: { number: true }
+        select: { id: true, number: true }
       });
+      const affectedCount =
+        Number(chunks._sum.createdKeywords ?? 0) +
+        Number(chunks._sum.updatedKeywords ?? 0);
       const version = await transaction.semanticVersion.create({
         data: {
           workspaceId: input.workspaceId,
           projectId: input.projectId,
           number: (latestVersion?.number ?? 0) + 1,
-          reason: "semantic_import",
+          reason: "IMPORT",
           actorId: input.actorId,
+          sourceJobId: input.importId,
+          ...(latestVersion
+            ? { parentVersionId: latestVersion.id }
+            : {}),
+          summary: "Импорт семантического ядра",
+          affectedCount,
+          reversible: false,
+          finalizedAt: new Date(),
           manifest: {
             importId: input.importId,
             mappingHash: receipt.mappingHash,

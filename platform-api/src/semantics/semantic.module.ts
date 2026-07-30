@@ -9,6 +9,7 @@ import { SemanticSavedViewController } from "./semantic-saved-view.controller.js
 import { SemanticCustomColumnController } from "./semantic-custom-column.controller.js";
 import { SemanticExportController } from "./semantic-export.controller.js";
 import { SemanticExportService } from "./semantic-export.service.js";
+import { SemanticVersionController } from "./semantic-version.controller.js";
 
 @Module({
   imports: [AuthorizationModule, IdentityModule, SeoDataModule],
@@ -18,7 +19,8 @@ import { SemanticExportService } from "./semantic-export.service.js";
     SemanticBulkController,
     SemanticCustomColumnController,
     SemanticSavedViewController,
-    SemanticExportController
+    SemanticExportController,
+    SemanticVersionController
   ],
   providers: [SemanticExportService]
 })

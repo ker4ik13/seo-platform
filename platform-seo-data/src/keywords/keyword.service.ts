@@ -20,6 +20,12 @@ import type {
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import {
+  lockSemanticKeywordWrites,
+  SemanticVersionService,
+  type SemanticKeywordVersionState,
+  type SemanticVersionIdentity
+} from "../semantic-versions/semantic-version.service.js";
 import { normalizeKeywordText } from "./keyword-normalization.js";
 
 const UUID_PATTERN =
@@ -45,10 +51,9 @@ const KEYWORD_INCLUDE = {
   },
   tags: {
     orderBy: { createdAt: "asc" as const },
-    take: 51,
     select: {
       tag: {
-        select: { name: true }
+        select: { id: true, name: true }
       }
     }
   },
@@ -66,7 +71,10 @@ type KeywordAggregate = Prisma.KeywordGetPayload<{
 
 @Injectable()
 export class KeywordService {
-  public constructor(private readonly prisma: PrismaService) {}
+  public constructor(
+    private readonly prisma: PrismaService,
+    private readonly semanticVersions: SemanticVersionService
+  ) {}
 
   public async list(
     workspaceId: string,
@@ -227,6 +235,7 @@ export class KeywordService {
   ): Promise<SemanticKeywordListItem> {
     try {
       return await this.prisma.$transaction(async (transaction) => {
+        await lockSemanticKeywordWrites(transaction, input.projectId);
         if (input.groupId) {
           await lockKeywordGroupTree(transaction, input.projectId);
         }
@@ -286,13 +295,32 @@ export class KeywordService {
             }))
           });
         }
+        const result = await requiredKeyword(
+          transaction,
+          input.workspaceId,
+          input.projectId,
+          created.id
+        );
+        await this.semanticVersions.createWithKeywordChange(
+          transaction,
+          {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            actorId: input.actorId,
+            reason: "KEYWORD_CREATE",
+            summary: "Добавлен поисковый запрос"
+          },
+          {
+            entityId: result.id,
+            operation: "CREATE",
+            beforeState: null,
+            afterState: keywordVersionState(result),
+            beforeVersion: null,
+            afterVersion: result.version
+          }
+        );
         return keywordItem(
-          await requiredKeyword(
-            transaction,
-            input.workspaceId,
-            input.projectId,
-            created.id
-          ),
+          result,
           input.targetUrl,
           false
         );
@@ -305,10 +333,12 @@ export class KeywordService {
 
   public async update(
     keywordId: string,
-    input: InternalUpdateSemanticKeywordInput
+    input: InternalUpdateSemanticKeywordInput,
+    semanticVersion?: SemanticVersionIdentity
   ): Promise<SemanticKeywordListItem> {
     try {
       return await this.prisma.$transaction(async (transaction) => {
+        await lockSemanticKeywordWrites(transaction, input.projectId);
         await lockKeyword(transaction, input.projectId, keywordId);
         if (input.groupId) {
           await lockKeywordGroupTree(transaction, input.projectId);
@@ -319,6 +349,7 @@ export class KeywordService {
           input.projectId,
           keywordId
         );
+        const beforeState = keywordVersionState(current);
         assertKeywordVersion(current.version, input.version);
         await assertGroup(
           transaction,
@@ -424,6 +455,33 @@ export class KeywordService {
                 result.targetPageId
               )
             : (input.targetUrl ?? undefined);
+        const change = {
+          entityId: result.id,
+          operation: "UPDATE" as const,
+          beforeState,
+          afterState: keywordVersionState(result),
+          beforeVersion: current.version,
+          afterVersion: result.version
+        };
+        if (semanticVersion) {
+          await this.semanticVersions.appendBulkKeywordChange(
+            transaction,
+            semanticVersion,
+            change
+          );
+        } else {
+          await this.semanticVersions.createWithKeywordChange(
+            transaction,
+            {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              actorId: input.actorId,
+              reason: "KEYWORD_UPDATE",
+              summary: "Изменён поисковый запрос"
+            },
+            change
+          );
+        }
         return keywordItem(
           result,
           targetUrl,
@@ -446,6 +504,7 @@ export class KeywordService {
     input: InternalDeleteSemanticKeywordInput
   ): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
+      await lockSemanticKeywordWrites(transaction, input.projectId);
       await lockKeyword(transaction, input.projectId, keywordId);
       const current = await requiredKeyword(
         transaction,
@@ -453,6 +512,7 @@ export class KeywordService {
         input.projectId,
         keywordId
       );
+      const beforeState = keywordVersionState(current);
       assertKeywordVersion(current.version, input.version);
       await transaction.keyword.update({
         where: {
@@ -469,44 +529,80 @@ export class KeywordService {
           version: { increment: 1 }
         }
       });
+      await this.semanticVersions.createWithKeywordChange(
+        transaction,
+        {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          actorId: input.actorId,
+          reason: "KEYWORD_DELETE",
+          summary: "Удалён поисковый запрос"
+        },
+        {
+          entityId: current.id,
+          operation: "DELETE",
+          beforeState,
+          afterState: { ...beforeState, status: "DELETED" },
+          beforeVersion: current.version,
+          afterVersion: current.version + 1
+        }
+      );
     });
   }
 
   public async bulkUpdate(
     input: InternalSemanticKeywordBulkInput
   ): Promise<SemanticKeywordBulkResult> {
+    const semanticVersion =
+      await this.semanticVersions.createOpenBulkVersion({
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        actorId: input.actorId,
+        reason: "BULK_UPDATE",
+        summary: `Массовое изменение ${input.items.length} запросов`
+      });
     const updatedItems: SemanticKeywordListItem[] = [];
     const conflictedIds: string[] = [];
     const skippedIds: string[] = [];
     const failedIds: string[] = [];
-    for (const item of input.items) {
-      try {
-        updatedItems.push(
-          await this.update(item.id, {
-            ...input.patch,
-            workspaceId: input.workspaceId,
-            projectId: input.projectId,
-            actorId: input.actorId,
-            version: item.version
-          })
-        );
-      } catch (error) {
-        if (!(error instanceof HttpException)) throw error;
-        const status = error.getStatus();
-        if (status === HttpStatus.PRECONDITION_FAILED) {
-          conflictedIds.push(item.id);
-        } else if (status === HttpStatus.NOT_FOUND) {
-          skippedIds.push(item.id);
-        } else if (
-          status === HttpStatus.BAD_REQUEST ||
-          status === HttpStatus.CONFLICT
-        ) {
-          failedIds.push(item.id);
-        } else {
-          throw error;
+    try {
+      for (const item of input.items) {
+        try {
+          updatedItems.push(
+            await this.update(
+              item.id,
+              {
+                ...input.patch,
+                workspaceId: input.workspaceId,
+                projectId: input.projectId,
+                actorId: input.actorId,
+                version: item.version
+              },
+              semanticVersion
+            )
+          );
+        } catch (error) {
+          if (!(error instanceof HttpException)) throw error;
+          const status = error.getStatus();
+          if (status === HttpStatus.PRECONDITION_FAILED) {
+            conflictedIds.push(item.id);
+          } else if (status === HttpStatus.NOT_FOUND) {
+            skippedIds.push(item.id);
+          } else if (
+            status === HttpStatus.BAD_REQUEST ||
+            status === HttpStatus.CONFLICT
+          ) {
+            failedIds.push(item.id);
+          } else {
+            throw error;
+          }
         }
       }
+    } catch (error) {
+      await this.semanticVersions.finalizeBulkVersion(semanticVersion);
+      throw error;
     }
+    await this.semanticVersions.finalizeBulkVersion(semanticVersion);
     return {
       selected: input.items.length,
       changed: updatedItems.length,
@@ -709,6 +805,25 @@ function keywordItem(
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     version: row.version
+  };
+}
+
+function keywordVersionState(
+  row: KeywordAggregate
+): SemanticKeywordVersionState {
+  return {
+    textOriginal: row.textOriginal,
+    textNormalized: row.textNormalized,
+    normalizedHash: row.normalizedHash,
+    language: row.language,
+    priority: row.priority,
+    isFavorite: row.isFavorite,
+    intent: row.intent,
+    status: row.status === "DELETED" ? "DELETED" : "ACTIVE",
+    clusterId: row.clusterId,
+    targetPageId: row.targetPageId,
+    groupId: row.memberships[0]?.group.id ?? null,
+    tagIds: row.tags.map(({ tag }) => tag.id)
   };
 }
 

@@ -2106,6 +2106,20 @@ svg { display: block; }
 .semantic-column-picker input { accent-color: var(--accent); }
 .semantic-column-picker .secondary-button { grid-column: 1 / -1; }
 .semantic-custom-columns { display: grid; gap: 14px; }
+.semantic-versions { display: grid; gap: 14px; }
+.semantic-version-list { display: grid; gap: 0; }
+.semantic-version-list article { align-items: center; border-top: 1px solid var(--line); display: flex; gap: 16px; justify-content: space-between; padding: 11px 2px; }
+.semantic-version-list article > div { display: grid; gap: 3px; min-width: 0; }
+.semantic-version-list article span,
+.semantic-version-list article small { color: var(--muted); font-size: 11px; }
+.semantic-version-readonly { border: 1px solid var(--line); border-radius: 999px; padding: 4px 8px; white-space: nowrap; }
+.semantic-version-empty { border: 1px dashed var(--line-strong); border-radius: 10px; color: var(--muted); padding: 20px; text-align: center; }
+.semantic-undo-preview { background: #fafafd; border: 1px solid var(--line); border-radius: 11px; display: grid; gap: 12px; padding: 14px; }
+.semantic-undo-preview > div:first-child { display: grid; gap: 4px; }
+.semantic-undo-preview span,
+.semantic-undo-preview li { color: var(--muted); font-size: 11px; }
+.semantic-undo-preview ul { margin: 8px 0 0; max-height: 180px; overflow: auto; padding-left: 20px; }
+.semantic-undo-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .semantic-custom-column-editor { align-items: end; background: #fafafd; border: 1px solid var(--line); border-radius: 11px; display: grid; gap: 10px; grid-template-columns: minmax(180px, 1fr) minmax(150px, .7fr) minmax(220px, 1.2fr); padding: 13px; }
 .semantic-custom-column-editor label { display: grid; gap: 6px; }
 .semantic-custom-column-editor label > span,

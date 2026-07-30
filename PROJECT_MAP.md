@@ -37,8 +37,23 @@ same-origin streaming BFF, требует `semantic.export` и CSRF, сохра�
 не раскрывает tenant context из browser body и защищает Google CSV от formula
 injection. Табличные заголовки локализуются, CSV имеет RFC-совместимое
 экранирование, JSON сохраняет typed custom values. Следующий P1 slice:
-асинхронные большие XLSX/archive exports с S3 signed URL, затем
-semantic versions/preview/undo и collaboration.
+асинхронные большие XLSX/archive exports с S3 signed URL.
+История semantic versions теперь получает tenant-safe append-only change set
+для ручного create/update/delete запросов и bounded bulk update. Before/after
+state записывается в той же PostgreSQL-транзакции, bulk version остаётся
+необратимой до финализации, а общий advisory lock сериализует ручные правки,
+import chunks и undo. Web показывает последние версии и сначала запрашивает
+preview; undo применяет только строки с exact current version и доступными
+group/page/tag dependencies, не перезаписывает более новые изменения,
+сообщает конфликты и сам создаёт новую откатываемую версию. Undo требует
+stable `Idempotency-Key`; tenant/project/actor-scoped receipt сохраняет
+исходный результат в той же транзакции, поэтому повтор после неоднозначного
+сетевого ответа не применяет откат второй раз, а повторное использование
+ключа для другой версии даёт `409`. Импорты
+появляются в истории с parent/source/affected metadata, но остаются
+history-only до сохранения полного масштабируемого row change package.
+Синхронный undo ограничен 500 изменениями. Следом в P1: version packages для
+custom cells/groups/import, asynchronous undo/export и collaboration.
 
 Предыдущий P2 foundation: versioned tracking context, provider-free оценка и immutable
 execution manifest в SEO Data завершены. Estimate хранится в `jobs_db`,

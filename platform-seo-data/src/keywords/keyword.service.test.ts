@@ -10,6 +10,7 @@ import type {
   SemanticKeywordListItem
 } from "@seo-platform/contracts";
 import type { PrismaService } from "../database/prisma.service.js";
+import type { SemanticVersionService } from "../semantic-versions/semantic-version.service.js";
 import { KeywordService } from "./keyword.service.js";
 
 const workspaceId = "01900000-0000-7000-8000-000000000001";
@@ -44,7 +45,7 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
         }
       ]
     }
-  } as unknown as PrismaService);
+  } as unknown as PrismaService, semanticVersions());
 
   const result = await service.list(
     workspaceId,
@@ -83,7 +84,10 @@ test("bulk update partitions changed, conflicted and skipped rows", async () => 
   const changedId = "01900000-0000-7000-8000-000000000040";
   const conflictId = "01900000-0000-7000-8000-000000000041";
   const skippedId = "01900000-0000-7000-8000-000000000042";
-  const service = new KeywordService({} as PrismaService);
+  const service = new KeywordService(
+    {} as PrismaService,
+    semanticVersions()
+  );
   service.update = async (
     id: string,
     input: InternalUpdateSemanticKeywordInput
@@ -153,6 +157,20 @@ function keyword(id: string, createdAt: string) {
     ],
     tags: [{ tag: { name: "Приоритет" } }]
   };
+}
+
+function semanticVersions(): SemanticVersionService {
+  return {
+    createOpenBulkVersion: async (input: {
+      workspaceId: string;
+      projectId: string;
+    }) => ({
+      id: "01900000-0000-7000-8000-000000000099",
+      workspaceId: input.workspaceId,
+      projectId: input.projectId
+    }),
+    finalizeBulkVersion: async () => ({})
+  } as unknown as SemanticVersionService;
 }
 
 function semanticItem(id: string): SemanticKeywordListItem {

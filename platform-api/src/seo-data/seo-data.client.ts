@@ -44,6 +44,9 @@ import {
   type SemanticKeywordCustomValue,
   type SemanticSavedView,
   type SemanticSavedViewConfig,
+  type SemanticVersionListItem,
+  type SemanticVersionUndoPreview,
+  type SemanticVersionUndoResult,
   type UpdateSemanticSavedViewInput,
   type SetSemanticKeywordCustomValueInput,
   type UpdateSemanticCustomColumnInput,
@@ -70,6 +73,11 @@ import {
   trackingContextKeywordPage,
   type TrackingContextKeywordPage
 } from "../rankings/tracking-context-response.js";
+import {
+  semanticVersionsResponse,
+  semanticVersionUndoPreviewResponse,
+  semanticVersionUndoResultResponse
+} from "../semantics/semantic-version-response.js";
 
 interface InternalContext {
   readonly tenant: TenantAuthorization;
@@ -297,6 +305,57 @@ export class SeoDataClient {
       context
     );
     return semanticCustomColumns(responseData(payload));
+  }
+
+  public async listSemanticVersions(
+    context: InternalContext
+  ): Promise<readonly SemanticVersionListItem[]> {
+    const payload = await this.request(
+      "GET",
+      semanticVersionUrl(context, this.config.services.seoData),
+      context
+    );
+    return semanticVersionsResponse(responseData(payload));
+  }
+
+  public async previewSemanticVersionUndo(
+    context: InternalContext,
+    versionId: string
+  ): Promise<SemanticVersionUndoPreview> {
+    const payload = await this.request(
+      "GET",
+      semanticVersionUrl(
+        context,
+        this.config.services.seoData,
+        `${versionId}/undo-preview`
+      ),
+      context
+    );
+    return semanticVersionUndoPreviewResponse(responseData(payload));
+  }
+
+  public async undoSemanticVersion(
+    context: InternalContext,
+    versionId: string,
+    idempotencyKey: string
+  ): Promise<SemanticVersionUndoResult> {
+    const scope = trackingScope(context);
+    const payload = await this.request(
+      "POST",
+      semanticVersionUrl(
+        context,
+        this.config.services.seoData,
+        `${versionId}/undo`
+      ),
+      context,
+      {
+        workspaceId: scope.workspaceId,
+        projectId: scope.projectId,
+        actorId: context.actorId,
+        idempotencyKey
+      }
+    );
+    return semanticVersionUndoResultResponse(responseData(payload));
   }
 
   public async createSemanticCustomColumn(
@@ -1352,6 +1411,28 @@ function semanticSavedViewUrl(
     viewId ? `${base}/${encodeURIComponent(viewId)}` : base,
     baseUrl
   );
+}
+
+function semanticVersionUrl(
+  context: InternalContext,
+  baseUrl: string,
+  suffix?: string
+): URL {
+  const projectId = requiredProjectId(context.tenant);
+  const base = `/internal/v1/projects/${encodeURIComponent(
+    projectId
+  )}/semantic-versions`;
+  return new URL(
+    suffix ? `${base}/${encodePathSuffix(suffix)}` : base,
+    baseUrl
+  );
+}
+
+function encodePathSuffix(value: string): string {
+  return value
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
 }
 
 function objectValue(

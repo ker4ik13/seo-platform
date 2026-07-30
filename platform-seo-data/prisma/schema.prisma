@@ -654,18 +654,74 @@ model FrequencySnapshot {
 }
 
 model SemanticVersion {
-  id          String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId String   @map("workspace_id") @db.Uuid
-  projectId   String   @map("project_id") @db.Uuid
-  number      Int
-  reason      String   @db.VarChar(160)
-  actorId     String   @map("actor_id") @db.Uuid
-  manifest    Json
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id              String    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId     String    @map("workspace_id") @db.Uuid
+  projectId       String    @map("project_id") @db.Uuid
+  number          Int
+  reason          String    @db.VarChar(160)
+  actorId         String    @map("actor_id") @db.Uuid
+  sourceJobId     String?   @map("source_job_id") @db.Uuid
+  parentVersionId String?   @map("parent_version_id") @db.Uuid
+  summary         String    @default("") @db.VarChar(500)
+  affectedCount   Int       @default(0) @map("affected_count")
+  reversible      Boolean   @default(false)
+  manifest        Json
+  finalizedAt     DateTime? @map("finalized_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  parent   SemanticVersion?  @relation("SemanticVersionParent", fields: [workspaceId, projectId, parentVersionId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  children SemanticVersion[] @relation("SemanticVersionParent")
+  changes  SemanticEntityChange[]
+  undoSourceReceipts  SemanticUndoReceipt[] @relation("SemanticUndoSourceVersion")
+  undoCreatedReceipts SemanticUndoReceipt[] @relation("SemanticUndoCreatedVersion")
 
   @@unique([projectId, number])
+  @@unique([workspaceId, projectId, id], map: "semantic_versions_tenant_project_id_key")
   @@index([workspaceId, projectId, createdAt])
+  @@index([workspaceId, projectId, parentVersionId], map: "semantic_versions_parent_idx")
   @@map("semantic_versions")
+}
+
+model SemanticUndoReceipt {
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  actorId          String   @map("actor_id") @db.Uuid
+  idempotencyKey   String   @map("idempotency_key") @db.VarChar(180)
+  sourceVersionId  String   @map("source_version_id") @db.Uuid
+  createdVersionId String?  @map("created_version_id") @db.Uuid
+  applied          Int
+  conflicted       Int
+  unsupported      Int
+  changes          Json
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  sourceVersion  SemanticVersion  @relation("SemanticUndoSourceVersion", fields: [workspaceId, projectId, sourceVersionId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  createdVersion SemanticVersion? @relation("SemanticUndoCreatedVersion", fields: [workspaceId, projectId, createdVersionId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([workspaceId, projectId, actorId, idempotencyKey])
+  @@index([workspaceId, projectId, sourceVersionId, createdAt(sort: Desc)], map: "semantic_undo_receipts_source_idx")
+  @@map("semantic_undo_receipts")
+}
+
+model SemanticEntityChange {
+  id                String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId       String   @map("workspace_id") @db.Uuid
+  projectId         String   @map("project_id") @db.Uuid
+  semanticVersionId String   @map("semantic_version_id") @db.Uuid
+  entityType        String   @map("entity_type") @db.VarChar(32)
+  entityId          String   @map("entity_id") @db.Uuid
+  operation         String   @db.VarChar(16)
+  beforeState       Json?    @map("before_state")
+  afterState        Json     @map("after_state")
+  beforeVersion     Int?     @map("before_version")
+  afterVersion      Int      @map("after_version")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  semanticVersion SemanticVersion @relation(fields: [workspaceId, projectId, semanticVersionId], references: [workspaceId, projectId, id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([semanticVersionId, entityType, entityId], map: "semantic_entity_changes_version_entity_key")
+  @@index([workspaceId, projectId, entityType, entityId, createdAt(sort: Desc)], map: "semantic_entity_changes_entity_history_idx")
+  @@map("semantic_entity_changes")
 }
 
 model SemanticImportReceipt {
