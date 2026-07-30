@@ -7,7 +7,7 @@ import { TenantModule } from "../tenants/tenant.module.js";
 import { RankExecutionGrantController } from "./rank-execution-grant.controller.js";
 import { RankExecutionGrantGuard } from "./rank-execution-grant.guard.js";
 import {
-  FailClosedRankExecutionGrantPolicy,
+  ControlledBetaRankExecutionGrantPolicy,
   RANK_EXECUTION_GRANT_POLICY
 } from "./rank-execution-grant.policy.js";
 import { RankExecutionGrantService } from "./rank-execution-grant.service.js";
@@ -32,12 +32,12 @@ import { TrackingContextController } from "./tracking-context.controller.js";
     TrackingContextController
   ],
   providers: [
-    FailClosedRankExecutionGrantPolicy,
+    ControlledBetaRankExecutionGrantPolicy,
     RankExecutionGrantGuard,
     RankExecutionGrantService,
     {
       provide: RANK_EXECUTION_GRANT_POLICY,
-      useExisting: FailClosedRankExecutionGrantPolicy
+      useExisting: ControlledBetaRankExecutionGrantPolicy
     }
   ]
 })

@@ -405,11 +405,37 @@ model RankExecutionGrantReceipt {
   correlationId      String                          @map("correlation_id") @db.VarChar(100)
   createdAt          DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  quotaReservation RankExecutionQuotaReservation? @relation(fields: [quotaReservationId, workspaceId, projectId, actorId, jobId, jobItemId, executionAttempt, policyVersion], references: [id, workspaceId, projectId, actorId, jobId, jobItemId, executionAttempt, policyVersion], onDelete: Restrict, onUpdate: Restrict)
+
   @@unique([workspaceId, idempotencyScope, idempotencyKey], map: "rank_execution_grants_workspace_idempotency_key")
   @@unique([workspaceId, jobItemId, executionAttempt], map: "rank_execution_grants_item_attempt_key")
   @@index([workspaceId, projectId, decidedAt], map: "rank_execution_grants_tenant_decided_idx")
   @@index([expiresAt, id], map: "rank_execution_grants_expiry_idx")
   @@map("rank_execution_grant_receipts")
+}
+
+model RankExecutionQuotaReservation {
+  id               String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  actorId          String   @map("actor_id") @db.Uuid
+  jobId            String   @map("job_id") @db.Uuid
+  jobItemId        String   @map("job_item_id") @db.Uuid
+  executionAttempt Int      @map("execution_attempt")
+  meter            String   @db.VarChar(64)
+  quantity         Int
+  policyVersion    String   @map("policy_version") @db.VarChar(64)
+  windowStartedAt  DateTime @map("window_started_at") @db.Timestamptz(6)
+  windowEndsAt     DateTime @map("window_ends_at") @db.Timestamptz(6)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  grantReceipts RankExecutionGrantReceipt[]
+
+  @@unique([workspaceId, jobItemId, executionAttempt], map: "rank_quota_reservations_item_attempt_key")
+  @@unique([id, workspaceId, projectId, actorId, jobId, jobItemId, executionAttempt, policyVersion], map: "rank_quota_reservations_receipt_binding_key")
+  @@index([workspaceId, meter, windowStartedAt, createdAt], map: "rank_quota_reservations_window_idx")
+  @@index([workspaceId, projectId, createdAt], map: "rank_quota_reservations_project_idx")
+  @@map("rank_execution_quota_reservations")
 }
 
 model AuditEvent {

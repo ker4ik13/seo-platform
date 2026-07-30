@@ -2,8 +2,8 @@
 
 Последнее обновление: 30 июля 2026 года
 
-Текущий инкремент: P1 production vertical — редактирование семантического ядра
-Статус: ручной CRUD запросов и иерархических групп реализуется поверх
+Текущий инкремент: P2 production vertical — реальный ручной съём позиций
+Статус P1: ручной CRUD запросов и иерархических групп реализован поверх
 tenant-scoped SEO Data owner с optimistic locking, RBAC/CSRF и audit.
 Запрос уже можно создать, изменить и soft-delete; поддерживаются текст,
 BCP-47 язык, приоритет, избранное, intent, группа, target URL и теги.
@@ -13,9 +13,7 @@ workspace/actor из browser body; Web использует same-origin BFF и �
 конфликты версии без silent overwrite. Bounded bulk-команда принимает 1–200
 явных keyword ID с отдельной ожидаемой версией, возвращает changed/skipped/
 failed/conflicted partition и позволяет массово менять приоритет, избранное,
-intent, группу, target URL и теги без blind overwrite. Текущий slice ещё не считается
-завершённым до полного lint/test/build и живого PostgreSQL E2E. Следом в P1:
-versions/undo, export и collaboration. Серверный keyword read
+intent, группу, target URL и теги без blind overwrite. Серверный keyword read
 model уже поддерживает allowlisted intent/group/favorite/tracked/priority
 filters и пять стабильных keyset sorts; cursor криптографически связан с
 фильтрами и сортировкой через SHA-256 fingerprint. Private и project-shared saved views сохраняют
@@ -55,47 +53,58 @@ history-only до сохранения полного масштабируемо
 Синхронный undo ограничен 500 изменениями. Следом в P1: version packages для
 custom cells/groups/import, asynchronous undo/export и collaboration.
 
-Предыдущий P2 foundation: versioned tracking context, provider-free оценка и immutable
+P2 runtime: versioned tracking context, provider-free оценка и immutable
 execution manifest в SEO Data завершены. Estimate хранится в `jobs_db`,
 доступен при read-only и не вызывает provider, decrypt, Job/BullMQ, списание
-или event. SEO Data уже атомарно seal-ит bounded keyword snapshots в
-immutable header/chunks/entries и защищает active semantic dedup. Jobs теперь
-durable создаёт `PREPARING` Job и immutable sidecar, seal-ит manifest через
-изолированный rank-worker, восстанавливает потерянные BullMQ notifications,
-сериализует cancel и закрывает sealed cancellation через SEO Data finalize.
-Неоднозначный исход ограниченно повторяется exact-командой и затем становится
+или event. SEO Data атомарно seal-ит bounded keyword snapshots в immutable
+header/chunks/entries и защищает active semantic dedup. Jobs durable создаёт
+`PREPARING` Job и immutable sidecar, seal-ит manifest через изолированный
+rank-worker, восстанавливает потерянные BullMQ notifications, сериализует
+cancel и закрывает sealed cancellation через SEO Data finalize. Неоднозначный
+исход ограниченно повторяется exact-командой и затем становится
 `ACTION_REQUIRED`, а не ложным `NOT_SEALED`. Public Platform API и
 восстанавливаемый Web Job flow готовы. SEO Data принимает exact normalized
 chunks, атомарно строит append-only snapshots/current projection, завершает
 успешный/partial manifest с redacted outbox event и предоставляет internal
 keyset history. Platform API публикует bounded read-only history proxy, а Web
-— private/noindex экран с фильтрами и cursor-дозагрузкой. Platform API теперь
-имеет protected issuer foundation одноразового 30-секундного execution grant:
-он повторно проверяет owned lifecycle/RBAC state под row locks и сохраняет
-immutable exact decision receipt. Jobs добавил bounded issuer client и
-durable intent/consume: exact `REQUESTED` записывается до HTTP, retryable ambiguity
-повторяет тот же request/idempotency key, а решение сохраняется как `DENIED`,
-`EXPIRED`, `GRANTED_PENDING_CONSUME` либо `REJECTED_LOCAL`. Неистёкшее
-положительное решение теперь под тем же canonical lock order атомарно
-переходит в `CONSUMED` вместе с единственным secret-free
+— private/noindex экран с фильтрами и cursor-дозагрузкой.
+
+Platform API имеет protected issuer одноразового 30-секундного execution
+grant: он повторно проверяет owned lifecycle/RBAC state под row locks и
+сохраняет immutable exact decision receipt. Jobs добавил bounded issuer
+client и durable intent/consume: exact `REQUESTED` записывается до HTTP,
+retryable ambiguity повторяет тот же request/idempotency key, а решение
+сохраняется как `DENIED`, `EXPIRED`, `GRANTED_PENDING_CONSUME` либо
+`REJECTED_LOCAL`. Неистёкшее положительное решение под тем же canonical lock
+order атомарно переходит в `CONSUMED` вместе с единственным secret-free
 `rank_connector_executions/READY_TO_SUBMIT`. Строка связывает exact
 Job/item/grant/manifest/binding/route/credential-version evidence, но не
-содержит credential material. Перед grant Jobs теперь дважды проверяет
-locked Job/Run/Item graph вокруг bounded чтения sealed manifest chunk,
-сохраняет единственный append-only privacy-sensitive, но secret-free
+содержит credential material. Перед grant Jobs дважды проверяет locked
+Job/Run/Item graph вокруг bounded чтения sealed manifest chunk, сохраняет
+единственный append-only privacy-sensitive, но secret-free
 `rank_provider_request_intents` snapshot и связывает его ID, request hash и
 chunk hash с private execution evidence и connector execution FK.
-Default-closed SECURITY DEFINER claim DDL уже
-переводит eligible row в bounded pre-network `CLAIMED` и возвращает только
-одну exact encrypted credential projection после full current-graph recheck.
-Exact deploy-time connector permissions теперь выдают только broker/claim/
-authorize signatures без table DML. Submit authorization повторно блокирует
-полный current graph, сверяет owner/token/lease generation/row version и
-атомарно фиксирует `SUBMITTING` с durable marker до возможных network bytes.
+
+Controlled-beta policy выдаёт grant только для exact
+`manual-arsenkin-positions@1.0.0`, резервирует одну immutable
+`RANK_PROVIDER_TASK` на JobItem/attempt и ограничивает workspace 200 provider
+tasks на календарные UTC-сутки. Receipt связан с reservation составным
+tenant/job/item FK. Rank dispatcher восстанавливает готовые sealed Jobs из
+PostgreSQL, переводит `QUEUED → RUNNING`, выдаёт все chunk grants со stable
+idempotency identity и финализирует доказанный отказ через SEO Data как
+`FAILED/EXECUTION_GRANT_DENIED`; неоднозначный transport outcome остаётся
+retryable. Default-closed SECURITY DEFINER claim DDL переводит eligible row
+в bounded pre-network `CLAIMED` и возвращает только одну exact encrypted
+credential projection после full current-graph recheck. Exact deploy-time
+connector permissions выдают только broker/claim/authorize signatures без
+table DML. Submit authorization повторно блокирует полный current graph,
+сверяет owner/token/lease generation/row version и атомарно фиксирует
+`SUBMITTING` с durable marker до возможных network bytes.
+
 Runtime caller, recorded Arsenkin wire request, submit/status/fetch
-persistence и normalized result producer ещё отсутствуют.
-Production policy и submit gate остаются fail-closed; live Arsenkin submit
-выключен до прохождения contract/security gates ADR-2026-034.
+persistence и normalized result producer ещё отсутствуют. Production submit
+gate остаётся выключен до прохождения оставшихся contract/security gates
+ADR-2026-034; controlled-beta quota сама по себе network submit не включает.
 
 Параллельный dependency-free срез browser Web Push device lifecycle
 реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет
@@ -524,7 +533,7 @@ Backend convention:
   и point keyword assignments с `ranking.view/configure`, CSRF,
   idempotency/OCC и audit, а также provider-free rank estimate с
   `ranking.view` и trusted lifecycle/access snapshot, public manual Job
-  lifecycle, bounded read-only rank history proxy и protected fail-closed
+  lifecycle, bounded read-only rank history proxy и protected controlled-beta
   execution-grant issuer с immutable exact replay;
 - `platform-contracts/src/api/rank-execution-grants.ts` — exact Jobs →
   Platform request/scope hash preimages, 30-second grant/decision contracts и
@@ -532,6 +541,9 @@ Backend convention:
 - `platform-api/prisma/migrations/20260729230000_rank_execution_grant_receipts`
   — immutable issuer decisions, exact idempotency/item-attempt keys,
   authoritative quota reservation и update/delete/truncate guards;
+- `platform-api/prisma/migrations/20260730223000_rank_beta_quota_reservations`
+  — immutable controlled-beta UTC-day reservations, workspace limit
+  `200 RANK_PROVIDER_TASK/day` и составной receipt binding FK;
 - `platform-jobs-integrations/prisma/migrations/20260729230100_rank_execution_grant_attempts`
   — durable exact Jobs intent/decision history, tenant-safe Job/Run/Item FK,
   immutable request identity, state matrix и delete/truncate guards;
@@ -619,7 +631,9 @@ Backend convention:
   state machine, canonical `Job → RankJobRun → JobItem → provider intent →
   credential → validation Job → binding → route → grant attempt` lock order,
   bounded recovery, public-safe Job projection, exact private provider
-  request intent и durable execution-grant intent/consume; dependency-free
+  request intent, durable execution-grant intent/consume и PostgreSQL
+  recovery dispatcher для `QUEUED → RUNNING`/per-chunk grant/failure
+  finalization; dependency-free
   provider lifecycle reducer фиксирует
   конечную state/event matrix и запрет auto-resubmit после ambiguous submit,
   но его DB persistence/runtime wiring ещё отсутствуют;
@@ -637,8 +651,9 @@ Backend convention:
   immutable SMTP receipt/terminal guards и запрет destructive mutation;
 - `platform-jobs-integrations/src/rank-worker.main.ts` — изолированный
   rank-preparation entrypoint с per-delivery lease owner, PostgreSQL
-  dispatcher recovery и двумя выделенными manifest/grant rank tokens; grant
-  service пока не подключён к dispatcher/provider execution;
+  preparation/execution dispatcher recovery и двумя выделенными
+  manifest/grant rank tokens; grant service подключён, provider runtime ещё
+  не подключён;
 - `platform-jobs-integrations/src/seo-data` — строго валидируемый internal
   HTTP client владельца semantic core и bounded rank-estimate scope;
 - `platform-seo-data/src/semantic-imports` — нормализация, import receipts,
@@ -1212,13 +1227,16 @@ SEO Data с одним manifest lock и запретом late ingest. Internal h
 валидирует scope, диапазон, фильтры, порядок, дубликаты и cursor coherence,
 redact-ит ответ SEO Data и отдаёт collection envelope. Private/noindex Web
 экран использует bounded UTC range, optional context/keyword filters и
-load-more. Platform API execution-grant issuer foundation реализован, но
-production policy выдаёт только persisted `DENIED`, пока отсутствует
-authoritative entitlement/quota implementation. Jobs bounded client и durable
-grant intent/decision history реализованы как fail-closed foundation: network intent
+load-more. Platform API execution-grant issuer использует controlled-beta
+authoritative quota: максимум 200 provider tasks на workspace/UTC day с
+immutable reservation и exact receipt binding. Jobs bounded client и durable
+grant intent/decision history реализованы: network intent
 записывается первым, exact replay сохраняется, а неистёкшее положительное
 решение атомарно связывается с secret-free scoped connector execution и
-становится `CONSUMED`. До grant immutable adapter request строится только из
+становится `CONSUMED`. PostgreSQL dispatcher переводит sealed Job в
+`RUNNING/WAITING_EXECUTION_GRANT`, выдаёт grants по всем chunks и
+идемпотентно восстанавливается после restart. До grant immutable adapter
+request строится только из
 verified sealed command/chunk, сохраняется один раз без credential material и
 через evidence v2/FK связывается с execution по request/manifest/chunk hashes.
 SECURITY DEFINER claim, scoped encrypted credential
@@ -1233,18 +1251,18 @@ caller, recorded connector wire submission/status и normalized result producer 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API tests: 273 pass, 0 fail, 3 opt-in PostgreSQL 18 tests skipped
+- Platform API tests: 387 pass, 0 fail, 4 opt-in PostgreSQL 18 tests skipped
   без отдельного disposable database URL.
-- SEO data unit tests: 89 pass, 0 fail.
-- Jobs/integrations tests: 271 pass, 0 fail, 6 disposable-DB tests skipped
+- SEO data unit tests: 116 pass, 0 fail.
+- Jobs/integrations tests: 394 pass, 0 fail, 9 disposable-DB tests skipped
   в обычном запуске; startup decrypt-canary targeted suite — 7/7 pass.
-- Realtime unit tests: 50 pass, 0 fail.
-- Contracts unit tests: 64 pass, 0 fail.
-- Unified Web helper tests: 101 pass, 0 fail.
+- Realtime unit tests: 112 pass, 0 fail.
+- Contracts unit tests: 97 pass, 0 fail.
+- Unified Web helper tests: 151 pass, 0 fail.
 - Infrastructure DB-role/connector и затронутый rank dependency targeted
   scope: 9 pass, 0 fail; PostgreSQL regressions остаются opt-in в обычном
   запуске.
-- Infrastructure suite после Redis/NATS hardening: 65 pass, 0 fail и два
+- Infrastructure suite после Redis/NATS hardening: 80 pass, 0 fail и пять
   opt-in PostgreSQL skips с локальным Redis 8.8.1 binary. Отдельный live smoke
   на source-built Redis 8.8.1: 3/3 pass; подтверждены BullMQ Queue/Worker,
   queue-key isolation и Lua denial, versioned Realtime Pub/Sub channels,

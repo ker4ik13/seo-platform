@@ -4,6 +4,9 @@ import type { Prisma } from "../generated/prisma/client.js";
 export const RANK_EXECUTION_GRANT_POLICY = Symbol(
   "RANK_EXECUTION_GRANT_POLICY"
 );
+export const CONTROLLED_BETA_RANK_POLICY_VERSION =
+  "manual-arsenkin-positions@1.0.0";
+export const CONTROLLED_BETA_DAILY_PROVIDER_TASK_LIMIT = 200;
 
 export interface RankExecutionGrantPolicyInput {
   readonly workspaceId: string;
@@ -43,19 +46,82 @@ export interface RankExecutionGrantPolicy {
   ): Promise<RankExecutionGrantPolicyDecision>;
 }
 
-/**
- * Production stays fail-closed until a versioned entitlement/quota ledger is
- * implemented. Replacing this provider is a separate billing release gate;
- * no environment flag can turn a denial into a grant.
- */
 @Injectable()
-export class FailClosedRankExecutionGrantPolicy
+export class ControlledBetaRankExecutionGrantPolicy
   implements RankExecutionGrantPolicy
 {
-  public async evaluate(): Promise<RankExecutionGrantPolicyDecision> {
+  public async evaluate(
+    transaction: Prisma.TransactionClient,
+    input: RankExecutionGrantPolicyInput
+  ): Promise<RankExecutionGrantPolicyDecision> {
+    if (
+      input.policyVersion !== CONTROLLED_BETA_RANK_POLICY_VERSION ||
+      input.usageIntent.meter !== "RANK_PROVIDER_TASK" ||
+      input.usageIntent.quantity !== 1
+    ) {
+      return {
+        entitlement: "DENIED",
+        quota: "NOT_AVAILABLE"
+      };
+    }
+    const [clock] = await transaction.$queryRaw<
+      readonly { readonly now: Date }[]
+    >`SELECT clock_timestamp() AS "now"`;
+    if (!clock?.now || Number.isNaN(clock.now.getTime())) {
+      return {
+        entitlement: "ALLOWED",
+        quota: "NOT_AVAILABLE"
+      };
+    }
+    const windowStartedAt = utcDay(clock.now);
+    const windowEndsAt = new Date(
+      windowStartedAt.getTime() + 24 * 60 * 60 * 1_000
+    );
+    const used = await transaction.rankExecutionQuotaReservation.count({
+      where: {
+        workspaceId: input.workspaceId,
+        meter: "RANK_PROVIDER_TASK",
+        windowStartedAt
+      }
+    });
+    if (used >= CONTROLLED_BETA_DAILY_PROVIDER_TASK_LIMIT) {
+      return {
+        entitlement: "ALLOWED",
+        quota: "EXHAUSTED"
+      };
+    }
+    const reservation =
+      await transaction.rankExecutionQuotaReservation.create({
+        data: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          actorId: input.actorId,
+          jobId: input.jobId,
+          jobItemId: input.jobItemId,
+          executionAttempt: input.executionAttempt,
+          meter: "RANK_PROVIDER_TASK",
+          quantity: input.usageIntent.quantity,
+          policyVersion: input.policyVersion,
+          windowStartedAt,
+          windowEndsAt,
+          createdAt: clock.now
+        },
+        select: { id: true }
+      });
     return {
-      entitlement: "NOT_AVAILABLE",
-      quota: "NOT_AVAILABLE"
+      entitlement: "ALLOWED",
+      quota: "AVAILABLE",
+      quotaReservationId: reservation.id
     };
   }
+}
+
+function utcDay(value: Date): Date {
+  return new Date(
+    Date.UTC(
+      value.getUTCFullYear(),
+      value.getUTCMonth(),
+      value.getUTCDate()
+    )
+  );
 }

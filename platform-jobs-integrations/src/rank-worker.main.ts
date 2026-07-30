@@ -13,6 +13,7 @@ import {
   RANK_PREPARATION_QUEUE,
   type RankPreparationJobData
 } from "./queue/rank-preparation.queue.js";
+import { RankExecutionDispatchService } from "./rank-runs/rank-execution-dispatch.service.js";
 import { RankPreparationService } from "./rank-runs/rank-preparation.service.js";
 import { RankWorkerModule } from "./rank-worker.module.js";
 
@@ -30,6 +31,7 @@ async function bootstrap(): Promise<void> {
     throw new Error("Rank worker requires RANK_PREPARATION_ENABLED=true");
   }
   const preparation = app.get(RankPreparationService);
+  const execution = app.get(RankExecutionDispatchService);
   const workerConnection = redis(config.redisUrl);
   const queueConnection = redis(config.redisUrl);
   const queue = new Queue<RankPreparationJobData>(
@@ -63,7 +65,19 @@ async function bootstrap(): Promise<void> {
     try {
       const ids = await preparation.pendingPreparationIds();
       for (const id of ids) {
-        await enqueueRankPreparation(queue, id);
+        try {
+          await enqueueRankPreparation(queue, id);
+        } catch {
+          logger.warn("Unable to enqueue one rank preparation");
+        }
+      }
+      const executionIds = await execution.pendingExecutionJobIds();
+      for (const id of executionIds) {
+        try {
+          await execution.process(id);
+        } catch {
+          logger.warn("Unable to dispatch one rank execution");
+        }
       }
     } catch {
       logger.error("Unable to dispatch pending rank preparations");

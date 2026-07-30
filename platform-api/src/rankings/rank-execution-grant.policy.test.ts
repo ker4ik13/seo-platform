@@ -1,0 +1,93 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { Prisma } from "../generated/prisma/client.js";
+import {
+  CONTROLLED_BETA_DAILY_PROVIDER_TASK_LIMIT,
+  CONTROLLED_BETA_RANK_POLICY_VERSION,
+  ControlledBetaRankExecutionGrantPolicy
+} from "./rank-execution-grant.policy.js";
+
+const workspaceId = "01900000-0000-7000-8000-000000000001";
+const projectId = "01900000-0000-7000-8000-000000000002";
+const actorId = "01900000-0000-7000-8000-000000000003";
+const jobId = "01900000-0000-7000-8000-000000000004";
+const jobItemId = "01900000-0000-7000-8000-000000000005";
+const reservationId = "01900000-0000-7000-8000-000000000006";
+
+test("reserves one controlled-beta BYOK provider task in the UTC day", async () => {
+  let created: Readonly<Record<string, unknown>> | undefined;
+  const policy = new ControlledBetaRankExecutionGrantPolicy();
+  const result = await policy.evaluate(
+    {
+      $queryRaw: async () => [
+        { now: new Date("2026-07-30T23:59:59.000Z") }
+      ],
+      rankExecutionQuotaReservation: {
+        count: async () => CONTROLLED_BETA_DAILY_PROVIDER_TASK_LIMIT - 1,
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          created = data;
+          return { id: reservationId };
+        }
+      }
+    } as unknown as Prisma.TransactionClient,
+    input()
+  );
+
+  assert.deepEqual(result, {
+    entitlement: "ALLOWED",
+    quota: "AVAILABLE",
+    quotaReservationId: reservationId
+  });
+  assert.ok(created);
+  assert.equal(
+    (created.windowStartedAt as Date).toISOString(),
+    "2026-07-30T00:00:00.000Z"
+  );
+  assert.equal(
+    (created.windowEndsAt as Date).toISOString(),
+    "2026-07-31T00:00:00.000Z"
+  );
+});
+
+test("denies an unknown policy and exhausts the bounded daily quota", async () => {
+  const policy = new ControlledBetaRankExecutionGrantPolicy();
+  const transaction = {
+    $queryRaw: async () => [
+      { now: new Date("2026-07-30T12:00:00.000Z") }
+    ],
+    rankExecutionQuotaReservation: {
+      count: async () => CONTROLLED_BETA_DAILY_PROVIDER_TASK_LIMIT,
+      create: async () => {
+        throw new Error("must not create");
+      }
+    }
+  } as unknown as Prisma.TransactionClient;
+
+  assert.deepEqual(
+    await policy.evaluate(transaction, {
+      ...input(),
+      policyVersion: "unknown-policy@1"
+    }),
+    { entitlement: "DENIED", quota: "NOT_AVAILABLE" }
+  );
+  assert.deepEqual(await policy.evaluate(transaction, input()), {
+    entitlement: "ALLOWED",
+    quota: "EXHAUSTED"
+  });
+});
+
+function input() {
+  return {
+    workspaceId,
+    projectId,
+    actorId,
+    jobId,
+    jobItemId,
+    executionAttempt: 1,
+    policyVersion: CONTROLLED_BETA_RANK_POLICY_VERSION,
+    usageIntent: {
+      meter: "RANK_PROVIDER_TASK" as const,
+      quantity: 1 as const
+    }
+  };
+}
