@@ -1,7 +1,12 @@
-import type { KeywordListQuery } from "@seo-platform/contracts";
+import {
+  semanticKeywordIntents,
+  semanticKeywordSorts,
+  type KeywordListQuery
+} from "@seo-platform/contracts";
+import { assertUuid } from "../common/identifier.js";
 import { validationError } from "../common/domain-error.js";
 
-const CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,1000}$/u;
+const CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,5000}$/u;
 
 export function keywordListQuery(value: unknown): KeywordListQuery {
   const query =
@@ -13,6 +18,22 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   const search = optionalSingleString(query.search, "search")?.normalize(
     "NFKC"
   );
+  const intent = optionalEnum(
+    query.intent,
+    "intent",
+    semanticKeywordIntents
+  );
+  const groupIdValue = optionalSingleString(query.groupId, "groupId");
+  const groupId = groupIdValue
+    ? assertUuid(groupIdValue, "groupId")
+    : undefined;
+  const isFavorite = optionalBoolean(query.isFavorite, "isFavorite");
+  const isTracked = optionalBoolean(query.isTracked, "isTracked");
+  const priorityMin = optionalInteger(query.priorityMin, "priorityMin");
+  const priorityMax = optionalInteger(query.priorityMax, "priorityMax");
+  const sort =
+    optionalEnum(query.sort, "sort", semanticKeywordSorts) ??
+    "CREATED_DESC";
   const parsedLimit = limit === undefined ? 100 : Number(limit);
 
   if (
@@ -28,12 +49,75 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   if (search && search.length > 200) {
     invalid("search", "Must contain at most 200 characters");
   }
+  if (
+    priorityMin !== undefined &&
+    (priorityMin < 0 || priorityMin > 100)
+  ) {
+    invalid("priorityMin", "Must be an integer between 0 and 100");
+  }
+  if (
+    priorityMax !== undefined &&
+    (priorityMax < 0 || priorityMax > 100)
+  ) {
+    invalid("priorityMax", "Must be an integer between 0 and 100");
+  }
+  if (
+    priorityMin !== undefined &&
+    priorityMax !== undefined &&
+    priorityMin > priorityMax
+  ) {
+    invalid("priorityMin", "Must not be greater than priorityMax");
+  }
 
   return {
     limit: parsedLimit,
     ...(cursor ? { cursor } : {}),
-    ...(search ? { search } : {})
+    ...(search ? { search } : {}),
+    ...(intent ? { intent } : {}),
+    ...(groupId ? { groupId } : {}),
+    ...(isFavorite === undefined ? {} : { isFavorite }),
+    ...(isTracked === undefined ? {} : { isTracked }),
+    ...(priorityMin === undefined ? {} : { priorityMin }),
+    ...(priorityMax === undefined ? {} : { priorityMax }),
+    sort
   };
+}
+
+function optionalEnum<T extends string>(
+  value: unknown,
+  field: string,
+  values: readonly T[]
+): T | undefined {
+  const parsed = optionalSingleString(value, field);
+  if (parsed === undefined) return undefined;
+  if (!values.includes(parsed as T)) {
+    invalid(field, `Must be one of: ${values.join(", ")}`);
+  }
+  return parsed as T;
+}
+
+function optionalBoolean(
+  value: unknown,
+  field: string
+): boolean | undefined {
+  const parsed = optionalSingleString(value, field);
+  if (parsed === undefined) return undefined;
+  if (parsed === "true") return true;
+  if (parsed === "false") return false;
+  return invalid(field, "Must be true or false");
+}
+
+function optionalInteger(
+  value: unknown,
+  field: string
+): number | undefined {
+  const parsed = optionalSingleString(value, field);
+  if (parsed === undefined) return undefined;
+  const integer = Number(parsed);
+  if (!Number.isSafeInteger(integer)) {
+    invalid(field, "Must be an integer");
+  }
+  return integer;
 }
 
 function optionalSingleString(

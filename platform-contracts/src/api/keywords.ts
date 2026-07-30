@@ -20,10 +20,28 @@ export const semanticKeywordIntents = [
 export type SemanticKeywordIntent =
   (typeof semanticKeywordIntents)[number];
 
+export const semanticKeywordSorts = [
+  "CREATED_DESC",
+  "CREATED_ASC",
+  "UPDATED_DESC",
+  "TEXT_ASC",
+  "PRIORITY_DESC"
+] as const;
+
+export type SemanticKeywordSort =
+  (typeof semanticKeywordSorts)[number];
+
 export interface KeywordListQuery {
   readonly limit: number;
   readonly cursor?: string;
   readonly search?: string;
+  readonly intent?: SemanticKeywordIntent;
+  readonly groupId?: string;
+  readonly isFavorite?: boolean;
+  readonly isTracked?: boolean;
+  readonly priorityMin?: number;
+  readonly priorityMax?: number;
+  readonly sort?: SemanticKeywordSort;
 }
 
 export interface SemanticKeywordListItem {

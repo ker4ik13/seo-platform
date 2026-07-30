@@ -1,7 +1,11 @@
 import { BadRequestException } from "@nestjs/common";
-import type { KeywordListQuery } from "@seo-platform/contracts";
+import {
+  semanticKeywordIntents,
+  semanticKeywordSorts,
+  type KeywordListQuery
+} from "@seo-platform/contracts";
 
-const CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,1000}$/u;
+const CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,5000}$/u;
 
 export function keywordListQuery(value: unknown): KeywordListQuery {
   const query =
@@ -13,6 +17,19 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   const search = optionalSingleString(query.search, "search")?.normalize(
     "NFKC"
   );
+  const intent = optionalEnum(
+    query.intent,
+    "intent",
+    semanticKeywordIntents
+  );
+  const groupId = optionalUuid(query.groupId, "groupId");
+  const isFavorite = optionalBoolean(query.isFavorite, "isFavorite");
+  const isTracked = optionalBoolean(query.isTracked, "isTracked");
+  const priorityMin = optionalInteger(query.priorityMin, "priorityMin");
+  const priorityMax = optionalInteger(query.priorityMax, "priorityMax");
+  const sort =
+    optionalEnum(query.sort, "sort", semanticKeywordSorts) ??
+    "CREATED_DESC";
   const parsedLimit = limit === undefined ? 100 : Number(limit);
   if (
     !Number.isSafeInteger(parsedLimit) ||
@@ -23,11 +40,86 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   }
   if (cursor && !CURSOR_PATTERN.test(cursor)) invalid("cursor");
   if (search && search.length > 200) invalid("search");
+  if (
+    priorityMin !== undefined &&
+    (priorityMin < 0 || priorityMin > 100)
+  ) {
+    invalid("priorityMin");
+  }
+  if (
+    priorityMax !== undefined &&
+    (priorityMax < 0 || priorityMax > 100)
+  ) {
+    invalid("priorityMax");
+  }
+  if (
+    priorityMin !== undefined &&
+    priorityMax !== undefined &&
+    priorityMin > priorityMax
+  ) {
+    invalid("priorityMin");
+  }
   return {
     limit: parsedLimit,
     ...(cursor ? { cursor } : {}),
-    ...(search ? { search } : {})
+    ...(search ? { search } : {}),
+    ...(intent ? { intent } : {}),
+    ...(groupId ? { groupId } : {}),
+    ...(isFavorite === undefined ? {} : { isFavorite }),
+    ...(isTracked === undefined ? {} : { isTracked }),
+    ...(priorityMin === undefined ? {} : { priorityMin }),
+    ...(priorityMax === undefined ? {} : { priorityMax }),
+    sort
   };
+}
+
+function optionalEnum<T extends string>(
+  value: unknown,
+  field: string,
+  values: readonly T[]
+): T | undefined {
+  const parsed = optionalSingleString(value, field);
+  if (parsed === undefined) return undefined;
+  if (!values.includes(parsed as T)) invalid(field);
+  return parsed as T;
+}
+
+function optionalBoolean(
+  value: unknown,
+  field: string
+): boolean | undefined {
+  const parsed = optionalSingleString(value, field);
+  if (parsed === undefined) return undefined;
+  if (parsed === "true") return true;
+  if (parsed === "false") return false;
+  return invalid(field);
+}
+
+function optionalInteger(
+  value: unknown,
+  field: string
+): number | undefined {
+  const parsed = optionalSingleString(value, field);
+  if (parsed === undefined) return undefined;
+  const result = Number(parsed);
+  if (!Number.isSafeInteger(result)) invalid(field);
+  return result;
+}
+
+function optionalUuid(
+  value: unknown,
+  field: string
+): string | undefined {
+  const parsed = optionalSingleString(value, field);
+  if (parsed === undefined) return undefined;
+  if (
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+      parsed
+    )
+  ) {
+    invalid(field);
+  }
+  return parsed;
 }
 
 function optionalSingleString(

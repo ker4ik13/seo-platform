@@ -72,6 +72,11 @@ enum RankCheckFinalStatus {
   ACTION_REQUIRED
 }
 
+enum SemanticSavedViewScope {
+  PRIVATE
+  PROJECT_SHARED
+}
+
 model Keyword {
   id             String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId    String         @map("workspace_id") @db.Uuid
@@ -108,11 +113,36 @@ model Keyword {
   @@unique([workspaceId, projectId, id], map: "keywords_tenant_project_id_key")
   @@index([workspaceId, projectId, status, id])
   @@index([workspaceId, projectId, status, createdAt(sort: Desc), id(sort: Desc)], map: "keywords_workspace_project_status_created_id_idx")
+  @@index([workspaceId, projectId, status, updatedAt(sort: Desc), id(sort: Desc)], map: "keywords_workspace_project_status_updated_id_idx")
+  @@index([workspaceId, projectId, status, textNormalized, id], map: "keywords_workspace_project_status_text_id_idx")
+  @@index([workspaceId, projectId, status, priority(sort: Desc), id(sort: Desc)], map: "keywords_workspace_project_status_priority_id_idx")
+  @@index([workspaceId, projectId, status, intent, createdAt(sort: Desc), id(sort: Desc)], map: "keywords_workspace_project_status_intent_created_idx")
   @@index([textNormalized(ops: raw("gin_trgm_ops"))], type: Gin, map: "keywords_text_normalized_trgm_idx")
   @@index([projectId, clusterId, id])
   @@index([projectId, targetPageId, id])
   @@index([projectId, isTracked, id])
   @@map("keywords")
+}
+
+model SemanticSavedView {
+  id             String                 @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId    String                 @map("workspace_id") @db.Uuid
+  projectId      String                 @map("project_id") @db.Uuid
+  ownerId        String                 @map("owner_id") @db.Uuid
+  scope          SemanticSavedViewScope
+  name           String                 @db.VarChar(160)
+  normalizedName String                 @map("normalized_name") @db.VarChar(160)
+  config         Json
+  status         EntityStatus           @default(ACTIVE)
+  version        Int                    @default(1)
+  createdAt      DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime               @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt      DateTime?              @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, projectId, id], map: "semantic_saved_views_tenant_project_id_key")
+  @@index([workspaceId, projectId, scope, status, updatedAt(sort: Desc), id(sort: Desc)], map: "semantic_saved_views_project_scope_status_updated_idx")
+  @@index([workspaceId, projectId, ownerId, status, updatedAt(sort: Desc), id(sort: Desc)], map: "semantic_saved_views_owner_status_updated_idx")
+  @@map("semantic_saved_views")
 }
 
 model KeywordGroup {

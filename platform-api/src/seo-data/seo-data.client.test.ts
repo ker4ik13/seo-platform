@@ -11,6 +11,7 @@ import {
   semanticKeywordGroups,
   semanticKeywordBulkResult,
   semanticKeywordPage,
+  semanticSavedViews,
   SeoDataClient
 } from "./seo-data.client.js";
 
@@ -170,6 +171,40 @@ test("validates a complete semantic bulk result partition", () => {
         },
         input
       ),
+    DomainError
+  );
+});
+
+test("validates versioned semantic saved views and rejects DSL drift", () => {
+  const view = {
+    id: "01900000-0000-7000-8000-000000000040",
+    ownerId: actorId,
+    scope: "PRIVATE",
+    name: "Основное",
+    config: {
+      schemaVersion: 1,
+      filters: { isTracked: true, priorityMin: 10 },
+      sort: "PRIORITY_DESC",
+      columns: ["query", "priority"],
+      density: "COMPACT"
+    },
+    version: 2,
+    createdAt: "2026-07-30T10:00:00.000Z",
+    updatedAt: "2026-07-30T11:00:00.000Z"
+  };
+  assert.equal(semanticSavedViews([view])[0]?.config.sort, "PRIORITY_DESC");
+  assert.throws(
+    () =>
+      semanticSavedViews([
+        {
+          ...view,
+          config: { ...view.config, columns: ["query", "query"] }
+        }
+      ]),
+    DomainError
+  );
+  assert.throws(
+    () => semanticSavedViews([view, view]),
     DomainError
   );
 });

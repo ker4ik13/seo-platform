@@ -11,6 +11,7 @@ import { TrackingContextModule } from "./tracking-contexts/tracking-context.modu
 import { RankScopeModule } from "./rank-scopes/rank-scope.module.js";
 import { RankManifestModule } from "./rank-manifests/rank-manifest.module.js";
 import { RankResultModule } from "./rank-results/rank-result.module.js";
+import { SemanticSavedViewModule } from "./semantic-saved-views/semantic-saved-view.module.js";
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { RankResultModule } from "./rank-results/rank-result.module.js";
     SemanticImportModule,
     KeywordModule,
     KeywordGroupModule,
+    SemanticSavedViewModule,
     TrackingContextModule,
     RankScopeModule,
     RankManifestModule,

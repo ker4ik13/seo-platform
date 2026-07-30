@@ -2,6 +2,10 @@ import { Inject, Injectable } from "@nestjs/common";
 import {
   semanticKeywordIntents,
   semanticKeywordSourceModes,
+  semanticKeywordSorts,
+  semanticSavedViewDensities,
+  semanticSavedViewScopes,
+  semanticSystemColumnKeys,
   type ApiCollectionResponse,
   type CreateSemanticKeywordInput,
   type CreateSemanticKeywordGroupInput,
@@ -10,6 +14,9 @@ import {
   type InternalDeleteSemanticKeywordInput,
   type InternalDeleteSemanticKeywordGroupInput,
   type InternalSemanticKeywordBulkInput,
+  type InternalCreateSemanticSavedViewInput,
+  type InternalDeleteSemanticSavedViewInput,
+  type InternalUpdateSemanticSavedViewInput,
   type InternalUpdateSemanticKeywordInput,
   type InternalUpdateSemanticKeywordGroupInput,
   type CreateTrackingContextInput,
@@ -24,6 +31,10 @@ import {
   type SemanticKeywordBulkResult,
   type SemanticKeywordGroup,
   type SemanticKeywordListItem,
+  type CreateSemanticSavedViewInput,
+  type SemanticSavedView,
+  type SemanticSavedViewConfig,
+  type UpdateSemanticSavedViewInput,
   type TrackingContextCollection,
   type TrackingContextKeywordAssignmentState,
   type TrackingContextKeywordQuery,
@@ -77,6 +88,21 @@ export class SeoDataClient {
     url.searchParams.set("limit", String(query.limit));
     if (query.cursor) url.searchParams.set("cursor", query.cursor);
     if (query.search) url.searchParams.set("search", query.search);
+    if (query.intent) url.searchParams.set("intent", query.intent);
+    if (query.groupId) url.searchParams.set("groupId", query.groupId);
+    if (query.isFavorite !== undefined) {
+      url.searchParams.set("isFavorite", String(query.isFavorite));
+    }
+    if (query.isTracked !== undefined) {
+      url.searchParams.set("isTracked", String(query.isTracked));
+    }
+    if (query.priorityMin !== undefined) {
+      url.searchParams.set("priorityMin", String(query.priorityMin));
+    }
+    if (query.priorityMax !== undefined) {
+      url.searchParams.set("priorityMax", String(query.priorityMax));
+    }
+    if (query.sort) url.searchParams.set("sort", query.sort);
 
     const payload = await this.request("GET", url, context);
     return semanticKeywordPage(payload);
@@ -234,6 +260,88 @@ export class SeoDataClient {
     await this.request(
       "DELETE",
       keywordGroupUrl(context, this.config.services.seoData, groupId),
+      context,
+      body
+    );
+  }
+
+  public async listSemanticSavedViews(
+    context: InternalContext
+  ): Promise<readonly SemanticSavedView[]> {
+    const payload = await this.request(
+      "GET",
+      semanticSavedViewUrl(context, this.config.services.seoData),
+      context
+    );
+    return semanticSavedViews(responseData(payload));
+  }
+
+  public async createSemanticSavedView(
+    context: InternalContext,
+    input: CreateSemanticSavedViewInput
+  ): Promise<SemanticSavedView> {
+    const scope = trackingScope(context);
+    const body: InternalCreateSemanticSavedViewInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      semanticSavedViewUrl(context, this.config.services.seoData),
+      context,
+      body
+    );
+    return semanticSavedView(responseData(payload));
+  }
+
+  public async updateSemanticSavedView(
+    context: InternalContext,
+    viewId: string,
+    input: UpdateSemanticSavedViewInput,
+    version: number
+  ): Promise<SemanticSavedView> {
+    const scope = trackingScope(context);
+    const body: InternalUpdateSemanticSavedViewInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    const payload = await this.request(
+      "PATCH",
+      semanticSavedViewUrl(
+        context,
+        this.config.services.seoData,
+        viewId
+      ),
+      context,
+      body
+    );
+    return semanticSavedView(responseData(payload));
+  }
+
+  public async deleteSemanticSavedView(
+    context: InternalContext,
+    viewId: string,
+    version: number
+  ): Promise<void> {
+    const scope = trackingScope(context);
+    const body: InternalDeleteSemanticSavedViewInput = {
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    await this.request(
+      "DELETE",
+      semanticSavedViewUrl(
+        context,
+        this.config.services.seoData,
+        viewId
+      ),
       context,
       body
     );
@@ -774,6 +882,145 @@ function keywordGroupUrl(
   )}/keyword-groups`;
   return new URL(
     groupId ? `${base}/${encodeURIComponent(groupId)}` : base,
+    baseUrl
+  );
+}
+
+export function semanticSavedViews(
+  value: unknown
+): readonly SemanticSavedView[] {
+  if (!Array.isArray(value) || value.length > 500) {
+    throw invalidResponse();
+  }
+  const views = value.map(semanticSavedView);
+  if (new Set(views.map(({ id }) => id)).size !== views.length) {
+    throw invalidResponse();
+  }
+  return views;
+}
+
+export function semanticSavedView(value: unknown): SemanticSavedView {
+  const view = exactRecord(value, [
+    "id",
+    "ownerId",
+    "scope",
+    "name",
+    "config",
+    "version",
+    "createdAt",
+    "updatedAt"
+  ]);
+  if (
+    !requiredString(view.id) ||
+    !requiredString(view.ownerId) ||
+    !requiredString(view.name) ||
+    typeof view.scope !== "string" ||
+    !semanticSavedViewScopes.some((scope) => scope === view.scope) ||
+    !Number.isSafeInteger(view.version) ||
+    Number(view.version) < 1 ||
+    !validDate(view.createdAt) ||
+    !validDate(view.updatedAt)
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    id: view.id,
+    ownerId: view.ownerId,
+    scope: view.scope as SemanticSavedView["scope"],
+    name: view.name,
+    config: semanticSavedViewConfig(view.config),
+    version: view.version as number,
+    createdAt: view.createdAt as string,
+    updatedAt: view.updatedAt as string
+  };
+}
+
+function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
+  const config = exactRecord(value, [
+    "schemaVersion",
+    "filters",
+    "sort",
+    "columns",
+    "density"
+  ]);
+  const filters = exactRecord(config.filters, [
+    "search",
+    "intent",
+    "groupId",
+    "isFavorite",
+    "isTracked",
+    "priorityMin",
+    "priorityMax"
+  ]);
+  const filterKeys = Object.keys(filters);
+  if (
+    config.schemaVersion !== 1 ||
+    typeof config.sort !== "string" ||
+    !semanticKeywordSorts.some((sort) => sort === config.sort) ||
+    typeof config.density !== "string" ||
+    !semanticSavedViewDensities.some(
+      (density) => density === config.density
+    ) ||
+    !Array.isArray(config.columns) ||
+    config.columns.length < 1 ||
+    config.columns.length > semanticSystemColumnKeys.length ||
+    !config.columns.every(
+      (column) =>
+        typeof column === "string" &&
+        semanticSystemColumnKeys.some((key) => key === column)
+    ) ||
+    new Set(config.columns).size !== config.columns.length ||
+    !config.columns.includes("query") ||
+    (filters.search !== undefined &&
+      (typeof filters.search !== "string" ||
+        filters.search.length > 200)) ||
+    (filters.intent !== undefined &&
+      (typeof filters.intent !== "string" ||
+        !semanticKeywordIntents.some(
+          (intent) => intent === filters.intent
+        ))) ||
+    (filters.groupId !== undefined &&
+      typeof filters.groupId !== "string") ||
+    (filters.isFavorite !== undefined &&
+      typeof filters.isFavorite !== "boolean") ||
+    (filters.isTracked !== undefined &&
+      typeof filters.isTracked !== "boolean") ||
+    !validOptionalPriority(filters.priorityMin) ||
+    !validOptionalPriority(filters.priorityMax) ||
+    (typeof filters.priorityMin === "number" &&
+      typeof filters.priorityMax === "number" &&
+      filters.priorityMin > filters.priorityMax) ||
+    filterKeys.length > 7
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    schemaVersion: 1,
+    filters: filters as SemanticSavedViewConfig["filters"],
+    sort: config.sort as SemanticSavedViewConfig["sort"],
+    columns: config.columns as SemanticSavedViewConfig["columns"],
+    density: config.density as SemanticSavedViewConfig["density"]
+  };
+}
+
+function validOptionalPriority(value: unknown): boolean {
+  return (
+    value === undefined ||
+    (Number.isSafeInteger(value) && Number(value) >= 0 && Number(value) <= 100)
+  );
+}
+
+function semanticSavedViewUrl(
+  context: InternalContext,
+  baseUrl: string,
+  viewId?: string
+): URL {
+  const projectId = requiredProjectId(context.tenant);
+  const base = `/internal/v1/projects/${encodeURIComponent(
+    projectId
+  )}/semantic-saved-views`;
+  return new URL(
+    viewId ? `${base}/${encodeURIComponent(viewId)}` : base,
     baseUrl
   );
 }

@@ -15,7 +15,8 @@ import type {
   KeywordListQuery,
   SemanticKeywordBulkResult,
   SemanticKeywordIntent,
-  SemanticKeywordListItem
+  SemanticKeywordListItem,
+  SemanticKeywordSort
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -25,10 +26,11 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 interface KeywordCursor {
-  readonly version: 1;
-  readonly createdAt: string;
+  readonly version: 2;
   readonly id: string;
-  readonly search: string;
+  readonly sort: SemanticKeywordSort;
+  readonly sortValue: string | number;
+  readonly filterHash: string;
 }
 
 const KEYWORD_INCLUDE = {
@@ -67,8 +69,10 @@ export class KeywordService {
     requestId: string
   ): Promise<ApiCollectionResponse<SemanticKeywordListItem>> {
     const search = normalizeKeywordText(query.search);
+    const sort = query.sort ?? "CREATED_DESC";
+    const filterHash = keywordFilterHash(query, search);
     const cursor = query.cursor
-      ? decodeCursor(query.cursor, search)
+      ? decodeCursor(query.cursor, sort, filterHash)
       : undefined;
     const baseWhere: Prisma.KeywordWhereInput = {
       workspaceId,
@@ -80,26 +84,61 @@ export class KeywordService {
               contains: search
             }
           }
-        : {})
+        : {}),
+      ...(query.intent ? { intent: query.intent } : {}),
+      ...(query.isFavorite === undefined
+        ? {}
+        : { isFavorite: query.isFavorite }),
+      ...(query.priorityMin === undefined &&
+      query.priorityMax === undefined
+        ? {}
+        : {
+            priority: {
+              ...(query.priorityMin === undefined
+                ? {}
+                : { gte: query.priorityMin }),
+              ...(query.priorityMax === undefined
+                ? {}
+                : { lte: query.priorityMax })
+            }
+          }),
+      ...(query.groupId
+        ? {
+            memberships: {
+              some: { projectId, groupId: query.groupId }
+            }
+          }
+        : {}),
+      ...(query.isTracked === undefined
+        ? {}
+        : {
+            trackingAssignments: query.isTracked
+              ? {
+                  some: {
+                    workspaceId,
+                    projectId,
+                    removedAt: null,
+                    context: { status: "ACTIVE" }
+                  }
+                }
+              : {
+                  none: {
+                    workspaceId,
+                    projectId,
+                    removedAt: null,
+                    context: { status: "ACTIVE" }
+                  }
+                }
+          })
     };
     const where: Prisma.KeywordWhereInput = {
       ...baseWhere,
-      ...(cursor
-        ? {
-            OR: [
-              { createdAt: { lt: new Date(cursor.createdAt) } },
-              {
-                createdAt: new Date(cursor.createdAt),
-                id: { lt: cursor.id }
-              }
-            ]
-          }
-        : {})
+      ...(cursor ? cursorWhere(cursor) : {})
     };
     const [rows, totalApprox] = await Promise.all([
       this.prisma.keyword.findMany({
         where,
-        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        orderBy: keywordOrderBy(sort),
         take: query.limit + 1,
         include: KEYWORD_INCLUDE
       }),
@@ -164,10 +203,11 @@ export class KeywordService {
         ...(hasNext && last
           ? {
               nextCursor: encodeCursor({
-                version: 1,
-                createdAt: last.createdAt.toISOString(),
+                version: 2,
                 id: last.id,
-                search
+                sort,
+                sortValue: cursorValue(last, sort),
+                filterHash
               })
             }
           : {})
@@ -727,7 +767,11 @@ function encodeCursor(value: KeywordCursor): string {
   return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
 }
 
-function decodeCursor(value: string, search: string): KeywordCursor {
+function decodeCursor(
+  value: string,
+  sort: SemanticKeywordSort,
+  filterHash: string
+): KeywordCursor {
   let parsed: unknown;
   try {
     parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8"));
@@ -742,26 +786,128 @@ function decodeCursor(value: string, search: string): KeywordCursor {
     throw invalidCursor();
   }
   const cursor = parsed as Readonly<Record<string, unknown>>;
-  const createdAt =
-    typeof cursor.createdAt === "string"
-      ? new Date(cursor.createdAt)
-      : new Date(Number.NaN);
   if (
-    cursor.version !== 1 ||
+    cursor.version !== 2 ||
     typeof cursor.id !== "string" ||
     !UUID_PATTERN.test(cursor.id) ||
-    typeof cursor.search !== "string" ||
-    cursor.search !== search ||
-    Number.isNaN(createdAt.getTime())
+    cursor.sort !== sort ||
+    cursor.filterHash !== filterHash ||
+    (typeof cursor.sortValue !== "string" &&
+      typeof cursor.sortValue !== "number")
   ) {
     throw invalidCursor();
   }
   return {
-    version: 1,
-    createdAt: createdAt.toISOString(),
+    version: 2,
     id: cursor.id,
-    search: cursor.search
+    sort,
+    sortValue: cursor.sortValue,
+    filterHash
   };
+}
+
+function keywordFilterHash(
+  query: KeywordListQuery,
+  normalizedSearch: string
+): string {
+  return sha256(
+    JSON.stringify({
+      search: normalizedSearch,
+      intent: query.intent ?? null,
+      groupId: query.groupId ?? null,
+      isFavorite: query.isFavorite ?? null,
+      isTracked: query.isTracked ?? null,
+      priorityMin: query.priorityMin ?? null,
+      priorityMax: query.priorityMax ?? null
+    })
+  );
+}
+
+function keywordOrderBy(
+  sort: SemanticKeywordSort
+): Prisma.KeywordOrderByWithRelationInput[] {
+  switch (sort) {
+    case "CREATED_ASC":
+      return [{ createdAt: "asc" }, { id: "asc" }];
+    case "UPDATED_DESC":
+      return [{ updatedAt: "desc" }, { id: "desc" }];
+    case "TEXT_ASC":
+      return [{ textNormalized: "asc" }, { id: "asc" }];
+    case "PRIORITY_DESC":
+      return [{ priority: "desc" }, { id: "desc" }];
+    case "CREATED_DESC":
+      return [{ createdAt: "desc" }, { id: "desc" }];
+  }
+}
+
+function cursorValue(
+  row: KeywordAggregate,
+  sort: SemanticKeywordSort
+): string | number {
+  switch (sort) {
+    case "CREATED_ASC":
+    case "CREATED_DESC":
+      return row.createdAt.toISOString();
+    case "UPDATED_DESC":
+      return row.updatedAt.toISOString();
+    case "TEXT_ASC":
+      return row.textNormalized;
+    case "PRIORITY_DESC":
+      return row.priority;
+  }
+}
+
+function cursorWhere(cursor: KeywordCursor): Prisma.KeywordWhereInput {
+  const idDirection =
+    cursor.sort === "CREATED_ASC" || cursor.sort === "TEXT_ASC"
+      ? "gt"
+      : "lt";
+  const comparison =
+    cursor.sort === "CREATED_ASC" || cursor.sort === "TEXT_ASC"
+      ? "gt"
+      : "lt";
+  const field =
+    cursor.sort === "UPDATED_DESC"
+      ? "updatedAt"
+      : cursor.sort === "TEXT_ASC"
+        ? "textNormalized"
+        : cursor.sort === "PRIORITY_DESC"
+          ? "priority"
+          : "createdAt";
+  const value =
+    field === "priority"
+      ? requiredCursorNumber(cursor.sortValue)
+      : field === "textNormalized"
+        ? requiredCursorString(cursor.sortValue)
+        : requiredCursorDate(cursor.sortValue);
+  return {
+    OR: [
+      { [field]: { [comparison]: value } },
+      {
+        [field]: value,
+        id: { [idDirection]: cursor.id }
+      }
+    ]
+  };
+}
+
+function requiredCursorNumber(value: string | number): number {
+  if (typeof value !== "number" || !Number.isSafeInteger(value)) {
+    throw invalidCursor();
+  }
+  return value;
+}
+
+function requiredCursorString(value: string | number): string {
+  if (typeof value !== "string") throw invalidCursor();
+  return value;
+}
+
+function requiredCursorDate(value: string | number): Date {
+  if (typeof value !== "string") throw invalidCursor();
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) throw invalidCursor();
+  return date;
 }
 
 function invalidCursor(): BadRequestException {

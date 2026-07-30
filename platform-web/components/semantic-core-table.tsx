@@ -12,14 +12,15 @@ import {
   type BrowserCursorPage
 } from "../lib/browser-api";
 import { SemanticBulkEditor } from "./semantic-bulk-editor";
-
-type SemanticKeywordIntent =
-  | "INFORMATIONAL"
-  | "NAVIGATIONAL"
-  | "COMMERCIAL"
-  | "TRANSACTIONAL"
-  | "LOCAL"
-  | "MIXED";
+import { SemanticSavedViews } from "./semantic-saved-views";
+import {
+  defaultSemanticViewConfig,
+  type SemanticKeywordIntent,
+  type SemanticSavedView,
+  type SemanticSystemColumn,
+  type SemanticViewConfig,
+  type SemanticViewFilters
+} from "./semantic-view-types";
 
 interface SemanticKeyword {
   readonly id: string;
@@ -87,8 +88,12 @@ export function SemanticCoreTable({
   const [page, setPage] = useState<BrowserCursorPage>({
     hasNext: false
   });
-  const [draftSearch, setDraftSearch] = useState("");
-  const [search, setSearch] = useState("");
+  const [draftConfig, setDraftConfig] = useState<SemanticViewConfig>(
+    defaultSemanticViewConfig
+  );
+  const [viewConfig, setViewConfig] = useState<SemanticViewConfig>(
+    defaultSemanticViewConfig
+  );
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string>();
@@ -107,7 +112,12 @@ export function SemanticCoreTable({
     setSelectedIds(new Set());
     setLoading(true);
     setError(undefined);
-    void loadKeywordPage(projectId, search, undefined, controller.signal)
+    void loadKeywordPage(
+      projectId,
+      viewConfig,
+      undefined,
+      controller.signal
+    )
       .then((result) => {
         if (controller.signal.aborted) return;
         setItems(result.data);
@@ -123,7 +133,7 @@ export function SemanticCoreTable({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [projectId, refreshVersion, retryVersion, search]);
+  }, [projectId, refreshVersion, retryVersion, viewConfig]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -140,14 +150,95 @@ export function SemanticCoreTable({
     return () => controller.abort();
   }, [groupRefreshVersion, projectId]);
 
-  function submitSearch(event: FormEvent<HTMLFormElement>): void {
+  function submitFilters(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
-    setSearch(draftSearch.trim());
+    const { search: draftSearch, ...otherFilters } = draftConfig.filters;
+    const search = draftSearch?.trim();
+    setViewConfig({
+      ...draftConfig,
+      filters: {
+        ...otherFilters,
+        ...(search ? { search } : {})
+      }
+    });
   }
 
-  function clearSearch(): void {
-    setDraftSearch("");
-    setSearch("");
+  function clearFilters(): void {
+    setDraftConfig(defaultSemanticViewConfig);
+    setViewConfig(defaultSemanticViewConfig);
+  }
+
+  function updateFilter(patch: Partial<SemanticViewFilters>): void {
+    setDraftConfig((current) => ({
+      ...current,
+      filters: { ...current.filters, ...patch }
+    }));
+  }
+
+  function updateBooleanFilter(
+    field: "isFavorite" | "isTracked",
+    value: string
+  ): void {
+    setDraftConfig((current) => {
+      const { [field]: ignored, ...rest } = current.filters;
+      void ignored;
+      return {
+        ...current,
+        filters:
+          value === ""
+            ? rest
+            : { ...rest, [field]: value === "true" }
+      };
+    });
+  }
+
+  function updateOptionalFilter(
+    field: "intent" | "groupId",
+    value: string
+  ): void {
+    setDraftConfig((current) => {
+      const { [field]: ignored, ...rest } = current.filters;
+      void ignored;
+      return {
+        ...current,
+        filters:
+          value === ""
+            ? rest
+            : { ...rest, [field]: value }
+      } as SemanticViewConfig;
+    });
+  }
+
+  function updatePriorityFilter(
+    field: "priorityMin" | "priorityMax",
+    value: string
+  ): void {
+    setDraftConfig((current) => {
+      const { [field]: ignored, ...rest } = current.filters;
+      void ignored;
+      return {
+        ...current,
+        filters:
+          value === ""
+            ? rest
+            : { ...rest, [field]: Number(value) }
+      };
+    });
+  }
+
+  function toggleColumn(column: SemanticSystemColumn): void {
+    if (column === "query") return;
+    setDraftConfig((current) => ({
+      ...current,
+      columns: current.columns.includes(column)
+        ? current.columns.filter((item) => item !== column)
+        : [...current.columns, column]
+    }));
+  }
+
+  function applySavedView(view: SemanticSavedView): void {
+    setDraftConfig(view.config);
+    setViewConfig(view.config);
   }
 
   async function loadMore(): Promise<void> {
@@ -157,7 +248,7 @@ export function SemanticCoreTable({
     try {
       const result = await loadKeywordPage(
         projectId,
-        search,
+        viewConfig,
         page.nextCursor
       );
       setItems((current) => mergeKeywords(current, result.data));
@@ -266,19 +357,8 @@ export function SemanticCoreTable({
                 ifMatch: editor.version
               }
             );
-      setItems((current) =>
-        editor.mode === "create"
-          ? [result, ...current]
-          : current.map((item) => (item.id === result.id ? result : item))
-      );
-      if (editor.mode === "create") {
-        setPage((current) => ({
-          ...current,
-          ...(current.totalApprox === undefined
-            ? {}
-            : { totalApprox: current.totalApprox + 1 })
-        }));
-      }
+      void result;
+      setRetryVersion((value) => value + 1);
       setEditor(undefined);
     } catch (requestError) {
       setMutationError(keywordMutationError(requestError));
@@ -357,28 +437,21 @@ export function SemanticCoreTable({
           </p>
         </div>
         <div className="semantic-header-actions">
-          <form className="semantic-search" onSubmit={submitSearch}>
+          <form className="semantic-search" onSubmit={submitFilters}>
             <label>
               <span className="visually-hidden">Поиск по запросам</span>
               <input
                 maxLength={200}
-                onChange={(event) => setDraftSearch(event.target.value)}
+                onChange={(event) =>
+                  updateFilter({ search: event.target.value })
+                }
                 placeholder="Поиск по запросам"
                 type="search"
-                value={draftSearch}
+                value={draftConfig.filters.search ?? ""}
               />
             </label>
-            {search && (
-              <button
-                className="secondary-button semantic-search-clear"
-                onClick={clearSearch}
-                type="button"
-              >
-                Сбросить
-              </button>
-            )}
             <button className="secondary-button" type="submit">
-              Найти
+              Применить
             </button>
           </form>
           <button className="primary-button" onClick={openCreate} type="button">
@@ -386,6 +459,172 @@ export function SemanticCoreTable({
           </button>
         </div>
       </header>
+
+      <form
+        className="semantic-filter-bar"
+        onSubmit={submitFilters}
+      >
+        <label>
+          <span>Интент</span>
+          <select
+            onChange={(event) =>
+              updateOptionalFilter("intent", event.target.value)
+            }
+            value={draftConfig.filters.intent ?? ""}
+          >
+            <option value="">Все</option>
+            <option value="INFORMATIONAL">Информационный</option>
+            <option value="NAVIGATIONAL">Навигационный</option>
+            <option value="COMMERCIAL">Коммерческий</option>
+            <option value="TRANSACTIONAL">Транзакционный</option>
+            <option value="LOCAL">Локальный</option>
+            <option value="MIXED">Смешанный</option>
+          </select>
+        </label>
+        <label>
+          <span>Группа</span>
+          <select
+            onChange={(event) =>
+              updateOptionalFilter("groupId", event.target.value)
+            }
+            value={draftConfig.filters.groupId ?? ""}
+          >
+            <option value="">Все группы</option>
+            {groups.map((group) => (
+              <option key={group.id} value={group.id}>
+                {group.path}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Избранное</span>
+          <select
+            onChange={(event) =>
+              updateBooleanFilter("isFavorite", event.target.value)
+            }
+            value={booleanFilter(draftConfig.filters.isFavorite)}
+          >
+            <option value="">Все</option>
+            <option value="true">Только избранные</option>
+            <option value="false">Не избранные</option>
+          </select>
+        </label>
+        <label>
+          <span>Отслеживание</span>
+          <select
+            onChange={(event) =>
+              updateBooleanFilter("isTracked", event.target.value)
+            }
+            value={booleanFilter(draftConfig.filters.isTracked)}
+          >
+            <option value="">Все</option>
+            <option value="true">Отслеживаются</option>
+            <option value="false">Не отслеживаются</option>
+          </select>
+        </label>
+        <label>
+          <span>Приоритет от</span>
+          <input
+            max={100}
+            min={0}
+            onChange={(event) =>
+              updatePriorityFilter("priorityMin", event.target.value)
+            }
+            type="number"
+            value={draftConfig.filters.priorityMin ?? ""}
+          />
+        </label>
+        <label>
+          <span>Приоритет до</span>
+          <input
+            max={100}
+            min={0}
+            onChange={(event) =>
+              updatePriorityFilter("priorityMax", event.target.value)
+            }
+            type="number"
+            value={draftConfig.filters.priorityMax ?? ""}
+          />
+        </label>
+        <label>
+          <span>Сортировка</span>
+          <select
+            onChange={(event) =>
+              setDraftConfig((current) => ({
+                ...current,
+                sort: event.target.value as SemanticViewConfig["sort"]
+              }))
+            }
+            value={draftConfig.sort}
+          >
+            <option value="CREATED_DESC">Сначала новые</option>
+            <option value="CREATED_ASC">Сначала старые</option>
+            <option value="UPDATED_DESC">Недавно изменённые</option>
+            <option value="TEXT_ASC">По алфавиту</option>
+            <option value="PRIORITY_DESC">По приоритету</option>
+          </select>
+        </label>
+        <button className="secondary-button" type="submit">
+          Применить фильтры
+        </button>
+        {hasActiveFilters(viewConfig) && (
+          <button
+            className="text-button"
+            onClick={clearFilters}
+            type="button"
+          >
+            Сбросить всё
+          </button>
+        )}
+      </form>
+
+      <div className="semantic-view-toolbar">
+        <SemanticSavedViews
+          config={viewConfig}
+          onApply={applySavedView}
+          projectId={projectId}
+        />
+        <details className="semantic-column-picker">
+          <summary>Колонки и плотность</summary>
+          <div>
+            {semanticColumns.map((column) => (
+              <label key={column.key}>
+                <input
+                  checked={draftConfig.columns.includes(column.key)}
+                  disabled={column.key === "query"}
+                  onChange={() => toggleColumn(column.key)}
+                  type="checkbox"
+                />
+                <span>{column.label}</span>
+              </label>
+            ))}
+            <label>
+              <span>Плотность</span>
+              <select
+                onChange={(event) =>
+                  setDraftConfig((current) => ({
+                    ...current,
+                    density: event.target
+                      .value as SemanticViewConfig["density"]
+                  }))
+                }
+                value={draftConfig.density}
+              >
+                <option value="COMFORTABLE">Обычная</option>
+                <option value="COMPACT">Компактная</option>
+              </select>
+            </label>
+            <button
+              className="secondary-button"
+              onClick={() => setViewConfig(draftConfig)}
+              type="button"
+            >
+              Применить таблицу
+            </button>
+          </div>
+        </details>
+      </div>
 
       {editor && (
         <form
@@ -607,22 +846,22 @@ export function SemanticCoreTable({
       ) : error && items.length === 0 ? null : items.length === 0 ? (
         <div className="semantic-table-empty">
           <strong>
-            {search
-              ? "По вашему запросу ничего не найдено"
+            {hasActiveFilters(viewConfig)
+              ? "По выбранным фильтрам ничего не найдено"
               : "Опубликованных запросов пока нет"}
           </strong>
           <p>
-            {search
-              ? "Измените формулировку или сбросьте поиск."
+            {hasActiveFilters(viewConfig)
+              ? "Измените условия или сбросьте фильтры."
               : "Загрузите CSV или TSV, проверьте сопоставление колонок и опубликуйте импорт."}
           </p>
-          {search && (
+          {hasActiveFilters(viewConfig) && (
             <button
               className="secondary-button"
-              onClick={clearSearch}
+              onClick={clearFilters}
               type="button"
             >
-              Показать все запросы
+              Сбросить фильтры
             </button>
           )}
         </div>
@@ -633,7 +872,9 @@ export function SemanticCoreTable({
             tabIndex={0}
             aria-label="Таблица семантического ядра"
           >
-            <table className="semantic-table">
+            <table
+              className={`semantic-table density-${viewConfig.density.toLowerCase()}`}
+            >
               <thead>
                 <tr>
                   <th className="semantic-select-cell">
@@ -647,13 +888,9 @@ export function SemanticCoreTable({
                       type="checkbox"
                     />
                   </th>
-                  <th>Запрос</th>
-                  <th>Группа</th>
-                  <th>Целевая страница</th>
-                  <th>Теги</th>
-                  <th>Интент</th>
-                  <th>Источник</th>
-                  <th>Обновлён</th>
+                  {viewConfig.columns.map((column) => (
+                    <th key={column}>{columnLabel(column)}</th>
+                  ))}
                   <th aria-label="Действия" />
                 </tr>
               </thead>
@@ -668,53 +905,11 @@ export function SemanticCoreTable({
                         type="checkbox"
                       />
                     </td>
-                    <td>
-                      <strong title={item.textOriginal}>
-                        {item.isFavorite ? "★ " : ""}
-                        {item.textOriginal}
-                      </strong>
-                      <small>
-                        {item.language.toUpperCase()}
-                        {item.isTracked ? " · отслеживается" : ""}
-                        {item.priority > 0 ? ` · P${item.priority}` : ""}
-                      </small>
-                    </td>
-                    <td title={item.groupPath}>
-                      {item.groupPath ?? "—"}
-                    </td>
-                    <td title={item.targetUrl}>
-                      {item.targetUrl ?? "—"}
-                    </td>
-                    <td>
-                      {item.tags.length > 0 ? (
-                        <span className="semantic-tags">
-                          {item.tags.slice(0, 3).map((tag) => (
-                            <span key={tag}>{tag}</span>
-                          ))}
-                          {(item.tags.length > 3 ||
-                            item.tagsTruncated) && (
-                            <span>
-                              +{Math.max(1, item.tags.length - 3)}
-                            </span>
-                          )}
-                        </span>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td>{intentLabel(item.intent)}</td>
-                    <td>
-                      <span
-                        className={`semantic-source source-${item.sourceMode.toLowerCase()}`}
-                      >
-                        {sourceModeLabel(item.sourceMode)}
-                      </span>
-                    </td>
-                    <td>
-                      <time dateTime={item.updatedAt}>
-                        {formatDate(item.updatedAt)}
-                      </time>
-                    </td>
+                    {viewConfig.columns.map((column) => (
+                      <td className={`semantic-column-${column}`} key={column}>
+                        {keywordColumn(item, column)}
+                      </td>
+                    ))}
                     <td>
                       <span className="semantic-row-actions">
                         <button
@@ -762,17 +957,116 @@ export function SemanticCoreTable({
 
 async function loadKeywordPage(
   projectId: string,
-  search: string,
+  config: SemanticViewConfig,
   cursor?: string,
   signal?: AbortSignal
 ) {
   const query = new URLSearchParams({ limit: "100" });
-  if (search) query.set("search", search);
+  const filters = config.filters;
+  if (filters.search) query.set("search", filters.search);
+  if (filters.intent) query.set("intent", filters.intent);
+  if (filters.groupId) query.set("groupId", filters.groupId);
+  if (filters.isFavorite !== undefined) {
+    query.set("isFavorite", String(filters.isFavorite));
+  }
+  if (filters.isTracked !== undefined) {
+    query.set("isTracked", String(filters.isTracked));
+  }
+  if (filters.priorityMin !== undefined) {
+    query.set("priorityMin", String(filters.priorityMin));
+  }
+  if (filters.priorityMax !== undefined) {
+    query.set("priorityMax", String(filters.priorityMax));
+  }
+  query.set("sort", config.sort);
   if (cursor) query.set("cursor", cursor);
   return browserApiCollectionRequest<SemanticKeyword>(
     `/app/api/projects/${encodeURIComponent(projectId)}/keywords?${query.toString()}`,
     signal ? { signal } : {}
   );
+}
+
+const semanticColumns: readonly Readonly<{
+  key: SemanticSystemColumn;
+  label: string;
+}>[] = [
+  { key: "query", label: "Запрос" },
+  { key: "group", label: "Группа" },
+  { key: "targetUrl", label: "Целевая страница" },
+  { key: "tags", label: "Теги" },
+  { key: "intent", label: "Интент" },
+  { key: "priority", label: "Приоритет" },
+  { key: "source", label: "Источник" },
+  { key: "updatedAt", label: "Обновлён" }
+];
+
+function columnLabel(column: SemanticSystemColumn): string {
+  return (
+    semanticColumns.find(({ key }) => key === column)?.label ?? column
+  );
+}
+
+function keywordColumn(
+  item: SemanticKeyword,
+  column: SemanticSystemColumn
+) {
+  switch (column) {
+    case "query":
+      return (
+        <>
+          <strong title={item.textOriginal}>
+            {item.isFavorite ? "★ " : ""}
+            {item.textOriginal}
+          </strong>
+          <small>
+            {item.language.toUpperCase()}
+            {item.isTracked ? " · отслеживается" : ""}
+          </small>
+        </>
+      );
+    case "group":
+      return <span title={item.groupPath}>{item.groupPath ?? "—"}</span>;
+    case "targetUrl":
+      return <span title={item.targetUrl}>{item.targetUrl ?? "—"}</span>;
+    case "tags":
+      return item.tags.length > 0 ? (
+        <span className="semantic-tags">
+          {item.tags.slice(0, 3).map((tag) => (
+            <span key={tag}>{tag}</span>
+          ))}
+          {(item.tags.length > 3 || item.tagsTruncated) && (
+            <span>+{Math.max(1, item.tags.length - 3)}</span>
+          )}
+        </span>
+      ) : (
+        "—"
+      );
+    case "intent":
+      return intentLabel(item.intent);
+    case "priority":
+      return `P${item.priority}`;
+    case "source":
+      return (
+        <span
+          className={`semantic-source source-${item.sourceMode.toLowerCase()}`}
+        >
+          {sourceModeLabel(item.sourceMode)}
+        </span>
+      );
+    case "updatedAt":
+      return (
+        <time dateTime={item.updatedAt}>{formatDate(item.updatedAt)}</time>
+      );
+  }
+}
+
+function hasActiveFilters(config: SemanticViewConfig): boolean {
+  return Object.keys(config.filters).length > 0 ||
+    config.sort !== defaultSemanticViewConfig.sort;
+}
+
+function booleanFilter(value: boolean | undefined): string {
+  return value === undefined ? "" : String(value);
 }
 
 function mergeKeywords(

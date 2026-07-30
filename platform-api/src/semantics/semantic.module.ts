@@ -5,13 +5,15 @@ import { SeoDataModule } from "../seo-data/seo-data.module.js";
 import { KeywordController } from "./keyword.controller.js";
 import { KeywordGroupController } from "./keyword-group.controller.js";
 import { SemanticBulkController } from "./semantic-bulk.controller.js";
+import { SemanticSavedViewController } from "./semantic-saved-view.controller.js";
 
 @Module({
   imports: [AuthorizationModule, IdentityModule, SeoDataModule],
   controllers: [
     KeywordController,
     KeywordGroupController,
-    SemanticBulkController
+    SemanticBulkController,
+    SemanticSavedViewController
   ]
 })
 export class SemanticModule {}
