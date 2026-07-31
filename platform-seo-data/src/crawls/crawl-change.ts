@@ -9,6 +9,7 @@ export const crawlChangeSnapshotSelect = {
   id: true,
   statusCode: true,
   redirectChain: true,
+  inSitemap: true,
   responseTimeMs: true,
   sizeBytes: true,
   title: true,
@@ -35,6 +36,7 @@ export interface CrawlChangeSnapshot {
   readonly id: string;
   readonly statusCode: number;
   readonly redirectChain: unknown;
+  readonly inSitemap: boolean;
   readonly responseTimeMs: number;
   readonly sizeBytes: number;
   readonly title: string | null;
@@ -72,6 +74,7 @@ export interface DetectedCrawlPageChange {
 interface ComparableSnapshot {
   readonly statusCode: number;
   readonly redirectChain: readonly unknown[];
+  readonly inSitemap: boolean;
   readonly responseTimeMs: number;
   readonly sizeBytes: number;
   readonly title: string | null;
@@ -96,6 +99,7 @@ interface ComparableSnapshot {
 const FIELD_SEVERITY: Readonly<Record<CrawlPageChangeField, CrawlIssueSeverity>> = {
   statusCode: "ERROR",
   redirectChain: "ERROR",
+  inSitemap: "WARNING",
   title: "WARNING",
   description: "WARNING",
   h1: "WARNING",
@@ -178,6 +182,7 @@ function comparablePrevious(
   return {
     statusCode: snapshot.statusCode,
     redirectChain: jsonArray(snapshot.redirectChain),
+    inSitemap: snapshot.inSitemap,
     responseTimeMs: snapshot.responseTimeMs,
     sizeBytes: snapshot.sizeBytes,
     title: snapshot.title,
@@ -208,6 +213,7 @@ function comparableCurrent(
   return {
     statusCode: snapshot.statusCode,
     redirectChain: [...snapshot.redirectChain],
+    inSitemap: snapshot.inSitemap,
     responseTimeMs: snapshot.responseTimeMs,
     sizeBytes: snapshot.sizeBytes,
     title: snapshot.title ?? null,

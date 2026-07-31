@@ -71,6 +71,7 @@ function pageInput(
     requestedUrl: "https://radar.example.com/",
     finalUrl: "https://radar.example.com/",
     redirectChain: [],
+    inSitemap: false,
     depth: 0,
     statusCode: 200,
     responseTimeMs: 250,

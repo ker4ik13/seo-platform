@@ -1,4 +1,8 @@
-import type { CreateTechnicalCrawlInput } from "@seo-platform/contracts";
+import {
+  technicalCrawlQueryPolicies,
+  type CreateTechnicalCrawlInput,
+  type TechnicalCrawlQueryPolicy
+} from "@seo-platform/contracts";
 import { validationError } from "../common/domain-error.js";
 
 export function createTechnicalCrawlInput(
@@ -10,13 +14,16 @@ export function createTechnicalCrawlInput(
   const input = value as Readonly<Record<string, unknown>>;
   const keys = [
     "startUrls",
+    "sitemapUrls",
+    "includePatterns",
+    "excludePatterns",
+    "queryPolicy",
     "maxUrls",
     "maxDepth",
     "requestsPerMinute",
     "obeyRobots"
   ];
   if (
-    Object.keys(input).length !== keys.length ||
     Object.keys(input).some((key) => !keys.includes(key)) ||
     !Array.isArray(input.startUrls) ||
     input.startUrls.length < 1 ||
@@ -26,13 +33,40 @@ export function createTechnicalCrawlInput(
   const startUrls = input.startUrls.map((value, index) =>
     publicUrl(value as string, `startUrls.${index}`)
   );
+  const sitemapUrls = stringArray(
+    input.sitemapUrls ?? [],
+    "sitemapUrls",
+    10,
+    (value, field) => publicUrl(value, field)
+  );
+  const includePatterns = stringArray(
+    input.includePatterns ?? [],
+    "includePatterns",
+    20,
+    pathPattern
+  );
+  const excludePatterns = stringArray(
+    input.excludePatterns ?? [],
+    "excludePatterns",
+    20,
+    pathPattern
+  );
+  const queryPolicy = input.queryPolicy === undefined
+    ? "DROP_TRACKING"
+    : queryPolicyValue(input.queryPolicy);
   if (
     new Set(startUrls).size !== startUrls.length ||
-    new Set(startUrls.map((url) => new URL(url).origin)).size !== 1
+    new Set([...startUrls, ...sitemapUrls].map(
+      (url) => new URL(url).origin
+    )).size !== 1
   ) invalid("startUrls");
   if (input.obeyRobots !== true) invalid("obeyRobots");
   return {
     startUrls,
+    sitemapUrls,
+    includePatterns,
+    excludePatterns,
+    queryPolicy,
     maxUrls: integer(input.maxUrls, "maxUrls", 1, 1_000),
     maxDepth: integer(input.maxDepth, "maxDepth", 0, 10),
     requestsPerMinute: integer(
@@ -43,6 +77,48 @@ export function createTechnicalCrawlInput(
     ),
     obeyRobots: true
   };
+}
+
+function stringArray(
+  value: unknown,
+  field: string,
+  max: number,
+  normalize: (value: string, field: string) => string
+): readonly string[] {
+  if (!Array.isArray(value) || value.length > max) invalid(field);
+  const result = value.map((item, index) => {
+    if (typeof item !== "string") invalid(`${field}.${index}`);
+    return normalize(item, `${field}.${index}`);
+  });
+  if (new Set(result).size !== result.length) invalid(field);
+  return result;
+}
+
+function pathPattern(value: string, field: string): string {
+  const pattern = value.trim();
+  if (
+    !pattern.startsWith("/") ||
+    pattern.length > 200 ||
+    [...pattern].some((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return code < 0x20 || code === 0x7f || character === "#";
+    })
+  ) {
+    invalid(field);
+  }
+  return pattern;
+}
+
+function queryPolicyValue(value: unknown): TechnicalCrawlQueryPolicy {
+  if (
+    typeof value !== "string" ||
+    !technicalCrawlQueryPolicies.includes(
+      value as TechnicalCrawlQueryPolicy
+    )
+  ) {
+    invalid("queryPolicy");
+  }
+  return value as TechnicalCrawlQueryPolicy;
 }
 
 export function assertEmptyCrawlCancelInput(value: unknown): void {

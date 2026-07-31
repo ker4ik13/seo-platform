@@ -16,6 +16,7 @@ test("sends the guarded request through the already validated address", async ()
   assert.match(source, /hostname: selected\.address/u);
   assert.match(source, /servername: url\.hostname/u);
   assert.match(source, /Host: url\.host/u);
+  assert.match(source, /await options\.beforeRequest\?\.\(\)/u);
   assert.match(source, /request\.end\(\);/u);
 });
 
@@ -76,6 +77,7 @@ test("allows only credential-free HTTP(S) on canonical ports", () => {
 
 test("rejects DNS answers containing a private or metadata address before network", async () => {
   let resolved = false;
+  let paced = 0;
   await assert.rejects(
     fetchPublicResource(
       "https://example.com/",
@@ -84,7 +86,10 @@ test("rejects DNS answers containing a private or metadata address before networ
         maxBytes: 1_000,
         maxRedirects: 0,
         accept: "text/html",
-        allowedContentTypes: ["text/html"]
+        allowedContentTypes: ["text/html"],
+        beforeRequest: async () => {
+          paced += 1;
+        }
       },
       async () => {
         resolved = true;
@@ -99,4 +104,5 @@ test("rejects DNS answers containing a private or metadata address before networ
       error.code === "FORBIDDEN_ADDRESS"
   );
   assert.equal(resolved, true);
+  assert.equal(paced, 1);
 });

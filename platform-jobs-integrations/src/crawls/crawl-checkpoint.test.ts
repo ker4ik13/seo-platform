@@ -8,6 +8,10 @@ import {
 
 const config = {
   startUrls: ["https://example.com/"],
+  sitemapUrls: [],
+  includePatterns: [],
+  excludePatterns: [],
+  queryPolicy: "DROP_TRACKING" as const,
   maxUrls: 100,
   maxDepth: 3,
   requestsPerMinute: 30,
@@ -18,6 +22,33 @@ test("round-trips a bounded same-origin crawl checkpoint", () => {
   const initial = initialCrawlCheckpoint(config);
   assert.deepEqual(
     storedCrawlCheckpoint(crawlCheckpointJson(initial), config),
+    initial
+  );
+});
+
+test("retains an explicit discovery seed outside the include scope", () => {
+  const scopedConfig = {
+    ...config,
+    sitemapUrls: ["https://example.com/sitemap.xml"],
+    includePatterns: ["/catalog/**"]
+  };
+  const initial = initialCrawlCheckpoint(scopedConfig);
+  assert.deepEqual(initial, {
+    version: 2,
+    pending: [
+      {
+        url: "https://example.com/",
+        depth: 0,
+        inSitemap: false
+      }
+    ],
+    seen: ["https://example.com/"],
+    sitemapPending: ["https://example.com/sitemap.xml"],
+    sitemapSeen: ["https://example.com/sitemap.xml"],
+    scopeReady: false
+  });
+  assert.deepEqual(
+    storedCrawlCheckpoint(crawlCheckpointJson(initial), scopedConfig),
     initial
   );
 });

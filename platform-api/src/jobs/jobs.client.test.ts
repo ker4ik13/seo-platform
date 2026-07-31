@@ -127,6 +127,40 @@ test("gets one tenant-scoped technical crawl through its public locator", async 
   }
 });
 
+test("upgrades a rolling legacy crawl response with safe scope defaults", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (): Promise<Response> =>
+    dataResponse(crawlResponseData({
+      config: {
+        startUrls: ["https://example.com/"],
+        maxUrls: 100,
+        maxDepth: 3,
+        requestsPerMinute: 30,
+        obeyRobots: true
+      }
+    }))) as typeof fetch;
+
+  try {
+    const crawl = await client().getTechnicalCrawl(
+      projectContext("request-crawl-legacy-001"),
+      crawlId
+    );
+    assert.deepEqual(crawl.config, {
+      startUrls: ["https://example.com/"],
+      sitemapUrls: [],
+      includePatterns: [],
+      excludePatterns: [],
+      queryPolicy: "DROP_TRACKING",
+      maxUrls: 100,
+      maxDepth: 3,
+      requestsPerMinute: 30,
+      obeyRobots: true
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("rejects secret-bearing or contradictory technical crawl responses", async () => {
   const originalFetch = globalThis.fetch;
   try {
@@ -857,6 +891,10 @@ function crawlResponseData(
     status: "QUEUED",
     config: {
       startUrls: ["https://example.com/"],
+      sitemapUrls: [],
+      includePatterns: [],
+      excludePatterns: [],
+      queryPolicy: "DROP_TRACKING",
       maxUrls: 100,
       maxDepth: 3,
       requestsPerMinute: 30,

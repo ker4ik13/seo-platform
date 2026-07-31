@@ -116,6 +116,24 @@ export class CrawlSnapshotService {
           lastSeenAt: new Date(input.crawledAt)
         }
       });
+      if (input.inSitemap) {
+        await transaction.pageSource.upsert({
+          where: {
+            pageId_source: { pageId: page.id, source: "SITEMAP" }
+          },
+          create: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            pageId: page.id,
+            source: "SITEMAP",
+            metadata: { crawlId: input.crawlId }
+          },
+          update: {
+            metadata: { crawlId: input.crawlId },
+            lastSeenAt: new Date(input.crawledAt)
+          }
+        });
+      }
       const previousSnapshot =
         await transaction.crawlPageSnapshot.findFirst({
           where: {
@@ -138,6 +156,7 @@ export class CrawlSnapshotService {
           finalUrl: input.finalUrl,
           finalUrlHash: identity.hash,
           redirectChain: input.redirectChain as Prisma.InputJsonValue,
+          inSitemap: input.inSitemap,
           depth: input.depth,
           statusCode: input.statusCode,
           responseTimeMs: input.responseTimeMs,

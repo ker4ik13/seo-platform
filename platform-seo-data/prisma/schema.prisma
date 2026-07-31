@@ -448,6 +448,7 @@ model CrawlPageSnapshot {
   finalUrl            String           @map("final_url") @db.Text
   finalUrlHash        String           @map("final_url_hash") @db.Char(64)
   redirectChain       Json             @map("redirect_chain")
+  inSitemap           Boolean          @map("in_sitemap")
   depth               Int
   statusCode          Int              @map("status_code")
   responseTimeMs      Int              @map("response_time_ms")

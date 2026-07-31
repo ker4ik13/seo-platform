@@ -12,6 +12,7 @@ export interface PublicFetchOptions {
   readonly accept: string;
   readonly allowedContentTypes: readonly string[];
   readonly userAgent?: string;
+  readonly beforeRequest?: () => Promise<void>;
 }
 
 export interface PublicFetchResult {
@@ -110,8 +111,12 @@ export async function fetchPublicResource(
   let current = requested;
   const redirects: string[] = [];
   const startedAt = performance.now();
+  let pacingTimeMs = 0;
 
   for (let redirectCount = 0; ; redirectCount += 1) {
+    const pacingStartedAt = performance.now();
+    await options.beforeRequest?.();
+    pacingTimeMs += performance.now() - pacingStartedAt;
     const result = await requestOnce(current, options, resolver);
     if (!isRedirect(result.statusCode)) {
       return {
@@ -121,7 +126,10 @@ export async function fetchPublicResource(
         ...(result.contentType ? { contentType: result.contentType } : {}),
         body: result.body,
         sizeBytes: result.body.byteLength,
-        responseTimeMs: Math.max(0, Math.round(performance.now() - startedAt)),
+        responseTimeMs: Math.max(
+          0,
+          Math.round(performance.now() - startedAt - pacingTimeMs)
+        ),
         redirectChain: redirects,
         ...(result.etag ? { etag: result.etag } : {}),
         ...(result.lastModified ? { lastModified: result.lastModified } : {})

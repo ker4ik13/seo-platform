@@ -10,6 +10,10 @@ const changesMigrationUrl = new URL(
   "../../prisma/migrations/20260731200000_crawl_page_changes/migration.sql",
   import.meta.url
 );
+const sitemapMigrationUrl = new URL(
+  "../../prisma/migrations/20260731213000_crawl_sitemap_scope/migration.sql",
+  import.meta.url
+);
 
 test("crawl evidence is tenant-bound, bounded and immutable", async () => {
   const sql = await readFile(migrationUrl, "utf8");
@@ -38,5 +42,13 @@ test("crawl page changes are tenant-bound, normalized and immutable", async () =
   assert.match(sql, /crawl_page_changes_diff_check/u);
   assert.match(sql, /crawl_page_changes_immutable_trigger/u);
   assert.match(sql, /redirect_chain/u);
+  assert.doesNotMatch(sql, /raw_html/iu);
+});
+
+test("sitemap presence is immutable evidence and a Radar change field", async () => {
+  const sql = await readFile(sitemapMigrationUrl, "utf8");
+  assert.match(sql, /ADD COLUMN "in_sitemap" BOOLEAN NOT NULL/u);
+  assert.match(sql, /DROP CONSTRAINT "crawl_page_changes_diff_check"/u);
+  assert.match(sql, /'inSitemap'/u);
   assert.doesNotMatch(sql, /raw_html/iu);
 });

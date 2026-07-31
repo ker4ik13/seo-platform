@@ -26,6 +26,10 @@ upload/inspection/import/publish контуре. Production dependency audit п�
 advisories. Внешние коммерческие gates остаются честно
 выключены до выдачи владельцем YooKassa, SMTP и реальных provider BYOK
 credentials; это не блокирует продолжение остальных продуктовых контуров.
+Отдельный live sitemap smoke прошёл на RFC Editor: sitemap index с двумя
+дочерними документами, include scope `/about/**`, checkpoint v2 и три
+страницы; PostgreSQL snapshot evidence подтвердил один explicit seed с
+`inSitemap=false` и две sitemap-страницы с `inSitemap=true`.
 
 Production technical crawl и audit issues работают поверх Page Map, реального
 съёма позиций и тарифных capacity boundaries.
@@ -207,6 +211,18 @@ headings/hreflang/schema, ссылки, content hash, indexability, изобра
 пороговые изменения latency/размера. Internal SEO Data и public Platform API
 возвращают максимум 500 строго валидируемых изменений под `page.view`, а Web
 показывает русскоязычную историю между обходами и корректный empty state.
+
+Настройки technical crawl теперь поддерживают до десяти same-origin sitemap,
+include/exclude glob-маски и явную политику query-параметров. Crawl worker
+безопасно читает bounded XML и `.xml.gz`, обходит до двадцати same-origin
+документов sitemap index, применяет единый host rate limit к robots, sitemap
+и HTML-запросам, включая каждый redirect hop, и сохраняет crash-safe sitemap
+traversal в checkpoint v2.
+Каждый immutable page snapshot содержит `inSitemap`; Page Map получает
+`SITEMAP` provenance, а Radar показывает изменение sitemap membership для
+страниц, присутствующих в обоих обходах. Старые crawl config/checkpoint без
+sitemap автоматически читаются с безопасными defaults; additive Jobs
+migration сохраняет DB-совместимость checkpoint v1 и bounded checkpoint v2.
 
 P3 billing foundation реализован в Platform API и Web. Versioned каталог
 содержит Trial/Solo/Team/Agency/Business/Enterprise и годовые цены; hosted
@@ -812,10 +828,11 @@ Backend convention:
   исход в проверяемый `ACTION_REQUIRED`;
 - `platform-jobs-integrations/src/crawls` — tenant-scoped crawl Job sidecar,
   SSRF/DNS-rebinding-safe HTTP client, streaming HTML analysis, robots rules,
+  bounded XML/XML.GZ sitemap/index traversal, include/exclude/query scope,
   PostgreSQL lease/checkpoint/retry recovery и secret-free BullMQ payload;
 - `platform-seo-data/src/crawls` — immutable crawl snapshots/issue
-  occurrences/page changes, current issue projection, deterministic
-  before/after diff и tenant-safe Page Map update без raw HTML;
+  occurrences/page changes с sitemap membership, current issue projection,
+  deterministic before/after diff и tenant-safe Page Map update без raw HTML;
 - `platform-api/src/crawls` и
   `platform-web/components/project-crawl-audit.tsx` — public RBAC/CSRF/audit
   boundary и private browser progress/issues/Radar history UI;
@@ -1111,7 +1128,7 @@ Entrypoints:
 | Integrations | vertical slice: catalog + encrypted BYOK vault + validation + project binding |
 | Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |
 | Automations | vertical slice: rank schedule CRUD + тарифный capacity + BullMQ scheduler + manual/scheduled execution + no-overlap/recovery/history/auto-pause + Web |
-| Pages/technical audit | vertical slice: Page Map CRUD/assignment + SSRF-safe async crawl + immutable snapshots/current issues/page-change history + lease/checkpoint recovery + Web |
+| Pages/technical audit | vertical slice: Page Map CRUD/assignment + SSRF-safe async crawl + sitemap/include/exclude/query scope + immutable snapshots/current issues/page-change history + lease/checkpoint recovery + Web |
 | Billing/YooKassa | vertical slice: catalog + hosted/recurring payment + webhook/reconciliation + ledger/refund/NPD obligation + Web UI + protected manual receipt operations + durable receipt email delivery; live provider/SMTP canary остаётся gate |
 | Directus content | planned |
 
@@ -1494,10 +1511,10 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API tests: 439 pass, 0 fail, 5 opt-in PostgreSQL 18 tests skipped
+- Platform API tests: 443 pass, 0 fail, 5 opt-in PostgreSQL 18 tests skipped
   без отдельного disposable database URL.
-- SEO data unit tests: 127 pass, 0 fail.
-- Jobs/integrations tests: 446 pass, 0 fail, 9 disposable-DB tests skipped
+- SEO data tests: 131 pass, 0 fail, 1 disposable-DB test skipped.
+- Jobs/integrations tests: 459 pass, 0 fail, 9 disposable-DB tests skipped
   в обычном запуске; startup decrypt-canary targeted suite — 7/7 pass.
 - Realtime unit tests: 112 pass, 0 fail.
 - Contracts unit tests: 100 pass, 0 fail.
@@ -1505,7 +1522,7 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
 - Infrastructure DB-role/connector и затронутый rank dependency targeted
   scope: 9 pass, 0 fail; PostgreSQL regressions остаются opt-in в обычном
   запуске.
-- Infrastructure suite после Redis/NATS/crawl hardening: 82 pass, 0 fail и пять
+- Infrastructure suite после Redis/NATS/crawl hardening: 87 pass, 0 fail и пять
   opt-in PostgreSQL skips с локальным Redis 8.8.1 binary. Отдельный live smoke
   на source-built Redis 8.8.1: 3/3 pass; подтверждены BullMQ Queue/Worker,
   queue-key isolation и Lua denial, versioned Realtime Pub/Sub channels,
@@ -1524,6 +1541,10 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
   запреты DDL/`_prisma_migrations`/`TRUNCATE`/membership/ownership/
   cross-database/replication/`PUBLIC` bypass, Directus exception, exact
   connector grants и реальный first-match HBA login/reject.
+- Fresh PostgreSQL 18 sitemap gates: полная цепочка из 17 SEO Data migrations
+  и 132/132 теста прошли без skip; полная Jobs migration chain принимает
+  legacy checkpoint v1 и bounded checkpoint v2, но DB constraint отклоняет
+  неполный v2. Та же Jobs migration применена к живому runtime.
 - Полный root `pnpm test` после startup-canary и scoped claim: pass без
   failures; обычный запуск безопасно пропускает opt-in disposable-DB tests.
   Отдельный fresh PostgreSQL 18 gate для Jobs grant/claim: 4/4 pass.
@@ -2019,11 +2040,14 @@ OAuth/OIDC выполняется после подтверждения зави
   обязательны. Keys.so пока используется только для credential validation,
   XMLStock ждёт подтверждённого provider contract и redacted fixtures.
 - Technical crawl production vertical закрывает ручной bounded обход,
-  текущие issues и page diff history, но полный Radar из раздела 10 ТЗ ещё
-  требует sitemap scope, include/exclude/query policy, conditional
-  requests/host backoff, schedules, duplicate groups, notifications и
-  отдельный browser-rendering pool. Cookies/custom headers намеренно не
-  принимаются до отдельной secret-safe policy.
+  sitemap/include/exclude/query scope, текущие issues и page diff history.
+  Полный Radar из раздела 10 ТЗ ещё требует conditional requests/host
+  backoff, schedules, duplicate groups, notifications и отдельный
+  browser-rendering pool. Sitemap disappearance гарантированно фиксируется,
+  когда URL также остаётся доступен из start/link scope; для исчезнувшей из
+  всех источников страницы требуется отдельный crawl-level membership
+  snapshot. Cookies/custom headers намеренно не принимаются до отдельной
+  secret-safe policy.
 - `platform-app` сохранён как legacy Git-источник до проверки переноса; новая
   функциональность добавляется только в `platform-web`.
 

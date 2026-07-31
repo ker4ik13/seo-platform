@@ -4,6 +4,7 @@ import type {
   CrawlPageChangeField,
   ProjectCrawlPageChangeCollection,
   ProjectCrawlIssueCollection,
+  TechnicalCrawlQueryPolicy,
   TechnicalCrawlSettings,
   TechnicalCrawlStatus,
   TechnicalCrawlSummary
@@ -45,6 +46,11 @@ export function ProjectCrawlAudit({
   const [maxUrls, setMaxUrls] = useState("100");
   const [maxDepth, setMaxDepth] = useState("3");
   const [rpm, setRpm] = useState("30");
+  const [sitemapUrls, setSitemapUrls] = useState("");
+  const [includePatterns, setIncludePatterns] = useState("");
+  const [excludePatterns, setExcludePatterns] = useState("");
+  const [queryPolicy, setQueryPolicy] =
+    useState<TechnicalCrawlQueryPolicy>("DROP_TRACKING");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -108,6 +114,10 @@ export function ProjectCrawlAudit({
         idempotencyKey: `crawl:${globalThis.crypto.randomUUID()}`,
         body: {
           startUrls: [startUrl.trim()],
+          sitemapUrls: lineList(sitemapUrls),
+          includePatterns: patternList(includePatterns),
+          excludePatterns: patternList(excludePatterns),
+          queryPolicy,
           maxUrls: Number(maxUrls),
           maxDepth: Number(maxDepth),
           requestsPerMinute: Number(rpm),
@@ -179,6 +189,48 @@ export function ProjectCrawlAudit({
         <NumberField label="Лимит URL" max={1000} min={1} set={setMaxUrls} value={maxUrls} />
         <NumberField label="Глубина" max={10} min={0} set={setMaxDepth} value={maxDepth} />
         <NumberField label="Запросов/мин" max={60} min={1} set={setRpm} value={rpm} />
+        <label className="form-field crawl-audit-scope">
+          <span>Sitemap URL, до 10 (необязательно)</span>
+          <textarea
+            onChange={(event) => setSitemapUrls(event.target.value)}
+            placeholder={"https://example.com/sitemap.xml\nhttps://example.com/products.xml.gz"}
+            rows={2}
+            value={sitemapUrls}
+          />
+        </label>
+        <label className="form-field crawl-audit-scope">
+          <span>Включить пути</span>
+          <textarea
+            onChange={(event) => setIncludePatterns(event.target.value)}
+            placeholder={"/catalog/**\n/services/**"}
+            rows={2}
+            value={includePatterns}
+          />
+        </label>
+        <label className="form-field crawl-audit-scope">
+          <span>Исключить пути</span>
+          <textarea
+            onChange={(event) => setExcludePatterns(event.target.value)}
+            placeholder={"/admin/**\n/cart/**"}
+            rows={2}
+            value={excludePatterns}
+          />
+        </label>
+        <label className="form-field">
+          <span>Query-параметры</span>
+          <select
+            onChange={(event) =>
+              setQueryPolicy(
+                event.target.value as TechnicalCrawlQueryPolicy
+              )
+            }
+            value={queryPolicy}
+          >
+            <option value="DROP_TRACKING">Убирать tracking</option>
+            <option value="DROP_ALL">Убирать все</option>
+            <option value="PRESERVE">Сохранять</option>
+          </select>
+        </label>
         <button
           className="primary-button"
           disabled={
@@ -369,6 +421,7 @@ function changeFieldLabel(field: CrawlPageChangeField): string {
   return {
     statusCode: "HTTP-статус",
     redirectChain: "цепочка редиректов",
+    inSitemap: "наличие в sitemap",
     title: "Title",
     description: "Description",
     h1: "H1",
@@ -389,6 +442,21 @@ function changeFieldLabel(field: CrawlPageChangeField): string {
     responseTimeMs: "время ответа",
     sizeBytes: "размер ответа"
   }[field] ?? field;
+}
+
+function lineList(value: string): readonly string[] {
+  return [...new Set(
+    value
+      .split(/\r?\n/u)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  )];
+}
+
+function patternList(value: string): readonly string[] {
+  return [...new Set(lineList(value).flatMap((line) =>
+    line.split(",").map((item) => item.trim()).filter(Boolean)
+  ))];
 }
 
 function restriction(value: string): string {

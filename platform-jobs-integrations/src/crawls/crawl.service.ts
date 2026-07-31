@@ -574,6 +574,10 @@ export class CrawlService {
 function configJson(input: InternalCreateTechnicalCrawlInput): Prisma.InputJsonValue {
   return {
     startUrls: [...input.startUrls],
+    sitemapUrls: [...input.sitemapUrls],
+    includePatterns: [...input.includePatterns],
+    excludePatterns: [...input.excludePatterns],
+    queryPolicy: input.queryPolicy,
     maxUrls: input.maxUrls,
     maxDepth: input.maxDepth,
     requestsPerMinute: input.requestsPerMinute,

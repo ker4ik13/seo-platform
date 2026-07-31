@@ -26,7 +26,7 @@ export function internalPersistCrawlPageInput(
   const input = object(value);
   const requiredKeys = [
     "workspaceId", "projectId", "crawlId", "sequence", "requestedUrl",
-    "finalUrl", "redirectChain", "depth", "statusCode", "responseTimeMs", "sizeBytes",
+    "finalUrl", "redirectChain", "inSitemap", "depth", "statusCode", "responseTimeMs", "sizeBytes",
     "contentType", "h1Count", "headings", "hreflang", "internalLinks",
     "externalLinks", "imageCount", "imagesMissingAlt",
     "structuredDataTypes", "wordCount", "contentHash", "indexability",
@@ -61,6 +61,7 @@ export function internalPersistCrawlPageInput(
     requestedUrl: normalizePageUrl(string(input.requestedUrl, "requestedUrl", 4_096)).normalized,
     finalUrl: normalizePageUrl(string(input.finalUrl, "finalUrl", 4_096)).normalized,
     redirectChain: urlArray(input.redirectChain, "redirectChain", 10),
+    inSitemap: boolean(input.inSitemap, "inSitemap"),
     depth: integer(input.depth, "depth", 0, 10),
     statusCode: integer(input.statusCode, "statusCode", 100, 599),
     responseTimeMs: integer(input.responseTimeMs, "responseTimeMs", 0, 3_600_000),
@@ -230,6 +231,11 @@ function integer(
     invalid(field);
   }
   return Number(value);
+}
+
+function boolean(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") invalid(field);
+  return value;
 }
 
 function pattern(value: unknown, field: string, expression: RegExp): string {

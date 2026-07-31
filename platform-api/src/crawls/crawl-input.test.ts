@@ -13,6 +13,10 @@ test("accepts one same-origin bounded crawl command", () => {
     }),
     {
       startUrls: ["https://example.com/"],
+      sitemapUrls: [],
+      includePatterns: [],
+      excludePatterns: [],
+      queryPolicy: "DROP_TRACKING",
       maxUrls: 100,
       maxDepth: 3,
       requestsPerMinute: 30,
@@ -45,3 +49,52 @@ test("rejects cross-origin, credential and robots bypass commands", () => {
     createTechnicalCrawlInput({ ...base, obeyRobots: false })
   );
 });
+
+test("normalizes bounded sitemap scope and rejects unsafe patterns", () => {
+  assert.deepEqual(
+    createTechnicalCrawlInput({
+      startUrls: ["https://example.com/"],
+      sitemapUrls: ["HTTPS://EXAMPLE.COM/sitemap.xml"],
+      includePatterns: ["/catalog/**"],
+      excludePatterns: ["/catalog/private/*"],
+      queryPolicy: "DROP_ALL",
+      maxUrls: 500,
+      maxDepth: 2,
+      requestsPerMinute: 20,
+      obeyRobots: true
+    }),
+    {
+      startUrls: ["https://example.com/"],
+      sitemapUrls: ["https://example.com/sitemap.xml"],
+      includePatterns: ["/catalog/**"],
+      excludePatterns: ["/catalog/private/*"],
+      queryPolicy: "DROP_ALL",
+      maxUrls: 500,
+      maxDepth: 2,
+      requestsPerMinute: 20,
+      obeyRobots: true
+    }
+  );
+  assert.throws(() =>
+    createTechnicalCrawlInput({
+      ...baseConfig(),
+      includePatterns: ["catalog/**"]
+    })
+  );
+  assert.throws(() =>
+    createTechnicalCrawlInput({
+      ...baseConfig(),
+      sitemapUrls: ["https://other.example/sitemap.xml"]
+    })
+  );
+});
+
+function baseConfig() {
+  return {
+    startUrls: ["https://example.com/"],
+    maxUrls: 100,
+    maxDepth: 3,
+    requestsPerMinute: 30,
+    obeyRobots: true
+  };
+}

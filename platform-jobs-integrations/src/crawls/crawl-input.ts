@@ -1,10 +1,16 @@
 import { BadRequestException } from "@nestjs/common";
-import type {
-  InternalCancelTechnicalCrawlInput,
-  InternalCreateTechnicalCrawlInput,
-  TechnicalCrawlConfig
+import {
+  technicalCrawlQueryPolicies,
+  type TechnicalCrawlQueryPolicy,
+  type InternalCancelTechnicalCrawlInput,
+  type InternalCreateTechnicalCrawlInput,
+  type TechnicalCrawlConfig
 } from "@seo-platform/contracts";
 import { assertSafeCrawlUrl } from "./public-http.js";
+import {
+  normalizedScopeUrl,
+  validCrawlPathPattern
+} from "./crawl-scope.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -20,6 +26,10 @@ export function internalCreateTechnicalCrawlInput(
     "idempotencyKey",
     "correlationId",
     "startUrls",
+    "sitemapUrls",
+    "includePatterns",
+    "excludePatterns",
+    "queryPolicy",
     "maxUrls",
     "maxDepth",
     "requestsPerMinute",
@@ -59,6 +69,9 @@ export function internalCancelTechnicalCrawlInput(
 export function crawlConfig(
   value: Readonly<Record<string, unknown>>
 ): TechnicalCrawlConfig {
+  const queryPolicy = queryPolicyValue(
+    value.queryPolicy ?? "DROP_TRACKING"
+  );
   if (!Array.isArray(value.startUrls) || value.startUrls.length < 1 ||
       value.startUrls.length > 20) {
     invalid("startUrls");
@@ -66,18 +79,37 @@ export function crawlConfig(
   const urls = value.startUrls.map((item, index) => {
     if (typeof item !== "string") invalid(`startUrls.${index}`);
     try {
-      return assertSafeCrawlUrl(item).toString();
+      return normalizedScopeUrl(item, queryPolicy);
     } catch {
       invalid(`startUrls.${index}`);
     }
   });
   const origins = new Set(urls.map((url) => new URL(url).origin));
+  const sitemapUrls = stringArray(
+    value.sitemapUrls ?? [],
+    "sitemapUrls",
+    10,
+    (item) => assertSafeCrawlUrl(item).toString()
+  );
+  for (const url of sitemapUrls) origins.add(new URL(url).origin);
+  const includePatterns = patternArray(
+    value.includePatterns ?? [],
+    "includePatterns"
+  );
+  const excludePatterns = patternArray(
+    value.excludePatterns ?? [],
+    "excludePatterns"
+  );
   if (origins.size !== 1 || new Set(urls).size !== urls.length) {
     invalid("startUrls");
   }
   if (value.obeyRobots !== true) invalid("obeyRobots");
   return {
     startUrls: urls,
+    sitemapUrls,
+    includePatterns,
+    excludePatterns,
+    queryPolicy,
     maxUrls: integer(value.maxUrls, "maxUrls", 1, 1_000),
     maxDepth: integer(value.maxDepth, "maxDepth", 0, 10),
     requestsPerMinute: integer(
@@ -88,6 +120,47 @@ export function crawlConfig(
     ),
     obeyRobots: true
   };
+}
+
+function stringArray(
+  value: unknown,
+  field: string,
+  max: number,
+  normalize: (value: string) => string
+): readonly string[] {
+  if (!Array.isArray(value) || value.length > max) invalid(field);
+  const result = value.map((item, index) => {
+    if (typeof item !== "string") invalid(`${field}.${index}`);
+    try {
+      return normalize(item);
+    } catch {
+      invalid(`${field}.${index}`);
+    }
+  });
+  if (new Set(result).size !== result.length) invalid(field);
+  return result;
+}
+
+function patternArray(value: unknown, field: string): readonly string[] {
+  if (!Array.isArray(value) || value.length > 20) invalid(field);
+  const patterns = value.map((item, index) => {
+    if (!validCrawlPathPattern(item)) invalid(`${field}.${index}`);
+    return item;
+  });
+  if (new Set(patterns).size !== patterns.length) invalid(field);
+  return patterns;
+}
+
+function queryPolicyValue(value: unknown): TechnicalCrawlQueryPolicy {
+  if (
+    typeof value !== "string" ||
+    !technicalCrawlQueryPolicies.includes(
+      value as TechnicalCrawlQueryPolicy
+    )
+  ) {
+    invalid("queryPolicy");
+  }
+  return value as TechnicalCrawlQueryPolicy;
 }
 
 function record(

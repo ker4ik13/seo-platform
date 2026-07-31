@@ -9,7 +9,8 @@ import {
   projectConnectorBindingAvailabilities,
   projectConnectorRouteSourceKinds,
   rankRunConflictDetails,
-  rankRunConflictReasons
+  rankRunConflictReasons,
+  technicalCrawlQueryPolicies
 } from "@seo-platform/contracts";
 import type {
   AutomationRunCollection,
@@ -1034,19 +1035,47 @@ function technicalCrawlResponse(
   const id = uuidValue(input.id);
   const responseWorkspaceId = uuidValue(input.workspaceId);
   const responseProjectId = uuidValue(input.projectId);
-  const config = exactRecord(input.config, [
-    "startUrls",
-    "maxUrls",
-    "maxDepth",
-    "requestsPerMinute",
-    "obeyRobots"
-  ]);
+  const configInput = record(input.config);
+  const config =
+    Object.keys(configInput).length === 5
+      ? exactRecord(configInput, [
+          "startUrls",
+          "maxUrls",
+          "maxDepth",
+          "requestsPerMinute",
+          "obeyRobots"
+        ])
+      : exactRecord(configInput, [
+          "startUrls",
+          "sitemapUrls",
+          "includePatterns",
+          "excludePatterns",
+          "queryPolicy",
+          "maxUrls",
+          "maxDepth",
+          "requestsPerMinute",
+          "obeyRobots"
+        ]);
   const startUrls = Array.isArray(config.startUrls)
     ? config.startUrls.map(safeCrawlResponseUrl)
     : [];
+  const sitemapUrls = Array.isArray(config.sitemapUrls)
+    ? config.sitemapUrls.map(safeCrawlResponseUrl)
+    : [];
+  const includePatterns = crawlResponsePatterns(
+    config.includePatterns ?? []
+  );
+  const excludePatterns = crawlResponsePatterns(
+    config.excludePatterns ?? []
+  );
+  const queryPolicy = config.queryPolicy ?? "DROP_TRACKING";
   const failureCode =
     typeof input.failureCode === "string" &&
-    ["ROBOTS_UNAVAILABLE", "CRAWL_EXECUTION_FAILED"].includes(
+    [
+      "ROBOTS_UNAVAILABLE",
+      "SITEMAP_UNAVAILABLE",
+      "CRAWL_EXECUTION_FAILED"
+    ].includes(
       input.failureCode
     )
       ? input.failureCode
@@ -1061,8 +1090,15 @@ function technicalCrawlResponse(
     ].includes(String(input.status)) ||
     startUrls.length < 1 ||
     startUrls.length > 20 ||
+    sitemapUrls.length > 10 ||
     new Set(startUrls).size !== startUrls.length ||
-    new Set(startUrls.map((url) => new URL(url).origin)).size !== 1 ||
+    new Set(sitemapUrls).size !== sitemapUrls.length ||
+    new Set([...startUrls, ...sitemapUrls].map(
+      (url) => new URL(url).origin
+    )).size !== 1 ||
+    !technicalCrawlQueryPolicies.includes(
+      queryPolicy as (typeof technicalCrawlQueryPolicies)[number]
+    ) ||
     config.obeyRobots !== true
   ) {
     throw invalidJobsResponse();
@@ -1075,6 +1111,11 @@ function technicalCrawlResponse(
     status: input.status as TechnicalCrawlSummary["status"],
     config: {
       startUrls,
+      sitemapUrls,
+      includePatterns,
+      excludePatterns,
+      queryPolicy:
+        queryPolicy as TechnicalCrawlSummary["config"]["queryPolicy"],
       maxUrls: boundedPositiveInteger(config.maxUrls, 1_000),
       maxDepth: boundedNonNegativeInteger(config.maxDepth, 10),
       requestsPerMinute: boundedPositiveInteger(
@@ -1110,6 +1151,27 @@ function technicalCrawlResponse(
     throw invalidJobsResponse();
   }
   return summary;
+}
+
+function crawlResponsePatterns(value: unknown): readonly string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length > 20 ||
+    value.some(
+      (item) =>
+        typeof item !== "string" ||
+        !item.startsWith("/") ||
+        item.length > 200 ||
+        [...item].some((character) => {
+          const code = character.codePointAt(0) ?? 0;
+          return code < 0x20 || code === 0x7f || character === "#";
+        })
+    ) ||
+    new Set(value).size !== value.length
+  ) {
+    throw invalidJobsResponse();
+  }
+  return value as readonly string[];
 }
 
 function validCrawlLifecycle(

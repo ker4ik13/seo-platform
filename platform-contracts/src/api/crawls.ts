@@ -11,8 +11,21 @@ export const technicalCrawlStatuses = [
 export type TechnicalCrawlStatus =
   (typeof technicalCrawlStatuses)[number];
 
+export const technicalCrawlQueryPolicies = [
+  "DROP_TRACKING",
+  "DROP_ALL",
+  "PRESERVE"
+] as const;
+
+export type TechnicalCrawlQueryPolicy =
+  (typeof technicalCrawlQueryPolicies)[number];
+
 export interface TechnicalCrawlConfig {
   readonly startUrls: readonly string[];
+  readonly sitemapUrls: readonly string[];
+  readonly includePatterns: readonly string[];
+  readonly excludePatterns: readonly string[];
+  readonly queryPolicy: TechnicalCrawlQueryPolicy;
   readonly maxUrls: number;
   readonly maxDepth: number;
   readonly requestsPerMinute: number;
@@ -105,6 +118,7 @@ export interface InternalPersistCrawlPageInput {
   readonly requestedUrl: string;
   readonly finalUrl: string;
   readonly redirectChain: readonly string[];
+  readonly inSitemap: boolean;
   readonly depth: number;
   readonly statusCode: number;
   readonly responseTimeMs: number;
@@ -173,6 +187,7 @@ export interface ProjectCrawlIssueCollection {
 export const crawlPageChangeFields = [
   "statusCode",
   "redirectChain",
+  "inSitemap",
   "title",
   "description",
   "h1",

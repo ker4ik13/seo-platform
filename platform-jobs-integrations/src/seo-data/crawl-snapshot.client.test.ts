@@ -11,6 +11,7 @@ const pageInput = {
   requestedUrl: "https://example.com/",
   finalUrl: "https://example.com/",
   redirectChain: [],
+  inSitemap: false,
   depth: 0,
   statusCode: 200,
   responseTimeMs: 120,

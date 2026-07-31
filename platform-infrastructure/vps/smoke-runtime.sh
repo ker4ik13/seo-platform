@@ -26,6 +26,29 @@ cookie_jar=$smoke_root/cookies.txt
 response_body=$smoke_root/response.json
 smoke_email="smoke-$(date -u +%Y%m%d%H%M%S)-$$@example.invalid"
 smoke_password="S$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-28)!9a"
+smoke_crawl_url=${SEO_PLATFORM_SMOKE_CRAWL_URL:-https://example.com/}
+smoke_sitemap_url=${SEO_PLATFORM_SMOKE_SITEMAP_URL:-}
+smoke_include_pattern=${SEO_PLATFORM_SMOKE_INCLUDE_PATTERN:-}
+smoke_project_domain=$(
+  SMOKE_CRAWL_URL="$smoke_crawl_url" \
+    /home/dev/.nvm/versions/node/v24.18.1/bin/node <<'NODE'
+const url = new URL(process.env.SMOKE_CRAWL_URL);
+if (
+  !["http:", "https:"].includes(url.protocol) ||
+  url.username ||
+  url.password ||
+  url.hash ||
+  (url.port &&
+    !(
+      (url.protocol === "http:" && url.port === "80") ||
+      (url.protocol === "https:" && url.port === "443")
+    ))
+) {
+  process.exit(1);
+}
+process.stdout.write(url.hostname);
+NODE
+) || runtime_fail "SEO_PLATFORM_SMOKE_CRAWL_URL is invalid"
 csrf_token=
 response_status=
 
@@ -129,8 +152,17 @@ api_call POST "workspaces/$workspace_id/billing/trial" \
   "smoke-trial-$(openssl rand -hex 16)"
 expect_status 201 start-trial
 
-api_call POST "workspaces/$workspace_id/projects" \
-  '{"name":"Example Smoke Project","domain":"example.com","locale":"ru","timezone":"Europe/Berlin"}'
+project_body=$(
+  jq -cn \
+    --arg domain "$smoke_project_domain" \
+    '{
+      name: "VPS Runtime Smoke Project",
+      domain: $domain,
+      locale: "ru",
+      timezone: "Europe/Berlin"
+    }'
+)
+api_call POST "workspaces/$workspace_id/projects" "$project_body"
 expect_status 201 create-project
 project_id=$(jq -er '.data.id' "$response_body")
 
@@ -154,8 +186,29 @@ expect_status 200 billing-subscription
 [ "$(jq -r '.data.status' "$response_body")" = TRIALING ] ||
   runtime_fail "trial subscription is not active"
 
+crawl_body=$(
+  jq -cn \
+    --arg startUrl "$smoke_crawl_url" \
+    --arg sitemapUrl "$smoke_sitemap_url" \
+    --arg includePattern "$smoke_include_pattern" \
+    '{
+      startUrls: [$startUrl],
+      sitemapUrls: (
+        if $sitemapUrl == "" then [] else [$sitemapUrl] end
+      ),
+      includePatterns: (
+        if $includePattern == "" then [] else [$includePattern] end
+      ),
+      excludePatterns: [],
+      queryPolicy: "DROP_TRACKING",
+      maxUrls: 3,
+      maxDepth: 1,
+      requestsPerMinute: 60,
+      obeyRobots: true
+    }'
+)
 api_call POST "projects/$project_id/crawls" \
-  '{"startUrls":["https://example.com/"],"maxUrls":3,"maxDepth":1,"requestsPerMinute":60,"obeyRobots":true}' \
+  "$crawl_body" \
   "smoke-crawl-$(openssl rand -hex 16)"
 expect_status 202 create-crawl
 crawl_id=$(jq -er '.data.id' "$response_body")

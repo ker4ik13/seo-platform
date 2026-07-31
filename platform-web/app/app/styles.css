@@ -3561,6 +3561,10 @@ svg { display: block; }
   align-items: end;
 }
 
+.crawl-audit-scope {
+  grid-column: span 2;
+}
+
 .crawl-audit-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
@@ -3655,6 +3659,10 @@ svg { display: block; }
   .crawl-audit-form,
   .crawl-audit-grid {
     grid-template-columns: 1fr;
+  }
+
+  .crawl-audit-scope {
+    grid-column: auto;
   }
 }
 
