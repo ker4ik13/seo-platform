@@ -105,6 +105,9 @@ test("serializes enabled creates and rejects the authoritative plan limit", asyn
         created = true;
         return automation();
       }
+    },
+    crawlAutomation: {
+      count: async () => 0
     }
   } as unknown as Prisma.TransactionClient;
   const service = new AutomationService(

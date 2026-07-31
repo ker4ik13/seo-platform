@@ -10,6 +10,7 @@ const credentialApiToken = "c".repeat(32);
 const rankManifestApiToken = "m".repeat(32);
 const rankResultApiToken = "r".repeat(32);
 const rankGrantApiToken = "g".repeat(32);
+const automationDispatchApiToken = "a".repeat(32);
 
 test("keeps optional adapters disabled by default", () => {
   const config = loadAppConfig({
@@ -297,6 +298,7 @@ test("requires credential encryption keys when the vault is enabled", () => {
         NODE_ENV: "production",
         DATABASE_URL: "postgresql://test",
         PLATFORM_API_TO_JOBS_TOKEN: "p".repeat(32),
+        JOBS_TO_PLATFORM_AUTOMATION_TOKEN: automationDispatchApiToken,
         JOBS_TO_SEO_DATA_TOKEN: "s".repeat(32),
         NATS_USER: "jobs-http",
         NATS_PASSWORD: "secret",

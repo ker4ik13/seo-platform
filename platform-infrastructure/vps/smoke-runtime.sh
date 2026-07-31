@@ -241,6 +241,75 @@ expect_status 200 crawl-changes
 jq -e '.data.changes | type == "array"' "$response_body" >/dev/null ||
   runtime_fail "crawl change history is not an array"
 
+crawl_automation_body=$(
+  jq -cn \
+    --arg startUrl "$smoke_crawl_url" \
+    '{
+      name: "VPS Runtime Scheduled Audit",
+      timezone: "Europe/Berlin",
+      schedule: {
+        cadence: "DAILY",
+        hour: 23,
+        minute: 59
+      },
+      allowedWindow: {
+        startMinute: 0,
+        endMinute: 1440
+      },
+      config: {
+        startUrls: [$startUrl],
+        sitemapUrls: [],
+        includePatterns: [],
+        excludePatterns: [],
+        queryPolicy: "DROP_TRACKING",
+        maxUrls: 1,
+        maxDepth: 0,
+        maxRuntimeSeconds: 300,
+        requestsPerMinute: 60,
+        obeyRobots: true
+      },
+      failureThreshold: 3,
+      enabled: true
+    }'
+)
+api_call POST "projects/$project_id/crawl-automations" \
+  "$crawl_automation_body" \
+  "smoke-crawl-automation-$(openssl rand -hex 16)"
+expect_status 201 create-crawl-automation
+crawl_automation_id=$(jq -er '.data.id' "$response_body")
+crawl_automation_version=$(jq -er '.data.version' "$response_body")
+
+api_call POST \
+  "projects/$project_id/crawl-automations/$crawl_automation_id/runs" \
+  '{}' \
+  "smoke-crawl-automation-run-$(openssl rand -hex 16)" \
+  "$crawl_automation_version"
+expect_status 202 run-crawl-automation
+scheduled_crawl_id=$(jq -er '.data.crawlId' "$response_body")
+
+scheduled_crawl_status=QUEUED
+for ((attempt = 1; attempt <= 45; attempt += 1)); do
+  api_call GET "projects/$project_id/crawls/$scheduled_crawl_id"
+  expect_status 200 read-scheduled-crawl
+  scheduled_crawl_status=$(jq -er '.data.status' "$response_body")
+  case "$scheduled_crawl_status" in
+    COMPLETED|PARTIALLY_COMPLETED) break ;;
+    FAILED|CANCELLED) runtime_fail "scheduled crawl finished with status $scheduled_crawl_status" ;;
+  esac
+  sleep 2
+done
+case "$scheduled_crawl_status" in
+  COMPLETED|PARTIALLY_COMPLETED) ;;
+  *) runtime_fail "scheduled crawl did not complete before the smoke timeout" ;;
+esac
+
+api_call POST \
+  "projects/$project_id/crawl-automations/$crawl_automation_id/pause" \
+  '{}' \
+  '' \
+  "$crawl_automation_version"
+expect_status 200 pause-crawl-automation
+
 semantic_file=$smoke_root/semantic-smoke.xlsx
 SEMANTIC_FIXTURE="$semantic_file" \
 FFLATE_MODULE="$project_root/platform-jobs-integrations/node_modules/fflate" \

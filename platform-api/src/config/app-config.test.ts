@@ -169,6 +169,7 @@ test("does not allow development tokens in production", () => {
         PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
         PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
         JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: "g".repeat(32),
+        JOBS_TO_PLATFORM_AUTOMATION_TOKEN: "a".repeat(32),
         JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: "e".repeat(32),
         WEB_PUBLIC_URL: "https://example.test",
         AUTH_EXPOSE_DEVELOPMENT_TOKENS: "true"
@@ -639,6 +640,7 @@ function productionEnvironment(
     PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
     PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
     JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: "g".repeat(32),
+    JOBS_TO_PLATFORM_AUTOMATION_TOKEN: "a".repeat(32),
     JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: "e".repeat(32),
     WEB_PUBLIC_URL: "https://example.test",
     ...overrides

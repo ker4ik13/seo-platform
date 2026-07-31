@@ -35,7 +35,12 @@ credentials; это не блокирует продолжение осталь�
 подтвердил новый snapshot с `notModified=true` и tenant-bound
 `reusedFromSnapshotId`. Полный повторный smoke одновременно подтвердил
 регистрацию, trial, проект, crawl, MinIO/CORS/ClamAV и публикацию XLSX
-семантики.
+семантики. После добавления Radar schedules ещё один полный live smoke
+подтвердил создание daily/weekly crawl automation, отдельный авторизованный
+manual dispatch, завершение связанного технического crawl, terminal run
+settlement и ручную паузу; тот же сценарий повторно прошёл регистрацию,
+workspace/trial/project, team/billing read projections, обычный crawl и
+полный XLSX upload/inspection/import/publish контур.
 
 Production technical crawl и audit issues работают поверх Page Map, реального
 съёма позиций и тарифных capacity boundaries.
@@ -248,6 +253,25 @@ pacing и повторные доставки: worker до следующего 
 просроченный обход как `PARTIALLY_COMPLETED` с
 `MAX_RUNTIME_EXCEEDED`, сохраняя уже собранные snapshots.
 
+Radar schedules теперь замкнуты отдельным production-контуром. Public API и
+Web на экране аудита создают daily/weekly расписание в IANA timezone с
+разрешённым локальным окном, crawl config, OCC, CSRF, idempotency и
+`automation.view/manage/enable`/`page.manage`. Jobs владеет versioned
+`crawl_automations` и immutable `crawl_automation_runs`, отдельным BullMQ Job
+Scheduler и общим plan-capacity lock с rank automations. До dispatch
+отсекаются quiet window, overlap, активный crawl того же host и глобальный
+host backoff. Каждый фактический запуск идёт через dedicated
+`JOBS_TO_PLATFORM_AUTOMATION_TOKEN`: Platform API заново проверяет текущие
+membership/RBAC/workspace/project границы и только затем идемпотентно создаёт
+technical crawl. В том же pre-dispatch gate заново проверяется текущий
+billing entitlement, поэтому истёкшая после создания расписания подписка не
+может запустить платный crawl; manual run использует ту же fresh billing
+границу. Reconciliation восстанавливает scheduler/pre-dispatch и settle-ит
+terminal crawl; ошибки включают threshold auto-pause, а отозванная
+авторизация/read-only billing выключают расписание сразу. Jobs API Redis ACL
+включает точный `crawl-automation` keyspace, а readiness выполняет bounded
+операцию в каждом из восьми queue keyspaces вместо недостаточного `PING`.
+
 P3 billing foundation реализован в Platform API и Web. Versioned каталог
 содержит Trial/Solo/Team/Agency/Business/Enterprise и годовые цены; hosted
 checkout YooKassa не принимает карточные данные, использует provider
@@ -343,7 +367,7 @@ digest.
 device boundaries сохранены отдельно. Все internal clients запрещают
 redirect, а service-token guards требуют один strict header. До запуска
 credential-bearing processes и NATS Compose выполняет network-less one-shot
-`service-token-preflight`: он глобально проверяет 25 credentials и отдельно
+`service-token-preflight`: он глобально проверяет 26 credentials и отдельно
 пять NATS bcrypt verifier и пять usernames без вывода значений или хэшей.
 Jobs image дополнительно
 получил явные process roles:
@@ -553,8 +577,8 @@ outbox/inbox foundations либо собственные producer rows.
   Guard принимает один exact header и сравнивает credential timing-safe;
   internal clients используют `redirect: "error"`.
 - Deploy-level `service-token-preflight` намеренно строже runtime validation:
-  до запуска credential-bearing processes он проверяет 25 deploy credentials
-  (десять service tokens, `RANK_HISTORY_CURSOR_KEY`, девять Redis passwords и
+  до запуска credential-bearing processes он проверяет 26 deploy credentials
+  (одиннадцать service tokens, `RANK_HISTORY_CURSOR_KEY`, девять Redis passwords и
   пять NATS passwords)
   на глобальную pairwise distinctness, пять NATS bcrypt verifier с
   canonical `$2a$` prefix/cost `11` на format/раздельность и пять NATS
@@ -855,6 +879,13 @@ Backend convention:
   bounded XML/XML.GZ sitemap/index traversal, include/exclude/query scope,
   conditional HTTP validators, global host backoff,
   PostgreSQL lease/checkpoint/retry recovery и secret-free BullMQ payload;
+- `platform-jobs-integrations/src/crawl-automations` и
+  `src/queue/crawl-automation.queue.ts` — versioned Radar schedule CRUD,
+  quiet-window/host/no-overlap admission, dedicated fresh authorization
+  dispatch, BullMQ reconciliation, terminal settlement и auto-pause;
+- `platform-jobs-integrations/prisma/migrations/20260731233000_crawl_automations`
+  — tenant-safe definitions/runs, immutable schedule provenance, lifecycle,
+  trigger/idempotency/chronology constraints и crawl/Job FKs;
 - `platform-jobs-integrations/prisma/migrations/20260731230100_crawl_host_backoff`
   — global per-host failure/latency state и durable per-crawl
   `backoffCode/backoffUntil`;
@@ -863,9 +894,11 @@ Backend convention:
   deterministic before/after diff и tenant-safe Page Map update без raw HTML;
 - `platform-seo-data/prisma/migrations/20260731230000_crawl_conditional_requests`
   — bounded HTTP validators и tenant-bound immutable snapshot reuse evidence;
-- `platform-api/src/crawls` и
-  `platform-web/components/project-crawl-audit.tsx` — public RBAC/CSRF/audit
-  boundary и private browser progress/issues/Radar history UI;
+- `platform-api/src/crawls`,
+  `platform-web/components/project-crawl-audit.tsx` и
+  `crawl-automation-panel.tsx` — public RBAC/CSRF/audit boundary, dedicated
+  Jobs→Platform fresh-execution authorization и private browser
+  progress/issues/Radar history/schedule UI;
 - `platform-jobs-integrations/src/platform-api` — bounded/no-redirect client
   issuer-а с dedicated token, exact envelope/request/scope hash validation,
   no-store check, response size и timeout limits;
@@ -1064,7 +1097,7 @@ Backend convention:
   caller/audience, dedicated service tokens и девяти Redis credentials и
   запрещает legacy env;
 - `platform-infrastructure/security/validate-service-tokens.sh` — one-shot
-  fail-closed deploy preflight для глобальной проверки 25 credentials и
+  fail-closed deploy preflight для глобальной проверки 26 credentials и
   пяти отдельных NATS bcrypt verifier/usernames; credential-bearing
   processes и NATS зависят от его успешного завершения;
 - тот же Compose fail-closed требует `JOBS_TO_SEO_RANK_RESULT_TOKEN` и
@@ -1541,10 +1574,10 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API tests: 444 pass, 0 fail, 5 opt-in PostgreSQL 18 tests skipped
+- Platform API tests: 448 pass, 0 fail, 5 opt-in PostgreSQL 18 tests skipped
   без отдельного disposable database URL.
 - SEO data tests: 134 pass, 0 fail, 1 disposable-DB test skipped.
-- Jobs/integrations tests: 466 pass, 0 fail, 10 disposable-DB tests skipped
+- Jobs/integrations tests: 472 pass, 0 fail, 10 disposable-DB tests skipped
   в обычном запуске; startup decrypt-canary targeted suite — 7/7 pass.
 - Realtime unit tests: 112 pass, 0 fail.
 - Contracts unit tests: 100 pass, 0 fail.
@@ -1580,6 +1613,12 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
   immutable `304` reuse, перенос issues и sitemap-only diff; полная цепочка
   из 32 Jobs migrations и opt-in integration подтверждает сериализацию
   глобального host state, `Retry-After`, recovery и latency backoff.
+- Fresh PostgreSQL 18 Radar schedule gate: полная цепочка из 33 Jobs
+  migrations применена без пропусков, таблицы definitions/runs и immutable
+  guard trigger проверены. Live Redis 8.8.1 gate выполняет BullMQ
+  scheduler/worker round-trip для `rank-automation` и `crawl-automation`;
+  отдельный runtime restart и повторный полный user smoke подтвердили
+  исправленный ACL/readiness без worker error loop.
 - Обе conditional/backoff migrations применены к живому PostgreSQL 18
   runtime; все HTTP/Web/MinIO health endpoints отвечают `200`, ClamAV ready,
   повторный crawl `019fb769-a26b-7a86-9a44-c6d8fe4f732e` завершён, а его
@@ -2075,16 +2114,17 @@ OAuth/OIDC выполняется после подтверждения зави
   не попадают в NATS/Jobs DB и не логируются.
 - QR для TOTP пока представлен локальным `otpauth://` URI и ручным ключом;
   UI QR появится после подтверждения зависимости `qrcode`.
-- Arsenkin position execution реализован; production live BYOK canary,
-  provider incident telemetry/circuit breaker и schedule orchestration ещё
-  обязательны. Keys.so пока используется только для credential validation,
-  XMLStock ждёт подтверждённого provider contract и redacted fixtures.
+- Arsenkin position execution и daily/weekly schedule orchestration
+  реализованы; до production live BYOK canary остаются обязательны provider
+  credentials владельца и incident telemetry/circuit breaker. Keys.so пока
+  используется только для credential validation, XMLStock ждёт
+  подтверждённого provider contract и redacted fixtures.
 - Technical crawl production vertical закрывает ручной bounded обход,
   sitemap/include/exclude/query scope, conditional page requests, global
-  host backoff, текущие issues и page diff history.
-  Полный Radar из раздела 10 ТЗ ещё требует schedules/quiet windows,
-  duplicate groups, notifications, long-lived `PAUSED_BY_SITE` policy и
-  отдельный
+  host backoff, current issues, page diff history и versioned daily/weekly
+  schedules с quiet windows/no-overlap/fresh execution authorization.
+  Полный Radar из раздела 10 ТЗ ещё требует duplicate groups, notifications,
+  long-lived `PAUSED_BY_SITE` policy и отдельный
   browser-rendering pool. Sitemap disappearance гарантированно фиксируется,
   когда URL также остаётся доступен из start/link scope; для исчезнувшей из
   всех источников страницы требуется отдельный crawl-level membership

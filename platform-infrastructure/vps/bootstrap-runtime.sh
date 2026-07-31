@@ -83,9 +83,15 @@ if [ ! -x "$runtime_root/postgres/usr/lib/postgresql/18/bin/postgres" ]; then
   mkdir -p "$runtime_root/postgres"
   cp -a "$postgres_distribution_root/." "$runtime_root/postgres/"
 fi
-install -m 0755 "$redis_server_binary" "$runtime_root/bin/redis-server"
-install -m 0755 "$redis_cli_binary" "$runtime_root/bin/redis-cli"
-install -m 0755 "$nats_server_binary" "$runtime_root/bin/nats-server"
+if [ "$(readlink -f "$redis_server_binary")" != "$runtime_root/bin/redis-server" ]; then
+  install -m 0755 "$redis_server_binary" "$runtime_root/bin/redis-server"
+fi
+if [ "$(readlink -f "$redis_cli_binary")" != "$runtime_root/bin/redis-cli" ]; then
+  install -m 0755 "$redis_cli_binary" "$runtime_root/bin/redis-cli"
+fi
+if [ "$(readlink -f "$nats_server_binary")" != "$runtime_root/bin/nats-server" ]; then
+  install -m 0755 "$nats_server_binary" "$runtime_root/bin/nats-server"
+fi
 
 "$runtime_root/postgres/usr/lib/postgresql/18/bin/postgres" --version |
   grep -Eq '^postgres \(PostgreSQL\) 18\.' ||
@@ -162,6 +168,7 @@ if [ ! -f "$runtime_env_file" ]; then
     JOBS_TO_SEO_RANK_TOKEN \
     JOBS_TO_SEO_RANK_RESULT_TOKEN \
     JOBS_TO_PLATFORM_RANK_GRANT_TOKEN \
+    JOBS_TO_PLATFORM_AUTOMATION_TOKEN \
     JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN \
     RANK_HISTORY_CURSOR_KEY \
     AUTH_PASSWORD_PEPPER
@@ -230,6 +237,20 @@ if ! grep -q '^MINIO_ROOT_USER=' "$runtime_env_file"; then
   write_environment_value S3_REGION us-east-1
   write_environment_value S3_BUCKET_UPLOADS seo-platform-uploads
   write_environment_value S3_BUCKET_ARTIFACTS seo-platform-artifacts
+  mv "$temporary_env_file" "$runtime_env_file"
+  temporary_env_file=
+  trap - EXIT INT TERM
+  chmod 600 "$runtime_env_file"
+fi
+
+if ! grep -q '^JOBS_TO_PLATFORM_AUTOMATION_TOKEN=' "$runtime_env_file"; then
+  temporary_env_file=$runtime_root/runtime.env.tmp.$$
+  trap 'rm -f "$temporary_env_file"' EXIT INT TERM
+  cp "$runtime_env_file" "$temporary_env_file"
+  chmod 600 "$temporary_env_file"
+  write_environment_value \
+    JOBS_TO_PLATFORM_AUTOMATION_TOKEN \
+    "$(random_url_secret)"
   mv "$temporary_env_file" "$runtime_env_file"
   temporary_env_file=
   trap - EXIT INT TERM

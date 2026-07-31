@@ -61,6 +61,7 @@ const jobsUsers = [
   ],
   ["seo_jobs_import", "REDIS_JOBS_IMPORT_PASSWORD", "semantic-import"],
   ["seo_jobs_rank", "REDIS_JOBS_RANK_PASSWORD", "rank-preparation"],
+  ["seo_jobs_crawl", "REDIS_JOBS_CRAWL_PASSWORD", "crawls"],
   [
     "seo_jobs_connector",
     "REDIS_JOBS_CONNECTOR_PASSWORD",
@@ -134,6 +135,12 @@ test("Redis 8 Jobs ACL runs BullMQ and enforces queue keyspaces", liveTestOption
       "seo_jobs_api",
       secrets.REDIS_JOBS_API_PASSWORD,
       "rank-automation"
+    );
+    await assertBullMqRoundTrip(
+      port,
+      "seo_jobs_api",
+      secrets.REDIS_JOBS_API_PASSWORD,
+      "crawl-automation"
     );
   });
 });
@@ -240,7 +247,7 @@ async function assertBullMqRoundTrip(
   let worker;
   try {
     await withDeadline(queue.waitUntilReady(), 5_000, "BullMQ queue did not become ready");
-    if (queueName === "rank-automation") {
+    if (queueName.endsWith("-automation")) {
       const schedulerId = `live-scheduler-${randomUUID()}`;
       const scheduled = await queue.upsertJobScheduler(
         schedulerId,
@@ -529,6 +536,7 @@ function redisSecrets() {
     REDIS_JOBS_INSPECTION_PASSWORD: randomSecret(),
     REDIS_JOBS_IMPORT_PASSWORD: randomSecret(),
     REDIS_JOBS_RANK_PASSWORD: randomSecret(),
+    REDIS_JOBS_CRAWL_PASSWORD: randomSecret(),
     REDIS_JOBS_CONNECTOR_PASSWORD: randomSecret(),
     REDIS_REALTIME_PASSWORD: randomSecret(),
     REDIS_DIRECTUS_PASSWORD: randomSecret()

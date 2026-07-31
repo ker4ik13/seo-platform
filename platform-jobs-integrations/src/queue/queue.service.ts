@@ -45,6 +45,12 @@ import {
   enqueueCrawl,
   type CrawlJobData
 } from "./crawl.queue.js";
+import {
+  CRAWL_AUTOMATION_QUEUE,
+  type CrawlAutomationJobData,
+  removeCrawlAutomationScheduler,
+  upsertCrawlAutomationScheduler
+} from "./crawl-automation.queue.js";
 
 export const SYSTEM_QUEUE = "system";
 
@@ -61,6 +67,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   private rankPreparationQueue?: Queue<RankPreparationJobData>;
   private rankAutomationQueue?: Queue<RankAutomationJobData>;
   private crawlQueue?: Queue<CrawlJobData>;
+  private crawlAutomationQueue?: Queue<CrawlAutomationJobData>;
 
   public constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
@@ -102,6 +109,10 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       CRAWL_QUEUE,
       bullMqConnectionOptions(this.connection)
     );
+    this.crawlAutomationQueue = new Queue(
+      CRAWL_AUTOMATION_QUEUE,
+      bullMqConnectionOptions(this.connection)
+    );
   }
 
   public async onModuleDestroy(): Promise<void> {
@@ -112,6 +123,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     await this.rankPreparationQueue?.close();
     await this.rankAutomationQueue?.close();
     await this.crawlQueue?.close();
+    await this.crawlAutomationQueue?.close();
     await this.connection?.quit();
   }
 
@@ -125,6 +137,24 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   public async ping(): Promise<void> {
     if (!this.connection) throw new Error("Redis is not connected");
     await this.connection.ping();
+    const queues = [
+      this.systemQueue,
+      this.uploadInspectionQueue,
+      this.semanticImportQueue,
+      this.integrationCredentialValidationQueue,
+      this.rankPreparationQueue,
+      this.rankAutomationQueue,
+      this.crawlQueue,
+      this.crawlAutomationQueue
+    ];
+    if (queues.some((queue) => !queue)) {
+      throw new Error("One or more Redis queues are not connected");
+    }
+    // PING alone cannot detect an ACL that omitted a newly introduced queue.
+    // Touch one bounded key per queue so readiness covers every keyspace.
+    await Promise.all(
+      queues.map((queue) => queue!.getJobCounts("waiting"))
+    );
   }
 
   public async enqueueUploadInspection(uploadId: string): Promise<void> {
@@ -213,6 +243,33 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     }
     return removeRankAutomationScheduler(
       this.rankAutomationQueue,
+      automationId
+    );
+  }
+
+  public async upsertCrawlAutomationScheduler(input: {
+    readonly automationId: string;
+    readonly automationVersion: number;
+    readonly schedule: AutomationSchedule;
+    readonly timezone: string;
+  }): Promise<Date> {
+    if (!this.crawlAutomationQueue) {
+      throw new Error("Crawl automation queue is not connected");
+    }
+    return upsertCrawlAutomationScheduler(
+      this.crawlAutomationQueue,
+      input
+    );
+  }
+
+  public async removeCrawlAutomationScheduler(
+    automationId: string
+  ): Promise<boolean> {
+    if (!this.crawlAutomationQueue) {
+      throw new Error("Crawl automation queue is not connected");
+    }
+    return removeCrawlAutomationScheduler(
+      this.crawlAutomationQueue,
       automationId
     );
   }

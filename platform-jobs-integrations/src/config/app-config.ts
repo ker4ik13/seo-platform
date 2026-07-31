@@ -74,6 +74,7 @@ export interface AppConfig {
   readonly rankManifestApiToken?: string;
   readonly rankResultApiToken?: string;
   readonly rankGrantApiToken?: string;
+  readonly automationDispatchApiToken?: string;
   readonly authEmailApiToken?: string;
   readonly internalCommandTimeoutMs: number;
   readonly platformApiCommandTimeoutMs: number;
@@ -177,6 +178,7 @@ const SERVICE_TOKEN_ENVIRONMENT_VARIABLES = [
   "JOBS_TO_SEO_RANK_TOKEN",
   "JOBS_TO_SEO_RANK_RESULT_TOKEN",
   "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
+  "JOBS_TO_PLATFORM_AUTOMATION_TOKEN",
   "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN"
 ] as const;
 
@@ -617,6 +619,10 @@ export function loadAppConfig(
     env,
     "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN"
   );
+  const automationDispatchApiToken = serviceToken(
+    env,
+    "JOBS_TO_PLATFORM_AUTOMATION_TOKEN"
+  );
   const authEmailApiToken = serviceToken(
     env,
     "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN"
@@ -793,6 +799,18 @@ export function loadAppConfig(
   }
   if (
     nodeEnv === "production" &&
+    processRole === "HTTP" &&
+    (
+      !automationDispatchApiToken ||
+      automationDispatchApiToken.length < 32
+    )
+  ) {
+    throw new Error(
+      "JOBS_TO_PLATFORM_AUTOMATION_TOKEN with at least 32 characters is required by the Jobs HTTP process"
+    );
+  }
+  if (
+    nodeEnv === "production" &&
     (processRole === "HTTP" ||
       processRole === "IMPORT_WORKER" ||
       processRole === "CRAWL_WORKER") &&
@@ -814,6 +832,11 @@ export function loadAppConfig(
   if (processRole !== "HTTP" && platformApiToken) {
     throw new Error(
       "Only the Jobs HTTP process may receive PLATFORM_API_TO_JOBS_TOKEN"
+    );
+  }
+  if (processRole !== "HTTP" && automationDispatchApiToken) {
+    throw new Error(
+      "Only the Jobs HTTP process may receive JOBS_TO_PLATFORM_AUTOMATION_TOKEN"
     );
   }
   if (
@@ -1227,6 +1250,7 @@ export function loadAppConfig(
     JOBS_TO_SEO_RANK_TOKEN: rankManifestApiToken,
     JOBS_TO_SEO_RANK_RESULT_TOKEN: rankResultApiToken,
     JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankGrantApiToken,
+    JOBS_TO_PLATFORM_AUTOMATION_TOKEN: automationDispatchApiToken,
     JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: authEmailApiToken
   });
 
@@ -1254,6 +1278,9 @@ export function loadAppConfig(
     ...(rankManifestApiToken ? { rankManifestApiToken } : {}),
     ...(rankResultApiToken ? { rankResultApiToken } : {}),
     ...(rankGrantApiToken ? { rankGrantApiToken } : {}),
+    ...(automationDispatchApiToken
+      ? { automationDispatchApiToken }
+      : {}),
     ...(authEmailApiToken ? { authEmailApiToken } : {}),
     internalCommandTimeoutMs,
     platformApiCommandTimeoutMs,

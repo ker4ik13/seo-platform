@@ -15,6 +15,7 @@ import { UploadModule } from "./uploads/upload.module.js";
 import { SemanticImportModule } from "./imports/semantic-import.module.js";
 import { AutomationModule } from "./automations/automation.module.js";
 import { CrawlModule } from "./crawls/crawl.module.js";
+import { CrawlAutomationModule } from "./crawl-automations/crawl-automation.module.js";
 
 @Module({
   imports: [
@@ -33,7 +34,8 @@ import { CrawlModule } from "./crawls/crawl.module.js";
     UploadModule,
     SemanticImportModule,
     AutomationModule,
-    CrawlModule
+    CrawlModule,
+    CrawlAutomationModule
   ]
 })
 export class AppModule {}

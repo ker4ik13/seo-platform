@@ -20,6 +20,7 @@ import {
   BrowserApiError,
   browserApiRequest
 } from "../lib/browser-api";
+import { CrawlAutomationPanel } from "./crawl-automation-panel";
 
 const ACTIVE = new Set<TechnicalCrawlStatus>([
   "QUEUED",
@@ -367,6 +368,10 @@ export function ProjectCrawlAudit({
           </p>
         )}
       </div>
+      <CrawlAutomationPanel
+        defaultStartUrl={startUrl}
+        projectId={projectId}
+      />
     </section>
   );
 }

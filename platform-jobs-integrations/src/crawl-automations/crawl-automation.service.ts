@@ -8,31 +8,31 @@ import {
 } from "@nestjs/common";
 import type {
   AutomationCapacityEntitlement,
-  InternalAutomationStatusInput,
-  InternalCreateRankTrackingAutomationInput,
-  InternalUpdateRankTrackingAutomationInput,
-  RankTrackingAutomationCollection,
-  RankTrackingAutomationSummary
+  CrawlAutomationCollection,
+  CrawlAutomationSummary,
+  InternalCreateCrawlAutomationInput,
+  InternalCrawlAutomationStatusInput,
+  InternalUpdateCrawlAutomationInput
 } from "@seo-platform/contracts";
 import type {
-  Automation,
+  CrawlAutomation,
   Prisma
 } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { QueueService } from "../queue/queue.service.js";
 import {
-  automationDefinition,
-  automationDefinitionJson,
-  sameAutomationCommand,
-  storedAutomationDefinition,
-  toAutomationSummary
-} from "./automation-record.js";
+  crawlAutomationDefinition,
+  crawlAutomationDefinitionJson,
+  sameCrawlAutomationCommand,
+  storedCrawlAutomationDefinition,
+  toCrawlAutomationSummary
+} from "./crawl-automation-record.js";
 
-const AUTOMATION_LIST_LIMIT = 100;
+const LIST_LIMIT = 100;
 
 @Injectable()
-export class AutomationService {
-  private readonly logger = new Logger(AutomationService.name);
+export class CrawlAutomationService {
+  private readonly logger = new Logger(CrawlAutomationService.name);
 
   public constructor(
     private readonly prisma: PrismaService,
@@ -40,44 +40,45 @@ export class AutomationService {
   ) {}
 
   public async create(
-    input: InternalCreateRankTrackingAutomationInput
-  ): Promise<RankTrackingAutomationSummary> {
+    input: InternalCreateCrawlAutomationInput
+  ): Promise<CrawlAutomationSummary> {
     const replay = await this.findIdempotent(input);
     if (replay) {
       this.assertReplay(replay, input);
       return this.syncAfterCommit(replay);
     }
-    let automation: Automation;
+    let automation: CrawlAutomation;
     try {
       automation = await this.prisma.$transaction(async (transaction) => {
-        await lockAutomationCapacity(transaction, input.workspaceId);
-        const transactionReplay = await transaction.automation.findUnique({
-          where: {
-            workspaceId_createdBy_idempotencyKey: {
-              workspaceId: input.workspaceId,
-              createdBy: input.actorId,
-              idempotencyKey: input.idempotencyKey
+        await lockCapacity(transaction, input.workspaceId);
+        const transactionReplay =
+          await transaction.crawlAutomation.findUnique({
+            where: {
+              workspaceId_createdBy_idempotencyKey: {
+                workspaceId: input.workspaceId,
+                createdBy: input.actorId,
+                idempotencyKey: input.idempotencyKey
+              }
             }
-          }
-        });
+          });
         if (transactionReplay) {
           this.assertReplay(transactionReplay, input);
           return transactionReplay;
         }
         if (input.enabled) {
-          await assertAutomationCapacity(
+          await assertCapacity(
             transaction,
             input.workspaceId,
             input.entitlement
           );
         }
-        return transaction.automation.create({
+        return transaction.crawlAutomation.create({
           data: {
             workspaceId: input.workspaceId,
             projectId: input.projectId,
             name: input.name,
-            definition: automationDefinitionJson(
-              automationDefinition(input)
+            definition: crawlAutomationDefinitionJson(
+              crawlAutomationDefinition(input)
             ),
             timezone: input.timezone,
             enabled: input.enabled,
@@ -102,12 +103,12 @@ export class AutomationService {
     workspaceId: string,
     projectId: string,
     limit: number
-  ): Promise<RankTrackingAutomationCollection> {
+  ): Promise<CrawlAutomationCollection> {
     const [automations, rankEnabled, crawlEnabled] = await Promise.all([
-      this.prisma.automation.findMany({
+      this.prisma.crawlAutomation.findMany({
         where: { workspaceId, projectId },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-        take: AUTOMATION_LIST_LIMIT + 1
+        take: LIST_LIMIT + 1
       }),
       this.prisma.automation.count({
         where: { workspaceId, enabled: true }
@@ -118,44 +119,40 @@ export class AutomationService {
     ]);
     return {
       automations: automations
-        .slice(0, AUTOMATION_LIST_LIMIT)
-        .map(toAutomationSummary),
+        .slice(0, LIST_LIMIT)
+        .map(toCrawlAutomationSummary),
       limit,
       enabledCount: rankEnabled + crawlEnabled,
-      truncated: automations.length > AUTOMATION_LIST_LIMIT
+      truncated: automations.length > LIST_LIMIT
     };
   }
 
   public async update(
-    input: InternalUpdateRankTrackingAutomationInput
-  ): Promise<RankTrackingAutomationSummary> {
+    input: InternalUpdateCrawlAutomationInput
+  ): Promise<CrawlAutomationSummary> {
     const automation = await this.prisma.$transaction(
       async (transaction) => {
-        await lockAutomationCapacity(transaction, input.workspaceId);
-        const current = await requiredAutomation(
-          transaction,
-          input.workspaceId,
-          input.projectId,
-          input.automationId
-        );
+        await lockCapacity(transaction, input.workspaceId);
+        const current = await requiredAutomation(transaction, input);
         assertVersion(current, input.expectedVersion);
         if (input.enabled && !current.enabled) {
-          await assertAutomationCapacity(
+          await assertCapacity(
             transaction,
             input.workspaceId,
             input.entitlement
           );
         }
-        return transaction.automation.update({
+        return transaction.crawlAutomation.update({
           where: { id: current.id },
           data: {
             name: input.name,
-            definition: automationDefinitionJson(
-              automationDefinition(input)
+            definition: crawlAutomationDefinitionJson(
+              crawlAutomationDefinition(input)
             ),
             timezone: input.timezone,
             enabled: input.enabled,
             pausedReason: input.enabled ? null : "MANUAL",
+            ...(!input.enabled ? { nextRunAt: null } : {}),
             updatedBy: input.actorId,
             version: { increment: 1 }
           }
@@ -166,19 +163,14 @@ export class AutomationService {
   }
 
   public async pause(
-    input: InternalAutomationStatusInput
-  ): Promise<RankTrackingAutomationSummary> {
+    input: InternalCrawlAutomationStatusInput
+  ): Promise<CrawlAutomationSummary> {
     const automation = await this.prisma.$transaction(
       async (transaction) => {
-        await lockAutomationCapacity(transaction, input.workspaceId);
-        const current = await requiredAutomation(
-          transaction,
-          input.workspaceId,
-          input.projectId,
-          input.automationId
-        );
+        await lockCapacity(transaction, input.workspaceId);
+        const current = await requiredAutomation(transaction, input);
         assertVersion(current, input.expectedVersion);
-        return transaction.automation.update({
+        return transaction.crawlAutomation.update({
           where: { id: current.id },
           data: {
             enabled: false,
@@ -194,41 +186,31 @@ export class AutomationService {
   }
 
   public async resume(
-    input: InternalAutomationStatusInput
-  ): Promise<RankTrackingAutomationSummary> {
+    input: InternalCrawlAutomationStatusInput
+  ): Promise<CrawlAutomationSummary> {
     const automation = await this.prisma.$transaction(
       async (transaction) => {
-        await lockAutomationCapacity(transaction, input.workspaceId);
-        const current = await requiredAutomation(
-          transaction,
-          input.workspaceId,
-          input.projectId,
-          input.automationId
-        );
+        await lockCapacity(transaction, input.workspaceId);
+        const current = await requiredAutomation(transaction, input);
         assertVersion(current, input.expectedVersion);
         if (!current.enabled) {
-          await assertAutomationCapacity(
+          await assertCapacity(
             transaction,
             input.workspaceId,
             input.entitlement
           );
         }
-        const definition = storedAutomationDefinition(
+        const definition = storedCrawlAutomationDefinition(
           current.definition
         );
-        return transaction.automation.update({
+        return transaction.crawlAutomation.update({
           where: { id: current.id },
           data: {
             enabled: true,
             pausedReason: null,
-            definition: automationDefinitionJson({
+            definition: crawlAutomationDefinitionJson({
               ...definition,
-              execution: {
-                actorId: input.actorId,
-                project: input.project,
-                access: input.access,
-                billingCurrency: input.billingCurrency
-              }
+              actorId: input.actorId
             }),
             updatedBy: input.actorId,
             version: { increment: 1 }
@@ -240,7 +222,7 @@ export class AutomationService {
   }
 
   public async reconcileSchedulers(limit = 100): Promise<number> {
-    const automations = await this.prisma.automation.findMany({
+    const automations = await this.prisma.crawlAutomation.findMany({
       orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
       take: Math.min(Math.max(limit, 1), 500)
     });
@@ -257,41 +239,41 @@ export class AutomationService {
   }
 
   private async syncAfterCommit(
-    automation: Automation
-  ): Promise<RankTrackingAutomationSummary> {
+    automation: CrawlAutomation
+  ): Promise<CrawlAutomationSummary> {
     try {
       return await this.sync(automation);
     } catch {
       this.logger.error(
-        "Automation scheduler synchronization deferred"
+        "Crawl automation scheduler synchronization deferred"
       );
-      return toAutomationSummary(automation);
+      return toCrawlAutomationSummary(automation);
     }
   }
 
   private async sync(
-    automation: Automation
-  ): Promise<RankTrackingAutomationSummary> {
+    automation: CrawlAutomation
+  ): Promise<CrawlAutomationSummary> {
     try {
       if (!automation.enabled) {
-        await this.queue.removeRankAutomationScheduler(automation.id);
-        const current = await this.prisma.automation.update({
+        await this.queue.removeCrawlAutomationScheduler(automation.id);
+        const current = await this.prisma.crawlAutomation.update({
           where: { id: automation.id },
           data: { nextRunAt: null }
         });
-        return toAutomationSummary(current);
+        return toCrawlAutomationSummary(current);
       }
-      const definition = storedAutomationDefinition(
+      const definition = storedCrawlAutomationDefinition(
         automation.definition
       );
       const nextRunAt =
-        await this.queue.upsertRankAutomationScheduler({
+        await this.queue.upsertCrawlAutomationScheduler({
           automationId: automation.id,
           automationVersion: automation.version,
           schedule: definition.schedule,
           timezone: automation.timezone
         });
-      await this.prisma.automation.updateMany({
+      await this.prisma.crawlAutomation.updateMany({
         where: {
           id: automation.id,
           version: automation.version,
@@ -299,24 +281,24 @@ export class AutomationService {
         },
         data: { nextRunAt }
       });
-      const current = await this.prisma.automation.findUnique({
+      const current = await this.prisma.crawlAutomation.findUnique({
         where: { id: automation.id }
       });
       if (!current) throw new NotFoundException("Automation not found");
-      return toAutomationSummary(current);
+      return toCrawlAutomationSummary(current);
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new ServiceUnavailableException(
-        "Unable to synchronize the automation scheduler",
+        "Unable to synchronize the crawl automation scheduler",
         { cause: error }
       );
     }
   }
 
   private findIdempotent(
-    input: InternalCreateRankTrackingAutomationInput
-  ): Promise<Automation | null> {
-    return this.prisma.automation.findUnique({
+    input: InternalCreateCrawlAutomationInput
+  ): Promise<CrawlAutomation | null> {
+    return this.prisma.crawlAutomation.findUnique({
       where: {
         workspaceId_createdBy_idempotencyKey: {
           workspaceId: input.workspaceId,
@@ -328,16 +310,16 @@ export class AutomationService {
   }
 
   private assertReplay(
-    automation: Automation,
-    input: InternalCreateRankTrackingAutomationInput
+    automation: CrawlAutomation,
+    input: InternalCreateCrawlAutomationInput
   ): void {
-    if (sameAutomationCommand(automation, input)) return;
+    if (sameCrawlAutomationCommand(automation, input)) return;
     throw new HttpException(
       {
         error: {
           code: "IDEMPOTENCY_CONFLICT",
           message:
-            "Idempotency key was already used for another automation"
+            "Idempotency key was already used for another crawl automation"
         }
       },
       HttpStatus.CONFLICT
@@ -345,7 +327,7 @@ export class AutomationService {
   }
 }
 
-async function lockAutomationCapacity(
+async function lockCapacity(
   transaction: Prisma.TransactionClient,
   workspaceId: string
 ): Promise<void> {
@@ -356,15 +338,13 @@ async function lockAutomationCapacity(
   `;
 }
 
-async function assertAutomationCapacity(
+async function assertCapacity(
   transaction: Prisma.TransactionClient,
   workspaceId: string,
   entitlement: AutomationCapacityEntitlement
 ): Promise<void> {
   const [rank, crawl] = await Promise.all([
-    transaction.automation.count({
-      where: { workspaceId, enabled: true }
-    }),
+    transaction.automation.count({ where: { workspaceId, enabled: true } }),
     transaction.crawlAutomation.count({
       where: { workspaceId, enabled: true }
     })
@@ -393,24 +373,33 @@ async function assertAutomationCapacity(
 
 async function requiredAutomation(
   transaction: Prisma.TransactionClient,
-  workspaceId: string,
-  projectId: string,
-  automationId: string
-): Promise<Automation> {
-  const automation = await transaction.automation.findFirst({
-    where: { id: automationId, workspaceId, projectId }
+  input: {
+    readonly workspaceId: string;
+    readonly projectId: string;
+    readonly automationId: string;
+  }
+): Promise<CrawlAutomation> {
+  const automation = await transaction.crawlAutomation.findFirst({
+    where: {
+      id: input.automationId,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId
+    }
   });
   if (!automation) throw new NotFoundException("Automation not found");
   return automation;
 }
 
-function assertVersion(automation: Automation, expectedVersion: number): void {
+function assertVersion(
+  automation: CrawlAutomation,
+  expectedVersion: number
+): void {
   if (automation.version === expectedVersion) return;
   throw new HttpException(
     {
       error: {
         code: "VERSION_CONFLICT",
-        message: "Automation version conflict",
+        message: "Crawl automation version conflict",
         details: { currentVersion: automation.version }
       }
     },

@@ -142,6 +142,7 @@ startup. Обычные internal HTTP-вызовы разделены так:
 | `JOBS_TO_SEO_DATA_TOKEN` | `jobs-integrations` HTTP и `import-worker` | `seo-data` |
 | `PLATFORM_API_TO_REALTIME_TOKEN` | `platform-api` | `realtime` general HTTP |
 | `JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN` | `auth-email-worker` | `platform-api` JIT material/completion |
+| `JOBS_TO_PLATFORM_AUTOMATION_TOKEN` | `jobs-integrations` HTTP scheduler | `platform-api` fresh crawl authorization |
 
 Credential vault, Web Push device lifecycle, rank manifest/result/grant и
 auth-email JIT material/completion используют отдельные narrow credentials и
@@ -155,9 +156,10 @@ Compose static regression проверяет exact effective recipients кажд
 credential и запрещает встроенные значения вместо required deploy variable.
 
 Перед запуском credential-bearing processes, Redis servers и NATS Compose
-обязательно завершает one-shot `service-token-preflight`. Он получает десять
+обязательно завершает one-shot `service-token-preflight`. Он получает
+одиннадцать
 service tokens, `RANK_HISTORY_CURSOR_KEY`, девять Redis passwords и пять
-NATS passwords, проверяет все 25 credentials на глобальную pairwise
+NATS passwords, проверяет все 26 credentials на глобальную pairwise
 distinctness, отсутствие placeholders и длину `32..512`. Дополнительно он
 проверяет пять разных canonical bcrypt verifier записей и пять NATS
 usernames отдельно на уникальный

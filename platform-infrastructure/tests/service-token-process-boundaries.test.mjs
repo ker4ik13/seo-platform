@@ -15,6 +15,7 @@ const globallyDistinctDeployCredentials = [
   "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN",
   "JOBS_TO_SEO_RANK_TOKEN",
   "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
+  "JOBS_TO_PLATFORM_AUTOMATION_TOKEN",
   "JOBS_TO_SEO_RANK_RESULT_TOKEN",
   "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN",
   "RANK_HISTORY_CURSOR_KEY",
@@ -124,6 +125,10 @@ const dedicatedBoundaries = new Map([
     ["platform-api", "rank-worker"]
   ],
   [
+    "JOBS_TO_PLATFORM_AUTOMATION_TOKEN",
+    ["jobs-integrations", "platform-api"]
+  ],
+  [
     "JOBS_TO_SEO_RANK_RESULT_TOKEN",
     ["rank-worker", "seo-data"]
   ],
@@ -162,6 +167,7 @@ const expectedJobsHttpEnvironment = sorted([
   "INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS",
   "INTEGRATION_CREDENTIAL_KEYS",
   "INTEGRATION_CREDENTIAL_ROLE",
+  "JOBS_TO_PLATFORM_AUTOMATION_TOKEN",
   "JOBS_TO_SEO_DATA_TOKEN",
   "NATS_PASSWORD",
   "NATS_URL",

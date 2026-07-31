@@ -72,6 +72,7 @@ test("renderer is POSIX shell and writes hashed least-privilege Jobs ACLs", asyn
     assert.deepEqual(
       keyPatterns(userLine(lines, "seo_jobs_api")),
       [
+        "~seo-platform:jobs:v1:crawl-automation:*",
         "~seo-platform:jobs:v1:crawls:*",
         "~seo-platform:jobs:v1:integration-credential-validation:*",
         "~seo-platform:jobs:v1:rank-automation:*",

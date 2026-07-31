@@ -3565,6 +3565,18 @@ svg { display: block; }
   grid-column: span 2;
 }
 
+.crawl-weekdays {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.crawl-weekdays label {
+  align-items: center;
+  display: inline-flex;
+  gap: 4px;
+}
+
 .crawl-audit-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);

@@ -15,6 +15,10 @@ import {
 import type {
   AutomationRunCollection,
   AutomationRunSummary,
+  CrawlAutomationCollection,
+  CrawlAutomationRunCollection,
+  CrawlAutomationRunSummary,
+  CrawlAutomationSummary,
   CompleteUploadInput,
   ConfigureSemanticImportInput,
   CancelSemanticImportInput,
@@ -34,6 +38,10 @@ import type {
   InternalCreateRankRunInput,
   CreateTechnicalCrawlInput,
   InternalCreateTechnicalCrawlInput,
+  InternalCreateCrawlAutomationInput,
+  InternalUpdateCrawlAutomationInput,
+  InternalCrawlAutomationStatusInput,
+  InternalRunCrawlAutomationInput,
   InternalCancelTechnicalCrawlInput,
   InternalRunRankTrackingAutomationInput,
   InternalCancelRankJobInput,
@@ -81,6 +89,12 @@ import {
   scopedAutomationRun,
   scopedAutomationRuns
 } from "./automation-response.js";
+import {
+  scopedCrawlAutomation,
+  scopedCrawlAutomationCollection,
+  scopedCrawlAutomationRun,
+  scopedCrawlAutomationRuns
+} from "./crawl-automation-response.js";
 
 interface InternalContext {
   readonly tenant: TenantAuthorization;
@@ -377,6 +391,144 @@ export class JobsClient {
       input.idempotencyKey
     );
     return scopedAutomationRun(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      input.automationId
+    );
+  }
+
+  public async listCrawlAutomations(
+    context: InternalContext,
+    limit: number
+  ): Promise<CrawlAutomationCollection> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      `${crawlAutomationCollectionPath(
+        context.tenant.workspaceId,
+        projectId
+      )}?limit=${encodeURIComponent(String(limit))}`,
+      context
+    );
+    return scopedCrawlAutomationCollection(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      limit
+    );
+  }
+
+  public async createCrawlAutomation(
+    context: InternalContext,
+    input: InternalCreateCrawlAutomationInput
+  ): Promise<CrawlAutomationSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "POST",
+      crawlAutomationCollectionPath(
+        context.tenant.workspaceId,
+        projectId
+      ),
+      context,
+      input,
+      "shared",
+      input.idempotencyKey
+    );
+    return scopedCrawlAutomation(
+      value,
+      context.tenant.workspaceId,
+      projectId
+    );
+  }
+
+  public async updateCrawlAutomation(
+    context: InternalContext,
+    input: InternalUpdateCrawlAutomationInput
+  ): Promise<CrawlAutomationSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "PATCH",
+      crawlAutomationPath(
+        context.tenant.workspaceId,
+        projectId,
+        input.automationId
+      ),
+      context,
+      input
+    );
+    return scopedCrawlAutomation(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      input.automationId
+    );
+  }
+
+  public async setCrawlAutomationStatus(
+    context: InternalContext,
+    input: InternalCrawlAutomationStatusInput,
+    action: "pause" | "resume"
+  ): Promise<CrawlAutomationSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "POST",
+      `${crawlAutomationPath(
+        context.tenant.workspaceId,
+        projectId,
+        input.automationId
+      )}/${action}`,
+      context,
+      input
+    );
+    return scopedCrawlAutomation(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      input.automationId
+    );
+  }
+
+  public async listCrawlAutomationRuns(
+    context: InternalContext,
+    automationId: string
+  ): Promise<CrawlAutomationRunCollection> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      `${crawlAutomationPath(
+        context.tenant.workspaceId,
+        projectId,
+        automationId
+      )}/runs`,
+      context
+    );
+    return scopedCrawlAutomationRuns(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      automationId
+    );
+  }
+
+  public async runCrawlAutomation(
+    context: InternalContext,
+    input: InternalRunCrawlAutomationInput
+  ): Promise<CrawlAutomationRunSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "POST",
+      `${crawlAutomationPath(
+        context.tenant.workspaceId,
+        projectId,
+        input.automationId
+      )}/runs`,
+      context,
+      input,
+      "shared",
+      input.idempotencyKey
+    );
+    return scopedCrawlAutomationRun(
       value,
       context.tenant.workspaceId,
       projectId,
@@ -1008,6 +1160,15 @@ function automationCollectionPath(
   )}/projects/${encodeURIComponent(projectId)}/automations`;
 }
 
+function crawlAutomationCollectionPath(
+  workspaceId: string,
+  projectId: string
+): string {
+  return `/internal/v1/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/projects/${encodeURIComponent(projectId)}/crawl-automations`;
+}
+
 function crawlCollectionPath(
   workspaceId: string,
   projectId: string
@@ -1338,6 +1499,17 @@ function automationPath(
   automationId: string
 ): string {
   return `${automationCollectionPath(
+    workspaceId,
+    projectId
+  )}/${encodeURIComponent(automationId)}`;
+}
+
+function crawlAutomationPath(
+  workspaceId: string,
+  projectId: string,
+  automationId: string
+): string {
+  return `${crawlAutomationCollectionPath(
     workspaceId,
     projectId
   )}/${encodeURIComponent(automationId)}`;

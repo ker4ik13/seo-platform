@@ -18,6 +18,7 @@ export interface AppConfig {
   readonly integrationCredentialApiToken?: string;
   readonly realtimeNotificationApiToken?: string;
   readonly rankExecutionGrantApiToken?: string;
+  readonly automationDispatchApiToken?: string;
   readonly authEmailApiToken?: string;
   readonly webPublicUrl?: string;
   readonly corsOrigins: readonly string[];
@@ -211,6 +212,10 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     env,
     "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN"
   );
+  const automationDispatchApiToken = serviceToken(
+    env,
+    "JOBS_TO_PLATFORM_AUTOMATION_TOKEN"
+  );
   const authEmailApiToken = serviceToken(
     env,
     "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN"
@@ -398,6 +403,18 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "A generated JOBS_TO_PLATFORM_RANK_GRANT_TOKEN with at least 32 characters is required in production"
     );
   }
+  if (
+    nodeEnv === "production" &&
+    (
+      !automationDispatchApiToken ||
+      automationDispatchApiToken.length < 32 ||
+      isPlaceholderSecret(automationDispatchApiToken)
+    )
+  ) {
+    throw new Error(
+      "A generated JOBS_TO_PLATFORM_AUTOMATION_TOKEN with at least 32 characters is required in production"
+    );
+  }
   if (isPlaceholderSecret(realtimeNotificationApiToken)) {
     throw new Error(
       "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN must not use an example placeholder"
@@ -406,6 +423,11 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (isPlaceholderSecret(rankExecutionGrantApiToken)) {
     throw new Error(
       "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN must not use an example placeholder"
+    );
+  }
+  if (isPlaceholderSecret(automationDispatchApiToken)) {
+    throw new Error(
+      "JOBS_TO_PLATFORM_AUTOMATION_TOKEN must not use an example placeholder"
     );
   }
   if (
@@ -492,6 +514,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     integrationCredentialApiToken,
     realtimeNotificationApiToken,
     rankExecutionGrantApiToken,
+    automationDispatchApiToken,
     authEmailApiToken
   ].filter((value): value is string => Boolean(value));
   if (new Set(internalTokens).size !== internalTokens.length) {
@@ -553,6 +576,9 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       : {}),
     ...(rankExecutionGrantApiToken
       ? { rankExecutionGrantApiToken }
+      : {}),
+    ...(automationDispatchApiToken
+      ? { automationDispatchApiToken }
       : {}),
     ...(authEmailApiToken ? { authEmailApiToken } : {}),
     ...(webPublicUrl ? { webPublicUrl } : {}),
