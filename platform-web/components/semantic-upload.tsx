@@ -679,12 +679,6 @@ export function SemanticUpload({
 
   return (
     <section className="panel semantic-upload">
-      <header className="panel-header">
-        <div>
-          <h2>Импорт семантики</h2>
-          <p>CSV, TSV или XLSX из Key Collector до 5 ГБ</p>
-        </div>
-      </header>
       {message && (
         <div className="inline-alert success" role="status">
           {message}
@@ -695,18 +689,26 @@ export function SemanticUpload({
           {error}
         </div>
       )}
-      <label className="upload-dropzone">
+      <label className="upload-dropzone" data-disabled={busy || undefined}>
         <input
           accept=".csv,.tsv,.xlsx"
           disabled={busy}
           onChange={selectFile}
           type="file"
         />
-        <strong>{file ? file.name : "Выберите файл семантики"}</strong>
-        <span>
-          {file
-            ? formatBytes(file.size)
-            : "Файл отправляется напрямую в S3 частями и не занимает память сервера"}
+        <span aria-hidden="true" className="upload-dropzone-icon">
+          ↑
+        </span>
+        <span className="upload-dropzone-copy">
+          <strong>{file ? file.name : "Выберите файл семантики"}</strong>
+          <small>
+            {file
+              ? `${formatBytes(file.size)} · файл готов к загрузке`
+              : "CSV, TSV или XLSX из Key Collector · до 5 ГБ"}
+          </small>
+        </span>
+        <span className="upload-dropzone-action">
+          {file ? "Заменить" : "Выбрать"}
         </span>
       </label>
       {stage !== "idle" && stage !== "cancelled" && (

@@ -18,6 +18,9 @@ export function SemanticsWorkspace({
   const [clusterRefreshVersion, setClusterRefreshVersion] = useState(0);
   const [columnRefreshVersion, setColumnRefreshVersion] = useState(0);
   const [activeTool, setActiveTool] = useState<SemanticTool>();
+  const toggleTool = (tool: SemanticTool) =>
+    setActiveTool((current) => (current === tool ? undefined : tool));
+
   return (
     <div className="semantic-workspace">
       <section className="semantic-workspace-toolbar">
@@ -29,20 +32,13 @@ export function SemanticsWorkspace({
           <a className="semantic-tool-button" href="/app/competitors">
             Сбор конкурентов
           </a>
-          <ToolButton active={activeTool === "IMPORT"} label="Импорт" onClick={() => setActiveTool("IMPORT")} />
-          <ToolButton active={activeTool === "GROUPS"} label="Группы" onClick={() => setActiveTool("GROUPS")} />
-          <ToolButton active={activeTool === "CLUSTERS"} label="Кластеры" onClick={() => setActiveTool("CLUSTERS")} />
-          <ToolButton active={activeTool === "COLUMNS"} label="Колонки" onClick={() => setActiveTool("COLUMNS")} />
-          <ToolButton active={activeTool === "HISTORY"} label="История" onClick={() => setActiveTool("HISTORY")} />
+          <ToolButton active={activeTool === "IMPORT"} label="Импорт" onClick={() => toggleTool("IMPORT")} />
+          <ToolButton active={activeTool === "GROUPS"} label="Группы" onClick={() => toggleTool("GROUPS")} />
+          <ToolButton active={activeTool === "CLUSTERS"} label="Кластеры" onClick={() => toggleTool("CLUSTERS")} />
+          <ToolButton active={activeTool === "COLUMNS"} label="Колонки" onClick={() => toggleTool("COLUMNS")} />
+          <ToolButton active={activeTool === "HISTORY"} label="История" onClick={() => toggleTool("HISTORY")} />
         </div>
       </section>
-      <SemanticCoreTable
-        columnRefreshVersion={columnRefreshVersion}
-        clusterRefreshVersion={clusterRefreshVersion}
-        groupRefreshVersion={groupRefreshVersion}
-        projectId={projectId}
-        refreshVersion={refreshVersion}
-      />
       {activeTool && (
         <section className="semantic-tool-drawer">
           <header>
@@ -71,6 +67,13 @@ export function SemanticsWorkspace({
           )}
         </section>
       )}
+      <SemanticCoreTable
+        columnRefreshVersion={columnRefreshVersion}
+        clusterRefreshVersion={clusterRefreshVersion}
+        groupRefreshVersion={groupRefreshVersion}
+        projectId={projectId}
+        refreshVersion={refreshVersion}
+      />
     </div>
   );
 }

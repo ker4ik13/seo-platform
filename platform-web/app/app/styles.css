@@ -2204,24 +2204,45 @@ svg { display: block; }
 .notification-load-more { justify-self: center; min-width: 150px; }
 
 .semantic-stack { max-width: 1180px; }
-.semantic-upload { display: grid; gap: 18px; }
+.semantic-upload { display: grid; gap: 14px; }
 .upload-dropzone {
   align-items: center;
   background: #fafafd;
   border: 1px dashed #cfd2dc;
-  border-radius: 13px;
+  border-radius: 11px;
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  min-height: 150px;
-  padding: 28px 20px;
-  text-align: center;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 72px;
+  padding: 12px 14px;
 }
 .upload-dropzone:hover { border-color: #aaa1f4; background: #f8f7ff; }
+.upload-dropzone[data-disabled="true"] { cursor: not-allowed; opacity: .65; }
 .upload-dropzone input { height: 1px; opacity: 0; position: absolute; width: 1px; }
-.upload-dropzone strong { font-size: 13px; margin-top: 28px; overflow-wrap: anywhere; }
-.upload-dropzone strong::before { color: var(--brand); content: "↑"; display: block; font-size: 24px; margin: -25px 0 8px; }
-.upload-dropzone span { color: var(--muted); font-size: 11px; line-height: 1.5; margin-top: 6px; max-width: 520px; }
+.upload-dropzone-icon {
+  align-items: center;
+  background: #f0edff;
+  border-radius: 9px;
+  color: var(--brand);
+  display: flex;
+  font-size: 18px;
+  height: 38px;
+  justify-content: center;
+  width: 38px;
+}
+.upload-dropzone-copy { display: grid; gap: 3px; min-width: 0; }
+.upload-dropzone-copy strong { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upload-dropzone-copy small { color: var(--muted); font-size: 11px; line-height: 1.4; }
+.upload-dropzone-action {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 7px 10px;
+}
 .upload-progress { display: grid; gap: 8px; }
 .upload-progress > div { color: var(--muted); display: flex; font-size: 11px; justify-content: space-between; }
 .upload-progress > div strong { color: var(--text); }
