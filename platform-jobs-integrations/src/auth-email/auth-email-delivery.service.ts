@@ -169,7 +169,10 @@ export class AuthEmailDeliveryService {
         return { disposition: "ACK", status: "CANCELLED" };
       }
       const now = await this.databaseNow();
-      if (new Date(material.expiresAt) <= now) {
+      if (
+        material.decision === "READY" &&
+        new Date(material.expiresAt) <= now
+      ) {
         await this.cancel(claim.claim, "MATERIAL_EXPIRED");
         return { disposition: "ACK", status: "CANCELLED" };
       }
@@ -359,7 +362,9 @@ export class AuthEmailDeliveryService {
   private async finishAfterSmtp(claim: ClaimedDelivery): Promise<void> {
     if (
       claim.row.eventType ===
-      transactionalEmailEventTypesV1.workspaceInviteRequested
+        transactionalEmailEventTypesV1.workspaceInviteRequested ||
+      claim.row.eventType ===
+        transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested
     ) {
       await this.materialClient.complete(claim.row.sourceEventId);
     }
@@ -552,7 +557,9 @@ function eventType(value: string): TransactionalEmailEventTypeV1 {
   if (
     value !== transactionalEmailEventTypesV1.emailVerificationRequested &&
     value !== transactionalEmailEventTypesV1.passwordResetRequested &&
-    value !== transactionalEmailEventTypesV1.workspaceInviteRequested
+    value !== transactionalEmailEventTypesV1.workspaceInviteRequested &&
+    value !==
+      transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested
   ) {
     throw new AuthEmailDeliveryInvariantError();
   }

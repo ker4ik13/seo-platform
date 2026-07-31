@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { AuditService } from "../audit/audit.service.js";
+import { BillingPiiService } from "../billing/billing-pii.service.js";
 import type { AppConfig } from "../config/app-config.js";
 import type { PrismaService } from "../database/prisma.service.js";
 import { AuthCryptoService } from "../identity/auth-crypto.service.js";
@@ -14,6 +16,8 @@ const USER_ID = "01900000-0000-7000-8000-000000000102";
 const TOKEN_ID = "01900000-0000-7000-8000-000000000103";
 const WORKSPACE_ID = "01900000-0000-7000-8000-000000000104";
 const INVITE_ID = "01900000-0000-7000-8000-000000000105";
+const RECEIPT_ID = "01900000-0000-7000-8000-000000000106";
+const ORDER_ID = "01900000-0000-7000-8000-000000000107";
 const EXPIRES_AT = new Date("2026-07-30T11:00:00.000Z");
 const DATABASE_NOW = new Date("2026-07-30T10:00:00.000Z");
 
@@ -137,6 +141,55 @@ test("marks a recipient-rejected workspace invitation as BOUNCED idempotently", 
   });
   assert.equal(fixture.appliedTransitions, 1);
   assert.equal(fixture.invite.status, "BOUNCED");
+});
+
+test("delivers exact NPD receipt material and records completion idempotently", async () => {
+  const fixture = receiptFixture();
+  const material = await fixture.service.material(EVENT_ID);
+
+  assert.deepEqual(material, {
+    schemaVersion: "auth-email-material-decision@1",
+    decision: "READY_RECEIPT",
+    eventId: EVENT_ID,
+    eventType: "billing.npd-receipt.delivery-requested.v1",
+    recipient: "Buyer@Example.test",
+    locale: "ru",
+    officialReceiptId: "205ldfqqhc",
+    receiptUrl:
+      "https://lknpd.nalog.ru/api/v1/receipt/220704837033/205ldfqqhc/print",
+    grossAmountMinor: 12_500,
+    currency: "RUB",
+    serviceDescription: "Подписка Team на 1 месяц"
+  });
+
+  const first = await fixture.service.complete(EVENT_ID, "DELIVERED");
+  const replay = await fixture.service.complete(EVENT_ID, "DELIVERED");
+  assert.deepEqual(first, replay);
+  assert.equal(fixture.receipt.status, "DELIVERED");
+  assert.equal(fixture.receipt.version, 3);
+  assert.equal(fixture.receipt.deliveryAttempts, 1);
+  assert.deepEqual(fixture.receipt.deliveredAt, DATABASE_NOW);
+  assert.equal(fixture.appliedTransitions, 1);
+  assert.equal(fixture.auditCalls, 1);
+  assert.equal(
+    (await fixture.service.material(EVENT_ID)).decision,
+    "SKIPPED"
+  );
+});
+
+test("records a permanent NPD recipient bounce without claiming delivery", async () => {
+  const fixture = receiptFixture();
+  await fixture.service.complete(EVENT_ID, "BOUNCED");
+  await fixture.service.complete(EVENT_ID, "BOUNCED");
+
+  assert.equal(fixture.receipt.status, "FAILED_FINAL");
+  assert.equal(fixture.receipt.deliveredAt, null);
+  assert.equal(fixture.receipt.deliveryAttempts, 1);
+  assert.equal(fixture.appliedTransitions, 1);
+  await assert.rejects(
+    fixture.service.complete(EVENT_ID, "DELIVERED"),
+    TypeError
+  );
 });
 
 test("skips revoked and suspended invite state without exposing material", async () => {
@@ -310,15 +363,72 @@ function inviteFixture(
   };
 }
 
+function receiptFixture() {
+  const pii = new BillingPiiService(appConfig());
+  const receipt: Record<string, unknown> = {
+    id: RECEIPT_ID,
+    workspaceId: WORKSPACE_ID,
+    version: 2,
+    status: "DELIVERY_PENDING",
+    currency: "RUB",
+    officialReceiptId: "205ldfqqhc",
+    officialReceiptUrl:
+      "https://lknpd.nalog.ru/api/v1/receipt/220704837033/205ldfqqhc/print",
+    registeredAt: new Date("2026-07-30T09:50:00.000Z"),
+    grossAmountMinor: 12_500n,
+    deliveryEmailEncrypted: pii.seal(
+      "Buyer@Example.test",
+      `order:${ORDER_ID}:delivery-email`
+    ),
+    serviceDescriptionSnapshot: "Подписка Team на 1 месяц",
+    deliveredAt: null,
+    deliveryAttempts: 0,
+    workspace: {
+      locale: "ru",
+      status: "ACTIVE"
+    },
+    payment: {
+      orderId: ORDER_ID
+    }
+  };
+  const fixture = serviceFixture({
+    outbox: {
+      ...baseOutbox(),
+      event_type: "billing.npd-receipt.delivery-requested.v1",
+      aggregate_type: "npdReceiptObligation",
+      aggregate_id: RECEIPT_ID,
+      aggregate_version: 2,
+      workspace_id: WORKSPACE_ID,
+      payload: {
+        receiptId: RECEIPT_ID,
+        workspaceId: WORKSPACE_ID
+      }
+    },
+    receipt
+  });
+  return {
+    service: fixture.service,
+    receipt,
+    get appliedTransitions() {
+      return fixture.appliedTransitions;
+    },
+    get auditCalls() {
+      return fixture.auditCalls;
+    }
+  };
+}
+
 function serviceFixture(options: {
   readonly outbox?: AuthEmailOutboxRow | undefined;
   readonly token?: Readonly<Record<string, unknown>>;
   readonly invite?: Record<string, unknown>;
+  readonly receipt?: Record<string, unknown>;
   readonly databaseNow?: Date;
 }) {
   const config = appConfig();
   const crypto = new AuthCryptoService(config);
   let appliedTransitions = 0;
+  let auditCalls = 0;
   const transaction = {
     $queryRaw: async () =>
       options.outbox
@@ -345,6 +455,32 @@ function serviceFixture(options: {
         }
         return { count: 0 };
       }
+    },
+    npdReceiptObligation: {
+      findUnique: async () => options.receipt ?? null,
+      updateMany: async (input: {
+        readonly where: {
+          readonly status: string;
+          readonly version: number;
+        };
+        readonly data: Readonly<Record<string, unknown>>;
+      }) => {
+        if (
+          options.receipt?.status !== input.where.status ||
+          options.receipt.version !== input.where.version
+        ) {
+          return { count: 0 };
+        }
+        options.receipt.status = input.data.status;
+        if (input.data.deliveredAt instanceof Date) {
+          options.receipt.deliveredAt = input.data.deliveredAt;
+        }
+        options.receipt.deliveryAttempts =
+          Number(options.receipt.deliveryAttempts) + 1;
+        options.receipt.version = Number(options.receipt.version) + 1;
+        appliedTransitions += 1;
+        return { count: 1 };
+      }
     }
   };
   const prisma = {
@@ -353,9 +489,22 @@ function serviceFixture(options: {
     ) => operation(transaction)
   } as unknown as PrismaService;
   return {
-    service: new AuthEmailDeliveryService(config, prisma, crypto),
+    service: new AuthEmailDeliveryService(
+      config,
+      prisma,
+      crypto,
+      new BillingPiiService(config),
+      {
+        record: async () => {
+          auditCalls += 1;
+        }
+      } as unknown as AuditService
+    ),
     get appliedTransitions() {
       return appliedTransitions;
+    },
+    get auditCalls() {
+      return auditCalls;
     }
   };
 }

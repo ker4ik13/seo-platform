@@ -13,6 +13,8 @@ import {
 } from "@seo-platform/contracts";
 import { APP_CONFIG } from "../config/config.module.js";
 import type { AppConfig } from "../config/app-config.js";
+import { AuditService } from "../audit/audit.service.js";
+import { BillingPiiService } from "../billing/billing-pii.service.js";
 import { PrismaService } from "../database/prisma.service.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import { AuthCryptoService } from "../identity/auth-crypto.service.js";
@@ -32,7 +34,9 @@ export class AuthEmailDeliveryService {
   public constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly prisma: PrismaService,
-    private readonly crypto: AuthCryptoService
+    private readonly crypto: AuthCryptoService,
+    private readonly pii: BillingPiiService,
+    private readonly audit: AuditService
   ) {}
 
   public async material(
@@ -51,6 +55,12 @@ export class AuthEmailDeliveryService {
           transactionalEmailEventTypesV1.passwordResetRequested
       ) {
         return this.identityMaterial(transaction, envelope, now);
+      }
+      if (
+        envelope.eventType ===
+        transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested
+      ) {
+        return this.receiptMaterial(transaction, envelope);
       }
       return this.inviteMaterial(transaction, envelope, now);
     });
@@ -77,6 +87,17 @@ export class AuthEmailDeliveryService {
           },
           data: { status: outcome }
         });
+      }
+      if (
+        envelope.eventType ===
+        transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested
+      ) {
+        await this.completeReceipt(
+          transaction,
+          envelope,
+          outcome,
+          canonicalDatabaseClock(row.database_now)
+        );
       }
 
       return internalAuthEmailCompletionReceipt({
@@ -203,6 +224,131 @@ export class AuthEmailDeliveryService {
     });
   }
 
+  private async receiptMaterial(
+    transaction: Transaction,
+    envelope: Extract<
+      TransactionalEmailEventEnvelopeV1,
+      {
+        readonly eventType:
+          "billing.npd-receipt.delivery-requested.v1";
+      }
+    >
+  ): Promise<InternalAuthEmailMaterialDecisionV1> {
+    const receipt = await transaction.npdReceiptObligation.findUnique({
+      where: { id: envelope.data.receiptId },
+      include: {
+        workspace: {
+          select: { locale: true, status: true }
+        },
+        payment: {
+          select: { orderId: true }
+        }
+      }
+    });
+    if (
+      !receipt ||
+      receipt.workspaceId !== envelope.data.workspaceId ||
+      receipt.workspaceId !== envelope.workspaceId ||
+      receipt.id !== envelope.aggregate.id ||
+      receipt.version !== envelope.aggregate.version ||
+      receipt.status !== "DELIVERY_PENDING" ||
+      receipt.currency !== "RUB" ||
+      !receipt.officialReceiptId ||
+      !receipt.officialReceiptUrl ||
+      !receipt.registeredAt ||
+      receipt.grossAmountMinor <= 0n ||
+      receipt.grossAmountMinor > BigInt(Number.MAX_SAFE_INTEGER) ||
+      ["SUSPENDED", "DELETING", "DELETED"].includes(
+        receipt.workspace.status
+      )
+    ) {
+      return skipped(envelope.eventId);
+    }
+
+    return readyReceipt({
+      eventId: envelope.eventId,
+      eventType: envelope.eventType,
+      recipient: this.pii.open(
+        receipt.deliveryEmailEncrypted,
+        `order:${receipt.payment.orderId}:delivery-email`
+      ),
+      locale: receipt.workspace.locale,
+      officialReceiptId: receipt.officialReceiptId,
+      receiptUrl: receipt.officialReceiptUrl,
+      grossAmountMinor: Number(receipt.grossAmountMinor),
+      currency: "RUB",
+      serviceDescription: receipt.serviceDescriptionSnapshot
+    });
+  }
+
+  private async completeReceipt(
+    transaction: Transaction,
+    envelope: Extract<
+      TransactionalEmailEventEnvelopeV1,
+      {
+        readonly eventType:
+          "billing.npd-receipt.delivery-requested.v1";
+      }
+    >,
+    outcome: InternalAuthEmailCompletionOutcomeV1,
+    now: Date
+  ): Promise<void> {
+    const receipt = await transaction.npdReceiptObligation.findUnique({
+      where: { id: envelope.data.receiptId }
+    });
+    const targetStatus =
+      outcome === "DELIVERED" ? "DELIVERED" : "FAILED_FINAL";
+    if (
+      !receipt ||
+      receipt.workspaceId !== envelope.workspaceId ||
+      receipt.id !== envelope.aggregate.id
+    ) {
+      throw new TypeError("NPD receipt delivery state is unavailable");
+    }
+    if (
+      receipt.status === targetStatus &&
+      receipt.version === envelope.aggregate.version + 1
+    ) {
+      return;
+    }
+    if (
+      receipt.status !== "DELIVERY_PENDING" ||
+      receipt.version !== envelope.aggregate.version
+    ) {
+      throw new TypeError("NPD receipt delivery state has changed");
+    }
+    const updated = await transaction.npdReceiptObligation.updateMany({
+      where: {
+        id: receipt.id,
+        workspaceId: envelope.workspaceId,
+        status: "DELIVERY_PENDING",
+        version: envelope.aggregate.version
+      },
+      data: {
+        status: targetStatus,
+        ...(outcome === "DELIVERED" ? { deliveredAt: now } : {}),
+        deliveryAttempts: { increment: 1 },
+        version: { increment: 1 }
+      }
+    });
+    if (updated.count !== 1) {
+      throw new TypeError("NPD receipt delivery state has changed");
+    }
+    await this.audit.record(
+      {
+        workspaceId: receipt.workspaceId,
+        action:
+          outcome === "DELIVERED"
+            ? "billing.npd_receipt.delivered"
+            : "billing.npd_receipt.delivery_bounced",
+        resourceType: "npd_receipt_obligation",
+        resourceId: receipt.id,
+        requestId: `auth-email-complete-${envelope.eventId}`
+      },
+      transaction
+    );
+  }
+
   private cryptoToken(
     purpose: "EMAIL_VERIFICATION" | "PASSWORD_RESET",
     record: {
@@ -321,6 +467,22 @@ function ready(
   return internalAuthEmailMaterialDecision({
     schemaVersion: AUTH_EMAIL_MATERIAL_DECISION_SCHEMA,
     decision: "READY",
+    ...input
+  });
+}
+
+function readyReceipt(
+  input: Omit<
+    Extract<
+      InternalAuthEmailMaterialDecisionV1,
+      { decision: "READY_RECEIPT" }
+    >,
+    "schemaVersion" | "decision"
+  >
+): InternalAuthEmailMaterialDecisionV1 {
+  return internalAuthEmailMaterialDecision({
+    schemaVersion: AUTH_EMAIL_MATERIAL_DECISION_SCHEMA,
+    decision: "READY_RECEIPT",
     ...input
   });
 }

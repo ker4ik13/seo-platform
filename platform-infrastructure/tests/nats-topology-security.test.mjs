@@ -112,6 +112,7 @@ test("NATS ACL grants exact runtime publisher consumer and provisioner subjects"
     "$NATS_EMAIL_VERIFICATION_EVENT_SUBJECT",
     "$NATS_PASSWORD_RESET_EVENT_SUBJECT",
     "$NATS_WORKSPACE_INVITE_EVENT_SUBJECT",
+    "$NATS_NPD_RECEIPT_EVENT_SUBJECT",
     "$JS.API.INFO",
     "$JS.API.STREAM.INFO.IDENTITY_EVENTS",
     "$JS.API.STREAM.INFO.AUTH_EMAIL_EVENTS"
@@ -207,6 +208,7 @@ test("Compose maps each NATS identity only to its exact runtime audience", async
     "NATS_EMAIL_VERIFICATION_EVENT_SUBJECT",
     "NATS_PASSWORD_RESET_EVENT_SUBJECT",
     "NATS_WORKSPACE_INVITE_EVENT_SUBJECT",
+    "NATS_NPD_RECEIPT_EVENT_SUBJECT",
     "NATS_AUTH_EMAIL_DLQ_SUBJECT"
   ]));
   for (const passwordName of [

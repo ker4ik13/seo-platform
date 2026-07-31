@@ -323,6 +323,7 @@ services:
       NATS_EMAIL_VERIFICATION_EVENT_SUBJECT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}.email.identity.email-verification.requested.v1
       NATS_PASSWORD_RESET_EVENT_SUBJECT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}.email.identity.password-reset.requested.v1
       NATS_WORKSPACE_INVITE_EVENT_SUBJECT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}.email.workspace.invite.requested.v1
+      NATS_NPD_RECEIPT_EVENT_SUBJECT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}.email.billing.npd-receipt.delivery-requested.v1
       NATS_AUTH_EMAIL_DLQ_SUBJECT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}.dlq.jobs.transactional-email.v1
     volumes:
       - nats_data:/data

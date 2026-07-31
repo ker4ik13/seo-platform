@@ -263,7 +263,7 @@ Platform API, Realtime и auth-email worker не создают и не изме
 - durable pull consumer `realtime_session_family_revoked_v1`: exact source
   filter, explicit ack, deliver all, instant replay, `ack_wait=60s`,
   `max_ack_pending=1`, unlimited transport redelivery и file-backed state;
-- `AUTH_EMAIL_EVENTS` с тремя exact
+- `AUTH_EMAIL_EVENTS` с четырьмя exact
   `{environment}.email.{eventType}` subjects, теми же bounded source
   retention/duplicate limits;
 - durable pull consumer `jobs_auth_email_v1` с filter

@@ -44,7 +44,9 @@ export const domainEventTypes = {
     "seo.tracking-context.keyword-assignment.changed.v1",
   rankCheckCompleted: "seo.rank-check.completed.v1",
   billingReservationCreated: "billing.reservation.created.v1",
-  billingReservationSettled: "billing.reservation.settled.v1"
+  billingReservationSettled: "billing.reservation.settled.v1",
+  billingNpdReceiptDeliveryRequested:
+    "billing.npd-receipt.delivery-requested.v1"
 } as const;
 
 export type DomainEventType =

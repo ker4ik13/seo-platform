@@ -5,6 +5,7 @@ import { BillingPiiService } from "../billing/billing-pii.service.js";
 import { loadAppConfig } from "../config/app-config.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { uuidV7 } from "../common/uuid-v7.js";
+import { OutboxService } from "../outbox/outbox.service.js";
 import { PlatformAdminService } from "./platform-admin.service.js";
 
 const databaseUrl = process.env.PLATFORM_API_ADMIN_TEST_DATABASE_URL;
@@ -23,7 +24,8 @@ test(
     const admin = new PlatformAdminService(
       prisma,
       pii,
-      new AuditService(prisma)
+      new AuditService(prisma),
+      new OutboxService()
     );
     try {
       const partial = await fixture(
@@ -63,6 +65,19 @@ test(
       });
       assert.equal(original.status, "CANCELLED");
       assert.equal(original.replacementReceiptId, replacement.id);
+      const deliveryEvent = await prisma.outboxEvent.findFirst({
+        where: {
+          eventType: "billing.npd-receipt.delivery-requested.v1",
+          aggregateId: replacement.id
+        }
+      });
+      assert.ok(deliveryEvent);
+      assert.equal(deliveryEvent.aggregateType, "npdReceiptObligation");
+      assert.equal(deliveryEvent.aggregateVer, replacement.version);
+      assert.deepEqual(deliveryEvent.payload, {
+        receiptId: replacement.id,
+        workspaceId: partial.workspaceId
+      });
 
       const full = await fixture(
         prisma,
@@ -107,6 +122,7 @@ async function fixture(
 ): Promise<{
   readonly receiptId: string;
   readonly userId: string;
+  readonly workspaceId: string;
 }> {
   const userId = uuidV7();
   const workspaceId = uuidV7();
@@ -190,7 +206,7 @@ async function fixture(
       status: receiptStatus
     }
   });
-  return { receiptId, userId };
+  return { receiptId, userId, workspaceId };
 }
 
 function registration(officialReceiptId: string, reason: string) {

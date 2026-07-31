@@ -16,6 +16,7 @@ const FAMILY_ID = "01900000-0000-7000-8000-000000000103";
 const TOKEN_ID = "01900000-0000-7000-8000-000000000105";
 const WORKSPACE_ID = "01900000-0000-7000-8000-000000000106";
 const INVITE_ID = "01900000-0000-7000-8000-000000000107";
+const RECEIPT_ID = "01900000-0000-7000-8000-000000000108";
 
 test("drains the publisher before the later database and NATS shutdown phase", () => {
   assert.equal(
@@ -59,7 +60,8 @@ test("claims one row with SKIP LOCKED and publishes the exact shared envelope", 
     "identity.session-family.revoked.v1",
     "identity.email-verification.requested.v1",
     "identity.password-reset.requested.v1",
-    "workspace.invite.requested.v1"
+    "workspace.invite.requested.v1",
+    "billing.npd-receipt.delivery-requested.v1"
   ]);
   assert.equal(fixture.publishCalls.length, 1);
   assert.deepEqual(fixture.publishCalls[0], {
@@ -92,11 +94,12 @@ test("claims one row with SKIP LOCKED and publishes the exact shared envelope", 
   assert.deepEqual(fixture.updateCalls[0]?.values, [EVENT_ID]);
 });
 
-test("publishes all three redacted transactional-email envelopes only to AUTH_EMAIL_EVENTS", async () => {
+test("publishes all four redacted transactional-email envelopes only to AUTH_EMAIL_EVENTS", async () => {
   for (const row of [
     authIdentityOutboxRow("identity.email-verification.requested.v1"),
     authIdentityOutboxRow("identity.password-reset.requested.v1"),
-    authInviteOutboxRow()
+    authInviteOutboxRow(),
+    authReceiptOutboxRow()
   ]) {
     const fixture = publisherFixture({ row });
     assert.equal(await fixture.service.runOnce(), 1);
@@ -419,6 +422,20 @@ function authInviteOutboxRow(): RawOutboxRow {
       inviteId: INVITE_ID,
       workspaceId: WORKSPACE_ID,
       expiresAt: "2026-08-06T10:00:00.000Z"
+    }
+  });
+}
+
+function authReceiptOutboxRow(): RawOutboxRow {
+  return outboxRow({
+    event_type: "billing.npd-receipt.delivery-requested.v1",
+    aggregate_type: "npdReceiptObligation",
+    aggregate_id: RECEIPT_ID,
+    aggregate_version: 2,
+    workspace_id: WORKSPACE_ID,
+    payload: {
+      receiptId: RECEIPT_ID,
+      workspaceId: WORKSPACE_ID
     }
   });
 }

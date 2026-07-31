@@ -55,7 +55,8 @@ export class AuthEmailMaterialClient {
     }
     if (
       decision.eventId !== eventId ||
-      (decision.decision === "READY" &&
+      ((decision.decision === "READY" ||
+        decision.decision === "READY_RECEIPT") &&
         decision.eventType !== expectedEventType)
     ) {
       throw invalidResponse();

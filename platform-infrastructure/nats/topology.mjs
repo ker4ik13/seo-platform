@@ -4,7 +4,8 @@ const IDENTITY_DLQ_SUFFIX =
 const AUTH_EMAIL_EVENT_SUFFIXES = Object.freeze([
   "identity.email-verification.requested.v1",
   "identity.password-reset.requested.v1",
-  "workspace.invite.requested.v1"
+  "workspace.invite.requested.v1",
+  "billing.npd-receipt.delivery-requested.v1"
 ]);
 const AUTH_EMAIL_FILTER_SUFFIX = "email.>";
 const AUTH_EMAIL_DLQ_SUFFIX = "dlq.jobs.transactional-email.v1";

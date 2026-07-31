@@ -25,7 +25,8 @@ test("topology is exact, bounded and compatible with app-level retry/DLQ", () =>
   assert.deepEqual(topology.authEmailSubjects, [
     "prod-eu1.email.identity.email-verification.requested.v1",
     "prod-eu1.email.identity.password-reset.requested.v1",
-    "prod-eu1.email.workspace.invite.requested.v1"
+    "prod-eu1.email.workspace.invite.requested.v1",
+    "prod-eu1.email.billing.npd-receipt.delivery-requested.v1"
   ]);
   assert.equal(topology.authEmailFilterSubject, "prod-eu1.email.>");
   assert.equal(

@@ -57,6 +57,26 @@ test("claims in PostgreSQL before JIT material, sends once and idempotently comp
   assertRedacted(fixture.row());
 });
 
+test("sends an official NPD receipt and durably completes its Platform state", async () => {
+  const fixture = deliveryFixture({ receipt: true });
+  const result = await fixture.service.processEvent(fixture.event, sourceHash);
+
+  assert.deepEqual(result, { disposition: "ACK", status: "COMPLETED" });
+  assert.equal(fixture.calls.messages.length, 1);
+  assert.equal(
+    fixture.calls.messages[0]?.subject,
+    "Ваш чек об оплате SEO Workspace"
+  );
+  assert.match(
+    fixture.calls.messages[0]?.text ?? "",
+    /https:\/\/lknpd\.nalog\.ru\/api\/v1\/receipt\//u
+  );
+  assert.deepEqual(fixture.calls.completions, [
+    { eventId: fixture.event.eventId, outcome: "DELIVERED" }
+  ]);
+  assertRedacted(fixture.row());
+});
+
 test("cancels stale or skipped material without SMTP access", async () => {
   for (const material of ["SKIPPED", "EXPIRED"] as const) {
     const fixture = deliveryFixture({ material });
@@ -263,6 +283,7 @@ test("documents the SMTP accept to DB crash window with a stable replay Message-
 
 interface DeliveryFixtureOptions {
   readonly material?: "READY" | "SKIPPED" | "EXPIRED";
+  readonly receipt?: boolean;
   readonly maxAttempts?: number;
   readonly failFirstSmtpReceiptWrite?: boolean;
   readonly send?: EmailPort["send"];
@@ -279,7 +300,7 @@ function deliveryFixture(options: DeliveryFixtureOptions = {}) {
   let now = new Date(initialNow);
   let stored: AuthEmailDeliveryAttempt | undefined;
   let failSmtpReceiptWrite = options.failFirstSmtpReceiptWrite ?? false;
-  const event = inviteEvent();
+  const event = options.receipt ? receiptEvent() : inviteEvent();
   const calls = {
     order: [] as string[],
     messages: [] as TransactionalEmail[],
@@ -327,6 +348,12 @@ function deliveryFixture(options: DeliveryFixtureOptions = {}) {
           eventId: event.eventId,
           reason: "NOT_DELIVERABLE"
         };
+      }
+      if (
+        event.eventType ===
+        transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested
+      ) {
+        return readyReceiptMaterial(event);
       }
       return readyMaterial(
         event,
@@ -385,7 +412,30 @@ function deliveryFixture(options: DeliveryFixtureOptions = {}) {
   };
 }
 
-function inviteEvent(): TransactionalEmailEventEnvelopeV1 {
+function receiptEvent(): Extract<
+  TransactionalEmailEventEnvelopeV1,
+  {
+    readonly eventType:
+      "billing.npd-receipt.delivery-requested.v1";
+  }
+> {
+  return createTransactionalEmailEventEnvelopeV1({
+    eventId: "01900000-0000-7000-8000-000000000021",
+    eventType:
+      transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested,
+    occurredAt: new Date("2026-07-30T11:50:00.000Z"),
+    traceId: "npd-receipt-delivery-test",
+    metadata: {},
+    receiptId: "01900000-0000-7000-8000-000000000022",
+    workspaceId: "01900000-0000-7000-8000-000000000013",
+    aggregateVersion: 2
+  });
+}
+
+function inviteEvent(): Extract<
+  TransactionalEmailEventEnvelopeV1,
+  { readonly eventType: "workspace.invite.requested.v1" }
+> {
   return createTransactionalEmailEventEnvelopeV1({
     eventId: "01900000-0000-7000-8000-000000000011",
     eventType: transactionalEmailEventTypesV1.workspaceInviteRequested,
@@ -399,7 +449,10 @@ function inviteEvent(): TransactionalEmailEventEnvelopeV1 {
 }
 
 function readyMaterial(
-  event: TransactionalEmailEventEnvelopeV1,
+  event: Extract<
+    TransactionalEmailEventEnvelopeV1,
+    { readonly eventType: "workspace.invite.requested.v1" }
+  >,
   expiresAt: string
 ): InternalAuthEmailMaterialDecisionV1 {
   return {
@@ -411,6 +464,31 @@ function readyMaterial(
     locale: "ru",
     expiresAt,
     actionUrl: "https://app.example.test/invite#token=one_time~secret"
+  };
+}
+
+function readyReceiptMaterial(
+  event: Extract<
+    TransactionalEmailEventEnvelopeV1,
+    {
+      readonly eventType:
+        "billing.npd-receipt.delivery-requested.v1";
+    }
+  >
+): InternalAuthEmailMaterialDecisionV1 {
+  return {
+    schemaVersion: AUTH_EMAIL_MATERIAL_DECISION_SCHEMA,
+    decision: "READY_RECEIPT",
+    eventId: event.eventId,
+    eventType: event.eventType,
+    recipient: "buyer@example.test",
+    locale: "ru",
+    officialReceiptId: "205ldfqqhc",
+    receiptUrl:
+      "https://lknpd.nalog.ru/api/v1/receipt/220704837033/205ldfqqhc/print",
+    grossAmountMinor: 12_500,
+    currency: "RUB",
+    serviceDescription: "Подписка Team на 1 месяц"
   };
 }
 

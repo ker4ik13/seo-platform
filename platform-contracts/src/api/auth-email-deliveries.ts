@@ -18,7 +18,10 @@ export interface InternalAuthEmailReadyMaterialDecisionV1 {
   readonly schemaVersion: typeof AUTH_EMAIL_MATERIAL_DECISION_SCHEMA;
   readonly decision: "READY";
   readonly eventId: string;
-  readonly eventType: TransactionalEmailEventTypeV1;
+  readonly eventType: Exclude<
+    TransactionalEmailEventTypeV1,
+    typeof transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested
+  >;
   readonly recipient: string;
   readonly locale: string;
   readonly expiresAt: string;
@@ -36,8 +39,24 @@ export interface InternalAuthEmailSkippedMaterialDecisionV1 {
   readonly reason: "NOT_DELIVERABLE";
 }
 
+export interface InternalAuthEmailReadyReceiptDecisionV1 {
+  readonly schemaVersion: typeof AUTH_EMAIL_MATERIAL_DECISION_SCHEMA;
+  readonly decision: "READY_RECEIPT";
+  readonly eventId: string;
+  readonly eventType:
+    typeof transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested;
+  readonly recipient: string;
+  readonly locale: string;
+  readonly officialReceiptId: string;
+  readonly receiptUrl: string;
+  readonly grossAmountMinor: number;
+  readonly currency: "RUB";
+  readonly serviceDescription: string;
+}
+
 export type InternalAuthEmailMaterialDecisionV1 =
   | InternalAuthEmailReadyMaterialDecisionV1
+  | InternalAuthEmailReadyReceiptDecisionV1
   | InternalAuthEmailSkippedMaterialDecisionV1;
 
 export interface InternalAuthEmailCompletionV1 {
@@ -59,7 +78,11 @@ const ISO_MILLIS_UTC_PATTERN =
 const LOCALE_PATTERN = /^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,3}$/u;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+$/u;
 const EVENT_TYPES = new Set<string>(
-  Object.values(transactionalEmailEventTypesV1)
+  [
+    transactionalEmailEventTypesV1.emailVerificationRequested,
+    transactionalEmailEventTypesV1.passwordResetRequested,
+    transactionalEmailEventTypesV1.workspaceInviteRequested
+  ]
 );
 
 export function internalAuthEmailMaterialDecision(
@@ -90,6 +113,58 @@ export function internalAuthEmailMaterialDecision(
     });
   }
 
+  if (decision === "READY_RECEIPT") {
+    exactKeys(base, [
+      "schemaVersion",
+      "decision",
+      "eventId",
+      "eventType",
+      "recipient",
+      "locale",
+      "officialReceiptId",
+      "receiptUrl",
+      "grossAmountMinor",
+      "currency",
+      "serviceDescription"
+    ]);
+    if (
+      base.schemaVersion !== AUTH_EMAIL_MATERIAL_DECISION_SCHEMA ||
+      base.eventType !==
+        transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested ||
+      base.currency !== "RUB" ||
+      typeof base.grossAmountMinor !== "number" ||
+      !Number.isSafeInteger(base.grossAmountMinor) ||
+      base.grossAmountMinor <= 0 ||
+      typeof base.officialReceiptId !== "string" ||
+      base.officialReceiptId.trim() !== base.officialReceiptId ||
+      base.officialReceiptId.length < 6 ||
+      base.officialReceiptId.length > 255 ||
+      typeof base.serviceDescription !== "string" ||
+      base.serviceDescription.trim() !== base.serviceDescription ||
+      base.serviceDescription.length < 1 ||
+      base.serviceDescription.length > 255
+    ) {
+      return invalid("material decision");
+    }
+    return Object.freeze({
+      schemaVersion: AUTH_EMAIL_MATERIAL_DECISION_SCHEMA,
+      decision: "READY_RECEIPT",
+      eventId,
+      eventType:
+        transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested,
+      recipient: recipient(base.recipient),
+      locale: locale(base.locale),
+      officialReceiptId: base.officialReceiptId,
+      receiptUrl: receiptUrl(
+        base.receiptUrl,
+        base.officialReceiptId
+      ),
+      grossAmountMinor: base.grossAmountMinor,
+      currency: "RUB",
+      serviceDescription: base.serviceDescription
+    });
+  }
+
   if (decision !== "READY") return invalid("material decision");
   exactKeys(base, [
     "schemaVersion",
@@ -113,7 +188,10 @@ export function internalAuthEmailMaterialDecision(
     schemaVersion: AUTH_EMAIL_MATERIAL_DECISION_SCHEMA,
     decision: "READY",
     eventId,
-    eventType: base.eventType as TransactionalEmailEventTypeV1,
+    eventType: base.eventType as Exclude<
+      TransactionalEmailEventTypeV1,
+      typeof transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested
+    >,
     recipient: recipient(base.recipient),
     locale: locale(base.locale),
     expiresAt: isoDate(base.expiresAt, "expiresAt"),
@@ -183,6 +261,38 @@ function actionUrl(value: unknown): string {
     return invalid("actionUrl");
   }
   return value;
+}
+
+function receiptUrl(value: unknown, officialReceiptId: string): string {
+  if (typeof value !== "string" || value.length > 2_048) {
+    return invalid("receiptUrl");
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    return invalid("receiptUrl");
+  }
+  const path = parsed.pathname.split("/").filter(Boolean);
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.hostname !== "lknpd.nalog.ru" ||
+    parsed.username ||
+    parsed.password ||
+    parsed.port ||
+    parsed.search ||
+    parsed.hash ||
+    path.length !== 6 ||
+    path[0] !== "api" ||
+    path[1] !== "v1" ||
+    path[2] !== "receipt" ||
+    !/^\d{10,16}$/u.test(path[3] ?? "") ||
+    path[4] !== officialReceiptId ||
+    path[5] !== "print"
+  ) {
+    return invalid("receiptUrl");
+  }
+  return parsed.toString();
 }
 
 function recipient(value: unknown): string {

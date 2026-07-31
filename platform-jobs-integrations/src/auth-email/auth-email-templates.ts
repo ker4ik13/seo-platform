@@ -1,11 +1,14 @@
 import type {
-  InternalAuthEmailMaterialDecisionV1,
-  TransactionalEmailEventEnvelopeV1
+  InternalAuthEmailMaterialDecisionV1
 } from "@seo-platform/contracts";
 import type { TransactionalEmail } from "../email/email.port.js";
 
 type ReadyMaterial = Extract<
   InternalAuthEmailMaterialDecisionV1,
+  { readonly decision: "READY" | "READY_RECEIPT" }
+>;
+type ActionReadyMaterial = Extract<
+  ReadyMaterial,
   { readonly decision: "READY" }
 >;
 
@@ -22,7 +25,7 @@ const COPY: Readonly<
   Record<
     "en" | "ru",
     Readonly<
-      Record<TransactionalEmailEventEnvelopeV1["eventType"], TemplateCopy>
+      Record<ActionReadyMaterial["eventType"], TemplateCopy>
     >
   >
 > = {
@@ -112,6 +115,9 @@ export function renderAuthEmail(
   messageIdDomain: string
 ): TransactionalEmail {
   const locale = templateLocale(material.locale);
+  if (material.decision === "READY_RECEIPT") {
+    return renderReceiptEmail(material, locale, messageIdDomain);
+  }
   const copy = COPY[locale][material.eventType];
   if (!copy) throw new TypeError("Unsupported auth email event type");
   const actionUrl = safeActionUrl(material.actionUrl);
@@ -155,6 +161,75 @@ export function renderAuthEmail(
   };
 }
 
+function renderReceiptEmail(
+  material: Extract<
+    ReadyMaterial,
+    { readonly decision: "READY_RECEIPT" }
+  >,
+  locale: "en" | "ru",
+  messageIdDomain: string
+): TransactionalEmail {
+  const receiptUrl = safeReceiptUrl(
+    material.receiptUrl,
+    material.officialReceiptId
+  );
+  const amount = new Intl.NumberFormat(locale, {
+    style: "currency",
+    currency: "RUB"
+  }).format(material.grossAmountMinor / 100);
+  const copy =
+    locale === "ru"
+      ? {
+          subject: "Ваш чек об оплате SEO Workspace",
+          heading: "Чек об оплате",
+          introduction:
+            "Оплата зарегистрирована. Официальный чек ФНС доступен по ссылке ниже.",
+          amount: "Сумма",
+          service: "Услуга",
+          receipt: "Открыть официальный чек",
+          identifier: "Номер чека"
+        }
+      : {
+          subject: "Your SEO Workspace payment receipt",
+          heading: "Payment receipt",
+          introduction:
+            "Your payment has been registered. The official FNS receipt is available below.",
+          amount: "Amount",
+          service: "Service",
+          receipt: "Open official receipt",
+          identifier: "Receipt ID"
+        };
+  const text = [
+    copy.heading,
+    "",
+    copy.introduction,
+    "",
+    `${copy.service}: ${material.serviceDescription}`,
+    `${copy.amount}: ${amount}`,
+    `${copy.identifier}: ${material.officialReceiptId}`,
+    "",
+    `${copy.receipt}: ${receiptUrl}`
+  ].join("\n");
+  const html = [
+    "<!doctype html>",
+    '<html><body style="font-family:system-ui,sans-serif;line-height:1.5;color:#172033">',
+    `<h1>${escapeHtml(copy.heading)}</h1>`,
+    `<p>${escapeHtml(copy.introduction)}</p>`,
+    `<p><strong>${escapeHtml(copy.service)}:</strong> ${escapeHtml(material.serviceDescription)}<br>`,
+    `<strong>${escapeHtml(copy.amount)}:</strong> ${escapeHtml(amount)}<br>`,
+    `<strong>${escapeHtml(copy.identifier)}:</strong> ${escapeHtml(material.officialReceiptId)}</p>`,
+    `<p><a href="${escapeHtml(receiptUrl)}" style="display:inline-block;padding:12px 18px;background:#3157d5;color:#fff;text-decoration:none;border-radius:6px">${escapeHtml(copy.receipt)}</a></p>`,
+    "</body></html>"
+  ].join("");
+  return {
+    messageId: authEmailMessageId(material.eventId, messageIdDomain),
+    to: material.recipient,
+    subject: copy.subject,
+    text,
+    html
+  };
+}
+
 function templateLocale(value: string): "en" | "ru" {
   try {
     return new Intl.Locale(value).language.toLowerCase() === "ru"
@@ -178,6 +253,38 @@ function safeActionUrl(value: string): string {
     parsed.password !== ""
   ) {
     throw new TypeError("Invalid auth email action URL");
+  }
+  return parsed.toString();
+}
+
+function safeReceiptUrl(
+  value: string,
+  officialReceiptId: string
+): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new TypeError("Invalid NPD receipt URL");
+  }
+  const path = parsed.pathname.split("/").filter(Boolean);
+  if (
+    parsed.protocol !== "https:" ||
+    parsed.hostname !== "lknpd.nalog.ru" ||
+    parsed.username ||
+    parsed.password ||
+    parsed.port ||
+    parsed.search ||
+    parsed.hash ||
+    path.length !== 6 ||
+    path[0] !== "api" ||
+    path[1] !== "v1" ||
+    path[2] !== "receipt" ||
+    !/^\d{10,16}$/u.test(path[3] ?? "") ||
+    path[4] !== officialReceiptId ||
+    path[5] !== "print"
+  ) {
+    throw new TypeError("Invalid NPD receipt URL");
   }
   return parsed.toString();
 }

@@ -37,6 +37,7 @@ const credentialNames = [
   "NATS_EMAIL_VERIFICATION_EVENT_SUBJECT",
   "NATS_PASSWORD_RESET_EVENT_SUBJECT",
   "NATS_WORKSPACE_INVITE_EVENT_SUBJECT",
+  "NATS_NPD_RECEIPT_EVENT_SUBJECT",
   "NATS_AUTH_EMAIL_DLQ_SUBJECT"
 ];
 
@@ -244,6 +245,8 @@ function validEnvironment() {
       "preview.email.identity.password-reset.requested.v1",
     NATS_WORKSPACE_INVITE_EVENT_SUBJECT:
       "preview.email.workspace.invite.requested.v1",
+    NATS_NPD_RECEIPT_EVENT_SUBJECT:
+      "preview.email.billing.npd-receipt.delivery-requested.v1",
     NATS_AUTH_EMAIL_DLQ_SUBJECT:
       "preview.dlq.jobs.transactional-email.v1"
   };

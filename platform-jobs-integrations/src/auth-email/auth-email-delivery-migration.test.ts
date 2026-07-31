@@ -7,6 +7,10 @@ const MIGRATION = new URL(
   import.meta.url
 );
 const migration = readFile(MIGRATION, "utf8");
+const RECEIPT_MIGRATION = new URL(
+  "../../prisma/migrations/20260731060000_npd_receipt_email_delivery/migration.sql",
+  import.meta.url
+);
 
 test("persists only redacted auth-email delivery state", async () => {
   const sql = await migration;
@@ -52,4 +56,24 @@ test("fences claims, freezes SMTP receipts and terminal states", async () => {
   ]) {
     assert.ok(normalized.includes(required), required);
   }
+});
+
+test("extends the durable allowlist only with NPD receipt delivery", async () => {
+  const sql = (await readFile(RECEIPT_MIGRATION, "utf8")).replace(
+    /\s+/gu,
+    " "
+  );
+  assert.match(
+    sql,
+    /DROP CONSTRAINT "auth_email_delivery_attempts_event_type_check"/u
+  );
+  assert.match(
+    sql,
+    /'billing\.npd-receipt\.delivery-requested\.v1'/u
+  );
+  assert.equal(
+    (sql.match(/billing\.npd-receipt\.delivery-requested\.v1/gu) ?? [])
+      .length,
+    1
+  );
 });

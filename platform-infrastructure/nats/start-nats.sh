@@ -56,6 +56,7 @@ NATS_IDENTITY_EVENT_DLQ_SUBJECT
 NATS_EMAIL_VERIFICATION_EVENT_SUBJECT
 NATS_PASSWORD_RESET_EVENT_SUBJECT
 NATS_WORKSPACE_INVITE_EVENT_SUBJECT
+NATS_NPD_RECEIPT_EVENT_SUBJECT
 NATS_AUTH_EMAIL_DLQ_SUBJECT'
 
 for required_name in $required_names; do
@@ -130,6 +131,7 @@ dlq_subject=$(printenv NATS_IDENTITY_EVENT_DLQ_SUBJECT)
 email_verification_subject=$(printenv NATS_EMAIL_VERIFICATION_EVENT_SUBJECT)
 password_reset_subject=$(printenv NATS_PASSWORD_RESET_EVENT_SUBJECT)
 workspace_invite_subject=$(printenv NATS_WORKSPACE_INVITE_EVENT_SUBJECT)
+npd_receipt_subject=$(printenv NATS_NPD_RECEIPT_EVENT_SUBJECT)
 auth_email_dlq_subject=$(printenv NATS_AUTH_EMAIL_DLQ_SUBJECT)
 if ! printf '%s' "$identity_subject" | grep -Eq '^[a-z][a-z0-9_-]{0,31}\.identity\.session-family\.revoked\.v1$'; then
   fail 'NATS_IDENTITY_EVENT_SUBJECT is invalid'
@@ -146,6 +148,9 @@ fi
 if ! printf '%s' "$workspace_invite_subject" | grep -Eq '^[a-z][a-z0-9_-]{0,31}\.email\.workspace\.invite\.requested\.v1$'; then
   fail 'NATS_WORKSPACE_INVITE_EVENT_SUBJECT is invalid'
 fi
+if ! printf '%s' "$npd_receipt_subject" | grep -Eq '^[a-z][a-z0-9_-]{0,31}\.email\.billing\.npd-receipt\.delivery-requested\.v1$'; then
+  fail 'NATS_NPD_RECEIPT_EVENT_SUBJECT is invalid'
+fi
 if ! printf '%s' "$auth_email_dlq_subject" | grep -Eq '^[a-z][a-z0-9_-]{0,31}\.dlq\.jobs\.transactional-email\.v1$'; then
   fail 'NATS_AUTH_EMAIL_DLQ_SUBJECT is invalid'
 fi
@@ -154,12 +159,14 @@ dlq_environment=${dlq_subject%.dlq.realtime.identity.session-family.revoked.v1}
 email_verification_environment=${email_verification_subject%.email.identity.email-verification.requested.v1}
 password_reset_environment=${password_reset_subject%.email.identity.password-reset.requested.v1}
 workspace_invite_environment=${workspace_invite_subject%.email.workspace.invite.requested.v1}
+npd_receipt_environment=${npd_receipt_subject%.email.billing.npd-receipt.delivery-requested.v1}
 auth_email_dlq_environment=${auth_email_dlq_subject%.dlq.jobs.transactional-email.v1}
 for event_environment in \
   "$dlq_environment" \
   "$email_verification_environment" \
   "$password_reset_environment" \
   "$workspace_invite_environment" \
+  "$npd_receipt_environment" \
   "$auth_email_dlq_environment"
 do
   if [ "$identity_environment" != "$event_environment" ]; then
@@ -194,6 +201,9 @@ while IFS= read -r line || [ -n "$line" ]; do
       ;;
     '            "__NATS_WORKSPACE_INVITE_EVENT_SUBJECT__",')
       printf '            "%s",\n' "$workspace_invite_subject"
+      ;;
+    '            "__NATS_NPD_RECEIPT_EVENT_SUBJECT__",')
+      printf '            "%s",\n' "$npd_receipt_subject"
       ;;
     '      user: "__NATS_REALTIME_CONSUMER_USER__"')
       printf '      user: "%s"\n' "$NATS_REALTIME_CONSUMER_USER"
@@ -248,11 +258,14 @@ unset \
   NATS_EMAIL_VERIFICATION_EVENT_SUBJECT \
   NATS_PASSWORD_RESET_EVENT_SUBJECT \
   NATS_WORKSPACE_INVITE_EVENT_SUBJECT \
+  NATS_NPD_RECEIPT_EVENT_SUBJECT \
   NATS_AUTH_EMAIL_DLQ_SUBJECT \
   identity_subject dlq_subject email_verification_subject \
-  password_reset_subject workspace_invite_subject auth_email_dlq_subject \
+  password_reset_subject workspace_invite_subject npd_receipt_subject \
+  auth_email_dlq_subject \
   identity_environment dlq_environment email_verification_environment \
   password_reset_environment workspace_invite_environment \
+  npd_receipt_environment \
   auth_email_dlq_environment event_environment \
   validated_usernames validated_hashes required_names username_names hash_names \
   marker_names marker_name marker marker_count required_name username_name \

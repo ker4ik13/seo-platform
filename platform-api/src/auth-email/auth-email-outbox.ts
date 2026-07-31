@@ -113,6 +113,33 @@ export function transactionalEmailEnvelopeFromOutbox(
     });
   }
 
+  if (
+    row.event_type ===
+    transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested
+  ) {
+    exactKeys(payload, ["receiptId", "workspaceId"], "payload");
+    if (
+      row.aggregate_type !== "npdReceiptObligation" ||
+      row.aggregate_id !== payload.receiptId ||
+      row.workspace_id !== payload.workspaceId
+    ) {
+      return invalid("receipt outbox");
+    }
+    return createTransactionalEmailEventEnvelopeV1({
+      ...common,
+      eventType: row.event_type,
+      receiptId: stringValue(payload.receiptId, "payload.receiptId"),
+      workspaceId: stringValue(
+        payload.workspaceId,
+        "payload.workspaceId"
+      ),
+      aggregateVersion: positiveInteger(
+        row.aggregate_version,
+        "aggregate_version"
+      )
+    });
+  }
+
   return invalid("event type");
 }
 

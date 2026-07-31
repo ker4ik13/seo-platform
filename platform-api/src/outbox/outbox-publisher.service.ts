@@ -137,7 +137,8 @@ export class OutboxPublisherService
               ${sessionFamilyRevokedEventTypeV1},
               ${transactionalEmailEventTypesV1.emailVerificationRequested},
               ${transactionalEmailEventTypesV1.passwordResetRequested},
-              ${transactionalEmailEventTypesV1.workspaceInviteRequested}
+              ${transactionalEmailEventTypesV1.workspaceInviteRequested},
+              ${transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested}
             )
           ORDER BY available_at ASC, created_at ASC, id ASC
           FOR UPDATE SKIP LOCKED

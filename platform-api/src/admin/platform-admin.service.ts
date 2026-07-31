@@ -1,4 +1,8 @@
 import { Injectable } from "@nestjs/common";
+import {
+  transactionalEmailEventTypesV1,
+  transactionalEmailNpdReceiptAggregateTypeV1
+} from "@seo-platform/contracts";
 import type {
   AdminNpdReceiptDetail,
   AdminNpdReceiptListPage,
@@ -24,6 +28,7 @@ import type {
   RequestContext
 } from "../identity/identity.types.js";
 import { BillingPiiService } from "../billing/billing-pii.service.js";
+import { OutboxService } from "../outbox/outbox.service.js";
 
 const RECEIPT_LIST_LIMIT = 100;
 
@@ -32,7 +37,8 @@ export class PlatformAdminService {
   public constructor(
     private readonly prisma: PrismaService,
     private readonly pii: BillingPiiService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly outbox: OutboxService
   ) {}
 
   public async profile(
@@ -227,9 +233,18 @@ export class PlatformAdminService {
         },
         transaction
       );
-      return transaction.npdReceiptObligation.findUniqueOrThrow({
-        where: { id }
-      });
+      const updated =
+        await transaction.npdReceiptObligation.findUniqueOrThrow({
+          where: { id }
+        });
+      if (updated.status === "DELIVERY_PENDING") {
+        await this.requestReceiptDelivery(
+          transaction,
+          updated,
+          context.requestId
+        );
+      }
+      return updated;
     });
     return receiptSummary(updated, new Date());
   }
@@ -409,10 +424,39 @@ export class PlatformAdminService {
           },
           transaction
         );
+        await this.requestReceiptDelivery(
+          transaction,
+          created,
+          context.requestId
+        );
         return created;
       }
     );
     return receiptSummary(replacement, new Date());
+  }
+
+  private async requestReceiptDelivery(
+    transaction: Prisma.TransactionClient,
+    receipt: Pick<
+      NpdReceiptObligation,
+      "id" | "workspaceId" | "version"
+    >,
+    requestId: string
+  ): Promise<void> {
+    await this.outbox.event(transaction, {
+      eventType:
+        transactionalEmailEventTypesV1
+          .billingNpdReceiptDeliveryRequested,
+      aggregateType: transactionalEmailNpdReceiptAggregateTypeV1,
+      aggregateId: receipt.id,
+      aggregateVersion: receipt.version,
+      workspaceId: receipt.workspaceId,
+      payload: {
+        receiptId: receipt.id,
+        workspaceId: receipt.workspaceId
+      },
+      requestId
+    });
   }
 
   public async listStaffRoles(): Promise<

@@ -12,7 +12,9 @@ export const transactionalEmailEventTypesV1 = {
   emailVerificationRequested:
     domainEventTypes.emailVerificationRequested,
   passwordResetRequested: domainEventTypes.passwordResetRequested,
-  workspaceInviteRequested: domainEventTypes.workspaceInviteRequested
+  workspaceInviteRequested: domainEventTypes.workspaceInviteRequested,
+  billingNpdReceiptDeliveryRequested:
+    domainEventTypes.billingNpdReceiptDeliveryRequested
 } as const;
 
 export type TransactionalEmailEventTypeV1 =
@@ -23,6 +25,8 @@ export const transactionalEmailUserAggregateTypeV1 = "user";
 export const transactionalEmailWorkspaceInviteAggregateTypeV1 =
   "workspaceInvite";
 export const transactionalEmailWorkspaceInviteAggregateVersionV1 = 1;
+export const transactionalEmailNpdReceiptAggregateTypeV1 =
+  "npdReceiptObligation";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -64,6 +68,11 @@ export interface WorkspaceInviteRequestedEventDataV1 {
   readonly inviteId: string;
   readonly workspaceId: string;
   readonly expiresAt: string;
+}
+
+export interface BillingNpdReceiptDeliveryRequestedEventDataV1 {
+  readonly receiptId: string;
+  readonly workspaceId: string;
 }
 
 interface TransactionalEmailIdentityEventEnvelopeV1<
@@ -115,10 +124,26 @@ export interface WorkspaceInviteRequestedEventEnvelopeV1
   readonly metadata: TransactionalEmailEventMetadataV1;
 }
 
+export interface BillingNpdReceiptDeliveryRequestedEventEnvelopeV1
+  extends DomainEventEnvelope<BillingNpdReceiptDeliveryRequestedEventDataV1> {
+  readonly eventType:
+    typeof transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested;
+  readonly producer: typeof transactionalEmailEventProducerV1;
+  readonly workspaceId: WorkspaceId;
+  readonly projectId?: never;
+  readonly aggregate: {
+    readonly type: typeof transactionalEmailNpdReceiptAggregateTypeV1;
+    readonly id: string;
+    readonly version: number;
+  };
+  readonly metadata: TransactionalEmailEventMetadataV1;
+}
+
 export type TransactionalEmailEventEnvelopeV1 =
   | EmailVerificationRequestedEventEnvelopeV1
   | PasswordResetRequestedEventEnvelopeV1
-  | WorkspaceInviteRequestedEventEnvelopeV1;
+  | WorkspaceInviteRequestedEventEnvelopeV1
+  | BillingNpdReceiptDeliveryRequestedEventEnvelopeV1;
 
 interface CreateTransactionalEmailEventEnvelopeBaseV1Input {
   readonly eventId: string;
@@ -158,10 +183,20 @@ export interface CreateWorkspaceInviteRequestedEventEnvelopeV1Input
   readonly expiresAt: Date;
 }
 
+export interface CreateBillingNpdReceiptDeliveryRequestedEventEnvelopeV1Input
+  extends CreateTransactionalEmailEventEnvelopeBaseV1Input {
+  readonly eventType:
+    typeof transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested;
+  readonly receiptId: string;
+  readonly workspaceId: string;
+  readonly aggregateVersion: number;
+}
+
 export type CreateTransactionalEmailEventEnvelopeV1Input =
   | CreateEmailVerificationRequestedEventEnvelopeV1Input
   | CreatePasswordResetRequestedEventEnvelopeV1Input
-  | CreateWorkspaceInviteRequestedEventEnvelopeV1Input;
+  | CreateWorkspaceInviteRequestedEventEnvelopeV1Input
+  | CreateBillingNpdReceiptDeliveryRequestedEventEnvelopeV1Input;
 
 export type TransactionalEmailEventSubjectV1<
   Environment extends string = string,
@@ -193,6 +228,9 @@ export function createTransactionalEmailEventEnvelopeV1(
   input: CreateWorkspaceInviteRequestedEventEnvelopeV1Input
 ): WorkspaceInviteRequestedEventEnvelopeV1;
 export function createTransactionalEmailEventEnvelopeV1(
+  input: CreateBillingNpdReceiptDeliveryRequestedEventEnvelopeV1Input
+): BillingNpdReceiptDeliveryRequestedEventEnvelopeV1;
+export function createTransactionalEmailEventEnvelopeV1(
   input: CreateTransactionalEmailEventEnvelopeV1Input
 ): TransactionalEmailEventEnvelopeV1;
 export function createTransactionalEmailEventEnvelopeV1(
@@ -213,7 +251,8 @@ export function createTransactionalEmailEventEnvelopeV1(
         "expiresAt",
         "aggregateVersion",
         "inviteId",
-        "workspaceId"
+        "workspaceId",
+        "receiptId"
       ],
       "input"
     );
@@ -275,6 +314,52 @@ export function createTransactionalEmailEventEnvelopeV1(
       });
     }
 
+    if (
+      eventType ===
+      transactionalEmailEventTypesV1.workspaceInviteRequested
+    ) {
+      const record = exactRecord(
+        input,
+        [
+          "eventId",
+          "eventType",
+          "occurredAt",
+          "traceId",
+          "metadata",
+          "inviteId",
+          "workspaceId",
+          "expiresAt"
+        ],
+        [],
+        "input"
+      );
+      const inviteId = canonicalUuid(record.inviteId, "input.inviteId");
+      const workspaceId = canonicalUuid(
+        record.workspaceId,
+        "input.workspaceId"
+      );
+
+      return parseTransactionalEmailEventEnvelopeV1({
+        eventId: canonicalUuid(record.eventId, "input.eventId"),
+        eventType,
+        occurredAt: canonicalDate(record.occurredAt, "input.occurredAt"),
+        producer: transactionalEmailEventProducerV1,
+        traceId: safeContextId(record.traceId, "input.traceId"),
+        workspaceId,
+        aggregate: {
+          type: transactionalEmailWorkspaceInviteAggregateTypeV1,
+          id: inviteId,
+          version: transactionalEmailWorkspaceInviteAggregateVersionV1
+        },
+        data: {
+          inviteId,
+          workspaceId,
+          expiresAt: canonicalDate(record.expiresAt, "input.expiresAt")
+        },
+        metadata: validatedMetadata(record.metadata, "input.metadata")
+      });
+    }
+
     const record = exactRecord(
       input,
       [
@@ -283,19 +368,18 @@ export function createTransactionalEmailEventEnvelopeV1(
         "occurredAt",
         "traceId",
         "metadata",
-        "inviteId",
+        "receiptId",
         "workspaceId",
-        "expiresAt"
+        "aggregateVersion"
       ],
       [],
       "input"
     );
-    const inviteId = canonicalUuid(record.inviteId, "input.inviteId");
+    const receiptId = canonicalUuid(record.receiptId, "input.receiptId");
     const workspaceId = canonicalUuid(
       record.workspaceId,
       "input.workspaceId"
     );
-
     return parseTransactionalEmailEventEnvelopeV1({
       eventId: canonicalUuid(record.eventId, "input.eventId"),
       eventType,
@@ -304,15 +388,14 @@ export function createTransactionalEmailEventEnvelopeV1(
       traceId: safeContextId(record.traceId, "input.traceId"),
       workspaceId,
       aggregate: {
-        type: transactionalEmailWorkspaceInviteAggregateTypeV1,
-        id: inviteId,
-        version: transactionalEmailWorkspaceInviteAggregateVersionV1
+        type: transactionalEmailNpdReceiptAggregateTypeV1,
+        id: receiptId,
+        version: positiveVersion(
+          record.aggregateVersion,
+          "input.aggregateVersion"
+        )
       },
-      data: {
-        inviteId,
-        workspaceId,
-        expiresAt: canonicalDate(record.expiresAt, "input.expiresAt")
-      },
+      data: { receiptId, workspaceId },
       metadata: validatedMetadata(record.metadata, "input.metadata")
     });
   } catch (error) {
@@ -349,9 +432,12 @@ export function parseTransactionalEmailEventEnvelopeV1(
     const isWorkspaceInvite =
       eventType ===
       transactionalEmailEventTypesV1.workspaceInviteRequested;
+    const isNpdReceipt =
+      eventType ===
+      transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested;
     const envelope = exactRecord(
       input,
-      isWorkspaceInvite
+      isWorkspaceInvite || isNpdReceipt
         ? [
             "eventId",
             "eventType",
@@ -457,6 +543,59 @@ export function parseTransactionalEmailEventEnvelopeV1(
             data.expiresAt,
             "event.data.expiresAt"
           )
+        }),
+        metadata: common.metadata
+      });
+    }
+
+    if (isNpdReceipt) {
+      if (aggregate.type !== transactionalEmailNpdReceiptAggregateTypeV1) {
+        invalidEvent("event.aggregate");
+      }
+      const aggregateVersion = positiveVersion(
+        aggregate.version,
+        "event.aggregate.version"
+      );
+      const workspaceId = canonicalUuid(
+        envelope.workspaceId,
+        "event.workspaceId"
+      );
+      const data = exactRecord(
+        envelope.data,
+        ["receiptId", "workspaceId"],
+        [],
+        "event.data"
+      );
+      const receiptId = canonicalUuid(
+        data.receiptId,
+        "event.data.receiptId"
+      );
+      const dataWorkspaceId = canonicalUuid(
+        data.workspaceId,
+        "event.data.workspaceId"
+      );
+      if (
+        aggregateId !== receiptId ||
+        workspaceId !== dataWorkspaceId
+      ) {
+        invalidEvent("event.aggregate");
+      }
+      return Object.freeze({
+        eventId: common.eventId,
+        eventType:
+          transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested,
+        occurredAt: common.occurredAt,
+        producer: transactionalEmailEventProducerV1,
+        traceId: common.traceId,
+        workspaceId: workspaceId as WorkspaceId,
+        aggregate: Object.freeze({
+          type: transactionalEmailNpdReceiptAggregateTypeV1,
+          id: aggregateId,
+          version: aggregateVersion
+        }),
+        data: Object.freeze({
+          receiptId,
+          workspaceId: dataWorkspaceId
         }),
         metadata: common.metadata
       });
@@ -836,7 +975,9 @@ function transactionalEmailEventType(
   if (
     value !== transactionalEmailEventTypesV1.emailVerificationRequested &&
     value !== transactionalEmailEventTypesV1.passwordResetRequested &&
-    value !== transactionalEmailEventTypesV1.workspaceInviteRequested
+    value !== transactionalEmailEventTypesV1.workspaceInviteRequested &&
+    value !==
+      transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested
   ) {
     invalidEvent(field);
   }

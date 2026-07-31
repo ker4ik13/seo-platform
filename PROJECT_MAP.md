@@ -133,8 +133,10 @@ append-only update/delete и запрет TRUNCATE. Included credits не пер
 checkout/автоплатёж остаётся operator gate до выдачи shop ID/secret, настройки
 webhook и sandbox/live canary. Защищённая operations-панель уже закрывает
 ручную регистрацию, cancellation после полного refund и replacement после
-частичного refund чека «Мой налог»; автоматическая email-доставка после
-регистрации остаётся следующим обязательным transport slice.
+частичного refund чека «Мой налог». Регистрация обычного или replacement
+чека атомарно создаёт secret-free событие; transactional-email worker
+получает recipient и официальный URL JIT, отправляет локализованный чек и
+идемпотентно фиксирует `DELIVERED` либо terminal bounce.
 Plan entitlement больше не является UI-only: общий
 `BillingEntitlementService` строго разбирает immutable feature snapshot,
 использует DB clock и сериализует capacity-команды блокировкой workspace.
@@ -157,8 +159,8 @@ generation через CAS и не теряет более новое измен�
 вкладки. Общая notification email/Web Push доставка и test send остаются
 выключены.
 
-Transactional auth-email срез по ADR-2026-038 реализует отдельный путь для
-подтверждения email, password reset и workspace invite. Platform API пишет
+Transactional email срез по ADR-2026-038 реализует отдельный путь для
+подтверждения email, password reset, workspace invite и NPD receipt. Platform API пишет
 secret-free events и публикует их в `AUTH_EMAIL_EVENTS`; отдельный
 `auth-email-worker` получает JIT recipient/action URL через защищённый
 Platform API boundary, отправляет SMTP и хранит только durable redacted state
@@ -352,7 +354,7 @@ bounded UTC/filter/cursor query во внутренний read model SEO Data. �
 Platform API durable publisher, JetStream topology и Realtime durable consumer
 проверяют exact subject/stream/consumer и fail-closed readiness. Остальные
 event families этот identity consumer намеренно не получает. Тот же Platform
-outbox publisher отдельным allowlist публикует три transactional auth-email
+outbox publisher отдельным allowlist публикует четыре transactional-email
 event type в `AUTH_EMAIL_EVENTS`; durable `jobs_auth_email_v1` обрабатывает их
 отдельным worker. Остальные event families пока имеют только локальные
 outbox/inbox foundations либо собственные producer rows.
@@ -546,12 +548,12 @@ Backend convention:
 - `platform-api/src/identity/mfa.*`, `totp.*` — TOTP lifecycle, login
   challenge и recovery codes;
 - `platform-contracts/src/events/transactional-email.ts` и
-  `src/api/auth-email-deliveries.ts` — exact secret-free auth-email events,
+  `src/api/auth-email-deliveries.ts` — exact secret-free transactional-email events,
   subjects/redacted DLQ и JIT material/completion contracts;
 - `platform-api/src/auth-email` — dedicated guard/controller и authoritative
   JIT materializer: повторная проверка user/token/invite/workspace state,
   восстановление token только в памяти, fragment-only action URL и
-  idempotent invite completion;
+  idempotent invite/NPD receipt completion;
 - `platform-api/src/authorization` — default-deny permission catalog и
   проверка tenant context;
 - `platform-api/src/billing` — versioned plan catalog, trial/subscription,
@@ -648,7 +650,7 @@ Backend convention:
   notification policy и encrypted browser subscription storage;
 - `platform-api/src/audit`, `src/outbox` — переиспользуемые transactional
   записи аудита и событий; текущий durable publisher выбирает exact terminal
-  identity event в `IDENTITY_EVENTS` и три auth-email events в
+  identity event в `IDENTITY_EVENTS` и четыре transactional-email events в
   `AUTH_EMAIL_EVENTS`, проверяет expected stream PubAck и сохраняет bounded
   retry/terminal status в той же outbox;
 - `platform-jobs-integrations/src/queue` — BullMQ connection с единым
@@ -699,6 +701,9 @@ Backend convention:
   — Jobs-owned `auth_email_delivery_attempts` без recipient/token/content,
   unique source event identity, bounded attempt/lease/status matrix,
   immutable SMTP receipt/terminal guards и запрет destructive mutation;
+- `platform-jobs-integrations/prisma/migrations/20260731060000_npd_receipt_email_delivery`
+  — expand-only allowlist durable attempt для
+  `billing.npd-receipt.delivery-requested.v1`;
 - `platform-jobs-integrations/src/rank-worker.main.ts` — изолированный
   rank-preparation entrypoint с per-delivery lease owner, PostgreSQL
   preparation/execution dispatcher recovery, отдельными manifest/grant/result
@@ -958,7 +963,7 @@ Entrypoints:
 | Notifications | vertical slice: preferences → effective policy → read center → encrypted browser device lifecycle |
 | Integrations | vertical slice: catalog + encrypted BYOK vault + validation + project binding |
 | Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |
-| Billing/YooKassa | vertical slice: catalog + hosted/recurring payment + webhook/reconciliation + ledger/refund/NPD obligation + Web UI + protected manual receipt operations; live provider и receipt email delivery остаются gate |
+| Billing/YooKassa | vertical slice: catalog + hosted/recurring payment + webhook/reconciliation + ledger/refund/NPD obligation + Web UI + protected manual receipt operations + durable receipt email delivery; live provider/SMTP canary остаётся gate |
 | Directus content | planned |
 
 Foundation содержит четыре валидные Prisma schemas и начальные migrations,
@@ -987,15 +992,18 @@ active/unexpired principal session под тем же lock. Refresh rotation н�
 keyset cursor без раскрытия family ID. Новые family IDs — UUIDv7; legacy UUIDv4
 продолжают читаться без смены identifier.
 
-Регистрация/resend verification, password reset request и workspace invite
-атомарно создают secret-free auth-email outbox events. Publisher валидирует
+Регистрация/resend verification, password reset request, workspace invite и
+ручная регистрация NPD receipt атомарно создают secret-free transactional
+outbox events. Publisher валидирует
 их отдельно от terminal identity event и отправляет в `AUTH_EMAIL_EVENTS`.
 Jobs durable attempt дедуплицируется по source event ID/hash; JIT material
 повторно проверяет authoritative Platform state непосредственно перед SMTP.
 Устаревший token/invite даёт `SKIPPED/NOT_DELIVERABLE`, а успешный invite
 completion переводит только актуальный `SENT` в `DELIVERED`; hard recipient
 rejection после redacted DLQ PubAck переводит только актуальный `SENT` в
-`BOUNCED`. SMTP и Jobs DB не
+`BOUNCED`, а NPD receipt — из `DELIVERY_PENDING` в `FAILED_FINAL`.
+Успешная отправка NPD receipt фиксирует `DELIVERED` и `deliveredAt`; recipient,
+официальный URL и текст чека не сохраняются в Jobs DB/NATS. SMTP и Jobs DB не
 транзакционны: crash после SMTP accept и до durable receipt может вызвать
 повтор со стабильным `Message-ID`, поэтому exactly-once не заявляется.
 
@@ -1547,13 +1555,23 @@ Job/manifest. Raw provider body нигде durable не сохраняется.
   harness; trigger-negative smoke, first-superadmin bootstrap и повторный
   fail-closed bootstrap проверены живой БД. Admin больше не содержит demo
   данных, требует MFA/recent auth/role и доступен через отдельный edge origin.
+- P3 NPD receipt delivery 2026-07-31: четвёртое exact
+  transactional-email событие замыкает manual registration/replacement на
+  durable Jobs SMTP worker; JIT material сверяет tenant/version/status,
+  расшифровывает recipient только в Platform API и валидирует официальный
+  `lknpd.nalog.ru` URL. Contracts 100/100, Jobs 418 pass + 9 opt-in skips и
+  infrastructure 82 pass + 5 opt-in skips проходят; внешний SMTP canary
+  требует operator credentials. Fresh 27-migration Jobs chain применён на
+  PostgreSQL 16 compatibility harness; новый allowlist принял NPD event и
+  отклонил посторонний event type. Platform NPD integration также пройден
+  на живой PostgreSQL.
 
 ## 9. Следующий вертикальный срез
 
 Ближайший обязательный billing-контур после projects/seats/BYOK entitlement:
 
 `keyword/tracked/storage/automation meters → estimate/reservation/capture для provider usage →
-receipt email delivery → sandbox checkout/autopay/refund E2E`
+sandbox checkout/autopay/refund/receipt E2E`
 
 Критерий — тариф реально ограничивает seats/projects/keywords/tracked pairs,
 каждая platform-paid команда проходит estimate/reservation/settlement, а
@@ -1617,7 +1635,7 @@ OAuth/OIDC выполняется после подтверждения зави
 - `semantic_import_receipts` без chunks требуют bounded reconciliation/retention;
   receipt с применёнными chunks автоматически не удаляется.
 - Durable publisher/consumer реализованы для
-  `identity.session-family.revoked.v1` и трёх transactional auth-email events;
+  `identity.session-family.revoked.v1` и четырёх transactional-email events;
   остальные event families требуют собственных allowlisted publishers/
   consumers, retention и replay runbooks.
 - `rank_estimates` требуют bounded maintenance/retention после окна
@@ -1680,8 +1698,9 @@ OAuth/OIDC выполняется после подтверждения зави
   `payment.succeeded`. Operations-панель сохраняет только точный HTTPS print
   URL `lknpd.nalog.ru`, сверочные подтверждения, cancellation после полного
   refund и replacement на остаток после частичного refund; роли persisted и
-  append-only. Email-доставка, bounded retry/bounce и delivery history ещё
-  должны быть подключены к transactional transport. Использовать
+  append-only. Email-доставка, bounded retry/bounce и durable redacted
+  attempt history подключены к transactional transport; live SMTP canary и
+  bounce/reconciliation runbook остаются operator gate. Использовать
   неофициальный API «Мой налог» или хранить его пароль запрещено.
 - KEK rotation runbook описан в `platform-infrastructure/README.md`, но
   автоматический bounded DEK rewrap ещё не реализован. DB-aware startup
@@ -1791,9 +1810,9 @@ OAuth/OIDC выполняется после подтверждения зави
   deploy между enqueue и execution может дать `CONNECTOR_VERSION_CHANGED`.
   До production нужны N/N−1 version support либо queue drain перед rollout.
 - Directus collection schema и seed появятся вместе с CMS vertical slice.
-- Email-verification event family всё ещё требует собственного allowlisted
-  durable consumer; наличие `@nats-io/jetstream` в identity transport не
-  подключает его автоматически. Plaintext verification token не логируется.
+- Email-verification/password-reset/invite/NPD receipt используют один
+  allowlisted durable transactional worker; plaintext token и billing PII
+  не попадают в NATS/Jobs DB и не логируются.
 - QR для TOTP пока представлен локальным `otpauth://` URI и ручным ключом;
   UI QR появится после подтверждения зависимости `qrcode`.
 - Arsenkin position execution реализован; production live BYOK canary,

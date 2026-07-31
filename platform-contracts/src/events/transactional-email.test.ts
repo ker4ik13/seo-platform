@@ -14,9 +14,11 @@ import {
   transactionalEmailEventProducerV1,
   transactionalEmailEventSubjectV1,
   transactionalEmailEventTypesV1,
+  transactionalEmailNpdReceiptAggregateTypeV1,
   transactionalEmailUserAggregateTypeV1,
   transactionalEmailWorkspaceInviteAggregateTypeV1,
   transactionalEmailWorkspaceInviteAggregateVersionV1,
+  type BillingNpdReceiptDeliveryRequestedEventEnvelopeV1,
   type EmailVerificationRequestedEventEnvelopeV1,
   type PasswordResetRequestedEventEnvelopeV1,
   type TransactionalEmailDeadLetterEnvelopeV1,
@@ -29,6 +31,7 @@ const USER_ID = "01900000-0000-7000-8000-000000000002";
 const ONE_TIME_TOKEN_ID = "01900000-0000-7000-8000-000000000003";
 const INVITE_ID = "01900000-0000-7000-8000-000000000004";
 const WORKSPACE_ID = "01900000-0000-7000-8000-000000000005";
+const RECEIPT_ID = "01900000-0000-7000-8000-000000000007";
 const OCCURRED_AT = "2026-07-30T12:00:00.123Z";
 const EXPIRES_AT = "2026-07-30T12:30:00.000Z";
 const TRACE_ID = "request-01900000-0000-7000-8000-000000000006";
@@ -91,6 +94,31 @@ function inviteEnvelope(): Readonly<Record<string, unknown>> {
   };
 }
 
+function receiptEnvelope(): Readonly<Record<string, unknown>> {
+  return {
+    eventId: EVENT_ID,
+    eventType:
+      transactionalEmailEventTypesV1.billingNpdReceiptDeliveryRequested,
+    occurredAt: OCCURRED_AT,
+    producer: "platform-api",
+    traceId: TRACE_ID,
+    workspaceId: WORKSPACE_ID,
+    aggregate: {
+      type: "npdReceiptObligation",
+      id: RECEIPT_ID,
+      version: 2
+    },
+    data: {
+      receiptId: RECEIPT_ID,
+      workspaceId: WORKSPACE_ID
+    },
+    metadata: {
+      correlationId: CORRELATION_ID,
+      causationId: CAUSATION_ID
+    }
+  };
+}
+
 function deadLetterEnvelope(): Readonly<Record<string, unknown>> {
   return {
     schemaVersion: 1,
@@ -106,12 +134,14 @@ function deadLetterEnvelope(): Readonly<Record<string, unknown>> {
   };
 }
 
-test("transactional email constants expose only the three allowlisted events", () => {
+test("transactional email constants expose only the four allowlisted events", () => {
   assert.deepEqual(transactionalEmailEventTypesV1, {
     emailVerificationRequested:
       "identity.email-verification.requested.v1",
     passwordResetRequested: "identity.password-reset.requested.v1",
-    workspaceInviteRequested: "workspace.invite.requested.v1"
+    workspaceInviteRequested: "workspace.invite.requested.v1",
+    billingNpdReceiptDeliveryRequested:
+      "billing.npd-receipt.delivery-requested.v1"
   });
   assert.equal(transactionalEmailEventProducerV1, "platform-api");
   assert.equal(transactionalEmailUserAggregateTypeV1, "user");
@@ -120,9 +150,13 @@ test("transactional email constants expose only the three allowlisted events", (
     "workspaceInvite"
   );
   assert.equal(transactionalEmailWorkspaceInviteAggregateVersionV1, 1);
+  assert.equal(
+    transactionalEmailNpdReceiptAggregateTypeV1,
+    "npdReceiptObligation"
+  );
 });
 
-test("creator builds all three exact immutable envelopes", () => {
+test("creator builds all four exact immutable envelopes", () => {
   const verification: EmailVerificationRequestedEventEnvelopeV1 =
     createTransactionalEmailEventEnvelopeV1({
       eventId: EVENT_ID,
@@ -170,13 +204,30 @@ test("creator builds all three exact immutable envelopes", () => {
       workspaceId: WORKSPACE_ID,
       expiresAt: new Date(EXPIRES_AT)
     });
+  const receipt: BillingNpdReceiptDeliveryRequestedEventEnvelopeV1 =
+    createTransactionalEmailEventEnvelopeV1({
+      eventId: EVENT_ID,
+      eventType:
+        transactionalEmailEventTypesV1
+          .billingNpdReceiptDeliveryRequested,
+      occurredAt: new Date(OCCURRED_AT),
+      traceId: TRACE_ID,
+      metadata: {
+        correlationId: CORRELATION_ID,
+        causationId: CAUSATION_ID
+      },
+      receiptId: RECEIPT_ID,
+      workspaceId: WORKSPACE_ID,
+      aggregateVersion: 2
+    });
 
   assert.deepEqual(verification, identityEnvelope());
   assert.deepEqual(reset, identityEnvelope(
     transactionalEmailEventTypesV1.passwordResetRequested
   ));
   assert.deepEqual(invite, inviteEnvelope());
-  for (const envelope of [verification, reset, invite]) {
+  assert.deepEqual(receipt, receiptEnvelope());
+  for (const envelope of [verification, reset, invite, receipt]) {
     assert.equal(Object.isFrozen(envelope), true);
     assert.equal(Object.isFrozen(envelope.aggregate), true);
     assert.equal(Object.isFrozen(envelope.data), true);
@@ -193,7 +244,8 @@ test("parser validates current outbox payload and aggregate shapes", () => {
     parseTransactionalEmailEventEnvelopeV1(identityEnvelope(
       transactionalEmailEventTypesV1.passwordResetRequested
     )),
-    parseTransactionalEmailEventEnvelopeV1(inviteEnvelope())
+    parseTransactionalEmailEventEnvelopeV1(inviteEnvelope()),
+    parseTransactionalEmailEventEnvelopeV1(receiptEnvelope())
   ];
 
   assert.deepEqual(events[0], identityEnvelope());
@@ -201,6 +253,7 @@ test("parser validates current outbox payload and aggregate shapes", () => {
     transactionalEmailEventTypesV1.passwordResetRequested
   ));
   assert.deepEqual(events[2], inviteEnvelope());
+  assert.deepEqual(events[3], receiptEnvelope());
 });
 
 test("creator and parser preserve golden field order", () => {
@@ -521,6 +574,13 @@ test("subject helpers produce exact typed event, filter and DLQ subjects", () =>
       "prod",
       transactionalEmailEventTypesV1.workspaceInviteRequested
     );
+  const receipt:
+    "prod.email.billing.npd-receipt.delivery-requested.v1" =
+    transactionalEmailEventSubjectV1(
+      "prod",
+      transactionalEmailEventTypesV1
+        .billingNpdReceiptDeliveryRequested
+    );
   const filter: "prod.email.>" =
     transactionalEmailEventFilterSubjectV1("prod");
   const deadLetter: "prod.dlq.jobs.transactional-email.v1" =
@@ -532,6 +592,10 @@ test("subject helpers produce exact typed event, filter and DLQ subjects", () =>
   );
   assert.equal(reset, "prod.email.identity.password-reset.requested.v1");
   assert.equal(invite, "prod.email.workspace.invite.requested.v1");
+  assert.equal(
+    receipt,
+    "prod.email.billing.npd-receipt.delivery-requested.v1"
+  );
   assert.equal(filter, "prod.email.>");
   assert.equal(deadLetter, "prod.dlq.jobs.transactional-email.v1");
 });
