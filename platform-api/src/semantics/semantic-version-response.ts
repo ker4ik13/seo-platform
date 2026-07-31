@@ -153,7 +153,7 @@ function semanticVersionChanges(
       "conflictCode"
     ]);
     if (
-      input.entityType !== "KEYWORD" ||
+      !["KEYWORD", "CLUSTER"].includes(String(input.entityType)) ||
       !uuid(input.entityId) ||
       !["CREATE", "UPDATE", "DELETE"].includes(String(input.operation)) ||
       typeof input.state !== "string" ||
@@ -168,7 +168,7 @@ function semanticVersionChanges(
       invalid();
     }
     return {
-      entityType: "KEYWORD" as const,
+      entityType: input.entityType as "KEYWORD" | "CLUSTER",
       entityId: input.entityId,
       operation: input.operation as "CREATE" | "UPDATE" | "DELETE",
       state: input.state,
@@ -182,7 +182,9 @@ function semanticVersionChanges(
     } as SemanticVersionChangePreview;
   });
   if (
-    new Set(changes.map(({ entityId }) => entityId)).size !== changes.length
+    new Set(
+      changes.map(({ entityType, entityId }) => `${entityType}:${entityId}`)
+    ).size !== changes.length
   ) {
     invalid();
   }

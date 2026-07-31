@@ -1,48 +1,15 @@
 "use client";
 
+import type {
+  SemanticVersionListItem,
+  SemanticVersionUndoPreview,
+  SemanticVersionUndoResult
+} from "@seo-platform/contracts";
 import { useEffect, useState } from "react";
 import {
   browserApiRequest,
   BrowserApiError
 } from "../lib/browser-api";
-
-interface SemanticVersion {
-  readonly id: string;
-  readonly number: number;
-  readonly reason:
-    | "KEYWORD_CREATE"
-    | "KEYWORD_UPDATE"
-    | "KEYWORD_DELETE"
-    | "BULK_UPDATE"
-    | "IMPORT"
-    | "UNDO"
-    | "LEGACY";
-  readonly summary: string;
-  readonly affectedCount: number;
-  readonly reversible: boolean;
-  readonly finalizedAt?: string;
-  readonly createdAt: string;
-}
-
-interface UndoChange {
-  readonly entityId: string;
-  readonly state: "APPLICABLE" | "CONFLICTED" | "UNSUPPORTED";
-  readonly conflictCode?: string;
-}
-
-interface UndoPreview {
-  readonly version: SemanticVersion;
-  readonly applicable: number;
-  readonly conflicted: number;
-  readonly unsupported: number;
-  readonly changes: readonly UndoChange[];
-}
-
-interface UndoResult {
-  readonly applied: number;
-  readonly conflicted: number;
-  readonly unsupported: number;
-}
 
 export function SemanticVersionHistory({
   projectId,
@@ -53,10 +20,10 @@ export function SemanticVersionHistory({
   refreshVersion: number;
   onRestored: () => void;
 }>) {
-  const [versions, setVersions] = useState<readonly SemanticVersion[]>([]);
+  const [versions, setVersions] = useState<readonly SemanticVersionListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
-  const [preview, setPreview] = useState<UndoPreview>();
+  const [preview, setPreview] = useState<SemanticVersionUndoPreview>();
   const [previewingId, setPreviewingId] = useState<string>();
   const [undoIdempotencyKey, setUndoIdempotencyKey] =
     useState<string>();
@@ -68,7 +35,7 @@ export function SemanticVersionHistory({
     const controller = new AbortController();
     setLoading(true);
     setError(undefined);
-    void browserApiRequest<readonly SemanticVersion[]>(
+    void browserApiRequest<readonly SemanticVersionListItem[]>(
       versionPath(projectId),
       { signal: controller.signal }
     )
@@ -93,7 +60,7 @@ export function SemanticVersionHistory({
     setError(undefined);
     setNotice(undefined);
     try {
-      const result = await browserApiRequest<UndoPreview>(
+      const result = await browserApiRequest<SemanticVersionUndoPreview>(
           `${versionPath(projectId)}/${encodeURIComponent(
             versionId
           )}/undo-preview`
@@ -126,7 +93,7 @@ export function SemanticVersionHistory({
     setRestoring(true);
     setError(undefined);
     try {
-      const result = await browserApiRequest<UndoResult>(
+      const result = await browserApiRequest<SemanticVersionUndoResult>(
         `${versionPath(projectId)}/${encodeURIComponent(
           preview.version.id
         )}/undo`,
@@ -277,7 +244,7 @@ function versionPath(projectId: string): string {
   )}/semantic-versions`;
 }
 
-function reasonLabel(reason: SemanticVersion["reason"]): string {
+function reasonLabel(reason: SemanticVersionListItem["reason"]): string {
   switch (reason) {
     case "KEYWORD_CREATE":
       return "добавление запроса";
@@ -285,6 +252,14 @@ function reasonLabel(reason: SemanticVersion["reason"]): string {
       return "изменение запроса";
     case "KEYWORD_DELETE":
       return "удаление запроса";
+    case "CLUSTER_CREATE":
+      return "создание кластера";
+    case "CLUSTER_UPDATE":
+      return "изменение кластера";
+    case "CLUSTER_DELETE":
+      return "удаление кластера";
+    case "CLUSTER_BULK_UPDATE":
+      return "массовое назначение посадочных";
     case "BULK_UPDATE":
       return "массовое изменение";
     case "IMPORT":
@@ -310,6 +285,12 @@ function conflictLabel(code: string | undefined): string {
       return "исходный кластер удалён";
     case "TARGET_PAGE_UNAVAILABLE":
       return "исходная целевая страница недоступна";
+    case "PRIMARY_PAGE_UNAVAILABLE":
+      return "исходная посадочная кластера недоступна";
+    case "DUPLICATE_CLUSTER":
+      return "исходное имя занято другим кластером";
+    case "CLUSTER_NOT_EMPTY":
+      return "кластер уже содержит запросы и не может быть удалён откатом";
     case "TAG_UNAVAILABLE":
       return "один из исходных тегов удалён";
     case "VERSION_NOT_REVERSIBLE":

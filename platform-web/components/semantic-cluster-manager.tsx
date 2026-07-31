@@ -3,7 +3,10 @@
 import type {
   ProjectPageSettings,
   ProjectPageSummary,
-  SemanticCluster
+  SemanticCluster,
+  SemanticClusterPageBulkInput,
+  SemanticClusterPageBulkPreview,
+  SemanticClusterPageBulkResult
 } from "@seo-platform/contracts";
 import { useEffect, useState, type FormEvent } from "react";
 import { browserApiRequest, BrowserApiError } from "../lib/browser-api";
@@ -32,6 +35,14 @@ export function SemanticClusterManager({
   const [pages, setPages] = useState<readonly ProjectPageSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [bulkAction, setBulkAction] = useState("");
+  const [bulkRationale, setBulkRationale] = useState("");
+  const [bulkBusy, setBulkBusy] = useState<"PREVIEW" | "APPLY">();
+  const [bulkPreview, setBulkPreview] =
+    useState<SemanticClusterPageBulkPreview>();
+  const [bulkNotice, setBulkNotice] = useState<string>();
+  const [selectedClusterIds, setSelectedClusterIds] =
+    useState<readonly string[]>([]);
   const [error, setError] = useState<string>();
   const [editor, setEditor] = useState<ClusterEditor>();
   const [reloadVersion, setReloadVersion] = useState(0);
@@ -50,6 +61,11 @@ export function SemanticClusterManager({
         if (!controller.signal.aborted) {
           setClusters(clusterResult);
           setPages(pageResult);
+          setSelectedClusterIds((current) =>
+            current.filter((id) =>
+              clusterResult.some((cluster) => cluster.id === id)
+            )
+          );
         }
       })
       .catch((requestError) => {
@@ -104,12 +120,118 @@ export function SemanticClusterManager({
         ifMatch: cluster.version
       });
       setClusters((current) => current.filter(({ id }) => id !== cluster.id));
+      setSelectedClusterIds((current) =>
+        current.filter((id) => id !== cluster.id)
+      );
       if (editor?.mode === "edit" && editor.clusterId === cluster.id) {
         setEditor(undefined);
       }
       onChanged();
     } catch (requestError) {
       setError(clusterError(requestError));
+    }
+  }
+
+  function toggleCluster(clusterId: string): void {
+    setBulkPreview(undefined);
+    setBulkNotice(undefined);
+    if (selectedClusterIds.includes(clusterId)) {
+      setSelectedClusterIds((current) =>
+        current.filter((id) => id !== clusterId)
+      );
+      return;
+    }
+    if (selectedClusterIds.length >= 200) {
+      setError("За одну операцию можно выбрать не больше 200 кластеров.");
+      return;
+    }
+    setSelectedClusterIds((current) => [...current, clusterId]);
+  }
+
+  function toggleVisibleClusters(): void {
+    setBulkPreview(undefined);
+    setBulkNotice(undefined);
+    if (selectedClusterIds.length > 0) {
+      setSelectedClusterIds([]);
+      return;
+    }
+    setSelectedClusterIds(clusters.slice(0, 200).map(({ id }) => id));
+    if (clusters.length > 200) {
+      setBulkNotice("Выбраны первые 200 кластеров — максимум одной операции.");
+    }
+  }
+
+  function changeBulkAction(value: string): void {
+    setBulkAction(value);
+    if (value === "CLEAR") setBulkRationale("");
+    setBulkPreview(undefined);
+    setBulkNotice(undefined);
+  }
+
+  function changeBulkRationale(value: string): void {
+    setBulkRationale(value);
+    setBulkPreview(undefined);
+    setBulkNotice(undefined);
+  }
+
+  async function previewBulkPageMapping(): Promise<void> {
+    const body = bulkPageMappingBody(
+      clusters,
+      selectedClusterIds,
+      bulkAction,
+      bulkRationale
+    );
+    if (!body || bulkBusy) return;
+    setBulkBusy("PREVIEW");
+    setError(undefined);
+    setBulkNotice(undefined);
+    try {
+      setBulkPreview(
+        await browserApiRequest<SemanticClusterPageBulkPreview>(
+          clusterPath(projectId, "page-mapping-preview"),
+          { method: "POST", body }
+        )
+      );
+    } catch (requestError) {
+      setBulkPreview(undefined);
+      setError(clusterError(requestError));
+    } finally {
+      setBulkBusy(undefined);
+    }
+  }
+
+  async function applyBulkPageMapping(): Promise<void> {
+    const body = bulkPageMappingBody(
+      clusters,
+      selectedClusterIds,
+      bulkAction,
+      bulkRationale
+    );
+    if (!body || !bulkPreview || bulkPreview.applicable === 0 || bulkBusy) {
+      return;
+    }
+    setBulkBusy("APPLY");
+    setError(undefined);
+    setBulkNotice(undefined);
+    try {
+      const result = await browserApiRequest<SemanticClusterPageBulkResult>(
+        clusterPath(projectId, "page-mapping-bulk"),
+        { method: "POST", body }
+      );
+      setClusters((current) => mergeClusters(current, result.updatedClusters));
+      setSelectedClusterIds([]);
+      setBulkAction("");
+      setBulkRationale("");
+      setBulkPreview(undefined);
+      setBulkNotice(bulkResultNotice(result));
+      if (result.conflicted > 0) {
+        setReloadVersion((value) => value + 1);
+      }
+      onChanged();
+    } catch (requestError) {
+      setError(clusterError(requestError));
+    } finally {
+      setBulkBusy(undefined);
     }
   }
 
@@ -120,18 +242,30 @@ export function SemanticClusterManager({
           <h2>Кластеры</h2>
           <p>Поисковые интенты для назначения и массовой обработки запросов</p>
         </div>
-        <button
-          className="secondary-button"
-          onClick={() => setEditor({
-            mode: "create",
-            name: "",
-            primaryPageId: "",
-            pageMappingRationale: ""
-          })}
-          type="button"
-        >
-          Новый кластер
-        </button>
+        <div className="semantic-cluster-header-actions">
+          {clusters.length > 0 && (
+            <button
+              className="text-button"
+              disabled={loading || Boolean(bulkBusy)}
+              onClick={toggleVisibleClusters}
+              type="button"
+            >
+              {selectedClusterIds.length > 0 ? "Снять выбор" : "Выбрать все"}
+            </button>
+          )}
+          <button
+            className="secondary-button"
+            onClick={() => setEditor({
+              mode: "create",
+              name: "",
+              primaryPageId: "",
+              pageMappingRationale: ""
+            })}
+            type="button"
+          >
+            Новый кластер
+          </button>
+        </div>
       </header>
 
       {editor && (
@@ -207,6 +341,90 @@ export function SemanticClusterManager({
         </div>
       )}
 
+      {bulkNotice && (
+        <div className="inline-alert success" role="status">{bulkNotice}</div>
+      )}
+
+      {selectedClusterIds.length > 0 && (
+        <section className="semantic-cluster-bulk" aria-busy={Boolean(bulkBusy)}>
+          <div className="semantic-bulk-heading">
+            <div>
+              <strong>Посадочная для {selectedClusterIds.length} кластеров</strong>
+              <span>
+                Сначала проверьте изменения. Конфликтующие версии не перезаписываются.
+              </span>
+            </div>
+            <button
+              className="text-button"
+              disabled={Boolean(bulkBusy)}
+              onClick={() => setSelectedClusterIds([])}
+              type="button"
+            >
+              Закрыть
+            </button>
+          </div>
+          <div className="semantic-cluster-bulk-fields">
+            <label>
+              <span>Действие</span>
+              <select
+                disabled={Boolean(bulkBusy)}
+                onChange={(event) => changeBulkAction(event.target.value)}
+                value={bulkAction}
+              >
+                <option value="">Выберите действие</option>
+                <option value="CLEAR">Снять основную посадочную</option>
+                {pages.map((page) => (
+                  <option key={page.id} value={page.id}>
+                    {page.title ? `${page.title} · ` : ""}{page.normalizedUrl}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Обоснование</span>
+              <input
+                disabled={!bulkAction || bulkAction === "CLEAR" || Boolean(bulkBusy)}
+                maxLength={2_000}
+                onChange={(event) => changeBulkRationale(event.target.value)}
+                placeholder="Интент, SERP или ручное решение"
+                value={bulkRationale}
+              />
+            </label>
+          </div>
+          {bulkPreview && (
+            <div className="semantic-cluster-bulk-preview" role="status">
+              <span><strong>{bulkPreview.applicable}</strong> будут изменены</span>
+              <span><strong>{bulkPreview.skipped}</strong> уже совпадают</span>
+              <span className={bulkPreview.conflicted > 0 ? "danger" : ""}>
+                <strong>{bulkPreview.conflicted}</strong> конфликтов
+              </span>
+            </div>
+          )}
+          <div className="semantic-editor-actions">
+            <button
+              className="secondary-button"
+              disabled={!bulkAction || Boolean(bulkBusy)}
+              onClick={() => void previewBulkPageMapping()}
+              type="button"
+            >
+              {bulkBusy === "PREVIEW" ? "Проверяем…" : "Проверить"}
+            </button>
+            {bulkPreview && (
+              <button
+                className="primary-button"
+                disabled={bulkPreview.applicable === 0 || Boolean(bulkBusy)}
+                onClick={() => void applyBulkPageMapping()}
+                type="button"
+              >
+                {bulkBusy === "APPLY"
+                  ? "Применяем…"
+                  : `Применить ${bulkPreview.applicable}`}
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
       {loading ? (
         <div className="semantic-group-skeleton" role="status">Загружаем кластеры…</div>
       ) : clusters.length === 0 ? (
@@ -217,7 +435,16 @@ export function SemanticClusterManager({
       ) : (
         <div className="semantic-group-list">
           {clusters.map((cluster) => (
-            <div className="semantic-group-row" key={cluster.id}>
+            <div className="semantic-group-row semantic-cluster-row" key={cluster.id}>
+              <label className="semantic-cluster-select">
+                <input
+                  aria-label={`Выбрать кластер «${cluster.name}»`}
+                  checked={selectedClusterIds.includes(cluster.id)}
+                  disabled={Boolean(bulkBusy)}
+                  onChange={() => toggleCluster(cluster.id)}
+                  type="checkbox"
+                />
+              </label>
               <i aria-hidden="true" className="semantic-cluster-mark" />
               <div>
                 <strong>{cluster.name}</strong>
@@ -293,6 +520,48 @@ function clusterBody(editor: ClusterEditor): Readonly<Record<string, unknown>> {
       ? { pageMappingRationale: editor.pageMappingRationale.trim() }
       : {})
   };
+}
+
+function bulkPageMappingBody(
+  clusters: readonly SemanticCluster[],
+  selectedIds: readonly string[],
+  action: string,
+  rationale: string
+): SemanticClusterPageBulkInput | undefined {
+  if (selectedIds.length === 0 || !action) return undefined;
+  const selected = new Set(selectedIds);
+  const items = clusters
+    .filter(({ id }) => selected.has(id))
+    .map(({ id, version }) => ({ id, version }));
+  if (items.length !== selectedIds.length) return undefined;
+  if (action === "CLEAR") return { items, primaryPageId: null };
+  return {
+    items,
+    primaryPageId: action,
+    pageMappingSource: "MANUAL",
+    ...(rationale.trim() ? { pageMappingRationale: rationale.trim() } : {})
+  };
+}
+
+function mergeClusters(
+  current: readonly SemanticCluster[],
+  updated: readonly SemanticCluster[]
+): readonly SemanticCluster[] {
+  const updates = new Map(updated.map((cluster) => [cluster.id, cluster]));
+  return current
+    .map((cluster) => updates.get(cluster.id) ?? cluster)
+    .sort((left, right) => left.name.localeCompare(right.name, "ru"));
+}
+
+function bulkResultNotice(result: SemanticClusterPageBulkResult): string {
+  const main = `Посадочная обновлена у ${result.changed} кластеров.`;
+  if (result.conflicted > 0) {
+    return `${main} ${result.conflicted} конфликтующих записей не изменены; список обновлён.`;
+  }
+  if (result.skipped > 0) {
+    return `${main} ${result.skipped} уже соответствовали выбранному состоянию.`;
+  }
+  return main;
 }
 
 async function loadActivePages(

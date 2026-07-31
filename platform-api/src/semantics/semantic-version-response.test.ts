@@ -32,6 +32,25 @@ test("validates finite semantic versions and coherent undo counts", () => {
     }).applicable,
     1
   );
+  assert.equal(
+    semanticVersionUndoPreviewResponse({
+      version: { ...version, reason: "CLUSTER_UPDATE" },
+      applicable: 1,
+      conflicted: 0,
+      unsupported: 0,
+      changes: [
+        {
+          entityType: "CLUSTER",
+          entityId: keywordId,
+          operation: "UPDATE",
+          state: "APPLICABLE",
+          expectedCurrentVersion: 3,
+          currentVersion: 3
+        }
+      ]
+    }).changes[0]?.entityType,
+    "CLUSTER"
+  );
 });
 
 test("rejects extensible or contradictory semantic version responses", () => {

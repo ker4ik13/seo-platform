@@ -1,5 +1,6 @@
 import type {
   CreateSemanticClusterInput,
+  SemanticClusterPageBulkInput,
   SemanticClusterPageSource,
   UpdateSemanticClusterInput
 } from "@seo-platform/contracts";
@@ -31,6 +32,46 @@ export function updateSemanticClusterInput(
   return { name: clusterName(input.name), ...updateMappingInput(input) };
 }
 
+export function semanticClusterPageBulkInput(
+  value: unknown
+): SemanticClusterPageBulkInput {
+  const input = exactRecordWithFields(value, [
+    "items",
+    "primaryPageId",
+    "pageMappingSource",
+    "pageMappingConfidence",
+    "pageMappingRationale"
+  ]);
+  if (!Object.hasOwn(input, "primaryPageId")) {
+    invalid("primaryPageId", "Is required");
+  }
+  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 200) {
+    invalid("items", "Must select between 1 and 200 clusters");
+  }
+  const items = input.items.map((value, index) => {
+    const item = exactRecordWithFields(value, ["id", "version"]);
+    if (typeof item.id !== "string" || !UUID_PATTERN.test(item.id)) {
+      invalid(`items.${index}.id`, "Must be a UUID");
+    }
+    if (!Number.isSafeInteger(item.version) || Number(item.version) < 1) {
+      invalid(`items.${index}.version`, "Must be a positive integer");
+    }
+    return { id: item.id.toLowerCase(), version: Number(item.version) };
+  });
+  if (new Set(items.map(({ id }) => id)).size !== items.length) {
+    invalid("items", "Cannot contain duplicate clusters");
+  }
+  const primaryPageId = bulkPageId(input.primaryPageId);
+  if (primaryPageId === null && hasMappingMetadata(input)) {
+    invalid("primaryPageId", "Mapping metadata cannot be set when clearing the page");
+  }
+  return {
+    items,
+    primaryPageId,
+    ...mappingMetadata(input)
+  };
+}
+
 function exactRecord(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     invalid("$", "Must be a JSON object");
@@ -47,6 +88,28 @@ function exactRecord(value: unknown): Readonly<Record<string, unknown>> {
     invalid("$", "Contains unsupported fields");
   }
   return input;
+}
+
+function exactRecordWithFields(
+  value: unknown,
+  allowed: readonly string[]
+): Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    invalid("$", "Must be a JSON object");
+  }
+  const input = value as Readonly<Record<string, unknown>>;
+  if (Object.keys(input).some((key) => !allowed.includes(key))) {
+    invalid("$", "Contains unsupported fields");
+  }
+  return input;
+}
+
+function bulkPageId(value: unknown): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+    invalid("primaryPageId", "Must be a UUID or null");
+  }
+  return value.toLowerCase();
 }
 
 function createMappingInput(

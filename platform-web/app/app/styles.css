@@ -2395,7 +2395,22 @@ svg { display: block; }
 .semantic-cluster-editor input,
 .semantic-cluster-editor select { background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); min-height: 39px; padding: 0 10px; width: 100%; }
 .semantic-cluster-editor input:disabled { background: #f3f3f6; color: var(--muted); }
+.semantic-cluster-header-actions { align-items: center; display: flex; gap: 10px; }
+.semantic-cluster-bulk { background: #f7f6ff; border: 1px solid #d8d3ff; border-radius: 12px; display: grid; gap: 12px; padding: 14px; }
+.semantic-cluster-bulk-fields { display: grid; gap: 10px; grid-template-columns: minmax(260px, 1.2fr) minmax(220px, 1fr); }
+.semantic-cluster-bulk-fields label { display: grid; gap: 6px; }
+.semantic-cluster-bulk-fields label > span { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.semantic-cluster-bulk-fields input,
+.semantic-cluster-bulk-fields select { background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); min-height: 39px; padding: 0 10px; width: 100%; }
+.semantic-cluster-bulk-fields input:disabled { background: #f3f3f6; color: var(--muted); }
+.semantic-cluster-bulk-preview { align-items: center; display: flex; flex-wrap: wrap; gap: 7px; }
+.semantic-cluster-bulk-preview span { background: #fff; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; padding: 5px 9px; }
+.semantic-cluster-bulk-preview span.danger { background: #fff0ef; border-color: #ffd4d0; color: var(--danger); }
+.semantic-cluster-bulk-preview strong { color: var(--text); }
 .semantic-cluster-mark { background: linear-gradient(180deg, #6758ef, #9388f5); }
+.semantic-cluster-row { grid-template-columns: auto 8px minmax(0, 1fr) auto auto; }
+.semantic-cluster-select { align-items: center; display: flex; }
+.semantic-cluster-select input { accent-color: var(--accent); height: 15px; margin: 0; width: 15px; }
 .semantic-cluster-diagnostics { align-items: center; display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
 .semantic-cluster-diagnostics small { background: #f1f0f7; border-radius: 999px; color: var(--muted); font-size: 9px; padding: 3px 7px; }
 .semantic-cluster-diagnostics small.warning { background: #fff5dc; color: #895a00; }
@@ -3106,6 +3121,7 @@ svg { display: block; }
   .semantic-editor-tags,
   .semantic-editor-url { grid-column: span 2; }
   .semantic-group-editor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .semantic-cluster-bulk-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .semantic-group-editor-actions { justify-content: flex-end; }
   .semantic-bulk-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .notification-channel-grid,
@@ -3369,10 +3385,14 @@ svg { display: block; }
   .semantic-editor-actions .secondary-button { flex: 1; }
   .semantic-group-editor { grid-template-columns: 1fr; }
   .semantic-cluster-editor { grid-template-columns: 1fr; }
+  .semantic-cluster-header-actions { align-items: stretch; flex-direction: column-reverse; }
+  .semantic-cluster-bulk-fields { grid-template-columns: 1fr; }
   .semantic-group-editor-actions { justify-content: stretch; }
   .semantic-group-editor-actions .primary-button { flex: 1; }
   .semantic-group-row { grid-template-columns: 8px minmax(0, 1fr) auto; }
+  .semantic-cluster-row { grid-template-columns: auto 8px minmax(0, 1fr) auto; }
   .semantic-group-row .danger-text { grid-column: 2 / 4; justify-self: end; }
+  .semantic-group-row.semantic-cluster-row .danger-text { grid-column: 3 / 5; }
   .semantic-bulk-grid { grid-template-columns: 1fr; }
   .semantic-bulk-tags,
   .semantic-bulk-url { grid-column: span 1; }

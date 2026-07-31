@@ -2,6 +2,10 @@ export const semanticVersionReasons = [
   "KEYWORD_CREATE",
   "KEYWORD_UPDATE",
   "KEYWORD_DELETE",
+  "CLUSTER_CREATE",
+  "CLUSTER_UPDATE",
+  "CLUSTER_DELETE",
+  "CLUSTER_BULK_UPDATE",
   "BULK_UPDATE",
   "IMPORT",
   "UNDO",
@@ -35,7 +39,7 @@ export interface SemanticVersionListItem {
 }
 
 export interface SemanticVersionChangePreview {
-  readonly entityType: "KEYWORD";
+  readonly entityType: "KEYWORD" | "CLUSTER";
   readonly entityId: string;
   readonly operation: "CREATE" | "UPDATE" | "DELETE";
   readonly state: SemanticVersionChangeState;

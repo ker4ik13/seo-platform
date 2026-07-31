@@ -6,12 +6,14 @@ import {
 } from "@nestjs/common";
 import type {
   SemanticCapacityEntitlement,
+  SemanticClusterPageSource,
   SemanticVersionChangePreview,
   SemanticVersionListItem,
   SemanticVersionReason,
   SemanticVersionUndoPreview,
   SemanticVersionUndoResult
 } from "@seo-platform/contracts";
+import { semanticClusterPageSources } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import type { SemanticVersion } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -42,6 +44,25 @@ export interface SemanticKeywordChange {
   readonly operation: "CREATE" | "UPDATE" | "DELETE";
   readonly beforeState: SemanticKeywordVersionState | null;
   readonly afterState: SemanticKeywordVersionState;
+  readonly beforeVersion: number | null;
+  readonly afterVersion: number;
+}
+
+export interface SemanticClusterVersionState {
+  readonly name: string;
+  readonly method: "MANUAL";
+  readonly status: "ACTIVE" | "DELETED";
+  readonly primaryPageId: string | null;
+  readonly pageMappingSource: SemanticClusterPageSource | null;
+  readonly pageMappingConfidence: number | null;
+  readonly pageMappingRationale: string | null;
+}
+
+export interface SemanticClusterChange {
+  readonly entityId: string;
+  readonly operation: "CREATE" | "UPDATE" | "DELETE";
+  readonly beforeState: SemanticClusterVersionState | null;
+  readonly afterState: SemanticClusterVersionState;
   readonly beforeVersion: number | null;
   readonly afterVersion: number;
 }
@@ -87,6 +108,48 @@ export class SemanticVersionService {
       where: { id: version.id },
       data: {
         affectedCount: 1,
+        reversible: true,
+        manifest: { schemaVersion: 1, state: "FINALIZED" },
+        finalizedAt: new Date()
+      }
+    });
+    return versionItem(finalized);
+  }
+
+  public async createWithClusterChange(
+    transaction: Prisma.TransactionClient,
+    input: CreateVersionInput,
+    change: SemanticClusterChange
+  ): Promise<SemanticVersionListItem> {
+    const version = await this.createVersion(transaction, input, true);
+    await this.appendClusterChange(transaction, version, change);
+    const finalized = await transaction.semanticVersion.update({
+      where: { id: version.id },
+      data: {
+        affectedCount: 1,
+        reversible: true,
+        manifest: { schemaVersion: 1, state: "FINALIZED" },
+        finalizedAt: new Date()
+      }
+    });
+    return versionItem(finalized);
+  }
+
+  public async createWithClusterChanges(
+    transaction: Prisma.TransactionClient,
+    input: CreateVersionInput,
+    changes: readonly SemanticClusterChange[]
+  ): Promise<SemanticVersionListItem | undefined> {
+    if (changes.length === 0) return undefined;
+    if (changes.length > MAX_UNDO_CHANGES) throw undoTooLarge();
+    const version = await this.createVersion(transaction, input, false);
+    for (const change of changes) {
+      await this.appendClusterChange(transaction, version, change);
+    }
+    const finalized = await transaction.semanticVersion.update({
+      where: { id: version.id },
+      data: {
+        affectedCount: changes.length,
         reversible: true,
         manifest: { schemaVersion: 1, state: "FINALIZED" },
         finalizedAt: new Date()
@@ -285,7 +348,8 @@ export class SemanticVersionService {
         return result;
       }
       const restoredKeywordCount = applicable.filter(
-        ({ operation }) => operation === "DELETE"
+        ({ entityType, operation }) =>
+          entityType === "KEYWORD" && operation === "DELETE"
       ).length;
       if (restoredKeywordCount > 0) {
         await assertStoredKeywordCapacity(
@@ -308,60 +372,92 @@ export class SemanticVersionService {
         false
       );
       const previewByEntity = new Map(
-        applicable.map((item) => [item.entityId, item])
+        applicable.map((item) => [changeKey(item.entityType, item.entityId), item])
       );
       let applied = 0;
       for (const change of changes) {
-        if (!previewByEntity.has(change.entityId)) continue;
-        const current = await transaction.keyword.findFirstOrThrow({
-          where: { id: change.entityId, workspaceId, projectId }
-        });
-        const target = nullableKeywordState(change.beforeState);
-        const before = requiredKeywordState(change.afterState);
-        const afterVersion = current.version + 1;
-        if (target === null) {
-          await transaction.keyword.update({
-            where: {
-              workspaceId_projectId_id: {
-                workspaceId,
-                projectId,
-                id: current.id
-              }
-            },
-            data: {
-              status: "DELETED",
-              deletedAt: new Date(),
-              updatedBy: actorId,
-              version: { increment: 1 }
-            }
+        if (!previewByEntity.has(changeKey(change.entityType, change.entityId))) {
+          continue;
+        }
+        if (change.entityType === "KEYWORD") {
+          const current = await transaction.keyword.findFirstOrThrow({
+            where: { id: change.entityId, workspaceId, projectId }
           });
-        } else {
-          await restoreKeyword(
+          const target = nullableKeywordState(change.beforeState);
+          const before = requiredKeywordState(change.afterState);
+          const afterVersion = current.version + 1;
+          if (target === null) {
+            await transaction.keyword.update({
+              where: {
+                workspaceId_projectId_id: {
+                  workspaceId,
+                  projectId,
+                  id: current.id
+                }
+              },
+              data: {
+                status: "DELETED",
+                deletedAt: new Date(),
+                updatedBy: actorId,
+                version: { increment: 1 }
+              }
+            });
+          } else {
+            await restoreKeyword(
+              transaction,
+              workspaceId,
+              projectId,
+              actorId,
+              current.id,
+              target
+            );
+          }
+          await this.appendKeywordChange(transaction, undoVersion, {
+            entityId: current.id,
+            operation:
+              target === null || target.status === "DELETED"
+                ? "DELETE"
+                : "UPDATE",
+            beforeState: before,
+            afterState:
+              target ??
+              ({
+                ...before,
+                status: "DELETED"
+              } satisfies SemanticKeywordVersionState),
+            beforeVersion: current.version,
+            afterVersion
+          });
+          applied += 1;
+          continue;
+        }
+        if (change.entityType === "CLUSTER") {
+          const current = await transaction.cluster.findFirstOrThrow({
+            where: { id: change.entityId, workspaceId, projectId }
+          });
+          const target = nullableClusterState(change.beforeState);
+          const before = requiredClusterState(change.afterState);
+          const afterVersion = current.version + 1;
+          await restoreCluster(
             transaction,
             workspaceId,
             projectId,
-            actorId,
             current.id,
-            target
+            target ?? { ...before, status: "DELETED" }
           );
+          await this.appendClusterChange(transaction, undoVersion, {
+            entityId: current.id,
+            operation:
+              target === null || target.status === "DELETED"
+                ? "DELETE"
+                : "UPDATE",
+            beforeState: before,
+            afterState: target ?? { ...before, status: "DELETED" },
+            beforeVersion: current.version,
+            afterVersion
+          });
+          applied += 1;
         }
-        await this.appendKeywordChange(transaction, undoVersion, {
-          entityId: current.id,
-          operation:
-            target === null || target.status === "DELETED"
-              ? "DELETE"
-              : "UPDATE",
-          beforeState: before,
-          afterState:
-            target ??
-            ({
-              ...before,
-              status: "DELETED"
-            } satisfies SemanticKeywordVersionState),
-          beforeVersion: current.version,
-          afterVersion
-        });
-        applied += 1;
       }
       const finalized = await transaction.semanticVersion.update({
         where: { id: undoVersion.id },
@@ -451,6 +547,31 @@ export class SemanticVersionService {
     });
   }
 
+  private async appendClusterChange(
+    transaction: Prisma.TransactionClient,
+    version: SemanticVersionIdentity,
+    change: SemanticClusterChange
+  ): Promise<void> {
+    await transaction.semanticEntityChange.create({
+      data: {
+        workspaceId: version.workspaceId,
+        projectId: version.projectId,
+        semanticVersionId: version.id,
+        entityType: "CLUSTER",
+        entityId: change.entityId,
+        operation: change.operation,
+        ...(change.beforeState
+          ? { beforeState: clusterStateJson(change.beforeState) }
+          : {}),
+        afterState: clusterStateJson(change.afterState),
+        ...(change.beforeVersion === null
+          ? {}
+          : { beforeVersion: change.beforeVersion }),
+        afterVersion: change.afterVersion
+      }
+    });
+  }
+
   private async requiredVersion(
     client: PrismaService | Prisma.TransactionClient,
     workspaceId: string,
@@ -526,33 +647,51 @@ async function previewChanges(
   if (!version.reversible || !version.finalizedAt) {
     return changes.map((change) => unsupportedPreview(change));
   }
-  const currentRows = await client.keyword.findMany({
-    where: {
-      workspaceId,
-      projectId,
-      id: { in: changes.map(({ entityId }) => entityId) }
-    },
-    select: { id: true, version: true, status: true }
-  });
-  const currentById = new Map(currentRows.map((row) => [row.id, row]));
+  const keywordIds = changes.flatMap((change) =>
+    change.entityType === "KEYWORD" ? [change.entityId] : []
+  );
+  const clusterIds = changes.flatMap((change) =>
+    change.entityType === "CLUSTER" ? [change.entityId] : []
+  );
+  const [currentKeywords, currentClusters] = await Promise.all([
+    keywordIds.length === 0
+      ? Promise.resolve([])
+      : client.keyword.findMany({
+          where: { workspaceId, projectId, id: { in: keywordIds } },
+          select: { id: true, version: true, status: true }
+        }),
+    clusterIds.length === 0
+      ? Promise.resolve([])
+      : client.cluster.findMany({
+          where: { workspaceId, projectId, id: { in: clusterIds } },
+          select: { id: true, version: true, status: true }
+        })
+  ]);
+  const currentByEntity = new Map([
+    ...currentKeywords.map((row) => [changeKey("KEYWORD", row.id), row] as const),
+    ...currentClusters.map((row) => [changeKey("CLUSTER", row.id), row] as const)
+  ]);
   const result: SemanticVersionChangePreview[] = [];
   for (const change of changes) {
     if (
-      change.entityType !== "KEYWORD" ||
+      !["KEYWORD", "CLUSTER"].includes(change.entityType) ||
       !["CREATE", "UPDATE", "DELETE"].includes(change.operation)
     ) {
       result.push(unsupportedPreview(change));
       continue;
     }
-    const current = currentById.get(change.entityId);
-    const after = requiredKeywordState(change.afterState);
+    const entityType = change.entityType as "KEYWORD" | "CLUSTER";
+    const current = currentByEntity.get(changeKey(entityType, change.entityId));
+    const after = entityType === "KEYWORD"
+      ? requiredKeywordState(change.afterState)
+      : requiredClusterState(change.afterState);
     if (
       !current ||
       current.version !== change.afterVersion ||
       current.status !== after.status
     ) {
       result.push({
-        entityType: "KEYWORD",
+        entityType,
         entityId: change.entityId,
         operation: change.operation as "CREATE" | "UPDATE" | "DELETE",
         state: "CONFLICTED",
@@ -562,18 +701,23 @@ async function previewChanges(
       });
       continue;
     }
-    const target = nullableKeywordState(change.beforeState);
-    const dependencyConflict = target
+    const dependencyConflict = entityType === "KEYWORD"
       ? await keywordRestoreConflict(
           client,
           workspaceId,
           projectId,
           change.entityId,
-          target
+          nullableKeywordState(change.beforeState)
         )
-      : undefined;
+      : await clusterRestoreConflict(
+          client,
+          workspaceId,
+          projectId,
+          change.entityId,
+          nullableClusterState(change.beforeState)
+        );
     result.push({
-      entityType: "KEYWORD",
+      entityType,
       entityId: change.entityId,
       operation: change.operation as "CREATE" | "UPDATE" | "DELETE",
       state: dependencyConflict ? "CONFLICTED" : "APPLICABLE",
@@ -590,8 +734,9 @@ async function keywordRestoreConflict(
   workspaceId: string,
   projectId: string,
   keywordId: string,
-  state: SemanticKeywordVersionState
+  state: SemanticKeywordVersionState | null
 ): Promise<string | undefined> {
+  if (state === null) return undefined;
   if (state.status === "DELETED") return undefined;
   const [duplicate, group, cluster, page, tagCount] = await Promise.all([
     client.keyword.findFirst({
@@ -657,6 +802,47 @@ async function keywordRestoreConflict(
   return undefined;
 }
 
+async function clusterRestoreConflict(
+  client: PrismaService | Prisma.TransactionClient,
+  workspaceId: string,
+  projectId: string,
+  clusterId: string,
+  state: SemanticClusterVersionState | null
+): Promise<string | undefined> {
+  if (state === null || state.status === "DELETED") {
+    const keywordCount = await client.keyword.count({
+      where: { workspaceId, projectId, clusterId, status: "ACTIVE" }
+    });
+    return keywordCount > 0 ? "CLUSTER_NOT_EMPTY" : undefined;
+  }
+  const [duplicate, page] = await Promise.all([
+    client.cluster.findFirst({
+      where: {
+        workspaceId,
+        projectId,
+        status: "ACTIVE",
+        name: { equals: state.name, mode: "insensitive" },
+        id: { not: clusterId }
+      },
+      select: { id: true }
+    }),
+    state.primaryPageId
+      ? client.page.findFirst({
+          where: {
+            id: state.primaryPageId,
+            workspaceId,
+            projectId,
+            status: "ACTIVE"
+          },
+          select: { id: true }
+        })
+      : Promise.resolve({ id: "" })
+  ]);
+  if (duplicate) return "DUPLICATE_CLUSTER";
+  if (!page) return "PRIMARY_PAGE_UNAVAILABLE";
+  return undefined;
+}
+
 async function restoreKeyword(
   transaction: Prisma.TransactionClient,
   workspaceId: string,
@@ -705,6 +891,58 @@ async function restoreKeyword(
       }))
     });
   }
+}
+
+async function restoreCluster(
+  transaction: Prisma.TransactionClient,
+  workspaceId: string,
+  projectId: string,
+  clusterId: string,
+  state: SemanticClusterVersionState
+): Promise<void> {
+  if (state.status === "ACTIVE" && state.primaryPageId) {
+    await transaction.$queryRaw`
+      SELECT "id"
+      FROM "pages"
+      WHERE "workspace_id" = ${workspaceId}::uuid
+        AND "project_id" = ${projectId}::uuid
+        AND "id" = ${state.primaryPageId}::uuid
+      FOR KEY SHARE
+    `;
+    const page = await transaction.page.findFirst({
+      where: {
+        id: state.primaryPageId,
+        workspaceId,
+        projectId,
+        status: "ACTIVE"
+      },
+      select: { id: true }
+    });
+    if (!page) {
+      throw new HttpException(
+        {
+          code: "UNDO_DEPENDENCY_CONFLICT",
+          message: "Primary page became unavailable during semantic undo"
+        },
+        HttpStatus.CONFLICT
+      );
+    }
+  }
+  await transaction.cluster.update({
+    where: {
+      workspaceId_projectId_id: { workspaceId, projectId, id: clusterId }
+    },
+    data: {
+      name: state.name,
+      method: state.method,
+      status: state.status,
+      primaryPageId: state.primaryPageId,
+      pageMappingSource: state.pageMappingSource,
+      pageMappingConfidence: state.pageMappingConfidence,
+      pageMappingRationale: state.pageMappingRationale,
+      version: { increment: 1 }
+    }
+  });
 }
 
 async function createUndoReceipt(
@@ -777,7 +1015,7 @@ function storedChangePreviews(
           !requiredKeys.includes(key) && !optionalKeys.includes(key)
       ) ||
       requiredKeys.some((key) => !(key in change)) ||
-      change.entityType !== "KEYWORD" ||
+      !["KEYWORD", "CLUSTER"].includes(String(change.entityType)) ||
       typeof change.entityId !== "string" ||
       !uuid(change.entityId) ||
       !["CREATE", "UPDATE", "DELETE"].includes(
@@ -796,7 +1034,7 @@ function storedChangePreviews(
       throw corruptedVersion();
     }
     return {
-      entityType: "KEYWORD",
+      entityType: change.entityType as "KEYWORD" | "CLUSTER",
       entityId: change.entityId,
       operation: change.operation as "CREATE" | "UPDATE" | "DELETE",
       state: change.state as
@@ -815,12 +1053,13 @@ function storedChangePreviews(
 }
 
 function unsupportedPreview(change: {
+  readonly entityType?: string;
   readonly entityId: string;
   readonly operation: string;
   readonly afterVersion: number;
 }): SemanticVersionChangePreview {
   return {
-    entityType: "KEYWORD",
+    entityType: change.entityType === "CLUSTER" ? "CLUSTER" : "KEYWORD",
     entityId: change.entityId,
     operation: ["CREATE", "UPDATE", "DELETE"].includes(change.operation)
       ? (change.operation as "CREATE" | "UPDATE" | "DELETE")
@@ -857,6 +1096,10 @@ function versionReason(value: string): SemanticVersionReason {
       "KEYWORD_CREATE",
       "KEYWORD_UPDATE",
       "KEYWORD_DELETE",
+      "CLUSTER_CREATE",
+      "CLUSTER_UPDATE",
+      "CLUSTER_DELETE",
+      "CLUSTER_BULK_UPDATE",
       "BULK_UPDATE",
       "UNDO"
     ].includes(value)
@@ -871,6 +1114,79 @@ function keywordStateJson(
   state: SemanticKeywordVersionState
 ): Prisma.InputJsonObject {
   return JSON.parse(JSON.stringify(state)) as Prisma.InputJsonObject;
+}
+
+function clusterStateJson(
+  state: SemanticClusterVersionState
+): Prisma.InputJsonObject {
+  return JSON.parse(JSON.stringify(state)) as Prisma.InputJsonObject;
+}
+
+function nullableClusterState(
+  value: Prisma.JsonValue | null
+): SemanticClusterVersionState | null {
+  return value === null ? null : requiredClusterState(value);
+}
+
+function requiredClusterState(
+  value: Prisma.JsonValue
+): SemanticClusterVersionState {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw corruptedVersion();
+  }
+  const state = value as Readonly<Record<string, Prisma.JsonValue>>;
+  const keys = [
+    "name",
+    "method",
+    "status",
+    "primaryPageId",
+    "pageMappingSource",
+    "pageMappingConfidence",
+    "pageMappingRationale"
+  ];
+  if (
+    Object.keys(state).length !== keys.length ||
+    keys.some((key) => !(key in state)) ||
+    typeof state.name !== "string" ||
+    state.name.length < 1 ||
+    state.name.length > 255 ||
+    state.method !== "MANUAL" ||
+    !["ACTIVE", "DELETED"].includes(String(state.status)) ||
+    !nullableUuid(state.primaryPageId) ||
+    (state.pageMappingSource !== null &&
+      (typeof state.pageMappingSource !== "string" ||
+        !semanticClusterPageSources.some(
+          (source) => source === state.pageMappingSource
+        ))) ||
+    (state.pageMappingConfidence !== null &&
+      (typeof state.pageMappingConfidence !== "number" ||
+        !Number.isFinite(state.pageMappingConfidence) ||
+        state.pageMappingConfidence < 0 ||
+        state.pageMappingConfidence > 1)) ||
+    (state.pageMappingRationale !== null &&
+      (typeof state.pageMappingRationale !== "string" ||
+        state.pageMappingRationale.length < 1 ||
+        state.pageMappingRationale.length > 2_000)) ||
+    (state.primaryPageId === null &&
+      (state.pageMappingSource !== null ||
+        state.pageMappingConfidence !== null ||
+        state.pageMappingRationale !== null))
+  ) {
+    throw corruptedVersion();
+  }
+  return {
+    name: state.name,
+    method: "MANUAL",
+    status: state.status as "ACTIVE" | "DELETED",
+    primaryPageId: state.primaryPageId as string | null,
+    pageMappingSource: state.pageMappingSource as SemanticClusterPageSource | null,
+    pageMappingConfidence: state.pageMappingConfidence as number | null,
+    pageMappingRationale: state.pageMappingRationale as string | null
+  };
+}
+
+function changeKey(entityType: string, entityId: string): string {
+  return `${entityType}:${entityId}`;
 }
 
 function nullableKeywordState(

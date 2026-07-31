@@ -13,7 +13,12 @@ import {
   Res,
   UseGuards
 } from "@nestjs/common";
-import type { ApiResponse, SemanticCluster } from "@seo-platform/contracts";
+import type {
+  ApiResponse,
+  SemanticCluster,
+  SemanticClusterPageBulkPreview,
+  SemanticClusterPageBulkResult
+} from "@seo-platform/contracts";
 import type { FastifyReply } from "fastify";
 import { AuditService } from "../audit/audit.service.js";
 import type { TenantRequest } from "../authorization/authorization.types.js";
@@ -40,6 +45,7 @@ import {
 import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import {
   createSemanticClusterInput,
+  semanticClusterPageBulkInput,
   updateSemanticClusterInput
 } from "./semantic-cluster-input.js";
 
@@ -106,6 +112,63 @@ export class SemanticClusterController {
     });
     setEntityVersion(reply, result.version);
     return apiResponse(request, result, result.version);
+  }
+
+  @Post("page-mapping-preview")
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission("semantic.bulk_edit")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async previewPageMapping(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticClusterPageBulkPreview>> {
+    const tenant = requiredMutableProjectTenant(request);
+    const input = semanticClusterPageBulkInput(body);
+    return apiResponse(
+      request,
+      await this.seoData.previewSemanticClusterPageMapping(
+        internalProjectContext(request, principal, tenant),
+        input
+      )
+    );
+  }
+
+  @Post("page-mapping-bulk")
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission("semantic.bulk_edit")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async bulkUpdatePageMapping(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticClusterPageBulkResult>> {
+    const tenant = requiredMutableProjectTenant(request);
+    const context = requestContext(request);
+    const input = semanticClusterPageBulkInput(body);
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.cluster_page_mapping.requested",
+      resourceType: "semantic_cluster",
+      outcome: "REQUESTED",
+      requestId: context.requestId
+    });
+    const result = await this.seoData.bulkUpdateSemanticClusterPageMapping(
+      internalProjectContext(request, principal, tenant),
+      input
+    );
+    await recordCommittedAudit(this.audit, this.logger, {
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.cluster_page_mapping.completed",
+      resourceType: "semantic_cluster",
+      outcome: result.conflicted > 0 ? "PARTIAL" : "SUCCESS",
+      requestId: context.requestId
+    });
+    return apiResponse(request, result);
   }
 
   @Patch(":clusterId")

@@ -1,3 +1,5 @@
+import type { PageIndexability, PageType } from "./pages.js";
+
 export const semanticClusterMethods = ["MANUAL"] as const;
 
 export type SemanticClusterMethod =
@@ -82,4 +84,60 @@ export interface InternalDeleteSemanticClusterInput {
   readonly actorId: string;
   readonly version: number;
 }
-import type { PageIndexability, PageType } from "./pages.js";
+
+export interface SemanticClusterPageBulkSelection {
+  readonly id: string;
+  readonly version: number;
+}
+
+export interface SemanticClusterPageBulkInput {
+  readonly items: readonly SemanticClusterPageBulkSelection[];
+  readonly primaryPageId: string | null;
+  readonly pageMappingSource?: SemanticClusterPageSource;
+  readonly pageMappingConfidence?: number;
+  readonly pageMappingRationale?: string;
+}
+
+export interface InternalSemanticClusterPageBulkInput
+  extends SemanticClusterPageBulkInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+}
+
+export const semanticClusterPageBulkStates = [
+  "APPLICABLE",
+  "UNCHANGED",
+  "CONFLICTED",
+  "UNAVAILABLE"
+] as const;
+
+export type SemanticClusterPageBulkState =
+  (typeof semanticClusterPageBulkStates)[number];
+
+export interface SemanticClusterPageBulkPreviewChange {
+  readonly clusterId: string;
+  readonly state: SemanticClusterPageBulkState;
+  readonly expectedVersion: number;
+  readonly currentVersion?: number;
+  readonly currentPrimaryPageId?: string;
+  readonly targetPrimaryPageId?: string;
+}
+
+export interface SemanticClusterPageBulkPreview {
+  readonly selected: number;
+  readonly applicable: number;
+  readonly skipped: number;
+  readonly conflicted: number;
+  readonly changes: readonly SemanticClusterPageBulkPreviewChange[];
+}
+
+export interface SemanticClusterPageBulkResult {
+  readonly selected: number;
+  readonly changed: number;
+  readonly skipped: number;
+  readonly conflicted: number;
+  readonly updatedClusters: readonly SemanticCluster[];
+  readonly skippedIds: readonly string[];
+  readonly conflictedIds: readonly string[];
+}

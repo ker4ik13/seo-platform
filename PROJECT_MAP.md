@@ -108,12 +108,14 @@ injection. Табличные заголовки локализуются, CSV �
 экранирование, JSON сохраняет typed custom values. Следующий P1 slice:
 асинхронные большие XLSX/archive exports с S3 signed URL.
 История semantic versions теперь получает tenant-safe append-only change set
-для ручного create/update/delete запросов и bounded bulk update. Before/after
-state записывается в той же PostgreSQL-транзакции, bulk version остаётся
+для ручного create/update/delete запросов и кластеров, bounded keyword bulk
+update и пакетного назначения cluster primary Page. Before/after state
+записывается в той же PostgreSQL-транзакции, bulk version остаётся
 необратимой до финализации, а общий advisory lock сериализует ручные правки,
 import chunks и undo. Web показывает последние версии и сначала запрашивает
 preview; undo применяет только строки с exact current version и доступными
-cluster/group/page/tag dependencies, не перезаписывает более новые изменения,
+cluster/group/page/tag dependencies, включая primary Page кластера, не
+перезаписывает более новые изменения,
 сообщает конфликты и сам создаёт новую откатываемую версию. Undo требует
 stable `Idempotency-Key`; tenant/project/actor-scoped receipt сохраняет
 исходный результат в той же транзакции, поэтому повтор после неоднозначного
@@ -1057,13 +1059,17 @@ Backend convention:
   soft-delete только пустого кластера; keyword assignment использует ту же
   project advisory-lock границу; primary Page mapping проверяет active
   tenant/project page под row lock и отдаёт derived missing/cannibalization
-  diagnostics;
+  diagnostics; bounded выбор 1–200 кластеров имеет отдельный preview,
+  exact-version partition и атомарный partial apply без blind overwrite;
 - migration `20260801030000_semantic_cluster_integrity` — fail-closed legacy
   review, partial case-insensitive uniqueness активных cluster names и
   составной tenant/project FK `Keyword.clusterId → Cluster`;
 - migration `20260801040000_cluster_primary_page` — nullable primary Page,
   constrained source/confidence/rationale, tenant-safe composite FK и
   page-map lookup index;
+- migration `20260801050000_cluster_version_changes` — fail-closed расширение
+  semantic change set на `CLUSTER` с предварительной online validation нового
+  check constraint;
 - `platform-seo-data/src/semantic-saved-views` и migration
   `20260730170000_semantic_saved_views` — tenant/owner-scoped private и
   project-shared views, partial unique names, strict v1 config DSL,
@@ -1308,7 +1314,7 @@ Entrypoints:
 | Admin operations | vertical slice: MFA + persisted roles + NPD operations |
 | Auth core | vertical slice: identity lifecycle + transactional verification/reset email transport |
 | Workspaces/projects/team access | vertical slice: включая transactional invite email/fragment acceptance |
-| Semantics/import | vertical slice: Key Collector-style groups/manual clusters/table/tools + CSV/TSV/XLSX → mapping → validation → quota reservation → publish/abort → query; manual cluster→primary Page и derived missing/cannibalization diagnostics закрыты, auto-clustering, alternate pages, mapping history/undo/evidence и cluster-level bulk preview ещё не закрыты |
+| Semantics/import | vertical slice: Key Collector-style groups/manual clusters/table/tools + CSV/TSV/XLSX → mapping → validation → quota reservation → publish/abort → query; manual cluster→primary Page, derived missing/cannibalization diagnostics, cluster-level bulk preview/apply и mapping history/undo закрыты; auto-clustering, alternate pages и расширенное SERP evidence ещё не закрыты |
 | Notifications | vertical slice: preferences → effective policy → read center → encrypted browser device lifecycle + durable terminal crawl in-app notifications |
 | Integrations | vertical slice: operational catalog + encrypted BYOK vault + validation + SERP/competitor project bindings |
 | Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |

@@ -3,12 +3,20 @@ import type {
   InternalCreateSemanticClusterInput,
   InternalDeleteSemanticClusterInput,
   InternalUpdateSemanticClusterInput,
+  InternalSemanticClusterPageBulkInput,
   SemanticCluster,
+  SemanticClusterPageBulkPreview,
+  SemanticClusterPageBulkPreviewChange,
+  SemanticClusterPageBulkResult,
   SemanticClusterPageSource
 } from "@seo-platform/contracts";
 import { semanticClusterPageSources } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import {
+  SemanticVersionService,
+  type SemanticClusterVersionState
+} from "../semantic-versions/semantic-version.service.js";
 
 const CLUSTER_INCLUDE = {
   primaryPage: {
@@ -38,7 +46,10 @@ const PAGE_MAPPING_SOURCES = new Set<string>(semanticClusterPageSources);
 
 @Injectable()
 export class ClusterService {
-  public constructor(private readonly prisma: PrismaService) {}
+  public constructor(
+    private readonly prisma: PrismaService,
+    private readonly semanticVersions: SemanticVersionService
+  ) {}
 
   public async list(
     workspaceId: string,
@@ -107,6 +118,24 @@ export class ClusterService {
         },
         include: CLUSTER_INCLUDE
       });
+      await this.semanticVersions.createWithClusterChange(
+        transaction,
+        {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          actorId: input.actorId,
+          reason: "CLUSTER_CREATE",
+          summary: `Создан кластер «${input.name}»`
+        },
+        {
+          entityId: row.id,
+          operation: "CREATE",
+          beforeState: null,
+          afterState: clusterVersionState(row),
+          beforeVersion: null,
+          afterVersion: row.version
+        }
+      );
       return clusterItem(row);
     });
   }
@@ -194,6 +223,24 @@ export class ClusterService {
         },
         _count: { _all: true }
       });
+      await this.semanticVersions.createWithClusterChange(
+        transaction,
+        {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          actorId: input.actorId,
+          reason: "CLUSTER_UPDATE",
+          summary: `Изменён кластер «${row.name}»`
+        },
+        {
+          entityId: row.id,
+          operation: "UPDATE",
+          beforeState: clusterVersionState(current),
+          afterState: clusterVersionState(row),
+          beforeVersion: current.version,
+          afterVersion: row.version
+        }
+      );
       return clusterItem(row, keywordPageStats(counts).get(clusterId));
     });
   }
@@ -225,12 +272,263 @@ export class ClusterService {
           "Move keywords to another cluster before deleting this cluster"
         );
       }
-      await transaction.cluster.update({
-        where: { id: clusterId },
-        data: { status: "DELETED", version: { increment: 1 } }
+      const deleted = await transaction.cluster.update({
+        where: {
+          workspaceId_projectId_id: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            id: clusterId
+          }
+        },
+        data: { status: "DELETED", version: { increment: 1 } },
+        include: CLUSTER_INCLUDE
       });
+      await this.semanticVersions.createWithClusterChange(
+        transaction,
+        {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          actorId: input.actorId,
+          reason: "CLUSTER_DELETE",
+          summary: `Удалён кластер «${current.name}»`
+        },
+        {
+          entityId: deleted.id,
+          operation: "DELETE",
+          beforeState: clusterVersionState(current),
+          afterState: clusterVersionState(deleted),
+          beforeVersion: current.version,
+          afterVersion: deleted.version
+        }
+      );
     });
   }
+
+  public async previewPageMapping(
+    input: InternalSemanticClusterPageBulkInput
+  ): Promise<SemanticClusterPageBulkPreview> {
+    if (input.primaryPageId) {
+      const page = await this.prisma.page.findFirst({
+        where: {
+          id: input.primaryPageId,
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "ACTIVE"
+        },
+        select: { id: true }
+      });
+      if (!page) throw unavailablePrimaryPage();
+    }
+    const rows = await this.prisma.cluster.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        status: "ACTIVE",
+        id: { in: input.items.map(({ id }) => id) }
+      },
+      include: CLUSTER_INCLUDE
+    });
+    return pageMappingPreview(input, rows);
+  }
+
+  public async bulkUpdatePageMapping(
+    input: InternalSemanticClusterPageBulkInput
+  ): Promise<SemanticClusterPageBulkResult> {
+    return this.prisma.$transaction(async (transaction) => {
+      await lockClusterSet(transaction, input.projectId);
+      if (input.primaryPageId) {
+        await assertPrimaryPage(
+          transaction,
+          input.workspaceId,
+          input.projectId,
+          input.primaryPageId
+        );
+      }
+      const rows = await transaction.cluster.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "ACTIVE",
+          id: { in: input.items.map(({ id }) => id) }
+        },
+        include: CLUSTER_INCLUDE
+      });
+      const preview = pageMappingPreview(input, rows);
+      const applicableIds = new Set(
+        preview.changes.flatMap((change) =>
+          change.state === "APPLICABLE" ? [change.clusterId] : []
+        )
+      );
+      const currentById = new Map(rows.map((row) => [row.id, row]));
+      const updatedRows: ClusterRow[] = [];
+      const historyChanges: Array<{
+        entityId: string;
+        operation: "UPDATE";
+        beforeState: SemanticClusterVersionState;
+        afterState: SemanticClusterVersionState;
+        beforeVersion: number;
+        afterVersion: number;
+      }> = [];
+      for (const item of input.items) {
+        if (!applicableIds.has(item.id)) continue;
+        const current = currentById.get(item.id);
+        if (!current) continue;
+        const updated = await transaction.cluster.update({
+          where: {
+            workspaceId_projectId_id: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              id: current.id
+            }
+          },
+          data: {
+            ...pageMappingData(input),
+            version: { increment: 1 }
+          },
+          include: CLUSTER_INCLUDE
+        });
+        updatedRows.push(updated);
+        historyChanges.push({
+          entityId: updated.id,
+          operation: "UPDATE",
+          beforeState: clusterVersionState(current),
+          afterState: clusterVersionState(updated),
+          beforeVersion: current.version,
+          afterVersion: updated.version
+        });
+      }
+      await this.semanticVersions.createWithClusterChanges(
+        transaction,
+        {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          actorId: input.actorId,
+          reason: "CLUSTER_BULK_UPDATE",
+          summary: `Назначены посадочные для кластеров: ${updatedRows.length}`
+        },
+        historyChanges
+      );
+      const counts = updatedRows.length === 0
+        ? []
+        : await transaction.keyword.groupBy({
+            by: ["clusterId", "targetPageId"],
+            where: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              status: "ACTIVE",
+              clusterId: { in: updatedRows.map(({ id }) => id) }
+            },
+            _count: { _all: true }
+          });
+      const stats = keywordPageStats(counts);
+      return {
+        selected: preview.selected,
+        changed: updatedRows.length,
+        skipped: preview.skipped,
+        conflicted: preview.conflicted,
+        updatedClusters: updatedRows.map((row) =>
+          clusterItem(row, stats.get(row.id))
+        ),
+        skippedIds: preview.changes.flatMap((change) =>
+          change.state === "UNCHANGED" ? [change.clusterId] : []
+        ),
+        conflictedIds: preview.changes.flatMap((change) =>
+          ["CONFLICTED", "UNAVAILABLE"].includes(change.state)
+            ? [change.clusterId]
+            : []
+        )
+      };
+    });
+  }
+}
+
+function pageMappingPreview(
+  input: InternalSemanticClusterPageBulkInput,
+  rows: readonly ClusterRow[]
+): SemanticClusterPageBulkPreview {
+  const rowById = new Map(rows.map((row) => [row.id, row]));
+  const changes: SemanticClusterPageBulkPreviewChange[] = input.items.map(
+    (item) => {
+      const current = rowById.get(item.id);
+      if (!current) {
+        return {
+          clusterId: item.id,
+          state: "UNAVAILABLE",
+          expectedVersion: item.version,
+          ...(input.primaryPageId
+            ? { targetPrimaryPageId: input.primaryPageId }
+            : {})
+        };
+      }
+      const common = {
+        clusterId: item.id,
+        expectedVersion: item.version,
+        currentVersion: current.version,
+        ...(current.primaryPageId
+          ? { currentPrimaryPageId: current.primaryPageId }
+          : {}),
+        ...(input.primaryPageId
+          ? { targetPrimaryPageId: input.primaryPageId }
+          : {})
+      };
+      if (current.version !== item.version) {
+        return { ...common, state: "CONFLICTED" };
+      }
+      return {
+        ...common,
+        state: samePageMapping(current, input) ? "UNCHANGED" : "APPLICABLE"
+      };
+    }
+  );
+  return {
+    selected: changes.length,
+    applicable: changes.filter(({ state }) => state === "APPLICABLE").length,
+    skipped: changes.filter(({ state }) => state === "UNCHANGED").length,
+    conflicted: changes.filter(({ state }) =>
+      ["CONFLICTED", "UNAVAILABLE"].includes(state)
+    ).length,
+    changes
+  };
+}
+
+function samePageMapping(
+  row: ClusterRow,
+  input: InternalSemanticClusterPageBulkInput
+): boolean {
+  const target = pageMappingTarget(input);
+  return (
+    row.primaryPageId === target.primaryPageId &&
+    row.pageMappingSource === target.pageMappingSource &&
+    row.pageMappingConfidence === target.pageMappingConfidence &&
+    row.pageMappingRationale === target.pageMappingRationale
+  );
+}
+
+function pageMappingTarget(input: InternalSemanticClusterPageBulkInput) {
+  return input.primaryPageId === null
+    ? {
+        primaryPageId: null,
+        pageMappingSource: null,
+        pageMappingConfidence: null,
+        pageMappingRationale: null
+      }
+    : {
+        primaryPageId: input.primaryPageId,
+        pageMappingSource: input.pageMappingSource ?? "MANUAL",
+        pageMappingConfidence: input.pageMappingConfidence ?? null,
+        pageMappingRationale: input.pageMappingRationale ?? null
+      };
+}
+
+function pageMappingData(
+  input: InternalSemanticClusterPageBulkInput
+): Readonly<{
+  primaryPageId: string | null;
+  pageMappingSource: SemanticClusterPageSource | null;
+  pageMappingConfidence: number | null;
+  pageMappingRationale: string | null;
+}> {
+  return pageMappingTarget(input);
 }
 
 async function requiredCluster(
@@ -271,11 +569,15 @@ async function assertPrimaryPage(
     select: { id: true }
   });
   if (!page) {
-    throw new HttpException(
-      { code: "PAGE_UNAVAILABLE", message: "Primary page is not active in this project" },
-      HttpStatus.CONFLICT
-    );
+    throw unavailablePrimaryPage();
   }
+}
+
+function unavailablePrimaryPage(): HttpException {
+  return new HttpException(
+    { code: "PAGE_UNAVAILABLE", message: "Primary page is not active in this project" },
+    HttpStatus.CONFLICT
+  );
 }
 
 async function assertUniqueName(
@@ -418,6 +720,33 @@ function emptyKeywordPageStats(): KeywordPageStats {
     mappedKeywordCount: 0,
     unmappedKeywordCount: 0,
     pageIds: new Set<string>()
+  };
+}
+
+function clusterVersionState(row: ClusterRow): SemanticClusterVersionState {
+  if (row.method !== "MANUAL") {
+    throw new HttpException(
+      { code: "INVALID_CLUSTER_STATE", message: "Unsupported cluster method" },
+      HttpStatus.INTERNAL_SERVER_ERROR
+    );
+  }
+  if (
+    row.pageMappingSource !== null &&
+    !PAGE_MAPPING_SOURCES.has(row.pageMappingSource)
+  ) {
+    throw new HttpException(
+      { code: "INVALID_CLUSTER_STATE", message: "Unsupported page mapping source" },
+      HttpStatus.INTERNAL_SERVER_ERROR
+    );
+  }
+  return {
+    name: row.name,
+    method: "MANUAL",
+    status: row.status === "DELETED" ? "DELETED" : "ACTIVE",
+    primaryPageId: row.primaryPageId,
+    pageMappingSource: row.pageMappingSource as SemanticClusterPageSource | null,
+    pageMappingConfidence: row.pageMappingConfidence,
+    pageMappingRationale: row.pageMappingRationale
   };
 }
 

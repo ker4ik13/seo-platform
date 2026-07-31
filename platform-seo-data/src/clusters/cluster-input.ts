@@ -2,6 +2,7 @@ import { BadRequestException } from "@nestjs/common";
 import type {
   InternalCreateSemanticClusterInput,
   InternalDeleteSemanticClusterInput,
+  InternalSemanticClusterPageBulkInput,
   InternalUpdateSemanticClusterInput,
   SemanticClusterPageSource
 } from "@seo-platform/contracts";
@@ -46,6 +47,39 @@ export function internalDeleteSemanticClusterInput(
   return {
     ...scope(input),
     version: positiveInteger(input.version, "version")
+  };
+}
+
+export function internalSemanticClusterPageBulkInput(
+  value: unknown
+): InternalSemanticClusterPageBulkInput {
+  const input = exactRecord(value, [
+    ...scopeFields(),
+    "items",
+    "primaryPageId",
+    "pageMappingSource",
+    "pageMappingConfidence",
+    "pageMappingRationale"
+  ]);
+  if (!Object.hasOwn(input, "primaryPageId")) invalid("primaryPageId");
+  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 200) {
+    invalid("items");
+  }
+  const items = input.items.map((value) => {
+    const item = exactRecord(value, ["id", "version"]);
+    return {
+      id: uuid(item.id, "items.id"),
+      version: positiveInteger(item.version, "items.version")
+    };
+  });
+  if (new Set(items.map(({ id }) => id)).size !== items.length) invalid("items");
+  const primaryPageId = bulkPageId(input.primaryPageId);
+  if (primaryPageId === null && hasMappingMetadata(input)) invalid("primaryPageId");
+  return {
+    ...scope(input),
+    items,
+    primaryPageId,
+    ...mappingMetadata(input)
   };
 }
 
@@ -113,6 +147,10 @@ function optionalUpdatePageId(
 ): Readonly<{ primaryPageId?: string | null }> {
   if (value === null) return { primaryPageId: null };
   return optionalCreatePageId(value);
+}
+
+function bulkPageId(value: unknown): string | null {
+  return value === null ? null : uuid(value, "primaryPageId");
 }
 
 function pageSource(value: unknown): SemanticClusterPageSource {

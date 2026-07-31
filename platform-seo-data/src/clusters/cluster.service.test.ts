@@ -3,12 +3,19 @@ import test from "node:test";
 import { HttpException, HttpStatus } from "@nestjs/common";
 import type { PrismaService } from "../database/prisma.service.js";
 import { ClusterService } from "./cluster.service.js";
+import type { SemanticVersionService } from "../semantic-versions/semantic-version.service.js";
 
 const workspaceId = "01900000-0000-7000-8000-000000000001";
 const projectId = "01900000-0000-7000-8000-000000000002";
 const actorId = "01900000-0000-7000-8000-000000000003";
 const clusterId = "01900000-0000-7000-8000-000000000004";
 const pageId = "01900000-0000-7000-8000-000000000005";
+const secondClusterId = "01900000-0000-7000-8000-000000000006";
+const thirdClusterId = "01900000-0000-7000-8000-000000000007";
+const missingClusterId = "01900000-0000-7000-8000-000000000008";
+const semanticVersions = {
+  createWithClusterChange: async () => undefined
+} as unknown as SemanticVersionService;
 
 const row = {
   id: clusterId,
@@ -50,7 +57,7 @@ test("lists tenant-scoped active clusters with active keyword counts", async () 
         ];
       }
     }
-  } as unknown as PrismaService);
+  } as unknown as PrismaService, semanticVersions);
 
   const result = await service.list(workspaceId, projectId);
 
@@ -74,6 +81,7 @@ test("lists tenant-scoped active clusters with active keyword counts", async () 
 
 test("maps an active tenant page and reports competing keyword pages", async () => {
   let selectedPageWhere: unknown;
+  let recordedChange: unknown;
   const mappedRow = {
     ...row,
     primaryPageId: pageId,
@@ -119,7 +127,16 @@ test("maps an active tenant page and reports competing keyword pages", async () 
     $transaction: async (
       callback: (tx: typeof transaction) => Promise<unknown>
     ) => callback(transaction)
-  } as unknown as PrismaService);
+  } as unknown as PrismaService, {
+    createWithClusterChange: async (
+      _transaction: unknown,
+      _input: unknown,
+      change: unknown
+    ) => {
+      recordedChange = change;
+      return undefined;
+    }
+  } as unknown as SemanticVersionService);
 
   const result = await service.update(clusterId, {
     workspaceId,
@@ -142,6 +159,30 @@ test("maps an active tenant page and reports competing keyword pages", async () 
   assert.equal(result.pageDiagnostics.hasCannibalization, true);
   assert.equal(result.pageDiagnostics.competingPageCount, 1);
   assert.equal(result.pageDiagnostics.unmappedKeywordCount, 1);
+  assert.deepEqual(recordedChange, {
+    entityId: clusterId,
+    operation: "UPDATE",
+    beforeState: {
+      name: "SEO аудит",
+      method: "MANUAL",
+      status: "ACTIVE",
+      primaryPageId: null,
+      pageMappingSource: null,
+      pageMappingConfidence: null,
+      pageMappingRationale: null
+    },
+    afterState: {
+      name: "SEO аудит",
+      method: "MANUAL",
+      status: "ACTIVE",
+      primaryPageId: pageId,
+      pageMappingSource: "MANUAL",
+      pageMappingConfidence: null,
+      pageMappingRationale: "Совпадает интент"
+    },
+    beforeVersion: 2,
+    afterVersion: 3
+  });
 });
 
 test("refuses to delete a cluster that still owns active keywords", async () => {
@@ -161,7 +202,7 @@ test("refuses to delete a cluster that still owns active keywords", async () => 
   const service = new ClusterService({
     $transaction: async (callback: (tx: typeof transaction) => Promise<void>) =>
       callback(transaction)
-  } as unknown as PrismaService);
+  } as unknown as PrismaService, semanticVersions);
 
   await assert.rejects(
     () =>
@@ -176,4 +217,194 @@ test("refuses to delete a cluster that still owns active keywords", async () => 
       error.getStatus() === HttpStatus.CONFLICT
   );
   assert.equal(updated, false);
+});
+
+test("previews applicable, unchanged, stale and unavailable page mappings", async () => {
+  const activePage = {
+    id: pageId,
+    url: "https://example.com/audit/",
+    normalizedUrl: "https://example.com/audit/",
+    pageType: "EXISTING" as const,
+    indexability: "INDEXABLE" as const,
+    status: "ACTIVE" as const
+  };
+  const alreadyMapped = {
+    ...row,
+    id: secondClusterId,
+    name: "Продвижение",
+    version: 3,
+    primaryPageId: pageId,
+    pageMappingSource: "MANUAL",
+    pageMappingRationale: "Совпадает интент",
+    primaryPage: activePage
+  };
+  const stale = {
+    ...row,
+    id: thirdClusterId,
+    name: "SEO услуги",
+    version: 4
+  };
+  const service = new ClusterService({
+    page: { findFirst: async () => ({ id: pageId }) },
+    cluster: { findMany: async () => [row, alreadyMapped, stale] }
+  } as unknown as PrismaService, semanticVersions);
+
+  const preview = await service.previewPageMapping({
+    workspaceId,
+    projectId,
+    actorId,
+    items: [
+      { id: clusterId, version: 2 },
+      { id: secondClusterId, version: 3 },
+      { id: thirdClusterId, version: 3 },
+      { id: missingClusterId, version: 1 }
+    ],
+    primaryPageId: pageId,
+    pageMappingSource: "MANUAL",
+    pageMappingRationale: "Совпадает интент"
+  });
+
+  assert.deepEqual(
+    preview.changes.map(({ clusterId: id, state }) => [id, state]),
+    [
+      [clusterId, "APPLICABLE"],
+      [secondClusterId, "UNCHANGED"],
+      [thirdClusterId, "CONFLICTED"],
+      [missingClusterId, "UNAVAILABLE"]
+    ]
+  );
+  assert.deepEqual(
+    {
+      selected: preview.selected,
+      applicable: preview.applicable,
+      skipped: preview.skipped,
+      conflicted: preview.conflicted
+    },
+    { selected: 4, applicable: 1, skipped: 1, conflicted: 2 }
+  );
+});
+
+test("bulk page mapping only updates applicable rows and records one version", async () => {
+  let updateCount = 0;
+  let recordedChanges: readonly unknown[] = [];
+  const activePage = {
+    id: pageId,
+    url: "https://example.com/audit/",
+    normalizedUrl: "https://example.com/audit/",
+    pageType: "EXISTING" as const,
+    indexability: "INDEXABLE" as const,
+    status: "ACTIVE" as const
+  };
+  const alreadyMapped = {
+    ...row,
+    id: secondClusterId,
+    name: "Продвижение",
+    version: 3,
+    primaryPageId: pageId,
+    pageMappingSource: "MANUAL",
+    pageMappingRationale: "Совпадает интент",
+    primaryPage: activePage
+  };
+  const stale = {
+    ...row,
+    id: thirdClusterId,
+    name: "SEO услуги",
+    version: 4
+  };
+  const updated = {
+    ...row,
+    version: 3,
+    primaryPageId: pageId,
+    pageMappingSource: "MANUAL",
+    pageMappingRationale: "Совпадает интент",
+    primaryPage: activePage
+  };
+  const transaction = {
+    $executeRaw: async () => 1,
+    $queryRaw: async () => [{ id: pageId }],
+    page: { findFirst: async () => ({ id: pageId }) },
+    cluster: {
+      findMany: async () => [row, alreadyMapped, stale],
+      update: async () => {
+        updateCount += 1;
+        return updated;
+      }
+    },
+    keyword: { groupBy: async () => [] }
+  };
+  const service = new ClusterService({
+    $transaction: async (
+      callback: (tx: typeof transaction) => Promise<unknown>
+    ) => callback(transaction)
+  } as unknown as PrismaService, {
+    createWithClusterChanges: async (
+      _transaction: unknown,
+      _input: unknown,
+      changes: readonly unknown[]
+    ) => {
+      recordedChanges = changes;
+      return undefined;
+    }
+  } as unknown as SemanticVersionService);
+
+  const result = await service.bulkUpdatePageMapping({
+    workspaceId,
+    projectId,
+    actorId,
+    items: [
+      { id: clusterId, version: 2 },
+      { id: secondClusterId, version: 3 },
+      { id: thirdClusterId, version: 3 }
+    ],
+    primaryPageId: pageId,
+    pageMappingSource: "MANUAL",
+    pageMappingRationale: "Совпадает интент"
+  });
+
+  assert.equal(updateCount, 1);
+  assert.equal(recordedChanges.length, 1);
+  assert.deepEqual(recordedChanges[0], {
+    entityId: clusterId,
+    operation: "UPDATE",
+    beforeState: {
+      name: "SEO аудит",
+      method: "MANUAL",
+      status: "ACTIVE",
+      primaryPageId: null,
+      pageMappingSource: null,
+      pageMappingConfidence: null,
+      pageMappingRationale: null
+    },
+    afterState: {
+      name: "SEO аудит",
+      method: "MANUAL",
+      status: "ACTIVE",
+      primaryPageId: pageId,
+      pageMappingSource: "MANUAL",
+      pageMappingConfidence: null,
+      pageMappingRationale: "Совпадает интент"
+    },
+    beforeVersion: 2,
+    afterVersion: 3
+  });
+  assert.deepEqual(
+    {
+      selected: result.selected,
+      changed: result.changed,
+      skipped: result.skipped,
+      conflicted: result.conflicted,
+      updatedIds: result.updatedClusters.map(({ id }) => id),
+      skippedIds: result.skippedIds,
+      conflictedIds: result.conflictedIds
+    },
+    {
+      selected: 3,
+      changed: 1,
+      skipped: 1,
+      conflicted: 1,
+      updatedIds: [clusterId],
+      skippedIds: [secondClusterId],
+      conflictedIds: [thirdClusterId]
+    }
+  );
 });

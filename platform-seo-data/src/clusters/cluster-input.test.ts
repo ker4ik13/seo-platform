@@ -4,6 +4,7 @@ import { BadRequestException } from "@nestjs/common";
 import {
   internalCreateSemanticClusterInput,
   internalDeleteSemanticClusterInput,
+  internalSemanticClusterPageBulkInput,
   internalUpdateSemanticClusterInput
 } from "./cluster-input.js";
 
@@ -87,6 +88,58 @@ test("rejects malformed and forged internal cluster commands", () => {
         actorId,
         name: "SEO",
         pageMappingConfidence: 2
+      }),
+    BadRequestException
+  );
+});
+
+test("accepts and scopes an exact internal cluster page mapping command", () => {
+  assert.deepEqual(
+    internalSemanticClusterPageBulkInput({
+      workspaceId,
+      projectId,
+      actorId,
+      items: [{ id: "01900000-0000-7000-8000-000000000004", version: 3 }],
+      primaryPageId: "01900000-0000-7000-8000-000000000005",
+      pageMappingSource: "SERP",
+      pageMappingConfidence: 0.9,
+      pageMappingRationale: "  Результаты выдачи  "
+    }),
+    {
+      workspaceId,
+      projectId,
+      actorId,
+      items: [{ id: "01900000-0000-7000-8000-000000000004", version: 3 }],
+      primaryPageId: "01900000-0000-7000-8000-000000000005",
+      pageMappingSource: "SERP",
+      pageMappingConfidence: 0.9,
+      pageMappingRationale: "Результаты выдачи"
+    }
+  );
+});
+
+test("rejects duplicate or contradictory internal page mapping commands", () => {
+  const item = { id: "01900000-0000-7000-8000-000000000004", version: 3 };
+  assert.throws(
+    () =>
+      internalSemanticClusterPageBulkInput({
+        workspaceId,
+        projectId,
+        actorId,
+        items: [item, item],
+        primaryPageId: null
+      }),
+    BadRequestException
+  );
+  assert.throws(
+    () =>
+      internalSemanticClusterPageBulkInput({
+        workspaceId,
+        projectId,
+        actorId,
+        items: [item],
+        primaryPageId: null,
+        pageMappingRationale: "Нельзя сохранить без страницы"
       }),
     BadRequestException
   );

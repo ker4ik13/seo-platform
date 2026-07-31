@@ -11,6 +11,8 @@ import {
   semanticKeywordGroups,
   semanticKeywordBulkResult,
   semanticKeywordPage,
+  semanticClusterPageBulkPreview,
+  semanticClusterPageBulkResult,
   semanticClusters,
   semanticCustomColumns,
   semanticKeywordCustomValue,
@@ -159,6 +161,106 @@ test("validates unique manual semantic clusters", () => {
   assert.equal(semanticClusters([cluster])[0]?.keywordCount, 4);
   assert.throws(() => semanticClusters([{ ...cluster, method: "UNKNOWN" }]), DomainError);
   assert.throws(() => semanticClusters([cluster, cluster]), DomainError);
+});
+
+test("validates cluster page mapping preview and complete result partitions", () => {
+  const first = "01900000-0000-7000-8000-000000000022";
+  const second = "01900000-0000-7000-8000-000000000023";
+  const pageId = "01900000-0000-7000-8000-000000000024";
+  const input = {
+    items: [
+      { id: first, version: 2 },
+      { id: second, version: 3 }
+    ],
+    primaryPageId: pageId,
+    pageMappingSource: "MANUAL" as const
+  };
+  const preview = semanticClusterPageBulkPreview(
+    {
+      selected: 2,
+      applicable: 1,
+      skipped: 0,
+      conflicted: 1,
+      changes: [
+        {
+          clusterId: first,
+          state: "APPLICABLE",
+          expectedVersion: 2,
+          currentVersion: 2,
+          targetPrimaryPageId: pageId
+        },
+        {
+          clusterId: second,
+          state: "CONFLICTED",
+          expectedVersion: 3,
+          currentVersion: 4,
+          targetPrimaryPageId: pageId
+        }
+      ]
+    },
+    input
+  );
+  assert.equal(preview.conflicted, 1);
+  assert.throws(
+    () =>
+      semanticClusterPageBulkPreview(
+        {
+          ...preview,
+          changes: [
+            { ...preview.changes[0], targetPrimaryPageId: second },
+            preview.changes[1]
+          ]
+        },
+        input
+      ),
+    DomainError
+  );
+
+  const cluster = {
+    id: first,
+    name: "SEO аудит",
+    method: "MANUAL",
+    keywordCount: 4,
+    primaryPage: {
+      id: pageId,
+      url: "https://example.com/audit/",
+      normalizedUrl: "https://example.com/audit/",
+      pageType: "EXISTING",
+      indexability: "INDEXABLE"
+    },
+    pageMappingSource: "MANUAL",
+    pageDiagnostics: {
+      mappedKeywordCount: 3,
+      unmappedKeywordCount: 1,
+      competingPageCount: 0,
+      hasCannibalization: false,
+      hasMissingLanding: false
+    },
+    version: 3,
+    createdAt: "2026-07-30T10:00:00.000Z",
+    updatedAt: "2026-07-30T11:00:00.000Z"
+  };
+  const result = semanticClusterPageBulkResult(
+    {
+      selected: 2,
+      changed: 1,
+      skipped: 0,
+      conflicted: 1,
+      updatedClusters: [cluster],
+      skippedIds: [],
+      conflictedIds: [second]
+    },
+    input
+  );
+  assert.equal(result.changed, 1);
+  assert.throws(
+    () =>
+      semanticClusterPageBulkResult(
+        { ...result, conflictedIds: [first] },
+        input
+      ),
+    DomainError
+  );
 });
 
 test("validates a complete semantic bulk result partition", () => {

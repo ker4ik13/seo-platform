@@ -5,6 +5,7 @@ import {
   semanticKeywordSorts,
   semanticClusterMethods,
   semanticClusterPageSources,
+  semanticClusterPageBulkStates,
   pageIndexabilities,
   pageTypes,
   semanticCustomColumnTypes,
@@ -53,6 +54,9 @@ import {
   type ProjectCrawlIssueCollection,
   type SemanticKeywordIntent,
   type SemanticCluster,
+  type SemanticClusterPageBulkInput,
+  type SemanticClusterPageBulkPreview,
+  type SemanticClusterPageBulkResult,
   type SemanticClusterPageSource,
   type SemanticKeywordBulkInput,
   type SemanticKeywordBulkResult,
@@ -392,6 +396,54 @@ export class SeoDataClient {
       context,
       body
     );
+  }
+
+  public async previewSemanticClusterPageMapping(
+    context: InternalContext,
+    input: SemanticClusterPageBulkInput
+  ): Promise<SemanticClusterPageBulkPreview> {
+    const scope = trackingScope(context);
+    const body = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      semanticClusterUrl(
+        context,
+        this.config.services.seoData,
+        "page-mapping-preview"
+      ),
+      context,
+      body
+    );
+    return semanticClusterPageBulkPreview(responseData(payload), input);
+  }
+
+  public async bulkUpdateSemanticClusterPageMapping(
+    context: InternalContext,
+    input: SemanticClusterPageBulkInput
+  ): Promise<SemanticClusterPageBulkResult> {
+    const scope = trackingScope(context);
+    const body = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      semanticClusterUrl(
+        context,
+        this.config.services.seoData,
+        "page-mapping-bulk"
+      ),
+      context,
+      body
+    );
+    return semanticClusterPageBulkResult(responseData(payload), input);
   }
 
   public async listSemanticSavedViews(
@@ -1498,6 +1550,137 @@ export function semanticCluster(value: unknown): SemanticCluster {
     createdAt: cluster.createdAt as string,
     updatedAt: cluster.updatedAt as string
   };
+}
+
+export function semanticClusterPageBulkPreview(
+  value: unknown,
+  input: SemanticClusterPageBulkInput
+): SemanticClusterPageBulkPreview {
+  const preview = exactRecord(value, [
+    "selected",
+    "applicable",
+    "skipped",
+    "conflicted",
+    "changes"
+  ]);
+  if (!Array.isArray(preview.changes) || preview.changes.length !== input.items.length) {
+    throw invalidResponse();
+  }
+  const expectedById = new Map(input.items.map((item) => [item.id, item.version]));
+  const changes = preview.changes.map((value) => {
+    const change = exactRecord(value, [
+      "clusterId",
+      "state",
+      "expectedVersion",
+      "currentVersion",
+      "currentPrimaryPageId",
+      "targetPrimaryPageId"
+    ]);
+    if (
+      !requiredString(change.clusterId) ||
+      typeof change.state !== "string" ||
+      !semanticClusterPageBulkStates.some((state) => state === change.state) ||
+      !Number.isSafeInteger(change.expectedVersion) ||
+      expectedById.get(change.clusterId) !== change.expectedVersion ||
+      (change.currentVersion !== undefined &&
+        (!Number.isSafeInteger(change.currentVersion) || Number(change.currentVersion) < 1)) ||
+      (change.currentPrimaryPageId !== undefined && !requiredString(change.currentPrimaryPageId)) ||
+      (change.targetPrimaryPageId !== undefined && !requiredString(change.targetPrimaryPageId)) ||
+      (input.primaryPageId === null
+        ? change.targetPrimaryPageId !== undefined
+        : change.targetPrimaryPageId !== input.primaryPageId)
+    ) {
+      throw invalidResponse();
+    }
+    return change as unknown as SemanticClusterPageBulkPreview["changes"][number];
+  });
+  if (
+    new Set(changes.map(({ clusterId }) => clusterId)).size !== changes.length ||
+    !bulkCount(preview.selected, changes.length) ||
+    !bulkCount(
+      preview.applicable,
+      changes.filter(({ state }) => state === "APPLICABLE").length
+    ) ||
+    !bulkCount(
+      preview.skipped,
+      changes.filter(({ state }) => state === "UNCHANGED").length
+    ) ||
+    !bulkCount(
+      preview.conflicted,
+      changes.filter(({ state }) =>
+        ["CONFLICTED", "UNAVAILABLE"].includes(state)
+      ).length
+    )
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    selected: Number(preview.selected),
+    applicable: Number(preview.applicable),
+    skipped: Number(preview.skipped),
+    conflicted: Number(preview.conflicted),
+    changes
+  };
+}
+
+export function semanticClusterPageBulkResult(
+  value: unknown,
+  input: SemanticClusterPageBulkInput
+): SemanticClusterPageBulkResult {
+  const result = exactRecord(value, [
+    "selected",
+    "changed",
+    "skipped",
+    "conflicted",
+    "updatedClusters",
+    "skippedIds",
+    "conflictedIds"
+  ]);
+  const updatedClusters = semanticClusters(result.updatedClusters);
+  const skippedIds = uuidList(result.skippedIds, input.items.length);
+  const conflictedIds = uuidList(result.conflictedIds, input.items.length);
+  const inputIds = new Set(input.items.map(({ id }) => id));
+  const partitions = [
+    ...updatedClusters.map(({ id }) => id),
+    ...skippedIds,
+    ...conflictedIds
+  ];
+  if (
+    partitions.some((id) => !inputIds.has(id)) ||
+    new Set(partitions).size !== partitions.length ||
+    !bulkCount(result.selected, input.items.length) ||
+    !bulkCount(result.changed, updatedClusters.length) ||
+    !bulkCount(result.skipped, skippedIds.length) ||
+    !bulkCount(result.conflicted, conflictedIds.length) ||
+    partitions.length !== input.items.length
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    selected: Number(result.selected),
+    changed: Number(result.changed),
+    skipped: Number(result.skipped),
+    conflicted: Number(result.conflicted),
+    updatedClusters,
+    skippedIds,
+    conflictedIds
+  };
+}
+
+function uuidList(value: unknown, max: number): readonly string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length > max ||
+    value.some((item) => !requiredString(item)) ||
+    new Set(value).size !== value.length
+  ) {
+    throw invalidResponse();
+  }
+  return value as string[];
+}
+
+function bulkCount(value: unknown, expected: number): boolean {
+  return Number.isSafeInteger(value) && Number(value) === expected;
 }
 
 function semanticClusterPrimaryPage(

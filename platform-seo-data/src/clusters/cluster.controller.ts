@@ -13,7 +13,12 @@ import {
   Req,
   UseGuards
 } from "@nestjs/common";
-import type { ApiResponse, SemanticCluster } from "@seo-platform/contracts";
+import type {
+  ApiResponse,
+  SemanticCluster,
+  SemanticClusterPageBulkPreview,
+  SemanticClusterPageBulkResult
+} from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
 import {
   assertInternalContext,
@@ -24,6 +29,7 @@ import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import {
   internalCreateSemanticClusterInput,
   internalDeleteSemanticClusterInput,
+  internalSemanticClusterPageBulkInput,
   internalUpdateSemanticClusterInput
 } from "./cluster-input.js";
 import { ClusterService } from "./cluster.service.js";
@@ -58,6 +64,38 @@ export class ClusterController {
     const input = internalCreateSemanticClusterInput(body);
     assertMutation(projectId, headers, input);
     return response(request, await this.clusters.create(input));
+  }
+
+  @Post("page-mapping-preview")
+  @HttpCode(HttpStatus.OK)
+  public async previewPageMapping(
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Headers() headers: InternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticClusterPageBulkPreview>> {
+    const input = internalSemanticClusterPageBulkInput(body);
+    assertMutation(projectId, headers, input);
+    return {
+      data: await this.clusters.previewPageMapping(input),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Post("page-mapping-bulk")
+  @HttpCode(HttpStatus.OK)
+  public async bulkUpdatePageMapping(
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Headers() headers: InternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticClusterPageBulkResult>> {
+    const input = internalSemanticClusterPageBulkInput(body);
+    assertMutation(projectId, headers, input);
+    return {
+      data: await this.clusters.bulkUpdatePageMapping(input),
+      meta: { requestId: request.id }
+    };
   }
 
   @Patch(":clusterId")

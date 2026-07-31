@@ -8,6 +8,7 @@ const projectId = "01900000-0000-7000-8000-000000000002";
 const actorId = "01900000-0000-7000-8000-000000000003";
 const versionId = "01900000-0000-7000-8000-000000000010";
 const keywordId = "01900000-0000-7000-8000-000000000020";
+const clusterId = "01900000-0000-7000-8000-000000000021";
 const undoVersionId = "01900000-0000-7000-8000-000000000011";
 const idempotencyKey = "semantic-undo-test-0001";
 const entitlement = {
@@ -42,6 +43,33 @@ test("preview refuses to overwrite a newer keyword version", async () => {
   assert.equal(result.applicable, 0);
   assert.equal(result.conflicted, 1);
   assert.equal(result.changes[0]?.conflictCode, "NEWER_CHANGE");
+});
+
+test("preview accepts an unchanged cluster mapping with available dependencies", async () => {
+  const service = new SemanticVersionService({
+    semanticVersion: {
+      findFirst: async () => ({ ...version(), reason: "CLUSTER_UPDATE" })
+    },
+    semanticEntityChange: {
+      findMany: async () => [clusterChange()]
+    },
+    cluster: {
+      findMany: async () => [
+        { id: clusterId, version: 2, status: "ACTIVE" }
+      ],
+      findFirst: async () => null
+    }
+  } as unknown as PrismaService);
+
+  const result = await service.previewUndo(
+    workspaceId,
+    projectId,
+    versionId
+  );
+
+  assert.equal(result.applicable, 1);
+  assert.equal(result.changes[0]?.entityType, "CLUSTER");
+  assert.equal(result.changes[0]?.state, "APPLICABLE");
 });
 
 test("undo creates a new version and soft-deletes only the exact current row", async () => {
@@ -155,6 +183,100 @@ test("undo creates a new version and soft-deletes only the exact current row", a
   assert.equal(recordedChanges.length, 1);
 });
 
+test("undo restores a cluster page mapping and records the inverse change", async () => {
+  const clusterUpdates: unknown[] = [];
+  const recordedChanges: Array<Record<string, unknown>> = [];
+  const source = { ...version(), reason: "CLUSTER_UPDATE" };
+  const undo = {
+    ...source,
+    id: undoVersionId,
+    number: 2,
+    reason: "UNDO",
+    parentVersionId: source.id,
+    summary: "Откат версии №1",
+    affectedCount: 0,
+    reversible: false,
+    finalizedAt: null
+  };
+  const transaction = {
+    $executeRaw: async () => 1,
+    semanticVersion: {
+      findFirst: async () => source,
+      create: async () => undo,
+      update: async () => ({
+        ...undo,
+        affectedCount: 1,
+        reversible: true,
+        finalizedAt: new Date("2026-07-30T12:05:00.000Z")
+      })
+    },
+    semanticUndoReceipt: {
+      findUnique: async () => null,
+      create: async ({ data }: { data: Record<string, unknown> }) => data
+    },
+    semanticEntityChange: {
+      findMany: async () => [clusterChange()],
+      create: async ({ data }: { data: Record<string, unknown> }) => {
+        recordedChanges.push(data);
+        return data;
+      }
+    },
+    cluster: {
+      findMany: async () => [
+        { id: clusterId, version: 2, status: "ACTIVE" }
+      ],
+      findFirst: async () => null,
+      findFirstOrThrow: async () => ({
+        id: clusterId,
+        workspaceId,
+        projectId,
+        version: 2,
+        status: "ACTIVE"
+      }),
+      update: async ({ data }: { data: unknown }) => {
+        clusterUpdates.push(data);
+        return {};
+      }
+    }
+  };
+  const service = new SemanticVersionService({
+    $transaction: async (
+      callback: (client: typeof transaction) => Promise<unknown>
+    ) => callback(transaction)
+  } as unknown as PrismaService);
+
+  const result = await service.undo(
+    workspaceId,
+    projectId,
+    actorId,
+    versionId,
+    "semantic-undo-cluster-0001",
+    entitlement
+  );
+
+  assert.equal(result.applied, 1);
+  assert.deepEqual(clusterUpdates, [
+    {
+      name: "SEO аудит",
+      method: "MANUAL",
+      status: "ACTIVE",
+      primaryPageId: null,
+      pageMappingSource: null,
+      pageMappingConfidence: null,
+      pageMappingRationale: null,
+      version: { increment: 1 }
+    }
+  ]);
+  assert.equal(recordedChanges.length, 1);
+  assert.equal(recordedChanges[0]?.entityType, "CLUSTER");
+  assert.deepEqual(recordedChanges[0]?.beforeState, clusterState(
+    "01900000-0000-7000-8000-000000000040"
+  ));
+  assert.deepEqual(recordedChanges[0]?.afterState, clusterState(null));
+  assert.equal(recordedChanges[0]?.beforeVersion, 2);
+  assert.equal(recordedChanges[0]?.afterVersion, 3);
+});
+
 function version() {
   return {
     id: versionId,
@@ -202,5 +324,31 @@ function keywordState() {
     targetPageId: null,
     groupId: null,
     tagIds: []
+  };
+}
+
+function clusterChange() {
+  return {
+    entityType: "CLUSTER",
+    entityId: clusterId,
+    operation: "UPDATE",
+    beforeState: clusterState(null),
+    afterState: clusterState("01900000-0000-7000-8000-000000000040"),
+    beforeVersion: 1,
+    afterVersion: 2,
+    createdAt: new Date("2026-07-30T12:00:00.000Z"),
+    id: "01900000-0000-7000-8000-000000000031"
+  };
+}
+
+function clusterState(primaryPageId: string | null) {
+  return {
+    name: "SEO аудит",
+    method: "MANUAL",
+    status: "ACTIVE",
+    primaryPageId,
+    pageMappingSource: primaryPageId ? "MANUAL" : null,
+    pageMappingConfidence: null,
+    pageMappingRationale: null
   };
 }
