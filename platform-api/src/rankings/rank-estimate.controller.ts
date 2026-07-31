@@ -20,6 +20,7 @@ import {
 } from "../authorization/project-tenant.js";
 import { RequirePermission } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
+import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import { apiResponse } from "../common/api-response.js";
 import { DomainError } from "../common/domain-error.js";
 import { requiredIdempotencyKey } from "../common/idempotency-key.js";
@@ -37,7 +38,8 @@ import { createRankEstimateInput } from "./rank-estimate-input.js";
 export class RankEstimateController {
   public constructor(
     private readonly jobs: JobsClient,
-    private readonly tenants: TenantService
+    private readonly tenants: TenantService,
+    private readonly billingEntitlements: BillingEntitlementService
   ) {}
 
   @Post()
@@ -54,9 +56,10 @@ export class RankEstimateController {
     const idempotencyKey = requiredIdempotencyKey(
       headerValue(request, "idempotency-key")
     );
-    const [workspace, project] = await Promise.all([
+    const [workspace, project, entitlementStatus] = await Promise.all([
       this.tenants.getWorkspace(principal.userId, tenant.workspaceId),
-      this.tenants.getProject(tenant.projectId)
+      this.tenants.getProject(tenant.projectId),
+      this.billingEntitlements.rankProviderAccess(tenant.workspaceId)
     ]);
     if (
       project.id !== tenant.projectId ||
@@ -85,7 +88,7 @@ export class RankEstimateController {
           tenant.projectAccessLevel,
           "ranking.run"
         ),
-        entitlementStatus: "NOT_AVAILABLE"
+        entitlementStatus
       },
       billingCurrency: workspace.billingCurrency,
       quota: { status: "NOT_AVAILABLE" }

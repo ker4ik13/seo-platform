@@ -60,6 +60,22 @@ test("projects the exact trusted storage capacity snapshot", async () => {
   });
 });
 
+test("projects current BYOK access for an interactive rank estimate", async () => {
+  const transaction = onboardingTransaction();
+  const service = new BillingEntitlementService({
+    $transaction: async (
+      callback: (
+        client: Prisma.TransactionClient
+      ) => Promise<unknown>
+    ) => callback(transaction)
+  } as unknown as PrismaService);
+
+  assert.equal(
+    await service.rankProviderAccess(WORKSPACE_ID),
+    "ALLOWED"
+  );
+});
+
 test("serializes project capacity and rejects the exact current-plan limit", async () => {
   const queries: string[] = [];
   const transaction = onboardingTransaction({

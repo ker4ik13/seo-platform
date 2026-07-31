@@ -623,6 +623,9 @@ function estimateBlockers(
 ): RankEstimateBlockerCode[] {
   const blockers = new Set<RankEstimateBlockerCode>();
   const keywordCount = Number(scope.keywordCount);
+  const execution = rankEstimateExecutionParameters(
+    scope.configuration
+  );
   if (scope.contextStatus === "ARCHIVED") blockers.add("CONTEXT_ARCHIVED");
   if (keywordCount === 0) blockers.add("NO_ASSIGNED_KEYWORDS");
   if (keywordCount > RANK_ESTIMATE_KEYWORD_LIMIT) {
@@ -631,22 +634,30 @@ function estimateBlockers(
   if (scope.semanticScopeHash.availability === "UNAVAILABLE") {
     blockers.add("SCOPE_HASH_UNAVAILABLE");
   }
-  if (scope.configuration.searchEngine !== "GOOGLE") {
-    blockers.add("UNSUPPORTED_SEARCH_ENGINE");
+  if (!execution) {
+    if (scope.configuration.searchEngine !== "GOOGLE") {
+      blockers.add("UNSUPPORTED_SEARCH_ENGINE");
+    }
+    if (scope.configuration.depth !== 30) {
+      blockers.add("UNSUPPORTED_DEPTH");
+    }
+    if (
+      !scope.configuration.regionCode ||
+      !/^[1-9]\d{0,9}$/u.test(scope.configuration.regionCode)
+    ) {
+      blockers.add("REGION_MAPPING_UNVERIFIED");
+    }
+    if (scope.configuration.safeSearch) {
+      blockers.add("SAFE_SEARCH_MAPPING_UNVERIFIED");
+    }
+    if (
+      ["CANONICAL_DOMAIN", "ANY_PROJECT_MIRROR"].includes(
+        scope.configuration.domainMatchRule.mode
+      )
+    ) {
+      blockers.add("DOMAIN_MAPPING_UNVERIFIED");
+    }
   }
-  if (scope.configuration.depth !== 30) {
-    blockers.add("UNSUPPORTED_DEPTH");
-  }
-  blockers.add("COUNTRY_MAPPING_UNVERIFIED");
-  if (
-    scope.configuration.regionCode ||
-    scope.configuration.regionLabel
-  ) {
-    blockers.add("REGION_MAPPING_UNVERIFIED");
-  }
-  blockers.add("LANGUAGE_MAPPING_UNVERIFIED");
-  blockers.add("SAFE_SEARCH_MAPPING_UNVERIFIED");
-  blockers.add("DOMAIN_MAPPING_UNVERIFIED");
 
   const binding = projection.binding;
   const route = binding?.routes.length === 1 ? binding.routes[0] : undefined;
@@ -702,8 +713,6 @@ function estimateBlockers(
     }
   }
 
-  blockers.add("PROVIDER_CONTRACT_NOT_READY");
-  blockers.add("PROVIDER_EXECUTION_DISABLED");
   if (input.access.entitlementStatus === "NOT_AVAILABLE") {
     blockers.add("ENTITLEMENT_NOT_AVAILABLE");
   } else if (input.access.entitlementStatus === "DENIED") {

@@ -112,6 +112,11 @@ found/not-found chunk проходит через отдельный SEO Data re
 Поддержанный первый production profile ограничен Google, глубиной 30,
 числовым Arsenkin region ID, выключенным safe search и однозначными URL rules;
 несовместимая конфигурация блокируется ещё на estimate, до provider call.
+Устаревшие unconditional beta-blockers с estimate-path удалены: Platform API
+теперь получает BYOK entitlement из действующего тарифа, а executable estimate
+становится `READY` только при полном совпадении этого production profile,
+активном binding и свежей validation. Неизвестный/неподдержанный mapping
+остаётся fail-closed с точным blocker code.
 Миграция activation переводит DB-control на новую kill-switch generation
 `arsenkin-positions@2`; Compose включает submit только в isolated
 connector-worker. Старые execution evidence поколения `@1` активироваться

@@ -175,6 +175,14 @@ export class BillingEntitlementService {
     return entitlement.features.byok ? "ALLOWED" : "DENIED";
   }
 
+  public async rankProviderAccess(
+    workspaceId: string
+  ): Promise<RankProviderEntitlement> {
+    return this.prisma.$transaction((transaction) =>
+      this.rankProviderEntitlement(transaction, workspaceId)
+    );
+  }
+
   private async snapshotInTransaction(
     transaction: Prisma.TransactionClient,
     workspaceId: string

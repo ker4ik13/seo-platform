@@ -8,6 +8,7 @@ import type { RankEstimate } from "@seo-platform/contracts";
 import type { TenantRequest } from "../authorization/authorization.types.js";
 import { REQUIRED_PERMISSION } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
+import type { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import { DomainError } from "../common/domain-error.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
 import { CsrfSessionGuard } from "../identity/session-auth.guard.js";
@@ -103,7 +104,8 @@ test("builds a trusted project/access snapshot without browser authority", async
     tenantService({
       workspaceStatus: "READ_ONLY",
       projectStatus: "ARCHIVED"
-    })
+    }),
+    billingEntitlements()
   );
 
   const response = await controller.create(
@@ -144,7 +146,7 @@ test("builds a trusted project/access snapshot without browser authority", async
     access: {
       workspaceStatus: "READ_ONLY",
       canRunRanking: true,
-      entitlementStatus: "NOT_AVAILABLE"
+      entitlementStatus: "ALLOWED"
     },
     billingCurrency: "RUB",
     quota: { status: "NOT_AVAILABLE" }
@@ -165,7 +167,8 @@ test("projects missing run permission while keeping estimate access", async () =
         return estimate;
       }
     } as unknown as JobsClient,
-    tenantService({ workspaceRoleCode: "ANALYST" })
+    tenantService({ workspaceRoleCode: "ANALYST" }),
+    billingEntitlements()
   );
 
   await controller.create(
@@ -191,7 +194,8 @@ test("rejects missing idempotency before loading tenant snapshots", async () => 
       getProject: async () => {
         tenantRead = true;
       }
-    } as unknown as TenantService
+    } as unknown as TenantService,
+    billingEntitlements()
   );
 
   await assert.rejects(
@@ -214,7 +218,8 @@ test("fails closed when authoritative project ownership changes", async () => {
     tenantService({
       projectWorkspaceId:
         "01900000-0000-7000-8000-000000000099"
-    })
+    }),
+    billingEntitlements()
   );
 
   await assert.rejects(
@@ -266,6 +271,14 @@ function tenantService(
       createdAt: "2026-07-29T10:00:00.000Z"
     })
   } as unknown as TenantService;
+}
+
+function billingEntitlements(
+  status: "ALLOWED" | "DENIED" | "NOT_AVAILABLE" = "ALLOWED"
+): BillingEntitlementService {
+  return {
+    rankProviderAccess: async () => status
+  } as unknown as BillingEntitlementService;
 }
 
 function request(

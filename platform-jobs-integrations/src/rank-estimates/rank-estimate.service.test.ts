@@ -5,6 +5,7 @@ import type {
   InternalCreateRankEstimateInput,
   InternalRankEstimateScope
 } from "@seo-platform/contracts";
+import { Prisma } from "../generated/prisma/client.js";
 import type { PrismaService } from "../database/prisma.service.js";
 import type { SeoDataClient } from "../seo-data/seo-data.client.js";
 import { rankEstimateSnapshot } from "./rank-estimate-snapshot.js";
@@ -49,13 +50,20 @@ const input: InternalCreateRankEstimateInput = {
 
 test("calculates bounded task counts, exact TTL and a redacted immutable estimate", async () => {
   const harness = estimateHarness({ scope: scope({ keywordCount: "251" }) });
+  const executableInput: InternalCreateRankEstimateInput = {
+    ...input,
+    access: {
+      ...input.access,
+      entitlementStatus: "ALLOWED"
+    }
+  };
   const estimate = await harness.service.create(
-    input,
+    executableInput,
     "rank-estimate-0001"
   );
 
-  assert.equal(estimate.status, "BLOCKED");
-  assert.equal(estimate.executionAllowed, false);
+  assert.equal(estimate.status, "READY");
+  assert.equal(estimate.executionAllowed, true);
   assert.equal(estimate.workload.taskCount, "2");
   assert.equal(estimate.workload.minimumRequestCount, "6");
   assert.equal(estimate.providerLimits.status, "NOT_AVAILABLE");
@@ -66,14 +74,7 @@ test("calculates bounded task counts, exact TTL and a redacted immutable estimat
       new Date(estimate.calculatedAt).getTime(),
     RANK_ESTIMATE_TTL_MILLISECONDS
   );
-  assert.deepEqual(
-    estimate.blockers.slice(-3).map(({ code }) => code),
-    [
-      "PROVIDER_CONTRACT_NOT_READY",
-      "PROVIDER_EXECUTION_DISABLED",
-      "ENTITLEMENT_NOT_AVAILABLE"
-    ]
-  );
+  assert.deepEqual(estimate.blockers, []);
   assert.equal(harness.transactionIsolation, "RepeatableRead");
   assert.equal(harness.seoCalls, 1);
 
@@ -95,7 +96,10 @@ test("calculates bounded task counts, exact TTL and a redacted immutable estimat
   assert.equal(publicSnapshot.includes(routeId), false);
   assert.equal(publicSnapshot.includes(credentialId), false);
   assert.equal(publicSnapshot.includes(validationId), false);
-  assert.equal(publicSnapshot.includes(input.project.domain), false);
+  assert.equal(
+    publicSnapshot.includes(executableInput.project.domain),
+    false
+  );
   assert.equal(
     harness.createdData?.minimumSubmitRequestCount,
     2
@@ -252,6 +256,38 @@ test("blocks stale and missing validation proof without selecting secret materia
   );
   assert.equal(missing.createdData?.credentialValidationId, null);
   assert.equal(missing.createdData?.credentialVerifiedAt, null);
+});
+
+test("keeps an unsupported provider mapping fail-closed before execution", async () => {
+  const baseScope = scope();
+  const harness = estimateHarness({
+    scope: {
+      ...baseScope,
+      configuration: {
+        ...baseScope.configuration,
+        regionCode: "RU-MOW"
+      }
+    }
+  });
+  const estimate = await harness.service.create(
+    {
+      ...input,
+      access: {
+        ...input.access,
+        entitlementStatus: "ALLOWED"
+      }
+    },
+    "rank-estimate-unsupported-mapping"
+  );
+
+  assert.equal(estimate.status, "BLOCKED");
+  assert.equal(estimate.executionAllowed, false);
+  assert.deepEqual(
+    estimate.blockers.map(({ code }) => code),
+    ["REGION_MAPPING_UNVERIFIED"]
+  );
+  assert.equal(harness.createdData?.executionSnapshot, Prisma.DbNull);
+  assert.equal(harness.createdData?.executionSnapshotHash, null);
 });
 
 test("does not accept a completed proof for another material version", async () => {
