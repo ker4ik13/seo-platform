@@ -186,8 +186,14 @@ keyword_id=$(jq -er '.data.id' "$response_body")
 
 api_call GET "workspaces/$workspace_id/integrations/catalog"
 expect_status 200 integration-catalog
-jq -e '.data | length > 0' "$response_body" >/dev/null ||
-  runtime_fail "integration catalog is empty"
+jq -e '
+  ([.data[].provider] | sort) == ["ARSENKIN", "KEYS_SO"] and
+  ([.data[] | select(.provider == "ARSENKIN")][0].capabilities ==
+    ["SERP_RANK_TRACKING"]) and
+  ([.data[] | select(.provider == "KEYS_SO")][0].capabilities ==
+    ["KEYWORD_RESEARCH", "COMPETITOR_RESEARCH"])
+' "$response_body" >/dev/null ||
+  runtime_fail "integration catalog advertises an unsupported workflow"
 
 api_call GET "workspaces/$workspace_id/members"
 expect_status 200 team-members
@@ -303,6 +309,22 @@ jq -e \
   '.data.crawlId == $crawlId and (.data.pages | type == "array")' \
   "$response_body" >/dev/null ||
   runtime_fail "crawl absent-page collection is invalid"
+
+crawl_notification_found=false
+for ((attempt = 1; attempt <= 15; attempt += 1)); do
+  api_call GET "notifications?limit=20&unreadOnly=true"
+  expect_status 200 crawl-notification-list
+  if jq -e \
+    --arg crawlId "$crawl_id" \
+    'any(.data[]; .eventType == "CRAWL_RADAR" and .resource.type == "technical_crawl" and .resource.id == $crawlId)' \
+    "$response_body" >/dev/null; then
+    crawl_notification_found=true
+    break
+  fi
+  sleep 2
+done
+[ "$crawl_notification_found" = true ] ||
+  runtime_fail "completed crawl did not create an in-app notification"
 
 crawl_automation_body=$(
   jq -cn \

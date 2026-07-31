@@ -586,6 +586,9 @@ provider catalog. Новая документированная возможно
 XMLStock остаётся `PROVIDER_DOCUMENTATION_REQUIRED`: локальная расшифровка не
 выдаётся пользователю за внешний test до подтверждённого provider contract и
 redacted fixtures.
+До этого provider остаётся только internal metadata для совместимости
+с уже сохранёнными credential и не показывается как новое доступное
+подключение в public operational catalog.
 
 Management API принимает только полную замену secret payload и не вызывает
 провайдера. Public decrypt adapter разрешён только role `EXECUTION`, однако

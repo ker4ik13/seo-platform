@@ -49,7 +49,7 @@ type CredentialOperationState = Readonly<
 >;
 
 const EMPTY_DRAFT: CredentialDraft = {
-  provider: "XMLSTOCK",
+  provider: "KEYS_SO",
   label: "",
   apiKey: "",
   accountIdentifier: ""
@@ -409,6 +409,16 @@ export function IntegrationSettings({
               ))}
             </div>
             <small>{providerNotice(provider.provider)}</small>
+            {provider.provider === "KEYS_SO" && (
+              <a className="text-button integration-workflow-link" href="/app/competitors">
+                Собрать семантику конкурента →
+              </a>
+            )}
+            {provider.provider === "ARSENKIN" && (
+              <a className="text-button integration-workflow-link" href="/app/rankings">
+                Настроить съём позиций →
+              </a>
+            )}
           </article>
         ))}
       </section>
@@ -912,9 +922,9 @@ function providerDescription(provider: Provider): string {
     XMLSTOCK:
       "Поисковая выдача, съём позиций и Wordstat через ваш аккаунт.",
     ARSENKIN:
-      "Кластеризация, проверка индексации и SEO-инструменты через ваш аккаунт.",
+      "Съём позиций через проверенный собственный API-ключ.",
     KEYS_SO:
-      "Исследование запросов, конкурентов и выдачи через ваш аккаунт."
+      "Запросы конкурентов с предпросмотром и импортом в ядро."
   };
   return descriptions[provider];
 }

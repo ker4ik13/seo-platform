@@ -256,6 +256,21 @@ export function SemanticCoreTable({
     });
   }
 
+  function selectGroup(groupId?: string): void {
+    const apply = (current: SemanticViewConfig): SemanticViewConfig => {
+      const { groupId: ignored, ...filters } = current.filters;
+      void ignored;
+      return {
+        ...current,
+        filters: groupId ? { ...filters, groupId } : filters
+      };
+    };
+    setDraftConfig((current) => apply(current));
+    setViewConfig((current) => apply(current));
+    setSelectedIds(new Set());
+    setBulkNotice(undefined);
+  }
+
   function updatePriorityFilter(
     field: "priorityMin" | "priorityMax",
     value: string
@@ -542,6 +557,41 @@ export function SemanticCoreTable({
           </button>
         </div>
       </header>
+
+      <nav aria-label="Группы семантического ядра" className="semantic-group-rail">
+        <header>
+          <strong>Группы</strong>
+          <span>{groups.length}</span>
+        </header>
+        <button
+          aria-current={!viewConfig.filters.groupId ? "true" : undefined}
+          className={!viewConfig.filters.groupId ? "active" : undefined}
+          onClick={() => selectGroup()}
+          type="button"
+        >
+          <span>Все запросы</span>
+          <small>{total === undefined ? "—" : formatInteger(total)}</small>
+        </button>
+        <div>
+          {groups.map((group) => (
+            <button
+              aria-current={viewConfig.filters.groupId === group.id ? "true" : undefined}
+              className={viewConfig.filters.groupId === group.id ? "active" : undefined}
+              key={group.id}
+              onClick={() => selectGroup(group.id)}
+              title={group.path}
+              type="button"
+            >
+              <i style={{ background: group.color ?? "var(--line-strong)" }} />
+              <span>
+                <strong>{group.name}</strong>
+                <small>{group.path}</small>
+              </span>
+              <b>{formatInteger(group.keywordCount)}</b>
+            </button>
+          ))}
+        </div>
+      </nav>
 
       <form
         className="semantic-filter-bar"

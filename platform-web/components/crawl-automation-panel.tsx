@@ -144,15 +144,19 @@ export function CrawlAutomationPanel({
   }
 
   return (
-    <div className="crawl-change-history">
-      <div>
-        <p className="eyebrow">Radar</p>
-        <h3>Расписание аудитов</h3>
+    <details className="crawl-radar-panel">
+      <summary>
+        <span className="crawl-radar-icon" aria-hidden="true">R</span>
+        <span>
+          <strong>Автоматический Radar</strong>
+          <small>{settings?.automations.length ? `${settings.automations.filter(({ enabled }) => enabled).length} активных из ${settings.automations.length}` : "Регулярные проверки по расписанию"}</small>
+        </span>
+        <span className="crawl-radar-action">Настроить</span>
+      </summary>
+      <div className="crawl-radar-body">
         <p className="muted-copy">
-          Запуски выполняются в часовом поясе браузера, не пересекаются и
-          автоматически ставятся на паузу после трёх ошибок.
+          Запуски не пересекаются и автоматически ставятся на паузу после трёх ошибок.
         </p>
-      </div>
       {error && <div className="inline-error" role="alert">{error}</div>}
       {notice && <div className="inline-success" role="status">{notice}</div>}
       {loading && !settings ? (
@@ -310,7 +314,8 @@ export function CrawlAutomationPanel({
       ) : (
         !loading && <p className="muted-copy">Расписания ещё не созданы.</p>
       )}
-    </div>
+      </div>
+    </details>
   );
 }
 

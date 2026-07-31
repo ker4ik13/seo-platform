@@ -25,12 +25,8 @@ export const integrationProviderCatalog = [
     provider: "ARSENKIN",
     displayName: "Arsenkin Tools",
     description:
-      "Rank tracking, clustering, indexation checks and supported SEO tools through a user-owned account.",
-    capabilities: [
-      "SERP_RANK_TRACKING",
-      "CLUSTERING",
-      "INDEXATION"
-    ],
+      "Rank tracking through a user-owned Arsenkin Tools account.",
+    capabilities: ["SERP_RANK_TRACKING"],
     supportedModes: ["BYOK_API_KEY"],
     credentialValidationMode: "ACCOUNT_METADATA",
     requiresAccountIdentifier: false,
@@ -41,11 +37,10 @@ export const integrationProviderCatalog = [
     provider: "KEYS_SO",
     displayName: "Keys.so",
     description:
-      "Keyword, competitor and SERP research through a user-owned Keys.so account.",
+      "Competitor keyword research with reviewed import into the project semantic core.",
     capabilities: [
       "KEYWORD_RESEARCH",
-      "COMPETITOR_RESEARCH",
-      "SERP_COLLECTION"
+      "COMPETITOR_RESEARCH"
     ],
     supportedModes: ["BYOK_API_KEY"],
     credentialValidationMode: "ACCOUNT_METADATA",
@@ -54,6 +49,12 @@ export const integrationProviderCatalog = [
       "A Keys.so plan with REST API access is purchased separately."
   }
 ] as const satisfies readonly IntegrationProviderCatalogItem[];
+
+export const operationalIntegrationProviderCatalog =
+  integrationProviderCatalog.filter(
+    ({ credentialValidationMode }) =>
+      credentialValidationMode === "ACCOUNT_METADATA"
+  );
 
 export function integrationProviderMetadata(
   provider: IntegrationProvider

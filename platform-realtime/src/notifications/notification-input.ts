@@ -6,6 +6,7 @@ import {
   notificationSeverities,
   projectNotificationEventTypes,
   projectNotificationModes,
+  type InternalCreateProjectNotificationInput,
   type InternalUpdateNotificationPreferencesInput,
   type InternalUpdateProjectNotificationSubscriptionInput,
   type NotificationQuietHours,
@@ -71,6 +72,98 @@ export function projectNotificationSubscriptionInput(
     ...(pausedUntil ? { pausedUntil } : {}),
     notifyOwnJobs: booleanValue(input.notifyOwnJobs, "notifyOwnJobs"),
     rules: rulesValue(input.rules, true)
+  };
+}
+
+export function createProjectNotificationInput(
+  value: unknown
+): InternalCreateProjectNotificationInput {
+  const input = exactInputObject(value, [
+    "userId",
+    "workspaceId",
+    "projectId",
+    "membershipId",
+    "membershipVersion",
+    "eventType",
+    "severity",
+    "title",
+    "body",
+    "actorId",
+    "resource",
+    "deepLink",
+    "dedupeKey",
+    "ownJob"
+  ]);
+  const resource = exactInputObject(input.resource, ["type", "id"]);
+  const body =
+    input.body === undefined
+      ? undefined
+      : boundedText(input.body, "body", 2_000);
+  const actorId =
+    input.actorId === undefined
+      ? undefined
+      : internalUuid(stringValue(input.actorId, "actorId"), "actorId");
+  const resourceType = stringValue(resource.type, "resource.type");
+  if (resourceType !== "technical_crawl") {
+    invalid("resource.type", "Unsupported notification resource");
+  }
+  const deepLink = stringValue(input.deepLink, "deepLink");
+  if (
+    deepLink.length > 600 ||
+    !/^\/app\/projects\/[0-9a-f-]+\/pages$/u.test(deepLink)
+  ) {
+    invalid("deepLink", "Unsupported internal project path");
+  }
+  const dedupeKey = stringValue(input.dedupeKey, "dedupeKey");
+  if (
+    dedupeKey.length > 180 ||
+    !/^crawl:[0-9a-f-]+:(?:COMPLETED|PARTIALLY_COMPLETED|CANCELLED|FAILED)$/u.test(
+      dedupeKey
+    )
+  ) {
+    invalid("dedupeKey", "Unsupported crawl notification key");
+  }
+  return {
+    userId: internalUuid(stringValue(input.userId, "userId"), "userId"),
+    workspaceId: internalUuid(
+      stringValue(input.workspaceId, "workspaceId"),
+      "workspaceId"
+    ),
+    projectId: internalUuid(
+      stringValue(input.projectId, "projectId"),
+      "projectId"
+    ),
+    membershipId: internalUuid(
+      stringValue(input.membershipId, "membershipId"),
+      "membershipId"
+    ),
+    membershipVersion: positiveInteger(
+      input.membershipVersion,
+      "membershipVersion"
+    ),
+    eventType: enumValue(
+      input.eventType,
+      projectNotificationEventTypes,
+      "eventType"
+    ),
+    severity: enumValue(
+      input.severity,
+      notificationSeverities,
+      "severity"
+    ),
+    title: boundedText(input.title, "title", 255),
+    ...(body ? { body } : {}),
+    ...(actorId ? { actorId } : {}),
+    resource: {
+      type: resourceType,
+      id: internalUuid(
+        stringValue(resource.id, "resource.id"),
+        "resource.id"
+      )
+    },
+    deepLink,
+    dedupeKey,
+    ownJob: booleanValue(input.ownJob, "ownJob")
   };
 }
 
@@ -161,6 +254,36 @@ function stringValue(value: unknown, field: string): string {
     invalid(field, "A non-empty string is required");
   }
   return value.trim();
+}
+
+function boundedText(
+  value: unknown,
+  field: string,
+  maximum: number
+): string {
+  const text = stringValue(value, field);
+  if (
+    text.length > maximum ||
+    [...text].some((character) => {
+      const code = character.codePointAt(0)!;
+      return code < 32 && code !== 9 && code !== 10 && code !== 13;
+    })
+  ) {
+    invalid(field, `Must contain at most ${maximum} safe characters`);
+  }
+  return text;
+}
+
+function exactInputObject(
+  value: unknown,
+  fields: readonly string[]
+): Readonly<Record<string, unknown>> {
+  const input = inputObject(value);
+  const allowed = new Set(fields);
+  if (Object.keys(input).some((field) => !allowed.has(field))) {
+    invalid("$", "Unexpected field");
+  }
+  return input;
 }
 
 function booleanValue(value: unknown, field: string): boolean {

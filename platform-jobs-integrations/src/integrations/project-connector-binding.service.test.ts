@@ -35,7 +35,7 @@ const createInput: InternalCreateProjectConnectorBindingInput = {
   projectId,
   actorId,
   idempotencyKey: "binding-create-001",
-  capability: "SERP_COLLECTION",
+  capability: "SERP_RANK_TRACKING",
   enabled: true,
   route: {
     position: 0,
@@ -49,9 +49,9 @@ const createInput: InternalCreateProjectConnectorBindingInput = {
 test("returns project-scoped aggregate and fails malformed capability JSON closed", async () => {
   const credential = credentialRecord({
     capabilities: [
-      "SERP_COLLECTION",
+      "SERP_RANK_TRACKING",
       "REMOVED_CAPABILITY",
-      "SERP_COLLECTION"
+      "SERP_RANK_TRACKING"
     ]
   });
   const binding = bindingRecord(credential);
@@ -91,7 +91,7 @@ test("returns project-scoped aggregate and fails malformed capability JSON close
 
   assert.equal(result.bindings[0]?.availability, "READY");
   assert.deepEqual(result.credentialOptions[0]?.capabilities, [
-    "SERP_COLLECTION"
+    "SERP_RANK_TRACKING"
   ]);
   assert.equal(result.credentialOptionsTruncated, false);
   assert.deepEqual(
@@ -904,7 +904,7 @@ function bindingRecord(
     id: bindingId,
     workspaceId,
     projectId,
-    capability: "SERP_COLLECTION",
+    capability: "SERP_RANK_TRACKING",
     enabled: true,
     createdBy: actorId,
     updatedBy: actorId,
@@ -981,7 +981,7 @@ function credentialRecord(
   return {
     id: credentialId,
     workspaceId,
-    provider: "KEYS_SO",
+    provider: "ARSENKIN",
     label: "Primary provider account",
     mode: "BYOK_API_KEY",
     status: "ACTIVE",
@@ -993,7 +993,7 @@ function credentialRecord(
     dataKeyAuthTag: Uint8Array.from({ length: 16 }, () => 1),
     keyVersion: 1,
     displayHint: "••••test",
-    capabilities: ["SERP_COLLECTION"],
+    capabilities: ["SERP_RANK_TRACKING"],
     providerMeta: { accountIdentifierConfigured: true },
     idempotencyKey: "credential-create-001",
     requestFingerprint: Uint8Array.from({ length: 32 }, () => 1),

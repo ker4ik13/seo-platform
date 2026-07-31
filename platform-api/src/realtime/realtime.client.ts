@@ -1,6 +1,8 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type {
   ErrorCode,
+  InternalCreateProjectNotificationInput,
+  InternalCreateProjectNotificationReceipt,
   InternalRenameWebPushDeviceInput,
   InternalUpsertWebPushSubscriptionInput,
   InternalUpdateNotificationPreferencesInput,
@@ -192,6 +194,44 @@ export class RealtimeClient {
       context
     );
     return projectNotificationSubscriptionSummary(data);
+  }
+
+  public async createProjectNotification(
+    context: ProjectContext,
+    input: InternalCreateProjectNotificationInput
+  ): Promise<InternalCreateProjectNotificationReceipt> {
+    const data = await this.request(
+      "POST",
+      `/internal/v1/projects/${encodeURIComponent(input.projectId)}/notifications`,
+      context,
+      input
+    );
+    if (
+      typeof data !== "object" ||
+      data === null ||
+      Array.isArray(data)
+    ) {
+      throw invalidResponse();
+    }
+    const receipt = data as Readonly<Record<string, unknown>>;
+    if (
+      !["CREATED", "EXISTING", "SKIPPED"].includes(
+        String(receipt.outcome)
+      )
+    ) {
+      throw invalidResponse();
+    }
+    return {
+      outcome:
+        receipt.outcome as InternalCreateProjectNotificationReceipt["outcome"],
+      ...(typeof receipt.notificationId === "string"
+        ? { notificationId: receipt.notificationId }
+        : {}),
+      ...(receipt.reason === "POLICY_DISABLED" ||
+      receipt.reason === "OWN_JOB_DISABLED"
+        ? { reason: receipt.reason }
+        : {})
+    };
   }
 
   public async updateProjectNotificationSubscription(

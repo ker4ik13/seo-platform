@@ -210,6 +210,26 @@ export interface InternalFinalizeCrawlSnapshotReceipt {
   readonly issueCount: number;
 }
 
+export interface InternalDeliverCrawlNotificationInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly crawlId: string;
+  readonly status:
+    | "COMPLETED"
+    | "PARTIALLY_COMPLETED"
+    | "CANCELLED"
+    | "FAILED";
+  readonly processedUrls: number;
+  readonly issueCount: number;
+  readonly idempotencyKey: string;
+}
+
+export interface InternalDeliverCrawlNotificationReceipt {
+  readonly accepted: true;
+  readonly outcome: "CREATED" | "EXISTING" | "SKIPPED";
+}
+
 export interface ProjectCrawlIssueSummary {
   readonly id: string;
   readonly crawlId: string;

@@ -169,6 +169,34 @@ export interface NotificationResourceReference {
   readonly id: string;
 }
 
+export interface InternalCreateProjectNotificationInput {
+  readonly userId: string;
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly membershipId: string;
+  readonly membershipVersion: number;
+  readonly eventType: ProjectNotificationEventType;
+  readonly severity: NotificationSeverity;
+  readonly title: string;
+  readonly body?: string;
+  readonly actorId?: string;
+  readonly resource: NotificationResourceReference;
+  readonly deepLink: string;
+  readonly dedupeKey: string;
+  readonly ownJob: boolean;
+}
+
+export type ProjectNotificationCreationOutcome =
+  | "CREATED"
+  | "EXISTING"
+  | "SKIPPED";
+
+export interface InternalCreateProjectNotificationReceipt {
+  readonly outcome: ProjectNotificationCreationOutcome;
+  readonly notificationId?: string;
+  readonly reason?: "POLICY_DISABLED" | "OWN_JOB_DISABLED";
+}
+
 export interface NotificationListItem {
   readonly id: string;
   readonly workspaceId: string;

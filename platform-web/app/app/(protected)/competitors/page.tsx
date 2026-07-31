@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { AppShell } from "../../../../components/app-shell";
+import { KeywordResearchConnectorSetup } from "../../../../components/keyword-research-connector-setup";
 import { KeywordResearchWorkspace } from "../../../../components/keyword-research-workspace";
 import { ProjectOnboarding } from "../../../../components/tenant-onboarding";
 import { requireProtectedAppContext } from "../../../../lib/protected-app";
@@ -36,6 +37,7 @@ export default async function CompetitorsPage() {
               </p>
             </div>
           </section>
+          <KeywordResearchConnectorSetup projectId={context.project.id} />
           <KeywordResearchWorkspace
             projectDomain={context.project.domain}
             projectId={context.project.id}

@@ -222,20 +222,30 @@ export function ProjectCrawlAudit({
     <section className="panel crawl-audit">
       <header className="crawl-audit-header">
         <div>
-          <p className="eyebrow">Технический crawl</p>
-          <h2>Аудит сайта</h2>
-          <p>
-            Обход соблюдает robots.txt, ограничивает скорость и сохраняет
-            только нормализованные SEO-сигналы и найденные проблемы.
-          </p>
+          <p className="eyebrow">Контроль качества</p>
+          <h2>Технический аудит</h2>
+          <p>Проверки, изменения страниц и автоматический Radar.</p>
         </div>
-        {hasActive && <span className="status-badge">Выполняется</span>}
+        <div className="crawl-audit-summary" aria-label="Сводка аудита">
+          <span><strong>{crawls?.crawls[0]?.processedUrls ?? 0}</strong> проверено</span>
+          <span><strong>{issues?.issues.length ?? 0}</strong> проблем</span>
+          <span><strong>{changes?.changes.length ?? 0}</strong> изменений</span>
+          {hasActive && <span className="status-badge">Выполняется</span>}
+        </div>
       </header>
 
       {error && <div className="inline-error" role="alert">{error}</div>}
       {notice && <div className="inline-success" role="status">{notice}</div>}
 
-      <form className="crawl-audit-form" onSubmit={start}>
+      <details className="crawl-disclosure" open={!crawls?.crawls.length}>
+        <summary>
+          <span>
+            <strong>Запустить аудит</strong>
+            <small>Scope, sitemap и лимиты обхода</small>
+          </span>
+          <span aria-hidden="true">Настроить</span>
+        </summary>
+        <form className="crawl-audit-form" onSubmit={start}>
         <label className="form-field crawl-audit-url">
           <span>Стартовый URL</span>
           <input
@@ -308,7 +318,8 @@ export function ProjectCrawlAudit({
         >
           {busy ? "Подождите…" : hasActive ? "Аудит уже идёт" : "Запустить аудит"}
         </button>
-      </form>
+        </form>
+      </details>
 
       {crawls && crawls.access.mutationRestriction !== "NONE" && (
         <p className="inline-note">
@@ -382,7 +393,11 @@ export function ProjectCrawlAudit({
         </div>
       </div>
 
-      <div className="crawl-duplicate-history">
+      <details className="crawl-duplicate-history crawl-stack-section">
+        <summary className="crawl-stack-summary">
+          <span>Дубли страниц</span>
+          <strong>{duplicates.groups.length}</strong>
+        </summary>
         <div className="crawl-duplicate-heading">
           <div>
             <p className="eyebrow">Duplicate groups</p>
@@ -471,9 +486,13 @@ export function ProjectCrawlAudit({
               : "В последнем завершённом обходе группы дублей не найдены."}
           </p>
         )}
-      </div>
+      </details>
 
-      <div className="crawl-absence-history">
+      <details className="crawl-absence-history crawl-stack-section">
+        <summary className="crawl-stack-summary">
+          <span>Исчезнувшие страницы</span>
+          <strong>{absences?.pages.length ?? 0}</strong>
+        </summary>
         <div>
           <p className="eyebrow">Crawl membership</p>
           <h3>Исчезнувшие страницы</h3>
@@ -501,9 +520,13 @@ export function ProjectCrawlAudit({
             В последнем сопоставимом полном обходе исчезнувших URL нет.
           </p>
         )}
-      </div>
+      </details>
 
-      <div className="crawl-change-history">
+      <details className="crawl-change-history crawl-stack-section">
+        <summary className="crawl-stack-summary">
+          <span>Изменения Radar</span>
+          <strong>{changes?.changes.length ?? 0}</strong>
+        </summary>
         <div>
           <p className="eyebrow">Radar</p>
           <h3>Изменения между обходами</h3>
@@ -544,7 +567,7 @@ export function ProjectCrawlAudit({
             действительно изменилась.
           </p>
         )}
-      </div>
+      </details>
       <CrawlAutomationPanel
         defaultStartUrl={startUrl}
         projectId={projectId}

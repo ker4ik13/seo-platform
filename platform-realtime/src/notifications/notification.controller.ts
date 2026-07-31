@@ -13,6 +13,7 @@ import {
 } from "@nestjs/common";
 import type {
   ApiResponse,
+  InternalCreateProjectNotificationReceipt,
   NotificationCollectionResponse,
   NotificationListItem,
   NotificationPreferencesSummary,
@@ -27,6 +28,7 @@ import {
 } from "../internal/internal-context.js";
 import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import {
+  createProjectNotificationInput,
   notificationPreferencesInput,
   projectNotificationSubscriptionInput
 } from "./notification-input.js";
@@ -141,6 +143,35 @@ export class NotificationController {
     return response(
       request,
       await this.notifications.getProjectSubscription(context)
+    );
+  }
+
+  @Post("projects/:projectId/notifications")
+  public async createProjectNotification(
+    @Param("projectId") projectId: string,
+    @Headers() headers: InternalHeaders,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<InternalCreateProjectNotificationReceipt>> {
+    const context = internalProjectContext(headers);
+    const input = createProjectNotificationInput(body);
+    assertSame(
+      internalUuid(projectId, "projectId"),
+      context.projectId,
+      "project"
+    );
+    assertSame(input.userId, context.actorId, "actor");
+    assertSame(input.workspaceId, context.workspaceId, "workspace");
+    assertSame(input.projectId, context.projectId, "project");
+    assertSame(input.membershipId, context.membershipId, "membership");
+    if (input.membershipVersion !== context.membershipVersion) {
+      throw new BadRequestException(
+        "Trusted membership version does not match the command"
+      );
+    }
+    return response(
+      request,
+      await this.notifications.createProjectNotification(context, input)
     );
   }
 

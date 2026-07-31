@@ -7,6 +7,8 @@ import {
   notificationEventTypes,
   projectNotificationEventTypes,
   type EffectiveProjectNotificationRule,
+  type InternalCreateProjectNotificationInput,
+  type InternalCreateProjectNotificationReceipt,
   type InternalUpdateNotificationPreferencesInput,
   type InternalUpdateProjectNotificationSubscriptionInput,
   type NotificationChannel,
@@ -18,6 +20,7 @@ import {
   type ProjectNotificationSubscriptionSummary
 } from "@seo-platform/contracts";
 import type { InternalProjectContext } from "../internal/internal-context.js";
+import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 
 interface StoredRule {
@@ -68,6 +71,84 @@ export class NotificationService {
     const preference = await this.ensurePreference(userId);
     const rules = await this.profileRules(preference.id);
     return preferenceSummary(preference, rules);
+  }
+
+  public async createProjectNotification(
+    context: InternalProjectContext,
+    input: InternalCreateProjectNotificationInput
+  ): Promise<InternalCreateProjectNotificationReceipt> {
+    const preference = await this.ensurePreference(input.userId);
+    const subscription = await this.ensureProjectSubscription(
+      preference.id,
+      context
+    );
+    const existing = await this.prisma.notification.findUnique({
+      where: {
+        userId_dedupeKey: {
+          userId: input.userId,
+          dedupeKey: input.dedupeKey
+        }
+      },
+      select: { id: true }
+    });
+    if (existing) {
+      return { outcome: "EXISTING", notificationId: existing.id };
+    }
+    if (input.ownJob && !subscription.notifyOwnJobs) {
+      return { outcome: "SKIPPED", reason: "OWN_JOB_DISABLED" };
+    }
+    const [profileRules, projectRules] = await Promise.all([
+      this.profileRules(preference.id),
+      this.projectRules(subscription.id)
+    ]);
+    const effective = resolveEffectiveProjectRules(
+      preferenceSummary(preference, profileRules),
+      subscription,
+      projectRules
+    ).find(
+      (rule) =>
+        rule.eventType === input.eventType &&
+        rule.channel === "IN_APP"
+    );
+    if (
+      !effective?.enabled ||
+      severityRank(input.severity) <
+        severityRank(effective.minimumSeverity)
+    ) {
+      return { outcome: "SKIPPED", reason: "POLICY_DISABLED" };
+    }
+    try {
+      const notification = await this.prisma.notification.create({
+        data: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          userId: input.userId,
+          eventType: input.eventType,
+          severity: input.severity,
+          title: input.title,
+          ...(input.body ? { body: input.body } : {}),
+          ...(input.actorId ? { actorId: input.actorId } : {}),
+          resourceType: input.resource.type,
+          resourceId: input.resource.id,
+          deepLink: input.deepLink,
+          dedupeKey: input.dedupeKey
+        },
+        select: { id: true }
+      });
+      return { outcome: "CREATED", notificationId: notification.id };
+    } catch (error) {
+      if (!isUniqueConstraint(error)) throw error;
+      const replay = await this.prisma.notification.findUniqueOrThrow({
+        where: {
+          userId_dedupeKey: {
+            userId: input.userId,
+            dedupeKey: input.dedupeKey
+          }
+        },
+        select: { id: true }
+      });
+      return { outcome: "EXISTING", notificationId: replay.id };
+    }
   }
 
   public async updatePreferences(
@@ -458,4 +539,15 @@ function versionConflict(): ConflictException {
   return new ConflictException(
     "Notification settings were changed in another session"
   );
+}
+
+function severityRank(severity: NotificationSeverity): number {
+  if (severity === "CRITICAL") return 3;
+  if (severity === "WARNING") return 2;
+  return 1;
+}
+
+function isUniqueConstraint(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError &&
+    error.code === "P2002";
 }

@@ -54,6 +54,10 @@ automation claims фиксируют `createdAt` тем же database clock, ч�
 В живой БД оба complete run сохранили разные scope fingerprints и ноль
 ложных absences; same-scope disappearance/reappearance отдельно проверены на
 чистой PostgreSQL 18.
+После добавления terminal crawl notifications полный public smoke
+`019fb80c-5da3-7618-99e3-dfc6578e4c13` подтвердил durable
+`outbox_events → Jobs dispatcher → fresh Platform authorization → Realtime`
+доставку персонального `CRAWL_RADAR` уведомления без дублирования.
 
 Production technical crawl и audit issues работают поверх Page Map, реального
 съёма позиций и тарифных capacity boundaries.
@@ -73,6 +77,10 @@ filters и пять стабильных keyset sorts; cursor криптогра
 фильтрами и сортировкой через SHA-256 fingerprint. Private и project-shared saved views сохраняют
 строго валидируемый versioned DSL (фильтры, сортировка, видимость/порядок
 колонок и плотность), имеют owner boundary, CAS, soft delete и browser UI.
+Web workspace семантики следует проверенным паттернам Key Collector:
+постоянное дерево групп, плотная таблица, быстрый поиск/фильтры и массовые
+операции находятся на основном экране; импорт, управление группами/колонками
+и история открываются как отдельные компактные инструменты и не вытесняют ядро.
 Custom columns базовых типов реализованы отдельными tenant-scoped definitions
 и typed EAV values: text/long text/integer/decimal/boolean/date/datetime/
 select/multi-select/URL/user/status. Каждая ячейка имеет CAS; PostgreSQL
@@ -225,6 +233,10 @@ BullMQ-постановку; идемпотентный SEO Data receipt не з
 issue projection. Page Map обновляется из `CRAWL` provenance. Web позволяет
 запустить/остановить обход, показывает polling progress, историю и открытые
 проблемы с loading/empty/error/read-only states.
+В Web сама Page Map показана первой: история запусков и проблем ограничена
+по высоте, duplicate/absence/change evidence складывается в раскрывающиеся
+секции, конфигурация ручного обхода и автоматический Radar доступны по
+запросу и не занимают основной рабочий экран.
 
 Radar теперь автоматически сравнивает повторный crawl одной Page: к каждому
 значимому отличию создаётся отдельный immutable `crawl_page_changes` с
@@ -902,6 +914,9 @@ Backend convention:
   boundary и private UI `сбор → preview → выбор → импорт` со всеми
   документированными Keys.so base codes, polling/error/empty/read-only
   states и ссылкой на настройку BYOK;
+  `keyword-research-connector-setup.tsx` создаёт/изменяет capability binding
+  `COMPETITOR_RESEARCH` прямо в рабочем сценарии и разрешает только
+  проверенный active Keys.so BYOK credential;
 - `platform-jobs-integrations/src/integrations` — allowlisted provider catalog,
   workspace-scoped envelope vault с per-record DEK, AES-256-GCM и versioned
   KEK, отдельный versioned HMAC fingerprint keyring, dedicated caller guard,
@@ -932,6 +947,9 @@ Backend convention:
   `src/queue/crawl-automation.queue.ts` — versioned Radar schedule CRUD,
   quiet-window/host/no-overlap admission, dedicated fresh authorization
   dispatch, BullMQ reconciliation, terminal settlement и auto-pause;
+- `platform-jobs-integrations/src/crawl-notifications` — dispatcher terminal
+  `technical-crawl.notification.requested.v1` из существующего outbox с
+  bounded lease/retry и idempotent Platform delivery;
 - `platform-jobs-integrations/prisma/migrations/20260731233000_crawl_automations`
   — tenant-safe definitions/runs, immutable schedule provenance, lifecycle,
   trigger/idempotency/chronology constraints и crawl/Job FKs;
@@ -959,6 +977,9 @@ Backend convention:
   `crawl-automation-panel.tsx` — public RBAC/CSRF/audit boundary, dedicated
   Jobs→Platform fresh-execution authorization и private browser
   progress/issues/Radar history/schedule UI;
+  UI держит Page Map основным экраном, складывает evidence/настройки в
+  компактные disclosure-секции; internal terminal notification controller
+  заново проверяет `page.view` и создаёт policy-aware idempotent запись в Realtime;
 - `platform-jobs-integrations/src/platform-api` — bounded/no-redirect client
   issuer-а с dedicated token, exact envelope/request/scope hash validation,
   no-store check, response size и timeout limits;
@@ -1251,12 +1272,12 @@ Entrypoints:
 | Admin operations | vertical slice: MFA + persisted roles + NPD operations |
 | Auth core | vertical slice: identity lifecycle + transactional verification/reset email transport |
 | Workspaces/projects/team access | vertical slice: включая transactional invite email/fragment acceptance |
-| Semantics/import | vertical slice: CSV/TSV → mapping → validation → quota reservation → publish/abort → query |
-| Notifications | vertical slice: preferences → effective policy → read center → encrypted browser device lifecycle |
-| Integrations | vertical slice: catalog + encrypted BYOK vault + validation + project binding |
+| Semantics/import | vertical slice: Key Collector-style groups/table/tools + CSV/TSV → mapping → validation → quota reservation → publish/abort → query |
+| Notifications | vertical slice: preferences → effective policy → read center → encrypted browser device lifecycle + durable terminal crawl in-app notifications |
+| Integrations | vertical slice: operational catalog + encrypted BYOK vault + validation + SERP/competitor project bindings |
 | Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |
 | Automations | vertical slice: rank schedule CRUD + тарифный capacity + BullMQ scheduler + manual/scheduled execution + no-overlap/recovery/history/auto-pause + Web |
-| Pages/technical audit | vertical slice: Page Map CRUD/assignment + SSRF-safe async crawl + sitemap/include/exclude/query scope + conditional 304 reuse/global host backoff/24h site auto-pause + immutable snapshots/current issues/page-change/duplicate/exact-scope disappearance history + lease/checkpoint recovery + Web |
+| Pages/technical audit | vertical slice: compact Page Map + CRUD/assignment + SSRF-safe async crawl + sitemap/include/exclude/query scope + conditional 304 reuse/global host backoff/24h site auto-pause + immutable snapshots/current issues/page-change/duplicate/exact-scope disappearance history + lease/checkpoint recovery + Radar Web/in-app notification |
 | Billing/YooKassa | vertical slice: catalog + hosted/recurring payment + webhook/reconciliation + ledger/refund/NPD obligation + Web UI + protected manual receipt operations + durable receipt email delivery; live provider/SMTP canary остаётся gate |
 | Directus content | planned |
 
@@ -1434,6 +1455,11 @@ user-scoped unread count, а список использует keyset cursor
 project/resource references и только локальный `/app` deep link; произвольный
 JSON наружу не возвращается. Mark-read команды идемпотентны и ограничены
 текущим пользователем.
+Terminal complete/partial/failed crawl атомарно пишет redacted outbox intent.
+Jobs dispatcher повторяет доставку, Platform API заново проверяет membership,
+проект и `page.view` инициатора, а Realtime применяет effective
+profile/project policy, `notifyOwnJobs` и unique `userId + dedupeKey`.
+Результат виден в центре уведомлений как локальный переход к Page Map.
 
 Workspace API-ключи управляются через `/app/settings/integrations`. Platform
 API проверяет workspace permission и передаёт trusted actor/workspace context
@@ -1474,14 +1500,17 @@ JSON для `2xx`, body limit 1 MiB и нормализацией ошибок.
 Terminal update атомарно сверяет workspace и `material_version`: замена или
 revoke credential делает старую проверку `STALE`, не перезаписывая новый
 материал. Retry учитывает ограниченный `Retry-After`. XMLStock остаётся
-`PROVIDER_DOCUMENTATION_REQUIRED`, поэтому его проверка честно недоступна.
+`PROVIDER_DOCUMENTATION_REQUIRED`, поэтому его проверка честно недоступна и
+провайдер исключён из публичного operational catalog. Arsenkin рекламирует
+только рабочий съём позиций, Keys.so — keyword/competitor research.
 Partial unique active dedup key ограничивает один validation на пару
 credential/material даже при разных `Idempotency-Key`.
 
 Проектные источники настраиваются через
-`/app/projects/:projectId/settings/integrations`. Первый честный UI-срез
-показывает только `SERP_RANK_TRACKING`; общий contract остаётся
-capability-based. На пару `workspace + project + capability` существует одна
+`/app/projects/:projectId/settings/integrations` для `SERP_RANK_TRACKING`,
+а `COMPETITOR_RESEARCH` назначается прямо в рабочем экране конкурентов.
+Оба сценария используют общий capability-based contract. На пару
+`workspace + project + capability` существует одна
 привязка и один нормализованный route `WORKSPACE_CREDENTIAL` с `position=0`.
 Создание разрешает только non-deleted `ACTIVE BYOK_API_KEY`, принадлежащий
 workspace и поддерживающий capability одновременно в сохранённом credential и
@@ -2001,9 +2030,10 @@ BYOK credential, операционные alert/circuit-breaker evidence и sche
 Неоднозначность manifest preparation уже fail-closed переходит в
 `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN` без бесконечного auto-retry.
 
-Параллельный обязательный следующий срез уведомлений:
-`остальные redacted domain events → effective profile/project policy →
-idempotent email + Web Push delivery`. Browser device/VAPID public-key
+In-app terminal crawl notifications уже проходят effective
+profile/project policy и durable idempotent delivery. Следующий срез:
+`остальные redacted domain events → idempotent email + Web Push delivery`.
+Browser device/VAPID public-key
 lifecycle реализован по ADR-2026-035, а terminal session-family producer,
 durable JetStream publisher/consumer, retry/DLQ и global session-expiry
 sweeper — по ADR-2026-036. Следующему срезу остаются VAPID private-key sender,
@@ -2226,8 +2256,8 @@ OAuth/OIDC выполняется после подтверждения зави
   authorization. Duplicate и membership analysis выполняются идемпотентно
   под project lock, учитываются в общем issue count и доступны через
   tenant-protected API/UI с immutable evidence.
-  Полный Radar из раздела 10 ТЗ ещё требует notifications и отдельный
-  browser-rendering pool. Cookies/custom headers намеренно не принимаются до
+  Для полного Radar из раздела 10 ТЗ остаются внешние email/Web Push
+  transports и отдельный browser-rendering pool. Cookies/custom headers не принимаются до
   отдельной secret-safe policy.
 - `platform-app` сохранён как legacy Git-источник до проверки переноса; новая
   функциональность добавляется только в `platform-web`.

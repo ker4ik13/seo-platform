@@ -33,7 +33,7 @@ import {
 } from "./integration-credential-input.js";
 import { IntegrationCredentialService } from "./integration-credential.service.js";
 import { IntegrationCredentialValidationService } from "./integration-credential-validation.service.js";
-import { integrationProviderCatalog } from "./integration-provider-catalog.js";
+import { operationalIntegrationProviderCatalog } from "./integration-provider-catalog.js";
 
 @Controller("internal/v1/workspaces/:workspaceId/integrations")
 @UseGuards(IntegrationCredentialApiGuard)
@@ -50,7 +50,7 @@ export class IntegrationCredentialController {
     @Req() request: FastifyRequest
   ): ApiResponse<readonly IntegrationProviderCatalogItem[]> {
     workspaceContext(workspaceId, headers);
-    return response(request, integrationProviderCatalog);
+    return response(request, operationalIntegrationProviderCatalog);
   }
 
   @Get("credentials")

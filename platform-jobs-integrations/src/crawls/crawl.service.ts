@@ -490,6 +490,7 @@ export class CrawlService {
           version: { increment: 1 }
         }
       });
+      await crawlNotificationEvent(transaction, crawl);
       return crawl;
     });
   }
@@ -611,7 +612,7 @@ export class CrawlService {
         select: { id: true }
       });
       if (!job) return;
-      await transaction.technicalCrawl.update({
+      const failed = await transaction.technicalCrawl.update({
         where: { id: crawl.id },
         data: {
           status: "FAILED",
@@ -636,6 +637,7 @@ export class CrawlService {
           version: { increment: 1 }
         }
       });
+      await crawlNotificationEvent(transaction, failed);
     });
   }
 
@@ -716,6 +718,38 @@ function replay(
 function isUniqueConstraint(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError &&
     error.code === "P2002";
+}
+
+async function crawlNotificationEvent(
+  transaction: Prisma.TransactionClient,
+  crawl: TechnicalCrawl
+): Promise<void> {
+  if (
+    !["COMPLETED", "PARTIALLY_COMPLETED", "CANCELLED", "FAILED"].includes(
+      crawl.status
+    )
+  ) {
+    throw new Error("Crawl notification requires a terminal crawl");
+  }
+  await transaction.outboxEvent.create({
+    data: {
+      eventType: "technical-crawl.notification.requested.v1",
+      aggregateId: crawl.id,
+      workspaceId: crawl.workspaceId,
+      projectId: crawl.projectId,
+      payload: {
+        workspaceId: crawl.workspaceId,
+        projectId: crawl.projectId,
+        actorId: crawl.actorId,
+        crawlId: crawl.id,
+        status: crawl.status,
+        processedUrls: crawl.processedUrls,
+        issueCount: crawl.issueCount,
+        idempotencyKey: `crawl-notification:${crawl.id}`
+      },
+      metadata: { schemaVersion: 1 }
+    }
+  });
 }
 
 function assertLease(leaseOwner: string, leaseSeconds: number): void {

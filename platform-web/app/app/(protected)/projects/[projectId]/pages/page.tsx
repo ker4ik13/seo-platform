@@ -49,11 +49,11 @@ export default async function ProjectPagesPage({
           </p>
         </div>
       </section>
+      <ProjectPageMap key={project.id} projectId={project.id} />
       <ProjectCrawlAudit
         projectDomain={project.domain}
         projectId={project.id}
       />
-      <ProjectPageMap key={project.id} projectId={project.id} />
     </AppShell>
   );
 }
