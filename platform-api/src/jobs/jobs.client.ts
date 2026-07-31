@@ -1028,6 +1028,8 @@ function technicalCrawlResponse(
     "issueCount", "version", "createdAt"
   ], [
     "failureCode",
+    "backoffCode",
+    "backoffUntil",
     "startedAt",
     "finishedAt",
     "cancelRequestedAt"
@@ -1079,6 +1081,16 @@ function technicalCrawlResponse(
       input.failureCode
     )
       ? input.failureCode
+      : undefined;
+  const backoffCode =
+    typeof input.backoffCode === "string" &&
+    [
+      "HOST_RATE_LIMIT",
+      "HOST_UNAVAILABLE",
+      "HOST_NETWORK_ERROR",
+      "LATENCY_SPIKE"
+    ].includes(input.backoffCode)
+      ? input.backoffCode
       : undefined;
   if (
     responseWorkspaceId !== workspaceId ||
@@ -1132,6 +1144,16 @@ function technicalCrawlResponse(
     version: positiveInteger(input.version),
     createdAt: isoDateValue(input.createdAt),
     ...(failureCode ? { failureCode } : {}),
+    ...(backoffCode
+      ? {
+          backoffCode:
+            backoffCode as Exclude<
+              TechnicalCrawlSummary["backoffCode"],
+              undefined
+            >,
+          backoffUntil: isoDateValue(input.backoffUntil)
+        }
+      : {}),
     ...(input.startedAt !== undefined
       ? { startedAt: isoDateValue(input.startedAt) }
       : {}),
@@ -1146,7 +1168,12 @@ function technicalCrawlResponse(
     summary.processedUrls !==
       summary.successfulUrls + summary.failedUrls ||
     summary.processedUrls > summary.discoveredUrls ||
-    !validCrawlLifecycle(summary, input.failureCode)
+    !validCrawlLifecycle(
+      summary,
+      input.failureCode,
+      input.backoffCode,
+      input.backoffUntil
+    )
   ) {
     throw invalidJobsResponse();
   }
@@ -1176,7 +1203,9 @@ function crawlResponsePatterns(value: unknown): readonly string[] {
 
 function validCrawlLifecycle(
   crawl: TechnicalCrawlSummary,
-  rawFailureCode: unknown
+  rawFailureCode: unknown,
+  rawBackoffCode: unknown,
+  rawBackoffUntil: unknown
 ): boolean {
   const created = Date.parse(crawl.createdAt);
   const started = crawl.startedAt ? Date.parse(crawl.startedAt) : undefined;
@@ -1189,10 +1218,26 @@ function validCrawlLifecycle(
     (finished !== undefined && finished < (started ?? created)) ||
     (cancelled !== undefined && cancelled < created)
   ) return false;
+  const hasBackoff =
+    crawl.backoffCode !== undefined &&
+    crawl.backoffUntil !== undefined &&
+    rawBackoffCode === crawl.backoffCode &&
+    rawBackoffUntil === crawl.backoffUntil;
+  if (
+    (rawBackoffCode === undefined) !==
+      (rawBackoffUntil === undefined) ||
+    (
+      rawBackoffCode !== undefined &&
+      !hasBackoff
+    )
+  ) {
+    return false;
+  }
   if (crawl.status === "QUEUED") {
     return finished === undefined && cancelled === undefined &&
       rawFailureCode === undefined;
   }
+  if (hasBackoff) return false;
   if (crawl.status === "RUNNING") {
     return started !== undefined && finished === undefined &&
       cancelled === undefined && rawFailureCode === undefined;

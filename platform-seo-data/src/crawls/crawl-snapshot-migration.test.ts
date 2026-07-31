@@ -14,6 +14,10 @@ const sitemapMigrationUrl = new URL(
   "../../prisma/migrations/20260731213000_crawl_sitemap_scope/migration.sql",
   import.meta.url
 );
+const conditionalMigrationUrl = new URL(
+  "../../prisma/migrations/20260731230000_crawl_conditional_requests/migration.sql",
+  import.meta.url
+);
 
 test("crawl evidence is tenant-bound, bounded and immutable", async () => {
   const sql = await readFile(migrationUrl, "utf8");
@@ -50,5 +54,18 @@ test("sitemap presence is immutable evidence and a Radar change field", async ()
   assert.match(sql, /ADD COLUMN "in_sitemap" BOOLEAN NOT NULL/u);
   assert.match(sql, /DROP CONSTRAINT "crawl_page_changes_diff_check"/u);
   assert.match(sql, /'inSitemap'/u);
+  assert.doesNotMatch(sql, /raw_html/iu);
+});
+
+test("conditional snapshot reuse is tenant-bound and validator-safe", async () => {
+  const sql = await readFile(conditionalMigrationUrl, "utf8");
+  assert.match(sql, /ADD COLUMN "etag" VARCHAR\(1000\)/u);
+  assert.match(sql, /ADD COLUMN "last_modified" VARCHAR\(128\)/u);
+  assert.match(sql, /crawl_page_snapshots_http_validator_check/u);
+  assert.match(sql, /crawl_page_snapshots_reuse_check/u);
+  assert.match(
+    sql,
+    /crawl_page_snapshots_reused_from_tenant_fkey[\s\S]*FOREIGN KEY \("workspace_id", "project_id", "reused_from_snapshot_id"\)/u
+  );
   assert.doesNotMatch(sql, /raw_html/iu);
 });

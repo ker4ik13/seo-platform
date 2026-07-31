@@ -161,6 +161,28 @@ test("upgrades a rolling legacy crawl response with safe scope defaults", async 
   }
 });
 
+test("accepts only a bounded queued host backoff projection", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (): Promise<Response> =>
+    dataResponse(crawlResponseData({
+      backoffCode: "HOST_RATE_LIMIT",
+      backoffUntil: "2026-07-31T05:05:00.000Z"
+    }))) as typeof fetch;
+  try {
+    const crawl = await client().getTechnicalCrawl(
+      projectContext("request-crawl-backoff-001"),
+      crawlId
+    );
+    assert.equal(crawl.backoffCode, "HOST_RATE_LIMIT");
+    assert.equal(
+      crawl.backoffUntil,
+      "2026-07-31T05:05:00.000Z"
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("rejects secret-bearing or contradictory technical crawl responses", async () => {
   const originalFetch = globalThis.fetch;
   try {
@@ -179,6 +201,14 @@ test("rejects secret-bearing or contradictory technical crawl responses", async 
         status: "FAILED",
         finishedAt: "2026-07-31T06:00:00.000Z",
         failureCode: "SECRET_PROVIDER_ERROR"
+      }),
+      crawlResponseData({
+        backoffCode: "HOST_RATE_LIMIT"
+      }),
+      crawlResponseData({
+        status: "RUNNING",
+        backoffCode: "HOST_UNAVAILABLE",
+        backoffUntil: "2026-07-31T05:05:00.000Z"
       })
     ]) {
       globalThis.fetch = (async (): Promise<Response> =>

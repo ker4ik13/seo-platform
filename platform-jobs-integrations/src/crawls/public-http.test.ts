@@ -4,8 +4,10 @@ import test from "node:test";
 import {
   PublicFetchError,
   assertSafeCrawlUrl,
+  conditionalRequestHeaders,
   fetchPublicResource,
-  isPublicAddress
+  isPublicAddress,
+  retryAfterDelay
 } from "./public-http.js";
 
 test("sends the guarded request through the already validated address", async () => {
@@ -18,6 +20,46 @@ test("sends the guarded request through the already validated address", async ()
   assert.match(source, /Host: url\.host/u);
   assert.match(source, /await options\.beforeRequest\?\.\(\)/u);
   assert.match(source, /request\.end\(\);/u);
+});
+
+test("builds only bounded conditional request headers", () => {
+  assert.deepEqual(
+    conditionalRequestHeaders({
+      etag: 'W/"content-v2"',
+      lastModified: "Fri, 31 Jul 2026 08:00:00 GMT"
+    }),
+    {
+      "If-None-Match": 'W/"content-v2"',
+      "If-Modified-Since": "Fri, 31 Jul 2026 08:00:00 GMT"
+    }
+  );
+  assert.deepEqual(conditionalRequestHeaders(undefined), {});
+  for (const conditional of [
+    { etag: "bad\r\nX-Injected: yes" },
+    { lastModified: "x".repeat(129) }
+  ]) {
+    assert.throws(
+      () => conditionalRequestHeaders(conditional),
+      (error: unknown) =>
+        error instanceof PublicFetchError &&
+        error.code === "INVALID_REQUEST_HEADER"
+    );
+  }
+});
+
+test("parses bounded Retry-After seconds and HTTP dates", () => {
+  const now = Date.parse("2026-07-31T08:00:00.000Z");
+  assert.equal(retryAfterDelay("120", now), 120_000);
+  assert.equal(
+    retryAfterDelay("Fri, 31 Jul 2026 08:02:00 GMT", now),
+    120_000
+  );
+  assert.equal(retryAfterDelay("-1", now), undefined);
+  assert.equal(retryAfterDelay(["1", "2"], now), undefined);
+  assert.equal(
+    retryAfterDelay("bad\r\nX-Injected: yes", now),
+    undefined
+  );
 });
 
 test("allows public IPv4 and IPv6 while denying every internal family", () => {

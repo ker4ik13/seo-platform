@@ -49,6 +49,50 @@ test(
         }),
         /immutable/u
       );
+
+      const validator = await service.validator({
+        workspaceId: WORKSPACE_ID,
+        projectId: PROJECT_ID,
+        url: "https://radar.example.com/"
+      });
+      assert.ok(validator);
+      assert.equal(validator.etag, '"radar-v2"');
+      assert.deepEqual(validator.internalLinks, []);
+
+      const reuse = await service.reusePage({
+        workspaceId: WORKSPACE_ID,
+        projectId: PROJECT_ID,
+        crawlId: "01900000-0000-7000-8000-000000000113",
+        sequence: 1,
+        sourceSnapshotId: validator.sourceSnapshotId,
+        requestedUrl: "https://radar.example.com/",
+        finalUrl: "https://radar.example.com/",
+        redirectChain: [],
+        inSitemap: true,
+        depth: 0,
+        crawledAt: "2026-08-01T10:00:00.000Z"
+      });
+      assert.deepEqual(reuse, {
+        accepted: true,
+        issueCount: 0,
+        success: true
+      });
+      const reused =
+        await prisma.crawlPageSnapshot.findFirstOrThrow({
+          where: {
+            crawlId: "01900000-0000-7000-8000-000000000113"
+          }
+        });
+      assert.equal(reused.notModified, true);
+      assert.equal(reused.reusedFromSnapshotId, validator.sourceSnapshotId);
+      assert.equal(reused.contentHash, "b".repeat(64));
+      const afterReuse = await service.listChanges(
+        WORKSPACE_ID,
+        PROJECT_ID
+      );
+      assert.deepEqual(afterReuse.changes[0]?.changedFields, [
+        "inSitemap"
+      ]);
     } finally {
       await prisma.$disconnect();
     }
@@ -93,6 +137,8 @@ function pageInput(
     structuredDataTypes: [],
     wordCount: 100,
     contentHash,
+    etag: `"radar-v${run}"`,
+    lastModified: `Fri, ${29 + run} Jul 2026 10:00:00 GMT`,
     indexability: "INDEXABLE",
     issues: [],
     crawledAt: `2026-07-${29 + run}T10:00:00.000Z`

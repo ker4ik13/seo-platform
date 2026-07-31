@@ -266,6 +266,12 @@ export function ProjectCrawlAudit({
                     {crawl.successfulUrls} успешно · {crawl.failedUrls} ошибок ·{" "}
                     {crawl.issueCount} проблем
                   </p>
+                  {crawl.backoffCode && crawl.backoffUntil && (
+                    <p className="inline-note" role="status">
+                      {backoffLabel(crawl.backoffCode)} Повтор после{" "}
+                      {new Date(crawl.backoffUntil).toLocaleString("ru-RU")}.
+                    </p>
+                  )}
                   {ACTIVE.has(crawl.status) && crawls.access.canRun && (
                     <button
                       className="text-button"
@@ -415,6 +421,17 @@ function severityLabel(severity: string): string {
     ERROR: "Ошибка",
     CRITICAL: "Критично"
   }[severity] ?? severity;
+}
+
+function backoffLabel(
+  code: NonNullable<TechnicalCrawlSummary["backoffCode"]>
+): string {
+  return {
+    HOST_RATE_LIMIT: "Сайт ограничил частоту запросов.",
+    HOST_UNAVAILABLE: "Сайт временно недоступен.",
+    HOST_NETWORK_ERROR: "Сеть или DNS сайта временно недоступны.",
+    LATENCY_SPIKE: "Сайт стал отвечать значительно медленнее."
+  }[code];
 }
 
 function changeFieldLabel(field: CrawlPageChangeField): string {

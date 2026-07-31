@@ -90,6 +90,20 @@ export function storedCrawlConfig(value: Prisma.JsonValue): TechnicalCrawlConfig
 export function technicalCrawlSummary(
   crawl: TechnicalCrawl
 ): TechnicalCrawlSummary {
+  if (
+    (
+      crawl.backoffCode !== null &&
+      ![
+        "HOST_RATE_LIMIT",
+        "HOST_UNAVAILABLE",
+        "HOST_NETWORK_ERROR",
+        "LATENCY_SPIKE"
+      ].includes(crawl.backoffCode)
+    ) ||
+    (crawl.backoffCode === null) !== (crawl.backoffUntil === null)
+  ) {
+    throw new TypeError("Stored crawl backoff state is invalid");
+  }
   return {
     id: crawl.id,
     jobId: crawl.jobId,
@@ -103,6 +117,18 @@ export function technicalCrawlSummary(
     failedUrls: crawl.failedUrls,
     issueCount: crawl.issueCount,
     ...(crawl.failureCode ? { failureCode: crawl.failureCode } : {}),
+    ...(crawl.backoffCode
+      ? {
+          backoffCode:
+            crawl.backoffCode as Exclude<
+              TechnicalCrawlSummary["backoffCode"],
+              undefined
+            >
+        }
+      : {}),
+    ...(crawl.backoffUntil
+      ? { backoffUntil: crawl.backoffUntil.toISOString() }
+      : {}),
     version: crawl.version,
     createdAt: crawl.createdAt.toISOString(),
     ...(crawl.startedAt ? { startedAt: crawl.startedAt.toISOString() } : {}),

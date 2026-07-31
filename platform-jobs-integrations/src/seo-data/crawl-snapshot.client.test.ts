@@ -94,6 +94,94 @@ test("rejects extensible and oversized crawl persistence responses", async () =>
   }
 });
 
+test("reads a bounded crawl validator with cached traversal links", async () => {
+  const originalFetch = globalThis.fetch;
+  const sourceSnapshotId = "01900000-0000-7000-8000-000000000004";
+  let requestBody: unknown;
+  globalThis.fetch = (async (
+    input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> => {
+    assert.equal(
+      String(input),
+      "http://seo-data.test:4001/internal/v1/crawl-snapshots/validators"
+    );
+    requestBody = JSON.parse(String(init?.body));
+    return response({
+      data: {
+        sourceSnapshotId,
+        etag: 'W/"page-v2"',
+        lastModified: "Fri, 31 Jul 2026 08:00:00 GMT",
+        internalLinks: [
+          "https://example.com/about",
+          "https://example.com/pricing"
+        ]
+      },
+      meta: { requestId: "crawl-validator-001" }
+    });
+  }) as typeof fetch;
+
+  try {
+    assert.deepEqual(
+      await client().validator({
+        workspaceId: pageInput.workspaceId,
+        projectId: pageInput.projectId,
+        url: pageInput.finalUrl
+      }),
+      {
+        sourceSnapshotId,
+        etag: 'W/"page-v2"',
+        lastModified: "Fri, 31 Jul 2026 08:00:00 GMT",
+        internalLinks: [
+          "https://example.com/about",
+          "https://example.com/pricing"
+        ]
+      }
+    );
+    assert.deepEqual(requestBody, {
+      workspaceId: pageInput.workspaceId,
+      projectId: pageInput.projectId,
+      url: pageInput.finalUrl
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects unsafe crawl validator headers and links", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const data of [
+      {
+        sourceSnapshotId: "01900000-0000-7000-8000-000000000004",
+        etag: "bad\r\nX-Injected: yes",
+        internalLinks: []
+      },
+      {
+        sourceSnapshotId: "01900000-0000-7000-8000-000000000004",
+        etag: '"safe"',
+        internalLinks: ["file:///etc/passwd"]
+      }
+    ]) {
+      globalThis.fetch = (async (): Promise<Response> =>
+        response({
+          data,
+          meta: { requestId: "crawl-validator-invalid" }
+        })) as typeof fetch;
+      await assert.rejects(
+        client().validator({
+          workspaceId: pageInput.workspaceId,
+          projectId: pageInput.projectId,
+          url: pageInput.finalUrl
+        }),
+        /SEO Data crawl response is invalid/u
+      );
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function client(): CrawlSnapshotClient {
   return new CrawlSnapshotClient(
     loadAppConfig(

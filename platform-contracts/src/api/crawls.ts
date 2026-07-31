@@ -48,6 +48,12 @@ export interface TechnicalCrawlSummary {
   readonly failedUrls: number;
   readonly issueCount: number;
   readonly failureCode?: string;
+  readonly backoffCode?:
+    | "HOST_RATE_LIMIT"
+    | "HOST_UNAVAILABLE"
+    | "HOST_NETWORK_ERROR"
+    | "LATENCY_SPIKE";
+  readonly backoffUntil?: string;
   readonly version: number;
   readonly createdAt: string;
   readonly startedAt?: string;
@@ -146,6 +152,8 @@ export interface InternalPersistCrawlPageInput {
   readonly structuredDataTypes: readonly string[];
   readonly wordCount: number;
   readonly contentHash: string;
+  readonly etag?: string;
+  readonly lastModified?: string;
   readonly indexability: CrawlPageIndexability;
   readonly issues: readonly CrawlPageIssueEvidence[];
   readonly crawledAt: string;
@@ -155,6 +163,33 @@ export interface InternalPersistCrawlPageReceipt {
   readonly accepted: true;
   readonly issueCount: number;
   readonly success: boolean;
+}
+
+export interface InternalGetCrawlPageValidatorInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly url: string;
+}
+
+export interface InternalCrawlPageValidator {
+  readonly sourceSnapshotId: string;
+  readonly etag?: string;
+  readonly lastModified?: string;
+  readonly internalLinks: readonly string[];
+}
+
+export interface InternalReuseCrawlPageInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly crawlId: string;
+  readonly sequence: number;
+  readonly sourceSnapshotId: string;
+  readonly requestedUrl: string;
+  readonly finalUrl: string;
+  readonly redirectChain: readonly string[];
+  readonly inSitemap: boolean;
+  readonly depth: number;
+  readonly crawledAt: string;
 }
 
 export interface InternalFinalizeCrawlSnapshotInput {

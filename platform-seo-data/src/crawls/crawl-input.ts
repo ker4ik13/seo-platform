@@ -3,8 +3,10 @@ import {
   technicalCrawlStatuses,
   type CrawlIssueSeverity,
   type CrawlPageIndexability,
+  type InternalGetCrawlPageValidatorInput,
   type InternalFinalizeCrawlSnapshotInput,
-  type InternalPersistCrawlPageInput
+  type InternalPersistCrawlPageInput,
+  type InternalReuseCrawlPageInput
 } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
 import { normalizePageUrl } from "../pages/page-url.js";
@@ -33,7 +35,8 @@ export function internalPersistCrawlPageInput(
     "issues", "crawledAt"
   ];
   const optionalKeys = [
-    "title", "description", "h1", "canonicalUrl", "robots", "language"
+    "title", "description", "h1", "canonicalUrl", "robots", "language",
+    "etag", "lastModified"
   ];
   if (
     Object.keys(input).some(
@@ -94,6 +97,8 @@ export function internalPersistCrawlPageInput(
     ),
     wordCount: integer(input.wordCount, "wordCount", 0, 10_000_000),
     contentHash: pattern(input.contentHash, "contentHash", HASH),
+    ...optionalHeader(input, "etag", 1_000),
+    ...optionalHeader(input, "lastModified", 128),
     indexability,
     issues: objectArray(input.issues, "issues", 100, (item, index) => ({
       code: pattern(item.code, `issues.${index}.code`, /^[A-Z][A-Z0-9_]{1,63}$/u),
@@ -101,6 +106,89 @@ export function internalPersistCrawlPageInput(
       title: string(item.title, `issues.${index}.title`, 255),
       details: scalarRecord(item.details, `issues.${index}.details`)
     }), ["code", "severity", "title", "details"]),
+    crawledAt: date(input.crawledAt, "crawledAt")
+  };
+}
+
+export function internalGetCrawlPageValidatorInput(
+  value: unknown
+): InternalGetCrawlPageValidatorInput {
+  const input = object(value);
+  const keys = ["workspaceId", "projectId", "url"];
+  if (
+    Object.keys(input).some((key) => !keys.includes(key)) ||
+    keys.some((key) => !(key in input))
+  ) {
+    invalid("body");
+  }
+  return {
+    workspaceId: internalUuid(
+      string(input.workspaceId, "workspaceId", 64),
+      "workspaceId"
+    ),
+    projectId: internalUuid(
+      string(input.projectId, "projectId", 64),
+      "projectId"
+    ),
+    url: normalizePageUrl(
+      string(input.url, "url", 4_096),
+      "url"
+    ).normalized
+  };
+}
+
+export function internalReuseCrawlPageInput(
+  value: unknown
+): InternalReuseCrawlPageInput {
+  const input = object(value);
+  const keys = [
+    "workspaceId",
+    "projectId",
+    "crawlId",
+    "sequence",
+    "sourceSnapshotId",
+    "requestedUrl",
+    "finalUrl",
+    "redirectChain",
+    "inSitemap",
+    "depth",
+    "crawledAt"
+  ];
+  if (
+    Object.keys(input).some((key) => !keys.includes(key)) ||
+    keys.some((key) => !(key in input))
+  ) {
+    invalid("body");
+  }
+  return {
+    workspaceId: internalUuid(
+      string(input.workspaceId, "workspaceId", 64),
+      "workspaceId"
+    ),
+    projectId: internalUuid(
+      string(input.projectId, "projectId", 64),
+      "projectId"
+    ),
+    crawlId: internalUuid(
+      string(input.crawlId, "crawlId", 64),
+      "crawlId"
+    ),
+    sequence: integer(input.sequence, "sequence", 1, 1_000),
+    sourceSnapshotId: internalUuid(
+      string(input.sourceSnapshotId, "sourceSnapshotId", 64),
+      "sourceSnapshotId"
+    ),
+    requestedUrl: normalizePageUrl(
+      string(input.requestedUrl, "requestedUrl", 4_096),
+      "requestedUrl"
+    ).normalized,
+    finalUrl: normalizePageUrl(
+      string(input.finalUrl, "finalUrl", 4_096),
+      "finalUrl"
+    ).normalized,
+    redirectChain: urlArray(input.redirectChain, "redirectChain", 10),
+    inSitemap: boolean(input.inSitemap, "inSitemap"),
+    depth: integer(input.depth, "depth", 0, 10),
     crawledAt: date(input.crawledAt, "crawledAt")
   };
 }
@@ -212,6 +300,24 @@ function optionalUrl(
   return {
     [field]: normalizePageUrl(string(input[field], field, 4_096)).normalized
   };
+}
+
+function optionalHeader(
+  input: Readonly<Record<string, unknown>>,
+  field: string,
+  max: number
+): Readonly<Record<string, string>> {
+  if (input[field] === undefined) return {};
+  const value = input[field];
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > max ||
+    !/^[\u0020-\u007e]+$/u.test(value)
+  ) {
+    invalid(field);
+  }
+  return { [field]: value };
 }
 
 function string(value: unknown, field: string, max: number): string {

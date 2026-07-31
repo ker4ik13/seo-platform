@@ -13,6 +13,10 @@ export interface PublicFetchOptions {
   readonly allowedContentTypes: readonly string[];
   readonly userAgent?: string;
   readonly beforeRequest?: () => Promise<void>;
+  readonly conditional?: {
+    readonly etag?: string;
+    readonly lastModified?: string;
+  };
 }
 
 export interface PublicFetchResult {
@@ -26,12 +30,15 @@ export interface PublicFetchResult {
   readonly redirectChain: readonly string[];
   readonly etag?: string;
   readonly lastModified?: string;
+  readonly retryAfterMs?: number;
 }
 
 export class PublicFetchError extends Error {
   public constructor(
     public readonly code:
       | "INVALID_URL"
+      | "INVALID_REQUEST_HEADER"
+      | "INVALID_NOT_MODIFIED"
       | "FORBIDDEN_ADDRESS"
       | "DNS_FAILED"
       | "TIMEOUT"
@@ -117,7 +124,14 @@ export async function fetchPublicResource(
     const pacingStartedAt = performance.now();
     await options.beforeRequest?.();
     pacingTimeMs += performance.now() - pacingStartedAt;
-    const result = await requestOnce(current, options, resolver);
+    const result = await requestOnce(
+      current,
+      options,
+      resolver,
+      redirectCount === 0
+        ? conditionalRequestHeaders(options.conditional)
+        : {}
+    );
     if (!isRedirect(result.statusCode)) {
       return {
         requestedUrl: requested.toString(),
@@ -132,7 +146,10 @@ export async function fetchPublicResource(
         ),
         redirectChain: redirects,
         ...(result.etag ? { etag: result.etag } : {}),
-        ...(result.lastModified ? { lastModified: result.lastModified } : {})
+        ...(result.lastModified ? { lastModified: result.lastModified } : {}),
+        ...(result.retryAfterMs !== undefined
+          ? { retryAfterMs: result.retryAfterMs }
+          : {})
       };
     }
     if (redirectCount >= options.maxRedirects) {
@@ -180,13 +197,15 @@ async function resolveHost(hostname: string): Promise<readonly ResolvedAddress[]
 async function requestOnce(
   url: URL,
   options: PublicFetchOptions,
-  resolver: Resolver
+  resolver: Resolver,
+  conditionalHeaders: Readonly<Record<string, string>>
 ): Promise<{
   readonly statusCode: number;
   readonly contentType?: string;
   readonly location?: string;
   readonly etag?: string;
   readonly lastModified?: string;
+  readonly retryAfterMs?: number;
   readonly body: Buffer;
 }> {
   const addresses = await resolver(url.hostname);
@@ -210,7 +229,8 @@ async function requestOnce(
         url,
         options,
         candidates[index]!,
-        attemptTimeoutMs
+        attemptTimeoutMs,
+        conditionalHeaders
       );
     } catch (error) {
       if (
@@ -230,13 +250,15 @@ function requestResolvedAddress(
   url: URL,
   options: PublicFetchOptions,
   selected: ResolvedAddress,
-  timeoutMs: number
+  timeoutMs: number,
+  conditionalHeaders: Readonly<Record<string, string>>
 ): Promise<{
   readonly statusCode: number;
   readonly contentType?: string;
   readonly location?: string;
   readonly etag?: string;
   readonly lastModified?: string;
+  readonly retryAfterMs?: number;
   readonly body: Buffer;
 }> {
   const transport = url.protocol === "https:" ? https : http;
@@ -265,7 +287,8 @@ function requestResolvedAddress(
           Accept: options.accept,
           "Accept-Encoding": "identity",
           Host: url.host,
-          "User-Agent": options.userAgent ?? CRAWL_USER_AGENT
+          "User-Agent": options.userAgent ?? CRAWL_USER_AGENT,
+          ...conditionalHeaders
         },
         setDefaultHeaders: true
       },
@@ -277,12 +300,17 @@ function requestResolvedAddress(
         const lastModified = boundedHeader(
           response.headers["last-modified"]
         );
+        const retryAfterMs = retryAfterDelay(
+          response.headers["retry-after"]
+        );
         const contentEncoding = singleHeader(
           response.headers["content-encoding"]
         );
         if (
           contentEncoding &&
-          contentEncoding.toLowerCase() !== "identity"
+          contentEncoding.toLowerCase() !== "identity" &&
+          !isRedirect(statusCode) &&
+          statusCode !== 304
         ) {
           response.destroy();
           fail(new PublicFetchError("UNSUPPORTED_CONTENT_ENCODING"));
@@ -301,6 +329,7 @@ function requestResolvedAddress(
         }
         if (
           !isRedirect(statusCode) &&
+          statusCode !== 304 &&
           contentType &&
           !options.allowedContentTypes.includes(contentType)
         ) {
@@ -332,6 +361,7 @@ function requestResolvedAddress(
             ...(location ? { location } : {}),
             ...(etag ? { etag } : {}),
             ...(lastModified ? { lastModified } : {}),
+            ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
             body: Buffer.concat(chunks, bytes)
           });
         });
@@ -507,7 +537,72 @@ function boundedHeader(
   value: string | readonly string[] | undefined
 ): string | undefined {
   const header = singleHeader(value);
-  return header && header.length <= 1_000 ? header : undefined;
+  return header &&
+    header.length <= 1_000 &&
+    /^[\u0020-\u007e]+$/u.test(header)
+    ? header
+    : undefined;
+}
+
+export function conditionalRequestHeaders(
+  value:
+    | {
+        readonly etag?: string;
+        readonly lastModified?: string;
+      }
+    | undefined
+): Readonly<Record<string, string>> {
+  if (!value) return {};
+  const headers: Record<string, string> = {};
+  if (value.etag !== undefined) {
+    if (!safeRequestHeader(value.etag, 1_000)) {
+      throw new PublicFetchError("INVALID_REQUEST_HEADER");
+    }
+    headers["If-None-Match"] = value.etag;
+  }
+  if (value.lastModified !== undefined) {
+    if (!safeRequestHeader(value.lastModified, 128)) {
+      throw new PublicFetchError("INVALID_REQUEST_HEADER");
+    }
+    headers["If-Modified-Since"] = value.lastModified;
+  }
+  return headers;
+}
+
+function safeRequestHeader(value: string, max: number): boolean {
+  return (
+    value.length >= 1 &&
+    value.length <= max &&
+    /^[\u0020-\u007e]+$/u.test(value)
+  );
+}
+
+export function retryAfterDelay(
+  value: string | readonly string[] | undefined,
+  nowMs = Date.now()
+): number | undefined {
+  const header = singleHeader(value);
+  if (
+    !header ||
+    header.length > 128 ||
+    !/^[\u0020-\u007e]+$/u.test(header)
+  ) {
+    return undefined;
+  }
+  if (/^(?:0|[1-9]\d{0,9})$/u.test(header)) {
+    const seconds = Number(header);
+    return Number.isSafeInteger(seconds) ? seconds * 1_000 : undefined;
+  }
+  if (
+    !/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/u.test(
+      header
+    )
+  ) {
+    return undefined;
+  }
+  const timestamp = Date.parse(header);
+  if (!Number.isFinite(timestamp)) return undefined;
+  return Math.max(0, timestamp - nowMs);
 }
 
 function isRedirect(statusCode: number): boolean {

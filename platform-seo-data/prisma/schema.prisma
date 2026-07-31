@@ -470,6 +470,10 @@ model CrawlPageSnapshot {
   structuredDataTypes Json             @map("structured_data_types")
   wordCount           Int              @map("word_count")
   contentHash         String           @map("content_hash") @db.Char(64)
+  etag                String?          @db.VarChar(1000)
+  lastModified        String?          @map("last_modified") @db.VarChar(128)
+  notModified         Boolean          @default(false) @map("not_modified")
+  reusedFromSnapshotId String?         @map("reused_from_snapshot_id") @db.Uuid
   indexability        PageIndexability
   crawledAt           DateTime         @map("crawled_at") @db.Timestamptz(6)
   createdAt           DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -478,12 +482,15 @@ model CrawlPageSnapshot {
   issueOccurrences CrawlIssueOccurrence[]
   previousChanges  CrawlPageChange[]          @relation("PreviousCrawlSnapshotChanges")
   currentChanges   CrawlPageChange[]           @relation("CurrentCrawlSnapshotChanges")
+  reusedFrom       CrawlPageSnapshot?          @relation("CrawlSnapshotReuse", fields: [workspaceId, projectId, reusedFromSnapshotId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  reusedBy         CrawlPageSnapshot[]          @relation("CrawlSnapshotReuse")
 
   @@unique([crawlId, sequence], map: "crawl_page_snapshots_crawl_sequence_key")
   @@unique([crawlId, finalUrlHash], map: "crawl_page_snapshots_crawl_url_key")
   @@unique([workspaceId, projectId, id], map: "crawl_page_snapshots_tenant_project_id_key")
   @@index([workspaceId, projectId, crawledAt(sort: Desc)], map: "crawl_page_snapshots_project_crawled_idx")
   @@index([workspaceId, projectId, pageId, crawledAt(sort: Desc)], map: "crawl_page_snapshots_page_crawled_idx")
+  @@index([workspaceId, projectId, reusedFromSnapshotId], map: "crawl_page_snapshots_reused_from_idx")
   @@map("crawl_page_snapshots")
 }
 

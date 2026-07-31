@@ -176,6 +176,9 @@ export class CrawlService {
           status: queued ? "CANCELLED" : "CANCEL_REQUESTED",
           cancelRequestedAt: new Date(),
           ...(queued ? { finishedAt: new Date() } : {}),
+          ...(queued
+            ? { backoffCode: null, backoffUntil: null }
+            : {}),
           version: { increment: 1 }
         }
       });
@@ -185,6 +188,7 @@ export class CrawlService {
           status: queued ? "CANCELLED" : "CANCEL_REQUESTED",
           cancelRequestedAt: new Date(),
           ...(queued ? { finishedAt: new Date() } : {}),
+          ...(queued ? { retryAt: null } : {}),
           version: { increment: 1 }
         }
       });
@@ -198,7 +202,13 @@ export class CrawlService {
     const rows = await this.prisma.technicalCrawl.findMany({
       where: {
         OR: [
-          { status: "QUEUED" },
+          {
+            status: "QUEUED",
+            OR: [
+              { backoffUntil: null },
+              { backoffUntil: { lte: now } }
+            ]
+          },
           {
             status: { in: ["RUNNING", "CANCEL_REQUESTED"] },
             job: {
@@ -234,6 +244,13 @@ export class CrawlService {
         current.status as (typeof ACTIVE_STATUSES)[number]
       )) return undefined;
       const queued = current.status === "QUEUED";
+      if (
+        queued &&
+        current.backoffUntil &&
+        current.backoffUntil > now
+      ) {
+        return undefined;
+      }
       const expectedJobStatus = queued
         ? "QUEUED"
         : current.status === "CANCEL_REQUESTED"
@@ -254,7 +271,14 @@ export class CrawlService {
           version: current.version
         },
         data: {
-          ...(queued ? { status: "RUNNING", startedAt: now } : {}),
+          ...(queued
+            ? {
+                status: "RUNNING",
+                startedAt: current.startedAt ?? now,
+                backoffCode: null,
+                backoffUntil: null
+              }
+            : {}),
           version: { increment: 1 }
         }
       });
@@ -267,7 +291,12 @@ export class CrawlService {
         },
         data: {
           ...(queued
-            ? { status: "RUNNING", stage: "crawling", startedAt: now }
+            ? {
+                status: "RUNNING",
+                stage: "crawling",
+                startedAt: current.job.startedAt ?? now,
+                retryAt: null
+              }
             : {}),
           leaseOwner,
           leaseExpiresAt,
@@ -422,6 +451,8 @@ export class CrawlService {
         data: {
           status,
           finishedAt: new Date(),
+          backoffCode: null,
+          backoffUntil: null,
           version: { increment: 1 }
         }
       });
@@ -444,6 +475,7 @@ export class CrawlService {
           },
           leaseOwner: null,
           leaseExpiresAt: null,
+          retryAt: null,
           version: { increment: 1 }
         }
       });
@@ -468,6 +500,8 @@ export class CrawlService {
         where: { id: crawl.id, status: crawl.status },
         data: {
           ...(crawl.status === "RUNNING" ? { status: "QUEUED" } : {}),
+          backoffCode: null,
+          backoffUntil: null,
           version: { increment: 1 }
         }
       });
@@ -484,7 +518,61 @@ export class CrawlService {
             : {}),
           leaseOwner: null,
           leaseExpiresAt: null,
+          retryAt: null,
           attempt: { increment: 1 },
+          version: { increment: 1 }
+        }
+      });
+      if (jobReleased.count !== 1) {
+        throw new Error("Technical crawl lease was lost");
+      }
+    });
+  }
+
+  public async releaseForHostBackoff(
+    crawlId: string,
+    leaseOwner: string,
+    backoffUntil: Date,
+    backoffCode:
+      | "HOST_RATE_LIMIT"
+      | "HOST_UNAVAILABLE"
+      | "HOST_NETWORK_ERROR"
+      | "LATENCY_SPIKE"
+  ): Promise<void> {
+    if (
+      Number.isNaN(backoffUntil.getTime()) ||
+      backoffUntil <= new Date()
+    ) {
+      throw new TypeError("Invalid technical crawl backoff deadline");
+    }
+    await this.prisma.$transaction(async (transaction) => {
+      const crawl = await transaction.technicalCrawl.findFirst({
+        where: { id: crawlId, status: "RUNNING" },
+        select: { id: true, jobId: true }
+      });
+      if (!crawl) return;
+      const released = await transaction.technicalCrawl.updateMany({
+        where: { id: crawl.id, status: "RUNNING" },
+        data: {
+          status: "QUEUED",
+          backoffCode,
+          backoffUntil,
+          version: { increment: 1 }
+        }
+      });
+      if (released.count !== 1) return;
+      const jobReleased = await transaction.job.updateMany({
+        where: {
+          id: crawl.jobId,
+          status: "RUNNING",
+          leaseOwner
+        },
+        data: {
+          status: "QUEUED",
+          stage: "backing_off",
+          retryAt: backoffUntil,
+          leaseOwner: null,
+          leaseExpiresAt: null,
           version: { increment: 1 }
         }
       });
@@ -521,6 +609,8 @@ export class CrawlService {
         data: {
           status: "FAILED",
           failureCode: code.slice(0, 64),
+          backoffCode: null,
+          backoffUntil: null,
           finishedAt: new Date(),
           version: { increment: 1 }
         }
@@ -535,6 +625,7 @@ export class CrawlService {
           attempt: { increment: 1 },
           leaseOwner: null,
           leaseExpiresAt: null,
+          retryAt: null,
           version: { increment: 1 }
         }
       });

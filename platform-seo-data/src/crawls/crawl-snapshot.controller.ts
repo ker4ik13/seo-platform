@@ -11,6 +11,7 @@ import {
 } from "@nestjs/common";
 import type {
   ApiResponse,
+  InternalCrawlPageValidator,
   InternalPersistCrawlPageReceipt,
   ProjectCrawlPageChangeCollection,
   ProjectCrawlIssueCollection
@@ -24,7 +25,9 @@ import { JobsApiGuard } from "../internal/jobs-api.guard.js";
 import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import {
   internalFinalizeCrawlSnapshotInput,
-  internalPersistCrawlPageInput
+  internalGetCrawlPageValidatorInput,
+  internalPersistCrawlPageInput,
+  internalReuseCrawlPageInput
 } from "./crawl-input.js";
 import { CrawlSnapshotService } from "./crawl-snapshot.service.js";
 
@@ -41,6 +44,32 @@ export class CrawlSnapshotController {
     return response(
       request,
       await this.snapshots.persistPage(internalPersistCrawlPageInput(body))
+    );
+  }
+
+  @Post("validators")
+  public async validator(
+    @Body() body: unknown,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<InternalCrawlPageValidator | null>> {
+    return response(
+      request,
+      await this.snapshots.validator(
+        internalGetCrawlPageValidatorInput(body)
+      )
+    );
+  }
+
+  @Post("pages/reuse")
+  public async reuse(
+    @Body() body: unknown,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<InternalPersistCrawlPageReceipt>> {
+    return response(
+      request,
+      await this.snapshots.reusePage(
+        internalReuseCrawlPageInput(body)
+      )
     );
   }
 

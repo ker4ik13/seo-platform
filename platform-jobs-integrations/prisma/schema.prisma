@@ -235,6 +235,8 @@ model TechnicalCrawl {
   failedUrls        Int                  @default(0) @map("failed_urls")
   issueCount        Int                  @default(0) @map("issue_count")
   failureCode       String?              @map("failure_code") @db.VarChar(64)
+  backoffCode       String?              @map("backoff_code") @db.VarChar(64)
+  backoffUntil      DateTime?            @map("backoff_until") @db.Timestamptz(6)
   version           Int                  @default(1)
   createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
   startedAt         DateTime?            @map("started_at") @db.Timestamptz(6)
@@ -248,7 +250,23 @@ model TechnicalCrawl {
   @@unique([workspaceId, projectId, jobId], map: "technical_crawls_tenant_project_job_key")
   @@index([workspaceId, projectId, createdAt(sort: Desc)], map: "technical_crawls_project_created_idx")
   @@index([status, createdAt], map: "technical_crawls_status_created_idx")
+  @@index([status, backoffUntil, createdAt], map: "technical_crawls_status_backoff_idx")
   @@map("technical_crawls")
+}
+
+model CrawlHostState {
+  host                String    @id @db.VarChar(253)
+  consecutiveFailures Int       @default(0) @map("consecutive_failures")
+  backoffUntil        DateTime? @map("backoff_until") @db.Timestamptz(6)
+  lastFailureCode     String?   @map("last_failure_code") @db.VarChar(64)
+  lastStatusCode      Int?      @map("last_status_code")
+  lastFailureAt       DateTime? @map("last_failure_at") @db.Timestamptz(6)
+  lastSuccessAt       DateTime? @map("last_success_at") @db.Timestamptz(6)
+  latencyEwmaMs       Int?      @map("latency_ewma_ms")
+  updatedAt           DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([backoffUntil], map: "crawl_host_states_backoff_idx")
+  @@map("crawl_host_states")
 }
 
 model JobItem {

@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import type {
   InternalPersistCrawlPageInput,
+  InternalPersistCrawlPageReceipt,
   TechnicalCrawlConfig
 } from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
@@ -11,8 +12,16 @@ import {
   crawlScopeAllows,
   normalizedScopeUrl
 } from "./crawl-scope.js";
-import { fetchPublicResource, PublicFetchError } from "./public-http.js";
+import {
+  fetchPublicResource,
+  PublicFetchError,
+  type PublicFetchResult
+} from "./public-http.js";
 import { robotsAllows } from "./robots.js";
+import {
+  CrawlHostStateService,
+  type CrawlBackoffCode
+} from "./crawl-host-state.service.js";
 import { CrawlService } from "./crawl.service.js";
 import {
   parseSitemapXml,
@@ -32,7 +41,8 @@ export class CrawlRunnerService {
   public constructor(
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly crawls: CrawlService,
-    private readonly snapshots: CrawlSnapshotClient
+    private readonly snapshots: CrawlSnapshotClient,
+    private readonly hostStates: CrawlHostStateService
   ) {}
 
   public async process(
@@ -45,6 +55,7 @@ export class CrawlRunnerService {
     if (!crawl) return;
     const crawlConfig = this.crawls.config(crawl);
     const origin = new URL(crawlConfig.startUrls[0]!).origin;
+    const host = new URL(origin).hostname;
     const checkpoint = this.crawls.checkpoint(crawl);
     const pending: PendingUrl[] = [...checkpoint.pending];
     const seen = new Set(checkpoint.seen);
@@ -55,6 +66,16 @@ export class CrawlRunnerService {
     let sequence = crawl.processedUrls;
     let failureCode = "CRAWL_EXECUTION_FAILED";
     try {
+      const existingBackoff = await this.hostStates.currentBackoff(host);
+      if (existingBackoff) {
+        await this.crawls.releaseForHostBackoff(
+          crawl.id,
+          leaseOwner,
+          existingBackoff.until,
+          existingBackoff.code
+        );
+        return;
+      }
       if (crawl.status === "CANCEL_REQUESTED") {
         await this.complete(crawl, leaseOwner, "CANCELLED", sequence);
         return;
@@ -198,7 +219,13 @@ export class CrawlRunnerService {
         sequence += 1;
         let issueCount = 0;
         let success = false;
+        let responseBackoffUntil: Date | undefined;
         try {
+          const validator = await this.snapshots.validator({
+            workspaceId: crawl.workspaceId,
+            projectId: crawl.projectId,
+            url: next.url
+          });
           const response = await fetchPublicResource(next.url, {
             timeoutMs: this.config.crawl.requestTimeoutMs,
             maxBytes: this.config.crawl.maxResponseBytes,
@@ -206,7 +233,19 @@ export class CrawlRunnerService {
             accept: "text/html,application/xhtml+xml;q=0.9",
             allowedContentTypes: ["text/html", "application/xhtml+xml"],
             userAgent: this.config.crawl.userAgent,
-            beforeRequest: paceRequest
+            beforeRequest: paceRequest,
+            ...(validator
+              ? {
+                  conditional: {
+                    ...(validator.etag
+                      ? { etag: validator.etag }
+                      : {}),
+                    ...(validator.lastModified
+                      ? { lastModified: validator.lastModified }
+                      : {})
+                  }
+                }
+              : {})
           });
           const normalizedFinalUrl = normalizedScopeUrl(
             response.finalUrl,
@@ -221,38 +260,72 @@ export class CrawlRunnerService {
           ) {
             throw new PublicFetchError("INVALID_REDIRECT");
           }
-          const analysis = analyzeHtmlPage({
-            html: response.body.toString("utf8"),
-            finalUrl: normalizedFinalUrl,
-            statusCode: response.statusCode,
-            responseTimeMs: response.responseTimeMs,
-            sizeBytes: response.sizeBytes
-          });
+          assertHostResponseAvailable(response);
           const crawledAt = new Date().toISOString();
-          const payload: InternalPersistCrawlPageInput = {
-            workspaceId: crawl.workspaceId,
-            projectId: crawl.projectId,
-            crawlId: crawl.id,
-            sequence,
-            requestedUrl: response.requestedUrl,
-            finalUrl: normalizedFinalUrl,
-            redirectChain: response.redirectChain.map((url) =>
-              normalizedScopeUrl(url, crawlConfig.queryPolicy)
-            ),
-            inSitemap: next.inSitemap,
-            depth: next.depth,
-            statusCode: response.statusCode,
-            responseTimeMs: response.responseTimeMs,
-            sizeBytes: response.sizeBytes,
-            contentType: response.contentType ?? "text/html",
-            ...analysis,
-            crawledAt
-          };
-          const receipt = await this.snapshots.persistPage(payload);
+          const redirectChain = response.redirectChain.map((url) =>
+            normalizedScopeUrl(url, crawlConfig.queryPolicy)
+          );
+          let internalLinks: readonly string[];
+          let receipt: InternalPersistCrawlPageReceipt;
+          if (response.statusCode === 304) {
+            if (!validator || response.redirectChain.length > 0) {
+              throw new PublicFetchError("INVALID_NOT_MODIFIED");
+            }
+            receipt = await this.snapshots.reusePage({
+              workspaceId: crawl.workspaceId,
+              projectId: crawl.projectId,
+              crawlId: crawl.id,
+              sequence,
+              sourceSnapshotId: validator.sourceSnapshotId,
+              requestedUrl: response.requestedUrl,
+              finalUrl: normalizedFinalUrl,
+              redirectChain,
+              inSitemap: next.inSitemap,
+              depth: next.depth,
+              crawledAt
+            });
+            internalLinks = validator.internalLinks;
+          } else {
+            const analysis = analyzeHtmlPage({
+              html: response.body.toString("utf8"),
+              finalUrl: normalizedFinalUrl,
+              statusCode: response.statusCode,
+              responseTimeMs: response.responseTimeMs,
+              sizeBytes: response.sizeBytes
+            });
+            const payload: InternalPersistCrawlPageInput = {
+              workspaceId: crawl.workspaceId,
+              projectId: crawl.projectId,
+              crawlId: crawl.id,
+              sequence,
+              requestedUrl: response.requestedUrl,
+              finalUrl: normalizedFinalUrl,
+              redirectChain,
+              inSitemap: next.inSitemap,
+              depth: next.depth,
+              statusCode: response.statusCode,
+              responseTimeMs: response.responseTimeMs,
+              sizeBytes: response.sizeBytes,
+              contentType: response.contentType ?? "text/html",
+              ...analysis,
+              ...(response.etag ? { etag: response.etag } : {}),
+              ...(response.lastModified
+                ? { lastModified: response.lastModified }
+                : {}),
+              crawledAt
+            };
+            receipt = await this.snapshots.persistPage(payload);
+            internalLinks = analysis.internalLinks;
+          }
           issueCount = receipt.issueCount;
           success = receipt.success;
+          responseBackoffUntil =
+            await this.hostStates.recordResponse(
+              host,
+              response.responseTimeMs
+            );
           if (next.depth < crawlConfig.maxDepth) {
-            for (const link of analysis.internalLinks) {
+            for (const link of internalLinks) {
               const normalized = normalizedScopeUrl(
                 link,
                 crawlConfig.queryPolicy
@@ -273,6 +346,18 @@ export class CrawlRunnerService {
             }
           }
         } catch (error) {
+          if (error instanceof CrawlHostBackoffSignal) throw error;
+          if (
+            error instanceof PublicFetchError &&
+            hostFailureFetchCodes.has(error.code)
+          ) {
+            throw new CrawlHostBackoffSignal(
+              "HOST_NETWORK_ERROR",
+              undefined,
+              undefined,
+              { cause: error }
+            );
+          }
           if (!(error instanceof PublicFetchError)) throw error;
           this.logger.warn(
             `Crawl page failed code=${crawlErrorCode(error)}`
@@ -291,6 +376,15 @@ export class CrawlRunnerService {
             scopeReady
           )
         );
+        if (responseBackoffUntil) {
+          await this.crawls.releaseForHostBackoff(
+            crawl.id,
+            leaseOwner,
+            responseBackoffUntil,
+            "LATENCY_SPIKE"
+          );
+          return;
+        }
       }
       const current = await this.crawls.get(
         crawl.workspaceId,
@@ -307,7 +401,37 @@ export class CrawlRunnerService {
             : "COMPLETED",
         current.processedUrls
       );
-    } catch {
+    } catch (error) {
+      const hostBackoff =
+        error instanceof CrawlHostBackoffSignal
+          ? error
+          : error instanceof PublicFetchError &&
+              hostFailureFetchCodes.has(error.code)
+            ? new CrawlHostBackoffSignal(
+                "HOST_NETWORK_ERROR",
+                undefined,
+                undefined,
+                { cause: error }
+              )
+            : undefined;
+      if (hostBackoff) {
+        const backoffUntil = await this.hostStates.recordFailure(host, {
+          code: hostBackoff.code,
+          ...(hostBackoff.statusCode
+            ? { statusCode: hostBackoff.statusCode }
+            : {}),
+          ...(hostBackoff.retryAfterMs !== undefined
+            ? { retryAfterMs: hostBackoff.retryAfterMs }
+            : {})
+        });
+        await this.crawls.releaseForHostBackoff(
+          crawl.id,
+          leaseOwner,
+          backoffUntil,
+          hostBackoff.code
+        );
+        return;
+      }
       if (finalAttempt) {
         await this.crawls.fail(crawl.id, failureCode, leaseOwner);
         return;
@@ -350,6 +474,7 @@ export class CrawlRunnerService {
       userAgent: this.config.crawl.userAgent,
       beforeRequest: paceRequest
     });
+    assertHostResponseAvailable(response);
     if (response.statusCode === 404 || response.statusCode === 410) return "";
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw new Error("robots unavailable");
@@ -386,6 +511,7 @@ export class CrawlRunnerService {
       userAgent: this.config.crawl.userAgent,
       beforeRequest: paceRequest
     });
+    assertHostResponseAvailable(response);
     if (
       response.statusCode < 200 ||
       response.statusCode >= 300 ||
@@ -423,6 +549,46 @@ function currentCheckpoint(
 
 function crawlErrorCode(error: unknown): string {
   return error instanceof PublicFetchError ? error.code : "PERSISTENCE_ERROR";
+}
+
+const hostFailureFetchCodes = new Set([
+  "DNS_FAILED",
+  "TIMEOUT",
+  "NETWORK_ERROR"
+]);
+
+function assertHostResponseAvailable(
+  response: Pick<
+    PublicFetchResult,
+    "statusCode" | "retryAfterMs"
+  >
+): void {
+  if (response.statusCode === 429) {
+    throw new CrawlHostBackoffSignal(
+      "HOST_RATE_LIMIT",
+      429,
+      response.retryAfterMs
+    );
+  }
+  if (response.statusCode === 503) {
+    throw new CrawlHostBackoffSignal(
+      "HOST_UNAVAILABLE",
+      503,
+      response.retryAfterMs
+    );
+  }
+}
+
+class CrawlHostBackoffSignal extends Error {
+  public constructor(
+    public readonly code: CrawlBackoffCode,
+    public readonly statusCode?: number,
+    public readonly retryAfterMs?: number,
+    options?: ErrorOptions
+  ) {
+    super(code, options);
+    this.name = "CrawlHostBackoffSignal";
+  }
 }
 
 function requestPacer(
