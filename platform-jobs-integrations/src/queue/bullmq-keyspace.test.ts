@@ -12,10 +12,11 @@ import {
 const sourceDirectoryUrl = new URL("../", import.meta.url);
 const sourceDirectoryPath = fileURLToPath(sourceDirectoryUrl);
 const expectedConstructionSites = new Map([
+  ["automations/automation-runtime.service.ts", 1],
   ["connector-worker.main.ts", 3],
   ["import-worker.main.ts", 2],
   ["inspection-worker.main.ts", 2],
-  ["queue/queue.service.ts", 5],
+  ["queue/queue.service.ts", 6],
   ["rank-worker.main.ts", 2],
   ["worker.main.ts", 1]
 ]);
@@ -39,6 +40,10 @@ test("uses one versioned BullMQ prefix without an ioredis keyPrefix", () => {
   assert.equal(
     keys.toKey("rank-preparation", "wait"),
     "seo-platform:jobs:v1:rank-preparation:wait"
+  );
+  assert.equal(
+    keys.toKey("rank-automation", "wait"),
+    "seo-platform:jobs:v1:rank-automation:wait"
   );
 });
 

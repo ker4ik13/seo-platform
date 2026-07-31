@@ -16,6 +16,7 @@ import { RankEstimateController } from "./rank-estimate.controller.js";
 import { RankHistoryController } from "./rank-history.controller.js";
 import { RankRunController } from "./rank-run.controller.js";
 import { TrackingContextController } from "./tracking-context.controller.js";
+import { AutomationController } from "./automation.controller.js";
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { TrackingContextController } from "./tracking-context.controller.js";
     TenantModule
   ],
   controllers: [
+    AutomationController,
     RankExecutionGrantController,
     RankEstimateController,
     RankHistoryController,

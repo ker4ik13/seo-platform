@@ -1,11 +1,12 @@
 import { rankHistoryReturnTo } from "../lib/rank-history";
+import { rankAutomationsReturnTo } from "../lib/rank-automations";
 import { trackingContextsReturnTo } from "../lib/tracking-contexts";
 
 export function RankingsTabs({
   active,
   projectId
 }: Readonly<{
-  active: "history" | "contexts";
+  active: "history" | "contexts" | "automations";
   projectId: string;
 }>) {
   return (
@@ -26,6 +27,13 @@ export function RankingsTabs({
         href={trackingContextsReturnTo(projectId)}
       >
         Контексты
+      </a>
+      <a
+        aria-current={active === "automations" ? "page" : undefined}
+        className={active === "automations" ? "active" : undefined}
+        href={rankAutomationsReturnTo(projectId)}
+      >
+        Автоматизация
       </a>
     </nav>
   );

@@ -1,9 +1,9 @@
 # Карта проекта
 
-Последнее обновление: 30 июля 2026 года
+Последнее обновление: 31 июля 2026 года
 
-Текущий инкремент: P3 billing/payment vertical после замыкания реального
-ручного съёма позиций
+Текущий инкремент: production automation vertical после замыкания реального
+ручного съёма позиций и тарифных capacity boundaries
 Статус P1: ручной CRUD запросов и иерархических групп реализован поверх
 tenant-scoped SEO Data owner с optimistic locking, RBAC/CSRF и audit.
 Запрос уже можно создать, изменить и soft-delete; поддерживаются текст,
@@ -122,6 +122,22 @@ found/not-found chunk проходит через отдельный SEO Data re
 connector-worker. Старые execution evidence поколения `@1` активироваться
 задним числом не могут.
 
+Rank-tracking automation теперь является рабочим сквозным модулем. Public
+Platform API и private Web позволяют создать и изменить daily/weekly
+расписание в IANA timezone, приостановить/возобновить его, запустить вручную
+и прочитать последние 50 запусков. Platform API каждый раз получает
+актуальные tenant/membership/project/BYOK/plan snapshots, проверяет отдельные
+`automation.view/manage/enable`, CSRF, `If-Match` и `Idempotency-Key`, пишет
+requested/committed audit. Jobs хранит versioned definition и immutable
+per-run execution snapshot, атомарно ограничивает число включённых
+расписаний по `scheduledAutomations`, синхронизирует BullMQ Job Scheduler,
+не допускает overlap одного расписания и запускает существующий
+estimate → manual rank Job pipeline. Terminal Job сбрасывает счётчик ошибок;
+повторные ошибки выключают расписание на настроенном пороге. Bounded
+reconciliation восстанавливает потерянный scheduler, зависший pre-dispatch
+run и terminal outcome после restart. Queue payload не содержит keyword,
+credential или secret material.
+
 P3 billing foundation реализован в Platform API и Web. Versioned каталог
 содержит Trial/Solo/Team/Agency/Business/Enterprise и годовые цены; hosted
 checkout YooKassa не принимает карточные данные, использует provider
@@ -167,8 +183,9 @@ complete/partial complete освобождает остаток, cancel/final fa
 `UPLOADING`, `UPLOADED`, `SCANNING` и `READY` uploads до создания новой
 multipart-записи. Параллельные загрузки не обходят тариф, идемпотентный
 проигравший multipart удаляется, а существующие файлы при превышении не
-удаляются. Automation meter и platform-paid settlement остаются следующей
-частью enforcement.
+удаляются. Automation capacity enforcement замкнут отдельным trusted snapshot
+и workspace advisory lock; platform-paid settlement остаётся следующей частью
+enforcement.
 
 Параллельный dependency-free срез browser Web Push device lifecycle
 реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет
@@ -606,8 +623,12 @@ Backend convention:
   и point keyword assignments с `ranking.view/configure`, CSRF,
   idempotency/OCC и audit, а также provider-free rank estimate с
   `ranking.view` и trusted lifecycle/access snapshot, public manual Job
-  lifecycle, bounded read-only rank history proxy и protected controlled-beta
+  lifecycle, bounded read-only rank history proxy, audited rank-tracking
+  automation CRUD/pause/resume/manual-run/history и protected controlled-beta
   execution-grant issuer с immutable exact replay;
+- `platform-contracts/src/api/automations.ts` — public/internal schedule,
+  capacity, manual command и bounded run-history contracts без provider
+  credential material;
 - `platform-contracts/src/api/rank-execution-grants.ts` — exact Jobs →
   Platform request/scope hash preimages, 30-second grant/decision contracts и
   redaction allowlist без binding/credential/secret IDs;
@@ -677,7 +698,15 @@ Backend convention:
 - `platform-jobs-integrations/src/queue` — BullMQ connection с единым
   versioned key prefix `seo-platform:jobs:v1`, system, `upload-inspection`,
   идемпотентная `integration-credential-validation` и DB-recoverable
-  `rank-preparation` queues;
+  `rank-preparation` queues и versioned rank automation Job Scheduler;
+- `platform-jobs-integrations/src/automations` — tenant-safe versioned
+  definitions, plan capacity lock, scheduler reconciliation, manual/scheduled
+  execution через существующие rank estimates/runs, no-overlap, crash
+  recovery, terminal settlement и failure-threshold auto-pause;
+- `platform-jobs-integrations/prisma/migrations/20260731110000_rank_tracking_automations`
+  — actor/idempotency provenance для definitions и durable automation run
+  lifecycle с immutable execution snapshot, trigger matrix и tenant/status
+  indexes;
 - `platform-jobs-integrations/src/storage` — S3 port, disabled и S3 adapters;
 - `platform-jobs-integrations/src/malware` — scanner port, disabled adapter и
   потоковый `clamd` INSTREAM adapter;
@@ -842,6 +871,11 @@ Backend convention:
   `lib/rank-history.ts` — private/noindex история позиций с UTC range,
   context/keyword filters, cursor-дозагрузкой и явными archived/read-only
   состояниями;
+- `platform-web/app/app/(protected)/projects/[projectId]/rankings/automations`,
+  `components/rank-automations.tsx` и `lib/rank-automations.ts` —
+  private/noindex редактор daily/weekly расписаний, тарифный счётчик,
+  pause/resume, ручной запуск и bounded история с полными loading/empty/error/
+  offline/permission состояниями;
 - Web image получает обязательный `WEB_PUBLIC_URL` как
   `NEXT_PUBLIC_SITE_URL` до `next build`, чтобы canonical metadata, robots и
   sitemap не зависели от запоздалого runtime env;
@@ -991,6 +1025,7 @@ Entrypoints:
 | Notifications | vertical slice: preferences → effective policy → read center → encrypted browser device lifecycle |
 | Integrations | vertical slice: catalog + encrypted BYOK vault + validation + project binding |
 | Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |
+| Automations | vertical slice: rank schedule CRUD + тарифный capacity + BullMQ scheduler + manual/scheduled execution + no-overlap/recovery/history/auto-pause + Web |
 | Billing/YooKassa | vertical slice: catalog + hosted/recurring payment + webhook/reconciliation + ledger/refund/NPD obligation + Web UI + protected manual receipt operations + durable receipt email delivery; live provider/SMTP canary остаётся gate |
 | Directus content | planned |
 
@@ -1279,10 +1314,10 @@ snapshot. SEO Data возвращает exact count до 1 000 либо sentinel
 а для provider-incompatible bounded scope 1..1 000 либо overflow `1001`
 возвращает согласованные unavailable semantic/final hashes. Пустой scope
 всегда materializable. TTL receipt — пять минут;
-replay после drift project/access/quota возвращает исходный ответ. Пока
-обязательны `PROVIDER_CONTRACT_NOT_READY` и
-`PROVIDER_EXECUTION_DISABLED`, ни provider call, ни Job/BullMQ, ни usage,
-reservation, outbox/event не создаются.
+replay после drift project/access/quota возвращает исходный ответ.
+Поддержанный Arsenkin profile возвращает `READY`; несовместимый provider
+profile, credential/binding или lifecycle остаётся fail-closed с конечным
+blocker code до provider call.
 
 Secret-bearing rank manifest endpoints принадлежат SEO Data и защищены
 отдельным `JOBS_TO_SEO_RANK_TOKEN`; general caller/audience tokens не дают
@@ -1345,19 +1380,42 @@ Connector-worker записывает exact wire/task/poll state и normalized s
 output, а rank-worker проверяет ingest receipt и terminal закрывает
 Job/manifest. Raw provider body нигде durable не сохраняется.
 
+Автоматизации съёма доступны на
+`/app/projects/:projectId/rankings/automations`. Public API реализует
+collection CRUD, `GET/POST .../{automationId}/runs`, pause и resume. Daily и
+weekly cron переводятся BullMQ Job Scheduler с IANA timezone; scheduler ID
+стабилен от automation ID, а payload содержит только ID и version.
+Definition и каждый run сохраняют exact redacted execution snapshot, поэтому
+поздняя доставка не читает browser context. Create и manual run идемпотентны,
+mutations требуют OCC, включённые schedules сериализуются общим
+billing-capacity lock. Advisory lock одного automation дедуплицирует delivery
+и создаёт `SKIPPED/OVERLAPPING_RUN`, если предыдущий run ещё активен.
+Estimate и rank Job используют stable run-derived keys; restart
+reconciliation повторяет только идемпотентный pre-dispatch и settle-ит
+terminal Job. После заданного числа последовательных ошибок scheduler
+удаляется и automation переходит на `FAILURE_THRESHOLD` pause. Run связан
+с automation, estimate и Job составными tenant/project FK; PostgreSQL
+проверяет lifecycle, provenance, idempotency и хронологию. Ошибка Redis после
+DB commit не превращает успешную mutation в ложный отказ: UI получает
+durable definition без `nextRunAt`, а bounded reconciliation повторно
+синхронизирует включённые и удаляет scheduler отключённых definitions.
+Истёкший тариф не скрывает сохранённые расписания и историю: read projection
+показывает последний immutable plan limit, но новые включения и provider calls
+по-прежнему fail-closed.
+
 ## 8. Проверенное состояние
 
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API tests: 387 pass, 0 fail, 4 opt-in PostgreSQL 18 tests skipped
+- Platform API tests: 431 pass, 0 fail, 5 opt-in PostgreSQL 18 tests skipped
   без отдельного disposable database URL.
-- SEO data unit tests: 116 pass, 0 fail.
-- Jobs/integrations tests: 415 pass, 0 fail, 9 disposable-DB tests skipped
+- SEO data unit tests: 121 pass, 0 fail.
+- Jobs/integrations tests: 434 pass, 0 fail, 9 disposable-DB tests skipped
   в обычном запуске; startup decrypt-canary targeted suite — 7/7 pass.
 - Realtime unit tests: 112 pass, 0 fail.
-- Contracts unit tests: 98 pass, 0 fail.
-- Unified Web helper tests: 151 pass, 0 fail.
+- Contracts unit tests: 100 pass, 0 fail.
+- Unified Web helper tests: 157 pass, 0 fail.
 - Infrastructure DB-role/connector и затронутый rank dependency targeted
   scope: 9 pass, 0 fail; PostgreSQL regressions остаются opt-in в обычном
   запуске.
@@ -1603,17 +1661,24 @@ Job/manifest. Raw provider body нигде durable не сохраняется.
   partial complete, cancel и final failure. Fresh 13-migration SEO Data и
   28-migration Jobs chains применены на PostgreSQL 16 compatibility harness;
   Prisma validate/generate, unit boundaries и migration contracts проходят.
+- P2 rank automation gate 2026-07-31: fresh полная цепочка из 29 Jobs
+  migrations применена на PostgreSQL 16 compatibility harness; Prisma
+  validate/generate, Platform API 431 + 5 skips, Jobs 434 + 9 skips, Web
+  157/157 и strict lint проходят. Redis 8.8.1 live-smoke 3/3 отдельно
+  подтвердил новый Job Scheduler под production ACL, обычный Queue/Worker,
+  tenant keyspace isolation и запрет опасных команд. Внешний Arsenkin canary
+  остаётся отдельным operator gate до реального BYOK API key.
 
 ## 9. Следующий вертикальный срез
 
 Ближайший обязательный billing-контур после
-projects/seats/BYOK/keyword/tracked-pair entitlement:
+projects/seats/BYOK/keyword/tracked-pair/storage/automation entitlement:
 
-`storage/automation meters → estimate/reservation/capture для provider usage →
+`estimate/reservation/capture для provider usage →
 sandbox checkout/autopay/refund/receipt E2E`
 
-Критерий — тариф дополнительно ограничивает storage/automations,
-каждая platform-paid команда проходит estimate/reservation/settlement, а
+Критерий — каждая platform-paid команда проходит
+estimate/reservation/settlement, а
 успешная оплата создаёт и доводит до доставки официальный чек без ручного
 изменения БД. До YooKassa shop credentials и юридической конфигурации внешний
 live canary честно остаётся operator gate.
@@ -1627,9 +1692,10 @@ PostgreSQL: пользователь создаёт проект и структ
 редактирует запросы, выполняет bulk-команду, сохраняет view, экспортирует и
 восстанавливает версию без tenant/permission leak и silent overwrite.
 
-После live rank smoke продолжается P2:
+После automation vertical продолжается P2:
 
-`schedules/automation → provider incident telemetry → raw SERP policy`
+`provider incident telemetry → raw SERP policy → дополнительные rank
+providers`
 
 Provider-free estimate и SEO Data immutable manifest из ADR-2026-034
 завершены; durable Jobs `PREPARING` saga, exact seal recovery, cooperative
@@ -1728,9 +1794,9 @@ OAuth/OIDC выполняется после подтверждения зави
   autopay и refund canary остаются release gates. Production startup требует
   reconciliation и webhook source-IP validation при включённой YooKassa.
 - Тарифные entitlements являются authoritative transaction guard для
-  projects, seats, `CLIENT` role и controlled-beta BYOK grant. Keywords,
-  storage, tracked pairs, automations/guest reports/API limits ещё требуют
-  owner-service meters, а system-provider usage пока не проводит
+  projects, seats, `CLIENT` role, keywords, storage, tracked pairs,
+  scheduled automations и controlled-beta BYOK grant. Guest reports/API
+  limits ещё требуют owner-service meters, а system-provider usage пока не проводит
   estimate/reservation/capture через новый ledger. До замыкания этих
   контуров биллинг нельзя считать полным коммерческим enforcement.
 - Manual NPD obligation создаётся идемпотентно после verified

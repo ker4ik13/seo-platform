@@ -12,6 +12,8 @@ import {
   rankRunConflictReasons
 } from "@seo-platform/contracts";
 import type {
+  AutomationRunCollection,
+  AutomationRunSummary,
   CompleteUploadInput,
   ConfigureSemanticImportInput,
   CancelSemanticImportInput,
@@ -29,10 +31,14 @@ import type {
   InternalCreateProjectConnectorBindingInput,
   InternalCreateRankEstimateInput,
   InternalCreateRankRunInput,
+  InternalRunRankTrackingAutomationInput,
   InternalCancelRankJobInput,
+  InternalAutomationStatusInput,
+  InternalCreateRankTrackingAutomationInput,
   InternalDeleteIntegrationCredentialInput,
   InternalUpdateProjectConnectorBindingInput,
   InternalUpdateIntegrationCredentialInput,
+  InternalUpdateRankTrackingAutomationInput,
   InternalCreateUploadInput,
   InternalCreateSemanticImportInput,
   InternalConfigureSemanticImportInput,
@@ -44,6 +50,8 @@ import type {
   ProjectConnectorCredentialOption,
   ProjectConnectorFallbackPolicy,
   ProjectConnectorRoute,
+  RankTrackingAutomationCollection,
+  RankTrackingAutomationSummary,
   RankEstimate,
   RankRunConflictDetails,
   RankRunConflictReason,
@@ -61,6 +69,12 @@ import { APP_CONFIG } from "../config/config.module.js";
 import type { AppConfig } from "../config/app-config.js";
 import { scopedRankJobSummary } from "./rank-job-response.js";
 import { scopedRankEstimate } from "./rank-estimate-response.js";
+import {
+  scopedAutomation,
+  scopedAutomationCollection,
+  scopedAutomationRun,
+  scopedAutomationRuns
+} from "./automation-response.js";
 
 interface InternalContext {
   readonly tenant: TenantAuthorization;
@@ -120,6 +134,144 @@ export class JobsClient {
       entitlement
     };
     return this.request("POST", "/internal/v1/uploads", context, body);
+  }
+
+  public async listAutomations(
+    context: InternalContext,
+    limit: number
+  ): Promise<RankTrackingAutomationCollection> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      `${automationCollectionPath(
+        context.tenant.workspaceId,
+        projectId
+      )}?limit=${encodeURIComponent(String(limit))}`,
+      context
+    );
+    return scopedAutomationCollection(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      limit
+    );
+  }
+
+  public async createAutomation(
+    context: InternalContext,
+    input: InternalCreateRankTrackingAutomationInput
+  ): Promise<RankTrackingAutomationSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "POST",
+      automationCollectionPath(
+        context.tenant.workspaceId,
+        projectId
+      ),
+      context,
+      input,
+      "shared",
+      input.idempotencyKey
+    );
+    return scopedAutomation(
+      value,
+      context.tenant.workspaceId,
+      projectId
+    );
+  }
+
+  public async updateAutomation(
+    context: InternalContext,
+    input: InternalUpdateRankTrackingAutomationInput
+  ): Promise<RankTrackingAutomationSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "PATCH",
+      automationPath(
+        context.tenant.workspaceId,
+        projectId,
+        input.automationId
+      ),
+      context,
+      input
+    );
+    return scopedAutomation(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      input.automationId
+    );
+  }
+
+  public async setAutomationStatus(
+    context: InternalContext,
+    input: InternalAutomationStatusInput,
+    action: "pause" | "resume"
+  ): Promise<RankTrackingAutomationSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "POST",
+      `${automationPath(
+        context.tenant.workspaceId,
+        projectId,
+        input.automationId
+      )}/${action}`,
+      context,
+      input
+    );
+    return scopedAutomation(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      input.automationId
+    );
+  }
+
+  public async listAutomationRuns(
+    context: InternalContext,
+    automationId: string
+  ): Promise<AutomationRunCollection> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      `${automationPath(
+        context.tenant.workspaceId,
+        projectId,
+        automationId
+      )}/runs`,
+      context
+    );
+    return scopedAutomationRuns(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      automationId
+    );
+  }
+
+  public async runAutomation(
+    context: InternalContext,
+    input: InternalRunRankTrackingAutomationInput
+  ): Promise<AutomationRunSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "POST",
+      `${automationPath(
+        context.tenant.workspaceId,
+        projectId,
+        input.automationId
+      )}/runs`,
+      context,
+      input,
+      "shared",
+      input.idempotencyKey
+    );
+    return scopedAutomationRun(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      input.automationId
+    );
   }
 
   public createUploadPartUrls(
@@ -735,6 +887,26 @@ function rankJobPath(
   )}/projects/${encodeURIComponent(
     projectId
   )}/jobs/${encodeURIComponent(jobId)}`;
+}
+
+function automationCollectionPath(
+  workspaceId: string,
+  projectId: string
+): string {
+  return `/internal/v1/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/projects/${encodeURIComponent(projectId)}/automations`;
+}
+
+function automationPath(
+  workspaceId: string,
+  projectId: string,
+  automationId: string
+): string {
+  return `${automationCollectionPath(
+    workspaceId,
+    projectId
+  )}/${encodeURIComponent(automationId)}`;
 }
 
 function requiredProjectId(tenant: TenantAuthorization): string {

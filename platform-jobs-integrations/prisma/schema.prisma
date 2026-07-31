@@ -195,6 +195,7 @@ model Job {
   rankProviderRequestIntents        RankProviderRequestIntent[]
   rankConnectorExecutions           RankConnectorExecution[]    @relation("RankConnectorExecutionJob")
   rankConnectorValidationExecutions RankConnectorExecution[]    @relation("RankConnectorExecutionValidationJob")
+  automationRuns                    AutomationRun[]
 
   @@unique([workspaceId, idempotencyScope, idempotencyKey])
   @@unique([workspaceId, id], map: "jobs_tenant_id_key")
@@ -396,6 +397,7 @@ model RankEstimate {
   createdAt                            DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
 
   rankRun RankJobRun?
+  automationRuns AutomationRun[]
 
   @@unique([workspaceId, idempotencyScope, idempotencyKey], map: "rank_estimates_workspace_scope_idempotency_key")
   @@unique([workspaceId, projectId, id], map: "rank_estimates_tenant_project_id_key")
@@ -645,12 +647,63 @@ model Automation {
   nextRunAt      DateTime? @map("next_run_at") @db.Timestamptz(6)
   lastRunAt      DateTime? @map("last_run_at") @db.Timestamptz(6)
   consecutiveErr Int       @default(0) @map("consecutive_errors")
+  createdBy      String?   @map("created_by") @db.Uuid
+  updatedBy      String?   @map("updated_by") @db.Uuid
+  idempotencyKey String?   @map("idempotency_key") @db.VarChar(180)
   version        Int       @default(1)
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  runs AutomationRun[]
+
+  @@unique([workspaceId, createdBy, idempotencyKey], map: "automations_workspace_actor_idempotency_key")
+  @@unique([id, workspaceId, projectId], map: "automations_tenant_project_id_key")
   @@index([workspaceId, projectId, enabled, nextRunAt])
   @@map("automations")
+}
+
+enum AutomationRunStatus {
+  RUNNING
+  DISPATCHED
+  SKIPPED
+  COMPLETED
+  FAILED
+}
+
+enum AutomationRunTrigger {
+  SCHEDULE
+  MANUAL
+}
+
+model AutomationRun {
+  id                String               @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  automationId      String               @map("automation_id") @db.Uuid
+  automationVersion Int                  @map("automation_version")
+  workspaceId       String               @map("workspace_id") @db.Uuid
+  projectId         String               @map("project_id") @db.Uuid
+  status            AutomationRunStatus
+  trigger           AutomationRunTrigger
+  scheduledFor      DateTime             @map("scheduled_for") @db.Timestamptz(6)
+  actorId           String               @map("actor_id") @db.Uuid
+  idempotencyKey    String?              @map("idempotency_key") @db.VarChar(180)
+  definition        Json
+  estimateId        String?              @map("estimate_id") @db.Uuid
+  jobId             String?              @map("job_id") @db.Uuid
+  errorCode         String?              @map("error_code") @db.VarChar(100)
+  startedAt         DateTime?            @map("started_at") @db.Timestamptz(6)
+  finishedAt        DateTime?            @map("finished_at") @db.Timestamptz(6)
+  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  automation Automation  @relation(fields: [automationId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, onUpdate: Restrict, map: "automation_runs_automation_tenant_fkey")
+  estimate   RankEstimate? @relation(fields: [workspaceId, projectId, estimateId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "automation_runs_estimate_tenant_fkey")
+  job        Job?          @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "automation_runs_job_tenant_fkey")
+
+  @@unique([automationId, scheduledFor], map: "automation_runs_schedule_key")
+  @@unique([automationId, actorId, idempotencyKey], map: "automation_runs_manual_idempotency_key")
+  @@index([workspaceId, projectId, automationId, createdAt], map: "automation_runs_tenant_created_idx")
+  @@index([status, createdAt], map: "automation_runs_status_created_idx")
+  @@map("automation_runs")
 }
 
 model Upload {

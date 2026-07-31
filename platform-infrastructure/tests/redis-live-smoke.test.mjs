@@ -52,7 +52,7 @@ const IoRedis = ioRedisModule.default ?? ioRedisModule;
 const { createClient } = realtimeRequire("redis");
 
 const jobsUsers = [
-  ["seo_jobs_api", "REDIS_JOBS_API_PASSWORD", "system"],
+  ["seo_jobs_api", "REDIS_JOBS_API_PASSWORD", "rank-automation"],
   ["seo_jobs_system", "REDIS_JOBS_SYSTEM_PASSWORD", "system"],
   [
     "seo_jobs_inspection",
@@ -123,7 +123,18 @@ test("Redis 8 Jobs ACL runs BullMQ and enforces queue keyspaces", liveTestOption
       await closeIoRedis(rankClient);
     }
 
-    await assertBullMqRoundTrip(port, secrets.REDIS_JOBS_RANK_PASSWORD);
+    await assertBullMqRoundTrip(
+      port,
+      "seo_jobs_rank",
+      secrets.REDIS_JOBS_RANK_PASSWORD,
+      "rank-preparation"
+    );
+    await assertBullMqRoundTrip(
+      port,
+      "seo_jobs_api",
+      secrets.REDIS_JOBS_API_PASSWORD,
+      "rank-automation"
+    );
   });
 });
 
@@ -207,11 +218,16 @@ test("Redis 8 Directus ACL supports cache operations but denies administration",
   });
 });
 
-async function assertBullMqRoundTrip(port, password) {
+async function assertBullMqRoundTrip(
+  port,
+  username,
+  password,
+  queueName
+) {
   const connection = {
     host: "127.0.0.1",
     port,
-    username: "seo_jobs_rank",
+    username,
     password,
     maxRetriesPerRequest: null,
     retryStrategy: () => null
@@ -220,18 +236,34 @@ async function assertBullMqRoundTrip(port, password) {
     connection,
     prefix: "seo-platform:jobs:v1"
   };
-  const queue = new Queue("rank-preparation", options);
-  const worker = new Worker(
-    "rank-preparation",
-    async (job) => ({ accepted: job.data.marker }),
-    options
-  );
-  worker.on("error", () => undefined);
+  const queue = new Queue(queueName, options);
+  let worker;
   try {
+    await withDeadline(queue.waitUntilReady(), 5_000, "BullMQ queue did not become ready");
+    if (queueName === "rank-automation") {
+      const schedulerId = `live-scheduler-${randomUUID()}`;
+      const scheduled = await queue.upsertJobScheduler(
+        schedulerId,
+        { every: 60_000 },
+        {
+          name: "rank.automation.live-smoke",
+          data: { marker: schedulerId }
+        }
+      );
+      assert.equal(typeof scheduled.id, "string");
+      assert.equal(await queue.removeJobScheduler(schedulerId), true);
+      await scheduled.remove();
+    }
+    worker = new Worker(
+      queueName,
+      async (job) => ({ accepted: job.data.marker }),
+      options
+    );
+    worker.on("error", () => undefined);
     await withDeadline(
-      Promise.all([queue.waitUntilReady(), worker.waitUntilReady()]),
+      worker.waitUntilReady(),
       5_000,
-      "BullMQ clients did not become ready"
+      "BullMQ worker did not become ready"
     );
     const marker = randomUUID();
     const completion = new Promise((resolve, reject) => {
@@ -266,7 +298,10 @@ async function assertBullMqRoundTrip(port, password) {
       result: { accepted: marker }
     });
   } finally {
-    await Promise.allSettled([worker.close(true), queue.close()]);
+    await Promise.allSettled([
+      ...(worker ? [worker.close(true)] : []),
+      queue.close()
+    ]);
   }
 }
 

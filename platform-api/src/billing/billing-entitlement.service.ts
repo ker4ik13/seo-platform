@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type {
+  AutomationCapacityEntitlement,
   BillingPlanFeatures,
   SemanticCapacityEntitlement,
   StorageCapacityEntitlement
@@ -77,6 +78,56 @@ export class BillingEntitlementService {
         planVersion: entitlement.planVersion,
         storageBytes: entitlement.features.storageBytes
       };
+    });
+  }
+
+  public async automationCapacity(
+    workspaceId: string
+  ): Promise<AutomationCapacityEntitlement> {
+    return this.prisma.$transaction(async (transaction) => {
+      const entitlement = await this.requiredEntitlement(
+        transaction,
+        workspaceId
+      );
+      return {
+        planCode: entitlement.planCode,
+        planVersion: entitlement.planVersion,
+        scheduledAutomations:
+          entitlement.features.scheduledAutomations
+      };
+    });
+  }
+
+  public async automationCapacityForRead(
+    workspaceId: string
+  ): Promise<AutomationCapacityEntitlement> {
+    return this.prisma.$transaction(async (transaction) => {
+      const current = await this.snapshotInTransaction(
+        transaction,
+        workspaceId
+      );
+      if (current) return automationCapacity(current);
+
+      const historical =
+        await transaction.billingSubscription.findUnique({
+          where: { workspaceId },
+          include: {
+            planVersion: {
+              include: { plan: true }
+            }
+          }
+        });
+      if (!historical) {
+        throw missingEntitlement(workspaceId);
+      }
+      return automationCapacity({
+        planCode: historical.planVersion.plan.code,
+        planVersion: historical.planVersion.version,
+        features: billingPlanFeatures(
+          historical.planVersion.features
+        ),
+        source: "SUBSCRIPTION"
+      });
     });
   }
 
@@ -236,12 +287,7 @@ export class BillingEntitlementService {
       workspaceId
     );
     if (entitlement) return entitlement;
-    throw new DomainError({
-      statusCode: 402,
-      code: "PAYMENT_REQUIRED",
-      message: "An active subscription is required for this operation",
-      details: { workspaceId }
-    });
+    throw missingEntitlement(workspaceId);
   }
 
   private async lockMutableWorkspace(
@@ -324,6 +370,25 @@ export class BillingEntitlementService {
     }
     return now;
   }
+}
+
+function automationCapacity(
+  entitlement: BillingEntitlementSnapshot
+): AutomationCapacityEntitlement {
+  return {
+    planCode: entitlement.planCode,
+    planVersion: entitlement.planVersion,
+    scheduledAutomations: entitlement.features.scheduledAutomations
+  };
+}
+
+function missingEntitlement(workspaceId: string): DomainError {
+  return new DomainError({
+    statusCode: 402,
+    code: "PAYMENT_REQUIRED",
+    message: "An active subscription is required for this operation",
+    details: { workspaceId }
+  });
 }
 
 function subscriptionIsUsable(

@@ -89,6 +89,12 @@ export interface StorageCapacityEntitlement {
   readonly storageBytes: number;
 }
 
+export interface AutomationCapacityEntitlement {
+  readonly planCode: string;
+  readonly planVersion: number;
+  readonly scheduledAutomations: number;
+}
+
 export interface BillingPlanPrice {
   readonly period: BillingPeriod;
   readonly currency: "RUB";

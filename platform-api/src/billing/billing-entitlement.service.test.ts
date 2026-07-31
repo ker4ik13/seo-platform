@@ -60,6 +60,63 @@ test("projects the exact trusted storage capacity snapshot", async () => {
   });
 });
 
+test("projects the exact trusted automation capacity snapshot", async () => {
+  const transaction = onboardingTransaction();
+  const service = new BillingEntitlementService({
+    $transaction: async (
+      callback: (
+        client: Prisma.TransactionClient
+      ) => Promise<unknown>
+    ) => callback(transaction)
+  } as unknown as PrismaService);
+
+  assert.deepEqual(await service.automationCapacity(WORKSPACE_ID), {
+    planCode: "TRIAL",
+    planVersion: 1,
+    scheduledAutomations: 1
+  });
+});
+
+test("keeps the last immutable automation limit readable after expiry", async () => {
+  const expired = {
+    status: "TRIALING",
+    currentPeriodEnd: new Date("2026-07-30T23:59:59.000Z"),
+    graceEnd: null,
+    planVersion: {
+      version: 7,
+      features: { ...planFeatures(), scheduledAutomations: 10 },
+      plan: { code: "TEAM" }
+    }
+  };
+  let subscriptionReads = 0;
+  const transaction = {
+    $queryRaw: async () => [{ now: NOW }],
+    billingSubscription: {
+      findUnique: async () => {
+        subscriptionReads += 1;
+        return expired;
+      }
+    }
+  } as unknown as Prisma.TransactionClient;
+  const service = new BillingEntitlementService({
+    $transaction: async (
+      callback: (
+        client: Prisma.TransactionClient
+      ) => Promise<unknown>
+    ) => callback(transaction)
+  } as unknown as PrismaService);
+
+  assert.deepEqual(
+    await service.automationCapacityForRead(WORKSPACE_ID),
+    {
+      planCode: "TEAM",
+      planVersion: 7,
+      scheduledAutomations: 10
+    }
+  );
+  assert.equal(subscriptionReads, 2);
+});
+
 test("projects current BYOK access for an interactive rank estimate", async () => {
   const transaction = onboardingTransaction();
   const service = new BillingEntitlementService({

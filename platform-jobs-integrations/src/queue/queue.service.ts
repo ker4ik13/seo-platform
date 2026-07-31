@@ -31,6 +31,15 @@ import {
   RANK_PREPARATION_QUEUE,
   type RankPreparationJobData
 } from "./rank-preparation.queue.js";
+import {
+  removeRankAutomationScheduler,
+  RANK_AUTOMATION_QUEUE,
+  type RankAutomationJobData,
+  upsertRankAutomationScheduler
+} from "./rank-automation.queue.js";
+import type {
+  AutomationSchedule
+} from "@seo-platform/contracts";
 
 export const SYSTEM_QUEUE = "system";
 
@@ -45,6 +54,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   private semanticImportQueue?: Queue<SemanticImportJobData>;
   private integrationCredentialValidationQueue?: Queue<IntegrationCredentialValidationJobData>;
   private rankPreparationQueue?: Queue<RankPreparationJobData>;
+  private rankAutomationQueue?: Queue<RankAutomationJobData>;
 
   public constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
@@ -78,6 +88,10 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       RANK_PREPARATION_QUEUE,
       bullMqConnectionOptions(this.connection)
     );
+    this.rankAutomationQueue = new Queue(
+      RANK_AUTOMATION_QUEUE,
+      bullMqConnectionOptions(this.connection)
+    );
   }
 
   public async onModuleDestroy(): Promise<void> {
@@ -86,6 +100,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     await this.semanticImportQueue?.close();
     await this.integrationCredentialValidationQueue?.close();
     await this.rankPreparationQueue?.close();
+    await this.rankAutomationQueue?.close();
     await this.connection?.quit();
   }
 
@@ -155,5 +170,32 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       throw new Error("Rank preparation queue is not connected");
     }
     await enqueueRankPreparation(this.rankPreparationQueue, jobId);
+  }
+
+  public async upsertRankAutomationScheduler(input: {
+    readonly automationId: string;
+    readonly automationVersion: number;
+    readonly schedule: AutomationSchedule;
+    readonly timezone: string;
+  }): Promise<Date> {
+    if (!this.rankAutomationQueue) {
+      throw new Error("Rank automation queue is not connected");
+    }
+    return upsertRankAutomationScheduler(
+      this.rankAutomationQueue,
+      input
+    );
+  }
+
+  public async removeRankAutomationScheduler(
+    automationId: string
+  ): Promise<boolean> {
+    if (!this.rankAutomationQueue) {
+      throw new Error("Rank automation queue is not connected");
+    }
+    return removeRankAutomationScheduler(
+      this.rankAutomationQueue,
+      automationId
+    );
   }
 }

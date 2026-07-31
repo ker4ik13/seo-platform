@@ -13,6 +13,7 @@ import { StorageModule } from "./storage/storage.module.js";
 import { SystemModule } from "./system/system.module.js";
 import { UploadModule } from "./uploads/upload.module.js";
 import { SemanticImportModule } from "./imports/semantic-import.module.js";
+import { AutomationModule } from "./automations/automation.module.js";
 
 @Module({
   imports: [
@@ -29,7 +30,8 @@ import { SemanticImportModule } from "./imports/semantic-import.module.js";
     HealthModule,
     SystemModule,
     UploadModule,
-    SemanticImportModule
+    SemanticImportModule,
+    AutomationModule
   ]
 })
 export class AppModule {}

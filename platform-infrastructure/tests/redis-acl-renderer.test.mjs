@@ -72,6 +72,7 @@ test("renderer is POSIX shell and writes hashed least-privilege Jobs ACLs", asyn
       keyPatterns(userLine(lines, "seo_jobs_api")),
       [
         "~seo-platform:jobs:v1:integration-credential-validation:*",
+        "~seo-platform:jobs:v1:rank-automation:*",
         "~seo-platform:jobs:v1:rank-preparation:*",
         "~seo-platform:jobs:v1:semantic-import:*",
         "~seo-platform:jobs:v1:system:*",

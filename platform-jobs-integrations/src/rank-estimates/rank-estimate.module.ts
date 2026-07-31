@@ -7,6 +7,7 @@ import { RankEstimateService } from "./rank-estimate.service.js";
 @Module({
   imports: [IntegrationModule, SeoDataModule],
   controllers: [RankEstimateController],
-  providers: [RankEstimateService]
+  providers: [RankEstimateService],
+  exports: [RankEstimateService]
 })
 export class RankEstimateModule {}
