@@ -45,6 +45,7 @@ export function ProjectCrawlAudit({
   );
   const [maxUrls, setMaxUrls] = useState("100");
   const [maxDepth, setMaxDepth] = useState("3");
+  const [maxRuntimeMinutes, setMaxRuntimeMinutes] = useState("60");
   const [rpm, setRpm] = useState("30");
   const [sitemapUrls, setSitemapUrls] = useState("");
   const [includePatterns, setIncludePatterns] = useState("");
@@ -120,6 +121,7 @@ export function ProjectCrawlAudit({
           queryPolicy,
           maxUrls: Number(maxUrls),
           maxDepth: Number(maxDepth),
+          maxRuntimeSeconds: Number(maxRuntimeMinutes) * 60,
           requestsPerMinute: Number(rpm),
           obeyRobots: true
         }
@@ -188,6 +190,13 @@ export function ProjectCrawlAudit({
         </label>
         <NumberField label="Лимит URL" max={1000} min={1} set={setMaxUrls} value={maxUrls} />
         <NumberField label="Глубина" max={10} min={0} set={setMaxDepth} value={maxDepth} />
+        <NumberField
+          label="Макс. время, мин"
+          max={360}
+          min={1}
+          set={setMaxRuntimeMinutes}
+          value={maxRuntimeMinutes}
+        />
         <NumberField label="Запросов/мин" max={60} min={1} set={setRpm} value={rpm} />
         <label className="form-field crawl-audit-scope">
           <span>Sitemap URL, до 10 (необязательно)</span>

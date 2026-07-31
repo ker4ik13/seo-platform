@@ -14,6 +14,7 @@ const config = {
   queryPolicy: "DROP_TRACKING" as const,
   maxUrls: 100,
   maxDepth: 3,
+  maxRuntimeSeconds: 3_600,
   requestsPerMinute: 30,
   obeyRobots: true as const
 };

@@ -174,6 +174,7 @@ export class JobsClient {
     const projectId = requiredProjectId(context.tenant);
     const body: InternalCreateTechnicalCrawlInput = {
       ...input,
+      maxRuntimeSeconds: input.maxRuntimeSeconds ?? 3_600,
       workspaceId: context.tenant.workspaceId,
       projectId,
       actorId: context.actorId,
@@ -1038,8 +1039,9 @@ function technicalCrawlResponse(
   const responseWorkspaceId = uuidValue(input.workspaceId);
   const responseProjectId = uuidValue(input.projectId);
   const configInput = record(input.config);
+  const configKeys = Object.keys(configInput).length;
   const config =
-    Object.keys(configInput).length === 5
+    configKeys === 5
       ? exactRecord(configInput, [
           "startUrls",
           "maxUrls",
@@ -1047,7 +1049,8 @@ function technicalCrawlResponse(
           "requestsPerMinute",
           "obeyRobots"
         ])
-      : exactRecord(configInput, [
+      : configKeys === 9
+        ? exactRecord(configInput, [
           "startUrls",
           "sitemapUrls",
           "includePatterns",
@@ -1055,6 +1058,18 @@ function technicalCrawlResponse(
           "queryPolicy",
           "maxUrls",
           "maxDepth",
+          "requestsPerMinute",
+          "obeyRobots"
+        ])
+        : exactRecord(configInput, [
+          "startUrls",
+          "sitemapUrls",
+          "includePatterns",
+          "excludePatterns",
+          "queryPolicy",
+          "maxUrls",
+          "maxDepth",
+          "maxRuntimeSeconds",
           "requestsPerMinute",
           "obeyRobots"
         ]);
@@ -1076,7 +1091,8 @@ function technicalCrawlResponse(
     [
       "ROBOTS_UNAVAILABLE",
       "SITEMAP_UNAVAILABLE",
-      "CRAWL_EXECUTION_FAILED"
+      "CRAWL_EXECUTION_FAILED",
+      "MAX_RUNTIME_EXCEEDED"
     ].includes(
       input.failureCode
     )
@@ -1130,6 +1146,10 @@ function technicalCrawlResponse(
         queryPolicy as TechnicalCrawlSummary["config"]["queryPolicy"],
       maxUrls: boundedPositiveInteger(config.maxUrls, 1_000),
       maxDepth: boundedNonNegativeInteger(config.maxDepth, 10),
+      maxRuntimeSeconds: boundedPositiveInteger(
+        config.maxRuntimeSeconds ?? 3_600,
+        21_600
+      ),
       requestsPerMinute: boundedPositiveInteger(
         config.requestsPerMinute,
         60

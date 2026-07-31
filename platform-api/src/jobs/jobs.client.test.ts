@@ -153,6 +153,7 @@ test("upgrades a rolling legacy crawl response with safe scope defaults", async 
       queryPolicy: "DROP_TRACKING",
       maxUrls: 100,
       maxDepth: 3,
+      maxRuntimeSeconds: 3_600,
       requestsPerMinute: 30,
       obeyRobots: true
     });
@@ -927,6 +928,7 @@ function crawlResponseData(
       queryPolicy: "DROP_TRACKING",
       maxUrls: 100,
       maxDepth: 3,
+      maxRuntimeSeconds: 3_600,
       requestsPerMinute: 30,
       obeyRobots: true
     },

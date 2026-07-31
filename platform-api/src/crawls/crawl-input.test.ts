@@ -19,6 +19,7 @@ test("accepts one same-origin bounded crawl command", () => {
       queryPolicy: "DROP_TRACKING",
       maxUrls: 100,
       maxDepth: 3,
+      maxRuntimeSeconds: 3_600,
       requestsPerMinute: 30,
       obeyRobots: true
     }
@@ -48,6 +49,12 @@ test("rejects cross-origin, credential and robots bypass commands", () => {
   assert.throws(() =>
     createTechnicalCrawlInput({ ...base, obeyRobots: false })
   );
+  assert.throws(() =>
+    createTechnicalCrawlInput({ ...base, maxRuntimeSeconds: 59 })
+  );
+  assert.throws(() =>
+    createTechnicalCrawlInput({ ...base, maxRuntimeSeconds: 21_601 })
+  );
 });
 
 test("normalizes bounded sitemap scope and rejects unsafe patterns", () => {
@@ -71,6 +78,7 @@ test("normalizes bounded sitemap scope and rejects unsafe patterns", () => {
       queryPolicy: "DROP_ALL",
       maxUrls: 500,
       maxDepth: 2,
+      maxRuntimeSeconds: 3_600,
       requestsPerMinute: 20,
       obeyRobots: true
     }

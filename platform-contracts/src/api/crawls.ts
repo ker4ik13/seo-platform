@@ -28,12 +28,15 @@ export interface TechnicalCrawlConfig {
   readonly queryPolicy: TechnicalCrawlQueryPolicy;
   readonly maxUrls: number;
   readonly maxDepth: number;
+  readonly maxRuntimeSeconds: number;
   readonly requestsPerMinute: number;
   readonly obeyRobots: true;
 }
 
 export interface CreateTechnicalCrawlInput
-  extends TechnicalCrawlConfig {}
+  extends Omit<TechnicalCrawlConfig, "maxRuntimeSeconds"> {
+  readonly maxRuntimeSeconds?: number;
+}
 
 export interface TechnicalCrawlSummary {
   readonly id: string;
@@ -80,7 +83,7 @@ export interface TechnicalCrawlSettings
 }
 
 export interface InternalCreateTechnicalCrawlInput
-  extends CreateTechnicalCrawlInput {
+  extends TechnicalCrawlConfig {
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;

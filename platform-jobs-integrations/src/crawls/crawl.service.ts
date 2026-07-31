@@ -422,7 +422,8 @@ export class CrawlService {
   public async finish(
     crawlId: string,
     leaseOwner: string,
-    status: "COMPLETED" | "PARTIALLY_COMPLETED" | "CANCELLED"
+    status: "COMPLETED" | "PARTIALLY_COMPLETED" | "CANCELLED",
+    failureCode?: string
   ): Promise<TechnicalCrawl> {
     return this.prisma.$transaction(async (transaction) => {
       const current = await transaction.technicalCrawl.findFirst({
@@ -451,6 +452,7 @@ export class CrawlService {
         data: {
           status,
           finishedAt: new Date(),
+          failureCode: failureCode?.slice(0, 64) ?? null,
           backoffCode: null,
           backoffUntil: null,
           version: { increment: 1 }
@@ -671,6 +673,7 @@ function configJson(input: InternalCreateTechnicalCrawlInput): Prisma.InputJsonV
     queryPolicy: input.queryPolicy,
     maxUrls: input.maxUrls,
     maxDepth: input.maxDepth,
+    maxRuntimeSeconds: input.maxRuntimeSeconds,
     requestsPerMinute: input.requestsPerMinute,
     obeyRobots: true
   };

@@ -32,6 +32,7 @@ export function internalCreateTechnicalCrawlInput(
     "queryPolicy",
     "maxUrls",
     "maxDepth",
+    "maxRuntimeSeconds",
     "requestsPerMinute",
     "obeyRobots"
   ]);
@@ -112,6 +113,12 @@ export function crawlConfig(
     queryPolicy,
     maxUrls: integer(value.maxUrls, "maxUrls", 1, 1_000),
     maxDepth: integer(value.maxDepth, "maxDepth", 0, 10),
+    maxRuntimeSeconds: integer(
+      value.maxRuntimeSeconds ?? 3_600,
+      "maxRuntimeSeconds",
+      60,
+      21_600
+    ),
     requestsPerMinute: integer(
       value.requestsPerMinute,
       "requestsPerMinute",

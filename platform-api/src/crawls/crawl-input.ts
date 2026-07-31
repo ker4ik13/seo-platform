@@ -20,6 +20,7 @@ export function createTechnicalCrawlInput(
     "queryPolicy",
     "maxUrls",
     "maxDepth",
+    "maxRuntimeSeconds",
     "requestsPerMinute",
     "obeyRobots"
   ];
@@ -69,6 +70,12 @@ export function createTechnicalCrawlInput(
     queryPolicy,
     maxUrls: integer(input.maxUrls, "maxUrls", 1, 1_000),
     maxDepth: integer(input.maxDepth, "maxDepth", 0, 10),
+    maxRuntimeSeconds: integer(
+      input.maxRuntimeSeconds ?? 3_600,
+      "maxRuntimeSeconds",
+      60,
+      21_600
+    ),
     requestsPerMinute: integer(
       input.requestsPerMinute,
       "requestsPerMinute",

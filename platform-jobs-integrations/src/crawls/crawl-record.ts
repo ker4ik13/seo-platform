@@ -44,6 +44,14 @@ export function storedCrawlConfig(value: Prisma.JsonValue): TechnicalCrawlConfig
     !Number.isSafeInteger(input.maxDepth) ||
     Number(input.maxDepth) < 0 ||
     Number(input.maxDepth) > 10 ||
+    (
+      input.maxRuntimeSeconds !== undefined &&
+      (
+        !Number.isSafeInteger(input.maxRuntimeSeconds) ||
+        Number(input.maxRuntimeSeconds) < 60 ||
+        Number(input.maxRuntimeSeconds) > 21_600
+      )
+    ) ||
     !Number.isSafeInteger(input.requestsPerMinute) ||
     Number(input.requestsPerMinute) < 1 ||
     Number(input.requestsPerMinute) > 60 ||
@@ -82,6 +90,7 @@ export function storedCrawlConfig(value: Prisma.JsonValue): TechnicalCrawlConfig
     queryPolicy: queryPolicy as TechnicalCrawlQueryPolicy,
     maxUrls: Number(input.maxUrls),
     maxDepth: Number(input.maxDepth),
+    maxRuntimeSeconds: Number(input.maxRuntimeSeconds ?? 3_600),
     requestsPerMinute: Number(input.requestsPerMinute),
     obeyRobots: true
   };

@@ -242,6 +242,11 @@ backoff для host сразу между всеми workspace. Crawl сохра
 переходит обратно в durable queue с `backoffCode/backoffUntil`, не расходует
 page attempt и автоматически возобновляется dispatcher-ом; Web показывает
 причину и время следующей попытки.
+Каждый ручной crawl теперь также хранит bounded `maxRuntimeSeconds`
+(1–360 минут, безопасный default для legacy config). Deadline включает
+pacing и повторные доставки: worker до следующего сетевого запроса завершает
+просроченный обход как `PARTIALLY_COMPLETED` с
+`MAX_RUNTIME_EXCEEDED`, сохраняя уже собранные snapshots.
 
 P3 billing foundation реализован в Platform API и Web. Versioned каталог
 содержит Trial/Solo/Team/Agency/Business/Enterprise и годовые цены; hosted
@@ -1539,7 +1544,7 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
 - Platform API tests: 444 pass, 0 fail, 5 opt-in PostgreSQL 18 tests skipped
   без отдельного disposable database URL.
 - SEO data tests: 134 pass, 0 fail, 1 disposable-DB test skipped.
-- Jobs/integrations tests: 465 pass, 0 fail, 10 disposable-DB tests skipped
+- Jobs/integrations tests: 466 pass, 0 fail, 10 disposable-DB tests skipped
   в обычном запуске; startup decrypt-canary targeted suite — 7/7 pass.
 - Realtime unit tests: 112 pass, 0 fail.
 - Contracts unit tests: 100 pass, 0 fail.
@@ -2078,8 +2083,8 @@ OAuth/OIDC выполняется после подтверждения зави
   sitemap/include/exclude/query scope, conditional page requests, global
   host backoff, текущие issues и page diff history.
   Полный Radar из раздела 10 ТЗ ещё требует schedules/quiet windows,
-  duplicate groups, notifications, explicit max-runtime/long-lived
-  `PAUSED_BY_SITE` policy и отдельный
+  duplicate groups, notifications, long-lived `PAUSED_BY_SITE` policy и
+  отдельный
   browser-rendering pool. Sitemap disappearance гарантированно фиксируется,
   когда URL также остаётся доступен из start/link scope; для исчезнувшей из
   всех источников страницы требуется отдельный crawl-level membership

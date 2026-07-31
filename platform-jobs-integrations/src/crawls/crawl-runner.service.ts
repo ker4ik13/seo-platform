@@ -54,6 +54,10 @@ export class CrawlRunnerService {
     const crawl = await this.crawls.claim(crawlId, leaseOwner, leaseSeconds);
     if (!crawl) return;
     const crawlConfig = this.crawls.config(crawl);
+    const deadline = new Date(
+      (crawl.startedAt ?? new Date()).getTime() +
+        crawlConfig.maxRuntimeSeconds * 1_000
+    );
     const origin = new URL(crawlConfig.startUrls[0]!).origin;
     const host = new URL(origin).hostname;
     const checkpoint = this.crawls.checkpoint(crawl);
@@ -62,10 +66,14 @@ export class CrawlRunnerService {
     const sitemapPending = [...checkpoint.sitemapPending];
     const sitemapSeen = new Set(checkpoint.sitemapSeen);
     let scopeReady = checkpoint.scopeReady;
-    const paceRequest = requestPacer(crawlConfig.requestsPerMinute);
+    const paceRequest = requestPacer(
+      crawlConfig.requestsPerMinute,
+      deadline
+    );
     let sequence = crawl.processedUrls;
     let failureCode = "CRAWL_EXECUTION_FAILED";
     try {
+      assertCrawlRuntime(deadline);
       const existingBackoff = await this.hostStates.currentBackoff(host);
       if (existingBackoff) {
         await this.crawls.releaseForHostBackoff(
@@ -81,7 +89,7 @@ export class CrawlRunnerService {
         return;
       }
       failureCode = "ROBOTS_UNAVAILABLE";
-      const robots = await this.loadRobots(origin, paceRequest);
+      const robots = await this.loadRobots(origin, paceRequest, deadline);
       if (!scopeReady) {
         failureCode = "SITEMAP_UNAVAILABLE";
         while (sitemapPending.length > 0) {
@@ -102,7 +110,8 @@ export class CrawlRunnerService {
             sitemapUrl,
             origin,
             crawlConfig,
-            paceRequest
+            paceRequest,
+            deadline
           );
           sitemapPending.shift();
           for (const nested of document.sitemapUrls) {
@@ -227,7 +236,10 @@ export class CrawlRunnerService {
             url: next.url
           });
           const response = await fetchPublicResource(next.url, {
-            timeoutMs: this.config.crawl.requestTimeoutMs,
+            timeoutMs: remainingRequestTimeout(
+              deadline,
+              this.config.crawl.requestTimeoutMs
+            ),
             maxBytes: this.config.crawl.maxResponseBytes,
             maxRedirects: this.config.crawl.maxRedirects,
             accept: "text/html,application/xhtml+xml;q=0.9",
@@ -402,6 +414,21 @@ export class CrawlRunnerService {
         current.processedUrls
       );
     } catch (error) {
+      if (error instanceof CrawlMaxRuntimeSignal) {
+        const current = await this.crawls.get(
+          crawl.workspaceId,
+          crawl.projectId,
+          crawl.id
+        );
+        await this.complete(
+          crawl,
+          leaseOwner,
+          "PARTIALLY_COMPLETED",
+          current.processedUrls,
+          "MAX_RUNTIME_EXCEEDED"
+        );
+        return;
+      }
       const hostBackoff =
         error instanceof CrawlHostBackoffSignal
           ? error
@@ -449,7 +476,8 @@ export class CrawlRunnerService {
     },
     leaseOwner: string,
     status: "COMPLETED" | "PARTIALLY_COMPLETED" | "CANCELLED",
-    processedUrls: number
+    processedUrls: number,
+    failureCode?: string
   ): Promise<void> {
     await this.snapshots.finalize({
       workspaceId: crawl.workspaceId,
@@ -458,15 +486,24 @@ export class CrawlRunnerService {
       status,
       processedUrls
     });
-    await this.crawls.finish(crawl.id, leaseOwner, status);
+    await this.crawls.finish(
+      crawl.id,
+      leaseOwner,
+      status,
+      failureCode
+    );
   }
 
   private async loadRobots(
     origin: string,
-    paceRequest: () => Promise<void>
+    paceRequest: () => Promise<void>,
+    deadline: Date
   ): Promise<string> {
     const response = await fetchPublicResource(`${origin}/robots.txt`, {
-      timeoutMs: this.config.crawl.requestTimeoutMs,
+      timeoutMs: remainingRequestTimeout(
+        deadline,
+        this.config.crawl.requestTimeoutMs
+      ),
       maxBytes: Math.min(this.config.crawl.maxResponseBytes, 1_000_000),
       maxRedirects: this.config.crawl.maxRedirects,
       accept: "text/plain,*/*;q=0.1",
@@ -486,14 +523,18 @@ export class CrawlRunnerService {
     sitemapUrl: string,
     origin: string,
     config: TechnicalCrawlConfig,
-    paceRequest: () => Promise<void>
+    paceRequest: () => Promise<void>,
+    deadline: Date
   ) {
     const maxSitemapBytes = Math.min(
       this.config.crawl.maxResponseBytes,
       5_000_000
     );
     const response = await fetchPublicResource(sitemapUrl, {
-      timeoutMs: this.config.crawl.requestTimeoutMs,
+      timeoutMs: remainingRequestTimeout(
+        deadline,
+        this.config.crawl.requestTimeoutMs
+      ),
       maxBytes: maxSitemapBytes,
       maxRedirects: this.config.crawl.maxRedirects,
       accept:
@@ -591,17 +632,43 @@ class CrawlHostBackoffSignal extends Error {
   }
 }
 
+class CrawlMaxRuntimeSignal extends Error {
+  public constructor() {
+    super("MAX_RUNTIME_EXCEEDED");
+    this.name = "CrawlMaxRuntimeSignal";
+  }
+}
+
 function requestPacer(
-  requestsPerMinute: number
+  requestsPerMinute: number,
+  deadline: Date
 ): () => Promise<void> {
   const intervalMs = Math.ceil(60_000 / requestsPerMinute);
   let nextRequestAt = 0;
   return async () => {
+    assertCrawlRuntime(deadline);
     const waitMs = Math.max(0, nextRequestAt - Date.now());
+    if (Date.now() + waitMs >= deadline.getTime()) {
+      throw new CrawlMaxRuntimeSignal();
+    }
     nextRequestAt = Math.max(nextRequestAt, Date.now()) + intervalMs;
     if (waitMs === 0) return;
     await new Promise<void>((resolve) => {
       setTimeout(resolve, waitMs);
     });
   };
+}
+
+function remainingRequestTimeout(deadline: Date, configuredMs: number): number {
+  assertCrawlRuntime(deadline);
+  return Math.max(
+    1,
+    Math.min(configuredMs, deadline.getTime() - Date.now())
+  );
+}
+
+function assertCrawlRuntime(deadline: Date): void {
+  if (Number.isNaN(deadline.getTime()) || Date.now() >= deadline.getTime()) {
+    throw new CrawlMaxRuntimeSignal();
+  }
 }
