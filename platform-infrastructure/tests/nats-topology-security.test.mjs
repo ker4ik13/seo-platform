@@ -80,7 +80,7 @@ test("NATS server renders a private config inside a hardened container", async (
   assert.match(entrypoint, /^exec nats-server --config "\$runtime_config"$/mu);
   assert.match(config, /^max_payload:\s*64KB$/mu);
   assert.match(config, /^\s*max_mem_store:\s*64MB$/mu);
-  assert.match(config, /^\s*max_file_store:\s*1GB$/mu);
+  assert.match(config, /^\s*max_file_store:\s*2GB$/mu);
   assert.match(config, /^\s*store_dir:\s*"\/data"$/mu);
   assert.equal(balanced(config, "{", "}"), true);
   assert.equal(balanced(config, "[", "]"), true);

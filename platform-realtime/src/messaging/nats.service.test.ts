@@ -56,8 +56,10 @@ test("readiness rejects wildcard or additional source and DLQ subjects", async (
 
   for (const subjects of [
     ["prod.dlq.>"],
+    ["prod.dlq.realtime.identity.session-family.revoked.v1"],
     [
       "prod.dlq.realtime.identity.session-family.revoked.v1",
+      "prod.dlq.jobs.transactional-email.v1",
       "prod.dlq.realtime.identity.another-event.v1"
     ]
   ]) {
@@ -324,7 +326,8 @@ function managerFixture(options: {
                   "prod.identity.session-family.revoked.v1"
                 ]
               : options.deadLetterSubjects ?? [
-                  "prod.dlq.realtime.identity.session-family.revoked.v1"
+                  "prod.dlq.realtime.identity.session-family.revoked.v1",
+                  "prod.dlq.jobs.transactional-email.v1"
                 ],
             source ? options.sourceConfig : options.deadLetterConfig
           )

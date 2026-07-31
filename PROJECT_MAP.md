@@ -2,8 +2,29 @@
 
 Последнее обновление: 31 июля 2026 года
 
-Текущий инкремент: production technical crawl и audit issues поверх рабочего
-Page Map, реального съёма позиций и тарифных capacity boundaries.
+Текущий инкремент: проверенный single-node VPS runtime и закрытие оставшихся
+пользовательских P1/P2-контуров по ТЗ. На VPS без Docker/sudo собран
+persistent runtime в `platform-infrastructure/vps`: PostgreSQL 18, два
+изолированных Redis, NATS JetStream, versioned MinIO, ClamAV, четыре HTTP
+сервиса, Web и выделенные system/import/inspection/rank/crawl/connector
+workers работают в detached `tmux`-сессии. Все data/application listeners
+остаются на loopback; системный Caddy публикует Web и отдельный TLS endpoint
+MinIO без раскрытия console/admin API. Секреты генерируются вне Git в
+mode-600 `runtime.env`, процессы запускаются с очищенным окружением.
+Runbook: `platform-infrastructure/vps/README.md`.
+
+Живой smoke на этом runtime подтверждает:
+`register → workspace/trial/project/team → real HTTP crawl → multipart upload
+через публичный signed URL → CORS → ClamAV inspection → semantic
+mapping/validation/publish → keyword read model`. Исправлены фактический
+HTTP-request lifecycle crawler, DNS/IP pinning и JSONB-order regression в
+SHA-256 semantic publication envelope. Полный repository lint/typecheck/test
+на этом состоянии проходит. Внешние коммерческие gates остаются честно
+выключены до выдачи владельцем YooKassa, SMTP и реальных provider BYOK
+credentials; это не блокирует продолжение остальных продуктовых контуров.
+
+Production technical crawl и audit issues работают поверх Page Map, реального
+съёма позиций и тарифных capacity boundaries.
 Статус P1: ручной CRUD запросов и иерархических групп реализован поверх
 tenant-scoped SEO Data owner с optimistic locking, RBAC/CSRF и audit.
 Запрос уже можно создать, изменить и soft-delete; поддерживаются текст,
@@ -1834,8 +1855,10 @@ OAuth/OIDC выполняется после подтверждения зави
   отдельными CPU/RAM/time limits.
 - ClamAV требует отдельного memory/capacity budget на VPS; concurrency
   inspection worker ограничивается независимо от API.
-- Bucket требует внешней CORS/lifecycle настройки: Web origin, exposed `ETag`,
-  abort incomplete multipart через 2 дня.
+- MinIO CORS для exact Web origin и доступ browser к `ETag` подтверждены
+  живым multipart smoke; buckets versioned и app user ограничен отдельной
+  policy. Retention rejected/quarantine objects и автоматический abort
+  incomplete multipart всё ещё требуют lifecycle/cleanup job.
 - Нет production observability и проверенного backup/restore runbook.
 - Billing migration `20260731023000_billing_foundation` создаёт versioned
   catalog, subscription/order/payment/refund/method, webhook inbox,

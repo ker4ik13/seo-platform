@@ -12,6 +12,7 @@ const environment = "prod-eu1";
 
 test("topology is exact, bounded and compatible with app-level retry/DLQ", () => {
   const topology = buildNatsTopology(environment);
+  const configuredFileStoreBytes = 2 * 1024 * 1024 * 1024;
 
   assert.equal(
     topology.sourceSubject,
@@ -59,6 +60,15 @@ test("topology is exact, bounded and compatible with app-level retry/DLQ", () =>
     assert.equal(stream.deny_purge, true);
     assert.equal(stream.allow_direct, false);
   }
+  assert.ok(
+    [
+      topology.sourceStream,
+      topology.authEmailStream,
+      topology.dlqStream
+    ].reduce((total, stream) => total + stream.max_bytes, 0) <=
+      configuredFileStoreBytes,
+    "the broker file-store budget must cover every bounded stream"
+  );
 
   assert.equal(topology.sourceStream.max_consumers, 4);
   assert.equal(

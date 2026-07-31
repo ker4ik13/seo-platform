@@ -105,7 +105,9 @@ test("gets one tenant-scoped technical crawl through its public locator", async 
     input: string | URL | Request
   ): Promise<Response> => {
     requestedUrl = String(input);
-    return dataResponse(crawlResponseData());
+    return dataResponse(crawlResponseData({
+      startedAt: "2026-07-31T05:01:00.000Z"
+    }));
   }) as typeof fetch;
 
   try {
@@ -115,6 +117,7 @@ test("gets one tenant-scoped technical crawl through its public locator", async 
     );
     assert.equal(crawl.id, crawlId);
     assert.equal(crawl.status, "QUEUED");
+    assert.equal(crawl.startedAt, "2026-07-31T05:01:00.000Z");
     assert.match(
       requestedUrl,
       new RegExp(`/projects/${projectId}/crawls/${crawlId}$`, "u")

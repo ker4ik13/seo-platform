@@ -124,14 +124,17 @@ export class NatsService implements OnModuleInit, OnApplicationShutdown {
     assertExactStream(
       sourceStream,
       eventConfig.streamName,
-      eventConfig.subject,
+      [eventConfig.subject],
       "source"
     );
     assertExactConsumer(consumer, eventConfig);
     assertExactStream(
       deadLetterStream,
       eventConfig.deadLetterStreamName,
-      eventConfig.deadLetterSubject,
+      [
+        eventConfig.deadLetterSubject,
+        `${eventConfig.environment}.dlq.jobs.transactional-email.v1`
+      ],
       "dead-letter"
     );
   }
@@ -221,7 +224,7 @@ export class NatsService implements OnModuleInit, OnApplicationShutdown {
 function assertExactStream(
   info: StreamInfo,
   expectedName: string,
-  expectedSubject: string,
+  expectedSubjects: readonly string[],
   role: "source" | "dead-letter"
 ): void {
   const config = info.config;
@@ -231,7 +234,7 @@ function assertExactStream(
     role === "source" ? SOURCE_MAX_AGE_NANOS : DEAD_LETTER_MAX_AGE_NANOS;
   if (
     config.name !== expectedName ||
-    !hasExactSingletonSubject(config.subjects, expectedSubject) ||
+    !hasExactSubjects(config.subjects, expectedSubjects) ||
     config.storage !== StorageType.File ||
     config.retention !== RetentionPolicy.Limits ||
     config.discard !== DiscardPolicy.New ||
@@ -303,11 +306,15 @@ function assertExactConsumer(
   }
 }
 
-function hasExactSingletonSubject(
+function hasExactSubjects(
   patterns: readonly string[] | undefined,
-  subject: string
+  expected: readonly string[]
 ): boolean {
-  return patterns?.length === 1 && patterns[0] === subject;
+  return (
+    patterns?.length === expected.length &&
+    new Set(patterns).size === patterns.length &&
+    expected.every((subject) => patterns.includes(subject))
+  );
 }
 
 interface NatsDrainLogger {

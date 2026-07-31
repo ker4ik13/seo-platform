@@ -184,38 +184,81 @@ async function requestOnce(
   const addresses = await resolver(url.hostname);
   if (addresses.length === 0) throw new PublicFetchError("DNS_FAILED");
   for (const { address } of addresses) assertPublicAddress(address);
-  const selected = addresses[0]!;
+  const candidates = [...uniqueAddresses(addresses)]
+    .sort((left, right) => left.family - right.family)
+    .slice(0, 4);
+  const deadline = performance.now() + options.timeoutMs;
+  let lastError: PublicFetchError | undefined;
+
+  for (let index = 0; index < candidates.length; index += 1) {
+    const remainingMs = Math.floor(deadline - performance.now());
+    if (remainingMs < 1) break;
+    const attemptTimeoutMs =
+      index === candidates.length - 1
+        ? remainingMs
+        : Math.min(5_000, remainingMs);
+    try {
+      return await requestResolvedAddress(
+        url,
+        options,
+        candidates[index]!,
+        attemptTimeoutMs
+      );
+    } catch (error) {
+      if (
+        !(error instanceof PublicFetchError) ||
+        !["NETWORK_ERROR", "TIMEOUT"].includes(error.code)
+      ) {
+        throw error;
+      }
+      lastError = error;
+    }
+  }
+
+  throw lastError ?? new PublicFetchError("TIMEOUT");
+}
+
+function requestResolvedAddress(
+  url: URL,
+  options: PublicFetchOptions,
+  selected: ResolvedAddress,
+  timeoutMs: number
+): Promise<{
+  readonly statusCode: number;
+  readonly contentType?: string;
+  readonly location?: string;
+  readonly etag?: string;
+  readonly lastModified?: string;
+  readonly body: Buffer;
+}> {
   const transport = url.protocol === "https:" ? https : http;
 
   return new Promise((resolve, reject) => {
     let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
     const fail = (error: PublicFetchError): void => {
       if (settled) return;
       settled = true;
+      if (timeout) clearTimeout(timeout);
       reject(error);
     };
     const request = transport.request(
-      url,
       {
+        agent: false,
+        protocol: url.protocol,
+        hostname: selected.address,
+        family: selected.family,
+        port: url.port || (url.protocol === "https:" ? 443 : 80),
+        path: `${url.pathname}${url.search}`,
+        ...(url.protocol === "https:" ? { servername: url.hostname } : {}),
         method: "GET",
         headers: {
           Accept: options.accept,
           "Accept-Encoding": "identity",
+          Host: url.host,
           "User-Agent": options.userAgent ?? CRAWL_USER_AGENT
         },
-        lookup: (_hostname, lookupOptions, callback) => {
-          const wantsAll =
-            typeof lookupOptions === "object" && lookupOptions.all === true;
-          if (wantsAll) {
-            callback(
-              null,
-              addresses.map(({ address, family }) => ({ address, family }))
-            );
-            return;
-          }
-          callback(null, selected.address, selected.family);
-        },
-        signal: AbortSignal.timeout(options.timeoutMs),
         setDefaultHeaders: true
       },
       (response) => {
@@ -274,6 +317,7 @@ async function requestOnce(
         response.once("end", () => {
           if (settled) return;
           settled = true;
+          if (timeout) clearTimeout(timeout);
           resolve({
             statusCode,
             ...(contentType ? { contentType } : {}),
@@ -288,7 +332,14 @@ async function requestOnce(
         );
       }
     );
+    timeout = setTimeout(() => {
+      timedOut = true;
+      request.destroy();
+      fail(new PublicFetchError("TIMEOUT"));
+    }, timeoutMs);
+    timeout.unref();
     request.once("socket", (socket: Socket) => {
+      socket.on("error", () => undefined);
       socket.once("connect", () => {
         if (
           !socket.remoteAddress ||
@@ -299,18 +350,26 @@ async function requestOnce(
         }
       });
     });
-    request.once("error", (error) => {
-      if (
-        typeof error === "object" &&
-        error !== null &&
-        "name" in error &&
-        error.name === "AbortError"
-      ) {
+    request.once("error", () => {
+      if (timedOut) {
         fail(new PublicFetchError("TIMEOUT"));
       } else {
         fail(new PublicFetchError("NETWORK_ERROR"));
       }
     });
+    request.end();
+  });
+}
+
+function uniqueAddresses(
+  addresses: readonly ResolvedAddress[]
+): readonly ResolvedAddress[] {
+  const seen = new Set<string>();
+  return addresses.filter(({ address, family }) => {
+    const key = `${family}:${address}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
   });
 }
 

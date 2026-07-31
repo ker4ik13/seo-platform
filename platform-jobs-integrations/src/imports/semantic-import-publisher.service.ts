@@ -187,7 +187,7 @@ export class SemanticImportPublisherService {
       );
       if (batch.length === 0) break;
       const rows = batch.map(({ canonical_row }) => {
-        const row = safePublishRow(canonical_row);
+        const row = canonicalPublishRow(canonical_row);
         if (!row) throw new Error("Validated semantic row is invalid");
         return row;
       });
@@ -626,7 +626,9 @@ async function validatedBatch(
       `;
 }
 
-function safePublishRow(value: unknown): SemanticImportPublishRow | undefined {
+export function canonicalPublishRow(
+  value: unknown
+): SemanticImportPublishRow | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
   }
@@ -643,6 +645,15 @@ function safePublishRow(value: unknown): SemanticImportPublishRow | undefined {
     typeof row.customValues !== "object" ||
     row.customValues === null ||
     Array.isArray(row.customValues)
+  ) {
+    return undefined;
+  }
+  if (
+    Object.values(row.customValues).some(
+      (item) => typeof item !== "string"
+    ) ||
+    (row.targetUrl !== undefined && typeof row.targetUrl !== "string") ||
+    (row.observedAt !== undefined && typeof row.observedAt !== "string")
   ) {
     return undefined;
   }
@@ -675,7 +686,31 @@ function safePublishRow(value: unknown): SemanticImportPublishRow | undefined {
   ) {
     return undefined;
   }
-  return value as SemanticImportPublishRow;
+  return {
+    sourceRowNumber: row.sourceRowNumber as string,
+    textOriginal: row.textOriginal as string,
+    textNormalized: row.textNormalized as string,
+    normalizedHash: row.normalizedHash as string,
+    language: row.language as string,
+    ...(row.groupPath
+      ? { groupPath: row.groupPath as readonly string[] }
+      : {}),
+    ...(row.targetUrl ? { targetUrl: row.targetUrl as string } : {}),
+    ...(row.frequencies
+      ? {
+          frequencies:
+            row.frequencies as NonNullable<
+              SemanticImportPublishRow["frequencies"]
+            >
+        }
+      : {}),
+    ...(row.observedAt
+      ? { observedAt: row.observedAt as string }
+      : {}),
+    ...(row.tags ? { tags: row.tags as readonly string[] } : {}),
+    customValues:
+      row.customValues as Readonly<Record<string, string>>
+  };
 }
 
 function importEntitlement(

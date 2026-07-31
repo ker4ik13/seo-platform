@@ -1,0 +1,404 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+umask 077
+
+script_dir=$(
+  CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
+  pwd -P
+)
+# shellcheck source=runtime-lib.sh
+. "$script_dir/runtime-lib.sh"
+
+[ "${SEO_PLATFORM_SMOKE_CONFIRM:-}" = "CREATE_TEST_DATA" ] ||
+  runtime_fail "set SEO_PLATFORM_SMOKE_CONFIRM=CREATE_TEST_DATA to run the mutating smoke test"
+
+load_runtime_environment
+
+smoke_root=$(mktemp -d)
+case "$smoke_root" in
+  /tmp/tmp.*) ;;
+  *) runtime_fail "mktemp returned an unexpected path" ;;
+esac
+trap 'rm -rf -- "$smoke_root"' EXIT INT TERM
+
+cookie_jar=$smoke_root/cookies.txt
+response_body=$smoke_root/response.json
+smoke_email="smoke-$(date -u +%Y%m%d%H%M%S)-$$@example.invalid"
+smoke_password="S$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-28)!9a"
+csrf_token=
+response_status=
+
+api_call() {
+  local method=$1
+  local path=$2
+  local body=${3:-}
+  local idempotency_key=${4:-}
+  local if_match=${5:-}
+  local request_arguments=(
+    --silent
+    --show-error
+    --max-time 20
+    --request "$method"
+    --header "Accept: application/json"
+    --header "Origin: $SEO_PLATFORM_PUBLIC_URL"
+    --cookie "$cookie_jar"
+    --cookie-jar "$cookie_jar"
+    --output "$response_body"
+    --write-out '%{http_code}'
+  )
+
+  if [ -n "$csrf_token" ] && [ "$method" != GET ]; then
+    request_arguments+=(--header "X-CSRF-Token: $csrf_token")
+  fi
+  if [ -n "$idempotency_key" ]; then
+    request_arguments+=(--header "Idempotency-Key: $idempotency_key")
+  fi
+  if [ -n "$if_match" ]; then
+    request_arguments+=(--header "If-Match: \"v$if_match\"")
+  fi
+  if [ -n "$body" ]; then
+    request_arguments+=(
+      --header "Content-Type: application/json"
+      --data-binary @-
+    )
+    response_status=$(
+      printf '%s' "$body" |
+        curl "${request_arguments[@]}" \
+          "$SEO_PLATFORM_PUBLIC_URL/app/api/$path"
+    )
+  else
+    response_status=$(
+      curl "${request_arguments[@]}" \
+        "$SEO_PLATFORM_PUBLIC_URL/app/api/$path"
+    )
+  fi
+}
+
+expect_status() {
+  local expected=$1
+  local operation=$2
+  if [ "$response_status" != "$expected" ]; then
+    printf 'seo-platform-vps-smoke: operation=%s expected=%s actual=%s\n' \
+      "$operation" \
+      "$expected" \
+      "$response_status" >&2
+    jq -c '{error: (.error // "invalid response")}' "$response_body" >&2 ||
+      true
+    exit 1
+  fi
+  printf 'smoke operation=%s status=%s\n' "$operation" "$response_status"
+}
+
+register_body=$(
+  jq -cn \
+    --arg email "$smoke_email" \
+    --arg password "$smoke_password" \
+    '{
+      email: $email,
+      password: $password,
+      displayName: "VPS Runtime Smoke",
+      country: "DE",
+      locale: "ru",
+      timezone: "Europe/Berlin",
+      termsVersion: "2026-07-01",
+      privacyVersion: "2026-07-01",
+      termsAccepted: true,
+      privacyAccepted: true,
+      marketingAccepted: false,
+      marketingVersion: "2026-07-01"
+    }'
+)
+api_call POST auth/register "$register_body"
+expect_status 201 register
+csrf_token=$(
+  awk '$6 == "seo_csrf" { print $7 }' "$cookie_jar" | tail -1
+)
+[ -n "$csrf_token" ] || runtime_fail "registration did not issue a CSRF cookie"
+
+api_call GET me
+expect_status 200 current-account
+
+api_call POST workspaces \
+  '{"name":"VPS Runtime Smoke","country":"DE","locale":"ru","timezone":"Europe/Berlin","billingCurrency":"RUB"}'
+expect_status 201 create-workspace
+workspace_id=$(jq -er '.data.id' "$response_body")
+
+api_call POST "workspaces/$workspace_id/billing/trial" \
+  '' \
+  "smoke-trial-$(openssl rand -hex 16)"
+expect_status 201 start-trial
+
+api_call POST "workspaces/$workspace_id/projects" \
+  '{"name":"Example Smoke Project","domain":"example.com","locale":"ru","timezone":"Europe/Berlin"}'
+expect_status 201 create-project
+project_id=$(jq -er '.data.id' "$response_body")
+
+api_call POST "projects/$project_id/keywords" \
+  '{"text":"seo platform smoke keyword","language":"en","priority":50,"isFavorite":true,"intent":"INFORMATIONAL","tagNames":["smoke"]}'
+expect_status 201 create-keyword
+keyword_id=$(jq -er '.data.id' "$response_body")
+
+api_call GET "workspaces/$workspace_id/integrations/catalog"
+expect_status 200 integration-catalog
+jq -e '.data | length > 0' "$response_body" >/dev/null ||
+  runtime_fail "integration catalog is empty"
+
+api_call GET "workspaces/$workspace_id/members"
+expect_status 200 team-members
+jq -e '.data | length == 1' "$response_body" >/dev/null ||
+  runtime_fail "new workspace must contain exactly its owner"
+
+api_call GET "workspaces/$workspace_id/billing/subscription"
+expect_status 200 billing-subscription
+[ "$(jq -r '.data.status' "$response_body")" = TRIALING ] ||
+  runtime_fail "trial subscription is not active"
+
+api_call POST "projects/$project_id/crawls" \
+  '{"startUrls":["https://example.com/"],"maxUrls":3,"maxDepth":1,"requestsPerMinute":60,"obeyRobots":true}' \
+  "smoke-crawl-$(openssl rand -hex 16)"
+expect_status 202 create-crawl
+crawl_id=$(jq -er '.data.id' "$response_body")
+
+crawl_status=QUEUED
+for ((attempt = 1; attempt <= 45; attempt += 1)); do
+  api_call GET "projects/$project_id/crawls/$crawl_id"
+  expect_status 200 read-crawl
+  crawl_status=$(jq -er '.data.status' "$response_body")
+  case "$crawl_status" in
+    COMPLETED|PARTIALLY_COMPLETED) break ;;
+    FAILED|CANCELLED) runtime_fail "crawl finished with status $crawl_status" ;;
+  esac
+  sleep 2
+done
+case "$crawl_status" in
+  COMPLETED|PARTIALLY_COMPLETED) ;;
+  *) runtime_fail "crawl did not complete before the smoke timeout" ;;
+esac
+
+processed_urls=$(jq -er '.data.processedUrls' "$response_body")
+[ "$processed_urls" -gt 0 ] ||
+  runtime_fail "crawl completed without processing a page"
+
+api_call GET "projects/$project_id/crawl-issues"
+expect_status 200 crawl-issues
+
+semantic_csv=$'Фраза;Группа;Частотность\nпродвижение сайта;Коммерция;120\nseo аудит;Аудит;70'
+semantic_size=$(
+  printf '%s' "$semantic_csv" |
+    LC_ALL=C wc -c |
+    tr -d '[:space:]'
+)
+api_call POST "projects/$project_id/uploads" \
+  "{\"fileName\":\"semantic-smoke.csv\",\"mediaType\":\"text/csv\",\"sizeBytes\":\"$semantic_size\"}" \
+  "smoke-upload-$(openssl rand -hex 16)"
+expect_status 201 create-semantic-upload
+upload_id=$(jq -er '.data.upload.id' "$response_body")
+[ "$(jq -er '.data.partCount' "$response_body")" = 1 ] ||
+  runtime_fail "semantic smoke fixture unexpectedly requires multiple parts"
+
+api_call POST "projects/$project_id/uploads/$upload_id/parts" \
+  '{"partNumbers":[1]}'
+expect_status 201 create-upload-part-url
+part_url=$(jq -er '.data.parts[0].url' "$response_body")
+expected_storage_endpoint=$(public_storage_endpoint)
+case "$part_url" in
+  "$expected_storage_endpoint"/*) ;;
+  *) runtime_fail "signed upload URL does not use the public storage endpoint" ;;
+esac
+
+preflight_headers=$smoke_root/preflight.headers
+preflight_status=$(
+  curl \
+    --silent \
+    --show-error \
+    --max-time 20 \
+    --request OPTIONS \
+    --header "Origin: $SEO_PLATFORM_PUBLIC_URL" \
+    --header 'Access-Control-Request-Method: PUT' \
+    --header 'Access-Control-Request-Headers: content-type' \
+    --dump-header "$preflight_headers" \
+    --output /dev/null \
+    --write-out '%{http_code}' \
+    "$part_url"
+)
+case "$preflight_status" in
+  200|204) ;;
+  *) runtime_fail "object-storage CORS preflight returned $preflight_status" ;;
+esac
+grep -Fqi "access-control-allow-origin: $SEO_PLATFORM_PUBLIC_URL" \
+  "$preflight_headers" ||
+  runtime_fail "object-storage CORS did not allow the public application origin"
+printf 'smoke operation=object-storage-cors status=%s\n' "$preflight_status"
+
+part_headers=$smoke_root/upload-part.headers
+part_status=$(
+  curl \
+    --silent \
+    --show-error \
+    --max-time 30 \
+    --request PUT \
+    --header "Origin: $SEO_PLATFORM_PUBLIC_URL" \
+    --header 'Content-Type: text/csv' \
+    --data-binary "$semantic_csv" \
+    --dump-header "$part_headers" \
+    --output /dev/null \
+    --write-out '%{http_code}' \
+    "$part_url"
+)
+[ "$part_status" = 200 ] ||
+  runtime_fail "uploading the semantic fixture returned $part_status"
+part_etag=$(
+  awk 'tolower($1) == "etag:" { gsub(/\r/, "", $2); print $2 }' \
+    "$part_headers" |
+    tail -1
+)
+[ -n "$part_etag" ] ||
+  runtime_fail "object storage did not return the uploaded part ETag"
+printf 'smoke operation=upload-semantic-part status=%s\n' "$part_status"
+
+complete_body=$(
+  jq -cn \
+    --arg etag "$part_etag" \
+    '{parts: [{partNumber: 1, etag: $etag}]}'
+)
+api_call POST "projects/$project_id/uploads/$upload_id/complete" \
+  "$complete_body"
+expect_status 201 complete-semantic-upload
+
+upload_status=UPLOADED
+for ((attempt = 1; attempt <= 60; attempt += 1)); do
+  api_call GET "projects/$project_id/uploads/$upload_id"
+  expect_status 200 inspect-semantic-upload
+  upload_status=$(jq -er '.data.status' "$response_body")
+  case "$upload_status" in
+    READY) break ;;
+    REJECTED|ABORTED|EXPIRED)
+      runtime_fail "semantic upload inspection finished with status $upload_status"
+      ;;
+  esac
+  sleep 2
+done
+[ "$upload_status" = READY ] ||
+  runtime_fail "semantic upload inspection did not complete before the smoke timeout"
+
+api_call POST "projects/$project_id/imports" \
+  "{\"uploadId\":\"$upload_id\"}" \
+  "smoke-import-$(openssl rand -hex 16)"
+expect_status 201 create-semantic-import
+semantic_import_id=$(jq -er '.data.id' "$response_body")
+
+import_status=QUEUED
+for ((attempt = 1; attempt <= 60; attempt += 1)); do
+  api_call GET "projects/$project_id/imports/$semantic_import_id"
+  expect_status 200 parse-semantic-import
+  import_status=$(jq -er '.data.status' "$response_body")
+  case "$import_status" in
+    AWAITING_MAPPING) break ;;
+    FAILED|CANCELLED)
+      runtime_fail "semantic import parsing finished with status $import_status"
+      ;;
+  esac
+  sleep 2
+done
+[ "$import_status" = AWAITING_MAPPING ] ||
+  runtime_fail "semantic import parsing did not complete before the smoke timeout"
+import_version=$(jq -er '.data.version' "$response_body")
+mapping_columns=$(
+  jq -c '
+    [
+      .data.preview.columns[] |
+      {
+        sourceIndex: .index,
+        target: .suggestedTarget
+      } +
+      if .suggestedTarget == "custom"
+      then {customName: .sourceName}
+      else {}
+      end
+    ]
+  ' "$response_body"
+)
+jq -e 'map(select(.target == "keyword.text")) | length == 1' \
+  <<< "$mapping_columns" >/dev/null ||
+  runtime_fail "semantic parser did not identify exactly one keyword column"
+mapping_body=$(
+  jq -cn \
+    --argjson columns "$mapping_columns" \
+    '{
+      columns: $columns,
+      defaultLanguage: "ru",
+      groupSeparator: "/",
+      duplicatePolicy: "SKIP_EXISTING"
+    }'
+)
+api_call POST \
+  "projects/$project_id/imports/$semantic_import_id/mapping" \
+  "$mapping_body" \
+  '' \
+  "$import_version"
+expect_status 201 validate-semantic-import
+
+import_status=VALIDATING
+for ((attempt = 1; attempt <= 60; attempt += 1)); do
+  api_call GET "projects/$project_id/imports/$semantic_import_id"
+  expect_status 200 read-semantic-validation
+  import_status=$(jq -er '.data.status' "$response_body")
+  case "$import_status" in
+    AWAITING_CONFIRMATION) break ;;
+    FAILED|CANCELLED)
+      runtime_fail "semantic import validation finished with status $import_status"
+      ;;
+  esac
+  sleep 2
+done
+[ "$import_status" = AWAITING_CONFIRMATION ] ||
+  runtime_fail "semantic import validation did not complete before the smoke timeout"
+[ "$(jq -er '.data.validation.uniqueKeywordsToProcess' "$response_body")" -ge 2 ] ||
+  runtime_fail "semantic validation did not retain the fixture keywords"
+import_version=$(jq -er '.data.version' "$response_body")
+
+api_call POST \
+  "projects/$project_id/imports/$semantic_import_id/publish" \
+  '' \
+  '' \
+  "$import_version"
+expect_status 201 publish-semantic-import
+
+import_status=READY_TO_PUBLISH
+for ((attempt = 1; attempt <= 60; attempt += 1)); do
+  api_call GET "projects/$project_id/imports/$semantic_import_id"
+  expect_status 200 read-semantic-publication
+  import_status=$(jq -er '.data.status' "$response_body")
+  case "$import_status" in
+    COMPLETED) break ;;
+    FAILED|CANCELLED)
+      runtime_fail "semantic import publication finished with status $import_status"
+      ;;
+  esac
+  sleep 2
+done
+[ "$import_status" = COMPLETED ] ||
+  runtime_fail "semantic import publication did not complete before the smoke timeout"
+[ "$(jq -er '.data.result.createdKeywords' "$response_body")" -ge 2 ] ||
+  runtime_fail "semantic import did not create the fixture keywords"
+
+api_call GET "projects/$project_id/keywords?pageSize=100"
+expect_status 200 list-imported-keywords
+jq -e '
+  [.data[] | .textOriginal] as $keywords |
+  ($keywords | index("продвижение сайта")) != null and
+  ($keywords | index("seo аудит")) != null
+' "$response_body" >/dev/null ||
+  runtime_fail "published semantic keywords are missing from the project"
+
+printf 'smoke result=passed workspace=%s project=%s keyword=%s crawl=%s crawl_status=%s processed_urls=%s upload=%s import=%s import_status=%s\n' \
+  "$workspace_id" \
+  "$project_id" \
+  "$keyword_id" \
+  "$crawl_id" \
+  "$crawl_status" \
+  "$processed_urls" \
+  "$upload_id" \
+  "$semantic_import_id" \
+  "$import_status"

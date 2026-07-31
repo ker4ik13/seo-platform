@@ -1128,8 +1128,8 @@ function validCrawlLifecycle(
     (cancelled !== undefined && cancelled < created)
   ) return false;
   if (crawl.status === "QUEUED") {
-    return started === undefined && finished === undefined &&
-      cancelled === undefined && rawFailureCode === undefined;
+    return finished === undefined && cancelled === undefined &&
+      rawFailureCode === undefined;
   }
   if (crawl.status === "RUNNING") {
     return started !== undefined && finished === undefined &&

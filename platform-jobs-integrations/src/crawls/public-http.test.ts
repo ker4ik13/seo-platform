@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   PublicFetchError,
@@ -6,6 +7,17 @@ import {
   fetchPublicResource,
   isPublicAddress
 } from "./public-http.js";
+
+test("sends the guarded request through the already validated address", async () => {
+  const source = await readFile(
+    new URL("./public-http.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(source, /hostname: selected\.address/u);
+  assert.match(source, /servername: url\.hostname/u);
+  assert.match(source, /Host: url\.host/u);
+  assert.match(source, /request\.end\(\);/u);
+});
 
 test("allows public IPv4 and IPv6 while denying every internal family", () => {
   for (const address of [
