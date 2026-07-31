@@ -80,7 +80,9 @@ filters и пять стабильных keyset sorts; cursor криптогра
 Web workspace семантики следует проверенным паттернам Key Collector:
 постоянное дерево групп, плотная таблица, быстрый поиск/фильтры и массовые
 операции находятся на основном экране; импорт, управление группами/колонками
-и история открываются как отдельные компактные инструменты и не вытесняют ядро.
+и история открываются как отдельные компактные инструменты и не вытесняют
+ядро. Из того же toolbar доступен рабочий Keys.so-сценарий сбора запросов
+конкурентов с preview и явным подтверждением импорта в текущее ядро.
 Custom columns базовых типов реализованы отдельными tenant-scoped definitions
 и typed EAV values: text/long text/integer/decimal/boolean/date/datetime/
 select/multi-select/URL/user/status. Каждая ячейка имеет CAS; PostgreSQL
@@ -233,10 +235,11 @@ BullMQ-постановку; идемпотентный SEO Data receipt не з
 issue projection. Page Map обновляется из `CRAWL` provenance. Web позволяет
 запустить/остановить обход, показывает polling progress, историю и открытые
 проблемы с loading/empty/error/read-only states.
-В Web сама Page Map показана первой: история запусков и проблем ограничена
-по высоте, duplicate/absence/change evidence складывается в раскрывающиеся
-секции, конфигурация ручного обхода и автоматический Radar доступны по
-запросу и не занимают основной рабочий экран.
+В Web сама Page Map показана первой: история запусков, открытые проблемы и
+duplicate/absence/change evidence складываются в компактные раскрывающиеся
+секции со счётчиками; активный обход раскрывается автоматически. Конфигурация
+ручного обхода и автоматический Radar доступны по запросу и не занимают
+основной рабочий экран.
 
 Radar теперь автоматически сравнивает повторный crawl одной Page: к каждому
 значимому отличию создаётся отдельный immutable `crawl_page_changes` с
@@ -366,15 +369,16 @@ multipart-записи. Параллельные загрузки не обхо�
 и workspace advisory lock; platform-paid settlement остаётся следующей частью
 enforcement.
 
-Параллельный dependency-free срез browser Web Push device lifecycle
-реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет
-ими через отдельный Realtime token, secret material хранится в
-`realtime_db` под AES-256-GCM и отдельными HMAC fingerprints, а Web
-регистрирует Service Worker только для `/app/`. IndexedDB schema v2 хранит
-монотонные reconciliation generations; foreground завершает только exact
-generation через CAS и не теряет более новое изменение Service Worker/другой
-вкладки. Общая notification email/Web Push доставка и test send остаются
-выключены.
+Browser Web Push lifecycle и delivery реализованы по ADR-2026-035/039:
+профиль владеет устройствами, Platform API управляет ими через отдельный
+Realtime token, secret material хранится в `realtime_db` под AES-256-GCM и
+отдельными HMAC fingerprints, а Web регистрирует Service Worker только для
+`/app/`. Realtime атомарно создаёт notification и exact per-device delivery
+attempt. Isolated sender выполняет fresh permission check до decrypt,
+lease/retry, `404/410` terminal expiry и global provider-expiry sweep.
+Persistent canaries запрещают same-version replacement keyring bytes.
+Production profile и test send по умолчанию выключены до операторских VAPID
+credentials/canary; общий notification email/digest ещё не реализован.
 
 Transactional email срез по ADR-2026-038 реализует отдельный путь для
 подтверждения email, password reset, workspace invite и NPD receipt. Platform API пишет
@@ -401,10 +405,10 @@ envelope, commit-ит `inbox + tombstone + device revoke` до source ack,
 source/DLQ streams и durable consumer до старта приложений; publisher,
 consumer, provisioner и остальные NATS runtimes имеют разные credentials и
 least-privilege ACL. Broker получает только пять bcrypt verifier записей,
-plain client passwords остаются у exact приложений/preflight. Общий
-notification Email/Web Push sender по-прежнему отсутствует; выделенный
-transactional auth-email worker не использует notification preferences или
-digest.
+plain client passwords остаются у exact приложений/preflight. Общий email/
+digest sender по-прежнему отсутствует; browser Web Push имеет отдельный
+durable sender, а transactional auth-email worker не использует notification
+preferences или digest.
 
 Межсервисный HTTP hardening удалил legacy `INTERNAL_API_TOKEN`: каждый
 обычный caller/audience pair теперь имеет отдельный credential, а legacy env
@@ -412,7 +416,7 @@ digest.
 device boundaries сохранены отдельно. Все internal clients запрещают
 redirect, а service-token guards требуют один strict header. До запуска
 credential-bearing processes и NATS Compose выполняет network-less one-shot
-`service-token-preflight`: он глобально проверяет 26 credentials и отдельно
+`service-token-preflight`: он глобально проверяет 27 credentials и отдельно
 пять NATS bcrypt verifier и пять usernames без вывода значений или хэшей.
 Jobs image дополнительно
 получил явные process roles:
@@ -686,14 +690,22 @@ outbox/inbox foundations либо собственные producer rows.
   управления browser Web Push devices. Пример намеренно пуст, runtime
   отклоняет placeholder, а production Compose требует явно сгенерированное
   значение.
+- `REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN` выдаётся только isolated
+  `web-push-worker` и Platform API. Worker использует его для fresh
+  user/workspace/project/membership permission check непосредственно перед
+  decrypt/send; Realtime HTTP и другие процессы credential не получают.
 - Browser subscription material использует отдельные versioned keyrings
   `WEB_PUSH_SUBSCRIPTION_KEYS` (AES-256-GCM) и
   `WEB_PUSH_FINGERPRINT_KEYS` (HMAC-SHA-256). Их key material не
   переиспользуется, отображение version → bytes immutable, active rows
-  проходят startup coverage guard.
+  проходят startup coverage guard. Таблицы
+  `web_push_encryption_key_canaries` и
+  `web_push_fingerprint_key_canaries` persistent-проверяют bytes каждой
+  версии; sender имеет к ним только `SELECT`.
 - `WEB_PUSH_ENDPOINT_ORIGINS` является exact HTTPS origin allowlist.
   `WEB_PUSH_REGISTRATION_ENABLED=false` — безопасный default; VAPID private
-  key не передаётся Platform API, Realtime HTTP, Web или текущему Compose.
+  key передаётся только Compose profile `web-push` isolated sender role и не
+  попадает в Platform API, Realtime HTTP или Web.
 - BYOK envelope encryption использует отдельный
   `INTEGRATION_CREDENTIAL_KEYS` KEK keyring; auth encryption key для него не
   переиспользуется. Request fingerprint использует второй независимый
@@ -1072,7 +1084,11 @@ Backend convention:
   ограничено сроком lease;
 - `platform-realtime/src/notifications` — профильные правила, membership-bound
   проектные подписки, effective policy, user-scoped notification center и
-  encrypted browser Web Push device lifecycle;
+  encrypted browser Web Push device lifecycle, durable per-device attempts,
+  isolated delivery worker, retry/expiry и persistent key canaries;
+- `platform-realtime/src/web-push-worker.*` — отдельный application context
+  без HTTP/NATS/Redis, с VAPID private key, outbound network и narrow
+  `realtime_web_push` DB role;
 - `platform-realtime/src/messaging` — exact durable JetStream pull consumer
   terminal session-family event: commit-before-ack, bounded retry/jitter,
   redacted DLQ, topology readiness и bounded shutdown;
@@ -1183,7 +1199,7 @@ Backend convention:
   caller/audience, dedicated service tokens и девяти Redis credentials и
   запрещает legacy env;
 - `platform-infrastructure/security/validate-service-tokens.sh` — one-shot
-  fail-closed deploy preflight для глобальной проверки 26 credentials и
+  fail-closed deploy preflight для глобальной проверки 27 credentials и
   пяти отдельных NATS bcrypt verifier/usernames; credential-bearing
   processes и NATS зависят от его успешного завершения;
 - тот же Compose fail-closed требует `JOBS_TO_SEO_RANK_RESULT_TOKEN` и
@@ -1427,11 +1443,13 @@ generation и только если отправленная subscription всё
 browser state. Запоздалый PUT после локальной смены subscription повторно
 взводит marker. Повреждённая или future local record восстанавливается лишь
 после явного подтверждения, успешного browser unsubscribe и выдачи нового
-installation UUID; перенос между аккаунтами запрещён. Registration честно
-возвращает
-`deliveryAvailable=false` и `testDeliveryAvailable=false`: email/Web Push
-notification sender, digest и delivery history пока отсутствуют. Это не
-отключает отдельный ADR-2026-038 transactional auth-email path, который не
+installation UUID; перенос между аккаунтами запрещён. Registration возвращает
+`deliveryAvailable` только из явного HTTP rollout flag; preview оставляет его
+`false`. `testDeliveryAvailable=false` до отдельной test command. При
+включённом Web Push effective policy атомарно создаёт exact device attempts;
+isolated sender повторно проверяет authoritative membership/project access до
+decrypt и применяет bounded retry/expiry. Общий email/digest и delivery
+history UI пока отсутствуют; ADR-2026-038 transactional auth-email не
 использует notification profile/project policy.
 
 Handler `identity.session-family.revoked.v1` атомарно
@@ -1460,6 +1478,10 @@ Jobs dispatcher повторяет доставку, Platform API заново �
 проект и `page.view` инициатора, а Realtime применяет effective
 profile/project policy, `notifyOwnJobs` и unique `userId + dedupeKey`.
 Результат виден в центре уведомлений как локальный переход к Page Map.
+Если пользователь включил Web Push и оператор активировал sender profile, та
+же effective policy создаёт idempotent per-device attempt с quiet-hour/digest
+schedule. Отзыв membership после fanout отменяет attempt до decrypt через
+fresh Platform authorization.
 
 Workspace API-ключи управляются через `/app/settings/integrations`. Platform
 API проверяет workspace permission и передаёт trusted actor/workspace context
@@ -2030,17 +2052,14 @@ BYOK credential, операционные alert/circuit-breaker evidence и sche
 Неоднозначность manifest preparation уже fail-closed переходит в
 `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN` без бесконечного auto-retry.
 
-In-app terminal crawl notifications уже проходят effective
-profile/project policy и durable idempotent delivery. Следующий срез:
-`остальные redacted domain events → idempotent email + Web Push delivery`.
-Browser device/VAPID public-key
-lifecycle реализован по ADR-2026-035, а terminal session-family producer,
-durable JetStream publisher/consumer, retry/DLQ и global session-expiry
-sweeper — по ADR-2026-036. Следующему срезу остаются VAPID private-key sender,
-`web-push`, delivery attempts/history, digest и transport для остальных
-notification events; фактическая внешняя доставка общего notification
-контура всё ещё выключена. Выделенный transactional auth-email transport по
-ADR-2026-038 реализован отдельно и не закрывает этот срез.
+Terminal crawl notifications проходят effective profile/project policy,
+durable idempotent in-app delivery и production-ready browser Web Push
+transport по ADR-2026-039. Source outbox/dispatcher остаётся at-least-once, а
+Realtime-owned DB attempts являются локальной durable queue. Операторские
+VAPID credentials/profile в preview намеренно выключены. Следующему срезу
+остаются source events остальных категорий, общий email/digest и delivery
+history/test UI. Transactional auth-email по ADR-2026-038 остаётся отдельным
+security flow.
 OAuth/OIDC выполняется после подтверждения зависимости `jose`; QR для TOTP —
 после подтверждения `qrcode`.
 
@@ -2064,13 +2083,10 @@ OAuth/OIDC выполняется после подтверждения зави
   нагрузки обязательны RANGE partitioning, partition maintenance/retention и
   representative history load test. Public history proxy/UI уже доступны,
   но не заменяют эти storage/load release gates.
-- Notification preferences не создают deliveries сами по себе: отсутствуют
-  durable transport остальных notification events, общий email/Web Push sender,
-  digest scheduler, VAPID private-key sender и provider delivery history.
-  Identity producer/publisher/consumer, Realtime tombstone handler и
-  fail-closed device-upsert check готовы; bounded global provider-expiry
-  sweeper остаётся отдельным blocker перед внешней доставкой.
-  До sweeper due subscriptions безопасно очищаются в user-scoped list/upsert.
+- Notification preferences создают durable Web Push attempts для поступивших
+  project notifications; sender/retry/fresh authorization/expiry/key canary
+  реализованы. Остальные notification event producers, общий email/digest,
+  rate-limited test command и delivery-history UI остаются незавершёнными.
 - Transactional auth-email worker требует operator-managed production SMTP
   account/sender/credentials и canary evidence: этих секретов в repository
   нет. SMTP accept не атомарен с Jobs DB; crash до durable receipt может дать
@@ -2080,12 +2096,10 @@ OAuth/OIDC выполняется после подтверждения зави
   `rotate ↔ rotate`, `login ↔ password reset`,
   `MFA challenge/confirm/disable ↔ reset`, outbox rollback, future
   suspend/deactivate producer и target-volume sweeper concurrency/load smoke.
-- `web_push_subscriptions` migration требует fresh apply и constraint-negative
-  smoke на PostgreSQL 18 staging; VAPID/encryption/fingerprint key rollout
-  требует expand-first coverage review. Startup guard видит только номера
-  versions, но не неизменность key bytes: persistent authenticated canary для
-  AES/HMAC keyrings обязателен до production-регистрации. Same-version key
-  replacement запрещён. Delivery/test остаются выключены.
+- Web Push migration требует fresh apply и constraint-negative smoke на
+  PostgreSQL 18 staging; VAPID/keyring rollout требует expand-first review и
+  operator-managed provider canary. Same-version key replacement уже
+  fail-closed проверяется persistent AES/HMAC canaries.
 - Для rejected/quarantine objects ещё требуется production lifecycle policy и
   отдельный reconciliation/cleanup job; выдача и импорт таких объектов
   запрещены уже сейчас.
@@ -2256,8 +2270,9 @@ OAuth/OIDC выполняется после подтверждения зави
   authorization. Duplicate и membership analysis выполняются идемпотентно
   под project lock, учитываются в общем issue count и доступны через
   tenant-protected API/UI с immutable evidence.
-  Для полного Radar из раздела 10 ТЗ остаются внешние email/Web Push
-  transports и отдельный browser-rendering pool. Cookies/custom headers не принимаются до
+  Для полного Radar из раздела 10 ТЗ остаются общий notification email
+  transport, операторский Web Push canary и отдельный browser-rendering pool.
+  Cookies/custom headers не принимаются до
   отдельной secret-safe policy.
 - `platform-app` сохранён как legacy Git-источник до проверки переноса; новая
   функциональность добавляется только в `platform-web`.

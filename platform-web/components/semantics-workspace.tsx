@@ -24,6 +24,9 @@ export function SemanticsWorkspace({
           <span>Группы, массовые операции, импорт и версии — в одном экране.</span>
         </div>
         <div aria-label="Инструменты семантики" role="toolbar">
+          <a className="semantic-tool-button" href="/app/competitors">
+            Сбор конкурентов
+          </a>
           <ToolButton active={activeTool === "IMPORT"} label="Импорт" onClick={() => setActiveTool("IMPORT")} />
           <ToolButton active={activeTool === "GROUPS"} label="Группы" onClick={() => setActiveTool("GROUPS")} />
           <ToolButton active={activeTool === "COLUMNS"} label="Колонки" onClick={() => setActiveTool("COLUMNS")} />

@@ -22,13 +22,14 @@ test("maps only the safe Web Push registration and device projection", () => {
       applicationServerKey,
       applicationServerKeyVersion: 2,
       maxActiveDevices: 20,
-      deliveryAvailable: false,
+      deliveryAvailable: true,
       testDeliveryAvailable: false
     },
     devices: [device()]
   });
 
   assert.equal(state.registration.status, "AVAILABLE");
+  assert.equal(state.registration.deliveryAvailable, true);
   assert.equal(state.devices[0]?.installationId, installationId);
 });
 

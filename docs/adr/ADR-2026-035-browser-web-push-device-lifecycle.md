@@ -5,6 +5,11 @@
 Затронутые репозитории: `platform-contracts`, `platform-api`,
 `platform-realtime`, `platform-web`, `platform-infrastructure`
 
+Дополнение от 31 июля 2026 года: delivery-specific список обязательных мер,
+честная доступность sender и persistent key canary ниже реализованы и
+уточнены ADR-2026-039. Историческое описание dependency-free этапа сохранено,
+но для текущего rollout применяется ADR-2026-039.
+
 ## Контекст
 
 Профильные и membership-bound проектные правила уведомлений уже принадлежат

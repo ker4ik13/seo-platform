@@ -346,17 +346,18 @@ Permission Web Push запрашивается только по нажатию 
 - loading, saving, saved, validation, conflict, error и blocked-channel states.
 
 Текущий repository slice реализует хранение и API профильных/проектных
-настроек, вычисление effective policy, in-app центр и dependency-free
-lifecycle browser Web Push devices по ADR-2026-035. Он не создаёт фактические
-email/Web Push delivery attempts: registration state всегда явно возвращает
-`deliveryAvailable=false` и `testDeliveryAvailable=false`, пока не подключён
-sender.
+настроек, effective policy, in-app центр, lifecycle devices по ADR-2026-035 и
+durable browser Web Push delivery по ADR-2026-039. Notification и exact
+per-device attempt создаются атомарно; sender имеет lease/retry, fresh
+membership authorization, `404/410` expiry, global provider-expiry sweeper и
+persistent key canaries. По умолчанию profile выключен, поэтому API честно
+возвращает `deliveryAvailable=false`; оператор включает его только вместе с
+проверенным VAPID/keyring/profile rollout. `testDeliveryAvailable=false` до
+отдельной rate-limited test command.
 
-Следующий обязательный вертикальный срез:
-`остальные redacted domain events → effective profile/project policy →
-idempotent Email/Web Push delivery attempt`. В него входят VAPID private-key
-sender, `web-push`, собственные delivery retry/DLQ, digest scheduler и
-delivery history; UI до этого не должен имитировать успешную внешнюю доставку.
+Следующий вертикальный срез общего notification-контура:
+`остальные redacted domain events → effective policy → idempotent Email/Web
+Push attempts`, а также email/digest scheduler и delivery-history UI.
 
 Identity safety leg уже замкнут по ADR-2026-036. Platform API пишет
 `identity.session-family.revoked.v1` в той же транзакции с revoke, bounded
@@ -419,8 +420,8 @@ Device lifecycle следует ADR-2026-035:
 - active device count bounded server-side, default — 20;
 - terminal revoke/expiry атомарно стирает ciphertext, nonce/tag и
   fingerprints, сохраняя безопасный tombstone;
-- VAPID private key отсутствует в HTTP/API/Web process и появляется только у
-  будущего sender;
+- VAPID private key отсутствует в HTTP/API/Web process и доступен только
+  isolated sender role;
 - смена browser subscription атомарно повышает локальную
   `reconcileGeneration` в IndexedDB schema v2; Service Worker не передаёт
   credentials без активной session;
@@ -441,6 +442,14 @@ Device lifecycle следует ADR-2026-035:
   tombstone до записи. Это закрывает reorder, когда event обработан раньше
   уже начатого запроса регистрации старой family; такой запрос fail-closed не
   может воскресить device.
+- Notification fanout сохраняет bounded policy/payload snapshot и exact
+  device version в `web_push_delivery_attempts`. Sender непосредственно перед
+  decrypt повторно проверяет device generation и authoritative Platform
+  membership/project permission. `404/410` и provider expiry terminal-очищают
+  только соответствующее устройство; временные ошибки получают bounded retry.
+- Каждый encryption/HMAC key version защищён persistent canary. Realtime HTTP
+  создаёт canary при первом expand, последующие HTTP/sender startups проверяют
+  bytes; sender не имеет права создавать или менять canaries.
 
 ### Telegram
 

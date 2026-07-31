@@ -350,7 +350,7 @@ export class WebPushService {
       applicationServerKeyVersion:
         this.config.webPush.applicationServerKeyVersion,
       maxActiveDevices: this.config.webPush.maxActiveDevices,
-      deliveryAvailable: false,
+      deliveryAvailable: this.config.webPush.deliveryAvailable,
       testDeliveryAvailable: false
     };
   }

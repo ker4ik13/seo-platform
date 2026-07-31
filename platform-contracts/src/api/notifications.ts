@@ -197,6 +197,21 @@ export interface InternalCreateProjectNotificationReceipt {
   readonly reason?: "POLICY_DISABLED" | "OWN_JOB_DISABLED";
 }
 
+export interface InternalAuthorizeProjectNotificationDeliveryInput {
+  readonly userId: string;
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly membershipId: string;
+  readonly membershipVersion: number;
+  readonly eventType: ProjectNotificationEventType;
+  readonly permission: "project.view" | "page.view";
+}
+
+export interface InternalAuthorizeProjectNotificationDeliveryResult {
+  readonly authorized: boolean;
+  readonly reason: "AUTHORIZED" | "ACCESS_REVOKED" | "SCOPE_CHANGED";
+}
+
 export interface NotificationListItem {
   readonly id: string;
   readonly workspaceId: string;

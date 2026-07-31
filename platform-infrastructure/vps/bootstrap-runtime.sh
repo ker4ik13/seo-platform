@@ -149,6 +149,7 @@ if [ ! -f "$runtime_env_file" ]; then
     JOBS_CONNECTOR_DATABASE_PASSWORD \
     REALTIME_DATABASE_OWNER_PASSWORD \
     REALTIME_DATABASE_PASSWORD \
+    REALTIME_WEB_PUSH_DATABASE_PASSWORD \
     DIRECTUS_DATABASE_PASSWORD \
     REDIS_JOBS_API_PASSWORD \
     REDIS_JOBS_SYSTEM_PASSWORD \
@@ -165,6 +166,7 @@ if [ ! -f "$runtime_env_file" ]; then
     PLATFORM_API_TO_REALTIME_TOKEN \
     PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN \
     PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN \
+    REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN \
     JOBS_TO_SEO_RANK_TOKEN \
     JOBS_TO_SEO_RANK_RESULT_TOKEN \
     JOBS_TO_PLATFORM_RANK_GRANT_TOKEN \
@@ -222,6 +224,34 @@ if [ ! -f "$runtime_env_file" ]; then
   trap - EXIT INT TERM
   chmod 600 "$runtime_env_file"
 else
+  chmod 600 "$runtime_env_file"
+fi
+
+if ! grep -q '^REALTIME_WEB_PUSH_DATABASE_PASSWORD=' "$runtime_env_file"; then
+  temporary_env_file=$runtime_root/runtime.env.tmp.$$
+  trap 'rm -f "$temporary_env_file"' EXIT INT TERM
+  cp "$runtime_env_file" "$temporary_env_file"
+  chmod 600 "$temporary_env_file"
+  write_environment_value \
+    REALTIME_WEB_PUSH_DATABASE_PASSWORD \
+    "$(random_url_secret)"
+  mv "$temporary_env_file" "$runtime_env_file"
+  temporary_env_file=
+  trap - EXIT INT TERM
+  chmod 600 "$runtime_env_file"
+fi
+
+if ! grep -q '^REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN=' "$runtime_env_file"; then
+  temporary_env_file=$runtime_root/runtime.env.tmp.$$
+  trap 'rm -f "$temporary_env_file"' EXIT INT TERM
+  cp "$runtime_env_file" "$temporary_env_file"
+  chmod 600 "$temporary_env_file"
+  write_environment_value \
+    REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN \
+    "$(random_url_secret)"
+  mv "$temporary_env_file" "$runtime_env_file"
+  temporary_env_file=
+  trap - EXIT INT TERM
   chmod 600 "$runtime_env_file"
 fi
 

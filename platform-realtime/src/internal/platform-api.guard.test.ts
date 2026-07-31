@@ -52,6 +52,7 @@ test("fails closed without general audience configuration", () => {
 
 function config(platformApiToken?: string): AppConfig {
   return {
+    serviceRole: "HTTP",
     nodeEnv: "test",
     bindAddress: "127.0.0.1",
     port: 4003,
@@ -74,10 +75,22 @@ function config(platformApiToken?: string): AppConfig {
     webOrigins: ["https://app.example.test"],
     webPush: {
       registrationEnabled: false,
+      deliveryAvailable: false,
+      deliveryEnabled: false,
+      deliveryAuthorizationTimeoutMs: 5_000,
       endpointOrigins: [],
       subscriptionKeys: new Map(),
       fingerprintKeys: new Map(),
-      maxActiveDevices: 20
+      maxActiveDevices: 20,
+      deliveryMaxAttempts: 8,
+      deliveryPollIntervalMs: 1_000,
+      deliveryLeaseMs: 30_000,
+      deliveryRetryBaseMs: 1_000,
+      deliveryRetryMaxMs: 300_000,
+      deliverySendTimeoutMs: 10_000,
+      deliveryTtlSeconds: 3_600,
+      expirySweepIntervalMs: 60_000,
+      expirySweepBatchSize: 100
     }
   };
 }

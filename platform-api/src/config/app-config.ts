@@ -17,6 +17,7 @@ export interface AppConfig {
   readonly realtimeApiToken?: string;
   readonly integrationCredentialApiToken?: string;
   readonly realtimeNotificationApiToken?: string;
+  readonly realtimeDeliveryAuthorizationApiToken?: string;
   readonly rankExecutionGrantApiToken?: string;
   readonly automationDispatchApiToken?: string;
   readonly authEmailApiToken?: string;
@@ -207,6 +208,10 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const realtimeNotificationApiToken = serviceToken(
     env,
     "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN"
+  );
+  const realtimeDeliveryAuthorizationApiToken = serviceToken(
+    env,
+    "REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN"
   );
   const rankExecutionGrantApiToken = serviceToken(
     env,
@@ -420,6 +425,21 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN must not use an example placeholder"
     );
   }
+  if (
+    nodeEnv === "production" &&
+    (!realtimeDeliveryAuthorizationApiToken ||
+      realtimeDeliveryAuthorizationApiToken.length < 32 ||
+      isPlaceholderSecret(realtimeDeliveryAuthorizationApiToken))
+  ) {
+    throw new Error(
+      "A generated REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN with at least 32 characters is required in production"
+    );
+  }
+  if (isPlaceholderSecret(realtimeDeliveryAuthorizationApiToken)) {
+    throw new Error(
+      "REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN must not use an example placeholder"
+    );
+  }
   if (isPlaceholderSecret(rankExecutionGrantApiToken)) {
     throw new Error(
       "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN must not use an example placeholder"
@@ -513,6 +533,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     realtimeApiToken,
     integrationCredentialApiToken,
     realtimeNotificationApiToken,
+    realtimeDeliveryAuthorizationApiToken,
     rankExecutionGrantApiToken,
     automationDispatchApiToken,
     authEmailApiToken
@@ -573,6 +594,9 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       : {}),
     ...(realtimeNotificationApiToken
       ? { realtimeNotificationApiToken }
+      : {}),
+    ...(realtimeDeliveryAuthorizationApiToken
+      ? { realtimeDeliveryAuthorizationApiToken }
       : {}),
     ...(rankExecutionGrantApiToken
       ? { rankExecutionGrantApiToken }

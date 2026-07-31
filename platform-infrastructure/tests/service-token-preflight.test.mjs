@@ -17,6 +17,7 @@ const credentialNames = [
   "PLATFORM_API_TO_REALTIME_TOKEN",
   "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN",
   "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN",
+  "REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN",
   "JOBS_TO_SEO_RANK_TOKEN",
   "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
   "JOBS_TO_PLATFORM_AUTOMATION_TOKEN",
@@ -73,7 +74,7 @@ test("preflight script is valid POSIX shell and accepts distinct credentials", a
 
   assert.match(
     result.stdout,
-    /validated 26 distinct deploy credentials, 5 distinct NATS bcrypt verifiers and 5 distinct NATS usernames/u
+    /validated 27 distinct deploy credentials, 5 distinct NATS bcrypt verifiers and 5 distinct NATS usernames/u
   );
   assert.equal(result.stderr, "");
   assertDoesNotExposeCredentials(

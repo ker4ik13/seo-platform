@@ -149,7 +149,7 @@ function registrationValue(value: unknown): WebPushRegistration {
       !validP256PublicKey(registration.applicationServerKey) ||
       !positiveInteger(registration.applicationServerKeyVersion) ||
       !positiveInteger(registration.maxActiveDevices) ||
-      registration.deliveryAvailable !== false ||
+      typeof registration.deliveryAvailable !== "boolean" ||
       registration.testDeliveryAvailable !== false
     ) {
       throw invalidResponse();
@@ -160,7 +160,7 @@ function registrationValue(value: unknown): WebPushRegistration {
       applicationServerKeyVersion:
         registration.applicationServerKeyVersion,
       maxActiveDevices: registration.maxActiveDevices,
-      deliveryAvailable: false,
+      deliveryAvailable: registration.deliveryAvailable,
       testDeliveryAvailable: false
     };
   }

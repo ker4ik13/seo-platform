@@ -82,10 +82,10 @@ export type WebPushRegistration =
       /** Positive server-side limit for simultaneously active devices. */
       readonly maxActiveDevices: number;
       /**
-       * External delivery is intentionally unavailable until the durable
-       * delivery adapter is enabled.
+       * True only when the durable sender has complete VAPID configuration
+       * and is enabled server-side.
        */
-      readonly deliveryAvailable: false;
+      readonly deliveryAvailable: boolean;
       readonly testDeliveryAvailable: false;
     }
   | {

@@ -4028,16 +4028,19 @@ svg { display: block; }
   gap: 6px;
 }
 .semantic-tool-button {
+  align-items: center;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 8px;
   color: var(--muted);
   cursor: pointer;
+  display: inline-flex;
   font: inherit;
   font-size: 11px;
   font-weight: 700;
   min-height: 32px;
   padding: 0 10px;
+  text-decoration: none;
 }
 .semantic-tool-button:hover,
 .semantic-tool-button[aria-pressed="true"] {
@@ -4269,8 +4272,7 @@ svg { display: block; }
 .crawl-stack-section > :not(summary) { margin: 12px; }
 .crawl-audit-grid {
   gap: 12px;
-  max-height: 430px;
-  overflow: hidden;
+  grid-template-columns: minmax(0, 1fr);
 }
 .crawl-run-list,
 .crawl-issue-list {

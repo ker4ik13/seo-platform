@@ -168,6 +168,7 @@ test("does not allow development tokens in production", () => {
         PLATFORM_API_TO_REALTIME_TOKEN: "r".repeat(32),
         PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
         PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
+        REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN: "w".repeat(32),
         JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: "g".repeat(32),
         JOBS_TO_PLATFORM_AUTOMATION_TOKEN: "a".repeat(32),
         JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: "e".repeat(32),
@@ -260,7 +261,8 @@ test("requires the dedicated rank grant caller token in production", () => {
         PLATFORM_API_TO_JOBS_TOKEN: "j".repeat(32),
         PLATFORM_API_TO_REALTIME_TOKEN: "r".repeat(32),
         PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
-        PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32)
+        PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
+        REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN: "w".repeat(32)
       }),
     /JOBS_TO_PLATFORM_RANK_GRANT_TOKEN/u
   );
@@ -291,6 +293,8 @@ test("rejects every documented service-token placeholder and unsafe header value
       "replace-with-a-distinct-random-credential-token",
     PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN:
       "replace-with-a-distinct-random-notification-token",
+    REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN:
+      "replace-with-a-distinct-random-delivery-authorization-token",
     JOBS_TO_PLATFORM_RANK_GRANT_TOKEN:
       "replace-with-a-distinct-random-rank-grant-token",
     JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN:
@@ -325,6 +329,31 @@ test("rejects every documented service-token placeholder and unsafe header value
       /visible ASCII characters without whitespace or commas/u
     );
   }
+});
+
+test("requires a dedicated Realtime delivery authorization token in production", () => {
+  assert.throws(
+    () =>
+      loadAppConfig(
+        productionEnvironment({
+          REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN: undefined
+        })
+      ),
+    /REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN/u
+  );
+});
+
+test("keeps the Realtime delivery authorization token distinct", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
+        REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN: "n".repeat(32)
+      }),
+    /Every internal API token must be distinct/u
+  );
 });
 
 test("keeps the rank grant token separate from other internal tokens", () => {
@@ -639,6 +668,7 @@ function productionEnvironment(
     PLATFORM_API_TO_REALTIME_TOKEN: "r".repeat(32),
     PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: "c".repeat(32),
     PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "n".repeat(32),
+    REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN: "w".repeat(32),
     JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: "g".repeat(32),
     JOBS_TO_PLATFORM_AUTOMATION_TOKEN: "a".repeat(32),
     JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: "e".repeat(32),

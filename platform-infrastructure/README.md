@@ -141,6 +141,8 @@ startup. Обычные internal HTTP-вызовы разделены так:
 | `PLATFORM_API_TO_JOBS_TOKEN` | `platform-api` | `jobs-integrations` HTTP |
 | `JOBS_TO_SEO_DATA_TOKEN` | `jobs-integrations` HTTP и `import-worker` | `seo-data` |
 | `PLATFORM_API_TO_REALTIME_TOKEN` | `platform-api` | `realtime` general HTTP |
+| `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` | `platform-api` | `realtime` device lifecycle и notification fanout |
+| `REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN` | `web-push-worker` | `platform-api` fresh delivery authorization |
 | `JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN` | `auth-email-worker` | `platform-api` JIT material/completion |
 | `JOBS_TO_PLATFORM_AUTOMATION_TOKEN` | `jobs-integrations` HTTP scheduler | `platform-api` fresh crawl authorization |
 
@@ -157,9 +159,8 @@ credential и запрещает встроенные значения вмес�
 
 Перед запуском credential-bearing processes, Redis servers и NATS Compose
 обязательно завершает one-shot `service-token-preflight`. Он получает
-одиннадцать
-service tokens, `RANK_HISTORY_CURSOR_KEY`, девять Redis passwords и пять
-NATS passwords, проверяет все 26 credentials на глобальную pairwise
+двенадцать service tokens, `RANK_HISTORY_CURSOR_KEY`, девять Redis passwords
+и пять NATS passwords, проверяет все 27 credentials на глобальную pairwise
 distinctness, отсутствие placeholders и длину `32..512`. Дополнительно он
 проверяет пять разных canonical bcrypt verifier записей и пять NATS
 usernames отдельно на уникальный
@@ -898,11 +899,11 @@ HTTP lifecycle browser-устройств включается отдельно 
 node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"
 ```
 
-Сначала развернуть миграцию, полный набор keyrings и dedicated token с
-`WEB_PUSH_REGISTRATION_ENABLED=false`. Текущий startup guard сверяет номера
-версий, но не bytes: включать регистрацию в production до persistent
-authenticated canary/verifier запрещено. В staging после ручной проверки
-immutable key material и coverage переключить только `realtime` на `true`.
+Сначала развернуть миграцию, полный набор keyrings и оба dedicated token с
+`WEB_PUSH_REGISTRATION_ENABLED=false`. Realtime HTTP создаёт persistent
+authenticated canary для каждой новой encryption/HMAC version; повторный
+startup проверяет bytes и fail-closed отклоняет same-version replacement.
+Sender canaries не создаёт и стартует после healthy Realtime HTTP.
 Отображение `version → key bytes` immutable; ротация выполняется
 expand-first, старую версию нельзя удалять,
 пока она используется активными строками. Fingerprint rotation требует
@@ -911,13 +912,19 @@ keyring везде, затем drain старых replicas и только по�
 active version. Partial unique index защищает один digest, но не разные HMAC
 digests одного endpoint под разными версиями ключа.
 
-VAPID private key намеренно отсутствует в текущих HTTP/API/Web process и в
-этом Compose. Он будет принадлежать отдельному sender process после включения
-durable delivery. Пока `deliveryAvailable=false` и
-`testDeliveryAvailable=false`: регистрация, переименование и отзыв устройства
-не означают, что внешняя доставка работает. `@nats-io/jetstream` используется
-только для durable identity safety pipeline; sender и production dependency
-`web-push` ещё не подключены.
+VAPID private key передаётся только profile `web-push` сервису
+`web-push-worker`; HTTP/API/Web его не получают. Worker использует отдельный
+`realtime_web_push` DB login, `REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN`,
+outbound network и `web-push`; Redis/NATS/general tokens запрещены.
+
+Порядок включения: миграции и runtime grants → Realtime HTTP с полным
+keyring/canaries → `realtime-web-push-db-permissions` → profile `web-push` →
+provider canary → одновременно `WEB_PUSH_REGISTRATION_ENABLED=true` и
+`WEB_PUSH_DELIVERY_AVAILABLE=true`. Без VAPID private key/subject, fresh-auth
+token или совпадающей пары ключей worker fail-closed не стартует. Откат:
+сначала выключить availability/registration и profile, не удаляя key versions,
+devices, canaries или attempts. `testDeliveryAvailable=false` остаётся
+честным до отдельной rate-limited test command.
 
 ## Проверка загружаемых файлов
 

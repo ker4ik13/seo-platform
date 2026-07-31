@@ -24,7 +24,7 @@ const publicStateFixture = {
     applicationServerKey: APPLICATION_SERVER_KEY_FIXTURE,
     applicationServerKeyVersion: 3,
     maxActiveDevices: 20,
-    deliveryAvailable: false,
+    deliveryAvailable: true,
     testDeliveryAvailable: false
   },
   devices: [
@@ -130,7 +130,7 @@ test("available registration exposes only a public VAPID key and disabled delive
     publicStateFixture.registration.applicationServerKeyVersion > 0,
     true
   );
-  assert.equal(publicStateFixture.registration.deliveryAvailable, false);
+  assert.equal(publicStateFixture.registration.deliveryAvailable, true);
   assert.equal(publicStateFixture.registration.testDeliveryAvailable, false);
 });
 

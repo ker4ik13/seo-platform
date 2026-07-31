@@ -3,6 +3,7 @@
 set -eu
 
 connector_user=jobs_connector
+web_push_user=realtime_web_push
 service_roles='platform_owner platform_runtime seo_owner seo_runtime jobs_owner jobs_runtime jobs_rank_runtime jobs_auth_email_runtime realtime_owner realtime_runtime directus_runtime_owner'
 
 if [ "${JOBS_CONNECTOR_DATABASE_USER:-$connector_user}" != "$connector_user" ]; then
@@ -12,6 +13,16 @@ fi
 
 if [ "${POSTGRES_USER:-postgres}" = "$connector_user" ]; then
   echo "JOBS_CONNECTOR_DATABASE_USER must differ from POSTGRES_USER" >&2
+  exit 1
+fi
+
+if [ "${REALTIME_WEB_PUSH_DATABASE_USER:-$web_push_user}" != "$web_push_user" ]; then
+  echo "REALTIME_WEB_PUSH_DATABASE_USER is immutable and must equal realtime_web_push" >&2
+  exit 1
+fi
+
+if [ "${POSTGRES_USER:-postgres}" = "$web_push_user" ]; then
+  echo "REALTIME_WEB_PUSH_DATABASE_USER must differ from POSTGRES_USER" >&2
   exit 1
 fi
 
@@ -37,6 +48,7 @@ write_hba() {
   echo 'local   realtime_db  "realtime_runtime"                  scram-sha-256'
   echo 'local   directus_db  "directus_runtime_owner"            scram-sha-256'
   printf 'local   jobs_db      "%s"                         scram-sha-256\n' "$connector_user"
+  printf 'local   realtime_db  "%s"                      scram-sha-256\n' "$web_push_user"
   echo 'local   replication  /^(platform|seo|jobs|realtime)_(owner|runtime)(_[a-z0-9_]+)?$  reject'
   echo 'local   all          /^(platform|seo|jobs|realtime)_(owner|runtime)(_[a-z0-9_]+)?$  reject'
   echo 'local   replication  /^jobs_rank_runtime(_[a-z0-9_]+)?$             reject'
@@ -47,6 +59,8 @@ write_hba() {
   echo 'local   all          /^directus_runtime_owner(_[a-z0-9_]+)?$          reject'
   echo "local   replication  /^jobs_connector(_[a-z0-9_]+)?$             reject"
   echo "local   all          /^jobs_connector(_[a-z0-9_]+)?$             reject"
+  echo "local   replication  /^realtime_web_push(_[a-z0-9_]+)?$          reject"
+  echo "local   all          /^realtime_web_push(_[a-z0-9_]+)?$          reject"
   echo 'host    platform_db  "platform_owner"                    all      scram-sha-256'
   echo 'host    platform_db  "platform_runtime"                  all      scram-sha-256'
   echo 'host    seo_db       "seo_owner"                         all      scram-sha-256'
@@ -59,6 +73,7 @@ write_hba() {
   echo 'host    realtime_db  "realtime_runtime"                  all      scram-sha-256'
   echo 'host    directus_db  "directus_runtime_owner"            all      scram-sha-256'
   printf 'host    jobs_db      "%s"                 all      scram-sha-256\n' "$connector_user"
+  printf 'host    realtime_db  "%s"              all      scram-sha-256\n' "$web_push_user"
   echo 'host    replication  /^(platform|seo|jobs|realtime)_(owner|runtime)(_[a-z0-9_]+)?$  all      reject'
   echo 'host    all          /^(platform|seo|jobs|realtime)_(owner|runtime)(_[a-z0-9_]+)?$  all      reject'
   echo 'host    replication  /^jobs_rank_runtime(_[a-z0-9_]+)?$             all      reject'
@@ -69,6 +84,8 @@ write_hba() {
   echo 'host    all          /^directus_runtime_owner(_[a-z0-9_]+)?$          all      reject'
   echo "host    replication  /^jobs_connector(_[a-z0-9_]+)?$     all      reject"
   echo "host    all          /^jobs_connector(_[a-z0-9_]+)?$     all      reject"
+  echo "host    replication  /^realtime_web_push(_[a-z0-9_]+)?$  all      reject"
+  echo "host    all          /^realtime_web_push(_[a-z0-9_]+)?$  all      reject"
   echo "local   all          all                           trust"
   echo "local   replication  all                           trust"
   echo "host    all          all                   all      scram-sha-256"

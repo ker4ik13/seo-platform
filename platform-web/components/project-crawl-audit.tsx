@@ -328,8 +328,11 @@ export function ProjectCrawlAudit({
       )}
 
       <div className="crawl-audit-grid">
-        <div>
-          <h3>Последние запуски</h3>
+        <details className="crawl-stack-section" open={hasActive}>
+          <summary className="crawl-stack-summary">
+            <span>Последние запуски</span>
+            <strong>{crawls?.crawls.length ?? 0}</strong>
+          </summary>
           {crawls?.crawls.length ? (
             <div className="crawl-run-list">
               {crawls.crawls.slice(0, 8).map((crawl) => (
@@ -365,9 +368,12 @@ export function ProjectCrawlAudit({
           ) : (
             <p className="muted-copy">Аудиты ещё не запускались.</p>
           )}
-        </div>
-        <div>
-          <h3>Открытые проблемы</h3>
+        </details>
+        <details className="crawl-stack-section">
+          <summary className="crawl-stack-summary">
+            <span>Открытые проблемы</span>
+            <strong>{issues?.issues.length ?? 0}</strong>
+          </summary>
           {issues?.issues.length ? (
             <div className="crawl-issue-list">
               {issues.issues.slice(0, 12).map((issue) => (
@@ -390,7 +396,7 @@ export function ProjectCrawlAudit({
               Открытых проблем нет. Запустите аудит для актуальной проверки.
             </p>
           )}
-        </div>
+        </details>
       </div>
 
       <details className="crawl-duplicate-history crawl-stack-section">

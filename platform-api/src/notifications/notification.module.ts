@@ -8,6 +8,8 @@ import {
   ProjectNotificationSubscriptionController
 } from "./notification.controller.js";
 import { WebPushSubscriptionController } from "./web-push.controller.js";
+import { DeliveryAuthorizationController } from "./delivery-authorization.controller.js";
+import { DeliveryAuthorizationGuard } from "./delivery-authorization.guard.js";
 
 @Module({
   imports: [AuthorizationModule, IdentityModule, RealtimeClientModule],
@@ -15,7 +17,9 @@ import { WebPushSubscriptionController } from "./web-push.controller.js";
     NotificationCenterController,
     NotificationPreferencesController,
     ProjectNotificationSubscriptionController,
-    WebPushSubscriptionController
-  ]
+    WebPushSubscriptionController,
+    DeliveryAuthorizationController
+  ],
+  providers: [DeliveryAuthorizationGuard]
 })
 export class NotificationModule {}

@@ -405,7 +405,7 @@ function parseRegistration(value: unknown): WebPushRegistration {
       !isPositiveInteger(registration.applicationServerKeyVersion) ||
       !isPositiveInteger(registration.maxActiveDevices) ||
       registration.maxActiveDevices > MAX_DEVICE_PROJECTION ||
-      registration.deliveryAvailable !== false ||
+      typeof registration.deliveryAvailable !== "boolean" ||
       registration.testDeliveryAvailable !== false
     ) {
       invalidPushResponse();
@@ -416,7 +416,7 @@ function parseRegistration(value: unknown): WebPushRegistration {
       applicationServerKeyVersion:
         registration.applicationServerKeyVersion as number,
       maxActiveDevices: registration.maxActiveDevices as number,
-      deliveryAvailable: false,
+      deliveryAvailable: registration.deliveryAvailable as boolean,
       testDeliveryAvailable: false
     };
   }

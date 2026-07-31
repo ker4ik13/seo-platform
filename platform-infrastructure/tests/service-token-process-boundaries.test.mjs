@@ -13,6 +13,7 @@ const globallyDistinctDeployCredentials = [
   "PLATFORM_API_TO_REALTIME_TOKEN",
   "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN",
   "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN",
+  "REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN",
   "JOBS_TO_SEO_RANK_TOKEN",
   "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
   "JOBS_TO_PLATFORM_AUTOMATION_TOKEN",
@@ -85,7 +86,8 @@ const tokenBearingServices = [
   "crawl-worker",
   "rank-worker",
   "auth-email-worker",
-  "realtime"
+  "realtime",
+  "web-push-worker"
 ];
 
 const callerAudienceBoundaries = new Map([
@@ -115,6 +117,10 @@ const dedicatedBoundaries = new Map([
   [
     "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN",
     ["platform-api", "realtime"]
+  ],
+  [
+    "REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN",
+    ["platform-api", "web-push-worker"]
   ],
   [
     "JOBS_TO_SEO_RANK_TOKEN",

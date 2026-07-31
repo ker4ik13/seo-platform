@@ -286,7 +286,7 @@ function validState() {
       applicationServerKey,
       applicationServerKeyVersion: 1,
       maxActiveDevices: 20,
-      deliveryAvailable: false as const,
+      deliveryAvailable: true,
       testDeliveryAvailable: false as const
     },
     devices: [

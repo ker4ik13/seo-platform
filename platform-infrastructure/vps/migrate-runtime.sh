@@ -95,4 +95,12 @@ grant_runtime_permissions realtime_db realtime_owner "$REALTIME_DATABASE_OWNER_P
   "$project_root/platform-infrastructure/postgres/permissions/provision-jobs-connector-role.sh" \
   >/dev/null
 
+"${bootstrap_environment[@]}" \
+  PGDATABASE=realtime_db \
+  REALTIME_WEB_PUSH_DATABASE_USER=realtime_web_push \
+  REALTIME_WEB_PUSH_DATABASE_PASSWORD="$REALTIME_WEB_PUSH_DATABASE_PASSWORD" \
+  /bin/sh \
+  "$project_root/platform-infrastructure/postgres/permissions/provision-realtime-web-push-role.sh" \
+  >/dev/null
+
 printf '%s\n' "seo-platform-vps: all service migrations and runtime grants are current"

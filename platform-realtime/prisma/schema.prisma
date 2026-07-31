@@ -90,6 +90,33 @@ enum WebPushDeliveryStatus {
   FAILED
 }
 
+enum WebPushDeliveryAttemptStatus {
+  PENDING
+  CLAIMED
+  RETRY_SCHEDULED
+  DELIVERED
+  FAILED_FINAL
+  CANCELLED
+}
+
+model WebPushEncryptionKeyCanary {
+  keyVersion Int      @id @map("key_version")
+  ciphertext Bytes
+  nonce      Bytes
+  authTag    Bytes    @map("auth_tag")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("web_push_encryption_key_canaries")
+}
+
+model WebPushFingerprintKeyCanary {
+  keyVersion Int      @id @map("key_version")
+  digest     Bytes
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("web_push_fingerprint_key_canaries")
+}
+
 model CollaborationDocument {
   id                String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId       String   @map("workspace_id") @db.Uuid
@@ -144,10 +171,14 @@ model Notification {
   deepLink     String?              @map("deep_link") @db.VarChar(600)
   data         Json?
   dedupeKey    String?              @map("dedupe_key") @db.VarChar(180)
+  inAppVisible Boolean              @default(true) @map("in_app_visible")
   readAt       DateTime?            @map("read_at") @db.Timestamptz(6)
   createdAt    DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  webPushDeliveryAttempts WebPushDeliveryAttempt[]
+
   @@unique([userId, dedupeKey])
+  @@unique([id, userId], map: "notifications_id_user_key")
   @@index([workspaceId, userId, readAt, createdAt])
   @@index([userId, createdAt(sort: Desc), id(sort: Desc)], map: "notifications_user_created_id_idx")
   @@index([userId, readAt, createdAt(sort: Desc), id(sort: Desc)], map: "notifications_user_read_created_id_idx")
@@ -254,11 +285,47 @@ model WebPushSubscription {
   createdAt                   DateTime                         @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                   DateTime                         @updatedAt @map("updated_at") @db.Timestamptz(6)
 
+  deliveryAttempts WebPushDeliveryAttempt[]
+
   @@unique([userId, installationId], map: "web_push_subscriptions_user_installation_key")
+  @@unique([id, userId], map: "web_push_subscriptions_id_user_key")
   @@index([userId, status, updatedAt(sort: Desc), id(sort: Desc)], map: "web_push_subscriptions_user_status_updated_idx")
   @@index([userId, registeredSessionFamilyId, status], map: "web_push_subscriptions_user_family_status_idx")
   @@index([status, providerExpiresAt], map: "web_push_subscriptions_status_expiry_idx")
   @@map("web_push_subscriptions")
+}
+
+model WebPushDeliveryAttempt {
+  id                  String                       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  notificationId      String                       @map("notification_id") @db.Uuid
+  subscriptionId      String                       @map("subscription_id") @db.Uuid
+  userId              String                       @map("user_id") @db.Uuid
+  subscriptionVersion Int                          @map("subscription_version")
+  status              WebPushDeliveryAttemptStatus @default(PENDING)
+  deliveryMode        NotificationDeliveryMode     @map("delivery_mode")
+  policySnapshot      Json                         @map("policy_snapshot")
+  payloadSnapshot     Json                         @map("payload_snapshot")
+  attemptCount        Int                          @default(0) @map("attempt_count")
+  maxAttempts         Int                          @default(8) @map("max_attempts")
+  availableAt         DateTime                     @default(now()) @map("available_at") @db.Timestamptz(6)
+  leaseToken          String?                      @map("lease_token") @db.Uuid
+  leaseExpiresAt      DateTime?                    @map("lease_expires_at") @db.Timestamptz(6)
+  lastHttpStatus      Int?                         @map("last_http_status")
+  lastErrorCode       String?                      @map("last_error_code") @db.VarChar(64)
+  providerMessageId   String?                      @map("provider_message_id") @db.VarChar(255)
+  deliveredAt         DateTime?                    @map("delivered_at") @db.Timestamptz(6)
+  terminalAt          DateTime?                    @map("terminal_at") @db.Timestamptz(6)
+  createdAt           DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  notification Notification        @relation(fields: [notificationId, userId], references: [id, userId], onDelete: Restrict)
+  subscription WebPushSubscription @relation(fields: [subscriptionId, userId], references: [id, userId], onDelete: Restrict)
+
+  @@unique([notificationId, subscriptionId], map: "web_push_delivery_notification_subscription_key")
+  @@index([status, availableAt, leaseExpiresAt, id], map: "web_push_delivery_claim_idx")
+  @@index([userId, createdAt(sort: Desc), id(sort: Desc)], map: "web_push_delivery_user_history_idx")
+  @@index([subscriptionId, status, createdAt(sort: Desc)], map: "web_push_delivery_subscription_status_idx")
+  @@map("web_push_delivery_attempts")
 }
 
 model RevokedSessionFamilyTombstone {

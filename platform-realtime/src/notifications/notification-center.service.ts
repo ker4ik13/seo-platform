@@ -56,6 +56,7 @@ export class NotificationCenterService {
       : undefined;
     const baseWhere: Prisma.NotificationWhereInput = {
       userId,
+      inAppVisible: true,
       ...(query.unreadOnly ? { readAt: null } : {})
     };
     const where: Prisma.NotificationWhereInput = {
@@ -80,7 +81,7 @@ export class NotificationCenterService {
         select: notificationSelect
       }),
       this.prisma.notification.count({
-        where: { userId, readAt: null }
+        where: { userId, inAppVisible: true, readAt: null }
       })
     ]);
     const hasNext = rows.length > query.limit;
@@ -112,11 +113,16 @@ export class NotificationCenterService {
   ): Promise<NotificationListItem> {
     return this.prisma.$transaction(async (transaction) => {
       await transaction.notification.updateMany({
-        where: { id: notificationId, userId, readAt: null },
+        where: {
+          id: notificationId,
+          userId,
+          inAppVisible: true,
+          readAt: null
+        },
         data: { readAt: new Date() }
       });
       const notification = await transaction.notification.findFirst({
-        where: { id: notificationId, userId },
+        where: { id: notificationId, userId, inAppVisible: true },
         select: notificationSelect
       });
       if (!notification) throw new NotFoundException("Notification not found");
@@ -129,7 +135,7 @@ export class NotificationCenterService {
   ): Promise<NotificationReadAllResult> {
     const readAt = new Date();
     const result = await this.prisma.notification.updateMany({
-      where: { userId, readAt: null },
+      where: { userId, inAppVisible: true, readAt: null },
       data: { readAt }
     });
     return {

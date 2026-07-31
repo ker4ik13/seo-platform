@@ -10,6 +10,9 @@ vapidKeyPair.generateKeys();
 const vapidPublicKey = vapidKeyPair
   .getPublicKey()
   .toString("base64url");
+const vapidPrivateKey = vapidKeyPair
+  .getPrivateKey()
+  .toString("base64url");
 
 describe("loadAppConfig", () => {
   it("uses safe local defaults for development networking", () => {
@@ -97,6 +100,77 @@ describe("loadAppConfig", () => {
     assert.equal(config.webPush.subscriptionKeys.get(4)?.length, 32);
     assert.equal(config.webPush.fingerprintKeys.get(7)?.length, 32);
     assert.equal(config.webPush.maxActiveDevices, 12);
+  });
+
+  it("enables an isolated sender only with a matching VAPID key pair and safe lease", () => {
+    const config = loadAppConfig({
+      NODE_ENV: "test",
+      SERVICE_ROLE: "WEB_PUSH_WORKER",
+      DATABASE_URL: "postgresql://test:test@localhost:5432/test",
+      WEB_PUSH_DELIVERY_ENABLED: "true",
+      PLATFORM_API_INTERNAL_URL: "http://platform-api:4000",
+      REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN: "d".repeat(32),
+      WEB_PUSH_VAPID_PUBLIC_KEY: vapidPublicKey,
+      WEB_PUSH_VAPID_PRIVATE_KEY: vapidPrivateKey,
+      WEB_PUSH_VAPID_SUBJECT: "mailto:security@example.test",
+      WEB_PUSH_VAPID_KEY_VERSION: "3",
+      WEB_PUSH_SUBSCRIPTION_KEYS: `4:${encryptionKey}`,
+      WEB_PUSH_ACTIVE_SUBSCRIPTION_KEY_VERSION: "4",
+      WEB_PUSH_FINGERPRINT_KEYS: `7:${fingerprintKey}`,
+      WEB_PUSH_ACTIVE_FINGERPRINT_KEY_VERSION: "7",
+      WEB_PUSH_DELIVERY_SEND_TIMEOUT_MS: "10000",
+      WEB_PUSH_DELIVERY_LEASE_MS: "30000"
+    });
+
+    assert.equal(config.webPush.deliveryEnabled, true);
+    assert.equal(config.webPush.vapidPrivateKey, vapidPrivateKey);
+    assert.equal(config.webPush.vapidSubject, "mailto:security@example.test");
+
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          SERVICE_ROLE: "WEB_PUSH_WORKER",
+          DATABASE_URL: "postgresql://test",
+          WEB_PUSH_DELIVERY_ENABLED: "true",
+          PLATFORM_API_INTERNAL_URL: "http://platform-api:4000",
+          REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN: "d".repeat(32),
+          WEB_PUSH_VAPID_PUBLIC_KEY: vapidPublicKey,
+          WEB_PUSH_VAPID_PRIVATE_KEY: vapidPrivateKey,
+          WEB_PUSH_VAPID_SUBJECT: "mailto:security@example.test",
+          WEB_PUSH_VAPID_KEY_VERSION: "3",
+          WEB_PUSH_SUBSCRIPTION_KEYS: `4:${encryptionKey}`,
+          WEB_PUSH_ACTIVE_SUBSCRIPTION_KEY_VERSION: "4",
+          WEB_PUSH_FINGERPRINT_KEYS: `7:${fingerprintKey}`,
+          WEB_PUSH_ACTIVE_FINGERPRINT_KEY_VERSION: "7",
+          WEB_PUSH_DELIVERY_LEASE_MS: "10000",
+          WEB_PUSH_DELIVERY_SEND_TIMEOUT_MS: "10000"
+        }),
+      /must exceed/u
+    );
+  });
+
+  it("keeps the VAPID private key and infrastructure credentials out of HTTP and sender roles", () => {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          WEB_PUSH_VAPID_PRIVATE_KEY: vapidPrivateKey,
+          WEB_PUSH_VAPID_SUBJECT: "mailto:security@example.test"
+        }),
+      /Realtime HTTP must not receive/u
+    );
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          SERVICE_ROLE: "WEB_PUSH_WORKER",
+          DATABASE_URL: "postgresql://test",
+          REDIS_URL: "redis://secret@example.test"
+        }),
+      /must not receive HTTP, NATS, Redis/u
+    );
   });
 
   it("rejects non-canonical, duplicate and insecure production Web origins", () => {

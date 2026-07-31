@@ -1,8 +1,9 @@
-import { ECDH } from "node:crypto";
+import { createECDH, ECDH } from "node:crypto";
 import { isIP } from "node:net";
 import { sessionFamilyRevokedEventSubjectV1 } from "@seo-platform/contracts";
 
 export interface AppConfig {
+  readonly serviceRole: "HTTP" | "WEB_PUSH_WORKER";
   readonly nodeEnv: "development" | "test" | "production";
   readonly bindAddress: "127.0.0.1" | "0.0.0.0";
   readonly port: number;
@@ -36,14 +37,30 @@ export interface AppConfig {
   readonly webOrigins: readonly string[];
   readonly webPush: {
     readonly registrationEnabled: boolean;
+    readonly deliveryAvailable: boolean;
+    readonly deliveryEnabled: boolean;
+    readonly platformApiUrl?: string;
+    readonly deliveryAuthorizationToken?: string;
+    readonly deliveryAuthorizationTimeoutMs: number;
     readonly applicationServerKey?: string;
     readonly applicationServerKeyVersion?: number;
+    readonly vapidPrivateKey?: string;
+    readonly vapidSubject?: string;
     readonly endpointOrigins: readonly string[];
     readonly subscriptionKeys: ReadonlyMap<number, Buffer>;
     readonly activeSubscriptionKeyVersion?: number;
     readonly fingerprintKeys: ReadonlyMap<number, Buffer>;
     readonly activeFingerprintKeyVersion?: number;
     readonly maxActiveDevices: number;
+    readonly deliveryMaxAttempts: number;
+    readonly deliveryPollIntervalMs: number;
+    readonly deliveryLeaseMs: number;
+    readonly deliveryRetryBaseMs: number;
+    readonly deliveryRetryMaxMs: number;
+    readonly deliverySendTimeoutMs: number;
+    readonly deliveryTtlSeconds: number;
+    readonly expirySweepIntervalMs: number;
+    readonly expirySweepBatchSize: number;
   };
 }
 
@@ -171,10 +188,11 @@ function boundedIntegerRange(
 
 function boundedEventConsumerConfig(
   env: NodeJS.ProcessEnv,
-  nodeEnv: AppConfig["nodeEnv"]
+  nodeEnv: AppConfig["nodeEnv"],
+  requiredInProduction: boolean
 ): AppConfig["eventConsumer"] {
   const enabled = bool(env.NATS_EVENT_CONSUMER_ENABLED);
-  if (nodeEnv === "production" && !enabled) {
+  if (nodeEnv === "production" && requiredInProduction && !enabled) {
     throw new Error(
       "NATS_EVENT_CONSUMER_ENABLED=true is required in production"
     );
@@ -439,6 +457,25 @@ function allowedWebOrigins(
   return origins;
 }
 
+function internalApiOrigin(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("PLATFORM_API_INTERNAL_URL must be a canonical HTTP(S) origin");
+  }
+  if (
+    (parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
+    parsed.username ||
+    parsed.password ||
+    parsed.origin !== value
+  ) {
+    throw new Error("PLATFORM_API_INTERNAL_URL must be a canonical HTTP(S) origin");
+  }
+  return value;
+}
+
 function applicationServerKey(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
   if (!/^[A-Za-z0-9_-]{87}$/u.test(value)) {
@@ -472,12 +509,88 @@ function applicationServerKey(value: string | undefined): string | undefined {
   return value;
 }
 
+function vapidPrivateKey(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (!/^[A-Za-z0-9_-]{43}$/u.test(value)) {
+    throw new Error(
+      "WEB_PUSH_VAPID_PRIVATE_KEY must be canonical base64url"
+    );
+  }
+  const decoded = Buffer.from(value, "base64url");
+  if (
+    decoded.length !== 32 ||
+    decoded.toString("base64url") !== value
+  ) {
+    throw new Error(
+      "WEB_PUSH_VAPID_PRIVATE_KEY must encode a 32-byte P-256 private key"
+    );
+  }
+  try {
+    const key = createECDH("prime256v1");
+    key.setPrivateKey(decoded);
+    key.getPublicKey();
+  } catch {
+    throw new Error(
+      "WEB_PUSH_VAPID_PRIVATE_KEY must encode a valid P-256 private key"
+    );
+  }
+  return value;
+}
+
+function vapidSubject(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (
+    value.length > 255 ||
+    [...value].some((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return code < 0x20 || code === 0x7f;
+    })
+  ) {
+    throw new Error(
+      "WEB_PUSH_VAPID_SUBJECT must be a bounded mailto: or HTTPS URI"
+    );
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(
+      "WEB_PUSH_VAPID_SUBJECT must be a bounded mailto: or HTTPS URI"
+    );
+  }
+  if (
+    (parsed.protocol !== "mailto:" && parsed.protocol !== "https:") ||
+    parsed.username ||
+    parsed.password ||
+    (parsed.protocol === "mailto:" && !parsed.pathname.includes("@")) ||
+    (parsed.protocol === "https:" &&
+      (parsed.hostname === "localhost" || isIP(parsed.hostname) !== 0))
+  ) {
+    throw new Error(
+      "WEB_PUSH_VAPID_SUBJECT must be a public mailto: or HTTPS URI"
+    );
+  }
+  return value;
+}
+
+function derivedVapidPublicKey(privateKey: string): string {
+  const key = createECDH("prime256v1");
+  key.setPrivateKey(Buffer.from(privateKey, "base64url"));
+  return key.getPublicKey(undefined, "uncompressed").toString("base64url");
+}
+
 export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const nodeEnv = env.NODE_ENV ?? "development";
   if (!["development", "test", "production"].includes(nodeEnv)) {
     throw new Error("NODE_ENV must be development, test or production");
   }
   const typedNodeEnv = nodeEnv as AppConfig["nodeEnv"];
+  const rawServiceRole = env.SERVICE_ROLE ?? "HTTP";
+  if (rawServiceRole !== "HTTP" && rawServiceRole !== "WEB_PUSH_WORKER") {
+    throw new Error("SERVICE_ROLE must be HTTP or WEB_PUSH_WORKER");
+  }
+  const serviceRole = rawServiceRole as AppConfig["serviceRole"];
+  const workerRole = serviceRole === "WEB_PUSH_WORKER";
 
   const natsUser = optional(env, "NATS_USER");
   const natsPassword = optional(env, "NATS_PASSWORD");
@@ -490,8 +603,23 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     "PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN"
   );
   const registrationEnabled = bool(env.WEB_PUSH_REGISTRATION_ENABLED);
+  const deliveryAvailable = bool(env.WEB_PUSH_DELIVERY_AVAILABLE);
+  const deliveryEnabled = bool(env.WEB_PUSH_DELIVERY_ENABLED);
+  const platformApiUrl = internalApiOrigin(
+    optional(env, "PLATFORM_API_INTERNAL_URL")
+  );
+  const deliveryAuthorizationToken = serviceToken(
+    env,
+    "REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN"
+  );
   const vapidPublicKey = applicationServerKey(
     optional(env, "WEB_PUSH_VAPID_PUBLIC_KEY")
+  );
+  const senderPrivateKey = vapidPrivateKey(
+    optional(env, "WEB_PUSH_VAPID_PRIVATE_KEY")
+  );
+  const senderSubject = vapidSubject(
+    optional(env, "WEB_PUSH_VAPID_SUBJECT")
   );
   const vapidKeyVersion = keyVersion(
     optional(env, "WEB_PUSH_VAPID_KEY_VERSION"),
@@ -516,9 +644,12 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const endpointOrigins = pushEndpointOrigins(
     env.WEB_PUSH_ENDPOINT_ORIGINS
   );
-  const webOrigins = allowedWebOrigins(env.WEB_ORIGINS, typedNodeEnv);
+  const webOrigins = workerRole
+    ? []
+    : allowedWebOrigins(env.WEB_ORIGINS, typedNodeEnv);
   if (
     nodeEnv === "production" &&
+    !workerRole &&
     (!platformApiToken || platformApiToken.length < 32)
   ) {
     throw new Error(
@@ -532,6 +663,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (
     nodeEnv === "production" &&
+    !workerRole &&
     (!notificationApiToken ||
       notificationApiToken.length < 32 ||
       isPlaceholderSecret(notificationApiToken))
@@ -552,7 +684,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   }
   if (
     registrationEnabled &&
-    (!notificationApiToken ||
+    (!(!workerRole && notificationApiToken) ||
       !vapidPublicKey ||
       vapidKeyVersion === undefined ||
       endpointOrigins.length === 0 ||
@@ -566,6 +698,69 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     );
   }
   if (
+    deliveryEnabled &&
+    (!workerRole ||
+      !vapidPublicKey ||
+      !senderPrivateKey ||
+      !senderSubject ||
+      !platformApiUrl ||
+      !deliveryAuthorizationToken ||
+      vapidKeyVersion === undefined ||
+      activeSubscriptionKeyVersion === undefined ||
+      !subscriptionKeys.has(activeSubscriptionKeyVersion) ||
+      activeFingerprintKeyVersion === undefined ||
+      !fingerprintKeys.has(activeFingerprintKeyVersion) ||
+      derivedVapidPublicKey(senderPrivateKey) !== vapidPublicKey)
+  ) {
+    throw new Error(
+      "Web Push delivery is enabled but Platform authorization, VAPID subject or matching private key is incomplete"
+    );
+  }
+  if (
+    !workerRole &&
+    (deliveryEnabled ||
+      senderPrivateKey ||
+      senderSubject ||
+      platformApiUrl ||
+      deliveryAuthorizationToken)
+  ) {
+    throw new Error(
+      "Realtime HTTP must not receive WEB_PUSH_DELIVERY_ENABLED or VAPID private sender configuration"
+    );
+  }
+  if (workerRole && registrationEnabled) {
+    throw new Error(
+      "WEB_PUSH_WORKER must not enable browser registration"
+    );
+  }
+  if (deliveryAvailable && (!registrationEnabled || workerRole)) {
+    throw new Error(
+      "WEB_PUSH_DELIVERY_AVAILABLE is valid only for configured Realtime HTTP registration"
+    );
+  }
+  if (
+    workerRole &&
+    (platformApiToken ||
+      notificationApiToken ||
+      natsUser ||
+      natsPassword ||
+      env.REDIS_URL?.trim() ||
+      env.WEB_ORIGINS?.trim())
+  ) {
+    throw new Error(
+      "WEB_PUSH_WORKER must not receive HTTP, NATS, Redis or browser-origin credentials"
+    );
+  }
+  if (
+    workerRole &&
+    nodeEnv === "production" &&
+    !deliveryEnabled
+  ) {
+    throw new Error(
+      "WEB_PUSH_DELIVERY_ENABLED=true is required for WEB_PUSH_WORKER in production"
+    );
+  }
+  if (
     [...subscriptionKeys.values()].some((encryptionKey) =>
       [...fingerprintKeys.values()].some((fingerprintKey) =>
         encryptionKey.equals(fingerprintKey)
@@ -576,9 +771,63 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "Web Push encryption and fingerprint keyrings must use distinct key material"
     );
   }
-  const eventConsumer = boundedEventConsumerConfig(env, typedNodeEnv);
+  const deliveryLeaseMs = boundedIntegerRange(
+    env.WEB_PUSH_DELIVERY_LEASE_MS,
+    30_000,
+    "WEB_PUSH_DELIVERY_LEASE_MS",
+    5_000,
+    300_000
+  );
+  const deliveryRetryBaseMs = boundedIntegerRange(
+    env.WEB_PUSH_DELIVERY_RETRY_BASE_MS,
+    1_000,
+    "WEB_PUSH_DELIVERY_RETRY_BASE_MS",
+    100,
+    60_000
+  );
+  const deliveryRetryMaxMs = boundedIntegerRange(
+    env.WEB_PUSH_DELIVERY_RETRY_MAX_MS,
+    300_000,
+    "WEB_PUSH_DELIVERY_RETRY_MAX_MS",
+    1_000,
+    3_600_000
+  );
+  const deliverySendTimeoutMs = boundedIntegerRange(
+    env.WEB_PUSH_DELIVERY_SEND_TIMEOUT_MS,
+    10_000,
+    "WEB_PUSH_DELIVERY_SEND_TIMEOUT_MS",
+    1_000,
+    60_000
+  );
+  const deliveryAuthorizationTimeoutMs = boundedIntegerRange(
+    env.WEB_PUSH_DELIVERY_AUTHORIZATION_TIMEOUT_MS,
+    5_000,
+    "WEB_PUSH_DELIVERY_AUTHORIZATION_TIMEOUT_MS",
+    500,
+    30_000
+  );
+  if (deliveryRetryMaxMs < deliveryRetryBaseMs) {
+    throw new Error(
+      "WEB_PUSH_DELIVERY_RETRY_MAX_MS must be greater than or equal to WEB_PUSH_DELIVERY_RETRY_BASE_MS"
+    );
+  }
+  if (
+    deliveryEnabled &&
+    deliveryLeaseMs <=
+      deliveryAuthorizationTimeoutMs + deliverySendTimeoutMs + 1_000
+  ) {
+    throw new Error(
+      "WEB_PUSH_DELIVERY_LEASE_MS must exceed WEB_PUSH_DELIVERY_SEND_TIMEOUT_MS by more than 1000ms"
+    );
+  }
+  const eventConsumer = boundedEventConsumerConfig(
+    env,
+    typedNodeEnv,
+    !workerRole
+  );
 
   return {
+    serviceRole,
     nodeEnv: typedNodeEnv,
     bindAddress: bindAddress(env.BIND_ADDRESS, typedNodeEnv),
     port: positiveInteger(env.PORT, 4003, "PORT"),
@@ -601,12 +850,23 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     webOrigins,
     webPush: {
       registrationEnabled,
+      deliveryAvailable,
+      deliveryEnabled,
+      ...(platformApiUrl ? { platformApiUrl } : {}),
+      ...(deliveryAuthorizationToken
+        ? { deliveryAuthorizationToken }
+        : {}),
+      deliveryAuthorizationTimeoutMs,
       ...(vapidPublicKey
         ? { applicationServerKey: vapidPublicKey }
         : {}),
       ...(vapidKeyVersion !== undefined
         ? { applicationServerKeyVersion: vapidKeyVersion }
         : {}),
+      ...(senderPrivateKey
+        ? { vapidPrivateKey: senderPrivateKey }
+        : {}),
+      ...(senderSubject ? { vapidSubject: senderSubject } : {}),
       endpointOrigins,
       subscriptionKeys,
       ...(activeSubscriptionKeyVersion !== undefined
@@ -621,6 +881,43 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         20,
         "WEB_PUSH_MAX_ACTIVE_DEVICES",
         100
+      ),
+      deliveryMaxAttempts: boundedPositiveInteger(
+        env.WEB_PUSH_DELIVERY_MAX_ATTEMPTS,
+        8,
+        "WEB_PUSH_DELIVERY_MAX_ATTEMPTS",
+        100
+      ),
+      deliveryPollIntervalMs: boundedIntegerRange(
+        env.WEB_PUSH_DELIVERY_POLL_INTERVAL_MS,
+        1_000,
+        "WEB_PUSH_DELIVERY_POLL_INTERVAL_MS",
+        100,
+        60_000
+      ),
+      deliveryLeaseMs,
+      deliveryRetryBaseMs,
+      deliveryRetryMaxMs,
+      deliverySendTimeoutMs,
+      deliveryTtlSeconds: boundedIntegerRange(
+        env.WEB_PUSH_DELIVERY_TTL_SECONDS,
+        3_600,
+        "WEB_PUSH_DELIVERY_TTL_SECONDS",
+        60,
+        86_400
+      ),
+      expirySweepIntervalMs: boundedIntegerRange(
+        env.WEB_PUSH_EXPIRY_SWEEP_INTERVAL_MS,
+        60_000,
+        "WEB_PUSH_EXPIRY_SWEEP_INTERVAL_MS",
+        10_000,
+        3_600_000
+      ),
+      expirySweepBatchSize: boundedPositiveInteger(
+        env.WEB_PUSH_EXPIRY_SWEEP_BATCH_SIZE,
+        100,
+        "WEB_PUSH_EXPIRY_SWEEP_BATCH_SIZE",
+        1_000
       )
     }
   };
