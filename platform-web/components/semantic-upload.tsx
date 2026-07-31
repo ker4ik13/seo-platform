@@ -519,15 +519,17 @@ export function SemanticUpload({
       if (inspected.status === "READY") {
         if (
           file &&
-          ["text/csv", "text/tab-separated-values"].includes(
-            mediaType(file)
-          )
+          [
+            "text/csv",
+            "text/tab-separated-values",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          ].includes(mediaType(file))
         ) {
           await startSemanticImport(inspected.id, controller.signal);
         } else {
           setStage("ready");
           setMessage(
-            `${inspected.originalName} проверен. Выбор листов и распознавание Excel/ZIP будут доступны после подключения parser worker.`
+            `${inspected.originalName} проверен. Legacy XLS и ZIP требуют отдельного конвертера.`
           );
         }
       } else {
@@ -680,7 +682,7 @@ export function SemanticUpload({
       <header className="panel-header">
         <div>
           <h2>Импорт семантики</h2>
-          <p>CSV, TSV, XLS/XLSX или архив Key Collector до 5 ГБ</p>
+          <p>CSV, TSV или XLSX из Key Collector до 5 ГБ</p>
         </div>
       </header>
       {message && (
@@ -695,7 +697,7 @@ export function SemanticUpload({
       )}
       <label className="upload-dropzone">
         <input
-          accept=".csv,.tsv,.xls,.xlsx,.zip"
+          accept=".csv,.tsv,.xlsx"
           disabled={busy}
           onChange={selectFile}
           type="file"
@@ -1356,7 +1358,7 @@ function importStartErrorMessage(error: unknown): string {
       return "Проект доступен только для чтения. Новый импорт временно недоступен.";
     }
     if (error.code === "VALIDATION_FAILED") {
-      return "Этот формат пока нельзя разобрать. CSV/TSV уже поддерживаются; Excel/ZIP parser подключается отдельно.";
+      return "Этот формат пока нельзя разобрать. Поддерживаются CSV, TSV и XLSX; legacy XLS и ZIP требуют отдельного конвертера.";
     }
     if (error.code === "DEPENDENCY_UNAVAILABLE") {
       return "Очередь импорта временно недоступна. Проверенный файл сохранён — повторите позже.";
@@ -1397,6 +1399,14 @@ function importFailureMessage(code: string | undefined): string {
       "Одна из ячеек превышает безопасный лимит размера.",
     ROW_TOO_LARGE:
       "Одна из строк превышает безопасный лимит размера.",
+    INVALID_XLSX:
+      "XLSX повреждён, зашифрован или содержит неподдерживаемую структуру.",
+    XLSX_TOO_LARGE:
+      "XLSX превышает безопасный лимит 256 МиБ. Для больших ядер используйте CSV/TSV.",
+    XLSX_ARCHIVE_TOO_LARGE:
+      "XLSX отклонён: распакованный workbook превышает безопасный лимит.",
+    XLSX_SHARED_STRINGS_TOO_LARGE:
+      "XLSX содержит слишком большой словарь строк. Экспортируйте ядро в CSV/TSV.",
     IMPORT_MAPPING_INVALID:
       "Сопоставление колонок устарело или повреждено. Вернитесь к настройке импорта.",
     SEO_DATA_VALIDATION_REJECTED:

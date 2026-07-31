@@ -183,14 +183,74 @@ processed_urls=$(jq -er '.data.processedUrls' "$response_body")
 api_call GET "projects/$project_id/crawl-issues"
 expect_status 200 crawl-issues
 
-semantic_csv=$'Фраза;Группа;Частотность\nпродвижение сайта;Коммерция;120\nseo аудит;Аудит;70'
+semantic_file=$smoke_root/semantic-smoke.xlsx
+SEMANTIC_FIXTURE="$semantic_file" \
+FFLATE_MODULE="$project_root/platform-jobs-integrations/node_modules/fflate" \
+  /home/dev/.nvm/versions/node/v24.18.1/bin/node <<'NODE'
+const { writeFileSync } = require("node:fs");
+const { strToU8, zipSync } = require(process.env.FFLATE_MODULE);
+const xml = (value) =>
+  strToU8(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>${value}`);
+const files = {
+  "[Content_Types].xml": xml(
+    '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+      '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+      '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+      '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>' +
+      "</Types>"
+  ),
+  "_rels/.rels": xml(
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+      "</Relationships>"
+  ),
+  "xl/workbook.xml": xml(
+    '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
+      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+      "<sheets>" +
+      '<sheet name="Служебный" sheetId="1" state="hidden" r:id="rId1"/>' +
+      '<sheet name="Key Collector" sheetId="2" r:id="rId2"/>' +
+      "</sheets></workbook>"
+  ),
+  "xl/_rels/workbook.xml.rels": xml(
+    '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>' +
+      '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>' +
+      "</Relationships>"
+  ),
+  "xl/sharedStrings.xml": xml(
+    '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="8" uniqueCount="8">' +
+      "<si><t>Не импортировать</t></si><si><t>Фраза</t></si>" +
+      "<si><t>Группа</t></si><si><t>Частотность</t></si>" +
+      "<si><t>продвижение сайта</t></si><si><t>Коммерция</t></si>" +
+      "<si><t>seo аудит</t></si><si><t>Аудит</t></si></sst>"
+  ),
+  "xl/worksheets/sheet1.xml": xml(
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' +
+      '<row r="1"><c r="A1" t="s"><v>0</v></c></row></sheetData></worksheet>'
+  ),
+  "xl/worksheets/sheet2.xml": xml(
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' +
+      '<row r="1"><c r="A1" t="s"><v>1</v></c><c r="B1" t="s"><v>2</v></c><c r="C1" t="s"><v>3</v></c></row>' +
+      '<row r="2"><c r="A2" t="s"><v>4</v></c><c r="B2" t="s"><v>5</v></c><c r="C2"><f>10*12</f><v>120</v></c></row>' +
+      '<row r="3"><c r="A3" t="s"><v>6</v></c><c r="B3" t="s"><v>7</v></c><c r="C3"><v>70</v></c></row>' +
+      "</sheetData></worksheet>"
+  )
+};
+writeFileSync(process.env.SEMANTIC_FIXTURE, Buffer.from(zipSync(files)), {
+  mode: 0o600
+});
+NODE
 semantic_size=$(
-  printf '%s' "$semantic_csv" |
-    LC_ALL=C wc -c |
+  LC_ALL=C wc -c < "$semantic_file" |
     tr -d '[:space:]'
 )
 api_call POST "projects/$project_id/uploads" \
-  "{\"fileName\":\"semantic-smoke.csv\",\"mediaType\":\"text/csv\",\"sizeBytes\":\"$semantic_size\"}" \
+  "{\"fileName\":\"semantic-smoke.xlsx\",\"mediaType\":\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\",\"sizeBytes\":\"$semantic_size\"}" \
   "smoke-upload-$(openssl rand -hex 16)"
 expect_status 201 create-semantic-upload
 upload_id=$(jq -er '.data.upload.id' "$response_body")
@@ -239,8 +299,8 @@ part_status=$(
     --max-time 30 \
     --request PUT \
     --header "Origin: $SEO_PLATFORM_PUBLIC_URL" \
-    --header 'Content-Type: text/csv' \
-    --data-binary "$semantic_csv" \
+    --header 'Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' \
+    --data-binary @"$semantic_file" \
     --dump-header "$part_headers" \
     --output /dev/null \
     --write-out '%{http_code}' \

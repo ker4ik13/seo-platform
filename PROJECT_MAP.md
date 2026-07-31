@@ -19,7 +19,11 @@ Runbook: `platform-infrastructure/vps/README.md`.
 mapping/validation/publish → keyword read model`. Исправлены фактический
 HTTP-request lifecycle crawler, DNS/IP pinning и JSONB-order regression в
 SHA-256 semantic publication envelope. Полный repository lint/typecheck/test
-на этом состоянии проходит. Внешние коммерческие gates остаются честно
+на этом состоянии проходит. Отдельный live XLSX smoke подтверждает первый
+видимый лист, shared strings и cached formula result во всём том же
+upload/inspection/import/publish контуре. Production dependency audit после
+точечных lockfile overrides: 0 известных low/moderate/high/critical
+advisories. Внешние коммерческие gates остаются честно
 выключены до выдачи владельцем YooKassa, SMTP и реальных provider BYOK
 credentials; это не блокирует продолжение остальных продуктовых контуров.
 
@@ -1850,8 +1854,13 @@ OAuth/OIDC выполняется после подтверждения зави
   запрещены уже сейчас.
 - Partitioned import staging требует retention/cleanup job и метрик роста до
   production; raw rows не считаются бессрочной историей.
-- CSV/TSV включены; XLSX/ZIP требуют подтверждения production-зависимостей
-  `exceljs`/`unzipper`, а legacy XLS — изолированного LibreOffice worker с
+- CSV/TSV и XLSX включены. XLSX использует bounded temporary spool,
+  `unzipper-esm` central-directory entry streams и `saxes`, выбирает первый
+  видимый лист, читает shared strings/cached formula values/dates и
+  fail-closed ограничивает zip bomb/XML/row budgets. Известные production
+  advisories удалены lockfile overrides; `pnpm audit --prod` чист.
+  Выбор нескольких листов, ZIP из нескольких файлов остаются следующим
+  wizard slice, а legacy XLS требует изолированного LibreOffice worker с
   отдельными CPU/RAM/time limits.
 - ClamAV требует отдельного memory/capacity budget на VPS; concurrency
   inspection worker ограничивается независимо от API.

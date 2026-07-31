@@ -246,6 +246,26 @@ keys, выдаёт короткоживущие signed URLs на отдельн�
 вычислить SHA-256, проверить MIME по содержимому и malware scan, после чего
 перевести объект в `READY` либо `REJECTED`.
 
+## Импорт XLSX
+
+`import-worker` поддерживает CSV/TSV и XLSX Key Collector. XLSX сначала
+потоково копируется в mode-600 temporary file с лимитом 256 МиБ, затем
+`unzipper-esm` читает central directory и только allowlisted OpenXML entries,
+а `saxes` потоково разбирает XML. Это позволяет обработать shared strings,
+cached formula values, даты и первый видимый worksheet без загрузки workbook
+целиком в память. Encrypted archive, duplicate/missing metadata, DTD,
+небезопасный relationship, более 10 000 entries, excessive compression ratio,
+uncompressed size, columns/field/row и shared-string budget отклоняются
+terminal-кодом.
+
+Новые production-зависимости ограничены parser worker:
+`unzipper-esm@0.13.3` даёт random-access entry streams без extraction на
+filesystem, `saxes@6.0.0` — namespace-safe streaming XML parser. Они заменили
+`exceljs`, чей production dependency tree содержал известные advisories.
+`pnpm audit --prod` после lockfile overrides не содержит известных
+уязвимостей. `fflate` используется только тестом/smoke для генерации
+детерминированного XLSX fixture.
+
 ## Проверка BYOK credentials
 
 HTTP-процесс запускается с `INTEGRATION_CREDENTIAL_ROLE=MANAGEMENT`: он

@@ -28,10 +28,14 @@ cursor load-more, loading/empty/error/offline и archived/read-only states.
 grant, live provider submit/status и result producer ещё отсутствуют, поэтому
 экран не означает готовность реального сбора.
 
-Экран `/app/semantics` поддерживает прямую multipart-загрузку CSV/TSV/XLS/
-XLSX/ZIP в S3, прогресс, ограниченную параллельность, повтор parts,
-возобновление после перезагрузки вкладки и явную отмену. Файл не публикуется
-до серверной проверки и import preview.
+Экран `/app/semantics` поддерживает прямую multipart-загрузку CSV/TSV/XLSX в
+S3, прогресс, ограниченную параллельность, повтор parts, возобновление после
+перезагрузки вкладки и явную отмену. После ClamAV/checksum/MIME-проверки
+CSV/TSV потоково разбираются как delimited text, а XLSX — через bounded
+OpenXML parser с первым видимым листом, cached formula values и защитой от
+zip bomb. Файл не публикуется до mapping, validation preview и явного
+подтверждения. Legacy XLS, ZIP из нескольких файлов и выбор листов ещё не
+включены.
 
 Имена auth cookies в Web и Platform API должны совпадать. Публичная зона,
 Toolbox и API docs не зависят от пользовательской сессии.

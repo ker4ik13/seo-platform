@@ -31,7 +31,8 @@ import { QueueService } from "../queue/queue.service.js";
 
 const SUPPORTED_SOURCE_FORMATS: Readonly<Record<string, string>> = {
   "text/csv": "CSV",
-  "text/tab-separated-values": "TSV"
+  "text/tab-separated-values": "TSV",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "XLSX"
 };
 
 @Injectable()

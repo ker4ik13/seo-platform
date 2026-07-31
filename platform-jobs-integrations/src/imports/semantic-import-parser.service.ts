@@ -20,6 +20,8 @@ import {
 } from "../storage/object-storage.port.js";
 import {
   DelimitedParseError,
+  type DetectedImportDelimiter,
+  type DetectedImportEncoding,
   delimiterCharacter,
   detectDelimiter,
   importHeaders,
@@ -28,17 +30,22 @@ import {
   resolveHeaderMode,
   suggestColumnMapping
 } from "./delimited-parser.js";
+import { parseXlsxRows } from "./xlsx-parser.js";
 
 const TERMINAL_PARSE_CODES = new Set([
   "BINARY_TEXT_FILE",
   "EMPTY_IMPORT",
   "FIELD_TOO_LARGE",
+  "INVALID_XLSX",
   "INVALID_TEXT_ENCODING",
   "INVALID_QUOTE",
   "ROW_TOO_LARGE",
   "TOO_MANY_COLUMNS",
   "UNSUPPORTED_IMPORT_FORMAT",
-  "UNTERMINATED_QUOTE"
+  "UNTERMINATED_QUOTE",
+  "XLSX_ARCHIVE_TOO_LARGE",
+  "XLSX_SHARED_STRINGS_TOO_LARGE",
+  "XLSX_TOO_LARGE"
 ]);
 
 export interface SemanticImportParseOutcome {
@@ -161,7 +168,7 @@ export class SemanticImportParserService {
     if (!this.storage.isEnabled()) {
       throw new Error("Object storage is disabled");
     }
-    if (!["CSV", "TSV"].includes(semanticImport.sourceFormat)) {
+    if (!["CSV", "TSV", "XLSX"].includes(semanticImport.sourceFormat)) {
       throw new DelimitedParseError("UNSUPPORTED_IMPORT_FORMAT");
     }
     const upload = await this.prisma.upload.findFirst({
@@ -182,21 +189,33 @@ export class SemanticImportParserService {
       upload.objectKey
     );
     const observed = observeBytes(objectSource);
-    const prepared = await prepareDelimitedText(
-      observed.stream,
-      requestedEncoding(semanticImport.requestedEncoding)
-    );
-    const fallbackDelimiter =
-      semanticImport.sourceFormat === "TSV" ? "TAB" : "COMMA";
-    const detectedDelimiter = detectDelimiter(
-      prepared.sampleText,
-      requestedDelimiter(semanticImport.requestedDelimiter),
-      fallbackDelimiter
-    );
-    const rows = parseDelimitedText(
-      prepared.text,
-      delimiterCharacter(detectedDelimiter)
-    )[Symbol.asyncIterator]();
+    let detectedEncoding: DetectedImportEncoding | undefined;
+    let detectedDelimiter: DetectedImportDelimiter | undefined;
+    let rowSource: AsyncIterable<readonly string[]>;
+    if (semanticImport.sourceFormat === "XLSX") {
+      rowSource = parseXlsxRows(
+        observed.stream,
+        semanticImport.totalBytes
+      );
+    } else {
+      const prepared = await prepareDelimitedText(
+        observed.stream,
+        requestedEncoding(semanticImport.requestedEncoding)
+      );
+      detectedEncoding = prepared.encoding;
+      const fallbackDelimiter =
+        semanticImport.sourceFormat === "TSV" ? "TAB" : "COMMA";
+      detectedDelimiter = detectDelimiter(
+        prepared.sampleText,
+        requestedDelimiter(semanticImport.requestedDelimiter),
+        fallbackDelimiter
+      );
+      rowSource = parseDelimitedText(
+        prepared.text,
+        delimiterCharacter(detectedDelimiter)
+      );
+    }
+    const rows = rowSource[Symbol.asyncIterator]();
     const initialRows: (readonly string[])[] = [];
     while (initialRows.length < 2) {
       const next = await rows.next();
@@ -292,8 +311,8 @@ export class SemanticImportParserService {
       semanticImport,
       claimedAt,
       {
-        encoding: prepared.encoding,
-        delimiter: detectedDelimiter,
+        ...(detectedEncoding ? { encoding: detectedEncoding } : {}),
+        ...(detectedDelimiter ? { delimiter: detectedDelimiter } : {}),
         headerMode: resolvedHeaderMode,
         headers,
         suggestedMapping: suggestColumnMapping(headers),
@@ -338,8 +357,8 @@ export class SemanticImportParserService {
         data: {
           status: "AWAITING_MAPPING",
           stage: "mapping",
-          detectedEncoding: result.encoding,
-          detectedDelimiter: result.delimiter,
+          detectedEncoding: result.encoding ?? null,
+          detectedDelimiter: result.delimiter ?? null,
           headerMode: result.headerMode,
           headers: [...result.headers],
           suggestedMapping: result.suggestedMapping.map((column) => ({
@@ -497,8 +516,8 @@ export class SemanticImportParserService {
 }
 
 interface ParseResult {
-  readonly encoding: "UTF_8" | "WINDOWS_1251";
-  readonly delimiter: "COMMA" | "SEMICOLON" | "TAB";
+  readonly encoding?: "UTF_8" | "WINDOWS_1251";
+  readonly delimiter?: "COMMA" | "SEMICOLON" | "TAB";
   readonly headerMode: "PRESENT" | "ABSENT";
   readonly headers: readonly string[];
   readonly suggestedMapping: readonly SemanticImportColumnPreview[];
