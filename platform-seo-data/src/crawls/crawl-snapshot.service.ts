@@ -1,13 +1,20 @@
 import { Injectable } from "@nestjs/common";
-import type {
-  InternalFinalizeCrawlSnapshotInput,
-  InternalPersistCrawlPageInput,
-  InternalPersistCrawlPageReceipt,
-  ProjectCrawlIssueCollection
+import {
+  crawlPageChangeFields,
+  type CrawlPageChangeField,
+  type InternalFinalizeCrawlSnapshotInput,
+  type InternalPersistCrawlPageInput,
+  type InternalPersistCrawlPageReceipt,
+  type ProjectCrawlPageChangeCollection,
+  type ProjectCrawlIssueCollection
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { normalizePageUrl } from "../pages/page-url.js";
+import {
+  crawlChangeSnapshotSelect,
+  detectCrawlPageChange
+} from "./crawl-change.js";
 
 @Injectable()
 export class CrawlSnapshotService {
@@ -109,6 +116,17 @@ export class CrawlSnapshotService {
           lastSeenAt: new Date(input.crawledAt)
         }
       });
+      const previousSnapshot =
+        await transaction.crawlPageSnapshot.findFirst({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            pageId: page.id,
+            NOT: { crawlId: input.crawlId }
+          },
+          select: crawlChangeSnapshotSelect,
+          orderBy: [{ crawledAt: "desc" }, { id: "desc" }]
+        });
       const snapshot = await transaction.crawlPageSnapshot.create({
         data: {
           workspaceId: input.workspaceId,
@@ -119,6 +137,7 @@ export class CrawlSnapshotService {
           requestedUrl: input.requestedUrl,
           finalUrl: input.finalUrl,
           finalUrlHash: identity.hash,
+          redirectChain: input.redirectChain as Prisma.InputJsonValue,
           depth: input.depth,
           statusCode: input.statusCode,
           responseTimeMs: input.responseTimeMs,
@@ -145,6 +164,27 @@ export class CrawlSnapshotService {
           crawledAt: new Date(input.crawledAt)
         }
       });
+      if (previousSnapshot) {
+        const change = detectCrawlPageChange(previousSnapshot, input);
+        if (change) {
+          await transaction.crawlPageChange.create({
+            data: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              pageId: page.id,
+              crawlId: input.crawlId,
+              previousSnapshotId: previousSnapshot.id,
+              currentSnapshotId: snapshot.id,
+              severity: change.severity,
+              changedFields: [...change.changedFields],
+              beforeHash: change.beforeHash,
+              afterHash: change.afterHash,
+              diffHash: change.diffHash,
+              diff: change.diff as Prisma.InputJsonValue
+            }
+          });
+        }
+      }
       for (const issue of input.issues) {
         await transaction.crawlIssueOccurrence.create({
           data: {
@@ -256,6 +296,36 @@ export class CrawlSnapshotService {
       }))
     };
   }
+
+  public async listChanges(
+    workspaceId: string,
+    projectId: string
+  ): Promise<ProjectCrawlPageChangeCollection> {
+    const changes = await this.prisma.crawlPageChange.findMany({
+      where: { workspaceId, projectId },
+      include: {
+        page: { select: { url: true } },
+        previousSnapshot: { select: { crawledAt: true } },
+        currentSnapshot: { select: { crawledAt: true } }
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 500
+    });
+    return {
+      changes: changes.map((change) => ({
+        id: change.id,
+        crawlId: change.crawlId,
+        pageId: change.pageId,
+        url: change.page.url,
+        severity: change.severity,
+        changedFields: storedChangeFields(change.changedFields),
+        previousCrawledAt:
+          change.previousSnapshot.crawledAt.toISOString(),
+        currentCrawledAt: change.currentSnapshot.crawledAt.toISOString(),
+        createdAt: change.createdAt.toISOString()
+      }))
+    };
+  }
 }
 
 function pageProjection(
@@ -272,4 +342,19 @@ function pageProjection(
     language: input.language ?? null,
     crawledAt: new Date(input.crawledAt)
   } as const;
+}
+
+function storedChangeFields(
+  values: readonly string[]
+): readonly CrawlPageChangeField[] {
+  const allowed = new Set<string>(crawlPageChangeFields);
+  if (
+    values.length < 1 ||
+    values.length > crawlPageChangeFields.length ||
+    new Set(values).size !== values.length ||
+    values.some((value) => !allowed.has(value))
+  ) {
+    throw new TypeError("Stored crawl page change fields are invalid");
+  }
+  return values as readonly CrawlPageChangeField[];
 }

@@ -13,6 +13,7 @@ import {
 } from "@nestjs/common";
 import type {
   ApiResponse,
+  ProjectCrawlPageChangeCollection,
   ProjectCrawlIssueCollection,
   TechnicalCrawlAccess,
   TechnicalCrawlSettings,
@@ -86,6 +87,22 @@ export class CrawlController {
     return apiResponse(
       request,
       await this.seoData.listProjectCrawlIssues(
+        internalProjectContext(request, principal, tenant)
+      )
+    );
+  }
+
+  @Get("crawl-changes")
+  @RequirePermission("page.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async changes(
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<ProjectCrawlPageChangeCollection>> {
+    const tenant = requiredProjectTenant(request);
+    return apiResponse(
+      request,
+      await this.seoData.listProjectCrawlPageChanges(
         internalProjectContext(request, principal, tenant)
       )
     );

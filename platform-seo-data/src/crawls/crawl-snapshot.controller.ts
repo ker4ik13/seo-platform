@@ -12,6 +12,7 @@ import {
 import type {
   ApiResponse,
   InternalPersistCrawlPageReceipt,
+  ProjectCrawlPageChangeCollection,
   ProjectCrawlIssueCollection
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
@@ -77,6 +78,33 @@ export class CrawlIssueController {
     return response(
       request,
       await this.snapshots.listIssues(
+        context.workspaceId,
+        context.projectId
+      )
+    );
+  }
+}
+
+@Controller("internal/v1/projects/:projectId/crawl-changes")
+@UseGuards(PlatformApiGuard)
+export class CrawlPageChangeController {
+  public constructor(private readonly snapshots: CrawlSnapshotService) {}
+
+  @Get()
+  public async list(
+    @Param("projectId") projectId: string,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<ProjectCrawlPageChangeCollection>> {
+    const context = internalCommandContext(headers);
+    if (context.projectId !== internalUuid(projectId, "projectId")) {
+      throw new BadRequestException(
+        "Route project identifier does not match trusted context"
+      );
+    }
+    return response(
+      request,
+      await this.snapshots.listChanges(
         context.workspaceId,
         context.projectId
       )

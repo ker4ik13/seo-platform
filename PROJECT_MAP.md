@@ -198,6 +198,16 @@ issue projection. Page Map обновляется из `CRAWL` provenance. Web �
 запустить/остановить обход, показывает polling progress, историю и открытые
 проблемы с loading/empty/error/read-only states.
 
+Radar теперь автоматически сравнивает повторный crawl одной Page: к каждому
+значимому отличию создаётся отдельный immutable `crawl_page_changes` с
+tenant-safe ссылками на предыдущий/текущий snapshot, crawl Job, severity,
+before/after/diff SHA-256 и bounded нормализованным diff без raw HTML.
+Сравнение покрывает HTTP status/redirect chain, метаданные, canonical/robots,
+headings/hreflang/schema, ссылки, content hash, indexability, изображения и
+пороговые изменения latency/размера. Internal SEO Data и public Platform API
+возвращают максимум 500 строго валидируемых изменений под `page.view`, а Web
+показывает русскоязычную историю между обходами и корректный empty state.
+
 P3 billing foundation реализован в Platform API и Web. Versioned каталог
 содержит Trial/Solo/Team/Agency/Business/Enterprise и годовые цены; hosted
 checkout YooKassa не принимает карточные данные, использует provider
@@ -804,11 +814,11 @@ Backend convention:
   SSRF/DNS-rebinding-safe HTTP client, streaming HTML analysis, robots rules,
   PostgreSQL lease/checkpoint/retry recovery и secret-free BullMQ payload;
 - `platform-seo-data/src/crawls` — immutable crawl snapshots/issue
-  occurrences, current issue projection и tenant-safe Page Map update без raw
-  HTML;
+  occurrences/page changes, current issue projection, deterministic
+  before/after diff и tenant-safe Page Map update без raw HTML;
 - `platform-api/src/crawls` и
   `platform-web/components/project-crawl-audit.tsx` — public RBAC/CSRF/audit
-  boundary и private browser progress/issues UI;
+  boundary и private browser progress/issues/Radar history UI;
 - `platform-jobs-integrations/src/platform-api` — bounded/no-redirect client
   issuer-а с dedicated token, exact envelope/request/scope hash validation,
   no-store check, response size и timeout limits;
@@ -1101,7 +1111,7 @@ Entrypoints:
 | Integrations | vertical slice: catalog + encrypted BYOK vault + validation + project binding |
 | Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |
 | Automations | vertical slice: rank schedule CRUD + тарифный capacity + BullMQ scheduler + manual/scheduled execution + no-overlap/recovery/history/auto-pause + Web |
-| Pages/technical audit | vertical slice: Page Map CRUD/assignment + SSRF-safe async crawl + immutable snapshots/current issues + lease/checkpoint recovery + Web |
+| Pages/technical audit | vertical slice: Page Map CRUD/assignment + SSRF-safe async crawl + immutable snapshots/current issues/page-change history + lease/checkpoint recovery + Web |
 | Billing/YooKassa | vertical slice: catalog + hosted/recurring payment + webhook/reconciliation + ledger/refund/NPD obligation + Web UI + protected manual receipt operations + durable receipt email delivery; live provider/SMTP canary остаётся gate |
 | Directus content | planned |
 
@@ -2008,12 +2018,12 @@ OAuth/OIDC выполняется после подтверждения зави
   provider incident telemetry/circuit breaker и schedule orchestration ещё
   обязательны. Keys.so пока используется только для credential validation,
   XMLStock ждёт подтверждённого provider contract и redacted fixtures.
-- Technical crawl production vertical закрывает ручной bounded обход и
-  текущие issues, но полный Radar из раздела 10 ТЗ ещё требует sitemap scope,
-  include/exclude/query policy, conditional requests/host backoff, schedules,
-  page diffs/duplicate groups, notifications и отдельный browser-rendering
-  pool. Cookies/custom headers намеренно не принимаются до отдельной
-  secret-safe policy.
+- Technical crawl production vertical закрывает ручной bounded обход,
+  текущие issues и page diff history, но полный Radar из раздела 10 ТЗ ещё
+  требует sitemap scope, include/exclude/query policy, conditional
+  requests/host backoff, schedules, duplicate groups, notifications и
+  отдельный browser-rendering pool. Cookies/custom headers намеренно не
+  принимаются до отдельной secret-safe policy.
 - `platform-app` сохранён как legacy Git-источник до проверки переноса; новая
   функциональность добавляется только в `platform-web`.
 

@@ -1,6 +1,8 @@
 "use client";
 
 import type {
+  CrawlPageChangeField,
+  ProjectCrawlPageChangeCollection,
   ProjectCrawlIssueCollection,
   TechnicalCrawlSettings,
   TechnicalCrawlStatus,
@@ -33,6 +35,8 @@ export function ProjectCrawlAudit({
 }>) {
   const [crawls, setCrawls] = useState<TechnicalCrawlSettings>();
   const [issues, setIssues] = useState<ProjectCrawlIssueCollection>();
+  const [changes, setChanges] =
+    useState<ProjectCrawlPageChangeCollection>();
   const [startUrl, setStartUrl] = useState(
     projectDomain.startsWith("http")
       ? projectDomain
@@ -48,7 +52,7 @@ export function ProjectCrawlAudit({
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
-      const [nextCrawls, nextIssues] = await Promise.all([
+      const [nextCrawls, nextIssues, nextChanges] = await Promise.all([
         browserApiRequest<TechnicalCrawlSettings>(
           crawlPath(projectId),
           signal ? { signal } : {}
@@ -56,10 +60,15 @@ export function ProjectCrawlAudit({
         browserApiRequest<ProjectCrawlIssueCollection>(
           issuePath(projectId),
           signal ? { signal } : {}
+        ),
+        browserApiRequest<ProjectCrawlPageChangeCollection>(
+          changePath(projectId),
+          signal ? { signal } : {}
         )
       ]);
       setCrawls(nextCrawls);
       setIssues(nextIssues);
+      setChanges(nextChanges);
       setError(undefined);
     } catch (caught) {
       if (!signal?.aborted) {
@@ -248,6 +257,49 @@ export function ProjectCrawlAudit({
           )}
         </div>
       </div>
+
+      <div className="crawl-change-history">
+        <div>
+          <p className="eyebrow">Radar</p>
+          <h3>Изменения между обходами</h3>
+          <p className="muted-copy">
+            Система сравнивает неизменяемые снимки и показывает только
+            значимые изменения, отбрасывая шум небольших колебаний скорости
+            и размера.
+          </p>
+        </div>
+        {changes?.changes.length ? (
+          <div className="crawl-change-list">
+            {changes.changes.slice(0, 12).map((change) => (
+              <article className="crawl-change" key={change.id}>
+                <span
+                  className={`issue-severity issue-${change.severity.toLowerCase()}`}
+                >
+                  {severityLabel(change.severity)}
+                </span>
+                <div>
+                  <a href={change.url} rel="noreferrer" target="_blank">
+                    {change.url}
+                  </a>
+                  <p>
+                    {change.changedFields.map(changeFieldLabel).join(", ")}
+                  </p>
+                  <small>
+                    {new Date(change.previousCrawledAt).toLocaleString("ru-RU")}
+                    {" → "}
+                    {new Date(change.currentCrawledAt).toLocaleString("ru-RU")}
+                  </small>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="muted-copy">
+            История появится после повторного обхода, если страница
+            действительно изменилась.
+          </p>
+        )}
+      </div>
     </section>
   );
 }
@@ -288,6 +340,10 @@ function issuePath(projectId: string): string {
   return `/app/api/projects/${encodeURIComponent(projectId)}/crawl-issues`;
 }
 
+function changePath(projectId: string): string {
+  return `/app/api/projects/${encodeURIComponent(projectId)}/crawl-changes`;
+}
+
 function statusLabel(status: TechnicalCrawlStatus): string {
   return {
     QUEUED: "В очереди",
@@ -307,6 +363,32 @@ function severityLabel(severity: string): string {
     ERROR: "Ошибка",
     CRITICAL: "Критично"
   }[severity] ?? severity;
+}
+
+function changeFieldLabel(field: CrawlPageChangeField): string {
+  return {
+    statusCode: "HTTP-статус",
+    redirectChain: "цепочка редиректов",
+    title: "Title",
+    description: "Description",
+    h1: "H1",
+    h1Count: "число H1",
+    headings: "заголовки",
+    canonicalUrl: "canonical",
+    robots: "robots",
+    language: "язык",
+    hreflang: "hreflang",
+    internalLinks: "внутренние ссылки",
+    externalLinks: "внешние ссылки",
+    imageCount: "изображения",
+    imagesMissingAlt: "alt изображений",
+    structuredDataTypes: "структурированные данные",
+    wordCount: "объём текста",
+    contentHash: "содержимое",
+    indexability: "индексируемость",
+    responseTimeMs: "время ответа",
+    sizeBytes: "размер ответа"
+  }[field] ?? field;
 }
 
 function restriction(value: string): string {

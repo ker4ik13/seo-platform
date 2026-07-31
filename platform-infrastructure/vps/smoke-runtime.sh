@@ -183,6 +183,11 @@ processed_urls=$(jq -er '.data.processedUrls' "$response_body")
 api_call GET "projects/$project_id/crawl-issues"
 expect_status 200 crawl-issues
 
+api_call GET "projects/$project_id/crawl-changes"
+expect_status 200 crawl-changes
+jq -e '.data.changes | type == "array"' "$response_body" >/dev/null ||
+  runtime_fail "crawl change history is not an array"
+
 semantic_file=$smoke_root/semantic-smoke.xlsx
 SEMANTIC_FIXTURE="$semantic_file" \
 FFLATE_MODULE="$project_root/platform-jobs-integrations/node_modules/fflate" \

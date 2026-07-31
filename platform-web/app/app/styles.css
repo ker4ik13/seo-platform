@@ -3572,20 +3572,23 @@ svg { display: block; }
 }
 
 .crawl-run-list,
-.crawl-issue-list {
+.crawl-issue-list,
+.crawl-change-list {
   display: grid;
   gap: 10px;
 }
 
 .crawl-run,
-.crawl-issue {
+.crawl-issue,
+.crawl-change {
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 12px;
 }
 
 .crawl-run > div,
-.crawl-issue > div {
+.crawl-issue > div,
+.crawl-change > div {
   display: grid;
   gap: 3px;
   min-width: 0;
@@ -3594,6 +3597,7 @@ svg { display: block; }
 .crawl-run span,
 .crawl-run p,
 .crawl-issue small,
+.crawl-change small,
 .muted-copy {
   color: var(--muted);
   font-size: 0.84rem;
@@ -3603,11 +3607,35 @@ svg { display: block; }
   justify-content: flex-start;
 }
 
-.crawl-issue a {
+.crawl-issue a,
+.crawl-change a {
   color: var(--brand);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.crawl-change-history {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 14px;
+  padding-top: 18px;
+}
+
+.crawl-change-history h3,
+.crawl-change-history p,
+.crawl-change p {
+  margin: 0;
+}
+
+.crawl-change {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+}
+
+.crawl-change p {
+  font-size: 0.88rem;
 }
 
 .issue-severity {

@@ -39,6 +39,7 @@ import {
   type ProjectPageCollection,
   type ProjectPageListQuery,
   type ProjectPageSummary,
+  type ProjectCrawlPageChangeCollection,
   type ProjectCrawlIssueCollection,
   type SemanticKeywordIntent,
   type SemanticKeywordBulkInput,
@@ -93,6 +94,7 @@ import {
   scopedProjectPageCollection
 } from "../pages/page-response.js";
 import { crawlIssueCollection } from "../crawls/crawl-issue-response.js";
+import { crawlPageChangeCollection } from "../crawls/crawl-change-response.js";
 
 interface InternalContext {
   readonly tenant: TenantAuthorization;
@@ -827,6 +829,23 @@ export class SeoDataClient {
       context
     );
     return crawlIssueCollection(responseData(payload));
+  }
+
+  public async listProjectCrawlPageChanges(
+    context: InternalContext
+  ): Promise<ProjectCrawlPageChangeCollection> {
+    const scope = trackingScope(context);
+    const payload = await this.request(
+      "GET",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(
+          scope.projectId
+        )}/crawl-changes`,
+        this.config.services.seoData
+      ),
+      context
+    );
+    return crawlPageChangeCollection(responseData(payload));
   }
 
   public async getProjectPage(

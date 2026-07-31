@@ -105,6 +105,7 @@ export class CrawlRunnerService {
             sequence,
             requestedUrl: response.requestedUrl,
             finalUrl: response.finalUrl,
+            redirectChain: response.redirectChain,
             depth: next.depth,
             statusCode: response.statusCode,
             responseTimeMs: response.responseTimeMs,

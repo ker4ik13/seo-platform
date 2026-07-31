@@ -385,6 +385,7 @@ model Page {
   createReceipts PageCreateReceipt[]
   crawlSnapshots CrawlPageSnapshot[]
   crawlIssues    CrawlIssue[]
+  crawlChanges   CrawlPageChange[]
 }
 
 model PageAlias {
@@ -446,6 +447,7 @@ model CrawlPageSnapshot {
   requestedUrl        String           @map("requested_url") @db.Text
   finalUrl            String           @map("final_url") @db.Text
   finalUrlHash        String           @map("final_url_hash") @db.Char(64)
+  redirectChain       Json             @map("redirect_chain")
   depth               Int
   statusCode          Int              @map("status_code")
   responseTimeMs      Int              @map("response_time_ms")
@@ -473,6 +475,8 @@ model CrawlPageSnapshot {
 
   page             Page                       @relation(fields: [workspaceId, projectId, pageId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
   issueOccurrences CrawlIssueOccurrence[]
+  previousChanges  CrawlPageChange[]          @relation("PreviousCrawlSnapshotChanges")
+  currentChanges   CrawlPageChange[]           @relation("CurrentCrawlSnapshotChanges")
 
   @@unique([crawlId, sequence], map: "crawl_page_snapshots_crawl_sequence_key")
   @@unique([crawlId, finalUrlHash], map: "crawl_page_snapshots_crawl_url_key")
@@ -480,6 +484,34 @@ model CrawlPageSnapshot {
   @@index([workspaceId, projectId, crawledAt(sort: Desc)], map: "crawl_page_snapshots_project_crawled_idx")
   @@index([workspaceId, projectId, pageId, crawledAt(sort: Desc)], map: "crawl_page_snapshots_page_crawled_idx")
   @@map("crawl_page_snapshots")
+}
+
+model CrawlPageChange {
+  id                 String             @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId        String             @map("workspace_id") @db.Uuid
+  projectId          String             @map("project_id") @db.Uuid
+  pageId             String             @map("page_id") @db.Uuid
+  crawlId            String             @map("crawl_id") @db.Uuid
+  previousSnapshotId String             @map("previous_snapshot_id") @db.Uuid
+  currentSnapshotId  String             @map("current_snapshot_id") @db.Uuid
+  severity           CrawlIssueSeverity
+  source             String             @default("TECHNICAL_CRAWL") @db.VarChar(32)
+  changedFields      String[]           @map("changed_fields")
+  beforeHash         String             @map("before_hash") @db.Char(64)
+  afterHash          String             @map("after_hash") @db.Char(64)
+  diffHash           String             @map("diff_hash") @db.Char(64)
+  diff               Json
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  page             Page              @relation(fields: [workspaceId, projectId, pageId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  previousSnapshot CrawlPageSnapshot @relation("PreviousCrawlSnapshotChanges", fields: [workspaceId, projectId, previousSnapshotId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  currentSnapshot  CrawlPageSnapshot @relation("CurrentCrawlSnapshotChanges", fields: [workspaceId, projectId, currentSnapshotId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([currentSnapshotId], map: "crawl_page_changes_current_snapshot_key")
+  @@unique([workspaceId, projectId, id], map: "crawl_page_changes_tenant_project_id_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc), id(sort: Desc)], map: "crawl_page_changes_project_created_idx")
+  @@index([workspaceId, projectId, pageId, createdAt(sort: Desc)], map: "crawl_page_changes_page_created_idx")
+  @@map("crawl_page_changes")
 }
 
 model CrawlIssue {

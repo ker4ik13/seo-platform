@@ -104,6 +104,7 @@ export interface InternalPersistCrawlPageInput {
   readonly sequence: number;
   readonly requestedUrl: string;
   readonly finalUrl: string;
+  readonly redirectChain: readonly string[];
   readonly depth: number;
   readonly statusCode: number;
   readonly responseTimeMs: number;
@@ -167,4 +168,47 @@ export interface ProjectCrawlIssueSummary {
 
 export interface ProjectCrawlIssueCollection {
   readonly issues: readonly ProjectCrawlIssueSummary[];
+}
+
+export const crawlPageChangeFields = [
+  "statusCode",
+  "redirectChain",
+  "title",
+  "description",
+  "h1",
+  "h1Count",
+  "headings",
+  "canonicalUrl",
+  "robots",
+  "language",
+  "hreflang",
+  "internalLinks",
+  "externalLinks",
+  "imageCount",
+  "imagesMissingAlt",
+  "structuredDataTypes",
+  "wordCount",
+  "contentHash",
+  "indexability",
+  "responseTimeMs",
+  "sizeBytes"
+] as const;
+
+export type CrawlPageChangeField =
+  (typeof crawlPageChangeFields)[number];
+
+export interface ProjectCrawlPageChangeSummary {
+  readonly id: string;
+  readonly crawlId: string;
+  readonly pageId: string;
+  readonly url: string;
+  readonly severity: CrawlIssueSeverity;
+  readonly changedFields: readonly CrawlPageChangeField[];
+  readonly previousCrawledAt: string;
+  readonly currentCrawledAt: string;
+  readonly createdAt: string;
+}
+
+export interface ProjectCrawlPageChangeCollection {
+  readonly changes: readonly ProjectCrawlPageChangeSummary[];
 }

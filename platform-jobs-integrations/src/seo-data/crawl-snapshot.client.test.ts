@@ -10,6 +10,7 @@ const pageInput = {
   sequence: 1,
   requestedUrl: "https://example.com/",
   finalUrl: "https://example.com/",
+  redirectChain: [],
   depth: 0,
   statusCode: 200,
   responseTimeMs: 120,
