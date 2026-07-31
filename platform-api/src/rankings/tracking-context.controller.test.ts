@@ -16,6 +16,7 @@ import type {
 } from "../authorization/authorization.types.js";
 import { AuthorizationModule } from "../authorization/authorization.module.js";
 import { BillingModule } from "../billing/billing.module.js";
+import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import { REQUIRED_PERMISSION } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
 import { DomainError } from "../common/domain-error.js";
@@ -38,6 +39,13 @@ const actorId = "01900000-0000-7000-8000-000000000003";
 const contextId = "01900000-0000-7000-8000-000000000004";
 const keywordId = "01900000-0000-7000-8000-000000000005";
 const assignmentId = "01900000-0000-7000-8000-000000000006";
+const entitlement = {
+  planCode: "TEAM",
+  planVersion: 1,
+  storedKeywords: 2_000_000,
+  keywordsPerProject: 2_000_000,
+  trackedContextPairs: 50_000
+} as const;
 const principal: AuthenticatedPrincipal = {
   userId: actorId,
   sessionId: "01900000-0000-7000-8000-000000000007",
@@ -356,6 +364,8 @@ test("lists and changes point keyword assignments without bulk ambiguity", async
   });
   assert.equal(assigned.data.assigned, true);
   assert.equal(removed.data.assigned, false);
+  assert.deepEqual(calls[1]?.args[4], entitlement);
+  assert.deepEqual(calls[2]?.args[4], entitlement);
   assert.deepEqual(
     records.map(({ action, resourceId }) => [action, resourceId]),
     [
@@ -389,7 +399,8 @@ test("keeps intent audit fail-closed and post-commit audit best-effort", async (
       record: async () => {
         throw new Error("audit unavailable");
       }
-    } as unknown as AuditService
+    } as unknown as AuditService,
+    billingEntitlements()
   );
   await assert.rejects(
     failClosed.create(
@@ -419,7 +430,8 @@ test("keeps intent audit fail-closed and post-commit audit best-effort", async (
         auditCalls += 1;
         if (auditCalls === 2) throw new Error("audit unavailable");
       }
-    } as unknown as AuditService
+    } as unknown as AuditService,
+    billingEntitlements()
   );
   silenceControllerLogger(committed);
   const response = reply();
@@ -457,7 +469,8 @@ test("rejects archived project mutations and missing preconditions before side e
       record: async () => {
         dependencyCalled = true;
       }
-    } as unknown as AuditService
+    } as unknown as AuditService,
+    billingEntitlements()
   );
 
   await assert.rejects(
@@ -511,8 +524,15 @@ function controllerWith(
       record: async (record: AuditRecord) => {
         records.push(record);
       }
-    } as unknown as AuditService
+    } as unknown as AuditService,
+    billingEntitlements()
   );
+}
+
+function billingEntitlements(): BillingEntitlementService {
+  return {
+    semanticCapacity: async () => entitlement
+  } as unknown as BillingEntitlementService;
 }
 
 function tenantRequest(

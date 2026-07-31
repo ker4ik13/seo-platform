@@ -93,6 +93,7 @@ export interface InternalCreateSemanticKeywordInput
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;
+  readonly entitlement: import("./billing.js").SemanticCapacityEntitlement;
 }
 
 export interface InternalUpdateSemanticKeywordInput

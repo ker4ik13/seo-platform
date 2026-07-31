@@ -33,6 +33,10 @@ import {
   type TrackingContextVersion
 } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import {
+  assertSemanticCapacity,
+  lockTrackedContextPairCapacity
+} from "../internal/semantic-capacity.js";
 import { normalizeKeywordText } from "../keywords/keyword-normalization.js";
 
 const CONTEXT_LIMIT = 200;
@@ -417,6 +421,12 @@ export class TrackingContextService {
     assign: boolean
   ): Promise<TrackingContextKeywordAssignmentState> {
     return this.prisma.$transaction(async (transaction) => {
+      if (assign) {
+        await lockTrackedContextPairCapacity(
+          transaction,
+          input.workspaceId
+        );
+      }
       await transaction.$queryRaw`
         SELECT pg_advisory_xact_lock(
           hashtextextended(${`${input.contextId}:${input.keywordId}`}, 0)
@@ -473,6 +483,24 @@ export class TrackingContextService {
           keywordId: input.keywordId,
           assigned: false
         };
+      }
+      if (assign) {
+        const current =
+          await transaction.trackingContextKeywordAssignment.count({
+            where: {
+              workspaceId: input.workspaceId,
+              removedAt: null,
+              context: { status: "ACTIVE" },
+              keyword: { status: "ACTIVE" }
+            }
+          });
+        assertSemanticCapacity(
+          "trackedContextPairs",
+          BigInt(current),
+          1n,
+          input.entitlement.trackedContextPairs,
+          input.entitlement
+        );
       }
       const now = new Date();
       let assignmentId: string | undefined;

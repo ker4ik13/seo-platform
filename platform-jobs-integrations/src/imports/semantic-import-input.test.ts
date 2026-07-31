@@ -12,6 +12,13 @@ const context = {
   projectId: "01900000-0000-7000-8000-000000000002",
   actorId: "01900000-0000-7000-8000-000000000003"
 } as const;
+const entitlement = {
+  planCode: "TEAM",
+  planVersion: 1,
+  storedKeywords: 2_000_000,
+  keywordsPerProject: 2_000_000,
+  trackedContextPairs: 50_000
+} as const;
 
 test("parses mapping, confirmation and monotonic cancellation commands", () => {
   assert.deepEqual(
@@ -39,7 +46,11 @@ test("parses mapping, confirmation and monotonic cancellation commands", () => {
     }
   );
   assert.equal(
-    internalConfirmSemanticImportInput({ ...context, version: 4 }).version,
+    internalConfirmSemanticImportInput({
+      ...context,
+      version: 4,
+      entitlement
+    }).version,
     4
   );
   assert.equal(

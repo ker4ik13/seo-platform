@@ -2,6 +2,7 @@ import { BadRequestException } from "@nestjs/common";
 import {
   semanticImportDuplicatePolicies,
   type InternalApplySemanticImportChunkInput,
+  type InternalAbortSemanticImportInput,
   type InternalBeginSemanticImportInput,
   type InternalCompleteSemanticImportInput,
   type InternalNormalizeSemanticKeywordsInput,
@@ -10,6 +11,7 @@ import {
   type SemanticImportPublishRow
 } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
+import { semanticCapacityEntitlement } from "../internal/semantic-capacity.js";
 
 const HASH_PATTERN = /^[a-f0-9]{64}$/u;
 const INTEGER_PATTERN = /^(0|[1-9]\d*)$/u;
@@ -58,7 +60,12 @@ export function beginSemanticImportInput(
     expectedUniqueRows: positiveBigintString(
       input.expectedUniqueRows,
       "expectedUniqueRows"
-    )
+    ),
+    expectedNewKeywords: bigintString(
+      input.expectedNewKeywords,
+      "expectedNewKeywords"
+    ),
+    entitlement: semanticCapacityEntitlement(input.entitlement)
   };
 }
 
@@ -96,6 +103,23 @@ export function completeSemanticImportInput(
     ...(input.partial === undefined
       ? {}
       : { partial: boolean(input.partial, "partial") })
+  };
+}
+
+export function abortSemanticImportInput(
+  value: unknown
+): InternalAbortSemanticImportInput {
+  const input = record(value);
+  if (
+    input.reason !== "CANCELLED" &&
+    input.reason !== "FAILED_FINAL"
+  ) {
+    invalid("reason");
+  }
+  return {
+    ...context(input),
+    importId: uuid(input.importId, "importId"),
+    reason: input.reason
   };
 }
 

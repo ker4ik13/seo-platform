@@ -70,6 +70,19 @@ export interface BillingPlanFeatures {
     | "HIGHEST_FAIR_USE";
 }
 
+/**
+ * Immutable plan limits attached by Platform API to trusted internal
+ * commands. Data-owning services use this snapshot to enforce capacity
+ * atomically with the write; browser clients never supply it.
+ */
+export interface SemanticCapacityEntitlement {
+  readonly planCode: string;
+  readonly planVersion: number;
+  readonly storedKeywords: number;
+  readonly keywordsPerProject: number;
+  readonly trackedContextPairs: number;
+}
+
 export interface BillingPlanPrice {
   readonly period: BillingPeriod;
   readonly currency: "RUB";

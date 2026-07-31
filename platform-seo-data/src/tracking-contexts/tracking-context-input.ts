@@ -13,6 +13,7 @@ import {
   type TrackingDomainMatchRule
 } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
+import { semanticCapacityEntitlement } from "../internal/semantic-capacity.js";
 
 const SEARCH_ENGINES = new Set<string>(trackingSearchEngines);
 const DEVICES = new Set<string>(trackingDevices);
@@ -89,7 +90,8 @@ export function internalChangeTrackingContextKeywordInput(
     "projectId",
     "contextId",
     "keywordId",
-    "actorId"
+    "actorId",
+    "entitlement"
   ]);
   return {
     ...scope(input),
@@ -100,7 +102,8 @@ export function internalChangeTrackingContextKeywordInput(
     keywordId: internalUuid(
       requiredString(input.keywordId, "keywordId"),
       "keywordId"
-    )
+    ),
+    entitlement: semanticCapacityEntitlement(input.entitlement)
   };
 }
 

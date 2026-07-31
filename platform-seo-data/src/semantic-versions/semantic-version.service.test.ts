@@ -10,6 +10,13 @@ const versionId = "01900000-0000-7000-8000-000000000010";
 const keywordId = "01900000-0000-7000-8000-000000000020";
 const undoVersionId = "01900000-0000-7000-8000-000000000011";
 const idempotencyKey = "semantic-undo-test-0001";
+const entitlement = {
+  planCode: "TEAM",
+  planVersion: 1,
+  storedKeywords: 2_000_000,
+  keywordsPerProject: 2_000_000,
+  trackedContextPairs: 50_000
+} as const;
 
 test("preview refuses to overwrite a newer keyword version", async () => {
   const service = new SemanticVersionService({
@@ -116,7 +123,8 @@ test("undo creates a new version and soft-deletes only the exact current row", a
     projectId,
     actorId,
     versionId,
-    idempotencyKey
+    idempotencyKey,
+    entitlement
   );
 
   assert.equal(result.applied, 1);
@@ -139,7 +147,8 @@ test("undo creates a new version and soft-deletes only the exact current row", a
     projectId,
     actorId,
     versionId,
-    idempotencyKey
+    idempotencyKey,
+    entitlement
   );
   assert.deepEqual(replay, result);
   assert.equal(keywordUpdates.length, 1);

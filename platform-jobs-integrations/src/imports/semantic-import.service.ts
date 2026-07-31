@@ -227,6 +227,17 @@ export class SemanticImportService {
         publishingStartedAt: null,
         publishingHeartbeatAt: null,
         publishingCompletedAt: null,
+        billingPlanCode: input.entitlement.planCode,
+        billingPlanVersion: input.entitlement.planVersion,
+        storedKeywordsLimit: BigInt(
+          input.entitlement.storedKeywords
+        ),
+        keywordsPerProjectLimit: BigInt(
+          input.entitlement.keywordsPerProject
+        ),
+        trackedContextPairsLimit: BigInt(
+          input.entitlement.trackedContextPairs
+        ),
         failure: Prisma.DbNull,
         version: { increment: 1 }
       }

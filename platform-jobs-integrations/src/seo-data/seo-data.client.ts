@@ -1,5 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import type {
+  InternalAbortSemanticImportInput,
+  InternalAbortSemanticImportResult,
   InternalApplySemanticImportChunkInput,
   InternalBeginSemanticImportInput,
   InternalCompleteSemanticImportInput,
@@ -22,6 +24,7 @@ export class SeoDataClientError extends Error {
       | "INVALID_COMMAND"
       | "CONFLICT"
       | "NOT_FOUND"
+      | "QUOTA_EXCEEDED"
       | "UNAVAILABLE",
     public readonly retryable: boolean
   ) {
@@ -99,6 +102,20 @@ export class SeoDataClient {
     return result;
   }
 
+  public async abortImport(
+    input: InternalAbortSemanticImportInput
+  ): Promise<InternalAbortSemanticImportResult> {
+    const payload = await this.request(
+      `/internal/v1/semantic-imports/${encodeURIComponent(input.importId)}/abort`,
+      input
+    );
+    const result = abortImportResult(payload);
+    if (!result || result.importId !== input.importId) {
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+    return result;
+  }
+
   public async rankEstimateScope(
     input: InternalRankEstimateScopeQuery
   ): Promise<InternalRankEstimateScope> {
@@ -128,7 +145,7 @@ export class SeoDataClient {
   ): Promise<unknown> {
     const response = await this.fetch(path, body);
     const payload = await response.json().catch(() => undefined);
-    if (!response.ok) throw clientError(response.status);
+    if (!response.ok) throw clientError(response.status, payload);
     if (
       typeof payload !== "object" ||
       payload === null ||
@@ -224,7 +241,10 @@ export class SeoDataClient {
 
 const RANK_SCOPE_RESPONSE_MAX_BYTES = 64 * 1_024;
 
-function clientError(status: number): SeoDataClientError {
+function clientError(
+  status: number,
+  payload?: unknown
+): SeoDataClientError {
   if (status === 400 || status === 422) {
     return new SeoDataClientError("INVALID_COMMAND", false);
   }
@@ -232,9 +252,19 @@ function clientError(status: number): SeoDataClientError {
     return new SeoDataClientError("NOT_FOUND", false);
   }
   if (status === 409) {
+    if (responseErrorCode(payload) === "QUOTA_EXCEEDED") {
+      return new SeoDataClientError("QUOTA_EXCEEDED", false);
+    }
     return new SeoDataClientError("CONFLICT", false);
   }
   return new SeoDataClientError("UNAVAILABLE", true);
+}
+
+function responseErrorCode(value: unknown): string | undefined {
+  const payload = object(value);
+  if (typeof payload?.code === "string") return payload.code;
+  const error = object(payload?.error);
+  return typeof error?.code === "string" ? error.code : undefined;
 }
 
 function normalizedKeywords(
@@ -272,7 +302,9 @@ function importReceipt(
   if (
     !payload ||
     typeof payload.importId !== "string" ||
-    !["RECEIVING", "COMPLETED"].includes(String(payload.status)) ||
+    !["RECEIVING", "COMPLETED", "ABORTED"].includes(
+      String(payload.status)
+    ) ||
     !nonNegativeInteger(payload.receivedChunks) ||
     !nonNegativeInteger(payload.expectedChunks)
   ) {
@@ -327,6 +359,23 @@ function importResult(
     return undefined;
   }
   return payload as unknown as SemanticImportResultSummary;
+}
+
+function abortImportResult(
+  value: unknown
+): InternalAbortSemanticImportResult | undefined {
+  const payload = object(value);
+  if (
+    !payload ||
+    typeof payload.importId !== "string" ||
+    !["ABORTED", "RECEIVING", "COMPLETED"].includes(
+      String(payload.status)
+    ) ||
+    !nonNegativeInteger(payload.receivedChunks)
+  ) {
+    return undefined;
+  }
+  return payload as unknown as InternalAbortSemanticImportResult;
 }
 
 function rankEstimateScope(

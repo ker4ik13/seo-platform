@@ -30,6 +30,7 @@ import {
   requiredMutableProjectTenant,
   requiredProjectTenant
 } from "../authorization/project-tenant.js";
+import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
 import { apiResponse } from "../common/api-response.js";
 import { recordCommittedAudit } from "../common/committed-audit.js";
@@ -57,7 +58,8 @@ export class KeywordController {
 
   public constructor(
     private readonly seoData: SeoDataClient,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly billingEntitlements: BillingEntitlementService
   ) {}
 
   @Get()
@@ -105,7 +107,10 @@ export class KeywordController {
     });
     const result = await this.seoData.createKeyword(
       internalProjectContext(request, principal, tenant),
-      input
+      input,
+      await this.billingEntitlements.semanticCapacity(
+        tenant.workspaceId
+      )
     );
     await recordCommittedAudit(this.audit, this.logger, {
       actorId: principal.userId,

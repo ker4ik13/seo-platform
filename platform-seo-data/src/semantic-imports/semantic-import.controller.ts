@@ -10,6 +10,7 @@ import {
 } from "@nestjs/common";
 import type {
   ApiResponse,
+  InternalAbortSemanticImportResult,
   InternalNormalizeSemanticKeywordsResult,
   InternalSemanticImportChunkResult,
   InternalSemanticImportReceipt,
@@ -24,6 +25,7 @@ import {
 import { JobsApiGuard } from "../internal/jobs-api.guard.js";
 import {
   applySemanticImportChunkInput,
+  abortSemanticImportInput,
   beginSemanticImportInput,
   completeSemanticImportInput,
   normalizeSemanticKeywordsInput
@@ -86,6 +88,18 @@ export class SemanticImportController {
     const input = completeSemanticImportInput(body);
     assertCommand(importId, headers, input);
     return response(request, await this.semanticImports.complete(input));
+  }
+
+  @Post("abort")
+  public async abort(
+    @Param("importId") importId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<InternalAbortSemanticImportResult>> {
+    const input = abortSemanticImportInput(body);
+    assertCommand(importId, headers, input);
+    return response(request, await this.semanticImports.abort(input));
   }
 }
 

@@ -14,7 +14,6 @@ import {
 import type {
   CompleteUploadInput,
   ConfigureSemanticImportInput,
-  ConfirmSemanticImportInput,
   CancelSemanticImportInput,
   CreateSemanticImportInput,
   CreatedMultipartUpload,
@@ -216,7 +215,10 @@ export class JobsClient {
   public confirmSemanticImport(
     context: InternalContext,
     importId: string,
-    input: ConfirmSemanticImportInput
+    input: Pick<
+      InternalConfirmSemanticImportInput,
+      "version" | "entitlement"
+    >
   ): Promise<SemanticImportSummary> {
     const body: InternalConfirmSemanticImportInput = {
       ...input,

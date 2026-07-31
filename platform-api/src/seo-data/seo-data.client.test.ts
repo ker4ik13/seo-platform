@@ -535,7 +535,14 @@ test("forwards the semantic undo idempotency key inside the trusted command", as
     const result = await client().undoSemanticVersion(
       internalContext(),
       contextId,
-      "semantic-undo-client-0001"
+      "semantic-undo-client-0001",
+      {
+        planCode: "TEAM",
+        planVersion: 1,
+        storedKeywords: 2_000_000,
+        keywordsPerProject: 2_000_000,
+        trackedContextPairs: 50_000
+      }
     );
 
     assert.equal(result.sourceVersionId, contextId);
@@ -543,7 +550,14 @@ test("forwards the semantic undo idempotency key inside the trusted command", as
       workspaceId,
       projectId,
       actorId,
-      idempotencyKey: "semantic-undo-client-0001"
+      idempotencyKey: "semantic-undo-client-0001",
+      entitlement: {
+        planCode: "TEAM",
+        planVersion: 1,
+        storedKeywords: 2_000_000,
+        keywordsPerProject: 2_000_000,
+        trackedContextPairs: 50_000
+      }
     });
   } finally {
     globalThis.fetch = originalFetch;

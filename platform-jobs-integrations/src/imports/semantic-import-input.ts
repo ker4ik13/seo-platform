@@ -14,11 +14,13 @@ import {
   type SemanticImportEncoding,
   type SemanticImportHeaderMode,
   type SemanticImportMappingColumn,
-  type SemanticImportTarget
+  type SemanticImportTarget,
+  type SemanticCapacityEntitlement
 } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
 
 const IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{8,180}$/u;
+const PLAN_CODE_PATTERN = /^[A-Z][A-Z0-9_-]{0,63}$/u;
 
 export function internalCreateSemanticImportInput(
   value: unknown
@@ -119,7 +121,11 @@ export function internalConfigureSemanticImportInput(
 export function internalConfirmSemanticImportInput(
   value: unknown
 ): InternalConfirmSemanticImportInput {
-  return versionedContext(value);
+  const input = record(value);
+  return {
+    ...versionedContext(input),
+    entitlement: semanticCapacityEntitlement(input.entitlement)
+  };
 }
 
 export function internalCancelSemanticImportInput(
@@ -138,13 +144,47 @@ export function internalCancelSemanticImportInput(
 
 function versionedContext(
   value: unknown
-): InternalConfirmSemanticImportInput {
+): {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly version: number;
+} {
   const input = record(value);
   return {
     workspaceId: uuid(input, "workspaceId"),
     projectId: uuid(input, "projectId"),
     actorId: uuid(input, "actorId"),
     version: positiveVersion(input.version)
+  };
+}
+
+function semanticCapacityEntitlement(
+  value: unknown
+): SemanticCapacityEntitlement {
+  const input = record(value);
+  if (
+    Object.keys(input).some(
+      (key) =>
+        ![
+          "planCode",
+          "planVersion",
+          "storedKeywords",
+          "keywordsPerProject",
+          "trackedContextPairs"
+        ].includes(key)
+    ) ||
+    typeof input.planCode !== "string" ||
+    !PLAN_CODE_PATTERN.test(input.planCode)
+  ) {
+    invalid("entitlement");
+  }
+  return {
+    planCode: input.planCode,
+    planVersion: positiveVersion(input.planVersion),
+    storedKeywords: positiveVersion(input.storedKeywords),
+    keywordsPerProject: positiveVersion(input.keywordsPerProject),
+    trackedContextPairs: positiveVersion(input.trackedContextPairs)
   };
 }
 

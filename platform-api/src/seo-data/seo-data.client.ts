@@ -44,6 +44,7 @@ import {
   type SemanticKeywordCustomValue,
   type SemanticSavedView,
   type SemanticSavedViewConfig,
+  type SemanticCapacityEntitlement,
   type SemanticVersionListItem,
   type SemanticVersionUndoPreview,
   type SemanticVersionUndoResult,
@@ -130,14 +131,16 @@ export class SeoDataClient {
 
   public async createKeyword(
     context: InternalContext,
-    input: CreateSemanticKeywordInput
+    input: CreateSemanticKeywordInput,
+    entitlement: SemanticCapacityEntitlement
   ): Promise<SemanticKeywordListItem> {
     const scope = trackingScope(context);
     const body: InternalCreateSemanticKeywordInput = {
       ...input,
       workspaceId: scope.workspaceId,
       projectId: scope.projectId,
-      actorId: context.actorId
+      actorId: context.actorId,
+      entitlement
     };
     const payload = await this.request(
       "POST",
@@ -337,7 +340,8 @@ export class SeoDataClient {
   public async undoSemanticVersion(
     context: InternalContext,
     versionId: string,
-    idempotencyKey: string
+    idempotencyKey: string,
+    entitlement: SemanticCapacityEntitlement
   ): Promise<SemanticVersionUndoResult> {
     const scope = trackingScope(context);
     const payload = await this.request(
@@ -352,7 +356,8 @@ export class SeoDataClient {
         workspaceId: scope.workspaceId,
         projectId: scope.projectId,
         actorId: context.actorId,
-        idempotencyKey
+        idempotencyKey,
+        entitlement
       }
     );
     return semanticVersionUndoResultResponse(responseData(payload));
@@ -739,7 +744,8 @@ export class SeoDataClient {
     context: InternalContext,
     contextId: string,
     keywordId: string,
-    assigned: boolean
+    assigned: boolean,
+    entitlement: SemanticCapacityEntitlement
   ): Promise<TrackingContextKeywordAssignmentState> {
     const scope = trackingScope(context);
     const body: InternalChangeTrackingContextKeywordInput = {
@@ -747,7 +753,8 @@ export class SeoDataClient {
       projectId: scope.projectId,
       contextId,
       keywordId,
-      actorId: context.actorId
+      actorId: context.actorId,
+      entitlement
     };
     const payload = await this.request(
       assigned ? "PUT" : "DELETE",
@@ -1567,6 +1574,13 @@ function upstreamError(status: number, payload: unknown): DomainError {
         statusCode: 409,
         code: "DUPLICATE",
         message: "A tracking context with these values already exists"
+      });
+    }
+    if (code === "QUOTA_EXCEEDED") {
+      return new DomainError({
+        statusCode: 409,
+        code: "QUOTA_EXCEEDED",
+        message: "The current plan capacity has been reached"
       });
     }
     return new DomainError({

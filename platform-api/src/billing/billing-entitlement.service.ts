@@ -1,5 +1,8 @@
 import { Injectable } from "@nestjs/common";
-import type { BillingPlanFeatures } from "@seo-platform/contracts";
+import type {
+  BillingPlanFeatures,
+  SemanticCapacityEntitlement
+} from "@seo-platform/contracts";
 import {
   Prisma,
   type BillingSubscriptionStatus
@@ -40,6 +43,24 @@ export class BillingEntitlementService {
     return this.prisma.$transaction((transaction) =>
       this.snapshotInTransaction(transaction, workspaceId)
     );
+  }
+
+  public async semanticCapacity(
+    workspaceId: string
+  ): Promise<SemanticCapacityEntitlement> {
+    return this.prisma.$transaction(async (transaction) => {
+      const entitlement = await this.requiredEntitlement(
+        transaction,
+        workspaceId
+      );
+      return {
+        planCode: entitlement.planCode,
+        planVersion: entitlement.planVersion,
+        storedKeywords: entitlement.features.storedKeywords,
+        keywordsPerProject: entitlement.features.keywordsPerProject,
+        trackedContextPairs: entitlement.features.trackedContextPairs
+      };
+    });
   }
 
   public async assertCanCreateProject(

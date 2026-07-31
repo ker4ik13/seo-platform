@@ -96,6 +96,13 @@ test("rejects unknown fields and inconsistent domain rules", () => {
 });
 
 test("bounds keyword queries and validates point command identifiers", () => {
+  const entitlement = {
+    planCode: "TEAM",
+    planVersion: 1,
+    storedKeywords: 2_000_000,
+    keywordsPerProject: 2_000_000,
+    trackedContextPairs: 50_000
+  } as const;
   assert.deepEqual(trackingContextKeywordQuery({}), { limit: 100 });
   assert.deepEqual(
     trackingContextKeywordQuery({ limit: "200", search: " seo " }),
@@ -115,8 +122,16 @@ test("bounds keyword queries and validates point command identifiers", () => {
       projectId,
       actorId,
       contextId,
-      keywordId
+      keywordId,
+      entitlement
     }),
-    { workspaceId, projectId, actorId, contextId, keywordId }
+    {
+      workspaceId,
+      projectId,
+      actorId,
+      contextId,
+      keywordId,
+      entitlement
+    }
   );
 });

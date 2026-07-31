@@ -24,6 +24,25 @@ test("strictly parses the published plan feature contract", () => {
   );
 });
 
+test("projects the exact trusted semantic capacity snapshot", async () => {
+  const transaction = onboardingTransaction();
+  const service = new BillingEntitlementService({
+    $transaction: async (
+      callback: (
+        client: Prisma.TransactionClient
+      ) => Promise<unknown>
+    ) => callback(transaction)
+  } as unknown as PrismaService);
+
+  assert.deepEqual(await service.semanticCapacity(WORKSPACE_ID), {
+    planCode: "TRIAL",
+    planVersion: 1,
+    storedKeywords: 25_000,
+    keywordsPerProject: 25_000,
+    trackedContextPairs: 500
+  });
+});
+
 test("serializes project capacity and rejects the exact current-plan limit", async () => {
   const queries: string[] = [];
   const transaction = onboardingTransaction({

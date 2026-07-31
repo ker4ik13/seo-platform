@@ -34,6 +34,7 @@ import {
   requiredProjectTenant,
   type AuthorizedProjectTenant
 } from "../authorization/project-tenant.js";
+import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import { RequirePermission } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
 import { apiResponse } from "../common/api-response.js";
@@ -63,7 +64,8 @@ export class TrackingContextController {
 
   public constructor(
     private readonly seoData: SeoDataClient,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly billingEntitlements: BillingEntitlementService
   ) {}
 
   @Get()
@@ -362,7 +364,10 @@ export class TrackingContextController {
       internalProjectContext(request, principal, tenant),
       canonicalContextId,
       canonicalKeywordId,
-      assigned
+      assigned,
+      await this.billingEntitlements.semanticCapacity(
+        tenant.workspaceId
+      )
     );
     await recordCommittedAudit(this.audit, this.logger, {
       actorId: principal.userId,

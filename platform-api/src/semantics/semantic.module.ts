@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
 import { AuthorizationModule } from "../authorization/authorization.module.js";
+import { BillingModule } from "../billing/billing.module.js";
 import { IdentityModule } from "../identity/identity.module.js";
 import { SeoDataModule } from "../seo-data/seo-data.module.js";
 import { KeywordController } from "./keyword.controller.js";
@@ -12,7 +13,12 @@ import { SemanticExportService } from "./semantic-export.service.js";
 import { SemanticVersionController } from "./semantic-version.controller.js";
 
 @Module({
-  imports: [AuthorizationModule, IdentityModule, SeoDataModule],
+  imports: [
+    AuthorizationModule,
+    BillingModule,
+    IdentityModule,
+    SeoDataModule
+  ],
   controllers: [
     KeywordController,
     KeywordGroupController,

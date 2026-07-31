@@ -5,6 +5,7 @@ import {
   NotFoundException
 } from "@nestjs/common";
 import type {
+  SemanticCapacityEntitlement,
   SemanticVersionChangePreview,
   SemanticVersionListItem,
   SemanticVersionReason,
@@ -14,6 +15,10 @@ import type {
 import { Prisma } from "../generated/prisma/client.js";
 import type { SemanticVersion } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import {
+  assertStoredKeywordCapacity,
+  lockStoredKeywordCapacity
+} from "../internal/semantic-capacity.js";
 
 const MAX_UNDO_CHANGES = 500;
 
@@ -188,9 +193,11 @@ export class SemanticVersionService {
     projectId: string,
     actorId: string,
     versionId: string,
-    idempotencyKey: string
+    idempotencyKey: string,
+    entitlement: SemanticCapacityEntitlement
   ): Promise<SemanticVersionUndoResult> {
     return this.prisma.$transaction(async (transaction) => {
+      await lockStoredKeywordCapacity(transaction, workspaceId);
       await lockSemanticKeywordWrites(transaction, projectId);
       await lockSemanticGroupTree(transaction, projectId);
       const receipt = await transaction.semanticUndoReceipt.findUnique({
@@ -275,6 +282,18 @@ export class SemanticVersionService {
           result
         );
         return result;
+      }
+      const restoredKeywordCount = applicable.filter(
+        ({ operation }) => operation === "DELETE"
+      ).length;
+      if (restoredKeywordCount > 0) {
+        await assertStoredKeywordCapacity(
+          transaction,
+          workspaceId,
+          projectId,
+          BigInt(restoredKeywordCount),
+          entitlement
+        );
       }
       const undoVersion = await this.createVersion(
         transaction,

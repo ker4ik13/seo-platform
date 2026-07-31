@@ -22,6 +22,7 @@ import {
   internalCommandContext,
   internalUuid
 } from "../internal/internal-command-context.js";
+import { semanticCapacityEntitlement } from "../internal/semantic-capacity.js";
 import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import { SemanticVersionService } from "./semantic-version.service.js";
 
@@ -82,7 +83,8 @@ export class SemanticVersionController {
         input.projectId,
         input.actorId,
         internalUuid(versionId, "versionId"),
-        input.idempotencyKey
+        input.idempotencyKey,
+        input.entitlement
       ),
       meta: { requestId: request.id }
     };
@@ -109,7 +111,7 @@ function internalUndoInput(value: unknown): InternalUndoSemanticVersionInput {
   }
   const input = value as Readonly<Record<string, unknown>>;
   if (
-    Object.keys(input).length !== 4 ||
+    Object.keys(input).length !== 5 ||
     typeof input.workspaceId !== "string" ||
     typeof input.projectId !== "string" ||
     typeof input.actorId !== "string" ||
@@ -122,6 +124,7 @@ function internalUndoInput(value: unknown): InternalUndoSemanticVersionInput {
     workspaceId: internalUuid(input.workspaceId, "workspaceId"),
     projectId: internalUuid(input.projectId, "projectId"),
     actorId: internalUuid(input.actorId, "actorId"),
-    idempotencyKey: input.idempotencyKey
+    idempotencyKey: input.idempotencyKey,
+    entitlement: semanticCapacityEntitlement(input.entitlement)
   };
 }

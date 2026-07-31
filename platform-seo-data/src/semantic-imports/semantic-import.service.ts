@@ -7,6 +7,8 @@ import {
 } from "@nestjs/common";
 import {
   domainEventTypes,
+  type InternalAbortSemanticImportInput,
+  type InternalAbortSemanticImportResult,
   type InternalApplySemanticImportChunkInput,
   type InternalBeginSemanticImportInput,
   type InternalCompleteSemanticImportInput,
@@ -26,6 +28,10 @@ import {
   type SemanticImportReceipt
 } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import {
+  assertStoredKeywordCapacity,
+  lockStoredKeywordCapacity
+} from "../internal/semantic-capacity.js";
 
 @Injectable()
 export class SemanticImportService {
@@ -66,17 +72,39 @@ export class SemanticImportService {
   public async begin(
     input: InternalBeginSemanticImportInput
   ): Promise<InternalSemanticImportReceipt> {
-    const existing = await this.prisma.semanticImportReceipt.findUnique({
-      where: { importId: input.importId },
-      include: { _count: { select: { chunks: true } } }
-    });
-    if (existing) {
-      assertReceiptCommand(existing, input);
-      return receiptSummary(existing, existing._count.chunks);
+    const expectedNewKeywords = BigInt(input.expectedNewKeywords);
+    if (expectedNewKeywords > BigInt(input.expectedUniqueRows)) {
+      throw new BadRequestException(
+        "Expected new keywords cannot exceed expected unique rows"
+      );
     }
-    let created: SemanticImportReceipt;
-    try {
-      created = await this.prisma.semanticImportReceipt.create({
+    return this.prisma.$transaction(async (transaction) => {
+      await lockStoredKeywordCapacity(
+        transaction,
+        input.workspaceId
+      );
+      await transaction.$executeRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtextextended(${`semantic-keyword-write:${input.projectId}`}, 0)
+        )
+      `;
+      const existing =
+        await transaction.semanticImportReceipt.findUnique({
+          where: { importId: input.importId },
+          include: { _count: { select: { chunks: true } } }
+        });
+      if (existing) {
+        assertReceiptCommand(existing, input);
+        return receiptSummary(existing, existing._count.chunks);
+      }
+      await assertStoredKeywordCapacity(
+        transaction,
+        input.workspaceId,
+        input.projectId,
+        expectedNewKeywords,
+        input.entitlement
+      );
+      const created = await transaction.semanticImportReceipt.create({
         data: {
           importId: input.importId,
           workspaceId: input.workspaceId,
@@ -85,23 +113,20 @@ export class SemanticImportService {
           mappingHash: input.mappingHash,
           duplicatePolicy: input.duplicatePolicy,
           expectedChunks: input.expectedChunks,
-          expectedUniqueRows: BigInt(input.expectedUniqueRows)
+          expectedUniqueRows: BigInt(input.expectedUniqueRows),
+          planCode: input.entitlement.planCode,
+          planVersion: input.entitlement.planVersion,
+          storedKeywordsLimit: BigInt(
+            input.entitlement.storedKeywords
+          ),
+          keywordsPerProjectLimit: BigInt(
+            input.entitlement.keywordsPerProject
+          ),
+          reservedKeywords: expectedNewKeywords
         }
       });
-    } catch (error) {
-      if (isUniqueConstraintError(error)) {
-        const winner = await this.prisma.semanticImportReceipt.findUnique({
-          where: { importId: input.importId },
-          include: { _count: { select: { chunks: true } } }
-        });
-        if (winner) {
-          assertReceiptCommand(winner, input);
-          return receiptSummary(winner, winner._count.chunks);
-        }
-      }
-      throw error;
-    }
-    return receiptSummary(created, 0);
+      return receiptSummary(created, 0);
+    });
   }
 
   public async applyChunk(
@@ -132,6 +157,10 @@ export class SemanticImportService {
     }
 
     return this.prisma.$transaction(async (transaction) => {
+      await lockStoredKeywordCapacity(
+        transaction,
+        input.workspaceId
+      );
       await transaction.$executeRaw`
         SELECT pg_advisory_xact_lock(
           hashtextextended(${`semantic-keyword-write:${input.projectId}`}, 0)
@@ -184,6 +213,22 @@ export class SemanticImportService {
             keywordKey(row.language, row.normalizedHash)
           )
       );
+      const missingReservation =
+        BigInt(newRows.length) > transactionReceipt.reservedKeywords
+          ? BigInt(newRows.length) -
+            transactionReceipt.reservedKeywords
+          : 0n;
+      if (missingReservation > 0n) {
+        await assertStoredKeywordCapacity(
+          transaction,
+          input.workspaceId,
+          input.projectId,
+          missingReservation,
+          receiptEntitlement(transactionReceipt)
+        );
+      }
+      const availableReservation =
+        transactionReceipt.reservedKeywords + missingReservation;
       const rowsToApply =
         input.duplicatePolicy === "SKIP_EXISTING"
           ? newRows
@@ -406,6 +451,18 @@ export class SemanticImportService {
       const createdKeywordCount = input.rows.filter((row) =>
         createdKeys.has(keywordKey(row.language, row.normalizedHash))
       ).length;
+      if (BigInt(createdKeywordCount) > availableReservation) {
+        throw new Error(
+          "Semantic import created more keywords than it reserved"
+        );
+      }
+      await transaction.semanticImportReceipt.update({
+        where: { importId: input.importId },
+        data: {
+          reservedKeywords:
+            availableReservation - BigInt(createdKeywordCount)
+        }
+      });
       const chunk = await transaction.semanticImportChunkReceipt.create({
         data: {
           importId: input.importId,
@@ -429,6 +486,10 @@ export class SemanticImportService {
     input: InternalCompleteSemanticImportInput
   ): Promise<SemanticImportResultSummary> {
     return this.prisma.$transaction(async (transaction) => {
+      await lockStoredKeywordCapacity(
+        transaction,
+        input.workspaceId
+      );
       await transaction.$executeRaw`
         SELECT pg_advisory_xact_lock(
           hashtextextended(${`semantic-version:${input.projectId}`}, 0)
@@ -527,6 +588,7 @@ export class SemanticImportService {
         where: { importId: input.importId },
         data: {
           status: "COMPLETED",
+          reservedKeywords: 0n,
           semanticVersionId: version.id,
           resultSummary: json(result),
           completedAt: new Date()
@@ -549,6 +611,56 @@ export class SemanticImportService {
         }
       });
       return result;
+    });
+  }
+
+  public async abort(
+    input: InternalAbortSemanticImportInput
+  ): Promise<InternalAbortSemanticImportResult> {
+    return this.prisma.$transaction(async (transaction) => {
+      await lockStoredKeywordCapacity(
+        transaction,
+        input.workspaceId
+      );
+      const receipt =
+        await transaction.semanticImportReceipt.findUnique({
+          where: { importId: input.importId },
+          include: { _count: { select: { chunks: true } } }
+        });
+      if (!receipt) {
+        return {
+          importId: input.importId,
+          status: "ABORTED",
+          receivedChunks: 0
+        };
+      }
+      assertReceiptScope(receipt, input);
+      if (
+        receipt.status === "COMPLETED" ||
+        (receipt.status === "RECEIVING" &&
+          receipt._count.chunks > 0)
+      ) {
+        return {
+          importId: input.importId,
+          status: receipt.status,
+          receivedChunks: receipt._count.chunks
+        };
+      }
+      if (receipt.status !== "ABORTED") {
+        await transaction.semanticImportReceipt.update({
+          where: { importId: input.importId },
+          data: {
+            status: "ABORTED",
+            reservedKeywords: 0n,
+            completedAt: new Date()
+          }
+        });
+      }
+      return {
+        importId: input.importId,
+        status: "ABORTED",
+        receivedChunks: receipt._count.chunks
+      };
     });
   }
 
@@ -1003,12 +1115,46 @@ function assertReceiptCommand(
     receipt.mappingHash !== input.mappingHash ||
     receipt.duplicatePolicy !== input.duplicatePolicy ||
     receipt.expectedChunks !== input.expectedChunks ||
-    receipt.expectedUniqueRows !== BigInt(input.expectedUniqueRows)
+    receipt.expectedUniqueRows !== BigInt(input.expectedUniqueRows) ||
+    receipt.planCode !== input.entitlement.planCode ||
+    receipt.planVersion !== input.entitlement.planVersion ||
+    receipt.storedKeywordsLimit !==
+      BigInt(input.entitlement.storedKeywords) ||
+    receipt.keywordsPerProjectLimit !==
+      BigInt(input.entitlement.keywordsPerProject)
   ) {
     throw new ConflictException(
       "Semantic import receipt already exists with another command"
     );
   }
+}
+
+function receiptEntitlement(
+  receipt: SemanticImportReceipt
+): InternalBeginSemanticImportInput["entitlement"] {
+  return {
+    planCode: receipt.planCode,
+    planVersion: receipt.planVersion,
+    storedKeywords: safeCapacityNumber(
+      receipt.storedKeywordsLimit,
+      "storedKeywordsLimit"
+    ),
+    keywordsPerProject: safeCapacityNumber(
+      receipt.keywordsPerProjectLimit,
+      "keywordsPerProjectLimit"
+    ),
+    // This snapshot is only used for keyword-capacity enforcement.
+    trackedContextPairs: 1
+  };
+}
+
+function safeCapacityNumber(value: bigint, field: string): number {
+  if (value <= 0n) {
+    throw new Error(`Stored ${field} is invalid`);
+  }
+  return value > BigInt(Number.MAX_SAFE_INTEGER)
+    ? Number.MAX_SAFE_INTEGER
+    : Number(value);
 }
 
 function assertReceiptScope(
@@ -1089,13 +1235,4 @@ function resultSummary(value: unknown): SemanticImportResultSummary | undefined 
     return undefined;
   }
   return value as unknown as SemanticImportResultSummary;
-}
-
-function isUniqueConstraintError(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    error.code === "P2002"
-  );
 }

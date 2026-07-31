@@ -17,6 +17,7 @@ import type {
   TenantRequest
 } from "../authorization/authorization.types.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
+import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import { apiResponse } from "../common/api-response.js";
 import { assertUuid } from "../common/identifier.js";
 import { requiredIdempotencyKey } from "../common/idempotency-key.js";
@@ -37,7 +38,10 @@ import {
 
 @Controller("api/v1/projects/:projectId/imports")
 export class SemanticImportController {
-  public constructor(private readonly jobs: JobsClient) {}
+  public constructor(
+    private readonly jobs: JobsClient,
+    private readonly billingEntitlements: BillingEntitlementService
+  ) {}
 
   @Post()
   @RequirePermission("semantic.import")
@@ -125,16 +129,23 @@ export class SemanticImportController {
   ): Promise<ApiResponse<SemanticImportSummary>> {
     assertUuid(importId, "importId");
     const context = requestContext(request);
+    const tenant = requiredTenant(request);
     return apiResponse(
       request,
       await this.jobs.confirmSemanticImport(
         {
-          tenant: requiredTenant(request),
+          tenant,
           actorId: principal.userId,
           requestId: context.requestId
         },
         importId,
-        { version: requiredVersion(headerValue(request, "if-match")) }
+        {
+          version: requiredVersion(headerValue(request, "if-match")),
+          entitlement:
+            await this.billingEntitlements.semanticCapacity(
+              tenant.workspaceId
+            )
+        }
       )
     );
   }

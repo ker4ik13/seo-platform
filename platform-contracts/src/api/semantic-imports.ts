@@ -139,6 +139,7 @@ export interface InternalConfirmSemanticImportInput
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;
+  readonly entitlement: import("./billing.js").SemanticCapacityEntitlement;
 }
 
 export interface CancelSemanticImportInput {
@@ -252,11 +253,13 @@ export interface InternalBeginSemanticImportInput {
   readonly duplicatePolicy: SemanticImportDuplicatePolicy;
   readonly expectedChunks: number;
   readonly expectedUniqueRows: string;
+  readonly expectedNewKeywords: string;
+  readonly entitlement: import("./billing.js").SemanticCapacityEntitlement;
 }
 
 export interface InternalSemanticImportReceipt {
   readonly importId: string;
-  readonly status: "RECEIVING" | "COMPLETED";
+  readonly status: "RECEIVING" | "COMPLETED" | "ABORTED";
   readonly receivedChunks: number;
   readonly expectedChunks: number;
 }
@@ -289,4 +292,18 @@ export interface InternalCompleteSemanticImportInput {
   readonly actorId: string;
   readonly importId: string;
   readonly partial?: boolean;
+}
+
+export interface InternalAbortSemanticImportInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly importId: string;
+  readonly reason: "CANCELLED" | "FAILED_FINAL";
+}
+
+export interface InternalAbortSemanticImportResult {
+  readonly importId: string;
+  readonly status: "ABORTED" | "RECEIVING" | "COMPLETED";
+  readonly receivedChunks: number;
 }

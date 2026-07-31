@@ -3,6 +3,7 @@ import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
   domainEventTypes,
   type InternalSemanticImportReceipt,
+  type SemanticCapacityEntitlement,
   type SemanticImportMapping,
   type SemanticImportPublishRow,
   type SemanticImportResultSummary
@@ -32,8 +33,10 @@ export interface SemanticImportPublishOutcome {
 interface SemanticImportPublishPlan {
   readonly mapping: SemanticImportMapping;
   readonly uniqueRows: bigint;
+  readonly newKeywords: bigint;
   readonly batchSize: number;
   readonly expectedChunks: number;
+  readonly entitlement: SemanticCapacityEntitlement;
 }
 
 @Injectable()
@@ -137,11 +140,18 @@ export class SemanticImportPublisherService {
       return await this.publishClaimed(semanticImport, claimedAt);
     } catch (error) {
       if (error instanceof SeoDataClientError && !error.retryable) {
-        return this.fail(
-          semanticImport,
-          claimedAt,
-          "SEO_DATA_PUBLISH_REJECTED"
-        );
+        try {
+          return await this.fail(
+            semanticImport,
+            claimedAt,
+            error.code === "QUOTA_EXCEEDED"
+              ? "QUOTA_EXCEEDED"
+              : "SEO_DATA_PUBLISH_REJECTED"
+          );
+        } catch (finalizationError) {
+          await this.releaseForRetry(semanticImport.id, claimedAt);
+          throw finalizationError;
+        }
       }
       await this.releaseForRetry(semanticImport.id, claimedAt);
       throw error;
@@ -166,8 +176,7 @@ export class SemanticImportPublisherService {
       if (await this.cancelRequested(semanticImport.id, claimedAt)) {
         return this.finishCancelled(
           semanticImport,
-          claimedAt,
-          chunkIndex
+          claimedAt
         );
       }
       const batch = await validatedBatch(
@@ -246,16 +255,7 @@ export class SemanticImportPublisherService {
     semanticImport: SemanticImport,
     claimedAt: Date
   ): Promise<SemanticImportPublishOutcome> {
-    const plan = this.publishPlan(semanticImport);
-    if ("code" in plan) {
-      return this.finishCancelled(semanticImport, claimedAt, 0);
-    }
-    const receipt = await this.beginReceipt(semanticImport, plan);
-    return this.finishCancelled(
-      semanticImport,
-      claimedAt,
-      receipt.receivedChunks
-    );
+    return this.finishCancelled(semanticImport, claimedAt);
   }
 
   private publishPlan(
@@ -279,11 +279,23 @@ export class SemanticImportPublisherService {
     if (expectedChunksBig > BigInt(Number.MAX_SAFE_INTEGER)) {
       return { code: "IMPORT_TOO_MANY_CHUNKS" };
     }
+    const existingKeywords = BigInt(
+      validation.existingKeywordsInProject
+    );
+    if (existingKeywords > uniqueRows) {
+      return { code: "IMPORT_VALIDATION_INVALID" };
+    }
+    const entitlement = importEntitlement(semanticImport);
+    if (!entitlement) {
+      return { code: "IMPORT_ENTITLEMENT_MISSING" };
+    }
     return {
       mapping,
       uniqueRows,
+      newKeywords: uniqueRows - existingKeywords,
       batchSize,
-      expectedChunks: Number(expectedChunksBig)
+      expectedChunks: Number(expectedChunksBig),
+      entitlement
     };
   }
 
@@ -299,7 +311,9 @@ export class SemanticImportPublisherService {
       mappingHash: hashJson(plan.mapping),
       duplicatePolicy: plan.mapping.duplicatePolicy,
       expectedChunks: plan.expectedChunks,
-      expectedUniqueRows: plan.uniqueRows.toString()
+      expectedUniqueRows: plan.uniqueRows.toString(),
+      expectedNewKeywords: plan.newKeywords.toString(),
+      entitlement: plan.entitlement
     });
   }
 
@@ -358,19 +372,12 @@ export class SemanticImportPublisherService {
 
   private async finishCancelled(
     semanticImport: SemanticImport,
-    claimedAt: Date,
-    processedChunks: number
+    claimedAt: Date
   ): Promise<SemanticImportPublishOutcome> {
-    const result =
-      processedChunks > 0
-        ? await this.seoData.completeImport({
-            workspaceId: semanticImport.workspaceId,
-            projectId: semanticImport.projectId,
-            actorId: semanticImport.actorId,
-            importId: semanticImport.id,
-            partial: true
-          })
-        : undefined;
+    const result = await this.terminateReceipt(
+      semanticImport,
+      "CANCELLED"
+    );
     await this.prisma.$transaction(async (transaction) => {
       const changed = await transaction.semanticImport.updateMany({
         where: {
@@ -416,6 +423,10 @@ export class SemanticImportPublisherService {
     claimedAt: Date,
     code: string
   ): Promise<SemanticImportPublishOutcome> {
+    const partialResult = await this.terminateReceipt(
+      semanticImport,
+      "FAILED_FINAL"
+    );
     return this.prisma.$transaction(async (transaction) => {
       const completedAt = new Date();
       const changed = await transaction.semanticImport.updateMany({
@@ -428,6 +439,9 @@ export class SemanticImportPublisherService {
           status: "FAILED",
           stage: "failed",
           failure: { code },
+          ...(partialResult
+            ? { resultSummary: json(partialResult) }
+            : {}),
           publishingHeartbeatAt: completedAt,
           publishingCompletedAt: completedAt,
           version: { increment: 1 }
@@ -451,7 +465,8 @@ export class SemanticImportPublisherService {
             workspaceId: semanticImport.workspaceId,
             projectId: semanticImport.projectId,
             stage: "publish",
-            code
+            code,
+            partial: Boolean(partialResult)
           },
           metadata: {
             producer: "jobs-integrations",
@@ -464,6 +479,27 @@ export class SemanticImportPublisherService {
         status: "FAILED" as const,
         code
       };
+    });
+  }
+
+  private async terminateReceipt(
+    semanticImport: SemanticImport,
+    reason: "CANCELLED" | "FAILED_FINAL"
+  ): Promise<SemanticImportResultSummary | undefined> {
+    const termination = await this.seoData.abortImport({
+      workspaceId: semanticImport.workspaceId,
+      projectId: semanticImport.projectId,
+      actorId: semanticImport.actorId,
+      importId: semanticImport.id,
+      reason
+    });
+    if (termination.status === "ABORTED") return undefined;
+    return this.seoData.completeImport({
+      workspaceId: semanticImport.workspaceId,
+      projectId: semanticImport.projectId,
+      actorId: semanticImport.actorId,
+      importId: semanticImport.id,
+      partial: termination.status !== "COMPLETED"
     });
   }
 
@@ -640,6 +676,56 @@ function safePublishRow(value: unknown): SemanticImportPublishRow | undefined {
     return undefined;
   }
   return value as SemanticImportPublishRow;
+}
+
+function importEntitlement(
+  semanticImport: SemanticImport
+): SemanticCapacityEntitlement | undefined {
+  const {
+    billingPlanCode,
+    billingPlanVersion,
+    storedKeywordsLimit,
+    keywordsPerProjectLimit,
+    trackedContextPairsLimit
+  } = semanticImport;
+  if (
+    !billingPlanCode ||
+    billingPlanVersion === null ||
+    storedKeywordsLimit === null ||
+    keywordsPerProjectLimit === null ||
+    trackedContextPairsLimit === null
+  ) {
+    return undefined;
+  }
+  const storedKeywords = safePlanLimit(storedKeywordsLimit);
+  const keywordsPerProject = safePlanLimit(
+    keywordsPerProjectLimit
+  );
+  const trackedContextPairs = safePlanLimit(
+    trackedContextPairsLimit
+  );
+  if (
+    !Number.isSafeInteger(billingPlanVersion) ||
+    billingPlanVersion <= 0 ||
+    storedKeywords === undefined ||
+    keywordsPerProject === undefined ||
+    trackedContextPairs === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    planCode: billingPlanCode,
+    planVersion: billingPlanVersion,
+    storedKeywords,
+    keywordsPerProject,
+    trackedContextPairs
+  };
+}
+
+function safePlanLimit(value: bigint): number | undefined {
+  return value > 0n && value <= BigInt(Number.MAX_SAFE_INTEGER)
+    ? Number(value)
+    : undefined;
 }
 
 function hashJson(value: unknown): string {

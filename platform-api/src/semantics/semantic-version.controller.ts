@@ -23,6 +23,7 @@ import {
   requiredProjectTenant
 } from "../authorization/project-tenant.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
+import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import { apiResponse } from "../common/api-response.js";
 import { recordCommittedAudit } from "../common/committed-audit.js";
 import { assertUuid } from "../common/identifier.js";
@@ -44,7 +45,8 @@ export class SemanticVersionController {
 
   public constructor(
     private readonly seoData: SeoDataClient,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly billingEntitlements: BillingEntitlementService
   ) {}
 
   @Get()
@@ -110,7 +112,10 @@ export class SemanticVersionController {
     const result = await this.seoData.undoSemanticVersion(
       internalProjectContext(request, principal, tenant),
       canonicalVersionId,
-      idempotencyKey
+      idempotencyKey,
+      await this.billingEntitlements.semanticCapacity(
+        tenant.workspaceId
+      )
     );
     await recordCommittedAudit(this.audit, this.logger, {
       actorId: principal.userId,

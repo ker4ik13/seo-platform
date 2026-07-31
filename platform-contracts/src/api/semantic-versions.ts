@@ -66,4 +66,5 @@ export interface InternalUndoSemanticVersionInput {
   readonly projectId: string;
   readonly actorId: string;
   readonly idempotencyKey: string;
+  readonly entitlement: import("./billing.js").SemanticCapacityEntitlement;
 }

@@ -11,6 +11,13 @@ const context = {
   actorId: "01900000-0000-7000-8000-000000000003",
   importId: "01900000-0000-7000-8000-000000000004"
 } as const;
+const entitlement = {
+  planCode: "TEAM",
+  planVersion: 1,
+  storedKeywords: 2_000_000,
+  keywordsPerProject: 2_000_000,
+  trackedContextPairs: 50_000
+} as const;
 
 test("normalizes keywords canonically and marks existing project rows", async () => {
   let observedWhere: unknown;
@@ -46,9 +53,16 @@ test("normalizes keywords canonically and marks existing project rows", async ()
 
 test("creates an idempotent semantic import receipt", async () => {
   const records: unknown[] = [];
-  const service = new SemanticImportService({
+  const transaction = {
+    $executeRaw: async () => 1,
+    keyword: {
+      count: async () => 0
+    },
     semanticImportReceipt: {
       findUnique: async () => null,
+      aggregate: async () => ({
+        _sum: { reservedKeywords: null }
+      }),
       create: async ({ data }: { data: Record<string, unknown> }) => {
         records.push(data);
         return {
@@ -63,6 +77,11 @@ test("creates an idempotent semantic import receipt", async () => {
         };
       }
     }
+  };
+  const service = new SemanticImportService({
+    $transaction: async (
+      callback: (client: typeof transaction) => Promise<unknown>
+    ) => callback(transaction)
   } as unknown as PrismaService);
 
   const result = await service.begin({
@@ -70,12 +89,76 @@ test("creates an idempotent semantic import receipt", async () => {
     mappingHash: "a".repeat(64),
     duplicatePolicy: "SKIP_EXISTING",
     expectedChunks: 2,
-    expectedUniqueRows: "10"
+    expectedUniqueRows: "10",
+    expectedNewKeywords: "8",
+    entitlement
   });
 
   assert.equal(result.status, "RECEIVING");
   assert.equal(result.receivedChunks, 0);
   assert.equal(records.length, 1);
+  assert.equal(
+    (records[0] as { readonly reservedKeywords: bigint })
+      .reservedKeywords,
+    8n
+  );
+});
+
+test("aborts an empty receipt and releases its remaining capacity", async () => {
+  let update:
+    | Readonly<Record<string, unknown>>
+    | undefined;
+  const receipt = {
+    ...context,
+    status: "RECEIVING",
+    mappingHash: "a".repeat(64),
+    duplicatePolicy: "SKIP_EXISTING",
+    expectedChunks: 2,
+    expectedUniqueRows: 10n,
+    planCode: "TEAM",
+    planVersion: 1,
+    storedKeywordsLimit: 2_000_000n,
+    keywordsPerProjectLimit: 2_000_000n,
+    reservedKeywords: 8n,
+    semanticVersionId: null,
+    resultSummary: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    completedAt: null,
+    _count: { chunks: 0 }
+  } as const;
+  const transaction = {
+    $executeRaw: async () => 1,
+    semanticImportReceipt: {
+      findUnique: async () => receipt,
+      update: async ({
+        data
+      }: {
+        data: Readonly<Record<string, unknown>>;
+      }) => {
+        update = data;
+        return receipt;
+      }
+    }
+  };
+  const service = new SemanticImportService({
+    $transaction: async (
+      callback: (client: typeof transaction) => Promise<unknown>
+    ) => callback(transaction)
+  } as unknown as PrismaService);
+
+  const result = await service.abort({
+    ...context,
+    reason: "CANCELLED"
+  });
+
+  assert.deepEqual(result, {
+    importId: context.importId,
+    status: "ABORTED",
+    receivedChunks: 0
+  });
+  assert.equal(update?.status, "ABORTED");
+  assert.equal(update?.reservedKeywords, 0n);
 });
 
 test("returns an applied chunk idempotently and rejects payload substitution", async () => {

@@ -164,4 +164,5 @@ export interface InternalChangeTrackingContextKeywordInput {
   readonly contextId: string;
   readonly keywordId: string;
   readonly actorId: string;
+  readonly entitlement: import("./billing.js").SemanticCapacityEntitlement;
 }

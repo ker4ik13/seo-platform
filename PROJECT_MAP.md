@@ -145,9 +145,18 @@ Plan entitlement больше не является UI-only: общий
 до тарифа с `clientRole`. При отсутствии подписки onboarding ограничен
 Trial-каталогом, но истёкшая/заблокированная подписка не откатывается на
 бесплатный fallback. Controlled-beta Arsenkin grant теперь проверяет
-действующий BYOK entitlement до quota reservation. Keyword, tracked-pair,
-storage и automation meters, а также platform-paid settlement остаются
-следующей частью enforcement.
+действующий BYOK entitlement до quota reservation. Актуальный semantic
+capacity snapshot теперь передаётся только по доверенной Platform API
+границе: SEO Data атомарно ограничивает workspace/project active keywords,
+undo-восстановления и active tracking-context pairs. Manual write, undo и
+import используют единый порядок advisory locks. Import confirmation
+фиксирует plan/version/limits в Jobs DB, а SEO receipt резервирует ожидаемые
+новые keywords; каждый chunk превращает резерв в фактические строки,
+complete/partial complete освобождает остаток, cancel/final failure переводит
+пустой receipt в `ABORTED`. Поэтому параллельные ручные команды, несколько
+проектов и массовый импорт не обходят `storedKeywords`,
+`keywordsPerProject` или `trackedContextPairs`. Storage и automation meters,
+а также platform-paid settlement остаются следующей частью enforcement.
 
 Параллельный dependency-free срез browser Web Push device lifecycle
 реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет
@@ -704,6 +713,9 @@ Backend convention:
 - `platform-jobs-integrations/prisma/migrations/20260731060000_npd_receipt_email_delivery`
   — expand-only allowlist durable attempt для
   `billing.npd-receipt.delivery-requested.v1`;
+- обе migrations `20260731070000_semantic_capacity_entitlements` —
+  immutable plan snapshot в Jobs import и bounded reservation/`ABORTED`
+  lifecycle в SEO Data receipt;
 - `platform-jobs-integrations/src/rank-worker.main.ts` — изолированный
   rank-preparation entrypoint с per-delivery lease owner, PostgreSQL
   preparation/execution dispatcher recovery, отдельными manifest/grant/result
@@ -721,7 +733,11 @@ Backend convention:
 - `platform-jobs-integrations/src/seo-data` — строго валидируемый internal
   HTTP client владельца semantic core и bounded rank-estimate scope;
 - `platform-seo-data/src/semantic-imports` — нормализация, import receipts,
-  идемпотентное применение chunks и semantic version;
+  quota reservation, идемпотентное применение chunks, abort/partial
+  finalization и semantic version;
+- `platform-seo-data/src/internal/semantic-capacity.ts` — единый exact parser,
+  workspace advisory locks и атомарные keyword/tracked-pair counters для
+  всех SEO Data writers;
 - `platform-seo-data/src/keywords` — tenant-scoped keyword read model и
   manual command owner: trigram search, allowlisted filters, пять stable
   keyset sorts с filter-bound cursor, CRUD с CAS, group/tag/page relations и
@@ -959,7 +975,7 @@ Entrypoints:
 | Admin operations | vertical slice: MFA + persisted roles + NPD operations |
 | Auth core | vertical slice: identity lifecycle + transactional verification/reset email transport |
 | Workspaces/projects/team access | vertical slice: включая transactional invite email/fragment acceptance |
-| Semantics/import | vertical slice: CSV/TSV → mapping → validation → publish → query |
+| Semantics/import | vertical slice: CSV/TSV → mapping → validation → quota reservation → publish/abort → query |
 | Notifications | vertical slice: preferences → effective policy → read center → encrypted browser device lifecycle |
 | Integrations | vertical slice: catalog + encrypted BYOK vault + validation + project binding |
 | Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |
@@ -1064,10 +1080,13 @@ summary дублей, ошибок и готовых уникальных зап
 
 Publisher передаёт не более 500 уникальных строк на command, повторно
 валидируемую `seo-data`. Receipt с mapping/payload hash делает begin/chunk/
-complete идемпотентными, project advisory lock сериализует merge, а complete
-создаёт semantic version и outbox event. Отмена во время публикации завершает
-текущий chunk и фиксирует partial version; зависший `cancel_requested`
-подбирается dispatcher-ом. Jobs не имеет подключения к `seo_db`.
+complete идемпотентными; workspace capacity lock и project write lock
+сериализуют quota reservation/merge, а complete создаёт semantic version,
+освобождает неиспользованный резерв и пишет outbox event. Отмена во время
+публикации завершает текущий chunk и фиксирует partial version; отмена до
+первого chunk помечает receipt `ABORTED` и не оставляет capacity leak.
+Зависший `cancel_requested` подбирается dispatcher-ом. Jobs не имеет
+подключения к `seo_db`.
 
 Опубликованное ядро читается по `GET /api/v1/projects/:projectId/keywords`.
 Platform API проверяет session, `semantic.view` и tenant scope, затем вызывает
@@ -1565,15 +1584,23 @@ Job/manifest. Raw provider body нигде durable не сохраняется.
   PostgreSQL 16 compatibility harness; новый allowlist принял NPD event и
   отклонил посторонний event type. Platform NPD integration также пройден
   на живой PostgreSQL.
+- P3 semantic capacity enforcement 2026-07-31: trusted plan snapshot
+  проводится через manual create, version undo, tracked-pair assignment и
+  import confirmation. SEO Data сериализует workspace/project counters,
+  учитывает незавершённые import reservations и освобождает их на complete,
+  partial complete, cancel и final failure. Fresh 13-migration SEO Data и
+  28-migration Jobs chains применены на PostgreSQL 16 compatibility harness;
+  Prisma validate/generate, unit boundaries и migration contracts проходят.
 
 ## 9. Следующий вертикальный срез
 
-Ближайший обязательный billing-контур после projects/seats/BYOK entitlement:
+Ближайший обязательный billing-контур после
+projects/seats/BYOK/keyword/tracked-pair entitlement:
 
-`keyword/tracked/storage/automation meters → estimate/reservation/capture для provider usage →
+`storage/automation meters → estimate/reservation/capture для provider usage →
 sandbox checkout/autopay/refund/receipt E2E`
 
-Критерий — тариф реально ограничивает seats/projects/keywords/tracked pairs,
+Критерий — тариф дополнительно ограничивает storage/automations,
 каждая platform-paid команда проходит estimate/reservation/settlement, а
 успешная оплата создаёт и доводит до доставки официальный чек без ручного
 изменения БД. До YooKassa shop credentials и юридической конфигурации внешний

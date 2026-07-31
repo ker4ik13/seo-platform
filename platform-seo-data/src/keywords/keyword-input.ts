@@ -9,6 +9,7 @@ import {
   type SemanticKeywordIntent
 } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
+import { semanticCapacityEntitlement } from "../internal/semantic-capacity.js";
 
 const INTENTS = new Set<string>(semanticKeywordIntents);
 
@@ -17,6 +18,7 @@ export function internalCreateSemanticKeywordInput(
 ): InternalCreateSemanticKeywordInput {
   const input = exactRecord(value, [
     ...scopeFields(),
+    "entitlement",
     ...editableFields()
   ]);
   const intent = optionalIntent(input.intent, false).intent;
@@ -24,6 +26,7 @@ export function internalCreateSemanticKeywordInput(
   const targetUrl = optionalTargetUrl(input.targetUrl, false).targetUrl;
   return {
     ...scope(input),
+    entitlement: semanticCapacityEntitlement(input.entitlement),
     text: keywordText(input.text),
     language: canonicalLanguage(input.language),
     priority: priority(input.priority),

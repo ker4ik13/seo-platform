@@ -21,6 +21,10 @@ import type {
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import {
+  assertStoredKeywordCapacity,
+  lockStoredKeywordCapacity
+} from "../internal/semantic-capacity.js";
+import {
   lockSemanticKeywordWrites,
   SemanticVersionService,
   type SemanticKeywordVersionState,
@@ -235,7 +239,18 @@ export class KeywordService {
   ): Promise<SemanticKeywordListItem> {
     try {
       return await this.prisma.$transaction(async (transaction) => {
+        await lockStoredKeywordCapacity(
+          transaction,
+          input.workspaceId
+        );
         await lockSemanticKeywordWrites(transaction, input.projectId);
+        await assertStoredKeywordCapacity(
+          transaction,
+          input.workspaceId,
+          input.projectId,
+          1n,
+          input.entitlement
+        );
         if (input.groupId) {
           await lockKeywordGroupTree(transaction, input.projectId);
         }

@@ -13,6 +13,13 @@ const context = {
   actorId: "01900000-0000-7000-8000-000000000003",
   importId: "01900000-0000-7000-8000-000000000004"
 } as const;
+const entitlement = {
+  planCode: "TEAM",
+  planVersion: 1,
+  storedKeywords: 2_000_000,
+  keywordsPerProject: 2_000_000,
+  trackedContextPairs: 50_000
+} as const;
 
 test("parses bounded keyword normalization and import receipt commands", () => {
   assert.deepEqual(
@@ -28,7 +35,9 @@ test("parses bounded keyword normalization and import receipt commands", () => {
       mappingHash: "a".repeat(64),
       duplicatePolicy: "SKIP_EXISTING",
       expectedChunks: 2,
-      expectedUniqueRows: "500"
+      expectedUniqueRows: "500",
+      expectedNewKeywords: "450",
+      entitlement
     }).expectedChunks,
     2
   );

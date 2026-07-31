@@ -117,6 +117,7 @@ test("rename keeps configuration immutable and config change appends a version",
   const events: Array<Record<string, unknown>> = [];
   const transaction = {
     $queryRaw: async () => [],
+    $executeRaw: async () => 1,
     trackingContext: {
       findFirst: async () => state,
       update: async ({ data }: { data: Record<string, any> }) => {
@@ -202,6 +203,7 @@ test("point assignments are temporal and naturally idempotent", async () => {
   const events: unknown[] = [];
   const transaction = {
     $queryRaw: async () => [],
+    $executeRaw: async () => 1,
     trackingContext: {
       findFirst: async () => ({ status: "ACTIVE" })
     },
@@ -209,6 +211,7 @@ test("point assignments are temporal and naturally idempotent", async () => {
       findFirst: async () => ({ id: keywordId })
     },
     trackingContextKeywordAssignment: {
+      count: async () => 0,
       findFirst: async () =>
         activeAssignment?.removedAt ? undefined : activeAssignment,
       create: async ({ data }: { data: Record<string, any> }) => {
@@ -243,7 +246,14 @@ test("point assignments are temporal and naturally idempotent", async () => {
     projectId,
     contextId,
     keywordId,
-    actorId
+    actorId,
+    entitlement: {
+      planCode: "TEAM",
+      planVersion: 1,
+      storedKeywords: 2_000_000,
+      keywordsPerProject: 2_000_000,
+      trackedContextPairs: 50_000
+    }
   };
 
   const assigned = await service.assignKeyword(input);
