@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { Queue, Worker } from "bullmq";
@@ -9,16 +10,19 @@ import { ImportWorkerModule } from "./import-worker.module.js";
 import { SemanticImportParserService } from "./imports/semantic-import-parser.service.js";
 import { SemanticImportPublisherService } from "./imports/semantic-import-publisher.service.js";
 import { SemanticImportValidatorService } from "./imports/semantic-import-validator.service.js";
+import { KeywordResearchImportService } from "./keyword-research/keyword-research-import.service.js";
 import { bullMqConnectionOptions } from "./queue/bullmq-keyspace.js";
 import {
   enqueueSemanticImport,
   enqueueSemanticImportPublish,
   enqueueSemanticImportValidation,
+  enqueueKeywordResearchImport,
+  KEYWORD_RESEARCH_IMPORT_JOB,
   SEMANTIC_IMPORT_PARSE_JOB,
   SEMANTIC_IMPORT_PUBLISH_JOB,
   SEMANTIC_IMPORT_QUEUE,
   SEMANTIC_IMPORT_VALIDATE_JOB,
-  type SemanticImportJobData
+  type ImportWorkerJobData
 } from "./queue/semantic-import.queue.js";
 
 const logger = new Logger("SemanticImportWorker");
@@ -34,15 +38,26 @@ async function bootstrap(): Promise<void> {
   const parser = app.get(SemanticImportParserService);
   const validator = app.get(SemanticImportValidatorService);
   const publisher = app.get(SemanticImportPublisherService);
+  const keywordResearch = app.get(KeywordResearchImportService);
+  const leaseOwner = `keyword-import-${randomUUID()}`;
   const workerConnection = redis(config.redisUrl);
   const queueConnection = redis(config.redisUrl);
-  const queue = new Queue<SemanticImportJobData>(
+  const queue = new Queue<ImportWorkerJobData>(
     SEMANTIC_IMPORT_QUEUE,
     bullMqConnectionOptions(queueConnection)
   );
-  const worker = new Worker<SemanticImportJobData>(
+  const worker = new Worker<ImportWorkerJobData>(
     SEMANTIC_IMPORT_QUEUE,
     async (job) => {
+      if (job.name === KEYWORD_RESEARCH_IMPORT_JOB) {
+        if (!("runId" in job.data) || !UUID_PATTERN.test(job.data.runId)) {
+          throw new Error("Invalid keyword research import job");
+        }
+        return keywordResearch.import(job.data.runId, leaseOwner);
+      }
+      if (!("importId" in job.data)) {
+        throw new Error("Invalid semantic import job");
+      }
       if (!UUID_PATTERN.test(job.data.importId)) {
         throw new Error("Invalid semantic import job");
       }
@@ -68,10 +83,11 @@ async function bootstrap(): Promise<void> {
     if (dispatching) return;
     dispatching = true;
     try {
-      const [importIds, validations, publications] = await Promise.all([
+      const [importIds, validations, publications, researchRunIds] = await Promise.all([
         parser.pendingImportIds(),
         validator.pendingImports(),
-        publisher.pendingImports()
+        publisher.pendingImports(),
+        keywordResearch.pendingIds()
       ]);
       for (const importId of importIds) {
         await enqueueSemanticImport(queue, importId);
@@ -89,6 +105,9 @@ async function bootstrap(): Promise<void> {
           semanticImport.id,
           semanticImport.version
         );
+      }
+      for (const runId of researchRunIds) {
+        await enqueueKeywordResearchImport(queue, runId);
       }
     } catch {
       logger.error("Unable to dispatch pending semantic imports");

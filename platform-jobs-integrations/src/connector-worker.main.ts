@@ -9,6 +9,7 @@ import { APP_CONFIG } from "./config/config.module.js";
 import { ConnectorWorkerModule } from "./connector-worker.module.js";
 import { IntegrationCredentialValidationWorkerService } from "./integrations/integration-credential-validation-worker.service.js";
 import { RankConnectorRuntimeService } from "./rank-runs/rank-connector-runtime.service.js";
+import { KeywordResearchRuntimeService } from "./keyword-research/keyword-research-runtime.service.js";
 import { bullMqConnectionOptions } from "./queue/bullmq-keyspace.js";
 import {
   enqueueIntegrationCredentialValidation,
@@ -21,6 +22,11 @@ import {
   RANK_CONNECTOR_RUNTIME_JOB,
   type RankConnectorRuntimeJobData
 } from "./queue/rank-connector-runtime.queue.js";
+import {
+  enqueueKeywordResearchRuntime,
+  KEYWORD_RESEARCH_RUNTIME_JOB,
+  type KeywordResearchRuntimeJobData
+} from "./queue/keyword-research-runtime.queue.js";
 
 const logger = new Logger("IntegrationConnectorWorker");
 const UUID_PATTERN =
@@ -41,6 +47,7 @@ async function bootstrap(): Promise<void> {
     IntegrationCredentialValidationWorkerService
   );
   const rankRuntime = app.get(RankConnectorRuntimeService);
+  const keywordResearchRuntime = app.get(KeywordResearchRuntimeService);
   const workerConnection = redis(config.redisUrl);
   const queueConnection = redis(config.redisUrl);
   const queue = new Queue<IntegrationCredentialValidationJobData>(
@@ -51,12 +58,27 @@ async function bootstrap(): Promise<void> {
     INTEGRATION_CREDENTIAL_VALIDATION_QUEUE,
     bullMqConnectionOptions(queueConnection)
   );
+  const keywordResearchQueue = new Queue<KeywordResearchRuntimeJobData>(
+    INTEGRATION_CREDENTIAL_VALIDATION_QUEUE,
+    bullMqConnectionOptions(queueConnection)
+  );
   const leaseOwner = `connector-${randomUUID()}`;
   const worker = new Worker<
-    IntegrationCredentialValidationJobData | RankConnectorRuntimeJobData
+    | IntegrationCredentialValidationJobData
+    | RankConnectorRuntimeJobData
+    | KeywordResearchRuntimeJobData
   >(
     INTEGRATION_CREDENTIAL_VALIDATION_QUEUE,
     async (job) => {
+      if (job.name === KEYWORD_RESEARCH_RUNTIME_JOB) {
+        if (
+          !("schemaVersion" in job.data) ||
+          job.data.schemaVersion !== "keyword-research-runtime@1"
+        ) {
+          throw new Error("Invalid keyword research runtime job");
+        }
+        return keywordResearchRuntime.processOne(leaseOwner);
+      }
       if (job.name === RANK_CONNECTOR_RUNTIME_JOB) {
         if (
           !("schemaVersion" in job.data) ||
@@ -105,6 +127,13 @@ async function bootstrap(): Promise<void> {
             (config.integrationCredentialValidation.dispatchSeconds * 1_000)
         )
       );
+      await enqueueKeywordResearchRuntime(
+        keywordResearchQueue,
+        Math.floor(
+          Date.now() /
+            (config.integrationCredentialValidation.dispatchSeconds * 1_000)
+        )
+      );
     } catch {
       logger.error("Unable to dispatch pending credential validations");
     } finally {
@@ -139,6 +168,7 @@ async function bootstrap(): Promise<void> {
     await worker.close();
     await queue.close();
     await rankQueue.close();
+    await keywordResearchQueue.close();
     await workerConnection.quit();
     await queueConnection.quit();
     await app.close();

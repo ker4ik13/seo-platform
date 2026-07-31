@@ -16,6 +16,7 @@ import { SemanticImportModule } from "./imports/semantic-import.module.js";
 import { AutomationModule } from "./automations/automation.module.js";
 import { CrawlModule } from "./crawls/crawl.module.js";
 import { CrawlAutomationModule } from "./crawl-automations/crawl-automation.module.js";
+import { KeywordResearchModule } from "./keyword-research/keyword-research.module.js";
 
 @Module({
   imports: [
@@ -35,7 +36,8 @@ import { CrawlAutomationModule } from "./crawl-automations/crawl-automation.modu
     SemanticImportModule,
     AutomationModule,
     CrawlModule,
-    CrawlAutomationModule
+    CrawlAutomationModule,
+    KeywordResearchModule
   ]
 })
 export class AppModule {}

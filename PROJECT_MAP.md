@@ -853,6 +853,22 @@ Backend convention:
 - `platform-jobs-integrations/src/imports` — потоковый CSV/TSV parser,
   Key Collector header mapping, raw/validated staging, lease/heartbeat,
   validation summary и chunked publisher;
+- `platform-jobs-integrations/src/keyword-research` — production BYOK
+  collection органических запросов конкурента через документированный
+  Keys.so `organic/keywords`: tenant/idempotency boundary, bounded
+  page evidence и preview rows, один provider request на delivery,
+  lease-fenced connector broker, explicit row selection и идемпотентный
+  импорт выбранного в SEO Data с актуальным plan entitlement;
+- `platform-jobs-integrations/prisma/migrations/20260801003000_keyword_research`
+  — `keyword_research_runs/pages/rows`, tenant-safe Job/binding/route/
+  credential FKs, lifecycle/value constraints и три exact
+  `SECURITY DEFINER` функции без table DML у connector role;
+- `platform-api/src/keyword-research` и
+  `platform-web/app/app/(protected)/competitors` — public
+  `competitor.view/manage` + `collector.run/cancel`, CSRF/OCC/audit/billing
+  boundary и private UI `сбор → preview → выбор → импорт` со всеми
+  документированными Keys.so base codes, polling/error/empty/read-only
+  states и ссылкой на настройку BYOK;
 - `platform-jobs-integrations/src/integrations` — allowlisted provider catalog,
   workspace-scoped envelope vault с per-record DEK, AES-256-GCM и versioned
   KEK, отдельный versioned HMAC fingerprint keyring, dedicated caller guard,
@@ -922,9 +938,14 @@ Backend convention:
   preparation/execution dispatcher recovery, отдельными manifest/grant/result
   tokens, staged-result ingest и terminal finalization;
 - `platform-jobs-integrations/src/connector-worker.main.ts` — isolated
-  credential-validation и Arsenkin submit/poll runtime в одном
+  credential-validation, Arsenkin submit/poll и Keys.so competitor-keyword
+  runtime в одном
   provider-wide BullMQ limiter; credential material расшифровывается только
-  после lease-fenced DB claim и повторной submit authorization;
+  после lease-fenced DB claim; payload очереди содержит только runtime tick;
+- `platform-jobs-integrations/src/import-worker.main.ts` — кроме file import
+  восстанавливает подтверждённый Keys.so preview через ту же
+  `semantic-import` keyspace; SEO Data normalize/begin/chunk/complete receipts
+  делают повтор после crash безопасным;
 - migrations `20260730123000_rank_connector_result_enum`,
   `20260730123100_rank_connector_provider_runtime`,
   `20260730123200_rank_job_runtime_finalization` и
@@ -2116,8 +2137,10 @@ OAuth/OIDC выполняется после подтверждения зави
   UI QR появится после подтверждения зависимости `qrcode`.
 - Arsenkin position execution и daily/weekly schedule orchestration
   реализованы; до production live BYOK canary остаются обязательны provider
-  credentials владельца и incident telemetry/circuit breaker. Keys.so пока
-  используется только для credential validation, XMLStock ждёт
+  credentials владельца и incident telemetry/circuit breaker. Keys.so теперь
+  поддерживает credential validation и полный competitor organic keywords
+  collection/preview/import; до production остаётся live canary на реальном
+  тарифе владельца. XMLStock ждёт
   подтверждённого provider contract и redacted fixtures.
 - Technical crawl production vertical закрывает ручной bounded обход,
   sitemap/include/exclude/query scope, conditional page requests, global

@@ -7,6 +7,7 @@ export * from "./api/automations.js";
 export * from "./api/identity.js";
 export * from "./api/integrations.js";
 export * from "./api/keywords.js";
+export * from "./api/keyword-research.js";
 export * from "./api/notifications.js";
 export * from "./api/pages.js";
 export * from "./api/rank-estimates.js";

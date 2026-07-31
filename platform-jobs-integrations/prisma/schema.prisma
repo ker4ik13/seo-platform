@@ -156,6 +156,18 @@ enum TechnicalCrawlStatus {
   FAILED
 }
 
+enum KeywordResearchStatus {
+  QUEUED
+  RUNNING
+  RETRY_SCHEDULED
+  READY_TO_IMPORT
+  IMPORT_QUEUED
+  IMPORTING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
 model Job {
   id                   String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId          String         @map("workspace_id") @db.Uuid
@@ -208,6 +220,7 @@ model Job {
   automationRuns                    AutomationRun[]
   crawlAutomationRuns               CrawlAutomationRun[]
   technicalCrawl                    TechnicalCrawl?
+  keywordResearchRun                KeywordResearchRun?
 
   @@unique([workspaceId, idempotencyScope, idempotencyKey])
   @@unique([workspaceId, id], map: "jobs_tenant_id_key")
@@ -227,9 +240,9 @@ model TechnicalCrawl {
   jobId             String               @unique @map("job_id") @db.Uuid
   actorId           String               @map("actor_id") @db.Uuid
   host              String               @db.VarChar(253)
-  config             Json
-  checkpoint         Json?
-  status             TechnicalCrawlStatus @default(QUEUED)
+  config            Json
+  checkpoint        Json?
+  status            TechnicalCrawlStatus @default(QUEUED)
   discoveredUrls    Int                  @default(0) @map("discovered_urls")
   processedUrls     Int                  @default(0) @map("processed_urls")
   successfulUrls    Int                  @default(0) @map("successful_urls")
@@ -245,7 +258,7 @@ model TechnicalCrawl {
   cancelRequestedAt DateTime?            @map("cancel_requested_at") @db.Timestamptz(6)
   updatedAt         DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  job Job @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Cascade, onUpdate: Restrict, map: "technical_crawls_job_tenant_fkey")
+  job            Job                  @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Cascade, onUpdate: Restrict, map: "technical_crawls_job_tenant_fkey")
   automationRuns CrawlAutomationRun[]
 
   @@unique([workspaceId, projectId, id], map: "technical_crawls_tenant_project_id_key")
@@ -333,6 +346,7 @@ model IntegrationCredential {
 
   connectorRoutes         ProjectConnectorRoute[]
   rankConnectorExecutions RankConnectorExecution[]
+  keywordResearchRuns     KeywordResearchRun[]
 
   @@unique([workspaceId, idempotencyKey])
   @@unique([workspaceId, id])
@@ -371,6 +385,7 @@ model ProjectConnectorBinding {
   routes                  ProjectConnectorRoute[]
   createReceipt           ProjectConnectorBindingCreateReceipt?
   rankConnectorExecutions RankConnectorExecution[]
+  keywordResearchRuns     KeywordResearchRun[]
 
   @@unique([workspaceId, projectId, capability], map: "project_connector_bindings_tenant_project_capability_key")
   @@unique([workspaceId, projectId, id], map: "project_connector_bindings_tenant_project_id_key")
@@ -408,8 +423,10 @@ model ProjectConnectorRoute {
   binding                 ProjectConnectorBinding  @relation(fields: [workspaceId, projectId, bindingId], references: [workspaceId, projectId, id], onDelete: Restrict, map: "project_connector_routes_binding_tenant_fkey")
   credential              IntegrationCredential    @relation(fields: [workspaceId, credentialId], references: [workspaceId, id], onDelete: Restrict, map: "project_connector_routes_credential_tenant_fkey")
   rankConnectorExecutions RankConnectorExecution[]
+  keywordResearchRuns     KeywordResearchRun[]
 
   @@unique([workspaceId, projectId, bindingId, position], map: "project_connector_routes_tenant_project_binding_position_key")
+  @@unique([workspaceId, projectId, bindingId, id], map: "project_connector_routes_tenant_project_binding_id_key")
   @@index([workspaceId, credentialId], map: "project_connector_routes_tenant_credential_idx")
   @@map("project_connector_routes")
 }
@@ -459,7 +476,7 @@ model RankEstimate {
   expiresAt                            DateTime          @map("expires_at") @db.Timestamptz(6)
   createdAt                            DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  rankRun RankJobRun?
+  rankRun        RankJobRun?
   automationRuns AutomationRun[]
 
   @@unique([workspaceId, idempotencyScope, idempotencyKey], map: "rank_estimates_workspace_scope_idempotency_key")
@@ -758,7 +775,7 @@ model AutomationRun {
   createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt         DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  automation Automation  @relation(fields: [automationId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, onUpdate: Restrict, map: "automation_runs_automation_tenant_fkey")
+  automation Automation    @relation(fields: [automationId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, onUpdate: Restrict, map: "automation_runs_automation_tenant_fkey")
   estimate   RankEstimate? @relation(fields: [workspaceId, projectId, estimateId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "automation_runs_estimate_tenant_fkey")
   job        Job?          @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "automation_runs_job_tenant_fkey")
 
@@ -817,14 +834,98 @@ model CrawlAutomationRun {
   updatedAt         DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   automation CrawlAutomation @relation(fields: [automationId, workspaceId, projectId], references: [id, workspaceId, projectId], onDelete: Restrict, onUpdate: Restrict, map: "crawl_automation_runs_automation_tenant_fkey")
-  crawl      TechnicalCrawl?  @relation(fields: [workspaceId, projectId, crawlId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "crawl_automation_runs_crawl_tenant_fkey")
-  job        Job?             @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "crawl_automation_runs_job_tenant_fkey")
+  crawl      TechnicalCrawl? @relation(fields: [workspaceId, projectId, crawlId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "crawl_automation_runs_crawl_tenant_fkey")
+  job        Job?            @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "crawl_automation_runs_job_tenant_fkey")
 
   @@unique([automationId, scheduledFor], map: "crawl_automation_runs_schedule_key")
   @@unique([automationId, actorId, idempotencyKey], map: "crawl_automation_runs_manual_idempotency_key")
   @@index([workspaceId, projectId, automationId, createdAt], map: "crawl_automation_runs_tenant_created_idx")
   @@index([status, createdAt], map: "crawl_automation_runs_status_created_idx")
   @@map("crawl_automation_runs")
+}
+
+model KeywordResearchRun {
+  id                String                @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId       String                @map("workspace_id") @db.Uuid
+  projectId         String                @map("project_id") @db.Uuid
+  jobId             String                @unique @map("job_id") @db.Uuid
+  actorId           String                @map("actor_id") @db.Uuid
+  bindingId         String                @map("binding_id") @db.Uuid
+  routeId           String                @map("route_id") @db.Uuid
+  credentialId      String                @map("credential_id") @db.Uuid
+  provider          String                @db.VarChar(64)
+  domain            String                @db.VarChar(253)
+  database          String                @db.VarChar(16)
+  maxKeywords       Int                   @map("max_keywords")
+  status            KeywordResearchStatus @default(QUEUED)
+  nextPage          Int                   @default(1) @map("next_page")
+  totalAvailable    Int?                  @map("total_available")
+  collectedKeywords Int                   @default(0) @map("collected_keywords")
+  selectedKeywords  Int                   @default(0) @map("selected_keywords")
+  importedKeywords  Int                   @default(0) @map("imported_keywords")
+  duplicatePolicy   String?               @map("duplicate_policy") @db.VarChar(16)
+  entitlement       Json?
+  retryAt           DateTime?             @map("retry_at") @db.Timestamptz(6)
+  failureCode       String?               @map("failure_code") @db.VarChar(64)
+  leaseToken        String?               @map("lease_token") @db.Uuid
+  version           Int                   @default(1)
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  finishedAt        DateTime?             @map("finished_at") @db.Timestamptz(6)
+
+  job        Job                     @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "keyword_research_runs_job_tenant_fkey")
+  binding    ProjectConnectorBinding @relation(fields: [workspaceId, projectId, bindingId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "keyword_research_runs_binding_tenant_fkey")
+  route      ProjectConnectorRoute   @relation(fields: [workspaceId, projectId, bindingId, routeId], references: [workspaceId, projectId, bindingId, id], onDelete: Restrict, onUpdate: Restrict, map: "keyword_research_runs_route_tenant_fkey")
+  credential IntegrationCredential   @relation(fields: [workspaceId, credentialId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "keyword_research_runs_credential_tenant_fkey")
+  pages      KeywordResearchPage[]
+  rows       KeywordResearchRow[]
+
+  @@unique([workspaceId, projectId, id], map: "keyword_research_runs_tenant_project_id_key")
+  @@unique([workspaceId, projectId, jobId], map: "keyword_research_runs_tenant_project_job_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc)], map: "keyword_research_runs_tenant_created_idx")
+  @@index([status, retryAt, createdAt], map: "keyword_research_runs_dispatch_idx")
+  @@map("keyword_research_runs")
+}
+
+model KeywordResearchPage {
+  id           String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  projectId    String   @map("project_id") @db.Uuid
+  runId        String   @map("run_id") @db.Uuid
+  page         Int
+  responseHash Bytes    @map("response_hash")
+  rowCount     Int      @map("row_count")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  run KeywordResearchRun @relation(fields: [workspaceId, projectId, runId], references: [workspaceId, projectId, id], onDelete: Cascade, onUpdate: Restrict, map: "keyword_research_pages_run_tenant_fkey")
+
+  @@unique([runId, page], map: "keyword_research_pages_run_page_key")
+  @@index([workspaceId, projectId, runId, page], map: "keyword_research_pages_tenant_run_page_idx")
+  @@map("keyword_research_pages")
+}
+
+model KeywordResearchRow {
+  id             String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  projectId      String   @map("project_id") @db.Uuid
+  runId          String   @map("run_id") @db.Uuid
+  ordinal        Int
+  providerRowId  String?  @map("provider_row_id") @db.VarChar(128)
+  keyword        String   @db.Text
+  url            String?  @db.Text
+  frequencyBase  Int?     @map("frequency_base")
+  frequencyExact Int?     @map("frequency_exact")
+  frequencyFixed Int?     @map("frequency_fixed")
+  position       Int?
+  kei            Float?
+  selected       Boolean  @default(false)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  run KeywordResearchRun @relation(fields: [workspaceId, projectId, runId], references: [workspaceId, projectId, id], onDelete: Cascade, onUpdate: Restrict, map: "keyword_research_rows_run_tenant_fkey")
+
+  @@unique([runId, ordinal], map: "keyword_research_rows_run_ordinal_key")
+  @@index([workspaceId, projectId, runId, selected, ordinal], map: "keyword_research_rows_tenant_selected_idx")
+  @@map("keyword_research_rows")
 }
 
 model Upload {

@@ -8,6 +8,10 @@ import { IntegrationCredentialKeyCoverageService } from "./integrations/integrat
 import { IntegrationCredentialValidationWorkerService } from "./integrations/integration-credential-validation-worker.service.js";
 import { ArsenkinRankConnector } from "./rank-runs/arsenkin-rank.connector.js";
 import { RankConnectorRuntimeBrokerService } from "./rank-runs/rank-connector-runtime-broker.service.js";
+import { KeysSoKeywordResearchConnector } from "./keyword-research/keys-so-keyword-research.connector.js";
+import { KeywordResearchRuntimeBrokerService } from "./keyword-research/keyword-research-runtime-broker.service.js";
+import { KeywordResearchRuntimeService } from "./keyword-research/keyword-research-runtime.service.js";
+import { KEYS_SO_KEYWORD_RESEARCH_CONNECTOR } from "./keyword-research/keyword-research.tokens.js";
 import {
   ARSENKIN_RANK_CONNECTOR,
   RankConnectorRuntimeService
@@ -23,6 +27,12 @@ import {
     IntegrationCredentialValidationWorkerService,
     RankConnectorRuntimeBrokerService,
     RankConnectorRuntimeService,
+    KeywordResearchRuntimeBrokerService,
+    KeywordResearchRuntimeService,
+    {
+      provide: KEYS_SO_KEYWORD_RESEARCH_CONNECTOR,
+      useFactory: () => new KeysSoKeywordResearchConnector()
+    },
     {
       provide: ARSENKIN_RANK_CONNECTOR,
       useFactory: () => new ArsenkinRankConnector()

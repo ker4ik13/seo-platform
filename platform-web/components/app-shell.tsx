@@ -57,7 +57,7 @@ const navigation: readonly {
     icon: "competitors",
     href: "/app/competitors",
     section: "competitors",
-    available: false
+    available: true
   },
   {
     label: "Заметки",

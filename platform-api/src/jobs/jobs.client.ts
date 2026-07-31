@@ -75,7 +75,14 @@ import type {
   TechnicalCrawlCollection,
   TechnicalCrawlSummary,
   UpdateIntegrationCredentialInput,
-  UpdateProjectConnectorBindingInput
+  UpdateProjectConnectorBindingInput,
+  CreateKeywordResearchRunInput,
+  InternalCreateKeywordResearchRunInput,
+  InternalConfirmKeywordResearchRunInput,
+  InternalCancelKeywordResearchRunInput,
+  ConfirmKeywordResearchRunInput,
+  KeywordResearchRunSummary,
+  SemanticCapacityEntitlement
 } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
@@ -95,6 +102,7 @@ import {
   scopedCrawlAutomationRun,
   scopedCrawlAutomationRuns
 } from "./crawl-automation-response.js";
+import { scopedKeywordResearchRun } from "./keyword-research-response.js";
 
 interface InternalContext {
   readonly tenant: TenantAuthorization;
@@ -178,6 +186,140 @@ export class JobsClient {
         )
       )
     };
+  }
+
+  public async listKeywordResearchRuns(
+    context: InternalContext
+  ): Promise<readonly KeywordResearchRunSummary[]> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      keywordResearchCollectionPath(context.tenant.workspaceId, projectId),
+      context
+    );
+    const input = exactRecord(value, ["runs"]);
+    if (!Array.isArray(input.runs) || input.runs.length > 25) {
+      throw invalidJobsResponse();
+    }
+    return input.runs.map((run) =>
+      scopedKeywordResearchRun(
+        run,
+        context.tenant.workspaceId,
+        projectId
+      )
+    );
+  }
+
+  public async createKeywordResearchRun(
+    context: InternalContext,
+    input: CreateKeywordResearchRunInput,
+    idempotencyKey: string
+  ): Promise<KeywordResearchRunSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalCreateKeywordResearchRunInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId,
+      idempotencyKey,
+      correlationId: context.requestId
+    };
+    const value = await this.request<unknown>(
+      "POST",
+      keywordResearchCollectionPath(context.tenant.workspaceId, projectId),
+      context,
+      body,
+      "shared",
+      idempotencyKey
+    );
+    return scopedKeywordResearchRun(
+      value,
+      context.tenant.workspaceId,
+      projectId
+    );
+  }
+
+  public async getKeywordResearchRun(
+    context: InternalContext,
+    runId: string
+  ): Promise<KeywordResearchRunSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      `${keywordResearchCollectionPath(
+        context.tenant.workspaceId,
+        projectId
+      )}/${encodeURIComponent(runId)}`,
+      context
+    );
+    return scopedKeywordResearchRun(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      runId
+    );
+  }
+
+  public async confirmKeywordResearchRun(
+    context: InternalContext,
+    runId: string,
+    input: ConfirmKeywordResearchRunInput,
+    version: number,
+    entitlement: SemanticCapacityEntitlement
+  ): Promise<KeywordResearchRunSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalConfirmKeywordResearchRunInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId,
+      version,
+      entitlement
+    };
+    const value = await this.request<unknown>(
+      "POST",
+      `${keywordResearchCollectionPath(
+        context.tenant.workspaceId,
+        projectId
+      )}/${encodeURIComponent(runId)}/confirm`,
+      context,
+      body
+    );
+    return scopedKeywordResearchRun(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      runId
+    );
+  }
+
+  public async cancelKeywordResearchRun(
+    context: InternalContext,
+    runId: string,
+    version: number
+  ): Promise<KeywordResearchRunSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalCancelKeywordResearchRunInput = {
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId,
+      version
+    };
+    const value = await this.request<unknown>(
+      "POST",
+      `${keywordResearchCollectionPath(
+        context.tenant.workspaceId,
+        projectId
+      )}/${encodeURIComponent(runId)}/cancel`,
+      context,
+      body
+    );
+    return scopedKeywordResearchRun(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      runId
+    );
   }
 
   public async createTechnicalCrawl(
@@ -1176,6 +1318,15 @@ function crawlCollectionPath(
   return `/internal/v1/workspaces/${encodeURIComponent(
     workspaceId
   )}/projects/${encodeURIComponent(projectId)}/crawls`;
+}
+
+function keywordResearchCollectionPath(
+  workspaceId: string,
+  projectId: string
+): string {
+  return `/internal/v1/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/projects/${encodeURIComponent(projectId)}/keyword-research-runs`;
 }
 
 function technicalCrawlResponse(

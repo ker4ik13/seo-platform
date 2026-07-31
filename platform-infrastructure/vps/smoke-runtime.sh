@@ -186,6 +186,22 @@ expect_status 200 billing-subscription
 [ "$(jq -r '.data.status' "$response_body")" = TRIALING ] ||
   runtime_fail "trial subscription is not active"
 
+api_call GET "projects/$project_id/keyword-research-runs"
+expect_status 200 keyword-research-runs
+jq -e \
+  '.data.runs | type == "array" and length == 0' \
+  "$response_body" >/dev/null ||
+  runtime_fail "new project keyword research history is not empty"
+
+api_call POST "projects/$project_id/keyword-research-runs" \
+  '{"domain":"example.com","database":"msk","maxKeywords":25}' \
+  "smoke-keyword-research-$(openssl rand -hex 16)"
+expect_status 422 keyword-research-requires-connector
+jq -e \
+  '.error.code == "VALIDATION_FAILED"' \
+  "$response_body" >/dev/null ||
+  runtime_fail "keyword research without a connector did not fail closed"
+
 crawl_body=$(
   jq -cn \
     --arg startUrl "$smoke_crawl_url" \

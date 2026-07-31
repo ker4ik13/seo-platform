@@ -351,6 +351,34 @@ SELECT format(
 )
 \gexec
 
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.claim_keyword_research_run(TEXT, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.complete_keyword_research_page(
+      UUID, TEXT, UUID, INTEGER, INTEGER, JSONB, BYTEA, INTEGER, BOOLEAN
+    )
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.fail_keyword_research_run(
+      UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, INTEGER
+    )
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
 -- A PostgreSQL role is cluster-wide. REVOKE above intentionally touches only
 -- jobs_db/public and must never mutate another service database. Instead,
 -- reject an existing role if any direct ACL dependency remains outside the
@@ -394,6 +422,10 @@ BEGIN
     'public.complete_rank_connector_submit(uuid,uuid,text,uuid,integer,integer,text,text,jsonb,bytea,text)'::regprocedure::oid,
     'public.claim_rank_connector_poll(text,integer,text)'::regprocedure::oid,
     'public.complete_rank_connector_poll(uuid,uuid,text,uuid,integer,integer,text,integer,timestamptz,jsonb,bytea,text)'::regprocedure::oid
+    ,
+    'public.claim_keyword_research_run(text,integer)'::regprocedure::oid,
+    'public.complete_keyword_research_page(uuid,text,uuid,integer,integer,jsonb,bytea,integer,boolean)'::regprocedure::oid,
+    'public.fail_keyword_research_run(uuid,text,uuid,integer,integer,text,integer)'::regprocedure::oid
   ];
 
   IF EXISTS (

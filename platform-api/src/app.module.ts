@@ -18,6 +18,7 @@ import { BillingModule } from "./billing/billing.module.js";
 import { PlatformAdminModule } from "./admin/platform-admin.module.js";
 import { PageModule } from "./pages/page.module.js";
 import { CrawlModule } from "./crawls/crawl.module.js";
+import { KeywordResearchModule } from "./keyword-research/keyword-research.module.js";
 
 @Module({
   imports: [
@@ -39,6 +40,7 @@ import { CrawlModule } from "./crawls/crawl.module.js";
     PageModule,
     CrawlModule,
     NotificationModule,
+    KeywordResearchModule,
     SystemModule
   ]
 })

@@ -4,13 +4,22 @@ export const SEMANTIC_IMPORT_QUEUE = "semantic-import";
 export const SEMANTIC_IMPORT_PARSE_JOB = "semantic.import.parse";
 export const SEMANTIC_IMPORT_VALIDATE_JOB = "semantic.import.validate";
 export const SEMANTIC_IMPORT_PUBLISH_JOB = "semantic.import.publish";
+export const KEYWORD_RESEARCH_IMPORT_JOB = "keyword.research.import";
 
 export interface SemanticImportJobData {
   readonly importId: string;
 }
 
+export interface KeywordResearchImportJobData {
+  readonly runId: string;
+}
+
+export type ImportWorkerJobData =
+  | SemanticImportJobData
+  | KeywordResearchImportJobData;
+
 export async function enqueueSemanticImport(
-  queue: Queue<SemanticImportJobData>,
+  queue: Queue<ImportWorkerJobData>,
   importId: string
 ): Promise<void> {
   return enqueue(
@@ -21,8 +30,36 @@ export async function enqueueSemanticImport(
   );
 }
 
+export async function enqueueKeywordResearchImport(
+  queue: Queue<ImportWorkerJobData>,
+  runId: string
+): Promise<void> {
+  const jobId = `keyword-research-import-${runId}`;
+  const existing = await queue.getJob(jobId);
+  if (existing) {
+    const state = await existing.getState();
+    if (state === "failed") {
+      await existing.retry();
+      return;
+    }
+    if (state !== "completed") return;
+    await existing.remove();
+  }
+  await queue.add(
+    KEYWORD_RESEARCH_IMPORT_JOB,
+    { runId },
+    {
+      jobId,
+      attempts: 5,
+      backoff: { type: "exponential", delay: 5_000 },
+      removeOnComplete: { age: 86_400, count: 10_000 },
+      removeOnFail: { age: 604_800, count: 10_000 }
+    }
+  );
+}
+
 export async function enqueueSemanticImportValidation(
-  queue: Queue<SemanticImportJobData>,
+  queue: Queue<ImportWorkerJobData>,
   importId: string,
   version: number
 ): Promise<void> {
@@ -35,7 +72,7 @@ export async function enqueueSemanticImportValidation(
 }
 
 export async function enqueueSemanticImportPublish(
-  queue: Queue<SemanticImportJobData>,
+  queue: Queue<ImportWorkerJobData>,
   importId: string,
   version: number
 ): Promise<void> {
@@ -48,7 +85,7 @@ export async function enqueueSemanticImportPublish(
 }
 
 async function enqueue(
-  queue: Queue<SemanticImportJobData>,
+  queue: Queue<ImportWorkerJobData>,
   jobName:
     | typeof SEMANTIC_IMPORT_PARSE_JOB
     | typeof SEMANTIC_IMPORT_VALIDATE_JOB
