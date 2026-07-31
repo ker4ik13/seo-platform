@@ -175,6 +175,7 @@ model Keyword {
   rankManifestEntries RankExecutionManifestEntry[]
   rankSnapshots       RankSnapshot[]                     @relation("RankSnapshotKeyword")
   typedCustomValues   SemanticKeywordCustomValue[]
+  cluster             Cluster?                           @relation(fields: [workspaceId, projectId, clusterId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
   targetPage          Page?                              @relation(fields: [workspaceId, projectId, targetPageId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([projectId, language, normalizedHash])
@@ -347,7 +348,9 @@ model Cluster {
   version     Int          @default(1)
   createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  keywords    Keyword[]
 
+  @@unique([workspaceId, projectId, id], map: "clusters_tenant_project_id_key")
   @@index([projectId, status, id])
   @@map("clusters")
 }

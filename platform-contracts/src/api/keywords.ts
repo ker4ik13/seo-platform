@@ -37,6 +37,7 @@ export interface KeywordListQuery {
   readonly search?: string;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
+  readonly clusterId?: string;
   readonly isFavorite?: boolean;
   readonly isTracked?: boolean;
   readonly priorityMin?: number;
@@ -55,6 +56,8 @@ export interface SemanticKeywordListItem {
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
   readonly groupPath?: string;
+  readonly clusterId?: string;
+  readonly clusterName?: string;
   readonly targetPageId?: string;
   readonly targetUrl?: string;
   readonly tags: readonly string[];
@@ -73,6 +76,7 @@ export interface CreateSemanticKeywordInput {
   readonly isFavorite: boolean;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
+  readonly clusterId?: string;
   readonly targetUrl?: string;
   readonly tagNames: readonly string[];
 }
@@ -84,6 +88,7 @@ export interface UpdateSemanticKeywordInput {
   readonly isFavorite?: boolean;
   readonly intent?: SemanticKeywordIntent | null;
   readonly groupId?: string | null;
+  readonly clusterId?: string | null;
   readonly targetUrl?: string | null;
   readonly tagNames?: readonly string[];
 }
@@ -168,6 +173,7 @@ export interface SemanticKeywordBulkPatch {
   readonly isFavorite?: boolean;
   readonly intent?: SemanticKeywordIntent | null;
   readonly groupId?: string | null;
+  readonly clusterId?: string | null;
   readonly targetUrl?: string | null;
   readonly tagNames?: readonly string[];
 }

@@ -2389,6 +2389,11 @@ svg { display: block; }
 .semantic-group-editor select { background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); min-height: 39px; padding: 0 10px; width: 100%; }
 .semantic-group-color input { background: transparent; border: 0; height: 39px; padding: 2px; width: 56px; }
 .semantic-group-editor-actions { align-items: center; display: flex; gap: 8px; min-height: 39px; }
+.semantic-cluster-editor { align-items: end; background: #fafafd; border: 1px solid var(--line); border-radius: 11px; display: grid; gap: 10px; grid-template-columns: minmax(220px, 1fr) auto; padding: 13px; }
+.semantic-cluster-editor label { display: grid; gap: 6px; }
+.semantic-cluster-editor label > span { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.semantic-cluster-editor input { background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); min-height: 39px; padding: 0 10px; width: 100%; }
+.semantic-cluster-mark { background: linear-gradient(180deg, #6758ef, #9388f5); }
 .semantic-group-list { border: 1px solid var(--line); border-radius: 10px; max-height: 320px; overflow: auto; }
 .semantic-group-row { align-items: center; border-bottom: 1px solid var(--line); display: grid; gap: 10px; grid-template-columns: 8px minmax(0, 1fr) auto auto; min-height: 49px; padding: 8px 12px; }
 .semantic-group-row:last-child { border-bottom: 0; }
@@ -3357,6 +3362,7 @@ svg { display: block; }
   .semantic-editor-actions .primary-button,
   .semantic-editor-actions .secondary-button { flex: 1; }
   .semantic-group-editor { grid-template-columns: 1fr; }
+  .semantic-cluster-editor { grid-template-columns: 1fr; }
   .semantic-group-editor-actions { justify-content: stretch; }
   .semantic-group-editor-actions .primary-button { flex: 1; }
   .semantic-group-row { grid-template-columns: 8px minmax(0, 1fr) auto; }

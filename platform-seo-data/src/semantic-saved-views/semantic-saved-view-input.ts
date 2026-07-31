@@ -96,6 +96,7 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
     "search",
     "intent",
     "groupId",
+    "clusterId",
     "isFavorite",
     "isTracked",
     "priorityMin",
@@ -114,6 +115,10 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
     input.groupId === undefined
       ? undefined
       : uuid(input.groupId, "config.filters.groupId");
+  const clusterId =
+    input.clusterId === undefined
+      ? undefined
+      : uuid(input.clusterId, "config.filters.clusterId");
   const isFavorite = optionalBoolean(
     input.isFavorite,
     "config.filters.isFavorite"
@@ -141,6 +146,7 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
     ...(search ? { search } : {}),
     ...(intent ? { intent } : {}),
     ...(groupId ? { groupId } : {}),
+    ...(clusterId ? { clusterId } : {}),
     ...(isFavorite === undefined ? {} : { isFavorite }),
     ...(isTracked === undefined ? {} : { isTracked }),
     ...(priorityMin === undefined ? {} : { priorityMin }),

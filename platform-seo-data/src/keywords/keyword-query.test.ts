@@ -4,6 +4,7 @@ import { BadRequestException } from "@nestjs/common";
 import { keywordListQuery } from "./keyword-query.js";
 
 test("parses bounded keyword list query", () => {
+  const clusterId = "01900000-0000-7000-8000-000000000002";
   assert.deepEqual(
     keywordListQuery({ limit: "50", search: "  SEO  " }),
     { limit: 50, search: "SEO", sort: "CREATED_DESC" }
@@ -16,6 +17,7 @@ test("parses bounded keyword list query", () => {
     keywordListQuery({
       intent: "LOCAL",
       groupId: "01900000-0000-7000-8000-000000000001",
+      clusterId,
       isFavorite: "true",
       priorityMin: "1",
       sort: "TEXT_ASC"
@@ -24,6 +26,7 @@ test("parses bounded keyword list query", () => {
       limit: 100,
       intent: "LOCAL",
       groupId: "01900000-0000-7000-8000-000000000001",
+      clusterId,
       isFavorite: true,
       priorityMin: 1,
       sort: "TEXT_ASC"
@@ -43,6 +46,10 @@ test("rejects oversized pages and malformed cursors", () => {
   );
   assert.throws(
     () => keywordListQuery({ groupId: "wrong" }),
+    BadRequestException
+  );
+  assert.throws(
+    () => keywordListQuery({ clusterId: "wrong" }),
     BadRequestException
   );
 });

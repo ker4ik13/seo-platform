@@ -3,16 +3,20 @@ import {
   semanticKeywordIntents,
   semanticKeywordSourceModes,
   semanticKeywordSorts,
+  semanticClusterMethods,
   semanticCustomColumnTypes,
   semanticSavedViewDensities,
   semanticSavedViewScopes,
   semanticSystemColumnKeys,
   type ApiCollectionResponse,
   type CreateSemanticKeywordInput,
+  type CreateSemanticClusterInput,
   type CreateSemanticKeywordGroupInput,
   type InternalCreateSemanticKeywordInput,
+  type InternalCreateSemanticClusterInput,
   type InternalCreateSemanticKeywordGroupInput,
   type InternalDeleteSemanticKeywordInput,
+  type InternalDeleteSemanticClusterInput,
   type InternalDeleteSemanticKeywordGroupInput,
   type InternalSemanticKeywordBulkInput,
   type InternalCreateSemanticSavedViewInput,
@@ -24,6 +28,7 @@ import {
   type InternalUpdateSemanticSavedViewInput,
   type InternalUpdateSemanticCustomColumnInput,
   type InternalUpdateSemanticKeywordInput,
+  type InternalUpdateSemanticClusterInput,
   type InternalUpdateSemanticKeywordGroupInput,
   type CreateTrackingContextInput,
   type InternalChangeTrackingContextKeywordInput,
@@ -44,6 +49,7 @@ import {
   type ProjectCrawlPageChangeCollection,
   type ProjectCrawlIssueCollection,
   type SemanticKeywordIntent,
+  type SemanticCluster,
   type SemanticKeywordBulkInput,
   type SemanticKeywordBulkResult,
   type SemanticKeywordGroup,
@@ -67,6 +73,7 @@ import {
   type TrackingContextKeywordQuery,
   type TrackingContextSummary,
   type UpdateSemanticKeywordInput,
+  type UpdateSemanticClusterInput,
   type UpdateProjectPageInput,
   type UpdateSemanticKeywordGroupInput,
   type UpdateTrackingContextInput
@@ -131,6 +138,7 @@ export class SeoDataClient {
     if (query.search) url.searchParams.set("search", query.search);
     if (query.intent) url.searchParams.set("intent", query.intent);
     if (query.groupId) url.searchParams.set("groupId", query.groupId);
+    if (query.clusterId) url.searchParams.set("clusterId", query.clusterId);
     if (query.isFavorite !== undefined) {
       url.searchParams.set("isFavorite", String(query.isFavorite));
     }
@@ -303,6 +311,80 @@ export class SeoDataClient {
     await this.request(
       "DELETE",
       keywordGroupUrl(context, this.config.services.seoData, groupId),
+      context,
+      body
+    );
+  }
+
+  public async listSemanticClusters(
+    context: InternalContext
+  ): Promise<readonly SemanticCluster[]> {
+    const payload = await this.request(
+      "GET",
+      semanticClusterUrl(context, this.config.services.seoData),
+      context
+    );
+    return semanticClusters(responseData(payload));
+  }
+
+  public async createSemanticCluster(
+    context: InternalContext,
+    input: CreateSemanticClusterInput
+  ): Promise<SemanticCluster> {
+    const scope = trackingScope(context);
+    const body: InternalCreateSemanticClusterInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      semanticClusterUrl(context, this.config.services.seoData),
+      context,
+      body
+    );
+    return semanticCluster(responseData(payload));
+  }
+
+  public async updateSemanticCluster(
+    context: InternalContext,
+    clusterId: string,
+    input: UpdateSemanticClusterInput,
+    version: number
+  ): Promise<SemanticCluster> {
+    const scope = trackingScope(context);
+    const body: InternalUpdateSemanticClusterInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    const payload = await this.request(
+      "PATCH",
+      semanticClusterUrl(context, this.config.services.seoData, clusterId),
+      context,
+      body
+    );
+    return semanticCluster(responseData(payload));
+  }
+
+  public async deleteSemanticCluster(
+    context: InternalContext,
+    clusterId: string,
+    version: number
+  ): Promise<void> {
+    const scope = trackingScope(context);
+    const body: InternalDeleteSemanticClusterInput = {
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    await this.request(
+      "DELETE",
+      semanticClusterUrl(context, this.config.services.seoData, clusterId),
       context,
       body
     );
@@ -1091,6 +1173,8 @@ export function semanticKeywordItem(
         !semanticKeywordIntents.some((intent) => intent === item.intent))) ||
     (item.groupId !== undefined && !requiredString(item.groupId)) ||
     (item.groupPath !== undefined && typeof item.groupPath !== "string") ||
+    (item.clusterId !== undefined && !requiredString(item.clusterId)) ||
+    (item.clusterName !== undefined && typeof item.clusterName !== "string") ||
     (item.targetPageId !== undefined && !requiredString(item.targetPageId)) ||
     (item.targetUrl !== undefined && typeof item.targetUrl !== "string") ||
     !Array.isArray(tags) ||
@@ -1125,6 +1209,12 @@ export function semanticKeywordItem(
       : {}),
     ...(typeof item.groupPath === "string"
       ? { groupPath: item.groupPath }
+      : {}),
+    ...(typeof item.clusterId === "string"
+      ? { clusterId: item.clusterId }
+      : {}),
+    ...(typeof item.clusterName === "string"
+      ? { clusterName: item.clusterName }
       : {}),
     ...(typeof item.targetUrl === "string"
       ? { targetUrl: item.targetUrl }
@@ -1315,6 +1405,65 @@ function keywordGroupUrl(
   )}/keyword-groups`;
   return new URL(
     groupId ? `${base}/${encodeURIComponent(groupId)}` : base,
+    baseUrl
+  );
+}
+
+export function semanticClusters(value: unknown): readonly SemanticCluster[] {
+  if (!Array.isArray(value) || value.length > 2_000) {
+    throw invalidResponse();
+  }
+  const clusters = value.map(semanticCluster);
+  if (new Set(clusters.map(({ id }) => id)).size !== clusters.length) {
+    throw invalidResponse();
+  }
+  return clusters;
+}
+
+export function semanticCluster(value: unknown): SemanticCluster {
+  const cluster = exactRecord(value, [
+    "id",
+    "name",
+    "method",
+    "keywordCount",
+    "version",
+    "createdAt",
+    "updatedAt"
+  ]);
+  if (
+    !requiredString(cluster.id) ||
+    !requiredString(cluster.name) ||
+    typeof cluster.method !== "string" ||
+    !semanticClusterMethods.some((method) => method === cluster.method) ||
+    !Number.isSafeInteger(cluster.keywordCount) ||
+    Number(cluster.keywordCount) < 0 ||
+    !Number.isSafeInteger(cluster.version) ||
+    Number(cluster.version) < 1 ||
+    !validDate(cluster.createdAt) ||
+    !validDate(cluster.updatedAt)
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    id: cluster.id,
+    name: cluster.name,
+    method: cluster.method as SemanticCluster["method"],
+    keywordCount: cluster.keywordCount as number,
+    version: cluster.version as number,
+    createdAt: cluster.createdAt as string,
+    updatedAt: cluster.updatedAt as string
+  };
+}
+
+function semanticClusterUrl(
+  context: InternalContext,
+  baseUrl: string,
+  clusterId?: string
+): URL {
+  const projectId = requiredProjectId(context.tenant);
+  const base = `/internal/v1/projects/${encodeURIComponent(projectId)}/clusters`;
+  return new URL(
+    clusterId ? `${base}/${encodeURIComponent(clusterId)}` : base,
     baseUrl
   );
 }
@@ -1556,6 +1705,7 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     "search",
     "intent",
     "groupId",
+    "clusterId",
     "isFavorite",
     "isTracked",
     "priorityMin",
@@ -1593,6 +1743,8 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
         ))) ||
     (filters.groupId !== undefined &&
       typeof filters.groupId !== "string") ||
+    (filters.clusterId !== undefined &&
+      typeof filters.clusterId !== "string") ||
     (filters.isFavorite !== undefined &&
       typeof filters.isFavorite !== "boolean") ||
     (filters.isTracked !== undefined &&
@@ -1602,7 +1754,7 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     (typeof filters.priorityMin === "number" &&
       typeof filters.priorityMax === "number" &&
       filters.priorityMin > filters.priorityMax) ||
-    filterKeys.length > 7
+    filterKeys.length > 8
   ) {
     throw invalidResponse();
   }

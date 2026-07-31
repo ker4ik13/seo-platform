@@ -16,6 +16,11 @@ interface BulkGroup {
   readonly path: string;
 }
 
+interface BulkCluster {
+  readonly id: string;
+  readonly name: string;
+}
+
 interface BulkResult {
   readonly selected: number;
   readonly changed: number;
@@ -36,12 +41,14 @@ export function SemanticBulkEditor({
   projectId,
   selections,
   groups,
+  clusters,
   onCancel,
   onCompleted
 }: Readonly<{
   projectId: string;
   selections: readonly BulkSelection[];
   groups: readonly BulkGroup[];
+  clusters: readonly BulkCluster[];
   onCancel: () => void;
   onCompleted: (result: BulkResult) => void;
 }>) {
@@ -49,6 +56,7 @@ export function SemanticBulkEditor({
   const [favorite, setFavorite] = useState<"KEEP" | "YES" | "NO">("KEEP");
   const [intent, setIntent] = useState<"KEEP" | "CLEAR" | BulkIntent>("KEEP");
   const [groupId, setGroupId] = useState<"KEEP" | "CLEAR" | string>("KEEP");
+  const [clusterId, setClusterId] = useState<"KEEP" | "CLEAR" | string>("KEEP");
   const [targetUrlMode, setTargetUrlMode] =
     useState<"KEEP" | "CLEAR" | "SET">("KEEP");
   const [targetUrl, setTargetUrl] = useState("");
@@ -72,6 +80,9 @@ export function SemanticBulkEditor({
       ...(groupId === "KEEP"
         ? {}
         : { groupId: groupId === "CLEAR" ? null : groupId }),
+      ...(clusterId === "KEEP"
+        ? {}
+        : { clusterId: clusterId === "CLEAR" ? null : clusterId }),
       ...(targetUrlMode === "KEEP"
         ? {}
         : {
@@ -176,6 +187,16 @@ export function SemanticBulkEditor({
               <option key={group.id} value={group.id}>
                 {group.path}
               </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Кластер</span>
+          <select onChange={(event) => setClusterId(event.target.value)} value={clusterId}>
+            <option value="KEEP">Не менять</option>
+            <option value="CLEAR">Без кластера</option>
+            {clusters.map((cluster) => (
+              <option key={cluster.id} value={cluster.id}>{cluster.name}</option>
             ))}
           </select>
         </label>

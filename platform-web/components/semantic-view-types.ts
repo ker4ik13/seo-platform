@@ -16,6 +16,7 @@ export type SemanticKeywordSort =
 export type SemanticSystemColumn =
   | "query"
   | "group"
+  | "cluster"
   | "targetUrl"
   | "tags"
   | "intent"
@@ -31,6 +32,7 @@ export interface SemanticViewFilters {
   readonly search?: string;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
+  readonly clusterId?: string;
   readonly isFavorite?: boolean;
   readonly isTracked?: boolean;
   readonly priorityMin?: number;
@@ -63,6 +65,7 @@ export const defaultSemanticViewConfig: SemanticViewConfig = {
   columns: [
     "query",
     "group",
+    "cluster",
     "targetUrl",
     "tags",
     "intent",

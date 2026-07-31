@@ -23,6 +23,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
     semanticKeywordIntents
   );
   const groupId = optionalUuid(query.groupId, "groupId");
+  const clusterId = optionalUuid(query.clusterId, "clusterId");
   const isFavorite = optionalBoolean(query.isFavorite, "isFavorite");
   const isTracked = optionalBoolean(query.isTracked, "isTracked");
   const priorityMin = optionalInteger(query.priorityMin, "priorityMin");
@@ -65,6 +66,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
     ...(search ? { search } : {}),
     ...(intent ? { intent } : {}),
     ...(groupId ? { groupId } : {}),
+    ...(clusterId ? { clusterId } : {}),
     ...(isFavorite === undefined ? {} : { isFavorite }),
     ...(isTracked === undefined ? {} : { isTracked }),
     ...(priorityMin === undefined ? {} : { priorityMin }),

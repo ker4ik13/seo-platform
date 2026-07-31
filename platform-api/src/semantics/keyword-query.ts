@@ -27,6 +27,10 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   const groupId = groupIdValue
     ? assertUuid(groupIdValue, "groupId")
     : undefined;
+  const clusterIdValue = optionalSingleString(query.clusterId, "clusterId");
+  const clusterId = clusterIdValue
+    ? assertUuid(clusterIdValue, "clusterId")
+    : undefined;
   const isFavorite = optionalBoolean(query.isFavorite, "isFavorite");
   const isTracked = optionalBoolean(query.isTracked, "isTracked");
   const priorityMin = optionalInteger(query.priorityMin, "priorityMin");
@@ -75,6 +79,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
     ...(search ? { search } : {}),
     ...(intent ? { intent } : {}),
     ...(groupId ? { groupId } : {}),
+    ...(clusterId ? { clusterId } : {}),
     ...(isFavorite === undefined ? {} : { isFavorite }),
     ...(isTracked === undefined ? {} : { isTracked }),
     ...(priorityMin === undefined ? {} : { priorityMin }),

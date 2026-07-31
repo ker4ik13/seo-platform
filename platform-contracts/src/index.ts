@@ -18,6 +18,7 @@ export * from "./api/realtime.js";
 export * from "./api/semantic-imports.js";
 export * from "./api/semantic-exports.js";
 export * from "./api/semantic-custom-columns.js";
+export * from "./api/semantic-clusters.js";
 export * from "./api/semantic-saved-views.js";
 export * from "./api/semantic-versions.js";
 export * from "./api/tenants.js";

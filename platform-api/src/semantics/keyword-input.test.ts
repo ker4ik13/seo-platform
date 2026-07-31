@@ -71,14 +71,15 @@ test("normalizes nested group create and nullable update", () => {
 
 test("requires exact versions for every bounded bulk selection", () => {
   const id = "01900000-0000-7000-8000-000000000020";
+  const clusterId = "01900000-0000-7000-8000-000000000021";
   assert.deepEqual(
     semanticKeywordBulkInput({
       items: [{ id, version: 3 }],
-      patch: { isFavorite: true, intent: null, tagNames: [] }
+      patch: { isFavorite: true, intent: null, clusterId, tagNames: [] }
     }),
     {
       items: [{ id, version: 3 }],
-      patch: { isFavorite: true, intent: null, tagNames: [] }
+      patch: { isFavorite: true, intent: null, clusterId, tagNames: [] }
     }
   );
   assert.throws(

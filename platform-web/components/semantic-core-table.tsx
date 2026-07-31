@@ -37,6 +37,8 @@ interface SemanticKeyword {
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
   readonly groupPath?: string;
+  readonly clusterId?: string;
+  readonly clusterName?: string;
   readonly targetPageId?: string;
   readonly targetUrl?: string;
   readonly tags: readonly string[];
@@ -63,6 +65,13 @@ interface SemanticKeywordGroup {
   readonly version: number;
 }
 
+interface SemanticCluster {
+  readonly id: string;
+  readonly name: string;
+  readonly keywordCount: number;
+  readonly version: number;
+}
+
 interface KeywordDraft {
   readonly text: string;
   readonly language: string;
@@ -70,6 +79,7 @@ interface KeywordDraft {
   readonly isFavorite: boolean;
   readonly intent: "" | SemanticKeywordIntent;
   readonly groupId: string;
+  readonly clusterId: string;
   readonly targetUrl: string;
   readonly tagNames: string;
 }
@@ -85,6 +95,7 @@ type KeywordEditor =
 
 interface SemanticCoreTableProps {
   readonly columnRefreshVersion: number;
+  readonly clusterRefreshVersion: number;
   readonly projectId: string;
   readonly refreshVersion: number;
   readonly groupRefreshVersion: number;
@@ -99,6 +110,7 @@ type SemanticExportFormat =
 
 export function SemanticCoreTable({
   columnRefreshVersion,
+  clusterRefreshVersion,
   projectId,
   refreshVersion,
   groupRefreshVersion
@@ -121,6 +133,7 @@ export function SemanticCoreTable({
   const [saving, setSaving] = useState(false);
   const [mutationError, setMutationError] = useState<string>();
   const [groups, setGroups] = useState<readonly SemanticKeywordGroup[]>([]);
+  const [clusters, setClusters] = useState<readonly SemanticCluster[]>([]);
   const [customColumns, setCustomColumns] = useState<
     readonly SemanticCustomColumn[]
   >([]);
@@ -182,6 +195,21 @@ export function SemanticCoreTable({
 
   useEffect(() => {
     const controller = new AbortController();
+    void browserApiRequest<readonly SemanticCluster[]>(
+      `/app/api/projects/${encodeURIComponent(projectId)}/clusters`,
+      { signal: controller.signal }
+    )
+      .then((result) => {
+        if (!controller.signal.aborted) setClusters(result);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setClusters([]);
+      });
+    return () => controller.abort();
+  }, [clusterRefreshVersion, projectId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
     void browserApiRequest<readonly SemanticCustomColumn[]>(
       `/app/api/projects/${encodeURIComponent(
         projectId
@@ -240,7 +268,7 @@ export function SemanticCoreTable({
   }
 
   function updateOptionalFilter(
-    field: "intent" | "groupId",
+    field: "intent" | "groupId" | "clusterId",
     value: string
   ): void {
     setDraftConfig((current) => {
@@ -341,6 +369,7 @@ export function SemanticCoreTable({
         isFavorite: false,
         intent: "",
         groupId: "",
+        clusterId: "",
         targetUrl: "",
         tagNames: ""
       }
@@ -362,6 +391,7 @@ export function SemanticCoreTable({
         isFavorite: item.isFavorite,
         intent: item.intent ?? "",
         groupId: item.groupId ?? "",
+        clusterId: item.clusterId ?? "",
         targetUrl: item.targetUrl ?? "",
         tagNames: item.tags.join(", ")
       }
@@ -394,6 +424,11 @@ export function SemanticCoreTable({
         ? { groupId: draft.groupId }
         : editor.mode === "edit"
           ? { groupId: null }
+          : {}),
+      ...(draft.clusterId
+        ? { clusterId: draft.clusterId }
+        : editor.mode === "edit"
+          ? { clusterId: null }
           : {}),
       ...(draft.targetUrl
         ? { targetUrl: draft.targetUrl }
@@ -626,6 +661,23 @@ export function SemanticCoreTable({
             {groups.map((group) => (
               <option key={group.id} value={group.id}>
                 {group.path}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span>Кластер</span>
+          <select
+            aria-label="Кластер"
+            onChange={(event) =>
+              updateOptionalFilter("clusterId", event.target.value)
+            }
+            value={draftConfig.filters.clusterId ?? ""}
+          >
+            <option value="">Все кластеры</option>
+            {clusters.map((cluster) => (
+              <option key={cluster.id} value={cluster.id}>
+                {cluster.name}
               </option>
             ))}
           </select>
@@ -894,6 +946,22 @@ export function SemanticCoreTable({
                 ))}
               </select>
             </label>
+            <label>
+              <span>Кластер</span>
+              <select
+                onChange={(event) =>
+                  updateDraft({ clusterId: event.target.value })
+                }
+                value={editor.draft.clusterId}
+              >
+                <option value="">Без кластера</option>
+                {clusters.map((cluster) => (
+                  <option key={cluster.id} value={cluster.id}>
+                    {cluster.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="semantic-editor-url">
               <span>Целевая URL</span>
               <input
@@ -963,6 +1031,7 @@ export function SemanticCoreTable({
 
       {!editor && selectedIds.size > 0 && (
         <SemanticBulkEditor
+          clusters={clusters}
           groups={groups}
           onCancel={() => setSelectedIds(new Set())}
           onCompleted={(result) => {
@@ -1191,6 +1260,7 @@ async function loadKeywordPage(
   if (filters.search) query.set("search", filters.search);
   if (filters.intent) query.set("intent", filters.intent);
   if (filters.groupId) query.set("groupId", filters.groupId);
+  if (filters.clusterId) query.set("clusterId", filters.clusterId);
   if (filters.isFavorite !== undefined) {
     query.set("isFavorite", String(filters.isFavorite));
   }
@@ -1217,6 +1287,7 @@ const semanticColumns: readonly Readonly<{
 }>[] = [
   { key: "query", label: "Запрос" },
   { key: "group", label: "Группа" },
+  { key: "cluster", label: "Кластер" },
   { key: "targetUrl", label: "Целевая страница" },
   { key: "tags", label: "Теги" },
   { key: "intent", label: "Интент" },
@@ -1282,6 +1353,8 @@ function keywordColumn(
       );
     case "group":
       return <span title={item.groupPath}>{item.groupPath ?? "—"}</span>;
+    case "cluster":
+      return <span title={item.clusterName}>{item.clusterName ?? "—"}</span>;
     case "targetUrl":
       return <span title={item.targetUrl}>{item.targetUrl ?? "—"}</span>;
     case "tags":

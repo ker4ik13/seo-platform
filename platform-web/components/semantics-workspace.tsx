@@ -3,17 +3,19 @@
 import { useState } from "react";
 import { SemanticCoreTable } from "./semantic-core-table";
 import { SemanticCustomColumnManager } from "./semantic-custom-column-manager";
+import { SemanticClusterManager } from "./semantic-cluster-manager";
 import { SemanticGroupManager } from "./semantic-group-manager";
 import { SemanticUpload } from "./semantic-upload";
 import { SemanticVersionHistory } from "./semantic-version-history";
 
-type SemanticTool = "IMPORT" | "GROUPS" | "COLUMNS" | "HISTORY";
+type SemanticTool = "IMPORT" | "GROUPS" | "CLUSTERS" | "COLUMNS" | "HISTORY";
 
 export function SemanticsWorkspace({
   projectId
 }: Readonly<{ projectId: string }>) {
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [groupRefreshVersion, setGroupRefreshVersion] = useState(0);
+  const [clusterRefreshVersion, setClusterRefreshVersion] = useState(0);
   const [columnRefreshVersion, setColumnRefreshVersion] = useState(0);
   const [activeTool, setActiveTool] = useState<SemanticTool>();
   return (
@@ -29,12 +31,14 @@ export function SemanticsWorkspace({
           </a>
           <ToolButton active={activeTool === "IMPORT"} label="Импорт" onClick={() => setActiveTool("IMPORT")} />
           <ToolButton active={activeTool === "GROUPS"} label="Группы" onClick={() => setActiveTool("GROUPS")} />
+          <ToolButton active={activeTool === "CLUSTERS"} label="Кластеры" onClick={() => setActiveTool("CLUSTERS")} />
           <ToolButton active={activeTool === "COLUMNS"} label="Колонки" onClick={() => setActiveTool("COLUMNS")} />
           <ToolButton active={activeTool === "HISTORY"} label="История" onClick={() => setActiveTool("HISTORY")} />
         </div>
       </section>
       <SemanticCoreTable
         columnRefreshVersion={columnRefreshVersion}
+        clusterRefreshVersion={clusterRefreshVersion}
         groupRefreshVersion={groupRefreshVersion}
         projectId={projectId}
         refreshVersion={refreshVersion}
@@ -55,6 +59,9 @@ export function SemanticsWorkspace({
           )}
           {activeTool === "GROUPS" && (
             <SemanticGroupManager onChanged={() => setGroupRefreshVersion((value) => value + 1)} projectId={projectId} />
+          )}
+          {activeTool === "CLUSTERS" && (
+            <SemanticClusterManager onChanged={() => setClusterRefreshVersion((value) => value + 1)} projectId={projectId} />
           )}
           {activeTool === "COLUMNS" && (
             <SemanticCustomColumnManager onChanged={() => setColumnRefreshVersion((value) => value + 1)} projectId={projectId} />
@@ -86,6 +93,8 @@ function toolLabel(tool: SemanticTool): string {
       return "Импорт запросов";
     case "GROUPS":
       return "Группы ядра";
+    case "CLUSTERS":
+      return "Кластеры запросов";
     case "COLUMNS":
       return "Пользовательские колонки";
     case "HISTORY":

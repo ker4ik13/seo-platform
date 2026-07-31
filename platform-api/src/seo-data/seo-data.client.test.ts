@@ -11,6 +11,7 @@ import {
   semanticKeywordGroups,
   semanticKeywordBulkResult,
   semanticKeywordPage,
+  semanticClusters,
   semanticCustomColumns,
   semanticKeywordCustomValue,
   semanticSavedViews,
@@ -136,6 +137,21 @@ test("validates a complete semantic group tree", () => {
       ]),
     DomainError
   );
+});
+
+test("validates unique manual semantic clusters", () => {
+  const cluster = {
+    id: "01900000-0000-7000-8000-000000000022",
+    name: "SEO аудит",
+    method: "MANUAL",
+    keywordCount: 4,
+    version: 2,
+    createdAt: "2026-07-30T10:00:00.000Z",
+    updatedAt: "2026-07-30T11:00:00.000Z"
+  };
+  assert.equal(semanticClusters([cluster])[0]?.keywordCount, 4);
+  assert.throws(() => semanticClusters([{ ...cluster, method: "UNKNOWN" }]), DomainError);
+  assert.throws(() => semanticClusters([cluster, cluster]), DomainError);
 });
 
 test("validates a complete semantic bulk result partition", () => {

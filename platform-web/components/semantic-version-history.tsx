@@ -306,6 +306,8 @@ function conflictLabel(code: string | undefined): string {
       return "исходный запрос уже занят другой строкой";
     case "GROUP_UNAVAILABLE":
       return "исходная группа удалена";
+    case "CLUSTER_UNAVAILABLE":
+      return "исходный кластер удалён";
     case "TARGET_PAGE_UNAVAILABLE":
       return "исходная целевая страница недоступна";
     case "TAG_UNAVAILABLE":

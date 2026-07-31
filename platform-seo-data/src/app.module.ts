@@ -16,6 +16,7 @@ import { SemanticCustomColumnModule } from "./semantic-custom-columns/semantic-c
 import { SemanticVersionModule } from "./semantic-versions/semantic-version.module.js";
 import { PageModule } from "./pages/page.module.js";
 import { CrawlSnapshotModule } from "./crawls/crawl-snapshot.module.js";
+import { ClusterModule } from "./clusters/cluster.module.js";
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { CrawlSnapshotModule } from "./crawls/crawl-snapshot.module.js";
     SemanticImportModule,
     KeywordModule,
     KeywordGroupModule,
+    ClusterModule,
     SemanticCustomColumnModule,
     SemanticSavedViewModule,
     SemanticVersionModule,

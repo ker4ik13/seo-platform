@@ -23,6 +23,7 @@ export function internalCreateSemanticKeywordInput(
   ]);
   const intent = optionalIntent(input.intent, false).intent;
   const groupId = optionalGroupId(input.groupId, false).groupId;
+  const clusterId = optionalClusterId(input.clusterId, false).clusterId;
   const targetUrl = optionalTargetUrl(input.targetUrl, false).targetUrl;
   return {
     ...scope(input),
@@ -33,6 +34,7 @@ export function internalCreateSemanticKeywordInput(
     isFavorite: booleanValue(input.isFavorite, "isFavorite"),
     ...(intent ? { intent } : {}),
     ...(groupId ? { groupId } : {}),
+    ...(clusterId ? { clusterId } : {}),
     ...(targetUrl ? { targetUrl } : {}),
     tagNames: tagNames(input.tagNames)
   };
@@ -65,6 +67,7 @@ export function internalUpdateSemanticKeywordInput(
       : { isFavorite: booleanValue(input.isFavorite, "isFavorite") }),
     ...optionalIntent(input.intent, true),
     ...optionalGroupId(input.groupId, true),
+    ...optionalClusterId(input.clusterId, true),
     ...optionalTargetUrl(input.targetUrl, true),
     ...(input.tagNames === undefined
       ? {}
@@ -108,6 +111,7 @@ export function internalSemanticKeywordBulkInput(
     "isFavorite",
     "intent",
     "groupId",
+    "clusterId",
     "targetUrl",
     "tagNames"
   ]);
@@ -129,6 +133,7 @@ export function internalSemanticKeywordBulkInput(
           }),
       ...optionalIntent(patch.intent, true),
       ...optionalGroupId(patch.groupId, true),
+      ...optionalClusterId(patch.clusterId, true),
       ...optionalTargetUrl(patch.targetUrl, true),
       ...(patch.tagNames === undefined
         ? {}
@@ -149,6 +154,7 @@ function editableFields(): readonly string[] {
     "isFavorite",
     "intent",
     "groupId",
+    "clusterId",
     "targetUrl",
     "tagNames"
   ];
@@ -208,6 +214,15 @@ function optionalGroupId(
   if (value === undefined) return {};
   if (value === null && nullable) return { groupId: null };
   return { groupId: uuid(value, "groupId") };
+}
+
+function optionalClusterId(
+  value: unknown,
+  nullable: boolean
+): Readonly<{ clusterId?: string | null }> {
+  if (value === undefined) return {};
+  if (value === null && nullable) return { clusterId: null };
+  return { clusterId: uuid(value, "clusterId") };
 }
 
 function optionalTargetUrl(

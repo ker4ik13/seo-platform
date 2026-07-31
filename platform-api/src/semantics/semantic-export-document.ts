@@ -18,6 +18,7 @@ const HEADERS: Readonly<
 > = {
   query: { en: "Query", ru: "Запрос" },
   group: { en: "Group", ru: "Группа" },
+  cluster: { en: "Cluster", ru: "Кластер" },
   targetUrl: { en: "Target URL", ru: "Целевая URL" },
   tags: { en: "Tags", ru: "Теги" },
   intent: { en: "Intent", ru: "Интент" },
@@ -132,6 +133,8 @@ function systemColumnValue(
       return item.textOriginal;
     case "group":
       return item.groupPath ?? null;
+    case "cluster":
+      return item.clusterName ?? null;
     case "targetUrl":
       return item.targetUrl ?? null;
     case "tags":

@@ -91,6 +91,7 @@ function exportFilters(value: unknown): SemanticExportFilters {
       "search",
       "intent",
       "groupId",
+      "clusterId",
       "isFavorite",
       "isTracked",
       "priorityMin",
@@ -104,6 +105,7 @@ function exportFilters(value: unknown): SemanticExportFilters {
       ? undefined
       : requiredEnum(input.intent, semanticKeywordIntents, "filters.intent");
   const groupId = optionalUuid(input.groupId, "filters.groupId");
+  const clusterId = optionalUuid(input.clusterId, "filters.clusterId");
   const isFavorite = optionalBoolean(
     input.isFavorite,
     "filters.isFavorite"
@@ -131,6 +133,7 @@ function exportFilters(value: unknown): SemanticExportFilters {
     ...(search ? { search } : {}),
     ...(intent ? { intent } : {}),
     ...(groupId ? { groupId } : {}),
+    ...(clusterId ? { clusterId } : {}),
     ...(isFavorite === undefined ? {} : { isFavorite }),
     ...(isTracked === undefined ? {} : { isTracked }),
     ...(priorityMin === undefined ? {} : { priorityMin }),

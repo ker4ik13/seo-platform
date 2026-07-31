@@ -200,6 +200,7 @@ export class SemanticVersionService {
       await lockStoredKeywordCapacity(transaction, workspaceId);
       await lockSemanticKeywordWrites(transaction, projectId);
       await lockSemanticGroupTree(transaction, projectId);
+      await lockSemanticClusterSet(transaction, projectId);
       const receipt = await transaction.semanticUndoReceipt.findUnique({
         where: {
           workspaceId_projectId_actorId_idempotencyKey: {
@@ -497,6 +498,17 @@ async function lockSemanticGroupTree(
   `;
 }
 
+async function lockSemanticClusterSet(
+  transaction: Prisma.TransactionClient,
+  projectId: string
+): Promise<void> {
+  await transaction.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtextextended(${`semantic-cluster-set:${projectId}`}, 0)
+    )
+  `;
+}
+
 async function previewChanges(
   client: PrismaService | Prisma.TransactionClient,
   workspaceId: string,
@@ -581,7 +593,7 @@ async function keywordRestoreConflict(
   state: SemanticKeywordVersionState
 ): Promise<string | undefined> {
   if (state.status === "DELETED") return undefined;
-  const [duplicate, group, page, tagCount] = await Promise.all([
+  const [duplicate, group, cluster, page, tagCount] = await Promise.all([
     client.keyword.findFirst({
       where: {
         workspaceId,
@@ -597,6 +609,17 @@ async function keywordRestoreConflict(
       ? client.keywordGroup.findFirst({
           where: {
             id: state.groupId,
+            workspaceId,
+            projectId,
+            status: "ACTIVE"
+          },
+          select: { id: true }
+        })
+      : Promise.resolve({ id: "" }),
+    state.clusterId
+      ? client.cluster.findFirst({
+          where: {
+            id: state.clusterId,
             workspaceId,
             projectId,
             status: "ACTIVE"
@@ -628,6 +651,7 @@ async function keywordRestoreConflict(
   ]);
   if (duplicate) return "DUPLICATE_KEYWORD";
   if (!group) return "GROUP_UNAVAILABLE";
+  if (!cluster) return "CLUSTER_UNAVAILABLE";
   if (!page) return "TARGET_PAGE_UNAVAILABLE";
   if (tagCount !== state.tagIds.length) return "TAG_UNAVAILABLE";
   return undefined;

@@ -22,6 +22,7 @@ export type SemanticSavedViewDensity =
 export const semanticSystemColumnKeys = [
   "query",
   "group",
+  "cluster",
   "targetUrl",
   "tags",
   "intent",
@@ -41,6 +42,7 @@ export interface SemanticSavedViewFilters {
   readonly search?: string;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
+  readonly clusterId?: string;
   readonly isFavorite?: boolean;
   readonly isTracked?: boolean;
   readonly priorityMin?: number;

@@ -4,6 +4,7 @@ import { DomainError } from "../common/domain-error.js";
 import { keywordListQuery } from "./keyword-query.js";
 
 test("parses a bounded semantic keyword query", () => {
+  const clusterId = "01900000-0000-7000-8000-000000000001";
   assert.deepEqual(
     keywordListQuery({ limit: "25", search: "  SEO аудит  " }),
     { limit: 25, search: "SEO аудит", sort: "CREATED_DESC" }
@@ -15,6 +16,7 @@ test("parses a bounded semantic keyword query", () => {
   assert.deepEqual(
     keywordListQuery({
       intent: "COMMERCIAL",
+      clusterId,
       isFavorite: "false",
       isTracked: "true",
       priorityMin: "10",
@@ -24,6 +26,7 @@ test("parses a bounded semantic keyword query", () => {
     {
       limit: 100,
       intent: "COMMERCIAL",
+      clusterId,
       isFavorite: false,
       isTracked: true,
       priorityMin: 10,
@@ -49,4 +52,5 @@ test("rejects ambiguous and unbounded semantic keyword queries", () => {
   );
   assert.throws(() => keywordListQuery({ isTracked: "yes" }), DomainError);
   assert.throws(() => keywordListQuery({ sort: "DROP_TABLE" }), DomainError);
+  assert.throws(() => keywordListQuery({ clusterId: "wrong" }), DomainError);
 });

@@ -11,6 +11,7 @@ import { SemanticCustomColumnController } from "./semantic-custom-column.control
 import { SemanticExportController } from "./semantic-export.controller.js";
 import { SemanticExportService } from "./semantic-export.service.js";
 import { SemanticVersionController } from "./semantic-version.controller.js";
+import { SemanticClusterController } from "./semantic-cluster.controller.js";
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { SemanticVersionController } from "./semantic-version.controller.js";
   controllers: [
     KeywordController,
     KeywordGroupController,
+    SemanticClusterController,
     SemanticBulkController,
     SemanticCustomColumnController,
     SemanticSavedViewController,

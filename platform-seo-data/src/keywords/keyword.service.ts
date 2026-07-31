@@ -128,6 +128,7 @@ export class KeywordService {
             }
           }
         : {}),
+      ...(query.clusterId ? { clusterId: query.clusterId } : {}),
       ...(query.isTracked === undefined
         ? {}
         : {
@@ -175,7 +176,12 @@ export class KeywordService {
       )
     ];
     const keywordIds = pageRows.map(({ id }) => id);
-    const [pages, activeTrackingAssignments] = await Promise.all([
+    const clusterIds = [
+      ...new Set(
+        pageRows.flatMap(({ clusterId }) => (clusterId ? [clusterId] : []))
+      )
+    ];
+    const [pages, activeTrackingAssignments, clusters] = await Promise.all([
       pageIds.length === 0
         ? Promise.resolve([])
         : this.prisma.page.findMany({
@@ -199,11 +205,25 @@ export class KeywordService {
             },
             select: { keywordId: true },
             distinct: ["keywordId"]
+          }),
+      clusterIds.length === 0
+        ? Promise.resolve([])
+        : this.prisma.cluster.findMany({
+            where: {
+              workspaceId,
+              projectId,
+              id: { in: clusterIds },
+              status: "ACTIVE"
+            },
+            select: { id: true, name: true }
           })
     ]);
     const pageUrlById = new Map(pages.map(({ id, url }) => [id, url]));
     const trackedKeywordIds = new Set(
       activeTrackingAssignments.map(({ keywordId }) => keywordId)
+    );
+    const clusterNameById = new Map(
+      clusters.map(({ id, name }) => [id, name])
     );
     const last = pageRows.at(-1);
     return {
@@ -213,7 +233,8 @@ export class KeywordService {
           row.targetPageId
             ? pageUrlById.get(row.targetPageId)
             : undefined,
-          trackedKeywordIds.has(row.id)
+          trackedKeywordIds.has(row.id),
+          row.clusterId ? clusterNameById.get(row.clusterId) : undefined
         )
       ),
       page: {
@@ -255,11 +276,20 @@ export class KeywordService {
         if (input.groupId) {
           await lockKeywordGroupTree(transaction, input.projectId);
         }
+        if (input.clusterId) {
+          await lockSemanticClusterSet(transaction, input.projectId);
+        }
         await assertGroup(
           transaction,
           input.workspaceId,
           input.projectId,
           input.groupId
+        );
+        await assertCluster(
+          transaction,
+          input.workspaceId,
+          input.projectId,
+          input.clusterId
         );
         const pageId = input.targetUrl
           ? await resolvePage(
@@ -288,6 +318,7 @@ export class KeywordService {
             priority: input.priority,
             isFavorite: input.isFavorite,
             ...(input.intent ? { intent: input.intent } : {}),
+            ...(input.clusterId ? { clusterId: input.clusterId } : {}),
             ...(pageId ? { targetPageId: pageId } : {}),
             sourceMode: "MANUAL",
             createdBy: input.actorId,
@@ -339,7 +370,13 @@ export class KeywordService {
         return keywordItem(
           result,
           input.targetUrl,
-          false
+          false,
+          await clusterNameFor(
+            transaction,
+            input.workspaceId,
+            input.projectId,
+            result.clusterId
+          )
         );
       });
     } catch (error) {
@@ -360,6 +397,9 @@ export class KeywordService {
         if (input.groupId) {
           await lockKeywordGroupTree(transaction, input.projectId);
         }
+        if (input.clusterId !== undefined) {
+          await lockSemanticClusterSet(transaction, input.projectId);
+        }
         const current = await requiredKeyword(
           transaction,
           input.workspaceId,
@@ -373,6 +413,12 @@ export class KeywordService {
           input.workspaceId,
           input.projectId,
           input.groupId
+        );
+        await assertCluster(
+          transaction,
+          input.workspaceId,
+          input.projectId,
+          input.clusterId
         );
         const pageId =
           input.targetUrl === undefined
@@ -425,6 +471,9 @@ export class KeywordService {
               ? {}
               : { isFavorite: input.isFavorite }),
             ...(input.intent === undefined ? {} : { intent: input.intent }),
+            ...(input.clusterId === undefined
+              ? {}
+              : { clusterId: input.clusterId }),
             ...(pageId === undefined ? {} : { targetPageId: pageId }),
             updatedBy: input.actorId,
             version: { increment: 1 }
@@ -508,6 +557,12 @@ export class KeywordService {
             input.workspaceId,
             input.projectId,
             keywordId
+          ),
+          await clusterNameFor(
+            transaction,
+            input.workspaceId,
+            input.projectId,
+            result.clusterId
           )
         );
       });
@@ -692,6 +747,36 @@ async function assertGroup(
   }
 }
 
+async function assertCluster(
+  transaction: Prisma.TransactionClient,
+  workspaceId: string,
+  projectId: string,
+  clusterId: string | null | undefined
+): Promise<void> {
+  if (!clusterId) return;
+  const cluster = await transaction.cluster.findFirst({
+    where: { id: clusterId, workspaceId, projectId, status: "ACTIVE" },
+    select: { id: true }
+  });
+  if (!cluster) {
+    throw new BadRequestException("Semantic cluster does not belong to project");
+  }
+}
+
+async function clusterNameFor(
+  transaction: Prisma.TransactionClient,
+  workspaceId: string,
+  projectId: string,
+  clusterId: string | null
+): Promise<string | undefined> {
+  if (!clusterId) return undefined;
+  const cluster = await transaction.cluster.findFirst({
+    where: { id: clusterId, workspaceId, projectId, status: "ACTIVE" },
+    select: { name: true }
+  });
+  return cluster?.name;
+}
+
 async function resolveTags(
   transaction: Prisma.TransactionClient,
   workspaceId: string,
@@ -826,10 +911,22 @@ async function lockKeywordGroupTree(
   `;
 }
 
+async function lockSemanticClusterSet(
+  transaction: Prisma.TransactionClient,
+  projectId: string
+): Promise<void> {
+  await transaction.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtextextended(${`semantic-cluster-set:${projectId}`}, 0)
+    )
+  `;
+}
+
 function keywordItem(
   row: KeywordAggregate,
   targetUrl: string | undefined,
-  isTracked: boolean
+  isTracked: boolean,
+  clusterName?: string
 ): SemanticKeywordListItem {
   const tags = row.tags.slice(0, 50).map(({ tag }) => tag.name);
   const group = row.memberships[0]?.group;
@@ -847,6 +944,8 @@ function keywordItem(
         }
       : {}),
     ...(group ? { groupId: group.id, groupPath: group.path ?? group.name } : {}),
+    ...(row.clusterId ? { clusterId: row.clusterId } : {}),
+    ...(clusterName ? { clusterName } : {}),
     ...(row.targetPageId ? { targetPageId: row.targetPageId } : {}),
     ...(targetUrl ? { targetUrl } : {}),
     tags,
@@ -1013,6 +1112,7 @@ function keywordFilterHash(
       search: normalizedSearch,
       intent: query.intent ?? null,
       groupId: query.groupId ?? null,
+      clusterId: query.clusterId ?? null,
       isFavorite: query.isFavorite ?? null,
       isTracked: query.isTracked ?? null,
       priorityMin: query.priorityMin ?? null,
