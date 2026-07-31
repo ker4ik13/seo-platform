@@ -31,6 +31,7 @@ import {
   type SemanticVersionIdentity
 } from "../semantic-versions/semantic-version.service.js";
 import { normalizeKeywordText } from "./keyword-normalization.js";
+import { normalizePageUrl } from "../pages/page-url.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -265,6 +266,7 @@ export class KeywordService {
               transaction,
               input.workspaceId,
               input.projectId,
+              input.actorId,
               input.targetUrl
             )
           : undefined;
@@ -381,6 +383,7 @@ export class KeywordService {
                   transaction,
                   input.workspaceId,
                   input.projectId,
+                  input.actorId,
                   input.targetUrl
                 );
         const tags =
@@ -723,25 +726,58 @@ async function resolvePage(
   transaction: Prisma.TransactionClient,
   workspaceId: string,
   projectId: string,
+  actorId: string,
   source: string
 ): Promise<string> {
-  const url = normalizeTargetUrl(source);
-  const urlHash = sha256(url);
+  const normalized = normalizePageUrl(source, "targetUrl");
+  const existing = await transaction.page.findUnique({
+    where: {
+      projectId_urlHash: { projectId, urlHash: normalized.hash }
+    },
+    select: { id: true, workspaceId: true, status: true }
+  });
+  if (
+    existing &&
+    (existing.workspaceId !== workspaceId || existing.status !== "ACTIVE")
+  ) {
+    throw new HttpException(
+      {
+        code: "RESOURCE_STATE_CONFLICT",
+        message: "Target page is not an active page in this workspace"
+      },
+      HttpStatus.CONFLICT
+    );
+  }
   const page = await transaction.page.upsert({
-    where: { projectId_urlHash: { projectId, urlHash } },
+    where: {
+      projectId_urlHash: { projectId, urlHash: normalized.hash }
+    },
     create: {
       workspaceId,
       projectId,
-      url,
-      normalizedUrl: url,
-      urlHash
+      url: normalized.original,
+      normalizedUrl: normalized.normalized,
+      urlHash: normalized.hash,
+      createdBy: actorId,
+      updatedBy: actorId
     },
     update: {
-      url,
-      normalizedUrl: url,
-      status: "ACTIVE"
+      // Page identity and lifecycle are owned by the Page Map. Assigning the
+      // same URL to another keyword must not create an invisible page edit.
     },
     select: { id: true }
+  });
+  await transaction.pageSource.upsert({
+    where: {
+      pageId_source: { pageId: page.id, source: "MANUAL" }
+    },
+    create: {
+      workspaceId,
+      projectId,
+      pageId: page.id,
+      source: "MANUAL"
+    },
+    update: { lastSeenAt: new Date() }
   });
   return page.id;
 }
@@ -919,19 +955,6 @@ function normalizeRequiredKeyword(value: string): string {
 
 function normalizeTagName(value: string): string {
   return value.normalize("NFKC").toLocaleLowerCase().trim();
-}
-
-function normalizeTargetUrl(value: string): string {
-  const url = new URL(value);
-  url.protocol = url.protocol.toLowerCase();
-  url.hostname = url.hostname.toLowerCase();
-  if (
-    (url.protocol === "http:" && url.port === "80") ||
-    (url.protocol === "https:" && url.port === "443")
-  ) {
-    url.port = "";
-  }
-  return url.toString();
 }
 
 function sha256(value: string): string {

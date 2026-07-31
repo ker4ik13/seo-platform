@@ -2,8 +2,8 @@
 
 Последнее обновление: 31 июля 2026 года
 
-Текущий инкремент: production automation vertical после замыкания реального
-ручного съёма позиций и тарифных capacity boundaries
+Текущий инкремент: production Page Map vertical после замыкания реального
+ручного и автоматического съёма позиций и тарифных capacity boundaries
 Статус P1: ручной CRUD запросов и иерархических групп реализован поверх
 tenant-scoped SEO Data owner с optimistic locking, RBAC/CSRF и audit.
 Запрос уже можно создать, изменить и soft-delete; поддерживаются текст,
@@ -137,6 +137,27 @@ estimate → manual rank Job pipeline. Terminal Job сбрасывает счё�
 reconciliation восстанавливает потерянный scheduler, зависший pre-dispatch
 run и terminal outcome после restart. Queue payload не содержит keyword,
 credential или secret material.
+
+Page Map теперь является рабочим сквозным модулем. SEO Data остаётся
+единственным владельцем страниц и хранит canonical URL, нормализованную
+identity, до 100 алиасов, источники, тип, индексируемость, HTTP/canonical/
+robots, Title/Description/H1, язык, шаблон, content workflow, владельца,
+приоритет, даты, метрики, заметки и lifecycle с optimistic locking.
+Назначения `Keyword.targetPageId` защищены составным tenant/project FK, а
+canonical и alias identities сериализуются общей PostgreSQL advisory-lock
+границей и не могут принадлежать двум страницам. Ручные назначения и
+semantic import используют один URL normalizer и сохраняют `MANUAL`/`IMPORT`
+provenance. Public Platform API предоставляет bounded keyset list, detail,
+идемпотентное create, CAS update, archive/restore, проверяет
+`page.view/page.manage`, CSRF и immutable tenant context, пишет requested и
+committed audit и строго валидирует owner-response. Private/noindex Web route
+`/app/projects/:projectId/pages` включён в навигацию: доступны поиск и
+фильтры, создание/редактирование, алиасы и SEO-метаданные, архив,
+восстановление, loading/empty/error/offline/read-only states и фактическое
+число назначенных запросов. Fresh migration-chain и DB smoke подтверждают
+tenant FK и конфликт canonical/alias. Следующий page/audit slice:
+SSRF-safe асинхронный crawl, immutable crawl snapshots, issue rules и
+issues-представление.
 
 P3 billing foundation реализован в Platform API и Web. Versioned каталог
 содержит Trial/Solo/Team/Agency/Business/Enterprise и годовые цены; hosted

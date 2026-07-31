@@ -28,10 +28,17 @@ import {
   type CreateTrackingContextInput,
   type InternalChangeTrackingContextKeywordInput,
   type InternalChangeTrackingContextStatusInput,
+  type InternalChangeProjectPageStatusInput,
+  type InternalCreateProjectPageInput,
   type InternalCreateTrackingContextInput,
+  type InternalUpdateProjectPageInput,
   type InternalUpdateTrackingContextInput,
   type KeywordListQuery,
   type RankHistoryQuery,
+  type CreateProjectPageInput,
+  type ProjectPageCollection,
+  type ProjectPageListQuery,
+  type ProjectPageSummary,
   type SemanticKeywordIntent,
   type SemanticKeywordBulkInput,
   type SemanticKeywordBulkResult,
@@ -56,6 +63,7 @@ import {
   type TrackingContextKeywordQuery,
   type TrackingContextSummary,
   type UpdateSemanticKeywordInput,
+  type UpdateProjectPageInput,
   type UpdateSemanticKeywordGroupInput,
   type UpdateTrackingContextInput
 } from "@seo-platform/contracts";
@@ -79,6 +87,10 @@ import {
   semanticVersionUndoPreviewResponse,
   semanticVersionUndoResultResponse
 } from "../semantics/semantic-version-response.js";
+import {
+  scopedProjectPage,
+  scopedProjectPageCollection
+} from "../pages/page-response.js";
 
 interface InternalContext {
   readonly tenant: TenantAuthorization;
@@ -771,6 +783,133 @@ export class SeoDataClient {
       contextId,
       keywordId,
       assigned
+    );
+  }
+
+  public async listProjectPages(
+    context: InternalContext,
+    query: ProjectPageListQuery
+  ): Promise<ProjectPageCollection> {
+    const scope = trackingScope(context);
+    const url = projectPageUrl(context, this.config.services.seoData);
+    url.searchParams.set("limit", String(query.limit));
+    if (query.cursor) url.searchParams.set("cursor", query.cursor);
+    if (query.search) url.searchParams.set("search", query.search);
+    if (query.pageType) url.searchParams.set("pageType", query.pageType);
+    if (query.indexability) {
+      url.searchParams.set("indexability", query.indexability);
+    }
+    if (query.lifecycleStatus) {
+      url.searchParams.set("lifecycleStatus", query.lifecycleStatus);
+    }
+    const payload = await this.request("GET", url, context);
+    return scopedProjectPageCollection(
+      responseData(payload),
+      scope.workspaceId,
+      scope.projectId
+    );
+  }
+
+  public async getProjectPage(
+    context: InternalContext,
+    pageId: string
+  ): Promise<ProjectPageSummary> {
+    const scope = trackingScope(context);
+    const payload = await this.request(
+      "GET",
+      projectPageUrl(context, this.config.services.seoData, pageId),
+      context
+    );
+    return scopedProjectPage(
+      responseData(payload),
+      scope.workspaceId,
+      scope.projectId,
+      pageId
+    );
+  }
+
+  public async createProjectPage(
+    context: InternalContext,
+    input: CreateProjectPageInput,
+    idempotencyKey: string
+  ): Promise<ProjectPageSummary> {
+    const scope = trackingScope(context);
+    const body: InternalCreateProjectPageInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      idempotencyKey
+    };
+    const payload = await this.request(
+      "POST",
+      projectPageUrl(context, this.config.services.seoData),
+      context,
+      body
+    );
+    return scopedProjectPage(
+      responseData(payload),
+      scope.workspaceId,
+      scope.projectId
+    );
+  }
+
+  public async updateProjectPage(
+    context: InternalContext,
+    pageId: string,
+    input: UpdateProjectPageInput,
+    version: number
+  ): Promise<ProjectPageSummary> {
+    const scope = trackingScope(context);
+    const body: InternalUpdateProjectPageInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    const payload = await this.request(
+      "PATCH",
+      projectPageUrl(context, this.config.services.seoData, pageId),
+      context,
+      body
+    );
+    return scopedProjectPage(
+      responseData(payload),
+      scope.workspaceId,
+      scope.projectId,
+      pageId
+    );
+  }
+
+  public async changeProjectPageStatus(
+    context: InternalContext,
+    pageId: string,
+    operation: "archive" | "restore",
+    version: number
+  ): Promise<ProjectPageSummary> {
+    const scope = trackingScope(context);
+    const body: InternalChangeProjectPageStatusInput = {
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    const payload = await this.request(
+      "POST",
+      projectPageUrl(
+        context,
+        this.config.services.seoData,
+        `${pageId}/${operation}`
+      ),
+      context,
+      body
+    );
+    return scopedProjectPage(
+      responseData(payload),
+      scope.workspaceId,
+      scope.projectId,
+      pageId
     );
   }
 
@@ -1496,6 +1635,21 @@ function trackingContextUrl(
     .join("/");
   return new URL(
     encodedSuffix ? `${base}/${encodedSuffix}` : base,
+    baseUrl
+  );
+}
+
+function projectPageUrl(
+  context: InternalContext,
+  baseUrl: string,
+  suffix?: string
+): URL {
+  const projectId = requiredProjectId(context.tenant);
+  const base = `/internal/v1/projects/${encodeURIComponent(
+    projectId
+  )}/pages`;
+  return new URL(
+    suffix ? `${base}/${encodePathSuffix(suffix)}` : base,
     baseUrl
   );
 }

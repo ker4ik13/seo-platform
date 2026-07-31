@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { ProtectedAppContext } from "../lib/app-types";
 import { rankHistoryReturnTo } from "../lib/rank-history";
+import { projectPagesReturnTo } from "../lib/project-pages";
 import { AccountMenu } from "./account-menu";
 import { Icon, type IconName } from "./icon";
 import { NotificationBell } from "./notification-bell";
@@ -48,7 +49,8 @@ const navigation: readonly {
     icon: "pages",
     href: "/app/pages",
     section: "pages",
-    available: false
+    available: true,
+    projectScoped: true
   },
   {
     label: "Конкуренты",
@@ -80,7 +82,9 @@ export function AppShell({
     item: (typeof navigation)[number]
   ): string =>
     item.projectScoped && context.project
-      ? rankHistoryReturnTo(context.project.id)
+      ? item.section === "pages"
+        ? projectPagesReturnTo(context.project.id)
+        : rankHistoryReturnTo(context.project.id)
       : item.href;
   return (
     <div className="app-shell">

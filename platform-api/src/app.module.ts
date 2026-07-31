@@ -16,6 +16,7 @@ import { RankingModule } from "./rankings/ranking.module.js";
 import { AuthEmailDeliveryModule } from "./auth-email/auth-email-delivery.module.js";
 import { BillingModule } from "./billing/billing.module.js";
 import { PlatformAdminModule } from "./admin/platform-admin.module.js";
+import { PageModule } from "./pages/page.module.js";
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { PlatformAdminModule } from "./admin/platform-admin.module.js";
     RankingModule,
     BillingModule,
     PlatformAdminModule,
+    PageModule,
     NotificationModule,
     SystemModule
   ]

@@ -32,6 +32,7 @@ import {
   assertStoredKeywordCapacity,
   lockStoredKeywordCapacity
 } from "../internal/semantic-capacity.js";
+import { normalizePageUrl } from "../pages/page-url.js";
 
 @Injectable()
 export class SemanticImportService {
@@ -251,10 +252,10 @@ export class SemanticImportService {
             normalizedHash: row.normalizedHash,
             language: row.language,
             ...(row.targetUrl &&
-            pages.ids.get(normalizeUrl(row.targetUrl).hash)
+            pages.ids.get(normalizePageUrl(row.targetUrl, "targetUrl").hash)
               ? {
                   targetPageId: pages.ids.get(
-                    normalizeUrl(row.targetUrl).hash
+                    normalizePageUrl(row.targetUrl, "targetUrl").hash
                   )!
                 }
               : {}),
@@ -311,7 +312,9 @@ export class SemanticImportService {
           input.actorId,
           input.importId,
           row.targetUrl
-            ? pages.ids.get(normalizeUrl(row.targetUrl).hash)
+            ? pages.ids.get(
+                normalizePageUrl(row.targetUrl, "targetUrl").hash
+              )
             : undefined
         );
         await transaction.keyword.update({
@@ -816,10 +819,10 @@ async function ensurePages(
   input: InternalApplySemanticImportChunkInput,
   rows: readonly SemanticImportPublishRow[]
 ): Promise<EnsuredEntities> {
-  const values = new Map<string, ReturnType<typeof normalizeUrl>>();
+  const values = new Map<string, ReturnType<typeof normalizePageUrl>>();
   for (const row of rows) {
     if (!row.targetUrl) continue;
-    const normalized = normalizeUrl(row.targetUrl);
+    const normalized = normalizePageUrl(row.targetUrl, "targetUrl");
     values.set(normalized.hash, normalized);
   }
   if (values.size === 0) return { ids: new Map(), created: 0 };
@@ -830,8 +833,13 @@ async function ensurePages(
       projectId: input.projectId,
       urlHash: { in: hashes }
     },
-    select: { id: true, urlHash: true }
+    select: { id: true, urlHash: true, status: true }
   });
+  if (existing.some(({ status }) => status !== "ACTIVE")) {
+    throw new ConflictException(
+      "An imported target URL belongs to an archived page"
+    );
+  }
   const existingHashes = new Set(existing.map(({ urlHash }) => urlHash));
   const created = await transaction.page.createMany({
     data: [...values.values()]
@@ -841,7 +849,9 @@ async function ensurePages(
         projectId: input.projectId,
         url: original,
         normalizedUrl: normalized,
-        urlHash: hash
+        urlHash: hash,
+        createdBy: input.actorId,
+        updatedBy: input.actorId
       })),
     skipDuplicates: true
   });
@@ -853,6 +863,20 @@ async function ensurePages(
     },
     select: { id: true, urlHash: true }
   });
+  for (const page of final) {
+    await transaction.pageSource.upsert({
+      where: {
+        pageId_source: { pageId: page.id, source: "IMPORT" }
+      },
+      create: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        pageId: page.id,
+        source: "IMPORT"
+      },
+      update: { lastSeenAt: new Date() }
+    });
+  }
   return {
     ids: new Map(final.map(({ urlHash, id }) => [urlHash, id])),
     created: created.count
@@ -1034,25 +1058,6 @@ function normalizeKeyword(
     language,
     existsInProject: false
   };
-}
-
-function normalizeUrl(value: string): {
-  readonly original: string;
-  readonly normalized: string;
-  readonly hash: string;
-} {
-  const url = new URL(value);
-  url.hash = "";
-  url.protocol = url.protocol.toLowerCase();
-  url.hostname = url.hostname.toLowerCase();
-  if (
-    (url.protocol === "http:" && url.port === "80") ||
-    (url.protocol === "https:" && url.port === "443")
-  ) {
-    url.port = "";
-  }
-  const normalized = url.toString();
-  return { original: value, normalized, hash: sha256(normalized) };
 }
 
 function normalizeGroupName(value: string): string {

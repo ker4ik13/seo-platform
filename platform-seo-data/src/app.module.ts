@@ -14,6 +14,7 @@ import { RankResultModule } from "./rank-results/rank-result.module.js";
 import { SemanticSavedViewModule } from "./semantic-saved-views/semantic-saved-view.module.js";
 import { SemanticCustomColumnModule } from "./semantic-custom-columns/semantic-custom-column.module.js";
 import { SemanticVersionModule } from "./semantic-versions/semantic-version.module.js";
+import { PageModule } from "./pages/page.module.js";
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { SemanticVersionModule } from "./semantic-versions/semantic-version.modu
     SemanticCustomColumnModule,
     SemanticSavedViewModule,
     SemanticVersionModule,
+    PageModule,
     TrackingContextModule,
     RankScopeModule,
     RankManifestModule,

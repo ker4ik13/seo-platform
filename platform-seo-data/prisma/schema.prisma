@@ -93,6 +93,36 @@ enum SemanticCustomColumnType {
   STATUS
 }
 
+enum PageType {
+  EXISTING
+  PLANNED
+  REDIRECTED
+  DELETED
+  EXTERNAL
+  UNKNOWN
+}
+
+enum PageIndexability {
+  UNKNOWN
+  INDEXABLE
+  NOINDEX
+  BLOCKED_ROBOTS
+  CANONICALIZED
+  REDIRECTED
+  ERROR
+}
+
+enum PageSourceType {
+  CRAWL
+  SITEMAP
+  SEARCH_CONSOLE
+  WEBMASTER
+  ANALYTICS
+  MANUAL
+  IMPORT
+  CMS
+}
+
 model Keyword {
   id             String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId    String         @map("workspace_id") @db.Uuid
@@ -125,6 +155,7 @@ model Keyword {
   rankManifestEntries RankExecutionManifestEntry[]
   rankSnapshots       RankSnapshot[]                     @relation("RankSnapshotKeyword")
   typedCustomValues   SemanticKeywordCustomValue[]
+  targetPage          Page?                              @relation(fields: [workspaceId, projectId, targetPageId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([projectId, language, normalizedHash])
   @@unique([workspaceId, projectId, id], map: "keywords_tenant_project_id_key")
@@ -302,22 +333,98 @@ model Cluster {
 }
 
 model Page {
-  id            String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId   String       @map("workspace_id") @db.Uuid
-  projectId     String       @map("project_id") @db.Uuid
-  url           String       @db.Text
-  normalizedUrl String       @map("normalized_url") @db.Text
-  urlHash       String       @map("url_hash") @db.Char(64)
-  title         String?      @db.Text
-  contentStatus String?      @map("content_status") @db.VarChar(64)
-  status        EntityStatus @default(ACTIVE)
-  version       Int          @default(1)
-  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id               String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId      String           @map("workspace_id") @db.Uuid
+  projectId        String           @map("project_id") @db.Uuid
+  url              String           @db.Text
+  normalizedUrl    String           @map("normalized_url") @db.Text
+  urlHash          String           @map("url_hash") @db.Char(64)
+  pageType         PageType         @default(UNKNOWN) @map("page_type")
+  indexability     PageIndexability @default(UNKNOWN)
+  httpStatus       Int?             @map("http_status")
+  canonicalTarget  String?          @map("canonical_target") @db.Text
+  robots           String?          @db.VarChar(255)
+  title            String?          @db.Text
+  description      String?          @db.Text
+  h1               String?          @db.Text
+  language         String?          @db.VarChar(16)
+  template         String?          @db.VarChar(160)
+  contentStatus    String?          @map("content_status") @db.VarChar(64)
+  ownerId          String?          @map("owner_id") @db.Uuid
+  priority         Int              @default(0)
+  publishedAt      DateTime?        @map("published_at") @db.Timestamptz(6)
+  crawledAt        DateTime?        @map("crawled_at") @db.Timestamptz(6)
+  analyticsMetrics Json             @default("{}") @map("analytics_metrics")
+  notes            String?          @db.Text
+  status           EntityStatus     @default(ACTIVE)
+  version          Int              @default(1)
+  createdBy        String?          @map("created_by") @db.Uuid
+  updatedBy        String?          @map("updated_by") @db.Uuid
+  archivedBy       String?          @map("archived_by") @db.Uuid
+  createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  archivedAt       DateTime?        @map("archived_at") @db.Timestamptz(6)
 
   @@unique([projectId, urlHash])
-  @@index([workspaceId, projectId, status, id])
+  @@unique([workspaceId, projectId, id], map: "pages_tenant_project_id_key")
+  @@index([workspaceId, projectId, status, updatedAt(sort: Desc), id(sort: Desc)], map: "pages_project_status_updated_id_idx")
+  @@index([workspaceId, projectId, pageType, status, id], map: "pages_project_type_status_idx")
+  @@index([workspaceId, projectId, indexability, status, id], map: "pages_project_indexability_status_idx")
   @@map("pages")
+
+  aliases        PageAlias[]
+  sources        PageSource[]
+  targetKeywords Keyword[]
+  createReceipts PageCreateReceipt[]
+}
+
+model PageAlias {
+  id            String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId   String         @map("workspace_id") @db.Uuid
+  projectId     String         @map("project_id") @db.Uuid
+  pageId        String         @map("page_id") @db.Uuid
+  url           String         @db.Text
+  normalizedUrl String         @map("normalized_url") @db.Text
+  urlHash       String         @map("url_hash") @db.Char(64)
+  source        PageSourceType
+  firstSeenAt   DateTime       @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt    DateTime       @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  page          Page           @relation(fields: [workspaceId, projectId, pageId], references: [workspaceId, projectId, id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([projectId, urlHash])
+  @@index([workspaceId, projectId, pageId, id], map: "page_aliases_tenant_page_idx")
+  @@map("page_aliases")
+}
+
+model PageSource {
+  workspaceId String         @map("workspace_id") @db.Uuid
+  projectId   String         @map("project_id") @db.Uuid
+  pageId      String         @map("page_id") @db.Uuid
+  source      PageSourceType
+  metadata    Json           @default("{}")
+  firstSeenAt DateTime       @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt  DateTime       @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  page        Page           @relation(fields: [workspaceId, projectId, pageId], references: [workspaceId, projectId, id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([pageId, source])
+  @@index([workspaceId, projectId, source, pageId], map: "page_sources_tenant_source_idx")
+  @@map("page_sources")
+}
+
+model PageCreateReceipt {
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  actorId          String   @map("actor_id") @db.Uuid
+  idempotencyKey   String   @map("idempotency_key") @db.VarChar(180)
+  requestHash      String   @map("request_hash") @db.Char(64)
+  pageId           String   @map("page_id") @db.Uuid
+  responseSnapshot Json     @map("response_snapshot")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  page             Page     @relation(fields: [workspaceId, projectId, pageId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@id([workspaceId, projectId, actorId, idempotencyKey])
+  @@index([workspaceId, projectId, pageId], map: "page_create_receipts_tenant_page_idx")
+  @@map("page_create_receipts")
 }
 
 model TrackingContext {
