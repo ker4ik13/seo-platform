@@ -14,6 +14,7 @@ import type {
   InternalCrawlPageValidator,
   InternalFinalizeCrawlSnapshotReceipt,
   InternalPersistCrawlPageReceipt,
+  ProjectCrawlAbsentPageCollection,
   ProjectCrawlDuplicateGroupCollection,
   ProjectCrawlPageChangeCollection,
   ProjectCrawlIssueCollection
@@ -112,6 +113,37 @@ export class CrawlDuplicateGroupController {
     return response(
       request,
       await this.snapshots.listDuplicateGroups(
+        context.workspaceId,
+        context.projectId,
+        internalUuid(crawlId, "crawlId")
+      )
+    );
+  }
+}
+
+@Controller(
+  "internal/v1/projects/:projectId/crawls/:crawlId/absent-pages"
+)
+@UseGuards(PlatformApiGuard)
+export class CrawlAbsentPageController {
+  public constructor(private readonly snapshots: CrawlSnapshotService) {}
+
+  @Get()
+  public async list(
+    @Param("projectId") projectId: string,
+    @Param("crawlId") crawlId: string,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<ProjectCrawlAbsentPageCollection>> {
+    const context = internalCommandContext(headers);
+    if (context.projectId !== internalUuid(projectId, "projectId")) {
+      throw new BadRequestException(
+        "Route project identifier does not match trusted context"
+      );
+    }
+    return response(
+      request,
+      await this.snapshots.listAbsentPages(
         context.workspaceId,
         context.projectId,
         internalUuid(crawlId, "crawlId")

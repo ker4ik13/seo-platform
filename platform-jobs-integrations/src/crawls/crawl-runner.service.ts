@@ -12,6 +12,7 @@ import {
   crawlScopeAllows,
   normalizedScopeUrl
 } from "./crawl-scope.js";
+import { crawlMembershipScopeHash } from "./crawl-membership-scope.js";
 import {
   fetchPublicResource,
   PublicFetchError,
@@ -85,7 +86,13 @@ export class CrawlRunnerService {
         return;
       }
       if (crawl.status === "CANCEL_REQUESTED") {
-        await this.complete(crawl, leaseOwner, "CANCELLED", sequence);
+        await this.complete(
+          crawl,
+          crawlConfig,
+          leaseOwner,
+          "CANCELLED",
+          sequence
+        );
         return;
       }
       failureCode = "ROBOTS_UNAVAILABLE";
@@ -191,6 +198,7 @@ export class CrawlRunnerService {
         if (await this.crawls.isCancellationRequested(crawlId)) {
           await this.complete(
             crawl,
+            crawlConfig,
             leaseOwner,
             "CANCELLED",
             sequence
@@ -405,6 +413,7 @@ export class CrawlRunnerService {
       );
       await this.complete(
         crawl,
+        crawlConfig,
         leaseOwner,
         current.status === "CANCEL_REQUESTED"
           ? "CANCELLED"
@@ -422,6 +431,7 @@ export class CrawlRunnerService {
         );
         await this.complete(
           crawl,
+          crawlConfig,
           leaseOwner,
           "PARTIALLY_COMPLETED",
           current.processedUrls,
@@ -474,6 +484,7 @@ export class CrawlRunnerService {
       readonly workspaceId: string;
       readonly projectId: string;
     },
+    crawlConfig: TechnicalCrawlConfig,
     leaseOwner: string,
     status: "COMPLETED" | "PARTIALLY_COMPLETED" | "CANCELLED",
     processedUrls: number,
@@ -484,7 +495,8 @@ export class CrawlRunnerService {
       projectId: crawl.projectId,
       crawlId: crawl.id,
       status,
-      processedUrls
+      processedUrls,
+      scopeHash: crawlMembershipScopeHash(crawlConfig)
     });
     await this.crawls.finish(
       crawl.id,

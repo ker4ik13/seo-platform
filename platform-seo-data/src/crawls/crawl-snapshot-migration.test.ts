@@ -22,6 +22,10 @@ const duplicateMigrationUrl = new URL(
   "../../prisma/migrations/20260801010000_crawl_duplicate_groups/migration.sql",
   import.meta.url
 );
+const membershipMigrationUrl = new URL(
+  "../../prisma/migrations/20260801020000_crawl_membership_absences/migration.sql",
+  import.meta.url
+);
 
 test("crawl evidence is tenant-bound, bounded and immutable", async () => {
   const sql = await readFile(migrationUrl, "utf8");
@@ -88,5 +92,22 @@ test("duplicate analyses are bounded, tenant-bound and immutable", async () => {
   );
   assert.match(sql, /crawl_duplicate_groups_immutable_trigger/u);
   assert.match(sql, /crawl_duplicate_group_members_immutable_trigger/u);
+  assert.doesNotMatch(sql, /raw_html/iu);
+});
+
+test("crawl membership compares only an exact scope and freezes absences", async () => {
+  const sql = await readFile(membershipMigrationUrl, "utf8");
+  assert.match(sql, /crawl_membership_analyses_scope_hash_check/u);
+  assert.match(sql, /crawl_membership_analyses_counts_check/u);
+  assert.match(
+    sql,
+    /crawl_page_absences_previous_analysis_tenant_fkey[\s\S]*FOREIGN KEY \("workspace_id", "project_id", "previous_crawl_id"\)/u
+  );
+  assert.match(
+    sql,
+    /crawl_page_absences_snapshot_tenant_fkey[\s\S]*"previous_crawl_id", "previous_snapshot_id"[\s\S]*"workspace_id", "project_id", "crawl_id", "id"/u
+  );
+  assert.match(sql, /crawl_membership_analyses_immutable_trigger/u);
+  assert.match(sql, /crawl_page_absences_immutable_trigger/u);
   assert.doesNotMatch(sql, /raw_html/iu);
 });

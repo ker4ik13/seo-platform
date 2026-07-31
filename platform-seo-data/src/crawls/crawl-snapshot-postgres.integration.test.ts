@@ -101,7 +101,8 @@ test(
         projectId: PROJECT_ID,
         crawlId: "01900000-0000-7000-8000-000000000114",
         status: "COMPLETED" as const,
-        processedUrls: 2
+        processedUrls: 2,
+        scopeHash: "c".repeat(64)
       };
       assert.deepEqual(await service.finalize(finalization), {
         accepted: true,
@@ -143,6 +144,144 @@ test(
           data: { memberCount: 3 }
         }),
         /immutable/u
+      );
+
+      const partialCrawlId =
+        "01900000-0000-7000-8000-000000000117";
+      await service.persistPage({
+        ...duplicatePageInput(1),
+        crawlId: partialCrawlId,
+        crawledAt: "2026-07-31T08:30:01.000Z"
+      });
+      assert.deepEqual(
+        await service.finalize({
+          ...finalization,
+          crawlId: partialCrawlId,
+          status: "PARTIALLY_COMPLETED",
+          processedUrls: 1
+        }),
+        { accepted: true, issueCount: 0 }
+      );
+      assert.deepEqual(
+        await service.listAbsentPages(
+          WORKSPACE_ID,
+          PROJECT_ID,
+          partialCrawlId
+        ),
+        { crawlId: partialCrawlId, pages: [] }
+      );
+
+      const changedScopeCrawlId =
+        "01900000-0000-7000-8000-000000000118";
+      await service.persistPage({
+        ...duplicatePageInput(1),
+        crawlId: changedScopeCrawlId,
+        crawledAt: "2026-07-31T08:45:01.000Z"
+      });
+      assert.deepEqual(
+        await service.finalize({
+          ...finalization,
+          crawlId: changedScopeCrawlId,
+          processedUrls: 1,
+          scopeHash: "d".repeat(64)
+        }),
+        { accepted: true, issueCount: 0 }
+      );
+      assert.deepEqual(
+        await service.listAbsentPages(
+          WORKSPACE_ID,
+          PROJECT_ID,
+          changedScopeCrawlId
+        ),
+        { crawlId: changedScopeCrawlId, pages: [] }
+      );
+
+      const missingCrawlId =
+        "01900000-0000-7000-8000-000000000115";
+      await service.persistPage({
+        ...duplicatePageInput(1),
+        crawlId: missingCrawlId,
+        crawledAt: "2026-07-31T09:00:01.000Z"
+      });
+      assert.deepEqual(
+        await service.finalize({
+          ...finalization,
+          crawlId: missingCrawlId,
+          processedUrls: 1
+        }),
+        { accepted: true, issueCount: 1 }
+      );
+      const absences = await service.listAbsentPages(
+        WORKSPACE_ID,
+        PROJECT_ID,
+        missingCrawlId
+      );
+      assert.deepEqual(absences, {
+        crawlId: missingCrawlId,
+        pages: [{
+          pageId: duplicateGroups.groups[0]!.members[1]!.pageId,
+          url: "https://radar.example.com/duplicate-2",
+          previousCrawlId: finalization.crawlId,
+          previousSnapshotId:
+            (await prisma.crawlPageSnapshot.findFirstOrThrow({
+              where: {
+                crawlId: finalization.crawlId,
+                sequence: 2
+              },
+              select: { id: true }
+            })).id,
+          wasInSitemap: false,
+          lastSeenAt: "2026-07-31T08:00:02.000Z",
+          detectedAt: absences.pages[0]!.detectedAt
+        }]
+      });
+      assert.equal(
+        (await service.listIssues(WORKSPACE_ID, PROJECT_ID)).issues.some(
+          ({ code, pageId }) =>
+            code === "URL_DISAPPEARED_FROM_CRAWL" &&
+            pageId === absences.pages[0]!.pageId
+        ),
+        true
+      );
+      await assert.rejects(
+        prisma.crawlPageAbsence.update({
+          where: {
+            workspaceId_projectId_crawlId_pageId: {
+              workspaceId: WORKSPACE_ID,
+              projectId: PROJECT_ID,
+              crawlId: missingCrawlId,
+              pageId: absences.pages[0]!.pageId
+            }
+          },
+          data: { detectedAt: new Date() }
+        }),
+        /immutable/u
+      );
+
+      const restoredCrawlId =
+        "01900000-0000-7000-8000-000000000116";
+      await service.persistPage({
+        ...duplicatePageInput(1),
+        crawlId: restoredCrawlId,
+        crawledAt: "2026-07-31T10:00:01.000Z"
+      });
+      await service.persistPage({
+        ...duplicatePageInput(2),
+        crawlId: restoredCrawlId,
+        crawledAt: "2026-07-31T10:00:02.000Z"
+      });
+      assert.deepEqual(
+        await service.finalize({
+          ...finalization,
+          crawlId: restoredCrawlId
+        }),
+        { accepted: true, issueCount: 8 }
+      );
+      assert.equal(
+        (await service.listIssues(WORKSPACE_ID, PROJECT_ID)).issues.some(
+          ({ code }) => code === "URL_DISAPPEARED_FROM_CRAWL"
+        ),
+        false
       );
     } finally {
       await prisma.$disconnect();
@@ -211,6 +350,6 @@ function duplicatePageInput(
     h1: "Duplicate heading",
     canonicalUrl: url,
     etag: `"duplicate-${sequence}"`,
-    crawledAt: `2026-08-01T11:00:0${sequence}.000Z`
+    crawledAt: `2026-07-31T08:00:0${sequence}.000Z`
   };
 }

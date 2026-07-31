@@ -201,6 +201,7 @@ export interface InternalFinalizeCrawlSnapshotInput {
   readonly crawlId: string;
   readonly status: "COMPLETED" | "PARTIALLY_COMPLETED" | "CANCELLED";
   readonly processedUrls: number;
+  readonly scopeHash: string;
 }
 
 export interface InternalFinalizeCrawlSnapshotReceipt {
@@ -225,6 +226,21 @@ export interface ProjectCrawlIssueSummary {
 
 export interface ProjectCrawlIssueCollection {
   readonly issues: readonly ProjectCrawlIssueSummary[];
+}
+
+export interface ProjectCrawlAbsentPageSummary {
+  readonly pageId: string;
+  readonly url: string;
+  readonly previousCrawlId: string;
+  readonly previousSnapshotId: string;
+  readonly wasInSitemap: boolean;
+  readonly lastSeenAt: string;
+  readonly detectedAt: string;
+}
+
+export interface ProjectCrawlAbsentPageCollection {
+  readonly crawlId: string;
+  readonly pages: readonly ProjectCrawlAbsentPageSummary[];
 }
 
 export const crawlPageChangeFields = [

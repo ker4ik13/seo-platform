@@ -3,6 +3,7 @@
 import type {
   CrawlDuplicateKind,
   CrawlPageChangeField,
+  ProjectCrawlAbsentPageCollection,
   ProjectCrawlDuplicateGroupCollection,
   ProjectCrawlPageChangeCollection,
   ProjectCrawlIssueCollection,
@@ -43,6 +44,8 @@ export function ProjectCrawlAudit({
     useState<ProjectCrawlPageChangeCollection>();
   const [duplicates, setDuplicates] =
     useState<ProjectCrawlDuplicateGroupCollection>({ groups: [] });
+  const [absences, setAbsences] =
+    useState<ProjectCrawlAbsentPageCollection>();
   const [duplicateKind, setDuplicateKind] =
     useState<"ALL" | CrawlDuplicateKind>("ALL");
   const [duplicatePage, setDuplicatePage] = useState(0);
@@ -75,7 +78,15 @@ export function ProjectCrawlAudit({
       const latestAnalyzed = nextCrawls.crawls.find(({ status }) =>
         status === "COMPLETED" || status === "PARTIALLY_COMPLETED"
       );
-      const [nextIssues, nextChanges, nextDuplicates] = await Promise.all([
+      const latestCompleted = nextCrawls.crawls.find(
+        ({ status }) => status === "COMPLETED"
+      );
+      const [
+        nextIssues,
+        nextChanges,
+        nextDuplicates,
+        nextAbsences
+      ] = await Promise.all([
         browserApiRequest<ProjectCrawlIssueCollection>(
           issuePath(projectId),
           options
@@ -89,12 +100,19 @@ export function ProjectCrawlAudit({
               duplicatePath(projectId, latestAnalyzed.id),
               options
             )
-          : Promise.resolve({ groups: [] })
+          : Promise.resolve({ groups: [] }),
+        latestCompleted
+          ? browserApiRequest<ProjectCrawlAbsentPageCollection>(
+              absentPath(projectId, latestCompleted.id),
+              options
+            )
+          : Promise.resolve(undefined)
       ]);
       setCrawls(nextCrawls);
       setIssues(nextIssues);
       setChanges(nextChanges);
       setDuplicates(nextDuplicates);
+      setAbsences(nextAbsences);
       setError(undefined);
     } catch (caught) {
       if (!signal?.aborted) {
@@ -455,6 +473,36 @@ export function ProjectCrawlAudit({
         )}
       </div>
 
+      <div className="crawl-absence-history">
+        <div>
+          <p className="eyebrow">Crawl membership</p>
+          <h3>Исчезнувшие страницы</h3>
+          <p className="muted-copy">
+            URL, найденные в предыдущем полном обходе с тем же scope, но
+            отсутствующие в последнем полном обходе.
+          </p>
+        </div>
+        {absences?.pages.length ? (
+          <div className="crawl-absence-list">
+            {absences.pages.map((page) => (
+              <article className="crawl-absence-item" key={page.pageId}>
+                <a href={page.url} rel="noreferrer" target="_blank">
+                  {page.url}
+                </a>
+                <span>
+                  Последний раз: {new Date(page.lastSeenAt).toLocaleString()}
+                  {page.wasInSitemap ? " · была в sitemap" : ""}
+                </span>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="muted-copy">
+            В последнем сопоставимом полном обходе исчезнувших URL нет.
+          </p>
+        )}
+      </div>
+
       <div className="crawl-change-history">
         <div>
           <p className="eyebrow">Radar</p>
@@ -549,6 +597,12 @@ function duplicatePath(projectId: string, crawlId: string): string {
   return `/app/api/projects/${encodeURIComponent(
     projectId
   )}/crawls/${encodeURIComponent(crawlId)}/duplicate-groups`;
+}
+
+function absentPath(projectId: string, crawlId: string): string {
+  return `/app/api/projects/${encodeURIComponent(
+    projectId
+  )}/crawls/${encodeURIComponent(crawlId)}/absent-pages`;
 }
 
 function statusLabel(status: TechnicalCrawlStatus): string {

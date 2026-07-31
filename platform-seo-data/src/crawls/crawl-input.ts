@@ -202,7 +202,8 @@ export function internalFinalizeCrawlSnapshotInput(
     "projectId",
     "crawlId",
     "status",
-    "processedUrls"
+    "processedUrls",
+    "scopeHash"
   ];
   if (Object.keys(input).some((key) => !keys.includes(key)) ||
       keys.some((key) => !(key in input))) invalid("body");
@@ -219,7 +220,12 @@ export function internalFinalizeCrawlSnapshotInput(
     projectId: internalUuid(string(input.projectId, "projectId", 64), "projectId"),
     crawlId: internalUuid(string(input.crawlId, "crawlId", 64), "crawlId"),
     status: input.status as InternalFinalizeCrawlSnapshotInput["status"],
-    processedUrls: integer(input.processedUrls, "processedUrls", 0, 1_000)
+    processedUrls: integer(input.processedUrls, "processedUrls", 0, 1_000),
+    scopeHash: pattern(
+      input.scopeHash,
+      "scopeHash",
+      /^[0-9a-f]{64}$/u
+    )
   };
 }
 

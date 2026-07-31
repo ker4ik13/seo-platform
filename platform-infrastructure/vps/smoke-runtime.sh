@@ -296,6 +296,14 @@ if [ -n "$smoke_duplicate_crawl_url" ]; then
     runtime_fail "crawl did not persist the expected duplicate groups"
 fi
 
+api_call GET "projects/$project_id/crawls/$crawl_id/absent-pages"
+expect_status 200 crawl-absent-pages
+jq -e \
+  --arg crawlId "$crawl_id" \
+  '.data.crawlId == $crawlId and (.data.pages | type == "array")' \
+  "$response_body" >/dev/null ||
+  runtime_fail "crawl absent-page collection is invalid"
+
 crawl_automation_body=$(
   jq -cn \
     --arg startUrl "$smoke_crawl_url" \

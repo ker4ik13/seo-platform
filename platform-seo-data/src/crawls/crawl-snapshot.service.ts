@@ -9,6 +9,7 @@ import {
   type InternalPersistCrawlPageInput,
   type InternalPersistCrawlPageReceipt,
   type InternalReuseCrawlPageInput,
+  type ProjectCrawlAbsentPageCollection,
   type ProjectCrawlDuplicateGroupCollection,
   type ProjectCrawlPageChangeCollection,
   type ProjectCrawlIssueCollection
@@ -24,6 +25,26 @@ import {
   detectCrawlDuplicateGroups,
   duplicateIssue
 } from "./crawl-duplicates.js";
+
+const finalizationSnapshotSelect = {
+  id: true,
+  pageId: true,
+  sequence: true,
+  finalUrl: true,
+  statusCode: true,
+  contentType: true,
+  title: true,
+  description: true,
+  h1: true,
+  wordCount: true,
+  contentHash: true,
+  inSitemap: true,
+  crawledAt: true
+} as const satisfies Prisma.CrawlPageSnapshotSelect;
+
+type FinalizationSnapshot = Prisma.CrawlPageSnapshotGetPayload<{
+  select: typeof finalizationSnapshotSelect;
+}>;
 
 @Injectable()
 export class CrawlSnapshotService {
@@ -546,11 +567,14 @@ export class CrawlSnapshotService {
     return this.prisma.$transaction(async (transaction) => {
       await transaction.$executeRaw`
         SELECT pg_advisory_xact_lock(
-          hashtextextended(${`${input.projectId}:${input.crawlId}:duplicates`}, 0)
+          hashtextextended(
+            ${`crawl-finalization:${input.workspaceId}:${input.projectId}`},
+            0
+          )
         )
       `;
-      const existing =
-        await transaction.crawlDuplicateAnalysis.findUnique({
+      const [existingDuplicates, existingMembership] = await Promise.all([
+        transaction.crawlDuplicateAnalysis.findUnique({
           where: {
             workspaceId_projectId_crawlId: {
               workspaceId: input.workspaceId,
@@ -559,9 +583,31 @@ export class CrawlSnapshotService {
             }
           },
           select: { issueCount: true }
-        });
-      if (existing) {
-        return { accepted: true, issueCount: existing.issueCount };
+        }),
+        transaction.crawlMembershipAnalysis.findUnique({
+          where: {
+            workspaceId_projectId_crawlId: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              crawlId: input.crawlId
+            }
+          },
+          select: { missingCount: true, scopeHash: true }
+        })
+      ]);
+      if (
+        existingMembership &&
+        existingMembership.scopeHash !== input.scopeHash
+      ) {
+        throw new TypeError("Crawl membership scope hash changed");
+      }
+      if (existingDuplicates && existingMembership) {
+        return {
+          accepted: true,
+          issueCount:
+            existingDuplicates.issueCount +
+            existingMembership.missingCount
+        };
       }
       const snapshots = await transaction.crawlPageSnapshot.findMany({
         where: {
@@ -569,20 +615,7 @@ export class CrawlSnapshotService {
           projectId: input.projectId,
           crawlId: input.crawlId
         },
-        select: {
-          id: true,
-          pageId: true,
-          sequence: true,
-          finalUrl: true,
-          statusCode: true,
-          contentType: true,
-          title: true,
-          description: true,
-          h1: true,
-          wordCount: true,
-          contentHash: true,
-          crawledAt: true
-        },
+        select: finalizationSnapshotSelect,
         orderBy: { sequence: "asc" },
         take: 1_001
       });
@@ -591,9 +624,58 @@ export class CrawlSnapshotService {
         snapshots.length !== input.processedUrls
       ) {
         throw new TypeError(
-          "Crawl duplicate analysis snapshot count does not match"
+          "Crawl finalization snapshot count does not match"
         );
       }
+      const duplicateIssueCount =
+        existingDuplicates?.issueCount ??
+        await this.persistDuplicateAnalysis(
+          transaction,
+          input,
+          snapshots
+        );
+      const missingIssueCount =
+        existingMembership?.missingCount ??
+        await this.persistMembershipAnalysis(
+          transaction,
+          input,
+          snapshots
+        );
+      if (input.status === "COMPLETED") {
+        await transaction.$executeRaw`
+          UPDATE "crawl_issues" AS issue
+          SET
+            "resolved_at" = CURRENT_TIMESTAMP,
+            "version" = issue."version" + 1,
+            "updated_at" = CURRENT_TIMESTAMP
+          WHERE
+            issue."workspace_id" = ${input.workspaceId}::uuid
+            AND issue."project_id" = ${input.projectId}::uuid
+            AND issue."resolved_at" IS NULL
+            AND issue."last_crawl_id" <> ${input.crawlId}::uuid
+            AND EXISTS (
+              SELECT 1
+              FROM "crawl_page_snapshots" AS snapshot
+              WHERE
+                snapshot."workspace_id" = issue."workspace_id"
+                AND snapshot."project_id" = issue."project_id"
+                AND snapshot."page_id" = issue."page_id"
+                AND snapshot."crawl_id" = ${input.crawlId}::uuid
+            )
+        `;
+      }
+      return {
+        accepted: true,
+        issueCount: duplicateIssueCount + missingIssueCount
+      };
+    });
+  }
+
+  private async persistDuplicateAnalysis(
+    transaction: Prisma.TransactionClient,
+    input: InternalFinalizeCrawlSnapshotInput,
+    snapshots: readonly FinalizationSnapshot[]
+  ): Promise<number> {
       const groups =
         input.status === "CANCELLED"
           ? []
@@ -733,27 +815,149 @@ export class CrawlSnapshotService {
             "updated_at" = CURRENT_TIMESTAMP
         `;
       }
-      if (input.status === "COMPLETED") {
-        await transaction.crawlIssue.updateMany({
+      return issueCount;
+  }
+
+  private async persistMembershipAnalysis(
+    transaction: Prisma.TransactionClient,
+    input: InternalFinalizeCrawlSnapshotInput,
+    snapshots: readonly FinalizationSnapshot[]
+  ): Promise<number> {
+    const previous =
+      input.status === "COMPLETED"
+        ? await transaction.crawlMembershipAnalysis.findFirst({
+            where: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              status: "COMPLETED",
+              scopeHash: input.scopeHash
+            },
+            select: { crawlId: true },
+            orderBy: [{ createdAt: "desc" }, { crawlId: "desc" }]
+          })
+        : null;
+    const previousSnapshots = previous
+      ? await transaction.crawlPageSnapshot.findMany({
           where: {
             workspaceId: input.workspaceId,
             projectId: input.projectId,
-            resolvedAt: null,
-            NOT: { lastCrawlId: input.crawlId },
-            page: {
-              crawlSnapshots: {
-                some: { crawlId: input.crawlId }
-              }
-            }
+            crawlId: previous.crawlId
           },
-          data: {
-            resolvedAt: new Date(),
-            version: { increment: 1 }
-          }
-        });
+          select: {
+            id: true,
+            pageId: true,
+            inSitemap: true,
+            crawledAt: true
+          },
+          orderBy: { sequence: "asc" },
+          take: 1_001
+        })
+      : [];
+    if (previousSnapshots.length > 1_000) {
+      throw new TypeError("Previous crawl membership exceeds limit");
+    }
+    const currentPageIds = new Set(
+      snapshots.map((snapshot) => snapshot.pageId)
+    );
+    const missing =
+      input.status === "COMPLETED"
+        ? previousSnapshots.filter(
+            (snapshot) => !currentPageIds.has(snapshot.pageId)
+          )
+        : [];
+    const [clock] = await transaction.$queryRaw<
+      readonly { readonly now: Date }[]
+    >`SELECT clock_timestamp() AS "now"`;
+    if (!clock?.now || Number.isNaN(clock.now.getTime())) {
+      throw new TypeError("Crawl membership database clock is unavailable");
+    }
+    await transaction.crawlMembershipAnalysis.create({
+      data: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        crawlId: input.crawlId,
+        status: input.status,
+        scopeHash: input.scopeHash,
+        previousCrawlId: previous?.crawlId ?? null,
+        snapshotCount: snapshots.length,
+        missingCount: missing.length,
+        createdAt: clock.now
       }
-      return { accepted: true, issueCount };
     });
+    if (!previous || missing.length === 0) return 0;
+    await transaction.crawlPageAbsence.createMany({
+      data: missing.map((snapshot) => ({
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        crawlId: input.crawlId,
+        pageId: snapshot.pageId,
+        previousCrawlId: previous.crawlId,
+        previousSnapshotId: snapshot.id,
+        detectedAt: clock.now
+      }))
+    });
+    const issueRows = missing.map((snapshot) => ({
+      pageId: snapshot.pageId,
+      code: "URL_DISAPPEARED_FROM_CRAWL",
+      severity: "WARNING",
+      title: "Страница исчезла из полного обхода",
+      details: {
+        previousCrawlId: previous.crawlId,
+        previousSnapshotId: snapshot.id,
+        wasInSitemap: snapshot.inSitemap
+      },
+      seenAt: clock.now.toISOString()
+    }));
+    await transaction.$executeRaw`
+      INSERT INTO "crawl_issues" (
+        "id",
+        "workspace_id",
+        "project_id",
+        "page_id",
+        "code",
+        "severity",
+        "title",
+        "details",
+        "first_crawl_id",
+        "last_crawl_id",
+        "first_seen_at",
+        "last_seen_at"
+      )
+      SELECT
+        uuidv7(),
+        ${input.workspaceId}::uuid,
+        ${input.projectId}::uuid,
+        row."pageId"::uuid,
+        row."code",
+        row."severity"::"CrawlIssueSeverity",
+        row."title",
+        row."details",
+        ${input.crawlId}::uuid,
+        ${input.crawlId}::uuid,
+        row."seenAt"::timestamptz,
+        row."seenAt"::timestamptz
+      FROM jsonb_to_recordset(${JSON.stringify(issueRows)}::jsonb)
+        AS row(
+          "pageId" text,
+          "code" text,
+          "severity" text,
+          "title" text,
+          "details" jsonb,
+          "seenAt" text
+        )
+      ON CONFLICT ("project_id", "page_id", "code")
+      DO UPDATE SET
+        "severity" = EXCLUDED."severity",
+        "title" = EXCLUDED."title",
+        "details" = EXCLUDED."details",
+        "last_crawl_id" = EXCLUDED."last_crawl_id",
+        "last_seen_at" = EXCLUDED."last_seen_at",
+        "resolved_at" = NULL,
+        "occurrences" = "crawl_issues"."occurrences" + 1,
+        "version" = "crawl_issues"."version" + 1,
+        "updated_at" = CURRENT_TIMESTAMP
+    `;
+    return missing.length;
   }
 
   public async listIssues(
@@ -860,6 +1064,36 @@ export class CrawlSnapshotService {
             url: member.page.url
           })),
         createdAt: group.createdAt.toISOString()
+      }))
+    };
+  }
+
+  public async listAbsentPages(
+    workspaceId: string,
+    projectId: string,
+    crawlId: string
+  ): Promise<ProjectCrawlAbsentPageCollection> {
+    const pages = await this.prisma.crawlPageAbsence.findMany({
+      where: { workspaceId, projectId, crawlId },
+      include: {
+        page: { select: { url: true } },
+        previousSnapshot: {
+          select: { inSitemap: true, crawledAt: true }
+        }
+      },
+      orderBy: [{ detectedAt: "desc" }, { pageId: "asc" }],
+      take: 1_000
+    });
+    return {
+      crawlId,
+      pages: pages.map((absence) => ({
+        pageId: absence.pageId,
+        url: absence.page.url,
+        previousCrawlId: absence.previousCrawlId,
+        previousSnapshotId: absence.previousSnapshotId,
+        wasInSitemap: absence.previousSnapshot.inSitemap,
+        lastSeenAt: absence.previousSnapshot.crawledAt.toISOString(),
+        detectedAt: absence.detectedAt.toISOString()
       }))
     };
   }

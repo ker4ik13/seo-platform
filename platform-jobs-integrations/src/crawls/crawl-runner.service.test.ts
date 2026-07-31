@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { TechnicalCrawlConfig } from "@seo-platform/contracts";
+import { crawlMembershipScopeHash } from "./crawl-membership-scope.js";
 import { CrawlRunnerService } from "./crawl-runner.service.js";
 
 const config: TechnicalCrawlConfig = {
@@ -77,7 +78,8 @@ test("finishes an expired crawl as a bounded partial result", async () => {
     projectId: "01900000-0000-7000-8000-000000000003",
     crawlId: "01900000-0000-7000-8000-000000000001",
     status: "PARTIALLY_COMPLETED",
-    processedUrls: 2
+    processedUrls: 2,
+    scopeHash: crawlMembershipScopeHash(config)
   }]);
   assert.deepEqual(finished, [[
     "01900000-0000-7000-8000-000000000001",

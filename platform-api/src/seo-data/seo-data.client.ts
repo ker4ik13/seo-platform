@@ -39,6 +39,7 @@ import {
   type ProjectPageCollection,
   type ProjectPageListQuery,
   type ProjectPageSummary,
+  type ProjectCrawlAbsentPageCollection,
   type ProjectCrawlDuplicateGroupCollection,
   type ProjectCrawlPageChangeCollection,
   type ProjectCrawlIssueCollection,
@@ -97,6 +98,7 @@ import {
 import { crawlIssueCollection } from "../crawls/crawl-issue-response.js";
 import { crawlPageChangeCollection } from "../crawls/crawl-change-response.js";
 import { crawlDuplicateGroupCollection } from "../crawls/crawl-duplicate-response.js";
+import { crawlAbsentPageCollection } from "../crawls/crawl-absence-response.js";
 
 interface InternalContext {
   readonly tenant: TenantAuthorization;
@@ -866,6 +868,24 @@ export class SeoDataClient {
       context
     );
     return crawlDuplicateGroupCollection(responseData(payload));
+  }
+
+  public async listProjectCrawlAbsentPages(
+    context: InternalContext,
+    crawlId: string
+  ): Promise<ProjectCrawlAbsentPageCollection> {
+    const scope = trackingScope(context);
+    const payload = await this.request(
+      "GET",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(
+          scope.projectId
+        )}/crawls/${encodeURIComponent(crawlId)}/absent-pages`,
+        this.config.services.seoData
+      ),
+      context
+    );
+    return crawlAbsentPageCollection(responseData(payload), crawlId);
   }
 
   public async getProjectPage(

@@ -48,6 +48,12 @@ Compose теперь принудительно запускают PostgreSQL и
 automation claims фиксируют `createdAt` тем же database clock, что
 `startedAt/finishedAt`, поэтому chronology constraints не зависят от
 часового пояса хоста и задержки между чтением clock и `INSERT`.
+После добавления crawl membership analysis полный public smoke
+`019fb7f6-14a6-73c9-b434-1171c8e25128` подтвердил новый tenant endpoint
+исчезнувших страниц вместе с обычным/automation crawl и полным XLSX import.
+В живой БД оба complete run сохранили разные scope fingerprints и ноль
+ложных absences; same-scope disappearance/reappearance отдельно проверены на
+чистой PostgreSQL 18.
 
 Production technical crawl и audit issues работают поверх Page Map, реального
 съёма позиций и тарифных capacity boundaries.
@@ -237,6 +243,16 @@ advisory lock анализирует успешные HTML snapshots и сохр
 FK; для каждой группы создаётся current issue соответствующей severity.
 Public API отдаёт их только под `page.view`, Web поддерживает фильтр по типу,
 пагинацию и раскрытие URL, а повторная финализация остаётся идемпотентной.
+
+Каждый terminal crawl также сохраняет immutable membership analysis с
+SHA-256 scope fingerprint. Только два полных обхода с теми же start/sitemap
+URL, include/exclude/query/robots/depth/limit настройками сравниваются между
+собой; partial/cancelled run и изменённый scope не могут создать ложную
+пропажу. Страницы, отсутствующие в новом полном обходе, сохраняются как
+tenant-bound immutable evidence и current issue
+`URL_DISAPPEARED_FROM_CRAWL`; повторное появление URL закрывает issue.
+Platform API и Web под `page.view` показывают последний seen snapshot,
+sitemap provenance и время обнаружения.
 
 Настройки technical crawl теперь поддерживают до десяти same-origin sitemap,
 include/exclude glob-маски и явную политику query-параметров. Crawl worker
@@ -923,13 +939,17 @@ Backend convention:
 - `platform-seo-data/src/crawls` — immutable crawl snapshots/issue
   occurrences/page changes с sitemap membership, current issue projection,
   deterministic before/after diff, идемпотентный анализ duplicate groups по
-  content hash/нормализованным Title/Description/H1 и tenant-safe Page Map
+  content hash/нормализованным Title/Description/H1, exact-scope membership
+  comparison с immutable evidence исчезнувших страниц и tenant-safe Page Map
   update без raw HTML;
 - `platform-seo-data/prisma/migrations/20260731230000_crawl_conditional_requests`
   — bounded HTTP validators и tenant-bound immutable snapshot reuse evidence;
 - `platform-seo-data/prisma/migrations/20260801010000_crawl_duplicate_groups`
   — immutable crawl analysis receipt, bounded duplicate groups/members,
   составные tenant/project/crawl FK и current issue projection;
+- `platform-seo-data/prisma/migrations/20260801020000_crawl_membership_absences`
+  — exact-scope terminal analysis, immutable absence evidence, tenant-safe
+  predecessor/snapshot/Page FK и bounded membership counts;
 - `platform-api/src/crawls`,
   `platform-web/components/project-crawl-audit.tsx` и
   `crawl-automation-panel.tsx` — public RBAC/CSRF/audit boundary, dedicated
@@ -1232,7 +1252,7 @@ Entrypoints:
 | Integrations | vertical slice: catalog + encrypted BYOK vault + validation + project binding |
 | Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |
 | Automations | vertical slice: rank schedule CRUD + тарифный capacity + BullMQ scheduler + manual/scheduled execution + no-overlap/recovery/history/auto-pause + Web |
-| Pages/technical audit | vertical slice: Page Map CRUD/assignment + SSRF-safe async crawl + sitemap/include/exclude/query scope + conditional 304 reuse/global host backoff + immutable snapshots/current issues/page-change history + lease/checkpoint recovery + Web |
+| Pages/technical audit | vertical slice: Page Map CRUD/assignment + SSRF-safe async crawl + sitemap/include/exclude/query scope + conditional 304 reuse/global host backoff + immutable snapshots/current issues/page-change/duplicate/exact-scope disappearance history + lease/checkpoint recovery + Web |
 | Billing/YooKassa | vertical slice: catalog + hosted/recurring payment + webhook/reconciliation + ledger/refund/NPD obligation + Web UI + protected manual receipt operations + durable receipt email delivery; live provider/SMTP canary остаётся gate |
 | Directus content | planned |
 
@@ -1615,10 +1635,10 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API tests: 453 pass, 0 fail, 5 opt-in PostgreSQL 18 tests skipped
+- Platform API tests: 455 pass, 0 fail, 5 opt-in PostgreSQL 18 tests skipped
   без отдельного disposable database URL.
-- SEO data tests: 138 pass, 0 fail, 1 disposable-DB test skipped.
-- Jobs/integrations tests: 481 pass, 0 fail, 10 disposable-DB tests skipped
+- SEO data tests: 139 pass, 0 fail, 1 disposable-DB test skipped.
+- Jobs/integrations tests: 482 pass, 0 fail, 10 disposable-DB tests skipped
   в обычном запуске; startup decrypt-canary targeted suite — 7/7 pass.
 - Realtime unit tests: 112 pass, 0 fail.
 - Contracts unit tests: 100 pass, 0 fail.
@@ -1658,6 +1678,11 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
   migrations, Prisma validate/generate и реальный snapshot integration
   проходят; проверены три immutable analysis/group/member таблицы,
   tenant-safe FK, bounded counts и запрет изменения terminal evidence.
+- Fresh PostgreSQL 18 crawl-membership gate: полная цепочка из 20 SEO Data
+  migrations и реальный snapshot integration проходят; same-scope complete
+  crawl фиксирует исчезнувший URL, partial и изменённый scope не создают
+  ложных evidence, повторное появление закрывает current issue, а обе
+  membership/absence таблицы отклоняют mutation.
 - Fresh PostgreSQL 18 Radar schedule gate: полная цепочка из 33 Jobs
   migrations применена без пропусков, таблицы definitions/runs и immutable
   guard trigger проверены. Live Redis 8.8.1 gate выполняет BullMQ
@@ -1675,6 +1700,13 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
   read model подтверждён, manual automation crawl завершился через `304`,
   затем успешно прошли pause и полный XLSX upload/inspection/import/publish.
   PostgreSQL и Node process environments фактически подтверждены как UTC.
+- Crawl-membership migration применена к живому PostgreSQL 18 runtime.
+  Полный public smoke workspace
+  `019fb7f6-14a6-73c9-b434-1171c8e25128`, project
+  `019fb7f6-1579-7109-953f-89f7525d6786`, crawl
+  `019fb7f6-182b-76bb-b55f-d6a9c46a6cc4` прошёл новый absence endpoint,
+  duplicate groups, manual Radar automation и весь XLSX import; live evidence
+  содержит два complete analysis, два разных scope и ноль ложных absences.
 - Полный root `pnpm test` после startup-canary и scoped claim: pass без
   failures; обычный запуск безопасно пропускает opt-in disposable-DB tests.
   Отдельный fresh PostgreSQL 18 gate для Jobs grant/claim: 4/4 pass.
@@ -2175,17 +2207,15 @@ OAuth/OIDC выполняется после подтверждения зави
 - Technical crawl production vertical закрывает ручной bounded обход,
   sitemap/include/exclude/query scope, conditional page requests, global
   host backoff, current issues, page diff history, группы дублей
-  content/Title/Description/H1 и versioned daily/weekly schedules с quiet
-  windows/no-overlap/fresh execution authorization. Duplicate analysis
-  выполняется один раз на terminal crawl, учитывается в общем issue count и
-  доступен через tenant-protected API/UI с полным составом групп.
+  content/Title/Description/H1, exact-scope исчезновение страниц и versioned
+  daily/weekly schedules с quiet windows/no-overlap/fresh execution
+  authorization. Duplicate и membership analysis выполняются идемпотентно
+  под project lock, учитываются в общем issue count и доступны через
+  tenant-protected API/UI с immutable evidence.
   Полный Radar из раздела 10 ТЗ ещё требует notifications,
   long-lived `PAUSED_BY_SITE` policy и отдельный
-  browser-rendering pool. Sitemap disappearance гарантированно фиксируется,
-  когда URL также остаётся доступен из start/link scope; для исчезнувшей из
-  всех источников страницы требуется отдельный crawl-level membership
-  snapshot. Cookies/custom headers намеренно не принимаются до отдельной
-  secret-safe policy.
+  browser-rendering pool. Cookies/custom headers намеренно не принимаются до
+  отдельной secret-safe policy.
 - `platform-app` сохранён как legacy Git-источник до проверки переноса; новая
   функциональность добавляется только в `platform-web`.
 

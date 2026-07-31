@@ -429,7 +429,7 @@ export class CrawlService {
     if (
       !Number.isSafeInteger(additionalIssueCount) ||
       additionalIssueCount < 0 ||
-      additionalIssueCount > 4_000
+      additionalIssueCount > 5_000
     ) {
       throw new TypeError("Invalid additional crawl issue count");
     }

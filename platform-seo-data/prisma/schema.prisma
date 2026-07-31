@@ -137,6 +137,12 @@ enum CrawlDuplicateKind {
   H1
 }
 
+enum CrawlMembershipStatus {
+  COMPLETED
+  PARTIALLY_COMPLETED
+  CANCELLED
+}
+
 model Keyword {
   id             String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId    String         @map("workspace_id") @db.Uuid
@@ -387,6 +393,7 @@ model Page {
   crawlIssues           CrawlIssue[]
   crawlChanges          CrawlPageChange[]
   duplicateGroupMembers CrawlDuplicateGroupMember[]
+  crawlAbsences         CrawlPageAbsence[]
 
   @@unique([projectId, urlHash])
   @@unique([workspaceId, projectId, id], map: "pages_tenant_project_id_key")
@@ -493,6 +500,7 @@ model CrawlPageSnapshot {
   reusedFrom            CrawlPageSnapshot?          @relation("CrawlSnapshotReuse", fields: [workspaceId, projectId, reusedFromSnapshotId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
   reusedBy              CrawlPageSnapshot[]         @relation("CrawlSnapshotReuse")
   duplicateGroupMembers CrawlDuplicateGroupMember[]
+  absenceEvidence       CrawlPageAbsence[]          @relation("CrawlAbsencePreviousSnapshot")
 
   @@unique([crawlId, sequence], map: "crawl_page_snapshots_crawl_sequence_key")
   @@unique([crawlId, finalUrlHash], map: "crawl_page_snapshots_crawl_url_key")
@@ -625,6 +633,46 @@ model CrawlDuplicateGroupMember {
   @@unique([groupId, pageId], map: "crawl_duplicate_group_members_group_page_key")
   @@index([workspaceId, projectId, crawlId, pageId], map: "crawl_duplicate_group_members_project_crawl_page_idx")
   @@map("crawl_duplicate_group_members")
+}
+
+model CrawlMembershipAnalysis {
+  workspaceId     String                @map("workspace_id") @db.Uuid
+  projectId       String                @map("project_id") @db.Uuid
+  crawlId         String                @map("crawl_id") @db.Uuid
+  status          CrawlMembershipStatus
+  scopeHash       String                @map("scope_hash") @db.Char(64)
+  previousCrawlId String?               @map("previous_crawl_id") @db.Uuid
+  snapshotCount   Int                   @map("snapshot_count")
+  missingCount    Int                   @map("missing_count")
+  createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  previousAnalysis CrawlMembershipAnalysis?  @relation("CrawlMembershipPredecessor", fields: [workspaceId, projectId, previousCrawlId], references: [workspaceId, projectId, crawlId], onDelete: Restrict, onUpdate: Restrict, map: "crawl_membership_analyses_previous_tenant_fkey")
+  nextAnalyses     CrawlMembershipAnalysis[] @relation("CrawlMembershipPredecessor")
+  absences         CrawlPageAbsence[]        @relation("CrawlMembershipCurrent")
+  previousAbsences CrawlPageAbsence[]        @relation("CrawlMembershipPrevious")
+
+  @@id([workspaceId, projectId, crawlId])
+  @@index([workspaceId, projectId, status, scopeHash, createdAt(sort: Desc)], map: "crawl_membership_analyses_comparable_idx")
+  @@map("crawl_membership_analyses")
+}
+
+model CrawlPageAbsence {
+  workspaceId        String   @map("workspace_id") @db.Uuid
+  projectId          String   @map("project_id") @db.Uuid
+  crawlId            String   @map("crawl_id") @db.Uuid
+  pageId             String   @map("page_id") @db.Uuid
+  previousCrawlId    String   @map("previous_crawl_id") @db.Uuid
+  previousSnapshotId String   @map("previous_snapshot_id") @db.Uuid
+  detectedAt         DateTime @default(now()) @map("detected_at") @db.Timestamptz(6)
+
+  analysis         CrawlMembershipAnalysis @relation("CrawlMembershipCurrent", fields: [workspaceId, projectId, crawlId], references: [workspaceId, projectId, crawlId], onDelete: Restrict, onUpdate: Restrict, map: "crawl_page_absences_analysis_tenant_fkey")
+  previousAnalysis CrawlMembershipAnalysis @relation("CrawlMembershipPrevious", fields: [workspaceId, projectId, previousCrawlId], references: [workspaceId, projectId, crawlId], onDelete: Restrict, onUpdate: Restrict, map: "crawl_page_absences_previous_analysis_tenant_fkey")
+  page             Page                    @relation(fields: [workspaceId, projectId, pageId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "crawl_page_absences_page_tenant_fkey")
+  previousSnapshot CrawlPageSnapshot       @relation("CrawlAbsencePreviousSnapshot", fields: [workspaceId, projectId, previousCrawlId, previousSnapshotId], references: [workspaceId, projectId, crawlId, id], onDelete: Restrict, onUpdate: Restrict, map: "crawl_page_absences_snapshot_tenant_fkey")
+
+  @@id([workspaceId, projectId, crawlId, pageId])
+  @@index([workspaceId, projectId, crawlId, detectedAt(sort: Desc), pageId], map: "crawl_page_absences_project_crawl_idx")
+  @@map("crawl_page_absences")
 }
 
 model TrackingContext {

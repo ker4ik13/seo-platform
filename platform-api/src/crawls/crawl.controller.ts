@@ -13,6 +13,7 @@ import {
 } from "@nestjs/common";
 import type {
   ApiResponse,
+  ProjectCrawlAbsentPageCollection,
   ProjectCrawlDuplicateGroupCollection,
   ProjectCrawlPageChangeCollection,
   ProjectCrawlIssueCollection,
@@ -121,6 +122,24 @@ export class CrawlController {
     return apiResponse(
       request,
       await this.seoData.listProjectCrawlDuplicateGroups(
+        internalProjectContext(request, principal, tenant),
+        assertUuid(crawlId, "crawlId")
+      )
+    );
+  }
+
+  @Get("crawls/:crawlId/absent-pages")
+  @RequirePermission("page.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async absentPages(
+    @Param("crawlId") crawlId: string,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<ProjectCrawlAbsentPageCollection>> {
+    const tenant = requiredProjectTenant(request);
+    return apiResponse(
+      request,
+      await this.seoData.listProjectCrawlAbsentPages(
         internalProjectContext(request, principal, tenant),
         assertUuid(crawlId, "crawlId")
       )

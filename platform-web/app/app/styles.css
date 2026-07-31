@@ -3645,6 +3645,38 @@ svg { display: block; }
   padding-top: 18px;
 }
 
+.crawl-absence-history {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 14px;
+  padding-top: 18px;
+}
+
+.crawl-absence-list {
+  display: grid;
+  gap: 10px;
+}
+
+.crawl-absence-item {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel-muted);
+  min-width: 0;
+}
+
+.crawl-absence-item a {
+  overflow-wrap: anywhere;
+  color: var(--brand);
+}
+
+.crawl-absence-item span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .crawl-duplicate-heading {
   align-items: end;
   display: flex;

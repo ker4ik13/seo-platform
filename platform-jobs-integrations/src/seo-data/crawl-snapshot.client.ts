@@ -164,7 +164,7 @@ function finalizeReceipt(
     data.accepted !== true ||
     !Number.isSafeInteger(data.issueCount) ||
     Number(data.issueCount) < 0 ||
-    Number(data.issueCount) > 4_000 ||
+    Number(data.issueCount) > 5_000 ||
     typeof meta.requestId !== "string" ||
     meta.requestId.length < 1 ||
     meta.requestId.length > 100

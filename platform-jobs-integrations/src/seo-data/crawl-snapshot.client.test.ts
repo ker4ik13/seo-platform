@@ -65,7 +65,8 @@ test("accepts a bounded duplicate finalization issue count", async () => {
         projectId: pageInput.projectId,
         crawlId: pageInput.crawlId,
         status: "COMPLETED",
-        processedUrls: 2
+        processedUrls: 2,
+        scopeHash: "b".repeat(64)
       }),
       { accepted: true, issueCount: 4 }
     );
