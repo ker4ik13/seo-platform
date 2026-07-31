@@ -3,6 +3,7 @@ import type {
   InternalCreateSemanticClusterInput,
   InternalDeleteSemanticClusterInput,
   InternalSemanticClusterMergeInput,
+  InternalSemanticClusterSplitInput,
   InternalSemanticClusterPageBulkInput,
   InternalUpdateSemanticClusterInput,
   SemanticClusterPageSource
@@ -102,6 +103,36 @@ export function internalSemanticClusterMergeInput(
   };
 }
 
+export function internalSemanticClusterSplitInput(
+  value: unknown
+): InternalSemanticClusterSplitInput {
+  const input = exactRecord(value, [
+    ...scopeFields(),
+    "sourceCluster",
+    "keywordItems",
+    "newClusterName",
+    "isLocked",
+    "excludeFromReclustering"
+  ]);
+  return {
+    ...scope(input),
+    sourceCluster: clusterSelection(input.sourceCluster, "sourceCluster"),
+    keywordItems: versionSelections(input.keywordItems, 1, 500, "keywordItems"),
+    newClusterName: clusterName(input.newClusterName),
+    ...(input.isLocked === undefined
+      ? {}
+      : { isLocked: boolean(input.isLocked, "isLocked") }),
+    ...(input.excludeFromReclustering === undefined
+      ? {}
+      : {
+          excludeFromReclustering: boolean(
+            input.excludeFromReclustering,
+            "excludeFromReclustering"
+          )
+        })
+  };
+}
+
 function scopeFields(): readonly string[] {
   return ["workspaceId", "projectId", "actorId"];
 }
@@ -161,17 +192,37 @@ function clusterSelections(
   minimum: number,
   maximum: number
 ): readonly { readonly id: string; readonly version: number }[] {
+  return versionSelections(value, minimum, maximum, "items");
+}
+
+function clusterSelection(
+  value: unknown,
+  field: string
+): { readonly id: string; readonly version: number } {
+  const item = exactRecord(value, ["id", "version"]);
+  return {
+    id: uuid(item.id, `${field}.id`),
+    version: positiveInteger(item.version, `${field}.version`)
+  };
+}
+
+function versionSelections(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  field: string
+): readonly { readonly id: string; readonly version: number }[] {
   if (!Array.isArray(value) || value.length < minimum || value.length > maximum) {
-    invalid("items");
+    invalid(field);
   }
   const items = value.map((entry) => {
     const item = exactRecord(entry, ["id", "version"]);
     return {
-      id: uuid(item.id, "items.id"),
-      version: positiveInteger(item.version, "items.version")
+      id: uuid(item.id, `${field}.id`),
+      version: positiveInteger(item.version, `${field}.version`)
     };
   });
-  if (new Set(items.map(({ id }) => id)).size !== items.length) invalid("items");
+  if (new Set(items.map(({ id }) => id)).size !== items.length) invalid(field);
   return items;
 }
 

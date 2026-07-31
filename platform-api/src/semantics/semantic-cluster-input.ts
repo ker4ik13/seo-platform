@@ -1,6 +1,7 @@
 import type {
   CreateSemanticClusterInput,
   SemanticClusterMergeInput,
+  SemanticClusterSplitInput,
   SemanticClusterPageBulkInput,
   SemanticClusterPageSource,
   UpdateSemanticClusterInput
@@ -91,6 +92,36 @@ export function semanticClusterMergeInput(
   return { items, targetClusterId };
 }
 
+export function semanticClusterSplitInput(
+  value: unknown
+): SemanticClusterSplitInput {
+  const input = exactRecordWithFields(value, [
+    "sourceCluster",
+    "keywordItems",
+    "newClusterName",
+    "isLocked",
+    "excludeFromReclustering"
+  ]);
+  const sourceCluster = clusterSelection(input.sourceCluster, "sourceCluster");
+  const keywordItems = versionSelections(input.keywordItems, 1, 500, "keywordItems");
+  return {
+    sourceCluster,
+    keywordItems,
+    newClusterName: clusterName(input.newClusterName),
+    ...(input.isLocked === undefined
+      ? {}
+      : { isLocked: boolean(input.isLocked, "isLocked") }),
+    ...(input.excludeFromReclustering === undefined
+      ? {}
+      : {
+          excludeFromReclustering: boolean(
+            input.excludeFromReclustering,
+            "excludeFromReclustering"
+          )
+        })
+  };
+}
+
 function exactRecord(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     invalid("$", "Must be a JSON object");
@@ -176,21 +207,44 @@ function clusterSelections(
   minimum: number,
   maximum: number
 ): readonly { readonly id: string; readonly version: number }[] {
+  return versionSelections(value, minimum, maximum, "items");
+}
+
+function clusterSelection(
+  value: unknown,
+  field: string
+): { readonly id: string; readonly version: number } {
+  const item = exactRecordWithFields(value, ["id", "version"]);
+  if (typeof item.id !== "string" || !UUID_PATTERN.test(item.id)) {
+    invalid(`${field}.id`, "Must be a UUID");
+  }
+  if (!Number.isSafeInteger(item.version) || Number(item.version) < 1) {
+    invalid(`${field}.version`, "Must be a positive integer");
+  }
+  return { id: item.id.toLowerCase(), version: Number(item.version) };
+}
+
+function versionSelections(
+  value: unknown,
+  minimum: number,
+  maximum: number,
+  field: string
+): readonly { readonly id: string; readonly version: number }[] {
   if (!Array.isArray(value) || value.length < minimum || value.length > maximum) {
-    invalid("items", `Must select between ${minimum} and ${maximum} clusters`);
+    invalid(field, `Must select between ${minimum} and ${maximum} items`);
   }
   const items = value.map((entry, index) => {
     const item = exactRecordWithFields(entry, ["id", "version"]);
     if (typeof item.id !== "string" || !UUID_PATTERN.test(item.id)) {
-      invalid(`items.${index}.id`, "Must be a UUID");
+      invalid(`${field}.${index}.id`, "Must be a UUID");
     }
     if (!Number.isSafeInteger(item.version) || Number(item.version) < 1) {
-      invalid(`items.${index}.version`, "Must be a positive integer");
+      invalid(`${field}.${index}.version`, "Must be a positive integer");
     }
     return { id: item.id.toLowerCase(), version: Number(item.version) };
   });
   if (new Set(items.map(({ id }) => id)).size !== items.length) {
-    invalid("items", "Cannot contain duplicate clusters");
+    invalid(field, "Cannot contain duplicate items");
   }
   return items;
 }

@@ -5,6 +5,7 @@ import {
   internalCreateSemanticClusterInput,
   internalDeleteSemanticClusterInput,
   internalSemanticClusterMergeInput,
+  internalSemanticClusterSplitInput,
   internalSemanticClusterPageBulkInput,
   internalUpdateSemanticClusterInput
 } from "./cluster-input.js";
@@ -95,6 +96,39 @@ test("accepts only an exact scoped cluster merge", () => {
         { id: second, version: 3 }
       ],
       targetClusterId: "01900000-0000-7000-8000-000000000099"
+    }),
+    BadRequestException
+  );
+});
+
+test("accepts only an exact scoped cluster split", () => {
+  const keywordId = "01900000-0000-7000-8000-000000000020";
+  assert.equal(
+    internalSemanticClusterSplitInput({
+      workspaceId,
+      projectId,
+      actorId,
+      sourceCluster: {
+        id: "01900000-0000-7000-8000-000000000004",
+        version: 3
+      },
+      keywordItems: [{ id: keywordId, version: 5 }],
+      newClusterName: "  Коммерческий   интент ",
+      isLocked: true
+    }).newClusterName,
+    "Коммерческий интент"
+  );
+  assert.throws(
+    () => internalSemanticClusterSplitInput({
+      workspaceId,
+      projectId,
+      actorId,
+      sourceCluster: {
+        id: "01900000-0000-7000-8000-000000000004",
+        version: 3
+      },
+      keywordItems: [],
+      newClusterName: "Новый"
     }),
     BadRequestException
   );

@@ -81,6 +81,13 @@ confidence и rationale назначения. Read model вычисляет за
 кластеры и создаёт один смешанный reversible change set. Более крупный scope
 честно возвращает `BACKGROUND_OPERATION_REQUIRED`, пока asynchronous merge
 не реализован.
+Выбранные запросы одного кластера можно выделить в новый кластер через
+компактный split workflow внутри массового редактора. Preview проверяет CAS
+исходного кластера и каждого запроса, занятое имя, принадлежность и запрет
+оставлять исходный кластер пустым. Apply под теми же keyword/cluster locks
+атомарно создаёт новый manual-кластер, переносит до 450 запросов и сохраняет
+единый mixed reversible change set; dependency-aware undo сначала учитывает
+возврат запросов и только затем допускает удаление созданного кластера.
 Platform API валидирует публичный ввод и никогда не принимает
 workspace/actor из browser body; Web использует same-origin BFF и показывает
 конфликты версии без silent overwrite. Bounded bulk-команда принимает 1–200
@@ -1071,7 +1078,9 @@ Backend convention:
   exact-version partition и атомарный partial apply без blind overwrite;
   lock/exclude controls защищают будущую рекластеризацию, а bounded merge
   2–50 кластеров использует preview, exact CAS, единый lock order и один
-  смешанный keyword/cluster reversible change set;
+  смешанный keyword/cluster reversible change set; bounded split из
+  выбранных запросов использует тот же lock order, запрещает пустой источник
+  и сохраняет полностью обратимую mixed version;
 - migration `20260801030000_semantic_cluster_integrity` — fail-closed legacy
   review, partial case-insensitive uniqueness активных cluster names и
   составной tenant/project FK `Keyword.clusterId → Cluster`;
@@ -1328,7 +1337,7 @@ Entrypoints:
 | Admin operations | vertical slice: MFA + persisted roles + NPD operations |
 | Auth core | vertical slice: identity lifecycle + transactional verification/reset email transport |
 | Workspaces/projects/team access | vertical slice: включая transactional invite email/fragment acceptance |
-| Semantics/import | vertical slice: Key Collector-style groups/manual clusters/table/tools + CSV/TSV/XLSX → mapping → validation → quota reservation → publish/abort → query; manual cluster→primary Page, derived missing/cannibalization diagnostics, lock/exclude, bounded cluster merge с preview и mapping/merge history/undo закрыты; split, background merge, auto-clustering, alternate pages и расширенное SERP evidence ещё не закрыты |
+| Semantics/import | vertical slice: Key Collector-style groups/manual clusters/table/tools + CSV/TSV/XLSX → mapping → validation → quota reservation → publish/abort → query; manual cluster→primary Page, derived missing/cannibalization diagnostics, lock/exclude, bounded cluster merge/split с preview и mapping/merge/split history/undo закрыты; background merge/split, auto-clustering, alternate pages и расширенное SERP evidence ещё не закрыты |
 | Notifications | vertical slice: preferences → effective policy → read center → encrypted browser device lifecycle + durable terminal crawl in-app notifications |
 | Integrations | vertical slice: operational catalog + encrypted BYOK vault + validation + SERP/competitor project bindings |
 | Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |

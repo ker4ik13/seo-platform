@@ -18,6 +18,8 @@ import type {
   SemanticCluster,
   SemanticClusterMergePreview,
   SemanticClusterMergeResult,
+  SemanticClusterSplitPreview,
+  SemanticClusterSplitResult,
   SemanticClusterPageBulkPreview,
   SemanticClusterPageBulkResult
 } from "@seo-platform/contracts";
@@ -48,6 +50,7 @@ import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import {
   createSemanticClusterInput,
   semanticClusterMergeInput,
+  semanticClusterSplitInput,
   semanticClusterPageBulkInput,
   updateSemanticClusterInput
 } from "./semantic-cluster-input.js";
@@ -227,6 +230,65 @@ export class SemanticClusterController {
       action: "semantic.cluster_merge.completed",
       resourceType: "semantic_cluster",
       resourceId: result.targetCluster.id,
+      outcome: "SUCCESS",
+      requestId: context.requestId
+    });
+    return apiResponse(request, result);
+  }
+
+  @Post("split-preview")
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission("semantic.bulk_edit")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async previewSplit(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticClusterSplitPreview>> {
+    const tenant = requiredMutableProjectTenant(request);
+    const input = semanticClusterSplitInput(body);
+    return apiResponse(
+      request,
+      await this.seoData.previewSemanticClusterSplit(
+        internalProjectContext(request, principal, tenant),
+        input
+      )
+    );
+  }
+
+  @Post("split")
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission("semantic.bulk_edit")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async split(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticClusterSplitResult>> {
+    const tenant = requiredMutableProjectTenant(request);
+    const context = requestContext(request);
+    const input = semanticClusterSplitInput(body);
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.cluster_split.requested",
+      resourceType: "semantic_cluster",
+      resourceId: input.sourceCluster.id,
+      outcome: "REQUESTED",
+      requestId: context.requestId
+    });
+    const result = await this.seoData.splitSemanticCluster(
+      internalProjectContext(request, principal, tenant),
+      input
+    );
+    await recordCommittedAudit(this.audit, this.logger, {
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.cluster_split.completed",
+      resourceType: "semantic_cluster",
+      resourceId: result.createdCluster.id,
       outcome: "SUCCESS",
       requestId: context.requestId
     });

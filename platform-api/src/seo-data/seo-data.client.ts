@@ -7,6 +7,8 @@ import {
   semanticClusterPageSources,
   semanticClusterPageBulkStates,
   semanticClusterMergeReadiness,
+  semanticClusterSplitReadiness,
+  semanticClusterSplitSourceStates,
   pageIndexabilities,
   pageTypes,
   semanticCustomColumnTypes,
@@ -23,6 +25,7 @@ import {
   type InternalDeleteSemanticKeywordInput,
   type InternalDeleteSemanticClusterInput,
   type InternalSemanticClusterMergeInput,
+  type InternalSemanticClusterSplitInput,
   type InternalDeleteSemanticKeywordGroupInput,
   type InternalSemanticKeywordBulkInput,
   type InternalCreateSemanticSavedViewInput,
@@ -59,6 +62,9 @@ import {
   type SemanticClusterMergeInput,
   type SemanticClusterMergePreview,
   type SemanticClusterMergeResult,
+  type SemanticClusterSplitInput,
+  type SemanticClusterSplitPreview,
+  type SemanticClusterSplitResult,
   type SemanticClusterPageBulkInput,
   type SemanticClusterPageBulkPreview,
   type SemanticClusterPageBulkResult,
@@ -489,6 +495,46 @@ export class SeoDataClient {
       body
     );
     return semanticClusterMergeResult(responseData(payload), input);
+  }
+
+  public async previewSemanticClusterSplit(
+    context: InternalContext,
+    input: SemanticClusterSplitInput
+  ): Promise<SemanticClusterSplitPreview> {
+    const scope = trackingScope(context);
+    const body: InternalSemanticClusterSplitInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      semanticClusterUrl(context, this.config.services.seoData, "split-preview"),
+      context,
+      body
+    );
+    return semanticClusterSplitPreview(responseData(payload), input);
+  }
+
+  public async splitSemanticCluster(
+    context: InternalContext,
+    input: SemanticClusterSplitInput
+  ): Promise<SemanticClusterSplitResult> {
+    const scope = trackingScope(context);
+    const body: InternalSemanticClusterSplitInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      semanticClusterUrl(context, this.config.services.seoData, "split"),
+      context,
+      body
+    );
+    return semanticClusterSplitResult(responseData(payload), input);
   }
 
   public async listSemanticSavedViews(
@@ -1795,6 +1841,104 @@ export function semanticClusterMergeResult(
   return {
     targetCluster,
     mergedClusterIds,
+    movedKeywordCount: Number(result.movedKeywordCount)
+  };
+}
+
+export function semanticClusterSplitPreview(
+  value: unknown,
+  input: SemanticClusterSplitInput
+): SemanticClusterSplitPreview {
+  const preview = exactRecord(value, [
+    "readiness",
+    "sourceClusterState",
+    "selectedKeywordCount",
+    "movableKeywordCount",
+    "sourceKeywordCount",
+    "sourceWouldBeEmpty",
+    "duplicateName",
+    "sourceLocked",
+    "conflictedKeywordIds",
+    "unavailableKeywordIds",
+    "synchronousKeywordLimit"
+  ]);
+  const conflictedKeywordIds = uuidList(
+    preview.conflictedKeywordIds,
+    input.keywordItems.length
+  );
+  const unavailableKeywordIds = uuidList(
+    preview.unavailableKeywordIds,
+    input.keywordItems.length
+  );
+  const inputIds = new Set(input.keywordItems.map(({ id }) => id));
+  const conflictIds = [...conflictedKeywordIds, ...unavailableKeywordIds];
+  const hasConflict =
+    preview.sourceClusterState !== "READY" ||
+    preview.sourceWouldBeEmpty === true ||
+    preview.duplicateName === true ||
+    conflictIds.length > 0;
+  if (
+    typeof preview.readiness !== "string" ||
+    !semanticClusterSplitReadiness.some((item) => item === preview.readiness) ||
+    typeof preview.sourceClusterState !== "string" ||
+    !semanticClusterSplitSourceStates.some(
+      (item) => item === preview.sourceClusterState
+    ) ||
+    !bulkCount(preview.selectedKeywordCount, input.keywordItems.length) ||
+    !boundedInteger(preview.movableKeywordCount, input.keywordItems.length) ||
+    !nonNegativeInteger(preview.sourceKeywordCount) ||
+    typeof preview.sourceWouldBeEmpty !== "boolean" ||
+    typeof preview.duplicateName !== "boolean" ||
+    typeof preview.sourceLocked !== "boolean" ||
+    !positiveInteger(preview.synchronousKeywordLimit) ||
+    conflictIds.some((id) => !inputIds.has(id)) ||
+    new Set(conflictIds).size !== conflictIds.length ||
+    (hasConflict
+      ? preview.readiness !== "CONFLICTED"
+      : input.keywordItems.length > Number(preview.synchronousKeywordLimit)
+        ? preview.readiness !== "BACKGROUND_REQUIRED"
+        : preview.readiness !== "READY")
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    readiness: preview.readiness as SemanticClusterSplitPreview["readiness"],
+    sourceClusterState:
+      preview.sourceClusterState as SemanticClusterSplitPreview["sourceClusterState"],
+    selectedKeywordCount: Number(preview.selectedKeywordCount),
+    movableKeywordCount: Number(preview.movableKeywordCount),
+    sourceKeywordCount: Number(preview.sourceKeywordCount),
+    sourceWouldBeEmpty: preview.sourceWouldBeEmpty,
+    duplicateName: preview.duplicateName,
+    sourceLocked: preview.sourceLocked,
+    conflictedKeywordIds,
+    unavailableKeywordIds,
+    synchronousKeywordLimit: Number(preview.synchronousKeywordLimit)
+  };
+}
+
+export function semanticClusterSplitResult(
+  value: unknown,
+  input: SemanticClusterSplitInput
+): SemanticClusterSplitResult {
+  const result = exactRecord(value, [
+    "sourceCluster",
+    "createdCluster",
+    "movedKeywordCount"
+  ]);
+  const sourceCluster = semanticCluster(result.sourceCluster);
+  const createdCluster = semanticCluster(result.createdCluster);
+  if (
+    sourceCluster.id !== input.sourceCluster.id ||
+    createdCluster.id === sourceCluster.id ||
+    createdCluster.name !== input.newClusterName ||
+    !bulkCount(result.movedKeywordCount, input.keywordItems.length)
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    sourceCluster,
+    createdCluster,
     movedKeywordCount: Number(result.movedKeywordCount)
   };
 }

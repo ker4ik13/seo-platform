@@ -15,6 +15,8 @@ import {
   semanticClusterPageBulkResult,
   semanticClusterMergePreview,
   semanticClusterMergeResult,
+  semanticClusterSplitPreview,
+  semanticClusterSplitResult,
   semanticClusters,
   semanticCustomColumns,
   semanticKeywordCustomValue,
@@ -322,6 +324,72 @@ test("validates coherent cluster merge preview and result", () => {
   assert.deepEqual(result.mergedClusterIds, [second]);
   assert.throws(
     () => semanticClusterMergeResult({ ...result, mergedClusterIds: [first] }, input),
+    DomainError
+  );
+});
+
+test("validates coherent cluster split preview and result", () => {
+  const sourceId = "01900000-0000-7000-8000-000000000042";
+  const createdId = "01900000-0000-7000-8000-000000000043";
+  const keywordId = "01900000-0000-7000-8000-000000000044";
+  const input = {
+    sourceCluster: { id: sourceId, version: 2 },
+    keywordItems: [{ id: keywordId, version: 5 }],
+    newClusterName: "Купить ноутбук"
+  };
+  const preview = semanticClusterSplitPreview({
+    readiness: "READY",
+    sourceClusterState: "READY",
+    selectedKeywordCount: 1,
+    movableKeywordCount: 1,
+    sourceKeywordCount: 3,
+    sourceWouldBeEmpty: false,
+    duplicateName: false,
+    sourceLocked: false,
+    conflictedKeywordIds: [],
+    unavailableKeywordIds: [],
+    synchronousKeywordLimit: 450
+  }, input);
+  assert.equal(preview.readiness, "READY");
+  assert.throws(
+    () => semanticClusterSplitPreview({ ...preview, duplicateName: true }, input),
+    DomainError
+  );
+  const clusterBase = {
+    name: "Исходный",
+    method: "MANUAL",
+    keywordCount: 2,
+    isLocked: false,
+    excludeFromReclustering: false,
+    pageDiagnostics: {
+      mappedKeywordCount: 0,
+      unmappedKeywordCount: 2,
+      competingPageCount: 0,
+      hasCannibalization: false,
+      hasMissingLanding: true
+    },
+    version: 3,
+    createdAt: "2026-07-30T10:00:00.000Z",
+    updatedAt: "2026-07-30T11:00:00.000Z"
+  };
+  const result = semanticClusterSplitResult({
+    sourceCluster: { id: sourceId, ...clusterBase },
+    createdCluster: {
+      id: createdId,
+      ...clusterBase,
+      name: input.newClusterName,
+      keywordCount: 1,
+      version: 1,
+      pageDiagnostics: {
+        ...clusterBase.pageDiagnostics,
+        unmappedKeywordCount: 1
+      }
+    },
+    movedKeywordCount: 1
+  }, input);
+  assert.equal(result.createdCluster.id, createdId);
+  assert.throws(
+    () => semanticClusterSplitResult({ ...result, movedKeywordCount: 0 }, input),
     DomainError
   );
 });

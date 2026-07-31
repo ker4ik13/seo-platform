@@ -730,6 +730,42 @@ async function previewChanges(
       restoredClusterIds.add(change.entityId);
     }
   }
+  const restorableKeywordIds = new Set<string>();
+  for (const change of changes) {
+    if (
+      change.entityType !== "KEYWORD" ||
+      !["CREATE", "UPDATE", "DELETE"].includes(change.operation)
+    ) continue;
+    const current = currentByEntity.get(changeKey("KEYWORD", change.entityId));
+    const after = requiredKeywordState(change.afterState);
+    if (
+      current?.version === change.afterVersion &&
+      current.status === after.status &&
+      !(await keywordRestoreConflict(
+        client,
+        workspaceId,
+        projectId,
+        change.entityId,
+        nullableKeywordState(change.beforeState),
+        restoredClusterIds
+      ))
+    ) {
+      restorableKeywordIds.add(change.entityId);
+    }
+  }
+  const detachedKeywordIdsByCluster = new Map<string, string[]>();
+  for (const change of changes) {
+    if (
+      change.entityType !== "KEYWORD" ||
+      !restorableKeywordIds.has(change.entityId)
+    ) continue;
+    const before = nullableKeywordState(change.beforeState);
+    const after = requiredKeywordState(change.afterState);
+    if (!after.clusterId || before?.clusterId === after.clusterId) continue;
+    const ids = detachedKeywordIdsByCluster.get(after.clusterId) ?? [];
+    ids.push(change.entityId);
+    detachedKeywordIdsByCluster.set(after.clusterId, ids);
+  }
   const result: SemanticVersionChangePreview[] = [];
   for (const change of changes) {
     if (
@@ -774,7 +810,8 @@ async function previewChanges(
           workspaceId,
           projectId,
           change.entityId,
-          nullableClusterState(change.beforeState)
+          nullableClusterState(change.beforeState),
+          detachedKeywordIdsByCluster.get(change.entityId) ?? []
         );
     result.push({
       entityType,
@@ -868,11 +905,20 @@ async function clusterRestoreConflict(
   workspaceId: string,
   projectId: string,
   clusterId: string,
-  state: SemanticClusterVersionState | null
+  state: SemanticClusterVersionState | null,
+  detachedKeywordIds: readonly string[] = []
 ): Promise<string | undefined> {
   if (state === null || state.status === "DELETED") {
     const keywordCount = await client.keyword.count({
-      where: { workspaceId, projectId, clusterId, status: "ACTIVE" }
+      where: {
+        workspaceId,
+        projectId,
+        clusterId,
+        status: "ACTIVE",
+        ...(detachedKeywordIds.length === 0
+          ? {}
+          : { id: { notIn: [...detachedKeywordIds] } })
+      }
     });
     return keywordCount > 0 ? "CLUSTER_NOT_EMPTY" : undefined;
   }

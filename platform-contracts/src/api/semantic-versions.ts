@@ -7,6 +7,7 @@ export const semanticVersionReasons = [
   "CLUSTER_DELETE",
   "CLUSTER_BULK_UPDATE",
   "CLUSTER_MERGE",
+  "CLUSTER_SPLIT",
   "BULK_UPDATE",
   "IMPORT",
   "UNDO",

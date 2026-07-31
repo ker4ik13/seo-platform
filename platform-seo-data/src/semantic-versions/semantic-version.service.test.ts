@@ -129,6 +129,88 @@ test("merge undo preview restores a deleted source cluster before its keywords",
   ]);
 });
 
+test("split undo preview detaches restorable keywords before deleting the new cluster", async () => {
+  const createdClusterId = "01900000-0000-7000-8000-000000000023";
+  const beforeKeyword = { ...keywordState(), clusterId };
+  const afterKeyword = { ...beforeKeyword, clusterId: createdClusterId };
+  const sourceState = clusterState(null);
+  const createdState = { ...clusterState(null), name: "Технический аудит" };
+  const changes = [
+    {
+      entityType: "CLUSTER",
+      entityId: clusterId,
+      operation: "UPDATE",
+      beforeState: sourceState,
+      afterState: sourceState,
+      beforeVersion: 2,
+      afterVersion: 3,
+      createdAt: new Date("2026-07-30T12:00:00.000Z"),
+      id: "01900000-0000-7000-8000-000000000034"
+    },
+    {
+      entityType: "CLUSTER",
+      entityId: createdClusterId,
+      operation: "CREATE",
+      beforeState: null,
+      afterState: createdState,
+      beforeVersion: null,
+      afterVersion: 1,
+      createdAt: new Date("2026-07-30T12:00:01.000Z"),
+      id: "01900000-0000-7000-8000-000000000035"
+    },
+    {
+      entityType: "KEYWORD",
+      entityId: keywordId,
+      operation: "UPDATE",
+      beforeState: beforeKeyword,
+      afterState: afterKeyword,
+      beforeVersion: 5,
+      afterVersion: 6,
+      createdAt: new Date("2026-07-30T12:00:02.000Z"),
+      id: "01900000-0000-7000-8000-000000000036"
+    }
+  ];
+  let countWhere: unknown;
+  const service = new SemanticVersionService({
+    semanticVersion: {
+      findFirst: async () => ({
+        ...version(),
+        reason: "CLUSTER_SPLIT",
+        affectedCount: 3
+      })
+    },
+    semanticEntityChange: { findMany: async () => changes },
+    cluster: {
+      findMany: async () => [
+        { id: clusterId, version: 3, status: "ACTIVE" },
+        { id: createdClusterId, version: 1, status: "ACTIVE" }
+      ],
+      findFirst: async () => null
+    },
+    keyword: {
+      findMany: async () => [
+        { id: keywordId, version: 6, status: "ACTIVE" }
+      ],
+      findFirst: async () => null,
+      count: async ({ where }: { where: unknown }) => {
+        countWhere = where;
+        return 0;
+      }
+    }
+  } as unknown as PrismaService);
+
+  const result = await service.previewUndo(workspaceId, projectId, versionId);
+
+  assert.equal(result.applicable, 3);
+  assert.deepEqual(countWhere, {
+    workspaceId,
+    projectId,
+    clusterId: createdClusterId,
+    status: "ACTIVE",
+    id: { notIn: [keywordId] }
+  });
+});
+
 test("undo creates a new version and soft-deletes only the exact current row", async () => {
   const keywordUpdates: unknown[] = [];
   const recordedChanges: unknown[] = [];

@@ -3,11 +3,14 @@ import type {
   InternalCreateSemanticClusterInput,
   InternalDeleteSemanticClusterInput,
   InternalSemanticClusterMergeInput,
+  InternalSemanticClusterSplitInput,
   InternalUpdateSemanticClusterInput,
   InternalSemanticClusterPageBulkInput,
   SemanticCluster,
   SemanticClusterMergePreview,
   SemanticClusterMergeResult,
+  SemanticClusterSplitPreview,
+  SemanticClusterSplitResult,
   SemanticClusterPageBulkPreview,
   SemanticClusterPageBulkPreviewChange,
   SemanticClusterPageBulkResult,
@@ -19,12 +22,14 @@ import { PrismaService } from "../database/prisma.service.js";
 import {
   lockSemanticKeywordWrites,
   SemanticVersionService,
+  type SemanticClusterChange,
   type SemanticClusterVersionState,
   type SemanticKeywordChange,
   type SemanticKeywordVersionState
 } from "../semantic-versions/semantic-version.service.js";
 
 const SYNCHRONOUS_MERGE_KEYWORD_LIMIT = 450;
+const SYNCHRONOUS_SPLIT_KEYWORD_LIMIT = 450;
 
 const CLUSTER_INCLUDE = {
   primaryPage: {
@@ -614,6 +619,213 @@ export class ClusterService {
       };
     });
   }
+
+  public async previewSplit(
+    input: InternalSemanticClusterSplitInput
+  ): Promise<SemanticClusterSplitPreview> {
+    const [source, keywords, sourceKeywordCount, duplicate] = await Promise.all([
+      this.prisma.cluster.findFirst({
+        where: {
+          id: input.sourceCluster.id,
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "ACTIVE"
+        },
+        include: CLUSTER_INCLUDE
+      }),
+      this.prisma.keyword.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "ACTIVE",
+          id: { in: input.keywordItems.map(({ id }) => id) }
+        },
+        include: MERGE_KEYWORD_INCLUDE
+      }),
+      this.prisma.keyword.count({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "ACTIVE",
+          clusterId: input.sourceCluster.id
+        }
+      }),
+      this.prisma.cluster.findFirst({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "ACTIVE",
+          name: { equals: input.newClusterName, mode: "insensitive" }
+        },
+        select: { id: true }
+      })
+    ]);
+    return splitPreview(
+      input,
+      source,
+      keywords,
+      sourceKeywordCount,
+      duplicate !== null
+    );
+  }
+
+  public async split(
+    input: InternalSemanticClusterSplitInput
+  ): Promise<SemanticClusterSplitResult> {
+    return this.prisma.$transaction(async (transaction) => {
+      await lockSemanticKeywordWrites(transaction, input.projectId);
+      await lockClusterSet(transaction, input.projectId);
+      await lockCluster(transaction, input.projectId, input.sourceCluster.id);
+      const [source, keywords, sourceKeywordCount, duplicate] = await Promise.all([
+        transaction.cluster.findFirst({
+          where: {
+            id: input.sourceCluster.id,
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            status: "ACTIVE"
+          },
+          include: CLUSTER_INCLUDE
+        }),
+        transaction.keyword.findMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            status: "ACTIVE",
+            id: { in: input.keywordItems.map(({ id }) => id) }
+          },
+          orderBy: { id: "asc" },
+          include: MERGE_KEYWORD_INCLUDE
+        }),
+        transaction.keyword.count({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            status: "ACTIVE",
+            clusterId: input.sourceCluster.id
+          }
+        }),
+        transaction.cluster.findFirst({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            status: "ACTIVE",
+            name: { equals: input.newClusterName, mode: "insensitive" }
+          },
+          select: { id: true }
+        })
+      ]);
+      const preview = splitPreview(
+        input,
+        source,
+        keywords,
+        sourceKeywordCount,
+        duplicate !== null
+      );
+      assertSplitReady(preview);
+      const currentSource = source!;
+      const created = await transaction.cluster.create({
+        data: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          name: input.newClusterName,
+          method: "MANUAL",
+          evidence: {
+            source: "MANUAL_SPLIT",
+            sourceClusterId: currentSource.id,
+            actorId: input.actorId
+          },
+          isLocked: input.isLocked ?? false,
+          excludeFromReclustering: input.excludeFromReclustering ?? false
+        },
+        include: CLUSTER_INCLUDE
+      });
+      const keywordChanges: SemanticKeywordChange[] = keywords.map((keyword) => {
+        const beforeState = mergeKeywordVersionState(keyword);
+        return {
+          entityId: keyword.id,
+          operation: "UPDATE",
+          beforeState,
+          afterState: { ...beforeState, clusterId: created.id },
+          beforeVersion: keyword.version,
+          afterVersion: keyword.version + 1
+        };
+      });
+      const moved = await transaction.keyword.updateMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "ACTIVE",
+          clusterId: currentSource.id,
+          id: { in: keywords.map(({ id }) => id) }
+        },
+        data: {
+          clusterId: created.id,
+          updatedBy: input.actorId,
+          version: { increment: 1 }
+        }
+      });
+      if (moved.count !== keywords.length) throw splitStateChanged();
+      const updatedSource = await transaction.cluster.update({
+        where: {
+          workspaceId_projectId_id: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            id: currentSource.id
+          }
+        },
+        data: { version: { increment: 1 } },
+        include: CLUSTER_INCLUDE
+      });
+      const sourceBefore = clusterVersionState(currentSource);
+      const createdState = clusterVersionState(created);
+      const clusterChanges: SemanticClusterChange[] = [
+        {
+          entityId: currentSource.id,
+          operation: "UPDATE",
+          beforeState: sourceBefore,
+          afterState: sourceBefore,
+          beforeVersion: currentSource.version,
+          afterVersion: currentSource.version + 1
+        },
+        {
+          entityId: created.id,
+          operation: "CREATE",
+          beforeState: null,
+          afterState: createdState,
+          beforeVersion: null,
+          afterVersion: created.version
+        }
+      ];
+      await this.semanticVersions.createWithChanges(
+        transaction,
+        {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          actorId: input.actorId,
+          reason: "CLUSTER_SPLIT",
+          summary: `Выделен кластер «${created.name}»: ${keywords.length} запросов`
+        },
+        keywordChanges,
+        clusterChanges
+      );
+      const counts = await transaction.keyword.groupBy({
+        by: ["clusterId", "targetPageId"],
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "ACTIVE",
+          clusterId: { in: [updatedSource.id, created.id] }
+        },
+        _count: { _all: true }
+      });
+      const stats = keywordPageStats(counts);
+      return {
+        sourceCluster: clusterItem(updatedSource, stats.get(updatedSource.id)),
+        createdCluster: clusterItem(created, stats.get(created.id)),
+        movedKeywordCount: keywords.length
+      };
+    });
+  }
 }
 
 function pageMappingPreview(
@@ -727,11 +939,102 @@ function assertMergeReady(preview: SemanticClusterMergePreview): void {
   );
 }
 
+function splitPreview(
+  input: InternalSemanticClusterSplitInput,
+  source: ClusterRow | null,
+  keywords: readonly MergeKeywordRow[],
+  sourceKeywordCount: number,
+  duplicateName: boolean
+): SemanticClusterSplitPreview {
+  const rowById = new Map(keywords.map((row) => [row.id, row]));
+  const unavailableKeywordIds = input.keywordItems.flatMap(({ id }) =>
+    rowById.has(id) ? [] : [id]
+  );
+  const conflictedKeywordIds = input.keywordItems.flatMap(({ id, version }) => {
+    const row = rowById.get(id);
+    return row && (row.version !== version || row.clusterId !== input.sourceCluster.id)
+      ? [id]
+      : [];
+  });
+  const sourceClusterState = !source
+    ? "UNAVAILABLE" as const
+    : source.version !== input.sourceCluster.version
+      ? "CONFLICTED" as const
+      : "READY" as const;
+  const movableKeywordCount = input.keywordItems.length
+    - unavailableKeywordIds.length
+    - conflictedKeywordIds.length;
+  const sourceWouldBeEmpty =
+    sourceClusterState === "READY" &&
+    unavailableKeywordIds.length === 0 &&
+    conflictedKeywordIds.length === 0 &&
+    movableKeywordCount >= sourceKeywordCount;
+  const conflicted =
+    sourceClusterState !== "READY" ||
+    duplicateName ||
+    sourceWouldBeEmpty ||
+    unavailableKeywordIds.length > 0 ||
+    conflictedKeywordIds.length > 0;
+  return {
+    readiness: conflicted
+      ? "CONFLICTED"
+      : input.keywordItems.length > SYNCHRONOUS_SPLIT_KEYWORD_LIMIT
+        ? "BACKGROUND_REQUIRED"
+        : "READY",
+    sourceClusterState,
+    selectedKeywordCount: input.keywordItems.length,
+    movableKeywordCount,
+    sourceKeywordCount,
+    sourceWouldBeEmpty,
+    duplicateName,
+    sourceLocked: source?.isLocked ?? false,
+    conflictedKeywordIds,
+    unavailableKeywordIds,
+    synchronousKeywordLimit: SYNCHRONOUS_SPLIT_KEYWORD_LIMIT
+  };
+}
+
+function assertSplitReady(preview: SemanticClusterSplitPreview): void {
+  if (preview.readiness === "READY") return;
+  if (preview.readiness === "BACKGROUND_REQUIRED") {
+    throw new HttpException(
+      {
+        code: "BACKGROUND_OPERATION_REQUIRED",
+        message: "This cluster split exceeds the synchronous safety limit",
+        limit: preview.synchronousKeywordLimit
+      },
+      HttpStatus.UNPROCESSABLE_ENTITY
+    );
+  }
+  throw new HttpException(
+    {
+      code: "VERSION_CONFLICT",
+      message: "Cluster split preview contains conflicts",
+      sourceClusterState: preview.sourceClusterState,
+      duplicateName: preview.duplicateName,
+      sourceWouldBeEmpty: preview.sourceWouldBeEmpty,
+      conflictedKeywordIds: preview.conflictedKeywordIds,
+      unavailableKeywordIds: preview.unavailableKeywordIds
+    },
+    HttpStatus.PRECONDITION_FAILED
+  );
+}
+
 function mergeStateChanged(): HttpException {
   return new HttpException(
     {
       code: "VERSION_CONFLICT",
       message: "Cluster merge scope changed while applying the operation"
+    },
+    HttpStatus.PRECONDITION_FAILED
+  );
+}
+
+function splitStateChanged(): HttpException {
+  return new HttpException(
+    {
+      code: "VERSION_CONFLICT",
+      message: "Cluster split scope changed while applying the operation"
     },
     HttpStatus.PRECONDITION_FAILED
   );

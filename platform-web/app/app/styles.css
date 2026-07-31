@@ -2449,6 +2449,17 @@ svg { display: block; }
 .semantic-bulk-grid label > span { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; }
 .semantic-bulk-grid input:not([type="checkbox"]),
 .semantic-bulk-grid select { background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; min-height: 38px; padding: 0 10px; width: 100%; }
+.semantic-bulk-split { border-top: 1px solid #dedaf8; padding-top: 10px; }
+.semantic-bulk-split summary { align-items: center; cursor: pointer; display: flex; gap: 10px; justify-content: space-between; }
+.semantic-bulk-split summary::marker { color: var(--primary); }
+.semantic-bulk-split summary span { font-size: 13px; font-weight: 750; }
+.semantic-bulk-split summary small { color: var(--muted); font-size: 11px; font-weight: 600; }
+.semantic-bulk-split-body { display: grid; gap: 10px; padding-top: 12px; }
+.semantic-bulk-split-body > label { display: grid; gap: 6px; }
+.semantic-bulk-split-body > label > span { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.semantic-bulk-split-body > label > input { background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; min-height: 38px; padding: 0 10px; width: 100%; }
+.semantic-bulk-split-options { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.semantic-bulk-split-options label { align-items: center; color: var(--muted); display: flex; font-size: 12px; gap: 7px; }
 .semantic-bulk-tags,
 .semantic-bulk-url { grid-column: span 2; }
 .semantic-bulk-tags > span { align-items: center; display: flex; gap: 6px; }

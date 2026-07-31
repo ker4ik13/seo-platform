@@ -9,6 +9,7 @@ import {
 interface BulkSelection {
   readonly id: string;
   readonly version: number;
+  readonly clusterId?: string;
 }
 
 interface BulkGroup {
@@ -19,6 +20,8 @@ interface BulkGroup {
 interface BulkCluster {
   readonly id: string;
   readonly name: string;
+  readonly keywordCount: number;
+  readonly version: number;
 }
 
 interface BulkResult {
@@ -27,6 +30,25 @@ interface BulkResult {
   readonly skipped: number;
   readonly failed: number;
   readonly conflicted: number;
+}
+
+interface SplitPreview {
+  readonly readiness: "READY" | "CONFLICTED" | "BACKGROUND_REQUIRED";
+  readonly sourceClusterState: "READY" | "CONFLICTED" | "UNAVAILABLE";
+  readonly selectedKeywordCount: number;
+  readonly movableKeywordCount: number;
+  readonly sourceKeywordCount: number;
+  readonly sourceWouldBeEmpty: boolean;
+  readonly duplicateName: boolean;
+  readonly sourceLocked: boolean;
+  readonly conflictedKeywordIds: readonly string[];
+  readonly unavailableKeywordIds: readonly string[];
+  readonly synchronousKeywordLimit: number;
+}
+
+interface SplitResult {
+  readonly createdCluster: Readonly<{ id: string; name: string }>;
+  readonly movedKeywordCount: number;
 }
 
 type BulkIntent =
@@ -43,7 +65,8 @@ export function SemanticBulkEditor({
   groups,
   clusters,
   onCancel,
-  onCompleted
+  onCompleted,
+  onSplitCompleted
 }: Readonly<{
   projectId: string;
   selections: readonly BulkSelection[];
@@ -51,6 +74,7 @@ export function SemanticBulkEditor({
   clusters: readonly BulkCluster[];
   onCancel: () => void;
   onCompleted: (result: BulkResult) => void;
+  onSplitCompleted: (result: SplitResult) => void;
 }>) {
   const [priority, setPriority] = useState("");
   const [favorite, setFavorite] = useState<"KEEP" | "YES" | "NO">("KEEP");
@@ -65,6 +89,65 @@ export function SemanticBulkEditor({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const [result, setResult] = useState<BulkResult>();
+  const [splitName, setSplitName] = useState("");
+  const [splitLocked, setSplitLocked] = useState(false);
+  const [splitExcluded, setSplitExcluded] = useState(false);
+  const [splitPreview, setSplitPreview] = useState<SplitPreview>();
+  const [splitSaving, setSplitSaving] = useState(false);
+  const [splitError, setSplitError] = useState<string>();
+  const sourceClusterId = selections[0]?.clusterId;
+  const sourceCluster = sourceClusterId && selections.every(
+    ({ clusterId: itemClusterId }) => itemClusterId === sourceClusterId
+  )
+    ? clusters.find(({ id }) => id === sourceClusterId)
+    : undefined;
+
+  function splitBody() {
+    return {
+      sourceCluster: sourceCluster
+        ? { id: sourceCluster.id, version: sourceCluster.version }
+        : undefined,
+      keywordItems: selections.map(({ id, version }) => ({ id, version })),
+      newClusterName: splitName,
+      isLocked: splitLocked,
+      excludeFromReclustering: splitExcluded
+    };
+  }
+
+  async function previewClusterSplit(): Promise<void> {
+    if (!sourceCluster || splitSaving) return;
+    setSplitSaving(true);
+    setSplitError(undefined);
+    try {
+      setSplitPreview(await browserApiRequest<SplitPreview>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/clusters/split-preview`,
+        { method: "POST", body: splitBody() }
+      ));
+    } catch (requestError) {
+      setSplitPreview(undefined);
+      setSplitError(bulkErrorMessage(requestError));
+    } finally {
+      setSplitSaving(false);
+    }
+  }
+
+  async function applyClusterSplit(): Promise<void> {
+    if (!sourceCluster || splitPreview?.readiness !== "READY" || splitSaving) return;
+    setSplitSaving(true);
+    setSplitError(undefined);
+    try {
+      const splitResult = await browserApiRequest<SplitResult>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/clusters/split`,
+        { method: "POST", body: splitBody() }
+      );
+      onSplitCompleted(splitResult);
+    } catch (requestError) {
+      setSplitPreview(undefined);
+      setSplitError(bulkErrorMessage(requestError));
+    } finally {
+      setSplitSaving(false);
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -104,7 +187,10 @@ export function SemanticBulkEditor({
         )}/bulk-commands`,
         {
           method: "POST",
-          body: { items: selections, patch }
+          body: {
+            items: selections.map(({ id, version }) => ({ id, version })),
+            patch
+          }
         }
       );
       setResult(response);
@@ -241,6 +327,97 @@ export function SemanticBulkEditor({
           />
         </label>
       </div>
+      <details className="semantic-bulk-split">
+        <summary>
+          <span>Выделить в новый кластер</span>
+          <small>
+            {sourceCluster
+              ? `Из «${sourceCluster.name}» · ${selections.length} запросов`
+              : "Выберите запросы одного кластера"}
+          </small>
+        </summary>
+        <div className="semantic-bulk-split-body">
+          <label>
+            <span>Название нового кластера</span>
+            <input
+              disabled={!sourceCluster || splitSaving}
+              maxLength={255}
+              onChange={(event) => {
+                setSplitName(event.target.value);
+                setSplitPreview(undefined);
+              }}
+              placeholder="Например, Купить ноутбук"
+              value={splitName}
+            />
+          </label>
+          <div className="semantic-bulk-split-options">
+            <label>
+              <input
+                checked={splitLocked}
+                disabled={!sourceCluster || splitSaving}
+                onChange={(event) => {
+                  setSplitLocked(event.target.checked);
+                  setSplitPreview(undefined);
+                }}
+                type="checkbox"
+              />
+              Зафиксировать
+            </label>
+            <label>
+              <input
+                checked={splitExcluded}
+                disabled={!sourceCluster || splitSaving}
+                onChange={(event) => {
+                  setSplitExcluded(event.target.checked);
+                  setSplitPreview(undefined);
+                }}
+                type="checkbox"
+              />
+              Исключить из автокластеризации
+            </label>
+          </div>
+          {splitPreview && (
+            <div
+              className={`inline-alert ${splitPreview.readiness === "READY" ? "success" : "danger"}`}
+              role="status"
+            >
+              {splitPreview.readiness === "READY"
+                ? `Готово к переносу: ${splitPreview.movableKeywordCount} из ${splitPreview.sourceKeywordCount} запросов исходного кластера.`
+                : splitPreview.sourceWouldBeEmpty
+                  ? "Нельзя перенести весь кластер: переименуйте его или оставьте хотя бы один запрос."
+                  : splitPreview.duplicateName
+                    ? "Кластер с таким названием уже существует."
+                    : splitPreview.readiness === "BACKGROUND_REQUIRED"
+                      ? `Для переноса более ${splitPreview.synchronousKeywordLimit} запросов нужна фоновая задача.`
+                      : "Часть запросов или исходный кластер изменилась. Обновите таблицу и повторите preview."}
+              {splitPreview.sourceLocked && (
+                <span> Исходный кластер зафиксирован; ручное действие разрешено.</span>
+              )}
+            </div>
+          )}
+          {splitError && (
+            <div className="inline-alert danger" role="alert">{splitError}</div>
+          )}
+          <div className="semantic-editor-actions">
+            <button
+              className="secondary-button"
+              disabled={!sourceCluster || !splitName.trim() || splitSaving}
+              onClick={() => void previewClusterSplit()}
+              type="button"
+            >
+              {splitSaving ? "Проверяем…" : "Проверить"}
+            </button>
+            <button
+              className="primary-button"
+              disabled={splitPreview?.readiness !== "READY" || splitSaving}
+              onClick={() => void applyClusterSplit()}
+              type="button"
+            >
+              Выделить кластер
+            </button>
+          </div>
+        </div>
+      </details>
       {error && (
         <div className="inline-alert danger" role="alert">
           {error}

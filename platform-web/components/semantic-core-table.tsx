@@ -1044,10 +1044,21 @@ export function SemanticCoreTable({
             );
             setRetryVersion((value) => value + 1);
           }}
+          onSplitCompleted={(result) => {
+            setSelectedIds(new Set());
+            setBulkNotice(
+              `Создан кластер «${result.createdCluster.name}»: перенесено ${result.movedKeywordCount} запросов`
+            );
+            setRetryVersion((value) => value + 1);
+          }}
           projectId={projectId}
           selections={items
             .filter(({ id }) => selectedIds.has(id))
-            .map(({ id, version }) => ({ id, version }))}
+            .map(({ id, version, clusterId }) => ({
+              id,
+              version,
+              ...(clusterId ? { clusterId } : {})
+            }))}
         />
       )}
 

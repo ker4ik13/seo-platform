@@ -34,7 +34,9 @@ test("protects static cluster page mapping routes with bulk permission and CSRF"
     [prototype.previewPageMapping, "page-mapping-preview"],
     [prototype.bulkUpdatePageMapping, "page-mapping-bulk"],
     [prototype.previewMerge, "merge-preview"],
-    [prototype.merge, "merge"]
+    [prototype.merge, "merge"],
+    [prototype.previewSplit, "split-preview"],
+    [prototype.split, "split"]
   ] as const) {
     assert.equal(Reflect.getMetadata(PATH_METADATA, method), path);
     assert.equal(

@@ -4,6 +4,7 @@ import { DomainError } from "../common/domain-error.js";
 import {
   createSemanticClusterInput,
   semanticClusterMergeInput,
+  semanticClusterSplitInput,
   semanticClusterPageBulkInput,
   updateSemanticClusterInput
 } from "./semantic-cluster-input.js";
@@ -70,6 +71,37 @@ test("normalizes an exact cluster merge and requires the target selection", () =
         { id: second, version: 3 }
       ],
       targetClusterId: pageId
+    }),
+    DomainError
+  );
+});
+
+test("normalizes an exact cluster split and rejects duplicate keywords", () => {
+  const keywordId = "01900000-0000-7000-8000-000000000020";
+  assert.deepEqual(
+    semanticClusterSplitInput({
+      sourceCluster: { id: clusterId.toUpperCase(), version: 4 },
+      keywordItems: [{ id: keywordId.toUpperCase(), version: 7 }],
+      newClusterName: "  Купить   ноутбук ",
+      isLocked: true,
+      excludeFromReclustering: false
+    }),
+    {
+      sourceCluster: { id: clusterId, version: 4 },
+      keywordItems: [{ id: keywordId, version: 7 }],
+      newClusterName: "Купить ноутбук",
+      isLocked: true,
+      excludeFromReclustering: false
+    }
+  );
+  assert.throws(
+    () => semanticClusterSplitInput({
+      sourceCluster: { id: clusterId, version: 4 },
+      keywordItems: [
+        { id: keywordId, version: 7 },
+        { id: keywordId, version: 7 }
+      ],
+      newClusterName: "Купить ноутбук"
     }),
     DomainError
   );

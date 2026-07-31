@@ -18,6 +18,8 @@ import type {
   SemanticCluster,
   SemanticClusterMergePreview,
   SemanticClusterMergeResult,
+  SemanticClusterSplitPreview,
+  SemanticClusterSplitResult,
   SemanticClusterPageBulkPreview,
   SemanticClusterPageBulkResult
 } from "@seo-platform/contracts";
@@ -32,6 +34,7 @@ import {
   internalCreateSemanticClusterInput,
   internalDeleteSemanticClusterInput,
   internalSemanticClusterMergeInput,
+  internalSemanticClusterSplitInput,
   internalSemanticClusterPageBulkInput,
   internalUpdateSemanticClusterInput
 } from "./cluster-input.js";
@@ -129,6 +132,38 @@ export class ClusterController {
     assertMutation(projectId, headers, input);
     return {
       data: await this.clusters.merge(input),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Post("split-preview")
+  @HttpCode(HttpStatus.OK)
+  public async previewSplit(
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Headers() headers: InternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticClusterSplitPreview>> {
+    const input = internalSemanticClusterSplitInput(body);
+    assertMutation(projectId, headers, input);
+    return {
+      data: await this.clusters.previewSplit(input),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Post("split")
+  @HttpCode(HttpStatus.OK)
+  public async split(
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Headers() headers: InternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticClusterSplitResult>> {
+    const input = internalSemanticClusterSplitInput(body);
+    assertMutation(projectId, headers, input);
+    return {
+      data: await this.clusters.split(input),
       meta: { requestId: request.id }
     };
   }

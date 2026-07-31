@@ -191,3 +191,56 @@ export interface SemanticClusterMergeResult {
   readonly mergedClusterIds: readonly string[];
   readonly movedKeywordCount: number;
 }
+
+export interface SemanticClusterSplitInput {
+  readonly sourceCluster: SemanticClusterVersionSelection;
+  readonly keywordItems: readonly SemanticClusterVersionSelection[];
+  readonly newClusterName: string;
+  readonly isLocked?: boolean;
+  readonly excludeFromReclustering?: boolean;
+}
+
+export interface InternalSemanticClusterSplitInput
+  extends SemanticClusterSplitInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+}
+
+export const semanticClusterSplitReadiness = [
+  "READY",
+  "CONFLICTED",
+  "BACKGROUND_REQUIRED"
+] as const;
+
+export type SemanticClusterSplitReadiness =
+  (typeof semanticClusterSplitReadiness)[number];
+
+export const semanticClusterSplitSourceStates = [
+  "READY",
+  "CONFLICTED",
+  "UNAVAILABLE"
+] as const;
+
+export type SemanticClusterSplitSourceState =
+  (typeof semanticClusterSplitSourceStates)[number];
+
+export interface SemanticClusterSplitPreview {
+  readonly readiness: SemanticClusterSplitReadiness;
+  readonly sourceClusterState: SemanticClusterSplitSourceState;
+  readonly selectedKeywordCount: number;
+  readonly movableKeywordCount: number;
+  readonly sourceKeywordCount: number;
+  readonly sourceWouldBeEmpty: boolean;
+  readonly duplicateName: boolean;
+  readonly sourceLocked: boolean;
+  readonly conflictedKeywordIds: readonly string[];
+  readonly unavailableKeywordIds: readonly string[];
+  readonly synchronousKeywordLimit: number;
+}
+
+export interface SemanticClusterSplitResult {
+  readonly sourceCluster: SemanticCluster;
+  readonly createdCluster: SemanticCluster;
+  readonly movedKeywordCount: number;
+}

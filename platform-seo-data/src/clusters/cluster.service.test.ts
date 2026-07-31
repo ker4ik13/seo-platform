@@ -551,3 +551,154 @@ test("previews and atomically merges bounded clusters with reversible changes", 
   assert.equal(result.movedKeywordCount, 1);
   assert.equal(result.targetCluster.keywordCount, 1);
 });
+
+test("previews a cluster split and refuses to empty the source cluster", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000030";
+  let sourceKeywordCount = 3;
+  const service = new ClusterService({
+    cluster: {
+      findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+        Object.hasOwn(where, "name") ? null : row
+    },
+    keyword: {
+      findMany: async () => [{ id: keywordId, version: 5, clusterId }],
+      count: async () => sourceKeywordCount
+    }
+  } as unknown as PrismaService, semanticVersions);
+  const input = {
+    workspaceId,
+    projectId,
+    actorId,
+    sourceCluster: { id: clusterId, version: 2 },
+    keywordItems: [{ id: keywordId, version: 5 }],
+    newClusterName: "Технический аудит"
+  };
+
+  const ready = await service.previewSplit(input);
+  assert.equal(ready.readiness, "READY");
+  assert.equal(ready.movableKeywordCount, 1);
+  sourceKeywordCount = 1;
+  const empty = await service.previewSplit(input);
+  assert.equal(empty.readiness, "CONFLICTED");
+  assert.equal(empty.sourceWouldBeEmpty, true);
+});
+
+test("atomically splits a cluster and records a reversible mixed change set", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000031";
+  const createdClusterId = "01900000-0000-7000-8000-000000000032";
+  const keyword = {
+    id: keywordId,
+    workspaceId,
+    projectId,
+    textOriginal: "технический аудит",
+    textNormalized: "технический аудит",
+    normalizedHash: "b".repeat(64),
+    language: "ru",
+    priority: 0,
+    isFavorite: false,
+    intent: null,
+    status: "ACTIVE" as const,
+    clusterId,
+    targetPageId: null,
+    sourceMode: "MANUAL" as const,
+    sourceId: null,
+    isTracked: false,
+    customValues: {},
+    createdBy: actorId,
+    updatedBy: actorId,
+    version: 5,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    deletedAt: null,
+    memberships: [],
+    tags: []
+  };
+  const created = {
+    ...row,
+    id: createdClusterId,
+    name: "Технический аудит",
+    evidence: {
+      source: "MANUAL_SPLIT",
+      sourceClusterId: clusterId,
+      actorId
+    },
+    version: 1
+  };
+  const updatedSource = { ...row, version: 3 };
+  let movedData: unknown;
+  let versionMetadata: unknown;
+  let recordedKeywordChanges: readonly unknown[] = [];
+  let recordedClusterChanges: readonly unknown[] = [];
+  const transaction = {
+    $executeRaw: async () => 1,
+    $queryRaw: async () => [],
+    cluster: {
+      findFirst: async ({ where }: { where: Record<string, unknown> }) =>
+        Object.hasOwn(where, "name") ? null : row,
+      create: async () => created,
+      update: async () => updatedSource
+    },
+    keyword: {
+      findMany: async () => [keyword],
+      count: async () => 3,
+      updateMany: async ({ data }: { data: unknown }) => {
+        movedData = data;
+        return { count: 1 };
+      },
+      groupBy: async () => [
+        { clusterId, targetPageId: null, _count: { _all: 2 } },
+        { clusterId: createdClusterId, targetPageId: null, _count: { _all: 1 } }
+      ]
+    }
+  };
+  const service = new ClusterService({
+    $transaction: async (
+      callback: (tx: typeof transaction) => Promise<unknown>
+    ) => callback(transaction)
+  } as unknown as PrismaService, {
+    createWithChanges: async (
+      _transaction: unknown,
+      metadata: unknown,
+      keywordChanges: readonly unknown[],
+      clusterChanges: readonly unknown[]
+    ) => {
+      versionMetadata = metadata;
+      recordedKeywordChanges = keywordChanges;
+      recordedClusterChanges = clusterChanges;
+      return undefined;
+    }
+  } as unknown as SemanticVersionService);
+
+  const result = await service.split({
+    workspaceId,
+    projectId,
+    actorId,
+    sourceCluster: { id: clusterId, version: 2 },
+    keywordItems: [{ id: keywordId, version: 5 }],
+    newClusterName: "Технический аудит"
+  });
+
+  assert.deepEqual(movedData, {
+    clusterId: createdClusterId,
+    updatedBy: actorId,
+    version: { increment: 1 }
+  });
+  assert.equal(
+    (versionMetadata as { reason: string }).reason,
+    "CLUSTER_SPLIT"
+  );
+  assert.equal(recordedKeywordChanges.length, 1);
+  assert.equal(recordedClusterChanges.length, 2);
+  assert.deepEqual(
+    (recordedKeywordChanges[0] as { afterState: { clusterId: string } })
+      .afterState.clusterId,
+    createdClusterId
+  );
+  assert.equal(
+    (recordedClusterChanges[1] as { operation: string }).operation,
+    "CREATE"
+  );
+  assert.equal(result.sourceCluster.keywordCount, 2);
+  assert.equal(result.createdCluster.keywordCount, 1);
+  assert.equal(result.movedKeywordCount, 1);
+});

@@ -262,6 +262,8 @@ function reasonLabel(reason: SemanticVersionListItem["reason"]): string {
       return "массовое назначение посадочных";
     case "CLUSTER_MERGE":
       return "объединение кластеров";
+    case "CLUSTER_SPLIT":
+      return "разделение кластера";
     case "BULK_UPDATE":
       return "массовое изменение";
     case "IMPORT":
