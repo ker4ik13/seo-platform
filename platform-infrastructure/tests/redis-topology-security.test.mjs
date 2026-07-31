@@ -42,6 +42,10 @@ const redisCredentials = new Map([
     ["rank-worker", "redis-jobs", "service-token-preflight"]
   ],
   [
+    "REDIS_JOBS_CRAWL_PASSWORD",
+    ["crawl-worker", "redis-jobs", "service-token-preflight"]
+  ],
+  [
     "REDIS_JOBS_CONNECTOR_PASSWORD",
     ["connector-worker", "redis-jobs", "service-token-preflight"]
   ],
@@ -88,6 +92,13 @@ const clientRoutes = [
     "rank-worker",
     "REDIS_URL",
     "redis://seo_jobs_rank:${REDIS_JOBS_RANK_PASSWORD:?REDIS_JOBS_RANK_PASSWORD is required}@redis-jobs:6379",
+    "redis-jobs",
+    "jobs-redis"
+  ],
+  [
+    "crawl-worker",
+    "REDIS_URL",
+    "redis://seo_jobs_crawl:${REDIS_JOBS_CRAWL_PASSWORD:?REDIS_JOBS_CRAWL_PASSWORD is required}@redis-jobs:6379",
     "redis-jobs",
     "jobs-redis"
   ],
@@ -307,7 +318,7 @@ test("Redis policies separate durable queues, ephemeral realtime and CMS cache",
   assert.doesNotMatch(start.slice(execIndex), /REDIS_[A-Z_]+|--requirepass/u);
 });
 
-test("example Compose validation supplies eight distinct URL-safe Redis secrets", async () => {
+test("example Compose validation supplies nine distinct URL-safe Redis secrets", async () => {
   const packageJson = JSON.parse(await readFile(packageUrl, "utf8"));
   const command = packageJson.scripts?.["infra:validate:example"];
   assert.equal(typeof command, "string");

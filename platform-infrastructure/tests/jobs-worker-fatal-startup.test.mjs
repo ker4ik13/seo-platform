@@ -4,6 +4,7 @@ import test from "node:test";
 
 const workerEntrypoints = [
   "connector-worker.main.ts",
+  "crawl-worker.main.ts",
   "import-worker.main.ts",
   "inspection-worker.main.ts",
   "rank-worker.main.ts"

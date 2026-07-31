@@ -23,6 +23,7 @@ const jobsPasswords = new Map([
   ["seo_jobs_inspection", "REDIS_JOBS_INSPECTION_PASSWORD"],
   ["seo_jobs_import", "REDIS_JOBS_IMPORT_PASSWORD"],
   ["seo_jobs_rank", "REDIS_JOBS_RANK_PASSWORD"],
+  ["seo_jobs_crawl", "REDIS_JOBS_CRAWL_PASSWORD"],
   ["seo_jobs_connector", "REDIS_JOBS_CONNECTOR_PASSWORD"]
 ]);
 
@@ -40,7 +41,7 @@ test("renderer is POSIX shell and writes hashed least-privilege Jobs ACLs", asyn
     assertDoesNotExposeSecrets(acl, environment);
 
     const lines = acl.trimEnd().split("\n");
-    assert.equal(lines.length, 8);
+    assert.equal(lines.length, 9);
     for (const [username, secretName] of jobsPasswords) {
       const line = userLine(lines, username);
       assert.match(line, new RegExp(`#${sha256(environment[secretName])}\\b`, "u"));
@@ -71,6 +72,7 @@ test("renderer is POSIX shell and writes hashed least-privilege Jobs ACLs", asyn
     assert.deepEqual(
       keyPatterns(userLine(lines, "seo_jobs_api")),
       [
+        "~seo-platform:jobs:v1:crawls:*",
         "~seo-platform:jobs:v1:integration-credential-validation:*",
         "~seo-platform:jobs:v1:rank-automation:*",
         "~seo-platform:jobs:v1:rank-preparation:*",
@@ -90,6 +92,9 @@ test("renderer is POSIX shell and writes hashed least-privilege Jobs ACLs", asyn
     ]);
     assert.deepEqual(keyPatterns(userLine(lines, "seo_jobs_rank")), [
       "~seo-platform:jobs:v1:rank-preparation:*"
+    ]);
+    assert.deepEqual(keyPatterns(userLine(lines, "seo_jobs_crawl")), [
+      "~seo-platform:jobs:v1:crawls:*"
     ]);
     assert.deepEqual(keyPatterns(userLine(lines, "seo_jobs_connector")), [
       "~seo-platform:jobs:v1:integration-credential-validation:*"
@@ -240,9 +245,10 @@ function validRedisEnvironment() {
     REDIS_JOBS_INSPECTION_PASSWORD: `redis-jobs-inspection-${"c".repeat(40)}`,
     REDIS_JOBS_IMPORT_PASSWORD: `redis-jobs-import-${"d".repeat(40)}`,
     REDIS_JOBS_RANK_PASSWORD: `redis-jobs-rank-${"e".repeat(40)}`,
-    REDIS_JOBS_CONNECTOR_PASSWORD: `redis-jobs-connector-${"f".repeat(40)}`,
-    REDIS_REALTIME_PASSWORD: `redis-realtime-${"g".repeat(40)}`,
-    REDIS_DIRECTUS_PASSWORD: `redis-directus-${"h".repeat(40)}`
+    REDIS_JOBS_CRAWL_PASSWORD: `redis-jobs-crawl-${"f".repeat(40)}`,
+    REDIS_JOBS_CONNECTOR_PASSWORD: `redis-jobs-connector-${"g".repeat(40)}`,
+    REDIS_REALTIME_PASSWORD: `redis-realtime-${"h".repeat(40)}`,
+    REDIS_DIRECTUS_PASSWORD: `redis-directus-${"i".repeat(40)}`
   };
 }
 

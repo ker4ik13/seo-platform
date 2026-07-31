@@ -27,6 +27,7 @@ const credentialNames = [
   "REDIS_JOBS_INSPECTION_PASSWORD",
   "REDIS_JOBS_IMPORT_PASSWORD",
   "REDIS_JOBS_RANK_PASSWORD",
+  "REDIS_JOBS_CRAWL_PASSWORD",
   "REDIS_JOBS_CONNECTOR_PASSWORD",
   "REDIS_REALTIME_PASSWORD",
   "REDIS_DIRECTUS_PASSWORD",
@@ -71,7 +72,7 @@ test("preflight script is valid POSIX shell and accepts distinct credentials", a
 
   assert.match(
     result.stdout,
-    /validated 24 distinct deploy credentials, 5 distinct NATS bcrypt verifiers and 5 distinct NATS usernames/u
+    /validated 25 distinct deploy credentials, 5 distinct NATS bcrypt verifiers and 5 distinct NATS usernames/u
   );
   assert.equal(result.stderr, "");
   assertDoesNotExposeCredentials(

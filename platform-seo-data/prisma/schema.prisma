@@ -123,6 +123,13 @@ enum PageSourceType {
   CMS
 }
 
+enum CrawlIssueSeverity {
+  INFO
+  WARNING
+  ERROR
+  CRITICAL
+}
+
 model Keyword {
   id             String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId    String         @map("workspace_id") @db.Uuid
@@ -376,6 +383,8 @@ model Page {
   sources        PageSource[]
   targetKeywords Keyword[]
   createReceipts PageCreateReceipt[]
+  crawlSnapshots CrawlPageSnapshot[]
+  crawlIssues    CrawlIssue[]
 }
 
 model PageAlias {
@@ -425,6 +434,93 @@ model PageCreateReceipt {
   @@id([workspaceId, projectId, actorId, idempotencyKey])
   @@index([workspaceId, projectId, pageId], map: "page_create_receipts_tenant_page_idx")
   @@map("page_create_receipts")
+}
+
+model CrawlPageSnapshot {
+  id                  String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId         String           @map("workspace_id") @db.Uuid
+  projectId           String           @map("project_id") @db.Uuid
+  crawlId             String           @map("crawl_id") @db.Uuid
+  sequence            Int
+  pageId              String           @map("page_id") @db.Uuid
+  requestedUrl        String           @map("requested_url") @db.Text
+  finalUrl            String           @map("final_url") @db.Text
+  finalUrlHash        String           @map("final_url_hash") @db.Char(64)
+  depth               Int
+  statusCode          Int              @map("status_code")
+  responseTimeMs      Int              @map("response_time_ms")
+  sizeBytes           Int              @map("size_bytes")
+  contentType         String           @map("content_type") @db.VarChar(160)
+  title               String?          @db.Text
+  description         String?          @db.Text
+  h1                  String?          @db.Text
+  h1Count             Int              @map("h1_count")
+  canonicalUrl        String?          @map("canonical_url") @db.Text
+  robots              String?          @db.VarChar(255)
+  language            String?          @db.VarChar(16)
+  headings            Json
+  hreflang            Json
+  internalLinks       Json             @map("internal_links")
+  externalLinks       Json             @map("external_links")
+  imageCount          Int              @map("image_count")
+  imagesMissingAlt    Int              @map("images_missing_alt")
+  structuredDataTypes Json             @map("structured_data_types")
+  wordCount           Int              @map("word_count")
+  contentHash         String           @map("content_hash") @db.Char(64)
+  indexability        PageIndexability
+  crawledAt           DateTime         @map("crawled_at") @db.Timestamptz(6)
+  createdAt           DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  page             Page                       @relation(fields: [workspaceId, projectId, pageId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  issueOccurrences CrawlIssueOccurrence[]
+
+  @@unique([crawlId, sequence], map: "crawl_page_snapshots_crawl_sequence_key")
+  @@unique([crawlId, finalUrlHash], map: "crawl_page_snapshots_crawl_url_key")
+  @@unique([workspaceId, projectId, id], map: "crawl_page_snapshots_tenant_project_id_key")
+  @@index([workspaceId, projectId, crawledAt(sort: Desc)], map: "crawl_page_snapshots_project_crawled_idx")
+  @@index([workspaceId, projectId, pageId, crawledAt(sort: Desc)], map: "crawl_page_snapshots_page_crawled_idx")
+  @@map("crawl_page_snapshots")
+}
+
+model CrawlIssue {
+  id            String             @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId   String             @map("workspace_id") @db.Uuid
+  projectId     String             @map("project_id") @db.Uuid
+  pageId        String             @map("page_id") @db.Uuid
+  code          String             @db.VarChar(64)
+  severity      CrawlIssueSeverity
+  title         String             @db.VarChar(255)
+  details       Json
+  firstCrawlId  String             @map("first_crawl_id") @db.Uuid
+  lastCrawlId   String             @map("last_crawl_id") @db.Uuid
+  occurrences   Int                @default(1)
+  firstSeenAt   DateTime           @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt    DateTime           @map("last_seen_at") @db.Timestamptz(6)
+  resolvedAt    DateTime?          @map("resolved_at") @db.Timestamptz(6)
+  version       Int                @default(1)
+  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  page Page @relation(fields: [workspaceId, projectId, pageId], references: [workspaceId, projectId, id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@unique([projectId, pageId, code], map: "crawl_issues_project_page_code_key")
+  @@unique([workspaceId, projectId, id], map: "crawl_issues_tenant_project_id_key")
+  @@index([workspaceId, projectId, resolvedAt, severity, lastSeenAt(sort: Desc)], map: "crawl_issues_project_status_idx")
+  @@map("crawl_issues")
+}
+
+model CrawlIssueOccurrence {
+  snapshotId String             @map("snapshot_id") @db.Uuid
+  code       String             @db.VarChar(64)
+  severity   CrawlIssueSeverity
+  title      String             @db.VarChar(255)
+  details    Json
+  createdAt  DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  snapshot CrawlPageSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  @@id([snapshotId, code])
+  @@map("crawl_issue_occurrences")
 }
 
 model TrackingContext {

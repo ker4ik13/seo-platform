@@ -6,8 +6,8 @@
 - три изолированных Redis: durable AOF для BullMQ, ephemeral Pub/Sub для
   Socket.IO и отдельный ephemeral Directus cache;
 - NATS с JetStream;
-- четыре NestJS API, отдельные system, inspection, import, rank, connector и
-  transactional auth-email workers;
+- четыре NestJS API, отдельные system, inspection, import, rank, crawl,
+  connector и transactional auth-email workers;
 - единый web (`/`, `/tools`, `/docs`, `/app`), internal-only admin shell и
   Directus;
 - S3 и SMTP подключаются как внешние managed/hosted сервисы.
@@ -35,8 +35,8 @@
    `RANK_HISTORY_CURSOR_KEY`. Пустые значения в корневом примере —
    намеренный предохранитель; одно значение нельзя переиспользовать между
    границами.
-   Сгенерировать восемь независимых Redis passwords:
-   `REDIS_JOBS_{API,SYSTEM,INSPECTION,IMPORT,RANK,CONNECTOR}_PASSWORD`,
+   Сгенерировать девять независимых Redis passwords:
+   `REDIS_JOBS_{API,SYSTEM,INSPECTION,IMPORT,RANK,CRAWL,CONNECTOR}_PASSWORD`,
    `REDIS_REALTIME_PASSWORD` и `REDIS_DIRECTUS_PASSWORD`. Они не совпадают с
    service/NATS credentials и соответствуют URL-safe deploy policy.
    Отдельно сгенерировать пять разных пар NATS identity:
@@ -156,8 +156,8 @@ credential и запрещает встроенные значения вмес�
 
 Перед запуском credential-bearing processes, Redis servers и NATS Compose
 обязательно завершает one-shot `service-token-preflight`. Он получает десять
-service tokens, `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и пять
-NATS passwords, проверяет все 24 credentials на глобальную pairwise
+service tokens, `RANK_HISTORY_CURSOR_KEY`, девять Redis passwords и пять
+NATS passwords, проверяет все 25 credentials на глобальную pairwise
 distinctness, отсутствие placeholders и длину `32..512`. Дополнительно он
 проверяет пять разных canonical bcrypt verifier записей и пять NATS
 usernames отдельно на уникальный
@@ -180,6 +180,7 @@ anchor со всеми секретами:
 | `upload-inspection-worker` | DB/Redis/S3 и malware scanner |
 | `system-worker` | только Redis и concurrency |
 | `rank-worker` | Отдельный `jobs_rank_runtime`, Redis, SEO rank manifest и Platform rank grant; остальное запрещено |
+| `crawl-worker` | Jobs DB, отдельный Redis keyspace, SEO Data и outbound HTTP(S); NATS/S3/SMTP/vault/provider secrets запрещены |
 | `connector-worker` | `jobs_connector`, Redis и execution KEK; management/general/NATS/S3/SMTP запрещены |
 | `auth-email-worker` | `jobs_auth_email_runtime`, dedicated NATS consumer, Platform JIT token и SMTP; Redis/general/vault/rank/S3 запрещены |
 
@@ -189,6 +190,31 @@ token, adapter credential или enable flag для чужой роли оста
 процесс. Эта misconfiguration boundary уже реализована, но не заменяет
 target-image Redis compatibility, egress, observability, backup/restore и
 provider-runtime release gates.
+
+### Crawl-worker process
+
+`crawl-worker` запускает только `dist/crawl-worker.main.js`, не публикует
+портов и подключён к `internal`, `jobs-redis` и `outbound`. Он получает
+`JOBS_TO_SEO_DATA_TOKEN`, но не получает NATS, S3, SMTP, credential vault,
+rank grant/result или provider secrets. Отдельный Redis user
+`seo_jobs_crawl` видит только versioned keyspace очереди `crawls`.
+
+PostgreSQL остаётся источником истины: BullMQ содержит только `crawlId`,
+dispatcher восстанавливает потерянную постановку и просроченный lease, а
+durable checkpoint хранит ограниченные `pending/seen` URL. Перед внешним
+запросом worker продлевает lease; SEO Data возвращает идемпотентный receipt,
+поэтому crash между сохранением snapshot и счётчиком Job не дублирует
+результат. Три попытки применяются только к внутренним/transport failures.
+HTTP-ошибка отдельной страницы сохраняется как partial outcome.
+
+Crawler всегда соблюдает `robots.txt`, использует идентифицируемый User-Agent
+с `WEB_PUBLIC_URL/crawler`, ограничен одним активным crawl на origin,
+скоростью `1..60` запросов/минуту, `1000` URL, depth `10`, response size,
+timeout и redirect budget. Каждый DNS answer и фактический socket address
+проверяются против private/link-local/metadata/reserved ranges; redirect
+проверяется заново. Raw HTML не сохраняется. Runtime limits задаются
+`JOBS_CRAWL_*` и `CRAWL_*`; увеличение concurrency/rate требует отдельного
+capacity и politeness review.
 
 ## Redis: isolated runtime topology
 
@@ -203,7 +229,7 @@ plaintext variables из child environment и не передаёт secrets че
 
 | Instance | Storage policy | Runtime identities |
 |---|---|---|
-| `redis-jobs` / `jobs-redis` | AOF everysec, dedicated `redis_jobs_data`, `noeviction` | шесть named users, каждый ограничен exact `seo-platform:jobs:v1:<queue>:*`; Jobs HTTP получает только пять публичных queue keyspaces |
+| `redis-jobs` / `jobs-redis` | AOF everysec, dedicated `redis_jobs_data`, `noeviction` | семь named users, каждый ограничен exact `seo-platform:jobs:v1:<queue>:*`; Jobs HTTP получает только семь producer queue keyspaces |
 | `redis-realtime` / `realtime-redis` | ephemeral tmpfs, Pub/Sub-only | `seo_realtime`, exact `seo-platform:realtime:v1` broadcast/request/response channels, без key access |
 | `redis-directus` / `directus-redis` | ephemeral tmpfs, `allkeys-lru` | отдельный `seo_directus`, cache namespace `seo-platform:directus:v1` |
 
@@ -925,7 +951,7 @@ cleanup; публичные download/import endpoints их не выдают.
 
 Вызовы jobs → `seo-data` используют `SEO_DATA_URL`, отдельный
 `JOBS_TO_SEO_DATA_TOKEN`, trusted tenant/actor headers и timeout
-`SEO_DATA_COMMAND_TIMEOUT_MS`. Token получают только Jobs HTTP/import и SEO
+`SEO_DATA_COMMAND_TIMEOUT_MS`. Token получают только Jobs HTTP/import/crawl и SEO
 Data; Jobs не получает доступ к `seo_db` и не следует HTTP redirects.
 Повтор chunk безопасен благодаря receipt/payload hash; рестарт после
 кооперативной отмены завершает partial semantic version.

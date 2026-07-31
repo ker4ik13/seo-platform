@@ -30,6 +30,7 @@ test("every controller module using session guards imports IdentityModule", () =
 
   assert.deepEqual(guardedModules.sort(), [
     "BillingModule",
+    "CrawlModule",
     "IntegrationModule",
     "NotificationModule",
     "PageModule",

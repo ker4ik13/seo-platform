@@ -31,6 +31,9 @@ import type {
   InternalCreateProjectConnectorBindingInput,
   InternalCreateRankEstimateInput,
   InternalCreateRankRunInput,
+  CreateTechnicalCrawlInput,
+  InternalCreateTechnicalCrawlInput,
+  InternalCancelTechnicalCrawlInput,
   InternalRunRankTrackingAutomationInput,
   InternalCancelRankJobInput,
   InternalAutomationStatusInput,
@@ -60,6 +63,8 @@ import type {
   StorageCapacityEntitlement,
   UploadPartUrls,
   UploadSummary,
+  TechnicalCrawlCollection,
+  TechnicalCrawlSummary,
   UpdateIntegrationCredentialInput,
   UpdateProjectConnectorBindingInput
 } from "@seo-platform/contracts";
@@ -134,6 +139,109 @@ export class JobsClient {
       entitlement
     };
     return this.request("POST", "/internal/v1/uploads", context, body);
+  }
+
+  public async listTechnicalCrawls(
+    context: InternalContext
+  ): Promise<TechnicalCrawlCollection> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      crawlCollectionPath(context.tenant.workspaceId, projectId),
+      context
+    );
+    const input = exactRecord(value, ["crawls"]);
+    if (!Array.isArray(input.crawls) || input.crawls.length > 50) {
+      throw invalidJobsResponse();
+    }
+    return {
+      crawls: input.crawls.map((crawl) =>
+        technicalCrawlResponse(
+          crawl,
+          context.tenant.workspaceId,
+          projectId
+        )
+      )
+    };
+  }
+
+  public async createTechnicalCrawl(
+    context: InternalContext,
+    input: CreateTechnicalCrawlInput,
+    idempotencyKey: string
+  ): Promise<TechnicalCrawlSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalCreateTechnicalCrawlInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId,
+      idempotencyKey,
+      correlationId: context.requestId
+    };
+    const value = await this.request<unknown>(
+      "POST",
+      crawlCollectionPath(context.tenant.workspaceId, projectId),
+      context,
+      body,
+      "shared",
+      idempotencyKey
+    );
+    return technicalCrawlResponse(
+      value,
+      context.tenant.workspaceId,
+      projectId
+    );
+  }
+
+  public async getTechnicalCrawl(
+    context: InternalContext,
+    crawlId: string
+  ): Promise<TechnicalCrawlSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      `${crawlCollectionPath(
+        context.tenant.workspaceId,
+        projectId
+      )}/${encodeURIComponent(crawlId)}`,
+      context
+    );
+    return technicalCrawlResponse(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      crawlId
+    );
+  }
+
+  public async cancelTechnicalCrawl(
+    context: InternalContext,
+    crawlId: string,
+    version: number
+  ): Promise<TechnicalCrawlSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalCancelTechnicalCrawlInput = {
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId,
+      version
+    };
+    const value = await this.request<unknown>(
+      "POST",
+      `${crawlCollectionPath(
+        context.tenant.workspaceId,
+        projectId
+      )}/${encodeURIComponent(crawlId)}/cancel`,
+      context,
+      body
+    );
+    return technicalCrawlResponse(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      crawlId
+    );
   }
 
   public async listAutomations(
@@ -896,6 +1004,205 @@ function automationCollectionPath(
   return `/internal/v1/workspaces/${encodeURIComponent(
     workspaceId
   )}/projects/${encodeURIComponent(projectId)}/automations`;
+}
+
+function crawlCollectionPath(
+  workspaceId: string,
+  projectId: string
+): string {
+  return `/internal/v1/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/projects/${encodeURIComponent(projectId)}/crawls`;
+}
+
+function technicalCrawlResponse(
+  value: unknown,
+  workspaceId: string,
+  projectId: string,
+  expectedId?: string
+): TechnicalCrawlSummary {
+  const input = crawlRecord(value, [
+    "id", "jobId", "workspaceId", "projectId", "status", "config",
+    "discoveredUrls", "processedUrls", "successfulUrls", "failedUrls",
+    "issueCount", "version", "createdAt"
+  ], [
+    "failureCode",
+    "startedAt",
+    "finishedAt",
+    "cancelRequestedAt"
+  ]);
+  const id = uuidValue(input.id);
+  const responseWorkspaceId = uuidValue(input.workspaceId);
+  const responseProjectId = uuidValue(input.projectId);
+  const config = exactRecord(input.config, [
+    "startUrls",
+    "maxUrls",
+    "maxDepth",
+    "requestsPerMinute",
+    "obeyRobots"
+  ]);
+  const startUrls = Array.isArray(config.startUrls)
+    ? config.startUrls.map(safeCrawlResponseUrl)
+    : [];
+  const failureCode =
+    typeof input.failureCode === "string" &&
+    ["ROBOTS_UNAVAILABLE", "CRAWL_EXECUTION_FAILED"].includes(
+      input.failureCode
+    )
+      ? input.failureCode
+      : undefined;
+  if (
+    responseWorkspaceId !== workspaceId ||
+    responseProjectId !== projectId ||
+    (expectedId && id !== expectedId) ||
+    ![
+      "QUEUED", "RUNNING", "CANCEL_REQUESTED", "CANCELLED",
+      "PARTIALLY_COMPLETED", "COMPLETED", "FAILED"
+    ].includes(String(input.status)) ||
+    startUrls.length < 1 ||
+    startUrls.length > 20 ||
+    new Set(startUrls).size !== startUrls.length ||
+    new Set(startUrls.map((url) => new URL(url).origin)).size !== 1 ||
+    config.obeyRobots !== true
+  ) {
+    throw invalidJobsResponse();
+  }
+  const summary: TechnicalCrawlSummary = {
+    id,
+    jobId: uuidValue(input.jobId),
+    workspaceId: responseWorkspaceId,
+    projectId: responseProjectId,
+    status: input.status as TechnicalCrawlSummary["status"],
+    config: {
+      startUrls,
+      maxUrls: boundedPositiveInteger(config.maxUrls, 1_000),
+      maxDepth: boundedNonNegativeInteger(config.maxDepth, 10),
+      requestsPerMinute: boundedPositiveInteger(
+        config.requestsPerMinute,
+        60
+      ),
+      obeyRobots: true
+    },
+    discoveredUrls: boundedNonNegativeInteger(input.discoveredUrls, 1_000),
+    processedUrls: boundedNonNegativeInteger(input.processedUrls, 1_000),
+    successfulUrls: boundedNonNegativeInteger(input.successfulUrls, 1_000),
+    failedUrls: boundedNonNegativeInteger(input.failedUrls, 1_000),
+    issueCount: boundedNonNegativeInteger(input.issueCount, 100_000),
+    version: positiveInteger(input.version),
+    createdAt: isoDateValue(input.createdAt),
+    ...(failureCode ? { failureCode } : {}),
+    ...(input.startedAt !== undefined
+      ? { startedAt: isoDateValue(input.startedAt) }
+      : {}),
+    ...(input.finishedAt !== undefined
+      ? { finishedAt: isoDateValue(input.finishedAt) }
+      : {}),
+    ...(input.cancelRequestedAt !== undefined
+      ? { cancelRequestedAt: isoDateValue(input.cancelRequestedAt) }
+      : {})
+  };
+  if (
+    summary.processedUrls !==
+      summary.successfulUrls + summary.failedUrls ||
+    summary.processedUrls > summary.discoveredUrls ||
+    !validCrawlLifecycle(summary, input.failureCode)
+  ) {
+    throw invalidJobsResponse();
+  }
+  return summary;
+}
+
+function validCrawlLifecycle(
+  crawl: TechnicalCrawlSummary,
+  rawFailureCode: unknown
+): boolean {
+  const created = Date.parse(crawl.createdAt);
+  const started = crawl.startedAt ? Date.parse(crawl.startedAt) : undefined;
+  const finished = crawl.finishedAt ? Date.parse(crawl.finishedAt) : undefined;
+  const cancelled = crawl.cancelRequestedAt
+    ? Date.parse(crawl.cancelRequestedAt)
+    : undefined;
+  if (
+    (started !== undefined && started < created) ||
+    (finished !== undefined && finished < (started ?? created)) ||
+    (cancelled !== undefined && cancelled < created)
+  ) return false;
+  if (crawl.status === "QUEUED") {
+    return started === undefined && finished === undefined &&
+      cancelled === undefined && rawFailureCode === undefined;
+  }
+  if (crawl.status === "RUNNING") {
+    return started !== undefined && finished === undefined &&
+      cancelled === undefined && rawFailureCode === undefined;
+  }
+  if (crawl.status === "CANCEL_REQUESTED") {
+    return started !== undefined && finished === undefined &&
+      cancelled !== undefined && rawFailureCode === undefined;
+  }
+  if (crawl.status === "CANCELLED") {
+    return finished !== undefined && cancelled !== undefined &&
+      rawFailureCode === undefined;
+  }
+  if (crawl.status === "COMPLETED") {
+    return started !== undefined && finished !== undefined &&
+      crawl.failedUrls === 0 && rawFailureCode === undefined;
+  }
+  if (crawl.status === "PARTIALLY_COMPLETED") {
+    return started !== undefined && finished !== undefined &&
+      crawl.failedUrls > 0 && rawFailureCode === undefined;
+  }
+  return crawl.status === "FAILED" && finished !== undefined &&
+    crawl.failureCode !== undefined && rawFailureCode === crawl.failureCode;
+}
+
+function safeCrawlResponseUrl(value: unknown): string {
+  if (typeof value !== "string" || value.length > 4_096) {
+    throw invalidJobsResponse();
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw invalidJobsResponse();
+  }
+  if (
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username ||
+    url.password ||
+    url.hash
+  ) {
+    throw invalidJobsResponse();
+  }
+  return url.toString();
+}
+
+function crawlRecord(
+  value: unknown,
+  required: readonly string[],
+  optional: readonly string[]
+): Readonly<Record<string, unknown>> {
+  const input = record(value);
+  const allowed = new Set([...required, ...optional]);
+  if (
+    required.some((field) => !(field in input)) ||
+    Object.keys(input).some((field) => !allowed.has(field))
+  ) {
+    throw invalidJobsResponse();
+  }
+  return input;
+}
+
+function boundedPositiveInteger(value: unknown, max: number): number {
+  const parsed = positiveInteger(value);
+  if (parsed > max) throw invalidJobsResponse();
+  return parsed;
+}
+
+function boundedNonNegativeInteger(value: unknown, max: number): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > max) {
+    throw invalidJobsResponse();
+  }
+  return Number(value);
 }
 
 function automationPath(

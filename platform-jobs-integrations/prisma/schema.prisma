@@ -146,6 +146,16 @@ enum AuthEmailDeliveryStatus {
   FAILED_FINAL
 }
 
+enum TechnicalCrawlStatus {
+  QUEUED
+  RUNNING
+  CANCEL_REQUESTED
+  CANCELLED
+  PARTIALLY_COMPLETED
+  COMPLETED
+  FAILED
+}
+
 model Job {
   id                   String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId          String         @map("workspace_id") @db.Uuid
@@ -196,6 +206,7 @@ model Job {
   rankConnectorExecutions           RankConnectorExecution[]    @relation("RankConnectorExecutionJob")
   rankConnectorValidationExecutions RankConnectorExecution[]    @relation("RankConnectorExecutionValidationJob")
   automationRuns                    AutomationRun[]
+  technicalCrawl                    TechnicalCrawl?
 
   @@unique([workspaceId, idempotencyScope, idempotencyKey])
   @@unique([workspaceId, id], map: "jobs_tenant_id_key")
@@ -206,6 +217,38 @@ model Job {
   @@index([type, status, leaseExpiresAt, createdAt])
   @@index([type, status, retryAt, priority, createdAt])
   @@map("jobs")
+}
+
+model TechnicalCrawl {
+  id                String               @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId       String               @map("workspace_id") @db.Uuid
+  projectId         String               @map("project_id") @db.Uuid
+  jobId             String               @unique @map("job_id") @db.Uuid
+  actorId           String               @map("actor_id") @db.Uuid
+  host              String               @db.VarChar(253)
+  config             Json
+  checkpoint         Json?
+  status             TechnicalCrawlStatus @default(QUEUED)
+  discoveredUrls    Int                  @default(0) @map("discovered_urls")
+  processedUrls     Int                  @default(0) @map("processed_urls")
+  successfulUrls    Int                  @default(0) @map("successful_urls")
+  failedUrls        Int                  @default(0) @map("failed_urls")
+  issueCount        Int                  @default(0) @map("issue_count")
+  failureCode       String?              @map("failure_code") @db.VarChar(64)
+  version           Int                  @default(1)
+  createdAt         DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  startedAt         DateTime?            @map("started_at") @db.Timestamptz(6)
+  finishedAt        DateTime?            @map("finished_at") @db.Timestamptz(6)
+  cancelRequestedAt DateTime?            @map("cancel_requested_at") @db.Timestamptz(6)
+  updatedAt         DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  job Job @relation(fields: [workspaceId, projectId, jobId], references: [workspaceId, projectId, id], onDelete: Cascade, onUpdate: Restrict, map: "technical_crawls_job_tenant_fkey")
+
+  @@unique([workspaceId, projectId, id], map: "technical_crawls_tenant_project_id_key")
+  @@unique([workspaceId, projectId, jobId], map: "technical_crawls_tenant_project_job_key")
+  @@index([workspaceId, projectId, createdAt(sort: Desc)], map: "technical_crawls_project_created_idx")
+  @@index([status, createdAt], map: "technical_crawls_status_created_idx")
+  @@map("technical_crawls")
 }
 
 model JobItem {

@@ -11,6 +11,8 @@ const validationId = "01900000-0000-7000-8000-000000000004";
 const projectId = "01900000-0000-7000-8000-000000000005";
 const bindingId = "01900000-0000-7000-8000-000000000006";
 const routeId = "01900000-0000-7000-8000-000000000007";
+const crawlId = "01900000-0000-7000-8000-000000000008";
+const crawlJobId = "01900000-0000-7000-8000-000000000009";
 
 test("forwards only the trusted storage entitlement with an upload command", async () => {
   const originalFetch = globalThis.fetch;
@@ -91,6 +93,69 @@ test("preserves a Jobs storage capacity rejection", async () => {
         error.code === "QUOTA_EXCEEDED" &&
         !error.message.includes("unsafe")
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("gets one tenant-scoped technical crawl through its public locator", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+  globalThis.fetch = (async (
+    input: string | URL | Request
+  ): Promise<Response> => {
+    requestedUrl = String(input);
+    return dataResponse(crawlResponseData());
+  }) as typeof fetch;
+
+  try {
+    const crawl = await client().getTechnicalCrawl(
+      projectContext("request-crawl-get-001"),
+      crawlId
+    );
+    assert.equal(crawl.id, crawlId);
+    assert.equal(crawl.status, "QUEUED");
+    assert.match(
+      requestedUrl,
+      new RegExp(`/projects/${projectId}/crawls/${crawlId}$`, "u")
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects secret-bearing or contradictory technical crawl responses", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const response of [
+      crawlResponseData({
+        config: {
+          ...crawlResponseData().config as object,
+          startUrls: ["https://user:secret@example.com/"]
+        }
+      }),
+      crawlResponseData({
+        status: "COMPLETED",
+        finishedAt: "2026-07-31T06:00:00.000Z"
+      }),
+      crawlResponseData({
+        status: "FAILED",
+        finishedAt: "2026-07-31T06:00:00.000Z",
+        failureCode: "SECRET_PROVIDER_ERROR"
+      })
+    ]) {
+      globalThis.fetch = (async (): Promise<Response> =>
+        dataResponse(response)) as typeof fetch;
+      await assert.rejects(
+        client().getTechnicalCrawl(
+          projectContext("request-crawl-invalid-001"),
+          crawlId
+        ),
+        (error: unknown) =>
+          error instanceof DomainError &&
+          error.code === "DEPENDENCY_UNAVAILABLE"
+      );
+    }
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -776,6 +841,33 @@ function dataResponse(data: unknown): Response {
     status: 200,
     headers: { "content-type": "application/json" }
   });
+}
+
+function crawlResponseData(
+  overrides: Readonly<Record<string, unknown>> = {}
+): Readonly<Record<string, unknown>> {
+  return {
+    id: crawlId,
+    jobId: crawlJobId,
+    workspaceId,
+    projectId,
+    status: "QUEUED",
+    config: {
+      startUrls: ["https://example.com/"],
+      maxUrls: 100,
+      maxDepth: 3,
+      requestsPerMinute: 30,
+      obeyRobots: true
+    },
+    discoveredUrls: 1,
+    processedUrls: 0,
+    successfulUrls: 0,
+    failedUrls: 0,
+    issueCount: 0,
+    version: 1,
+    createdAt: "2026-07-31T05:00:00.000Z",
+    ...overrides
+  };
 }
 
 function projectBindingResponseData(

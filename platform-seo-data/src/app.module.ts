@@ -15,6 +15,7 @@ import { SemanticSavedViewModule } from "./semantic-saved-views/semantic-saved-v
 import { SemanticCustomColumnModule } from "./semantic-custom-columns/semantic-custom-column.module.js";
 import { SemanticVersionModule } from "./semantic-versions/semantic-version.module.js";
 import { PageModule } from "./pages/page.module.js";
+import { CrawlSnapshotModule } from "./crawls/crawl-snapshot.module.js";
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { PageModule } from "./pages/page.module.js";
     SemanticSavedViewModule,
     SemanticVersionModule,
     PageModule,
+    CrawlSnapshotModule,
     TrackingContextModule,
     RankScopeModule,
     RankManifestModule,

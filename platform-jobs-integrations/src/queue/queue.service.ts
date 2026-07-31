@@ -40,6 +40,11 @@ import {
 import type {
   AutomationSchedule
 } from "@seo-platform/contracts";
+import {
+  CRAWL_QUEUE,
+  enqueueCrawl,
+  type CrawlJobData
+} from "./crawl.queue.js";
 
 export const SYSTEM_QUEUE = "system";
 
@@ -55,6 +60,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   private integrationCredentialValidationQueue?: Queue<IntegrationCredentialValidationJobData>;
   private rankPreparationQueue?: Queue<RankPreparationJobData>;
   private rankAutomationQueue?: Queue<RankAutomationJobData>;
+  private crawlQueue?: Queue<CrawlJobData>;
 
   public constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
@@ -92,6 +98,10 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       RANK_AUTOMATION_QUEUE,
       bullMqConnectionOptions(this.connection)
     );
+    this.crawlQueue = new Queue(
+      CRAWL_QUEUE,
+      bullMqConnectionOptions(this.connection)
+    );
   }
 
   public async onModuleDestroy(): Promise<void> {
@@ -101,7 +111,15 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     await this.integrationCredentialValidationQueue?.close();
     await this.rankPreparationQueue?.close();
     await this.rankAutomationQueue?.close();
+    await this.crawlQueue?.close();
     await this.connection?.quit();
+  }
+
+  public async enqueueCrawl(crawlId: string): Promise<void> {
+    if (!this.crawlQueue) {
+      throw new Error("Crawl queue is not connected");
+    }
+    await enqueueCrawl(this.crawlQueue, crawlId);
   }
 
   public async ping(): Promise<void> {

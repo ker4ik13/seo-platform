@@ -14,9 +14,10 @@ const sourceDirectoryPath = fileURLToPath(sourceDirectoryUrl);
 const expectedConstructionSites = new Map([
   ["automations/automation-runtime.service.ts", 1],
   ["connector-worker.main.ts", 3],
+  ["crawl-worker.main.ts", 2],
   ["import-worker.main.ts", 2],
   ["inspection-worker.main.ts", 2],
-  ["queue/queue.service.ts", 6],
+  ["queue/queue.service.ts", 7],
   ["rank-worker.main.ts", 2],
   ["worker.main.ts", 1]
 ]);

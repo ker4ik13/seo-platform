@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { AppShell } from "../../../../../../components/app-shell";
 import { ProjectPageMap } from "../../../../../../components/project-page-map";
+import { ProjectCrawlAudit } from "../../../../../../components/project-crawl-audit";
 import { requireProtectedProjectAppContext } from "../../../../../../lib/protected-app";
 
 export const dynamic = "force-dynamic";
@@ -48,6 +49,10 @@ export default async function ProjectPagesPage({
           </p>
         </div>
       </section>
+      <ProjectCrawlAudit
+        projectDomain={project.domain}
+        projectId={project.id}
+      />
       <ProjectPageMap key={project.id} projectId={project.id} />
     </AppShell>
   );

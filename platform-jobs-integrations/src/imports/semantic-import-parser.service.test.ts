@@ -285,6 +285,16 @@ function configFixture(): AppConfig {
       submitEnabled: false,
       killSwitchVersion: "arsenkin-positions@1"
     },
+    crawl: {
+      enabled: false,
+      concurrency: 2,
+      dispatchSeconds: 15,
+      leaseSeconds: 180,
+      requestTimeoutMs: 20_000,
+      maxResponseBytes: 2_000_000,
+      maxRedirects: 5,
+      userAgent: "SeoPlatformCrawler/1.0 (+https://example.test/crawler)"
+    },
     authEmail: disabledAuthEmailConfig(),
     uploads: {
       maxSizeBytes: 5 * 1_024 * 1_024 * 1_024,

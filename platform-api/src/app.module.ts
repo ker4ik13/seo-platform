@@ -17,6 +17,7 @@ import { AuthEmailDeliveryModule } from "./auth-email/auth-email-delivery.module
 import { BillingModule } from "./billing/billing.module.js";
 import { PlatformAdminModule } from "./admin/platform-admin.module.js";
 import { PageModule } from "./pages/page.module.js";
+import { CrawlModule } from "./crawls/crawl.module.js";
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { PageModule } from "./pages/page.module.js";
     BillingModule,
     PlatformAdminModule,
     PageModule,
+    CrawlModule,
     NotificationModule,
     SystemModule
   ]

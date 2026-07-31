@@ -575,7 +575,7 @@ test("keeps the credential caller token separate from HTTP audience auth", () =>
   );
 });
 
-test("allows SEO Data auth only on HTTP and import-worker roles", () => {
+test("allows SEO Data auth only on HTTP, import and crawl worker roles", () => {
   const token = "s".repeat(32);
   const importConfig = loadAppConfig(
     {
@@ -587,6 +587,17 @@ test("allows SEO Data auth only on HTTP and import-worker roles", () => {
   );
   assert.equal(importConfig.seoDataApiToken, token);
   assert.equal(importConfig.platformApiToken, undefined);
+  const crawlConfig = loadAppConfig(
+    {
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://test",
+      JOBS_TO_SEO_DATA_TOKEN: token,
+      CRAWL_CONTACT_URL: "https://app.example.test/crawler"
+    },
+    "CRAWL_WORKER"
+  );
+  assert.equal(crawlConfig.seoDataApiToken, token);
+  assert.equal(crawlConfig.crawl.enabled, true);
 
   for (const role of [
     "INSPECTION_WORKER",
@@ -602,7 +613,7 @@ test("allows SEO Data auth only on HTTP and import-worker roles", () => {
           },
           role
         ),
-      /Only the Jobs HTTP and import-worker processes/u
+      /Only the Jobs HTTP, import-worker and crawl-worker processes/u
     );
   }
   assert.throws(
@@ -939,6 +950,11 @@ test("rejects every undeclared adapter capability by process role", () => {
     HTTP: { NODE_ENV: "test", DATABASE_URL: "postgresql://test" },
     IMPORT_WORKER: { NODE_ENV: "test", DATABASE_URL: "postgresql://test" },
     INSPECTION_WORKER: { NODE_ENV: "test", DATABASE_URL: "postgresql://test" },
+    CRAWL_WORKER: {
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      JOBS_TO_SEO_DATA_TOKEN: "s".repeat(32)
+    },
     RANK_WORKER: {
       NODE_ENV: "test",
       DATABASE_URL: "postgresql://test",

@@ -2,8 +2,8 @@
 
 Последнее обновление: 31 июля 2026 года
 
-Текущий инкремент: production Page Map vertical после замыкания реального
-ручного и автоматического съёма позиций и тарифных capacity boundaries
+Текущий инкремент: production technical crawl и audit issues поверх рабочего
+Page Map, реального съёма позиций и тарифных capacity boundaries.
 Статус P1: ручной CRUD запросов и иерархических групп реализован поверх
 tenant-scoped SEO Data owner с optimistic locking, RBAC/CSRF и audit.
 Запрос уже можно создать, изменить и soft-delete; поддерживаются текст,
@@ -155,9 +155,23 @@ committed audit и строго валидирует owner-response. Private/noi
 фильтры, создание/редактирование, алиасы и SEO-метаданные, архив,
 восстановление, loading/empty/error/offline/read-only states и фактическое
 число назначенных запросов. Fresh migration-chain и DB smoke подтверждают
-tenant FK и конфликт canonical/alias. Следующий page/audit slice:
-SSRF-safe асинхронный crawl, immutable crawl snapshots, issue rules и
-issues-представление.
+tenant FK и конфликт canonical/alias.
+
+Первый production technical crawl vertical замкнут сквозным образом.
+Platform API создаёт идемпотентный асинхронный Job, проверяет
+`page.view/page.manage`, CSRF, mutable tenant context, optimistic cancel и
+audit. Выделенный `crawl-worker` соблюдает обязательный `robots.txt`,
+идентифицируемый User-Agent, rate/depth/URL/timeout/size/redirect budgets и
+запрещает private/link-local/metadata/reserved IP как после DNS resolution,
+так и на фактическом socket. Один host имеет не более одного активного
+crawl. PostgreSQL остаётся источником истины: lease, bounded durable
+`pending/seen` checkpoint и dispatcher восстанавливают crash/потерянную
+BullMQ-постановку; идемпотентный SEO Data receipt не задваивает счётчики при
+сбое между snapshot и Job checkpoint. SEO Data не хранит raw HTML, а
+сохраняет immutable page snapshots/issue occurrences и current open/resolved
+issue projection. Page Map обновляется из `CRAWL` provenance. Web позволяет
+запустить/остановить обход, показывает polling progress, историю и открытые
+проблемы с loading/empty/error/read-only states.
 
 P3 billing foundation реализован в Platform API и Web. Versioned каталог
 содержит Trial/Solo/Team/Agency/Business/Enterprise и годовые цены; hosted
@@ -254,7 +268,7 @@ digest.
 device boundaries сохранены отдельно. Все internal clients запрещают
 redirect, а service-token guards требуют один strict header. До запуска
 credential-bearing processes и NATS Compose выполняет network-less one-shot
-`service-token-preflight`: он глобально проверяет 24 credentials и отдельно
+`service-token-preflight`: он глобально проверяет 25 credentials и отдельно
 пять NATS bcrypt verifier и пять usernames без вывода значений или хэшей.
 Jobs image дополнительно
 получил явные process roles:
@@ -341,6 +355,7 @@ jobs <──> S3
 upload inspection worker ──> ClamAV
 import worker ──> S3 + partitioned staging in jobs_db
 import worker ──internal HTTP──> seo-data semantic core
+crawl worker ──> public HTTP(S) + jobs_db/Redis + seo-data snapshots
 connector worker ──> jobs_db + BullMQ + allowlisted provider endpoints
 platform-api outbox ──> AUTH_EMAIL_EVENTS ──> auth-email worker ──> SMTP
 auth-email worker ──internal HTTP/JIT──> platform-api
@@ -370,7 +385,7 @@ Tracking context читается и изменяется через Platform AP
 в SEO Data. Platform API передаёт проверенный tenant/actor context по internal
 HTTP с `PLATFORM_API_TO_SEO_DATA_TOKEN`; SEO Data повторно сверяет
 route/project scope и атомарно пишет redacted outbox event вместе с domain
-change. Jobs HTTP и import обращаются к SEO Data только с отдельным
+change. Jobs HTTP, import и crawl worker обращаются к SEO Data только с отдельным
 `JOBS_TO_SEO_DATA_TOKEN`. Realtime general HTTP принимает от Platform API
 `PLATFORM_API_TO_REALTIME_TOKEN`, а browser device lifecycle — отдельный
 notification credential.
@@ -449,7 +464,7 @@ outbox/inbox foundations либо собственные producer rows.
   всех четырёх backend. General internal HTTP разделён на exact pairs:
   `PLATFORM_API_TO_SEO_DATA_TOKEN` (Platform API → SEO Data),
   `PLATFORM_API_TO_JOBS_TOKEN` (Platform API → Jobs HTTP),
-  `JOBS_TO_SEO_DATA_TOKEN` (Jobs HTTP/import → SEO Data) и
+  `JOBS_TO_SEO_DATA_TOKEN` (Jobs HTTP/import/crawl → SEO Data) и
   `PLATFORM_API_TO_REALTIME_TOKEN` (Platform API → Realtime).
 - `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN` отличается от general tokens и
   выдаётся только Platform API и credential-capable jobs/integrations HTTP
@@ -463,8 +478,8 @@ outbox/inbox foundations либо собственные producer rows.
   Guard принимает один exact header и сравнивает credential timing-safe;
   internal clients используют `redirect: "error"`.
 - Deploy-level `service-token-preflight` намеренно строже runtime validation:
-  до запуска credential-bearing processes он проверяет 24 deploy credentials
-  (десять service tokens, `RANK_HISTORY_CURSOR_KEY`, восемь Redis passwords и
+  до запуска credential-bearing processes он проверяет 25 deploy credentials
+  (десять service tokens, `RANK_HISTORY_CURSOR_KEY`, девять Redis passwords и
   пять NATS passwords)
   на глобальную pairwise distinctness, пять NATS bcrypt verifier с
   canonical `$2a$` prefix/cost `11` на format/раздельность и пять NATS
@@ -488,7 +503,7 @@ outbox/inbox foundations либо собственные producer rows.
   user имеет только `PING`. Wrapper до privilege drop копирует выбранный
   config и атомарно рендерит ACL в dedicated runtime tmpfs, выставляет
   `redis:redis 0700/0600`; ACL содержит только SHA-256 password hashes.
-  Шесть Jobs identities ограничены exact versioned BullMQ keyspaces
+  Семь Jobs identities ограничены exact versioned BullMQ keyspaces
   `seo-platform:jobs:v1:*`, Realtime не имеет key access и получает только
   exact Socket.IO channels `seo-platform:realtime:v1`. Jobs
   `maxmemory=256 MiB` работает под container cap `768 MiB`, оставляя headroom для AOF rewrite
@@ -760,6 +775,15 @@ Backend convention:
   normalized result persistence и terminal Job/manifest finalizer. Provider
   lifecycle запрещает auto-resubmit после ambiguous submit и переводит такой
   исход в проверяемый `ACTION_REQUIRED`;
+- `platform-jobs-integrations/src/crawls` — tenant-scoped crawl Job sidecar,
+  SSRF/DNS-rebinding-safe HTTP client, streaming HTML analysis, robots rules,
+  PostgreSQL lease/checkpoint/retry recovery и secret-free BullMQ payload;
+- `platform-seo-data/src/crawls` — immutable crawl snapshots/issue
+  occurrences, current issue projection и tenant-safe Page Map update без raw
+  HTML;
+- `platform-api/src/crawls` и
+  `platform-web/components/project-crawl-audit.tsx` — public RBAC/CSRF/audit
+  boundary и private browser progress/issues UI;
 - `platform-jobs-integrations/src/platform-api` — bounded/no-redirect client
   issuer-а с dedicated token, exact envelope/request/scope hash validation,
   no-store check, response size и timeout limits;
@@ -943,6 +967,9 @@ Backend convention:
   resources, migration/Redis/SEO Data/Platform API dependencies, двумя
   dedicated rank tokens, отдельным `jobs_rank_runtime`, forced-disabled
   provider submit и без ports/outbound;
+- тот же Compose запускает bounded `crawl-worker` с отдельным Redis user,
+  Jobs DB/SEO Data/outbound-only capability set, contact User-Agent,
+  PostgreSQL lease recovery и без NATS/S3/SMTP/vault/rank/provider secrets;
 - тот же Compose запускает `auth-email-worker` отдельным process того же Jobs
   image с `jobs_auth_email_runtime`, dedicated NATS identity и Platform token,
   SMTP-only outbound capability, bounded resources/timeouts и без Redis/
@@ -952,10 +979,10 @@ Backend convention:
 - тот же Compose разделяет Jobs HTTP, Redis-only system, import и inspection
   env allowlists и подключает каждый процесс только к его named Redis user и
   isolated network; static regression проверяет exact recipients четырёх
-  caller/audience, dedicated service tokens и восьми Redis credentials и
+  caller/audience, dedicated service tokens и девяти Redis credentials и
   запрещает legacy env;
 - `platform-infrastructure/security/validate-service-tokens.sh` — one-shot
-  fail-closed deploy preflight для глобальной проверки 24 credentials и
+  fail-closed deploy preflight для глобальной проверки 25 credentials и
   пяти отдельных NATS bcrypt verifier/usernames; credential-bearing
   processes и NATS зависят от его успешного завершения;
 - тот же Compose fail-closed требует `JOBS_TO_SEO_RANK_RESULT_TOKEN` и
@@ -1003,6 +1030,8 @@ Entrypoints:
   `platform-jobs-integrations/src/import-worker.main.ts`;
 - rank manifest preparation worker:
   `platform-jobs-integrations/src/rank-worker.main.ts`;
+- technical crawl worker:
+  `platform-jobs-integrations/src/crawl-worker.main.ts`;
 - credential validation connector worker:
   `platform-jobs-integrations/src/connector-worker.main.ts`;
 - transactional auth-email worker:
@@ -1047,6 +1076,7 @@ Entrypoints:
 | Integrations | vertical slice: catalog + encrypted BYOK vault + validation + project binding |
 | Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |
 | Automations | vertical slice: rank schedule CRUD + тарифный capacity + BullMQ scheduler + manual/scheduled execution + no-overlap/recovery/history/auto-pause + Web |
+| Pages/technical audit | vertical slice: Page Map CRUD/assignment + SSRF-safe async crawl + immutable snapshots/current issues + lease/checkpoint recovery + Web |
 | Billing/YooKassa | vertical slice: catalog + hosted/recurring payment + webhook/reconciliation + ledger/refund/NPD obligation + Web UI + protected manual receipt operations + durable receipt email delivery; live provider/SMTP canary остаётся gate |
 | Directus content | planned |
 
@@ -1429,28 +1459,29 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API tests: 431 pass, 0 fail, 5 opt-in PostgreSQL 18 tests skipped
+- Platform API tests: 439 pass, 0 fail, 5 opt-in PostgreSQL 18 tests skipped
   без отдельного disposable database URL.
-- SEO data unit tests: 121 pass, 0 fail.
-- Jobs/integrations tests: 434 pass, 0 fail, 9 disposable-DB tests skipped
+- SEO data unit tests: 127 pass, 0 fail.
+- Jobs/integrations tests: 446 pass, 0 fail, 9 disposable-DB tests skipped
   в обычном запуске; startup decrypt-canary targeted suite — 7/7 pass.
 - Realtime unit tests: 112 pass, 0 fail.
 - Contracts unit tests: 100 pass, 0 fail.
-- Unified Web helper tests: 157 pass, 0 fail.
+- Unified Web helper tests: 159 pass, 0 fail.
 - Infrastructure DB-role/connector и затронутый rank dependency targeted
   scope: 9 pass, 0 fail; PostgreSQL regressions остаются opt-in в обычном
   запуске.
-- Infrastructure suite после Redis/NATS hardening: 80 pass, 0 fail и пять
+- Infrastructure suite после Redis/NATS/crawl hardening: 82 pass, 0 fail и пять
   opt-in PostgreSQL skips с локальным Redis 8.8.1 binary. Отдельный live smoke
   на source-built Redis 8.8.1: 3/3 pass; подтверждены BullMQ Queue/Worker,
   queue-key isolation и Lua denial, versioned Realtime Pub/Sub channels,
   Directus cache-команды, health/default users и запрет admin/dangerous
   commands. Live NATS 2.12.12 smoke подтвердил четыре bcrypt identities,
   отсутствие plaintext-password warning и topology create → unchanged.
-- Свежий user-space PostgreSQL 16 compatibility rehearsal: все 26 Jobs
-  migrations применены одной цепочкой с test-only `uuidv7()` shim; новый
-  control row подтверждён как
-  `ARSENKIN/SERP_RANK_TRACKING/true/arsenkin-positions@2/version 2`.
+- Свежий user-space PostgreSQL 16 compatibility rehearsal: все 30 Jobs и 15
+  SEO Data migrations применены отдельными полными цепочками с test-only
+  `uuidv7()` shim. Live rollback-smoke подтвердил crawl Job checkpoint
+  constraint, tenant Page FK, immutable snapshot/occurrence trigger и issue
+  evidence.
   Целевой PostgreSQL 18 runtime/race gate остаётся обязательным перед
   production rollout.
 - Отдельный fresh PostgreSQL 18 service-role proof: pass; применены 37 Prisma
@@ -1924,7 +1955,7 @@ OAuth/OIDC выполняется после подтверждения зави
   read внутри `jobs_db` закрыт. До production нужен повтор permission/HBA/login
   proof в целевом окружении. Роль с ownership объектов script отклоняет.
   Compose уже разделяет Jobs, Realtime и Directus Redis instances/networks и
-  выдаёт шесть Jobs queue-scoped identities, channel-only Realtime identity и
+  выдаёт семь Jobs queue-scoped identities, channel-only Realtime identity и
   отдельный Directus cache user. Core Redis 8.8.1 live compatibility пройдена
   локально на собранном official source; до production остаются startup smoke
   pinned OCI image вместе с Directus, rollout/drain старого `redis_data`,
@@ -1945,6 +1976,12 @@ OAuth/OIDC выполняется после подтверждения зави
   provider incident telemetry/circuit breaker и schedule orchestration ещё
   обязательны. Keys.so пока используется только для credential validation,
   XMLStock ждёт подтверждённого provider contract и redacted fixtures.
+- Technical crawl production vertical закрывает ручной bounded обход и
+  текущие issues, но полный Radar из раздела 10 ТЗ ещё требует sitemap scope,
+  include/exclude/query policy, conditional requests/host backoff, schedules,
+  page diffs/duplicate groups, notifications и отдельный browser-rendering
+  pool. Cookies/custom headers намеренно не принимаются до отдельной
+  secret-safe policy.
 - `platform-app` сохранён как legacy Git-источник до проверки переноса; новая
   функциональность добавляется только в `platform-web`.
 

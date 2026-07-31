@@ -46,6 +46,7 @@ export type JobsProcessRole =
   | "IMPORT_WORKER"
   | "INSPECTION_WORKER"
   | "RANK_WORKER"
+  | "CRAWL_WORKER"
   | "CONNECTOR_WORKER"
   | "AUTH_EMAIL_WORKER";
 
@@ -104,6 +105,16 @@ export interface AppConfig {
   readonly rankExecution: {
     readonly submitEnabled: boolean;
     readonly killSwitchVersion: string;
+  };
+  readonly crawl: {
+    readonly enabled: boolean;
+    readonly concurrency: number;
+    readonly dispatchSeconds: number;
+    readonly leaseSeconds: number;
+    readonly requestTimeoutMs: number;
+    readonly maxResponseBytes: number;
+    readonly maxRedirects: number;
+    readonly userAgent: string;
   };
   readonly authEmail: {
     readonly enabled: boolean;
@@ -782,7 +793,9 @@ export function loadAppConfig(
   }
   if (
     nodeEnv === "production" &&
-    (processRole === "HTTP" || processRole === "IMPORT_WORKER") &&
+    (processRole === "HTTP" ||
+      processRole === "IMPORT_WORKER" ||
+      processRole === "CRAWL_WORKER") &&
     (!seoDataApiToken || seoDataApiToken.length < 32)
   ) {
     throw new Error(
@@ -806,10 +819,11 @@ export function loadAppConfig(
   if (
     processRole !== "HTTP" &&
     processRole !== "IMPORT_WORKER" &&
+    processRole !== "CRAWL_WORKER" &&
     seoDataApiToken
   ) {
     throw new Error(
-      "Only the Jobs HTTP and import-worker processes may receive JOBS_TO_SEO_DATA_TOKEN"
+      "Only the Jobs HTTP, import-worker and crawl-worker processes may receive JOBS_TO_SEO_DATA_TOKEN"
     );
   }
   if (processRole !== "AUTH_EMAIL_WORKER" && authEmailApiToken) {
@@ -871,6 +885,45 @@ export function loadAppConfig(
     throw new Error(
       "Only the Jobs HTTP process may use the MANAGEMENT credential role"
     );
+  }
+  if (
+    processRole !== "CRAWL_WORKER" &&
+    [
+      "CRAWL_CONTACT_URL",
+      "CRAWL_CONCURRENCY",
+      "CRAWL_DISPATCH_SECONDS",
+      "CRAWL_LEASE_SECONDS",
+      "CRAWL_REQUEST_TIMEOUT_MS",
+      "CRAWL_MAX_RESPONSE_BYTES",
+      "CRAWL_MAX_REDIRECTS"
+    ].some((key) => optional(env, key) !== undefined)
+  ) {
+    throw new Error(
+      "Only the crawl-worker process may receive crawler configuration"
+    );
+  }
+  const crawlContactUrl =
+    optional(env, "CRAWL_CONTACT_URL") ??
+    (nodeEnv === "production" ? undefined : "https://localhost.invalid/crawler");
+  if (processRole === "CRAWL_WORKER" && !crawlContactUrl) {
+    throw new Error(
+      "CRAWL_CONTACT_URL is required by the crawl-worker in production"
+    );
+  }
+  if (crawlContactUrl) {
+    let parsedContact: URL;
+    try {
+      parsedContact = new URL(crawlContactUrl);
+    } catch {
+      throw new Error("CRAWL_CONTACT_URL must be an absolute HTTPS URL");
+    }
+    if (
+      parsedContact.protocol !== "https:" ||
+      parsedContact.username ||
+      parsedContact.password
+    ) {
+      throw new Error("CRAWL_CONTACT_URL must be an absolute HTTPS URL");
+    }
   }
   if (processRole === "AUTH_EMAIL_WORKER") {
     const environment = eventEnvironment(
@@ -1319,6 +1372,52 @@ export function loadAppConfig(
     rankExecution: {
       submitEnabled: rankProviderSubmitEnabled,
       killSwitchVersion: rankProviderKillSwitchVersion
+    },
+    crawl: {
+      enabled: processRole === "CRAWL_WORKER",
+      concurrency: boundedInteger(
+        env.CRAWL_CONCURRENCY,
+        2,
+        "CRAWL_CONCURRENCY",
+        1,
+        8
+      ),
+      dispatchSeconds: boundedInteger(
+        env.CRAWL_DISPATCH_SECONDS,
+        15,
+        "CRAWL_DISPATCH_SECONDS",
+        5,
+        300
+      ),
+      leaseSeconds: boundedInteger(
+        env.CRAWL_LEASE_SECONDS,
+        180,
+        "CRAWL_LEASE_SECONDS",
+        90,
+        600
+      ),
+      requestTimeoutMs: boundedInteger(
+        env.CRAWL_REQUEST_TIMEOUT_MS,
+        20_000,
+        "CRAWL_REQUEST_TIMEOUT_MS",
+        1_000,
+        120_000
+      ),
+      maxResponseBytes: boundedInteger(
+        env.CRAWL_MAX_RESPONSE_BYTES,
+        2_000_000,
+        "CRAWL_MAX_RESPONSE_BYTES",
+        100_000,
+        10_000_000
+      ),
+      maxRedirects: boundedInteger(
+        env.CRAWL_MAX_REDIRECTS,
+        5,
+        "CRAWL_MAX_REDIRECTS",
+        0,
+        10
+      ),
+      userAgent: `SeoPlatformCrawler/1.0 (+${crawlContactUrl ?? "https://localhost.invalid/crawler"})`
     },
     authEmail: {
       enabled: processRole === "AUTH_EMAIL_WORKER",

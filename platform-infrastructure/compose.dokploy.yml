@@ -225,6 +225,7 @@ services:
       REDIS_JOBS_INSPECTION_PASSWORD: ${REDIS_JOBS_INSPECTION_PASSWORD:?REDIS_JOBS_INSPECTION_PASSWORD is required}
       REDIS_JOBS_IMPORT_PASSWORD: ${REDIS_JOBS_IMPORT_PASSWORD:?REDIS_JOBS_IMPORT_PASSWORD is required}
       REDIS_JOBS_RANK_PASSWORD: ${REDIS_JOBS_RANK_PASSWORD:?REDIS_JOBS_RANK_PASSWORD is required}
+      REDIS_JOBS_CRAWL_PASSWORD: ${REDIS_JOBS_CRAWL_PASSWORD:?REDIS_JOBS_CRAWL_PASSWORD is required}
       REDIS_JOBS_CONNECTOR_PASSWORD: ${REDIS_JOBS_CONNECTOR_PASSWORD:?REDIS_JOBS_CONNECTOR_PASSWORD is required}
       REDIS_REALTIME_PASSWORD: ${REDIS_REALTIME_PASSWORD:?REDIS_REALTIME_PASSWORD is required}
       REDIS_DIRECTUS_PASSWORD: ${REDIS_DIRECTUS_PASSWORD:?REDIS_DIRECTUS_PASSWORD is required}
@@ -259,6 +260,7 @@ services:
       REDIS_JOBS_INSPECTION_PASSWORD: ${REDIS_JOBS_INSPECTION_PASSWORD:?REDIS_JOBS_INSPECTION_PASSWORD is required}
       REDIS_JOBS_IMPORT_PASSWORD: ${REDIS_JOBS_IMPORT_PASSWORD:?REDIS_JOBS_IMPORT_PASSWORD is required}
       REDIS_JOBS_RANK_PASSWORD: ${REDIS_JOBS_RANK_PASSWORD:?REDIS_JOBS_RANK_PASSWORD is required}
+      REDIS_JOBS_CRAWL_PASSWORD: ${REDIS_JOBS_CRAWL_PASSWORD:?REDIS_JOBS_CRAWL_PASSWORD is required}
       REDIS_JOBS_CONNECTOR_PASSWORD: ${REDIS_JOBS_CONNECTOR_PASSWORD:?REDIS_JOBS_CONNECTOR_PASSWORD is required}
     volumes:
       - redis_jobs_data:/data
@@ -916,6 +918,53 @@ services:
         [
           "CMD-SHELL",
           "ps -o args | grep -q '[r]ank-worker.main.js'"
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  crawl-worker:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: platform-infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/jobs-integrations"
+    command: ["node", "dist/crawl-worker.main.js"]
+    environment:
+      <<: [*jobs-runtime-env, *jobs-seo-data-env]
+      DATABASE_POOL_MAX: ${JOBS_CRAWL_DATABASE_POOL_MAX:-10}
+      REDIS_URL: redis://seo_jobs_crawl:${REDIS_JOBS_CRAWL_PASSWORD:?REDIS_JOBS_CRAWL_PASSWORD is required}@redis-jobs:6379
+      CRAWL_CONTACT_URL: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required}/crawler
+      CRAWL_CONCURRENCY: ${CRAWL_CONCURRENCY:-2}
+      CRAWL_DISPATCH_SECONDS: ${CRAWL_DISPATCH_SECONDS:-15}
+      CRAWL_LEASE_SECONDS: ${CRAWL_LEASE_SECONDS:-180}
+      CRAWL_REQUEST_TIMEOUT_MS: ${CRAWL_REQUEST_TIMEOUT_MS:-20000}
+      CRAWL_MAX_RESPONSE_BYTES: ${CRAWL_MAX_RESPONSE_BYTES:-2000000}
+      CRAWL_MAX_REDIRECTS: ${CRAWL_MAX_REDIRECTS:-5}
+    cpus: "${JOBS_CRAWL_CPU_LIMIT:-1.0}"
+    mem_limit: "${JOBS_CRAWL_MEMORY_LIMIT:-512M}"
+    pids_limit: ${JOBS_CRAWL_PIDS_LIMIT:-128}
+    networks:
+      - internal
+      - outbound
+      - jobs-redis
+    depends_on:
+      jobs-runtime-db-permissions:
+        condition: service_completed_successfully
+      service-token-preflight:
+        condition: service_completed_successfully
+      redis-jobs:
+        condition: service_healthy
+      seo-data:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "ps -o args | grep -q '[c]rawl-worker.main.js'"
         ]
       interval: 30s
       timeout: 5s

@@ -23,6 +23,7 @@ const globallyDistinctDeployCredentials = [
   "REDIS_JOBS_INSPECTION_PASSWORD",
   "REDIS_JOBS_IMPORT_PASSWORD",
   "REDIS_JOBS_RANK_PASSWORD",
+  "REDIS_JOBS_CRAWL_PASSWORD",
   "REDIS_JOBS_CONNECTOR_PASSWORD",
   "REDIS_REALTIME_PASSWORD",
   "REDIS_DIRECTUS_PASSWORD",
@@ -80,6 +81,7 @@ const tokenBearingServices = [
   "seo-data",
   "jobs-integrations",
   "import-worker",
+  "crawl-worker",
   "rank-worker",
   "auth-email-worker",
   "realtime"
@@ -96,7 +98,7 @@ const callerAudienceBoundaries = new Map([
   ],
   [
     "JOBS_TO_SEO_DATA_TOKEN",
-    ["import-worker", "jobs-integrations", "seo-data"]
+    ["crawl-worker", "import-worker", "jobs-integrations", "seo-data"]
   ],
   [
     "PLATFORM_API_TO_REALTIME_TOKEN",
