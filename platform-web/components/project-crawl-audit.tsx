@@ -31,6 +31,8 @@ const ACTIVE = new Set<TechnicalCrawlStatus>([
   "CANCEL_REQUESTED"
 ]);
 
+type AuditView = "ISSUES" | "RUNS" | "CHANGES" | "DUPLICATES" | "ABSENCES";
+
 export function ProjectCrawlAudit({
   projectId,
   projectDomain
@@ -67,6 +69,7 @@ export function ProjectCrawlAudit({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const [activeView, setActiveView] = useState<AuditView>("ISSUES");
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
@@ -184,6 +187,7 @@ export function ProjectCrawlAudit({
         }
       });
       setNotice("Аудит поставлен в очередь. Результаты обновляются автоматически.");
+      setActiveView("RUNS");
       await load();
     } catch (caught) {
       setError(message(caught, "Не удалось запустить технический аудит."));
@@ -201,6 +205,7 @@ export function ProjectCrawlAudit({
         { method: "POST", body: {}, ifMatch: crawl.version }
       );
       setNotice("Остановка аудита запрошена.");
+      setActiveView("RUNS");
       await load();
     } catch (caught) {
       setError(message(caught, "Не удалось остановить аудит."));
@@ -237,6 +242,7 @@ export function ProjectCrawlAudit({
       {error && <div className="inline-error" role="alert">{error}</div>}
       {notice && <div className="inline-success" role="status">{notice}</div>}
 
+      <div className="crawl-audit-controls">
       <details className="crawl-disclosure" open={!crawls?.crawls.length}>
         <summary>
           <span>
@@ -321,14 +327,28 @@ export function ProjectCrawlAudit({
         </form>
       </details>
 
+      <CrawlAutomationPanel
+        defaultStartUrl={startUrl}
+        projectId={projectId}
+      />
+      </div>
+
       {crawls && crawls.access.mutationRestriction !== "NONE" && (
         <p className="inline-note">
           Запуск недоступен: {restriction(crawls.access.mutationRestriction)}.
         </p>
       )}
 
-      <div className="crawl-audit-grid">
-        <details className="crawl-stack-section" open={hasActive}>
+      <div aria-label="Разделы технического аудита" className="crawl-audit-tabs" role="toolbar">
+        <AuditTab active={activeView === "ISSUES"} count={issues?.issues.length ?? 0} label="Проблемы" onClick={() => setActiveView("ISSUES")} />
+        <AuditTab active={activeView === "RUNS"} count={crawls?.crawls.length ?? 0} label="Запуски" onClick={() => setActiveView("RUNS")} />
+        <AuditTab active={activeView === "CHANGES"} count={changes?.changes.length ?? 0} label="Radar" onClick={() => setActiveView("CHANGES")} />
+        <AuditTab active={activeView === "DUPLICATES"} count={duplicates.groups.length} label="Дубли" onClick={() => setActiveView("DUPLICATES")} />
+        <AuditTab active={activeView === "ABSENCES"} count={absences?.pages.length ?? 0} label="Исчезли" onClick={() => setActiveView("ABSENCES")} />
+      </div>
+
+      <div className="crawl-audit-results">
+        <details className="crawl-stack-section" hidden={activeView !== "RUNS"} open>
           <summary className="crawl-stack-summary">
             <span>Последние запуски</span>
             <strong>{crawls?.crawls.length ?? 0}</strong>
@@ -369,7 +389,7 @@ export function ProjectCrawlAudit({
             <p className="muted-copy">Аудиты ещё не запускались.</p>
           )}
         </details>
-        <details className="crawl-stack-section">
+        <details className="crawl-stack-section" hidden={activeView !== "ISSUES"} open>
           <summary className="crawl-stack-summary">
             <span>Открытые проблемы</span>
             <strong>{issues?.issues.length ?? 0}</strong>
@@ -397,9 +417,7 @@ export function ProjectCrawlAudit({
             </p>
           )}
         </details>
-      </div>
-
-      <details className="crawl-duplicate-history crawl-stack-section">
+      <details className="crawl-duplicate-history crawl-stack-section" hidden={activeView !== "DUPLICATES"} open>
         <summary className="crawl-stack-summary">
           <span>Дубли страниц</span>
           <strong>{duplicates.groups.length}</strong>
@@ -494,7 +512,7 @@ export function ProjectCrawlAudit({
         )}
       </details>
 
-      <details className="crawl-absence-history crawl-stack-section">
+      <details className="crawl-absence-history crawl-stack-section" hidden={activeView !== "ABSENCES"} open>
         <summary className="crawl-stack-summary">
           <span>Исчезнувшие страницы</span>
           <strong>{absences?.pages.length ?? 0}</strong>
@@ -528,7 +546,7 @@ export function ProjectCrawlAudit({
         )}
       </details>
 
-      <details className="crawl-change-history crawl-stack-section">
+      <details className="crawl-change-history crawl-stack-section" hidden={activeView !== "CHANGES"} open>
         <summary className="crawl-stack-summary">
           <span>Изменения Radar</span>
           <strong>{changes?.changes.length ?? 0}</strong>
@@ -574,11 +592,32 @@ export function ProjectCrawlAudit({
           </p>
         )}
       </details>
-      <CrawlAutomationPanel
-        defaultStartUrl={startUrl}
-        projectId={projectId}
-      />
+      </div>
     </section>
+  );
+}
+
+function AuditTab({
+  active,
+  count,
+  label,
+  onClick
+}: Readonly<{
+  active: boolean;
+  count: number;
+  label: string;
+  onClick: () => void;
+}>) {
+  return (
+    <button
+      aria-pressed={active}
+      className="crawl-audit-tab"
+      onClick={onClick}
+      type="button"
+    >
+      <span>{label}</span>
+      <strong>{count}</strong>
+    </button>
   );
 }
 

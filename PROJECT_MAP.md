@@ -1342,7 +1342,7 @@ Entrypoints:
 | Integrations | vertical slice: operational catalog + encrypted BYOK vault + validation + SERP/competitor project bindings |
 | Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |
 | Automations | vertical slice: rank schedule CRUD + тарифный capacity + BullMQ scheduler + manual/scheduled execution + no-overlap/recovery/history/auto-pause + Web |
-| Pages/technical audit | vertical slice: compact Page Map + CRUD/assignment + SSRF-safe async crawl + sitemap/include/exclude/query scope + conditional 304 reuse/global host backoff/24h site auto-pause + immutable snapshots/current issues/page-change/duplicate/exact-scope disappearance history + lease/checkpoint recovery + Radar Web/in-app notification |
+| Pages/technical audit | vertical slice: compact Page Map с command bar, 4 смысловыми колонками и progressive editor + CRUD/assignment + SSRF-safe async crawl + sitemap/include/exclude/query scope + conditional 304 reuse/global host backoff/24h site auto-pause + immutable snapshots/current issues/page-change/duplicate/exact-scope disappearance history + lease/checkpoint recovery + единая tab-панель проблем/запусков/дублей/исчезновений/Radar + компактное расписание Radar + in-app notification |
 | Billing/YooKassa | vertical slice: catalog + hosted/recurring payment + webhook/reconciliation + ledger/refund/NPD obligation + Web UI + protected manual receipt operations + durable receipt email delivery; live provider/SMTP canary остаётся gate |
 | Directus content | planned |
 

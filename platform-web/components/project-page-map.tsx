@@ -117,6 +117,11 @@ export function ProjectPageMap({
     setAppliedFilters(filters);
   }
 
+  function resetFilters(): void {
+    setFilters(DEFAULT_FILTERS);
+    setAppliedFilters(DEFAULT_FILTERS);
+  }
+
   function startCreate(): void {
     setErrors({});
     setOperationError(undefined);
@@ -266,6 +271,7 @@ export function ProjectPageMap({
   }
 
   if (!collection) return null;
+  const activeFilterCount = filterCount(appliedFilters);
 
   return (
     <div className="page-map">
@@ -288,9 +294,9 @@ export function ProjectPageMap({
       )}
 
       <section className="panel page-map-toolbar">
-        <form className="page-map-filters" onSubmit={applyFilters}>
+        <form className="page-map-commandbar" onSubmit={applyFilters}>
           <label className="form-field page-map-search">
-            <span>Поиск</span>
+            <span className="visually-hidden">Поиск по карте страниц</span>
             <input
               onChange={(event) =>
                 setFilters((value) => ({
@@ -303,63 +309,83 @@ export function ProjectPageMap({
               value={filters.search}
             />
           </label>
-          <label className="form-field">
-            <span>Тип</span>
-            <select
-              onChange={(event) =>
-                setFilters((value) => ({
-                  ...value,
-                  pageType: event.target.value as PageType | ""
-                }))
-              }
-              value={filters.pageType}
-            >
-              <option value="">Все типы</option>
-              {pageTypes.map((value) => (
-                <option key={value} value={value}>
-                  {pageTypeLabel(value)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="form-field">
-            <span>Индексируемость</span>
-            <select
-              onChange={(event) =>
-                setFilters((value) => ({
-                  ...value,
-                  indexability: event.target.value as PageIndexability | ""
-                }))
-              }
-              value={filters.indexability}
-            >
-              <option value="">Все состояния</option>
-              {pageIndexabilities.map((value) => (
-                <option key={value} value={value}>
-                  {indexabilityLabel(value)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="form-field">
-            <span>Раздел</span>
-            <select
-              onChange={(event) =>
-                setFilters((value) => ({
-                  ...value,
-                  lifecycleStatus:
-                    event.target.value as PageLifecycleStatus
-                }))
-              }
-              value={filters.lifecycleStatus}
-            >
-              <option value="ACTIVE">Активные</option>
-              <option value="ARCHIVED">Архив</option>
-            </select>
-          </label>
-          <button className="secondary-button" type="submit">
-            Применить
+          <button className="secondary-button page-map-search-button" type="submit">
+            Найти
           </button>
+          <details className="page-map-filter-disclosure">
+            <summary>
+              Фильтры{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ""}
+            </summary>
+            <div className="page-map-filter-popover">
+              <label className="form-field">
+                <span>Тип</span>
+                <select
+                  onChange={(event) =>
+                    setFilters((value) => ({
+                      ...value,
+                      pageType: event.target.value as PageType | ""
+                    }))
+                  }
+                  value={filters.pageType}
+                >
+                  <option value="">Все типы</option>
+                  {pageTypes.map((value) => (
+                    <option key={value} value={value}>
+                      {pageTypeLabel(value)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span>Индексируемость</span>
+                <select
+                  onChange={(event) =>
+                    setFilters((value) => ({
+                      ...value,
+                      indexability: event.target.value as PageIndexability | ""
+                    }))
+                  }
+                  value={filters.indexability}
+                >
+                  <option value="">Все состояния</option>
+                  {pageIndexabilities.map((value) => (
+                    <option key={value} value={value}>
+                      {indexabilityLabel(value)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-field">
+                <span>Раздел</span>
+                <select
+                  onChange={(event) =>
+                    setFilters((value) => ({
+                      ...value,
+                      lifecycleStatus:
+                        event.target.value as PageLifecycleStatus
+                    }))
+                  }
+                  value={filters.lifecycleStatus}
+                >
+                  <option value="ACTIVE">Активные</option>
+                  <option value="ARCHIVED">Архив</option>
+                </select>
+              </label>
+              <div className="page-map-filter-actions">
+                <button
+                  className="text-button"
+                  disabled={filterCount(filters) === 0}
+                  onClick={resetFilters}
+                  type="button"
+                >
+                  Сбросить
+                </button>
+                <button className="primary-button" type="submit">
+                  Показать
+                </button>
+              </div>
+            </div>
+          </details>
         </form>
         <button
           className="primary-button"
@@ -388,7 +414,9 @@ export function ProjectPageMap({
           <h2>
             {appliedFilters.lifecycleStatus === "ARCHIVED"
               ? "Архив пуст"
-              : "Страниц пока нет"}
+              : activeFilterCount > 0
+                ? "По фильтрам ничего не найдено"
+                : "Страниц пока нет"}
           </h2>
           <p>
             Добавьте существующую или планируемую посадочную страницу. URL,
@@ -408,11 +436,8 @@ export function ProjectPageMap({
               <thead>
                 <tr>
                   <th>Страница</th>
-                  <th>Тип</th>
-                  <th>Индексируемость</th>
-                  <th>HTTP</th>
-                  <th>Запросы</th>
-                  <th>Кластеры</th>
+                  <th>Состояние</th>
+                  <th>Семантика</th>
                   <th>Контент</th>
                   <th aria-label="Действия" />
                 </tr>
@@ -473,6 +498,13 @@ function PageEditor({
   onChange: (patch: Partial<ProjectPageDraft>) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }>) {
+  const hasAdvancedErrors = Boolean(
+    errors.httpStatus ||
+    errors.language ||
+    errors.canonicalTarget ||
+    errors.aliases ||
+    errors.ownerId
+  );
   return (
     <section className="panel page-map-editor">
       <header>
@@ -527,14 +559,6 @@ function PageEditor({
             ))}
           </select>
         </EditorField>
-        <EditorField error={errors.httpStatus} label="HTTP-код">
-          <input
-            inputMode="numeric"
-            onChange={(event) => onChange({ httpStatus: event.target.value })}
-            placeholder="200"
-            value={draft.httpStatus}
-          />
-        </EditorField>
         <EditorField error={errors.priority} label="Приоритет">
           <input
             max="100"
@@ -557,31 +581,6 @@ function PageEditor({
             value={draft.h1}
           />
         </EditorField>
-        <EditorField label="Description" wide>
-          <textarea
-            onChange={(event) => onChange({ description: event.target.value })}
-            rows={2}
-            value={draft.description}
-          />
-        </EditorField>
-        <EditorField error={errors.canonicalTarget} label="Canonical target" wide>
-          <input
-            onChange={(event) =>
-              onChange({ canonicalTarget: event.target.value })
-            }
-            placeholder="https://example.com/canonical/"
-            type="url"
-            value={draft.canonicalTarget}
-          />
-        </EditorField>
-        <EditorField error={errors.aliases} label="Алиасы URL" wide>
-          <textarea
-            onChange={(event) => onChange({ aliases: event.target.value })}
-            placeholder={"https://example.com/old-url/\nhttps://example.com/legacy/"}
-            rows={3}
-            value={draft.aliases}
-          />
-        </EditorField>
         <EditorField label="Статус контента">
           <select
             onChange={(event) =>
@@ -597,47 +596,85 @@ function PageEditor({
             ))}
           </select>
         </EditorField>
-        <EditorField error={errors.language} label="Язык">
-          <input
-            onChange={(event) => onChange({ language: event.target.value })}
-            placeholder="ru-RU"
-            value={draft.language}
-          />
-        </EditorField>
-        <EditorField label="Шаблон">
-          <input
-            onChange={(event) => onChange({ template: event.target.value })}
-            placeholder="service-detail"
-            value={draft.template}
-          />
-        </EditorField>
-        <EditorField label="Robots">
-          <input
-            onChange={(event) => onChange({ robots: event.target.value })}
-            placeholder="index, follow"
-            value={draft.robots}
-          />
-        </EditorField>
-        <EditorField error={errors.ownerId} label="ID владельца">
-          <input
-            onChange={(event) => onChange({ ownerId: event.target.value })}
-            value={draft.ownerId}
-          />
-        </EditorField>
-        <EditorField label="Опубликована">
-          <input
-            onChange={(event) => onChange({ publishedAt: event.target.value })}
-            type="datetime-local"
-            value={draft.publishedAt}
-          />
-        </EditorField>
-        <EditorField label="Заметки" wide>
-          <textarea
-            onChange={(event) => onChange({ notes: event.target.value })}
-            rows={3}
-            value={draft.notes}
-          />
-        </EditorField>
+        <details className="page-map-advanced" open={hasAdvancedErrors || undefined}>
+          <summary>Дополнительные параметры</summary>
+          <div className="page-map-advanced-grid">
+            <EditorField error={errors.httpStatus} label="HTTP-код">
+              <input
+                inputMode="numeric"
+                onChange={(event) => onChange({ httpStatus: event.target.value })}
+                placeholder="200"
+                value={draft.httpStatus}
+              />
+            </EditorField>
+            <EditorField error={errors.language} label="Язык">
+              <input
+                onChange={(event) => onChange({ language: event.target.value })}
+                placeholder="ru-RU"
+                value={draft.language}
+              />
+            </EditorField>
+            <EditorField label="Шаблон">
+              <input
+                onChange={(event) => onChange({ template: event.target.value })}
+                placeholder="service-detail"
+                value={draft.template}
+              />
+            </EditorField>
+            <EditorField label="Robots">
+              <input
+                onChange={(event) => onChange({ robots: event.target.value })}
+                placeholder="index, follow"
+                value={draft.robots}
+              />
+            </EditorField>
+            <EditorField label="Description" wide>
+              <textarea
+                onChange={(event) => onChange({ description: event.target.value })}
+                rows={2}
+                value={draft.description}
+              />
+            </EditorField>
+            <EditorField error={errors.canonicalTarget} label="Canonical target" wide>
+              <input
+                onChange={(event) =>
+                  onChange({ canonicalTarget: event.target.value })
+                }
+                placeholder="https://example.com/canonical/"
+                type="url"
+                value={draft.canonicalTarget}
+              />
+            </EditorField>
+            <EditorField error={errors.aliases} label="Алиасы URL" wide>
+              <textarea
+                onChange={(event) => onChange({ aliases: event.target.value })}
+                placeholder={"https://example.com/old-url/\nhttps://example.com/legacy/"}
+                rows={3}
+                value={draft.aliases}
+              />
+            </EditorField>
+            <EditorField error={errors.ownerId} label="ID владельца">
+              <input
+                onChange={(event) => onChange({ ownerId: event.target.value })}
+                value={draft.ownerId}
+              />
+            </EditorField>
+            <EditorField label="Опубликована">
+              <input
+                onChange={(event) => onChange({ publishedAt: event.target.value })}
+                type="datetime-local"
+                value={draft.publishedAt}
+              />
+            </EditorField>
+            <EditorField label="Заметки" wide>
+              <textarea
+                onChange={(event) => onChange({ notes: event.target.value })}
+                rows={3}
+                value={draft.notes}
+              />
+            </EditorField>
+          </div>
+        </details>
         <div className="page-map-editor-actions">
           <button className="secondary-button" onClick={onCancel} type="button">
             Отмена
@@ -701,15 +738,21 @@ function PageRow({
           </span>
         </div>
       </td>
-      <td><span className="status-pill">{pageTypeLabel(page.pageType)}</span></td>
       <td>
-        <span className={`status-pill page-index-${page.indexability.toLowerCase()}`}>
-          {indexabilityLabel(page.indexability)}
-        </span>
+        <div className="page-map-state-stack">
+          <span className={`status-pill page-index-${page.indexability.toLowerCase()}`}>
+            {indexabilityLabel(page.indexability)}
+          </span>
+          <span className="status-pill">{pageTypeLabel(page.pageType)}</span>
+          <span className="page-http-state">HTTP {page.httpStatus ?? "—"}</span>
+        </div>
       </td>
-      <td>{page.httpStatus ?? "—"}</td>
-      <td><strong>{page.assignedKeywordCount}</strong></td>
-      <td><strong>{page.assignedClusterCount}</strong></td>
+      <td>
+        <div className="page-map-semantic-stats">
+          <span><strong>{page.assignedKeywordCount}</strong> запросов</span>
+          <span><strong>{page.assignedClusterCount}</strong> кластеров</span>
+        </div>
+      </td>
       <td>{page.contentStatus ? contentStatusLabel(page.contentStatus) : "—"}</td>
       <td>
         <div className="page-map-actions">
@@ -779,6 +822,15 @@ function withPage(
         : [page, ...collection.pages]
       : collection.pages.filter(({ id }) => id !== page.id)
   };
+}
+
+function filterCount(filters: PageFilters): number {
+  return [
+    filters.search.trim() !== "",
+    filters.pageType !== "",
+    filters.indexability !== "",
+    filters.lifecycleStatus !== "ACTIVE"
+  ].filter(Boolean).length;
 }
 
 function restrictionLabel(
