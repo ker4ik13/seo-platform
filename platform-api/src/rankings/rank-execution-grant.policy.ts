@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import type { Prisma } from "../generated/prisma/client.js";
+import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 
 export const RANK_EXECUTION_GRANT_POLICY = Symbol(
   "RANK_EXECUTION_GRANT_POLICY"
@@ -50,6 +51,10 @@ export interface RankExecutionGrantPolicy {
 export class ControlledBetaRankExecutionGrantPolicy
   implements RankExecutionGrantPolicy
 {
+  public constructor(
+    private readonly entitlements: BillingEntitlementService
+  ) {}
+
   public async evaluate(
     transaction: Prisma.TransactionClient,
     input: RankExecutionGrantPolicyInput
@@ -61,6 +66,17 @@ export class ControlledBetaRankExecutionGrantPolicy
     ) {
       return {
         entitlement: "DENIED",
+        quota: "NOT_AVAILABLE"
+      };
+    }
+    const entitlement =
+      await this.entitlements.rankProviderEntitlement(
+        transaction,
+        input.workspaceId
+      );
+    if (entitlement !== "ALLOWED") {
+      return {
+        entitlement,
         quota: "NOT_AVAILABLE"
       };
     }

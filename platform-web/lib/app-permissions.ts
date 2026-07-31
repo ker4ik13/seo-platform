@@ -19,6 +19,10 @@ const PROJECT_UPDATE_ROLES = new Set([
 ]);
 const PROJECT_ARCHIVE_ROLES = new Set(["OWNER", "ADMIN", "SEO_LEAD"]);
 const PROJECT_RESTORE_ROLES = new Set(["OWNER", "ADMIN"]);
+const BILLING_VIEW_ROLES = new Set(["OWNER", "ADMIN", "SEO_LEAD"]);
+const BILLING_MANAGE_PLAN_ROLES = new Set(["OWNER", "ADMIN"]);
+const BILLING_TOP_UP_ROLES = new Set(["OWNER", "ADMIN"]);
+const BILLING_MANAGE_PAYMENT_METHOD_ROLES = new Set(["OWNER"]);
 
 type EffectiveProjectPermission =
   | "integration.view"
@@ -63,6 +67,32 @@ export function canManageWorkspaceTeam(
   roleCode: string | undefined
 ): boolean {
   return Boolean(roleCode && TEAM_MANAGE_ROLES.has(roleCode));
+}
+
+export function canViewWorkspaceBilling(
+  roleCode: string | undefined
+): boolean {
+  return Boolean(roleCode && BILLING_VIEW_ROLES.has(roleCode));
+}
+
+export function canManageWorkspacePlan(
+  roleCode: string | undefined
+): boolean {
+  return Boolean(roleCode && BILLING_MANAGE_PLAN_ROLES.has(roleCode));
+}
+
+export function canTopUpWorkspaceBalance(
+  roleCode: string | undefined
+): boolean {
+  return Boolean(roleCode && BILLING_TOP_UP_ROLES.has(roleCode));
+}
+
+export function canManageWorkspacePaymentMethods(
+  roleCode: string | undefined
+): boolean {
+  return Boolean(
+    roleCode && BILLING_MANAGE_PAYMENT_METHOD_ROLES.has(roleCode)
+  );
 }
 
 export function canUpdateWorkspace(

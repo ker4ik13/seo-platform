@@ -9,6 +9,7 @@ import {
   type WorkspaceSummary
 } from "@seo-platform/contracts";
 import { AuditService } from "../audit/audit.service.js";
+import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import {
   DomainError,
   isUniqueConstraintError
@@ -34,7 +35,8 @@ export class TenantService {
   public constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
-    private readonly outbox: OutboxService
+    private readonly outbox: OutboxService,
+    private readonly entitlements: BillingEntitlementService
   ) {}
 
   public async listWorkspaces(
@@ -294,6 +296,10 @@ export class TenantService {
 
     try {
       const project = await this.prisma.$transaction(async (transaction) => {
+        await this.entitlements.assertCanCreateProject(
+          transaction,
+          workspaceId
+        );
         const created = await transaction.project.create({
           data: {
             workspaceId,

@@ -110,6 +110,7 @@ const readOnlySafePermissions: ReadonlySet<Permission> = new Set([
   "ranking.export",
   "collector.cancel",
   "file.download",
+  "billing.manage_plan",
   "billing.top_up",
   "billing.manage_payment_methods"
 ]);

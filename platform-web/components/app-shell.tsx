@@ -145,13 +145,10 @@ export function AppShell({
           <span>Настройки</span>
         </a>
         <div className="workspace-usage">
-          <span>
-            <strong>Тарификация не подключена</strong>
-          </span>
-          <span className="usage-track">
-            <i style={{ width: "0%" }} />
-          </span>
-          <small>Просмотр данных останется доступен при нулевом балансе</small>
+          <a href="/app/settings/billing">
+            <strong>Тариф и баланс</strong>
+          </a>
+          <small>Тариф, платежи, чеки и расходы workspace</small>
         </div>
       </aside>
 

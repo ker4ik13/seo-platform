@@ -7,6 +7,7 @@ import type {
   WorkspaceMember
 } from "../generated/prisma/client.js";
 import type { AuditService } from "../audit/audit.service.js";
+import type { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import { DomainError } from "../common/domain-error.js";
 import { loadAppConfig } from "../config/app-config.js";
 import type { PrismaService } from "../database/prisma.service.js";
@@ -281,7 +282,14 @@ test("accepts a matching verified invitation in one authoritative transaction", 
       outboxCalls.push(input);
     }
   } as unknown as OutboxService;
-  const service = new TeamService(prisma, audit, outbox, crypto, CONFIG);
+  const service = new TeamService(
+    prisma,
+    audit,
+    outbox,
+    crypto,
+    CONFIG,
+    permissiveEntitlements()
+  );
 
   const result = await service.acceptInvite(
     USER_ID,
@@ -310,8 +318,16 @@ function teamService(prisma: PrismaService): TeamService {
     {} as AuditService,
     {} as OutboxService,
     new AuthCryptoService(CONFIG),
-    CONFIG
+    CONFIG,
+    permissiveEntitlements()
   );
+}
+
+function permissiveEntitlements(): BillingEntitlementService {
+  return {
+    assertCanCreateInvite: async () => undefined,
+    assertCanAcceptInvite: async () => undefined
+  } as unknown as BillingEntitlementService;
 }
 
 function member(

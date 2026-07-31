@@ -100,6 +100,143 @@ enum MfaMethodStatus {
   DISABLED
 }
 
+enum BillingPlanStatus {
+  ACTIVE
+  RETIRED
+}
+
+enum BillingCatalogVersionStatus {
+  PUBLISHED
+  RETIRED
+}
+
+enum BillingPeriod {
+  MONTHLY
+  ANNUAL
+}
+
+enum BillingSubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  GRACE
+  PAUSED
+  CANCELLING
+  CANCELLED
+  SUSPENDED
+}
+
+enum BillingPaymentProvider {
+  YOOKASSA
+  MANUAL
+}
+
+enum BillingOrderKind {
+  SUBSCRIPTION
+  TOP_UP
+}
+
+enum BillingOrderStatus {
+  PENDING
+  PROVIDER_PENDING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+  PARTIALLY_REFUNDED
+  REFUNDED
+}
+
+enum BillingPaymentStatus {
+  CREATING
+  PENDING
+  SUCCEEDED
+  CANCELED
+  PARTIALLY_REFUNDED
+  REFUNDED
+  FAILED_RETRYABLE
+  FAILED_FINAL
+}
+
+enum BillingPaymentMethodStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum BillingRefundStatus {
+  CREATING
+  PENDING
+  SUCCEEDED
+  CANCELED
+  FAILED_RETRYABLE
+  FAILED_FINAL
+}
+
+enum BillingLedgerAccountType {
+  CUSTOMER_PREPAID_LIABILITY
+  PROMOTIONAL_LIABILITY
+  PAYMENT_CLEARING
+  PLATFORM_REVENUE
+  PROMOTIONAL_EXPENSE
+  PROVIDER_COST
+  REFUNDS
+  RESERVATION
+}
+
+enum BillingLedgerTransactionType {
+  TOP_UP
+  SUBSCRIPTION_PAYMENT
+  INCLUDED_CREDIT_GRANT
+  RESERVATION
+  CAPTURE
+  RELEASE
+  REFUND
+  MANUAL_ADJUSTMENT
+  PROMO_GRANT
+  PROMO_EXPIRATION
+}
+
+enum BillingLedgerTransactionStatus {
+  DRAFT
+  POSTED
+}
+
+enum BillingLedgerDirection {
+  DEBIT
+  CREDIT
+}
+
+enum BillingWebhookInboxStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED_RETRYABLE
+  FAILED_FINAL
+}
+
+enum BillingBuyerType {
+  INDIVIDUAL
+  INDIVIDUAL_ENTREPRENEUR
+  LEGAL_ENTITY
+}
+
+enum NpdReceiptRegistrationMode {
+  MANUAL_MY_TAX
+}
+
+enum NpdReceiptStatus {
+  PENDING
+  AWAITING_MANUAL_REGISTRATION
+  REGISTERING
+  REGISTERED
+  DELIVERY_PENDING
+  DELIVERED
+  FAILED_RETRYABLE
+  FAILED_FINAL
+  CANCELLATION_PENDING
+  CANCELLED
+  REPLACEMENT_REQUIRED
+}
+
 model User {
   id              String     @id @default(dbgenerated("uuidv7()")) @db.Uuid
   emailNormalized String     @unique(map: "users_email_normalized_key") @map("email_normalized") @db.VarChar(320)
@@ -124,6 +261,7 @@ model User {
   mfaMethods    MfaMethod[]
   recoveryCodes RecoveryCode[]
   mfaChallenges MfaChallenge[]
+  billingTrialClaims BillingTrialClaim[]
 
   @@index([status, createdAt])
   @@map("users")
@@ -283,9 +421,15 @@ model Workspace {
   updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
   deletedAt       DateTime?       @map("deleted_at") @db.Timestamptz(6)
 
-  members  WorkspaceMember[]
-  projects Project[]
-  invites  WorkspaceInvite[]
+  members               WorkspaceMember[]
+  projects              Project[]
+  invites               WorkspaceInvite[]
+  billingSubscription   BillingSubscription?
+  billingTrialClaim     BillingTrialClaim?
+  billingOrders         BillingOrder[]
+  billingPaymentMethods BillingPaymentMethod[]
+  billingLedgerAccounts BillingLedgerAccount[]
+  npdReceiptObligations NpdReceiptObligation[]
 
   @@index([ownerUserId])
   @@index([status, createdAt])
@@ -436,6 +580,333 @@ model RankExecutionQuotaReservation {
   @@index([workspaceId, meter, windowStartedAt, createdAt], map: "rank_quota_reservations_window_idx")
   @@index([workspaceId, projectId, createdAt], map: "rank_quota_reservations_project_idx")
   @@map("rank_execution_quota_reservations")
+}
+
+model BillingPlan {
+  id            String            @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  code          String            @unique(map: "billing_plans_code_key") @db.VarChar(32)
+  status        BillingPlanStatus @default(ACTIVE)
+  nameRu        String            @map("name_ru") @db.VarChar(120)
+  descriptionRu String            @map("description_ru") @db.Text
+  createdAt     DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  versions BillingPlanVersion[]
+
+  @@index([status, code])
+  @@map("billing_plans")
+}
+
+model BillingPlanVersion {
+  id                       String                      @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  planId                   String                      @map("plan_id") @db.Uuid
+  version                  Int
+  status                   BillingCatalogVersionStatus @default(PUBLISHED)
+  effectiveFrom            DateTime                    @map("effective_from") @db.Timestamptz(6)
+  effectiveTo              DateTime?                   @map("effective_to") @db.Timestamptz(6)
+  features                 Json
+  includedDataCreditsMinor BigInt                      @default(0) @map("included_data_credits_minor")
+  trialDays                Int                         @default(0) @map("trial_days")
+  serviceDescription       String                      @map("service_description") @db.VarChar(255)
+  createdAt                DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  plan          BillingPlan          @relation(fields: [planId], references: [id], onDelete: Restrict)
+  prices        BillingPlanPrice[]
+  subscriptions BillingSubscription[]
+  orders        BillingOrder[]
+
+  @@unique([planId, version], map: "billing_plan_versions_plan_version_key")
+  @@index([status, effectiveFrom, effectiveTo])
+  @@map("billing_plan_versions")
+}
+
+model BillingPlanPrice {
+  id            String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  planVersionId String        @map("plan_version_id") @db.Uuid
+  period        BillingPeriod
+  currency      String        @db.Char(3)
+  amountMinor   BigInt        @map("amount_minor")
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  planVersion BillingPlanVersion @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([planVersionId, period, currency], map: "billing_plan_prices_version_period_currency_key")
+  @@index([currency, period])
+  @@map("billing_plan_prices")
+}
+
+model BillingSubscription {
+  id                       String                    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId              String                    @unique(map: "billing_subscriptions_workspace_id_key") @map("workspace_id") @db.Uuid
+  planVersionId            String                    @map("plan_version_id") @db.Uuid
+  status                   BillingSubscriptionStatus
+  period                   BillingPeriod
+  currency                 String                    @db.Char(3)
+  startedAt                DateTime                  @map("started_at") @db.Timestamptz(6)
+  currentPeriodStart       DateTime                  @map("current_period_start") @db.Timestamptz(6)
+  currentPeriodEnd         DateTime                  @map("current_period_end") @db.Timestamptz(6)
+  trialEnd                 DateTime?                 @map("trial_end") @db.Timestamptz(6)
+  graceEnd                 DateTime?                 @map("grace_end") @db.Timestamptz(6)
+  cancelAtPeriodEnd        Boolean                   @default(false) @map("cancel_at_period_end")
+  provider                 BillingPaymentProvider?
+  externalSubscriptionId   String?                   @map("external_subscription_id") @db.VarChar(255)
+  defaultPaymentMethodId   String?                   @map("default_payment_method_id") @db.Uuid
+  version                  Int                       @default(1)
+  createdAt                DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  workspace            Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  planVersion          BillingPlanVersion     @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
+  defaultPaymentMethod BillingPaymentMethod?  @relation("SubscriptionDefaultPaymentMethod", fields: [defaultPaymentMethodId], references: [id], onDelete: SetNull)
+
+  @@index([status, currentPeriodEnd])
+  @@map("billing_subscriptions")
+}
+
+model BillingTrialClaim {
+  id          String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  ownerUserId String   @unique(map: "billing_trial_claims_owner_user_id_key") @map("owner_user_id") @db.Uuid
+  workspaceId String   @unique(map: "billing_trial_claims_workspace_id_key") @map("workspace_id") @db.Uuid
+  claimedAt   DateTime @default(now()) @map("claimed_at") @db.Timestamptz(6)
+
+  ownerUser User      @relation(fields: [ownerUserId], references: [id], onDelete: Restrict)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@map("billing_trial_claims")
+}
+
+model BillingOrder {
+  id                         String             @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId                String             @map("workspace_id") @db.Uuid
+  createdBy                  String             @map("created_by") @db.Uuid
+  kind                       BillingOrderKind
+  status                     BillingOrderStatus @default(PENDING)
+  planVersionId              String?            @map("plan_version_id") @db.Uuid
+  period                     BillingPeriod?
+  amountMinor                BigInt             @map("amount_minor")
+  currency                   String             @db.Char(3)
+  serviceDescriptionSnapshot String             @map("service_description_snapshot") @db.VarChar(255)
+  idempotencyKey             String             @map("idempotency_key") @db.VarChar(180)
+  requestHash                Bytes              @map("request_hash")
+  termsVersion               String             @map("terms_version") @db.VarChar(64)
+  termsAcceptedAt            DateTime            @map("terms_accepted_at") @db.Timestamptz(6)
+  savePaymentMethod          Boolean            @default(false) @map("save_payment_method")
+  buyerType                  BillingBuyerType   @map("buyer_type")
+  buyerNameEncrypted         String?            @map("buyer_name_encrypted") @db.Text
+  buyerInnEncrypted          String?            @map("buyer_inn_encrypted") @db.Text
+  deliveryEmailEncrypted     String             @map("delivery_email_encrypted") @db.Text
+  version                    Int                @default(1)
+  createdAt                  DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  completedAt                DateTime?          @map("completed_at") @db.Timestamptz(6)
+
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  planVersion BillingPlanVersion? @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
+  payments    BillingPayment[]
+
+  @@unique([workspaceId, idempotencyKey], map: "billing_orders_workspace_idempotency_key")
+  @@index([workspaceId, createdAt])
+  @@index([status, createdAt])
+  @@map("billing_orders")
+}
+
+model BillingPayment {
+  id                      String               @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId             String               @map("workspace_id") @db.Uuid
+  orderId                 String               @map("order_id") @db.Uuid
+  provider                BillingPaymentProvider
+  externalId              String?              @map("external_id") @db.VarChar(255)
+  providerIdempotencyKey  String               @map("provider_idempotency_key") @db.VarChar(64)
+  status                  BillingPaymentStatus @default(CREATING)
+  amountMinor             BigInt               @map("amount_minor")
+  currency                String               @db.Char(3)
+  confirmationUrl         String?              @map("confirmation_url") @db.Text
+  paymentMethodRecordId   String?              @map("payment_method_record_id") @db.Uuid
+  paymentMethodType       String?              @map("payment_method_type") @db.VarChar(64)
+  providerObjectHash      Bytes?               @map("provider_object_hash")
+  providerCreatedAt       DateTime?            @map("provider_created_at") @db.Timestamptz(6)
+  verifiedAt              DateTime?            @map("verified_at") @db.Timestamptz(6)
+  succeededAt             DateTime?            @map("succeeded_at") @db.Timestamptz(6)
+  canceledAt              DateTime?            @map("canceled_at") @db.Timestamptz(6)
+  refundedAmountMinor     BigInt                @default(0) @map("refunded_amount_minor")
+  failureCode             String?              @map("failure_code") @db.VarChar(100)
+  version                 Int                  @default(1)
+  createdAt               DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  order         BillingOrder          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  paymentMethod BillingPaymentMethod? @relation(fields: [paymentMethodRecordId], references: [id], onDelete: SetNull)
+  refunds       BillingRefund[]
+  receipt       NpdReceiptObligation?
+
+  @@unique([orderId, provider], map: "billing_payments_order_provider_key")
+  @@unique([provider, externalId], map: "billing_payments_provider_external_id_key")
+  @@index([workspaceId, createdAt])
+  @@index([status, updatedAt])
+  @@map("billing_payments")
+}
+
+model BillingPaymentMethod {
+  id                  String                     @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId         String                     @map("workspace_id") @db.Uuid
+  provider            BillingPaymentProvider
+  externalId          String                     @map("external_id") @db.VarChar(255)
+  type                String                     @db.VarChar(64)
+  title               String?                    @db.VarChar(160)
+  status              BillingPaymentMethodStatus @default(ACTIVE)
+  consentedAt         DateTime                   @map("consented_at") @db.Timestamptz(6)
+  disabledAt          DateTime?                  @map("disabled_at") @db.Timestamptz(6)
+  version             Int                        @default(1)
+  createdAt           DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  workspace            Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  payments             BillingPayment[]
+  defaultSubscriptions BillingSubscription[] @relation("SubscriptionDefaultPaymentMethod")
+
+  @@unique([provider, externalId], map: "billing_payment_methods_provider_external_id_key")
+  @@index([workspaceId, status])
+  @@map("billing_payment_methods")
+}
+
+model BillingRefund {
+  id                     String              @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId            String              @map("workspace_id") @db.Uuid
+  paymentId              String              @map("payment_id") @db.Uuid
+  createdBy              String              @map("created_by") @db.Uuid
+  externalId             String?             @map("external_id") @db.VarChar(255)
+  providerIdempotencyKey String              @map("provider_idempotency_key") @db.VarChar(64)
+  requestIdempotencyKey  String              @map("request_idempotency_key") @db.VarChar(180)
+  requestHash            Bytes               @map("request_hash")
+  status                 BillingRefundStatus @default(CREATING)
+  amountMinor            BigInt              @map("amount_minor")
+  currency               String              @db.Char(3)
+  reason                 String              @db.VarChar(500)
+  providerObjectHash     Bytes?              @map("provider_object_hash")
+  succeededAt            DateTime?           @map("succeeded_at") @db.Timestamptz(6)
+  failureCode            String?             @map("failure_code") @db.VarChar(100)
+  createdAt              DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  payment BillingPayment @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, requestIdempotencyKey], map: "billing_refunds_workspace_idempotency_key")
+  @@unique([paymentId, providerIdempotencyKey], map: "billing_refunds_payment_provider_idempotency_key")
+  @@unique([externalId], map: "billing_refunds_external_id_key")
+  @@index([workspaceId, createdAt])
+  @@index([status, updatedAt])
+  @@map("billing_refunds")
+}
+
+model BillingLedgerAccount {
+  id          String                   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String?                  @map("workspace_id") @db.Uuid
+  type        BillingLedgerAccountType
+  currency    String                   @db.Char(3)
+  status      String                   @default("ACTIVE") @db.VarChar(32)
+  createdAt   DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  workspace Workspace?           @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  entries   BillingLedgerEntry[]
+
+  @@unique([workspaceId, type, currency], map: "billing_ledger_accounts_workspace_type_currency_key")
+  @@index([type, currency])
+  @@map("billing_ledger_accounts")
+}
+
+model BillingLedgerTransaction {
+  id                String                         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  type              BillingLedgerTransactionType
+  status            BillingLedgerTransactionStatus @default(DRAFT)
+  businessReference String                         @unique(map: "billing_ledger_transactions_business_reference_key") @map("business_reference") @db.VarChar(255)
+  description       String                         @db.VarChar(500)
+  occurredAt        DateTime                       @map("occurred_at") @db.Timestamptz(6)
+  createdBy         String?                        @map("created_by") @db.Uuid
+  metadata          Json
+  reversalOfId      String?                        @map("reversal_of_id") @db.Uuid
+  createdAt         DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  reversalOf BillingLedgerTransaction?  @relation("LedgerTransactionReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversals  BillingLedgerTransaction[] @relation("LedgerTransactionReversal")
+  entries    BillingLedgerEntry[]
+
+  @@index([occurredAt, id])
+  @@map("billing_ledger_transactions")
+}
+
+model BillingLedgerEntry {
+  id            String                 @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  transactionId String                 @map("transaction_id") @db.Uuid
+  accountId     String                 @map("account_id") @db.Uuid
+  direction     BillingLedgerDirection
+  amountMinor   BigInt                 @map("amount_minor")
+  currency      String                 @db.Char(3)
+  createdAt     DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  transaction BillingLedgerTransaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+  account     BillingLedgerAccount     @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@unique([transactionId, accountId, direction], map: "billing_ledger_entries_transaction_account_direction_key")
+  @@index([accountId, createdAt])
+  @@map("billing_ledger_entries")
+}
+
+model BillingWebhookInbox {
+  id               String                    @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  provider         BillingPaymentProvider
+  eventFingerprint String                    @map("event_fingerprint") @db.Char(64)
+  eventType        String                    @map("event_type") @db.VarChar(100)
+  objectType       String                    @map("object_type") @db.VarChar(32)
+  objectId         String                    @map("object_id") @db.VarChar(255)
+  payloadHash      Bytes                     @map("payload_hash")
+  sourceIp         String?                   @map("source_ip") @db.Inet
+  status           BillingWebhookInboxStatus @default(RECEIVED)
+  attemptCount     Int                       @default(0) @map("attempt_count")
+  failureCode      String?                   @map("failure_code") @db.VarChar(100)
+  receivedAt       DateTime                  @default(now()) @map("received_at") @db.Timestamptz(6)
+  processedAt      DateTime?                 @map("processed_at") @db.Timestamptz(6)
+  updatedAt        DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([provider, eventFingerprint], map: "billing_webhook_inbox_provider_fingerprint_key")
+  @@index([status, updatedAt])
+  @@index([provider, objectId, receivedAt])
+  @@map("billing_webhook_inbox")
+}
+
+model NpdReceiptObligation {
+  id                         String                     @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  paymentId                  String                     @unique(map: "npd_receipt_obligations_payment_id_key") @map("payment_id") @db.Uuid
+  yookassaPaymentId          String                     @unique(map: "npd_receipt_obligations_yookassa_payment_id_key") @map("yookassa_payment_id") @db.VarChar(255)
+  workspaceId                String                     @map("workspace_id") @db.Uuid
+  grossAmountMinor           BigInt                     @map("gross_amount_minor")
+  currency                   String                     @db.Char(3)
+  paidAt                     DateTime                   @map("paid_at") @db.Timestamptz(6)
+  serviceDescriptionSnapshot String                     @map("service_description_snapshot") @db.VarChar(255)
+  buyerType                  BillingBuyerType           @map("buyer_type")
+  buyerNameEncrypted         String?                    @map("buyer_name_encrypted") @db.Text
+  buyerInnEncrypted          String?                    @map("buyer_inn_encrypted") @db.Text
+  deliveryEmailEncrypted     String                     @map("delivery_email_encrypted") @db.Text
+  registrationMode           NpdReceiptRegistrationMode @default(MANUAL_MY_TAX) @map("registration_mode")
+  status                     NpdReceiptStatus           @default(AWAITING_MANUAL_REGISTRATION)
+  officialReceiptId          String?                    @map("official_receipt_id") @db.VarChar(255)
+  officialReceiptUrl         String?                    @map("official_receipt_url") @db.Text
+  registeredAt               DateTime?                  @map("registered_at") @db.Timestamptz(6)
+  deliveredAt                DateTime?                  @map("delivered_at") @db.Timestamptz(6)
+  deliveryAttempts           Int                        @default(0) @map("delivery_attempts")
+  cancellationReason         String?                    @map("cancellation_reason") @db.VarChar(500)
+  replacementReceiptId       String?                    @map("replacement_receipt_id") @db.Uuid
+  version                    Int                        @default(1)
+  createdAt                  DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  payment            BillingPayment        @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  workspace          Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  replacementReceipt NpdReceiptObligation? @relation("NpdReceiptReplacement", fields: [replacementReceiptId], references: [id], onDelete: Restrict)
+  replacedReceipts   NpdReceiptObligation[] @relation("NpdReceiptReplacement")
+
+  @@index([status, createdAt])
+  @@index([workspaceId, createdAt])
+  @@map("npd_receipt_obligations")
 }
 
 model AuditEvent {

@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type {
+  BillingEntitlementService,
+  RankProviderEntitlement
+} from "../billing/billing-entitlement.service.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import {
   CONTROLLED_BETA_DAILY_PROVIDER_TASK_LIMIT,
@@ -16,7 +20,7 @@ const reservationId = "01900000-0000-7000-8000-000000000006";
 
 test("reserves one controlled-beta BYOK provider task in the UTC day", async () => {
   let created: Readonly<Record<string, unknown>> | undefined;
-  const policy = new ControlledBetaRankExecutionGrantPolicy();
+  const policy = policyWithEntitlement("ALLOWED");
   const result = await policy.evaluate(
     {
       $queryRaw: async () => [
@@ -50,7 +54,7 @@ test("reserves one controlled-beta BYOK provider task in the UTC day", async () 
 });
 
 test("denies an unknown policy and exhausts the bounded daily quota", async () => {
-  const policy = new ControlledBetaRankExecutionGrantPolicy();
+  const policy = policyWithEntitlement("ALLOWED");
   const transaction = {
     $queryRaw: async () => [
       { now: new Date("2026-07-30T12:00:00.000Z") }
@@ -75,6 +79,43 @@ test("denies an unknown policy and exhausts the bounded daily quota", async () =
     quota: "EXHAUSTED"
   });
 });
+
+test("fails closed before quota reservation when billing entitlement is unavailable", async () => {
+  const transaction = {
+    $queryRaw: async () => {
+      throw new Error("quota clock must not be read");
+    },
+    rankExecutionQuotaReservation: {
+      count: async () => {
+        throw new Error("quota must not be read");
+      },
+      create: async () => {
+        throw new Error("quota must not be reserved");
+      }
+    }
+  } as unknown as Prisma.TransactionClient;
+
+  assert.deepEqual(
+    await policyWithEntitlement("NOT_AVAILABLE").evaluate(
+      transaction,
+      input()
+    ),
+    { entitlement: "NOT_AVAILABLE", quota: "NOT_AVAILABLE" }
+  );
+  assert.deepEqual(
+    await policyWithEntitlement("DENIED").evaluate(transaction, input()),
+    { entitlement: "DENIED", quota: "NOT_AVAILABLE" }
+  );
+});
+
+function policyWithEntitlement(
+  result: RankProviderEntitlement
+): ControlledBetaRankExecutionGrantPolicy {
+  const entitlements = {
+    rankProviderEntitlement: async () => result
+  } as unknown as BillingEntitlementService;
+  return new ControlledBetaRankExecutionGrantPolicy(entitlements);
+}
 
 function input() {
   return {

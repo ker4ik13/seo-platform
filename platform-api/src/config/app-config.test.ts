@@ -24,6 +24,84 @@ test("loads explicit service configuration", () => {
     transactionTimeoutMs: 10_000,
     lockTimeoutMs: 500
   });
+  assert.deepEqual(config.billing, {
+    yookassa: {
+      enabled: false,
+      apiBaseUrl: "https://api.yookassa.ru/v3",
+      requestTimeoutMs: 10_000,
+      validateWebhookSourceIp: true
+    },
+    reconciliation: {
+      enabled: false,
+      intervalMs: 60_000,
+      batchSize: 25
+    }
+  });
+});
+
+test("requires complete YooKassa credentials and derives a safe return URL", () => {
+  assert.throws(
+    () =>
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        YOOKASSA_ENABLED: "true",
+        WEB_PUBLIC_URL: "https://app.example.test"
+      }),
+    /YOOKASSA_SHOP_ID/u
+  );
+
+  const config = loadAppConfig({
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    WEB_PUBLIC_URL: "https://app.example.test",
+    YOOKASSA_ENABLED: "true",
+    YOOKASSA_SHOP_ID: "123456",
+    YOOKASSA_SECRET_KEY: "s".repeat(32)
+  });
+  assert.equal(
+    config.billing.yookassa.returnUrl,
+    "https://app.example.test/app/settings/billing?checkout=return"
+  );
+  assert.equal(config.billing.reconciliation.enabled, true);
+});
+
+test("keeps production YooKassa traffic on the official API with IP validation", () => {
+  const enabled = {
+    YOOKASSA_ENABLED: "true",
+    YOOKASSA_SHOP_ID: "123456",
+    YOOKASSA_SECRET_KEY: "s".repeat(32)
+  };
+  assert.throws(
+    () =>
+      loadAppConfig(
+        productionEnvironment({
+          ...enabled,
+          YOOKASSA_API_BASE_URL: "https://provider.example.test/v3"
+        })
+      ),
+    /official YooKassa v3 endpoint/u
+  );
+  assert.throws(
+    () =>
+      loadAppConfig(
+        productionEnvironment({
+          ...enabled,
+          YOOKASSA_VALIDATE_WEBHOOK_SOURCE_IP: "false"
+        })
+      ),
+    /cannot be disabled in production/u
+  );
+  assert.throws(
+    () =>
+      loadAppConfig(
+        productionEnvironment({
+          ...enabled,
+          BILLING_RECONCILIATION_ENABLED: "false"
+        })
+      ),
+    /BILLING_RECONCILIATION_ENABLED is required/u
+  );
 });
 
 test("uses only explicit loopback or container bind addresses", () => {

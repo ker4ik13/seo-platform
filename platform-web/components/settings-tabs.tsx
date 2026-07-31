@@ -1,5 +1,6 @@
 import {
   canViewProjectIntegrations,
+  canViewWorkspaceBilling,
   canViewWorkspaceTeam,
   canViewWorkspaceIntegrations
 } from "../lib/app-permissions";
@@ -12,6 +13,7 @@ export function SettingsTabs({
   workspaceRoleCode
 }: Readonly<{
   active:
+    | "billing"
     | "workspace"
     | "team"
     | "project"
@@ -49,6 +51,15 @@ export function SettingsTabs({
           href="/app/settings/team"
         >
           Команда
+        </a>
+      )}
+      {canViewWorkspaceBilling(workspaceRoleCode) && (
+        <a
+          aria-current={active === "billing" ? "page" : undefined}
+          className={active === "billing" ? "active" : undefined}
+          href="/app/settings/billing"
+        >
+          Тариф и оплата
         </a>
       )}
       <a

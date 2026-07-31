@@ -69,6 +69,41 @@
    до post-migration grants, а application processes стартуют только после
    успешного privilege provisioning.
 
+## YooKassa и биллинг
+
+По умолчанию `YOOKASSA_ENABLED=false`, поэтому приложение показывает каталог,
+trial и ledger, но не создаёт внешние платежи. Для sandbox/live-контура:
+
+1. задать `YOOKASSA_SHOP_ID` и `YOOKASSA_SECRET_KEY` только в secret storage
+   Platform API; не передавать их Web, Jobs, URL или логам;
+2. включить `YOOKASSA_ENABLED=true` и
+   `BILLING_RECONCILIATION_ENABLED=true`; production startup fail-closed
+   отклоняет YooKassa без reconciliation или source-IP validation;
+3. оставить `YOOKASSA_API_BASE_URL=https://api.yookassa.ru/v3`, а
+   `YOOKASSA_RETURN_URL` направить на тот же `WEB_PUBLIC_URL`:
+   `/app/settings/billing?checkout=return`;
+4. зарегистрировать в кабинете YooKassa webhook
+   `https://<API_PUBLIC_URL>/api/v1/billing/providers/yookassa/webhook` только
+   для поддержанных payment/refund events;
+5. убедиться, что reverse proxy передаёт единственный достоверный client IP:
+   Platform API принимает только официальные сети YooKassa и затем всегда
+   делает canonical server-side `GET` объекта, не доверяя телу webhook;
+6. пройти sandbox canary: hosted payment, повтор с тем же idempotency key,
+   webhook replay, saved-method renewal, отключение продления, частичный и
+   полный refund, reconciliation после пропущенного webhook.
+
+Card PAN/CVC платформа не принимает. Регистрацию чека НПД YooKassa не
+выполняет: после verified `payment.succeeded` создаётся manual obligation для
+официального приложения/кабинета «Мой налог». До защищённой operations-панели
+receipt ID/URL, доставка, отмена и replacement остаются release gate; применять
+неофициальные API или browser automation запрещено.
+
+Нормативные provider flow:
+[payments](https://yookassa.ru/developers/payment-acceptance/getting-started/payment-process),
+[webhooks](https://yookassa.ru/developers/using-api/webhooks),
+[saved methods](https://yookassa.ru/developers/payment-acceptance/scenario-extensions/recurring-payments/pay-with-saved),
+[refunds](https://yookassa.ru/developers/payment-acceptance/after-the-payment/refunds).
+
 ## Web build-time public URL
 
 Next.js встраивает `NEXT_PUBLIC_SITE_URL` в build artifact; одного runtime env

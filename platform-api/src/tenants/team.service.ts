@@ -12,6 +12,7 @@ import {
   type WorkspaceTeamListQuery
 } from "@seo-platform/contracts";
 import { AuditService } from "../audit/audit.service.js";
+import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import type { AppConfig } from "../config/app-config.js";
 import {
@@ -50,7 +51,8 @@ export class TeamService {
     private readonly audit: AuditService,
     private readonly outbox: OutboxService,
     private readonly crypto: AuthCryptoService,
-    @Inject(APP_CONFIG) private readonly config: AppConfig
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly entitlements: BillingEntitlementService
   ) {}
 
   public async listMembers(
@@ -182,6 +184,11 @@ export class TeamService {
     try {
       const { invite, token } = await this.prisma.$transaction(
         async (transaction) => {
+          await this.entitlements.assertCanCreateInvite(
+            transaction,
+            workspaceId,
+            input.roleCode
+          );
           const created = await transaction.workspaceInvite.create({
             data: {
               workspaceId,
@@ -383,6 +390,11 @@ export class TeamService {
           message: "The user is already a workspace member"
         });
       }
+      await this.entitlements.assertCanAcceptInvite(
+        transaction,
+        invite.workspaceId,
+        invite.roleCode
+      );
 
       const member = await transaction.workspaceMember.upsert({
         where: {

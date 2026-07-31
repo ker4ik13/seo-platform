@@ -2,7 +2,8 @@
 
 Последнее обновление: 30 июля 2026 года
 
-Текущий инкремент: P2 production vertical — реальный ручной съём позиций
+Текущий инкремент: P3 billing/payment vertical после замыкания реального
+ручного съёма позиций
 Статус P1: ручной CRUD запросов и иерархических групп реализован поверх
 tenant-scoped SEO Data owner с optimistic locking, RBAC/CSRF и audit.
 Запрос уже можно создать, изменить и soft-delete; поддерживаются текст,
@@ -115,6 +116,34 @@ found/not-found chunk проходит через отдельный SEO Data re
 `arsenkin-positions@2`; Compose включает submit только в isolated
 connector-worker. Старые execution evidence поколения `@1` активироваться
 задним числом не могут.
+
+P3 billing foundation реализован в Platform API и Web. Versioned каталог
+содержит Trial/Solo/Team/Agency/Business/Enterprise и годовые цены; hosted
+checkout YooKassa не принимает карточные данные, использует provider
+idempotence, canonical GET после webhook, официальный source-IP allowlist и
+bounded reconciliation. Поддержаны trial, подписка, пополнение data balance,
+сохранённый способ с отдельным согласием, автопродление, отключение продления,
+полный/частичный refund только в пределах неиспользованного остатка, payment
+history и manual-NPD receipt obligations. PII плательщика шифруется
+AES-256-GCM с purpose-bound AAD; секрет YooKassa получает только Platform API.
+Double-entry ledger защищён PostgreSQL triggers: только balanced DRAFT→POSTED,
+append-only update/delete и запрет TRUNCATE. Included credits не переносятся
+на новый период; failed renewal проходит past_due/grace и переводит workspace
+в read-only, успешная оплата восстанавливает доступ. Реальный provider
+checkout/автоплатёж остаётся operator gate до выдачи shop ID/secret, настройки
+webhook и sandbox/live canary; ручная регистрация/доставка чека «Мой налог»
+пока требует отдельной защищённой operations-панели.
+Plan entitlement больше не является UI-only: общий
+`BillingEntitlementService` строго разбирает immutable feature snapshot,
+использует DB clock и сериализует capacity-команды блокировкой workspace.
+Создание проекта считает все сохранённые slots; invitation резервирует seat,
+а acceptance повторно проверяет active/suspended members. `CLIENT` закрыт
+до тарифа с `clientRole`. При отсутствии подписки onboarding ограничен
+Trial-каталогом, но истёкшая/заблокированная подписка не откатывается на
+бесплатный fallback. Controlled-beta Arsenkin grant теперь проверяет
+действующий BYOK entitlement до quota reservation. Keyword, tracked-pair,
+storage и automation meters, а также platform-paid settlement остаются
+следующей частью enforcement.
 
 Параллельный dependency-free срез browser Web Push device lifecycle
 реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет
@@ -523,6 +552,10 @@ Backend convention:
   idempotent invite completion;
 - `platform-api/src/authorization` — default-deny permission catalog и
   проверка tenant context;
+- `platform-api/src/billing` — versioned plan catalog, trial/subscription,
+  YooKassa checkout/webhook/reconciliation/autopay/refund, encrypted buyer
+  PII, manual-NPD obligations, append-only double-entry ledger и общий
+  transaction-scoped entitlement guard для projects/seats/CLIENT/BYOK;
 - `platform-api/src/tenants` — workspace/project commands и queries;
 - `platform-api/src/tenants/team.*` — tenant-bound cursor pagination,
   приглашения, участники и проектные ограничения доступа;
@@ -918,8 +951,8 @@ Entrypoints:
 | Semantics/import | vertical slice: CSV/TSV → mapping → validation → publish → query |
 | Notifications | vertical slice: preferences → effective policy → read center → encrypted browser device lifecycle |
 | Integrations | vertical slice: catalog + encrypted BYOK vault + validation + project binding |
-| Rankings | vertical slice: contexts + estimate/preparation + persisted/public history; provider execution отсутствует |
-| Billing/YooKassa | planned |
+| Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |
+| Billing/YooKassa | vertical slice: catalog + hosted/recurring payment + webhook/reconciliation + ledger/refund/NPD obligation + Web UI; live provider и operations receipt workflow остаются gate |
 | Directus content | planned |
 
 Foundation содержит четыре валидные Prisma schemas и начальные migrations,
@@ -1494,10 +1527,29 @@ Job/manifest. Raw provider body нигде durable не сохраняется.
   это интеграционный smoke, а не production deploy.
 - Target runtime: Node.js 24. Текущий полный lint/typecheck/test/build baseline
   проверен на Node.js 24.18.1; контейнеры также используют Node.js 24.
+- P3 billing + first entitlement gate 2026-07-31: полная цепочка 9 Platform
+  API migrations применена на новой PostgreSQL 16.14 БД; 6 plans, 11 prices
+  и 5 system ledger accounts подтверждены. Live negative smokes блокируют
+  второй trial владельца, direct POSTED/unbalanced ledger, entry mutation и
+  TRUNCATE. Root typecheck/lint/tests проходят: contracts 98, Platform API
+  407 + 4 opt-in skips, Jobs 415 + 9 skips, SEO Data 116, Realtime 112, Web
+  154, Admin 2, infrastructure 82 + 5 opt-in skips. Production build всех
+  deployable проходит и содержит `/app/settings/billing`.
 
 ## 9. Следующий вертикальный срез
 
-Ближайший пользовательский P1-контур:
+Ближайший обязательный billing-контур после projects/seats/BYOK entitlement:
+
+`keyword/tracked/storage/automation meters → estimate/reservation/capture для provider usage →
+защищённая operations-панель НПД → sandbox checkout/autopay/refund E2E`
+
+Критерий — тариф реально ограничивает seats/projects/keywords/tracked pairs,
+каждая platform-paid команда проходит estimate/reservation/settlement, а
+успешная оплата создаёт и доводит до доставки официальный чек без ручного
+изменения БД. До YooKassa shop credentials и юридической конфигурации внешний
+live canary честно остаётся operator gate.
+
+Следующий пользовательский P1-контур:
 
 `live DB/browser E2E для semantics/versions/export → comments/presence`
 
@@ -1598,6 +1650,25 @@ OAuth/OIDC выполняется после подтверждения зави
 - Bucket требует внешней CORS/lifecycle настройки: Web origin, exposed `ETag`,
   abort incomplete multipart через 2 дня.
 - Нет production observability и проверенного backup/restore runbook.
+- Billing migration `20260731023000_billing_foundation` создаёт versioned
+  catalog, subscription/order/payment/refund/method, webhook inbox,
+  double-entry ledger и NPD obligation. Fresh full Platform API chain
+  применён на локальном PostgreSQL 16; balanced posting, direct POSTED insert,
+  update/delete и TRUNCATE guards проверены живыми negative smokes. Целевой
+  PostgreSQL 18, YooKassa sandbox/live checkout, webhook ingress, saved-method
+  autopay и refund canary остаются release gates. Production startup требует
+  reconciliation и webhook source-IP validation при включённой YooKassa.
+- Тарифные entitlements являются authoritative transaction guard для
+  projects, seats, `CLIENT` role и controlled-beta BYOK grant. Keywords,
+  storage, tracked pairs, automations/guest reports/API limits ещё требуют
+  owner-service meters, а system-provider usage пока не проводит
+  estimate/reservation/capture через новый ledger. До замыкания этих
+  контуров биллинг нельзя считать полным коммерческим enforcement.
+- Manual NPD obligation создаётся идемпотентно после verified
+  `payment.succeeded`, но защищённая operations-панель для сохранения
+  официального receipt ID/URL, доставки, SLA/escalation, cancellation и
+  replacement ещё не реализована. Использовать неофициальный API «Мой налог»
+  или хранить его пароль запрещено.
 - KEK rotation runbook описан в `platform-infrastructure/README.md`, но
   автоматический bounded DEK rewrap ещё не реализован. DB-aware startup
   coverage работает fail-closed; до rewrap старые используемые KEK запрещено
@@ -1711,14 +1782,10 @@ OAuth/OIDC выполняется после подтверждения зави
   подключает его автоматически. Plaintext verification token не логируется.
 - QR для TOTP пока представлен локальным `otpauth://` URI и ручным ключом;
   UI QR появится после подтверждения зависимости `qrcode`.
-- Rank/frequency provider execution, тарификация и YooKassa пока
-  присутствуют только в ТЗ/схемах; tracking configuration, provider-free
-  estimate, durable rank preparation Job и normalized SEO Data storage
-  реализованы, но production provider worker snapshots ещё не создаёт.
-  Arsenkin/Keys.so connectors сейчас выполняют только
-  read-only credential validation; live Arsenkin `positions` заблокирован
-  ADR-2026-034, XMLStock ждёт подтверждённого provider contract и redacted
-  fixtures.
+- Arsenkin position execution реализован; production live BYOK canary,
+  provider incident telemetry/circuit breaker и schedule orchestration ещё
+  обязательны. Keys.so пока используется только для credential validation,
+  XMLStock ждёт подтверждённого provider contract и redacted fixtures.
 - `platform-app` сохранён как legacy Git-источник до проверки переноса; новая
   функциональность добавляется только в `platform-web`.
 

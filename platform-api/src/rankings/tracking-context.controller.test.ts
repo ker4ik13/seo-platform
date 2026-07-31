@@ -15,6 +15,7 @@ import type {
   TenantRequest
 } from "../authorization/authorization.types.js";
 import { AuthorizationModule } from "../authorization/authorization.module.js";
+import { BillingModule } from "../billing/billing.module.js";
 import { REQUIRED_PERMISSION } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
 import { DomainError } from "../common/domain-error.js";
@@ -138,6 +139,7 @@ test("imports every module required by ranking controller guards and clients", (
     Reflect.getMetadata(MODULE_METADATA.IMPORTS, RankingModule),
     [
       AuthorizationModule,
+      BillingModule,
       IdentityModule,
       JobsModule,
       SeoDataModule,

@@ -45,6 +45,22 @@ export interface AppConfig {
     readonly transactionTimeoutMs: number;
     readonly lockTimeoutMs: number;
   };
+  readonly billing: {
+    readonly yookassa: {
+      readonly enabled: boolean;
+      readonly apiBaseUrl: string;
+      readonly shopId?: string;
+      readonly secretKey?: string;
+      readonly returnUrl?: string;
+      readonly requestTimeoutMs: number;
+      readonly validateWebhookSourceIp: boolean;
+    };
+    readonly reconciliation: {
+      readonly enabled: boolean;
+      readonly intervalMs: number;
+      readonly batchSize: number;
+    };
+  };
   readonly services: {
     readonly seoData: string;
     readonly jobs: string;
@@ -202,6 +218,32 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const webPublicUrl = optionalWebPublicUrl(
     env.WEB_PUBLIC_URL,
     nodeEnv as AppConfig["nodeEnv"]
+  );
+  const yookassaEnabled = booleanValue(
+    env.YOOKASSA_ENABLED,
+    false,
+    "YOOKASSA_ENABLED"
+  );
+  const yookassaShopId = env.YOOKASSA_SHOP_ID?.trim();
+  const yookassaSecretKey = env.YOOKASSA_SECRET_KEY?.trim();
+  const yookassaReturnUrl = optionalYookassaReturnUrl(
+    env.YOOKASSA_RETURN_URL,
+    webPublicUrl,
+    nodeEnv as AppConfig["nodeEnv"]
+  );
+  const yookassaApiBaseUrl = yookassaBaseUrl(
+    env.YOOKASSA_API_BASE_URL,
+    nodeEnv as AppConfig["nodeEnv"]
+  );
+  const yookassaValidateWebhookSourceIp = booleanValue(
+    env.YOOKASSA_VALIDATE_WEBHOOK_SOURCE_IP,
+    true,
+    "YOOKASSA_VALIDATE_WEBHOOK_SOURCE_IP"
+  );
+  const billingReconciliationEnabled = booleanValue(
+    env.BILLING_RECONCILIATION_ENABLED,
+    yookassaEnabled,
+    "BILLING_RECONCILIATION_ENABLED"
   );
   const outboxPublisherEnabled = booleanValue(
     env.OUTBOX_PUBLISHER_ENABLED,
@@ -389,6 +431,55 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       "WEB_PUBLIC_URL is required when auth-email delivery is configured"
     );
   }
+  if (yookassaEnabled) {
+    if (!yookassaShopId || !/^[0-9]{4,32}$/u.test(yookassaShopId)) {
+      throw new Error(
+        "YOOKASSA_SHOP_ID must contain 4 to 32 digits when YooKassa is enabled"
+      );
+    }
+    if (
+      !yookassaSecretKey ||
+      yookassaSecretKey.length < 20 ||
+      yookassaSecretKey.length > 512 ||
+      isPlaceholderSecret(yookassaSecretKey) ||
+      [...yookassaSecretKey].some((character) => {
+        const code = character.codePointAt(0) ?? 0;
+        return code < 0x21 || code > 0x7e;
+      })
+    ) {
+      throw new Error(
+        "YOOKASSA_SECRET_KEY must be a non-placeholder visible ASCII secret when YooKassa is enabled"
+      );
+    }
+    if (!yookassaReturnUrl) {
+      throw new Error(
+        "YOOKASSA_RETURN_URL or WEB_PUBLIC_URL is required when YooKassa is enabled"
+      );
+    }
+  }
+  if (billingReconciliationEnabled && !yookassaEnabled) {
+    throw new Error(
+      "BILLING_RECONCILIATION_ENABLED requires YOOKASSA_ENABLED"
+    );
+  }
+  if (
+    nodeEnv === "production" &&
+    yookassaEnabled &&
+    !billingReconciliationEnabled
+  ) {
+    throw new Error(
+      "BILLING_RECONCILIATION_ENABLED is required with YooKassa in production"
+    );
+  }
+  if (
+    nodeEnv === "production" &&
+    yookassaEnabled &&
+    !yookassaValidateWebhookSourceIp
+  ) {
+    throw new Error(
+      "YOOKASSA_VALIDATE_WEBHOOK_SOURCE_IP cannot be disabled in production"
+    );
+  }
   if (env.INTERNAL_API_TOKEN?.trim()) {
     throw new Error(
       "INTERNAL_API_TOKEN is no longer supported; configure caller/audience tokens"
@@ -529,6 +620,40 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       transactionTimeoutMs: sessionExpiryTransactionTimeoutMs,
       lockTimeoutMs: sessionExpiryLockTimeoutMs
     },
+    billing: {
+      yookassa: {
+        enabled: yookassaEnabled,
+        apiBaseUrl: yookassaApiBaseUrl,
+        ...(yookassaShopId ? { shopId: yookassaShopId } : {}),
+        ...(yookassaSecretKey ? { secretKey: yookassaSecretKey } : {}),
+        ...(yookassaReturnUrl ? { returnUrl: yookassaReturnUrl } : {}),
+        requestTimeoutMs: integerInRange(
+          env.YOOKASSA_REQUEST_TIMEOUT_MS,
+          10_000,
+          "YOOKASSA_REQUEST_TIMEOUT_MS",
+          1_000,
+          30_000
+        ),
+        validateWebhookSourceIp: yookassaValidateWebhookSourceIp
+      },
+      reconciliation: {
+        enabled: billingReconciliationEnabled,
+        intervalMs: integerInRange(
+          env.BILLING_RECONCILIATION_INTERVAL_MS,
+          60_000,
+          "BILLING_RECONCILIATION_INTERVAL_MS",
+          10_000,
+          3_600_000
+        ),
+        batchSize: integerInRange(
+          env.BILLING_RECONCILIATION_BATCH_SIZE,
+          25,
+          "BILLING_RECONCILIATION_BATCH_SIZE",
+          1,
+          100
+        )
+      }
+    },
     services: {
       seoData:
         env.SEO_DATA_INTERNAL_URL?.trim() || "http://localhost:4001",
@@ -658,4 +783,69 @@ function optionalWebPublicUrl(
     throw new Error("WEB_PUBLIC_URL must be an explicit canonical origin");
   }
   return value;
+}
+
+function yookassaBaseUrl(
+  value: string | undefined,
+  nodeEnv: AppConfig["nodeEnv"]
+): string {
+  const candidate = value?.trim() || "https://api.yookassa.ru/v3";
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error("YOOKASSA_API_BASE_URL must be an explicit HTTPS URL");
+  }
+  if (
+    parsed.origin + parsed.pathname.replace(/\/$/u, "") !== candidate ||
+    parsed.search !== "" ||
+    parsed.hash !== "" ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    (parsed.protocol !== "https:" &&
+      !(nodeEnv === "test" && parsed.protocol === "http:"))
+  ) {
+    throw new Error("YOOKASSA_API_BASE_URL must be an explicit HTTPS URL");
+  }
+  if (
+    nodeEnv === "production" &&
+    candidate !== "https://api.yookassa.ru/v3"
+  ) {
+    throw new Error(
+      "YOOKASSA_API_BASE_URL must use the official YooKassa v3 endpoint in production"
+    );
+  }
+  return candidate;
+}
+
+function optionalYookassaReturnUrl(
+  value: string | undefined,
+  webPublicUrl: string | undefined,
+  nodeEnv: AppConfig["nodeEnv"]
+): string | undefined {
+  const candidate =
+    value?.trim() ||
+    (webPublicUrl
+      ? `${webPublicUrl}/app/settings/billing?checkout=return`
+      : undefined);
+  if (!candidate) return undefined;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error("YOOKASSA_RETURN_URL must be an explicit return URL");
+  }
+  if (
+    parsed.toString() !== candidate ||
+    parsed.username !== "" ||
+    parsed.password !== "" ||
+    parsed.hash !== "" ||
+    (parsed.protocol !== "https:" &&
+      !(nodeEnv !== "production" && parsed.protocol === "http:")) ||
+    (webPublicUrl && parsed.origin !== webPublicUrl)
+  ) {
+    throw new Error("YOOKASSA_RETURN_URL must be an explicit return URL");
+  }
+  return candidate;
 }
