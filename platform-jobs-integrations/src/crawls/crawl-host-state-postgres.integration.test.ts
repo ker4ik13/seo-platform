@@ -53,6 +53,27 @@ test(
         (await service.currentBackoff("radar.example.com"))?.code,
         "LATENCY_SPIKE"
       );
+      for (let attempt = 2; attempt <= 6; attempt += 1) {
+        await service.recordFailure("radar.example.com", {
+          code: "HOST_UNAVAILABLE",
+          statusCode: 503
+        });
+      }
+      const sitePause =
+        await service.currentBackoff("radar.example.com");
+      assert.equal(sitePause?.code, "SITE_PAUSED");
+      assert.ok(
+        sitePause!.until.getTime() >=
+          Date.now() + 23 * 60 * 60 * 1_000
+      );
+      assert.equal(
+        (
+          await prisma.crawlHostState.findUniqueOrThrow({
+            where: { host: "radar.example.com" }
+          })
+        ).consecutiveFailures,
+        6
+      );
     } finally {
       await prisma.$disconnect();
     }

@@ -544,11 +544,7 @@ export class CrawlService {
     crawlId: string,
     leaseOwner: string,
     backoffUntil: Date,
-    backoffCode:
-      | "HOST_RATE_LIMIT"
-      | "HOST_UNAVAILABLE"
-      | "HOST_NETWORK_ERROR"
-      | "LATENCY_SPIKE"
+    backoffCode: NonNullable<TechnicalCrawlSummary["backoffCode"]>
   ): Promise<void> {
     if (
       Number.isNaN(backoffUntil.getTime()) ||

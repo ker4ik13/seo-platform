@@ -4,9 +4,11 @@ import { PrismaService } from "../database/prisma.service.js";
 
 const MAX_BACKOFF_MS = 60 * 60 * 1_000;
 const MAX_FAILURES = 30;
+const SITE_PAUSE_AFTER_FAILURES = 6;
+const SITE_PAUSE_MS = 24 * 60 * 60 * 1_000;
 
 export interface CrawlHostFailure {
-  readonly code: CrawlBackoffCode;
+  readonly code: CrawlHostFailureCode;
   readonly statusCode?: number;
   readonly retryAfterMs?: number;
 }
@@ -15,7 +17,13 @@ export type CrawlBackoffCode =
   | "HOST_RATE_LIMIT"
   | "HOST_UNAVAILABLE"
   | "HOST_NETWORK_ERROR"
-  | "LATENCY_SPIKE";
+  | "LATENCY_SPIKE"
+  | "SITE_PAUSED";
+
+export type CrawlHostFailureCode = Exclude<
+  CrawlBackoffCode,
+  "SITE_PAUSED"
+>;
 
 export interface CrawlHostBackoff {
   readonly code: CrawlBackoffCode;
@@ -63,12 +71,13 @@ export class CrawlHostStateService {
         (current?.consecutiveFailures ?? 0) + 1,
         MAX_FAILURES
       );
+      const decision = crawlHostBackoffDecision(
+        code,
+        consecutiveFailures,
+        input.retryAfterMs
+      );
       const candidate = new Date(
-        now.getTime() +
-          crawlBackoffDelayMs(
-            consecutiveFailures,
-            input.retryAfterMs
-          )
+        now.getTime() + decision.delayMs
       );
       const backoffUntil =
         current?.backoffUntil && current.backoffUntil > candidate
@@ -80,14 +89,14 @@ export class CrawlHostStateService {
           host: normalized,
           consecutiveFailures,
           backoffUntil,
-          lastFailureCode: code,
+          lastFailureCode: decision.code,
           ...(statusCode ? { lastStatusCode: statusCode } : {}),
           lastFailureAt: now
         },
         update: {
           consecutiveFailures,
           backoffUntil,
-          lastFailureCode: code,
+          lastFailureCode: decision.code,
           lastStatusCode: statusCode ?? null,
           lastFailureAt: now
         }
@@ -123,8 +132,12 @@ export class CrawlHostStateService {
           (current?.consecutiveFailures ?? 0) + 1,
           MAX_FAILURES
         );
+        const decision = crawlHostBackoffDecision(
+          "LATENCY_SPIKE",
+          consecutiveFailures
+        );
         const candidate = new Date(
-          now.getTime() + crawlBackoffDelayMs(consecutiveFailures)
+          now.getTime() + decision.delayMs
         );
         const backoffUntil =
           current?.backoffUntil && current.backoffUntil > candidate
@@ -136,14 +149,14 @@ export class CrawlHostStateService {
             host: normalized,
             consecutiveFailures,
             backoffUntil,
-            lastFailureCode: "LATENCY_SPIKE",
+            lastFailureCode: decision.code,
             lastFailureAt: now,
             latencyEwmaMs
           },
           update: {
             consecutiveFailures,
             backoffUntil,
-            lastFailureCode: "LATENCY_SPIKE",
+            lastFailureCode: decision.code,
             lastStatusCode: null,
             lastFailureAt: now,
             latencyEwmaMs
@@ -190,6 +203,26 @@ export function crawlBackoffDelayMs(
   return Math.max(exponential, retryAfter);
 }
 
+export function crawlHostBackoffDecision(
+  code: CrawlHostFailureCode,
+  consecutiveFailures: number,
+  retryAfterMs?: number
+): {
+  readonly code: CrawlBackoffCode;
+  readonly delayMs: number;
+} {
+  const ordinaryDelay = crawlBackoffDelayMs(
+    consecutiveFailures,
+    retryAfterMs
+  );
+  return consecutiveFailures >= SITE_PAUSE_AFTER_FAILURES
+    ? {
+        code: "SITE_PAUSED",
+        delayMs: Math.max(ordinaryDelay, SITE_PAUSE_MS)
+      }
+    : { code, delayMs: ordinaryDelay };
+}
+
 function crawlHost(value: string): string {
   const normalized = value.toLowerCase().replace(/\.$/u, "");
   if (
@@ -210,7 +243,8 @@ function backoffCode(value: string | null): CrawlBackoffCode {
       "HOST_RATE_LIMIT",
       "HOST_UNAVAILABLE",
       "HOST_NETWORK_ERROR",
-      "LATENCY_SPIKE"
+      "LATENCY_SPIKE",
+      "SITE_PAUSED"
     ].includes(value ?? "")
   ) {
     throw new TypeError("Invalid crawl host failure code");

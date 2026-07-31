@@ -106,7 +106,8 @@ export function technicalCrawlSummary(
         "HOST_RATE_LIMIT",
         "HOST_UNAVAILABLE",
         "HOST_NETWORK_ERROR",
-        "LATENCY_SPIKE"
+        "LATENCY_SPIKE",
+        "SITE_PAUSED"
       ].includes(crawl.backoffCode)
     ) ||
     (crawl.backoffCode === null) !== (crawl.backoffUntil === null)

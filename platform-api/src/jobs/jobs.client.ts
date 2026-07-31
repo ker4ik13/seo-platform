@@ -1416,7 +1416,8 @@ function technicalCrawlResponse(
       "HOST_RATE_LIMIT",
       "HOST_UNAVAILABLE",
       "HOST_NETWORK_ERROR",
-      "LATENCY_SPIKE"
+      "LATENCY_SPIKE",
+      "SITE_PAUSED"
     ].includes(input.backoffCode)
       ? input.backoffCode
       : undefined;

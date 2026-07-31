@@ -277,7 +277,9 @@ Jobs владеет глобальным `crawl_host_states`: `429`, `503`, DNS/
 backoff для host сразу между всеми workspace. Crawl сохраняет checkpoint,
 переходит обратно в durable queue с `backoffCode/backoffUntil`, не расходует
 page attempt и автоматически возобновляется dispatcher-ом; Web показывает
-причину и время следующей попытки.
+причину и время следующей попытки. После шести последовательных сигналов
+сайт автоматически получает отдельный `SITE_PAUSED` cooldown на 24 часа;
+успешный ответ под тем же global host lock сбрасывает failure series.
 Каждый ручной crawl теперь также хранит bounded `maxRuntimeSeconds`
 (1–360 минут, безопасный default для legacy config). Deadline включает
 pacing и повторные доставки: worker до следующего сетевого запроса завершает
@@ -936,6 +938,8 @@ Backend convention:
 - `platform-jobs-integrations/prisma/migrations/20260731230100_crawl_host_backoff`
   — global per-host failure/latency state и durable per-crawl
   `backoffCode/backoffUntil`;
+- `platform-jobs-integrations/prisma/migrations/20260801030000_crawl_site_pause`
+  — additive `SITE_PAUSED` state для durable technical crawl projection;
 - `platform-seo-data/src/crawls` — immutable crawl snapshots/issue
   occurrences/page changes с sitemap membership, current issue projection,
   deterministic before/after diff, идемпотентный анализ duplicate groups по
@@ -1252,7 +1256,7 @@ Entrypoints:
 | Integrations | vertical slice: catalog + encrypted BYOK vault + validation + project binding |
 | Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |
 | Automations | vertical slice: rank schedule CRUD + тарифный capacity + BullMQ scheduler + manual/scheduled execution + no-overlap/recovery/history/auto-pause + Web |
-| Pages/technical audit | vertical slice: Page Map CRUD/assignment + SSRF-safe async crawl + sitemap/include/exclude/query scope + conditional 304 reuse/global host backoff + immutable snapshots/current issues/page-change/duplicate/exact-scope disappearance history + lease/checkpoint recovery + Web |
+| Pages/technical audit | vertical slice: Page Map CRUD/assignment + SSRF-safe async crawl + sitemap/include/exclude/query scope + conditional 304 reuse/global host backoff/24h site auto-pause + immutable snapshots/current issues/page-change/duplicate/exact-scope disappearance history + lease/checkpoint recovery + Web |
 | Billing/YooKassa | vertical slice: catalog + hosted/recurring payment + webhook/reconciliation + ledger/refund/NPD obligation + Web UI + protected manual receipt operations + durable receipt email delivery; live provider/SMTP canary остаётся gate |
 | Directus content | planned |
 
@@ -1638,7 +1642,7 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
 - Platform API tests: 455 pass, 0 fail, 5 opt-in PostgreSQL 18 tests skipped
   без отдельного disposable database URL.
 - SEO data tests: 139 pass, 0 fail, 1 disposable-DB test skipped.
-- Jobs/integrations tests: 482 pass, 0 fail, 10 disposable-DB tests skipped
+- Jobs/integrations tests: 483 pass, 0 fail, 10 disposable-DB tests skipped
   в обычном запуске; startup decrypt-canary targeted suite — 7/7 pass.
 - Realtime unit tests: 112 pass, 0 fail.
 - Contracts unit tests: 100 pass, 0 fail.
@@ -1689,6 +1693,10 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
   scheduler/worker round-trip для `rank-automation` и `crawl-automation`;
   отдельный runtime restart и повторный полный user smoke подтвердили
   исправленный ACL/readiness без worker error loop.
+- Fresh PostgreSQL 18 site-pause gate: полная цепочка из 35 Jobs migrations
+  и реальный host-state integration проходят; шестой последовательный
+  rate-limit/unavailable/network/latency signal переводит global host в
+  `SITE_PAUSED` минимум на 24 часа, а успешный ответ сбрасывает series.
 - Обе conditional/backoff migrations применены к живому PostgreSQL 18
   runtime; все HTTP/Web/MinIO health endpoints отвечают `200`, ClamAV ready,
   повторный crawl `019fb769-a26b-7a86-9a44-c6d8fe4f732e` завершён, а его
@@ -1707,6 +1715,12 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
   `019fb7f6-182b-76bb-b55f-d6a9c46a6cc4` прошёл новый absence endpoint,
   duplicate groups, manual Radar automation и весь XLSX import; live evidence
   содержит два complete analysis, два разных scope и ноль ложных absences.
+- Site-pause migration применена к живому runtime. Регрессионный public smoke
+  workspace `019fb7fd-6fe3-7aef-9eb6-91ec322a0fe4`, crawl
+  `019fb7fd-7340-7918-b5ca-34154bc9a9d5` снова прошёл обычный и automation
+  crawl, duplicate/absence reads и полный XLSX import/publish; destructive
+  шестикратный failure against публичного сайта намеренно проверяется только
+  в disposable PostgreSQL integration, а не на внешнем host.
 - Полный root `pnpm test` после startup-canary и scoped claim: pass без
   failures; обычный запуск безопасно пропускает opt-in disposable-DB tests.
   Отдельный fresh PostgreSQL 18 gate для Jobs grant/claim: 4/4 pass.
@@ -2212,8 +2226,7 @@ OAuth/OIDC выполняется после подтверждения зави
   authorization. Duplicate и membership analysis выполняются идемпотентно
   под project lock, учитываются в общем issue count и доступны через
   tenant-protected API/UI с immutable evidence.
-  Полный Radar из раздела 10 ТЗ ещё требует notifications,
-  long-lived `PAUSED_BY_SITE` policy и отдельный
+  Полный Radar из раздела 10 ТЗ ещё требует notifications и отдельный
   browser-rendering pool. Cookies/custom headers намеренно не принимаются до
   отдельной secret-safe policy.
 - `platform-app` сохранён как legacy Git-источник до проверки переноса; новая

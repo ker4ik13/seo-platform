@@ -166,18 +166,18 @@ test("accepts only a bounded queued host backoff projection", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (): Promise<Response> =>
     dataResponse(crawlResponseData({
-      backoffCode: "HOST_RATE_LIMIT",
-      backoffUntil: "2026-07-31T05:05:00.000Z"
+      backoffCode: "SITE_PAUSED",
+      backoffUntil: "2026-08-01T05:05:00.000Z"
     }))) as typeof fetch;
   try {
     const crawl = await client().getTechnicalCrawl(
       projectContext("request-crawl-backoff-001"),
       crawlId
     );
-    assert.equal(crawl.backoffCode, "HOST_RATE_LIMIT");
+    assert.equal(crawl.backoffCode, "SITE_PAUSED");
     assert.equal(
       crawl.backoffUntil,
-      "2026-07-31T05:05:00.000Z"
+      "2026-08-01T05:05:00.000Z"
     );
   } finally {
     globalThis.fetch = originalFetch;

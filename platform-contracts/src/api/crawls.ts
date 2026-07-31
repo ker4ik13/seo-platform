@@ -55,7 +55,8 @@ export interface TechnicalCrawlSummary {
     | "HOST_RATE_LIMIT"
     | "HOST_UNAVAILABLE"
     | "HOST_NETWORK_ERROR"
-    | "LATENCY_SPIKE";
+    | "LATENCY_SPIKE"
+    | "SITE_PAUSED";
   readonly backoffUntil?: string;
   readonly version: number;
   readonly createdAt: string;

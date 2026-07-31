@@ -21,7 +21,7 @@ import {
 import { robotsAllows } from "./robots.js";
 import {
   CrawlHostStateService,
-  type CrawlBackoffCode
+  type CrawlHostFailureCode
 } from "./crawl-host-state.service.js";
 import { CrawlService } from "./crawl.service.js";
 import {
@@ -635,7 +635,7 @@ function assertHostResponseAvailable(
 
 class CrawlHostBackoffSignal extends Error {
   public constructor(
-    public readonly code: CrawlBackoffCode,
+    public readonly code: CrawlHostFailureCode,
     public readonly statusCode?: number,
     public readonly retryAfterMs?: number,
     options?: ErrorOptions
