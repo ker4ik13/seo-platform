@@ -49,6 +49,7 @@ import type {
   RankRunConflictReason,
   RankJobSummary,
   SemanticImportSummary,
+  StorageCapacityEntitlement,
   UploadPartUrls,
   UploadSummary,
   UpdateIntegrationCredentialInput,
@@ -107,14 +108,16 @@ export class JobsClient {
   public createUpload(
     context: InternalContext,
     input: CreateUploadInput,
-    idempotencyKey: string
+    idempotencyKey: string,
+    entitlement: StorageCapacityEntitlement
   ): Promise<CreatedMultipartUpload> {
     const body: InternalCreateUploadInput = {
       ...input,
       workspaceId: context.tenant.workspaceId,
       projectId: requiredProjectId(context.tenant),
       actorId: context.actorId,
-      idempotencyKey
+      idempotencyKey,
+      entitlement
     };
     return this.request("POST", "/internal/v1/uploads", context, body);
   }
@@ -781,6 +784,13 @@ function upstreamError(status: number, payload: unknown): DomainError {
         statusCode: 409,
         code: "DUPLICATE",
         message: "A project integration already exists"
+      });
+    }
+    if (code === "QUOTA_EXCEEDED") {
+      return new DomainError({
+        statusCode: 409,
+        code: "QUOTA_EXCEEDED",
+        message: "The current plan capacity would be exceeded"
       });
     }
     if (isRankRunConflictReason(code)) {

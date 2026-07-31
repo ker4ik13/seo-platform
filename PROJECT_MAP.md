@@ -155,8 +155,15 @@ import используют единый порядок advisory locks. Import c
 complete/partial complete освобождает остаток, cancel/final failure переводит
 пустой receipt в `ABORTED`. Поэтому параллельные ручные команды, несколько
 проектов и массовый импорт не обходят `storedKeywords`,
-`keywordsPerProject` или `trackedContextPairs`. Storage и automation meters,
-а также platform-paid settlement остаются следующей частью enforcement.
+`keywordsPerProject` или `trackedContextPairs`. Storage capacity также
+переведён с UI-only ограничения на trusted internal snapshot: Platform API
+получает актуальный `storageBytes` только из действующего immutable plan,
+а Jobs под workspace advisory lock атомарно считает все `INITIATED`,
+`UPLOADING`, `UPLOADED`, `SCANNING` и `READY` uploads до создания новой
+multipart-записи. Параллельные загрузки не обходят тариф, идемпотентный
+проигравший multipart удаляется, а существующие файлы при превышении не
+удаляются. Automation meter и platform-paid settlement остаются следующей
+частью enforcement.
 
 Параллельный dependency-free срез browser Web Push device lifecycle
 реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет

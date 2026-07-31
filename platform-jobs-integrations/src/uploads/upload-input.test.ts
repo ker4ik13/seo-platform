@@ -15,7 +15,12 @@ const validCreate = {
   fileName: "keywords.csv",
   mediaType: "text/csv",
   sizeBytes: "1024",
-  checksumSha256: "a".repeat(64)
+  checksumSha256: "a".repeat(64),
+  entitlement: {
+    planCode: "TRIAL",
+    planVersion: 1,
+    storageBytes: 536_870_912
+  }
 };
 
 test("parses an internal multipart upload command", () => {
@@ -30,7 +35,8 @@ test("parses an internal multipart upload command", () => {
     idempotencyKey: validCreate.idempotencyKey,
     fileName: validCreate.fileName,
     mediaType: validCreate.mediaType,
-    sizeBytes: validCreate.sizeBytes
+    sizeBytes: validCreate.sizeBytes,
+    entitlement: validCreate.entitlement
   };
   assert.deepEqual(
     internalCreateUploadInput(withoutChecksum, 10_000),
@@ -51,6 +57,20 @@ test("rejects paths and oversized upload declarations", () => {
     () =>
       internalCreateUploadInput(
         { ...validCreate, sizeBytes: "10001" },
+        10_000
+      ),
+    BadRequestException
+  );
+  assert.throws(
+    () =>
+      internalCreateUploadInput(
+        {
+          ...validCreate,
+          entitlement: {
+            ...validCreate.entitlement,
+            storageBytes: 0
+          }
+        },
         10_000
       ),
     BadRequestException

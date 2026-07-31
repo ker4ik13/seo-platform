@@ -26,6 +26,7 @@ import type {
 import { CurrentPrincipal } from "../identity/current-principal.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
 import { requestContext } from "../identity/request-context.js";
+import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import {
   CsrfSessionGuard,
   headerValue,
@@ -40,7 +41,10 @@ import {
 
 @Controller("api/v1/projects/:projectId/uploads")
 export class UploadController {
-  public constructor(private readonly jobs: JobsClient) {}
+  public constructor(
+    private readonly jobs: JobsClient,
+    private readonly billingEntitlements: BillingEntitlementService
+  ) {}
 
   @Post()
   @RequirePermission("file.upload")
@@ -62,6 +66,9 @@ export class UploadController {
         createUploadInput(body),
         requiredIdempotencyKey(
           headerValue(request, "idempotency-key")
+        ),
+        await this.billingEntitlements.storageCapacity(
+          requiredTenant(request).workspaceId
         )
       )
     );

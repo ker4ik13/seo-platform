@@ -43,6 +43,23 @@ test("projects the exact trusted semantic capacity snapshot", async () => {
   });
 });
 
+test("projects the exact trusted storage capacity snapshot", async () => {
+  const transaction = onboardingTransaction();
+  const service = new BillingEntitlementService({
+    $transaction: async (
+      callback: (
+        client: Prisma.TransactionClient
+      ) => Promise<unknown>
+    ) => callback(transaction)
+  } as unknown as PrismaService);
+
+  assert.deepEqual(await service.storageCapacity(WORKSPACE_ID), {
+    planCode: "TRIAL",
+    planVersion: 1,
+    storageBytes: 536_870_912
+  });
+});
+
 test("serializes project capacity and rejects the exact current-plan limit", async () => {
   const queries: string[] = [];
   const transaction = onboardingTransaction({

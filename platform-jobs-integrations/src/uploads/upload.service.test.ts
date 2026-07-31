@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { UnprocessableEntityException } from "@nestjs/common";
+import {
+  HttpException,
+  UnprocessableEntityException
+} from "@nestjs/common";
 import type { Upload } from "../generated/prisma/client.js";
 import type { AppConfig } from "../config/app-config.js";
 import type { PrismaService } from "../database/prisma.service.js";
@@ -14,9 +17,11 @@ const actorId = "01900000-0000-7000-8000-000000000003";
 
 test("creates an opaque, idempotent multipart declaration", async () => {
   let createData: Readonly<Record<string, unknown>> | undefined;
-  const prisma = {
+  const transaction = {
+    $executeRaw: async () => 1,
     upload: {
       findUnique: async () => null,
+      aggregate: async () => ({ _sum: { sizeBytes: 0n } }),
       create: async ({ data }: { data: Readonly<Record<string, unknown>> }) => {
         createData = data;
         return uploadRecord({
@@ -27,6 +32,14 @@ test("creates an opaque, idempotent multipart declaration", async () => {
         });
       }
     }
+  };
+  const prisma = {
+    upload: {
+      findUnique: async () => null
+    },
+    $transaction: async (
+      callback: (client: typeof transaction) => Promise<unknown>
+    ) => callback(transaction)
   } as unknown as PrismaService;
   const service = new UploadService(
     prisma,
@@ -42,7 +55,8 @@ test("creates an opaque, idempotent multipart declaration", async () => {
     idempotencyKey: "upload-01900000-0000-7000-8000-000000000004",
     fileName: "client-keywords.csv",
     mediaType: "text/csv",
-    sizeBytes: String(9 * 1_024 * 1_024)
+    sizeBytes: String(9 * 1_024 * 1_024),
+    entitlement: storageEntitlement(20 * 1_024 * 1_024)
   });
 
   assert.equal(result.partSizeBytes, 8 * 1_024 * 1_024);
@@ -53,6 +67,116 @@ test("creates an opaque, idempotent multipart declaration", async () => {
     new RegExp(`^${workspaceId}/${projectId}/`)
   );
   assert.equal(String(createData?.objectKey).includes("client-keywords"), false);
+});
+
+test("atomically rejects a new upload beyond plan storage and aborts its multipart", async () => {
+  let aborted = 0;
+  let created = false;
+  const transaction = {
+    $executeRaw: async () => 1,
+    upload: {
+      findUnique: async () => null,
+      aggregate: async () => ({ _sum: { sizeBytes: 900n } }),
+      create: async () => {
+        created = true;
+        return uploadRecord();
+      }
+    }
+  };
+  const prisma = {
+    upload: {
+      findUnique: async () => null
+    },
+    $transaction: async (
+      callback: (client: typeof transaction) => Promise<unknown>
+    ) => callback(transaction)
+  } as unknown as PrismaService;
+  const service = new UploadService(
+    prisma,
+    storage({
+      abortMultipartUpload: async () => {
+        aborted += 1;
+      }
+    }),
+    config(),
+    queue()
+  );
+
+  await assert.rejects(
+    service.create({
+      workspaceId,
+      projectId,
+      actorId,
+      idempotencyKey:
+        "upload-01900000-0000-7000-8000-000000000006",
+      fileName: "keywords.csv",
+      mediaType: "text/csv",
+      sizeBytes: "101",
+      entitlement: storageEntitlement(1_000)
+    }),
+    (error: unknown) => {
+      if (!(error instanceof HttpException)) return false;
+      const response = error.getResponse() as {
+        readonly error?: { readonly code?: string };
+      };
+      return response.error?.code === "QUOTA_EXCEEDED";
+    }
+  );
+  assert.equal(created, false);
+  assert.equal(aborted, 1);
+});
+
+test("returns an idempotent winner and removes the redundant multipart", async () => {
+  let aborted = 0;
+  const winner = uploadRecord();
+  let lookups = 0;
+  const transaction = {
+    $executeRaw: async () => 1,
+    upload: {
+      findUnique: async () => winner,
+      aggregate: async () => {
+        throw new Error("capacity must not be recounted for a replay");
+      },
+      create: async () => {
+        throw new Error("replay must not create another upload");
+      }
+    }
+  };
+  const prisma = {
+    upload: {
+      findUnique: async () => {
+        lookups += 1;
+        return lookups === 1 ? null : winner;
+      }
+    },
+    $transaction: async (
+      callback: (client: typeof transaction) => Promise<unknown>
+    ) => callback(transaction)
+  } as unknown as PrismaService;
+  const service = new UploadService(
+    prisma,
+    storage({
+      abortMultipartUpload: async () => {
+        aborted += 1;
+      }
+    }),
+    config(),
+    queue()
+  );
+
+  const result = await service.create({
+    workspaceId,
+    projectId,
+    actorId,
+    idempotencyKey: winner.idempotencyKey,
+    fileName: winner.originalName,
+    mediaType: "text/csv",
+    sizeBytes: winner.sizeBytes.toString(),
+    entitlement: storageEntitlement(1_000)
+  });
+
+  assert.equal(result.upload.id, winner.id);
+  assert.equal(aborted, 1);
 });
 
 test("requires every part and scopes lookup to actor and tenant", async () => {
@@ -302,6 +426,14 @@ function queue(): QueueService {
   return {
     enqueueUploadInspection: async () => undefined
   } as unknown as QueueService;
+}
+
+function storageEntitlement(storageBytes: number) {
+  return {
+    planCode: "TRIAL",
+    planVersion: 1,
+    storageBytes
+  } as const;
 }
 
 async function* emptyStream(): AsyncGenerator<Uint8Array> {

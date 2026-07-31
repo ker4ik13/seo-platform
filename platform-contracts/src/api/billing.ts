@@ -83,6 +83,12 @@ export interface SemanticCapacityEntitlement {
   readonly trackedContextPairs: number;
 }
 
+export interface StorageCapacityEntitlement {
+  readonly planCode: string;
+  readonly planVersion: number;
+  readonly storageBytes: number;
+}
+
 export interface BillingPlanPrice {
   readonly period: BillingPeriod;
   readonly currency: "RUB";

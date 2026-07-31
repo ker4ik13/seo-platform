@@ -6,6 +6,7 @@ import {
   type CreateUploadPartUrlsInput,
   type InternalCreateUploadInput
 } from "@seo-platform/contracts";
+import { storageCapacityEntitlement } from "./storage-capacity.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -62,6 +63,7 @@ export function internalCreateUploadInput(
     fileName,
     mediaType: mediaType as InternalCreateUploadInput["mediaType"],
     sizeBytes: sizeBytes.toString(),
+    entitlement: storageCapacityEntitlement(input.entitlement),
     ...(checksumSha256 ? { checksumSha256 } : {})
   };
 }

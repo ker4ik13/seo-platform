@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 import {
   BadGatewayException,
   ConflictException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   NotFoundException,
@@ -16,7 +18,10 @@ import {
   type UploadPartUrls,
   type UploadSummary
 } from "@seo-platform/contracts";
-import type { Upload } from "../generated/prisma/client.js";
+import type {
+  Prisma,
+  Upload
+} from "../generated/prisma/client.js";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -26,8 +31,19 @@ import {
   type ObjectStoragePort,
   type StoredObjectMetadata
 } from "../storage/object-storage.port.js";
+import {
+  assertStorageCapacity,
+  lockStorageCapacity
+} from "./storage-capacity.js";
 
 const MEBIBYTE = 1_024 * 1_024;
+const STORAGE_RESERVING_UPLOAD_STATUSES = [
+  "INITIATED",
+  "UPLOADING",
+  "UPLOADED",
+  "SCANNING",
+  "READY"
+] as const;
 
 @Injectable()
 export class UploadService {
@@ -59,44 +75,65 @@ export class UploadService {
         objectKey,
         input.mediaType
       );
-      const upload = await this.prisma.upload.create({
-        data: {
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          actorId: input.actorId,
-          bucket: "uploads",
-          objectKey: multipart.objectKey,
-          originalName: input.fileName,
-          mediaType: input.mediaType,
-          sizeBytes,
-          ...(input.checksumSha256
-            ? { declaredChecksum: input.checksumSha256 }
-            : {}),
-          multipartId: multipart.uploadId,
-          partSizeBytes,
-          partCount,
-          idempotencyKey: input.idempotencyKey,
-          expiresAt: new Date(
-            Date.now() + this.config.uploads.expiresHours * 60 * 60 * 1_000
-          )
-        }
-      });
-      return this.createdResult(upload);
+      const initiatedMultipart = multipart;
+      const stored = await this.prisma.$transaction(
+        async (transaction) => {
+          await lockStorageCapacity(transaction, input.workspaceId);
+          const winner = await this.findIdempotent(input, transaction);
+          if (winner) return { upload: winner, created: false };
+
+          const used = await transaction.upload.aggregate({
+            where: {
+              workspaceId: input.workspaceId,
+              status: { in: [...STORAGE_RESERVING_UPLOAD_STATUSES] }
+            },
+            _sum: { sizeBytes: true }
+          });
+          assertStorageCapacity(
+            used._sum.sizeBytes ?? 0n,
+            sizeBytes,
+            input.entitlement
+          );
+          const upload = await transaction.upload.create({
+            data: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              actorId: input.actorId,
+              bucket: "uploads",
+              objectKey: initiatedMultipart.objectKey,
+              originalName: input.fileName,
+              mediaType: input.mediaType,
+              sizeBytes,
+              ...(input.checksumSha256
+                ? { declaredChecksum: input.checksumSha256 }
+                : {}),
+              multipartId: initiatedMultipart.uploadId,
+              partSizeBytes,
+              partCount,
+              idempotencyKey: input.idempotencyKey,
+              expiresAt: new Date(
+                Date.now() +
+                  this.config.uploads.expiresHours * 60 * 60 * 1_000
+              )
+            }
+          });
+          return { upload, created: true };
+        },
+        { isolationLevel: "ReadCommitted" }
+      );
+      if (!stored.created) {
+        await this.abortMultipart(initiatedMultipart);
+      }
+      return this.createdResult(stored.upload);
     } catch (error) {
       if (multipart) {
-        await this.storage
-          .abortMultipartUpload(
-            "uploads",
-            multipart.objectKey,
-            multipart.uploadId
-          )
-          .catch(() => undefined);
+        await this.abortMultipart(multipart);
       }
       if (isUniqueConstraintError(error)) {
         const winner = await this.findIdempotent(input);
         if (winner) return this.createdResult(winner);
       }
-      if (error instanceof ConflictException) throw error;
+      if (error instanceof HttpException) throw error;
       throw new ServiceUnavailableException(
         "Unable to initiate object storage upload",
         { cause: error }
@@ -366,9 +403,10 @@ export class UploadService {
   }
 
   private async findIdempotent(
-    input: InternalCreateUploadInput
+    input: InternalCreateUploadInput,
+    prisma: Pick<Prisma.TransactionClient, "upload"> = this.prisma
   ): Promise<Upload | null> {
-    const upload = await this.prisma.upload.findUnique({
+    const upload = await prisma.upload.findUnique({
       where: {
         workspaceId_actorId_idempotencyKey: {
           workspaceId: input.workspaceId,
@@ -385,8 +423,15 @@ export class UploadService {
         upload.sizeBytes.toString() !== input.sizeBytes ||
         (upload.declaredChecksum ?? undefined) !== input.checksumSha256)
     ) {
-      throw new ConflictException(
-        "Idempotency key was already used for another upload"
+      throw new HttpException(
+        {
+          error: {
+            code: "IDEMPOTENCY_CONFLICT",
+            message:
+              "Idempotency key was already used for another upload"
+          }
+        },
+        HttpStatus.CONFLICT
       );
     }
     return upload;
@@ -449,6 +494,19 @@ export class UploadService {
       input.projectId,
       `${randomBytes(20).toString("hex")}${extension}`
     ].join("/");
+  }
+
+  private async abortMultipart(multipart: {
+    readonly uploadId: string;
+    readonly objectKey: string;
+  }): Promise<void> {
+    await this.storage
+      .abortMultipartUpload(
+        "uploads",
+        multipart.objectKey,
+        multipart.uploadId
+      )
+      .catch(() => undefined);
   }
 
   private requireStorage(): void {

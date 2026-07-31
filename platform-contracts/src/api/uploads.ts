@@ -90,4 +90,5 @@ export interface InternalCreateUploadInput extends CreateUploadInput {
   readonly projectId: string;
   readonly actorId: string;
   readonly idempotencyKey: string;
+  readonly entitlement: import("./billing.js").StorageCapacityEntitlement;
 }

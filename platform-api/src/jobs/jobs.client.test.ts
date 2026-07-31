@@ -12,6 +12,90 @@ const projectId = "01900000-0000-7000-8000-000000000005";
 const bindingId = "01900000-0000-7000-8000-000000000006";
 const routeId = "01900000-0000-7000-8000-000000000007";
 
+test("forwards only the trusted storage entitlement with an upload command", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedBody: Readonly<Record<string, unknown>> | undefined;
+  globalThis.fetch = (async (
+    _input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> => {
+    capturedBody = JSON.parse(String(init?.body)) as Readonly<
+      Record<string, unknown>
+    >;
+    return dataResponse({});
+  }) as typeof fetch;
+
+  try {
+    await client().createUpload(
+      projectContext("request-upload-001"),
+      {
+        fileName: "keywords.csv",
+        mediaType: "text/csv",
+        sizeBytes: "1024"
+      },
+      "upload-command-001",
+      {
+        planCode: "TRIAL",
+        planVersion: 1,
+        storageBytes: 536_870_912
+      }
+    );
+
+    assert.deepEqual(capturedBody?.entitlement, {
+      planCode: "TRIAL",
+      planVersion: 1,
+      storageBytes: 536_870_912
+    });
+    assert.equal(capturedBody?.workspaceId, workspaceId);
+    assert.equal(capturedBody?.projectId, projectId);
+    assert.equal(capturedBody?.actorId, actorId);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("preserves a Jobs storage capacity rejection", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (): Promise<Response> =>
+    new Response(
+      JSON.stringify({
+        error: {
+          code: "QUOTA_EXCEEDED",
+          message: "unsafe upstream message"
+        }
+      }),
+      {
+        status: 409,
+        headers: { "content-type": "application/json" }
+      }
+    )) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      client().createUpload(
+        projectContext("request-upload-quota-001"),
+        {
+          fileName: "keywords.csv",
+          mediaType: "text/csv",
+          sizeBytes: "1024"
+        },
+        "upload-command-quota-001",
+        {
+          planCode: "TRIAL",
+          planVersion: 1,
+          storageBytes: 536_870_912
+        }
+      ),
+      (error: unknown) =>
+        error instanceof DomainError &&
+        error.code === "QUOTA_EXCEEDED" &&
+        !error.message.includes("unsafe")
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("forwards a credential idempotency key with trusted workspace context", async () => {
   const originalFetch = globalThis.fetch;
   let capturedBody: Readonly<Record<string, unknown>> | undefined;
