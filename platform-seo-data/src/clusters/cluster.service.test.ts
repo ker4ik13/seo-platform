@@ -28,6 +28,8 @@ const row = {
   pageMappingSource: null,
   pageMappingConfidence: null,
   pageMappingRationale: null,
+  isLocked: false,
+  excludeFromReclustering: false,
   status: "ACTIVE" as const,
   version: 2,
   createdAt: new Date("2026-07-30T10:00:00Z"),
@@ -169,7 +171,9 @@ test("maps an active tenant page and reports competing keyword pages", async () 
       primaryPageId: null,
       pageMappingSource: null,
       pageMappingConfidence: null,
-      pageMappingRationale: null
+        pageMappingRationale: null,
+        isLocked: false,
+        excludeFromReclustering: false
     },
     afterState: {
       name: "SEO аудит",
@@ -178,7 +182,9 @@ test("maps an active tenant page and reports competing keyword pages", async () 
       primaryPageId: pageId,
       pageMappingSource: "MANUAL",
       pageMappingConfidence: null,
-      pageMappingRationale: "Совпадает интент"
+        pageMappingRationale: "Совпадает интент",
+        isLocked: false,
+        excludeFromReclustering: false
     },
     beforeVersion: 2,
     afterVersion: 3
@@ -373,7 +379,9 @@ test("bulk page mapping only updates applicable rows and records one version", a
       primaryPageId: null,
       pageMappingSource: null,
       pageMappingConfidence: null,
-      pageMappingRationale: null
+      pageMappingRationale: null,
+      isLocked: false,
+      excludeFromReclustering: false
     },
     afterState: {
       name: "SEO аудит",
@@ -382,7 +390,9 @@ test("bulk page mapping only updates applicable rows and records one version", a
       primaryPageId: pageId,
       pageMappingSource: "MANUAL",
       pageMappingConfidence: null,
-      pageMappingRationale: "Совпадает интент"
+      pageMappingRationale: "Совпадает интент",
+      isLocked: false,
+      excludeFromReclustering: false
     },
     beforeVersion: 2,
     afterVersion: 3
@@ -407,4 +417,137 @@ test("bulk page mapping only updates applicable rows and records one version", a
       conflictedIds: [thirdClusterId]
     }
   );
+});
+
+test("previews and atomically merges bounded clusters with reversible changes", async () => {
+  const sourcePageId = "01900000-0000-7000-8000-000000000009";
+  const keywordId = "01900000-0000-7000-8000-000000000010";
+  const source = {
+    ...row,
+    id: secondClusterId,
+    name: "Технический аудит",
+    version: 3,
+    primaryPageId: sourcePageId,
+    isLocked: true
+  };
+  const input = {
+    workspaceId,
+    projectId,
+    actorId,
+    items: [
+      { id: clusterId, version: 2 },
+      { id: secondClusterId, version: 3 }
+    ],
+    targetClusterId: clusterId
+  };
+  const previewService = new ClusterService({
+    cluster: { findMany: async () => [row, source] },
+    keyword: { count: async () => 1 }
+  } as unknown as PrismaService, semanticVersions);
+
+  const preview = await previewService.previewMerge(input);
+  assert.deepEqual(preview, {
+    readiness: "READY",
+    selectedClusterCount: 2,
+    sourceClusterCount: 1,
+    movedKeywordCount: 1,
+    sourcePageConflictCount: 1,
+    lockedClusterCount: 1,
+    conflictedIds: [],
+    unavailableIds: [],
+    synchronousKeywordLimit: 450
+  });
+
+  let keywordUpdate: unknown;
+  let clusterUpdate: unknown;
+  let recordedKeywordChanges: readonly unknown[] = [];
+  let recordedClusterChanges: readonly unknown[] = [];
+  const transaction = {
+    $executeRaw: async () => 1,
+    $queryRaw: async () => [],
+    cluster: {
+      findMany: async () => [row, source],
+      updateMany: async ({ data }: { data: unknown }) => {
+        clusterUpdate = data;
+        return { count: 1 };
+      }
+    },
+    keyword: {
+      findMany: async () => [{
+        id: keywordId,
+        workspaceId,
+        projectId,
+        textOriginal: "технический аудит",
+        textNormalized: "технический аудит",
+        normalizedHash: "a".repeat(64),
+        language: "ru",
+        priority: 0,
+        isFavorite: false,
+        intent: null,
+        status: "ACTIVE" as const,
+        clusterId: secondClusterId,
+        targetPageId: null,
+        sourceMode: "MANUAL" as const,
+        sourceId: null,
+        isTracked: false,
+        customValues: {},
+        createdBy: actorId,
+        updatedBy: actorId,
+        version: 4,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deletedAt: null,
+        memberships: [],
+        tags: []
+      }],
+      updateMany: async ({ data }: { data: unknown }) => {
+        keywordUpdate = data;
+        return { count: 1 };
+      },
+      groupBy: async () => [
+        { clusterId, targetPageId: null, _count: { _all: 1 } }
+      ]
+    }
+  };
+  const service = new ClusterService({
+    $transaction: async (
+      callback: (tx: typeof transaction) => Promise<unknown>
+    ) => callback(transaction)
+  } as unknown as PrismaService, {
+    createWithChanges: async (
+      _transaction: unknown,
+      _metadata: unknown,
+      keywordChanges: readonly unknown[],
+      clusterChanges: readonly unknown[]
+    ) => {
+      recordedKeywordChanges = keywordChanges;
+      recordedClusterChanges = clusterChanges;
+      return undefined;
+    }
+  } as unknown as SemanticVersionService);
+
+  const result = await service.merge(input);
+
+  assert.deepEqual(keywordUpdate, {
+    clusterId,
+    updatedBy: actorId,
+    version: { increment: 1 }
+  });
+  assert.deepEqual(clusterUpdate, {
+    status: "DELETED",
+    version: { increment: 1 }
+  });
+  assert.equal(recordedKeywordChanges.length, 1);
+  assert.equal(recordedClusterChanges.length, 1);
+  assert.deepEqual(
+    (recordedKeywordChanges[0] as { afterState: { clusterId: string } }).afterState.clusterId,
+    clusterId
+  );
+  assert.deepEqual(
+    (recordedClusterChanges[0] as { afterState: { status: string } }).afterState.status,
+    "DELETED"
+  );
+  assert.deepEqual(result.mergedClusterIds, [secondClusterId]);
+  assert.equal(result.movedKeywordCount, 1);
+  assert.equal(result.targetCluster.keywordCount, 1);
 });

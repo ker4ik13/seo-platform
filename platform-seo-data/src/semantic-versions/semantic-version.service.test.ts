@@ -72,6 +72,63 @@ test("preview accepts an unchanged cluster mapping with available dependencies",
   assert.equal(result.changes[0]?.state, "APPLICABLE");
 });
 
+test("merge undo preview restores a deleted source cluster before its keywords", async () => {
+  const targetClusterId = "01900000-0000-7000-8000-000000000022";
+  const beforeKeyword = { ...keywordState(), clusterId };
+  const afterKeyword = { ...beforeKeyword, clusterId: targetClusterId };
+  const beforeCluster = clusterState(null);
+  const changes = [
+    {
+      entityType: "CLUSTER",
+      entityId: clusterId,
+      operation: "DELETE",
+      beforeState: beforeCluster,
+      afterState: { ...beforeCluster, status: "DELETED" },
+      beforeVersion: 1,
+      afterVersion: 2,
+      createdAt: new Date("2026-07-30T12:00:00.000Z"),
+      id: "01900000-0000-7000-8000-000000000032"
+    },
+    {
+      entityType: "KEYWORD",
+      entityId: keywordId,
+      operation: "UPDATE",
+      beforeState: beforeKeyword,
+      afterState: afterKeyword,
+      beforeVersion: 1,
+      afterVersion: 2,
+      createdAt: new Date("2026-07-30T12:00:01.000Z"),
+      id: "01900000-0000-7000-8000-000000000033"
+    }
+  ];
+  const service = new SemanticVersionService({
+    semanticVersion: {
+      findFirst: async () => ({ ...version(), reason: "CLUSTER_MERGE", affectedCount: 2 })
+    },
+    semanticEntityChange: { findMany: async () => changes },
+    cluster: {
+      findMany: async () => [
+        { id: clusterId, version: 2, status: "DELETED" }
+      ],
+      findFirst: async () => null
+    },
+    keyword: {
+      findMany: async () => [
+        { id: keywordId, version: 2, status: "ACTIVE" }
+      ],
+      findFirst: async () => null
+    }
+  } as unknown as PrismaService);
+
+  const result = await service.previewUndo(workspaceId, projectId, versionId);
+
+  assert.equal(result.applicable, 2);
+  assert.deepEqual(result.changes.map(({ entityType, state }) => [entityType, state]), [
+    ["CLUSTER", "APPLICABLE"],
+    ["KEYWORD", "APPLICABLE"]
+  ]);
+});
+
 test("undo creates a new version and soft-deletes only the exact current row", async () => {
   const keywordUpdates: unknown[] = [];
   const recordedChanges: unknown[] = [];
@@ -264,6 +321,8 @@ test("undo restores a cluster page mapping and records the inverse change", asyn
       pageMappingSource: null,
       pageMappingConfidence: null,
       pageMappingRationale: null,
+      isLocked: false,
+      excludeFromReclustering: false,
       version: { increment: 1 }
     }
   ]);
@@ -349,6 +408,8 @@ function clusterState(primaryPageId: string | null) {
     primaryPageId,
     pageMappingSource: primaryPageId ? "MANUAL" : null,
     pageMappingConfidence: null,
-    pageMappingRationale: null
+    pageMappingRationale: null,
+    isLocked: false,
+    excludeFromReclustering: false
   };
 }

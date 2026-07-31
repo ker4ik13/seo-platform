@@ -348,6 +348,8 @@ model Cluster {
   pageMappingSource     String?      @map("page_mapping_source") @db.VarChar(16)
   pageMappingConfidence Float?       @map("page_mapping_confidence")
   pageMappingRationale  String?      @map("page_mapping_rationale") @db.Text
+  isLocked              Boolean      @default(false) @map("is_locked")
+  excludeFromReclustering Boolean    @default(false) @map("exclude_from_reclustering")
   status                EntityStatus @default(ACTIVE)
   version               Int          @default(1)
   createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -358,6 +360,7 @@ model Cluster {
   @@unique([workspaceId, projectId, id], map: "clusters_tenant_project_id_key")
   @@index([projectId, status, id])
   @@index([workspaceId, projectId, primaryPageId, status, id], map: "clusters_primary_page_idx")
+  @@index([workspaceId, projectId, status, isLocked, excludeFromReclustering, id], map: "clusters_reclustering_eligibility_idx")
   @@map("clusters")
 }
 

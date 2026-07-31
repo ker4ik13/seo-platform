@@ -37,6 +37,8 @@ export interface SemanticCluster {
   readonly name: string;
   readonly method: SemanticClusterMethod;
   readonly keywordCount: number;
+  readonly isLocked: boolean;
+  readonly excludeFromReclustering: boolean;
   readonly primaryPage?: SemanticClusterPrimaryPage;
   readonly pageMappingSource?: SemanticClusterPageSource;
   readonly pageMappingConfidence?: number;
@@ -49,6 +51,8 @@ export interface SemanticCluster {
 
 export interface CreateSemanticClusterInput {
   readonly name: string;
+  readonly isLocked?: boolean;
+  readonly excludeFromReclustering?: boolean;
   readonly primaryPageId?: string;
   readonly pageMappingSource?: SemanticClusterPageSource;
   readonly pageMappingConfidence?: number;
@@ -57,6 +61,8 @@ export interface CreateSemanticClusterInput {
 
 export interface UpdateSemanticClusterInput {
   readonly name: string;
+  readonly isLocked?: boolean;
+  readonly excludeFromReclustering?: boolean;
   readonly primaryPageId?: string | null;
   readonly pageMappingSource?: SemanticClusterPageSource;
   readonly pageMappingConfidence?: number;
@@ -140,4 +146,48 @@ export interface SemanticClusterPageBulkResult {
   readonly updatedClusters: readonly SemanticCluster[];
   readonly skippedIds: readonly string[];
   readonly conflictedIds: readonly string[];
+}
+
+export interface SemanticClusterVersionSelection {
+  readonly id: string;
+  readonly version: number;
+}
+
+export interface SemanticClusterMergeInput {
+  readonly items: readonly SemanticClusterVersionSelection[];
+  readonly targetClusterId: string;
+}
+
+export interface InternalSemanticClusterMergeInput
+  extends SemanticClusterMergeInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+}
+
+export const semanticClusterMergeReadiness = [
+  "READY",
+  "CONFLICTED",
+  "BACKGROUND_REQUIRED"
+] as const;
+
+export type SemanticClusterMergeReadiness =
+  (typeof semanticClusterMergeReadiness)[number];
+
+export interface SemanticClusterMergePreview {
+  readonly readiness: SemanticClusterMergeReadiness;
+  readonly selectedClusterCount: number;
+  readonly sourceClusterCount: number;
+  readonly movedKeywordCount: number;
+  readonly sourcePageConflictCount: number;
+  readonly lockedClusterCount: number;
+  readonly conflictedIds: readonly string[];
+  readonly unavailableIds: readonly string[];
+  readonly synchronousKeywordLimit: number;
+}
+
+export interface SemanticClusterMergeResult {
+  readonly targetCluster: SemanticCluster;
+  readonly mergedClusterIds: readonly string[];
+  readonly movedKeywordCount: number;
 }

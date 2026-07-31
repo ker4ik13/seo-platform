@@ -16,6 +16,8 @@ import {
 import type {
   ApiResponse,
   SemanticCluster,
+  SemanticClusterMergePreview,
+  SemanticClusterMergeResult,
   SemanticClusterPageBulkPreview,
   SemanticClusterPageBulkResult
 } from "@seo-platform/contracts";
@@ -29,6 +31,7 @@ import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import {
   internalCreateSemanticClusterInput,
   internalDeleteSemanticClusterInput,
+  internalSemanticClusterMergeInput,
   internalSemanticClusterPageBulkInput,
   internalUpdateSemanticClusterInput
 } from "./cluster-input.js";
@@ -94,6 +97,38 @@ export class ClusterController {
     assertMutation(projectId, headers, input);
     return {
       data: await this.clusters.bulkUpdatePageMapping(input),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Post("merge-preview")
+  @HttpCode(HttpStatus.OK)
+  public async previewMerge(
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Headers() headers: InternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticClusterMergePreview>> {
+    const input = internalSemanticClusterMergeInput(body);
+    assertMutation(projectId, headers, input);
+    return {
+      data: await this.clusters.previewMerge(input),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Post("merge")
+  @HttpCode(HttpStatus.OK)
+  public async merge(
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Headers() headers: InternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticClusterMergeResult>> {
+    const input = internalSemanticClusterMergeInput(body);
+    assertMutation(projectId, headers, input);
+    return {
+      data: await this.clusters.merge(input),
       meta: { requestId: request.id }
     };
   }

@@ -4,6 +4,9 @@ import type {
   ProjectPageSettings,
   ProjectPageSummary,
   SemanticCluster,
+  SemanticClusterMergeInput,
+  SemanticClusterMergePreview,
+  SemanticClusterMergeResult,
   SemanticClusterPageBulkInput,
   SemanticClusterPageBulkPreview,
   SemanticClusterPageBulkResult
@@ -17,6 +20,8 @@ type ClusterEditor =
       name: string;
       primaryPageId: string;
       pageMappingRationale: string;
+      isLocked: boolean;
+      excludeFromReclustering: boolean;
     }>
   | Readonly<{
       mode: "edit";
@@ -25,6 +30,8 @@ type ClusterEditor =
       name: string;
       primaryPageId: string;
       pageMappingRationale: string;
+      isLocked: boolean;
+      excludeFromReclustering: boolean;
     }>;
 
 export function SemanticClusterManager({
@@ -41,6 +48,9 @@ export function SemanticClusterManager({
   const [bulkPreview, setBulkPreview] =
     useState<SemanticClusterPageBulkPreview>();
   const [bulkNotice, setBulkNotice] = useState<string>();
+  const [mergeTargetId, setMergeTargetId] = useState("");
+  const [mergeBusy, setMergeBusy] = useState<"PREVIEW" | "APPLY">();
+  const [mergePreview, setMergePreview] = useState<SemanticClusterMergePreview>();
   const [selectedClusterIds, setSelectedClusterIds] =
     useState<readonly string[]>([]);
   const [error, setError] = useState<string>();
@@ -135,6 +145,8 @@ export function SemanticClusterManager({
   function toggleCluster(clusterId: string): void {
     setBulkPreview(undefined);
     setBulkNotice(undefined);
+    setMergePreview(undefined);
+    setMergeTargetId("");
     if (selectedClusterIds.includes(clusterId)) {
       setSelectedClusterIds((current) =>
         current.filter((id) => id !== clusterId)
@@ -151,6 +163,8 @@ export function SemanticClusterManager({
   function toggleVisibleClusters(): void {
     setBulkPreview(undefined);
     setBulkNotice(undefined);
+    setMergePreview(undefined);
+    setMergeTargetId("");
     if (selectedClusterIds.length > 0) {
       setSelectedClusterIds([]);
       return;
@@ -235,6 +249,60 @@ export function SemanticClusterManager({
     }
   }
 
+  async function previewMerge(): Promise<void> {
+    const body = mergeBody(clusters, selectedClusterIds, mergeTargetId);
+    if (!body || mergeBusy) return;
+    setMergeBusy("PREVIEW");
+    setError(undefined);
+    setBulkNotice(undefined);
+    try {
+      setMergePreview(
+        await browserApiRequest<SemanticClusterMergePreview>(
+          clusterPath(projectId, "merge-preview"),
+          { method: "POST", body }
+        )
+      );
+    } catch (requestError) {
+      setMergePreview(undefined);
+      setError(clusterError(requestError));
+    } finally {
+      setMergeBusy(undefined);
+    }
+  }
+
+  async function applyMerge(): Promise<void> {
+    const body = mergeBody(clusters, selectedClusterIds, mergeTargetId);
+    if (!body || mergePreview?.readiness !== "READY" || mergeBusy) return;
+    setMergeBusy("APPLY");
+    setError(undefined);
+    setBulkNotice(undefined);
+    try {
+      const result = await browserApiRequest<SemanticClusterMergeResult>(
+        clusterPath(projectId, "merge"),
+        { method: "POST", body }
+      );
+      const removed = new Set(result.mergedClusterIds);
+      setClusters((current) =>
+        mergeClusters(
+          current.filter(({ id }) => !removed.has(id)),
+          [result.targetCluster]
+        )
+      );
+      setSelectedClusterIds([]);
+      setMergeTargetId("");
+      setMergePreview(undefined);
+      setBulkNotice(
+        `Объединено ${result.mergedClusterIds.length} кластеров, перенесено ${result.movedKeywordCount} запросов.`
+      );
+      onChanged();
+    } catch (requestError) {
+      setMergePreview(undefined);
+      setError(clusterError(requestError));
+    } finally {
+      setMergeBusy(undefined);
+    }
+  }
+
   return (
     <section className="panel semantic-groups" aria-busy={loading}>
       <header className="panel-header">
@@ -259,7 +327,9 @@ export function SemanticClusterManager({
               mode: "create",
               name: "",
               primaryPageId: "",
-              pageMappingRationale: ""
+              pageMappingRationale: "",
+              isLocked: false,
+              excludeFromReclustering: false
             })}
             type="button"
           >
@@ -285,6 +355,34 @@ export function SemanticClusterManager({
               value={editor.name}
             />
           </label>
+          <div className="semantic-cluster-controls">
+            <label>
+              <input
+                checked={editor.isLocked}
+                onChange={(event) =>
+                  setEditor((current) =>
+                    current ? { ...current, isLocked: event.target.checked } : current
+                  )
+                }
+                type="checkbox"
+              />
+              <span>Зафиксировать кластер</span>
+            </label>
+            <label>
+              <input
+                checked={editor.excludeFromReclustering}
+                onChange={(event) =>
+                  setEditor((current) =>
+                    current
+                      ? { ...current, excludeFromReclustering: event.target.checked }
+                      : current
+                  )
+                }
+                type="checkbox"
+              />
+              <span>Не включать в рекластеризацию</span>
+            </label>
+          </div>
           <label>
             <span>Основная посадочная</span>
             <select
@@ -346,23 +444,97 @@ export function SemanticClusterManager({
       )}
 
       {selectedClusterIds.length > 0 && (
-        <section className="semantic-cluster-bulk" aria-busy={Boolean(bulkBusy)}>
+        <section
+          className="semantic-cluster-bulk"
+          aria-busy={Boolean(bulkBusy || mergeBusy)}
+        >
           <div className="semantic-bulk-heading">
             <div>
-              <strong>Посадочная для {selectedClusterIds.length} кластеров</strong>
+              <strong>Действия с {selectedClusterIds.length} кластерами</strong>
               <span>
                 Сначала проверьте изменения. Конфликтующие версии не перезаписываются.
               </span>
             </div>
             <button
               className="text-button"
-              disabled={Boolean(bulkBusy)}
-              onClick={() => setSelectedClusterIds([])}
+              disabled={Boolean(bulkBusy || mergeBusy)}
+              onClick={() => {
+                setSelectedClusterIds([]);
+                setMergeTargetId("");
+                setMergePreview(undefined);
+              }}
               type="button"
             >
               Закрыть
             </button>
           </div>
+          {selectedClusterIds.length >= 2 && selectedClusterIds.length <= 50 && (
+            <details className="semantic-cluster-merge">
+              <summary>Объединить выбранные кластеры</summary>
+              <div className="semantic-cluster-merge-controls">
+                <label>
+                  <span>Кластер-получатель</span>
+                  <select
+                    disabled={Boolean(mergeBusy)}
+                    onChange={(event) => {
+                      setMergeTargetId(event.target.value);
+                      setMergePreview(undefined);
+                    }}
+                    value={mergeTargetId}
+                  >
+                    <option value="">Выберите кластер</option>
+                    {clusters
+                      .filter(({ id }) => selectedClusterIds.includes(id))
+                      .map((cluster) => (
+                        <option key={cluster.id} value={cluster.id}>{cluster.name}</option>
+                      ))}
+                  </select>
+                </label>
+                {mergePreview && (
+                  <div className="semantic-cluster-bulk-preview" role="status">
+                    <span><strong>{mergePreview.movedKeywordCount}</strong> запросов</span>
+                    <span><strong>{mergePreview.sourceClusterCount}</strong> кластеров исчезнут</span>
+                    {mergePreview.sourcePageConflictCount > 0 && (
+                      <span className="warning">
+                        <strong>{mergePreview.sourcePageConflictCount}</strong> других посадочных
+                      </span>
+                    )}
+                    {mergePreview.lockedClusterCount > 0 && (
+                      <span><strong>{mergePreview.lockedClusterCount}</strong> зафиксировано</span>
+                    )}
+                    {mergePreview.readiness === "CONFLICTED" && (
+                      <span className="danger">Список изменился — обновите данные</span>
+                    )}
+                    {mergePreview.readiness === "BACKGROUND_REQUIRED" && (
+                      <span className="warning">
+                        Больше {mergePreview.synchronousKeywordLimit} запросов — нужен фоновый merge
+                      </span>
+                    )}
+                  </div>
+                )}
+                <div className="semantic-editor-actions">
+                  <button
+                    className="secondary-button"
+                    disabled={!mergeTargetId || Boolean(mergeBusy)}
+                    onClick={() => void previewMerge()}
+                    type="button"
+                  >
+                    {mergeBusy === "PREVIEW" ? "Проверяем…" : "Проверить merge"}
+                  </button>
+                  {mergePreview?.readiness === "READY" && (
+                    <button
+                      className="primary-button"
+                      disabled={Boolean(mergeBusy)}
+                      onClick={() => void applyMerge()}
+                      type="button"
+                    >
+                      {mergeBusy === "APPLY" ? "Объединяем…" : "Объединить"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            </details>
+          )}
           <div className="semantic-cluster-bulk-fields">
             <label>
               <span>Действие</span>
@@ -469,6 +641,10 @@ export function SemanticClusterManager({
                       Каннибализация: {cluster.pageDiagnostics.competingPageCount}
                     </small>
                   )}
+                  {cluster.isLocked && <small>Зафиксирован</small>}
+                  {cluster.excludeFromReclustering && (
+                    <small>Вне рекластеризации</small>
+                  )}
                 </div>
               </div>
               <button
@@ -479,7 +655,9 @@ export function SemanticClusterManager({
                   version: cluster.version,
                   name: cluster.name,
                   primaryPageId: cluster.primaryPage?.id ?? "",
-                  pageMappingRationale: cluster.pageMappingRationale ?? ""
+                  pageMappingRationale: cluster.pageMappingRationale ?? "",
+                  isLocked: cluster.isLocked,
+                  excludeFromReclustering: cluster.excludeFromReclustering
                 })}
                 type="button"
               >
@@ -509,17 +687,42 @@ function clusterBody(editor: ClusterEditor): Readonly<Record<string, unknown>> {
   if (!editor.primaryPageId) {
     return {
       name: editor.name,
+      isLocked: editor.isLocked,
+      excludeFromReclustering: editor.excludeFromReclustering,
       ...(editor.mode === "edit" ? { primaryPageId: null } : {})
     };
   }
   return {
     name: editor.name,
+    isLocked: editor.isLocked,
+    excludeFromReclustering: editor.excludeFromReclustering,
     primaryPageId: editor.primaryPageId,
     pageMappingSource: "MANUAL",
     ...(editor.pageMappingRationale.trim()
       ? { pageMappingRationale: editor.pageMappingRationale.trim() }
       : {})
   };
+}
+
+function mergeBody(
+  clusters: readonly SemanticCluster[],
+  selectedIds: readonly string[],
+  targetClusterId: string
+): SemanticClusterMergeInput | undefined {
+  if (selectedIds.length < 2 || selectedIds.length > 50 || !targetClusterId) {
+    return undefined;
+  }
+  const selected = new Set(selectedIds);
+  const items = clusters
+    .filter(({ id }) => selected.has(id))
+    .map(({ id, version }) => ({ id, version }));
+  if (
+    items.length !== selectedIds.length ||
+    !items.some(({ id }) => id === targetClusterId)
+  ) {
+    return undefined;
+  }
+  return { items, targetClusterId };
 }
 
 function bulkPageMappingBody(
@@ -589,6 +792,7 @@ function clusterError(error: unknown): string {
     if (error.code === "VERSION_CONFLICT") return "Кластер уже изменён. Обновите список и повторите.";
     if (error.code === "RESOURCE_STATE_CONFLICT") return "Сначала перенесите запросы из этого кластера.";
     if (error.code === "PAGE_UNAVAILABLE") return "Выбранная страница больше недоступна. Обновите список.";
+    if (error.code === "BACKGROUND_OPERATION_REQUIRED") return "Этот merge нужно выполнить фоновой операцией.";
     if (error.code === "FORBIDDEN") return "У вас нет права изменять кластеры.";
     return error.message;
   }

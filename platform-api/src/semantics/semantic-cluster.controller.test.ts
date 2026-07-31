@@ -32,7 +32,9 @@ test("protects static cluster page mapping routes with bulk permission and CSRF"
   const prototype = SemanticClusterController.prototype;
   for (const [method, path] of [
     [prototype.previewPageMapping, "page-mapping-preview"],
-    [prototype.bulkUpdatePageMapping, "page-mapping-bulk"]
+    [prototype.bulkUpdatePageMapping, "page-mapping-bulk"],
+    [prototype.previewMerge, "merge-preview"],
+    [prototype.merge, "merge"]
   ] as const) {
     assert.equal(Reflect.getMetadata(PATH_METADATA, method), path);
     assert.equal(
@@ -49,6 +51,75 @@ test("protects static cluster page mapping routes with bulk permission and CSRF"
     Reflect.getMetadata(PATH_METADATA, prototype.update),
     ":clusterId"
   );
+});
+
+test("forwards an exact merge and audits the committed target", async () => {
+  const sourceId = "01900000-0000-7000-8000-000000000008";
+  const calls: unknown[][] = [];
+  const audits: AuditRecord[] = [];
+  const controller = new SemanticClusterController({
+    previewSemanticClusterMerge: async (...args: unknown[]) => {
+      calls.push(args);
+      return {
+        readiness: "READY",
+        selectedClusterCount: 2,
+        sourceClusterCount: 1,
+        movedKeywordCount: 4,
+        sourcePageConflictCount: 0,
+        lockedClusterCount: 0,
+        conflictedIds: [],
+        unavailableIds: [],
+        synchronousKeywordLimit: 450
+      };
+    },
+    mergeSemanticClusters: async (...args: unknown[]) => {
+      calls.push(args);
+      return {
+        targetCluster: { id: clusterId },
+        mergedClusterIds: [sourceId],
+        movedKeywordCount: 4
+      };
+    }
+  } as unknown as SeoDataClient, {
+    record: async (record: AuditRecord) => {
+      audits.push(record);
+    }
+  } as unknown as AuditService);
+  const body = {
+    items: [
+      { id: clusterId.toUpperCase(), version: 2 },
+      { id: sourceId, version: 3 }
+    ],
+    targetClusterId: clusterId.toUpperCase()
+  };
+
+  await controller.previewMerge(body, request(), principal);
+  await controller.merge(body, request(), principal);
+
+  const normalized = {
+    items: [
+      { id: clusterId, version: 2 },
+      { id: sourceId, version: 3 }
+    ],
+    targetClusterId: clusterId
+  };
+  assert.deepEqual(calls.map((args) => args[1]), [normalized, normalized]);
+  assert.deepEqual(audits.map(({ action, outcome, resourceId }) => ({
+    action,
+    outcome,
+    resourceId
+  })), [
+    {
+      action: "semantic.cluster_merge.requested",
+      outcome: "REQUESTED",
+      resourceId: clusterId
+    },
+    {
+      action: "semantic.cluster_merge.completed",
+      outcome: "SUCCESS",
+      resourceId: clusterId
+    }
+  ]);
 });
 
 test("forwards only normalized tenant context and audits a partial bulk apply", async () => {

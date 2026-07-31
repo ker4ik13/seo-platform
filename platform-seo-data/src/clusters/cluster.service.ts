@@ -2,9 +2,12 @@ import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import type {
   InternalCreateSemanticClusterInput,
   InternalDeleteSemanticClusterInput,
+  InternalSemanticClusterMergeInput,
   InternalUpdateSemanticClusterInput,
   InternalSemanticClusterPageBulkInput,
   SemanticCluster,
+  SemanticClusterMergePreview,
+  SemanticClusterMergeResult,
   SemanticClusterPageBulkPreview,
   SemanticClusterPageBulkPreviewChange,
   SemanticClusterPageBulkResult,
@@ -14,9 +17,14 @@ import { semanticClusterPageSources } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import {
+  lockSemanticKeywordWrites,
   SemanticVersionService,
-  type SemanticClusterVersionState
+  type SemanticClusterVersionState,
+  type SemanticKeywordChange,
+  type SemanticKeywordVersionState
 } from "../semantic-versions/semantic-version.service.js";
+
+const SYNCHRONOUS_MERGE_KEYWORD_LIMIT = 450;
 
 const CLUSTER_INCLUDE = {
   primaryPage: {
@@ -33,6 +41,22 @@ const CLUSTER_INCLUDE = {
 
 type ClusterRow = Prisma.ClusterGetPayload<{
   include: typeof CLUSTER_INCLUDE;
+}>;
+
+const MERGE_KEYWORD_INCLUDE = {
+  memberships: {
+    orderBy: { createdAt: "asc" as const },
+    take: 1,
+    select: { group: { select: { id: true } } }
+  },
+  tags: {
+    orderBy: { createdAt: "asc" as const },
+    select: { tag: { select: { id: true } } }
+  }
+} satisfies Prisma.KeywordInclude;
+
+type MergeKeywordRow = Prisma.KeywordGetPayload<{
+  include: typeof MERGE_KEYWORD_INCLUDE;
 }>;
 
 interface KeywordPageStats {
@@ -103,6 +127,8 @@ export class ClusterService {
           name: input.name,
           method: "MANUAL",
           evidence: { source: "MANUAL", actorId: input.actorId },
+          isLocked: input.isLocked ?? false,
+          excludeFromReclustering: input.excludeFromReclustering ?? false,
           ...(input.primaryPageId
             ? {
                 primaryPageId: input.primaryPageId,
@@ -183,6 +209,10 @@ export class ClusterService {
         },
         data: {
           name: input.name,
+          ...(input.isLocked === undefined ? {} : { isLocked: input.isLocked }),
+          ...(input.excludeFromReclustering === undefined
+            ? {}
+            : { excludeFromReclustering: input.excludeFromReclustering }),
           ...(input.primaryPageId === undefined
             ? {}
             : { primaryPageId: input.primaryPageId }),
@@ -440,6 +470,150 @@ export class ClusterService {
       };
     });
   }
+
+  public async previewMerge(
+    input: InternalSemanticClusterMergeInput
+  ): Promise<SemanticClusterMergePreview> {
+    const rows = await this.prisma.cluster.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        status: "ACTIVE",
+        id: { in: input.items.map(({ id }) => id) }
+      },
+      include: CLUSTER_INCLUDE
+    });
+    const sourceIds = input.items
+      .map(({ id }) => id)
+      .filter((id) => id !== input.targetClusterId);
+    const movedKeywordCount = await this.prisma.keyword.count({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        status: "ACTIVE",
+        clusterId: { in: sourceIds }
+      }
+    });
+    return mergePreview(input, rows, movedKeywordCount);
+  }
+
+  public async merge(
+    input: InternalSemanticClusterMergeInput
+  ): Promise<SemanticClusterMergeResult> {
+    return this.prisma.$transaction(async (transaction) => {
+      await lockSemanticKeywordWrites(transaction, input.projectId);
+      await lockClusterSet(transaction, input.projectId);
+      for (const clusterId of input.items.map(({ id }) => id).sort()) {
+        await lockCluster(transaction, input.projectId, clusterId);
+      }
+      const rows = await transaction.cluster.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "ACTIVE",
+          id: { in: input.items.map(({ id }) => id) }
+        },
+        include: CLUSTER_INCLUDE
+      });
+      const sourceIds = input.items
+        .map(({ id }) => id)
+        .filter((id) => id !== input.targetClusterId);
+      const keywords = await transaction.keyword.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "ACTIVE",
+          clusterId: { in: sourceIds }
+        },
+        orderBy: { id: "asc" },
+        take: SYNCHRONOUS_MERGE_KEYWORD_LIMIT + 1,
+        include: MERGE_KEYWORD_INCLUDE
+      });
+      const preview = mergePreview(input, rows, keywords.length);
+      assertMergeReady(preview);
+      const target = rows.find(({ id }) => id === input.targetClusterId)!;
+      const keywordChanges: SemanticKeywordChange[] = keywords.map((keyword) => {
+        const beforeState = mergeKeywordVersionState(keyword);
+        return {
+          entityId: keyword.id,
+          operation: "UPDATE",
+          beforeState,
+          afterState: { ...beforeState, clusterId: target.id },
+          beforeVersion: keyword.version,
+          afterVersion: keyword.version + 1
+        };
+      });
+      if (keywords.length > 0) {
+        const updated = await transaction.keyword.updateMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            id: { in: keywords.map(({ id }) => id) },
+            status: "ACTIVE"
+          },
+          data: {
+            clusterId: target.id,
+            updatedBy: input.actorId,
+            version: { increment: 1 }
+          }
+        });
+        if (updated.count !== keywords.length) throw mergeStateChanged();
+      }
+      const sourceRows = rows.filter(({ id }) => id !== target.id);
+      if (sourceRows.length > 0) {
+        const deleted = await transaction.cluster.updateMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            id: { in: sourceRows.map(({ id }) => id) },
+            status: "ACTIVE"
+          },
+          data: { status: "DELETED", version: { increment: 1 } }
+        });
+        if (deleted.count !== sourceRows.length) throw mergeStateChanged();
+      }
+      await this.semanticVersions.createWithChanges(
+        transaction,
+        {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          actorId: input.actorId,
+          reason: "CLUSTER_MERGE",
+          summary: `Объединены кластеры в «${target.name}»: ${sourceRows.length}`
+        },
+        keywordChanges,
+        sourceRows.map((source) => {
+          const beforeState = clusterVersionState(source);
+          return {
+            entityId: source.id,
+            operation: "DELETE" as const,
+            beforeState,
+            afterState: { ...beforeState, status: "DELETED" as const },
+            beforeVersion: source.version,
+            afterVersion: source.version + 1
+          };
+        })
+      );
+      const counts = await transaction.keyword.groupBy({
+        by: ["clusterId", "targetPageId"],
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          clusterId: target.id,
+          status: "ACTIVE"
+        },
+        _count: { _all: true }
+      });
+      return {
+        targetCluster: clusterItem(
+          target,
+          keywordPageStats(counts).get(target.id)
+        ),
+        mergedClusterIds: sourceRows.map(({ id }) => id),
+        movedKeywordCount: keywords.length
+      };
+    });
+  }
 }
 
 function pageMappingPreview(
@@ -489,6 +663,78 @@ function pageMappingPreview(
     ).length,
     changes
   };
+}
+
+function mergePreview(
+  input: InternalSemanticClusterMergeInput,
+  rows: readonly ClusterRow[],
+  movedKeywordCount: number
+): SemanticClusterMergePreview {
+  const rowById = new Map(rows.map((row) => [row.id, row]));
+  const target = rowById.get(input.targetClusterId);
+  const unavailableIds = input.items.flatMap(({ id }) =>
+    rowById.has(id) ? [] : [id]
+  );
+  const conflictedIds = input.items.flatMap(({ id, version }) => {
+    const row = rowById.get(id);
+    return row && row.version !== version ? [id] : [];
+  });
+  const sourceRows = rows.filter(({ id }) => id !== input.targetClusterId);
+  const hasConflict =
+    !target || unavailableIds.length > 0 || conflictedIds.length > 0;
+  return {
+    readiness: hasConflict
+      ? "CONFLICTED"
+      : movedKeywordCount > SYNCHRONOUS_MERGE_KEYWORD_LIMIT
+        ? "BACKGROUND_REQUIRED"
+        : "READY",
+    selectedClusterCount: input.items.length,
+    sourceClusterCount: input.items.length - 1,
+    movedKeywordCount,
+    sourcePageConflictCount: target
+      ? sourceRows.filter(
+          ({ primaryPageId }) =>
+            primaryPageId !== null && primaryPageId !== target.primaryPageId
+        ).length
+      : 0,
+    lockedClusterCount: rows.filter(({ isLocked }) => isLocked).length,
+    conflictedIds,
+    unavailableIds,
+    synchronousKeywordLimit: SYNCHRONOUS_MERGE_KEYWORD_LIMIT
+  };
+}
+
+function assertMergeReady(preview: SemanticClusterMergePreview): void {
+  if (preview.readiness === "READY") return;
+  if (preview.readiness === "BACKGROUND_REQUIRED") {
+    throw new HttpException(
+      {
+        code: "BACKGROUND_OPERATION_REQUIRED",
+        message: "This cluster merge exceeds the synchronous safety limit",
+        limit: preview.synchronousKeywordLimit
+      },
+      HttpStatus.UNPROCESSABLE_ENTITY
+    );
+  }
+  throw new HttpException(
+    {
+      code: "VERSION_CONFLICT",
+      message: "One or more semantic clusters changed after preview",
+      conflictedIds: preview.conflictedIds,
+      unavailableIds: preview.unavailableIds
+    },
+    HttpStatus.PRECONDITION_FAILED
+  );
+}
+
+function mergeStateChanged(): HttpException {
+  return new HttpException(
+    {
+      code: "VERSION_CONFLICT",
+      message: "Cluster merge scope changed while applying the operation"
+    },
+    HttpStatus.PRECONDITION_FAILED
+  );
 }
 
 function samePageMapping(
@@ -666,6 +912,8 @@ function clusterItem(
     name: row.name,
     method: row.method,
     keywordCount: stats.keywordCount,
+    isLocked: row.isLocked,
+    excludeFromReclustering: row.excludeFromReclustering,
     ...(primaryPage ? { primaryPage } : {}),
     ...(row.pageMappingSource
       ? { pageMappingSource: row.pageMappingSource as SemanticClusterPageSource }
@@ -746,7 +994,28 @@ function clusterVersionState(row: ClusterRow): SemanticClusterVersionState {
     primaryPageId: row.primaryPageId,
     pageMappingSource: row.pageMappingSource as SemanticClusterPageSource | null,
     pageMappingConfidence: row.pageMappingConfidence,
-    pageMappingRationale: row.pageMappingRationale
+    pageMappingRationale: row.pageMappingRationale,
+    isLocked: row.isLocked,
+    excludeFromReclustering: row.excludeFromReclustering
+  };
+}
+
+function mergeKeywordVersionState(
+  row: MergeKeywordRow
+): SemanticKeywordVersionState {
+  return {
+    textOriginal: row.textOriginal,
+    textNormalized: row.textNormalized,
+    normalizedHash: row.normalizedHash,
+    language: row.language,
+    priority: row.priority,
+    isFavorite: row.isFavorite,
+    intent: row.intent,
+    status: row.status === "DELETED" ? "DELETED" : "ACTIVE",
+    clusterId: row.clusterId,
+    targetPageId: row.targetPageId,
+    groupId: row.memberships[0]?.group.id ?? null,
+    tagIds: row.tags.map(({ tag }) => tag.id)
   };
 }
 

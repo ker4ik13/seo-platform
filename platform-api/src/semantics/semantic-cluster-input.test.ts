@@ -3,6 +3,7 @@ import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
 import {
   createSemanticClusterInput,
+  semanticClusterMergeInput,
   semanticClusterPageBulkInput,
   updateSemanticClusterInput
 } from "./semantic-cluster-input.js";
@@ -11,9 +12,18 @@ const clusterId = "01900000-0000-7000-8000-000000000001";
 const pageId = "01900000-0000-7000-8000-000000000002";
 
 test("normalizes exact semantic cluster commands", () => {
-  assert.deepEqual(createSemanticClusterInput({ name: "  Купить   SEO  " }), {
-    name: "Купить SEO"
-  });
+  assert.deepEqual(
+    createSemanticClusterInput({
+      name: "  Купить   SEO  ",
+      isLocked: true,
+      excludeFromReclustering: false
+    }),
+    {
+      name: "Купить SEO",
+      isLocked: true,
+      excludeFromReclustering: false
+    }
+  );
   assert.deepEqual(updateSemanticClusterInput({ name: "SEO аудит" }), {
     name: "SEO аудит"
   });
@@ -32,6 +42,36 @@ test("normalizes exact semantic cluster commands", () => {
       pageMappingConfidence: 0.8,
       pageMappingRationale: "Совпадает интент"
     }
+  );
+});
+
+test("normalizes an exact cluster merge and requires the target selection", () => {
+  const second = "01900000-0000-7000-8000-000000000003";
+  assert.deepEqual(
+    semanticClusterMergeInput({
+      items: [
+        { id: clusterId.toUpperCase(), version: 2 },
+        { id: second, version: 3 }
+      ],
+      targetClusterId: second.toUpperCase()
+    }),
+    {
+      items: [
+        { id: clusterId, version: 2 },
+        { id: second, version: 3 }
+      ],
+      targetClusterId: second
+    }
+  );
+  assert.throws(
+    () => semanticClusterMergeInput({
+      items: [
+        { id: clusterId, version: 2 },
+        { id: second, version: 3 }
+      ],
+      targetClusterId: pageId
+    }),
+    DomainError
   );
 });
 

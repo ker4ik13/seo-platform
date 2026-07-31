@@ -4,6 +4,7 @@ import { BadRequestException } from "@nestjs/common";
 import {
   internalCreateSemanticClusterInput,
   internalDeleteSemanticClusterInput,
+  internalSemanticClusterMergeInput,
   internalSemanticClusterPageBulkInput,
   internalUpdateSemanticClusterInput
 } from "./cluster-input.js";
@@ -18,7 +19,9 @@ test("accepts exact tenant-scoped cluster commands", () => {
       workspaceId,
       projectId,
       actorId,
-      name: "  SEO   аудит "
+      name: "  SEO   аудит ",
+      isLocked: true,
+      excludeFromReclustering: true
     }).name,
     "SEO аудит"
   );
@@ -54,6 +57,46 @@ test("accepts exact tenant-scoped cluster commands", () => {
       version: 3
     }).version,
     3
+  );
+});
+
+test("accepts only an exact scoped cluster merge", () => {
+  const first = "01900000-0000-7000-8000-000000000004";
+  const second = "01900000-0000-7000-8000-000000000005";
+  assert.deepEqual(
+    internalSemanticClusterMergeInput({
+      workspaceId,
+      projectId,
+      actorId,
+      items: [
+        { id: first, version: 2 },
+        { id: second, version: 3 }
+      ],
+      targetClusterId: second
+    }),
+    {
+      workspaceId,
+      projectId,
+      actorId,
+      items: [
+        { id: first, version: 2 },
+        { id: second, version: 3 }
+      ],
+      targetClusterId: second
+    }
+  );
+  assert.throws(
+    () => internalSemanticClusterMergeInput({
+      workspaceId,
+      projectId,
+      actorId,
+      items: [
+        { id: first, version: 2 },
+        { id: second, version: 3 }
+      ],
+      targetClusterId: "01900000-0000-7000-8000-000000000099"
+    }),
+    BadRequestException
   );
 });
 

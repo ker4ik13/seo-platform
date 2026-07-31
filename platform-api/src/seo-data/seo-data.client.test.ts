@@ -13,6 +13,8 @@ import {
   semanticKeywordPage,
   semanticClusterPageBulkPreview,
   semanticClusterPageBulkResult,
+  semanticClusterMergePreview,
+  semanticClusterMergeResult,
   semanticClusters,
   semanticCustomColumns,
   semanticKeywordCustomValue,
@@ -147,6 +149,8 @@ test("validates unique manual semantic clusters", () => {
     name: "SEO аудит",
     method: "MANUAL",
     keywordCount: 4,
+    isLocked: false,
+    excludeFromReclustering: false,
     pageDiagnostics: {
       mappedKeywordCount: 3,
       unmappedKeywordCount: 1,
@@ -221,6 +225,8 @@ test("validates cluster page mapping preview and complete result partitions", ()
     name: "SEO аудит",
     method: "MANUAL",
     keywordCount: 4,
+    isLocked: true,
+    excludeFromReclustering: false,
     primaryPage: {
       id: pageId,
       url: "https://example.com/audit/",
@@ -259,6 +265,63 @@ test("validates cluster page mapping preview and complete result partitions", ()
         { ...result, conflictedIds: [first] },
         input
       ),
+    DomainError
+  );
+});
+
+test("validates coherent cluster merge preview and result", () => {
+  const first = "01900000-0000-7000-8000-000000000022";
+  const second = "01900000-0000-7000-8000-000000000023";
+  const input = {
+    items: [
+      { id: first, version: 2 },
+      { id: second, version: 3 }
+    ],
+    targetClusterId: first
+  };
+  const preview = semanticClusterMergePreview({
+    readiness: "READY",
+    selectedClusterCount: 2,
+    sourceClusterCount: 1,
+    movedKeywordCount: 12,
+    sourcePageConflictCount: 1,
+    lockedClusterCount: 0,
+    conflictedIds: [],
+    unavailableIds: [],
+    synchronousKeywordLimit: 450
+  }, input);
+  assert.equal(preview.movedKeywordCount, 12);
+  assert.throws(
+    () => semanticClusterMergePreview({ ...preview, readiness: "CONFLICTED" }, input),
+    DomainError
+  );
+
+  const targetCluster = {
+    id: first,
+    name: "SEO аудит",
+    method: "MANUAL",
+    keywordCount: 20,
+    isLocked: false,
+    excludeFromReclustering: false,
+    pageDiagnostics: {
+      mappedKeywordCount: 0,
+      unmappedKeywordCount: 20,
+      competingPageCount: 0,
+      hasCannibalization: false,
+      hasMissingLanding: true
+    },
+    version: 2,
+    createdAt: "2026-07-30T10:00:00.000Z",
+    updatedAt: "2026-07-30T11:00:00.000Z"
+  };
+  const result = semanticClusterMergeResult({
+    targetCluster,
+    mergedClusterIds: [second],
+    movedKeywordCount: 12
+  }, input);
+  assert.deepEqual(result.mergedClusterIds, [second]);
+  assert.throws(
+    () => semanticClusterMergeResult({ ...result, mergedClusterIds: [first] }, input),
     DomainError
   );
 });

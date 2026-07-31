@@ -16,6 +16,8 @@ import {
 import type {
   ApiResponse,
   SemanticCluster,
+  SemanticClusterMergePreview,
+  SemanticClusterMergeResult,
   SemanticClusterPageBulkPreview,
   SemanticClusterPageBulkResult
 } from "@seo-platform/contracts";
@@ -45,6 +47,7 @@ import {
 import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import {
   createSemanticClusterInput,
+  semanticClusterMergeInput,
   semanticClusterPageBulkInput,
   updateSemanticClusterInput
 } from "./semantic-cluster-input.js";
@@ -166,6 +169,65 @@ export class SemanticClusterController {
       action: "semantic.cluster_page_mapping.completed",
       resourceType: "semantic_cluster",
       outcome: result.conflicted > 0 ? "PARTIAL" : "SUCCESS",
+      requestId: context.requestId
+    });
+    return apiResponse(request, result);
+  }
+
+  @Post("merge-preview")
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission("semantic.bulk_edit")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async previewMerge(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticClusterMergePreview>> {
+    const tenant = requiredMutableProjectTenant(request);
+    const input = semanticClusterMergeInput(body);
+    return apiResponse(
+      request,
+      await this.seoData.previewSemanticClusterMerge(
+        internalProjectContext(request, principal, tenant),
+        input
+      )
+    );
+  }
+
+  @Post("merge")
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission("semantic.bulk_edit")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async merge(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticClusterMergeResult>> {
+    const tenant = requiredMutableProjectTenant(request);
+    const context = requestContext(request);
+    const input = semanticClusterMergeInput(body);
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.cluster_merge.requested",
+      resourceType: "semantic_cluster",
+      resourceId: input.targetClusterId,
+      outcome: "REQUESTED",
+      requestId: context.requestId
+    });
+    const result = await this.seoData.mergeSemanticClusters(
+      internalProjectContext(request, principal, tenant),
+      input
+    );
+    await recordCommittedAudit(this.audit, this.logger, {
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.cluster_merge.completed",
+      resourceType: "semantic_cluster",
+      resourceId: result.targetCluster.id,
+      outcome: "SUCCESS",
       requestId: context.requestId
     });
     return apiResponse(request, result);

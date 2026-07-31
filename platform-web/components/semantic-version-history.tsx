@@ -260,6 +260,8 @@ function reasonLabel(reason: SemanticVersionListItem["reason"]): string {
       return "удаление кластера";
     case "CLUSTER_BULK_UPDATE":
       return "массовое назначение посадочных";
+    case "CLUSTER_MERGE":
+      return "объединение кластеров";
     case "BULK_UPDATE":
       return "массовое изменение";
     case "IMPORT":

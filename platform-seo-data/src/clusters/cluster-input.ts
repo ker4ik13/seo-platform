@@ -2,6 +2,7 @@ import { BadRequestException } from "@nestjs/common";
 import type {
   InternalCreateSemanticClusterInput,
   InternalDeleteSemanticClusterInput,
+  InternalSemanticClusterMergeInput,
   InternalSemanticClusterPageBulkInput,
   InternalUpdateSemanticClusterInput,
   SemanticClusterPageSource
@@ -83,6 +84,24 @@ export function internalSemanticClusterPageBulkInput(
   };
 }
 
+export function internalSemanticClusterMergeInput(
+  value: unknown
+): InternalSemanticClusterMergeInput {
+  const input = exactRecord(value, [
+    ...scopeFields(),
+    "items",
+    "targetClusterId"
+  ]);
+  const items = clusterSelections(input.items, 2, 50);
+  const targetClusterId = uuid(input.targetClusterId, "targetClusterId");
+  if (!items.some(({ id }) => id === targetClusterId)) invalid("targetClusterId");
+  return {
+    ...scope(input),
+    items,
+    targetClusterId
+  };
+}
+
 function scopeFields(): readonly string[] {
   return ["workspaceId", "projectId", "actorId"];
 }
@@ -90,6 +109,8 @@ function scopeFields(): readonly string[] {
 function editableFields(): readonly string[] {
   return [
     "name",
+    "isLocked",
+    "excludeFromReclustering",
     "primaryPageId",
     "pageMappingSource",
     "pageMappingConfidence",
@@ -101,6 +122,7 @@ function createMappingInput(
   input: Readonly<Record<string, unknown>>
 ): Omit<InternalCreateSemanticClusterInput, "workspaceId" | "projectId" | "actorId" | "name"> {
   return {
+    ...clusterControls(input),
     ...optionalCreatePageId(input.primaryPageId),
     ...mappingMetadata(input)
   };
@@ -110,9 +132,52 @@ function updateMappingInput(
   input: Readonly<Record<string, unknown>>
 ): Omit<InternalUpdateSemanticClusterInput, "workspaceId" | "projectId" | "actorId" | "name" | "version"> {
   return {
+    ...clusterControls(input),
     ...optionalUpdatePageId(input.primaryPageId),
     ...mappingMetadata(input)
   };
+}
+
+function clusterControls(
+  input: Readonly<Record<string, unknown>>
+): Readonly<{ isLocked?: boolean; excludeFromReclustering?: boolean }> {
+  return {
+    ...(input.isLocked === undefined
+      ? {}
+      : { isLocked: boolean(input.isLocked, "isLocked") }),
+    ...(input.excludeFromReclustering === undefined
+      ? {}
+      : {
+          excludeFromReclustering: boolean(
+            input.excludeFromReclustering,
+            "excludeFromReclustering"
+          )
+        })
+  };
+}
+
+function clusterSelections(
+  value: unknown,
+  minimum: number,
+  maximum: number
+): readonly { readonly id: string; readonly version: number }[] {
+  if (!Array.isArray(value) || value.length < minimum || value.length > maximum) {
+    invalid("items");
+  }
+  const items = value.map((entry) => {
+    const item = exactRecord(entry, ["id", "version"]);
+    return {
+      id: uuid(item.id, "items.id"),
+      version: positiveInteger(item.version, "items.version")
+    };
+  });
+  if (new Set(items.map(({ id }) => id)).size !== items.length) invalid("items");
+  return items;
+}
+
+function boolean(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") invalid(field);
+  return value;
 }
 
 function mappingMetadata(

@@ -6,6 +6,7 @@ import {
   semanticClusterMethods,
   semanticClusterPageSources,
   semanticClusterPageBulkStates,
+  semanticClusterMergeReadiness,
   pageIndexabilities,
   pageTypes,
   semanticCustomColumnTypes,
@@ -21,6 +22,7 @@ import {
   type InternalCreateSemanticKeywordGroupInput,
   type InternalDeleteSemanticKeywordInput,
   type InternalDeleteSemanticClusterInput,
+  type InternalSemanticClusterMergeInput,
   type InternalDeleteSemanticKeywordGroupInput,
   type InternalSemanticKeywordBulkInput,
   type InternalCreateSemanticSavedViewInput,
@@ -54,6 +56,9 @@ import {
   type ProjectCrawlIssueCollection,
   type SemanticKeywordIntent,
   type SemanticCluster,
+  type SemanticClusterMergeInput,
+  type SemanticClusterMergePreview,
+  type SemanticClusterMergeResult,
   type SemanticClusterPageBulkInput,
   type SemanticClusterPageBulkPreview,
   type SemanticClusterPageBulkResult,
@@ -444,6 +449,46 @@ export class SeoDataClient {
       body
     );
     return semanticClusterPageBulkResult(responseData(payload), input);
+  }
+
+  public async previewSemanticClusterMerge(
+    context: InternalContext,
+    input: SemanticClusterMergeInput
+  ): Promise<SemanticClusterMergePreview> {
+    const scope = trackingScope(context);
+    const body: InternalSemanticClusterMergeInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      semanticClusterUrl(context, this.config.services.seoData, "merge-preview"),
+      context,
+      body
+    );
+    return semanticClusterMergePreview(responseData(payload), input);
+  }
+
+  public async mergeSemanticClusters(
+    context: InternalContext,
+    input: SemanticClusterMergeInput
+  ): Promise<SemanticClusterMergeResult> {
+    const scope = trackingScope(context);
+    const body: InternalSemanticClusterMergeInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      semanticClusterUrl(context, this.config.services.seoData, "merge"),
+      context,
+      body
+    );
+    return semanticClusterMergeResult(responseData(payload), input);
   }
 
   public async listSemanticSavedViews(
@@ -1482,6 +1527,8 @@ export function semanticCluster(value: unknown): SemanticCluster {
     "name",
     "method",
     "keywordCount",
+    "isLocked",
+    "excludeFromReclustering",
     "primaryPage",
     "pageMappingSource",
     "pageMappingConfidence",
@@ -1502,6 +1549,8 @@ export function semanticCluster(value: unknown): SemanticCluster {
     !semanticClusterMethods.some((method) => method === cluster.method) ||
     !Number.isSafeInteger(cluster.keywordCount) ||
     Number(cluster.keywordCount) < 0 ||
+    typeof cluster.isLocked !== "boolean" ||
+    typeof cluster.excludeFromReclustering !== "boolean" ||
     (cluster.pageMappingSource !== undefined &&
       (typeof cluster.pageMappingSource !== "string" ||
         !semanticClusterPageSources.some(
@@ -1532,6 +1581,8 @@ export function semanticCluster(value: unknown): SemanticCluster {
     name: cluster.name,
     method: cluster.method as SemanticCluster["method"],
     keywordCount: cluster.keywordCount as number,
+    isLocked: cluster.isLocked as boolean,
+    excludeFromReclustering: cluster.excludeFromReclustering as boolean,
     ...(primaryPage ? { primaryPage } : {}),
     ...(cluster.pageMappingSource === undefined
       ? {}
@@ -1665,6 +1716,95 @@ export function semanticClusterPageBulkResult(
     skippedIds,
     conflictedIds
   };
+}
+
+export function semanticClusterMergePreview(
+  value: unknown,
+  input: SemanticClusterMergeInput
+): SemanticClusterMergePreview {
+  const preview = exactRecord(value, [
+    "readiness",
+    "selectedClusterCount",
+    "sourceClusterCount",
+    "movedKeywordCount",
+    "sourcePageConflictCount",
+    "lockedClusterCount",
+    "conflictedIds",
+    "unavailableIds",
+    "synchronousKeywordLimit"
+  ]);
+  const conflictedIds = uuidList(preview.conflictedIds, input.items.length);
+  const unavailableIds = uuidList(preview.unavailableIds, input.items.length);
+  const inputIds = new Set(input.items.map(({ id }) => id));
+  const conflictIds = [...conflictedIds, ...unavailableIds];
+  if (
+    typeof preview.readiness !== "string" ||
+    !semanticClusterMergeReadiness.some((item) => item === preview.readiness) ||
+    !bulkCount(preview.selectedClusterCount, input.items.length) ||
+    !bulkCount(preview.sourceClusterCount, input.items.length - 1) ||
+    !nonNegativeInteger(preview.movedKeywordCount) ||
+    !boundedInteger(preview.sourcePageConflictCount, input.items.length - 1) ||
+    !boundedInteger(preview.lockedClusterCount, input.items.length) ||
+    !positiveInteger(preview.synchronousKeywordLimit) ||
+    conflictIds.some((id) => !inputIds.has(id)) ||
+    new Set(conflictIds).size !== conflictIds.length ||
+    (conflictIds.length > 0
+      ? preview.readiness !== "CONFLICTED"
+      : Number(preview.movedKeywordCount) > Number(preview.synchronousKeywordLimit)
+        ? preview.readiness !== "BACKGROUND_REQUIRED"
+        : preview.readiness !== "READY")
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    readiness: preview.readiness as SemanticClusterMergePreview["readiness"],
+    selectedClusterCount: Number(preview.selectedClusterCount),
+    sourceClusterCount: Number(preview.sourceClusterCount),
+    movedKeywordCount: Number(preview.movedKeywordCount),
+    sourcePageConflictCount: Number(preview.sourcePageConflictCount),
+    lockedClusterCount: Number(preview.lockedClusterCount),
+    conflictedIds,
+    unavailableIds,
+    synchronousKeywordLimit: Number(preview.synchronousKeywordLimit)
+  };
+}
+
+export function semanticClusterMergeResult(
+  value: unknown,
+  input: SemanticClusterMergeInput
+): SemanticClusterMergeResult {
+  const result = exactRecord(value, [
+    "targetCluster",
+    "mergedClusterIds",
+    "movedKeywordCount"
+  ]);
+  const targetCluster = semanticCluster(result.targetCluster);
+  const mergedClusterIds = uuidList(result.mergedClusterIds, input.items.length - 1);
+  const expectedSourceIds = input.items
+    .map(({ id }) => id)
+    .filter((id) => id !== input.targetClusterId)
+    .sort();
+  if (
+    targetCluster.id !== input.targetClusterId ||
+    !nonNegativeInteger(result.movedKeywordCount) ||
+    mergedClusterIds.length !== expectedSourceIds.length ||
+    [...mergedClusterIds].sort().some((id, index) => id !== expectedSourceIds[index])
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    targetCluster,
+    mergedClusterIds,
+    movedKeywordCount: Number(result.movedKeywordCount)
+  };
+}
+
+function positiveInteger(value: unknown): boolean {
+  return Number.isSafeInteger(value) && Number(value) >= 1;
+}
+
+function boundedInteger(value: unknown, maximum: number): boolean {
+  return nonNegativeInteger(value) && Number(value) <= maximum;
 }
 
 function uuidList(value: unknown, max: number): readonly string[] {

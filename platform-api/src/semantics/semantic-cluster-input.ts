@@ -1,5 +1,6 @@
 import type {
   CreateSemanticClusterInput,
+  SemanticClusterMergeInput,
   SemanticClusterPageBulkInput,
   SemanticClusterPageSource,
   UpdateSemanticClusterInput
@@ -72,6 +73,24 @@ export function semanticClusterPageBulkInput(
   };
 }
 
+export function semanticClusterMergeInput(
+  value: unknown
+): SemanticClusterMergeInput {
+  const input = exactRecordWithFields(value, ["items", "targetClusterId"]);
+  const items = clusterSelections(input.items, 2, 50);
+  if (
+    typeof input.targetClusterId !== "string" ||
+    !UUID_PATTERN.test(input.targetClusterId)
+  ) {
+    invalid("targetClusterId", "Must be a UUID");
+  }
+  const targetClusterId = input.targetClusterId.toLowerCase();
+  if (!items.some(({ id }) => id === targetClusterId)) {
+    invalid("targetClusterId", "Must reference one of the selected clusters");
+  }
+  return { items, targetClusterId };
+}
+
 function exactRecord(value: unknown): Readonly<Record<string, unknown>> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     invalid("$", "Must be a JSON object");
@@ -79,6 +98,8 @@ function exactRecord(value: unknown): Readonly<Record<string, unknown>> {
   const input = value as Readonly<Record<string, unknown>>;
   const allowed = [
     "name",
+    "isLocked",
+    "excludeFromReclustering",
     "primaryPageId",
     "pageMappingSource",
     "pageMappingConfidence",
@@ -116,6 +137,7 @@ function createMappingInput(
   input: Readonly<Record<string, unknown>>
 ): Omit<CreateSemanticClusterInput, "name"> {
   return {
+    ...clusterControls(input),
     ...optionalCreatePageId(input.primaryPageId),
     ...mappingMetadata(input)
   };
@@ -125,9 +147,57 @@ function updateMappingInput(
   input: Readonly<Record<string, unknown>>
 ): Omit<UpdateSemanticClusterInput, "name"> {
   return {
+    ...clusterControls(input),
     ...optionalUpdatePageId(input.primaryPageId),
     ...mappingMetadata(input)
   };
+}
+
+function clusterControls(
+  input: Readonly<Record<string, unknown>>
+): Readonly<{ isLocked?: boolean; excludeFromReclustering?: boolean }> {
+  return {
+    ...(input.isLocked === undefined
+      ? {}
+      : { isLocked: boolean(input.isLocked, "isLocked") }),
+    ...(input.excludeFromReclustering === undefined
+      ? {}
+      : {
+          excludeFromReclustering: boolean(
+            input.excludeFromReclustering,
+            "excludeFromReclustering"
+          )
+        })
+  };
+}
+
+function clusterSelections(
+  value: unknown,
+  minimum: number,
+  maximum: number
+): readonly { readonly id: string; readonly version: number }[] {
+  if (!Array.isArray(value) || value.length < minimum || value.length > maximum) {
+    invalid("items", `Must select between ${minimum} and ${maximum} clusters`);
+  }
+  const items = value.map((entry, index) => {
+    const item = exactRecordWithFields(entry, ["id", "version"]);
+    if (typeof item.id !== "string" || !UUID_PATTERN.test(item.id)) {
+      invalid(`items.${index}.id`, "Must be a UUID");
+    }
+    if (!Number.isSafeInteger(item.version) || Number(item.version) < 1) {
+      invalid(`items.${index}.version`, "Must be a positive integer");
+    }
+    return { id: item.id.toLowerCase(), version: Number(item.version) };
+  });
+  if (new Set(items.map(({ id }) => id)).size !== items.length) {
+    invalid("items", "Cannot contain duplicate clusters");
+  }
+  return items;
+}
+
+function boolean(value: unknown, path: string): boolean {
+  if (typeof value !== "boolean") invalid(path, "Must be a boolean");
+  return value;
 }
 
 function mappingMetadata(

@@ -56,6 +56,8 @@ export interface SemanticClusterVersionState {
   readonly pageMappingSource: SemanticClusterPageSource | null;
   readonly pageMappingConfidence: number | null;
   readonly pageMappingRationale: string | null;
+  readonly isLocked: boolean;
+  readonly excludeFromReclustering: boolean;
 }
 
 export interface SemanticClusterChange {
@@ -150,6 +152,36 @@ export class SemanticVersionService {
       where: { id: version.id },
       data: {
         affectedCount: changes.length,
+        reversible: true,
+        manifest: { schemaVersion: 1, state: "FINALIZED" },
+        finalizedAt: new Date()
+      }
+    });
+    return versionItem(finalized);
+  }
+
+  public async createWithChanges(
+    transaction: Prisma.TransactionClient,
+    input: CreateVersionInput,
+    keywordChanges: readonly SemanticKeywordChange[],
+    clusterChanges: readonly SemanticClusterChange[]
+  ): Promise<SemanticVersionListItem | undefined> {
+    const affectedCount = keywordChanges.length + clusterChanges.length;
+    if (affectedCount === 0) return undefined;
+    if (affectedCount > MAX_UNDO_CHANGES) throw undoTooLarge();
+    const version = await this.createVersion(transaction, input, false);
+    // Cluster restores must be evaluated and applied before keywords that may
+    // depend on those clusters. Persisting them first makes that order stable.
+    for (const change of clusterChanges) {
+      await this.appendClusterChange(transaction, version, change);
+    }
+    for (const change of keywordChanges) {
+      await this.appendKeywordChange(transaction, version, change);
+    }
+    const finalized = await transaction.semanticVersion.update({
+      where: { id: version.id },
+      data: {
+        affectedCount,
         reversible: true,
         manifest: { schemaVersion: 1, state: "FINALIZED" },
         finalizedAt: new Date()
@@ -375,7 +407,14 @@ export class SemanticVersionService {
         applicable.map((item) => [changeKey(item.entityType, item.entityId), item])
       );
       let applied = 0;
-      for (const change of changes) {
+      const orderedChanges = [...changes].sort((left, right) =>
+        left.entityType === right.entityType
+          ? 0
+          : left.entityType === "CLUSTER"
+            ? -1
+            : 1
+      );
+      for (const change of orderedChanges) {
         if (!previewByEntity.has(changeKey(change.entityType, change.entityId))) {
           continue;
         }
@@ -671,6 +710,26 @@ async function previewChanges(
     ...currentKeywords.map((row) => [changeKey("KEYWORD", row.id), row] as const),
     ...currentClusters.map((row) => [changeKey("CLUSTER", row.id), row] as const)
   ]);
+  const restoredClusterIds = new Set<string>();
+  for (const change of changes) {
+    if (change.entityType !== "CLUSTER") continue;
+    const state = nullableClusterState(change.beforeState);
+    const current = currentByEntity.get(changeKey("CLUSTER", change.entityId));
+    if (
+      state?.status === "ACTIVE" &&
+      current?.version === change.afterVersion &&
+      current.status === requiredClusterState(change.afterState).status &&
+      !(await clusterRestoreConflict(
+        client,
+        workspaceId,
+        projectId,
+        change.entityId,
+        state
+      ))
+    ) {
+      restoredClusterIds.add(change.entityId);
+    }
+  }
   const result: SemanticVersionChangePreview[] = [];
   for (const change of changes) {
     if (
@@ -707,7 +766,8 @@ async function previewChanges(
           workspaceId,
           projectId,
           change.entityId,
-          nullableKeywordState(change.beforeState)
+          nullableKeywordState(change.beforeState),
+          restoredClusterIds
         )
       : await clusterRestoreConflict(
           client,
@@ -734,7 +794,8 @@ async function keywordRestoreConflict(
   workspaceId: string,
   projectId: string,
   keywordId: string,
-  state: SemanticKeywordVersionState | null
+  state: SemanticKeywordVersionState | null,
+  restoredClusterIds: ReadonlySet<string> = new Set()
 ): Promise<string | undefined> {
   if (state === null) return undefined;
   if (state.status === "DELETED") return undefined;
@@ -761,7 +822,7 @@ async function keywordRestoreConflict(
           select: { id: true }
         })
       : Promise.resolve({ id: "" }),
-    state.clusterId
+    state.clusterId && !restoredClusterIds.has(state.clusterId)
       ? client.cluster.findFirst({
           where: {
             id: state.clusterId,
@@ -940,6 +1001,8 @@ async function restoreCluster(
       pageMappingSource: state.pageMappingSource,
       pageMappingConfidence: state.pageMappingConfidence,
       pageMappingRationale: state.pageMappingRationale,
+      isLocked: state.isLocked,
+      excludeFromReclustering: state.excludeFromReclustering,
       version: { increment: 1 }
     }
   });
@@ -1100,6 +1163,7 @@ function versionReason(value: string): SemanticVersionReason {
       "CLUSTER_UPDATE",
       "CLUSTER_DELETE",
       "CLUSTER_BULK_UPDATE",
+      "CLUSTER_MERGE",
       "BULK_UPDATE",
       "UNDO"
     ].includes(value)
@@ -1142,11 +1206,15 @@ function requiredClusterState(
     "primaryPageId",
     "pageMappingSource",
     "pageMappingConfidence",
-    "pageMappingRationale"
+    "pageMappingRationale",
+    "isLocked",
+    "excludeFromReclustering"
   ];
+  const legacyKeys = keys.slice(0, 7);
   if (
-    Object.keys(state).length !== keys.length ||
-    keys.some((key) => !(key in state)) ||
+    ![legacyKeys.length, keys.length].includes(Object.keys(state).length) ||
+    legacyKeys.some((key) => !(key in state)) ||
+    Object.keys(state).some((key) => !keys.includes(key)) ||
     typeof state.name !== "string" ||
     state.name.length < 1 ||
     state.name.length > 255 ||
@@ -1170,7 +1238,10 @@ function requiredClusterState(
     (state.primaryPageId === null &&
       (state.pageMappingSource !== null ||
         state.pageMappingConfidence !== null ||
-        state.pageMappingRationale !== null))
+        state.pageMappingRationale !== null)) ||
+    (state.isLocked !== undefined && typeof state.isLocked !== "boolean") ||
+    (state.excludeFromReclustering !== undefined &&
+      typeof state.excludeFromReclustering !== "boolean")
   ) {
     throw corruptedVersion();
   }
@@ -1181,7 +1252,10 @@ function requiredClusterState(
     primaryPageId: state.primaryPageId as string | null,
     pageMappingSource: state.pageMappingSource as SemanticClusterPageSource | null,
     pageMappingConfidence: state.pageMappingConfidence as number | null,
-    pageMappingRationale: state.pageMappingRationale as string | null
+    pageMappingRationale: state.pageMappingRationale as string | null,
+    isLocked: (state.isLocked as boolean | undefined) ?? false,
+    excludeFromReclustering:
+      (state.excludeFromReclustering as boolean | undefined) ?? false
   };
 }
 

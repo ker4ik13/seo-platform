@@ -2389,12 +2389,16 @@ svg { display: block; }
 .semantic-group-editor select { background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); min-height: 39px; padding: 0 10px; width: 100%; }
 .semantic-group-color input { background: transparent; border: 0; height: 39px; padding: 2px; width: 56px; }
 .semantic-group-editor-actions { align-items: center; display: flex; gap: 8px; min-height: 39px; }
-.semantic-cluster-editor { align-items: end; background: #fafafd; border: 1px solid var(--line); border-radius: 11px; display: grid; gap: 10px; grid-template-columns: minmax(180px, .8fr) minmax(260px, 1.2fr) minmax(220px, 1fr) auto; padding: 13px; }
+.semantic-cluster-editor { align-items: end; background: #fafafd; border: 1px solid var(--line); border-radius: 11px; display: grid; gap: 10px; grid-template-columns: minmax(170px, .8fr) minmax(180px, .65fr) minmax(230px, 1.1fr) minmax(190px, .9fr) auto; padding: 13px; }
 .semantic-cluster-editor label { display: grid; gap: 6px; }
 .semantic-cluster-editor label > span { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; }
 .semantic-cluster-editor input,
 .semantic-cluster-editor select { background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); min-height: 39px; padding: 0 10px; width: 100%; }
 .semantic-cluster-editor input:disabled { background: #f3f3f6; color: var(--muted); }
+.semantic-cluster-controls { align-items: center; display: grid; gap: 7px; min-height: 39px; }
+.semantic-cluster-controls label { align-items: center; display: flex; gap: 7px; }
+.semantic-cluster-controls input { accent-color: var(--accent); min-height: 0; width: auto; }
+.semantic-cluster-controls label > span { color: var(--muted); font-size: 10px; font-weight: 600; text-transform: none; }
 .semantic-cluster-header-actions { align-items: center; display: flex; gap: 10px; }
 .semantic-cluster-bulk { background: #f7f6ff; border: 1px solid #d8d3ff; border-radius: 12px; display: grid; gap: 12px; padding: 14px; }
 .semantic-cluster-bulk-fields { display: grid; gap: 10px; grid-template-columns: minmax(260px, 1.2fr) minmax(220px, 1fr); }
@@ -2406,7 +2410,14 @@ svg { display: block; }
 .semantic-cluster-bulk-preview { align-items: center; display: flex; flex-wrap: wrap; gap: 7px; }
 .semantic-cluster-bulk-preview span { background: #fff; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; padding: 5px 9px; }
 .semantic-cluster-bulk-preview span.danger { background: #fff0ef; border-color: #ffd4d0; color: var(--danger); }
+.semantic-cluster-bulk-preview span.warning { background: #fff5dc; border-color: #f1d899; color: #895a00; }
 .semantic-cluster-bulk-preview strong { color: var(--text); }
+.semantic-cluster-merge { background: rgba(255, 255, 255, .72); border: 1px solid var(--line); border-radius: 9px; }
+.semantic-cluster-merge summary { color: var(--text); cursor: pointer; font-size: 11px; font-weight: 700; padding: 9px 11px; }
+.semantic-cluster-merge-controls { border-top: 1px solid var(--line); display: grid; gap: 10px; padding: 11px; }
+.semantic-cluster-merge-controls > label { display: grid; gap: 6px; max-width: 520px; }
+.semantic-cluster-merge-controls > label > span { color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.semantic-cluster-merge-controls select { background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); min-height: 39px; padding: 0 10px; width: 100%; }
 .semantic-cluster-mark { background: linear-gradient(180deg, #6758ef, #9388f5); }
 .semantic-cluster-row { grid-template-columns: auto 8px minmax(0, 1fr) auto auto; }
 .semantic-cluster-select { align-items: center; display: flex; }
@@ -3038,6 +3049,8 @@ svg { display: block; }
   .integration-credential-row { grid-template-columns: minmax(190px, 1fr) auto; }
   .integration-credential-meta { grid-column: 1; }
   .billing-plans { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .semantic-cluster-editor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .semantic-cluster-editor .semantic-group-editor-actions { justify-content: flex-end; }
 }
 
 @media (max-width: 1050px) {
