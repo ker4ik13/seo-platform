@@ -412,6 +412,7 @@ export function ProjectPageMap({
                   <th>Индексируемость</th>
                   <th>HTTP</th>
                   <th>Запросы</th>
+                  <th>Кластеры</th>
                   <th>Контент</th>
                   <th aria-label="Действия" />
                 </tr>
@@ -708,6 +709,7 @@ function PageRow({
       </td>
       <td>{page.httpStatus ?? "—"}</td>
       <td><strong>{page.assignedKeywordCount}</strong></td>
+      <td><strong>{page.assignedClusterCount}</strong></td>
       <td>{page.contentStatus ? contentStatusLabel(page.contentStatus) : "—"}</td>
       <td>
         <div className="page-map-actions">

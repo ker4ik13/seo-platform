@@ -145,6 +145,13 @@ test("validates unique manual semantic clusters", () => {
     name: "SEO аудит",
     method: "MANUAL",
     keywordCount: 4,
+    pageDiagnostics: {
+      mappedKeywordCount: 3,
+      unmappedKeywordCount: 1,
+      competingPageCount: 1,
+      hasCannibalization: true,
+      hasMissingLanding: true
+    },
     version: 2,
     createdAt: "2026-07-30T10:00:00.000Z",
     updatedAt: "2026-07-30T11:00:00.000Z"

@@ -16,7 +16,7 @@ const PAGE_KEYS = [
   "sources", "pageType", "indexability", "httpStatus", "canonicalTarget",
   "robots", "title", "description", "h1", "language", "template",
   "contentStatus", "ownerId", "priority", "publishedAt", "crawledAt",
-  "analyticsMetrics", "notes", "assignedKeywordCount", "lifecycleStatus",
+  "analyticsMetrics", "notes", "assignedKeywordCount", "assignedClusterCount", "lifecycleStatus",
   "version", "createdBy", "updatedBy", "archivedBy", "createdAt",
   "updatedAt", "archivedAt"
 ] as const;
@@ -91,6 +91,7 @@ export function scopedProjectPage(
     !numericRecord(page.analyticsMetrics) ||
     !optionalString(page.notes) ||
     !integer(page.assignedKeywordCount, 0, Number.MAX_SAFE_INTEGER) ||
+    !integer(page.assignedClusterCount, 0, Number.MAX_SAFE_INTEGER) ||
     typeof page.lifecycleStatus !== "string" ||
     !pageLifecycleStatuses.some(
       (value) => value === page.lifecycleStatus

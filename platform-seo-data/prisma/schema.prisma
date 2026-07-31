@@ -338,20 +338,26 @@ model KeywordTag {
 }
 
 model Cluster {
-  id          String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId String       @map("workspace_id") @db.Uuid
-  projectId   String       @map("project_id") @db.Uuid
-  name        String       @db.VarChar(255)
-  method      String       @db.VarChar(64)
-  evidence    Json?
-  status      EntityStatus @default(ACTIVE)
-  version     Int          @default(1)
-  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
-  keywords    Keyword[]
+  id                    String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId           String       @map("workspace_id") @db.Uuid
+  projectId             String       @map("project_id") @db.Uuid
+  name                  String       @db.VarChar(255)
+  method                String       @db.VarChar(64)
+  evidence              Json?
+  primaryPageId         String?      @map("primary_page_id") @db.Uuid
+  pageMappingSource     String?      @map("page_mapping_source") @db.VarChar(16)
+  pageMappingConfidence Float?       @map("page_mapping_confidence")
+  pageMappingRationale  String?      @map("page_mapping_rationale") @db.Text
+  status                EntityStatus @default(ACTIVE)
+  version               Int          @default(1)
+  createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  keywords              Keyword[]
+  primaryPage           Page?        @relation("ClusterPrimaryPage", fields: [workspaceId, projectId, primaryPageId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([workspaceId, projectId, id], map: "clusters_tenant_project_id_key")
   @@index([projectId, status, id])
+  @@index([workspaceId, projectId, primaryPageId, status, id], map: "clusters_primary_page_idx")
   @@map("clusters")
 }
 
@@ -391,6 +397,7 @@ model Page {
   aliases               PageAlias[]
   sources               PageSource[]
   targetKeywords        Keyword[]
+  primaryClusters       Cluster[]                    @relation("ClusterPrimaryPage")
   createReceipts        PageCreateReceipt[]
   crawlSnapshots        CrawlPageSnapshot[]
   crawlIssues           CrawlIssue[]

@@ -30,6 +30,7 @@ const page = {
   priority: 10,
   analyticsMetrics: {},
   assignedKeywordCount: 3,
+  assignedClusterCount: 2,
   lifecycleStatus: "ACTIVE",
   version: 1,
   createdAt: "2026-07-30T10:00:00.000Z",

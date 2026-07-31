@@ -68,7 +68,11 @@ BCP-47 язык, приоритет, избранное, intent, группа, �
 Группы имеют вложенность, защищённый перенос без циклов, CAS и запрет удаления
 непустой группы. Кластеры имеют tenant-scoped CRUD, CAS, case-insensitive
 защиту от дублей и запрет удаления, пока им назначены активные запросы;
-общая advisory-lock граница не допускает гонку удаления и назначения.
+общая advisory-lock граница не допускает гонку удаления и назначения. Для
+кластера можно выбрать ровно одну активную primary Page и сохранить источник,
+confidence и rationale назначения. Read model вычисляет запросы без URL и
+отличающиеся target pages как missing-landing/cannibalization diagnostics;
+назначенную primary Page нельзя архивировать до переноса кластеров.
 Platform API валидирует публичный ввод и никогда не принимает
 workspace/actor из browser body; Web использует same-origin BFF и показывает
 конфликты версии без silent overwrite. Bounded bulk-команда принимает 1–200
@@ -1051,10 +1055,15 @@ Backend convention:
 - `platform-seo-data/src/clusters` — tenant-scoped manual cluster CRUD,
   active-keyword counters, case-insensitive duplicate guard, CAS и безопасное
   soft-delete только пустого кластера; keyword assignment использует ту же
-  project advisory-lock границу;
+  project advisory-lock границу; primary Page mapping проверяет active
+  tenant/project page под row lock и отдаёт derived missing/cannibalization
+  diagnostics;
 - migration `20260801030000_semantic_cluster_integrity` — fail-closed legacy
   review, partial case-insensitive uniqueness активных cluster names и
   составной tenant/project FK `Keyword.clusterId → Cluster`;
+- migration `20260801040000_cluster_primary_page` — nullable primary Page,
+  constrained source/confidence/rationale, tenant-safe composite FK и
+  page-map lookup index;
 - `platform-seo-data/src/semantic-saved-views` и migration
   `20260730170000_semantic_saved_views` — tenant/owner-scoped private и
   project-shared views, partial unique names, strict v1 config DSL,
@@ -1299,7 +1308,7 @@ Entrypoints:
 | Admin operations | vertical slice: MFA + persisted roles + NPD operations |
 | Auth core | vertical slice: identity lifecycle + transactional verification/reset email transport |
 | Workspaces/projects/team access | vertical slice: включая transactional invite email/fragment acceptance |
-| Semantics/import | vertical slice: Key Collector-style groups/manual clusters/table/tools + CSV/TSV/XLSX → mapping → validation → quota reservation → publish/abort → query; auto-clustering и полный cluster→page/cannibalization workflow ещё не закрыты |
+| Semantics/import | vertical slice: Key Collector-style groups/manual clusters/table/tools + CSV/TSV/XLSX → mapping → validation → quota reservation → publish/abort → query; manual cluster→primary Page и derived missing/cannibalization diagnostics закрыты, auto-clustering, alternate pages, mapping history/undo/evidence и cluster-level bulk preview ещё не закрыты |
 | Notifications | vertical slice: preferences → effective policy → read center → encrypted browser device lifecycle + durable terminal crawl in-app notifications |
 | Integrations | vertical slice: operational catalog + encrypted BYOK vault + validation + SERP/competitor project bindings |
 | Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |

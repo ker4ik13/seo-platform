@@ -2,24 +2,39 @@ import { BadRequestException } from "@nestjs/common";
 import type {
   InternalCreateSemanticClusterInput,
   InternalDeleteSemanticClusterInput,
-  InternalUpdateSemanticClusterInput
+  InternalUpdateSemanticClusterInput,
+  SemanticClusterPageSource
 } from "@seo-platform/contracts";
+import { semanticClusterPageSources } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
+
+const PAGE_SOURCES = new Set<string>(semanticClusterPageSources);
 
 export function internalCreateSemanticClusterInput(
   value: unknown
 ): InternalCreateSemanticClusterInput {
-  const input = exactRecord(value, [...scopeFields(), "name"]);
-  return { ...scope(input), name: clusterName(input.name) };
+  const input = exactRecord(value, [...scopeFields(), ...editableFields()]);
+  if (input.primaryPageId === undefined && hasMappingMetadata(input)) invalid("primaryPageId");
+  return {
+    ...scope(input),
+    name: clusterName(input.name),
+    ...createMappingInput(input)
+  };
 }
 
 export function internalUpdateSemanticClusterInput(
   value: unknown
 ): InternalUpdateSemanticClusterInput {
-  const input = exactRecord(value, [...scopeFields(), "version", "name"]);
+  const input = exactRecord(value, [
+    ...scopeFields(),
+    "version",
+    ...editableFields()
+  ]);
+  if (input.primaryPageId === null && hasMappingMetadata(input)) invalid("primaryPageId");
   return {
     ...scope(input),
     name: clusterName(input.name),
+    ...updateMappingInput(input),
     version: positiveInteger(input.version, "version")
   };
 }
@@ -36,6 +51,95 @@ export function internalDeleteSemanticClusterInput(
 
 function scopeFields(): readonly string[] {
   return ["workspaceId", "projectId", "actorId"];
+}
+
+function editableFields(): readonly string[] {
+  return [
+    "name",
+    "primaryPageId",
+    "pageMappingSource",
+    "pageMappingConfidence",
+    "pageMappingRationale"
+  ];
+}
+
+function createMappingInput(
+  input: Readonly<Record<string, unknown>>
+): Omit<InternalCreateSemanticClusterInput, "workspaceId" | "projectId" | "actorId" | "name"> {
+  return {
+    ...optionalCreatePageId(input.primaryPageId),
+    ...mappingMetadata(input)
+  };
+}
+
+function updateMappingInput(
+  input: Readonly<Record<string, unknown>>
+): Omit<InternalUpdateSemanticClusterInput, "workspaceId" | "projectId" | "actorId" | "name" | "version"> {
+  return {
+    ...optionalUpdatePageId(input.primaryPageId),
+    ...mappingMetadata(input)
+  };
+}
+
+function mappingMetadata(
+  input: Readonly<Record<string, unknown>>
+): Readonly<{
+  pageMappingSource?: SemanticClusterPageSource;
+  pageMappingConfidence?: number;
+  pageMappingRationale?: string;
+}> {
+  return {
+    ...(input.pageMappingSource === undefined
+      ? {}
+      : { pageMappingSource: pageSource(input.pageMappingSource) }),
+    ...(input.pageMappingConfidence === undefined
+      ? {}
+      : { pageMappingConfidence: confidence(input.pageMappingConfidence) }),
+    ...(input.pageMappingRationale === undefined
+      ? {}
+      : { pageMappingRationale: rationale(input.pageMappingRationale) })
+  };
+}
+
+function optionalCreatePageId(
+  value: unknown
+): Readonly<{ primaryPageId?: string }> {
+  if (value === undefined) return {};
+  return { primaryPageId: uuid(value, "primaryPageId") };
+}
+
+function optionalUpdatePageId(
+  value: unknown
+): Readonly<{ primaryPageId?: string | null }> {
+  if (value === null) return { primaryPageId: null };
+  return optionalCreatePageId(value);
+}
+
+function pageSource(value: unknown): SemanticClusterPageSource {
+  if (typeof value !== "string" || !PAGE_SOURCES.has(value)) invalid("pageMappingSource");
+  return value as SemanticClusterPageSource;
+}
+
+function confidence(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) {
+    invalid("pageMappingConfidence");
+  }
+  return value;
+}
+
+function rationale(value: unknown): string {
+  if (typeof value !== "string") invalid("pageMappingRationale");
+  const normalized = value.normalize("NFKC").trim();
+  if (!normalized || normalized.length > 2_000) invalid("pageMappingRationale");
+  return normalized;
+}
+
+function hasMappingMetadata(input: Readonly<Record<string, unknown>>): boolean {
+  return [
+    input.pageMappingSource,
+    input.pageMappingConfidence,
+    input.pageMappingRationale
+  ].some((item) => item !== undefined);
 }
 
 function scope(input: Readonly<Record<string, unknown>>) {

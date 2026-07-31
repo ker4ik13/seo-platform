@@ -3,12 +3,38 @@ import type {
   InternalCreateSemanticClusterInput,
   InternalDeleteSemanticClusterInput,
   InternalUpdateSemanticClusterInput,
-  SemanticCluster
+  SemanticCluster,
+  SemanticClusterPageSource
 } from "@seo-platform/contracts";
+import { semanticClusterPageSources } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 
-type ClusterRow = Prisma.ClusterGetPayload<Record<string, never>>;
+const CLUSTER_INCLUDE = {
+  primaryPage: {
+    select: {
+      id: true,
+      url: true,
+      normalizedUrl: true,
+      pageType: true,
+      indexability: true,
+      status: true
+    }
+  }
+} satisfies Prisma.ClusterInclude;
+
+type ClusterRow = Prisma.ClusterGetPayload<{
+  include: typeof CLUSTER_INCLUDE;
+}>;
+
+interface KeywordPageStats {
+  keywordCount: number;
+  mappedKeywordCount: number;
+  unmappedKeywordCount: number;
+  pageIds: Set<string>;
+}
+
+const PAGE_MAPPING_SOURCES = new Set<string>(semanticClusterPageSources);
 
 @Injectable()
 export class ClusterService {
@@ -22,10 +48,11 @@ export class ClusterService {
       this.prisma.cluster.findMany({
         where: { workspaceId, projectId, status: "ACTIVE" },
         orderBy: [{ name: "asc" }, { id: "asc" }],
-        take: 2_000
+        take: 2_000,
+        include: CLUSTER_INCLUDE
       }),
       this.prisma.keyword.groupBy({
-        by: ["clusterId"],
+        by: ["clusterId", "targetPageId"],
         where: {
           workspaceId,
           projectId,
@@ -35,12 +62,8 @@ export class ClusterService {
         _count: { _all: true }
       })
     ]);
-    const countById = new Map(
-      counts.flatMap((count) =>
-        count.clusterId ? [[count.clusterId, count._count._all] as const] : []
-      )
-    );
-    return rows.map((row) => clusterItem(row, countById.get(row.id) ?? 0));
+    const stats = keywordPageStats(counts);
+    return rows.map((row) => clusterItem(row, stats.get(row.id)));
   }
 
   public async create(
@@ -54,16 +77,37 @@ export class ClusterService {
         input.projectId,
         input.name
       );
+      if (input.primaryPageId) {
+        await assertPrimaryPage(
+          transaction,
+          input.workspaceId,
+          input.projectId,
+          input.primaryPageId
+        );
+      }
       const row = await transaction.cluster.create({
         data: {
           workspaceId: input.workspaceId,
           projectId: input.projectId,
           name: input.name,
           method: "MANUAL",
-          evidence: { source: "MANUAL", actorId: input.actorId }
-        }
+          evidence: { source: "MANUAL", actorId: input.actorId },
+          ...(input.primaryPageId
+            ? {
+                primaryPageId: input.primaryPageId,
+                pageMappingSource: input.pageMappingSource ?? "MANUAL",
+                ...(input.pageMappingConfidence === undefined
+                  ? {}
+                  : { pageMappingConfidence: input.pageMappingConfidence }),
+                ...(input.pageMappingRationale
+                  ? { pageMappingRationale: input.pageMappingRationale }
+                  : {})
+              }
+            : {})
+        },
+        include: CLUSTER_INCLUDE
       });
-      return clusterItem(row, 0);
+      return clusterItem(row);
     });
   }
 
@@ -88,19 +132,69 @@ export class ClusterService {
         input.name,
         clusterId
       );
+      if (input.primaryPageId) {
+        await assertPrimaryPage(
+          transaction,
+          input.workspaceId,
+          input.projectId,
+          input.primaryPageId
+        );
+      }
+      const pageChanged =
+        input.primaryPageId !== undefined &&
+        input.primaryPageId !== current.primaryPageId;
+      const mappingCleared = input.primaryPageId === null;
       const row = await transaction.cluster.update({
-        where: { id: clusterId },
-        data: { name: input.name, version: { increment: 1 } }
+        where: {
+          workspaceId_projectId_id: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            id: clusterId
+          }
+        },
+        data: {
+          name: input.name,
+          ...(input.primaryPageId === undefined
+            ? {}
+            : { primaryPageId: input.primaryPageId }),
+          ...(mappingCleared
+            ? {
+                pageMappingSource: null,
+                pageMappingConfidence: null,
+                pageMappingRationale: null
+              }
+            : {
+                ...(input.pageMappingSource === undefined
+                  ? pageChanged
+                    ? { pageMappingSource: "MANUAL" }
+                    : {}
+                  : { pageMappingSource: input.pageMappingSource }),
+                ...(input.pageMappingConfidence === undefined
+                  ? pageChanged
+                    ? { pageMappingConfidence: null }
+                    : {}
+                  : { pageMappingConfidence: input.pageMappingConfidence }),
+                ...(input.pageMappingRationale === undefined
+                  ? pageChanged
+                    ? { pageMappingRationale: null }
+                    : {}
+                  : { pageMappingRationale: input.pageMappingRationale })
+              }),
+          version: { increment: 1 }
+        },
+        include: CLUSTER_INCLUDE
       });
-      const keywordCount = await transaction.keyword.count({
+      const counts = await transaction.keyword.groupBy({
+        by: ["clusterId", "targetPageId"],
         where: {
           workspaceId: input.workspaceId,
           projectId: input.projectId,
           clusterId,
           status: "ACTIVE"
-        }
+        },
+        _count: { _all: true }
       });
-      return clusterItem(row, keywordCount);
+      return clusterItem(row, keywordPageStats(counts).get(clusterId));
     });
   }
 
@@ -146,7 +240,8 @@ async function requiredCluster(
   clusterId: string
 ): Promise<ClusterRow> {
   const cluster = await transaction.cluster.findFirst({
-    where: { id: clusterId, workspaceId, projectId, status: "ACTIVE" }
+    where: { id: clusterId, workspaceId, projectId, status: "ACTIVE" },
+    include: CLUSTER_INCLUDE
   });
   if (!cluster) {
     throw new HttpException(
@@ -155,6 +250,32 @@ async function requiredCluster(
     );
   }
   return cluster;
+}
+
+async function assertPrimaryPage(
+  transaction: Prisma.TransactionClient,
+  workspaceId: string,
+  projectId: string,
+  pageId: string
+): Promise<void> {
+  await transaction.$queryRaw`
+    SELECT "id"
+    FROM "pages"
+    WHERE "workspace_id" = ${workspaceId}::uuid
+      AND "project_id" = ${projectId}::uuid
+      AND "id" = ${pageId}::uuid
+    FOR KEY SHARE
+  `;
+  const page = await transaction.page.findFirst({
+    where: { id: pageId, workspaceId, projectId, status: "ACTIVE" },
+    select: { id: true }
+  });
+  if (!page) {
+    throw new HttpException(
+      { code: "PAGE_UNAVAILABLE", message: "Primary page is not active in this project" },
+      HttpStatus.CONFLICT
+    );
+  }
 }
 
 async function assertUniqueName(
@@ -207,21 +328,96 @@ async function lockCluster(
   `;
 }
 
-function clusterItem(row: ClusterRow, keywordCount: number): SemanticCluster {
+function clusterItem(
+  row: ClusterRow,
+  stats: KeywordPageStats = emptyKeywordPageStats()
+): SemanticCluster {
   if (row.method !== "MANUAL") {
     throw new HttpException(
       { code: "INVALID_UPSTREAM_RESPONSE", message: "Unsupported cluster method" },
       HttpStatus.BAD_GATEWAY
     );
   }
+  if (
+    row.pageMappingSource !== null &&
+    !PAGE_MAPPING_SOURCES.has(row.pageMappingSource)
+  ) {
+    throw new HttpException(
+      { code: "INVALID_UPSTREAM_RESPONSE", message: "Unsupported page mapping source" },
+      HttpStatus.BAD_GATEWAY
+    );
+  }
+  const primaryPage = row.primaryPage?.status === "ACTIVE"
+    ? {
+        id: row.primaryPage.id,
+        url: row.primaryPage.url,
+        normalizedUrl: row.primaryPage.normalizedUrl,
+        pageType: row.primaryPage.pageType,
+        indexability: row.primaryPage.indexability
+      }
+    : undefined;
+  const competingPageCount = primaryPage
+    ? [...stats.pageIds].filter((pageId) => pageId !== primaryPage.id).length
+    : stats.pageIds.size;
   return {
     id: row.id,
     name: row.name,
     method: row.method,
-    keywordCount,
+    keywordCount: stats.keywordCount,
+    ...(primaryPage ? { primaryPage } : {}),
+    ...(row.pageMappingSource
+      ? { pageMappingSource: row.pageMappingSource as SemanticClusterPageSource }
+      : {}),
+    ...(row.pageMappingConfidence === null
+      ? {}
+      : { pageMappingConfidence: row.pageMappingConfidence }),
+    ...(row.pageMappingRationale
+      ? { pageMappingRationale: row.pageMappingRationale }
+      : {}),
+    pageDiagnostics: {
+      mappedKeywordCount: stats.mappedKeywordCount,
+      unmappedKeywordCount: stats.unmappedKeywordCount,
+      competingPageCount,
+      hasCannibalization: primaryPage
+        ? competingPageCount > 0
+        : stats.pageIds.size > 1,
+      hasMissingLanding: stats.keywordCount > 0 && !primaryPage
+    },
     version: row.version,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString()
+  };
+}
+
+function keywordPageStats(
+  counts: readonly Readonly<{
+    clusterId: string | null;
+    targetPageId: string | null;
+    _count: Readonly<{ _all: number }>;
+  }>[]
+): Map<string, KeywordPageStats> {
+  const result = new Map<string, KeywordPageStats>();
+  for (const count of counts) {
+    if (!count.clusterId) continue;
+    const current = result.get(count.clusterId) ?? emptyKeywordPageStats();
+    current.keywordCount += count._count._all;
+    if (count.targetPageId) {
+      current.mappedKeywordCount += count._count._all;
+      current.pageIds.add(count.targetPageId);
+    } else {
+      current.unmappedKeywordCount += count._count._all;
+    }
+    result.set(count.clusterId, current);
+  }
+  return result;
+}
+
+function emptyKeywordPageStats(): KeywordPageStats {
+  return {
+    keywordCount: 0,
+    mappedKeywordCount: 0,
+    unmappedKeywordCount: 0,
+    pageIds: new Set<string>()
   };
 }
 

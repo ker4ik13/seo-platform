@@ -96,6 +96,7 @@ export interface ProjectPageSummary {
   readonly analyticsMetrics: Readonly<Record<string, number>>;
   readonly notes?: string;
   readonly assignedKeywordCount: number;
+  readonly assignedClusterCount: number;
   readonly lifecycleStatus: PageLifecycleStatus;
   readonly version: number;
   readonly createdBy?: string;

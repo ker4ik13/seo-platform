@@ -30,7 +30,8 @@ const PAGE_INCLUDE = {
   },
   _count: {
     select: {
-      targetKeywords: { where: { status: "ACTIVE" as const } }
+      targetKeywords: { where: { status: "ACTIVE" as const } },
+      primaryClusters: { where: { status: "ACTIVE" as const } }
     }
   }
 } satisfies Prisma.PageInclude;
@@ -359,6 +360,11 @@ export class PageService {
             : "Page is already archived"
         );
       }
+      if (status === "ARCHIVED" && current._count.primaryClusters > 0) {
+        conflict(
+          "Move primary clusters to another page before archiving this page"
+        );
+      }
       const now = new Date();
       await transaction.page.update({
         where: {
@@ -465,6 +471,7 @@ function pageSummary(page: PageAggregate): ProjectPageSummary {
     analyticsMetrics: numericMetrics(page.analyticsMetrics),
     ...(page.notes ? { notes: page.notes } : {}),
     assignedKeywordCount: page._count.targetKeywords,
+    assignedClusterCount: page._count.primaryClusters,
     lifecycleStatus: page.status === "ARCHIVED" ? "ARCHIVED" : "ACTIVE",
     version: page.version,
     ...(page.createdBy ? { createdBy: page.createdBy } : {}),

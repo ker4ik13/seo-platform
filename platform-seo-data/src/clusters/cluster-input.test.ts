@@ -31,6 +31,20 @@ test("accepts exact tenant-scoped cluster commands", () => {
     }).version,
     2
   );
+  assert.deepEqual(
+    internalUpdateSemanticClusterInput({
+      workspaceId,
+      projectId,
+      actorId,
+      name: "Аудит сайта",
+      primaryPageId: "01900000-0000-7000-8000-000000000010",
+      pageMappingSource: "SERP",
+      pageMappingConfidence: 0.75,
+      pageMappingRationale: "  Совпадение выдачи  ",
+      version: 2
+    }).pageMappingRationale,
+    "Совпадение выдачи"
+  );
   assert.equal(
     internalDeleteSemanticClusterInput({
       workspaceId,
@@ -62,6 +76,17 @@ test("rejects malformed and forged internal cluster commands", () => {
         actorId,
         name: "SEO",
         version: 0
+      }),
+    BadRequestException
+  );
+  assert.throws(
+    () =>
+      internalCreateSemanticClusterInput({
+        workspaceId,
+        projectId,
+        actorId,
+        name: "SEO",
+        pageMappingConfidence: 2
       }),
     BadRequestException
   );

@@ -1,25 +1,27 @@
 "use client";
 
+import type {
+  ProjectPageSettings,
+  ProjectPageSummary,
+  SemanticCluster
+} from "@seo-platform/contracts";
 import { useEffect, useState, type FormEvent } from "react";
 import { browserApiRequest, BrowserApiError } from "../lib/browser-api";
 
-interface SemanticCluster {
-  readonly id: string;
-  readonly name: string;
-  readonly method: "MANUAL";
-  readonly keywordCount: number;
-  readonly version: number;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-}
-
 type ClusterEditor =
-  | Readonly<{ mode: "create"; name: string }>
+  | Readonly<{
+      mode: "create";
+      name: string;
+      primaryPageId: string;
+      pageMappingRationale: string;
+    }>
   | Readonly<{
       mode: "edit";
       clusterId: string;
       version: number;
       name: string;
+      primaryPageId: string;
+      pageMappingRationale: string;
     }>;
 
 export function SemanticClusterManager({
@@ -27,6 +29,7 @@ export function SemanticClusterManager({
   onChanged
 }: Readonly<{ projectId: string; onChanged: () => void }>) {
   const [clusters, setClusters] = useState<readonly SemanticCluster[]>([]);
+  const [pages, setPages] = useState<readonly ProjectPageSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
@@ -37,11 +40,17 @@ export function SemanticClusterManager({
     const controller = new AbortController();
     setLoading(true);
     setError(undefined);
-    void browserApiRequest<readonly SemanticCluster[]>(clusterPath(projectId), {
-      signal: controller.signal
-    })
-      .then((result) => {
-        if (!controller.signal.aborted) setClusters(result);
+    void Promise.all([
+      browserApiRequest<readonly SemanticCluster[]>(clusterPath(projectId), {
+        signal: controller.signal
+      }),
+      loadActivePages(projectId, controller.signal)
+    ])
+      .then(([clusterResult, pageResult]) => {
+        if (!controller.signal.aborted) {
+          setClusters(clusterResult);
+          setPages(pageResult);
+        }
       })
       .catch((requestError) => {
         if (!controller.signal.aborted) setError(clusterError(requestError));
@@ -62,13 +71,13 @@ export function SemanticClusterManager({
         editor.mode === "create"
           ? await browserApiRequest<SemanticCluster>(clusterPath(projectId), {
               method: "POST",
-              body: { name: editor.name }
+              body: clusterBody(editor)
             })
           : await browserApiRequest<SemanticCluster>(
               clusterPath(projectId, editor.clusterId),
               {
                 method: "PATCH",
-                body: { name: editor.name },
+                body: clusterBody(editor),
                 ifMatch: editor.version
               }
             );
@@ -113,7 +122,12 @@ export function SemanticClusterManager({
         </div>
         <button
           className="secondary-button"
-          onClick={() => setEditor({ mode: "create", name: "" })}
+          onClick={() => setEditor({
+            mode: "create",
+            name: "",
+            primaryPageId: "",
+            pageMappingRationale: ""
+          })}
           type="button"
         >
           Новый кластер
@@ -135,6 +149,42 @@ export function SemanticClusterManager({
               placeholder="Например, Купить кондиционер"
               required
               value={editor.name}
+            />
+          </label>
+          <label>
+            <span>Основная посадочная</span>
+            <select
+              onChange={(event) =>
+                setEditor((current) =>
+                  current
+                    ? { ...current, primaryPageId: event.target.value }
+                    : current
+                )
+              }
+              value={editor.primaryPageId}
+            >
+              <option value="">Не назначена</option>
+              {pages.map((page) => (
+                <option key={page.id} value={page.id}>
+                  {page.title ? `${page.title} · ` : ""}{page.normalizedUrl}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Почему эта страница</span>
+            <input
+              disabled={!editor.primaryPageId}
+              maxLength={2_000}
+              onChange={(event) =>
+                setEditor((current) =>
+                  current
+                    ? { ...current, pageMappingRationale: event.target.value }
+                    : current
+                )
+              }
+              placeholder="Интент, SERP или ручное решение"
+              value={editor.pageMappingRationale}
             />
           </label>
           <div className="semantic-group-editor-actions">
@@ -171,7 +221,28 @@ export function SemanticClusterManager({
               <i aria-hidden="true" className="semantic-cluster-mark" />
               <div>
                 <strong>{cluster.name}</strong>
-                <span>{cluster.keywordCount} {keywordLabel(cluster.keywordCount)}</span>
+                <span>
+                  {cluster.keywordCount} {keywordLabel(cluster.keywordCount)}
+                  {" · "}
+                  {cluster.primaryPage
+                    ? cluster.primaryPage.normalizedUrl
+                    : "посадочная не назначена"}
+                </span>
+                <div className="semantic-cluster-diagnostics">
+                  {cluster.pageDiagnostics.hasMissingLanding && (
+                    <small className="warning">Нет основной посадочной</small>
+                  )}
+                  {cluster.pageDiagnostics.unmappedKeywordCount > 0 && (
+                    <small>
+                      {cluster.pageDiagnostics.unmappedKeywordCount} без URL
+                    </small>
+                  )}
+                  {cluster.pageDiagnostics.hasCannibalization && (
+                    <small className="danger">
+                      Каннибализация: {cluster.pageDiagnostics.competingPageCount}
+                    </small>
+                  )}
+                </div>
               </div>
               <button
                 className="text-button"
@@ -179,7 +250,9 @@ export function SemanticClusterManager({
                   mode: "edit",
                   clusterId: cluster.id,
                   version: cluster.version,
-                  name: cluster.name
+                  name: cluster.name,
+                  primaryPageId: cluster.primaryPage?.id ?? "",
+                  pageMappingRationale: cluster.pageMappingRationale ?? ""
                 })}
                 type="button"
               >
@@ -205,11 +278,48 @@ function clusterPath(projectId: string, clusterId?: string): string {
   return clusterId ? `${base}/${encodeURIComponent(clusterId)}` : base;
 }
 
+function clusterBody(editor: ClusterEditor): Readonly<Record<string, unknown>> {
+  if (!editor.primaryPageId) {
+    return {
+      name: editor.name,
+      ...(editor.mode === "edit" ? { primaryPageId: null } : {})
+    };
+  }
+  return {
+    name: editor.name,
+    primaryPageId: editor.primaryPageId,
+    pageMappingSource: "MANUAL",
+    ...(editor.pageMappingRationale.trim()
+      ? { pageMappingRationale: editor.pageMappingRationale.trim() }
+      : {})
+  };
+}
+
+async function loadActivePages(
+  projectId: string,
+  signal: AbortSignal
+): Promise<readonly ProjectPageSummary[]> {
+  const result: ProjectPageSummary[] = [];
+  let cursor: string | undefined;
+  do {
+    const query = new URLSearchParams({ limit: "100", lifecycleStatus: "ACTIVE" });
+    if (cursor) query.set("cursor", cursor);
+    const page = await browserApiRequest<ProjectPageSettings>(
+      `/app/api/projects/${encodeURIComponent(projectId)}/pages?${query.toString()}`,
+      { signal }
+    );
+    result.push(...page.pages);
+    cursor = page.nextCursor;
+  } while (cursor && result.length < 2_000);
+  return result;
+}
+
 function clusterError(error: unknown): string {
   if (error instanceof BrowserApiError) {
     if (error.code === "DUPLICATE") return "Кластер с таким названием уже существует.";
     if (error.code === "VERSION_CONFLICT") return "Кластер уже изменён. Обновите список и повторите.";
     if (error.code === "RESOURCE_STATE_CONFLICT") return "Сначала перенесите запросы из этого кластера.";
+    if (error.code === "PAGE_UNAVAILABLE") return "Выбранная страница больше недоступна. Обновите список.";
     if (error.code === "FORBIDDEN") return "У вас нет права изменять кластеры.";
     return error.message;
   }

@@ -4,6 +4,9 @@ import {
   semanticKeywordSourceModes,
   semanticKeywordSorts,
   semanticClusterMethods,
+  semanticClusterPageSources,
+  pageIndexabilities,
+  pageTypes,
   semanticCustomColumnTypes,
   semanticSavedViewDensities,
   semanticSavedViewScopes,
@@ -50,6 +53,7 @@ import {
   type ProjectCrawlIssueCollection,
   type SemanticKeywordIntent,
   type SemanticCluster,
+  type SemanticClusterPageSource,
   type SemanticKeywordBulkInput,
   type SemanticKeywordBulkResult,
   type SemanticKeywordGroup,
@@ -1426,10 +1430,19 @@ export function semanticCluster(value: unknown): SemanticCluster {
     "name",
     "method",
     "keywordCount",
+    "primaryPage",
+    "pageMappingSource",
+    "pageMappingConfidence",
+    "pageMappingRationale",
+    "pageDiagnostics",
     "version",
     "createdAt",
     "updatedAt"
   ]);
+  const primaryPage = cluster.primaryPage === undefined
+    ? undefined
+    : semanticClusterPrimaryPage(cluster.primaryPage);
+  const diagnostics = semanticClusterPageDiagnostics(cluster.pageDiagnostics);
   if (
     !requiredString(cluster.id) ||
     !requiredString(cluster.name) ||
@@ -1437,6 +1450,24 @@ export function semanticCluster(value: unknown): SemanticCluster {
     !semanticClusterMethods.some((method) => method === cluster.method) ||
     !Number.isSafeInteger(cluster.keywordCount) ||
     Number(cluster.keywordCount) < 0 ||
+    (cluster.pageMappingSource !== undefined &&
+      (typeof cluster.pageMappingSource !== "string" ||
+        !semanticClusterPageSources.some(
+          (source) => source === cluster.pageMappingSource
+        ))) ||
+    (cluster.pageMappingConfidence !== undefined &&
+      (typeof cluster.pageMappingConfidence !== "number" ||
+        !Number.isFinite(cluster.pageMappingConfidence) ||
+        cluster.pageMappingConfidence < 0 ||
+        cluster.pageMappingConfidence > 1)) ||
+    (cluster.pageMappingRationale !== undefined &&
+      !requiredString(cluster.pageMappingRationale)) ||
+    (primaryPage === undefined &&
+      (cluster.pageMappingSource !== undefined ||
+        cluster.pageMappingConfidence !== undefined ||
+        cluster.pageMappingRationale !== undefined)) ||
+    diagnostics.mappedKeywordCount + diagnostics.unmappedKeywordCount !==
+      Number(cluster.keywordCount) ||
     !Number.isSafeInteger(cluster.version) ||
     Number(cluster.version) < 1 ||
     !validDate(cluster.createdAt) ||
@@ -1449,10 +1480,74 @@ export function semanticCluster(value: unknown): SemanticCluster {
     name: cluster.name,
     method: cluster.method as SemanticCluster["method"],
     keywordCount: cluster.keywordCount as number,
+    ...(primaryPage ? { primaryPage } : {}),
+    ...(cluster.pageMappingSource === undefined
+      ? {}
+      : {
+          pageMappingSource:
+            cluster.pageMappingSource as SemanticClusterPageSource
+        }),
+    ...(cluster.pageMappingConfidence === undefined
+      ? {}
+      : { pageMappingConfidence: cluster.pageMappingConfidence as number }),
+    ...(cluster.pageMappingRationale === undefined
+      ? {}
+      : { pageMappingRationale: cluster.pageMappingRationale as string }),
+    pageDiagnostics: diagnostics,
     version: cluster.version as number,
     createdAt: cluster.createdAt as string,
     updatedAt: cluster.updatedAt as string
   };
+}
+
+function semanticClusterPrimaryPage(
+  value: unknown
+): NonNullable<SemanticCluster["primaryPage"]> {
+  const page = exactRecord(value, [
+    "id",
+    "url",
+    "normalizedUrl",
+    "pageType",
+    "indexability"
+  ]);
+  if (
+    !requiredString(page.id) ||
+    !requiredString(page.url) ||
+    !requiredString(page.normalizedUrl) ||
+    typeof page.pageType !== "string" ||
+    !pageTypes.some((item) => item === page.pageType) ||
+    typeof page.indexability !== "string" ||
+    !pageIndexabilities.some((item) => item === page.indexability)
+  ) {
+    throw invalidResponse();
+  }
+  return page as unknown as NonNullable<SemanticCluster["primaryPage"]>;
+}
+
+function semanticClusterPageDiagnostics(
+  value: unknown
+): SemanticCluster["pageDiagnostics"] {
+  const diagnostics = exactRecord(value, [
+    "mappedKeywordCount",
+    "unmappedKeywordCount",
+    "competingPageCount",
+    "hasCannibalization",
+    "hasMissingLanding"
+  ]);
+  if (
+    !nonNegativeInteger(diagnostics.mappedKeywordCount) ||
+    !nonNegativeInteger(diagnostics.unmappedKeywordCount) ||
+    !nonNegativeInteger(diagnostics.competingPageCount) ||
+    typeof diagnostics.hasCannibalization !== "boolean" ||
+    typeof diagnostics.hasMissingLanding !== "boolean"
+  ) {
+    throw invalidResponse();
+  }
+  return diagnostics as unknown as SemanticCluster["pageDiagnostics"];
+}
+
+function nonNegativeInteger(value: unknown): boolean {
+  return Number.isSafeInteger(value) && Number(value) >= 0;
 }
 
 function semanticClusterUrl(
