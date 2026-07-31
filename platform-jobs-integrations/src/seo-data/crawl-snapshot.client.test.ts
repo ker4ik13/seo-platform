@@ -51,6 +51,29 @@ test("accepts only the exact idempotent crawl persistence receipt", async () => 
   }
 });
 
+test("accepts a bounded duplicate finalization issue count", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (): Promise<Response> =>
+    response({
+      data: { accepted: true, issueCount: 4 },
+      meta: { requestId: "crawl-finalize-001" }
+    })) as typeof fetch;
+  try {
+    assert.deepEqual(
+      await client().finalize({
+        workspaceId: pageInput.workspaceId,
+        projectId: pageInput.projectId,
+        crawlId: pageInput.crawlId,
+        status: "COMPLETED",
+        processedUrls: 2
+      }),
+      { accepted: true, issueCount: 4 }
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("rejects extensible and oversized crawl persistence responses", async () => {
   const originalFetch = globalThis.fetch;
   try {

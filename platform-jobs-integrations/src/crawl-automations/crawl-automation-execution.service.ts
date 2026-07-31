@@ -193,6 +193,7 @@ export class CrawlAutomationExecutionService {
           status: skipReason ? "SKIPPED" : "RUNNING",
           trigger: "SCHEDULE",
           scheduledFor,
+          createdAt: now,
           actorId: definition.actorId,
           definition: crawlAutomationDefinitionJson(definition),
           ...(skipReason
@@ -251,6 +252,7 @@ export class CrawlAutomationExecutionService {
           status: skipReason ? "SKIPPED" : "RUNNING",
           trigger: "MANUAL",
           scheduledFor: now,
+          createdAt: now,
           actorId: input.actorId,
           idempotencyKey: input.idempotencyKey,
           definition: crawlAutomationDefinitionJson(definition),

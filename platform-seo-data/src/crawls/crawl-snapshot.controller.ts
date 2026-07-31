@@ -12,7 +12,9 @@ import {
 import type {
   ApiResponse,
   InternalCrawlPageValidator,
+  InternalFinalizeCrawlSnapshotReceipt,
   InternalPersistCrawlPageReceipt,
+  ProjectCrawlDuplicateGroupCollection,
   ProjectCrawlPageChangeCollection,
   ProjectCrawlIssueCollection
 } from "@seo-platform/contracts";
@@ -77,11 +79,42 @@ export class CrawlSnapshotController {
   public async finalize(
     @Body() body: unknown,
     @Req() request: FastifyRequest
-  ): Promise<ApiResponse<{ readonly accepted: true }>> {
+  ): Promise<ApiResponse<InternalFinalizeCrawlSnapshotReceipt>> {
     return response(
       request,
       await this.snapshots.finalize(
         internalFinalizeCrawlSnapshotInput(body)
+      )
+    );
+  }
+}
+
+@Controller(
+  "internal/v1/projects/:projectId/crawls/:crawlId/duplicate-groups"
+)
+@UseGuards(PlatformApiGuard)
+export class CrawlDuplicateGroupController {
+  public constructor(private readonly snapshots: CrawlSnapshotService) {}
+
+  @Get()
+  public async list(
+    @Param("projectId") projectId: string,
+    @Param("crawlId") crawlId: string,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<ProjectCrawlDuplicateGroupCollection>> {
+    const context = internalCommandContext(headers);
+    if (context.projectId !== internalUuid(projectId, "projectId")) {
+      throw new BadRequestException(
+        "Route project identifier does not match trusted context"
+      );
+    }
+    return response(
+      request,
+      await this.snapshots.listDuplicateGroups(
+        context.workspaceId,
+        context.projectId,
+        internalUuid(crawlId, "crawlId")
       )
     );
   }

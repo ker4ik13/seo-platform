@@ -130,6 +130,13 @@ enum CrawlIssueSeverity {
   CRITICAL
 }
 
+enum CrawlDuplicateKind {
+  CONTENT
+  TITLE
+  DESCRIPTION
+  H1
+}
+
 model Keyword {
   id             String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId    String         @map("workspace_id") @db.Uuid
@@ -372,20 +379,21 @@ model Page {
   updatedAt        DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
   archivedAt       DateTime?        @map("archived_at") @db.Timestamptz(6)
 
+  aliases               PageAlias[]
+  sources               PageSource[]
+  targetKeywords        Keyword[]
+  createReceipts        PageCreateReceipt[]
+  crawlSnapshots        CrawlPageSnapshot[]
+  crawlIssues           CrawlIssue[]
+  crawlChanges          CrawlPageChange[]
+  duplicateGroupMembers CrawlDuplicateGroupMember[]
+
   @@unique([projectId, urlHash])
   @@unique([workspaceId, projectId, id], map: "pages_tenant_project_id_key")
   @@index([workspaceId, projectId, status, updatedAt(sort: Desc), id(sort: Desc)], map: "pages_project_status_updated_id_idx")
   @@index([workspaceId, projectId, pageType, status, id], map: "pages_project_type_status_idx")
   @@index([workspaceId, projectId, indexability, status, id], map: "pages_project_indexability_status_idx")
   @@map("pages")
-
-  aliases        PageAlias[]
-  sources        PageSource[]
-  targetKeywords Keyword[]
-  createReceipts PageCreateReceipt[]
-  crawlSnapshots CrawlPageSnapshot[]
-  crawlIssues    CrawlIssue[]
-  crawlChanges   CrawlPageChange[]
 }
 
 model PageAlias {
@@ -438,56 +446,58 @@ model PageCreateReceipt {
 }
 
 model CrawlPageSnapshot {
-  id                  String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId         String           @map("workspace_id") @db.Uuid
-  projectId           String           @map("project_id") @db.Uuid
-  crawlId             String           @map("crawl_id") @db.Uuid
-  sequence            Int
-  pageId              String           @map("page_id") @db.Uuid
-  requestedUrl        String           @map("requested_url") @db.Text
-  finalUrl            String           @map("final_url") @db.Text
-  finalUrlHash        String           @map("final_url_hash") @db.Char(64)
-  redirectChain       Json             @map("redirect_chain")
-  inSitemap           Boolean          @map("in_sitemap")
-  depth               Int
-  statusCode          Int              @map("status_code")
-  responseTimeMs      Int              @map("response_time_ms")
-  sizeBytes           Int              @map("size_bytes")
-  contentType         String           @map("content_type") @db.VarChar(160)
-  title               String?          @db.Text
-  description         String?          @db.Text
-  h1                  String?          @db.Text
-  h1Count             Int              @map("h1_count")
-  canonicalUrl        String?          @map("canonical_url") @db.Text
-  robots              String?          @db.VarChar(255)
-  language            String?          @db.VarChar(16)
-  headings            Json
-  hreflang            Json
-  internalLinks       Json             @map("internal_links")
-  externalLinks       Json             @map("external_links")
-  imageCount          Int              @map("image_count")
-  imagesMissingAlt    Int              @map("images_missing_alt")
-  structuredDataTypes Json             @map("structured_data_types")
-  wordCount           Int              @map("word_count")
-  contentHash         String           @map("content_hash") @db.Char(64)
-  etag                String?          @db.VarChar(1000)
-  lastModified        String?          @map("last_modified") @db.VarChar(128)
-  notModified         Boolean          @default(false) @map("not_modified")
-  reusedFromSnapshotId String?         @map("reused_from_snapshot_id") @db.Uuid
-  indexability        PageIndexability
-  crawledAt           DateTime         @map("crawled_at") @db.Timestamptz(6)
-  createdAt           DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  id                   String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId          String           @map("workspace_id") @db.Uuid
+  projectId            String           @map("project_id") @db.Uuid
+  crawlId              String           @map("crawl_id") @db.Uuid
+  sequence             Int
+  pageId               String           @map("page_id") @db.Uuid
+  requestedUrl         String           @map("requested_url") @db.Text
+  finalUrl             String           @map("final_url") @db.Text
+  finalUrlHash         String           @map("final_url_hash") @db.Char(64)
+  redirectChain        Json             @map("redirect_chain")
+  inSitemap            Boolean          @map("in_sitemap")
+  depth                Int
+  statusCode           Int              @map("status_code")
+  responseTimeMs       Int              @map("response_time_ms")
+  sizeBytes            Int              @map("size_bytes")
+  contentType          String           @map("content_type") @db.VarChar(160)
+  title                String?          @db.Text
+  description          String?          @db.Text
+  h1                   String?          @db.Text
+  h1Count              Int              @map("h1_count")
+  canonicalUrl         String?          @map("canonical_url") @db.Text
+  robots               String?          @db.VarChar(255)
+  language             String?          @db.VarChar(16)
+  headings             Json
+  hreflang             Json
+  internalLinks        Json             @map("internal_links")
+  externalLinks        Json             @map("external_links")
+  imageCount           Int              @map("image_count")
+  imagesMissingAlt     Int              @map("images_missing_alt")
+  structuredDataTypes  Json             @map("structured_data_types")
+  wordCount            Int              @map("word_count")
+  contentHash          String           @map("content_hash") @db.Char(64)
+  etag                 String?          @db.VarChar(1000)
+  lastModified         String?          @map("last_modified") @db.VarChar(128)
+  notModified          Boolean          @default(false) @map("not_modified")
+  reusedFromSnapshotId String?          @map("reused_from_snapshot_id") @db.Uuid
+  indexability         PageIndexability
+  crawledAt            DateTime         @map("crawled_at") @db.Timestamptz(6)
+  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  page             Page                       @relation(fields: [workspaceId, projectId, pageId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
-  issueOccurrences CrawlIssueOccurrence[]
-  previousChanges  CrawlPageChange[]          @relation("PreviousCrawlSnapshotChanges")
-  currentChanges   CrawlPageChange[]           @relation("CurrentCrawlSnapshotChanges")
-  reusedFrom       CrawlPageSnapshot?          @relation("CrawlSnapshotReuse", fields: [workspaceId, projectId, reusedFromSnapshotId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
-  reusedBy         CrawlPageSnapshot[]          @relation("CrawlSnapshotReuse")
+  page                  Page                        @relation(fields: [workspaceId, projectId, pageId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  issueOccurrences      CrawlIssueOccurrence[]
+  previousChanges       CrawlPageChange[]           @relation("PreviousCrawlSnapshotChanges")
+  currentChanges        CrawlPageChange[]           @relation("CurrentCrawlSnapshotChanges")
+  reusedFrom            CrawlPageSnapshot?          @relation("CrawlSnapshotReuse", fields: [workspaceId, projectId, reusedFromSnapshotId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  reusedBy              CrawlPageSnapshot[]         @relation("CrawlSnapshotReuse")
+  duplicateGroupMembers CrawlDuplicateGroupMember[]
 
   @@unique([crawlId, sequence], map: "crawl_page_snapshots_crawl_sequence_key")
   @@unique([crawlId, finalUrlHash], map: "crawl_page_snapshots_crawl_url_key")
   @@unique([workspaceId, projectId, id], map: "crawl_page_snapshots_tenant_project_id_key")
+  @@unique([workspaceId, projectId, crawlId, id], map: "crawl_page_snapshots_tenant_project_crawl_id_key")
   @@index([workspaceId, projectId, crawledAt(sort: Desc)], map: "crawl_page_snapshots_project_crawled_idx")
   @@index([workspaceId, projectId, pageId, crawledAt(sort: Desc)], map: "crawl_page_snapshots_page_crawled_idx")
   @@index([workspaceId, projectId, reusedFromSnapshotId], map: "crawl_page_snapshots_reused_from_idx")
@@ -523,23 +533,23 @@ model CrawlPageChange {
 }
 
 model CrawlIssue {
-  id            String             @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId   String             @map("workspace_id") @db.Uuid
-  projectId     String             @map("project_id") @db.Uuid
-  pageId        String             @map("page_id") @db.Uuid
-  code          String             @db.VarChar(64)
-  severity      CrawlIssueSeverity
-  title         String             @db.VarChar(255)
-  details       Json
-  firstCrawlId  String             @map("first_crawl_id") @db.Uuid
-  lastCrawlId   String             @map("last_crawl_id") @db.Uuid
-  occurrences   Int                @default(1)
-  firstSeenAt   DateTime           @map("first_seen_at") @db.Timestamptz(6)
-  lastSeenAt    DateTime           @map("last_seen_at") @db.Timestamptz(6)
-  resolvedAt    DateTime?          @map("resolved_at") @db.Timestamptz(6)
-  version       Int                @default(1)
-  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id           String             @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId  String             @map("workspace_id") @db.Uuid
+  projectId    String             @map("project_id") @db.Uuid
+  pageId       String             @map("page_id") @db.Uuid
+  code         String             @db.VarChar(64)
+  severity     CrawlIssueSeverity
+  title        String             @db.VarChar(255)
+  details      Json
+  firstCrawlId String             @map("first_crawl_id") @db.Uuid
+  lastCrawlId  String             @map("last_crawl_id") @db.Uuid
+  occurrences  Int                @default(1)
+  firstSeenAt  DateTime           @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt   DateTime           @map("last_seen_at") @db.Timestamptz(6)
+  resolvedAt   DateTime?          @map("resolved_at") @db.Timestamptz(6)
+  version      Int                @default(1)
+  createdAt    DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   page Page @relation(fields: [workspaceId, projectId, pageId], references: [workspaceId, projectId, id], onDelete: Cascade, onUpdate: Restrict)
 
@@ -561,6 +571,60 @@ model CrawlIssueOccurrence {
 
   @@id([snapshotId, code])
   @@map("crawl_issue_occurrences")
+}
+
+model CrawlDuplicateAnalysis {
+  workspaceId   String   @map("workspace_id") @db.Uuid
+  projectId     String   @map("project_id") @db.Uuid
+  crawlId       String   @map("crawl_id") @db.Uuid
+  snapshotCount Int      @map("snapshot_count")
+  groupCount    Int      @map("group_count")
+  issueCount    Int      @map("issue_count")
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  groups CrawlDuplicateGroup[]
+
+  @@id([workspaceId, projectId, crawlId])
+  @@index([workspaceId, projectId, createdAt(sort: Desc)], map: "crawl_duplicate_analyses_project_created_idx")
+  @@map("crawl_duplicate_analyses")
+}
+
+model CrawlDuplicateGroup {
+  id            String             @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId   String             @map("workspace_id") @db.Uuid
+  projectId     String             @map("project_id") @db.Uuid
+  crawlId       String             @map("crawl_id") @db.Uuid
+  kind          CrawlDuplicateKind
+  signatureHash String             @map("signature_hash") @db.Char(64)
+  memberCount   Int                @map("member_count")
+  createdAt     DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  analysis CrawlDuplicateAnalysis      @relation(fields: [workspaceId, projectId, crawlId], references: [workspaceId, projectId, crawlId], onDelete: Restrict, onUpdate: Restrict, map: "crawl_duplicate_groups_analysis_tenant_fkey")
+  members  CrawlDuplicateGroupMember[]
+
+  @@unique([crawlId, kind, signatureHash], map: "crawl_duplicate_groups_crawl_kind_signature_key")
+  @@unique([workspaceId, projectId, crawlId, id], map: "crawl_duplicate_groups_tenant_project_crawl_id_key")
+  @@index([workspaceId, projectId, crawlId, kind, memberCount(sort: Desc), id], map: "crawl_duplicate_groups_project_crawl_kind_idx")
+  @@map("crawl_duplicate_groups")
+}
+
+model CrawlDuplicateGroupMember {
+  workspaceId String   @map("workspace_id") @db.Uuid
+  projectId   String   @map("project_id") @db.Uuid
+  crawlId     String   @map("crawl_id") @db.Uuid
+  groupId     String   @map("group_id") @db.Uuid
+  snapshotId  String   @map("snapshot_id") @db.Uuid
+  pageId      String   @map("page_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  group    CrawlDuplicateGroup @relation(fields: [workspaceId, projectId, crawlId, groupId], references: [workspaceId, projectId, crawlId, id], onDelete: Restrict, onUpdate: Restrict, map: "crawl_duplicate_group_members_group_tenant_fkey")
+  snapshot CrawlPageSnapshot   @relation(fields: [workspaceId, projectId, crawlId, snapshotId], references: [workspaceId, projectId, crawlId, id], onDelete: Restrict, onUpdate: Restrict, map: "crawl_duplicate_group_members_snapshot_tenant_fkey")
+  page     Page                @relation(fields: [workspaceId, projectId, pageId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "crawl_duplicate_group_members_page_tenant_fkey")
+
+  @@id([groupId, snapshotId])
+  @@unique([groupId, pageId], map: "crawl_duplicate_group_members_group_page_key")
+  @@index([workspaceId, projectId, crawlId, pageId], map: "crawl_duplicate_group_members_project_crawl_page_idx")
+  @@map("crawl_duplicate_group_members")
 }
 
 model TrackingContext {

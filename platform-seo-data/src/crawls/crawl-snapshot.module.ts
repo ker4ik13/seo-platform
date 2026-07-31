@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { InternalModule } from "../internal/internal.module.js";
 import {
+  CrawlDuplicateGroupController,
   CrawlIssueController,
   CrawlPageChangeController,
   CrawlSnapshotController
@@ -11,6 +12,7 @@ import { CrawlSnapshotService } from "./crawl-snapshot.service.js";
   imports: [InternalModule],
   controllers: [
     CrawlSnapshotController,
+    CrawlDuplicateGroupController,
     CrawlIssueController,
     CrawlPageChangeController
   ],

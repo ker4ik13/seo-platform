@@ -13,6 +13,7 @@ x-backend-defaults: &backend-defaults
 
 x-common-backend-env: &common-backend-env
   NODE_ENV: production
+  TZ: UTC
   SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
   NATS_URL: nats://nats:4222
 
@@ -22,6 +23,7 @@ x-generic-nats-runtime-env: &generic-nats-runtime-env
 
 x-jobs-runtime-env: &jobs-runtime-env
   NODE_ENV: production
+  TZ: UTC
   SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
   DATABASE_URL: postgresql://jobs_runtime:${JOBS_DATABASE_PASSWORD:?JOBS_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
 
@@ -141,7 +143,13 @@ services:
     entrypoint:
       ["/bin/sh", "/postgres-config/start-postgres.sh"]
     command:
-      ["postgres", "-c", "hba_file=/tmp/seo-platform-pg_hba.conf"]
+      [
+        "postgres",
+        "-c",
+        "hba_file=/tmp/seo-platform-pg_hba.conf",
+        "-c",
+        "timezone=UTC"
+      ]
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
@@ -750,6 +758,7 @@ services:
     environment:
       <<: *auth-email-runtime-env
       NODE_ENV: production
+      TZ: UTC
       SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
       DATABASE_URL: postgresql://jobs_auth_email_runtime:${JOBS_AUTH_EMAIL_DATABASE_PASSWORD:?JOBS_AUTH_EMAIL_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
       DATABASE_POOL_MAX: ${JOBS_AUTH_EMAIL_DATABASE_POOL_MAX:-5}
@@ -809,6 +818,7 @@ services:
     command: ["node", "dist/worker.main.js"]
     environment:
       NODE_ENV: production
+      TZ: UTC
       SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
       REDIS_URL: redis://seo_jobs_system:${REDIS_JOBS_SYSTEM_PASSWORD:?REDIS_JOBS_SYSTEM_PASSWORD is required}@redis-jobs:6379
       SYSTEM_WORKER_CONCURRENCY: ${SYSTEM_WORKER_CONCURRENCY:-2}
@@ -986,6 +996,7 @@ services:
     environment:
       <<: *integration-credential-execution-env
       NODE_ENV: production
+      TZ: UTC
       SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
       DATABASE_URL: postgresql://jobs_connector:${JOBS_CONNECTOR_DATABASE_PASSWORD:?JOBS_CONNECTOR_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
       REDIS_URL: redis://seo_jobs_connector:${REDIS_JOBS_CONNECTOR_PASSWORD:?REDIS_JOBS_CONNECTOR_PASSWORD is required}@redis-jobs:6379
@@ -1094,6 +1105,7 @@ services:
         NEXT_PUBLIC_MARKETING_VERSION: ${MARKETING_VERSION:?MARKETING_VERSION is required}
     environment:
       NODE_ENV: production
+      TZ: UTC
       PORT: 3000
       NEXT_PUBLIC_SITE_URL: ${WEB_PUBLIC_URL}
       NEXT_PUBLIC_PLATFORM_API_URL: ${API_PUBLIC_URL}
@@ -1124,6 +1136,7 @@ services:
         PACKAGE_PATH: platform-admin
     environment:
       NODE_ENV: production
+      TZ: UTC
       PORT: 3002
       ADMIN_PUBLIC_URL: ${ADMIN_PUBLIC_URL:?ADMIN_PUBLIC_URL is required}
       PLATFORM_API_INTERNAL_URL: http://platform-api:4000

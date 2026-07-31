@@ -289,7 +289,7 @@ test("generated pg_hba allows connector only into jobs_db before general rules",
   );
   assert.match(
     compose,
-    /command:\s*\["postgres", "-c", "hba_file=\/tmp\/seo-platform-pg_hba\.conf"\]/u
+    /command:\s*\[\s*"postgres",\s*"-c",\s*"hba_file=\/tmp\/seo-platform-pg_hba\.conf",\s*"-c",\s*"timezone=UTC"\s*\]/u
   );
   assert.match(
     compose,

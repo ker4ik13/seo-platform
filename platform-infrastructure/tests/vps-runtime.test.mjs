@@ -63,6 +63,16 @@ test("VPS runtime keeps every data service and application on loopback", async (
   assert.doesNotMatch(source, /BIND_ADDRESS=0\.0\.0\.0/);
 });
 
+test("VPS runtime uses UTC for PostgreSQL and every Node process", async () => {
+  const source = await readVpsFile("run-component.sh");
+  const nodeRuntimeCount = [...source.matchAll(/NODE_ENV=production \\/gu)].length;
+  const utcRuntimeCount = [...source.matchAll(/TZ=UTC \\/gu)].length;
+
+  assert.equal(nodeRuntimeCount, 11);
+  assert.equal(utcRuntimeCount, nodeRuntimeCount);
+  assert.match(source, /postgres[\s\S]*-c timezone=UTC/);
+});
+
 test("public object-storage proxy is exact, TLS-enabled and never receives credentials", async () => {
   const source = await readVpsFile("storage-proxy.sh");
   const componentSource = await readVpsFile("run-component.sh");

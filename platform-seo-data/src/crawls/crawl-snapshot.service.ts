@@ -4,10 +4,12 @@ import {
   type CrawlPageChangeField,
   type InternalCrawlPageValidator,
   type InternalFinalizeCrawlSnapshotInput,
+  type InternalFinalizeCrawlSnapshotReceipt,
   type InternalGetCrawlPageValidatorInput,
   type InternalPersistCrawlPageInput,
   type InternalPersistCrawlPageReceipt,
   type InternalReuseCrawlPageInput,
+  type ProjectCrawlDuplicateGroupCollection,
   type ProjectCrawlPageChangeCollection,
   type ProjectCrawlIssueCollection
 } from "@seo-platform/contracts";
@@ -18,6 +20,10 @@ import {
   crawlChangeSnapshotSelect,
   detectCrawlPageChange
 } from "./crawl-change.js";
+import {
+  detectCrawlDuplicateGroups,
+  duplicateIssue
+} from "./crawl-duplicates.js";
 
 @Injectable()
 export class CrawlSnapshotService {
@@ -145,7 +151,9 @@ export class CrawlSnapshotService {
           projectId: input.projectId,
           pageId: page.id,
           source: "CRAWL",
-          metadata: { crawlId: input.crawlId }
+          metadata: { crawlId: input.crawlId },
+          firstSeenAt: new Date(input.crawledAt),
+          lastSeenAt: new Date(input.crawledAt)
         },
         update: {
           metadata: { crawlId: input.crawlId },
@@ -162,7 +170,9 @@ export class CrawlSnapshotService {
             projectId: input.projectId,
             pageId: page.id,
             source: "SITEMAP",
-            metadata: { crawlId: input.crawlId }
+            metadata: { crawlId: input.crawlId },
+            firstSeenAt: new Date(input.crawledAt),
+            lastSeenAt: new Date(input.crawledAt)
           },
           update: {
             metadata: { crawlId: input.crawlId },
@@ -372,7 +382,9 @@ export class CrawlSnapshotService {
           projectId: input.projectId,
           pageId: page.id,
           source: "CRAWL",
-          metadata: { crawlId: input.crawlId }
+          metadata: { crawlId: input.crawlId },
+          firstSeenAt: new Date(input.crawledAt),
+          lastSeenAt: new Date(input.crawledAt)
         },
         update: {
           metadata: { crawlId: input.crawlId },
@@ -389,7 +401,9 @@ export class CrawlSnapshotService {
             projectId: input.projectId,
             pageId: page.id,
             source: "SITEMAP",
-            metadata: { crawlId: input.crawlId }
+            metadata: { crawlId: input.crawlId },
+            firstSeenAt: new Date(input.crawledAt),
+            lastSeenAt: new Date(input.crawledAt)
           },
           update: {
             metadata: { crawlId: input.crawlId },
@@ -528,27 +542,218 @@ export class CrawlSnapshotService {
 
   public async finalize(
     input: InternalFinalizeCrawlSnapshotInput
-  ): Promise<{ readonly accepted: true }> {
-    if (input.status === "COMPLETED") {
-      await this.prisma.crawlIssue.updateMany({
+  ): Promise<InternalFinalizeCrawlSnapshotReceipt> {
+    return this.prisma.$transaction(async (transaction) => {
+      await transaction.$executeRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtextextended(${`${input.projectId}:${input.crawlId}:duplicates`}, 0)
+        )
+      `;
+      const existing =
+        await transaction.crawlDuplicateAnalysis.findUnique({
+          where: {
+            workspaceId_projectId_crawlId: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              crawlId: input.crawlId
+            }
+          },
+          select: { issueCount: true }
+        });
+      if (existing) {
+        return { accepted: true, issueCount: existing.issueCount };
+      }
+      const snapshots = await transaction.crawlPageSnapshot.findMany({
         where: {
           workspaceId: input.workspaceId,
           projectId: input.projectId,
-          resolvedAt: null,
-          NOT: { lastCrawlId: input.crawlId },
-          page: {
-            crawlSnapshots: {
-              some: { crawlId: input.crawlId }
-            }
-          }
+          crawlId: input.crawlId
         },
+        select: {
+          id: true,
+          pageId: true,
+          sequence: true,
+          finalUrl: true,
+          statusCode: true,
+          contentType: true,
+          title: true,
+          description: true,
+          h1: true,
+          wordCount: true,
+          contentHash: true,
+          crawledAt: true
+        },
+        orderBy: { sequence: "asc" },
+        take: 1_001
+      });
+      if (
+        snapshots.length > 1_000 ||
+        snapshots.length !== input.processedUrls
+      ) {
+        throw new TypeError(
+          "Crawl duplicate analysis snapshot count does not match"
+        );
+      }
+      const groups =
+        input.status === "CANCELLED"
+          ? []
+          : detectCrawlDuplicateGroups(snapshots);
+      const issueCount = groups.reduce(
+        (total, group) => total + group.members.length,
+        0
+      );
+      await transaction.crawlDuplicateAnalysis.create({
         data: {
-          resolvedAt: new Date(),
-          version: { increment: 1 }
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          crawlId: input.crawlId,
+          snapshotCount: snapshots.length,
+          groupCount: groups.length,
+          issueCount
         }
       });
-    }
-    return { accepted: true };
+      if (groups.length > 0) {
+        const identifiers = await transaction.$queryRaw<
+          readonly { readonly id: string; readonly position: number }[]
+        >`
+          SELECT uuidv7()::text AS id, position::integer AS position
+          FROM generate_series(0, ${groups.length - 1}) AS position
+          ORDER BY position
+        `;
+        if (identifiers.length !== groups.length) {
+          throw new TypeError(
+            "Crawl duplicate group identifiers are unavailable"
+          );
+        }
+        const storedGroups = groups.map((group, index) => {
+          const id = identifiers[index]?.id;
+          if (!id) {
+            throw new TypeError(
+              "Crawl duplicate group identifier is unavailable"
+            );
+          }
+          return { ...group, id };
+        });
+        await transaction.crawlDuplicateGroup.createMany({
+          data: storedGroups.map((group) => ({
+            id: group.id,
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            crawlId: input.crawlId,
+            kind: group.kind,
+            signatureHash: group.signatureHash,
+            memberCount: group.members.length
+          }))
+        });
+        await transaction.crawlDuplicateGroupMember.createMany({
+          data: storedGroups.flatMap((group) =>
+            group.members.map((member) => ({
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              crawlId: input.crawlId,
+              groupId: group.id,
+              snapshotId: member.id,
+              pageId: member.pageId
+            }))
+          )
+        });
+        const issueRows = storedGroups.flatMap((group) => {
+          const evidence = duplicateIssue(group.kind);
+          return group.members.map((member) => ({
+            snapshotId: member.id,
+            pageId: member.pageId,
+            code: evidence.code,
+            severity: evidence.severity,
+            title: evidence.title,
+            details: {
+              duplicateKind: group.kind,
+              groupId: group.id,
+              groupSize: group.members.length
+            },
+            seenAt: member.crawledAt.toISOString()
+          }));
+        });
+        await transaction.crawlIssueOccurrence.createMany({
+          data: issueRows.map((row) => ({
+            snapshotId: row.snapshotId,
+            code: row.code,
+            severity: row.severity,
+            title: row.title,
+            details: row.details
+          }))
+        });
+        await transaction.$executeRaw`
+          INSERT INTO "crawl_issues" (
+            "id",
+            "workspace_id",
+            "project_id",
+            "page_id",
+            "code",
+            "severity",
+            "title",
+            "details",
+            "first_crawl_id",
+            "last_crawl_id",
+            "first_seen_at",
+            "last_seen_at"
+          )
+          SELECT
+            uuidv7(),
+            ${input.workspaceId}::uuid,
+            ${input.projectId}::uuid,
+            row."pageId"::uuid,
+            row."code",
+            row."severity"::"CrawlIssueSeverity",
+            row."title",
+            row."details",
+            ${input.crawlId}::uuid,
+            ${input.crawlId}::uuid,
+            row."seenAt"::timestamptz,
+            row."seenAt"::timestamptz
+          FROM jsonb_to_recordset(${JSON.stringify(issueRows)}::jsonb)
+            AS row(
+              "snapshotId" text,
+              "pageId" text,
+              "code" text,
+              "severity" text,
+              "title" text,
+              "details" jsonb,
+              "seenAt" text
+            )
+          ON CONFLICT ("project_id", "page_id", "code")
+          DO UPDATE SET
+            "severity" = EXCLUDED."severity",
+            "title" = EXCLUDED."title",
+            "details" = EXCLUDED."details",
+            "last_crawl_id" = EXCLUDED."last_crawl_id",
+            "last_seen_at" = EXCLUDED."last_seen_at",
+            "resolved_at" = NULL,
+            "occurrences" = "crawl_issues"."occurrences" + 1,
+            "version" = "crawl_issues"."version" + 1,
+            "updated_at" = CURRENT_TIMESTAMP
+        `;
+      }
+      if (input.status === "COMPLETED") {
+        await transaction.crawlIssue.updateMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            resolvedAt: null,
+            NOT: { lastCrawlId: input.crawlId },
+            page: {
+              crawlSnapshots: {
+                some: { crawlId: input.crawlId }
+              }
+            }
+          },
+          data: {
+            resolvedAt: new Date(),
+            version: { increment: 1 }
+          }
+        });
+      }
+      return { accepted: true, issueCount };
+    });
   }
 
   public async listIssues(
@@ -613,6 +818,48 @@ export class CrawlSnapshotService {
           change.previousSnapshot.crawledAt.toISOString(),
         currentCrawledAt: change.currentSnapshot.crawledAt.toISOString(),
         createdAt: change.createdAt.toISOString()
+      }))
+    };
+  }
+
+  public async listDuplicateGroups(
+    workspaceId: string,
+    projectId: string,
+    crawlId: string
+  ): Promise<ProjectCrawlDuplicateGroupCollection> {
+    const groups = await this.prisma.crawlDuplicateGroup.findMany({
+      where: { workspaceId, projectId, crawlId },
+      include: {
+        members: {
+          include: {
+            page: { select: { url: true } },
+            snapshot: { select: { sequence: true } }
+          }
+        }
+      },
+      orderBy: [
+        { kind: "asc" },
+        { memberCount: "desc" },
+        { id: "asc" }
+      ],
+      take: 2_000
+    });
+    return {
+      groups: groups.map((group) => ({
+        id: group.id,
+        crawlId: group.crawlId,
+        kind: group.kind,
+        memberCount: group.memberCount,
+        members: [...group.members]
+          .sort(
+            (left, right) =>
+              left.snapshot.sequence - right.snapshot.sequence
+          )
+          .map((member) => ({
+            pageId: member.pageId,
+            url: member.page.url
+          })),
+        createdAt: group.createdAt.toISOString()
       }))
     };
   }

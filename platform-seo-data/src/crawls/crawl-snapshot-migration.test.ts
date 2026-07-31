@@ -18,6 +18,10 @@ const conditionalMigrationUrl = new URL(
   "../../prisma/migrations/20260731230000_crawl_conditional_requests/migration.sql",
   import.meta.url
 );
+const duplicateMigrationUrl = new URL(
+  "../../prisma/migrations/20260801010000_crawl_duplicate_groups/migration.sql",
+  import.meta.url
+);
 
 test("crawl evidence is tenant-bound, bounded and immutable", async () => {
   const sql = await readFile(migrationUrl, "utf8");
@@ -67,5 +71,22 @@ test("conditional snapshot reuse is tenant-bound and validator-safe", async () =
     sql,
     /crawl_page_snapshots_reused_from_tenant_fkey[\s\S]*FOREIGN KEY \("workspace_id", "project_id", "reused_from_snapshot_id"\)/u
   );
+  assert.doesNotMatch(sql, /raw_html/iu);
+});
+
+test("duplicate analyses are bounded, tenant-bound and immutable", async () => {
+  const sql = await readFile(duplicateMigrationUrl, "utf8");
+  assert.match(sql, /crawl_duplicate_analyses_counts_check/u);
+  assert.match(sql, /crawl_duplicate_groups_member_count_check/u);
+  assert.match(
+    sql,
+    /crawl_duplicate_group_members_group_tenant_fkey[\s\S]*FOREIGN KEY \("workspace_id", "project_id", "crawl_id", "group_id"\)/u
+  );
+  assert.match(
+    sql,
+    /crawl_duplicate_group_members_snapshot_tenant_fkey[\s\S]*FOREIGN KEY \("workspace_id", "project_id", "crawl_id", "snapshot_id"\)/u
+  );
+  assert.match(sql, /crawl_duplicate_groups_immutable_trigger/u);
+  assert.match(sql, /crawl_duplicate_group_members_immutable_trigger/u);
   assert.doesNotMatch(sql, /raw_html/iu);
 });

@@ -2,6 +2,7 @@ import { Inject, Injectable } from "@nestjs/common";
 import type {
   InternalCrawlPageValidator,
   InternalFinalizeCrawlSnapshotInput,
+  InternalFinalizeCrawlSnapshotReceipt,
   InternalGetCrawlPageValidatorInput,
   InternalPersistCrawlPageInput,
   InternalPersistCrawlPageReceipt,
@@ -49,12 +50,15 @@ export class CrawlSnapshotClient {
     return persistReceipt(payload);
   }
 
-  public finalize(input: InternalFinalizeCrawlSnapshotInput): Promise<void> {
-    return this.request(
+  public async finalize(
+    input: InternalFinalizeCrawlSnapshotInput
+  ): Promise<InternalFinalizeCrawlSnapshotReceipt> {
+    const payload = await this.request(
       "/internal/v1/crawl-snapshots/finalize",
       input,
-      undefined
-    ).then(() => undefined);
+      8_192
+    );
+    return finalizeReceipt(payload);
   }
 
   private async request(
@@ -148,6 +152,26 @@ function persistReceipt(value: unknown): InternalPersistCrawlPageReceipt {
     issueCount: Number(data.issueCount),
     success: data.success
   };
+}
+
+function finalizeReceipt(
+  value: unknown
+): InternalFinalizeCrawlSnapshotReceipt {
+  const envelope = exactRecord(value, ["data", "meta"]);
+  const data = exactRecord(envelope.data, ["accepted", "issueCount"]);
+  const meta = exactRecord(envelope.meta, ["requestId"]);
+  if (
+    data.accepted !== true ||
+    !Number.isSafeInteger(data.issueCount) ||
+    Number(data.issueCount) < 0 ||
+    Number(data.issueCount) > 4_000 ||
+    typeof meta.requestId !== "string" ||
+    meta.requestId.length < 1 ||
+    meta.requestId.length > 100
+  ) {
+    throw new Error("SEO Data crawl response is invalid");
+  }
+  return { accepted: true, issueCount: Number(data.issueCount) };
 }
 
 function validatorReceipt(

@@ -29,7 +29,8 @@ case "$component" in
       -h 127.0.0.1 \
       -k "$runtime_root/postgres/socket" \
       -p 5432 \
-      -c password_encryption=scram-sha-256
+      -c password_encryption=scram-sha-256 \
+      -c timezone=UTC
     ;;
   redis-jobs)
     redis_jobs_config=$runtime_root/redis/jobs/redis.conf
@@ -154,6 +155,7 @@ case "$component" in
       -i \
       PATH="$node_path" \
       NODE_ENV=production \
+      TZ=UTC \
       BIND_ADDRESS=127.0.0.1 \
       PORT=4001 \
       SERVICE_VERSION=0.1.0 \
@@ -174,6 +176,7 @@ case "$component" in
       -i \
       PATH="$node_path" \
       NODE_ENV=production \
+      TZ=UTC \
       BIND_ADDRESS=127.0.0.1 \
       PORT=4002 \
       SERVICE_VERSION=0.1.0 \
@@ -213,6 +216,7 @@ case "$component" in
       -i \
       PATH="$node_path" \
       NODE_ENV=production \
+      TZ=UTC \
       BIND_ADDRESS=127.0.0.1 \
       PORT=4003 \
       SERVICE_VERSION=0.1.0 \
@@ -239,6 +243,7 @@ case "$component" in
       -i \
       PATH="$node_path" \
       NODE_ENV=production \
+      TZ=UTC \
       BIND_ADDRESS=127.0.0.1 \
       PORT=4000 \
       SERVICE_VERSION=0.1.0 \
@@ -279,6 +284,7 @@ case "$component" in
       -i \
       PATH="$node_path" \
       NODE_ENV=production \
+      TZ=UTC \
       REDIS_URL="redis://seo_jobs_system:${REDIS_JOBS_SYSTEM_PASSWORD}@127.0.0.1:6379" \
       SYSTEM_WORKER_CONCURRENCY=2 \
       "$node_bin" "$project_root/platform-jobs-integrations/dist/worker.main.js"
@@ -288,6 +294,7 @@ case "$component" in
       -i \
       PATH="$node_path" \
       NODE_ENV=production \
+      TZ=UTC \
       DATABASE_URL="postgresql://jobs_runtime:${JOBS_DATABASE_PASSWORD}@${postgres_url}/jobs_db" \
       DATABASE_POOL_MAX=10 \
       REDIS_URL="redis://seo_jobs_import:${REDIS_JOBS_IMPORT_PASSWORD}@127.0.0.1:6379" \
@@ -310,6 +317,7 @@ case "$component" in
       -i \
       PATH="$node_path" \
       NODE_ENV=production \
+      TZ=UTC \
       DATABASE_URL="postgresql://jobs_runtime:${JOBS_DATABASE_PASSWORD}@${postgres_url}/jobs_db" \
       DATABASE_POOL_MAX=10 \
       REDIS_URL="redis://seo_jobs_inspection:${REDIS_JOBS_INSPECTION_PASSWORD}@127.0.0.1:6379" \
@@ -332,6 +340,7 @@ case "$component" in
       -i \
       PATH="$node_path" \
       NODE_ENV=production \
+      TZ=UTC \
       DATABASE_URL="postgresql://jobs_rank_runtime:${JOBS_RANK_DATABASE_PASSWORD}@${postgres_url}/jobs_db" \
       DATABASE_POOL_MAX=10 \
       REDIS_URL="redis://seo_jobs_rank:${REDIS_JOBS_RANK_PASSWORD}@127.0.0.1:6379" \
@@ -353,6 +362,7 @@ case "$component" in
       -i \
       PATH="$node_path" \
       NODE_ENV=production \
+      TZ=UTC \
       DATABASE_URL="postgresql://jobs_runtime:${JOBS_DATABASE_PASSWORD}@${postgres_url}/jobs_db" \
       DATABASE_POOL_MAX=10 \
       REDIS_URL="redis://seo_jobs_crawl:${REDIS_JOBS_CRAWL_PASSWORD}@127.0.0.1:6379" \
@@ -375,6 +385,7 @@ case "$component" in
       -i \
       PATH="$node_path" \
       NODE_ENV=production \
+      TZ=UTC \
       DATABASE_URL="postgresql://jobs_connector:${JOBS_CONNECTOR_DATABASE_PASSWORD}@${postgres_url}/jobs_db" \
       DATABASE_POOL_MAX=10 \
       REDIS_URL="redis://seo_jobs_connector:${REDIS_JOBS_CONNECTOR_PASSWORD}@127.0.0.1:6379" \
@@ -394,6 +405,7 @@ case "$component" in
       PATH="$node_path" \
       HOME=/home/dev \
       NODE_ENV=production \
+      TZ=UTC \
       NEXT_PUBLIC_SITE_URL="$SEO_PLATFORM_PUBLIC_URL" \
       PLATFORM_API_INTERNAL_URL=http://127.0.0.1:4000 \
       AUTH_ACCESS_COOKIE_NAME=seo_access \

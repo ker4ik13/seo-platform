@@ -39,6 +39,7 @@ import {
   type ProjectPageCollection,
   type ProjectPageListQuery,
   type ProjectPageSummary,
+  type ProjectCrawlDuplicateGroupCollection,
   type ProjectCrawlPageChangeCollection,
   type ProjectCrawlIssueCollection,
   type SemanticKeywordIntent,
@@ -95,6 +96,7 @@ import {
 } from "../pages/page-response.js";
 import { crawlIssueCollection } from "../crawls/crawl-issue-response.js";
 import { crawlPageChangeCollection } from "../crawls/crawl-change-response.js";
+import { crawlDuplicateGroupCollection } from "../crawls/crawl-duplicate-response.js";
 
 interface InternalContext {
   readonly tenant: TenantAuthorization;
@@ -846,6 +848,24 @@ export class SeoDataClient {
       context
     );
     return crawlPageChangeCollection(responseData(payload));
+  }
+
+  public async listProjectCrawlDuplicateGroups(
+    context: InternalContext,
+    crawlId: string
+  ): Promise<ProjectCrawlDuplicateGroupCollection> {
+    const scope = trackingScope(context);
+    const payload = await this.request(
+      "GET",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(
+          scope.projectId
+        )}/crawls/${encodeURIComponent(crawlId)}/duplicate-groups`,
+        this.config.services.seoData
+      ),
+      context
+    );
+    return crawlDuplicateGroupCollection(responseData(payload));
   }
 
   public async getProjectPage(

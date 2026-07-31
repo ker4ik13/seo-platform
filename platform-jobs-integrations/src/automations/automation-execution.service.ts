@@ -313,6 +313,7 @@ export class AutomationExecutionService {
             status: "SKIPPED",
             trigger: "SCHEDULE",
             scheduledFor,
+            createdAt: now,
             actorId: definition.execution.actorId,
             definition: definitionJson,
             errorCode: "OVERLAPPING_RUN",
@@ -330,6 +331,7 @@ export class AutomationExecutionService {
           status: "RUNNING",
           trigger: "SCHEDULE",
           scheduledFor,
+          createdAt: now,
           actorId: definition.execution.actorId,
           definition: definitionJson,
           startedAt: now
@@ -442,6 +444,7 @@ export class AutomationExecutionService {
           status: active ? "SKIPPED" : "RUNNING",
           trigger: "MANUAL",
           scheduledFor: now,
+          createdAt: now,
           actorId: input.actorId,
           idempotencyKey: input.idempotencyKey,
           definition: automationDefinitionJson(definition),

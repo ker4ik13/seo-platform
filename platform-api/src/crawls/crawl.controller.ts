@@ -13,6 +13,7 @@ import {
 } from "@nestjs/common";
 import type {
   ApiResponse,
+  ProjectCrawlDuplicateGroupCollection,
   ProjectCrawlPageChangeCollection,
   ProjectCrawlIssueCollection,
   TechnicalCrawlAccess,
@@ -104,6 +105,24 @@ export class CrawlController {
       request,
       await this.seoData.listProjectCrawlPageChanges(
         internalProjectContext(request, principal, tenant)
+      )
+    );
+  }
+
+  @Get("crawls/:crawlId/duplicate-groups")
+  @RequirePermission("page.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async duplicateGroups(
+    @Param("crawlId") crawlId: string,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<ProjectCrawlDuplicateGroupCollection>> {
+    const tenant = requiredProjectTenant(request);
+    return apiResponse(
+      request,
+      await this.seoData.listProjectCrawlDuplicateGroups(
+        internalProjectContext(request, principal, tenant),
+        assertUuid(crawlId, "crawlId")
       )
     );
   }

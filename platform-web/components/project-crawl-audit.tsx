@@ -1,7 +1,9 @@
 "use client";
 
 import type {
+  CrawlDuplicateKind,
   CrawlPageChangeField,
+  ProjectCrawlDuplicateGroupCollection,
   ProjectCrawlPageChangeCollection,
   ProjectCrawlIssueCollection,
   TechnicalCrawlQueryPolicy,
@@ -39,6 +41,11 @@ export function ProjectCrawlAudit({
   const [issues, setIssues] = useState<ProjectCrawlIssueCollection>();
   const [changes, setChanges] =
     useState<ProjectCrawlPageChangeCollection>();
+  const [duplicates, setDuplicates] =
+    useState<ProjectCrawlDuplicateGroupCollection>({ groups: [] });
+  const [duplicateKind, setDuplicateKind] =
+    useState<"ALL" | CrawlDuplicateKind>("ALL");
+  const [duplicatePage, setDuplicatePage] = useState(0);
   const [startUrl, setStartUrl] = useState(
     projectDomain.startsWith("http")
       ? projectDomain
@@ -60,23 +67,34 @@ export function ProjectCrawlAudit({
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
-      const [nextCrawls, nextIssues, nextChanges] = await Promise.all([
-        browserApiRequest<TechnicalCrawlSettings>(
-          crawlPath(projectId),
-          signal ? { signal } : {}
-        ),
+      const options = signal ? { signal } : {};
+      const nextCrawls = await browserApiRequest<TechnicalCrawlSettings>(
+        crawlPath(projectId),
+        options
+      );
+      const latestAnalyzed = nextCrawls.crawls.find(({ status }) =>
+        status === "COMPLETED" || status === "PARTIALLY_COMPLETED"
+      );
+      const [nextIssues, nextChanges, nextDuplicates] = await Promise.all([
         browserApiRequest<ProjectCrawlIssueCollection>(
           issuePath(projectId),
-          signal ? { signal } : {}
+          options
         ),
         browserApiRequest<ProjectCrawlPageChangeCollection>(
           changePath(projectId),
-          signal ? { signal } : {}
-        )
+          options
+        ),
+        latestAnalyzed
+          ? browserApiRequest<ProjectCrawlDuplicateGroupCollection>(
+              duplicatePath(projectId, latestAnalyzed.id),
+              options
+            )
+          : Promise.resolve({ groups: [] })
       ]);
       setCrawls(nextCrawls);
       setIssues(nextIssues);
       setChanges(nextChanges);
+      setDuplicates(nextDuplicates);
       setError(undefined);
     } catch (caught) {
       if (!signal?.aborted) {
@@ -97,6 +115,26 @@ export function ProjectCrawlAudit({
     () => crawls?.crawls.some(({ status }) => ACTIVE.has(status)) ?? false,
     [crawls]
   );
+  const filteredDuplicates = useMemo(
+    () =>
+      duplicates.groups.filter(
+        ({ kind }) => duplicateKind === "ALL" || kind === duplicateKind
+      ),
+    [duplicateKind, duplicates.groups]
+  );
+  const duplicatePageCount = Math.max(
+    1,
+    Math.ceil(filteredDuplicates.length / 20)
+  );
+  const duplicateCrawlId = duplicates.groups[0]?.crawlId;
+  const visibleDuplicates = filteredDuplicates.slice(
+    duplicatePage * 20,
+    duplicatePage * 20 + 20
+  );
+
+  useEffect(() => {
+    setDuplicatePage(0);
+  }, [duplicateCrawlId, duplicateKind]);
 
   useEffect(() => {
     if (!hasActive) return;
@@ -326,6 +364,97 @@ export function ProjectCrawlAudit({
         </div>
       </div>
 
+      <div className="crawl-duplicate-history">
+        <div className="crawl-duplicate-heading">
+          <div>
+            <p className="eyebrow">Duplicate groups</p>
+            <h3>Дубли страниц</h3>
+            <p className="muted-copy">
+              Группы строятся по нормализованным Title, Description, H1 и
+              хешу видимого текста последнего завершённого обхода.
+            </p>
+          </div>
+          <label className="form-field crawl-duplicate-filter">
+            <span>Тип дубля</span>
+            <select
+              onChange={(event) =>
+                setDuplicateKind(
+                  event.target.value as "ALL" | CrawlDuplicateKind
+                )
+              }
+              value={duplicateKind}
+            >
+              <option value="ALL">Все ({duplicates.groups.length})</option>
+              <option value="CONTENT">Контент</option>
+              <option value="TITLE">Title</option>
+              <option value="DESCRIPTION">Description</option>
+              <option value="H1">H1</option>
+            </select>
+          </label>
+        </div>
+        {visibleDuplicates.length ? (
+          <>
+            <div className="crawl-duplicate-list">
+              {visibleDuplicates.map((group) => (
+                <details className="crawl-duplicate-group" key={group.id}>
+                  <summary>
+                    <strong>{duplicateKindLabel(group.kind)}</strong>
+                    <span>{group.memberCount} страниц</span>
+                  </summary>
+                  <div className="crawl-duplicate-members">
+                    {group.members.map((member) => (
+                      <a
+                        href={member.url}
+                        key={member.pageId}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        {member.url}
+                      </a>
+                    ))}
+                  </div>
+                </details>
+              ))}
+            </div>
+            {duplicatePageCount > 1 && (
+              <div className="crawl-duplicate-pagination">
+                <button
+                  className="secondary-button"
+                  disabled={duplicatePage === 0}
+                  onClick={() =>
+                    setDuplicatePage((current) => Math.max(0, current - 1))
+                  }
+                  type="button"
+                >
+                  Назад
+                </button>
+                <span>
+                  {duplicatePage + 1} из {duplicatePageCount}
+                </span>
+                <button
+                  className="secondary-button"
+                  disabled={duplicatePage + 1 >= duplicatePageCount}
+                  onClick={() =>
+                    setDuplicatePage((current) =>
+                      Math.min(duplicatePageCount - 1, current + 1)
+                    )
+                  }
+                  type="button"
+                >
+                  Далее
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="muted-copy">
+            {duplicates.groups.length
+              ? "Для выбранного типа дублей нет."
+              : "В последнем завершённом обходе группы дублей не найдены."}
+          </p>
+        )}
+      </div>
+
       <div className="crawl-change-history">
         <div>
           <p className="eyebrow">Radar</p>
@@ -416,6 +545,12 @@ function changePath(projectId: string): string {
   return `/app/api/projects/${encodeURIComponent(projectId)}/crawl-changes`;
 }
 
+function duplicatePath(projectId: string, crawlId: string): string {
+  return `/app/api/projects/${encodeURIComponent(
+    projectId
+  )}/crawls/${encodeURIComponent(crawlId)}/duplicate-groups`;
+}
+
 function statusLabel(status: TechnicalCrawlStatus): string {
   return {
     QUEUED: "В очереди",
@@ -473,6 +608,15 @@ function changeFieldLabel(field: CrawlPageChangeField): string {
     responseTimeMs: "время ответа",
     sizeBytes: "размер ответа"
   }[field] ?? field;
+}
+
+function duplicateKindLabel(kind: CrawlDuplicateKind): string {
+  return {
+    CONTENT: "Одинаковый контент",
+    TITLE: "Одинаковый Title",
+    DESCRIPTION: "Одинаковый Description",
+    H1: "Одинаковый H1"
+  }[kind];
 }
 
 function lineList(value: string): readonly string[] {

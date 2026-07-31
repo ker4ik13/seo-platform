@@ -27,10 +27,12 @@ response_body=$smoke_root/response.json
 smoke_email="smoke-$(date -u +%Y%m%d%H%M%S)-$$@example.invalid"
 smoke_password="S$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-28)!9a"
 smoke_crawl_url=${SEO_PLATFORM_SMOKE_CRAWL_URL:-https://example.com/}
+smoke_duplicate_crawl_url=${SEO_PLATFORM_SMOKE_DUPLICATE_CRAWL_URL:-}
 smoke_sitemap_url=${SEO_PLATFORM_SMOKE_SITEMAP_URL:-}
 smoke_include_pattern=${SEO_PLATFORM_SMOKE_INCLUDE_PATTERN:-}
 smoke_project_domain=$(
   SMOKE_CRAWL_URL="$smoke_crawl_url" \
+  SMOKE_DUPLICATE_CRAWL_URL="$smoke_duplicate_crawl_url" \
     /home/dev/.nvm/versions/node/v24.18.1/bin/node <<'NODE'
 const url = new URL(process.env.SMOKE_CRAWL_URL);
 if (
@@ -46,9 +48,20 @@ if (
 ) {
   process.exit(1);
 }
+if (process.env.SMOKE_DUPLICATE_CRAWL_URL) {
+  const duplicate = new URL(process.env.SMOKE_DUPLICATE_CRAWL_URL);
+  if (
+    duplicate.origin !== url.origin ||
+    duplicate.username ||
+    duplicate.password ||
+    duplicate.hash
+  ) {
+    process.exit(1);
+  }
+}
 process.stdout.write(url.hostname);
 NODE
-) || runtime_fail "SEO_PLATFORM_SMOKE_CRAWL_URL is invalid"
+) || runtime_fail "SEO_PLATFORM_SMOKE_CRAWL_URL scope is invalid"
 csrf_token=
 response_status=
 
@@ -205,10 +218,16 @@ jq -e \
 crawl_body=$(
   jq -cn \
     --arg startUrl "$smoke_crawl_url" \
+    --arg duplicateUrl "$smoke_duplicate_crawl_url" \
     --arg sitemapUrl "$smoke_sitemap_url" \
     --arg includePattern "$smoke_include_pattern" \
     '{
-      startUrls: [$startUrl],
+      startUrls: (
+        if $duplicateUrl == ""
+        then [$startUrl]
+        else [$startUrl, $duplicateUrl]
+        end
+      ),
       sitemapUrls: (
         if $sitemapUrl == "" then [] else [$sitemapUrl] end
       ),
@@ -256,6 +275,26 @@ api_call GET "projects/$project_id/crawl-changes"
 expect_status 200 crawl-changes
 jq -e '.data.changes | type == "array"' "$response_body" >/dev/null ||
   runtime_fail "crawl change history is not an array"
+
+api_call GET "projects/$project_id/crawls/$crawl_id/duplicate-groups"
+expect_status 200 crawl-duplicate-groups
+jq -e \
+  '.data.groups | type == "array"' \
+  "$response_body" >/dev/null ||
+  runtime_fail "crawl duplicate groups are not an array"
+if [ -n "$smoke_duplicate_crawl_url" ]; then
+  jq -e '
+    [
+      .data.groups[] |
+      select(.memberCount == 2) |
+      .kind
+    ] as $kinds |
+    ($kinds | index("CONTENT")) != null and
+    ($kinds | index("TITLE")) != null and
+    ($kinds | index("H1")) != null
+  ' "$response_body" >/dev/null ||
+    runtime_fail "crawl did not persist the expected duplicate groups"
+fi
 
 crawl_automation_body=$(
   jq -cn \

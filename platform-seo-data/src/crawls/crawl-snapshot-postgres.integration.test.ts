@@ -93,6 +93,57 @@ test(
       assert.deepEqual(afterReuse.changes[0]?.changedFields, [
         "inSitemap"
       ]);
+
+      await service.persistPage(duplicatePageInput(1));
+      await service.persistPage(duplicatePageInput(2));
+      const finalization = {
+        workspaceId: WORKSPACE_ID,
+        projectId: PROJECT_ID,
+        crawlId: "01900000-0000-7000-8000-000000000114",
+        status: "COMPLETED" as const,
+        processedUrls: 2
+      };
+      assert.deepEqual(await service.finalize(finalization), {
+        accepted: true,
+        issueCount: 8
+      });
+      const duplicateGroups = await service.listDuplicateGroups(
+        WORKSPACE_ID,
+        PROJECT_ID,
+        finalization.crawlId
+      );
+      assert.deepEqual(
+        duplicateGroups.groups.map(({ kind, memberCount }) => ({
+          kind,
+          memberCount
+        })),
+        [
+          { kind: "CONTENT", memberCount: 2 },
+          { kind: "TITLE", memberCount: 2 },
+          { kind: "DESCRIPTION", memberCount: 2 },
+          { kind: "H1", memberCount: 2 }
+        ]
+      );
+      assert.deepEqual(await service.finalize(finalization), {
+        accepted: true,
+        issueCount: 8
+      });
+      assert.equal(
+        await prisma.crawlIssueOccurrence.count({
+          where: {
+            snapshot: { crawlId: finalization.crawlId },
+            code: { startsWith: "DUPLICATE_" }
+          }
+        }),
+        8
+      );
+      await assert.rejects(
+        prisma.crawlDuplicateGroup.update({
+          where: { id: duplicateGroups.groups[0]!.id },
+          data: { memberCount: 3 }
+        }),
+        /immutable/u
+      );
     } finally {
       await prisma.$disconnect();
     }
@@ -142,5 +193,24 @@ function pageInput(
     indexability: "INDEXABLE",
     issues: [],
     crawledAt: `2026-07-${29 + run}T10:00:00.000Z`
+  };
+}
+
+function duplicatePageInput(
+  sequence: number
+): InternalPersistCrawlPageInput {
+  const url = `https://radar.example.com/duplicate-${sequence}`;
+  return {
+    ...pageInput(2, "Duplicate title", "c".repeat(64)),
+    crawlId: "01900000-0000-7000-8000-000000000114",
+    sequence,
+    requestedUrl: url,
+    finalUrl: url,
+    title: sequence === 1 ? " Duplicate   title " : "duplicate title",
+    description: "Duplicate description",
+    h1: "Duplicate heading",
+    canonicalUrl: url,
+    etag: `"duplicate-${sequence}"`,
+    crawledAt: `2026-08-01T11:00:0${sequence}.000Z`
   };
 }

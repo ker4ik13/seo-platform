@@ -423,8 +423,16 @@ export class CrawlService {
     crawlId: string,
     leaseOwner: string,
     status: "COMPLETED" | "PARTIALLY_COMPLETED" | "CANCELLED",
-    failureCode?: string
+    failureCode?: string,
+    additionalIssueCount = 0
   ): Promise<TechnicalCrawl> {
+    if (
+      !Number.isSafeInteger(additionalIssueCount) ||
+      additionalIssueCount < 0 ||
+      additionalIssueCount > 4_000
+    ) {
+      throw new TypeError("Invalid additional crawl issue count");
+    }
     return this.prisma.$transaction(async (transaction) => {
       const current = await transaction.technicalCrawl.findFirst({
         where: {
@@ -455,6 +463,7 @@ export class CrawlService {
           failureCode: failureCode?.slice(0, 64) ?? null,
           backoffCode: null,
           backoffUntil: null,
+          issueCount: { increment: additionalIssueCount },
           version: { increment: 1 }
         }
       });

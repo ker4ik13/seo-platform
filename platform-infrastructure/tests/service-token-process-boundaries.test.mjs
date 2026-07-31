@@ -143,7 +143,8 @@ const jobsRuntimeEnvironment = [
   "DATABASE_URL",
   "NODE_ENV",
   "REDIS_URL",
-  "SERVICE_VERSION"
+  "SERVICE_VERSION",
+  "TZ"
 ];
 
 const s3Environment = [
@@ -212,14 +213,16 @@ const expectedAuthEmailWorkerEnvironment = sorted([
   "SMTP_PORT",
   "SMTP_SECURE",
   "SMTP_SOCKET_TIMEOUT_MS",
-  "SMTP_USER"
+  "SMTP_USER",
+  "TZ"
 ]);
 
 const expectedSystemWorkerEnvironment = sorted([
   "NODE_ENV",
   "REDIS_URL",
   "SERVICE_VERSION",
-  "SYSTEM_WORKER_CONCURRENCY"
+  "SYSTEM_WORKER_CONCURRENCY",
+  "TZ"
 ]);
 
 const expectedImportWorkerEnvironment = sorted([

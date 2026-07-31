@@ -41,6 +41,13 @@ manual dispatch, завершение связанного техническо�
 settlement и ручную паузу; тот же сценарий повторно прошёл регистрацию,
 workspace/trial/project, team/billing read projections, обычный crawl и
 полный XLSX upload/inspection/import/publish контур.
+После добавления duplicate-group анализа live crawl двух разных URL с
+одинаковым HTML создал группы `CONTENT/TITLE/H1`, а следующий automation
+обход успешно повторно использовал оба snapshot по `304`. VPS и Dokploy
+Compose теперь принудительно запускают PostgreSQL и все Node runtimes в UTC;
+automation claims фиксируют `createdAt` тем же database clock, что
+`startedAt/finishedAt`, поэтому chronology constraints не зависят от
+часового пояса хоста и задержки между чтением clock и `INSERT`.
 
 Production technical crawl и audit issues работают поверх Page Map, реального
 съёма позиций и тарифных capacity boundaries.
@@ -222,6 +229,14 @@ headings/hreflang/schema, ссылки, content hash, indexability, изобра
 пороговые изменения latency/размера. Internal SEO Data и public Platform API
 возвращают максимум 500 строго валидируемых изменений под `page.view`, а Web
 показывает русскоязычную историю между обходами и корректный empty state.
+
+После финализации каждого complete/partial crawl SEO Data один раз под
+advisory lock анализирует успешные HTML snapshots и сохраняет immutable
+группы дублирующегося content hash, нормализованных Title, Description и H1.
+Группы и их полный bounded member list связаны составными tenant/project/crawl
+FK; для каждой группы создаётся current issue соответствующей severity.
+Public API отдаёт их только под `page.view`, Web поддерживает фильтр по типу,
+пагинацию и раскрытие URL, а повторная финализация остаётся идемпотентной.
 
 Настройки technical crawl теперь поддерживают до десяти same-origin sitemap,
 include/exclude glob-маски и явную политику query-параметров. Crawl worker
@@ -907,9 +922,14 @@ Backend convention:
   `backoffCode/backoffUntil`;
 - `platform-seo-data/src/crawls` — immutable crawl snapshots/issue
   occurrences/page changes с sitemap membership, current issue projection,
-  deterministic before/after diff и tenant-safe Page Map update без raw HTML;
+  deterministic before/after diff, идемпотентный анализ duplicate groups по
+  content hash/нормализованным Title/Description/H1 и tenant-safe Page Map
+  update без raw HTML;
 - `platform-seo-data/prisma/migrations/20260731230000_crawl_conditional_requests`
   — bounded HTTP validators и tenant-bound immutable snapshot reuse evidence;
+- `platform-seo-data/prisma/migrations/20260801010000_crawl_duplicate_groups`
+  — immutable crawl analysis receipt, bounded duplicate groups/members,
+  составные tenant/project/crawl FK и current issue projection;
 - `platform-api/src/crawls`,
   `platform-web/components/project-crawl-audit.tsx` и
   `crawl-automation-panel.tsx` — public RBAC/CSRF/audit boundary, dedicated
@@ -1595,10 +1615,10 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
 - Prisma Client generation: pass для 4 сервисов.
 - Prisma schema validation: pass для 4 сервисов.
 - TypeScript strict typecheck: pass для 8 пакетов.
-- Platform API tests: 448 pass, 0 fail, 5 opt-in PostgreSQL 18 tests skipped
+- Platform API tests: 453 pass, 0 fail, 5 opt-in PostgreSQL 18 tests skipped
   без отдельного disposable database URL.
-- SEO data tests: 134 pass, 0 fail, 1 disposable-DB test skipped.
-- Jobs/integrations tests: 472 pass, 0 fail, 10 disposable-DB tests skipped
+- SEO data tests: 138 pass, 0 fail, 1 disposable-DB test skipped.
+- Jobs/integrations tests: 481 pass, 0 fail, 10 disposable-DB tests skipped
   в обычном запуске; startup decrypt-canary targeted suite — 7/7 pass.
 - Realtime unit tests: 112 pass, 0 fail.
 - Contracts unit tests: 100 pass, 0 fail.
@@ -1606,7 +1626,7 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
 - Infrastructure DB-role/connector и затронутый rank dependency targeted
   scope: 9 pass, 0 fail; PostgreSQL regressions остаются opt-in в обычном
   запуске.
-- Infrastructure suite после Redis/NATS/crawl hardening: 87 pass, 0 fail и пять
+- Infrastructure suite после Redis/NATS/crawl hardening: 89 pass, 0 fail и пять
   opt-in PostgreSQL skips с локальным Redis 8.8.1 binary. Отдельный live smoke
   на source-built Redis 8.8.1: 3/3 pass; подтверждены BullMQ Queue/Worker,
   queue-key isolation и Lua denial, versioned Realtime Pub/Sub channels,
@@ -1634,6 +1654,10 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
   immutable `304` reuse, перенос issues и sitemap-only diff; полная цепочка
   из 32 Jobs migrations и opt-in integration подтверждает сериализацию
   глобального host state, `Retry-After`, recovery и latency backoff.
+- Fresh PostgreSQL 18 duplicate-group gate: полная цепочка из 19 SEO Data
+  migrations, Prisma validate/generate и реальный snapshot integration
+  проходят; проверены три immutable analysis/group/member таблицы,
+  tenant-safe FK, bounded counts и запрет изменения terminal evidence.
 - Fresh PostgreSQL 18 Radar schedule gate: полная цепочка из 33 Jobs
   migrations применена без пропусков, таблицы definitions/runs и immutable
   guard trigger проверены. Live Redis 8.8.1 gate выполняет BullMQ
@@ -1645,6 +1669,12 @@ durable definition без `nextRunAt`, а bounded reconciliation повторн�
   повторный crawl `019fb769-a26b-7a86-9a44-c6d8fe4f732e` завершён, а его
   единственный snapshot имеет `not_modified=true` и ссылку на исходный
   immutable snapshot.
+- Duplicate-group migration применена к живому runtime. Полный public smoke
+  `019fb7e1-21c8-7060-8a9c-934cae802363` прошёл без ошибок: primary crawl
+  `019fb7e1-247b-79f9-b474-575f9b688da6` обработал два URL, duplicate-group
+  read model подтверждён, manual automation crawl завершился через `304`,
+  затем успешно прошли pause и полный XLSX upload/inspection/import/publish.
+  PostgreSQL и Node process environments фактически подтверждены как UTC.
 - Полный root `pnpm test` после startup-canary и scoped claim: pass без
   failures; обычный запуск безопасно пропускает opt-in disposable-DB tests.
   Отдельный fresh PostgreSQL 18 gate для Jobs grant/claim: 4/4 pass.
@@ -2144,9 +2174,12 @@ OAuth/OIDC выполняется после подтверждения зави
   подтверждённого provider contract и redacted fixtures.
 - Technical crawl production vertical закрывает ручной bounded обход,
   sitemap/include/exclude/query scope, conditional page requests, global
-  host backoff, current issues, page diff history и versioned daily/weekly
-  schedules с quiet windows/no-overlap/fresh execution authorization.
-  Полный Radar из раздела 10 ТЗ ещё требует duplicate groups, notifications,
+  host backoff, current issues, page diff history, группы дублей
+  content/Title/Description/H1 и versioned daily/weekly schedules с quiet
+  windows/no-overlap/fresh execution authorization. Duplicate analysis
+  выполняется один раз на terminal crawl, учитывается в общем issue count и
+  доступен через tenant-protected API/UI с полным составом групп.
+  Полный Radar из раздела 10 ТЗ ещё требует notifications,
   long-lived `PAUSED_BY_SITE` policy и отдельный
   browser-rendering pool. Sitemap disappearance гарантированно фиксируется,
   когда URL также остаётся доступен из start/link scope; для исчезнувшей из

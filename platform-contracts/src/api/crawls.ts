@@ -203,6 +203,11 @@ export interface InternalFinalizeCrawlSnapshotInput {
   readonly processedUrls: number;
 }
 
+export interface InternalFinalizeCrawlSnapshotReceipt {
+  readonly accepted: true;
+  readonly issueCount: number;
+}
+
 export interface ProjectCrawlIssueSummary {
   readonly id: string;
   readonly crawlId: string;
@@ -264,4 +269,31 @@ export interface ProjectCrawlPageChangeSummary {
 
 export interface ProjectCrawlPageChangeCollection {
   readonly changes: readonly ProjectCrawlPageChangeSummary[];
+}
+
+export const crawlDuplicateKinds = [
+  "CONTENT",
+  "TITLE",
+  "DESCRIPTION",
+  "H1"
+] as const;
+
+export type CrawlDuplicateKind = (typeof crawlDuplicateKinds)[number];
+
+export interface ProjectCrawlDuplicateGroupMember {
+  readonly pageId: string;
+  readonly url: string;
+}
+
+export interface ProjectCrawlDuplicateGroupSummary {
+  readonly id: string;
+  readonly crawlId: string;
+  readonly kind: CrawlDuplicateKind;
+  readonly memberCount: number;
+  readonly members: readonly ProjectCrawlDuplicateGroupMember[];
+  readonly createdAt: string;
+}
+
+export interface ProjectCrawlDuplicateGroupCollection {
+  readonly groups: readonly ProjectCrawlDuplicateGroupSummary[];
 }

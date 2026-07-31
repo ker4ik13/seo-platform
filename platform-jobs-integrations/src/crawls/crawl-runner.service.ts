@@ -479,7 +479,7 @@ export class CrawlRunnerService {
     processedUrls: number,
     failureCode?: string
   ): Promise<void> {
-    await this.snapshots.finalize({
+    const receipt = await this.snapshots.finalize({
       workspaceId: crawl.workspaceId,
       projectId: crawl.projectId,
       crawlId: crawl.id,
@@ -490,7 +490,8 @@ export class CrawlRunnerService {
       crawl.id,
       leaseOwner,
       status,
-      failureCode
+      failureCode,
+      receipt.issueCount
     );
   }
 

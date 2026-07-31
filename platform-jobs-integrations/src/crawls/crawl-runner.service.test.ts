@@ -45,6 +45,7 @@ test("finishes an expired crawl as a bounded partial result", async () => {
   const snapshots = {
     finalize: async (input: unknown) => {
       finalized.push(input);
+      return { accepted: true, issueCount: 4 };
     }
   };
   const runner = new CrawlRunnerService(
@@ -82,6 +83,7 @@ test("finishes an expired crawl as a bounded partial result", async () => {
     "01900000-0000-7000-8000-000000000001",
     "crawl-test-worker",
     "PARTIALLY_COMPLETED",
-    "MAX_RUNTIME_EXCEEDED"
+    "MAX_RUNTIME_EXCEEDED",
+    4
   ]]);
 });
