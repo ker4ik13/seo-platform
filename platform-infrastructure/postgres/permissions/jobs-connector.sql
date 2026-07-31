@@ -295,7 +295,9 @@ SELECT format(
 
 SELECT format(
   'GRANT EXECUTE ON FUNCTION
-    public.claim_rank_connector_execution(TEXT, INTEGER, TEXT)
+    public.authorize_rank_connector_execution_submit(
+      UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT
+    )
   TO %I',
   :'connector_user'
 )
@@ -303,8 +305,46 @@ SELECT format(
 
 SELECT format(
   'GRANT EXECUTE ON FUNCTION
-    public.authorize_rank_connector_execution_submit(
-      UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT
+    public.claim_rank_connector_submit_bounded(TEXT, INTEGER, TEXT)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.read_rank_connector_submit_request(
+      UUID, UUID, TEXT, UUID, INTEGER, INTEGER
+    )
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.complete_rank_connector_submit(
+      UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, TEXT,
+      JSONB, BYTEA, TEXT
+    )
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.claim_rank_connector_poll(TEXT, INTEGER, TEXT)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.complete_rank_connector_poll(
+      UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, INTEGER,
+      TIMESTAMPTZ, JSONB, BYTEA, TEXT
     )
   TO %I',
   :'connector_user'
@@ -348,8 +388,12 @@ BEGIN
     'public.finish_integration_credential_validation_job_failure(uuid,text,uuid,integer,text,integer)'::regprocedure::oid,
     'public.finish_integration_credential_validation_provider_failure(uuid,text,uuid,integer,text,text,integer)'::regprocedure::oid,
     'public.finish_integration_credential_validation_success(uuid,text,uuid,integer,text,jsonb)'::regprocedure::oid,
-    'public.claim_rank_connector_execution(text,integer,text)'::regprocedure::oid,
-    'public.authorize_rank_connector_execution_submit(uuid,uuid,text,uuid,integer,integer,text)'::regprocedure::oid
+    'public.authorize_rank_connector_execution_submit(uuid,uuid,text,uuid,integer,integer,text)'::regprocedure::oid,
+    'public.claim_rank_connector_submit_bounded(text,integer,text)'::regprocedure::oid,
+    'public.read_rank_connector_submit_request(uuid,uuid,text,uuid,integer,integer)'::regprocedure::oid,
+    'public.complete_rank_connector_submit(uuid,uuid,text,uuid,integer,integer,text,text,jsonb,bytea,text)'::regprocedure::oid,
+    'public.claim_rank_connector_poll(text,integer,text)'::regprocedure::oid,
+    'public.complete_rank_connector_poll(uuid,uuid,text,uuid,integer,integer,text,integer,timestamptz,jsonb,bytea,text)'::regprocedure::oid
   ];
 
   IF EXISTS (

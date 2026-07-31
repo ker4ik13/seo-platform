@@ -9,7 +9,7 @@ import {
 const configuration = {
   searchEngine: "GOOGLE",
   countryCode: "US",
-  regionCode: "US-NY",
+  regionCode: "1023191",
   language: "en",
   device: "DESKTOP",
   depth: 30,
@@ -29,18 +29,38 @@ test("persists and verifies exact provider-effective execution", () => {
   );
   assert.equal(
     rankEstimateExecutionHash(execution).toString("hex"),
-    "b4c719cbd5fb884ec469cce342b9e88fbebead1a4c6aebbd2214f767e52f90f6"
+    "1f3f038ee48aaf19e70f6849c930735c3c0f98a363becc7e9ef17f22da27a124"
   );
 });
 
 test("keeps incompatible estimates viewable without executable data", () => {
-  assert.equal(
-    rankEstimateExecutionParameters({
+  for (const incompatible of [
+    { ...configuration, searchEngine: "YANDEX" as const },
+    { ...configuration, regionCode: "US-NY" },
+    {
+      searchEngine: "GOOGLE" as const,
+      countryCode: "US",
+      language: "en",
+      device: "DESKTOP" as const,
+      depth: 30 as const,
+      domainMatchRule: { mode: "EXACT_HOST" as const },
+      safeSearch: false
+    },
+    { ...configuration, safeSearch: true },
+    {
       ...configuration,
-      searchEngine: "YANDEX"
-    }),
-    undefined
-  );
+      domainMatchRule: { mode: "ANY_PROJECT_MIRROR" as const }
+    },
+    {
+      ...configuration,
+      domainMatchRule: { mode: "CANONICAL_DOMAIN" as const }
+    }
+  ]) {
+    assert.equal(
+      rankEstimateExecutionParameters(incompatible),
+      undefined
+    );
+  }
   assert.equal(storedRankEstimateExecution(null, null), undefined);
 });
 

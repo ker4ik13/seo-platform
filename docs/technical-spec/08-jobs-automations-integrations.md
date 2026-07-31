@@ -809,8 +809,9 @@ immutable manifest receipt и immutable finalization receipt.
 `NOT_SEALED`. Retryable transport/service ambiguity повторяет ту же
 идемпотентную exact seal/finalize command в пределах 20 attempts;
 non-retryable ambiguity либо исчерпание budget завершает Job как
-`ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`. Неидемпотентный provider submit в
-этом runtime ещё отсутствует и этой политикой не охватывается.
+`ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN`. Неидемпотентный provider submit
+имеет отдельный durable may-have-started marker и никогда автоматически не
+повторяется после неоднозначного transport outcome.
 Exact command до каждого HTTP повторно сверяется с immutable
 workspace/project/actor/job/estimate/context/domain/version/pair binding;
 self-consistent hash для другого graph не покидает сервис.
@@ -847,17 +848,18 @@ queue/log/event и не смешивается с credential material. Вали�
 атомарно получает `CONSUMED` вместе с secret-free
 `rank_connector_executions/READY_TO_SUBMIT`, а execution обязан ссылаться на
 совпадающие intent/request/manifest/chunk hashes.
-Default-closed SECURITY DEFINER claim DDL уже добавляет bounded lease,
+SECURITY DEFINER claim DDL добавляет bounded lease,
 pre-network `CLAIMED`, full current-graph recheck и единственную scoped
 encrypted credential projection. `PUBLIC` execute отозван; connector
 permission allowlist выдаёт exact `EXECUTE` только на public claim и
 authorize. Authorize повторно проверяет полный current graph, lease fence и
 ожидаемые execution/control versions, затем атомарно переводит execution в
-`SUBMITTING` и фиксирует durable may-have-started marker. Runtime caller,
-Arsenkin request/status/result producer и schedules ещё отсутствуют. Live
-Arsenkin execution остаётся выключенным; готовые PREPARING, issuer, intent,
-consume, claim и authorize DDL не являются доказательством рабочего съёма
-позиций.
+`SUBMITTING` и фиксирует durable may-have-started marker. Connector-worker
+отправляет documented `check-top`, сохраняет wire hash/task ID, poll-ит и
+stage-ит normalized output; rank-worker ingest-ит chunk и terminal закрывает
+manifest/Job. Runtime activation использует новую immutable kill-switch
+generation `arsenkin-positions@2`. Schedules и live BYOK provider smoke
+остаются отдельными release gates.
 
 ### 17.6. Platform-owned execution grant issuer foundation
 
@@ -939,13 +941,13 @@ canonical graph locks и attempt row, использует database clock, по�
 Execution row содержит tenant/job/item/manifest и версии
 binding/route/credential/validation/connector/kill-switch, но не ciphertext,
 wrapped DEK или provider payload. Service зарегистрирован только в
-rank-worker module, но dispatcher/provider execution к нему ещё не подключены.
+rank-worker module и вызывается dispatcher-ом для каждого sealed chunk.
 Dedicated
 `JOBS_TO_PLATFORM_RANK_GRANT_TOKEN` получают только Platform API и
 rank-worker; generic Jobs HTTP, connector/import/inspection/system/migration,
-Web и остальные сервисы token не получают. Production runtime дополнительно
-отклоняет включение `RANK_PROVIDER_SUBMIT_ENABLED`, а Compose фиксирует его в
-`false`.
+Web и остальные сервисы token не получают. Submit flag принимается только
+isolated connector-worker; rank-worker всегда запускается с этим флагом
+выключенным.
 
 Migrations `20260729230100_rank_execution_grant_attempts`,
 `20260729230200_rank_connector_executions`,
@@ -955,15 +957,13 @@ Migrations `20260729230100_rank_execution_grant_attempts`,
 fresh full-chain и upgrade rehearsal. Exact non-owner connector permissions,
 default-closed control, stale-head skip, concurrent claim/reclaim и
 claim/authorize fence races также проверены на PostgreSQL 18. Pure TypeScript
-lifecycle уже моделирует request/status/result transitions и трактует commit
-authorize как may-have-started boundary, но ещё не имеет DB persistence, не
-подключён к runtime/provider и сам по себе не является security boundary без
-DB wrapper. Retryable submit outcome не возвращает ту же execution в
+lifecycle моделирует request/status/result transitions и трактует commit
+authorize как may-have-started boundary; PostgreSQL brokers сохраняют wire,
+poll, normalized staging и result-persistence state. Retryable submit outcome
+не возвращает ту же execution в
 `READY_TO_SUBMIT`: scheduler обязан получить новый authoritative grant и
-создать следующий monotonic `execution_attempt`. Поэтому production gate для
-provider request/status/result и normalized result producer остаётся
-открытым. Credential validation worker/KEK canary уже не требуют global vault
-read.
+создать следующий monotonic `execution_attempt`. Credential validation
+worker/KEK canary и provider runtime не требуют global vault read.
 
 ### 17.8. Реализованная caller/audience service authentication
 

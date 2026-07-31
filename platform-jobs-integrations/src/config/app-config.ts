@@ -71,6 +71,7 @@ export interface AppConfig {
   readonly seoDataApiToken?: string;
   readonly integrationCredentialApiToken?: string;
   readonly rankManifestApiToken?: string;
+  readonly rankResultApiToken?: string;
   readonly rankGrantApiToken?: string;
   readonly authEmailApiToken?: string;
   readonly internalCommandTimeoutMs: number;
@@ -163,6 +164,7 @@ const SERVICE_TOKEN_ENVIRONMENT_VARIABLES = [
   "JOBS_TO_SEO_DATA_TOKEN",
   "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN",
   "JOBS_TO_SEO_RANK_TOKEN",
+  "JOBS_TO_SEO_RANK_RESULT_TOKEN",
   "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
   "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN"
 ] as const;
@@ -596,6 +598,10 @@ export function loadAppConfig(
     env,
     "JOBS_TO_SEO_RANK_TOKEN"
   );
+  const rankResultApiToken = serviceToken(
+    env,
+    "JOBS_TO_SEO_RANK_RESULT_TOKEN"
+  );
   const rankGrantApiToken = serviceToken(
     env,
     "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN"
@@ -610,7 +616,7 @@ export function loadAppConfig(
   );
   const rankProviderKillSwitchVersion = boundedVersion(
     env.RANK_PROVIDER_KILL_SWITCH_VERSION,
-    "arsenkin-positions@1",
+    "arsenkin-positions@2",
     "RANK_PROVIDER_KILL_SWITCH_VERSION"
   );
   const malwareScannerHost = optional(env, "MALWARE_SCANNER_HOST");
@@ -666,7 +672,7 @@ export function loadAppConfig(
     );
   }
   if (
-    (rankManifestApiToken || rankGrantApiToken) &&
+    (rankManifestApiToken || rankResultApiToken || rankGrantApiToken) &&
     !rankPreparationEnabled
   ) {
     throw new Error(
@@ -687,6 +693,14 @@ export function loadAppConfig(
   ) {
     throw new Error(
       "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN with at least 32 characters is required by the rank preparation worker"
+    );
+  }
+  if (
+    rankPreparationEnabled &&
+    (!rankResultApiToken || rankResultApiToken.length < 32)
+  ) {
+    throw new Error(
+      "JOBS_TO_SEO_RANK_RESULT_TOKEN with at least 32 characters is required by the rank worker"
     );
   }
   if (rankPreparationEnabled && credentialRole !== "DISABLED") {
@@ -958,7 +972,8 @@ export function loadAppConfig(
     (rankManifestApiToken === platformApiToken ||
       rankManifestApiToken === seoDataApiToken ||
       rankManifestApiToken === integrationCredentialApiToken ||
-      rankManifestApiToken === rankGrantApiToken)
+      rankManifestApiToken === rankGrantApiToken ||
+      rankManifestApiToken === rankResultApiToken)
   ) {
     throw new Error(
       "Rank manifest token must differ from all other service tokens"
@@ -974,14 +989,23 @@ export function loadAppConfig(
       "Rank grant token must differ from all other service tokens"
     );
   }
-  if (rankProviderSubmitEnabled && !rankPreparationEnabled) {
+  if (
+    rankResultApiToken &&
+    (rankResultApiToken === platformApiToken ||
+      rankResultApiToken === seoDataApiToken ||
+      rankResultApiToken === integrationCredentialApiToken ||
+      rankResultApiToken === rankGrantApiToken)
+  ) {
     throw new Error(
-      "RANK_PROVIDER_SUBMIT_ENABLED may be enabled only for the rank worker"
+      "Rank result token must differ from all other service tokens"
     );
   }
-  if (nodeEnv === "production" && rankProviderSubmitEnabled) {
+  if (
+    rankProviderSubmitEnabled &&
+    processRole !== "CONNECTOR_WORKER"
+  ) {
     throw new Error(
-      "RANK_PROVIDER_SUBMIT_ENABLED cannot be enabled in production before the recorded provider contract gate is complete"
+      "RANK_PROVIDER_SUBMIT_ENABLED may be enabled only for the connector worker"
     );
   }
   if (
@@ -1148,6 +1172,7 @@ export function loadAppConfig(
     PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN:
       integrationCredentialApiToken,
     JOBS_TO_SEO_RANK_TOKEN: rankManifestApiToken,
+    JOBS_TO_SEO_RANK_RESULT_TOKEN: rankResultApiToken,
     JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankGrantApiToken,
     JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: authEmailApiToken
   });
@@ -1174,6 +1199,7 @@ export function loadAppConfig(
       ? { integrationCredentialApiToken }
       : {}),
     ...(rankManifestApiToken ? { rankManifestApiToken } : {}),
+    ...(rankResultApiToken ? { rankResultApiToken } : {}),
     ...(rankGrantApiToken ? { rankGrantApiToken } : {}),
     ...(authEmailApiToken ? { authEmailApiToken } : {}),
     internalCommandTimeoutMs,

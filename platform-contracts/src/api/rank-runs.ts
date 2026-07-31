@@ -509,7 +509,9 @@ const ACTIVE_RANK_JOB_STAGES: ReadonlySet<RankJobStage> = new Set([
 const CANCELLABLE_RANK_JOB_STAGES: ReadonlySet<RankJobStage> = new Set([
   "PREPARING_SCOPE",
   "WAITING_FOR_QUEUE",
-  ...ACTIVE_RANK_JOB_STAGES
+  ...[...ACTIVE_RANK_JOB_STAGES].filter(
+    (stage) => stage !== "FINALIZING"
+  )
 ]);
 
 const RANK_JOB_FAILURE_CODES: ReadonlySet<string> = new Set(

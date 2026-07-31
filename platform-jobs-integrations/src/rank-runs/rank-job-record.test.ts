@@ -114,7 +114,29 @@ test("projects an unresolved submit only as terminal action required", () => {
   assert.equal(summary.finishedAt, finishedAt.toISOString());
 });
 
-test("rejects action-required summaries with partially known outcomes", () => {
+test("projects persisted chunks while preserving an unresolved submit", () => {
+  const summary = toRankJobSummary(
+    rankJob({
+      status: "ACTION_REQUIRED",
+      stage: "SUBMIT_OUTCOME_UNKNOWN",
+      finishedAt: new Date("2026-07-29T12:00:03.000Z"),
+      errorSummary: { code: "SUBMIT_OUTCOME_UNKNOWN" },
+      resultSummary: {
+        pairCount: "3",
+        persistedCount: "1",
+        foundCount: "1",
+        notFoundCount: "0",
+        failedCount: "0",
+        submitOutcomeUnknownCount: "2"
+      },
+      progressCurrent: 1n
+    })
+  );
+  assert.equal(summary.status, "ACTION_REQUIRED");
+  assert.equal(summary.progress.current, "1");
+  assert.equal(summary.result.persistedCount, "1");
+  assert.equal(summary.result.submitOutcomeUnknownCount, "2");
+
   assert.throws(
     () =>
       toRankJobSummary(
@@ -128,7 +150,7 @@ test("rejects action-required summaries with partially known outcomes", () => {
             persistedCount: "1",
             foundCount: "1",
             notFoundCount: "0",
-            failedCount: "0",
+            failedCount: "1",
             submitOutcomeUnknownCount: "2"
           },
           progressCurrent: 1n

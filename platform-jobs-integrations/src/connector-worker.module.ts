@@ -6,6 +6,12 @@ import { IntegrationCredentialCryptoService } from "./integrations/integration-c
 import { IntegrationCredentialExecutionBrokerService } from "./integrations/integration-credential-execution-broker.service.js";
 import { IntegrationCredentialKeyCoverageService } from "./integrations/integration-credential-key-coverage.service.js";
 import { IntegrationCredentialValidationWorkerService } from "./integrations/integration-credential-validation-worker.service.js";
+import { ArsenkinRankConnector } from "./rank-runs/arsenkin-rank.connector.js";
+import { RankConnectorRuntimeBrokerService } from "./rank-runs/rank-connector-runtime-broker.service.js";
+import {
+  ARSENKIN_RANK_CONNECTOR,
+  RankConnectorRuntimeService
+} from "./rank-runs/rank-connector-runtime.service.js";
 
 @Module({
   imports: [ConfigModule.forRole("CONNECTOR_WORKER"), DatabaseModule],
@@ -14,7 +20,13 @@ import { IntegrationCredentialValidationWorkerService } from "./integrations/int
     IntegrationCredentialCryptoService,
     IntegrationCredentialExecutionBrokerService,
     IntegrationCredentialKeyCoverageService,
-    IntegrationCredentialValidationWorkerService
+    IntegrationCredentialValidationWorkerService,
+    RankConnectorRuntimeBrokerService,
+    RankConnectorRuntimeService,
+    {
+      provide: ARSENKIN_RANK_CONNECTOR,
+      useFactory: () => new ArsenkinRankConnector()
+    }
   ]
 })
 export class ConnectorWorkerModule {}

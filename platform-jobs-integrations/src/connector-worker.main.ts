@@ -8,6 +8,7 @@ import type { AppConfig } from "./config/app-config.js";
 import { APP_CONFIG } from "./config/config.module.js";
 import { ConnectorWorkerModule } from "./connector-worker.module.js";
 import { IntegrationCredentialValidationWorkerService } from "./integrations/integration-credential-validation-worker.service.js";
+import { RankConnectorRuntimeService } from "./rank-runs/rank-connector-runtime.service.js";
 import { bullMqConnectionOptions } from "./queue/bullmq-keyspace.js";
 import {
   enqueueIntegrationCredentialValidation,
@@ -15,6 +16,11 @@ import {
   INTEGRATION_CREDENTIAL_VALIDATION_QUEUE,
   type IntegrationCredentialValidationJobData
 } from "./queue/integration-credential-validation.queue.js";
+import {
+  enqueueRankConnectorRuntime,
+  RANK_CONNECTOR_RUNTIME_JOB,
+  type RankConnectorRuntimeJobData
+} from "./queue/rank-connector-runtime.queue.js";
 
 const logger = new Logger("IntegrationConnectorWorker");
 const UUID_PATTERN =
@@ -34,18 +40,35 @@ async function bootstrap(): Promise<void> {
   const validations = app.get(
     IntegrationCredentialValidationWorkerService
   );
+  const rankRuntime = app.get(RankConnectorRuntimeService);
   const workerConnection = redis(config.redisUrl);
   const queueConnection = redis(config.redisUrl);
   const queue = new Queue<IntegrationCredentialValidationJobData>(
     INTEGRATION_CREDENTIAL_VALIDATION_QUEUE,
     bullMqConnectionOptions(queueConnection)
   );
+  const rankQueue = new Queue<RankConnectorRuntimeJobData>(
+    INTEGRATION_CREDENTIAL_VALIDATION_QUEUE,
+    bullMqConnectionOptions(queueConnection)
+  );
   const leaseOwner = `connector-${randomUUID()}`;
-  const worker = new Worker<IntegrationCredentialValidationJobData>(
+  const worker = new Worker<
+    IntegrationCredentialValidationJobData | RankConnectorRuntimeJobData
+  >(
     INTEGRATION_CREDENTIAL_VALIDATION_QUEUE,
     async (job) => {
+      if (job.name === RANK_CONNECTOR_RUNTIME_JOB) {
+        if (
+          !("schemaVersion" in job.data) ||
+          job.data.schemaVersion !== "rank-connector-runtime@1"
+        ) {
+          throw new Error("Invalid rank connector runtime job");
+        }
+        return rankRuntime.processOne(leaseOwner);
+      }
       if (
         job.name !== INTEGRATION_CREDENTIAL_VALIDATION_JOB ||
+        !("jobId" in job.data) ||
         !UUID_PATTERN.test(job.data.jobId)
       ) {
         throw new Error("Invalid integration credential validation job");
@@ -60,8 +83,8 @@ async function bootstrap(): Promise<void> {
       concurrency:
         config.integrationCredentialValidation.concurrency,
       limiter: {
-        max: 5,
-        duration: 10_000
+        max: 30,
+        duration: 60_000
       }
     }
   );
@@ -75,6 +98,13 @@ async function bootstrap(): Promise<void> {
       for (const validationJobId of validationJobIds) {
         await enqueueIntegrationCredentialValidation(queue, validationJobId);
       }
+      await enqueueRankConnectorRuntime(
+        rankQueue,
+        Math.floor(
+          Date.now() /
+            (config.integrationCredentialValidation.dispatchSeconds * 1_000)
+        )
+      );
     } catch {
       logger.error("Unable to dispatch pending credential validations");
     } finally {
@@ -108,6 +138,7 @@ async function bootstrap(): Promise<void> {
     clearInterval(dispatchTimer);
     await worker.close();
     await queue.close();
+    await rankQueue.close();
     await workerConnection.quit();
     await queueConnection.quit();
     await app.close();

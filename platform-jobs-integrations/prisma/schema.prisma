@@ -125,6 +125,14 @@ enum RankConnectorExecutionStatus {
   READY_TO_SUBMIT
   CLAIMED
   SUBMITTING
+  SUBMIT_OUTCOME_UNKNOWN
+  POLL_WAIT
+  FETCHING
+  STAGED
+  PERSISTING
+  PERSISTED
+  FAILED_RETRYABLE
+  FAILED_FINAL
 }
 
 enum AuthEmailDeliveryStatus {
@@ -537,6 +545,17 @@ model RankConnectorExecution {
   leaseGeneration                      Int                          @default(0) @map("lease_generation")
   submitAttemptCount                   Int                          @default(0) @map("submit_attempt_count")
   submitBytesStartedAt                 DateTime?                    @map("submit_bytes_started_at") @db.Timestamptz(6)
+  providerTaskId                       String?                      @map("provider_task_id") @db.VarChar(100)
+  providerWireRequestSnapshot          Json?                        @map("provider_wire_request_snapshot")
+  providerWireRequestHash              Bytes?                       @map("provider_wire_request_hash")
+  providerSubmittedAt                  DateTime?                    @map("provider_submitted_at") @db.Timestamptz(6)
+  pollAttemptCount                     Int                          @default(0) @map("poll_attempt_count")
+  nextActionAt                         DateTime?                    @map("next_action_at") @db.Timestamptz(6)
+  observedAt                           DateTime?                    @map("observed_at") @db.Timestamptz(6)
+  normalizedResultSnapshot             Json?                        @map("normalized_result_snapshot")
+  normalizedResultHash                 Bytes?                       @map("normalized_result_hash")
+  lastErrorCode                        String?                      @map("last_error_code") @db.VarChar(100)
+  finishedAt                           DateTime?                    @map("finished_at") @db.Timestamptz(6)
   version                              Int                          @default(1)
   createdAt                            DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt                            DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -554,6 +573,7 @@ model RankConnectorExecution {
   @@unique([workspaceId, jobItemId, executionAttempt], map: "rank_connector_executions_workspace_item_attempt_key")
   @@index([workspaceId, projectId, jobId, createdAt], map: "rank_connector_executions_job_created_idx")
   @@index([status, authorizationExpiresAt, leaseExpiresAt, createdAt, id], map: "rank_connector_executions_claim_due_idx")
+  @@index([status, nextActionAt, leaseExpiresAt, createdAt, id], map: "rank_connector_executions_poll_due_idx")
   @@map("rank_connector_executions")
 }
 

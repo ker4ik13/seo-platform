@@ -386,7 +386,16 @@ WHERE current_database() = 'jobs_db'
 \gexec
 
 SELECT format(
-  'GRANT UPDATE (id) ON TABLE public.job_items TO %I',
+  'GRANT UPDATE (
+    status,
+    provider_request_id,
+    output_reference,
+    actual_cost_micro,
+    error,
+    attempt,
+    retry_at,
+    updated_at
+  ) ON TABLE public.job_items TO %I',
   :'rank_runtime_role'
 )
 WHERE current_database() = 'jobs_db'
@@ -607,6 +616,7 @@ FROM unnest(CASE current_database()
   ]
   WHEN 'jobs_db' THEN ARRAY[
     'public.manual_rank_job_state_is_coherent(public."JobStatus",public."RankManifestSealState",public."RankCheckFinalStatus")',
+    'public.manual_rank_action_result_is_coherent(jsonb,bigint,bigint)',
     'public.rank_execution_grant_request_is_exact(jsonb,uuid,uuid,uuid,uuid,integer,integer,bytea)',
     'public.rank_execution_grant_decision_is_exact(jsonb,text,bytea,bytea,timestamp with time zone,timestamp with time zone)',
     'public.list_integration_credential_key_versions()',
@@ -624,8 +634,11 @@ SELECT format(
 )
 FROM unnest(ARRAY[
   'public.manual_rank_job_state_is_coherent(public."JobStatus",public."RankManifestSealState",public."RankCheckFinalStatus")',
+  'public.manual_rank_action_result_is_coherent(jsonb,bigint,bigint)',
   'public.rank_execution_grant_request_is_exact(jsonb,uuid,uuid,uuid,uuid,integer,integer,bytea)',
-  'public.rank_execution_grant_decision_is_exact(jsonb,text,bytea,bytea,timestamp with time zone,timestamp with time zone)'
+  'public.rank_execution_grant_decision_is_exact(jsonb,text,bytea,bytea,timestamp with time zone,timestamp with time zone)',
+  'public.claim_rank_staged_result(text,integer)',
+  'public.complete_rank_staged_result(uuid,uuid,text,uuid,integer,integer,boolean)'
 ]) AS rank_required_routine(routine_signature)
 WHERE current_database() = 'jobs_db'
 ORDER BY routine_signature

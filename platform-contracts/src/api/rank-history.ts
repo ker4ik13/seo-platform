@@ -138,7 +138,7 @@ const QUALITY_FLAGS: ReadonlySet<string> = new Set([
 ]);
 const UUID_V7_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-const CONNECTOR_VERSION_PATTERN = /^[a-z0-9][a-z0-9._-]{0,63}$/u;
+const CONNECTOR_VERSION_PATTERN = /^[a-z0-9][a-z0-9@._-]{0,63}$/u;
 const MAX_URL_LENGTH = 4_096;
 const MAX_TITLE_LENGTH = 2_048;
 const MAX_SNIPPET_LENGTH = 8_192;

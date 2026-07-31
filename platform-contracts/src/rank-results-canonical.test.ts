@@ -204,6 +204,18 @@ test("ingest preimage is exact, complete, sealed-order and canonically flagged",
   );
 });
 
+test("accepts the sealed execution connector version vocabulary", () => {
+  const command = {
+    ...ingestCommand(),
+    connectorVersion: "arsenkin-positions@1.0.0"
+  };
+  assert.equal(
+    rankChunkIngestHashPreimage(command, sealedChunk())
+      .connectorVersion,
+    "arsenkin-positions@1.0.0"
+  );
+});
+
 test("equivalent quality-flag order has one ingest hash", () => {
   const first = ingestCommand();
   const second = ingestCommand();

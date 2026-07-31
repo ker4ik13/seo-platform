@@ -43,7 +43,7 @@ test(
          WHERE provider = 'ARSENKIN'
            AND capability = 'SERP_RANK_TRACKING'`
       );
-      assert.equal(control.rows[0]?.submitEnabled, false);
+      assert.equal(control.rows[0]?.submitEnabled, true);
 
       const stale = await createClaimableExecution(
         setup,

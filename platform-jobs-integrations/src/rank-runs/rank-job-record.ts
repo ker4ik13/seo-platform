@@ -274,11 +274,8 @@ export function toRankJobSummary(stored: StoredRankJob): RankJobSummary {
       if (
         code !== "SUBMIT_OUTCOME_UNKNOWN" ||
         stored.stage !== "SUBMIT_OUTCOME_UNKNOWN" ||
-        result.persistedCount !== "0" ||
-        result.foundCount !== "0" ||
-        result.notFoundCount !== "0" ||
-        result.failedCount !== "0" ||
-        result.submitOutcomeUnknownCount !== result.pairCount
+        BigInt(result.persistedCount) >= BigInt(result.pairCount) ||
+        BigInt(result.submitOutcomeUnknownCount) < 1n
       ) {
         invalid();
       }
@@ -325,6 +322,10 @@ function resultSummary(
     BigInt(result.persistedCount) !==
       BigInt(result.foundCount) + BigInt(result.notFoundCount) ||
     BigInt(result.persistedCount) > BigInt(result.pairCount) ||
+    BigInt(result.persistedCount) +
+        BigInt(result.failedCount) +
+        BigInt(result.submitOutcomeUnknownCount) !==
+      BigInt(result.pairCount) ||
     BigInt(result.pairCount) !== expectedPairCount ||
     BigInt(result.persistedCount) !== expectedPersistedCount
   ) {

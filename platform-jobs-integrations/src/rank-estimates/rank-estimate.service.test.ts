@@ -620,6 +620,7 @@ function scope(
     configuration: {
       searchEngine: "GOOGLE",
       countryCode: "RU",
+      regionCode: "1011969",
       language: "ru",
       device: "DESKTOP",
       depth: 30,

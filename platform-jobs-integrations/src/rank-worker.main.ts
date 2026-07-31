@@ -15,6 +15,8 @@ import {
 } from "./queue/rank-preparation.queue.js";
 import { RankExecutionDispatchService } from "./rank-runs/rank-execution-dispatch.service.js";
 import { RankPreparationService } from "./rank-runs/rank-preparation.service.js";
+import { RankResultFinalizationService } from "./rank-runs/rank-result-finalization.service.js";
+import { RankResultPersistenceService } from "./rank-runs/rank-result-persistence.service.js";
 import { RankWorkerModule } from "./rank-worker.module.js";
 
 const logger = new Logger("RankPreparationWorker");
@@ -32,6 +34,8 @@ async function bootstrap(): Promise<void> {
   }
   const preparation = app.get(RankPreparationService);
   const execution = app.get(RankExecutionDispatchService);
+  const finalization = app.get(RankResultFinalizationService);
+  const resultPersistence = app.get(RankResultPersistenceService);
   const workerConnection = redis(config.redisUrl);
   const queueConnection = redis(config.redisUrl);
   const queue = new Queue<RankPreparationJobData>(
@@ -77,6 +81,27 @@ async function bootstrap(): Promise<void> {
           await execution.process(id);
         } catch {
           logger.warn("Unable to dispatch one rank execution");
+        }
+      }
+      for (
+        let index = 0;
+        index < config.rankPreparation.concurrency;
+        index += 1
+      ) {
+        const outcome = await resultPersistence.processOne(
+          `rank-result-${randomUUID()}`
+        );
+        if (outcome === "IDLE") break;
+      }
+      const finalizationIds = await finalization.pendingJobIds();
+      for (const id of finalizationIds) {
+        try {
+          await finalization.process(
+            id,
+            `rank-finalize-${randomUUID()}`
+          );
+        } catch {
+          logger.warn("Unable to finalize one rank result");
         }
       }
     } catch {

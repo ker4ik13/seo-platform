@@ -64,10 +64,11 @@ Wizard:
 
 ### 3.1. Первый manual BYOK slice
 
-По ADR-2026-034 первый execution slice использует Arsenkin `positions` только
-после прохождения provider contract gate. До этого разрешены context,
-assignment, binding, estimate и compatibility UI, но live submit выключен
-provider/capability kill switch.
+По ADR-2026-034 первый execution slice использует Arsenkin `check-top` после
+provider contract, quota, credential freshness и compatibility gates.
+Context, assignment, binding, estimate и compatibility UI не делают сетевой
+запрос; live submit выполняет только isolated connector-worker под новой
+kill-switch generation.
 
 Первый scope ограничен Google Desktop/Mobile TOP-30, simple format, одним
 context на provider task, chunk до 250 keywords и 1 000 keywords на command.
@@ -148,28 +149,28 @@ text, но не credential identity/material; grant evidence v2 и состав�
 replay снова проверяет authoritative SEO Data chunk, поэтому self-consistent
 локальная подмена не принимается.
 
-Default-closed `SECURITY DEFINER` claim под canonical locks повторно проверяет
-current graph и переводит ровно одну строку в pre-network `CLAIMED`, возвращая
-только scoped encrypted credential projection. `PUBLIC` execute отозван, а
-authorize повторно проверяет graph/lease/control fence и атомарно фиксирует
-`SUBMITTING` до возможных network bytes. `CLAIMED` сам по себе не разрешает
-provider call; следующими остаются runtime caller, recorded Arsenkin wire
-contract, provider submit/status и producer нормализованных результатов.
+`SECURITY DEFINER` claim под canonical locks повторно проверяет current graph
+и переводит ровно одну строку в pre-network `CLAIMED`, возвращая только scoped
+encrypted credential projection. `PUBLIC` execute отозван, а authorize
+повторно проверяет graph/lease/control fence и атомарно фиксирует
+`SUBMITTING` до возможных network bytes. Isolated connector-worker затем
+отправляет documented Arsenkin `check-top`, durable хранит exact wire
+snapshot/hash и task ID, poll-ит результат и сохраняет только normalized
+found/not-found output без raw provider body.
 
-Platform API issuer foundation уже принимает exact Jobs request без
+Platform API issuer принимает exact Jobs request без
 binding/credential IDs, повторно проверяет owned lifecycle/RBAC state и
 сохраняет immutable 30-секундный decision receipt с exact replay. Production
-policy пока всегда fail-closed, потому что authoritative entitlement/quota
-ledger не реализован. Jobs bounded client уже сохраняет durable `REQUESTED`
+controlled-beta policy резервирует bounded BYOK task quota. Jobs bounded
+client сохраняет durable `REQUESTED`
 до HTTP, делает exact replay и по часам `jobs_db` фиксирует
 `DENIED`/`EXPIRED`/`GRANTED_PENDING_CONSUME`/`REJECTED_LOCAL`; валидное
 положительное решение под повторной проверкой graph атомарно создаёт
-secret-free scoped execution и становится `CONSUMED`. Dispatcher path
-по-прежнему не вызывает service. DB-control claim по умолчанию закрыт,
-использованные kill-switch versions immutable и не переиспользуются.
-Connector permission allowlist выдаёт только exact claim/authorize execute,
-но runtime caller отсутствует. Поэтому foundation не разрешает provider
-submit.
+secret-free scoped execution и становится `CONSUMED`. Dispatcher вызывает
+service по одному sealed chunk. Использованные kill-switch versions immutable
+и не переиспользуются; runtime activation выдаётся только новой generation
+`arsenkin-positions@2`. Connector permission allowlist содержит только exact
+claim/authorize/runtime broker execute и не выдаёт table DML.
 
 ### 3.4. Реализованный read slice истории
 
@@ -178,8 +179,9 @@ SEO Data принимает exact normalized result chunks через отдел
 projection, атомарно finalizes successful/partial manifest и пишет redacted
 completion outbox. Внутренний history read использует tenant/filter-bound
 HMAC cursor под отдельным `RANK_HISTORY_CURSOR_KEY`. Текущий Compose требует
-оба secret, но передаёт их только `seo-data`; Jobs result producer ещё не
-подключён.
+оба secret и передаёт result token только `seo-data` и isolated
+`rank-worker`; producer повторно проверяет staged hash и exact ingest receipt
+до terminal Job/manifest finalization.
 
 Public Platform API предоставляет
 `GET /api/v1/projects/:projectId/rank-history`. Route требует browser session,
@@ -195,11 +197,10 @@ base64url cursor. Array/unknown parameters и некогерентный диа�
 Private/noindex Web route
 `/app/projects/:projectId/rankings` показывает UTC date range,
 context/keyword filters, load-more, loading/empty/error/offline states и
-явные archived/read-only пояснения. Экран не доказывает готовность сбора:
-claim DDL остаётся default-closed и не подключён к worker; authorize/
-`SUBMITTING`, полная scoped credential boundary, live provider submit/status
-и normalized result producer отсутствуют, поэтому до trusted ingest история
-остаётся пустой. Live Arsenkin `set` работает fail-closed.
+явные archived/read-only пояснения. Сбор запускается только для
+provider-compatible Google/depth-30/numeric-region конфигурации и свежего
+пользовательского Arsenkin BYOK credential; неподдержанные safe-search,
+canonical/mirror rules и нечисловой регион блокируются до provider call.
 
 ## 4. Rank snapshot
 

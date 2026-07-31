@@ -7,6 +7,7 @@ const expectedEnvironment = [
   "DATABASE_URL",
   "INTEGRATION_CREDENTIAL_ROLE",
   "JOBS_TO_PLATFORM_RANK_GRANT_TOKEN",
+  "JOBS_TO_SEO_RANK_RESULT_TOKEN",
   "JOBS_TO_SEO_RANK_TOKEN",
   "PLATFORM_API_COMMAND_TIMEOUT_MS",
   "PLATFORM_API_URL",
@@ -65,7 +66,7 @@ test("rank worker has an explicit least-capability runtime boundary", async () =
   assert.match(environment, /RANK_PROVIDER_SUBMIT_ENABLED: "false"/u);
   assert.match(
     environment,
-    /RANK_PROVIDER_KILL_SWITCH_VERSION: \$\{RANK_PROVIDER_KILL_SWITCH_VERSION:-arsenkin-positions@1\}/u
+    /RANK_PROVIDER_KILL_SWITCH_VERSION: \$\{RANK_PROVIDER_KILL_SWITCH_VERSION:-arsenkin-positions@2\}/u
   );
   assert.match(environment, /INTEGRATION_CREDENTIAL_ROLE: DISABLED/u);
   assert.match(environment, /PLATFORM_API_URL: http:\/\/platform-api:4000/u);
@@ -81,7 +82,6 @@ test("rank worker has an explicit least-capability runtime boundary", async () =
   for (const forbidden of [
     "INTERNAL_API_TOKEN",
     "PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN",
-    "JOBS_TO_SEO_RANK_RESULT_TOKEN",
     "RANK_HISTORY_CURSOR_KEY",
     "INTEGRATION_CREDENTIAL_KEYS",
     "INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS",

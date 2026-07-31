@@ -25,8 +25,12 @@ const expectedFunctions = [
   "public.finish_integration_credential_validation_job_failure( UUID, TEXT, UUID, INTEGER, TEXT, INTEGER )",
   "public.finish_integration_credential_validation_provider_failure( UUID, TEXT, UUID, INTEGER, TEXT, TEXT, INTEGER )",
   "public.finish_integration_credential_validation_success( UUID, TEXT, UUID, INTEGER, TEXT, JSONB )",
-  "public.claim_rank_connector_execution(TEXT, INTEGER, TEXT)",
-  "public.authorize_rank_connector_execution_submit( UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT )"
+  "public.authorize_rank_connector_execution_submit( UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT )",
+  "public.claim_rank_connector_submit_bounded(TEXT, INTEGER, TEXT)",
+  "public.read_rank_connector_submit_request( UUID, UUID, TEXT, UUID, INTEGER, INTEGER )",
+  "public.complete_rank_connector_submit( UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, TEXT, JSONB, BYTEA, TEXT )",
+  "public.claim_rank_connector_poll(TEXT, INTEGER, TEXT)",
+  "public.complete_rank_connector_poll( UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, INTEGER, TIMESTAMPTZ, JSONB, BYTEA, TEXT )"
 ];
 
 function compactSql(sql) {

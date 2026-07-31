@@ -8,6 +8,7 @@ import {
 
 const credentialApiToken = "c".repeat(32);
 const rankManifestApiToken = "m".repeat(32);
+const rankResultApiToken = "r".repeat(32);
 const rankGrantApiToken = "g".repeat(32);
 
 test("keeps optional adapters disabled by default", () => {
@@ -30,7 +31,7 @@ test("keeps optional adapters disabled by default", () => {
   assert.equal(config.rankExecution.submitEnabled, false);
   assert.equal(
     config.rankExecution.killSwitchVersion,
-    "arsenkin-positions@1"
+    "arsenkin-positions@2"
   );
 });
 
@@ -97,6 +98,7 @@ test("loads an isolated rank preparation worker", () => {
     DATABASE_URL: "postgresql://test",
     RANK_PREPARATION_ENABLED: "true",
     JOBS_TO_SEO_RANK_TOKEN: rankManifestApiToken,
+    JOBS_TO_SEO_RANK_RESULT_TOKEN: rankResultApiToken,
     JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankGrantApiToken,
     PLATFORM_API_URL: "http://platform-api:4000",
     PLATFORM_API_COMMAND_TIMEOUT_MS: "2500"
@@ -104,6 +106,7 @@ test("loads an isolated rank preparation worker", () => {
 
   assert.equal(config.rankPreparation.enabled, true);
   assert.equal(config.rankManifestApiToken, rankManifestApiToken);
+  assert.equal(config.rankResultApiToken, rankResultApiToken);
   assert.equal(config.rankGrantApiToken, rankGrantApiToken);
   assert.equal(config.services.platformApi, "http://platform-api:4000");
   assert.equal(config.platformApiCommandTimeoutMs, 2_500);
@@ -115,6 +118,7 @@ test("loads an isolated rank preparation worker", () => {
 test("rejects rank tokens outside the isolated rank worker", () => {
   for (const token of [
     { JOBS_TO_SEO_RANK_TOKEN: rankManifestApiToken },
+    { JOBS_TO_SEO_RANK_RESULT_TOKEN: rankResultApiToken },
     { JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankGrantApiToken }
   ]) {
     assert.throws(
@@ -132,6 +136,7 @@ test("rejects rank tokens outside the isolated rank worker", () => {
 test("requires both dedicated tokens on the rank worker", () => {
   for (const token of [
     { JOBS_TO_SEO_RANK_TOKEN: rankManifestApiToken },
+    { JOBS_TO_SEO_RANK_RESULT_TOKEN: rankResultApiToken },
     { JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankGrantApiToken }
   ]) {
     assert.throws(
@@ -153,6 +158,7 @@ test("rejects unrelated secrets and short leases on rank workers", () => {
     DATABASE_URL: "postgresql://test",
     RANK_PREPARATION_ENABLED: "true",
     JOBS_TO_SEO_RANK_TOKEN: rankManifestApiToken,
+    JOBS_TO_SEO_RANK_RESULT_TOKEN: rankResultApiToken,
     JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankGrantApiToken
   };
   assert.throws(
@@ -182,6 +188,7 @@ test("keeps every rank service token distinct", () => {
         DATABASE_URL: "postgresql://test",
         RANK_PREPARATION_ENABLED: "true",
         JOBS_TO_SEO_RANK_TOKEN: rankManifestApiToken,
+        JOBS_TO_SEO_RANK_RESULT_TOKEN: rankResultApiToken,
         JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankManifestApiToken
       }),
     /Rank manifest token must differ/u
@@ -202,13 +209,14 @@ test("bounds the Platform API command timeout", () => {
   }
 });
 
-test("loads a versioned rank kill switch but blocks live production submit", () => {
+test("allows recorded provider submit only on the execution connector worker", () => {
+  const encryptionKey = Buffer.alloc(32, 1).toString("base64url");
   const development = loadAppConfig({
-    NODE_ENV: "test",
+    NODE_ENV: "production",
     DATABASE_URL: "postgresql://test",
-    RANK_PREPARATION_ENABLED: "true",
-    JOBS_TO_SEO_RANK_TOKEN: rankManifestApiToken,
-    JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankGrantApiToken,
+    INTEGRATION_CREDENTIAL_ROLE: "EXECUTION",
+    INTEGRATION_CREDENTIAL_KEYS: `1:${encryptionKey}`,
+    INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1",
     RANK_PROVIDER_SUBMIT_ENABLED: "true",
     RANK_PROVIDER_KILL_SWITCH_VERSION: "arsenkin-positions@2"
   });
@@ -221,14 +229,15 @@ test("loads a versioned rank kill switch but blocks live production submit", () 
   assert.throws(
     () =>
       loadAppConfig({
-        NODE_ENV: "production",
+        NODE_ENV: "test",
         DATABASE_URL: "postgresql://test",
         RANK_PREPARATION_ENABLED: "true",
         JOBS_TO_SEO_RANK_TOKEN: rankManifestApiToken,
+        JOBS_TO_SEO_RANK_RESULT_TOKEN: rankResultApiToken,
         JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankGrantApiToken,
         RANK_PROVIDER_SUBMIT_ENABLED: "true"
       }),
-    /cannot be enabled in production/u
+    /only for the connector worker/u
   );
   assert.throws(
     () =>
@@ -627,6 +636,7 @@ test("rejects process-role and capability-role mismatches", () => {
           DATABASE_URL: "postgresql://test",
           RANK_PREPARATION_ENABLED: "true",
           JOBS_TO_SEO_RANK_TOKEN: rankManifestApiToken,
+          JOBS_TO_SEO_RANK_RESULT_TOKEN: rankResultApiToken,
           JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: rankGrantApiToken
         },
         "HTTP"
@@ -934,6 +944,7 @@ test("rejects every undeclared adapter capability by process role", () => {
       DATABASE_URL: "postgresql://test",
       RANK_PREPARATION_ENABLED: "true",
       JOBS_TO_SEO_RANK_TOKEN: "m".repeat(32),
+      JOBS_TO_SEO_RANK_RESULT_TOKEN: "r".repeat(32),
       JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: "g".repeat(32)
     },
     CONNECTOR_WORKER: {

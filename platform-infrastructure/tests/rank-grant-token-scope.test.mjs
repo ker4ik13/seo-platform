@@ -86,10 +86,10 @@ test("rank grant token examples stay fail-closed and validation supplies a CI-on
   assert.match(rootExample, /^PLATFORM_API_COMMAND_TIMEOUT_MS=5000$/mu);
   assert.match(jobsExample, /^PLATFORM_API_COMMAND_TIMEOUT_MS=5000$/mu);
   assert.match(jobsExample, /^PLATFORM_API_URL=http:\/\/platform-api:4000$/mu);
-  assert.match(jobsExample, /^RANK_PROVIDER_SUBMIT_ENABLED=false$/mu);
+  assert.match(jobsExample, /^RANK_PROVIDER_SUBMIT_ENABLED=true$/mu);
   assert.match(
     jobsExample,
-    /^RANK_PROVIDER_KILL_SWITCH_VERSION=arsenkin-positions@1$/mu
+    /^RANK_PROVIDER_KILL_SWITCH_VERSION=arsenkin-positions@2$/mu
   );
   assert.match(
     packageJson.scripts["infra:validate:example"],

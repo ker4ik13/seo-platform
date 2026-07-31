@@ -122,6 +122,10 @@ const dedicatedBoundaries = new Map([
     ["platform-api", "rank-worker"]
   ],
   [
+    "JOBS_TO_SEO_RANK_RESULT_TOKEN",
+    ["rank-worker", "seo-data"]
+  ],
+  [
     "JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN",
     ["auth-email-worker", "platform-api"]
   ]

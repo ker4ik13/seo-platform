@@ -249,8 +249,9 @@ passwords. Runtime намеренно сохраняет
 visible ASCII без whitespace/control/comma. Jobs HTTP,
 import, inspection, system, rank, connector и auth-email используют отдельные process
 roles/env allowlists. Эти gates уменьшают secret fan-out и ошибку конфигурации,
-но не закрывают P2: остаются provider runtime, durable delivery, egress,
-observability, target-environment rollout и load/restore evidence.
+но не закрывают P2: остаются общий notification delivery, egress,
+observability, live BYOK smoke, target-environment rollout и load/restore
+evidence.
 
 Redis hardening теперь разделяет Jobs, Realtime и Directus на три
 internal-only instance/network. Jobs использует AOF + `noeviction` и шесть
@@ -325,17 +326,14 @@ durable Jobs preparation, public/Web Job lifecycle, normalized SEO Data
 history/outbox и public history API/UI готовы. Jobs bounded grant client и
 durable intent/decision history тоже реализованы; atomic
 `CONSUMED ↔ READY_TO_SUBMIT`, scoped credential broker, claim и атомарный
-`CLAIMED → SUBMITTING` foundation готовы, но provider request/status runtime и
-normalized result producer ещё отсутствуют. Platform API issuer foundation сохраняет
-immutable exact 30-секундные decisions под lifecycle/RBAC locks, production
-policy остаётся fail-closed, а Jobs не выдаёт credential или provider action;
-это ещё не provider execution. Live `set` остаётся выключенным до recorded
-one-key contract или письменного подтверждения response/status/retry
-semantics, producer-side обработки ingest receipts, durable
-`SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit и production environment evidence.
-Наличие working
-credential validation и capability в binding не считается доказательством рабочего
-`positions` execution.
+`CLAIMED → SUBMITTING` boundary, documented Arsenkin request adapter,
+durable submit/poll/stage state, normalized ingest producer и terminal
+Job/manifest finalizer реализованы. Platform API issuer сохраняет immutable
+exact 30-секундные decisions под lifecycle/RBAC locks и controlled-beta quota
+reservation. Неоднозначный submit durable переходит в
+`SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit. Runtime включается только новой
+kill-switch generation `arsenkin-positions@2`; live BYOK smoke и production
+environment evidence остаются обязательной приёмкой внешнего провайдера.
 
 До production rollout BYOK дополнительно блокируют две границы текущего
 validation slice:
@@ -380,16 +378,15 @@ validation slice:
 - валидный grant атомарно получает `CONSUMED` только вместе с единственной
   secret-free `READY_TO_SUBMIT` execution row; deferred invariant запрещает
   commit любой половины;
-- dispatcher/provider path service не вызывает; default-closed
-  `SECURITY DEFINER` claim/authorize и exact connector grants существуют, но
-  runtime caller ещё не подключён к scoped role, а production submit
-  fail-closed выключен;
+- dispatcher вызывает grant service по sealed chunks; `SECURITY DEFINER`
+  claim/authorize/runtime brokers и exact connector grants используются
+  isolated connector role, а submit активирован новой generation;
 - PostgreSQL 18 fresh/negative/race и upgrade ACL tests для
   intent/consume/claim/authorize пройдены; target-environment login/rollout и
   provider lifecycle evidence остаются обязательными;
-- приёмка этого slice не закрывает подключение connector runtime к scoped
-  role, provider contract, normalized producer, vault isolation и production
-  security gates.
+- приёмка этого slice закрывает connector runtime, provider contract,
+  normalized producer и vault isolation; отдельно остаются live credential
+  smoke, target-environment rollout и production operations gates.
 
 #### Промежуточная приёмка public history read
 

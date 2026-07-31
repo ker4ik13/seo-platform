@@ -12,7 +12,7 @@ import {
 const sourceDirectoryUrl = new URL("../", import.meta.url);
 const sourceDirectoryPath = fileURLToPath(sourceDirectoryUrl);
 const expectedConstructionSites = new Map([
-  ["connector-worker.main.ts", 2],
+  ["connector-worker.main.ts", 3],
   ["import-worker.main.ts", 2],
   ["inspection-worker.main.ts", 2],
   ["queue/queue.service.ts", 5],

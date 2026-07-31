@@ -9,13 +9,19 @@ import type { Prisma } from "../generated/prisma/client.js";
 
 const EXECUTION_HASH_SCHEMA = "rank-estimate-execution@1";
 const PROVIDER_MAPPING_VERSION = "arsenkin-positions@1";
+const ARSENKIN_REGION_ID_PATTERN = /^[1-9]\d{0,9}$/u;
 
 export function rankEstimateExecutionParameters(
   configuration: TrackingContextConfigurationInput
 ): InternalRankExecutionParameters | undefined {
   if (
     configuration.searchEngine !== "GOOGLE" ||
-    configuration.depth !== 30
+    configuration.depth !== 30 ||
+    !configuration.regionCode ||
+    !ARSENKIN_REGION_ID_PATTERN.test(configuration.regionCode) ||
+    configuration.safeSearch ||
+    configuration.domainMatchRule.mode === "CANONICAL_DOMAIN" ||
+    configuration.domainMatchRule.mode === "ANY_PROJECT_MIRROR"
   ) {
     return undefined;
   }

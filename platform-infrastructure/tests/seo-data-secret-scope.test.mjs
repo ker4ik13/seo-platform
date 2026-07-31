@@ -49,7 +49,7 @@ function interpolationSource(assignment) {
   return match[1];
 }
 
-test("rank result token reaches isolated preflight and seo-data only", async () => {
+test("rank result token reaches preflight, producer and seo-data only", async () => {
   const composeUrl = new URL("../compose.dokploy.yml", import.meta.url);
   const compose = await readFile(composeUrl, "utf8");
   const preparationOccurrences = secretOccurrences(
@@ -60,12 +60,12 @@ test("rank result token reaches isolated preflight and seo-data only", async () 
 
   assert.deepEqual(
     resultOccurrences.map(({ service }) => service),
-    ["service-token-preflight", "seo-data"],
-    `${resultTokenName} must not reach anchors, runtime workers or migrations`
+    ["service-token-preflight", "seo-data", "rank-worker"],
+    `${resultTokenName} must not reach anchors, connector or unrelated workers`
   );
   assert.deepEqual(
     resultOccurrences.map(({ line }) => line),
-    Array(2).fill(
+    Array(3).fill(
       `${resultTokenName}: \${${resultTokenName}:?${resultTokenName} is required}`
     )
   );

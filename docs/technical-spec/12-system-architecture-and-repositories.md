@@ -216,16 +216,17 @@ capability останавливает startup. Rank и connector сохраня�
 `src/rank-worker.main.ts` является отдельным preparation/recovery process:
 credential role `DISABLED`, только `jobs_db`, Redis, internal SEO Data URL и
 выделенные `JOBS_TO_SEO_RANK_TOKEN` и
-`JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`. Последний также получает только
+`JOBS_TO_PLATFORM_RANK_GRANT_TOKEN`, а для normalized ingest —
+`JOBS_TO_SEO_RANK_RESULT_TOKEN`. Grant token также получает только
 Platform API; generic Jobs HTTP и остальные worker processes его не получают.
 Rank-worker не получает HTTP/internal/vault, NATS, S3, SMTP или provider
 credentials, не публикует port и в текущем Dokploy Compose подключён только к
 `internal` и отдельной `jobs-redis`. Его bounded grant client сохраняет intent/decision и атомарно
-создаёт secret-free `CONSUMED/READY_TO_SUBMIT` scoped execution, но dispatcher
-его ещё не вызывает; scoped claim/authorize SQL и exact grants уже существуют,
-но runtime caller и live submit явно выключены. Перед live provider execution
-connector process обязан продолжать использовать только `jobs_connector`, а
-не Jobs owner/runtime login. Env изоляция сама по себе не заменяет DB grants.
+создаёт secret-free `CONSUMED/READY_TO_SUBMIT` scoped execution, а dispatcher
+вызывает его по одному sealed chunk. Scoped claim/authorize/runtime SQL и
+exact grants обслуживают isolated connector-worker под login
+`jobs_connector`; Jobs owner/runtime login provider credential не получает.
+Env изоляция сама по себе не заменяет DB grants.
 
 ### 3.6. `platform-realtime`
 

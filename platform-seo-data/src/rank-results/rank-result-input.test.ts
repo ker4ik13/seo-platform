@@ -144,7 +144,7 @@ function command(result: Readonly<Record<string, unknown>>) {
     provider: "ARSENKIN",
     operation: "POSITIONS",
     providerRequestId: "provider-task-1",
-    connectorVersion: "1.0.0",
+    connectorVersion: "arsenkin-positions@1.0.0",
     observedAt: "2026-07-29T12:00:00.000Z",
     results: [result],
     ingestEnvelopeHash: hash

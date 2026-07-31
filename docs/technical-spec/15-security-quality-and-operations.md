@@ -256,7 +256,8 @@
   выдаёт credential material. SECURITY DEFINER claim возвращает exact
   encrypted projection только после повторной проверки current graph и
   доступен connector role через exact permission grant; authorize имеет такой
-  же narrow grant. Ни одна из функций пока не вызывается runtime caller.
+  же narrow grant. Isolated connector-worker вызывает только эти brokers,
+  сохраняет secret-free wire evidence и не имеет table DML.
 - До HTTP Jobs записывает immutable exact `REQUESTED` intent и stable
   idempotency key в `rank_execution_grant_attempts`. Retryable ambiguity
   повторяет сохранённый request; response под canonical graph locks и DB
@@ -264,7 +265,7 @@
   `REJECTED_LOCAL`. `GRANTED_PENDING_CONSUME` не является execution claim;
   только повторно проверенная one-to-one
   `CONSUMED ↔ rank_connector_executions/READY_TO_SUBMIT` пара фиксируется
-  атомарно. Dispatcher/provider path к service не подключён.
+  атомарно. Dispatcher вызывает service по одному sealed manifest chunk.
 - Plaintext keyword manifest boundary использует отдельный
   `JOBS_TO_SEO_RANK_TOKEN` и `x-rank-execution-token`. Он обязан отличаться
   от всех general caller/audience, credential/realtime и result tokens.
@@ -1191,22 +1192,18 @@ Radar/crawler capacity:
   отдельные metrics/alerts до production; текущий runtime имеет только
   структурированные логи;
 - текущая изоляция обеспечена отдельным module/entrypoint и env allowlist.
-  Минимальная connector DB role и exact claim/authorize grants подготовлены и
-  проверены; перед live provider execution runtime caller должен быть
-  подключён именно к этой role. Общий Jobs DB user не считается окончательной
-  least-privilege boundary;
+  Минимальная connector DB role получает только exact
+  claim/authorize/runtime grants; provider runtime запускается именно под
+  этой role. Общий Jobs DB user credential material не получает;
 - grant service сохраняет intent/decision и атомарную secret-free
-  `CONSUMED/READY_TO_SUBMIT` пару, но не вызывается dispatcher-ом. Production
-  runtime отклоняет включённый submit, а Compose фиксирует
-  `RANK_PROVIDER_SUBMIT_ENABLED=false`;
-- default-closed SECURITY DEFINER claim/authorize DDL реализован,
-  `PUBLIC EXECUTE` отозван, connector role получает exact grants, но runtime
-  caller не подключён. Authorize атомарно фиксирует `SUBMITTING` и durable
-  may-have-started marker. Pure reducer сам по себе не является security
-  boundary без DB wrapper. Live Arsenkin submit остаётся выключенным, пока не
-  реализованы provider request/status/result, DB persistence для pure
-  lifecycle, остальные scoped operations, normalized ingest и provider
-  contract gates.
+  `CONSUMED/READY_TO_SUBMIT` пару, dispatcher вызывает его по sealed chunks,
+  а submit flag разрешён только connector-worker;
+- SECURITY DEFINER claim/authorize/runtime DDL реализован, `PUBLIC EXECUTE`
+  отозван. Authorize атомарно фиксирует `SUBMITTING` и durable
+  may-have-started marker; provider wire/task/poll/normalized state хранится
+  через lease-fenced brokers. Raw provider body не пишется в БД, логи,
+  события или queue payload. Live BYOK smoke и операционные alerts остаются
+  release evidence, а не недостающей runtime-функцией.
 
 ### 34.3. Jobs process capability isolation
 

@@ -1,0 +1,16 @@
+ALTER TYPE "RankConnectorExecutionStatus"
+  ADD VALUE IF NOT EXISTS 'SUBMIT_OUTCOME_UNKNOWN';
+ALTER TYPE "RankConnectorExecutionStatus"
+  ADD VALUE IF NOT EXISTS 'POLL_WAIT';
+ALTER TYPE "RankConnectorExecutionStatus"
+  ADD VALUE IF NOT EXISTS 'FETCHING';
+ALTER TYPE "RankConnectorExecutionStatus"
+  ADD VALUE IF NOT EXISTS 'STAGED';
+ALTER TYPE "RankConnectorExecutionStatus"
+  ADD VALUE IF NOT EXISTS 'PERSISTING';
+ALTER TYPE "RankConnectorExecutionStatus"
+  ADD VALUE IF NOT EXISTS 'PERSISTED';
+ALTER TYPE "RankConnectorExecutionStatus"
+  ADD VALUE IF NOT EXISTS 'FAILED_RETRYABLE';
+ALTER TYPE "RankConnectorExecutionStatus"
+  ADD VALUE IF NOT EXISTS 'FAILED_FINAL';

@@ -258,6 +258,15 @@ export class RankRunService {
             }
             if (isTerminal(current.status)) return current;
             if (current.status === "CANCEL_REQUESTED") return current;
+            // SEO Data finalization is the point of no return. Once this
+            // stage starts, an idempotent receipt may already exist even if
+            // the local Jobs transaction still needs recovery.
+            if (
+              current.status === "RUNNING" &&
+              current.stage === "FINALIZING"
+            ) {
+              return current;
+            }
             const [clock] = await transaction.$queryRaw<
               readonly { readonly now: Date }[]
             >`SELECT clock_timestamp() AS "now"`;

@@ -101,10 +101,20 @@ table DML. Submit authorization повторно блокирует полный
 сверяет owner/token/lease generation/row version и атомарно фиксирует
 `SUBMITTING` с durable marker до возможных network bytes.
 
-Runtime caller, recorded Arsenkin wire request, submit/status/fetch
-persistence и normalized result producer ещё отсутствуют. Production submit
-gate остаётся выключен до прохождения оставшихся contract/security gates
-ADR-2026-034; controlled-beta quota сама по себе network submit не включает.
+Реальный Arsenkin runtime замкнут: connector-worker отправляет документированный
+`check-top` POST, соблюдает общий лимит 30 запросов/минуту и не более пяти
+одновременных provider tasks, durable сохраняет wire snapshot/hash и task ID,
+poll-ит результат, но никогда не хранит raw provider body. Нормализованный
+found/not-found chunk проходит через отдельный SEO Data result boundary,
+после чего rank-worker атомарно закрывает Job/JobItems/manifest как
+`COMPLETED`, `PARTIALLY_COMPLETED`, `FAILED` или `ACTION_REQUIRED`.
+Поддержанный первый production profile ограничен Google, глубиной 30,
+числовым Arsenkin region ID, выключенным safe search и однозначными URL rules;
+несовместимая конфигурация блокируется ещё на estimate, до provider call.
+Миграция activation переводит DB-control на новую kill-switch generation
+`arsenkin-positions@2`; Compose включает submit только в isolated
+connector-worker. Старые execution evidence поколения `@1` активироваться
+задним числом не могут.
 
 Параллельный dependency-free срез browser Web Push device lifecycle
 реализует ADR-2026-035: профиль владеет устройствами, Platform API управляет
@@ -164,7 +174,8 @@ DB/Redis/S3/malware, system — Redis-only; rank и connector сохраняют
 Redis/general Jobs capabilities. Это закрывает credential fan-out через env,
 но не означает полной production готовности: source-built Redis compatibility
 подтверждена, однако pinned OCI startup, observability, общий notification
-sender, provider runtime и остальные release gates остаются.
+sender, live smoke с пользовательским Arsenkin BYOK credential и остальные
+release gates остаются.
 
 Этот файл является короткой оперативной картой. Полные требования находятся в [`docs/technical-spec/00-index.md`](./docs/technical-spec/00-index.md).
 
@@ -394,8 +405,7 @@ outbox/inbox foundations либо собственные producer rows.
   execution grants и отличается от всех остальных service tokens. Текущий
   Compose передаёт его только Platform API и выделенному rank-worker с
   bounded Jobs grant client. Generic Jobs HTTP, connector/import/inspection/
-  system/migration, Web и остальные сервисы его не получают. Production
-  Compose фиксирует `RANK_PROVIDER_SUBMIT_ENABLED=false`.
+  system/migration, Web и остальные сервисы его не получают.
 - `JOBS_TO_SEO_RANK_TOKEN` отличается от всех остальных service tokens и
   защищает seal/chunk boundary с plaintext keyword snapshots. До появления
   provider execution его получают только SEO Data HTTP и отдельный
@@ -403,8 +413,9 @@ outbox/inbox foundations либо собственные producer rows.
   migration processes его не получают.
 - `JOBS_TO_SEO_RANK_RESULT_TOKEN` защищает отдельную запись уже
   нормализованных результатов и не переиспользует preparation credential.
-  Текущий Compose требует его, но передаёт только SEO Data: result producer
-  ещё не подключён, а остальные процессы не получают этот secret.
+  Текущий Compose требует его и передаёт только SEO Data и isolated
+  rank-worker result producer; connector, generic HTTP, import, inspection,
+  system и migration processes secret не получают.
 - `RANK_HISTORY_CURSOR_KEY` — отдельный HMAC key непрозрачного history
   cursor. Текущий Compose требует и передаёт его только SEO Data; Platform
   API, Web, workers и migration processes key не получают.
@@ -633,10 +644,10 @@ Backend convention:
   bounded recovery, public-safe Job projection, exact private provider
   request intent, durable execution-grant intent/consume и PostgreSQL
   recovery dispatcher для `QUEUED → RUNNING`/per-chunk grant/failure
-  finalization; dependency-free
-  provider lifecycle reducer фиксирует
-  конечную state/event matrix и запрет auto-resubmit после ambiguous submit,
-  но его DB persistence/runtime wiring ещё отсутствуют;
+  finalization; documented Arsenkin adapter, durable submit/poll/stage state,
+  normalized result persistence и terminal Job/manifest finalizer. Provider
+  lifecycle запрещает auto-resubmit после ambiguous submit и переводит такой
+  исход в проверяемый `ACTION_REQUIRED`;
 - `platform-jobs-integrations/src/platform-api` — bounded/no-redirect client
   issuer-а с dedicated token, exact envelope/request/scope hash validation,
   no-store check, response size и timeout limits;
@@ -651,9 +662,18 @@ Backend convention:
   immutable SMTP receipt/terminal guards и запрет destructive mutation;
 - `platform-jobs-integrations/src/rank-worker.main.ts` — изолированный
   rank-preparation entrypoint с per-delivery lease owner, PostgreSQL
-  preparation/execution dispatcher recovery и двумя выделенными
-  manifest/grant rank tokens; grant service подключён, provider runtime ещё
-  не подключён;
+  preparation/execution dispatcher recovery, отдельными manifest/grant/result
+  tokens, staged-result ingest и terminal finalization;
+- `platform-jobs-integrations/src/connector-worker.main.ts` — isolated
+  credential-validation и Arsenkin submit/poll runtime в одном
+  provider-wide BullMQ limiter; credential material расшифровывается только
+  после lease-fenced DB claim и повторной submit authorization;
+- migrations `20260730123000_rank_connector_result_enum`,
+  `20260730123100_rank_connector_provider_runtime`,
+  `20260730123200_rank_job_runtime_finalization` и
+  `20260730123300_rank_provider_runtime_activation` — durable provider
+  lifecycle, least-privilege brokers, mixed terminal counts и новая
+  irreversible kill-switch generation;
 - `platform-jobs-integrations/src/seo-data` — строго валидируемый internal
   HTTP client владельца semantic core и bounded rank-estimate scope;
 - `platform-seo-data/src/semantic-imports` — нормализация, import receipts,
@@ -1242,9 +1262,10 @@ verified sealed command/chunk, сохраняется один раз без cre
 SECURITY DEFINER claim, scoped encrypted credential
 projection и exact connector permissions реализованы; `CLAIMED` остаётся
 pre-network. Authorize повторно проверяет весь current graph и атомарно
-фиксирует `SUBMITTING`/single-attempt marker до secret-free permit. Runtime
-caller, recorded connector wire submission/status и normalized result producer ещё не
-реализованы, поэтому production worker не создаёт provider snapshots.
+фиксирует `SUBMITTING`/single-attempt marker до secret-free permit.
+Connector-worker записывает exact wire/task/poll state и normalized staged
+output, а rank-worker проверяет ingest receipt и terminal закрывает
+Job/manifest. Raw provider body нигде durable не сохраняется.
 
 ## 8. Проверенное состояние
 
@@ -1254,10 +1275,10 @@ caller, recorded connector wire submission/status и normalized result producer 
 - Platform API tests: 387 pass, 0 fail, 4 opt-in PostgreSQL 18 tests skipped
   без отдельного disposable database URL.
 - SEO data unit tests: 116 pass, 0 fail.
-- Jobs/integrations tests: 394 pass, 0 fail, 9 disposable-DB tests skipped
+- Jobs/integrations tests: 415 pass, 0 fail, 9 disposable-DB tests skipped
   в обычном запуске; startup decrypt-canary targeted suite — 7/7 pass.
 - Realtime unit tests: 112 pass, 0 fail.
-- Contracts unit tests: 97 pass, 0 fail.
+- Contracts unit tests: 98 pass, 0 fail.
 - Unified Web helper tests: 151 pass, 0 fail.
 - Infrastructure DB-role/connector и затронутый rank dependency targeted
   scope: 9 pass, 0 fail; PostgreSQL regressions остаются opt-in в обычном
@@ -1269,6 +1290,12 @@ caller, recorded connector wire submission/status и normalized result producer 
   Directus cache-команды, health/default users и запрет admin/dangerous
   commands. Live NATS 2.12.12 smoke подтвердил четыре bcrypt identities,
   отсутствие plaintext-password warning и topology create → unchanged.
+- Свежий user-space PostgreSQL 16 compatibility rehearsal: все 26 Jobs
+  migrations применены одной цепочкой с test-only `uuidv7()` shim; новый
+  control row подтверждён как
+  `ARSENKIN/SERP_RANK_TRACKING/true/arsenkin-positions@2/version 2`.
+  Целевой PostgreSQL 18 runtime/race gate остаётся обязательным перед
+  production rollout.
 - Отдельный fresh PostgreSQL 18 service-role proof: pass; применены 37 Prisma
   migrations четырёх сервисов, подтверждены runtime CRUD/UUIDv7/constraints,
   запреты DDL/`_prisma_migrations`/`TRUNCATE`/membership/ownership/
@@ -1295,9 +1322,9 @@ caller, recorded connector wire submission/status и normalized result producer 
 - Resolved Compose topology: outbound-required Jobs runtimes имеют
   `internal,outbound`; connector не публикует ports и не получает
   management/NATS credentials.
-- Rank-worker Dokploy topology: 3/3 static tests и Compose config pass;
-  process использует только `internal`, 16 allowlisted env keys, отдельные
-  manifest/grant rank tokens, принудительный disabled submit и не получает
+- Rank-worker Dokploy topology: static tests pass; process использует только
+  `internal`, 17 allowlisted env keys, отдельные manifest/grant/result rank
+  tokens, принудительный disabled submit и не получает
   ports/outbound/NATS/S3/SMTP/vault credentials.
 - Visual QA: 1440, 1024 и 390 px; horizontal overflow не найден.
 - Semantics upload browser QA: 1280 px, runtime errors и horizontal overflow
@@ -1470,19 +1497,18 @@ caller, recorded connector wire submission/status и normalized result producer 
 
 ## 9. Следующий вертикальный срез
 
-Сначала закрывается пользовательский P1-контур:
+Ближайший пользовательский P1-контур:
 
-`versions/undo/export → comments/presence`
+`live DB/browser E2E для semantics/versions/export → comments/presence`
 
 Критерий — не наличие controller/service файлов, а browser E2E на живом
 PostgreSQL: пользователь создаёт проект и структуру групп, добавляет и
 редактирует запросы, выполняет bulk-команду, сохраняет view, экспортирует и
 восстанавливает версию без tenant/permission leak и silent overwrite.
 
-После P1 продолжается P2:
+После live rank smoke продолжается P2:
 
-`provider runtime caller → submit/status/fetch persistence →
-normalized result producer/ingest receipts`
+`schedules/automation → provider incident telemetry → raw SERP policy`
 
 Provider-free estimate и SEO Data immutable manifest из ADR-2026-034
 завершены; durable Jobs `PREPARING` saga, exact seal recovery, cooperative
@@ -1491,15 +1517,16 @@ cancel, public/Web Job lifecycle и normalized SEO Data result persistence
 подключены к internal read model. Authoritative one-time grant уже имеет
 Platform-owned issuer/receipt, Jobs-owned intent/decision и атомарный
 `CONSUMED ↔ rank_connector_executions/READY_TO_SUBMIT`. Scoped broker/claim,
-exact connector permission и атомарный authorize/`SUBMITTING` уже готовы и
-прошли fresh PostgreSQL 18 permission/race/upgrade proof. Immutable exact
+exact connector permission и атомарный authorize/`SUBMITTING` готовы.
+Immutable exact
 provider request intent до grant теперь также хранится append-only, повторно
 проверяется при grant replay и обязательно связан с connector execution.
-Следующими нужны runtime caller, durable provider submit/status/fetch state и
-producer нормализованных результатов с ingest receipts. Live Arsenkin `set`
-выключен, пока нет recorded provider wire contract,
-полного persisted provider lifecycle, fairness/circuit breaker и production
-environment evidence.
+Connector записывает documented wire request/task ID, durable poll state и
+только normalized staged output; rank-worker отправляет exact ingest и
+terminal finalize receipts. DB/Compose activation использует новую
+kill-switch generation `arsenkin-positions@2`, а общий BullMQ limiter
+ограничивает провайдера 30 запросами/минуту. Остаются live smoke с реальным
+BYOK credential, операционные alert/circuit-breaker evidence и schedules.
 Неоднозначность manifest preparation уже fail-closed переходит в
 `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN` без бесконечного auto-retry.
 
