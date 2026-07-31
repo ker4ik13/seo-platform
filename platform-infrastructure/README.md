@@ -94,9 +94,10 @@ trial и ledger, но не создаёт внешние платежи. Для 
 
 Card PAN/CVC платформа не принимает. Регистрацию чека НПД YooKassa не
 выполняет: после verified `payment.succeeded` создаётся manual obligation для
-официального приложения/кабинета «Мой налог». До защищённой operations-панели
-receipt ID/URL, доставка, отмена и replacement остаются release gate; применять
-неофициальные API или browser automation запрещено.
+официального приложения/кабинета «Мой налог». Защищённая operations-панель
+принимает только официальный print URL `lknpd.nalog.ru`, сохраняет
+регистрацию, отмену после полного refund и replacement после частичного
+refund. Применять неофициальные API или browser automation запрещено.
 
 Нормативные provider flow:
 [payments](https://yookassa.ru/developers/payment-acceptance/getting-started/payment-process),
@@ -114,20 +115,19 @@ Next.js встраивает `NEXT_PUBLIC_SITE_URL` в build artifact; одно�
 для согласованности запуска, но не исправляет artifact, собранный с неверным
 origin. Admin build намеренно не получает этот public Web arg.
 
-## Admin shell: только internal
+## Защищённая Admin surface
 
-Текущий `platform-admin` — unauthenticated shell с демонстрационными данными,
-а не готовая operator surface. Compose может запускать его только в сети
-`internal` для build/runtime smoke; `expose: 3002` не является host publish и
-не разрешает внешний ingress. Service намеренно не подключён к `edge`.
+`platform-admin` подключён к `edge`, но не публикует host port. Внешний
+маршрут задаётся отдельным `ADMIN_PUBLIC_URL` в Dokploy/Traefik или Caddy.
+Панель использует только закрытый same-origin BFF allowlist, общую session
+identity, обязательный MFA-вход, persisted platform roles, недавнюю
+аутентификацию и audit. Демонстрационных данных нет.
 
-Запрещено добавлять `ADMIN_PUBLIC_URL`, Dokploy/Traefik domain, edge network
-или host port binding до реализации отдельной operator authentication
-session/audience, обязательной 2FA, platform-role authorization, audit
-опасных действий и server-backed non-demo данных. До прохождения этих gates
-Admin origin также запрещено добавлять в Platform API `CORS_ORIGINS` и
-Realtime `WEB_ORIGINS`; текущий Compose разрешает только `WEB_PUBLIC_URL`.
-Фальшивая auth-заглушка не является основанием для внешней публикации.
+Первый `SUPER_ADMIN` создаётся одноразовой fail-closed командой
+`pnpm --filter @seo-platform/platform-api admin:bootstrap` после
+подтверждения email и активации TOTP. Команда отказывается работать после
+появления первого активного назначения. Admin origin добавляется в
+`CORS_ORIGINS`; Realtime он не использует и в `WEB_ORIGINS` не включается.
 
 ## Caller/audience service authentication
 

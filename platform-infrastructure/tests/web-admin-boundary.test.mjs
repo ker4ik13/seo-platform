@@ -5,7 +5,7 @@ import test from "node:test";
 const requiredPublicUrlAssignment =
   "        NEXT_PUBLIC_SITE_URL: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required}";
 const requiredApiOriginAssignment =
-  "      CORS_ORIGINS: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required}";
+  "      CORS_ORIGINS: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required},${ADMIN_PUBLIC_URL:?ADMIN_PUBLIC_URL is required}";
 const requiredRealtimeOriginAssignment =
   "      WEB_ORIGINS: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required}";
 
@@ -43,7 +43,7 @@ test("web build embeds the required public site URL before Next.js build", async
   );
 });
 
-test("admin stays internal-only while web remains attached to edge", async () => {
+test("authenticated admin and web attach to edge without host ports", async () => {
   const compose = await infrastructureFile("compose.dokploy.yml");
   const web = serviceBlock(compose, "web");
   const admin = serviceBlock(compose, "admin");
@@ -52,10 +52,13 @@ test("admin stays internal-only while web remains attached to edge", async () =>
     "internal",
     "edge"
   ]);
-  assert.deepEqual(
-    networkNames(nestedBlock(admin, "networks")),
-    ["internal"],
-    "unauthenticated admin shell must not have an edge route"
+  assert.deepEqual(networkNames(nestedBlock(admin, "networks")), [
+    "internal",
+    "edge"
+  ]);
+  assert.match(
+    nestedBlock(admin, "environment"),
+    /ADMIN_PUBLIC_URL: \$\{ADMIN_PUBLIC_URL:\?ADMIN_PUBLIC_URL is required\}/u
   );
   assert.doesNotMatch(
     admin,
@@ -88,7 +91,7 @@ test("internal HTTP services bind explicitly inside isolated container networks"
   }
 });
 
-test("admin origin is absent from external browser allowlists", async () => {
+test("admin origin is scoped to Platform API and excluded from Realtime", async () => {
   const compose = await infrastructureFile("compose.dokploy.yml");
   const apiEnvironment = nestedBlock(
     serviceBlock(compose, "platform-api"),
@@ -106,7 +109,7 @@ test("admin origin is absent from external browser allowlists", async () => {
 
   assert.ok(
     apiEnvironment.split(/\r?\n/u).includes(requiredApiOriginAssignment),
-    "Platform API CORS must require only the public Web origin"
+    "Platform API CORS must require Web and Admin origins"
   );
   assert.ok(
     realtimeEnvironment
@@ -115,21 +118,16 @@ test("admin origin is absent from external browser allowlists", async () => {
     "Realtime Web origins must require only the public Web origin"
   );
 
-  for (const [name, contents] of [
-    ["Compose", compose],
-    ["root env example", rootExample],
-    ["Platform API env example", apiExample],
-    ["Realtime env example", realtimeExample]
-  ]) {
-    assert.doesNotMatch(
-      contents,
-      /ADMIN_PUBLIC_URL|admin\.example|localhost:3002/u,
-      `${name} must not allow the unauthenticated Admin origin`
-    );
-  }
-
-  assert.match(apiExample, /^CORS_ORIGINS=https:\/\/example\.com$/mu);
+  assert.match(rootExample, /^ADMIN_PUBLIC_URL=https:\/\/admin\.example\.com$/mu);
+  assert.match(
+    apiExample,
+    /^CORS_ORIGINS=https:\/\/example\.com,https:\/\/admin\.example\.com$/mu
+  );
   assert.match(realtimeExample, /^WEB_ORIGINS=http:\/\/localhost:3000$/mu);
+  assert.doesNotMatch(
+    requiredRealtimeOriginAssignment,
+    /ADMIN_PUBLIC_URL/u
+  );
 });
 
 async function infrastructureFile(relativePath) {

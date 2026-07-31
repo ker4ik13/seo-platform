@@ -28,6 +28,6 @@ import { YookassaClient } from "./yookassa.client.js";
     BillingService,
     YookassaClient
   ],
-  exports: [BillingEntitlementService, BillingService]
+  exports: [BillingEntitlementService, BillingPiiService, BillingService]
 })
 export class BillingModule {}

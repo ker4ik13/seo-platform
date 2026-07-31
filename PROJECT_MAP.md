@@ -131,8 +131,10 @@ append-only update/delete и запрет TRUNCATE. Included credits не пер
 на новый период; failed renewal проходит past_due/grace и переводит workspace
 в read-only, успешная оплата восстанавливает доступ. Реальный provider
 checkout/автоплатёж остаётся operator gate до выдачи shop ID/secret, настройки
-webhook и sandbox/live canary; ручная регистрация/доставка чека «Мой налог»
-пока требует отдельной защищённой operations-панели.
+webhook и sandbox/live canary. Защищённая operations-панель уже закрывает
+ручную регистрацию, cancellation после полного refund и replacement после
+частичного refund чека «Мой налог»; автоматическая email-доставка после
+регистрации остаётся следующим обязательным transport slice.
 Plan entitlement больше не является UI-only: общий
 `BillingEntitlementService` строго разбирает immutable feature snapshot,
 использует DB clock и сериализует capacity-команды блокировкой workspace.
@@ -256,7 +258,7 @@ boundary и при реальной операционной необходим�
 | `platform-jobs-integrations` | jobs, workers, connectors, S3/email ports | несколько entrypoints |
 | `platform-realtime` | WebSocket presence/collaboration delivery | да |
 | `platform-web` | public site, Toolbox, API docs и приложение `/app` | да |
-| `platform-admin` | незавершённый internal-only административный shell | да, без внешнего ingress |
+| `platform-admin` | защищённая operations-панель НПД и platform roles | да, отдельный edge origin |
 | `platform-infrastructure` | Compose/Dokploy, monitoring, runbooks | конфигурация |
 | `.github/workflows/ci.yml` | Node.js 24 workspace quality gate | GitHub Actions |
 | `docs/technical-spec` | нормативное ТЗ | нет |
@@ -556,6 +558,10 @@ Backend convention:
   YooKassa checkout/webhook/reconciliation/autopay/refund, encrypted buyer
   PII, manual-NPD obligations, append-only double-entry ledger и общий
   transaction-scoped entitlement guard для projects/seats/CLIENT/BYOK;
+- `platform-api/src/admin` — обязательный MFA/recent-auth guard поверх
+  persisted platform roles, одноразовый fail-closed bootstrap первого
+  `SUPER_ADMIN`, bounded NPD queue/detail, audited PII access, manual
+  registration/cancellation/replacement и role assignment/revocation;
 - `platform-api/src/tenants` — workspace/project commands и queries;
 - `platform-api/src/tenants/team.*` — tenant-bound cursor pagination,
   приглашения, участники и проектные ограничения доступа;
@@ -816,12 +822,12 @@ Backend convention:
   а Compose явно выбирает `0.0.0.0` только внутри изолированной container
   network. Realtime development origin совпадает с Web на
   `http://localhost:3000`;
-- незавершённый `platform-admin` остаётся только в Compose-сети `internal`,
-  без `edge`, host port и browser CORS/WebSocket allowlist. Публичный ingress
-  запрещён до отдельной operator auth session/audience, обязательной 2FA,
-  platform-role authorization, audit и server-backed non-demo data. Его
-  Next policy уже выставляет private/no-store/noindex и строгие security
-  headers для любого route;
+- `platform-admin` подключён к `internal + edge` без host port и принимает
+  отдельный exact `ADMIN_PUBLIC_URL`. Browser видит только same-origin BFF с
+  явным route allowlist; общая session identity допускается лишь после MFA,
+  recent authentication и active platform role. Панель полностью
+  server-backed, private/no-store/noindex; каждый просмотр billing PII и
+  mutation фиксируется в audit;
 - `platform-web/lib/protected-app.ts` — server-side session gate и безопасный
   refresh redirect;
 - `platform-*/lib` и `components` — adapters и переиспользуемые UI-части;
@@ -945,14 +951,14 @@ Entrypoints:
 | S3/email ports | vertical slice: S3 foundation + выделенный auth-email SMTP worker; общий notification sender не реализован, production SMTP остаётся operator gate |
 | Realtime public gateway | foundation |
 | Unified Web/private app shell | vertical slice |
-| Admin shell | vertical slice |
+| Admin operations | vertical slice: MFA + persisted roles + NPD operations |
 | Auth core | vertical slice: identity lifecycle + transactional verification/reset email transport |
 | Workspaces/projects/team access | vertical slice: включая transactional invite email/fragment acceptance |
 | Semantics/import | vertical slice: CSV/TSV → mapping → validation → publish → query |
 | Notifications | vertical slice: preferences → effective policy → read center → encrypted browser device lifecycle |
 | Integrations | vertical slice: catalog + encrypted BYOK vault + validation + project binding |
 | Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |
-| Billing/YooKassa | vertical slice: catalog + hosted/recurring payment + webhook/reconciliation + ledger/refund/NPD obligation + Web UI; live provider и operations receipt workflow остаются gate |
+| Billing/YooKassa | vertical slice: catalog + hosted/recurring payment + webhook/reconciliation + ledger/refund/NPD obligation + Web UI + protected manual receipt operations; live provider и receipt email delivery остаются gate |
 | Directus content | planned |
 
 Foundation содержит четыре валидные Prisma schemas и начальные migrations,
@@ -1527,21 +1533,27 @@ Job/manifest. Raw provider body нигде durable не сохраняется.
   это интеграционный smoke, а не production deploy.
 - Target runtime: Node.js 24. Текущий полный lint/typecheck/test/build baseline
   проверен на Node.js 24.18.1; контейнеры также используют Node.js 24.
-- P3 billing + first entitlement gate 2026-07-31: полная цепочка 9 Platform
+- P3 billing + first entitlement gate 2026-07-31: полная цепочка 10 Platform
   API migrations применена на новой PostgreSQL 16.14 БД; 6 plans, 11 prices
   и 5 system ledger accounts подтверждены. Live negative smokes блокируют
   второй trial владельца, direct POSTED/unbalanced ledger, entry mutation и
   TRUNCATE. Root typecheck/lint/tests проходят: contracts 98, Platform API
-  407 + 4 opt-in skips, Jobs 415 + 9 skips, SEO Data 116, Realtime 112, Web
-  154, Admin 2, infrastructure 82 + 5 opt-in skips. Production build всех
+  414 + 4 opt-in skips, Jobs 415 + 9 skips, SEO Data 116, Realtime 112, Web
+  154, Admin 4, infrastructure 82 + 5 opt-in skips. Production build всех
   deployable проходит и содержит `/app/settings/billing`.
+- P3 finance operations 2026-07-31: migration добавляет append-only
+  `platform_staff_role_assignments` и корректную replacement lineage
+  NPD-чеков. Fresh 10-migration chain применён на PostgreSQL 16 compatibility
+  harness; trigger-negative smoke, first-superadmin bootstrap и повторный
+  fail-closed bootstrap проверены живой БД. Admin больше не содержит demo
+  данных, требует MFA/recent auth/role и доступен через отдельный edge origin.
 
 ## 9. Следующий вертикальный срез
 
 Ближайший обязательный billing-контур после projects/seats/BYOK entitlement:
 
 `keyword/tracked/storage/automation meters → estimate/reservation/capture для provider usage →
-защищённая operations-панель НПД → sandbox checkout/autopay/refund E2E`
+receipt email delivery → sandbox checkout/autopay/refund E2E`
 
 Критерий — тариф реально ограничивает seats/projects/keywords/tracked pairs,
 каждая platform-paid команда проходит estimate/reservation/settlement, а
@@ -1665,10 +1677,12 @@ OAuth/OIDC выполняется после подтверждения зави
   estimate/reservation/capture через новый ledger. До замыкания этих
   контуров биллинг нельзя считать полным коммерческим enforcement.
 - Manual NPD obligation создаётся идемпотентно после verified
-  `payment.succeeded`, но защищённая operations-панель для сохранения
-  официального receipt ID/URL, доставки, SLA/escalation, cancellation и
-  replacement ещё не реализована. Использовать неофициальный API «Мой налог»
-  или хранить его пароль запрещено.
+  `payment.succeeded`. Operations-панель сохраняет только точный HTTPS print
+  URL `lknpd.nalog.ru`, сверочные подтверждения, cancellation после полного
+  refund и replacement на остаток после частичного refund; роли persisted и
+  append-only. Email-доставка, bounded retry/bounce и delivery history ещё
+  должны быть подключены к transactional transport. Использовать
+  неофициальный API «Мой налог» или хранить его пароль запрещено.
 - KEK rotation runbook описан в `platform-infrastructure/README.md`, но
   автоматический bounded DEK rewrap ещё не реализован. DB-aware startup
   coverage работает fail-closed; до rewrap старые используемые KEK запрещено

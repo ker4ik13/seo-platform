@@ -61,6 +61,9 @@ export class BillingPiiService {
       const tagBytes = Buffer.from(tag, "base64url");
       const encryptedBytes = Buffer.from(encrypted, "base64url");
       if (
+        ivBytes.toString("base64url") !== iv ||
+        tagBytes.toString("base64url") !== tag ||
+        encryptedBytes.toString("base64url") !== encrypted ||
         ivBytes.length !== IV_BYTES ||
         tagBytes.length !== TAG_BYTES ||
         encryptedBytes.length === 0 ||

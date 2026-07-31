@@ -237,6 +237,16 @@ enum NpdReceiptStatus {
   REPLACEMENT_REQUIRED
 }
 
+enum PlatformRoleCode {
+  SUPER_ADMIN
+  OPERATIONS
+  SUPPORT
+  FINANCE
+  CONTENT
+  SECURITY_AUDITOR
+  ANALYST
+}
+
 model User {
   id              String     @id @default(dbgenerated("uuidv7()")) @db.Uuid
   emailNormalized String     @unique(map: "users_email_normalized_key") @map("email_normalized") @db.VarChar(320)
@@ -262,6 +272,9 @@ model User {
   recoveryCodes RecoveryCode[]
   mfaChallenges MfaChallenge[]
   billingTrialClaims BillingTrialClaim[]
+  platformRoles PlatformStaffRoleAssignment[] @relation("PlatformStaffRoleUser")
+  assignedPlatformRoles PlatformStaffRoleAssignment[] @relation("PlatformStaffRoleAssignedBy")
+  revokedPlatformRoles PlatformStaffRoleAssignment[] @relation("PlatformStaffRoleRevokedBy")
 
   @@index([status, createdAt])
   @@map("users")
@@ -737,7 +750,7 @@ model BillingPayment {
   order         BillingOrder          @relation(fields: [orderId], references: [id], onDelete: Restrict)
   paymentMethod BillingPaymentMethod? @relation(fields: [paymentMethodRecordId], references: [id], onDelete: SetNull)
   refunds       BillingRefund[]
-  receipt       NpdReceiptObligation?
+  receipts      NpdReceiptObligation[]
 
   @@unique([orderId, provider], map: "billing_payments_order_provider_key")
   @@unique([provider, externalId], map: "billing_payments_provider_external_id_key")
@@ -875,8 +888,9 @@ model BillingWebhookInbox {
 
 model NpdReceiptObligation {
   id                         String                     @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  paymentId                  String                     @unique(map: "npd_receipt_obligations_payment_id_key") @map("payment_id") @db.Uuid
-  yookassaPaymentId          String                     @unique(map: "npd_receipt_obligations_yookassa_payment_id_key") @map("yookassa_payment_id") @db.VarChar(255)
+  paymentId                  String                     @map("payment_id") @db.Uuid
+  yookassaPaymentId          String                     @map("yookassa_payment_id") @db.VarChar(255)
+  sequence                   Int                        @default(1)
   workspaceId                String                     @map("workspace_id") @db.Uuid
   grossAmountMinor           BigInt                     @map("gross_amount_minor")
   currency                   String                     @db.Char(3)
@@ -894,6 +908,8 @@ model NpdReceiptObligation {
   deliveredAt                DateTime?                  @map("delivered_at") @db.Timestamptz(6)
   deliveryAttempts           Int                        @default(0) @map("delivery_attempts")
   cancellationReason         String?                    @map("cancellation_reason") @db.VarChar(500)
+  cancellationOfficialReference String?                 @map("cancellation_official_reference") @db.VarChar(255)
+  cancelledAt                DateTime?                  @map("cancelled_at") @db.Timestamptz(6)
   replacementReceiptId       String?                    @map("replacement_receipt_id") @db.Uuid
   version                    Int                        @default(1)
   createdAt                  DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
@@ -906,7 +922,30 @@ model NpdReceiptObligation {
 
   @@index([status, createdAt])
   @@index([workspaceId, createdAt])
+  @@index([yookassaPaymentId])
+  @@unique([paymentId, sequence], map: "npd_receipt_obligations_payment_sequence_key")
   @@map("npd_receipt_obligations")
+}
+
+model PlatformStaffRoleAssignment {
+  id           String           @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  userId       String           @map("user_id") @db.Uuid
+  roleCode     PlatformRoleCode @map("role_code")
+  assignedBy   String?          @map("assigned_by") @db.Uuid
+  reason       String           @db.VarChar(500)
+  assignedAt   DateTime         @default(now()) @map("assigned_at") @db.Timestamptz(6)
+  revokedAt    DateTime?        @map("revoked_at") @db.Timestamptz(6)
+  revokedBy    String?          @map("revoked_by") @db.Uuid
+  revokeReason String?          @map("revoke_reason") @db.VarChar(500)
+  version      Int              @default(1)
+
+  user       User  @relation("PlatformStaffRoleUser", fields: [userId], references: [id], onDelete: Restrict)
+  assigner   User? @relation("PlatformStaffRoleAssignedBy", fields: [assignedBy], references: [id], onDelete: Restrict)
+  revoker    User? @relation("PlatformStaffRoleRevokedBy", fields: [revokedBy], references: [id], onDelete: Restrict)
+
+  @@index([userId, revokedAt])
+  @@index([roleCode, revokedAt])
+  @@map("platform_staff_role_assignments")
 }
 
 model AuditEvent {

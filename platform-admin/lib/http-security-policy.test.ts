@@ -23,7 +23,7 @@ test("marks every admin response private, non-indexable and non-embeddable", () 
   assert.equal(values.get("x-frame-options"), "DENY");
   assert.equal(
     values.get("content-security-policy"),
-    "frame-ancestors 'none'"
+    "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
   );
   assert.equal(values.get("referrer-policy"), "no-referrer");
   assert.equal(

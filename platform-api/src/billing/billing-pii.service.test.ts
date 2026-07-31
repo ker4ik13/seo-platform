@@ -35,8 +35,11 @@ test("encrypts billing PII with a purpose-bound authenticated envelope", () => {
 test("rejects tampered or oversized billing PII", () => {
   const pii = service();
   const sealed = pii.seal("private", "order:order-1:buyer");
+  const tampered = `${sealed.slice(0, -1)}${
+    sealed.endsWith("A") ? "B" : "A"
+  }`;
   assert.throws(
-    () => pii.open(`${sealed.slice(0, -1)}A`, "order:order-1:buyer"),
+    () => pii.open(tampered, "order:order-1:buyer"),
     /Invalid encrypted billing PII/u
   );
   assert.throws(

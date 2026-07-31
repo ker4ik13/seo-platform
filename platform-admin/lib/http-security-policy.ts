@@ -19,7 +19,8 @@ export function createAdminHttpHeaderRules(
         { key: "X-Frame-Options", value: "DENY" },
         {
           key: "Content-Security-Policy",
-          value: "frame-ancestors 'none'"
+          value:
+            "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
         },
         { key: "Referrer-Policy", value: "no-referrer" },
         {

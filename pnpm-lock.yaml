@@ -15,6 +15,9 @@ importers:
 
   platform-admin:
     dependencies:
+      '@seo-platform/contracts':
+        specifier: workspace:*
+        version: link:../platform-contracts
       next:
         specifier: 16.2.12
         version: 16.2.12(react-dom@19.2.8(react@19.2.8))(react@19.2.8)

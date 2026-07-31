@@ -15,6 +15,7 @@ import { OutboxModule } from "./outbox/outbox.module.js";
 import { RankingModule } from "./rankings/ranking.module.js";
 import { AuthEmailDeliveryModule } from "./auth-email/auth-email-delivery.module.js";
 import { BillingModule } from "./billing/billing.module.js";
+import { PlatformAdminModule } from "./admin/platform-admin.module.js";
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { BillingModule } from "./billing/billing.module.js";
     SemanticModule,
     RankingModule,
     BillingModule,
+    PlatformAdminModule,
     NotificationModule,
     SystemModule
   ]

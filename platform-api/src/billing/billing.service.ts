@@ -1465,10 +1465,16 @@ export class BillingService {
       }
     }
     await transaction.npdReceiptObligation.upsert({
-      where: { paymentId: payment.id },
+      where: {
+        paymentId_sequence: {
+          paymentId: payment.id,
+          sequence: 1
+        }
+      },
       create: {
         paymentId: payment.id,
         yookassaPaymentId: externalId,
+        sequence: 1,
         workspaceId: order.workspaceId,
         grossAmountMinor: payment.amountMinor,
         currency: CURRENCY,
@@ -1744,7 +1750,11 @@ export class BillingService {
         }
       });
       await transaction.npdReceiptObligation.updateMany({
-        where: { paymentId: current.paymentId },
+        where: {
+          paymentId: current.paymentId,
+          replacementReceiptId: null,
+          status: { not: "CANCELLED" }
+        },
         data: {
           status: fullyRefunded
             ? "CANCELLATION_PENDING"

@@ -11,7 +11,8 @@
     "test": "node --import tsx --test 'src/**/*.test.ts'",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
-    "prisma:migrate:deploy": "prisma migrate deploy"
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "admin:bootstrap": "tsx src/admin/platform-admin-bootstrap.ts"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.2",
