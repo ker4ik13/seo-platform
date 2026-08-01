@@ -126,7 +126,6 @@ CREATE TABLE "web_push_delivery_attempts" (
         AND "last_error_code" IS NOT NULL
       )
     )
-  )
 );
 
 CREATE UNIQUE INDEX "web_push_delivery_notification_subscription_key"
