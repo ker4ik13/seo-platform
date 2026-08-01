@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   RankEstimate,
   RankJobSummary,
@@ -8,6 +8,20 @@ import type {
   TrackingContextSummary
 } from "@seo-platform/contracts";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
+import {
+  stableIdempotencyCommand,
+  type IdempotentCommand
+} from "../lib/idempotency";
+import {
+  emptyTrackingContextDraft,
+  reconcileTrackingContextCreate,
+  trackingContextApiPath,
+  trackingContextCreateInput,
+  trackingContextPayloadSignature,
+  validateTrackingContextDraft,
+  withTrackingContext,
+  type TrackingContextDraft
+} from "../lib/tracking-contexts";
 import {
   parseRankEstimate,
   rankEstimateBlockerLabel
@@ -33,6 +47,10 @@ export function SemanticPositionDialog({
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string>();
   const [estimate, setEstimate] = useState<RankEstimate>();
+  const [contextDraft, setContextDraft] = useState(defaultContextDraft);
+  const createContextCommand = useRef<IdempotentCommand | undefined>(
+    undefined
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -62,16 +80,54 @@ export function SemanticPositionDialog({
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (!context || running) return;
+    if (running) return;
     setRunning(true);
     setError(undefined);
     setEstimate(undefined);
     try {
+      let selectedContext = context;
+      if (!selectedContext) {
+        if (!settings?.access.canConfigure) {
+          throw new Error(
+            "Недостаточно прав для создания поискового контекста."
+          );
+        }
+        const draftErrors = validateTrackingContextDraft(contextDraft);
+        const firstError = Object.values(draftErrors)[0];
+        if (firstError) throw new Error(firstError);
+        const signature = trackingContextPayloadSignature(contextDraft);
+        createContextCommand.current = stableIdempotencyCommand(
+          createContextCommand.current,
+          signature,
+          () => `semantic-tracking-context:${crypto.randomUUID()}`
+        );
+        const receipt = await browserApiRequest<TrackingContextSummary>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/tracking-contexts`,
+          {
+            method: "POST",
+            idempotencyKey: createContextCommand.current.key,
+            body: trackingContextCreateInput(contextDraft)
+          }
+        );
+        const authoritative = await browserApiRequest<TrackingContextSummary>(
+          trackingContextApiPath(projectId, receipt.id)
+        );
+        const createdContext = reconcileTrackingContextCreate(
+          receipt,
+          authoritative
+        ).current;
+        createContextCommand.current = undefined;
+        selectedContext = createdContext;
+        setSettings((current) =>
+          current ? withTrackingContext(current, createdContext) : current
+        );
+        setContextId(createdContext.id);
+      }
       if (assignKeywords) {
         const assignments = await Promise.allSettled(
           keywordIds.map((keywordId) =>
             browserApiRequest(
-              `/app/api/projects/${encodeURIComponent(projectId)}/tracking-contexts/${encodeURIComponent(context.id)}/keywords/${encodeURIComponent(keywordId)}`,
+              `/app/api/projects/${encodeURIComponent(projectId)}/tracking-contexts/${encodeURIComponent(selectedContext.id)}/keywords/${encodeURIComponent(keywordId)}`,
               { method: "PUT" }
             )
           )
@@ -87,13 +143,13 @@ export function SemanticPositionDialog({
         `/app/api/projects/${encodeURIComponent(projectId)}/rank-estimates`,
         {
           method: "POST",
-          body: { trackingContextId: context.id },
+          body: { trackingContextId: selectedContext.id },
           idempotencyKey: `semantic-rank-estimate:${crypto.randomUUID()}`
         }
       );
       const nextEstimate = parseRankEstimate(estimatePayload, {
         projectId,
-        trackingContextId: context.id
+        trackingContextId: selectedContext.id
       });
       setEstimate(nextEstimate);
       if (nextEstimate.status !== "READY" || !nextEstimate.executionAllowed) return;
@@ -106,9 +162,9 @@ export function SemanticPositionDialog({
         }
       );
       const job = parseRankJobSummary(jobPayload, {
-        workspaceId: context.workspaceId,
+        workspaceId: selectedContext.workspaceId,
         projectId,
-        trackingContextId: context.id
+        trackingContextId: selectedContext.id
       });
       onStarted(job);
     } catch (requestError) {
@@ -170,11 +226,12 @@ export function SemanticPositionDialog({
             </label>
           </>
         ) : (
-          <div className="semantic-inspector-empty">
-            <strong>Нет контекстов отслеживания</strong>
-            <span>Создайте контекст с поисковой системой, регионом, устройством и BYOK-маршрутом.</span>
-            <a className="primary-button" href={`/app/projects/${encodeURIComponent(projectId)}/rankings/contexts`}>Создать контекст</a>
-          </div>
+          <PositionContextCreator
+            canConfigure={settings?.access.canConfigure ?? false}
+            draft={contextDraft}
+            onChange={setContextDraft}
+            projectId={projectId}
+          />
         )}
         {estimate?.status === "BLOCKED" && (
           <div className="inline-alert warning" role="alert">
@@ -185,13 +242,184 @@ export function SemanticPositionDialog({
         {error && <div className="inline-alert danger" role="alert">{error}</div>}
         <div className="semantic-modal-actions">
           <button className="secondary-button" disabled={running} onClick={onClose} type="button">Отмена</button>
-          <button className="primary-button" disabled={loading || running || !context} type="submit">
-            {running ? "Проверяем и запускаем…" : `Запустить проверку (${keywordIds.length})`}
+          <button
+            className="primary-button"
+            disabled={
+              loading ||
+              running ||
+              (!context && !(settings?.access.canConfigure ?? false))
+            }
+            type="submit"
+          >
+            {running
+              ? "Проверяем и запускаем…"
+              : context
+                ? `Запустить проверку (${keywordIds.length})`
+                : `Создать контекст и запустить (${keywordIds.length})`}
           </button>
         </div>
       </form>
     </SemanticModal>
   );
+}
+
+function PositionContextCreator({
+  canConfigure,
+  draft,
+  onChange,
+  projectId
+}: Readonly<{
+  canConfigure: boolean;
+  draft: TrackingContextDraft;
+  onChange: (draft: TrackingContextDraft) => void;
+  projectId: string;
+}>) {
+  if (!canConfigure) {
+    return (
+      <div className="semantic-inspector-empty">
+        <strong>Нет контекстов отслеживания</strong>
+        <span>
+          Для создания контекста требуется разрешение настройки позиций.
+        </span>
+        <a
+          className="secondary-button"
+          href={`/app/projects/${encodeURIComponent(projectId)}/rankings/contexts`}
+        >
+          Открыть настройки
+        </a>
+      </div>
+    );
+  }
+  return (
+    <section className="semantic-position-create">
+      <header>
+        <strong>Первый поисковый контекст</strong>
+        <span>
+          Исполняемый профиль Arsenkin: Google, Top-30, числовой ID региона.
+          Контекст сохранится для текущих и будущих проверок.
+        </span>
+      </header>
+      <div className="semantic-position-create-grid">
+        <label className="wide">
+          <span>Название</span>
+          <input
+            autoFocus
+            maxLength={160}
+            onChange={(event) =>
+              onChange({ ...draft, name: event.target.value })
+            }
+            required
+            value={draft.name}
+          />
+        </label>
+        <label>
+          <span>Поисковая система</span>
+          <select
+            onChange={(event) =>
+              onChange({
+                ...draft,
+                searchEngine: event.target
+                  .value as TrackingContextDraft["searchEngine"]
+              })
+            }
+            value={draft.searchEngine}
+          >
+            <option value="GOOGLE">Google</option>
+            <option disabled value="YANDEX">Яндекс — пока только в настройках</option>
+          </select>
+        </label>
+        <label>
+          <span>Устройство</span>
+          <select
+            onChange={(event) =>
+              onChange({
+                ...draft,
+                device: event.target.value as TrackingContextDraft["device"]
+              })
+            }
+            value={draft.device}
+          >
+            <option value="DESKTOP">Десктоп</option>
+            <option value="MOBILE">Мобильное</option>
+          </select>
+        </label>
+        <label>
+          <span>Страна</span>
+          <input
+            maxLength={2}
+            onChange={(event) =>
+              onChange({ ...draft, countryCode: event.target.value })
+            }
+            required
+            value={draft.countryCode}
+          />
+        </label>
+        <label>
+          <span>Язык</span>
+          <input
+            maxLength={16}
+            onChange={(event) =>
+              onChange({ ...draft, language: event.target.value })
+            }
+            required
+            value={draft.language}
+          />
+        </label>
+        <label>
+          <span>Код региона</span>
+          <input
+            maxLength={100}
+            onChange={(event) =>
+              onChange({ ...draft, regionCode: event.target.value })
+            }
+            placeholder="213"
+            value={draft.regionCode}
+          />
+        </label>
+        <label>
+          <span>Название региона</span>
+          <input
+            maxLength={160}
+            onChange={(event) =>
+              onChange({ ...draft, regionLabel: event.target.value })
+            }
+            placeholder="Москва"
+            value={draft.regionLabel}
+          />
+        </label>
+        <label>
+          <span>Глубина</span>
+          <select
+            onChange={(event) =>
+              onChange({
+                ...draft,
+                depth: Number(event.target.value) as TrackingContextDraft["depth"]
+              })
+            }
+            value={draft.depth}
+          >
+            <option value={30}>Топ-30</option>
+            <option disabled value={50}>Топ-50 — пока недоступно</option>
+            <option disabled value={100}>Топ-100 — пока недоступно</option>
+          </select>
+        </label>
+      </div>
+    </section>
+  );
+}
+
+function defaultContextDraft(): TrackingContextDraft {
+  return {
+    ...emptyTrackingContextDraft(),
+    name: "Google · Москва · Десктоп",
+    searchEngine: "GOOGLE",
+    countryCode: "RU",
+    regionCode: "1011969",
+    regionLabel: "Москва",
+    language: "ru",
+    device: "DESKTOP",
+    depth: 30
+  };
 }
 
 function ContextFacts({ context }: Readonly<{ context: TrackingContextSummary }>) {

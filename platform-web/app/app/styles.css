@@ -5017,6 +5017,31 @@ svg { display: block; }
 .semantic-position-grid > section:first-child { padding-left: 0; }
 .semantic-position-grid > section:last-child { border-right: 0; padding-right: 0; }
 .semantic-position-grid h3 { font-size: 12px; margin: 0 0 12px; }
+.semantic-position-create {
+  background: #fafafd;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+}
+.semantic-position-create > header { display: grid; gap: 4px; }
+.semantic-position-create > header strong { font-size: 12px; }
+.semantic-position-create > header span { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.semantic-position-create-grid { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.semantic-position-create-grid label { display: grid; gap: 6px; min-width: 0; }
+.semantic-position-create-grid label.wide { grid-column: span 2; }
+.semantic-position-create-grid label > span { color: var(--muted); font-size: 10px; font-weight: 700; }
+.semantic-position-create-grid input,
+.semantic-position-create-grid select {
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  min-height: 40px;
+  min-width: 0;
+  padding: 0 10px;
+  width: 100%;
+}
 .semantic-dialog-link { color: var(--brand); display: inline-flex; font-size: 10px; margin-top: 10px; }
 .semantic-dialog-link + .semantic-dialog-link { margin-left: 12px; }
 .semantic-dialog-facts { display: grid; gap: 8px; margin: 0; }
@@ -5103,6 +5128,7 @@ svg { display: block; }
   .semantic-core > :not(.semantic-core-header):not(.semantic-commandbar):not(.semantic-selection-bar):not(dialog):not(.context-menu):not(.semantic-operations-drawer):not(.semantic-keyword-inspector) { grid-column: 1 !important; }
   .semantic-table-tools { overflow-x: auto; }
   .semantic-position-grid { grid-template-columns: 1fr; }
+  .semantic-position-create-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .semantic-frequency-grid { grid-template-columns: 1fr; }
   .semantic-frequency-grid > section { padding: 14px 0; }
   .semantic-frequency-grid > section:first-child { border-bottom: 1px solid var(--line); border-right: 0; padding-top: 0; }
@@ -5119,5 +5145,10 @@ svg { display: block; }
   .semantic-view-toolbar { overflow-x: auto; }
   .semantic-modal { border-radius: 12px 12px 0 0; margin: auto 0 0; max-height: 94vh; max-width: 100vw; width: 100vw; }
   .semantic-modal-body { max-height: calc(94vh - 76px); }
+  .semantic-position-create-grid { grid-template-columns: 1fr; }
+  .semantic-position-create-grid label.wide { grid-column: 1; }
+  .semantic-modal-actions { display: grid; grid-template-columns: 1fr; }
+  .semantic-modal-actions .primary-button,
+  .semantic-modal-actions .secondary-button { min-height: 44px; width: 100%; }
   .semantic-keyword-inspector { height: calc(100vh - 66px); max-height: none; top: 66px; width: min(330px, 100vw); }
 }

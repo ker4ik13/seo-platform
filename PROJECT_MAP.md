@@ -121,6 +121,12 @@ cursor только у нижней границы scroll-контейнера, 
 с компактного выбора CSV/TSV/XLSX, а mapping, preview, validation и публикация
 раскрываются только по мере прохождения этапов. Из того же toolbar доступен рабочий Keys.so-сценарий сбора запросов
 конкурентов с preview и явным подтверждением импорта в текущее ядро.
+Сбор частотности запускается из семантики как durable XMLStock Wordstat Job,
+показывает прогресс/историю/повтор/отмену в правом журнале и до запуска
+проверяет project binding. Проверка позиций назначает выбранные запросы
+контексту, получает estimate и создаёт Arsenkin Job; если контекстов ещё нет,
+modal создаёт первый совместимый Google Top-30 контекст inline и продолжает
+тот же запуск без перехода на отдельную страницу.
 Custom columns базовых типов реализованы отдельными tenant-scoped definitions
 и typed EAV values: text/long text/integer/decimal/boolean/date/datetime/
 select/multi-select/URL/user/status. Каждая ячейка имеет CAS; PostgreSQL
