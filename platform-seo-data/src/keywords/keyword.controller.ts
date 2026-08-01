@@ -18,6 +18,8 @@ import type {
   ApiCollectionResponse,
   ApiResponse,
   SemanticKeywordBulkResult,
+  SemanticKeywordCleaningPreview,
+  SemanticKeywordCleaningResult,
   SemanticKeywordListItem
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
@@ -31,6 +33,7 @@ import {
   internalCreateSemanticKeywordInput,
   internalDeleteSemanticKeywordInput,
   internalSemanticKeywordBulkInput,
+  internalSemanticKeywordCleaningInput,
   internalUpdateSemanticKeywordInput
 } from "./keyword-input.js";
 import { keywordListQuery } from "./keyword-query.js";
@@ -86,6 +89,36 @@ export class KeywordController {
     assertMutationContext(projectId, headers, input);
     return {
       data: await this.keywords.bulkUpdate(input),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Post("bulk-clean-preview")
+  public async previewCleaning(
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticKeywordCleaningPreview>> {
+    const input = internalSemanticKeywordCleaningInput(body);
+    assertMutationContext(projectId, headers, input);
+    return {
+      data: await this.keywords.previewCleaning(input),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Post("bulk-clean")
+  public async clean(
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticKeywordCleaningResult>> {
+    const input = internalSemanticKeywordCleaningInput(body);
+    assertMutationContext(projectId, headers, input);
+    return {
+      data: await this.keywords.clean(input),
       meta: { requestId: request.id }
     };
   }

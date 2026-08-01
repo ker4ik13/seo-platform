@@ -1,5 +1,10 @@
 "use client";
 
+import type {
+  SemanticKeywordCleaningCase,
+  SemanticKeywordCleaningPreview,
+  SemanticKeywordCleaningResult
+} from "@seo-platform/contracts";
 import { useState, type FormEvent } from "react";
 import {
   browserApiRequest,
@@ -95,12 +100,104 @@ export function SemanticBulkEditor({
   const [splitPreview, setSplitPreview] = useState<SplitPreview>();
   const [splitSaving, setSplitSaving] = useState(false);
   const [splitError, setSplitError] = useState<string>();
+  const [cleaningCase, setCleaningCase] =
+    useState<SemanticKeywordCleaningCase>("KEEP");
+  const [collapseWhitespace, setCollapseWhitespace] = useState(true);
+  const [normalizeQuotes, setNormalizeQuotes] = useState(false);
+  const [normalizeDashes, setNormalizeDashes] = useState(false);
+  const [normalizeYo, setNormalizeYo] = useState(false);
+  const [removeSearchOperators, setRemoveSearchOperators] = useState(false);
+  const [cleaningPreview, setCleaningPreview] =
+    useState<SemanticKeywordCleaningPreview>();
+  const [cleaningBusy, setCleaningBusy] = useState<"PREVIEW" | "APPLY">();
+  const [cleaningError, setCleaningError] = useState<string>();
   const sourceClusterId = selections[0]?.clusterId;
   const sourceCluster = sourceClusterId && selections.every(
     ({ clusterId: itemClusterId }) => itemClusterId === sourceClusterId
   )
     ? clusters.find(({ id }) => id === sourceClusterId)
     : undefined;
+
+  const cleaningRules = {
+    collapseWhitespace,
+    normalizeQuotes,
+    normalizeDashes,
+    normalizeYo,
+    removeSearchOperators,
+    letterCase: cleaningCase
+  };
+  const hasCleaningRule =
+    collapseWhitespace ||
+    normalizeQuotes ||
+    normalizeDashes ||
+    normalizeYo ||
+    removeSearchOperators ||
+    cleaningCase !== "KEEP";
+
+  function invalidateCleaning(): void {
+    setCleaningPreview(undefined);
+    setCleaningError(undefined);
+  }
+
+  async function previewCleaning(): Promise<void> {
+    if (!hasCleaningRule || cleaningBusy) return;
+    setCleaningBusy("PREVIEW");
+    setCleaningError(undefined);
+    try {
+      setCleaningPreview(
+        await browserApiRequest<SemanticKeywordCleaningPreview>(
+          `/app/api/projects/${encodeURIComponent(
+            projectId
+          )}/bulk-commands/clean-preview`,
+          {
+            method: "POST",
+            body: {
+              items: selections.map(({ id, version }) => ({ id, version })),
+              rules: cleaningRules
+            }
+          }
+        )
+      );
+    } catch (requestError) {
+      setCleaningPreview(undefined);
+      setCleaningError(bulkErrorMessage(requestError));
+    } finally {
+      setCleaningBusy(undefined);
+    }
+  }
+
+  async function applyCleaning(): Promise<void> {
+    if (!cleaningPreview?.applicable || cleaningBusy) return;
+    setCleaningBusy("APPLY");
+    setCleaningError(undefined);
+    try {
+      const cleaningResult =
+        await browserApiRequest<SemanticKeywordCleaningResult>(
+          `/app/api/projects/${encodeURIComponent(
+            projectId
+          )}/bulk-commands/clean`,
+          {
+            method: "POST",
+            body: {
+              items: selections.map(({ id, version }) => ({ id, version })),
+              rules: cleaningRules
+            }
+          }
+        );
+      onCompleted({
+        selected: cleaningResult.selected,
+        changed: cleaningResult.changed,
+        skipped: cleaningResult.unchanged,
+        failed: cleaningResult.failed,
+        conflicted: cleaningResult.conflicted
+      });
+    } catch (requestError) {
+      setCleaningPreview(undefined);
+      setCleaningError(bulkErrorMessage(requestError));
+    } finally {
+      setCleaningBusy(undefined);
+    }
+  }
 
   function splitBody() {
     return {
@@ -418,6 +515,151 @@ export function SemanticBulkEditor({
           </div>
         </div>
       </details>
+      <details className="semantic-bulk-split">
+        <summary>
+          <span>Очистить запросы</span>
+          <small>Preview, проверка дублей и отмена через историю</small>
+        </summary>
+        <div className="semantic-bulk-split-body">
+          <div className="semantic-cleaning-options">
+            <label>
+              <span>Регистр</span>
+              <select
+                disabled={Boolean(cleaningBusy)}
+                onChange={(event) => {
+                  setCleaningCase(
+                    event.target.value as SemanticKeywordCleaningCase
+                  );
+                  invalidateCleaning();
+                }}
+                value={cleaningCase}
+              >
+                <option value="KEEP">Не менять</option>
+                <option value="LOWER">строчные</option>
+                <option value="UPPER">ПРОПИСНЫЕ</option>
+              </select>
+            </label>
+            <label>
+              <input
+                checked={collapseWhitespace}
+                disabled={Boolean(cleaningBusy)}
+                onChange={(event) => {
+                  setCollapseWhitespace(event.target.checked);
+                  invalidateCleaning();
+                }}
+                type="checkbox"
+              />
+              Пробелы
+            </label>
+            <label>
+              <input
+                checked={normalizeQuotes}
+                disabled={Boolean(cleaningBusy)}
+                onChange={(event) => {
+                  setNormalizeQuotes(event.target.checked);
+                  invalidateCleaning();
+                }}
+                type="checkbox"
+              />
+              Кавычки
+            </label>
+            <label>
+              <input
+                checked={normalizeDashes}
+                disabled={Boolean(cleaningBusy)}
+                onChange={(event) => {
+                  setNormalizeDashes(event.target.checked);
+                  invalidateCleaning();
+                }}
+                type="checkbox"
+              />
+              Дефисы
+            </label>
+            <label>
+              <input
+                checked={normalizeYo}
+                disabled={Boolean(cleaningBusy)}
+                onChange={(event) => {
+                  setNormalizeYo(event.target.checked);
+                  invalidateCleaning();
+                }}
+                type="checkbox"
+              />
+              Ё → Е
+            </label>
+            <label>
+              <input
+                checked={removeSearchOperators}
+                disabled={Boolean(cleaningBusy)}
+                onChange={(event) => {
+                  setRemoveSearchOperators(event.target.checked);
+                  invalidateCleaning();
+                }}
+                type="checkbox"
+              />
+              Удалить операторы
+            </label>
+          </div>
+          {cleaningPreview && (
+            <div className="semantic-cleaning-preview" role="status">
+              <div className="semantic-cluster-bulk-preview">
+                <span>
+                  <strong>{cleaningPreview.applicable}</strong> изменятся
+                </span>
+                <span>
+                  <strong>{cleaningPreview.unchanged}</strong> без изменений
+                </span>
+                <span className={cleaningPreview.conflicted > 0 ? "danger" : ""}>
+                  <strong>{cleaningPreview.conflicted}</strong> конфликтов
+                </span>
+                <span className={cleaningPreview.failed > 0 ? "danger" : ""}>
+                  <strong>{cleaningPreview.failed}</strong> ошибок/дублей
+                </span>
+              </div>
+              <div className="semantic-cleaning-preview-list">
+                {cleaningPreview.changes
+                  .filter(({ state }) => state !== "UNCHANGED")
+                  .slice(0, 8)
+                  .map((change) => (
+                    <div key={change.keywordId}>
+                      <span>{change.beforeText ?? "Запрос недоступен"}</span>
+                      <strong aria-hidden="true">→</strong>
+                      <span>{change.afterText ?? cleaningStateLabel(change.state)}</span>
+                      {change.state !== "APPLICABLE" && (
+                        <small>{cleaningStateLabel(change.state)}</small>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+          {cleaningError && (
+            <div className="inline-alert danger" role="alert">
+              {cleaningError}
+            </div>
+          )}
+          <div className="semantic-editor-actions">
+            <button
+              className="secondary-button"
+              disabled={!hasCleaningRule || Boolean(cleaningBusy)}
+              onClick={() => void previewCleaning()}
+              type="button"
+            >
+              {cleaningBusy === "PREVIEW" ? "Проверяем…" : "Проверить очистку"}
+            </button>
+            <button
+              className="primary-button"
+              disabled={!cleaningPreview?.applicable || Boolean(cleaningBusy)}
+              onClick={() => void applyCleaning()}
+              type="button"
+            >
+              {cleaningBusy === "APPLY"
+                ? "Применяем…"
+                : `Применить ${cleaningPreview?.applicable ?? 0}`}
+            </button>
+          </div>
+        </div>
+      </details>
       {error && (
         <div className="inline-alert danger" role="alert">
           {error}
@@ -456,6 +698,20 @@ function parseTags(value: string): readonly string[] {
         .map((tag) => [tag.toLocaleLowerCase(), tag] as const)
     ).values()
   ].slice(0, 50);
+}
+
+function cleaningStateLabel(
+  state: SemanticKeywordCleaningPreview["changes"][number]["state"]
+): string {
+  const labels = {
+    APPLICABLE: "Готово",
+    UNCHANGED: "Без изменений",
+    CONFLICTED: "Версия изменилась",
+    UNAVAILABLE: "Запрос недоступен",
+    DUPLICATE: "Будет создан дубль",
+    INVALID: "После очистки запрос пуст или слишком длинный"
+  } as const;
+  return labels[state];
 }
 
 function bulkErrorMessage(error: unknown): string {

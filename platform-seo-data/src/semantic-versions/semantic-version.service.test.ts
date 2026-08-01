@@ -19,6 +19,24 @@ const entitlement = {
   trackedContextPairs: 50_000
 } as const;
 
+test("list preserves cleaning and cluster split version reasons", async () => {
+  const service = new SemanticVersionService({
+    semanticVersion: {
+      findMany: async () => [
+        { ...version(), reason: "CLEANING", number: 3 },
+        { ...version(), id: undoVersionId, reason: "CLUSTER_SPLIT", number: 2 }
+      ]
+    }
+  } as unknown as PrismaService);
+
+  const result = await service.list(workspaceId, projectId);
+
+  assert.deepEqual(result.map(({ reason }) => reason), [
+    "CLEANING",
+    "CLUSTER_SPLIT"
+  ]);
+});
+
 test("preview refuses to overwrite a newer keyword version", async () => {
   const service = new SemanticVersionService({
     semanticVersion: {

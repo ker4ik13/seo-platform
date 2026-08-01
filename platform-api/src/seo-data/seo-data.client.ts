@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
   semanticKeywordIntents,
+  semanticKeywordCleaningStates,
   semanticKeywordSourceModes,
   semanticKeywordSorts,
   semanticClusterMethods,
@@ -28,6 +29,7 @@ import {
   type InternalSemanticClusterSplitInput,
   type InternalDeleteSemanticKeywordGroupInput,
   type InternalSemanticKeywordBulkInput,
+  type InternalSemanticKeywordCleaningInput,
   type InternalCreateSemanticSavedViewInput,
   type InternalCreateSemanticCustomColumnInput,
   type InternalDeleteSemanticSavedViewInput,
@@ -71,6 +73,9 @@ import {
   type SemanticClusterPageSource,
   type SemanticKeywordBulkInput,
   type SemanticKeywordBulkResult,
+  type SemanticKeywordCleaningInput,
+  type SemanticKeywordCleaningPreview,
+  type SemanticKeywordCleaningResult,
   type SemanticKeywordGroup,
   type SemanticKeywordListItem,
   type CreateSemanticSavedViewInput,
@@ -259,6 +264,46 @@ export class SeoDataClient {
       body
     );
     return semanticKeywordBulkResult(responseData(payload), input);
+  }
+
+  public async previewSemanticKeywordCleaning(
+    context: InternalContext,
+    input: SemanticKeywordCleaningInput
+  ): Promise<SemanticKeywordCleaningPreview> {
+    const scope = trackingScope(context);
+    const body: InternalSemanticKeywordCleaningInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      keywordUrl(context, this.config.services.seoData, "bulk-clean-preview"),
+      context,
+      body
+    );
+    return semanticKeywordCleaningPreview(responseData(payload), input);
+  }
+
+  public async cleanSemanticKeywords(
+    context: InternalContext,
+    input: SemanticKeywordCleaningInput
+  ): Promise<SemanticKeywordCleaningResult> {
+    const scope = trackingScope(context);
+    const body: InternalSemanticKeywordCleaningInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      keywordUrl(context, this.config.services.seoData, "bulk-clean"),
+      context,
+      body
+    );
+    return semanticKeywordCleaningResult(responseData(payload), input);
   }
 
   public async listKeywordGroups(
@@ -1500,6 +1545,129 @@ export function semanticKeywordBulkResult(
     conflictedIds: result.conflictedIds as string[],
     skippedIds: result.skippedIds as string[],
     failedIds: result.failedIds as string[]
+  };
+}
+
+export function semanticKeywordCleaningPreview(
+  value: unknown,
+  input: SemanticKeywordCleaningInput
+): SemanticKeywordCleaningPreview {
+  const preview = exactRecord(value, [
+    "selected",
+    "applicable",
+    "unchanged",
+    "conflicted",
+    "failed",
+    "changes"
+  ]);
+  if (!Array.isArray(preview.changes) || preview.changes.length !== input.items.length) {
+    throw invalidResponse();
+  }
+  const expectedById = new Map(input.items.map((item) => [item.id, item.version]));
+  const changes = preview.changes.map((value) => {
+    const change = exactRecord(value, [
+      "keywordId",
+      "state",
+      "expectedVersion",
+      "currentVersion",
+      "beforeText",
+      "afterText"
+    ]);
+    const unavailable = change.state === "UNAVAILABLE";
+    if (
+      !requiredString(change.keywordId) ||
+      typeof change.state !== "string" ||
+      !semanticKeywordCleaningStates.some((state) => state === change.state) ||
+      !positiveInteger(change.expectedVersion) ||
+      expectedById.get(change.keywordId) !== change.expectedVersion ||
+      (unavailable
+        ? change.currentVersion !== undefined ||
+          change.beforeText !== undefined ||
+          change.afterText !== undefined
+        : !positiveInteger(change.currentVersion) ||
+          !requiredString(change.beforeText) ||
+          typeof change.afterText !== "string")
+    ) {
+      throw invalidResponse();
+    }
+    return change as unknown as SemanticKeywordCleaningPreview["changes"][number];
+  });
+  const stateCount = (states: readonly string[]) =>
+    changes.filter(({ state }) => states.includes(state)).length;
+  if (
+    new Set(changes.map(({ keywordId }) => keywordId)).size !== changes.length ||
+    !bulkCount(preview.selected, changes.length) ||
+    !bulkCount(preview.applicable, stateCount(["APPLICABLE"])) ||
+    !bulkCount(preview.unchanged, stateCount(["UNCHANGED"])) ||
+    !bulkCount(preview.conflicted, stateCount(["CONFLICTED"])) ||
+    !bulkCount(
+      preview.failed,
+      stateCount(["UNAVAILABLE", "DUPLICATE", "INVALID"])
+    )
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    selected: Number(preview.selected),
+    applicable: Number(preview.applicable),
+    unchanged: Number(preview.unchanged),
+    conflicted: Number(preview.conflicted),
+    failed: Number(preview.failed),
+    changes
+  };
+}
+
+export function semanticKeywordCleaningResult(
+  value: unknown,
+  input: SemanticKeywordCleaningInput
+): SemanticKeywordCleaningResult {
+  const result = exactRecord(value, [
+    "selected",
+    "changed",
+    "unchanged",
+    "conflicted",
+    "failed",
+    "updatedItems",
+    "unchangedIds",
+    "conflictedIds",
+    "failedIds"
+  ]);
+  const updatedItems = Array.isArray(result.updatedItems)
+    ? result.updatedItems.map(semanticKeywordItem)
+    : [];
+  const unchangedIds = uuidList(result.unchangedIds, input.items.length);
+  const conflictedIds = uuidList(result.conflictedIds, input.items.length);
+  const failedIds = uuidList(result.failedIds, input.items.length);
+  const allowedIds = new Set(input.items.map(({ id }) => id));
+  const partitions = [
+    ...updatedItems.map(({ id }) => id),
+    ...unchangedIds,
+    ...conflictedIds,
+    ...failedIds
+  ];
+  if (
+    !Array.isArray(result.updatedItems) ||
+    partitions.some((id) => !allowedIds.has(id)) ||
+    new Set(partitions).size !== partitions.length ||
+    partitions.length !== input.items.length ||
+    !bulkCount(result.selected, input.items.length) ||
+    !bulkCount(result.changed, updatedItems.length) ||
+    !bulkCount(result.unchanged, unchangedIds.length) ||
+    !bulkCount(result.conflicted, conflictedIds.length) ||
+    !bulkCount(result.failed, failedIds.length)
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    selected: Number(result.selected),
+    changed: Number(result.changed),
+    unchanged: Number(result.unchanged),
+    conflicted: Number(result.conflicted),
+    failed: Number(result.failed),
+    updatedItems,
+    unchangedIds,
+    conflictedIds,
+    failedIds
   };
 }
 

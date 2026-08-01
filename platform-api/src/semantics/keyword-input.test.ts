@@ -4,6 +4,7 @@ import { DomainError } from "../common/domain-error.js";
 import {
   createSemanticKeywordInput,
   semanticKeywordBulkInput,
+  semanticKeywordCleaningInput,
   updateSemanticKeywordInput
 } from "./keyword-input.js";
 import {
@@ -95,6 +96,44 @@ test("requires exact versions for every bounded bulk selection", () => {
   );
   assert.throws(
     () => semanticKeywordBulkInput({ items: [{ id, version: 1 }], patch: {} }),
+    DomainError
+  );
+});
+
+test("accepts only explicit non-empty keyword cleaning rules", () => {
+  const id = "01900000-0000-7000-8000-000000000030";
+  assert.deepEqual(
+    semanticKeywordCleaningInput({
+      items: [{ id, version: 2 }],
+      rules: {
+        collapseWhitespace: true,
+        normalizeYo: false,
+        letterCase: "LOWER"
+      }
+    }),
+    {
+      items: [{ id, version: 2 }],
+      rules: {
+        collapseWhitespace: true,
+        normalizeYo: false,
+        letterCase: "LOWER"
+      }
+    }
+  );
+  assert.throws(
+    () =>
+      semanticKeywordCleaningInput({
+        items: [{ id, version: 2 }],
+        rules: { collapseWhitespace: false, letterCase: "KEEP" }
+      }),
+    DomainError
+  );
+  assert.throws(
+    () =>
+      semanticKeywordCleaningInput({
+        items: [{ id, version: 2 }],
+        rules: { unsafeRegex: ".*" }
+      }),
     DomainError
   );
 });

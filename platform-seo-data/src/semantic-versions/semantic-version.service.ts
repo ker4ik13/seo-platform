@@ -1210,7 +1210,9 @@ function versionReason(value: string): SemanticVersionReason {
       "CLUSTER_DELETE",
       "CLUSTER_BULK_UPDATE",
       "CLUSTER_MERGE",
+      "CLUSTER_SPLIT",
       "BULK_UPDATE",
+      "CLEANING",
       "UNDO"
     ].includes(value)
   ) {

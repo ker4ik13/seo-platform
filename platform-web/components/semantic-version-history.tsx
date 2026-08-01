@@ -266,6 +266,8 @@ function reasonLabel(reason: SemanticVersionListItem["reason"]): string {
       return "разделение кластера";
     case "BULK_UPDATE":
       return "массовое изменение";
+    case "CLEANING":
+      return "очистка запросов";
     case "IMPORT":
       return "импорт";
     case "UNDO":

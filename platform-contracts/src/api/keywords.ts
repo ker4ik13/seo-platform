@@ -201,3 +201,75 @@ export interface SemanticKeywordBulkResult {
   readonly skippedIds: readonly string[];
   readonly failedIds: readonly string[];
 }
+
+export const semanticKeywordCleaningCases = [
+  "KEEP",
+  "LOWER",
+  "UPPER"
+] as const;
+
+export type SemanticKeywordCleaningCase =
+  (typeof semanticKeywordCleaningCases)[number];
+
+export interface SemanticKeywordCleaningRules {
+  readonly collapseWhitespace?: boolean;
+  readonly normalizeQuotes?: boolean;
+  readonly normalizeDashes?: boolean;
+  readonly normalizeYo?: boolean;
+  readonly removeSearchOperators?: boolean;
+  readonly letterCase?: SemanticKeywordCleaningCase;
+}
+
+export interface SemanticKeywordCleaningInput {
+  readonly items: readonly SemanticKeywordBulkSelection[];
+  readonly rules: SemanticKeywordCleaningRules;
+}
+
+export interface InternalSemanticKeywordCleaningInput
+  extends SemanticKeywordCleaningInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+}
+
+export const semanticKeywordCleaningStates = [
+  "APPLICABLE",
+  "UNCHANGED",
+  "CONFLICTED",
+  "UNAVAILABLE",
+  "DUPLICATE",
+  "INVALID"
+] as const;
+
+export type SemanticKeywordCleaningState =
+  (typeof semanticKeywordCleaningStates)[number];
+
+export interface SemanticKeywordCleaningPreviewChange {
+  readonly keywordId: string;
+  readonly state: SemanticKeywordCleaningState;
+  readonly expectedVersion: number;
+  readonly currentVersion?: number;
+  readonly beforeText?: string;
+  readonly afterText?: string;
+}
+
+export interface SemanticKeywordCleaningPreview {
+  readonly selected: number;
+  readonly applicable: number;
+  readonly unchanged: number;
+  readonly conflicted: number;
+  readonly failed: number;
+  readonly changes: readonly SemanticKeywordCleaningPreviewChange[];
+}
+
+export interface SemanticKeywordCleaningResult {
+  readonly selected: number;
+  readonly changed: number;
+  readonly unchanged: number;
+  readonly conflicted: number;
+  readonly failed: number;
+  readonly updatedItems: readonly SemanticKeywordListItem[];
+  readonly unchangedIds: readonly string[];
+  readonly conflictedIds: readonly string[];
+  readonly failedIds: readonly string[];
+}

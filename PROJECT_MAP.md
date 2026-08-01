@@ -93,8 +93,14 @@ workspace/actor из browser body; Web использует same-origin BFF и �
 конфликты версии без silent overwrite. Bounded bulk-команда принимает 1–200
 явных keyword ID с отдельной ожидаемой версией, возвращает changed/skipped/
 failed/conflicted partition и позволяет массово менять приоритет, избранное,
-intent, группу, кластер, target URL и теги без blind overwrite. Серверный keyword read
-model уже поддерживает allowlisted intent/group/cluster/favorite/tracked/priority
+intent, группу, кластер, target URL и теги без blind overwrite. Для выбранных
+1–200 запросов доступен bounded cleaner: пользователь явно
+выбирает пробелы, кавычки, дефисы, `ё/е`, регистр и удаление поисковых
+операторов, получает row-level preview с duplicate/CAS/invalid состояниями и
+только затем применяет допустимые строки. Apply создаёт одну reversible
+semantic version `CLEANING`, поэтому результат доступен в истории и undo.
+Серверный keyword read model поддерживает allowlisted
+intent/group/cluster/favorite/tracked/priority
 filters и пять стабильных keyset sorts; cursor криптографически связан с
 фильтрами и сортировкой через SHA-256 fingerprint. Private и project-shared saved views сохраняют
 строго валидируемый versioned DSL (фильтры, сортировка, видимость/порядок
@@ -832,7 +838,8 @@ Backend convention:
 - `platform-api/src/imports` — project-scoped create/read orchestration с
   `semantic.import`/`semantic.view`;
 - `platform-api/src/semantics` — public project-scoped keyword read/create/
-  update/delete, bounded explicit-ID bulk, иерархические groups и versioned
+  update/delete, bounded explicit-ID bulk и cleaner preview/apply,
+  иерархические groups и versioned
   manual clusters, private/project-shared saved views, а также typed custom
   column/value CRUD;
   reads используют `semantic.view`, definitions защищены
@@ -1066,8 +1073,9 @@ Backend convention:
   всех SEO Data writers;
 - `platform-seo-data/src/keywords` — tenant-scoped keyword read model и
   manual command owner: trigram search, allowlisted filters, пять stable
-  keyset sorts с filter-bound cursor, CRUD с CAS, cluster/group/tag/page relations и
-  derived `isTracked` по активным temporal assignments;
+  keyset sorts с filter-bound cursor, CRUD с CAS, cluster/group/tag/page relations,
+  derived `isTracked` по активным temporal assignments и deterministic
+  duplicate-aware keyword cleaner с preview, partial apply и reversible version;
 - `platform-seo-data/src/keyword-groups` — bounded tree query, nested create,
   rename/move с cycle guard и descendant path rewrite, CAS и безопасное
   удаление только пустой группы;
@@ -1339,7 +1347,7 @@ Entrypoints:
 | Admin operations | vertical slice: MFA + persisted roles + NPD operations |
 | Auth core | vertical slice: identity lifecycle + transactional verification/reset email transport |
 | Workspaces/projects/team access | vertical slice: включая transactional invite email/fragment acceptance |
-| Semantics/import | vertical slice: Key Collector-style groups/manual clusters/table/tools + CSV/TSV/XLSX → mapping → validation → quota reservation → publish/abort → query; manual cluster→primary Page, derived missing/cannibalization diagnostics, lock/exclude, bounded cluster merge/split с preview и mapping/merge/split history/undo закрыты; background merge/split, auto-clustering, alternate pages и расширенное SERP evidence ещё не закрыты |
+| Semantics/import | vertical slice: Key Collector-style groups/manual clusters/table/tools + CSV/TSV/XLSX → mapping → validation → quota reservation → publish/abort → query; manual cluster→primary Page, derived missing/cannibalization diagnostics, lock/exclude, bounded cluster merge/split и keyword cleaner с preview/history/undo закрыты; background merge/split, full SERP-based auto-clustering proposals, alternate pages и расширенное SERP evidence ещё не закрыты |
 | Notifications | vertical slice: preferences → effective policy → read center → encrypted browser device lifecycle + durable terminal crawl in-app notifications |
 | Integrations | vertical slice: operational catalog + encrypted BYOK vault + validation + SERP/competitor project bindings |
 | Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |

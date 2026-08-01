@@ -10,6 +10,8 @@ import {
 import {
   semanticKeywordGroups,
   semanticKeywordBulkResult,
+  semanticKeywordCleaningPreview,
+  semanticKeywordCleaningResult,
   semanticKeywordPage,
   semanticClusterPageBulkPreview,
   semanticClusterPageBulkResult,
@@ -427,6 +429,76 @@ test("validates a complete semantic bulk result partition", () => {
           changed: 2,
           updatedItems: [validItem]
         },
+        input
+      ),
+    DomainError
+  );
+});
+
+test("validates keyword cleaning preview and result partitions", () => {
+  const first = validItem.id;
+  const second = "01900000-0000-7000-8000-000000000030";
+  const input = {
+    items: [
+      { id: first, version: 1 },
+      { id: second, version: 2 }
+    ],
+    rules: { collapseWhitespace: true }
+  };
+  const preview = semanticKeywordCleaningPreview(
+    {
+      selected: 2,
+      applicable: 1,
+      unchanged: 0,
+      conflicted: 0,
+      failed: 1,
+      changes: [
+        {
+          keywordId: first,
+          state: "APPLICABLE",
+          expectedVersion: 1,
+          currentVersion: 1,
+          beforeText: "SEO   аудит",
+          afterText: "SEO аудит"
+        },
+        {
+          keywordId: second,
+          state: "UNAVAILABLE",
+          expectedVersion: 2
+        }
+      ]
+    },
+    input
+  );
+  assert.equal(preview.applicable, 1);
+  assert.throws(
+    () =>
+      semanticKeywordCleaningPreview(
+        { ...preview, applicable: 2 },
+        input
+      ),
+    DomainError
+  );
+
+  const result = semanticKeywordCleaningResult(
+    {
+      selected: 2,
+      changed: 1,
+      unchanged: 0,
+      conflicted: 0,
+      failed: 1,
+      updatedItems: [validItem],
+      unchangedIds: [],
+      conflictedIds: [],
+      failedIds: [second]
+    },
+    input
+  );
+  assert.equal(result.changed, 1);
+  assert.throws(
+    () =>
+      semanticKeywordCleaningResult(
+        { ...result, failedIds: [first] },
         input
       ),
     DomainError

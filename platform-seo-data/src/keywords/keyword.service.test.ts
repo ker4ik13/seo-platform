@@ -121,6 +121,131 @@ test("bulk update partitions changed, conflicted and skipped rows", async () => 
   assert.deepEqual(result.conflictedIds, [conflictId]);
 });
 
+test("cleaning preview detects versions and project duplicates", async () => {
+  const changedId = "01900000-0000-7000-8000-000000000050";
+  const conflictId = "01900000-0000-7000-8000-000000000051";
+  const duplicateId = "01900000-0000-7000-8000-000000000052";
+  let call = 0;
+  const service = new KeywordService(
+    {
+      keyword: {
+        findMany: async (query: {
+          where: { OR?: readonly { language: string; normalizedHash: string }[] };
+        }) => {
+          call += 1;
+          if (call === 1) {
+            return [
+              {
+                id: changedId,
+                textOriginal: "  SEO   АУДИТ  ",
+                language: "ru",
+                version: 1
+              },
+              {
+                id: conflictId,
+                textOriginal: "Ёлка",
+                language: "ru",
+                version: 2
+              }
+            ];
+          }
+          const target = query.where.OR?.[0];
+          return target
+            ? [{ id: duplicateId, ...target }]
+            : [];
+        }
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  const preview = await service.previewCleaning({
+    workspaceId,
+    projectId,
+    actorId: "01900000-0000-7000-8000-000000000003",
+    items: [
+      { id: changedId, version: 1 },
+      { id: conflictId, version: 1 }
+    ],
+    rules: { collapseWhitespace: true, letterCase: "LOWER" }
+  });
+
+  assert.equal(preview.applicable, 0);
+  assert.equal(preview.conflicted, 1);
+  assert.equal(preview.failed, 1);
+  assert.equal(preview.changes[0]?.state, "DUPLICATE");
+  assert.equal(preview.changes[1]?.state, "CONFLICTED");
+});
+
+test("cleaning apply creates one version and partitions every selection", async () => {
+  const changedId = "01900000-0000-7000-8000-000000000060";
+  const unchangedId = "01900000-0000-7000-8000-000000000061";
+  const failedId = "01900000-0000-7000-8000-000000000062";
+  let finalized = 0;
+  const versions = {
+    ...semanticVersions(),
+    finalizeBulkVersion: async () => {
+      finalized += 1;
+      return {};
+    }
+  } as unknown as SemanticVersionService;
+  const service = new KeywordService({} as PrismaService, versions);
+  service.previewCleaning = async () => ({
+    selected: 3,
+    applicable: 1,
+    unchanged: 1,
+    conflicted: 0,
+    failed: 1,
+    changes: [
+      {
+        keywordId: changedId,
+        state: "APPLICABLE",
+        expectedVersion: 1,
+        currentVersion: 1,
+        beforeText: "SEO   аудит",
+        afterText: "SEO аудит"
+      },
+      {
+        keywordId: unchangedId,
+        state: "UNCHANGED",
+        expectedVersion: 1,
+        currentVersion: 1,
+        beforeText: "PPC",
+        afterText: "PPC"
+      },
+      {
+        keywordId: failedId,
+        state: "INVALID",
+        expectedVersion: 1,
+        currentVersion: 1,
+        beforeText: "!",
+        afterText: ""
+      }
+    ]
+  });
+  service.update = async (id, input) => {
+    assert.equal(input.text, "SEO аудит");
+    return semanticItem(id);
+  };
+
+  const result = await service.clean({
+    workspaceId,
+    projectId,
+    actorId: "01900000-0000-7000-8000-000000000003",
+    items: [
+      { id: changedId, version: 1 },
+      { id: unchangedId, version: 1 },
+      { id: failedId, version: 1 }
+    ],
+    rules: { collapseWhitespace: true }
+  });
+
+  assert.equal(result.changed, 1);
+  assert.deepEqual(result.unchangedIds, [unchangedId]);
+  assert.deepEqual(result.failedIds, [failedId]);
+  assert.equal(finalized, 1);
+});
+
 function keyword(id: string, createdAt: string) {
   return {
     id,

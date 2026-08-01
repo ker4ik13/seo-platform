@@ -1,9 +1,12 @@
 import { Buffer } from "node:buffer";
 import {
+  semanticKeywordCleaningCases,
   semanticKeywordIntents,
   type CreateSemanticKeywordInput,
   type SemanticKeywordBulkInput,
   type SemanticKeywordBulkPatch,
+  type SemanticKeywordCleaningInput,
+  type SemanticKeywordCleaningRules,
   type SemanticKeywordIntent,
   type UpdateSemanticKeywordInput
 } from "@seo-platform/contracts";
@@ -66,11 +69,28 @@ export function semanticKeywordBulkInput(
   value: unknown
 ): SemanticKeywordBulkInput {
   const input = exactRecord(value, ["items", "patch"], "$");
-  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 200) {
+  const items = semanticKeywordSelections(input.items);
+  return { items, patch: semanticKeywordBulkPatch(input.patch) };
+}
+
+export function semanticKeywordCleaningInput(
+  value: unknown
+): SemanticKeywordCleaningInput {
+  const input = exactRecord(value, ["items", "rules"], "$");
+  return {
+    items: semanticKeywordSelections(input.items),
+    rules: semanticKeywordCleaningRules(input.rules)
+  };
+}
+
+function semanticKeywordSelections(
+  value: unknown
+): SemanticKeywordBulkInput["items"] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 200) {
     invalid("items", "Must select between 1 and 200 keywords");
   }
-  const items = input.items.map((value, index) => {
-    const item = exactRecord(value, ["id", "version"], `items.${index}`);
+  const items = value.map((entry, index) => {
+    const item = exactRecord(entry, ["id", "version"], `items.${index}`);
     if (typeof item.id !== "string" || !UUID_PATTERN.test(item.id)) {
       invalid(`items.${index}.id`, "Must be a UUID");
     }
@@ -82,7 +102,87 @@ export function semanticKeywordBulkInput(
   if (new Set(items.map(({ id }) => id)).size !== items.length) {
     invalid("items", "Cannot contain duplicate keywords");
   }
-  return { items, patch: semanticKeywordBulkPatch(input.patch) };
+  return items;
+}
+
+function semanticKeywordCleaningRules(
+  value: unknown
+): SemanticKeywordCleaningRules {
+  const input = exactRecord(
+    value,
+    [
+      "collapseWhitespace",
+      "normalizeQuotes",
+      "normalizeDashes",
+      "normalizeYo",
+      "removeSearchOperators",
+      "letterCase"
+    ],
+    "rules"
+  );
+  const rules: SemanticKeywordCleaningRules = {
+    ...(input.collapseWhitespace === undefined
+      ? {}
+      : {
+          collapseWhitespace: booleanValue(
+            input.collapseWhitespace,
+            "rules.collapseWhitespace"
+          )
+        }),
+    ...(input.normalizeQuotes === undefined
+      ? {}
+      : {
+          normalizeQuotes: booleanValue(
+            input.normalizeQuotes,
+            "rules.normalizeQuotes"
+          )
+        }),
+    ...(input.normalizeDashes === undefined
+      ? {}
+      : {
+          normalizeDashes: booleanValue(
+            input.normalizeDashes,
+            "rules.normalizeDashes"
+          )
+        }),
+    ...(input.normalizeYo === undefined
+      ? {}
+      : {
+          normalizeYo: booleanValue(input.normalizeYo, "rules.normalizeYo")
+        }),
+    ...(input.removeSearchOperators === undefined
+      ? {}
+      : {
+          removeSearchOperators: booleanValue(
+            input.removeSearchOperators,
+            "rules.removeSearchOperators"
+          )
+        }),
+    ...(input.letterCase === undefined
+      ? {}
+      : { letterCase: cleaningCase(input.letterCase) })
+  };
+  if (
+    !Object.entries(rules).some(
+      ([key, entry]) =>
+        (key === "letterCase" && entry !== "KEEP") || entry === true
+    )
+  ) {
+    invalid("rules", "At least one cleaning rule is required");
+  }
+  return rules;
+}
+
+function cleaningCase(
+  value: unknown
+): NonNullable<SemanticKeywordCleaningRules["letterCase"]> {
+  if (
+    typeof value !== "string" ||
+    !semanticKeywordCleaningCases.some((item) => item === value)
+  ) {
+    invalid("rules.letterCase", "Contains an unsupported letter case");
+  }
+  return value as NonNullable<SemanticKeywordCleaningRules["letterCase"]>;
 }
 
 function semanticKeywordBulkPatch(

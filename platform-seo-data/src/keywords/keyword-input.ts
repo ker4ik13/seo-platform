@@ -1,11 +1,14 @@
 import { Buffer } from "node:buffer";
 import { BadRequestException } from "@nestjs/common";
 import {
+  semanticKeywordCleaningCases,
   semanticKeywordIntents,
   type InternalCreateSemanticKeywordInput,
   type InternalDeleteSemanticKeywordInput,
   type InternalSemanticKeywordBulkInput,
+  type InternalSemanticKeywordCleaningInput,
   type InternalUpdateSemanticKeywordInput,
+  type SemanticKeywordCleaningRules,
   type SemanticKeywordIntent
 } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
@@ -93,19 +96,7 @@ export function internalSemanticKeywordBulkInput(
     "items",
     "patch"
   ]);
-  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 200) {
-    invalid("items");
-  }
-  const items = input.items.map((value) => {
-    const item = exactRecord(value, ["id", "version"]);
-    return {
-      id: uuid(item.id, "items.id"),
-      version: positiveInteger(item.version, "items.version")
-    };
-  });
-  if (new Set(items.map(({ id }) => id)).size !== items.length) {
-    invalid("items");
-  }
+  const items = semanticKeywordSelections(input.items);
   const patch = exactRecord(input.patch, [
     "priority",
     "isFavorite",
@@ -140,6 +131,110 @@ export function internalSemanticKeywordBulkInput(
         : { tagNames: tagNames(patch.tagNames) })
     }
   };
+}
+
+export function internalSemanticKeywordCleaningInput(
+  value: unknown
+): InternalSemanticKeywordCleaningInput {
+  const input = exactRecord(value, [...scopeFields(), "items", "rules"]);
+  return {
+    ...scope(input),
+    items: semanticKeywordSelections(input.items),
+    rules: semanticKeywordCleaningRules(input.rules)
+  };
+}
+
+function semanticKeywordSelections(
+  value: unknown
+): InternalSemanticKeywordBulkInput["items"] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 200) {
+    invalid("items");
+  }
+  const items = value.map((entry) => {
+    const item = exactRecord(entry, ["id", "version"]);
+    return {
+      id: uuid(item.id, "items.id"),
+      version: positiveInteger(item.version, "items.version")
+    };
+  });
+  if (new Set(items.map(({ id }) => id)).size !== items.length) {
+    invalid("items");
+  }
+  return items;
+}
+
+function semanticKeywordCleaningRules(
+  value: unknown
+): SemanticKeywordCleaningRules {
+  const input = exactRecord(value, [
+    "collapseWhitespace",
+    "normalizeQuotes",
+    "normalizeDashes",
+    "normalizeYo",
+    "removeSearchOperators",
+    "letterCase"
+  ]);
+  const rules: SemanticKeywordCleaningRules = {
+    ...(input.collapseWhitespace === undefined
+      ? {}
+      : {
+          collapseWhitespace: booleanValue(
+            input.collapseWhitespace,
+            "rules.collapseWhitespace"
+          )
+        }),
+    ...(input.normalizeQuotes === undefined
+      ? {}
+      : {
+          normalizeQuotes: booleanValue(
+            input.normalizeQuotes,
+            "rules.normalizeQuotes"
+          )
+        }),
+    ...(input.normalizeDashes === undefined
+      ? {}
+      : {
+          normalizeDashes: booleanValue(
+            input.normalizeDashes,
+            "rules.normalizeDashes"
+          )
+        }),
+    ...(input.normalizeYo === undefined
+      ? {}
+      : { normalizeYo: booleanValue(input.normalizeYo, "rules.normalizeYo") }),
+    ...(input.removeSearchOperators === undefined
+      ? {}
+      : {
+          removeSearchOperators: booleanValue(
+            input.removeSearchOperators,
+            "rules.removeSearchOperators"
+          )
+        }),
+    ...(input.letterCase === undefined
+      ? {}
+      : { letterCase: cleaningCase(input.letterCase) })
+  };
+  if (
+    !Object.entries(rules).some(
+      ([key, entry]) =>
+        (key === "letterCase" && entry !== "KEEP") || entry === true
+    )
+  ) {
+    invalid("rules");
+  }
+  return rules;
+}
+
+function cleaningCase(
+  value: unknown
+): NonNullable<SemanticKeywordCleaningRules["letterCase"]> {
+  if (
+    typeof value !== "string" ||
+    !semanticKeywordCleaningCases.some((item) => item === value)
+  ) {
+    invalid("rules.letterCase");
+  }
+  return value as NonNullable<SemanticKeywordCleaningRules["letterCase"]>;
 }
 
 function scopeFields(): readonly string[] {

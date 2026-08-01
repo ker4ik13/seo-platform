@@ -11,9 +11,13 @@ import type {
   InternalCreateSemanticKeywordInput,
   InternalDeleteSemanticKeywordInput,
   InternalSemanticKeywordBulkInput,
+  InternalSemanticKeywordCleaningInput,
   InternalUpdateSemanticKeywordInput,
   KeywordListQuery,
   SemanticKeywordBulkResult,
+  SemanticKeywordCleaningPreview,
+  SemanticKeywordCleaningPreviewChange,
+  SemanticKeywordCleaningResult,
   SemanticKeywordIntent,
   SemanticKeywordListItem,
   SemanticKeywordSort
@@ -31,6 +35,7 @@ import {
   type SemanticVersionIdentity
 } from "../semantic-versions/semantic-version.service.js";
 import { normalizeKeywordText } from "./keyword-normalization.js";
+import { cleanKeywordText } from "./keyword-cleaning.js";
 import { normalizePageUrl } from "../pages/page-url.js";
 
 const UUID_PATTERN =
@@ -688,6 +693,235 @@ export class KeywordService {
       failedIds
     };
   }
+
+  public async previewCleaning(
+    input: InternalSemanticKeywordCleaningInput
+  ): Promise<SemanticKeywordCleaningPreview> {
+    const rows = await this.prisma.keyword.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        status: "ACTIVE",
+        id: { in: input.items.map(({ id }) => id) }
+      },
+      select: {
+        id: true,
+        textOriginal: true,
+        language: true,
+        version: true
+      }
+    });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    const candidates: CleaningCandidate[] = input.items.map((item) => {
+      const row = byId.get(item.id);
+      if (!row) {
+        return {
+          keywordId: item.id,
+          state: "UNAVAILABLE",
+          expectedVersion: item.version
+        };
+      }
+      const afterText = cleanKeywordText(row.textOriginal, input.rules);
+      const change = {
+        keywordId: item.id,
+        expectedVersion: item.version,
+        currentVersion: row.version,
+        beforeText: row.textOriginal,
+        afterText
+      } as const;
+      if (row.version !== item.version) {
+        return { ...change, state: "CONFLICTED" };
+      }
+      const normalized = normalizeKeywordText(afterText);
+      if (!normalized || Buffer.byteLength(afterText, "utf8") > 2_000) {
+        return { ...change, state: "INVALID" };
+      }
+      if (afterText === row.textOriginal) {
+        return { ...change, state: "UNCHANGED" };
+      }
+      return {
+        ...change,
+        state: "APPLICABLE",
+        language: row.language,
+        normalizedHash: sha256(normalized)
+      };
+    });
+    const applicable = candidates.filter(
+      (candidate): candidate is ApplicableCleaningCandidate =>
+        candidate.state === "APPLICABLE"
+    );
+    const occupants = applicable.length === 0
+      ? []
+      : await this.prisma.keyword.findMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            OR: applicable.map(({ language, normalizedHash }) => ({
+              language,
+              normalizedHash
+            }))
+          },
+          select: { id: true, language: true, normalizedHash: true }
+        });
+    const targetCounts = new Map<string, number>();
+    for (const candidate of applicable) {
+      const key = cleaningKey(candidate.language, candidate.normalizedHash);
+      targetCounts.set(key, (targetCounts.get(key) ?? 0) + 1);
+    }
+    const changes = candidates.map((candidate) => {
+      if (!isApplicableCleaningCandidate(candidate)) {
+        return publicCleaningChange(candidate);
+      }
+      const key = cleaningKey(candidate.language, candidate.normalizedHash);
+      const duplicate =
+        (targetCounts.get(key) ?? 0) > 1 ||
+        occupants.some(
+          (occupant) =>
+            occupant.id !== candidate.keywordId &&
+            cleaningKey(occupant.language, occupant.normalizedHash) === key
+        );
+      return publicCleaningChange(
+        duplicate ? { ...candidate, state: "DUPLICATE" } : candidate
+      );
+    });
+    return cleaningPreview(changes);
+  }
+
+  public async clean(
+    input: InternalSemanticKeywordCleaningInput
+  ): Promise<SemanticKeywordCleaningResult> {
+    const preview = await this.previewCleaning(input);
+    const updatedItems: SemanticKeywordListItem[] = [];
+    const unchangedIds: string[] = [];
+    const conflictedIds: string[] = [];
+    const failedIds: string[] = [];
+    const semanticVersion = preview.applicable > 0
+      ? await this.semanticVersions.createOpenBulkVersion({
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          actorId: input.actorId,
+          reason: "CLEANING",
+          summary: `Очистка ${input.items.length} запросов`
+        })
+      : undefined;
+    try {
+      for (const change of preview.changes) {
+        if (change.state === "UNCHANGED") {
+          unchangedIds.push(change.keywordId);
+          continue;
+        }
+        if (change.state === "CONFLICTED") {
+          conflictedIds.push(change.keywordId);
+          continue;
+        }
+        if (change.state !== "APPLICABLE" || !semanticVersion) {
+          failedIds.push(change.keywordId);
+          continue;
+        }
+        try {
+          updatedItems.push(
+            await this.update(
+              change.keywordId,
+              {
+                workspaceId: input.workspaceId,
+                projectId: input.projectId,
+                actorId: input.actorId,
+                version: change.expectedVersion,
+                text: change.afterText!
+              },
+              semanticVersion
+            )
+          );
+        } catch (error) {
+          if (!(error instanceof HttpException)) throw error;
+          if (error.getStatus() === HttpStatus.PRECONDITION_FAILED) {
+            conflictedIds.push(change.keywordId);
+          } else if (
+            error.getStatus() === HttpStatus.NOT_FOUND ||
+            error.getStatus() === HttpStatus.BAD_REQUEST ||
+            error.getStatus() === HttpStatus.CONFLICT
+          ) {
+            failedIds.push(change.keywordId);
+          } else {
+            throw error;
+          }
+        }
+      }
+    } finally {
+      if (semanticVersion) {
+        await this.semanticVersions.finalizeBulkVersion(semanticVersion);
+      }
+    }
+    return {
+      selected: input.items.length,
+      changed: updatedItems.length,
+      unchanged: unchangedIds.length,
+      conflicted: conflictedIds.length,
+      failed: failedIds.length,
+      updatedItems,
+      unchangedIds,
+      conflictedIds,
+      failedIds
+    };
+  }
+}
+
+type CleaningCandidate = SemanticKeywordCleaningPreviewChange &
+  Readonly<{ language?: string; normalizedHash?: string }>;
+
+type ApplicableCleaningCandidate = CleaningCandidate &
+  Readonly<{
+    state: "APPLICABLE";
+    language: string;
+    normalizedHash: string;
+  }>;
+
+function isApplicableCleaningCandidate(
+  candidate: CleaningCandidate
+): candidate is ApplicableCleaningCandidate {
+  return (
+    candidate.state === "APPLICABLE" &&
+    candidate.language !== undefined &&
+    candidate.normalizedHash !== undefined
+  );
+}
+
+function publicCleaningChange(
+  candidate: CleaningCandidate
+): SemanticKeywordCleaningPreviewChange {
+  return {
+    keywordId: candidate.keywordId,
+    state: candidate.state,
+    expectedVersion: candidate.expectedVersion,
+    ...(candidate.currentVersion === undefined
+      ? {}
+      : { currentVersion: candidate.currentVersion }),
+    ...(candidate.beforeText === undefined
+      ? {}
+      : { beforeText: candidate.beforeText }),
+    ...(candidate.afterText === undefined
+      ? {}
+      : { afterText: candidate.afterText })
+  };
+}
+
+function cleaningPreview(
+  changes: readonly SemanticKeywordCleaningPreviewChange[]
+): SemanticKeywordCleaningPreview {
+  return {
+    selected: changes.length,
+    applicable: changes.filter(({ state }) => state === "APPLICABLE").length,
+    unchanged: changes.filter(({ state }) => state === "UNCHANGED").length,
+    conflicted: changes.filter(({ state }) => state === "CONFLICTED").length,
+    failed: changes.filter(({ state }) =>
+      ["UNAVAILABLE", "DUPLICATE", "INVALID"].includes(state)
+    ).length,
+    changes
+  };
+}
+
+function cleaningKey(language: string, normalizedHash: string): string {
+  return `${language}\u0000${normalizedHash}`;
 }
 
 async function isKeywordTracked(
