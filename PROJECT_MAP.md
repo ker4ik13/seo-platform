@@ -1,6 +1,6 @@
 # Карта проекта
 
-Последнее обновление: 31 июля 2026 года
+Последнее обновление: 1 августа 2026 года
 
 Текущий инкремент: проверенный single-node VPS runtime и закрытие оставшихся
 пользовательских P1/P2-контуров по ТЗ. На VPS без Docker/sudo собран
@@ -107,9 +107,17 @@ filters и пять стабильных keyset sorts; cursor криптогра
 колонок и плотность), имеют owner boundary, CAS, soft delete и browser UI.
 Web workspace семантики следует проверенным паттернам Key Collector:
 постоянное дерево групп, плотная таблица, быстрый поиск/фильтры и массовые
-операции находятся на основном экране; импорт, управление группами/колонками
-кластерами и история открываются как отдельные компактные инструменты сразу под
-command bar, закрываются повторным нажатием и не вытесняют ядро. Импорт начинает
+операции находятся на основном экране без промежуточного отступа от общего
+sidebar. Ручное добавление принимает в textarea до 2 000 запросов по одному
+в строке, нормализует пробелы, пропускает дубли и при частичной ошибке
+оставляет для повтора только необработанные строки. Группы поддерживают
+collapse, multi-select, right-click menu и
+drag-and-drop перенос с server-side CAS; строки имеют row context menu, bulk
+bar, drag-and-drop в дерево и правый inspector. Таблица использует
+cursor-based infinite scroll с оконным DOM-render и догружает следующий
+cursor только у нижней границы scroll-контейнера, а не постраничной
+навигацией. Импорт, управление группами/колонками, кластерами и
+история открываются в native modal/dialog layers и не вытесняют ядро. Импорт начинает
 с компактного выбора CSV/TSV/XLSX, а mapping, preview, validation и публикация
 раскрываются только по мере прохождения этапов. Из того же toolbar доступен рабочий Keys.so-сценарий сбора запросов
 конкурентов с preview и явным подтверждением импорта в текущее ядро.
@@ -954,6 +962,24 @@ Backend convention:
   — `keyword_research_runs/pages/rows`, tenant-safe Job/binding/route/
   credential FKs, lifecycle/value constraints и три exact
   `SECURITY DEFINER` функции без table DML у connector role;
+- `platform-jobs-integrations/src/frequency-collections` — асинхронный
+  `FREQUENCY_COLLECTION` Job для 1–200 явных keyword ID/version через XMLStock
+  Wordstat BYOK. Job/JobItem содержат только ссылки и параметры; connector
+  получает encrypted credential только через exact `SECURITY DEFINER` claim,
+  расшифровывает его в памяти, собирает BASE/EXACT/FIXED и сохраняет
+  normalized snapshots через отдельную Jobs → SEO Data границу. Retry,
+  частичный результат, отмена и server-side history видны в журнале операций;
+- migration `20260801144000_frequency_collection_runtime` добавляет три exact
+  broker-функции claim/complete/fail без table DML у connector role, а
+  `platform-infrastructure/postgres/permissions/jobs-connector.sql` включает
+  только эти сигнатуры в allowlist;
+- `platform-seo-data/src/frequencies` и migration
+  `20260801143000_frequency_snapshot_job_idempotency` — owner-side resolve
+  keyword version и идемпотентная запись snapshot по
+  tenant/project/job/keyword/type/region/device; snapshot сохраняет device,
+  optional period и finite quality flags, а импорт без полного контекста
+  маркируется `CONTEXT_INCOMPLETE`. Keyword insights объединяет bounded
+  frequency history и current rank projections для правого inspector;
 - `platform-api/src/keyword-research` и
   `platform-web/app/app/(protected)/competitors` — public
   `competitor.view/manage` + `collector.run/cancel`, CSRF/OCC/audit/billing
@@ -1580,9 +1606,10 @@ JSON для `2xx`, body limit 1 MiB и нормализацией ошибок.
 пересечение, а новая не выдаётся старому ключу без повторной внешней проверки.
 Terminal update атомарно сверяет workspace и `material_version`: замена или
 revoke credential делает старую проверку `STALE`, не перезаписывая новый
-материал. Retry учитывает ограниченный `Retry-After`. XMLStock остаётся
-`PROVIDER_DOCUMENTATION_REQUIRED`, поэтому его проверка честно недоступна и
-провайдер исключён из публичного operational catalog. Arsenkin рекламирует
+материал. Retry учитывает ограниченный `Retry-After`. XMLStock теперь входит
+в operational catalog: credential validation использует документированный
+read-only `regionsTree` Wordstat endpoint, нормализует JSON error codes даже
+при HTTP 200 и не пишет query URL с user/key в логи. Arsenkin рекламирует
 только рабочий съём позиций, Keys.so — keyword/competitor research.
 Partial unique active dedup key ограничивает один validation на пару
 credential/material даже при разных `Idempotency-Key`.
@@ -2319,8 +2346,9 @@ OAuth/OIDC выполняется после подтверждения зави
   credentials владельца и incident telemetry/circuit breaker. Keys.so теперь
   поддерживает credential validation и полный competitor organic keywords
   collection/preview/import; до production остаётся live canary на реальном
-  тарифе владельца. XMLStock ждёт
-  подтверждённого provider contract и redacted fixtures.
+  тарифе владельца. XMLStock validation и Wordstat runtime реализованы по
+  официальному contract; до production остаётся live canary на реальном
+  ключе/балансе владельца и provider incident telemetry/circuit breaker.
 - Technical crawl production vertical закрывает ручной bounded обход,
   sitemap/include/exclude/query scope, conditional page requests, global
   host backoff, current issues, page diff history, группы дублей

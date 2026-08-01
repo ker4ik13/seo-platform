@@ -20,7 +20,10 @@ import type {
   SemanticKeywordCleaningResult,
   SemanticKeywordIntent,
   SemanticKeywordListItem,
-  SemanticKeywordSort
+  SemanticKeywordInsights,
+  SemanticKeywordSort,
+  SemanticFrequencyDevice,
+  SemanticFrequencyQualityFlag
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -258,6 +261,102 @@ export class KeywordService {
           : {})
       },
       meta: { requestId }
+    };
+  }
+
+  public async insights(
+    workspaceId: string,
+    projectId: string,
+    keywordId: string
+  ): Promise<SemanticKeywordInsights> {
+    const keyword = await this.prisma.keyword.findFirst({
+      where: { id: keywordId, workspaceId, projectId, status: "ACTIVE" },
+      select: { id: true }
+    });
+    if (!keyword) {
+      throw new HttpException("Keyword not found", HttpStatus.NOT_FOUND);
+    }
+    const [frequencies, currentRanks] = await Promise.all([
+      this.prisma.frequencySnapshot.findMany({
+        where: { workspaceId, projectId, keywordId },
+        orderBy: [{ observedAt: "desc" }, { id: "desc" }],
+        take: 100
+      }),
+      this.prisma.currentRank.findMany({
+        where: { workspaceId, projectId, keywordId },
+        orderBy: { observedAt: "desc" },
+        take: 50
+      })
+    ]);
+    const contextIds = currentRanks.map(({ trackingContextId }) => trackingContextId);
+    const [contexts, configurations] = contextIds.length === 0
+      ? [[], []] as const
+      : await Promise.all([
+          this.prisma.trackingContext.findMany({
+            where: { workspaceId, projectId, id: { in: contextIds } },
+            select: { id: true, name: true }
+          }),
+          this.prisma.trackingContextVersion.findMany({
+            where: {
+              workspaceId,
+              projectId,
+              OR: currentRanks.map((rank) => ({
+                contextId: rank.trackingContextId,
+                configurationVersion: rank.configurationVersion
+              }))
+            },
+            select: {
+              contextId: true,
+              configurationVersion: true,
+              searchEngine: true,
+              device: true,
+              regionCode: true,
+              countryCode: true
+            }
+          })
+        ]);
+    const contextById = new Map(contexts.map((context) => [context.id, context]));
+    const configurationById = new Map(
+      configurations.map((configuration) => [
+        `${configuration.contextId}:${configuration.configurationVersion}`,
+        configuration
+      ])
+    );
+    return {
+      keywordId,
+      frequencies: frequencies.map((snapshot) => ({
+        type: frequencyType(snapshot.type),
+        regionCode: snapshot.regionCode,
+        device: frequencyDevice(snapshot.device),
+        ...(snapshot.period === null ? {} : { period: snapshot.period }),
+        ...(snapshot.value === null ? {} : { value: snapshot.value.toString() }),
+        provider: snapshot.provider,
+        sourceMode: snapshot.sourceMode,
+        jobId: snapshot.jobId,
+        qualityFlags: frequencyQualityFlags(snapshot.qualityFlags),
+        observedAt: snapshot.observedAt.toISOString()
+      })),
+      positions: currentRanks.flatMap((rank) => {
+        const context = contextById.get(rank.trackingContextId);
+        const configuration = configurationById.get(
+          `${rank.trackingContextId}:${rank.configurationVersion}`
+        );
+        if (!context || !configuration) return [];
+        return [{
+          trackingContextId: rank.trackingContextId,
+          contextName: context.name,
+          searchEngine: configuration.searchEngine,
+          device: configuration.device,
+          regionCode: configuration.regionCode ?? configuration.countryCode,
+          found: rank.found,
+          ...(rank.position === null ? {} : { position: rank.position }),
+          ...(rank.previousPosition === null
+            ? {}
+            : { previousPosition: rank.previousPosition }),
+          ...(rank.rankingUrl === null ? {} : { rankingUrl: rank.rankingUrl }),
+          observedAt: rank.observedAt.toISOString()
+        }];
+      })
     };
   }
 
@@ -1446,4 +1545,41 @@ function invalidCursor(): BadRequestException {
   return new BadRequestException(
     "Keyword cursor is invalid for the current query"
   );
+}
+
+function frequencyType(value: string): "BASE" | "EXACT" | "FIXED" {
+  if (value === "BASE" || value === "EXACT" || value === "FIXED") {
+    return value;
+  }
+  throw new Error("Stored frequency type is unsupported");
+}
+
+function frequencyDevice(value: string): SemanticFrequencyDevice {
+  if (
+    value === "ALL" ||
+    value === "DESKTOP" ||
+    value === "MOBILE" ||
+    value === "PHONE_ONLY" ||
+    value === "TABLET_ONLY"
+  ) return value;
+  throw new Error("Stored frequency device is unsupported");
+}
+
+function frequencyQualityFlags(value: unknown): readonly SemanticFrequencyQualityFlag[] {
+  if (!Array.isArray(value) || value.length > 4) {
+    throw new Error("Stored frequency quality flags are invalid");
+  }
+  const flags = value.map((flag): SemanticFrequencyQualityFlag => {
+    if (
+      flag === "CONTEXT_INCOMPLETE" ||
+      flag === "STALE" ||
+      flag === "PARTIAL" ||
+      flag === "ESTIMATED"
+    ) return flag;
+    throw new Error("Stored frequency quality flag is unsupported");
+  });
+  if (new Set(flags).size !== flags.length) {
+    throw new Error("Stored frequency quality flags contain duplicates");
+  }
+  return flags;
 }

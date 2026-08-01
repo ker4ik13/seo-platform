@@ -17,7 +17,8 @@ import {
 import type {
   ApiCollectionResponse,
   ApiResponse,
-  SemanticKeywordListItem
+  SemanticKeywordListItem,
+  SemanticKeywordInsights
 } from "@seo-platform/contracts";
 import type { FastifyReply } from "fastify";
 import { AuditService } from "../audit/audit.service.js";
@@ -124,6 +125,25 @@ export class KeywordController {
     });
     setEntityVersion(reply, result.version);
     return apiResponse(request, result, result.version);
+  }
+
+  @Get(":keywordId/insights")
+  @RequirePermission("semantic.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async insights(
+    @Param("keywordId") keywordId: string,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticKeywordInsights>> {
+    const tenant = requiredProjectTenant(request);
+    const canonicalKeywordId = assertUuid(keywordId, "keywordId");
+    return apiResponse(
+      request,
+      await this.seoData.keywordInsights(
+        internalProjectContext(request, principal, tenant),
+        canonicalKeywordId
+      )
+    );
   }
 
   @Patch(":keywordId")

@@ -379,6 +379,30 @@ SELECT format(
 )
 \gexec
 
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.claim_frequency_collection_item(TEXT, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.complete_frequency_collection_item(UUID, UUID, TEXT, INTEGER, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.fail_frequency_collection_item(UUID, UUID, TEXT, INTEGER, TEXT, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
 -- A PostgreSQL role is cluster-wide. REVOKE above intentionally touches only
 -- jobs_db/public and must never mutate another service database. Instead,
 -- reject an existing role if any direct ACL dependency remains outside the
@@ -425,7 +449,10 @@ BEGIN
     ,
     'public.claim_keyword_research_run(text,integer)'::regprocedure::oid,
     'public.complete_keyword_research_page(uuid,text,uuid,integer,integer,jsonb,bytea,integer,boolean)'::regprocedure::oid,
-    'public.fail_keyword_research_run(uuid,text,uuid,integer,integer,text,integer)'::regprocedure::oid
+    'public.fail_keyword_research_run(uuid,text,uuid,integer,integer,text,integer)'::regprocedure::oid,
+    'public.claim_frequency_collection_item(text,integer)'::regprocedure::oid,
+    'public.complete_frequency_collection_item(uuid,uuid,text,integer,integer)'::regprocedure::oid,
+    'public.fail_frequency_collection_item(uuid,uuid,text,integer,text,integer)'::regprocedure::oid
   ];
 
   IF EXISTS (

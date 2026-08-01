@@ -33,7 +33,10 @@ const expectedFunctions = [
   "public.complete_rank_connector_poll( UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, INTEGER, TIMESTAMPTZ, JSONB, BYTEA, TEXT )",
   "public.claim_keyword_research_run(TEXT, INTEGER)",
   "public.complete_keyword_research_page( UUID, TEXT, UUID, INTEGER, INTEGER, JSONB, BYTEA, INTEGER, BOOLEAN )",
-  "public.fail_keyword_research_run( UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, INTEGER )"
+  "public.fail_keyword_research_run( UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, INTEGER )",
+  "public.claim_frequency_collection_item(TEXT, INTEGER)",
+  "public.complete_frequency_collection_item(UUID, UUID, TEXT, INTEGER, INTEGER)",
+  "public.fail_frequency_collection_item(UUID, UUID, TEXT, INTEGER, TEXT, INTEGER)"
 ];
 
 function compactSql(sql) {

@@ -17,6 +17,7 @@ import { SemanticVersionModule } from "./semantic-versions/semantic-version.modu
 import { PageModule } from "./pages/page.module.js";
 import { CrawlSnapshotModule } from "./crawls/crawl-snapshot.module.js";
 import { ClusterModule } from "./clusters/cluster.module.js";
+import { FrequencyModule } from "./frequencies/frequency.module.js";
 
 @Module({
   imports: [
@@ -37,7 +38,8 @@ import { ClusterModule } from "./clusters/cluster.module.js";
     RankScopeModule,
     RankManifestModule,
     RankResultModule,
-    SystemModule
+    SystemModule,
+    FrequencyModule
   ]
 })
 export class AppModule {}

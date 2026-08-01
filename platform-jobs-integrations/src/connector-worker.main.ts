@@ -27,6 +27,12 @@ import {
   KEYWORD_RESEARCH_RUNTIME_JOB,
   type KeywordResearchRuntimeJobData
 } from "./queue/keyword-research-runtime.queue.js";
+import { FrequencyCollectionRuntimeService } from "./frequency-collections/frequency-collection-runtime.service.js";
+import {
+  enqueueFrequencyCollectionRuntime,
+  FREQUENCY_COLLECTION_RUNTIME_JOB,
+  type FrequencyCollectionRuntimeJobData
+} from "./queue/frequency-collection-runtime.queue.js";
 
 const logger = new Logger("IntegrationConnectorWorker");
 const UUID_PATTERN =
@@ -48,6 +54,7 @@ async function bootstrap(): Promise<void> {
   );
   const rankRuntime = app.get(RankConnectorRuntimeService);
   const keywordResearchRuntime = app.get(KeywordResearchRuntimeService);
+  const frequencyRuntime = app.get(FrequencyCollectionRuntimeService);
   const workerConnection = redis(config.redisUrl);
   const queueConnection = redis(config.redisUrl);
   const queue = new Queue<IntegrationCredentialValidationJobData>(
@@ -62,14 +69,28 @@ async function bootstrap(): Promise<void> {
     INTEGRATION_CREDENTIAL_VALIDATION_QUEUE,
     bullMqConnectionOptions(queueConnection)
   );
+  const frequencyQueue = new Queue<FrequencyCollectionRuntimeJobData>(
+    INTEGRATION_CREDENTIAL_VALIDATION_QUEUE,
+    bullMqConnectionOptions(queueConnection)
+  );
   const leaseOwner = `connector-${randomUUID()}`;
   const worker = new Worker<
     | IntegrationCredentialValidationJobData
     | RankConnectorRuntimeJobData
     | KeywordResearchRuntimeJobData
+    | FrequencyCollectionRuntimeJobData
   >(
     INTEGRATION_CREDENTIAL_VALIDATION_QUEUE,
     async (job) => {
+      if (job.name === FREQUENCY_COLLECTION_RUNTIME_JOB) {
+        if (
+          !("schemaVersion" in job.data) ||
+          job.data.schemaVersion !== "frequency-collection-runtime@1"
+        ) {
+          throw new Error("Invalid frequency collection runtime job");
+        }
+        return frequencyRuntime.processBatch(leaseOwner);
+      }
       if (job.name === KEYWORD_RESEARCH_RUNTIME_JOB) {
         if (
           !("schemaVersion" in job.data) ||
@@ -134,6 +155,13 @@ async function bootstrap(): Promise<void> {
             (config.integrationCredentialValidation.dispatchSeconds * 1_000)
         )
       );
+      await enqueueFrequencyCollectionRuntime(
+        frequencyQueue,
+        Math.floor(
+          Date.now() /
+            (config.integrationCredentialValidation.dispatchSeconds * 1_000)
+        )
+      );
     } catch {
       logger.error("Unable to dispatch pending credential validations");
     } finally {
@@ -169,6 +197,7 @@ async function bootstrap(): Promise<void> {
     await queue.close();
     await rankQueue.close();
     await keywordResearchQueue.close();
+    await frequencyQueue.close();
     await workerConnection.quit();
     await queueConnection.quit();
     await app.close();

@@ -59,6 +59,21 @@ export class RankRunController {
     private readonly audit: AuditService
   ) {}
 
+  @Get("rank-runs")
+  @RequirePermission("ranking.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async list(
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<{ readonly jobs: readonly RankJobSummary[] }>> {
+    const tenant = requiredProjectTenant(request);
+    return apiResponse(request, {
+      jobs: await this.jobs.listRankJobs(
+        internalProjectContext(request, principal, tenant)
+      )
+    });
+  }
+
   @Post("rank-runs")
   @HttpCode(HttpStatus.ACCEPTED)
   @RequirePermission("ranking.run")

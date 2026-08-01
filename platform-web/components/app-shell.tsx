@@ -181,7 +181,15 @@ export function AppShell({
           </div>
         </header>
 
-        <main className="content">{children}</main>
+        <main
+          className={
+            activeSection === "semantics"
+              ? "content content-workspace"
+              : "content"
+          }
+        >
+          {children}
+        </main>
 
         <nav className="mobile-nav" aria-label="Мобильная навигация">
           {navigation.slice(0, 4).map((item) =>

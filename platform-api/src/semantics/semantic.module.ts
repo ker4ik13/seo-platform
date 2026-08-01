@@ -12,13 +12,16 @@ import { SemanticExportController } from "./semantic-export.controller.js";
 import { SemanticExportService } from "./semantic-export.service.js";
 import { SemanticVersionController } from "./semantic-version.controller.js";
 import { SemanticClusterController } from "./semantic-cluster.controller.js";
+import { JobsModule } from "../jobs/jobs.module.js";
+import { FrequencyCollectionController } from "./frequency-collection.controller.js";
 
 @Module({
   imports: [
     AuthorizationModule,
     BillingModule,
     IdentityModule,
-    SeoDataModule
+    SeoDataModule,
+    JobsModule
   ],
   controllers: [
     KeywordController,
@@ -28,7 +31,8 @@ import { SemanticClusterController } from "./semantic-cluster.controller.js";
     SemanticCustomColumnController,
     SemanticSavedViewController,
     SemanticExportController,
-    SemanticVersionController
+    SemanticVersionController,
+    FrequencyCollectionController
   ],
   providers: [SemanticExportService]
 })

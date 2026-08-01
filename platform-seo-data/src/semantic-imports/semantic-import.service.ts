@@ -439,11 +439,13 @@ export class SemanticImportService {
           keywordId: keyword.id,
           type: frequency.type,
           regionCode: "global",
+          device: "ALL",
           value: BigInt(frequency.value),
           observedAt,
           provider: "import",
           sourceMode: "IMPORT" as const,
-          jobId: input.importId
+          jobId: input.importId,
+          qualityFlags: ["CONTEXT_INCOMPLETE"]
         }));
       });
       if (metricSnapshots.length > 0) {

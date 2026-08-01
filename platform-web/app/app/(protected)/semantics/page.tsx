@@ -18,19 +18,10 @@ export default async function SemanticsPage() {
           </section>
         )
       ) : (
-        <>
-          <section className="page-heading">
-            <div>
-              <p className="eyebrow">Проект · {context.project.name}</p>
-              <h1>Семантическое ядро</h1>
-              <p>
-                Импортируйте исходные данные, проверьте сопоставление колонок и
-                только затем публикуйте новую версию ядра.
-              </p>
-            </div>
-          </section>
-          <SemanticsWorkspace projectId={context.project.id} />
-        </>
+        <SemanticsWorkspace
+          projectId={context.project.id}
+          projectName={context.project.name}
+        />
       )}
     </AppShell>
   );

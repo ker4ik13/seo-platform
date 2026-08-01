@@ -2,8 +2,10 @@
 
 import {
   useEffect,
+  useRef,
   useState,
-  type FormEvent
+  type FormEvent,
+  type MouseEvent
 } from "react";
 import {
   browserApiCollectionRequest,
@@ -13,8 +15,23 @@ import {
   type BrowserCursorPage
 } from "../lib/browser-api";
 import { SemanticBulkEditor } from "./semantic-bulk-editor";
+import { ContextMenu, type ContextMenuItem } from "./context-menu";
 import type { SemanticCustomColumn } from "./semantic-custom-column-types";
 import { SemanticCustomValueEditor } from "./semantic-custom-value-editor";
+import {
+  SemanticGroupDialog,
+  type SemanticGroupDialogState
+} from "./semantic-group-dialog";
+import {
+  SemanticGroupTree,
+  type SemanticGroupTreeItem
+} from "./semantic-group-tree";
+import { SemanticKeywordMoveDialog } from "./semantic-keyword-move-dialog";
+import { SemanticKeywordInspector } from "./semantic-keyword-inspector";
+import { SemanticPositionDialog } from "./semantic-position-dialog";
+import { SemanticFrequencyDialog } from "./semantic-frequency-dialog";
+import { SemanticOperationsDrawer } from "./semantic-operations-drawer";
+import { SemanticModal } from "./semantic-modal";
 import { SemanticSavedViews } from "./semantic-saved-views";
 import {
   defaultSemanticViewConfig,
@@ -93,12 +110,21 @@ type KeywordEditor =
       draft: KeywordDraft;
     }>;
 
+const MANUAL_KEYWORD_LIMIT = 2_000;
+const MANUAL_KEYWORD_REQUEST_BATCH_SIZE = 8;
+
 interface SemanticCoreTableProps {
   readonly columnRefreshVersion: number;
   readonly clusterRefreshVersion: number;
   readonly projectId: string;
   readonly refreshVersion: number;
   readonly groupRefreshVersion: number;
+  readonly onGroupsChanged: () => void;
+  readonly onOpenClusters: () => void;
+  readonly onOpenColumns: () => void;
+  readonly onOpenHistory: () => void;
+  readonly onOpenImport: () => void;
+  readonly projectName: string;
 }
 
 type SemanticExportFormat =
@@ -113,7 +139,13 @@ export function SemanticCoreTable({
   clusterRefreshVersion,
   projectId,
   refreshVersion,
-  groupRefreshVersion
+  groupRefreshVersion,
+  onGroupsChanged,
+  onOpenClusters,
+  onOpenColumns,
+  onOpenHistory,
+  onOpenImport,
+  projectName
 }: SemanticCoreTableProps) {
   const [items, setItems] = useState<readonly SemanticKeyword[]>([]);
   const [page, setPage] = useState<BrowserCursorPage>({
@@ -149,9 +181,32 @@ export function SemanticCoreTable({
     useState<SemanticExportFormat>("CSV");
   const [exporting, setExporting] = useState(false);
   const [exportNotice, setExportNotice] = useState<string>();
+  const [focusedKeywordId, setFocusedKeywordId] = useState<string>();
+  const [groupDialog, setGroupDialog] = useState<SemanticGroupDialogState>();
+  const [moveKeywordDialog, setMoveKeywordDialog] = useState(false);
+  const [moveKeywordTargetId, setMoveKeywordTargetId] = useState("");
+  const [deleteSelectionOpen, setDeleteSelectionOpen] = useState(false);
+  const [bulkEditorOpen, setBulkEditorOpen] = useState(false);
+  const [positionDialogOpen, setPositionDialogOpen] = useState(false);
+  const [frequencyDialogOpen, setFrequencyDialogOpen] = useState(false);
+  const [operationsRefreshVersion, setOperationsRefreshVersion] = useState(0);
+  const [rowContextMenu, setRowContextMenu] = useState<Readonly<{
+    item: SemanticKeyword;
+    x: number;
+    y: number;
+  }>>();
+  const [operationsOpen, setOperationsOpen] = useState(false);
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const [tableViewport, setTableViewport] = useState({
+    height: 520,
+    scrollTop: 0
+  });
 
   useEffect(() => {
     const controller = new AbortController();
+    tableScrollRef.current?.scrollTo({ top: 0 });
+    setTableViewport((current) => ({ ...current, scrollTop: 0 }));
     setSelectedIds(new Set());
     setLoading(true);
     setError(undefined);
@@ -356,6 +411,34 @@ export function SemanticCoreTable({
     }
   }
 
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current;
+    const scrollRoot = tableScrollRef.current;
+    if (!sentinel || !scrollRoot || !page.hasNext || !page.nextCursor) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) void loadMore();
+      },
+      { root: scrollRoot, rootMargin: "280px 0px" }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  });
+
+  useEffect(() => {
+    const scrollRoot = tableScrollRef.current;
+    if (!scrollRoot) return;
+    const updateHeight = () =>
+      setTableViewport((current) => ({
+        ...current,
+        height: scrollRoot.clientHeight
+      }));
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(scrollRoot);
+    return () => observer.disconnect();
+  }, [loading, items.length]);
+
   function openCreate(): void {
     setSelectedIds(new Set());
     setBulkNotice(undefined);
@@ -409,11 +492,23 @@ export function SemanticCoreTable({
   async function saveKeyword(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!editor || saving) return;
+    const draft = editor.draft;
+    const texts = editor.mode === "create"
+      ? manualKeywordTexts(draft.text)
+      : [draft.text.trim()];
+    if (texts.length < 1 || texts.length > MANUAL_KEYWORD_LIMIT) {
+      setMutationError(
+        `Введите от 1 до ${formatInteger(MANUAL_KEYWORD_LIMIT)} запросов, по одному в строке.`
+      );
+      return;
+    }
+    if (texts.some((text) => text.length > 2_000)) {
+      setMutationError("Длина каждого запроса не должна превышать 2000 символов.");
+      return;
+    }
     setSaving(true);
     setMutationError(undefined);
-    const draft = editor.draft;
-    const body = {
-      text: draft.text,
+    const commonBody = {
       language: draft.language,
       priority: Number(draft.priority),
       isFavorite: draft.isFavorite,
@@ -438,60 +533,61 @@ export function SemanticCoreTable({
       tagNames: parseTagNames(draft.tagNames)
     };
     try {
-      const result =
-        editor.mode === "create"
-          ? await browserApiRequest<SemanticKeyword>(
-              `/app/api/projects/${encodeURIComponent(projectId)}/keywords`,
-              { method: "POST", body }
+      if (editor.mode === "create") {
+        const failures: Array<{ readonly text: string; readonly error: unknown }> = [];
+        for (
+          let offset = 0;
+          offset < texts.length;
+          offset += MANUAL_KEYWORD_REQUEST_BATCH_SIZE
+        ) {
+          const batch = texts.slice(
+            offset,
+            offset + MANUAL_KEYWORD_REQUEST_BATCH_SIZE
+          );
+          const results = await Promise.allSettled(
+            batch.map((text) =>
+              browserApiRequest<SemanticKeyword>(
+                `/app/api/projects/${encodeURIComponent(projectId)}/keywords`,
+                { method: "POST", body: { ...commonBody, text } }
+              )
             )
-          : await browserApiRequest<SemanticKeyword>(
-              `/app/api/projects/${encodeURIComponent(
-                projectId
-              )}/keywords/${encodeURIComponent(editor.keywordId)}`,
-              {
-                method: "PATCH",
-                body,
-                ifMatch: editor.version
-              }
-            );
-      void result;
-      setRetryVersion((value) => value + 1);
+          );
+          results.forEach((result, index) => {
+            if (result.status === "rejected" && batch[index]) {
+              failures.push({ text: batch[index], error: result.reason });
+            }
+          });
+        }
+        const created = texts.length - failures.length;
+        setRetryVersion((value) => value + 1);
+        if (failures.length > 0) {
+          setEditor((current) => current && current.mode === "create"
+            ? { ...current, draft: { ...current.draft, text: failures.map(({ text }) => text).join("\n") } }
+            : current);
+          setMutationError(
+            `Добавлено ${created} из ${texts.length}. В форме оставлены только необработанные строки. ${keywordMutationError(failures[0]?.error)}`
+          );
+          return;
+        }
+        setBulkNotice(`Добавлено запросов: ${created}`);
+      } else {
+        await browserApiRequest<SemanticKeyword>(
+          `/app/api/projects/${encodeURIComponent(
+            projectId
+          )}/keywords/${encodeURIComponent(editor.keywordId)}`,
+          {
+            method: "PATCH",
+            body: { ...commonBody, text: texts[0] },
+            ifMatch: editor.version
+          }
+        );
+        setRetryVersion((value) => value + 1);
+      }
       setEditor(undefined);
     } catch (requestError) {
       setMutationError(keywordMutationError(requestError));
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function deleteKeyword(item: SemanticKeyword): Promise<void> {
-    if (
-      !window.confirm(
-        `Удалить запрос «${item.textOriginal}» из активного ядра?`
-      )
-    ) {
-      return;
-    }
-    setMutationError(undefined);
-    try {
-      await browserApiRequest<void>(
-        `/app/api/projects/${encodeURIComponent(
-          projectId
-        )}/keywords/${encodeURIComponent(item.id)}`,
-        { method: "DELETE", ifMatch: item.version }
-      );
-      setItems((current) => current.filter(({ id }) => id !== item.id));
-      setPage((current) => ({
-        ...current,
-        ...(current.totalApprox === undefined
-          ? {}
-          : { totalApprox: Math.max(0, current.totalApprox - 1) })
-      }));
-      if (editor?.mode === "edit" && editor.keywordId === item.id) {
-        setEditor(undefined);
-      }
-    } catch (requestError) {
-      setMutationError(keywordMutationError(requestError));
     }
   }
 
@@ -521,24 +617,32 @@ export function SemanticCoreTable({
     });
   }
 
-  async function downloadExport(): Promise<void> {
+  async function downloadExport(groupId?: string): Promise<void> {
     if (exporting) return;
     setExporting(true);
     setExportNotice(undefined);
     setMutationError(undefined);
-    const selected = items
-      .filter(({ id }) => selectedIds.has(id))
-      .map(({ id }) => id);
+    const selected = groupId
+      ? []
+      : items
+          .filter(({ id }) => selectedIds.has(id))
+          .map(({ id }) => id);
     try {
       const download = await browserApiDownload(
         `/app/api/projects/${encodeURIComponent(projectId)}/exports`,
         {
           body: {
             format: exportFormat,
-            scope: selected.length > 0 ? "SELECTED" : "CURRENT_FILTER",
+            scope: groupId
+              ? "GROUP_SUBTREE"
+              : selected.length > 0
+                ? "SELECTED"
+                : "CURRENT_FILTER",
             locale: "ru",
             columns: viewConfig.columns,
-            ...(selected.length > 0
+            ...(groupId
+              ? { filters: { groupId } }
+              : selected.length > 0
               ? { keywordIds: selected }
               : { filters: viewConfig.filters }),
             sort: viewConfig.sort,
@@ -557,81 +661,194 @@ export function SemanticCoreTable({
     }
   }
 
+  async function deleteSelectedKeywords(): Promise<void> {
+    if (saving || selectedIds.size === 0) return;
+    setSaving(true);
+    setMutationError(undefined);
+    const selected = items.filter(({ id }) => selectedIds.has(id));
+    const results = await Promise.allSettled(
+      selected.map((item) =>
+        browserApiRequest<void>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(item.id)}`,
+          { method: "DELETE", ifMatch: item.version }
+        )
+      )
+    );
+    const deletedIds = new Set(
+      results.flatMap((result, index) =>
+        result.status === "fulfilled" && selected[index]
+          ? [selected[index].id]
+          : []
+      )
+    );
+    setItems((current) => current.filter(({ id }) => !deletedIds.has(id)));
+    setSelectedIds(new Set());
+    setDeleteSelectionOpen(false);
+    setSaving(false);
+    if (deletedIds.size !== selected.length) {
+      setMutationError(
+        `Удалено ${deletedIds.size} из ${selected.length}. Остальные строки были изменены или недоступны — таблица обновлена.`
+      );
+    } else {
+      setBulkNotice(`Удалено запросов: ${deletedIds.size}`);
+    }
+    setRetryVersion((value) => value + 1);
+  }
+
+  function openRowMenu(event: MouseEvent, item: SemanticKeyword): void {
+    event.preventDefault();
+    if (!selectedIds.has(item.id)) setSelectedIds(new Set([item.id]));
+    setFocusedKeywordId(item.id);
+    setRowContextMenu({ item, x: event.clientX, y: event.clientY });
+  }
+
   const total = page.totalApprox;
+  const manualInputStats = editor?.mode === "create"
+    ? manualKeywordInputStats(editor.draft.text)
+    : undefined;
+  const virtualRows = semanticVirtualRows(
+    items,
+    tableViewport,
+    viewConfig.density
+  );
+  const focusedKeyword = items.find(({ id }) => id === focusedKeywordId);
+  const rowMenuItems: readonly ContextMenuItem[] = rowContextMenu
+    ? [
+        {
+          id: "edit",
+          label: "Изменить запрос",
+          onSelect: () => openEdit(rowContextMenu.item)
+        },
+        {
+          id: "move",
+          label:
+            selectedIds.size > 1
+              ? `Перенести запросы (${selectedIds.size})…`
+              : "Перенести в группу…",
+          onSelect: () => setMoveKeywordDialog(true)
+        },
+        {
+          id: "bulk",
+          label: "Теги, интент и URL…",
+          onSelect: () => setBulkEditorOpen(true)
+        },
+        {
+          id: "delete",
+          label:
+            selectedIds.size > 1
+              ? `Удалить запросы (${selectedIds.size})`
+              : "Удалить запрос",
+          danger: true,
+          dividerBefore: true,
+          onSelect: () => setDeleteSelectionOpen(true)
+        }
+      ]
+    : [];
   return (
-    <section className="panel semantic-core" aria-busy={loading}>
-      <header className="panel-header semantic-core-header">
-        <div>
-          <h2>Запросы</h2>
-          <p>
-            {total === undefined
-              ? "Опубликованное семантическое ядро"
-              : `${formatInteger(total)} ${keywordCountLabel(total)}`}
-          </p>
+    <section className="semantic-core" aria-busy={loading}>
+      <header className="semantic-core-header">
+        <div className="semantic-title-block">
+          <h1>Семантическое ядро</h1>
+          <span>{projectName}</span>
         </div>
-        <div className="semantic-header-actions">
-          <form className="semantic-search" onSubmit={submitFilters}>
-            <label>
-              <span className="visually-hidden">Поиск по запросам</span>
-              <input
-                maxLength={200}
-                onChange={(event) =>
-                  updateFilter({ search: event.target.value })
-                }
-                placeholder="Поиск по запросам"
-                type="search"
-                value={draftConfig.filters.search ?? ""}
-              />
-            </label>
-            <button className="secondary-button" type="submit">
-              Применить
-            </button>
-          </form>
-          <button className="primary-button" onClick={openCreate} type="button">
-            Добавить запрос
-          </button>
+        <dl className="semantic-summary">
+          <div>
+            <dt>Запросов</dt>
+            <dd>{total === undefined ? "—" : formatInteger(total)}</dd>
+          </div>
+          <div>
+            <dt>Групп</dt>
+            <dd>{formatInteger(groups.length)}</dd>
+          </div>
+          <div>
+            <dt>Кластеров</dt>
+            <dd>{formatInteger(clusters.length)}</dd>
+          </div>
+          <div>
+            <dt>Загружено</dt>
+            <dd>{formatInteger(items.length)}</dd>
+          </div>
+        </dl>
+        <div className="semantic-header-status">
+          {selectedIds.size > 0 && <span>Выбрано: {selectedIds.size}</span>}
         </div>
       </header>
-
-      <nav aria-label="Группы семантического ядра" className="semantic-group-rail">
-        <header>
-          <strong>Группы</strong>
-          <span>{groups.length}</span>
-        </header>
-        <button
-          aria-current={!viewConfig.filters.groupId ? "true" : undefined}
-          className={!viewConfig.filters.groupId ? "active" : undefined}
-          onClick={() => selectGroup()}
-          type="button"
-        >
-          <span>Все запросы</span>
-          <small>{total === undefined ? "—" : formatInteger(total)}</small>
-        </button>
-        <div>
-          {groups.map((group) => (
-            <button
-              aria-current={viewConfig.filters.groupId === group.id ? "true" : undefined}
-              className={viewConfig.filters.groupId === group.id ? "active" : undefined}
-              key={group.id}
-              onClick={() => selectGroup(group.id)}
-              title={group.path}
-              type="button"
-            >
-              <i style={{ background: group.color ?? "var(--line-strong)" }} />
-              <span>
-                <strong>{group.name}</strong>
-                <small>{group.path}</small>
-              </span>
-              <b>{formatInteger(group.keywordCount)}</b>
-            </button>
-          ))}
-        </div>
+      <nav aria-label="Действия с семантикой" className="semantic-commandbar">
+        <button onClick={openCreate} type="button"><span>＋</span>Добавить</button>
+        <button onClick={onOpenImport} type="button"><span>⇩</span>Импорт</button>
+        <button disabled={selectedIds.size === 0} onClick={() => setFrequencyDialogOpen(true)} title={selectedIds.size === 0 ? "Сначала выберите запросы" : undefined} type="button"><span>▥</span>Собрать частотность</button>
+        <button disabled={selectedIds.size === 0} onClick={() => setPositionDialogOpen(true)} title={selectedIds.size === 0 ? "Сначала выберите запросы" : undefined} type="button"><span>◎</span>Проверить позиции</button>
+        <button onClick={onOpenClusters} type="button"><span>⌘</span>Кластеризовать</button>
+        <button disabled={selectedIds.size === 0} onClick={() => setMoveKeywordDialog(true)} type="button"><span>⇥</span>Перенести</button>
+        <button disabled={selectedIds.size === 0} onClick={() => setBulkEditorOpen(true)} type="button"><span>◇</span>Теги и интент</button>
+        <button className="danger" disabled={selectedIds.size === 0} onClick={() => setDeleteSelectionOpen(true)} type="button"><span>⌫</span>Удалить</button>
+        <button onClick={() => void downloadExport()} type="button"><span>⇩</span>Экспорт</button>
+        <button onClick={onOpenHistory} type="button"><span>↶</span>История</button>
+        <button onClick={() => setOperationsOpen(true)} type="button"><span>◷</span>Операции</button>
+        <button aria-label="Колонки и представления" onClick={onOpenColumns} type="button"><span>•••</span></button>
       </nav>
 
-      <form
-        className="semantic-filter-bar"
-        onSubmit={submitFilters}
-      >
+      {selectedIds.size > 0 && (
+        <div className="semantic-selection-bar">
+          <strong>Выбрано: {selectedIds.size}</strong>
+          <button onClick={() => setMoveKeywordDialog(true)} type="button">Перенести</button>
+          <button onClick={() => setBulkEditorOpen(true)} type="button">Теги и интент</button>
+          <button onClick={() => setDeleteSelectionOpen(true)} type="button">Удалить</button>
+          <button onClick={() => setSelectedIds(new Set())} type="button">Снять выделение</button>
+        </div>
+      )}
+
+      <SemanticGroupTree
+        {...(viewConfig.filters.groupId
+          ? { activeGroupId: viewConfig.filters.groupId }
+          : {})}
+        groups={groups as readonly SemanticGroupTreeItem[]}
+        onCreate={(parentId) => setGroupDialog({ mode: "create", ...(parentId ? { parentId } : {}) })}
+        onDelete={(selectedGroups) => setGroupDialog({ mode: "delete", groups: selectedGroups })}
+        onExport={(group) => void downloadExport(group.id)}
+        onMove={(selectedGroups, targetId) =>
+          setGroupDialog({
+            mode: "move",
+            groups: selectedGroups,
+            ...(targetId ? { suggestedTargetId: targetId } : {})
+          })
+        }
+        onKeywordDrop={(keywordIds, targetId) => {
+          const availableIds = keywordIds.filter((id) =>
+            items.some((item) => item.id === id)
+          );
+          if (availableIds.length === 0) return;
+          setSelectedIds(new Set(availableIds));
+          setMoveKeywordTargetId(targetId ?? "");
+          setMoveKeywordDialog(true);
+        }}
+        onRename={(group) => setGroupDialog({ mode: "rename", group })}
+        onSelect={selectGroup}
+        {...(total === undefined ? {} : { total })}
+      />
+
+      <div className="semantic-table-tools">
+        <form className="semantic-search" onSubmit={submitFilters}>
+          <label>
+            <span className="visually-hidden">Поиск по запросам</span>
+            <input
+              maxLength={200}
+              onChange={(event) => updateFilter({ search: event.target.value })}
+              placeholder="Поиск по запросам"
+              type="search"
+              value={draftConfig.filters.search ?? ""}
+            />
+          </label>
+          <button className="secondary-button" type="submit">Найти</button>
+        </form>
+        <details className="semantic-filter-disclosure">
+          <summary>
+            Фильтры
+            {Object.keys(viewConfig.filters).length > 0 && (
+              <span>{Object.keys(viewConfig.filters).length}</span>
+            )}
+          </summary>
+          <form className="semantic-filter-bar" onSubmit={submitFilters}>
         <label>
           <span>Интент</span>
           <select
@@ -762,7 +979,12 @@ export function SemanticCoreTable({
             Сбросить всё
           </button>
         )}
-      </form>
+          </form>
+        </details>
+        <button className="semantic-compact-button" onClick={onOpenColumns} type="button">
+          Колонки
+        </button>
+      </div>
 
       <div className="semantic-view-toolbar">
         <SemanticSavedViews
@@ -851,41 +1073,54 @@ export function SemanticCoreTable({
       </div>
 
       {editor && (
-        <form
-          className="semantic-editor"
-          onSubmit={(event) => void saveKeyword(event)}
+        <SemanticModal
+          description="Группа, кластер, посадочная страница и теги сохраняются вместе с проверкой версии."
+          onClose={saving ? () => undefined : () => setEditor(undefined)}
+          size="medium"
+          title={editor.mode === "create" ? "Добавить запросы" : "Изменить запрос"}
         >
-          <div className="semantic-editor-heading">
-            <div>
-              <strong>
-                {editor.mode === "create"
-                  ? "Новый поисковый запрос"
-                  : "Редактирование запроса"}
-              </strong>
-              <span>
-                Изменения сохраняются с проверкой версии — чужая правка не
-                будет перезаписана.
-              </span>
-            </div>
-            <button
-              className="text-button"
-              disabled={saving}
-              onClick={() => setEditor(undefined)}
-              type="button"
-            >
-              Закрыть
-            </button>
-          </div>
+          <form
+            className="semantic-editor"
+            onSubmit={(event) => void saveKeyword(event)}
+          >
           <div className="semantic-editor-grid">
             <label className="semantic-editor-query">
-              <span>Запрос</span>
-              <input
-                autoFocus
-                maxLength={2000}
-                onChange={(event) => updateDraft({ text: event.target.value })}
-                required
-                value={editor.draft.text}
-              />
+              <span>{editor.mode === "create" ? "Запросы — по одному в строке" : "Запрос"}</span>
+              {editor.mode === "create" ? (
+                <>
+                  <textarea
+                    autoFocus
+                    maxLength={4_100_000}
+                    onChange={(event) => updateDraft({ text: event.target.value })}
+                    placeholder="купить слона\nдоставка слона\nцена слона"
+                    required
+                    rows={6}
+                    value={editor.draft.text}
+                  />
+                  <small
+                    className={
+                      manualInputStats &&
+                      manualInputStats.unique > MANUAL_KEYWORD_LIMIT
+                        ? "semantic-editor-query-limit"
+                        : undefined
+                    }
+                  >
+                    {manualInputStats?.unique ?? 0} уникальных запросов
+                    {manualInputStats?.duplicates
+                      ? ` · дублей пропущено: ${manualInputStats.duplicates}`
+                      : ""}
+                    {` · лимит за один запуск: ${formatInteger(MANUAL_KEYWORD_LIMIT)}`}
+                  </small>
+                </>
+              ) : (
+                <input
+                  autoFocus
+                  maxLength={2000}
+                  onChange={(event) => updateDraft({ text: event.target.value })}
+                  required
+                  value={editor.draft.text}
+                />
+              )}
             </label>
             <label>
               <span>Язык</span>
@@ -1013,7 +1248,8 @@ export function SemanticCoreTable({
               {saving ? "Сохраняем…" : "Сохранить"}
             </button>
           </div>
-        </form>
+          </form>
+        </SemanticModal>
       )}
 
       {!editor && mutationError && (
@@ -1029,13 +1265,20 @@ export function SemanticCoreTable({
         </div>
       )}
 
-      {!editor && selectedIds.size > 0 && (
-        <SemanticBulkEditor
+      {!editor && selectedIds.size > 0 && bulkEditorOpen && (
+        <SemanticModal
+          description="Измените только выбранные поля. Перед очисткой запросов будет показан row-level preview."
+          onClose={() => setBulkEditorOpen(false)}
+          size="large"
+          title={`Массовые операции · ${selectedIds.size}`}
+        >
+          <SemanticBulkEditor
           clusters={clusters}
           groups={groups}
-          onCancel={() => setSelectedIds(new Set())}
+          onCancel={() => setBulkEditorOpen(false)}
           onCompleted={(result) => {
             setSelectedIds(new Set());
+            setBulkEditorOpen(false);
             setBulkNotice(
               `Массовое изменение: обновлено ${result.changed} из ${result.selected}` +
                 (result.conflicted > 0
@@ -1046,6 +1289,7 @@ export function SemanticCoreTable({
           }}
           onSplitCompleted={(result) => {
             setSelectedIds(new Set());
+            setBulkEditorOpen(false);
             setBulkNotice(
               `Создан кластер «${result.createdCluster.name}»: перенесено ${result.movedKeywordCount} запросов`
             );
@@ -1059,7 +1303,8 @@ export function SemanticCoreTable({
               version,
               ...(clusterId ? { clusterId } : {})
             }))}
-        />
+          />
+        </SemanticModal>
       )}
 
       {customValueEditor && (
@@ -1151,6 +1396,13 @@ export function SemanticCoreTable({
         <>
           <div
             className="semantic-table-wrap"
+            onScroll={(event) =>
+              setTableViewport({
+                height: event.currentTarget.clientHeight,
+                scrollTop: event.currentTarget.scrollTop
+              })
+            }
+            ref={tableScrollRef}
             tabIndex={0}
             aria-label="Таблица семантического ядра"
           >
@@ -1179,13 +1431,36 @@ export function SemanticCoreTable({
                 </tr>
               </thead>
               <tbody>
-                {items.map((item) => (
-                  <tr key={item.id}>
+                {virtualRows.paddingTop > 0 && (
+                  <tr aria-hidden="true" className="semantic-virtual-spacer">
+                    <td colSpan={viewConfig.columns.length + 2} style={{ height: virtualRows.paddingTop }} />
+                  </tr>
+                )}
+                {virtualRows.items.map((item) => (
+                  <tr
+                    className={focusedKeywordId === item.id ? "focused" : undefined}
+                    draggable
+                    key={item.id}
+                    onClick={() => setFocusedKeywordId(item.id)}
+                    onContextMenu={(event) => openRowMenu(event, item)}
+                    onDragStart={(event) => {
+                      const ids = selectedIds.has(item.id)
+                        ? [...selectedIds]
+                        : [item.id];
+                      setSelectedIds(new Set(ids));
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData(
+                        "application/x-seo-keyword-ids",
+                        ids.join(",")
+                      );
+                    }}
+                  >
                     <td className="semantic-select-cell">
                       <input
                         aria-label={`Выбрать запрос ${item.textOriginal}`}
                         checked={selectedIds.has(item.id)}
                         onChange={() => toggleSelection(item.id)}
+                        onClick={(event) => event.stopPropagation()}
                         type="checkbox"
                       />
                     </td>
@@ -1204,45 +1479,154 @@ export function SemanticCoreTable({
                       </td>
                     ))}
                     <td>
-                      <span className="semantic-row-actions">
-                        <button
-                          className="text-button"
-                          onClick={() => openEdit(item)}
-                          type="button"
-                        >
-                          Изменить
-                        </button>
-                        <button
-                          className="text-button danger-text"
-                          onClick={() => void deleteKeyword(item)}
-                          type="button"
-                        >
-                          Удалить
-                        </button>
-                      </span>
+                      <button
+                        aria-label={`Действия с запросом ${item.textOriginal}`}
+                        className="semantic-row-more"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          openRowMenu(event, item);
+                        }}
+                        type="button"
+                      >
+                        ⋮
+                      </button>
                     </td>
                   </tr>
                 ))}
+                {virtualRows.paddingBottom > 0 && (
+                  <tr aria-hidden="true" className="semantic-virtual-spacer">
+                    <td colSpan={viewConfig.columns.length + 2} style={{ height: virtualRows.paddingBottom }} />
+                  </tr>
+                )}
               </tbody>
             </table>
+            <div aria-hidden="true" className="semantic-load-sentinel" ref={loadMoreSentinelRef} />
           </div>
           <footer className="semantic-table-footer">
             <span>
               Показано {formatInteger(items.length)}
               {total === undefined ? "" : ` из ${formatInteger(total)}`}
             </span>
-            {page.hasNext && (
-              <button
-                className="secondary-button"
-                disabled={loadingMore}
-                onClick={() => void loadMore()}
-                type="button"
-              >
-                {loadingMore ? "Загружаем…" : "Показать ещё"}
-              </button>
-            )}
+            <span>
+              {loadingMore
+                ? "Загружаем следующую часть…"
+                : page.hasNext
+                  ? "Прокрутите ниже — строки загрузятся автоматически"
+                  : "Все доступные строки загружены"}
+            </span>
           </footer>
         </>
+      )}
+      {focusedKeyword && (
+        <SemanticKeywordInspector
+          item={focusedKeyword}
+          onClose={() => setFocusedKeywordId(undefined)}
+          onEdit={() => openEdit(focusedKeyword)}
+          projectId={projectId}
+        />
+      )}
+      {groupDialog && (
+        <SemanticGroupDialog
+          groups={groups}
+          onClose={() => setGroupDialog(undefined)}
+          onCompleted={(message) => {
+            setGroupDialog(undefined);
+            setBulkNotice(message);
+            onGroupsChanged();
+            setRetryVersion((value) => value + 1);
+          }}
+          projectId={projectId}
+          state={groupDialog}
+        />
+      )}
+      {moveKeywordDialog && selectedIds.size > 0 && (
+        <SemanticKeywordMoveDialog
+          groups={groups}
+          initialGroupId={moveKeywordTargetId}
+          onClose={() => {
+            setMoveKeywordDialog(false);
+            setMoveKeywordTargetId("");
+          }}
+          onCompleted={(result) => {
+            setMoveKeywordDialog(false);
+            setMoveKeywordTargetId("");
+            setSelectedIds(new Set());
+            setBulkNotice(
+              `Перенесено ${result.changed} из ${result.selected}` +
+                (result.conflicted > 0 ? `, конфликтов: ${result.conflicted}` : "")
+            );
+            setRetryVersion((value) => value + 1);
+          }}
+          projectId={projectId}
+          selections={items
+            .filter(({ id }) => selectedIds.has(id))
+            .map(({ id, version, textOriginal }) => ({ id, version, text: textOriginal }))}
+        />
+      )}
+      {deleteSelectionOpen && selectedIds.size > 0 && (
+        <SemanticModal
+          description="Удаление скроет запросы из активного ядра. История изменений и аудит сохранятся."
+          onClose={saving ? () => undefined : () => setDeleteSelectionOpen(false)}
+          size="small"
+          title={`Удалить запросы (${selectedIds.size})`}
+        >
+          <div className="semantic-confirm-dialog">
+            <div className="inline-alert danger" role="alert">
+              Вы действительно хотите удалить выбранные запросы? Параллельно изменённые строки не будут перезаписаны.
+            </div>
+            <div className="semantic-modal-actions">
+              <button className="secondary-button" disabled={saving} onClick={() => setDeleteSelectionOpen(false)} type="button">Отмена</button>
+              <button className="danger-button" disabled={saving} onClick={() => void deleteSelectedKeywords()} type="button">
+                {saving ? "Удаляем…" : "Удалить"}
+              </button>
+            </div>
+          </div>
+        </SemanticModal>
+      )}
+      {positionDialogOpen && selectedIds.size > 0 && (
+        <SemanticPositionDialog
+          keywordIds={items.filter(({ id }) => selectedIds.has(id)).map(({ id }) => id)}
+          onClose={() => setPositionDialogOpen(false)}
+          onStarted={(job) => {
+            setPositionDialogOpen(false);
+            void job;
+            setOperationsRefreshVersion((value) => value + 1);
+            setBulkNotice("Проверка позиций запущена в фоне. Прогресс доступен в операциях.");
+            setOperationsOpen(true);
+          }}
+          projectId={projectId}
+        />
+      )}
+      {frequencyDialogOpen && selectedIds.size > 0 && (
+        <SemanticFrequencyDialog
+          onClose={() => setFrequencyDialogOpen(false)}
+          onStarted={() => {
+            setFrequencyDialogOpen(false);
+            setOperationsRefreshVersion((value) => value + 1);
+            setBulkNotice("Сбор частотности запущен в фоне. Результаты появятся в правой панели после завершения.");
+            setOperationsOpen(true);
+          }}
+          projectId={projectId}
+          selections={items
+            .filter(({ id }) => selectedIds.has(id))
+            .map(({ id, version }) => ({ id, version }))}
+        />
+      )}
+      {rowContextMenu && (
+        <ContextMenu
+          items={rowMenuItems}
+          label={`Действия с запросом ${rowContextMenu.item.textOriginal}`}
+          onClose={() => setRowContextMenu(undefined)}
+          x={rowContextMenu.x}
+          y={rowContextMenu.y}
+        />
+      )}
+      {operationsOpen && (
+        <SemanticOperationsDrawer
+          onClose={() => setOperationsOpen(false)}
+          projectId={projectId}
+          refreshToken={operationsRefreshVersion}
+        />
       )}
     </section>
   );
@@ -1258,6 +1642,53 @@ function saveBrowserDownload(blob: Blob, filename: string): void {
   link.click();
   link.remove();
   URL.revokeObjectURL(objectUrl);
+}
+
+function manualKeywordTexts(value: string): readonly string[] {
+  return manualKeywordInputStats(value).values;
+}
+
+function manualKeywordInputStats(value: string): Readonly<{
+  values: readonly string[];
+  unique: number;
+  duplicates: number;
+}> {
+  const unique = new Set<string>();
+  let nonEmpty = 0;
+  for (const line of value.split(/\r?\n/u)) {
+    const text = line.normalize("NFKC").trim().replace(/\s+/gu, " ");
+    if (text) {
+      nonEmpty += 1;
+      unique.add(text);
+    }
+  }
+  return {
+    values: [...unique],
+    unique: unique.size,
+    duplicates: nonEmpty - unique.size
+  };
+}
+
+function semanticVirtualRows(
+  items: readonly SemanticKeyword[],
+  viewport: Readonly<{ height: number; scrollTop: number }>,
+  density: SemanticViewConfig["density"]
+): Readonly<{
+  items: readonly SemanticKeyword[];
+  paddingTop: number;
+  paddingBottom: number;
+}> {
+  const rowHeight = density === "COMPACT" ? 34 : 38;
+  const overscan = 14;
+  const bodyScrollTop = Math.max(0, viewport.scrollTop - 35);
+  const start = Math.max(0, Math.floor(bodyScrollTop / rowHeight) - overscan);
+  const visible = Math.ceil(viewport.height / rowHeight) + overscan * 2;
+  const end = Math.min(items.length, start + visible);
+  return {
+    items: items.slice(start, end),
+    paddingTop: start * rowHeight,
+    paddingBottom: Math.max(0, (items.length - end) * rowHeight)
+  };
 }
 
 async function loadKeywordPage(
@@ -1521,13 +1952,4 @@ function formatDate(value: string): string {
 
 function formatInteger(value: number): string {
   return new Intl.NumberFormat("ru-RU").format(value);
-}
-
-function keywordCountLabel(value: number): string {
-  const mod100 = value % 100;
-  const mod10 = value % 10;
-  if (mod100 >= 11 && mod100 <= 14) return "запросов";
-  if (mod10 === 1) return "запрос";
-  if (mod10 >= 2 && mod10 <= 4) return "запроса";
-  return "запросов";
 }

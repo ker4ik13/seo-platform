@@ -18,6 +18,7 @@ import { CrawlModule } from "./crawls/crawl.module.js";
 import { CrawlAutomationModule } from "./crawl-automations/crawl-automation.module.js";
 import { KeywordResearchModule } from "./keyword-research/keyword-research.module.js";
 import { CrawlNotificationModule } from "./crawl-notifications/crawl-notification.module.js";
+import { FrequencyCollectionModule } from "./frequency-collections/frequency-collection.module.js";
 
 @Module({
   imports: [
@@ -39,7 +40,8 @@ import { CrawlNotificationModule } from "./crawl-notifications/crawl-notificatio
     CrawlModule,
     CrawlAutomationModule,
     CrawlNotificationModule,
-    KeywordResearchModule
+    KeywordResearchModule,
+    FrequencyCollectionModule
   ]
 })
 export class AppModule {}

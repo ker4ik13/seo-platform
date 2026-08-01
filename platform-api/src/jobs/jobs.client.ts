@@ -82,7 +82,12 @@ import type {
   InternalCancelKeywordResearchRunInput,
   ConfirmKeywordResearchRunInput,
   KeywordResearchRunSummary,
-  SemanticCapacityEntitlement
+  SemanticCapacityEntitlement,
+  CreateFrequencyCollectionInput,
+  InternalCreateFrequencyCollectionInput,
+  InternalCancelFrequencyCollectionInput,
+  InternalRetryFrequencyCollectionInput,
+  FrequencyCollectionSummary
 } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
@@ -103,6 +108,7 @@ import {
   scopedCrawlAutomationRuns
 } from "./crawl-automation-response.js";
 import { scopedKeywordResearchRun } from "./keyword-research-response.js";
+import { scopedFrequencyCollection } from "./frequency-collection-response.js";
 
 interface InternalContext {
   readonly tenant: TenantAuthorization;
@@ -207,6 +213,127 @@ export class JobsClient {
         context.tenant.workspaceId,
         projectId
       )
+    );
+  }
+
+  public async listFrequencyCollections(
+    context: InternalContext
+  ): Promise<readonly FrequencyCollectionSummary[]> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      frequencyCollectionPath(context.tenant.workspaceId, projectId),
+      context
+    );
+    const input = exactRecord(value, ["collections"]);
+    if (!Array.isArray(input.collections) || input.collections.length > 25) {
+      throw invalidJobsResponse();
+    }
+    return input.collections.map((collection) =>
+      scopedFrequencyCollection(
+        collection,
+        context.tenant.workspaceId,
+        projectId
+      )
+    );
+  }
+
+  public async createFrequencyCollection(
+    context: InternalContext,
+    input: CreateFrequencyCollectionInput,
+    idempotencyKey: string
+  ): Promise<FrequencyCollectionSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalCreateFrequencyCollectionInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId,
+      idempotencyKey,
+      correlationId: context.requestId
+    };
+    const value = await this.request<unknown>(
+      "POST",
+      frequencyCollectionPath(context.tenant.workspaceId, projectId),
+      context,
+      body,
+      "shared",
+      idempotencyKey
+    );
+    return scopedFrequencyCollection(
+      value,
+      context.tenant.workspaceId,
+      projectId
+    );
+  }
+
+  public async getFrequencyCollection(
+    context: InternalContext,
+    jobId: string
+  ): Promise<FrequencyCollectionSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      `${frequencyCollectionPath(context.tenant.workspaceId, projectId)}/${encodeURIComponent(jobId)}`,
+      context
+    );
+    return scopedFrequencyCollection(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      jobId
+    );
+  }
+
+  public async cancelFrequencyCollection(
+    context: InternalContext,
+    jobId: string,
+    version: number
+  ): Promise<FrequencyCollectionSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalCancelFrequencyCollectionInput = {
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId,
+      version
+    };
+    const value = await this.request<unknown>(
+      "POST",
+      `${frequencyCollectionPath(context.tenant.workspaceId, projectId)}/${encodeURIComponent(jobId)}/cancel`,
+      context,
+      body
+    );
+    return scopedFrequencyCollection(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      jobId
+    );
+  }
+
+  public async retryFailedFrequencyCollection(
+    context: InternalContext,
+    jobId: string,
+    version: number
+  ): Promise<FrequencyCollectionSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalRetryFrequencyCollectionInput = {
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId,
+      version
+    };
+    const value = await this.request<unknown>(
+      "POST",
+      `${frequencyCollectionPath(context.tenant.workspaceId, projectId)}/${encodeURIComponent(jobId)}/retry-failed`,
+      context,
+      body
+    );
+    return scopedFrequencyCollection(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      jobId
     );
   }
 
@@ -1077,6 +1204,28 @@ export class JobsClient {
     );
   }
 
+  public async listRankJobs(
+    context: InternalContext
+  ): Promise<readonly RankJobSummary[]> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      rankRunCollectionPath(context.tenant.workspaceId, projectId),
+      context
+    );
+    const input = exactRecord(value, ["jobs"]);
+    if (!Array.isArray(input.jobs) || input.jobs.length > 25) {
+      throw invalidJobsResponse();
+    }
+    return input.jobs.map((job) =>
+      scopedRankJobSummary(
+        job,
+        context.tenant.workspaceId,
+        projectId
+      )
+    );
+  }
+
   public async getRankJob(
     context: InternalContext,
     jobId: string
@@ -1327,6 +1476,15 @@ function keywordResearchCollectionPath(
   return `/internal/v1/workspaces/${encodeURIComponent(
     workspaceId
   )}/projects/${encodeURIComponent(projectId)}/keyword-research-runs`;
+}
+
+function frequencyCollectionPath(
+  workspaceId: string,
+  projectId: string
+): string {
+  return `/internal/v1/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/projects/${encodeURIComponent(projectId)}/frequency-collections`;
 }
 
 function technicalCrawlResponse(

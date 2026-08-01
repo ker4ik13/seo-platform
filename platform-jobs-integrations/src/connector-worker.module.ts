@@ -16,9 +16,13 @@ import {
   ARSENKIN_RANK_CONNECTOR,
   RankConnectorRuntimeService
 } from "./rank-runs/rank-connector-runtime.service.js";
+import { SeoDataModule } from "./seo-data/seo-data.module.js";
+import { FrequencyCollectionRuntimeBrokerService } from "./frequency-collections/frequency-collection-runtime-broker.service.js";
+import { FrequencyCollectionRuntimeService } from "./frequency-collections/frequency-collection-runtime.service.js";
+import { XmlStockWordstatConnector } from "./frequency-collections/xmlstock-wordstat.connector.js";
 
 @Module({
-  imports: [ConfigModule.forRole("CONNECTOR_WORKER"), DatabaseModule],
+  imports: [ConfigModule.forRole("CONNECTOR_WORKER"), DatabaseModule, SeoDataModule],
   providers: [
     IntegrationCredentialConnectorRegistry,
     IntegrationCredentialCryptoService,
@@ -29,6 +33,12 @@ import {
     RankConnectorRuntimeService,
     KeywordResearchRuntimeBrokerService,
     KeywordResearchRuntimeService,
+    FrequencyCollectionRuntimeBrokerService,
+    FrequencyCollectionRuntimeService,
+    {
+      provide: XmlStockWordstatConnector,
+      useFactory: () => new XmlStockWordstatConnector()
+    },
     {
       provide: KEYS_SO_KEYWORD_RESEARCH_CONNECTOR,
       useFactory: () => new KeysSoKeywordResearchConnector()

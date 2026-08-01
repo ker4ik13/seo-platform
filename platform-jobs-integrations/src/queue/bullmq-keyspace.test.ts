@@ -13,7 +13,7 @@ const sourceDirectoryUrl = new URL("../", import.meta.url);
 const sourceDirectoryPath = fileURLToPath(sourceDirectoryUrl);
 const expectedConstructionSites = new Map([
   ["automations/automation-runtime.service.ts", 1],
-  ["connector-worker.main.ts", 4],
+  ["connector-worker.main.ts", 5],
   ["crawl-automations/crawl-automation-runtime.service.ts", 1],
   ["crawl-worker.main.ts", 2],
   ["import-worker.main.ts", 2],

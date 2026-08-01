@@ -14,6 +14,9 @@ import type {
   InternalSemanticImportReceipt,
   SemanticImportResultSummary,
   TrackingContextConfigurationInput
+  ,InternalResolveFrequencyKeywordInput
+  ,InternalFrequencyKeyword
+  ,InternalPersistFrequencySnapshotsInput
 } from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
@@ -133,6 +136,45 @@ export class SeoDataClient {
       throw new SeoDataClientError("UNAVAILABLE", true);
     }
     return result;
+  }
+
+  public async resolveFrequencyKeyword(
+    input: InternalResolveFrequencyKeywordInput
+  ): Promise<InternalFrequencyKeyword> {
+    const payload = await this.request(
+      `/internal/v1/projects/${encodeURIComponent(input.projectId)}/frequencies/resolve`,
+      input
+    );
+    const value = object(payload);
+    if (
+      !value ||
+      value.id !== input.keywordId ||
+      typeof value.text !== "string" ||
+      value.text.length < 1 ||
+      value.text.length > 2_000 ||
+      value.version !== input.version
+    ) {
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+    return { id: value.id, text: value.text, version: value.version };
+  }
+
+  public async persistFrequencySnapshots(
+    input: InternalPersistFrequencySnapshotsInput
+  ): Promise<void> {
+    const payload = await this.request(
+      `/internal/v1/projects/${encodeURIComponent(input.projectId)}/frequencies/snapshots`,
+      input
+    );
+    const value = object(payload);
+    if (
+      !value ||
+      !Number.isSafeInteger(value.created) ||
+      Number(value.created) < 0 ||
+      Number(value.created) > input.snapshots.length
+    ) {
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
   }
 
   private async request(

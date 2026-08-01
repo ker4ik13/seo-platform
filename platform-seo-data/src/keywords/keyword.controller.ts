@@ -20,7 +20,8 @@ import type {
   SemanticKeywordBulkResult,
   SemanticKeywordCleaningPreview,
   SemanticKeywordCleaningResult,
-  SemanticKeywordListItem
+  SemanticKeywordListItem,
+  SemanticKeywordInsights
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
 import {
@@ -119,6 +120,29 @@ export class KeywordController {
     assertMutationContext(projectId, headers, input);
     return {
       data: await this.keywords.clean(input),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Get(":keywordId/insights")
+  public async insights(
+    @Param("projectId") projectId: string,
+    @Param("keywordId") keywordId: string,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticKeywordInsights>> {
+    const context = internalCommandContext(headers);
+    if (internalUuid(projectId, "projectId") !== context.projectId) {
+      throw new BadRequestException(
+        "Route project identifier does not match trusted context"
+      );
+    }
+    return {
+      data: await this.keywords.insights(
+        context.workspaceId,
+        context.projectId,
+        internalUuid(keywordId, "keywordId")
+      ),
       meta: { requestId: request.id }
     };
   }

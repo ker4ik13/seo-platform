@@ -78,6 +78,7 @@ import {
   type SemanticKeywordCleaningResult,
   type SemanticKeywordGroup,
   type SemanticKeywordListItem,
+  type SemanticKeywordInsights,
   type CreateSemanticSavedViewInput,
   type CreateSemanticCustomColumnInput,
   type SemanticCustomColumn,
@@ -179,6 +180,22 @@ export class SeoDataClient {
 
     const payload = await this.request("GET", url, context);
     return semanticKeywordPage(payload);
+  }
+
+  public async keywordInsights(
+    context: InternalContext,
+    keywordId: string
+  ): Promise<SemanticKeywordInsights> {
+    const projectId = requiredProjectId(context.tenant);
+    const payload = await this.request(
+      "GET",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(keywordId)}/insights`,
+        this.config.services.seoData
+      ),
+      context
+    );
+    return semanticKeywordInsights(responseData(payload), keywordId);
   }
 
   public async createKeyword(
@@ -1340,6 +1357,91 @@ export function semanticKeywordPage(payload: unknown): KeywordPage {
         ? { totalApprox: page.totalApprox }
         : {})
     }
+  };
+}
+
+function semanticKeywordInsights(
+  value: unknown,
+  keywordId: string
+): SemanticKeywordInsights {
+  const input = objectValue(value);
+  if (
+    !input ||
+    input.keywordId !== keywordId ||
+    !Array.isArray(input.frequencies) ||
+    input.frequencies.length > 100 ||
+    !Array.isArray(input.positions) ||
+    input.positions.length > 50
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    keywordId,
+    frequencies: input.frequencies.map((value) => {
+      const item = objectValue(value);
+      if (
+        !item ||
+        !["BASE", "EXACT", "FIXED"].includes(String(item.type)) ||
+        !requiredString(item.regionCode) ||
+        !["ALL", "DESKTOP", "MOBILE", "PHONE_ONLY", "TABLET_ONLY"].includes(String(item.device)) ||
+        (item.period !== undefined &&
+          (typeof item.period !== "string" || !/^[0-9A-Za-z._:-]{1,32}$/u.test(item.period))) ||
+        (item.value !== undefined &&
+          (typeof item.value !== "string" || !/^(?:0|[1-9]\d{0,18})$/u.test(item.value))) ||
+        !requiredString(item.provider) ||
+        !["BYOK", "PLATFORM", "IMPORT", "MANUAL"].includes(String(item.sourceMode)) ||
+        !requiredString(item.jobId) ||
+        !Array.isArray(item.qualityFlags) ||
+        item.qualityFlags.length > 4 ||
+        item.qualityFlags.some((flag) =>
+          !["CONTEXT_INCOMPLETE", "STALE", "PARTIAL", "ESTIMATED"].includes(String(flag))
+        ) ||
+        new Set(item.qualityFlags).size !== item.qualityFlags.length ||
+        !validDate(item.observedAt)
+      ) throw invalidResponse();
+      return {
+        type: item.type as "BASE" | "EXACT" | "FIXED",
+        regionCode: item.regionCode,
+        device: item.device as "ALL" | "DESKTOP" | "MOBILE" | "PHONE_ONLY" | "TABLET_ONLY",
+        ...(typeof item.period === "string" ? { period: item.period } : {}),
+        ...(typeof item.value === "string" ? { value: item.value } : {}),
+        provider: item.provider,
+        sourceMode: item.sourceMode as "BYOK" | "PLATFORM" | "IMPORT" | "MANUAL",
+        jobId: item.jobId,
+        qualityFlags: item.qualityFlags as Array<"CONTEXT_INCOMPLETE" | "STALE" | "PARTIAL" | "ESTIMATED">,
+        observedAt: item.observedAt
+      };
+    }),
+    positions: input.positions.map((value) => {
+      const item = objectValue(value);
+      if (
+        !item ||
+        !requiredString(item.trackingContextId) ||
+        !requiredString(item.contextName) ||
+        !["GOOGLE", "YANDEX"].includes(String(item.searchEngine)) ||
+        !["DESKTOP", "MOBILE"].includes(String(item.device)) ||
+        !requiredString(item.regionCode) ||
+        typeof item.found !== "boolean" ||
+        (item.position !== undefined && (!Number.isSafeInteger(item.position) || Number(item.position) < 1)) ||
+        (item.previousPosition !== undefined && (!Number.isSafeInteger(item.previousPosition) || Number(item.previousPosition) < 1)) ||
+        (item.rankingUrl !== undefined && typeof item.rankingUrl !== "string") ||
+        !validDate(item.observedAt)
+      ) throw invalidResponse();
+      return {
+        trackingContextId: item.trackingContextId,
+        contextName: item.contextName,
+        searchEngine: item.searchEngine as "GOOGLE" | "YANDEX",
+        device: item.device as "DESKTOP" | "MOBILE",
+        regionCode: item.regionCode,
+        found: item.found,
+        ...(typeof item.position === "number" ? { position: item.position } : {}),
+        ...(typeof item.previousPosition === "number"
+          ? { previousPosition: item.previousPosition }
+          : {}),
+        ...(typeof item.rankingUrl === "string" ? { rankingUrl: item.rankingUrl } : {}),
+        observedAt: item.observedAt
+      };
+    })
   };
 }
 

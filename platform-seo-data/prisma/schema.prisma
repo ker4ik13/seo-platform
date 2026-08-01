@@ -1011,14 +1011,18 @@ model FrequencySnapshot {
   keywordId   String         @map("keyword_id") @db.Uuid
   type        String         @db.VarChar(64)
   regionCode  String         @map("region_code") @db.VarChar(100)
+  device      String         @default("ALL") @db.VarChar(32)
+  period      String?        @db.VarChar(32)
   value       BigInt?
   observedAt  DateTime       @map("observed_at") @db.Timestamptz(6)
   provider    String         @db.VarChar(64)
   sourceMode  DataSourceMode @map("source_mode")
   jobId       String         @map("job_id") @db.Uuid
+  qualityFlags Json          @default("[]") @map("quality_flags")
   createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@index([projectId, keywordId, type, regionCode, observedAt])
+  @@index([projectId, keywordId, type, regionCode, device, observedAt], map: "frequency_snapshots_keyword_context_observed_idx")
+  @@unique([workspaceId, projectId, jobId, keywordId, type, regionCode, device], map: "frequency_snapshots_job_keyword_context_key")
   @@map("frequency_snapshots")
 }
 

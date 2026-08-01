@@ -232,6 +232,23 @@ export class RankRunService {
     return toRankJobSummary(stored);
   }
 
+  public async list(
+    workspaceId: string,
+    projectId: string
+  ): Promise<readonly RankJobSummary[]> {
+    const jobs = await this.prisma.job.findMany({
+      where: {
+        workspaceId,
+        projectId,
+        type: MANUAL_RANK_CHECK_JOB_TYPE
+      },
+      include: { rankRun: true },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 25
+    });
+    return jobs.map(toRankJobSummary);
+  }
+
   public async cancel(
     input: InternalCancelRankJobInput
   ): Promise<RankJobSummary> {

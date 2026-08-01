@@ -15,7 +15,7 @@ export const integrationProviderCatalog = [
       "WORDSTAT"
     ],
     supportedModes: ["BYOK_API_KEY"],
-    credentialValidationMode: "PROVIDER_DOCUMENTATION_REQUIRED",
+    credentialValidationMode: "ACCOUNT_METADATA",
     requiresAccountIdentifier: true,
     accountIdentifierLabel: "XMLStock user ID",
     subscriptionNotice:

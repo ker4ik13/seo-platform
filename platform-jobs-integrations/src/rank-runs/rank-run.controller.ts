@@ -36,6 +36,23 @@ import { RankRunService } from "./rank-run.service.js";
 export class RankRunController {
   public constructor(private readonly rankRuns: RankRunService) {}
 
+  @Get("rank-runs")
+  public async list(
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectId") projectId: string,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<{ readonly jobs: readonly RankJobSummary[] }>> {
+    const context = internalCommandContext(headers);
+    assertPathContext(workspaceId, projectId, context);
+    return {
+      data: {
+        jobs: await this.rankRuns.list(context.workspaceId, context.projectId)
+      },
+      meta: { requestId: request.id }
+    };
+  }
+
   @Post("rank-runs")
   @HttpCode(HttpStatus.ACCEPTED)
   public async create(

@@ -8,6 +8,7 @@ import type {
 import type { IntegrationCredentialSecret } from "./integration-credential-crypto.service.js";
 import { integrationProviderMetadata } from "./integration-provider-catalog.js";
 import { KeysSoCredentialValidationConnector } from "./keys-so-credential-validation.connector.js";
+import { XmlStockCredentialValidationConnector } from "./xmlstock-credential-validation.connector.js";
 
 @Injectable()
 export class IntegrationCredentialConnectorRegistry {
@@ -18,6 +19,7 @@ export class IntegrationCredentialConnectorRegistry {
 
   public constructor() {
     const connectors: readonly IntegrationCredentialValidationConnector[] = [
+      new XmlStockCredentialValidationConnector(),
       new ArsenkinCredentialValidationConnector(),
       new KeysSoCredentialValidationConnector()
     ];

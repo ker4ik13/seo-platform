@@ -15,7 +15,7 @@ test("Arsenkin catalog exposes its documented rank-tracking capability", () => {
 test("public catalog only advertises operational provider workflows", () => {
   assert.deepEqual(
     operationalIntegrationProviderCatalog.map(({ provider }) => provider),
-    ["ARSENKIN", "KEYS_SO"]
+    ["XMLSTOCK", "ARSENKIN", "KEYS_SO"]
   );
   assert.deepEqual(
     integrationProviderMetadata("ARSENKIN").capabilities,
@@ -27,6 +27,6 @@ test("public catalog only advertises operational provider workflows", () => {
   );
   assert.equal(
     integrationProviderMetadata("XMLSTOCK").credentialValidationMode,
-    "PROVIDER_DOCUMENTATION_REQUIRED"
+    "ACCOUNT_METADATA"
   );
 });
