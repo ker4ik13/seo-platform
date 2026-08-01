@@ -5,6 +5,7 @@
   --text: #171923;
   --muted: #6d7280;
   --line: #e7e9ef;
+  --line-strong: #c9ced9;
   --brand: #6758ef;
   --brand-dark: #5546df;
   --green: #1f9d6b;
@@ -2385,8 +2386,8 @@ svg { display: block; }
 .semantic-editor-heading span { display: block; }
 .semantic-editor-heading strong { font-size: 13px; }
 .semantic-editor-heading span { color: var(--muted); font-size: 11px; line-height: 1.45; margin-top: 4px; }
-.semantic-editor-grid { display: grid; gap: 12px; grid-template-columns: minmax(120px, .7fr) minmax(100px, .45fr) minmax(150px, .7fr) minmax(180px, 1fr); }
-.semantic-editor-grid label { display: grid; gap: 6px; }
+.semantic-editor-grid { align-items: start; display: grid; gap: 12px; grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.semantic-editor-grid label { align-content: start; display: grid; gap: 6px; min-width: 0; }
 .semantic-editor-grid label > span { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase; }
 .semantic-editor-grid input:not([type="checkbox"]),
 .semantic-editor-grid select,
@@ -2397,10 +2398,15 @@ svg { display: block; }
 .semantic-editor-grid input:focus,
 .semantic-editor-grid select:focus,
 .semantic-editor-grid textarea:focus { border-color: #aaa1f4; box-shadow: 0 0 0 3px rgba(103, 88, 239, .1); outline: 0; }
-.semantic-editor-query,
-.semantic-editor-tags,
-.semantic-editor-url { grid-column: span 2; }
-.semantic-editor-check { align-content: center; align-items: center; display: flex !important; grid-template-columns: auto 1fr; padding-top: 20px; }
+.semantic-editor-query { grid-column: 1 / -1; }
+.semantic-editor-language,
+.semantic-editor-priority,
+.semantic-editor-intent { grid-column: span 2; }
+.semantic-editor-group,
+.semantic-editor-cluster,
+.semantic-editor-url,
+.semantic-editor-tags { grid-column: span 3; }
+.semantic-editor-check { align-content: center; align-items: center; display: flex !important; grid-column: 1 / -1; grid-template-columns: auto 1fr; padding-top: 4px; }
 .semantic-editor-check input { accent-color: var(--accent); height: 16px; width: 16px; }
 .semantic-editor-check > span { color: var(--text) !important; font-size: 11px !important; letter-spacing: 0 !important; text-transform: none !important; }
 .semantic-editor-actions { display: flex; gap: 8px; justify-content: flex-end; }
@@ -3180,8 +3186,13 @@ svg { display: block; }
   .semantic-custom-value-editor > * { grid-column: 1 !important; }
   .semantic-editor-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .semantic-editor-query,
+  .semantic-editor-group,
+  .semantic-editor-cluster,
   .semantic-editor-tags,
   .semantic-editor-url { grid-column: span 2; }
+  .semantic-editor-language,
+  .semantic-editor-priority,
+  .semantic-editor-intent { grid-column: span 1; }
   .semantic-group-editor { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .semantic-cluster-bulk-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .semantic-group-editor-actions { justify-content: flex-end; }
@@ -3441,6 +3452,12 @@ svg { display: block; }
   .semantic-custom-column-editor > * { grid-column: 1 !important; }
   .semantic-editor-grid { grid-template-columns: 1fr; }
   .semantic-editor-query,
+  .semantic-editor-language,
+  .semantic-editor-priority,
+  .semantic-editor-intent,
+  .semantic-editor-group,
+  .semantic-editor-cluster,
+  .semantic-editor-check,
   .semantic-editor-tags,
   .semantic-editor-url { grid-column: span 1; }
   .semantic-editor-actions .primary-button,
@@ -4953,6 +4970,7 @@ svg { display: block; }
   padding: 0;
   width: 680px;
 }
+.semantic-modal:focus { outline: 0; }
 .semantic-modal::backdrop { background: rgba(25, 29, 42, .48); backdrop-filter: blur(2px); }
 .semantic-modal-small { width: 480px; }
 .semantic-modal-large { width: 920px; }
@@ -4965,6 +4983,21 @@ svg { display: block; }
 .semantic-modal-body { max-height: calc(90vh - 76px); overflow: auto; padding: 18px 20px; }
 .semantic-modal-fullscreen .semantic-modal-body { height: calc(100% - 76px); }
 .semantic-tool-modal-content > .panel { border: 0; border-radius: 0; box-shadow: none; padding: 0; }
+.semantic-modal :where(input:not([type="checkbox"]):not([type="radio"]):not([type="color"]), select, textarea) {
+  background-color: #fff;
+  border: 1px solid var(--line-strong);
+}
+.semantic-modal :where(input:not([type="checkbox"]):not([type="radio"]), select, textarea):focus-visible {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px rgba(103, 88, 239, .14);
+  outline: 0;
+}
+.semantic-modal input[type="color"] {
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  padding: 3px;
+}
 .semantic-dialog-form, .semantic-position-dialog { display: grid; gap: 14px; }
 .semantic-dialog-form > label, .semantic-position-dialog label { display: grid; gap: 6px; }
 .semantic-dialog-form label > span, .semantic-position-dialog label > span { color: var(--muted); font-size: 10px; font-weight: 700; }

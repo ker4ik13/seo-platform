@@ -1122,7 +1122,7 @@ export function SemanticCoreTable({
                 />
               )}
             </label>
-            <label>
+            <label className="semantic-editor-language">
               <span>Язык</span>
               <input
                 maxLength={16}
@@ -1133,7 +1133,7 @@ export function SemanticCoreTable({
                 value={editor.draft.language}
               />
             </label>
-            <label>
+            <label className="semantic-editor-priority">
               <span>Приоритет</span>
               <input
                 max={100}
@@ -1146,7 +1146,7 @@ export function SemanticCoreTable({
                 value={editor.draft.priority}
               />
             </label>
-            <label>
+            <label className="semantic-editor-intent">
               <span>Интент</span>
               <select
                 onChange={(event) =>
@@ -1165,7 +1165,7 @@ export function SemanticCoreTable({
                 <option value="MIXED">Смешанный</option>
               </select>
             </label>
-            <label>
+            <label className="semantic-editor-group">
               <span>Группа</span>
               <select
                 onChange={(event) =>
@@ -1181,7 +1181,7 @@ export function SemanticCoreTable({
                 ))}
               </select>
             </label>
-            <label>
+            <label className="semantic-editor-cluster">
               <span>Кластер</span>
               <select
                 onChange={(event) =>

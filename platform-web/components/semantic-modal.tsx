@@ -44,6 +44,9 @@ export function SemanticModal({
         event.preventDefault();
         onClose();
       }}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
       ref={dialogRef}
     >
       <header className="semantic-modal-header">
