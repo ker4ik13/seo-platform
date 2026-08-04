@@ -661,7 +661,7 @@ services:
       AUTH_PASSWORD_RESET_TTL_MINUTES: ${AUTH_PASSWORD_RESET_TTL_MINUTES:-30}
       AUTH_MFA_CHALLENGE_TTL_MINUTES: ${AUTH_MFA_CHALLENGE_TTL_MINUTES:-5}
       AUTH_RECENT_AUTHENTICATION_MINUTES: ${AUTH_RECENT_AUTHENTICATION_MINUTES:-10}
-      AUTH_TOTP_ISSUER: ${AUTH_TOTP_ISSUER:-SEO Workspace}
+      AUTH_TOTP_ISSUER: ${AUTH_TOTP_ISSUER:-SEOньорита}
       AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
       AUTH_EXPOSE_DEVELOPMENT_TOKENS: "false"
     expose:
@@ -937,7 +937,7 @@ services:
       RANK_PREPARATION_DISPATCH_SECONDS: ${RANK_PREPARATION_DISPATCH_SECONDS:-15}
       RANK_PREPARATION_CONCURRENCY: ${RANK_PREPARATION_CONCURRENCY:-2}
       RANK_PROVIDER_SUBMIT_ENABLED: "false"
-      RANK_PROVIDER_KILL_SWITCH_VERSION: ${RANK_PROVIDER_KILL_SWITCH_VERSION:-arsenkin-positions@2}
+      RANK_PROVIDER_KILL_SWITCH_VERSION: ${RANK_PROVIDER_KILL_SWITCH_VERSION:-arsenkin-positions@4}
       INTEGRATION_CREDENTIAL_ROLE: DISABLED
     cpus: "${JOBS_RANK_CPU_LIMIT:-1.0}"
     mem_limit: "${JOBS_RANK_MEMORY_LIMIT:-512M}"
@@ -1025,6 +1025,9 @@ services:
     command: ["node", "dist/connector-worker.main.js"]
     environment:
       <<: *integration-credential-execution-env
+      JOBS_TO_SEO_DATA_TOKEN: ${JOBS_TO_SEO_DATA_TOKEN:?JOBS_TO_SEO_DATA_TOKEN is required}
+      SEO_DATA_URL: http://seo-data:4001
+      SEO_DATA_COMMAND_TIMEOUT_MS: ${SEO_DATA_COMMAND_TIMEOUT_MS:-60000}
       NODE_ENV: production
       TZ: UTC
       SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
@@ -1036,12 +1039,14 @@ services:
       INTEGRATION_VALIDATION_DISPATCH_SECONDS: ${INTEGRATION_VALIDATION_DISPATCH_SECONDS:-15}
       INTEGRATION_VALIDATION_CONCURRENCY: ${INTEGRATION_VALIDATION_CONCURRENCY:-2}
       RANK_PROVIDER_SUBMIT_ENABLED: ${RANK_PROVIDER_SUBMIT_ENABLED:-true}
-      RANK_PROVIDER_KILL_SWITCH_VERSION: ${RANK_PROVIDER_KILL_SWITCH_VERSION:-arsenkin-positions@2}
+      RANK_PROVIDER_KILL_SWITCH_VERSION: ${RANK_PROVIDER_KILL_SWITCH_VERSION:-arsenkin-positions@4}
     networks:
       - internal
       - outbound
       - jobs-redis
     depends_on:
+      service-token-preflight:
+        condition: service_completed_successfully
       jobs-connector-db-permissions:
         condition: service_completed_successfully
       redis-jobs:

@@ -13,10 +13,24 @@ test("parses only the exact immutable manifest chunk reference", () => {
     manifestId: reference.manifestId,
     chunkIndex: 2
   });
+  assert.deepEqual(
+    rankJobItemReference({ ...reference, chunkIndex: 4 }),
+    {
+      manifestId: reference.manifestId,
+      chunkIndex: 4
+    }
+  );
+  assert.deepEqual(
+    rankJobItemReference({ ...reference, chunkIndex: 14_999 }),
+    {
+      manifestId: reference.manifestId,
+      chunkIndex: 14_999
+    }
+  );
   for (const candidate of [
     { ...reference, keywordText: "must-not-cross" },
     { ...reference, manifestId: "not-a-uuid" },
-    { ...reference, chunkIndex: 4 }
+    { ...reference, chunkIndex: 15_000 }
   ]) {
     assert.throws(() => rankJobItemReference(candidate), /Invalid rank/u);
   }

@@ -17,6 +17,13 @@ export const semanticImportDelimiters = [
 export type SemanticImportDelimiter =
   (typeof semanticImportDelimiters)[number];
 
+/**
+ * Native project formats may contain deeply nested folder trees. The limit is
+ * deliberately high enough for real Key Collector projects while still
+ * bounding recursive validation and group creation work.
+ */
+export const semanticImportMaxGroupDepth = 64;
+
 export const semanticImportHeaderModes = [
   "AUTO",
   "PRESENT",
@@ -46,12 +53,22 @@ export type SemanticImportStatus =
 export const semanticImportTargets = [
   "ignore",
   "keyword.text",
+  "keyword.language",
+  "keyword.priority",
+  "keyword.favorite",
+  "keyword.intent",
   "group.path",
   "page.target_url",
   "frequency.base",
   "frequency.exact",
   "frequency.fixed",
   "ranking.position",
+  "ranking.yandex.position",
+  "ranking.yandex.change",
+  "ranking.yandex.url",
+  "ranking.google.position",
+  "ranking.google.change",
+  "ranking.google.url",
   "context.search_engine",
   "context.region",
   "metric.observed_at",
@@ -87,6 +104,7 @@ export interface InternalCreateSemanticImportInput
   readonly projectId: string;
   readonly actorId: string;
   readonly idempotencyKey: string;
+  readonly jobCapacity: import("./billing.js").JobCapacityEntitlement;
 }
 
 export interface SemanticImportColumnPreview {
@@ -175,6 +193,15 @@ export interface SemanticImportResultSummary {
   readonly createdPages: string;
   readonly createdTags: string;
   readonly createdMetricSnapshots: string;
+  readonly trashedDuplicateCandidates?: readonly SemanticImportTrashCandidate[];
+  readonly trashedDuplicateCandidatesTruncated?: boolean;
+}
+
+export interface SemanticImportTrashCandidate {
+  readonly keywordId: string;
+  readonly version: number;
+  readonly text: string;
+  readonly language: string;
 }
 
 export interface SemanticImportSummary {
@@ -230,15 +257,28 @@ export interface SemanticImportFrequencyValue {
   readonly value: string;
 }
 
+export interface SemanticImportPositionValue {
+  readonly searchEngine: "YANDEX" | "GOOGLE";
+  readonly found: boolean;
+  readonly position?: number;
+  readonly previousPosition?: number;
+  readonly rankingUrl?: string;
+}
+
 export interface SemanticImportPublishRow {
   readonly sourceRowNumber: string;
   readonly textOriginal: string;
   readonly textNormalized: string;
   readonly normalizedHash: string;
   readonly language: string;
+  readonly priority?: number;
+  readonly isFavorite?: boolean;
+  readonly intent?: import("./keywords.js").SemanticKeywordIntent;
   readonly groupPath?: readonly string[];
+  readonly groupPaths?: readonly (readonly string[])[];
   readonly targetUrl?: string;
   readonly frequencies?: readonly SemanticImportFrequencyValue[];
+  readonly positions?: readonly SemanticImportPositionValue[];
   readonly observedAt?: string;
   readonly tags?: readonly string[];
   readonly customValues: Readonly<Record<string, string>>;
@@ -272,6 +312,7 @@ export interface InternalApplySemanticImportChunkInput {
   readonly chunkIndex: number;
   readonly payloadHash: string;
   readonly duplicatePolicy: SemanticImportDuplicatePolicy;
+  readonly groupPaths?: readonly (readonly string[])[];
   readonly rows: readonly SemanticImportPublishRow[];
 }
 
@@ -284,6 +325,7 @@ export interface InternalSemanticImportChunkResult {
   readonly createdPages: string;
   readonly createdTags: string;
   readonly createdMetricSnapshots: string;
+  readonly trashedDuplicateCandidates: readonly SemanticImportTrashCandidate[];
 }
 
 export interface InternalCompleteSemanticImportInput {

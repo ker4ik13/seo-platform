@@ -1,5 +1,10 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
+  legacyRankManifestChunkSize,
+  legacyRankProviderKeywordLimit,
+  rankManifestSingleTaskChunkSize,
+  rankProviderKeywordLimit,
+  xmlStockRankManifestChunkSize,
   rankManifestChunkHashPreimage,
   type InternalFinalizeRankCheckInput,
   type InternalGetRankManifestChunkInput,
@@ -10,6 +15,7 @@ import {
   type InternalRankManifestSeal,
   type InternalRankRunProjectSnapshot,
   type InternalSealRankManifestInput,
+  type RankCheckFinalStatus,
   type RankManifestHash
 } from "@seo-platform/contracts";
 import {
@@ -21,9 +27,8 @@ import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 
 const RESPONSE_MAX_BYTES = 64 * 1_024;
-const CHUNK_RESPONSE_MAX_BYTES = 1_024 * 1_024;
-const MANIFEST_CHUNK_SIZE = 250;
-const MAX_MANIFEST_CHUNK_INDEX = 3;
+const CHUNK_RESPONSE_MAX_BYTES = 64 * 1_024 * 1_024;
+const MAX_MANIFEST_CHUNK_INDEX = rankProviderKeywordLimit - 1;
 const MAX_KEYWORD_CODE_POINTS = 500;
 const MAX_KEYWORD_CODE_UNITS = MAX_KEYWORD_CODE_POINTS * 2;
 const MAX_KEYWORD_UTF8_BYTES = 2_000;
@@ -295,7 +300,10 @@ function rankManifestChunk(
     !chunkHash ||
     !Array.isArray(input.entries) ||
     input.entries.length < 1 ||
-    input.entries.length > MANIFEST_CHUNK_SIZE
+    input.entries.length >
+      (input.chunkIndex === 0
+        ? rankManifestSingleTaskChunkSize
+        : legacyRankManifestChunkSize)
   ) {
     return undefined;
   }
@@ -304,10 +312,26 @@ function rankManifestChunk(
   const entryIds = new Set<string>();
   const assignmentIds = new Set<string>();
   const keywordIds = new Set<string>();
+  const firstSequence = exactRecord(input.entries[0], [
+    "id",
+    "sequence",
+    "assignmentId",
+    "keywordId",
+    "keywordVersion",
+    "keywordText",
+    "keywordTextHash",
+    "language"
+  ])?.sequence;
+  const sequenceBase =
+    input.entries.length === 1 && firstSequence === input.chunkIndex
+      ? input.chunkIndex
+      : input.chunkIndex === 0
+        ? 0
+        : input.chunkIndex * legacyRankManifestChunkSize;
   for (let offset = 0; offset < input.entries.length; offset += 1) {
     const entry = rankManifestEntry(
       input.entries[offset],
-      input.chunkIndex * MANIFEST_CHUNK_SIZE + offset
+      sequenceBase + offset
     );
     if (
       !entry ||
@@ -414,18 +438,20 @@ function rankFinalizationReceipt(
     "finalizedAt"
   ]);
   const requestHash = input ? manifestHash(input.requestHash) : undefined;
-  const pairCount = input ? decimal(input.pairCount, 1_000) : undefined;
+  const pairCount = input
+    ? decimal(input.pairCount, rankProviderKeywordLimit)
+    : undefined;
   const persistedCount = input
-    ? decimalAllowZero(input.persistedCount, 1_000)
+    ? decimalAllowZero(input.persistedCount, rankProviderKeywordLimit)
     : undefined;
   const foundCount = input
-    ? decimalAllowZero(input.foundCount, 1_000)
+    ? decimalAllowZero(input.foundCount, rankProviderKeywordLimit)
     : undefined;
   const notFoundCount = input
-    ? decimalAllowZero(input.notFoundCount, 1_000)
+    ? decimalAllowZero(input.notFoundCount, rankProviderKeywordLimit)
     : undefined;
   const missingCount = input
-    ? decimalAllowZero(input.missingCount, 1_000)
+    ? decimalAllowZero(input.missingCount, rankProviderKeywordLimit)
     : undefined;
   const expectedHash = canonicalJsonSha256("rank-finalize@1", {
     schemaVersion: command.schemaVersion,
@@ -448,10 +474,18 @@ function rankFinalizationReceipt(
     input.configurationVersion !== expected.configurationVersion ||
     input.status !== command.status ||
     pairCount !== String(expected.pairCount) ||
-    persistedCount !== "0" ||
-    foundCount !== "0" ||
-    notFoundCount !== "0" ||
-    missingCount !== pairCount ||
+    persistedCount === undefined ||
+    foundCount === undefined ||
+    notFoundCount === undefined ||
+    missingCount === undefined ||
+    !finalizationCountsAreValid(
+      input.status,
+      pairCount,
+      persistedCount,
+      foundCount,
+      notFoundCount,
+      missingCount
+    ) ||
     !timestamp(input.finalizedAt)
   ) {
     return undefined;
@@ -473,6 +507,73 @@ function rankFinalizationReceipt(
     missingCount,
     finalizedAt: input.finalizedAt as string
   };
+}
+
+function finalizationCountsAreValid(
+  status: unknown,
+  pairCount: string,
+  persistedCount: string,
+  foundCount: string,
+  notFoundCount: string,
+  missingCount: string
+): status is RankCheckFinalStatus {
+  const pair = Number(pairCount);
+  const persisted = Number(persistedCount);
+  const found = Number(foundCount);
+  const notFound = Number(notFoundCount);
+  const missing = Number(missingCount);
+  if (
+    found + notFound !== persisted ||
+    missing !== pair - persisted ||
+    persisted > pair
+  ) {
+    return false;
+  }
+  switch (status) {
+    case "COMPLETED":
+      return persisted === pair;
+    case "PARTIALLY_COMPLETED":
+      return persisted > 0 && persisted < pair;
+    case "CANCELLED":
+      return true;
+    case "FAILED":
+      return persisted === 0;
+    case "ACTION_REQUIRED":
+      return persisted < pair;
+    default:
+      return false;
+  }
+}
+
+function validManifestShape(
+  provider: unknown,
+  pairCount: number,
+  chunkCount: number,
+  chunkSize: unknown
+): boolean {
+  if (chunkSize === String(legacyRankManifestChunkSize)) {
+    return (
+      pairCount >= 1 &&
+      pairCount <= legacyRankProviderKeywordLimit &&
+      chunkCount ===
+        Math.ceil(pairCount / legacyRankManifestChunkSize)
+    );
+  }
+  if (provider === "XMLSTOCK") {
+    return (
+      chunkSize === String(xmlStockRankManifestChunkSize) &&
+      pairCount >= 1 &&
+      pairCount <= rankProviderKeywordLimit &&
+      chunkCount === pairCount
+    );
+  }
+  return (
+    provider === "ARSENKIN" &&
+    chunkSize === String(rankManifestSingleTaskChunkSize) &&
+    pairCount >= 1 &&
+    pairCount <= rankProviderKeywordLimit &&
+    chunkCount === 1
+  );
 }
 
 function rankManifestSeal(
@@ -519,8 +620,17 @@ function rankManifestSeal(
     "normalizedRankHistory",
     "rawSerp"
   ]);
-  const pairCount = decimal(input.pairCount, 1_000);
-  const chunkCount = decimal(input.chunkCount, 4);
+  const pairCount = decimal(input.pairCount, rankProviderKeywordLimit);
+  const chunkCount = decimal(input.chunkCount, rankProviderKeywordLimit);
+  const validShape =
+    pairCount !== undefined &&
+    chunkCount !== undefined &&
+    validManifestShape(
+      input.provider,
+      Number(pairCount),
+      Number(chunkCount),
+      input.chunkSize
+    );
   if (
     !uuid(input.id) ||
     input.workspaceId !== command.workspaceId ||
@@ -530,7 +640,7 @@ function rankManifestSeal(
     input.estimateExpiresAt !== command.estimate.expiresAt ||
     input.sealedBy !== command.actorId ||
     input.trackingContextId !== command.estimate.trackingContextId ||
-    input.provider !== "ARSENKIN" ||
+    input.provider !== command.provider ||
     input.operation !== "POSITIONS" ||
     !project ||
     canonicalizeJson(project) !== canonicalizeJson(command.project) ||
@@ -543,9 +653,10 @@ function rankManifestSeal(
     input.hashSchemaVersion !== "rank-manifest@1" ||
     !fullHash ||
     !deduplicationHash ||
+    pairCount === undefined ||
+    chunkCount === undefined ||
     pairCount !== command.estimate.pairCount ||
-    chunkCount !== String(Math.ceil(Number(pairCount) / 250)) ||
-    input.chunkSize !== "250" ||
+    !validShape ||
     !execution ||
     canonicalizeJson(execution) !== canonicalizeJson(command.execution) ||
     !retention ||
@@ -568,7 +679,7 @@ function rankManifestSeal(
     estimateExpiresAt: command.estimate.expiresAt,
     sealedBy: command.actorId,
     trackingContextId: command.estimate.trackingContextId,
-    provider: "ARSENKIN",
+    provider: command.provider,
     operation: "POSITIONS",
     project,
     contextVersion: command.estimate.contextVersion,
@@ -581,7 +692,7 @@ function rankManifestSeal(
     deduplicationHash,
     pairCount,
     chunkCount,
-    chunkSize: "250",
+    chunkSize: input.chunkSize as "1" | "250" | "15000",
     execution,
     retention: {
       normalizedRankHistory: "LONG_TERM",
@@ -643,7 +754,7 @@ function executionParameters(
   ]);
   if (
     !input ||
-    input.searchEngine !== "GOOGLE" ||
+    !["GOOGLE", "YANDEX"].includes(String(input.searchEngine)) ||
     typeof input.countryCode !== "string" ||
     !/^[A-Z]{2}$/u.test(input.countryCode) ||
     ("regionCode" in input &&
@@ -654,7 +765,7 @@ function executionParameters(
     input.language.length < 1 ||
     input.language.length > 16 ||
     !["DESKTOP", "MOBILE"].includes(String(input.device)) ||
-    input.depth !== 30 ||
+    ![30, 50, 100].includes(Number(input.depth)) ||
     typeof input.safeSearch !== "boolean" ||
     input.format !== "SIMPLE" ||
     input.rawSerp !== false ||
@@ -668,14 +779,15 @@ function executionParameters(
   const rule = domainMatchRule(input.domainMatchRule);
   if (!rule) return undefined;
   return {
-    searchEngine: "GOOGLE",
+    searchEngine:
+      input.searchEngine as InternalRankExecutionParameters["searchEngine"],
     countryCode: input.countryCode,
     ...("regionCode" in input
       ? { regionCode: input.regionCode as string }
       : {}),
     language: input.language,
     device: input.device as InternalRankExecutionParameters["device"],
-    depth: 30,
+    depth: input.depth as InternalRankExecutionParameters["depth"],
     domainMatchRule: rule,
     safeSearch: input.safeSearch,
     format: "SIMPLE",

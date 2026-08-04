@@ -1,5 +1,7 @@
 import {
+  semanticKeywordDefaultPageSize,
   semanticKeywordIntents,
+  semanticKeywordMaxPageSize,
   semanticKeywordSorts,
   type KeywordListQuery
 } from "@seo-platform/contracts";
@@ -38,14 +40,18 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   const sort =
     optionalEnum(query.sort, "sort", semanticKeywordSorts) ??
     "CREATED_DESC";
-  const parsedLimit = limit === undefined ? 100 : Number(limit);
+  const parsedLimit =
+    limit === undefined ? semanticKeywordDefaultPageSize : Number(limit);
 
   if (
     !Number.isSafeInteger(parsedLimit) ||
     parsedLimit < 1 ||
-    parsedLimit > 200
+    parsedLimit > semanticKeywordMaxPageSize
   ) {
-    invalid("limit", "Must be an integer between 1 and 200");
+    invalid(
+      "limit",
+      `Must be an integer between 1 and ${semanticKeywordMaxPageSize}`
+    );
   }
   if (cursor && !CURSOR_PATTERN.test(cursor)) {
     invalid("cursor", "Must be a valid pagination cursor");

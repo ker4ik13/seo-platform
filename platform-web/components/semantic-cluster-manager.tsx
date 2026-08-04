@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import type {
   ProjectPageSettings,
   ProjectPageSummary,
@@ -385,7 +387,7 @@ export function SemanticClusterManager({
           </div>
           <label>
             <span>Основная посадочная</span>
-            <select
+            <CustomSelect
               onChange={(event) =>
                 setEditor((current) =>
                   current
@@ -401,7 +403,7 @@ export function SemanticClusterManager({
                   {page.title ? `${page.title} · ` : ""}{page.normalizedUrl}
                 </option>
               ))}
-            </select>
+            </CustomSelect>
           </label>
           <label>
             <span>Почему эта страница</span>
@@ -474,7 +476,7 @@ export function SemanticClusterManager({
               <div className="semantic-cluster-merge-controls">
                 <label>
                   <span>Кластер-получатель</span>
-                  <select
+                  <CustomSelect
                     disabled={Boolean(mergeBusy)}
                     onChange={(event) => {
                       setMergeTargetId(event.target.value);
@@ -488,7 +490,7 @@ export function SemanticClusterManager({
                       .map((cluster) => (
                         <option key={cluster.id} value={cluster.id}>{cluster.name}</option>
                       ))}
-                  </select>
+                  </CustomSelect>
                 </label>
                 {mergePreview && (
                   <div className="semantic-cluster-bulk-preview" role="status">
@@ -538,7 +540,7 @@ export function SemanticClusterManager({
           <div className="semantic-cluster-bulk-fields">
             <label>
               <span>Действие</span>
-              <select
+              <CustomSelect
                 disabled={Boolean(bulkBusy)}
                 onChange={(event) => changeBulkAction(event.target.value)}
                 value={bulkAction}
@@ -550,7 +552,7 @@ export function SemanticClusterManager({
                     {page.title ? `${page.title} · ` : ""}{page.normalizedUrl}
                   </option>
                 ))}
-              </select>
+              </CustomSelect>
             </label>
             <label>
               <span>Обоснование</span>

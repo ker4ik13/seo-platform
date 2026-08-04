@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState, type DragEvent, type MouseEvent } from "react";
+import {
+  semanticGroupDropPlacement,
+  type SemanticGroupDropPlacement
+} from "../lib/semantic-group-drag";
 import { ContextMenu, type ContextMenuItem } from "./context-menu";
 
 export interface SemanticGroupTreeItem {
@@ -9,7 +13,9 @@ export interface SemanticGroupTreeItem {
   readonly name: string;
   readonly path: string;
   readonly color?: string;
+  readonly position: number;
   readonly keywordCount: number;
+  readonly systemKind?: "UNGROUPED" | "TRASH";
   readonly version: number;
 }
 
@@ -19,47 +25,94 @@ interface FlatGroup {
   readonly hasChildren: boolean;
 }
 
+export type SemanticGroupTreeDropTarget =
+  | Readonly<{ placement: "root" }>
+  | Readonly<{
+      group: SemanticGroupTreeItem;
+      placement: SemanticGroupDropPlacement;
+    }>;
+
 export function SemanticGroupTree({
   activeGroupId,
+  expandedIds,
   groups,
   onCreate,
   onDelete,
   onExport,
-  onMove,
+  onDropMove,
+  onMoveRequest,
+  onReorder,
   onKeywordDrop,
   onRename,
   onSelect,
+  onExpandedIdsChange,
   total
 }: Readonly<{
   activeGroupId?: string;
+  expandedIds: ReadonlySet<string> | null;
   groups: readonly SemanticGroupTreeItem[];
   onCreate: (parentId?: string) => void;
   onDelete: (groups: readonly SemanticGroupTreeItem[]) => void;
   onExport: (group: SemanticGroupTreeItem) => void;
-  onMove: (groups: readonly SemanticGroupTreeItem[], targetId?: string) => void;
+  onDropMove: (
+    groups: readonly SemanticGroupTreeItem[],
+    target: SemanticGroupTreeDropTarget
+  ) => void;
+  onMoveRequest: (groups: readonly SemanticGroupTreeItem[]) => void;
+  onReorder: (group: SemanticGroupTreeItem, position: number) => void;
   onKeywordDrop: (keywordIds: readonly string[], targetId?: string) => void;
   onRename: (group: SemanticGroupTreeItem) => void;
   onSelect: (groupId?: string) => void;
+  onExpandedIdsChange: (expandedIds: ReadonlySet<string>) => void;
   total?: number;
 }>) {
-  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(
-    () => new Set(groups.map(({ id }) => id))
-  );
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
     new Set()
   );
   const [draggingIds, setDraggingIds] = useState<readonly string[]>([]);
-  const [dragTarget, setDragTarget] = useState<string | "ROOT">();
+  const [dragTarget, setDragTarget] = useState<SemanticGroupTreeDropTarget>();
   const [search, setSearch] = useState("");
   const [contextMenu, setContextMenu] = useState<Readonly<{
     x: number;
     y: number;
     group: SemanticGroupTreeItem;
   }>>();
-  const flatGroups = useMemo(
-    () => flattenGroups(groups, expandedIds, search),
-    [expandedIds, groups, search]
+  const effectiveExpandedIds = useMemo<ReadonlySet<string>>(
+    () =>
+      expandedIds ??
+      new Set(
+        groups
+          .filter(({ systemKind }) => !systemKind)
+          .map(({ id }) => id)
+      ),
+    [expandedIds, groups]
   );
+  const flatGroups = useMemo(
+    () =>
+      flattenGroups(
+        groups.filter(({ systemKind }) => !systemKind),
+        effectiveExpandedIds,
+        search
+      ),
+    [effectiveExpandedIds, groups, search]
+  );
+  const systemGroups = useMemo(() => {
+    const normalizedSearch = normalizeGroupSearch(search);
+    return groups
+      .filter(
+        (group) =>
+          group.systemKind &&
+          (!normalizedSearch ||
+            group.name
+              .normalize("NFKC")
+              .toLocaleLowerCase("ru")
+              .includes(normalizedSearch))
+      )
+      .sort(
+        (left, right) =>
+          systemGroupOrder(left.systemKind) - systemGroupOrder(right.systemKind)
+      );
+  }, [groups, search]);
   useEffect(() => {
     const clearDragTarget = () => setDragTarget(undefined);
     document.addEventListener("dragend", clearDragTarget);
@@ -80,7 +133,6 @@ export function SemanticGroupTree({
       });
       return;
     }
-    setSelectedIds(new Set([group.id]));
     onSelect(group.id);
   }
 
@@ -105,12 +157,15 @@ export function SemanticGroupTree({
     event.dataTransfer.setData("text/plain", ids.join(","));
   }
 
-  function drop(targetId?: string): void {
+  function drop(target: SemanticGroupTreeDropTarget): void {
     const moving = groups.filter(({ id }) => draggingIds.includes(id));
     setDraggingIds([]);
     setDragTarget(undefined);
-    if (moving.length === 0 || moving.some(({ id }) => id === targetId)) return;
-    onMove(moving, targetId);
+    if (
+      moving.length === 0 ||
+      ("group" in target && moving.some(({ id }) => id === target.group.id))
+    ) return;
+    onDropMove(moving, target);
   }
 
   const contextGroups = contextMenu
@@ -118,8 +173,27 @@ export function SemanticGroupTree({
       ? selectedGroups
       : [contextMenu.group]
     : [];
+  const contextSiblings = contextMenu
+    ? groups
+        .filter(({ parentId }) => parentId === contextMenu.group.parentId)
+        .sort(compareGroupPosition)
+    : [];
+  const contextIndex = contextMenu
+    ? contextSiblings.findIndex(({ id }) => id === contextMenu.group.id)
+    : -1;
   const contextItems: readonly ContextMenuItem[] = contextMenu
-    ? [
+    ? contextMenu.group.systemKind
+      ? [
+          {
+            id: "open-system-group",
+            label:
+              contextMenu.group.systemKind === "TRASH"
+                ? "Открыть корзину"
+                : "Открыть без группы",
+            onSelect: () => onSelect(contextMenu.group.id)
+          }
+        ]
+      : [
         {
           id: "create",
           label: "Создать подгруппу",
@@ -137,7 +211,22 @@ export function SemanticGroupTree({
             contextGroups.length > 1
               ? `Переместить группы (${contextGroups.length})…`
               : "Переместить…",
-          onSelect: () => onMove(contextGroups)
+          onSelect: () => onMoveRequest(contextGroups)
+        },
+        {
+          id: "move-up",
+          label: "Поднять выше",
+          disabled: contextGroups.length !== 1 || contextIndex <= 0,
+          onSelect: () => onReorder(contextMenu.group, contextIndex - 1)
+        },
+        {
+          id: "move-down",
+          label: "Опустить ниже",
+          disabled:
+            contextGroups.length !== 1 ||
+            contextIndex < 0 ||
+            contextIndex >= contextSiblings.length - 1,
+          onSelect: () => onReorder(contextMenu.group, contextIndex + 1)
         },
         {
           id: "export",
@@ -157,6 +246,117 @@ export function SemanticGroupTree({
         }
       ]
     : [];
+
+  function renderGroupRow({
+    depth,
+    group,
+    hasChildren
+  }: FlatGroup) {
+    const selected = selectedIds.has(group.id);
+    return (
+      <div
+        className={`semantic-group-tree-row${activeGroupId === group.id ? " active" : ""}${selected ? " selected" : ""}${group.systemKind ? ` system ${group.systemKind.toLowerCase()}` : ""}${dragTarget && "group" in dragTarget && dragTarget.group.id === group.id ? ` drag-${dragTarget.placement}` : ""}`}
+        draggable={!group.systemKind}
+        key={group.id}
+        onContextMenu={(event) => openContextMenu(event, group)}
+        onDragEnd={() => {
+          setDraggingIds([]);
+          setDragTarget(undefined);
+        }}
+        onDragStart={(event) => startDrag(event, group)}
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (group.systemKind === "TRASH") return;
+          setDragTarget({
+            group,
+            placement: semanticGroupDropPlacement(
+              event.clientY,
+              event.currentTarget.getBoundingClientRect().top,
+              event.currentTarget.getBoundingClientRect().height
+            )
+          });
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const keywordIds = draggedKeywordIds(event);
+          if (keywordIds.length > 0) {
+            if (group.systemKind === "TRASH") return;
+            onKeywordDrop(keywordIds, group.id);
+            setDragTarget(undefined);
+            return;
+          }
+          if (group.systemKind) return;
+          const placement = semanticGroupDropPlacement(
+            event.clientY,
+            event.currentTarget.getBoundingClientRect().top,
+            event.currentTarget.getBoundingClientRect().height
+          );
+          drop({ group, placement });
+        }}
+        style={{
+          minWidth: `${180 + depth * 10}px`,
+          paddingLeft: `${4 + depth * 10}px`
+        }}
+      >
+        <button
+          aria-label={
+            hasChildren
+              ? effectiveExpandedIds.has(group.id)
+                ? `Свернуть ${group.name}`
+                : `Развернуть ${group.name}`
+              : undefined
+          }
+          className="semantic-group-toggle"
+          disabled={!hasChildren}
+          onClick={() =>
+            onExpandedIdsChange(toggleId(effectiveExpandedIds, group.id))
+          }
+          type="button"
+        >
+          {hasChildren && (
+            <svg
+              aria-hidden="true"
+              className={effectiveExpandedIds.has(group.id) ? undefined : "collapsed"}
+              viewBox="0 0 20 20"
+            >
+              <path d="m5.5 7.5 4.5 4.5 4.5-4.5 1.4 1.4-5.9 5.9-5.9-5.9 1.4-1.4Z" />
+            </svg>
+          )}
+        </button>
+        <button
+          className="semantic-group-name"
+          onClick={(event) => chooseGroup(event, group)}
+          title={`${group.path}. Ctrl/Cmd+клик — множественный выбор`}
+          type="button"
+        >
+          <i style={{ background: group.color ?? "#a8a5b8" }} />
+          {group.systemKind && (
+            <span aria-hidden="true" className="semantic-system-group-icon">
+              {group.systemKind === "TRASH" ? "⌫" : "∅"}
+            </span>
+          )}
+          <span>{group.name}</span>
+        </button>
+        <small>{formatInteger(group.keywordCount)}</small>
+        <button
+          aria-label={`Действия с группой ${group.name}`}
+          className="semantic-group-more"
+          onClick={(event) =>
+            setContextMenu({
+              x: event.clientX,
+              y: event.clientY,
+              group
+            })
+          }
+          type="button"
+        >
+          ⋮
+        </button>
+      </div>
+    );
+  }
 
   return (
     <nav aria-label="Группы семантического ядра" className="semantic-group-tree">
@@ -185,14 +385,14 @@ export function SemanticGroupTree({
       </label>
       <button
         aria-current={!activeGroupId ? "true" : undefined}
-        className={`semantic-group-root${dragTarget === "ROOT" ? " drag-target" : ""}`}
+        className={`semantic-group-root${dragTarget?.placement === "root" ? " drag-target" : ""}`}
         onClick={() => {
           setSelectedIds(new Set());
           onSelect();
         }}
         onDragEnter={(event) => {
           event.preventDefault();
-          setDragTarget("ROOT");
+          setDragTarget({ placement: "root" });
         }}
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => {
@@ -203,7 +403,7 @@ export function SemanticGroupTree({
             setDragTarget(undefined);
             return;
           }
-          drop();
+          drop({ placement: "root" });
         }}
         type="button"
       >
@@ -211,86 +411,34 @@ export function SemanticGroupTree({
         <strong>Все запросы</strong>
         <small>{total === undefined ? "—" : formatInteger(total)}</small>
       </button>
-      <div className="semantic-group-tree-list">
-        {flatGroups.map(({ depth, group, hasChildren }) => {
-          const selected = selectedIds.has(group.id);
-          return (
-            <div
-              className={`semantic-group-tree-row${activeGroupId === group.id ? " active" : ""}${selected ? " selected" : ""}${dragTarget === group.id ? " drag-target" : ""}`}
-              draggable
-              key={group.id}
-              onContextMenu={(event) => openContextMenu(event, group)}
-              onDragEnd={() => {
-                setDraggingIds([]);
-                setDragTarget(undefined);
-              }}
-              onDragStart={(event) => startDrag(event, group)}
-              onDragEnter={(event) => {
-                event.preventDefault();
-                setDragTarget(group.id);
-              }}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                const keywordIds = draggedKeywordIds(event);
-                if (keywordIds.length > 0) {
-                  onKeywordDrop(keywordIds, group.id);
-                  setDragTarget(undefined);
-                  return;
-                }
-                drop(group.id);
-              }}
-              style={{ paddingLeft: `${8 + depth * 16}px` }}
-            >
-              <button
-                aria-label={
-                  hasChildren
-                    ? expandedIds.has(group.id)
-                      ? `Свернуть ${group.name}`
-                      : `Развернуть ${group.name}`
-                    : undefined
-                }
-                className="semantic-group-toggle"
-                disabled={!hasChildren}
-                onClick={() =>
-                  setExpandedIds((current) => toggleId(current, group.id))
-                }
-                type="button"
-              >
-                {hasChildren ? (expandedIds.has(group.id) ? "⌄" : "›") : ""}
-              </button>
-              <button
-                className="semantic-group-name"
-                onClick={(event) => chooseGroup(event, group)}
-                title={`${group.path}. Ctrl/Cmd+клик — множественный выбор`}
-                type="button"
-              >
-                <i style={{ background: group.color ?? "#a8a5b8" }} />
-                <span>{group.name}</span>
-              </button>
-              <small>{formatInteger(group.keywordCount)}</small>
-              <button
-                aria-label={`Действия с группой ${group.name}`}
-                className="semantic-group-more"
-                onClick={(event) =>
-                  setContextMenu({
-                    x: event.clientX,
-                    y: event.clientY,
-                    group
-                  })
-                }
-                type="button"
-              >
-                ⋮
-              </button>
-            </div>
-          );
-        })}
+      <div
+        className={`semantic-group-tree-list${dragTarget?.placement === "root" ? " root-drop-target" : ""}`}
+        onDragOver={(event) => {
+          if (event.target !== event.currentTarget) return;
+          event.preventDefault();
+          setDragTarget({ placement: "root" });
+        }}
+        onDrop={(event) => {
+          if (event.target !== event.currentTarget) return;
+          event.preventDefault();
+          const keywordIds = draggedKeywordIds(event);
+          if (keywordIds.length > 0) {
+            onKeywordDrop(keywordIds);
+            setDragTarget(undefined);
+            return;
+          }
+          drop({ placement: "root" });
+        }}
+      >
+        {flatGroups.map(renderGroupRow)}
       </div>
-      <p className="semantic-group-hint">
-        Ctrl/Cmd+клик — выбрать несколько · перетащите для переноса
-      </p>
+      {systemGroups.length > 0 && (
+        <div className="semantic-system-groups">
+          {systemGroups.map((group) =>
+            renderGroupRow({ group, depth: 0, hasChildren: false })
+          )}
+        </div>
+      )}
       {contextMenu && (
         <ContextMenu
           items={contextItems}
@@ -309,7 +457,7 @@ function flattenGroups(
   expandedIds: ReadonlySet<string>,
   search: string
 ): readonly FlatGroup[] {
-  const normalizedSearch = search.normalize("NFKC").trim().toLocaleLowerCase("ru");
+  const normalizedSearch = normalizeGroupSearch(search);
   const byParent = new Map<string | undefined, SemanticGroupTreeItem[]>();
   for (const group of groups) {
     const bucket = byParent.get(group.parentId) ?? [];
@@ -317,7 +465,7 @@ function flattenGroups(
     byParent.set(group.parentId, bucket);
   }
   for (const bucket of byParent.values()) {
-    bucket.sort((left, right) => left.name.localeCompare(right.name, "ru"));
+    bucket.sort(compareGroupPosition);
   }
   const result: FlatGroup[] = [];
   const walk = (parentId: string | undefined, depth: number) => {
@@ -334,6 +482,23 @@ function flattenGroups(
   };
   walk(undefined, 0);
   return result;
+}
+
+function normalizeGroupSearch(value: string): string {
+  return value.normalize("NFKC").trim().toLocaleLowerCase("ru");
+}
+
+function systemGroupOrder(kind: SemanticGroupTreeItem["systemKind"]): number {
+  if (kind === "UNGROUPED") return 0;
+  if (kind === "TRASH") return 1;
+  return 2;
+}
+
+function compareGroupPosition(
+  left: SemanticGroupTreeItem,
+  right: SemanticGroupTreeItem
+): number {
+  return left.position - right.position || left.id.localeCompare(right.id);
 }
 
 function toggleId(

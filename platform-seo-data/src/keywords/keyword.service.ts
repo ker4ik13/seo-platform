@@ -10,16 +10,21 @@ import type {
   ApiCollectionResponse,
   InternalCreateSemanticKeywordInput,
   InternalDeleteSemanticKeywordInput,
+  InternalSemanticKeywordBulkCreateInput,
   InternalSemanticKeywordBulkInput,
   InternalSemanticKeywordCleaningInput,
   InternalUpdateSemanticKeywordInput,
   KeywordListQuery,
   SemanticKeywordBulkResult,
+  SemanticKeywordBulkCreateResult,
+  SemanticKeywordCreateOutcome,
   SemanticKeywordCleaningPreview,
   SemanticKeywordCleaningPreviewChange,
   SemanticKeywordCleaningResult,
   SemanticKeywordIntent,
   SemanticKeywordListItem,
+  SemanticKeywordListFrequencyValue,
+  SemanticKeywordListPosition,
   SemanticKeywordInsights,
   SemanticKeywordSort,
   SemanticFrequencyDevice,
@@ -40,6 +45,7 @@ import {
 import { normalizeKeywordText } from "./keyword-normalization.js";
 import { cleanKeywordText } from "./keyword-cleaning.js";
 import { normalizePageUrl } from "../pages/page-url.js";
+import { ensureKeywordSystemGroupIds } from "../keyword-groups/semantic-system-groups.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -58,7 +64,7 @@ const KEYWORD_INCLUDE = {
     take: 1,
     select: {
       group: {
-        select: { id: true, path: true, name: true }
+        select: { id: true, path: true, name: true, systemKind: true }
       }
     }
   },
@@ -97,6 +103,19 @@ export class KeywordService {
   ): Promise<ApiCollectionResponse<SemanticKeywordListItem>> {
     const search = normalizeKeywordText(query.search);
     const sort = query.sort ?? "CREATED_DESC";
+    const selectedGroup = query.groupId
+      ? await this.prisma.keywordGroup.findFirst({
+          where: {
+            id: query.groupId,
+            workspaceId,
+            projectId,
+            status: "ACTIVE"
+          },
+          select: { systemKind: true }
+        })
+      : undefined;
+    const keywordStatus =
+      selectedGroup?.systemKind === "TRASH" ? "DELETED" : "ACTIVE";
     const filterHash = keywordFilterHash(query, search);
     const cursor = query.cursor
       ? decodeCursor(query.cursor, sort, filterHash)
@@ -104,7 +123,7 @@ export class KeywordService {
     const baseWhere: Prisma.KeywordWhereInput = {
       workspaceId,
       projectId,
-      status: "ACTIVE",
+      status: keywordStatus,
       ...(search
         ? {
             textNormalized: {
@@ -159,21 +178,55 @@ export class KeywordService {
                 }
           })
     };
-    const where: Prisma.KeywordWhereInput = {
-      ...baseWhere,
-      ...(cursor ? cursorWhere(cursor) : {})
-    };
-    const [rows, totalApprox] = await Promise.all([
-      this.prisma.keyword.findMany({
-        where,
-        orderBy: keywordOrderBy(sort),
-        take: query.limit + 1,
-        include: KEYWORD_INCLUDE
-      }),
-      cursor
-        ? Promise.resolve(undefined)
-        : this.prisma.keyword.count({ where: baseWhere })
-    ]);
+    let metricSortValueById = new Map<string, string>();
+    let rows: KeywordAggregate[];
+    let totalApprox: number | undefined;
+    if (isMetricKeywordSort(sort)) {
+      const [metricPage, count] = await Promise.all([
+        metricSortedKeywordPage(
+          this.prisma,
+          workspaceId,
+          projectId,
+          query,
+          search,
+          sort,
+          cursor,
+          keywordStatus
+        ),
+        cursor
+          ? Promise.resolve(undefined)
+          : this.prisma.keyword.count({ where: baseWhere })
+      ]);
+      const aggregates: KeywordAggregate[] = metricPage.ids.length === 0
+        ? []
+        : await this.prisma.keyword.findMany({
+            where: { ...baseWhere, id: { in: [...metricPage.ids] } },
+            include: KEYWORD_INCLUDE
+          });
+      const aggregateById = new Map(aggregates.map((row) => [row.id, row]));
+      rows = metricPage.ids.flatMap((id) => {
+        const row = aggregateById.get(id);
+        return row ? [row] : [];
+      });
+      metricSortValueById = metricPage.sortValueById;
+      totalApprox = count;
+    } else {
+      const where: Prisma.KeywordWhereInput = {
+        ...baseWhere,
+        ...(cursor ? cursorWhere(cursor) : {})
+      };
+      [rows, totalApprox] = await Promise.all([
+        this.prisma.keyword.findMany({
+          where,
+          orderBy: keywordOrderBy(sort),
+          take: query.limit + 1,
+          include: KEYWORD_INCLUDE
+        }),
+        cursor
+          ? Promise.resolve(undefined)
+          : this.prisma.keyword.count({ where: baseWhere })
+      ]);
+    }
     const hasNext = rows.length > query.limit;
     const pageRows = rows.slice(0, query.limit);
     const pageIds = [
@@ -189,7 +242,13 @@ export class KeywordService {
         pageRows.flatMap(({ clusterId }) => (clusterId ? [clusterId] : []))
       )
     ];
-    const [pages, activeTrackingAssignments, clusters] = await Promise.all([
+    const [
+      pages,
+      activeTrackingAssignments,
+      clusters,
+      frequencySnapshots,
+      currentRanks
+    ] = await Promise.all([
       pageIds.length === 0
         ? Promise.resolve([])
         : this.prisma.page.findMany({
@@ -224,8 +283,65 @@ export class KeywordService {
               status: "ACTIVE"
             },
             select: { id: true, name: true }
+          }),
+      keywordIds.length === 0
+        ? Promise.resolve([])
+        : this.prisma.frequencySnapshot.findMany({
+            where: {
+              workspaceId,
+              projectId,
+              keywordId: { in: keywordIds },
+            },
+            orderBy: [
+              { keywordId: "asc" },
+              { observedAt: "desc" },
+              { id: "desc" }
+            ],
+            distinct: ["keywordId", "type"],
+            select: {
+              keywordId: true,
+              type: true,
+              value: true,
+              regionCode: true,
+              device: true,
+              provider: true,
+              observedAt: true
+            }
+          }),
+      keywordIds.length === 0
+        ? Promise.resolve([])
+        : this.prisma.currentRank.findMany({
+            where: { workspaceId, projectId, keywordId: { in: keywordIds } },
+            orderBy: [{ observedAt: "desc" }, { keywordId: "asc" }],
+            select: {
+              keywordId: true,
+              trackingContextId: true,
+              configurationVersion: true,
+              found: true,
+              position: true,
+              previousPosition: true,
+              rankingUrl: true,
+              observedAt: true
+            }
           })
     ]);
+    const rankConfigurations = currentRanks.length === 0
+      ? []
+      : await this.prisma.trackingContextVersion.findMany({
+          where: {
+            workspaceId,
+            projectId,
+            OR: currentRanks.map((rank) => ({
+              contextId: rank.trackingContextId,
+              configurationVersion: rank.configurationVersion
+            }))
+          },
+          select: {
+            contextId: true,
+            configurationVersion: true,
+            searchEngine: true
+          }
+        });
     const pageUrlById = new Map(pages.map(({ id, url }) => [id, url]));
     const trackedKeywordIds = new Set(
       activeTrackingAssignments.map(({ keywordId }) => keywordId)
@@ -233,6 +349,56 @@ export class KeywordService {
     const clusterNameById = new Map(
       clusters.map(({ id, name }) => [id, name])
     );
+    const frequenciesByKeywordId = new Map<
+      string,
+      SemanticKeywordListFrequencyValue[]
+    >();
+    for (const snapshot of frequencySnapshots) {
+      const frequencies = frequenciesByKeywordId.get(snapshot.keywordId) ?? [];
+      frequencies.push({
+        type: snapshot.type as SemanticKeywordListFrequencyValue["type"],
+        ...(snapshot.value === null
+          ? {}
+          : { value: snapshot.value.toString() }),
+        regionCode: snapshot.regionCode,
+        device: frequencyDevice(snapshot.device),
+        provider: snapshot.provider,
+        observedAt: snapshot.observedAt.toISOString()
+      });
+      frequenciesByKeywordId.set(snapshot.keywordId, frequencies);
+    }
+    const configurationById = new Map(
+      rankConfigurations.map((configuration) => [
+        `${configuration.contextId}:${configuration.configurationVersion}`,
+        configuration
+      ])
+    );
+    const positionsByKeywordId = new Map<
+      string,
+      Map<SemanticKeywordListPosition["searchEngine"], SemanticKeywordListPosition>
+    >();
+    for (const rank of currentRanks) {
+      const configuration = configurationById.get(
+        `${rank.trackingContextId}:${rank.configurationVersion}`
+      );
+      if (!configuration) continue;
+      const searchEngine = configuration.searchEngine as
+        SemanticKeywordListPosition["searchEngine"];
+      const positions = positionsByKeywordId.get(rank.keywordId) ?? new Map();
+      if (!positions.has(searchEngine)) {
+        positions.set(searchEngine, {
+          searchEngine,
+          found: rank.found,
+          ...(rank.position === null ? {} : { position: rank.position }),
+          ...(rank.previousPosition === null
+            ? {}
+            : { previousPosition: rank.previousPosition }),
+          ...(rank.rankingUrl === null || rank.rankingUrl === undefined ? {} : { rankingUrl: rank.rankingUrl }),
+          observedAt: rank.observedAt.toISOString()
+        });
+      }
+      positionsByKeywordId.set(rank.keywordId, positions);
+    }
     const last = pageRows.at(-1);
     return {
       data: pageRows.map((row) =>
@@ -242,7 +408,9 @@ export class KeywordService {
             ? pageUrlById.get(row.targetPageId)
             : undefined,
           trackedKeywordIds.has(row.id),
-          row.clusterId ? clusterNameById.get(row.clusterId) : undefined
+          row.clusterId ? clusterNameById.get(row.clusterId) : undefined,
+          frequenciesByKeywordId.get(row.id),
+          [...(positionsByKeywordId.get(row.id)?.values() ?? [])]
         )
       ),
       page: {
@@ -254,7 +422,8 @@ export class KeywordService {
                 version: 2,
                 id: last.id,
                 sort,
-                sortValue: cursorValue(last, sort),
+                sortValue:
+                  metricSortValueById.get(last.id) ?? cursorValue(last, sort),
                 filterHash
               })
             }
@@ -270,7 +439,12 @@ export class KeywordService {
     keywordId: string
   ): Promise<SemanticKeywordInsights> {
     const keyword = await this.prisma.keyword.findFirst({
-      where: { id: keywordId, workspaceId, projectId, status: "ACTIVE" },
+      where: {
+        id: keywordId,
+        workspaceId,
+        projectId,
+        status: { in: ["ACTIVE", "DELETED"] }
+      },
       select: { id: true }
     });
     if (!keyword) {
@@ -353,7 +527,7 @@ export class KeywordService {
           ...(rank.previousPosition === null
             ? {}
             : { previousPosition: rank.previousPosition }),
-          ...(rank.rankingUrl === null ? {} : { rankingUrl: rank.rankingUrl }),
+          ...(rank.rankingUrl === null || rank.rankingUrl === undefined ? {} : { rankingUrl: rank.rankingUrl }),
           observedAt: rank.observedAt.toISOString()
         }];
       })
@@ -361,25 +535,91 @@ export class KeywordService {
   }
 
   public async create(
-    input: InternalCreateSemanticKeywordInput
+    input: InternalCreateSemanticKeywordInput,
+    semanticVersion?: SemanticVersionIdentity
   ): Promise<SemanticKeywordListItem> {
     try {
       return await this.prisma.$transaction(async (transaction) => {
+        const normalized = normalizeRequiredKeyword(input.text);
+        const normalizedHash = sha256(normalized);
         await lockStoredKeywordCapacity(
           transaction,
           input.workspaceId
         );
         await lockSemanticKeywordWrites(transaction, input.projectId);
-        await assertStoredKeywordCapacity(
-          transaction,
-          input.workspaceId,
-          input.projectId,
-          1n,
-          input.entitlement
-        );
-        if (input.groupId) {
-          await lockKeywordGroupTree(transaction, input.projectId);
+        const existing = await transaction.keyword.findFirst({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            language: input.language,
+            normalizedHash
+          },
+          include: KEYWORD_INCLUDE
+        });
+        const isActiveDuplicate = existing?.status === "ACTIVE";
+        const isTrashedDuplicate = existing?.status === "DELETED"
+          ? Boolean(
+              await transaction.keywordGroupMembership.findFirst({
+                where: {
+                  projectId: input.projectId,
+                  keywordId: existing.id,
+                  group: {
+                    workspaceId: input.workspaceId,
+                    projectId: input.projectId,
+                    status: "ACTIVE",
+                    systemKind: "TRASH"
+                  }
+                },
+                select: { keywordId: true }
+              })
+            )
+          : false;
+        if (
+          existing &&
+          (isActiveDuplicate ||
+            (isTrashedDuplicate && input.duplicatePolicy !== "RESTORE_TRASHED"))
+        ) {
+          if (
+            input.duplicatePolicy === "REJECT_EXISTING" &&
+            !isTrashedDuplicate
+          ) {
+            throw duplicateKeyword();
+          }
+          return {
+            ...keywordItem(
+              existing,
+              await targetUrlFor(
+                transaction,
+                input.workspaceId,
+                input.projectId,
+                existing.targetPageId
+              ),
+              await isKeywordTracked(
+                transaction,
+                input.workspaceId,
+                input.projectId,
+                existing.id
+              ),
+              await clusterNameFor(
+                transaction,
+                input.workspaceId,
+                input.projectId,
+                existing.clusterId
+              )
+            ),
+            createOutcome: "SKIPPED_EXISTING"
+          };
         }
+        if (!existing) {
+          await assertStoredKeywordCapacity(
+            transaction,
+            input.workspaceId,
+            input.projectId,
+            1n,
+            input.entitlement
+          );
+        }
+        await lockKeywordGroupTree(transaction, input.projectId);
         if (input.clusterId) {
           await lockSemanticClusterSet(transaction, input.projectId);
         }
@@ -388,6 +628,11 @@ export class KeywordService {
           input.workspaceId,
           input.projectId,
           input.groupId
+        );
+        const systemGroups = await ensureKeywordSystemGroupIds(
+          transaction,
+          input.workspaceId,
+          input.projectId
         );
         await assertCluster(
           transaction,
@@ -410,14 +655,120 @@ export class KeywordService {
           input.projectId,
           input.tagNames
         );
-        const normalized = normalizeRequiredKeyword(input.text);
+        if (existing) {
+          await lockKeyword(transaction, input.projectId, existing.id);
+          const beforeState = keywordVersionState(existing);
+          const restored = await transaction.keyword.updateMany({
+            where: {
+              id: existing.id,
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              status: "DELETED",
+              version: existing.version,
+              language: input.language,
+              normalizedHash
+            },
+            data: {
+              textOriginal: input.text,
+              textNormalized: normalized,
+              normalizedHash,
+              language: input.language,
+              priority: input.priority,
+              isFavorite: input.isFavorite,
+              intent: input.intent ?? null,
+              clusterId: input.clusterId ?? null,
+              targetPageId: pageId ?? null,
+              status: "ACTIVE",
+              deletedAt: null,
+              updatedBy: input.actorId,
+              version: { increment: 1 }
+            }
+          });
+          if (restored.count !== 1) {
+            throw keywordVersionConflict(existing.version);
+          }
+          await transaction.keywordGroupMembership.deleteMany({
+            where: { projectId: input.projectId, keywordId: existing.id }
+          });
+          await transaction.keywordGroupMembership.create({
+            data: {
+              projectId: input.projectId,
+              keywordId: existing.id,
+              groupId: input.groupId ?? systemGroups.UNGROUPED
+            }
+          });
+          await transaction.keywordTag.deleteMany({
+            where: { projectId: input.projectId, keywordId: existing.id }
+          });
+          if (tags.length > 0) {
+            await transaction.keywordTag.createMany({
+              data: tags.map((tag) => ({
+                projectId: input.projectId,
+                keywordId: existing.id,
+                tagId: tag.id
+              }))
+            });
+          }
+          const result = await requiredKeyword(
+            transaction,
+            input.workspaceId,
+            input.projectId,
+            existing.id
+          );
+          const change = {
+            entityId: result.id,
+            operation: "UPDATE" as const,
+            beforeState,
+            afterState: keywordVersionState(result),
+            beforeVersion: existing.version,
+            afterVersion: result.version
+          };
+          if (semanticVersion) {
+            await this.semanticVersions.appendBulkKeywordChange(
+              transaction,
+              semanticVersion,
+              change
+            );
+          } else {
+            await this.semanticVersions.createWithKeywordChange(
+              transaction,
+              {
+                workspaceId: input.workspaceId,
+                projectId: input.projectId,
+                actorId: input.actorId,
+                reason: "KEYWORD_CREATE",
+                summary: "Восстановлен поисковый запрос"
+              },
+              change
+            );
+          }
+          return {
+            ...keywordItem(
+              result,
+              input.targetUrl,
+              await isKeywordTracked(
+                transaction,
+                input.workspaceId,
+                input.projectId,
+                result.id
+              ),
+              await clusterNameFor(
+                transaction,
+                input.workspaceId,
+                input.projectId,
+                result.clusterId
+              )
+            ),
+            createOutcome: "RESTORED"
+          };
+        }
         const created = await transaction.keyword.create({
           data: {
             workspaceId: input.workspaceId,
             projectId: input.projectId,
             textOriginal: input.text,
             textNormalized: normalized,
-            normalizedHash: sha256(normalized),
+            normalizedHash,
             language: input.language,
             priority: input.priority,
             isFavorite: input.isFavorite,
@@ -429,15 +780,13 @@ export class KeywordService {
             updatedBy: input.actorId
           }
         });
-        if (input.groupId) {
-          await transaction.keywordGroupMembership.create({
-            data: {
-              projectId: input.projectId,
-              keywordId: created.id,
-              groupId: input.groupId
-            }
-          });
-        }
+        await transaction.keywordGroupMembership.create({
+          data: {
+            projectId: input.projectId,
+            keywordId: created.id,
+            groupId: input.groupId ?? systemGroups.UNGROUPED
+          }
+        });
         if (tags.length > 0) {
           await transaction.keywordTag.createMany({
             data: tags.map((tag) => ({
@@ -453,40 +802,110 @@ export class KeywordService {
           input.projectId,
           created.id
         );
-        await this.semanticVersions.createWithKeywordChange(
-          transaction,
-          {
-            workspaceId: input.workspaceId,
-            projectId: input.projectId,
-            actorId: input.actorId,
-            reason: "KEYWORD_CREATE",
-            summary: "Добавлен поисковый запрос"
-          },
-          {
-            entityId: result.id,
-            operation: "CREATE",
-            beforeState: null,
-            afterState: keywordVersionState(result),
-            beforeVersion: null,
-            afterVersion: result.version
-          }
-        );
-        return keywordItem(
-          result,
-          input.targetUrl,
-          false,
-          await clusterNameFor(
+        const change = {
+          entityId: result.id,
+          operation: "CREATE" as const,
+          beforeState: null,
+          afterState: keywordVersionState(result),
+          beforeVersion: null,
+          afterVersion: result.version
+        };
+        if (semanticVersion) {
+          await this.semanticVersions.appendBulkKeywordChange(
             transaction,
-            input.workspaceId,
-            input.projectId,
-            result.clusterId
-          )
-        );
+            semanticVersion,
+            change
+          );
+        } else {
+          await this.semanticVersions.createWithKeywordChange(
+            transaction,
+            {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              actorId: input.actorId,
+              reason: "KEYWORD_CREATE",
+              summary: "Добавлен поисковый запрос"
+            },
+            change
+          );
+        }
+        return {
+          ...keywordItem(
+            result,
+            input.targetUrl,
+            false,
+            await clusterNameFor(
+              transaction,
+              input.workspaceId,
+              input.projectId,
+              result.clusterId
+            )
+          ),
+          createOutcome: "CREATED"
+        };
       });
     } catch (error) {
       if (isUniqueConstraintError(error)) throw duplicateKeyword();
       throw error;
     }
+  }
+
+  public async bulkCreate(
+    input: InternalSemanticKeywordBulkCreateInput
+  ): Promise<SemanticKeywordBulkCreateResult> {
+    const semanticVersion =
+      await this.semanticVersions.createOpenBulkVersion({
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        actorId: input.actorId,
+        reason: "KEYWORD_CREATE",
+        summary: `Добавление ${input.items.length} запросов`
+      });
+    const rows: SemanticKeywordBulkCreateResult["rows"][number][] = [];
+    try {
+      for (const [index, item] of input.items.entries()) {
+        try {
+          const keyword = await this.create(
+            {
+              ...item,
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              actorId: input.actorId,
+              entitlement: input.entitlement,
+              duplicatePolicy: input.duplicatePolicy
+            },
+            semanticVersion
+          );
+          rows.push({
+            index,
+            outcome: keyword.createOutcome ?? "CREATED",
+            keywordId: keyword.id,
+            version: keyword.version,
+            ...(keyword.trashed === true ? { trashed: true } : {})
+          });
+        } catch (error) {
+          const code = semanticKeywordCreateErrorCode(error);
+          rows.push({
+            index,
+            outcome: code === "DUPLICATE" ? "REJECTED_EXISTING" : "FAILED",
+            errorCode: code
+          });
+        }
+      }
+    } finally {
+      await this.semanticVersions.finalizeBulkVersion(semanticVersion);
+    }
+    const count = (outcome: SemanticKeywordCreateOutcome): number =>
+      rows.filter((row) => row.outcome === outcome).length;
+    return {
+      selected: rows.length,
+      created: count("CREATED"),
+      restored: count("RESTORED"),
+      skipped: count("SKIPPED_EXISTING"),
+      rejected: count("REJECTED_EXISTING"),
+      failed: count("FAILED"),
+      rows
+    };
   }
 
   public async update(
@@ -497,10 +916,10 @@ export class KeywordService {
     try {
       return await this.prisma.$transaction(async (transaction) => {
         await lockSemanticKeywordWrites(transaction, input.projectId);
-        await lockKeyword(transaction, input.projectId, keywordId);
-        if (input.groupId) {
+        if (input.groupId !== undefined) {
           await lockKeywordGroupTree(transaction, input.projectId);
         }
+        await lockKeyword(transaction, input.projectId, keywordId);
         if (input.clusterId !== undefined) {
           await lockSemanticClusterSet(transaction, input.projectId);
         }
@@ -584,18 +1003,21 @@ export class KeywordService {
           }
         });
         if (input.groupId !== undefined) {
+          const systemGroups = await ensureKeywordSystemGroupIds(
+            transaction,
+            input.workspaceId,
+            input.projectId
+          );
           await transaction.keywordGroupMembership.deleteMany({
             where: { projectId: input.projectId, keywordId }
           });
-          if (input.groupId) {
-            await transaction.keywordGroupMembership.create({
-              data: {
-                projectId: input.projectId,
-                keywordId,
-                groupId: input.groupId
-              }
-            });
-          }
+          await transaction.keywordGroupMembership.create({
+            data: {
+              projectId: input.projectId,
+              keywordId,
+              groupId: input.groupId ?? systemGroups.UNGROUPED
+            }
+          });
         }
         if (tags !== undefined) {
           await transaction.keywordTag.deleteMany({
@@ -682,15 +1104,111 @@ export class KeywordService {
   ): Promise<void> {
     await this.prisma.$transaction(async (transaction) => {
       await lockSemanticKeywordWrites(transaction, input.projectId);
+      await lockKeywordGroupTree(transaction, input.projectId);
       await lockKeyword(transaction, input.projectId, keywordId);
-      const current = await requiredKeyword(
-        transaction,
-        input.workspaceId,
-        input.projectId,
-        keywordId
-      );
+      const current = await transaction.keyword.findUnique({
+        where: {
+          workspaceId_projectId_id: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            id: keywordId
+          }
+        },
+        include: KEYWORD_INCLUDE
+      });
+      if (!current) {
+        throw new HttpException(
+          { code: "NOT_FOUND", message: "Semantic keyword not found" },
+          HttpStatus.NOT_FOUND
+        );
+      }
       const beforeState = keywordVersionState(current);
       assertKeywordVersion(current.version, input.version);
+      const systemGroups = await ensureKeywordSystemGroupIds(
+        transaction,
+        input.workspaceId,
+        input.projectId
+      );
+      if (input.permanent === true) {
+        const isTrashed =
+          current.status === "DELETED" &&
+          current.memberships.some(
+            ({ group }) => group.id === systemGroups.TRASH
+          );
+        if (!isTrashed) {
+          throw new HttpException(
+            {
+              code: "RESOURCE_STATE_CONFLICT",
+              message: "Only trashed keywords can be permanently deleted"
+            },
+            HttpStatus.CONFLICT
+          );
+        }
+        // Rank manifests and snapshots are deliberately immutable. Removing
+        // their keyword row would either violate provenance FKs or require
+        // weakening the audit trail. Permanent deletion therefore destroys
+        // every user-controlled keyword value and releases its unique
+        // identity while retaining an opaque tombstone for historical rows.
+        await transaction.keywordGroupMembership.deleteMany({
+          where: { projectId: input.projectId, keywordId }
+        });
+        await transaction.keywordTag.deleteMany({
+          where: { projectId: input.projectId, keywordId }
+        });
+        await transaction.semanticKeywordCustomValue.deleteMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            keywordId
+          }
+        });
+        await transaction.keyword.update({
+          where: {
+            workspaceId_projectId_id: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              id: keywordId
+            }
+          },
+          data: {
+            textOriginal: "",
+            textNormalized: `__purged__:${keywordId}`,
+            normalizedHash: sha256(
+              `purged:${input.workspaceId}:${input.projectId}:${keywordId}`
+            ),
+            language: "und",
+            priority: 0,
+            isFavorite: false,
+            intent: null,
+            clusterId: null,
+            targetPageId: null,
+            isTracked: false,
+            customValues: {},
+            sourceMode: "MANUAL",
+            sourceId: null,
+            createdBy: null,
+            updatedBy: input.actorId,
+            version: { increment: 1 }
+          }
+        });
+        return;
+      }
+      if (current.status !== "ACTIVE") {
+        throw new HttpException(
+          { code: "NOT_FOUND", message: "Semantic keyword not found" },
+          HttpStatus.NOT_FOUND
+        );
+      }
+      await transaction.keywordGroupMembership.deleteMany({
+        where: { projectId: input.projectId, keywordId }
+      });
+      await transaction.keywordGroupMembership.create({
+        data: {
+          projectId: input.projectId,
+          keywordId,
+          groupId: systemGroups.TRASH
+        }
+      });
       await transaction.keyword.update({
         where: {
           workspaceId_projectId_id: {
@@ -719,7 +1237,11 @@ export class KeywordService {
           entityId: current.id,
           operation: "DELETE",
           beforeState,
-          afterState: { ...beforeState, status: "DELETED" },
+          afterState: {
+            ...beforeState,
+            status: "DELETED",
+            groupId: systemGroups.TRASH
+          },
           beforeVersion: current.version,
           afterVersion: current.version + 1
         }
@@ -1073,9 +1595,9 @@ async function assertGroup(
   if (!groupId) return;
   const group = await transaction.keywordGroup.findFirst({
     where: { id: groupId, workspaceId, projectId, status: "ACTIVE" },
-    select: { id: true }
+    select: { id: true, systemKind: true }
   });
-  if (!group) {
+  if (!group || group.systemKind === "TRASH") {
     throw new BadRequestException("Keyword group does not belong to project");
   }
 }
@@ -1259,10 +1781,24 @@ function keywordItem(
   row: KeywordAggregate,
   targetUrl: string | undefined,
   isTracked: boolean,
-  clusterName?: string
+  clusterName?: string,
+  frequencies: readonly SemanticKeywordListFrequencyValue[] = [],
+  positions: readonly SemanticKeywordListPosition[] = []
 ): SemanticKeywordListItem {
   const tags = row.tags.slice(0, 50).map(({ tag }) => tag.name);
   const group = row.memberships[0]?.group;
+  const baseFrequency = frequencies.find(({ type }) => type === "BASE");
+  const legacyBaseFrequency = baseFrequency
+    ? {
+        ...(baseFrequency.value === undefined
+          ? {}
+          : { value: baseFrequency.value }),
+        regionCode: baseFrequency.regionCode,
+        device: baseFrequency.device,
+        provider: baseFrequency.provider,
+        observedAt: baseFrequency.observedAt
+      }
+    : undefined;
   return {
     id: row.id,
     textOriginal: row.textOriginal,
@@ -1284,7 +1820,11 @@ function keywordItem(
     tags,
     tagsTruncated: row.tags.length > 50,
     customValues: (row.typedCustomValues ?? []).map(keywordCustomValue),
+    ...(legacyBaseFrequency ? { frequency: legacyBaseFrequency } : {}),
+    ...(frequencies.length > 0 ? { frequencies } : {}),
+    ...(positions.length > 0 ? { positions } : {}),
     sourceMode: row.sourceMode,
+    ...(row.status === "DELETED" ? { trashed: true } : {}),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     version: row.version
@@ -1350,7 +1890,11 @@ function keywordCustomValueData(
 
 function assertKeywordVersion(current: number, expected: number): void {
   if (current === expected) return;
-  throw new HttpException(
+  throw keywordVersionConflict(current);
+}
+
+function keywordVersionConflict(current: number): HttpException {
+  return new HttpException(
     {
       code: "VERSION_CONFLICT",
       message: "Semantic keyword version conflict",
@@ -1368,6 +1912,26 @@ function duplicateKeyword(): HttpException {
     },
     HttpStatus.CONFLICT
   );
+}
+
+function semanticKeywordCreateErrorCode(error: unknown): string {
+  if (error instanceof HttpException) {
+    const response = error.getResponse();
+    if (typeof response === "object" && response !== null) {
+      const body = response as Readonly<Record<string, unknown>>;
+      if (typeof body.code === "string") return body.code;
+      if (typeof body.error === "object" && body.error !== null) {
+        const nested = body.error as Readonly<Record<string, unknown>>;
+        if (typeof nested.code === "string") return nested.code;
+      }
+    }
+    if (error.getStatus() === HttpStatus.BAD_REQUEST) return "INVALID_INPUT";
+    if (error.getStatus() === HttpStatus.NOT_FOUND) return "NOT_FOUND";
+    if (error.getStatus() === HttpStatus.CONFLICT) {
+      return "RESOURCE_STATE_CONFLICT";
+    }
+  }
+  return "INTERNAL_ERROR";
 }
 
 function isUniqueConstraintError(error: unknown): boolean {
@@ -1462,12 +2026,37 @@ function keywordOrderBy(
       return [{ createdAt: "asc" }, { id: "asc" }];
     case "UPDATED_DESC":
       return [{ updatedAt: "desc" }, { id: "desc" }];
+    case "UPDATED_ASC":
+      return [{ updatedAt: "asc" }, { id: "asc" }];
     case "TEXT_ASC":
       return [{ textNormalized: "asc" }, { id: "asc" }];
+    case "TEXT_DESC":
+      return [{ textNormalized: "desc" }, { id: "desc" }];
     case "PRIORITY_DESC":
       return [{ priority: "desc" }, { id: "desc" }];
+    case "PRIORITY_ASC":
+      return [{ priority: "asc" }, { id: "asc" }];
+    case "SOURCE_ASC":
+      return [{ sourceMode: "asc" }, { id: "asc" }];
+    case "SOURCE_DESC":
+      return [{ sourceMode: "desc" }, { id: "desc" }];
     case "CREATED_DESC":
       return [{ createdAt: "desc" }, { id: "desc" }];
+    case "FREQUENCY_BASE_DESC":
+    case "FREQUENCY_BASE_ASC":
+    case "FREQUENCY_EXACT_DESC":
+    case "FREQUENCY_EXACT_ASC":
+    case "FREQUENCY_FIXED_DESC":
+    case "FREQUENCY_FIXED_ASC":
+    case "YANDEX_POSITION_ASC":
+    case "YANDEX_POSITION_DESC":
+    case "GOOGLE_POSITION_ASC":
+    case "GOOGLE_POSITION_DESC":
+    case "YANDEX_CHECKED_AT_ASC":
+    case "YANDEX_CHECKED_AT_DESC":
+    case "GOOGLE_CHECKED_AT_ASC":
+    case "GOOGLE_CHECKED_AT_DESC":
+      throw new Error("Metric keyword sorts are resolved by metricSortedKeywordPage");
   }
 }
 
@@ -1480,35 +2069,54 @@ function cursorValue(
     case "CREATED_DESC":
       return row.createdAt.toISOString();
     case "UPDATED_DESC":
+    case "UPDATED_ASC":
       return row.updatedAt.toISOString();
     case "TEXT_ASC":
+    case "TEXT_DESC":
       return row.textNormalized;
     case "PRIORITY_DESC":
+    case "PRIORITY_ASC":
       return row.priority;
+    case "SOURCE_ASC":
+    case "SOURCE_DESC":
+      return row.sourceMode;
+    case "FREQUENCY_BASE_DESC":
+    case "FREQUENCY_BASE_ASC":
+    case "FREQUENCY_EXACT_DESC":
+    case "FREQUENCY_EXACT_ASC":
+    case "FREQUENCY_FIXED_DESC":
+    case "FREQUENCY_FIXED_ASC":
+    case "YANDEX_POSITION_ASC":
+    case "YANDEX_POSITION_DESC":
+    case "GOOGLE_POSITION_ASC":
+    case "GOOGLE_POSITION_DESC":
+    case "YANDEX_CHECKED_AT_ASC":
+    case "YANDEX_CHECKED_AT_DESC":
+    case "GOOGLE_CHECKED_AT_ASC":
+    case "GOOGLE_CHECKED_AT_DESC":
+      throw new Error("Metric cursor value is provided by metricSortedKeywordPage");
   }
 }
 
 function cursorWhere(cursor: KeywordCursor): Prisma.KeywordWhereInput {
-  const idDirection =
-    cursor.sort === "CREATED_ASC" || cursor.sort === "TEXT_ASC"
-      ? "gt"
-      : "lt";
-  const comparison =
-    cursor.sort === "CREATED_ASC" || cursor.sort === "TEXT_ASC"
-      ? "gt"
-      : "lt";
+  if (isMetricKeywordSort(cursor.sort)) throw invalidCursor();
+  const ascending = isAscendingKeywordSort(cursor.sort);
+  const idDirection = ascending ? "gt" : "lt";
+  const comparison = ascending ? "gt" : "lt";
   const field =
-    cursor.sort === "UPDATED_DESC"
+    cursor.sort === "UPDATED_DESC" || cursor.sort === "UPDATED_ASC"
       ? "updatedAt"
-      : cursor.sort === "TEXT_ASC"
+      : cursor.sort === "TEXT_ASC" || cursor.sort === "TEXT_DESC"
         ? "textNormalized"
-        : cursor.sort === "PRIORITY_DESC"
+        : cursor.sort === "PRIORITY_DESC" || cursor.sort === "PRIORITY_ASC"
           ? "priority"
+          : cursor.sort === "SOURCE_ASC" || cursor.sort === "SOURCE_DESC"
+            ? "sourceMode"
           : "createdAt";
   const value =
     field === "priority"
       ? requiredCursorNumber(cursor.sortValue)
-      : field === "textNormalized"
+      : field === "textNormalized" || field === "sourceMode"
         ? requiredCursorString(cursor.sortValue)
         : requiredCursorDate(cursor.sortValue);
   return {
@@ -1520,6 +2128,146 @@ function cursorWhere(cursor: KeywordCursor): Prisma.KeywordWhereInput {
       }
     ]
   };
+}
+
+function isMetricKeywordSort(sort: SemanticKeywordSort): boolean {
+  return (
+    sort.startsWith("FREQUENCY_") ||
+    sort.startsWith("YANDEX_POSITION_") ||
+    sort.startsWith("GOOGLE_POSITION_") ||
+    sort.startsWith("YANDEX_CHECKED_AT_") ||
+    sort.startsWith("GOOGLE_CHECKED_AT_")
+  );
+}
+
+async function metricSortedKeywordPage(
+  prisma: PrismaService,
+  workspaceId: string,
+  projectId: string,
+  query: KeywordListQuery,
+  search: string,
+  sort: SemanticKeywordSort,
+  cursor: KeywordCursor | undefined,
+  keywordStatus: "ACTIVE" | "DELETED"
+): Promise<Readonly<{
+  ids: readonly string[];
+  sortValueById: Map<string, string>;
+}>> {
+  const ascending = sort.endsWith("_ASC");
+  const nullSentinel = ascending ? 9_223_372_036_854_775_807n : -1n;
+  const metricJoin = sort.startsWith("FREQUENCY_")
+    ? Prisma.sql`
+        LEFT JOIN LATERAL (
+          SELECT fs.value AS metric
+          FROM frequency_snapshots fs
+          WHERE fs.workspace_id = k.workspace_id
+            AND fs.project_id = k.project_id
+            AND fs.keyword_id = k.id
+            AND fs.type = ${frequencyTypeForSort(sort)}
+          ORDER BY fs.observed_at DESC, fs.id DESC
+          LIMIT 1
+        ) metric_source ON TRUE`
+    : Prisma.sql`
+        LEFT JOIN LATERAL (
+          SELECT ${sort.includes("_CHECKED_AT_")
+            ? Prisma.sql`floor(extract(epoch from cr.observed_at) * 1000)::bigint`
+            : Prisma.sql`cr.position::bigint`} AS metric
+          FROM current_ranks cr
+          INNER JOIN tracking_context_versions tcv
+            ON tcv.workspace_id = cr.workspace_id
+           AND tcv.project_id = cr.project_id
+           AND tcv.context_id = cr.tracking_context_id
+           AND tcv.configuration_version = cr.configuration_version
+          WHERE cr.workspace_id = k.workspace_id
+            AND cr.project_id = k.project_id
+            AND cr.keyword_id = k.id
+            ${sort.includes("_CHECKED_AT_") ? Prisma.empty : Prisma.sql`AND cr.found = TRUE`}
+            AND tcv.search_engine::text = ${sort.startsWith("YANDEX_") ? "YANDEX" : "GOOGLE"}
+          ORDER BY cr.observed_at DESC, cr.tracking_context_id DESC
+          LIMIT 1
+        ) metric_source ON TRUE`;
+  const filters: Prisma.Sql[] = [
+    Prisma.sql`k.workspace_id = ${workspaceId}::uuid`,
+    Prisma.sql`k.project_id = ${projectId}::uuid`,
+    Prisma.sql`k.status::text = ${keywordStatus}`
+  ];
+  if (search) filters.push(Prisma.sql`strpos(k.text_normalized, ${search}) > 0`);
+  if (query.intent) filters.push(Prisma.sql`k.intent::text = ${query.intent}`);
+  if (query.isFavorite !== undefined) filters.push(Prisma.sql`k.is_favorite = ${query.isFavorite}`);
+  if (query.priorityMin !== undefined) filters.push(Prisma.sql`k.priority >= ${query.priorityMin}`);
+  if (query.priorityMax !== undefined) filters.push(Prisma.sql`k.priority <= ${query.priorityMax}`);
+  if (query.groupId) {
+    filters.push(Prisma.sql`EXISTS (
+      SELECT 1 FROM keyword_group_memberships kgm
+      WHERE kgm.project_id = k.project_id
+        AND kgm.keyword_id = k.id
+        AND kgm.group_id = ${query.groupId}::uuid
+    )`);
+  }
+  if (query.clusterId) filters.push(Prisma.sql`k.cluster_id = ${query.clusterId}::uuid`);
+  if (query.isTracked !== undefined) {
+    const tracked = Prisma.sql`EXISTS (
+      SELECT 1
+      FROM tracking_context_keyword_assignments tcka
+      INNER JOIN tracking_contexts tc
+        ON tc.workspace_id = tcka.workspace_id
+       AND tc.project_id = tcka.project_id
+       AND tc.id = tcka.context_id
+      WHERE tcka.workspace_id = k.workspace_id
+        AND tcka.project_id = k.project_id
+        AND tcka.keyword_id = k.id
+        AND tcka.removed_at IS NULL
+        AND tc.status::text = 'ACTIVE'
+    )`;
+    filters.push(query.isTracked ? tracked : Prisma.sql`NOT (${tracked})`);
+  }
+  const cursorValue = cursor
+    ? requiredMetricCursorValue(cursor.sortValue)
+    : undefined;
+  const cursorClause = cursorValue === undefined
+    ? Prisma.empty
+    : ascending
+      ? Prisma.sql`WHERE (ranked.sort_value, ranked.id) > (${cursorValue}::bigint, ${cursor!.id}::uuid)`
+      : Prisma.sql`WHERE (ranked.sort_value, ranked.id) < (${cursorValue}::bigint, ${cursor!.id}::uuid)`;
+  const order = ascending
+    ? Prisma.sql`ranked.sort_value ASC, ranked.id ASC`
+    : Prisma.sql`ranked.sort_value DESC, ranked.id DESC`;
+  const rows = await prisma.$queryRaw<readonly Readonly<{ id: string; sort_value: bigint }>[]>
+    `
+      SELECT ranked.id, ranked.sort_value
+      FROM (
+        SELECT k.id, COALESCE(metric_source.metric, ${nullSentinel}::bigint) AS sort_value
+        FROM keywords k
+        ${metricJoin}
+        WHERE ${Prisma.join(filters, " AND ")}
+      ) ranked
+      ${cursorClause}
+      ORDER BY ${order}
+      LIMIT ${query.limit + 1}
+    `;
+  return {
+    ids: rows.map(({ id }) => id),
+    sortValueById: new Map(rows.map(({ id, sort_value }) => [id, sort_value.toString()]))
+  };
+}
+
+function frequencyTypeForSort(sort: SemanticKeywordSort): "BASE" | "EXACT" | "FIXED" {
+  if (sort.includes("_EXACT_")) return "EXACT";
+  if (sort.includes("_FIXED_")) return "FIXED";
+  return "BASE";
+}
+
+function requiredMetricCursorValue(value: string | number): bigint {
+  if (typeof value !== "string" || !/^-?\d+$/u.test(value)) throw invalidCursor();
+  try {
+    return BigInt(value);
+  } catch {
+    throw invalidCursor();
+  }
+}
+
+function isAscendingKeywordSort(sort: SemanticKeywordSort): boolean {
+  return sort.endsWith("_ASC");
 }
 
 function requiredCursorNumber(value: string | number): number {

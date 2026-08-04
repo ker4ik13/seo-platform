@@ -4,13 +4,14 @@ import {
   type RankManifestHash
 } from "@seo-platform/contracts";
 import {
-  ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION,
+  rankExecutionConnectorVersion,
   rankExecutionEvidence,
   rankExecutionEvidenceHash,
   type RankExecutionEvidenceV2
 } from "./rank-execution-evidence.js";
 
 export interface RankExecutionGrantRequestFacts {
+  readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;
@@ -95,8 +96,7 @@ export function buildRankExecutionGrantRequest(
       verifiedAt: timestamp(facts.credentialVerifiedAt)
     },
     estimateExecutionHash: hash(facts.estimateExecutionHash),
-    executionConnectorVersion:
-      ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION,
+    executionConnectorVersion: rankExecutionConnectorVersion(facts.provider),
     providerPolicyVersion: facts.providerPolicyVersion,
     killSwitch: {
       enabled: true,
@@ -122,7 +122,7 @@ export function buildRankExecutionGrantRequest(
     jobVersion: facts.jobVersion,
     executionAttempt: facts.executionAttempt,
     purpose: "PROVIDER_SUBMIT",
-    provider: "ARSENKIN",
+    provider: facts.provider,
     operation: "POSITIONS",
     capability: "SERP_RANK_TRACKING",
     credentialMode: "BYOK_API_KEY",

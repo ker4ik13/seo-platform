@@ -27,7 +27,7 @@ test("atomically closes a sealed manifest with a zero-result receipt", async () 
     {
       isolationLevel: "ReadCommitted",
       maxWait: 5_000,
-      timeout: 15_000
+      timeout: 60_000
     }
   ]);
   assert.equal(harness.lockCalls, 1);

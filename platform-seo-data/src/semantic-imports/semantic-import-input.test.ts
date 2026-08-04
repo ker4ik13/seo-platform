@@ -18,6 +18,7 @@ const entitlement = {
   planVersion: 1,
   storedKeywords: 2_000_000,
   keywordsPerProject: 2_000_000,
+  foldersPerProject: 500,
   trackedContextPairs: 50_000
 } as const;
 
@@ -77,4 +78,50 @@ test("rejects duplicate chunk keys and values outside PostgreSQL bigint", () => 
       }),
     BadRequestException
   );
+});
+
+test("accepts deep KC4 paths and bounded imported positions", () => {
+  const groupPath = Array.from({ length: 20 }, (_, index) =>
+    `Уровень ${index + 1}`
+  );
+  const result = applySemanticImportChunkInput({
+    ...context,
+    chunkIndex: 0,
+    payloadHash: "d".repeat(64),
+    duplicatePolicy: "MERGE_NON_EMPTY",
+    groupPaths: [groupPath],
+    rows: [
+      {
+        sourceRowNumber: "1",
+        textOriginal: "SEO",
+        textNormalized: "seo",
+        normalizedHash: "e".repeat(64),
+        language: "ru",
+        groupPath,
+        positions: [
+          {
+            searchEngine: "YANDEX",
+            found: true,
+            position: 25,
+            previousPosition: 27,
+            rankingUrl: "https://example.com/yandex-result"
+          },
+          { searchEngine: "GOOGLE", found: false }
+        ],
+        customValues: {}
+      }
+    ]
+  });
+
+  assert.deepEqual(result.groupPaths, [groupPath]);
+  assert.deepEqual(result.rows[0]?.positions, [
+    {
+      searchEngine: "YANDEX",
+      found: true,
+      position: 25,
+      previousPosition: 27,
+      rankingUrl: "https://example.com/yandex-result"
+    },
+    { searchEngine: "GOOGLE", found: false }
+  ]);
 });

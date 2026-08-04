@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import { useState, type FormEvent } from "react";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import { SemanticModal } from "./semantic-modal";
@@ -41,10 +43,12 @@ export function SemanticGroupDialog({
   );
   const [color, setColor] = useState(initialGroup?.color ?? "#6758ef");
   const [saving, setSaving] = useState(false);
+  const [deleteKeywords, setDeleteKeywords] = useState(false);
   const [error, setError] = useState<string>();
   const movedGroups = state.mode === "move" ? state.groups : [];
   const parentOptions = groups.filter(
     (candidate) =>
+      !candidate.systemKind &&
       !movedGroups.some(
         (moving) =>
           candidate.id === moving.id ||
@@ -117,7 +121,8 @@ export function SemanticGroupDialog({
         state.groups.map((group) =>
           browserApiRequest<void>(groupPath(projectId, group.id), {
             method: "DELETE",
-            ifMatch: group.version
+            ifMatch: group.version,
+            body: { deleteKeywords }
           })
         )
       );
@@ -175,14 +180,30 @@ export function SemanticGroupDialog({
                 value={parentId}
               />
             </label>
-            <label className="semantic-dialog-color">
-              <span>Цвет</span>
-              <input
-                onChange={(event) => setColor(event.target.value)}
-                type="color"
-                value={color}
-              />
-            </label>
+            <fieldset className="semantic-dialog-color">
+              <legend>Цвет</legend>
+              <div>
+                <input
+                  aria-label="Выбрать цвет"
+                  onChange={(event) => setColor(event.target.value.toUpperCase())}
+                  type="color"
+                  value={/^#[0-9a-f]{6}$/iu.test(color) ? color : "#6758EF"}
+                />
+                <label>
+                  <span className="visually-hidden">HEX-код цвета</span>
+                  <input
+                    aria-label="HEX-код цвета"
+                    maxLength={7}
+                    onChange={(event) => setColor(event.target.value.toUpperCase())}
+                    pattern="#[0-9A-Fa-f]{6}"
+                    placeholder="#6758EF"
+                    required
+                    spellCheck={false}
+                    value={color}
+                  />
+                </label>
+              </div>
+            </fieldset>
           </>
         )}
         {state.mode === "move" && (
@@ -204,10 +225,23 @@ export function SemanticGroupDialog({
           </>
         )}
         {state.mode === "delete" && (
-          <div className="inline-alert danger" role="alert">
-            Удалить можно только пустые группы без вложенных папок. Запросы и
-            дочерние группы автоматически не удаляются.
-          </div>
+          <>
+            <div className="inline-alert" role="status">
+              Вложенные папки удалятся вместе с выбранной. По умолчанию её
+              запросы будут перенесены в системную папку «Без группы».
+            </div>
+            <label className="semantic-dialog-checkbox">
+              <input
+                checked={deleteKeywords}
+                onChange={(event) => setDeleteKeywords(event.target.checked)}
+                type="checkbox"
+              />
+              <span>
+                <strong>Переместить запросы в корзину</strong>
+                <small>Выключено по умолчанию. В корзине запросы можно удалить навсегда.</small>
+              </span>
+            </label>
+          </>
         )}
         {error && <div className="inline-alert danger" role="alert">{error}</div>}
         <div className="semantic-modal-actions">
@@ -245,12 +279,12 @@ function GroupParentSelect({
   value: string;
 }>) {
   return (
-    <select autoFocus={autoFocus} onChange={(event) => onChange(event.target.value)} value={value}>
+    <CustomSelect autoFocus={autoFocus} onChange={(event) => onChange(event.target.value)} value={value}>
       <option value="">Корневой уровень</option>
       {groups.map((group) => (
         <option key={group.id} value={group.id}>{group.path}</option>
       ))}
-    </select>
+    </CustomSelect>
   );
 }
 
@@ -263,7 +297,7 @@ function groupDialogDescription(state: SemanticGroupDialogState): string {
   if (state.mode === "create") return "Создайте папку на выбранном уровне дерева.";
   if (state.mode === "rename") return "Название, цвет и родитель сохраняются с проверкой версии.";
   if (state.mode === "move") return `Выбрано групп: ${state.groups.length}. Вложенные группы переместятся вместе с родителем.`;
-  return `Выбрано групп: ${state.groups.length}. Операция необратима для пустых папок.`;
+  return `Выбрано групп: ${state.groups.length}. Выберите, что сделать с запросами внутри.`;
 }
 
 function groupErrorMessage(error: unknown): string {

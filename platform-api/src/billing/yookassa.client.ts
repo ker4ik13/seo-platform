@@ -5,6 +5,7 @@ import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 
 const MAX_RESPONSE_BYTES = 1_048_576;
+const PROVIDER_NETWORK_ATTEMPTS = 3;
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9_-]{1,255}$/u;
 
 export interface YookassaMoney {
@@ -177,20 +178,31 @@ export class YookassaClient {
       headers.set("Idempotence-Key", idempotencyKey);
     }
 
-    let response: Response;
-    try {
-      response = await fetch(`${provider.apiBaseUrl}${path}`, {
-        method,
-        headers,
-        ...(body ? { body: JSON.stringify(body) } : {}),
-        redirect: "error",
-        signal: AbortSignal.timeout(provider.requestTimeoutMs)
-      });
-    } catch {
-      throw new YookassaProviderError(
-        "PAYMENT_PROVIDER_UNAVAILABLE",
-        true
-      );
+    const attempts = method === "GET" || idempotencyKey
+      ? PROVIDER_NETWORK_ATTEMPTS
+      : 1;
+    let response: Response | undefined;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        response = await fetch(`${provider.apiBaseUrl}${path}`, {
+          method,
+          headers,
+          ...(body ? { body: JSON.stringify(body) } : {}),
+          redirect: "error",
+          signal: AbortSignal.timeout(provider.requestTimeoutMs)
+        });
+        break;
+      } catch {
+        if (attempt === attempts) {
+          throw new YookassaProviderError(
+            "PAYMENT_PROVIDER_UNAVAILABLE",
+            true
+          );
+        }
+      }
+    }
+    if (!response) {
+      throw new YookassaProviderError("PAYMENT_PROVIDER_UNAVAILABLE", true);
     }
 
     const text = await boundedText(response);

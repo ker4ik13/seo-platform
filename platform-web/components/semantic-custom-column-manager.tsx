@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import { useEffect, useState, type FormEvent } from "react";
 import {
   BrowserApiError,
@@ -196,7 +198,7 @@ export function SemanticCustomColumnManager({
           </label>
           <label>
             <span>Тип</span>
-            <select
+            <CustomSelect
               disabled={Boolean(editing)}
               onChange={(event) =>
                 setDraft((current) => ({
@@ -211,7 +213,7 @@ export function SemanticCustomColumnManager({
                   {customColumnTypeLabel(type)}
                 </option>
               ))}
-            </select>
+            </CustomSelect>
           </label>
           <label className="semantic-custom-description">
             <span>Описание</span>

@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
 import type { ProtectedAppContext } from "../lib/app-types";
-import { rankHistoryReturnTo } from "../lib/rank-history";
 import { projectPagesReturnTo } from "../lib/project-pages";
 import { AccountMenu } from "./account-menu";
 import { Icon, type IconName } from "./icon";
 import { NotificationBell } from "./notification-bell";
 import { TenantSwitcher } from "./tenant-switcher";
+import { DropdownCoordinator } from "./dropdown-coordinator";
 
 const navigation: readonly {
   readonly label: string;
@@ -14,19 +14,13 @@ const navigation: readonly {
   readonly section: string;
   readonly available: boolean;
   readonly projectScoped?: boolean;
+  readonly workspaceScoped?: boolean;
 }[] = [
   {
     label: "Обзор",
     icon: "dashboard",
     href: "/app",
     section: "overview",
-    available: true
-  },
-  {
-    label: "Инструменты",
-    icon: "tasks",
-    href: "/app/tools",
-    section: "tools",
     available: true
   },
   {
@@ -37,19 +31,25 @@ const navigation: readonly {
     available: true
   },
   {
-    label: "Позиции",
-    icon: "positions",
-    href: "/app/rankings",
-    section: "positions",
-    available: true,
-    projectScoped: true
+    label: "Инструменты",
+    icon: "tools",
+    href: "/app/tools",
+    section: "tools",
+    available: true
+  },
+  {
+    label: "Операции",
+    icon: "tasks",
+    href: "/app/tasks",
+    section: "tasks",
+    available: true
   },
   {
     label: "Карта страниц",
     icon: "pages",
     href: "/app/pages",
     section: "pages",
-    available: true,
+    available: false,
     projectScoped: true
   },
   {
@@ -57,7 +57,7 @@ const navigation: readonly {
     icon: "competitors",
     href: "/app/competitors",
     section: "competitors",
-    available: true
+    available: false
   },
   {
     label: "Заметки",
@@ -67,6 +67,13 @@ const navigation: readonly {
     available: false
   }
 ];
+
+const mobileNavigationSections = new Set([
+  "overview",
+  "tools",
+  "semantics",
+  "tasks"
+]);
 
 export function AppShell({
   children,
@@ -78,20 +85,34 @@ export function AppShell({
   activeSection?: string;
 }>) {
   const hasProject = Boolean(context.project);
+  const hasWorkspace = Boolean(context.workspace);
+  const usesWorkspaceLayout = ["semantics", "tasks"].includes(activeSection);
+  const isNavigationAvailable = (
+    item: (typeof navigation)[number]
+  ): boolean =>
+    item.available &&
+    (item.section === "overview" ||
+      (item.workspaceScoped ? hasWorkspace : hasProject));
   const navigationHref = (
     item: (typeof navigation)[number]
   ): string =>
     item.projectScoped && context.project
-      ? item.section === "pages"
-        ? projectPagesReturnTo(context.project.id)
-        : rankHistoryReturnTo(context.project.id)
+      ? projectPagesReturnTo(context.project.id)
       : item.href;
   return (
     <div className="app-shell">
+      <DropdownCoordinator />
       <aside className="sidebar">
-        <a className="app-brand" href="/app" aria-label="SEO Workspace">
-          <span className="brand-mark">S</span>
-          <span>SEO Workspace</span>
+        <a className="app-brand" href="/app" aria-label="SEOньорита">
+          <img
+            alt=""
+            aria-hidden="true"
+            className="brand-mark"
+            height={29}
+            src="/brand/seonorita-mark.svg"
+            width={29}
+          />
+          <span>SEOньорита</span>
         </a>
 
         <TenantSwitcher
@@ -103,7 +124,7 @@ export function AppShell({
 
         <nav aria-label="Навигация проекта">
           {navigation.map((item) =>
-            item.available && (item.section === "overview" || hasProject) ? (
+            isNavigationAvailable(item) ? (
               <a
                 aria-current={
                   item.section === activeSection ? "page" : undefined
@@ -125,9 +146,11 @@ export function AppShell({
                 className="nav-item disabled"
                 key={item.label}
                 title={
-                  hasProject
-                    ? "Раздел появится в следующем функциональном срезе"
-                    : "Сначала создайте проект"
+                  !item.available
+                    ? "Раздел временно недоступен"
+                    : hasProject
+                      ? "Раздел появится в следующем функциональном срезе"
+                      : "Сначала создайте проект"
                 }
               >
                 <Icon name={item.icon} />
@@ -156,11 +179,24 @@ export function AppShell({
         </div>
       </aside>
 
-      <div className="main-column">
+      <div
+        className={
+          usesWorkspaceLayout
+            ? `main-column workspace-main-column section-${activeSection}`
+            : `main-column section-${activeSection}`
+        }
+      >
         <header className="topbar">
           <div className="app-mobile-brand">
-            <span className="brand-mark">S</span>
-            <strong>Workspace</strong>
+            <img
+              alt=""
+              aria-hidden="true"
+              className="brand-mark"
+              height={27}
+              src="/brand/seonorita-mark.svg"
+              width={27}
+            />
+            <strong>SEOньорита</strong>
           </div>
           <label className="global-search">
             <Icon name="search" />
@@ -173,7 +209,7 @@ export function AppShell({
             <kbd>⌘ K</kbd>
           </label>
           <div className="topbar-actions">
-            <NotificationBell />
+            <NotificationBell {...(context.project ? { projectId: context.project.id } : {})} />
             <AccountMenu
               roleCode={context.workspace?.roleCode}
               user={context.user}
@@ -183,37 +219,39 @@ export function AppShell({
 
         <main
           className={
-            activeSection === "semantics"
-              ? "content content-workspace"
-              : "content"
+            usesWorkspaceLayout
+              ? `content content-workspace content-${activeSection}`
+              : `content content-${activeSection}`
           }
         >
           {children}
         </main>
 
         <nav className="mobile-nav" aria-label="Мобильная навигация">
-          {navigation.slice(0, 4).map((item) =>
-            item.available && (item.section === "overview" || hasProject) ? (
-              <a
-                aria-current={
-                  item.section === activeSection ? "page" : undefined
-                }
-                className={
-                  item.section === activeSection ? "active" : undefined
-                }
-                href={navigationHref(item)}
-                key={item.label}
-              >
-                <Icon name={item.icon} />
-                <span>{item.label}</span>
-              </a>
-            ) : (
-              <span aria-disabled="true" key={item.label}>
-                <Icon name={item.icon} />
-                <span>{item.label}</span>
-              </span>
-            )
-          )}
+          {navigation
+            .filter((item) => mobileNavigationSections.has(item.section))
+            .map((item) =>
+              isNavigationAvailable(item) ? (
+                <a
+                  aria-current={
+                    item.section === activeSection ? "page" : undefined
+                  }
+                  className={
+                    item.section === activeSection ? "active" : undefined
+                  }
+                  href={navigationHref(item)}
+                  key={item.label}
+                >
+                  <Icon name={item.icon} />
+                  <span>{item.label}</span>
+                </a>
+              ) : (
+                <span aria-disabled="true" key={item.label}>
+                  <Icon name={item.icon} />
+                  <span>{item.label}</span>
+                </span>
+              )
+            )}
         </nav>
       </div>
     </div>

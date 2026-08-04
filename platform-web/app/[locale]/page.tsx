@@ -81,7 +81,10 @@ export default async function MarketingPage({ params }: PageProps) {
   return (
     <main>
       <header className="site-header">
-        <a className="brand" href={`/${locale}`}><span>S</span>SEO Workspace</a>
+        <a className="brand" href={`/${locale}`}>
+          <img alt="" aria-hidden="true" height={28} src="/brand/seonorita-mark.svg" width={28} />
+          {locale === "ru" ? "SEOньорита" : "SEOnorita"}
+        </a>
         <nav aria-label="Основная навигация">
           {copy.nav.map((item, index) => (
             <a
@@ -160,7 +163,10 @@ export default async function MarketingPage({ params }: PageProps) {
       </section>
 
       <footer>
-        <a className="brand" href={`/${locale}`}><span>S</span>SEO Workspace</a>
+        <a className="brand" href={`/${locale}`}>
+          <img alt="" aria-hidden="true" height={28} src="/brand/seonorita-mark.svg" width={28} />
+          {locale === "ru" ? "SEOньорита" : "SEOnorita"}
+        </a>
         <p>{copy.footer}</p>
         {page.source === "fallback" && <small>CMS fallback</small>}
       </footer>

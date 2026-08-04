@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { utf8Sha256 } from "@seo-platform/contracts/canonical-json";
+import type { ArsenkinHttpRateLimitGate } from "../integrations/arsenkin-http-rate-limiter.js";
 import {
   ArsenkinRankConnector,
   arsenkinRankWireRequestHash,
@@ -24,29 +25,84 @@ const ids = {
   secondKeywordId: "01900000-0000-7000-8000-000000000011"
 } as const;
 
-test("builds the documented check-top payload with exact query order", () => {
+test("builds the documented positions payload with exact query order and tracking URL", () => {
   const request = buildArsenkinRankWireRequest(intent());
   assert.deepEqual(request, {
-    tools_name: "check-top",
+    tools_name: "positions",
     data: {
       queries: ["купить диван", "seo audit"],
-      is_snippet: false,
-      noreask: false,
-      se: [{ type: 11, region: 1011969 }],
-      depth: 30
+      url: "https://example.com/",
+      alt_urls: ["https://www.example.com/"],
+      subdomain: false,
+      se: [{ type: 11, region: 1011969, depth: 30 }],
+      format: 0
     }
   });
   assert.deepEqual(
     buildArsenkinRankWireRequest(
       intent({ execution: { ...intent().execution, device: "MOBILE" } })
     ).data.se,
-    [{ type: 12, region: 1011969 }]
+    [{ type: 12, region: 1011969, depth: 30 }]
   );
+  assert.deepEqual(
+    buildArsenkinRankWireRequest(
+      intent({
+        execution: {
+          ...intent().execution,
+          searchEngine: "YANDEX",
+          device: "DESKTOP",
+          depth: 30
+        }
+      })
+    ).data,
+    {
+      queries: ["купить диван", "seo audit"],
+      url: "https://example.com/",
+      alt_urls: ["https://www.example.com/"],
+      subdomain: false,
+      se: [{ type: 2, region: 1011969 }],
+      format: 0
+    }
+  );
+  assert.deepEqual(
+    buildArsenkinRankWireRequest(
+      intent({
+        execution: {
+          ...intent().execution,
+          searchEngine: "YANDEX",
+          device: "MOBILE",
+          depth: 30
+        }
+      })
+    ).data.se,
+    [{ type: 3, region: 1011969 }]
+  );
+  const yandexSearchApi = buildArsenkinRankWireRequest(
+    intent({
+      execution: {
+        ...intent().execution,
+        searchEngine: "YANDEX",
+        device: "DESKTOP",
+        depth: 30,
+        providerMappingVersion: "arsenkin-yandex-search-api@2"
+      }
+    })
+  );
+  assert.deepEqual(yandexSearchApi.data.se, [
+    { type: 1, region: 1011969 }
+  ]);
+  assert.doesNotThrow(() => arsenkinRankWireRequestHash(yandexSearchApi));
 });
 
 test("submits only through POST with Bearer auth and keeps transport ambiguity explicit", async () => {
   let called = false;
-  const connector = new ArsenkinRankConnector(async (url, init) => {
+  let permits = 0;
+  const connector = new ArsenkinRankConnector({
+    async tryAcquire() {
+      permits += 1;
+      return { allowed: true };
+    }
+  }, async (url, init) => {
     called = true;
     assert.equal(String(url), "https://arsenkin.ru/api/tools/set");
     assert.equal(init?.method, "POST");
@@ -69,8 +125,9 @@ test("submits only through POST with Bearer auth and keeps transport ambiguity e
     }
   );
   assert.equal(called, true);
+  assert.equal(permits, 1);
 
-  const ambiguous = new ArsenkinRankConnector(async () => {
+  const ambiguous = new ArsenkinRankConnector(allowAll(), async () => {
     throw new Error("connection reset");
   });
   assert.deepEqual(
@@ -82,7 +139,68 @@ test("submits only through POST with Bearer auth and keeps transport ambiguity e
   );
 });
 
-test("normalizes provider throttling and bounded pending/result polling", async () => {
+test("keeps one positions provider task for a stored legacy 250-key chunk", async () => {
+  const keywords = keywordEntries(250);
+  const base = intent();
+  const batchIntent = intent({
+    manifest: { ...base.manifest, pairCount: "250" },
+    keywords
+  });
+  let submissions = 0;
+  const connector = new ArsenkinRankConnector(allowAll(), async (_url, init) => {
+    submissions += 1;
+    const body = JSON.parse(String(init?.body)) as {
+      readonly tools_name: string;
+      readonly data: { readonly queries: readonly string[] };
+    };
+    assert.equal(body.tools_name, "positions");
+    assert.equal(body.data.queries.length, 250);
+    assert.equal(body.data.queries[0], "query 1");
+    assert.equal(body.data.queries[249], "query 250");
+    return json({ task_id: 3944 });
+  });
+
+  const result = await connector.submit(
+    batchIntent,
+    { apiKey: "private-key" },
+    1_000
+  );
+  assert.equal(result.status, "ACCEPTED");
+  assert.equal(submissions, 1);
+});
+
+test("submits the current 15,000-key positions scope as exactly one provider task", async () => {
+  const keywordCount = 15_000;
+  const base = intent();
+  const batchIntent = intent({
+    providerPolicyVersion: "manual-arsenkin-positions@2.0.0",
+    manifest: { ...base.manifest, pairCount: String(keywordCount) },
+    keywords: keywordEntries(keywordCount)
+  });
+  let submissions = 0;
+  const connector = new ArsenkinRankConnector(allowAll(), async (_url, init) => {
+    submissions += 1;
+    const body = JSON.parse(String(init?.body)) as {
+      readonly tools_name: string;
+      readonly data: { readonly queries: readonly string[] };
+    };
+    assert.equal(body.tools_name, "positions");
+    assert.equal(body.data.queries.length, keywordCount);
+    assert.equal(body.data.queries[0], "query 1");
+    assert.equal(body.data.queries[keywordCount - 1], "query 15000");
+    return json({ task_id: 3944 });
+  });
+
+  const result = await connector.submit(
+    batchIntent,
+    { apiKey: "private-key" },
+    1_000
+  );
+  assert.equal(result.status, "ACCEPTED");
+  assert.equal(submissions, 1);
+});
+
+test("checks task status before fetching a finished positions result", async () => {
   const responses = [
     json(
       {
@@ -94,11 +212,19 @@ test("normalizes provider throttling and bounded pending/result polling", async 
       429,
       { "Retry-After": "15" }
     ),
-    json({ code: "TASK_RUNNING", task_id: "3944" }),
+    json({ code: "TASK_STATUS", status: "process", progress: 50 }),
+    json({ code: "TASK_STATUS", status: "finish", progress: 100 }),
     json(resultBody())
   ];
-  const connector = new ArsenkinRankConnector(async (url, init) => {
-    assert.equal(String(url), "https://arsenkin.ru/api/tools/get");
+  const calledUrls: string[] = [];
+  let permits = 0;
+  const connector = new ArsenkinRankConnector({
+    async tryAcquire() {
+      permits += 1;
+      return { allowed: true };
+    }
+  }, async (url, init) => {
+    calledUrls.push(String(url));
     assert.equal(init?.method, "POST");
     assert.deepEqual(JSON.parse(String(init?.body)), { task_id: "3944" });
     const response = responses.shift();
@@ -132,9 +258,89 @@ test("normalizes provider throttling and bounded pending/result polling", async 
     1_000
   );
   assert.equal(ready.status, "READY");
+  assert.deepEqual(calledUrls, [
+    "https://arsenkin.ru/api/tools/check",
+    "https://arsenkin.ru/api/tools/check",
+    "https://arsenkin.ru/api/tools/check",
+    "https://arsenkin.ru/api/tools/get"
+  ]);
+  assert.equal(permits, 4);
 });
 
-test("derives one found and one not-found result from the documented matrix", () => {
+test("does not fetch rank result without a second shared HTTP permit", async () => {
+  let permits = 0;
+  const calledUrls: string[] = [];
+  const connector = new ArsenkinRankConnector({
+    async tryAcquire() {
+      permits += 1;
+      return permits === 1
+        ? { allowed: true }
+        : { allowed: false, retryAfterSeconds: 8 };
+    }
+  }, async (url) => {
+    calledUrls.push(String(url));
+    return json({ code: "TASK_STATUS", status: "finish", progress: 100 });
+  });
+
+  assert.deepEqual(
+    await connector.fetchResult(
+      "3944",
+      { apiKey: "private-key" },
+      1_000
+    ),
+    {
+      status: "RETRYABLE_FAILURE",
+      code: "PROVIDER_RATE_LIMITED",
+      retryAfterSeconds: 8
+    }
+  );
+  assert.deepEqual(calledUrls, ["https://arsenkin.ru/api/tools/check"]);
+});
+
+test("does not fetch a premature TASK_RESULT before check reaches finish/100", async () => {
+  let calls = 0;
+  const connector = new ArsenkinRankConnector(allowAll(), async (url) => {
+    calls += 1;
+    assert.equal(String(url), "https://arsenkin.ru/api/tools/check");
+    return json({ code: "TASK_STATUS", status: "process", progress: 99 });
+  });
+
+  assert.deepEqual(
+    await connector.fetchResult(
+      "3944",
+      { apiKey: "private-key" },
+      1_000
+    ),
+    { status: "PENDING" }
+  );
+  assert.equal(calls, 1);
+});
+
+test("fails closed on undocumented or inconsistent check states", async () => {
+  const responses = [
+    json({ code: "TASK_STATUS", status: "finish", progress: 99 }),
+    json({ code: "TASK_STATUS", status: "process", progress: 100 })
+  ];
+  const connector = new ArsenkinRankConnector(allowAll(), async (url) => {
+    assert.equal(String(url), "https://arsenkin.ru/api/tools/check");
+    const response = responses.shift();
+    assert.ok(response);
+    return response;
+  });
+
+  for (let index = 0; index < 2; index += 1) {
+    assert.deepEqual(
+      await connector.fetchResult(
+        "3944",
+        { apiKey: "private-key" },
+        1_000
+      ),
+      { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" }
+    );
+  }
+});
+
+test("derives one found and one not-found result from a sealed positions fixture", () => {
   assert.deepEqual(
     normalizeArsenkinRankResult(resultBody(), "3944", intent()),
     [
@@ -180,6 +386,21 @@ test("derives one found and one not-found result from the documented matrix", ()
   );
 });
 
+test("accepts a provider-supported TOP-100 position at the sealed depth", () => {
+  const top100Intent = intent({
+    execution: {
+      ...intent().execution,
+      depth: 100
+    }
+  });
+  const results = normalizeArsenkinRankResult(
+    resultBody(100),
+    "3944",
+    top100Intent
+  );
+  assert.equal(results[0]?.position, 100);
+});
+
 test("applies exact URL matching and rejects unbound or malformed provider data", () => {
   const exactUrlIntent = intent({
     execution: {
@@ -204,12 +425,48 @@ test("applies exact URL matching and rejects unbound or malformed provider data"
     () => normalizeArsenkinRankResult(wrongTask, "3944", intent()),
     /Invalid Arsenkin rank provider response/u
   );
-  const wrongEcho = resultBody();
-  (
-    wrongEcho.result.request as { queries: string[] }
-  ).queries = ["another query", "seo audit"];
+  const missingQuery = resultBody();
+  delete missingQuery.result.table["купить диван"];
   assert.throws(
-    () => normalizeArsenkinRankResult(wrongEcho, "3944", intent()),
+    () => normalizeArsenkinRankResult(missingQuery, "3944", intent()),
+    /Invalid Arsenkin rank provider response/u
+  );
+  const legacyCheckTopEcho = resultBody();
+  (legacyCheckTopEcho as { result: unknown }).result = {
+    request: { queries: ["купить диван", "seo audit"] },
+    result: { collect: [] }
+  };
+  assert.throws(
+    () => normalizeArsenkinRankResult(legacyCheckTopEcho, "3944", intent()),
+    /Invalid Arsenkin rank provider response/u
+  );
+  const unknownPositionsShape = resultBody();
+  (unknownPositionsShape as { result: unknown }).result = {
+    rows: [{ query: "купить диван", position: 2, url: "https://example.com/" }]
+  };
+  assert.throws(
+    () => normalizeArsenkinRankResult(unknownPositionsShape, "3944", intent()),
+    /Invalid Arsenkin rank provider response/u
+  );
+  const foreignUrl = resultBody();
+  foreignUrl.result.table["купить диван"] = {
+    commerce: [false],
+    position: [2],
+    top20: "[]",
+    url: "https://foreign.example/page"
+  };
+  assert.throws(
+    () => normalizeArsenkinRankResult(foreignUrl, "3944", intent()),
+    /Invalid Arsenkin rank provider response/u
+  );
+  const malformedNotFound = resultBody();
+  malformedNotFound.result.table["seo audit"] = {
+    position: [1_001],
+    top20: "[]",
+    url: "https://example.com/must-not-exist"
+  };
+  assert.throws(
+    () => normalizeArsenkinRankResult(malformedNotFound, "3944", intent()),
     /Invalid Arsenkin rank provider response/u
   );
   assert.throws(
@@ -222,7 +479,7 @@ test("applies exact URL matching and rejects unbound or malformed provider data"
           }
         })
       ),
-    /numeric Google region id/u
+    /numeric search region id/u
   );
 });
 
@@ -266,7 +523,7 @@ function intent(
       hashSchemaVersion: "rank-manifest-chunk@1",
       chunkHash: hash("b")
     },
-    executionConnectorVersion: "arsenkin-positions@1.0.0",
+    executionConnectorVersion: "arsenkin-positions@2.0.0",
     providerPolicyVersion: "manual-arsenkin-positions@1.0.0",
     keywords: [
       {
@@ -296,40 +553,57 @@ function intent(
   return { ...base, ...overrides };
 }
 
-function resultBody(): {
+function resultBody(position = 2): {
   task_id: string;
   code: string;
   result: {
-    request: {
-      queries: string[];
-      depth: number;
-      ss: { ss: number; region: number }[];
-    };
-    result: { collect: string[][][] };
+    table: Record<string, Record<string, unknown>>;
+    summary: Record<string, unknown>;
+    format: number;
   };
+  created_at: string;
+  finished_at: string;
 } {
   return {
     code: "TASK_RESULT",
     task_id: "3944",
     result: {
-      request: {
-        queries: ["купить диван", "seo audit"],
-        depth: 30,
-        ss: [{ ss: 11, region: 1011969 }]
+      table: {
+        "купить диван": {
+          commerce: [false],
+          position: [position],
+          top20: "[]",
+          url: "HTTPS://WWW.Example.COM:443/catalog#result"
+        },
+        "seo audit": {
+          position: [1_001],
+          top20: "[]"
+        }
       },
-      result: {
-        collect: [
-          [
-            [
-              "https://competitor.example/",
-              "HTTPS://WWW.Example.COM:443/catalog#result"
-            ],
-            ["https://competitor.example/a"]
-          ]
-        ]
-      }
-    }
+      summary: {},
+      format: 0
+    },
+    created_at: "2026-08-02 12:00:00",
+    finished_at: "2026-08-02 12:01:00"
   };
+}
+
+function keywordEntries(count: number): RankProviderRequestIntentV1["keywords"] {
+  return Array.from({ length: count }, (_, index) => {
+    const suffix = String(index + 1).padStart(12, "0");
+    const keywordText = `query ${index + 1}`;
+    return {
+      manifestEntryId: `01910000-0000-7000-8000-${suffix}`,
+      sequence: index,
+      keywordId: `01920000-0000-7000-8000-${suffix}`,
+      keywordText,
+      keywordTextHash: {
+        algorithm: "SHA_256",
+        value: utf8Sha256(keywordText)
+      },
+      language: "ru"
+    };
+  });
 }
 
 function hash(character: string): {
@@ -351,4 +625,12 @@ function json(
     status,
     headers: { "Content-Type": "application/json", ...headers }
   });
+}
+
+function allowAll(): ArsenkinHttpRateLimitGate {
+  return {
+    async tryAcquire() {
+      return { allowed: true };
+    }
+  };
 }

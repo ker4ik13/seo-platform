@@ -5,6 +5,7 @@ import type {
   InternalCancelRankJobInput,
   InternalCreateRankRunInput
 } from "@seo-platform/contracts";
+import { xmlStockRankProviderPolicyVersion } from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
 import type { PrismaService } from "../database/prisma.service.js";
 import type { QueueService } from "../queue/queue.service.js";
@@ -14,7 +15,10 @@ import {
   type StoredRankJob
 } from "./rank-job-record.js";
 import { RankPreparationService } from "./rank-preparation.service.js";
-import { RankRunService } from "./rank-run.service.js";
+import {
+  rankEstimatePolicyMatchesProvider,
+  RankRunService
+} from "./rank-run.service.js";
 
 const workspaceId = "0190abcd-0000-7000-8000-000000000001";
 const projectId = "0190abcd-0000-7000-8000-000000000002";
@@ -24,6 +28,27 @@ const estimateId = "0190abcd-0000-7000-8000-000000000005";
 const trackingContextId = "0190abcd-0000-7000-8000-000000000006";
 const membershipId = "0190abcd-0000-7000-8000-000000000007";
 const jobId = "0190abcd-0000-7000-8000-000000000008";
+
+test("uses the immutable policy generation of the selected rank provider", () => {
+  assert.equal(
+    rankEstimatePolicyMatchesProvider(
+      "XMLSTOCK",
+      xmlStockRankProviderPolicyVersion
+    ),
+    true
+  );
+  assert.equal(
+    rankEstimatePolicyMatchesProvider(
+      "ARSENKIN",
+      xmlStockRankProviderPolicyVersion
+    ),
+    false
+  );
+  assert.equal(
+    rankEstimatePolicyMatchesProvider("UNSUPPORTED", "rank-estimate:v1"),
+    false
+  );
+});
 
 test("returns an exact idempotent replay before mutable execution checks", async () => {
   const input = rankRunInput({
@@ -325,6 +350,11 @@ function rankRunInput(
       }
     },
     billingCurrency: "RUB",
+    jobCapacity: {
+      planCode: "TEAM",
+      planVersion: 3,
+      concurrentJobs: 10
+    },
     ...overrides
   };
 }

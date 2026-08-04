@@ -53,6 +53,9 @@ export interface BillingPlanFeatures {
   readonly projects: number;
   readonly storedKeywords: number;
   readonly keywordsPerProject: number;
+  /** Zero means that the plan does not impose a folder limit. */
+  readonly foldersPerProject: number;
+  readonly concurrentJobs: number;
   readonly trackedContextPairs: number;
   readonly storageBytes: number;
   readonly rawSerpRetentionDays: number;
@@ -80,7 +83,15 @@ export interface SemanticCapacityEntitlement {
   readonly planVersion: number;
   readonly storedKeywords: number;
   readonly keywordsPerProject: number;
+  /** Zero means that the plan does not impose a folder limit. */
+  readonly foldersPerProject: number;
   readonly trackedContextPairs: number;
+}
+
+export interface JobCapacityEntitlement {
+  readonly planCode: string;
+  readonly planVersion: number;
+  readonly concurrentJobs: number;
 }
 
 export interface StorageCapacityEntitlement {

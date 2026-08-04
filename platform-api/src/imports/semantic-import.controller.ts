@@ -52,18 +52,20 @@ export class SemanticImportController {
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiResponse<SemanticImportSummary>> {
     const context = requestContext(request);
+    const tenant = requiredTenant(request);
     return apiResponse(
       request,
       await this.jobs.createSemanticImport(
         {
-          tenant: requiredTenant(request),
+          tenant,
           actorId: principal.userId,
           requestId: context.requestId
         },
         createSemanticImportInput(body),
         requiredIdempotencyKey(
           headerValue(request, "idempotency-key")
-        )
+        ),
+        await this.billingEntitlements.jobCapacity(tenant.workspaceId)
       )
     );
   }

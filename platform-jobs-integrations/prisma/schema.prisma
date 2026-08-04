@@ -345,6 +345,7 @@ model IntegrationCredential {
   deletedAt             DateTime?        @map("deleted_at") @db.Timestamptz(6)
 
   connectorRoutes         ProjectConnectorRoute[]
+  workspaceConnectorRoutes WorkspaceConnectorRoute[]
   rankConnectorExecutions RankConnectorExecution[]
   keywordResearchRuns     KeywordResearchRun[]
 
@@ -376,6 +377,11 @@ model ProjectConnectorBinding {
   projectId   String   @map("project_id") @db.Uuid
   capability  String   @db.VarChar(100)
   enabled     Boolean  @default(true)
+  fallbackMode String  @default("NONE") @map("fallback_mode") @db.VarChar(48)
+  fallbackReasons Json @default("[]") @map("fallback_reasons")
+  configurationScope String @default("PROJECT_OVERRIDE") @map("configuration_scope") @db.VarChar(32)
+  workspaceBindingId String? @map("workspace_binding_id") @db.Uuid
+  workspaceBindingVersion Int? @map("workspace_binding_version")
   createdBy   String   @map("created_by") @db.Uuid
   updatedBy   String   @map("updated_by") @db.Uuid
   version     Int      @default(1)
@@ -383,6 +389,7 @@ model ProjectConnectorBinding {
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   routes                  ProjectConnectorRoute[]
+  workspaceBinding        WorkspaceConnectorBinding? @relation(fields: [workspaceId, workspaceBindingId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "project_connector_bindings_workspace_binding_fkey")
   createReceipt           ProjectConnectorBindingCreateReceipt?
   rankConnectorExecutions RankConnectorExecution[]
   keywordResearchRuns     KeywordResearchRun[]
@@ -391,6 +398,46 @@ model ProjectConnectorBinding {
   @@unique([workspaceId, projectId, id], map: "project_connector_bindings_tenant_project_id_key")
   @@index([workspaceId, projectId, createdAt, id], map: "project_connector_bindings_tenant_project_created_idx")
   @@map("project_connector_bindings")
+}
+
+model WorkspaceConnectorBinding {
+  id           String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  capability   String   @db.VarChar(100)
+  enabled      Boolean  @default(true)
+  fallbackMode String   @default("NONE") @map("fallback_mode") @db.VarChar(48)
+  fallbackReasons Json  @default("[]") @map("fallback_reasons")
+  createdBy    String   @map("created_by") @db.Uuid
+  updatedBy    String   @map("updated_by") @db.Uuid
+  version      Int      @default(1)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  routes WorkspaceConnectorRoute[]
+  inheritedProjectBindings ProjectConnectorBinding[]
+
+  @@unique([workspaceId, capability], map: "workspace_connector_bindings_workspace_capability_key")
+  @@unique([workspaceId, id], map: "workspace_connector_bindings_workspace_id_key")
+  @@index([workspaceId, createdAt, id], map: "workspace_connector_bindings_workspace_created_idx")
+  @@map("workspace_connector_bindings")
+}
+
+model WorkspaceConnectorRoute {
+  id           String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  bindingId    String   @map("binding_id") @db.Uuid
+  position     Int
+  credentialId String   @map("credential_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  binding    WorkspaceConnectorBinding @relation(fields: [workspaceId, bindingId], references: [workspaceId, id], onDelete: Cascade, onUpdate: Restrict, map: "workspace_connector_routes_binding_workspace_fkey")
+  credential IntegrationCredential     @relation(fields: [workspaceId, credentialId], references: [workspaceId, id], onDelete: Restrict, onUpdate: Restrict, map: "workspace_connector_routes_credential_workspace_fkey")
+
+  @@unique([workspaceId, bindingId, position], map: "workspace_connector_routes_workspace_binding_position_key")
+  @@unique([workspaceId, bindingId, credentialId], map: "workspace_connector_routes_workspace_binding_credential_key")
+  @@index([workspaceId, credentialId], map: "workspace_connector_routes_workspace_credential_idx")
+  @@map("workspace_connector_routes")
 }
 
 model ProjectConnectorBindingCreateReceipt {
@@ -417,6 +464,8 @@ model ProjectConnectorRoute {
   position     Int
   sourceKind   ProjectConnectorRouteSourceKind @map("source_kind")
   credentialId String                          @map("credential_id") @db.Uuid
+  routingScope String                          @default("PROJECT_OVERRIDE") @map("routing_scope") @db.VarChar(32)
+  workspaceRouteId String?                     @map("workspace_route_id") @db.Uuid
   createdAt    DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt    DateTime                        @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -596,6 +645,7 @@ model RankConnectorExecution {
   grantAttemptId                       String                       @unique(map: "rank_connector_executions_grant_attempt_key") @map("grant_attempt_id") @db.Uuid
   executionAttempt                     Int                          @map("execution_attempt")
   jobVersion                           Int                          @map("job_version")
+  provider                             String                       @default("ARSENKIN") @db.VarChar(64)
   estimateId                           String                       @map("estimate_id") @db.Uuid
   manifestId                           String                       @map("manifest_id") @db.Uuid
   manifestHash                         Bytes                        @map("manifest_hash")
@@ -979,6 +1029,7 @@ model SemanticImport {
   detectedEncoding         String?              @map("detected_encoding") @db.VarChar(32)
   detectedDelimiter        String?              @map("detected_delimiter") @db.VarChar(32)
   headers                  Json?
+  sourceMetadata           Json?                @map("source_metadata")
   suggestedMapping         Json?                @map("suggested_mapping")
   sampleRows               Json?                @map("sample_rows")
   confirmedMapping         Json?                @map("confirmed_mapping")
@@ -988,6 +1039,7 @@ model SemanticImport {
   billingPlanVersion       Int?                 @map("billing_plan_version")
   storedKeywordsLimit      BigInt?              @map("stored_keywords_limit")
   keywordsPerProjectLimit  BigInt?              @map("keywords_per_project_limit")
+  foldersPerProjectLimit   BigInt?              @map("folders_per_project_limit")
   trackedContextPairsLimit BigInt?              @map("tracked_context_pairs_limit")
   totalRows                BigInt               @default(0) @map("total_rows")
   validRows                BigInt               @default(0) @map("valid_rows")

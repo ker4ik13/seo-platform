@@ -32,7 +32,7 @@ export default async function ProjectPagesPage({
       context={{ ...context, project, workspace }}
     >
       <nav aria-label="Хлебные крошки" className="app-breadcrumbs">
-        <a href="/app">Проекты</a>
+        <a href="/app/projects">Проекты</a>
         <span aria-hidden="true">/</span>
         <span>{project.name}</span>
         <span aria-hidden="true">/</span>
@@ -40,7 +40,6 @@ export default async function ProjectPagesPage({
       </nav>
       <section className="page-heading tracking-context-heading">
         <div>
-          <p className="eyebrow">Страницы · {project.name}</p>
           <h1>Карта страниц</h1>
           <p>
             URL проекта, их состояние, семантика и результаты технических

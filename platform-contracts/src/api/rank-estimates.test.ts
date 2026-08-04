@@ -84,7 +84,7 @@ const publicEstimateFixture = {
 
 test("rank estimate finite vocabularies pin the provider-free first slice", () => {
   assert.deepEqual(rankEstimateStatuses, ["READY", "BLOCKED"]);
-  assert.deepEqual(rankEstimateProviders, ["ARSENKIN"]);
+  assert.deepEqual(rankEstimateProviders, ["ARSENKIN", "XMLSTOCK"]);
   assert.deepEqual(rankEstimateOperations, ["POSITIONS"]);
   assert.deepEqual(rankEstimateCredentialModes, ["BYOK_API_KEY"]);
   assert.deepEqual(rankEstimateScopeHashAvailabilities, [

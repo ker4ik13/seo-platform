@@ -54,6 +54,7 @@ export function storedEntitlement(value: Prisma.JsonValue | null) {
     "planVersion",
     "storedKeywords",
     "keywordsPerProject",
+    "foldersPerProject",
     "trackedContextPairs"
   ] as const;
   if (
@@ -71,6 +72,7 @@ export function storedEntitlement(value: Prisma.JsonValue | null) {
     planVersion: Number(input.planVersion),
     storedKeywords: Number(input.storedKeywords),
     keywordsPerProject: Number(input.keywordsPerProject),
+    foldersPerProject: Number(input.foldersPerProject),
     trackedContextPairs: Number(input.trackedContextPairs)
   } satisfies SemanticCapacityEntitlement;
 }

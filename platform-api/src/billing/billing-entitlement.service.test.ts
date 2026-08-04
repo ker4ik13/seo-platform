@@ -39,7 +39,25 @@ test("projects the exact trusted semantic capacity snapshot", async () => {
     planVersion: 1,
     storedKeywords: 25_000,
     keywordsPerProject: 25_000,
+    foldersPerProject: 50,
     trackedContextPairs: 500
+  });
+});
+
+test("projects the exact workspace task concurrency snapshot", async () => {
+  const transaction = onboardingTransaction();
+  const service = new BillingEntitlementService({
+    $transaction: async (
+      callback: (
+        client: Prisma.TransactionClient
+      ) => Promise<unknown>
+    ) => callback(transaction)
+  } as unknown as PrismaService);
+
+  assert.deepEqual(await service.jobCapacity(WORKSPACE_ID), {
+    planCode: "TRIAL",
+    planVersion: 1,
+    concurrentJobs: 1
   });
 });
 
@@ -133,6 +151,53 @@ test("projects current BYOK access for an interactive rank estimate", async () =
   );
 });
 
+test("projects a bounded daily rank quota before the execution grant", async () => {
+  const transaction = onboardingTransaction({ rankTaskCount: 17 });
+  const service = new BillingEntitlementService({
+    $transaction: async (
+      callback: (
+        client: Prisma.TransactionClient
+      ) => Promise<unknown>
+    ) => callback(transaction)
+  } as unknown as PrismaService);
+
+  assert.deepEqual(await service.rankProviderRunAccess(WORKSPACE_ID), {
+    entitlementStatus: "ALLOWED",
+    quota: {
+      status: "AVAILABLE",
+      limit: "200",
+      used: "17",
+      remaining: "183",
+      resetsAt: "2026-08-01T00:00:00.000Z"
+    }
+  });
+});
+
+test("projects an active workspace-specific rank quota override", async () => {
+  const transaction = onboardingTransaction({
+    rankTaskCount: 17,
+    rankTaskLimit: 1_000_000
+  });
+  const service = new BillingEntitlementService({
+    $transaction: async (
+      callback: (
+        client: Prisma.TransactionClient
+      ) => Promise<unknown>
+    ) => callback(transaction)
+  } as unknown as PrismaService);
+
+  assert.deepEqual(await service.rankProviderRunAccess(WORKSPACE_ID), {
+    entitlementStatus: "ALLOWED",
+    quota: {
+      status: "AVAILABLE",
+      limit: "1000000",
+      used: "17",
+      remaining: "999983",
+      resetsAt: "2026-08-01T00:00:00.000Z"
+    }
+  });
+});
+
 test("serializes project capacity and rejects the exact current-plan limit", async () => {
   const queries: string[] = [];
   const transaction = onboardingTransaction({
@@ -152,6 +217,16 @@ test("serializes project capacity and rejects the exact current-plan limit", asy
   );
   assert.match(queries[0] ?? "", /FROM "workspaces"/u);
   assert.match(queries[0] ?? "", /FOR UPDATE/u);
+});
+
+test("uses an explicit workspace project capacity override", async () => {
+  const transaction = onboardingTransaction({
+    projectCount: 1,
+    projectLimit: 10_000
+  });
+  const service = new BillingEntitlementService({} as PrismaService);
+
+  await service.assertCanCreateProject(transaction, WORKSPACE_ID);
 });
 
 test("counts live invitations as reserved seats and gates CLIENT by plan", async () => {
@@ -217,8 +292,11 @@ function onboardingTransaction(
   options: {
     readonly queries?: string[];
     readonly projectCount?: number;
+    readonly projectLimit?: number;
     readonly memberCount?: number;
     readonly pendingInviteCount?: number;
+    readonly rankTaskCount?: number;
+    readonly rankTaskLimit?: number;
   } = {}
 ): Prisma.TransactionClient {
   return {
@@ -242,11 +320,29 @@ function onboardingTransaction(
     project: {
       count: async () => options.projectCount ?? 0
     },
+    projectCapacityOverride: {
+      findUnique: async () =>
+        options.projectLimit === undefined
+          ? null
+          : { projectLimit: options.projectLimit }
+    },
     workspaceMember: {
       count: async () => options.memberCount ?? 0
     },
     workspaceInvite: {
       count: async () => options.pendingInviteCount ?? 0
+    },
+    rankExecutionQuotaReservation: {
+      count: async () => options.rankTaskCount ?? 0
+    },
+    rankExecutionQuotaOverride: {
+      findUnique: async () =>
+        options.rankTaskLimit === undefined
+          ? null
+          : {
+              dailyTaskLimit: options.rankTaskLimit,
+              expiresAt: null
+            }
     }
   } as unknown as Prisma.TransactionClient;
 }
@@ -257,6 +353,8 @@ function planFeatures() {
     projects: 1,
     storedKeywords: 25_000,
     keywordsPerProject: 25_000,
+    foldersPerProject: 50,
+    concurrentJobs: 1,
     trackedContextPairs: 500,
     storageBytes: 536_870_912,
     rawSerpRetentionDays: 7,

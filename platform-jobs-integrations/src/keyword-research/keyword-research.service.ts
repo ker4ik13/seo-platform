@@ -14,6 +14,8 @@ import type {
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { assertJobCapacity } from "../jobs/job-capacity.js";
+import { WorkspaceConnectorRoutingService } from "../integrations/workspace-connector-routing.service.js";
 import {
   entitlementJson,
   keywordResearchSummary
@@ -29,7 +31,10 @@ const CANCELLABLE = [
 
 @Injectable()
 export class KeywordResearchService {
-  public constructor(private readonly prisma: PrismaService) {}
+  public constructor(
+    private readonly prisma: PrismaService,
+    private readonly routing: WorkspaceConnectorRoutingService
+  ) {}
 
   public async create(
     input: InternalCreateKeywordResearchRunInput
@@ -47,35 +52,13 @@ export class KeywordResearchService {
     });
     if (existing) return replay(existing, hash);
 
-    const binding = await this.prisma.projectConnectorBinding.findUnique({
-      where: {
-        workspaceId_projectId_capability: {
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          capability: "COMPETITOR_RESEARCH"
-        }
-      },
-      include: {
-        routes: {
-          orderBy: { position: "asc" },
-          include: { credential: true }
-        }
-      }
-    });
-    const route = binding?.routes[0];
-    if (
-      !binding?.enabled ||
-      binding.routes.length !== 1 ||
-      !route ||
-      route.position !== 0 ||
-      route.credential.provider !== "KEYS_SO" ||
-      route.credential.mode !== "BYOK_API_KEY" ||
-      route.credential.status !== "ACTIVE" ||
-      route.credential.deletedAt !== null ||
-      !capabilities(route.credential.capabilities).includes(
-        "COMPETITOR_RESEARCH"
-      )
-    ) {
+    const route = await this.routing.resolve(
+      input.workspaceId,
+      input.projectId,
+      "COMPETITOR_RESEARCH",
+      input.actorId
+    );
+    if (route.provider !== "KEYS_SO") {
       throw new HttpException(
         {
           code: "CONNECTOR_NOT_READY",
@@ -88,6 +71,11 @@ export class KeywordResearchService {
 
     try {
       const run = await this.prisma.$transaction(async (transaction) => {
+        await assertJobCapacity(
+          transaction,
+          input.workspaceId,
+          input.jobCapacity
+        );
         const job = await transaction.job.create({
           data: {
             workspaceId: input.workspaceId,
@@ -107,13 +95,23 @@ export class KeywordResearchService {
             scopeSnapshot: {
               workspaceId: input.workspaceId,
               projectId: input.projectId,
-              bindingId: binding.id,
-              routeId: route.id,
-              credentialId: route.credentialId
+              bindingId: route.bindingId,
+              bindingVersion: route.bindingVersion,
+              routeId: route.routeId,
+              credentialId: route.credentialId,
+              routingScope: route.routingScope,
+              connectorAttempts: route.attempts.map((entry) => ({
+                sequence: entry.sequence,
+                provider: entry.provider,
+                routingScope: entry.routingScope,
+                outcome: entry.outcome,
+                ...(entry.reasonCode ? { reasonCode: entry.reasonCode } : {}),
+                occurredAt: entry.occurredAt
+              }))
             },
             progressTotal: BigInt(input.maxKeywords),
             progressUnit: "keywords",
-            credentialMode: "BYOK_API_KEY",
+            credentialMode: route.credentialMode,
             provider: "KEYS_SO",
             correlationId: input.correlationId,
             queuedAt: new Date(),
@@ -126,8 +124,8 @@ export class KeywordResearchService {
             projectId: input.projectId,
             jobId: job.id,
             actorId: input.actorId,
-            bindingId: binding.id,
-            routeId: route.id,
+            bindingId: route.bindingId,
+            routeId: route.routeId,
             credentialId: route.credentialId,
             provider: "KEYS_SO",
             domain: input.domain,
@@ -338,12 +336,6 @@ function replay(
     throw new ConflictException("Idempotency key was already used");
   }
   return keywordResearchSummary(job.keywordResearchRun, job.keywordResearchRun.rows);
-}
-
-function capabilities(value: Prisma.JsonValue): readonly string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === "string")
-    ? value
-    : [];
 }
 
 function unique(error: unknown): boolean {

@@ -1,6 +1,8 @@
 import { BadRequestException } from "@nestjs/common";
 import {
+  semanticKeywordDefaultPageSize,
   semanticKeywordIntents,
+  semanticKeywordMaxPageSize,
   semanticKeywordSorts,
   type KeywordListQuery
 } from "@seo-platform/contracts";
@@ -31,11 +33,12 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   const sort =
     optionalEnum(query.sort, "sort", semanticKeywordSorts) ??
     "CREATED_DESC";
-  const parsedLimit = limit === undefined ? 100 : Number(limit);
+  const parsedLimit =
+    limit === undefined ? semanticKeywordDefaultPageSize : Number(limit);
   if (
     !Number.isSafeInteger(parsedLimit) ||
     parsedLimit < 1 ||
-    parsedLimit > 200
+    parsedLimit > semanticKeywordMaxPageSize
   ) {
     invalid("limit");
   }

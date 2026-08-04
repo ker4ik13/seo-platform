@@ -269,7 +269,7 @@ function requestIntent() {
       hashSchemaVersion: "rank-manifest-chunk@1",
       chunkHash: hash("e")
     },
-    executionConnectorVersion: "arsenkin-positions@1.0.0",
+    executionConnectorVersion: "arsenkin-positions@2.0.0",
     providerPolicyVersion: "manual-arsenkin-positions@1.0.0",
     keywords: [
       {

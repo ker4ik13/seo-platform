@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import { useState, type FormEvent } from "react";
 import {
   browserApiRequest,
@@ -200,7 +202,7 @@ export function AuthForm({
         <>
           <label className="form-field">
             <span>Страна</span>
-            <select defaultValue="" name="country">
+            <CustomSelect defaultValue="" name="country">
               <option value="">Не выбрана</option>
               <option value="RU">Россия</option>
               <option value="KZ">Казахстан</option>
@@ -208,7 +210,7 @@ export function AuthForm({
               <option value="GB">Великобритания</option>
               <option value="DE">Германия</option>
               <option value="AE">ОАЭ</option>
-            </select>
+            </CustomSelect>
           </label>
           <label className="checkbox-field">
             <input name="termsAccepted" required type="checkbox" />

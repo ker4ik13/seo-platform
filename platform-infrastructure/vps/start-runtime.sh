@@ -20,6 +20,7 @@ for build_artifact in \
   platform-jobs-integrations/dist/main.js \
   platform-jobs-integrations/dist/inspection-worker.main.js \
   platform-realtime/dist/main.js \
+  platform-realtime/dist/web-push-worker.main.js \
   platform-web/.next/BUILD_ID
 do
   [ -f "$project_root/$build_artifact" ] ||
@@ -102,6 +103,13 @@ start_window realtime
 wait_for_http http://127.0.0.1:4003/health/ready
 start_window platform-api
 wait_for_http http://127.0.0.1:4000/health/ready
+if [ "${YOOKASSA_ENABLED:-false}" = true ]; then
+  start_window billing-webhook-proxy
+fi
+
+if [ "${WEB_PUSH_DELIVERY_ENABLED:-false}" = true ]; then
+  start_window web-push-worker
+fi
 
 for worker in \
   system-worker \

@@ -52,7 +52,7 @@ test("lists the bounded active validation for the current credential material", 
       kind: INTEGRATION_CREDENTIAL_VALIDATION_INPUT_KIND,
       credentialId,
       credentialMaterialVersion: 3,
-      connectorVersion: "xmlstock@1.0.0"
+      connectorVersion: "xmlstock@1.1.0"
     }
   });
   let validationQuery: unknown;
@@ -129,6 +129,77 @@ test("does not query validation jobs for an empty credential list", async () => 
   assert.equal(validationQueries, 0);
 });
 
+test("projects only a normalized provider quota without exposing provider metadata", async () => {
+  const crypto = testCrypto();
+  const credential = credentialRecord(crypto, createInput, {
+    provider: "ARSENKIN",
+    providerMeta: {
+      limitsTotal: 12_345,
+      nestedSecret: "must-not-cross-boundary"
+    },
+    lastSuccessAt: new Date("2026-08-02T12:00:00.000Z")
+  });
+  const prisma = {
+    integrationCredential: { findMany: async () => [credential] },
+    job: { findMany: async () => [] }
+  } as unknown as PrismaService;
+
+  const result = await new IntegrationCredentialService(
+    prisma,
+    crypto
+  ).list(workspaceId);
+
+  assert.deepEqual(result[0]?.quota, {
+    status: "AVAILABLE",
+    unit: "ARSENKIN_LIMITS",
+    remaining: 12_345,
+    observedAt: "2026-08-02T12:00:00.000Z"
+  });
+  assert.equal(JSON.stringify(result).includes("nestedSecret"), false);
+  assert.equal(JSON.stringify(result).includes("providerMeta"), false);
+});
+
+test("projects XMLStock request quota, balance and usage without raw metadata", async () => {
+  const crypto = testCrypto();
+  const credential = credentialRecord(crypto, createInput, {
+    provider: "XMLSTOCK",
+    providerMeta: {
+      account: {
+        requestLimit: 900,
+        frozenRequestLimit: 20,
+        usedToday: 7,
+        usedMonth: 81,
+        balance: "27.39",
+        frozenBalance: "1.50",
+        tariffDaysRemaining: 12,
+        rawAccountSecret: "must-not-cross-boundary"
+      }
+    },
+    lastSuccessAt: new Date("2026-08-04T12:00:00.000Z")
+  });
+  const prisma = {
+    integrationCredential: { findMany: async () => [credential] },
+    job: { findMany: async () => [] }
+  } as unknown as PrismaService;
+
+  const result = await new IntegrationCredentialService(prisma, crypto).list(
+    workspaceId
+  );
+
+  assert.deepEqual(result[0]?.quota, {
+    status: "AVAILABLE",
+    unit: "XMLSTOCK_REQUESTS",
+    remaining: 900,
+    balance: { amount: "27.39", frozenAmount: "1.50", currency: "RUB" },
+    frozenRemaining: 20,
+    usedToday: 7,
+    usedMonth: 81,
+    tariffDaysRemaining: 12,
+    observedAt: "2026-08-04T12:00:00.000Z"
+  });
+  assert.equal(JSON.stringify(result).includes("rawAccountSecret"), false);
+});
+
 test("fails closed for an active validation projection from another material version", async () => {
   const crypto = testCrypto();
   const credential = credentialRecord(crypto, createInput, {
@@ -150,7 +221,7 @@ test("fails closed for an active validation projection from another material ver
             kind: INTEGRATION_CREDENTIAL_VALIDATION_INPUT_KIND,
             credentialId,
             credentialMaterialVersion: 2,
-            connectorVersion: "xmlstock@1.0.0"
+            connectorVersion: "xmlstock@1.1.0"
           }
         })
       ]
@@ -571,7 +642,7 @@ function validationJobRecord(overrides: Partial<Job> = {}): Job {
       kind: INTEGRATION_CREDENTIAL_VALIDATION_INPUT_KIND,
       credentialId,
       credentialMaterialVersion: 1,
-      connectorVersion: "xmlstock@1.0.0"
+      connectorVersion: "xmlstock@1.1.0"
     },
     scopeSnapshot: { workspaceId, credentialId },
     progressCurrent: 0n,

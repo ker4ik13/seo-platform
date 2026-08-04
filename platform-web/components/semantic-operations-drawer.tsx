@@ -1,34 +1,55 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   FrequencyCollectionSummary,
   RankJobSummary
 } from "@seo-platform/contracts";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
+import {
+  connectorRoutingScopeLabel,
+  hasConnectorFallback
+} from "../lib/connector-routing-presentation";
+import { OperationResultModal } from "./operation-result-modal";
+import { ProviderLogo } from "./provider-logo";
 
 type OperationTab = "ACTIVE" | "COMPLETED" | "ERROR";
 
 export function SemanticOperationsDrawer({
   onClose,
+  onFrequencySettled,
   projectId,
-  refreshToken = 0
+  refreshToken = 0,
+  watchedFrequencyId
 }: Readonly<{
   onClose: () => void;
+  onFrequencySettled?: () => void;
   projectId: string;
   refreshToken?: number;
+  watchedFrequencyId?: string;
 }>) {
   const [frequencies, setFrequencies] = useState<readonly FrequencyCollectionSummary[]>([]);
   const [ranks, setRanks] = useState<readonly RankJobSummary[]>([]);
   const [tab, setTab] = useState<OperationTab>("ACTIVE");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
+  const [updatedAt, setUpdatedAt] = useState<Date>();
   const [cancellingId, setCancellingId] = useState<string>();
   const [retryingId, setRetryingId] = useState<string>();
+  const [selectedOperation, setSelectedOperation] = useState<Operation>();
+  const settledFrequencyNotifications = useRef(new Set<string>());
+  const onFrequencySettledRef = useRef(onFrequencySettled);
+  const requestInFlight = useRef(false);
+
+  useEffect(() => {
+    onFrequencySettledRef.current = onFrequencySettled;
+  }, [onFrequencySettled]);
 
   const load = useCallback(async (signal?: AbortSignal) => {
+    if (requestInFlight.current) return;
+    requestInFlight.current = true;
     try {
-      const [frequencyResult, rankResult] = await Promise.all([
+      const [frequencyResult, rankResult] = await Promise.allSettled([
         browserApiRequest<{ readonly collections: readonly FrequencyCollectionSummary[] }>(
           `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections`,
           signal ? { signal } : {}
@@ -39,42 +60,73 @@ export function SemanticOperationsDrawer({
         )
       ]);
       if (signal?.aborted) return;
-      setFrequencies(frequencyResult.collections);
-      setRanks(rankResult.jobs);
-      setError(undefined);
+      if (frequencyResult.status === "fulfilled") {
+        setFrequencies(frequencyResult.value.collections);
+        const watched = frequencyResult.value.collections.find(
+          ({ id }) => id === watchedFrequencyId
+        );
+        if (
+          watched &&
+          isTerminalFrequency(watched.status) &&
+          !settledFrequencyNotifications.current.has(watched.id)
+        ) {
+          settledFrequencyNotifications.current.add(watched.id);
+          onFrequencySettledRef.current?.();
+        }
+      }
+      if (rankResult.status === "fulfilled") {
+        setRanks(rankResult.value.jobs);
+      }
+      if (
+        frequencyResult.status === "fulfilled" ||
+        rankResult.status === "fulfilled"
+      ) {
+        setUpdatedAt(new Date());
+      }
+      const failures = [frequencyResult, rankResult]
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => operationError(result.reason));
+      setError(failures.length > 0 ? [...new Set(failures)].join(" · ") : undefined);
     } catch (requestError) {
       if (!signal?.aborted) setError(operationError(requestError));
     } finally {
       if (!signal?.aborted) setLoading(false);
+      requestInFlight.current = false;
     }
-  }, [projectId]);
+  }, [projectId, watchedFrequencyId]);
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
     void load(controller.signal);
-    const timer = window.setInterval(() => void load(controller.signal), 4_000);
+    const timer = window.setInterval(() => void load(controller.signal), 2_000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void load(controller.signal);
+    };
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("online", refreshWhenVisible);
     return () => {
       controller.abort();
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("online", refreshWhenVisible);
     };
   }, [load, refreshToken]);
 
   const operations = useMemo(() => {
     const values: Operation[] = [
-      ...frequencies.map((value) => frequencyOperation(value, projectId)),
-      ...ranks.map((value) => rankOperation(value, projectId))
+      ...frequencies.map(frequencyOperation),
+      ...ranks.map(rankOperation)
     ];
     return values
       .filter((operation) => operation.tab === tab)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-  }, [frequencies, projectId, ranks, tab]);
+  }, [frequencies, ranks, tab]);
 
   const counts = useMemo(() => ({
-    ACTIVE: [...frequencies.map((value) => frequencyOperation(value, projectId)), ...ranks.map((value) => rankOperation(value, projectId))].filter(({ tab }) => tab === "ACTIVE").length,
-    COMPLETED: [...frequencies.map((value) => frequencyOperation(value, projectId)), ...ranks.map((value) => rankOperation(value, projectId))].filter(({ tab }) => tab === "COMPLETED").length,
-    ERROR: [...frequencies.map((value) => frequencyOperation(value, projectId)), ...ranks.map((value) => rankOperation(value, projectId))].filter(({ tab }) => tab === "ERROR").length
-  }), [frequencies, projectId, ranks]);
+    ACTIVE: [...frequencies.map(frequencyOperation), ...ranks.map(rankOperation)].filter(({ tab }) => tab === "ACTIVE").length,
+    COMPLETED: [...frequencies.map(frequencyOperation), ...ranks.map(rankOperation)].filter(({ tab }) => tab === "COMPLETED").length,
+    ERROR: [...frequencies.map(frequencyOperation), ...ranks.map(rankOperation)].filter(({ tab }) => tab === "ERROR").length
+  }), [frequencies, ranks]);
 
   async function cancel(operation: Operation): Promise<void> {
     setCancellingId(operation.id);
@@ -118,9 +170,11 @@ export function SemanticOperationsDrawer({
   }
 
   return (
+    <>
     <aside aria-label="Задачи и операции" className="semantic-operations-drawer">
       <header>
         <div><span>Фоновые процессы</span><h2>Задачи и операции</h2></div>
+        <span className="semantic-live-status" title={updatedAt ? `Обновлено ${formatDateTime(updatedAt.toISOString())}` : "Подключение"}><i /> Онлайн</span>
         <button aria-label="Закрыть операции" onClick={onClose} type="button">×</button>
       </header>
       <div className="semantic-operation-tabs" role="tablist">
@@ -130,39 +184,68 @@ export function SemanticOperationsDrawer({
           </button>
         ))}
       </div>
-      {error && <div className="inline-alert danger" role="alert">{error}</div>}
-      {loading ? (
-        <div className="semantic-dialog-loading" role="status">Загружаем журнал операций…</div>
-      ) : operations.length > 0 ? operations.map((operation) => (
-        <article key={`${operation.kind}:${operation.id}`}>
-          <header><strong>{operation.title}</strong><span>{operation.statusLabel}</span></header>
-          <div className="semantic-operation-progress"><i style={{ width: `${operation.percent}%` }} /></div>
-          <div><span>{operation.progressLabel}</span><time>{formatDateTime(operation.createdAt)}</time></div>
-          {operation.errorCode && <small>Код: {operation.errorCode}</small>}
-          <footer>
-            {operation.retryable && (
-              <button className="semantic-operation-retry" disabled={retryingId === operation.id} onClick={() => void retry(operation)} type="button">
-                {retryingId === operation.id ? "Перезапускаем…" : "Повторить ошибки"}
+      <div className="semantic-operation-list">
+        {error && <div className="inline-alert danger" role="alert">{error}</div>}
+        {loading ? (
+          <div className="semantic-dialog-loading" role="status">Загружаем журнал операций…</div>
+        ) : operations.length > 0 ? operations.map((operation) => (
+          <article key={`${operation.kind}:${operation.id}`}>
+            <header>
+              <strong className="provider-inline">
+                <ProviderLogo provider={operation.provider} size="compact" />
+                <span>{operation.title}</span>
+              </strong>
+              <span className="semantic-operation-status">{operation.statusLabel}</span>
+            </header>
+            <div className="semantic-operation-progress"><i style={{ width: `${operation.percent}%` }} /></div>
+            <div className="semantic-operation-meta"><span>{operation.progressLabel}</span><time>{formatDateTime(operation.createdAt)}</time></div>
+            {operation.routeLabel && <small>{operation.routeLabel}</small>}
+            {operation.errorCode && <small>Код: {operation.errorCode}</small>}
+            <footer>
+              <div>
+                {operation.retryable && (
+                  <button className="semantic-operation-retry" disabled={retryingId === operation.id} onClick={() => void retry(operation)} type="button">
+                    {retryingId === operation.id ? "Перезапускаем…" : "Повторить ошибки"}
+                  </button>
+                )}
+                {operation.cancellable && (
+                  <button disabled={cancellingId === operation.id} onClick={() => void cancel(operation)} type="button">
+                    {cancellingId === operation.id ? "Останавливаем…" : "Остановить"}
+                  </button>
+                )}
+              </div>
+              <button
+                className="semantic-operation-open"
+                onClick={() => setSelectedOperation(operation)}
+                type="button"
+              >
+                Открыть результат
               </button>
-            )}
-            {operation.cancellable && (
-              <button disabled={cancellingId === operation.id} onClick={() => void cancel(operation)} type="button">
-                {cancellingId === operation.id ? "Останавливаем…" : "Остановить"}
-              </button>
-            )}
-            <a href={operation.href}>{operation.kind === "RANK" ? "Открыть позиции" : "Открыть семантику"}</a>
-          </footer>
-        </article>
-      )) : (
-        <div className="semantic-inspector-empty"><strong>В этом разделе задач нет</strong><span>История хранится на сервере и появится после первого запуска.</span></div>
-      )}
+            </footer>
+          </article>
+        )) : (
+          <div className="semantic-inspector-empty semantic-operation-empty"><strong>В этом разделе задач нет</strong><span>История хранится на сервере и появится после первого запуска.</span></div>
+        )}
+      </div>
     </aside>
+    {selectedOperation && (
+      <OperationResultModal
+        description={`${selectedOperation.provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools"} · ${formatDateTime(selectedOperation.createdAt)}`}
+        kind={selectedOperation.kind === "FREQUENCY" ? "frequency" : "rank"}
+        onClose={() => setSelectedOperation(undefined)}
+        operationId={selectedOperation.id}
+        projectId={projectId}
+        title={selectedOperation.kind === "FREQUENCY" ? "Сбор частотности" : "Проверка позиций"}
+      />
+    )}
+    </>
   );
 }
 
 interface Operation {
   readonly id: string;
   readonly kind: "FREQUENCY" | "RANK";
+  readonly provider: "XMLSTOCK" | "ARSENKIN";
   readonly title: string;
   readonly statusLabel: string;
   readonly progressLabel: string;
@@ -172,15 +255,16 @@ interface Operation {
   readonly retryable: boolean;
   readonly version: number;
   readonly errorCode?: string;
+  readonly routeLabel?: string;
   readonly createdAt: string;
-  readonly href: string;
 }
 
-function frequencyOperation(value: FrequencyCollectionSummary, projectId: string): Operation {
+function frequencyOperation(value: FrequencyCollectionSummary): Operation {
   const done = value.completedKeywords + value.failedKeywords;
   return {
     id: value.id,
     kind: "FREQUENCY",
+    provider: value.provider,
     title: `Частотность · ${value.types.map(frequencyTypeLabel).join(" + ")}`,
     statusLabel: frequencyStatus(value.status),
     progressLabel: `${done} из ${value.selectedKeywords}`,
@@ -189,19 +273,25 @@ function frequencyOperation(value: FrequencyCollectionSummary, projectId: string
     cancellable: ["QUEUED", "RUNNING", "WAITING_RATE_LIMIT", "RETRY_SCHEDULED", "FAILED_RETRYABLE"].includes(value.status),
     retryable: ["FAILED_FINAL", "PARTIALLY_COMPLETED", "ACTION_REQUIRED"].includes(value.status),
     version: value.version,
+    ...(value.routingScope
+      ? {
+          routeLabel: `${connectorRoutingScopeLabel(value.routingScope)}${hasConnectorFallback(value.connectorAttempts) ? " · fallback выполнен" : ""}`
+        }
+      : {}),
     ...(value.failureCode ? { errorCode: value.failureCode } : {}),
-    createdAt: value.createdAt,
-    href: `/app/semantics?projectId=${encodeURIComponent(projectId)}`
+    createdAt: value.createdAt
   };
 }
 
-function rankOperation(value: RankJobSummary, projectId: string): Operation {
+function rankOperation(value: RankJobSummary): Operation {
   const current = Number(value.progress.current);
   const total = Number(value.progress.total);
+  const providerName = value.provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin";
   return {
     id: value.id,
     kind: "RANK",
-    title: "Проверка позиций · Arsenkin",
+    provider: value.provider,
+    title: `Проверка позиций · ${providerName}`,
     statusLabel: frequencyStatus(value.status),
     progressLabel: `${current} из ${total}`,
     percent: total > 0 ? Math.round(current / total * 100) : 0,
@@ -209,11 +299,15 @@ function rankOperation(value: RankJobSummary, projectId: string): Operation {
     cancellable: ["PREPARING", "QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(value.status),
     retryable: false,
     version: 1,
+    ...(value.routingScope
+      ? {
+          routeLabel: `${connectorRoutingScopeLabel(value.routingScope)}${hasConnectorFallback(value.connectorAttempts) ? " · fallback выполнен" : ""}`
+        }
+      : {}),
     ...(value.status === "FAILED" || value.status === "ACTION_REQUIRED"
       ? { errorCode: value.failure.code }
       : {}),
-    createdAt: value.createdAt,
-    href: `/app/projects/${encodeURIComponent(projectId)}/rankings`
+    createdAt: value.createdAt
   };
 }
 
@@ -234,8 +328,18 @@ function frequencyStatus(status: string): string {
   return labels[status] ?? status;
 }
 
+function isTerminalFrequency(status: string): boolean {
+  return [
+    "ACTION_REQUIRED",
+    "CANCELLED",
+    "PARTIALLY_COMPLETED",
+    "COMPLETED",
+    "FAILED_FINAL"
+  ].includes(status);
+}
+
 function frequencyTypeLabel(type: string): string {
-  return { BASE: "базовая", EXACT: "фразовая", FIXED: "точная" }[type] ?? type;
+  return { BASE: "без операторов", EXACT: '""', FIXED: '"!"' }[type] ?? type;
 }
 
 function tabLabel(value: OperationTab): string {

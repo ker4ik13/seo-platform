@@ -1,6 +1,14 @@
-import { Injectable, UnprocessableEntityException } from "@nestjs/common";
+import {
+  Injectable,
+  Optional,
+  UnprocessableEntityException
+} from "@nestjs/common";
 import type { IntegrationProvider } from "@seo-platform/contracts";
 import { ArsenkinCredentialValidationConnector } from "./arsenkin-credential-validation.connector.js";
+import {
+  ArsenkinHttpRateLimiter,
+  type ArsenkinHttpRateLimitGate
+} from "./arsenkin-http-rate-limiter.js";
 import type {
   CredentialValidationResult,
   IntegrationCredentialValidationConnector
@@ -17,10 +25,14 @@ export class IntegrationCredentialConnectorRegistry {
     IntegrationCredentialValidationConnector
   >;
 
-  public constructor() {
+  public constructor(
+    @Optional() rateLimiter?: ArsenkinHttpRateLimiter
+  ) {
     const connectors: readonly IntegrationCredentialValidationConnector[] = [
       new XmlStockCredentialValidationConnector(),
-      new ArsenkinCredentialValidationConnector(),
+      new ArsenkinCredentialValidationConnector(
+        rateLimiter ?? ARSENKIN_VALIDATION_DISABLED_GATE
+      ),
       new KeysSoCredentialValidationConnector()
     ];
     this.connectors = new Map(
@@ -54,6 +66,15 @@ export class IntegrationCredentialConnectorRegistry {
     return connector;
   }
 }
+
+// The HTTP management process uses this registry only for connector versions.
+// If validation is accidentally invoked outside connector-worker, fail closed
+// before any provider request instead of bypassing the shared rate limiter.
+const ARSENKIN_VALIDATION_DISABLED_GATE: ArsenkinHttpRateLimitGate = {
+  async tryAcquire() {
+    return { allowed: false, retryAfterSeconds: 3_600 };
+  }
+};
 
 function validationUnavailable(): UnprocessableEntityException {
   return new UnprocessableEntityException(

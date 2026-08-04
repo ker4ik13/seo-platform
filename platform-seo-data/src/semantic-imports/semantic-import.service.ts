@@ -33,6 +33,10 @@ import {
   lockStoredKeywordCapacity
 } from "../internal/semantic-capacity.js";
 import { normalizePageUrl } from "../pages/page-url.js";
+import { ensureKeywordSystemGroupIds } from "../keyword-groups/semantic-system-groups.js";
+
+const SEMANTIC_IMPORT_TRANSACTION_MAX_WAIT_MS = 5_000;
+const SEMANTIC_IMPORT_TRANSACTION_TIMEOUT_MS = 120_000;
 
 @Injectable()
 export class SemanticImportService {
@@ -123,6 +127,9 @@ export class SemanticImportService {
           keywordsPerProjectLimit: BigInt(
             input.entitlement.keywordsPerProject
           ),
+          foldersPerProjectLimit: BigInt(
+            input.entitlement.foldersPerProject
+          ),
           reservedKeywords: expectedNewKeywords
         }
       });
@@ -133,7 +140,7 @@ export class SemanticImportService {
   public async applyChunk(
     input: InternalApplySemanticImportChunkInput
   ): Promise<InternalSemanticImportChunkResult> {
-    if (payloadHash(input.rows) !== input.payloadHash) {
+    if (payloadHash(input.rows, input.groupPaths) !== input.payloadHash) {
       throw new BadRequestException("Semantic import payload hash mismatch");
     }
     const receipt = await this.requiredReceipt(input);
@@ -165,6 +172,11 @@ export class SemanticImportService {
       await transaction.$executeRaw`
         SELECT pg_advisory_xact_lock(
           hashtextextended(${`semantic-keyword-write:${input.projectId}`}, 0)
+        )
+      `;
+      await transaction.$executeRaw`
+        SELECT pg_advisory_xact_lock(
+          hashtextextended(${`semantic-group-tree:${input.projectId}`}, 0)
         )
       `;
       const concurrentChunk =
@@ -208,6 +220,38 @@ export class SemanticImportService {
           keyword
         ])
       );
+      const trashedKeywordIds = new Set(
+        existingKeywords.length === 0
+          ? []
+          : (
+              await transaction.keywordGroupMembership.findMany({
+                where: {
+                  projectId: input.projectId,
+                  keywordId: { in: existingKeywords.map(({ id }) => id) },
+                  group: {
+                    workspaceId: input.workspaceId,
+                    projectId: input.projectId,
+                    status: "ACTIVE",
+                    systemKind: "TRASH"
+                  }
+                },
+                select: { keywordId: true }
+              })
+            ).map(({ keywordId }) => keywordId)
+      );
+      const trashedDuplicateCandidates = input.rows.flatMap((row) => {
+        const keyword = existingByKey.get(
+          keywordKey(row.language, row.normalizedHash)
+        );
+        return keyword && trashedKeywordIds.has(keyword.id)
+          ? [{
+              keywordId: keyword.id,
+              version: keyword.version,
+              text: row.textOriginal,
+              language: row.language
+            }]
+          : [];
+      });
       const newRows = input.rows.filter(
         (row) =>
           !existingByKey.has(
@@ -235,7 +279,13 @@ export class SemanticImportService {
           ? newRows
           : input.rows;
       const pages = await ensurePages(transaction, input, rowsToApply);
-      const groups = await ensureGroups(transaction, input, rowsToApply);
+      const groups = await ensureGroups(
+        transaction,
+        input,
+        rowsToApply,
+        input.groupPaths ?? [],
+        receiptEntitlement(transactionReceipt).foldersPerProject
+      );
       const tags = await ensureTags(transaction, input, rowsToApply);
       const customColumns = await ensureCustomColumns(
         transaction,
@@ -251,6 +301,11 @@ export class SemanticImportService {
             textNormalized: row.textNormalized,
             normalizedHash: row.normalizedHash,
             language: row.language,
+            ...(row.priority === undefined ? {} : { priority: row.priority }),
+            ...(row.isFavorite === undefined
+              ? {}
+              : { isFavorite: row.isFavorite }),
+            ...(row.intent === undefined ? {} : { intent: row.intent }),
             ...(row.targetUrl &&
             pages.ids.get(normalizePageUrl(row.targetUrl, "targetUrl").hash)
               ? {
@@ -301,6 +356,10 @@ export class SemanticImportService {
           throw new Error("Imported keyword was not persisted");
         }
         if (createdKeys.has(key)) continue;
+        if (trashedKeywordIds.has(keyword.id)) {
+          skippedKeywordIds.add(keyword.id);
+          continue;
+        }
         if (input.duplicatePolicy === "SKIP_EXISTING") {
           skippedKeywordIds.add(keyword.id);
           continue;
@@ -355,7 +414,7 @@ export class SemanticImportService {
         )!;
         if (
           input.duplicatePolicy === "OVERWRITE_MAPPED" &&
-          row.groupPath?.length
+          (row.groupPath?.length || row.groupPaths?.length)
         ) {
           overwrittenWithGroup.add(keyword.id);
         }
@@ -377,22 +436,18 @@ export class SemanticImportService {
         });
       }
       const memberships = processedRows.flatMap((row) => {
-        if (!row.groupPath?.length) return [];
-        const groupId = groups.ids.get(groupPathKey(row.groupPath));
         const keyword = keywordByKey.get(
           keywordKey(row.language, row.normalizedHash)
         );
-        return keyword &&
-          groupId &&
-          !keywordsWithExistingGroup.has(keyword.id)
-          ? [
-              {
-                projectId: input.projectId,
-                keywordId: keyword.id,
-                groupId
-              }
-            ]
-          : [];
+        if (!keyword || keywordsWithExistingGroup.has(keyword.id)) return [];
+        const groupPaths = row.groupPaths ??
+          (row.groupPath ? [row.groupPath] : []);
+        return groupPaths.flatMap((path) => {
+          const groupId = groups.ids.get(groupPathKey(path));
+          return groupId
+            ? [{ projectId: input.projectId, keywordId: keyword.id, groupId }]
+            : [];
+        });
       });
       if (memberships.length > 0) {
         await transaction.keywordGroupMembership.createMany({
@@ -400,6 +455,11 @@ export class SemanticImportService {
           skipDuplicates: true
         });
       }
+      await ensureKeywordSystemGroupIds(
+        transaction,
+        input.workspaceId,
+        input.projectId
+      );
       const keywordTags = processedRows.flatMap((row) => {
         const keyword = keywordByKey.get(
           keywordKey(row.language, row.normalizedHash)
@@ -453,6 +513,12 @@ export class SemanticImportService {
           data: metricSnapshots
         });
       }
+      await applyImportedCurrentRanks(
+        transaction,
+        input,
+        processedRows,
+        keywordByKey
+      );
       const createdKeywordCount = input.rows.filter((row) =>
         createdKeys.has(keywordKey(row.language, row.normalizedHash))
       ).length;
@@ -480,10 +546,14 @@ export class SemanticImportService {
           createdGroups: groups.created,
           createdPages: pages.created,
           createdTags: tags.created,
-          createdMetricSnapshots: metricSnapshots.length
+          createdMetricSnapshots: metricSnapshots.length,
+          trashedDuplicateCandidates: json(trashedDuplicateCandidates)
         }
       });
       return chunkSummary(chunk);
+    }, {
+      maxWait: SEMANTIC_IMPORT_TRANSACTION_MAX_WAIT_MS,
+      timeout: SEMANTIC_IMPORT_TRANSACTION_TIMEOUT_MS
     });
   }
 
@@ -526,6 +596,19 @@ export class SemanticImportService {
           createdMetricSnapshots: true
         }
       });
+      const chunkCandidates = await transaction.semanticImportChunkReceipt.findMany({
+        where: { importId: input.importId },
+        orderBy: { chunkIndex: "asc" },
+        select: { trashedDuplicateCandidates: true }
+      });
+      const trashedDuplicateCandidates = chunkCandidates
+        .flatMap(({ trashedDuplicateCandidates }) =>
+          semanticImportTrashCandidates(trashedDuplicateCandidates)
+        )
+        .filter(
+          (candidate, index, values) =>
+            values.findIndex(({ keywordId }) => keywordId === candidate.keywordId) === index
+        );
       if (
         (!input.partial &&
           (chunks._count._all !== receipt.expectedChunks ||
@@ -587,7 +670,14 @@ export class SemanticImportService {
         createdTags: String(chunks._sum.createdTags ?? 0),
         createdMetricSnapshots: String(
           chunks._sum.createdMetricSnapshots ?? 0
-        )
+        ),
+        ...(trashedDuplicateCandidates.length > 0
+          ? {
+              trashedDuplicateCandidates: trashedDuplicateCandidates.slice(0, 2_000),
+              trashedDuplicateCandidatesTruncated:
+                trashedDuplicateCandidates.length > 2_000
+            }
+          : {})
       };
       await transaction.semanticImportReceipt.update({
         where: { importId: input.importId },
@@ -605,10 +695,10 @@ export class SemanticImportService {
           aggregateId: version.id,
           workspaceId: input.workspaceId,
           projectId: input.projectId,
-          payload: {
+          payload: json({
             importId: input.importId,
             ...result
-          },
+          }),
           metadata: {
             producer: "seo-data",
             source: "semantic-import"
@@ -888,16 +978,30 @@ async function ensurePages(
 async function ensureGroups(
   transaction: Prisma.TransactionClient,
   input: InternalApplySemanticImportChunkInput,
-  rows: readonly SemanticImportPublishRow[]
+  rows: readonly SemanticImportPublishRow[],
+  sourceGroupPaths: readonly (readonly string[])[],
+  foldersPerProjectLimit: number
 ): Promise<EnsuredEntities> {
   const paths = new Map<
     string,
     { readonly segments: readonly string[]; readonly hash: string }
   >();
   for (const row of rows) {
-    if (!row.groupPath?.length) continue;
-    for (let depth = 1; depth <= row.groupPath.length; depth += 1) {
-      const segments = row.groupPath.slice(0, depth).map(normalizeGroupName);
+    const rowGroupPaths = row.groupPaths ??
+      (row.groupPath ? [row.groupPath] : []);
+    for (const groupPath of rowGroupPaths) {
+      for (let depth = 1; depth <= groupPath.length; depth += 1) {
+        const segments = groupPath.slice(0, depth).map(normalizeGroupName);
+        paths.set(groupPathKey(segments), {
+          segments,
+          hash: groupPathHash(segments)
+        });
+      }
+    }
+  }
+  for (const groupPath of sourceGroupPaths) {
+    for (let depth = 1; depth <= groupPath.length; depth += 1) {
+      const segments = groupPath.slice(0, depth).map(normalizeGroupName);
       paths.set(groupPathKey(segments), {
         segments,
         hash: groupPathHash(segments)
@@ -907,6 +1011,44 @@ async function ensureGroups(
   const ordered = [...paths.values()].sort(
     (left, right) => left.segments.length - right.segments.length
   );
+  if (foldersPerProjectLimit > 0 && ordered.length > 0) {
+    const [activeGroups, existingPaths] = await Promise.all([
+      transaction.keywordGroup.count({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "ACTIVE",
+          systemKind: null
+        }
+      }),
+      transaction.keywordGroup.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "ACTIVE",
+          systemKind: null,
+          pathHash: { in: ordered.map(({ hash }) => hash) }
+        },
+        select: { pathHash: true }
+      })
+    ]);
+    const existingHashes = new Set(
+      existingPaths.map(({ pathHash }) => pathHash)
+    );
+    const newGroupCount = ordered.filter(
+      ({ hash }) => !existingHashes.has(hash)
+    ).length;
+    if (activeGroups + newGroupCount > foldersPerProjectLimit) {
+      throw new ConflictException({
+        code: "QUOTA_EXCEEDED",
+        message: "Project folder limit exceeded",
+        resource: "semantic_folders",
+        current: activeGroups,
+        requested: newGroupCount,
+        limit: foldersPerProjectLimit
+      });
+    }
+  }
   const ids = new Map<string, string>();
   let created = 0;
   for (const path of ordered) {
@@ -917,9 +1059,26 @@ async function ensureGroups(
           pathHash: path.hash
         }
       },
-      select: { id: true }
+      select: { id: true, status: true, systemKind: true }
     });
     if (existing) {
+      if (existing.status !== "ACTIVE" || existing.systemKind !== null) {
+        const parentSegments = path.segments.slice(0, -1);
+        await transaction.keywordGroup.update({
+          where: { id: existing.id },
+          data: {
+            status: "ACTIVE",
+            systemKind: null,
+            name: path.segments.at(-1)!,
+            path: path.segments.join(" / "),
+            ...(parentSegments.length > 0 &&
+            ids.get(groupPathKey(parentSegments))
+              ? { parentId: ids.get(groupPathKey(parentSegments))! }
+              : { parentId: null })
+          }
+        });
+        created += 1;
+      }
       ids.set(groupPathKey(path.segments), existing.id);
       continue;
     }
@@ -1012,11 +1171,37 @@ function keywordUpdate(
     ...(policy === "OVERWRITE_MAPPED"
       ? {
           textOriginal: row.textOriginal,
+          ...(row.priority === undefined ? {} : { priority: row.priority }),
+          ...(row.isFavorite === undefined
+            ? {}
+            : { isFavorite: row.isFavorite }),
+          ...(row.intent === undefined ? {} : { intent: row.intent }),
           ...(targetPageId ? { targetPageId } : {})
         }
       : keyword.targetPageId || !targetPageId
-        ? {}
-        : { targetPageId }),
+        ? {
+            ...(keyword.priority === 0 && row.priority !== undefined
+              ? { priority: row.priority }
+              : {}),
+            ...(!keyword.isFavorite && row.isFavorite !== undefined
+              ? { isFavorite: row.isFavorite }
+              : {}),
+            ...(keyword.intent === null && row.intent !== undefined
+              ? { intent: row.intent }
+              : {})
+          }
+        : {
+            targetPageId,
+            ...(keyword.priority === 0 && row.priority !== undefined
+              ? { priority: row.priority }
+              : {}),
+            ...(!keyword.isFavorite && row.isFavorite !== undefined
+              ? { isFavorite: row.isFavorite }
+              : {}),
+            ...(keyword.intent === null && row.intent !== undefined
+              ? { intent: row.intent }
+              : {})
+          }),
     customValues: json(customValues),
     sourceMode: "IMPORT",
     sourceId: importId,
@@ -1090,12 +1275,459 @@ function keywordKey(language: string, normalizedHash: string): string {
   return `${language}\u0000${normalizedHash}`;
 }
 
-function payloadHash(rows: readonly SemanticImportPublishRow[]): string {
-  return sha256(JSON.stringify(rows));
+async function applyImportedCurrentRanks(
+  transaction: Prisma.TransactionClient,
+  input: Pick<
+    InternalApplySemanticImportChunkInput,
+    "workspaceId" | "projectId" | "actorId" | "importId" | "chunkIndex"
+  >,
+  rows: readonly SemanticImportPublishRow[],
+  keywordByKey: ReadonlyMap<string, Keyword>
+): Promise<void> {
+  const engines = [
+    ...new Set(
+      rows.flatMap((row) =>
+        (row.positions ?? []).map(({ searchEngine }) => searchEngine)
+      )
+    )
+  ];
+  if (engines.length === 0) return;
+
+  const importedAt = new Date();
+  for (const engine of engines) {
+    const context = await ensureImportedRankContext(
+      transaction,
+      input,
+      engine
+    );
+    const byKeyword = new Map<
+      string,
+      {
+        readonly keyword: Keyword;
+        readonly found: boolean;
+        readonly position: number | null;
+        readonly rankingUrl: string | null;
+        readonly normalizedRankingUrl: string | null;
+      }
+    >();
+    for (const row of rows) {
+      const keyword = keywordByKey.get(
+        keywordKey(row.language, row.normalizedHash)
+      );
+      const position = (row.positions ?? []).find(
+        (candidate) => candidate.searchEngine === engine
+      );
+      if (!keyword || !position) continue;
+      const rankingUrl = position.rankingUrl ?? null;
+      byKeyword.set(keyword.id, {
+        keyword,
+        found: position.found,
+        position: position.position ?? null,
+        rankingUrl,
+        normalizedRankingUrl: rankingUrl
+          ? normalizePageUrl(rankingUrl, "rankingUrl").normalized
+          : null
+      });
+    }
+    const candidates = [...byKeyword.values()];
+    if (candidates.length === 0) continue;
+    await persistImportedRankSnapshot(
+      transaction,
+      input,
+      engine,
+      context,
+      candidates,
+      importedAt
+    );
+  }
+}
+
+interface ImportedRankContext {
+  readonly id: string;
+  readonly version: number;
+  readonly configurationVersion: number;
+  readonly configurationHash: string;
+}
+
+interface ImportedRankCandidate {
+  readonly keyword: Keyword;
+  readonly found: boolean;
+  readonly position: number | null;
+  readonly rankingUrl: string | null;
+  readonly normalizedRankingUrl: string | null;
+}
+
+async function persistImportedRankSnapshot(
+  transaction: Prisma.TransactionClient,
+  input: Pick<
+    InternalApplySemanticImportChunkInput,
+    "workspaceId" | "projectId" | "actorId" | "importId" | "chunkIndex"
+  >,
+  engine: "YANDEX" | "GOOGLE",
+  context: ImportedRankContext,
+  candidates: readonly ImportedRankCandidate[],
+  importedAt: Date
+): Promise<void> {
+  const keywordIds = candidates.map(({ keyword }) => keyword.id);
+  const existingAssignments =
+    await transaction.trackingContextKeywordAssignment.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        contextId: context.id,
+        keywordId: { in: keywordIds },
+        removedAt: null
+      },
+      select: { id: true, keywordId: true }
+    });
+  const assignedKeywordIds = new Set(
+    existingAssignments.map(({ keywordId }) => keywordId)
+  );
+  const missingAssignments = keywordIds.filter(
+    (keywordId) => !assignedKeywordIds.has(keywordId)
+  );
+  if (missingAssignments.length > 0) {
+    await transaction.trackingContextKeywordAssignment.createMany({
+      data: missingAssignments.map((keywordId) => ({
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        contextId: context.id,
+        keywordId,
+        assignedBy: input.actorId
+      }))
+    });
+    await transaction.keyword.updateMany({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        id: { in: missingAssignments }
+      },
+      data: { isTracked: true }
+    });
+  }
+  const assignments =
+    await transaction.trackingContextKeywordAssignment.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        contextId: context.id,
+        keywordId: { in: keywordIds },
+        removedAt: null
+      },
+      select: { id: true, keywordId: true },
+      orderBy: { assignedAt: "asc" }
+    });
+  const assignmentByKeyword = new Map(
+    assignments.map((assignment) => [assignment.keywordId, assignment.id])
+  );
+  if (assignmentByKeyword.size !== candidates.length) {
+    throw new Error("Unable to assign imported rank keywords");
+  }
+
+  const identity = `${input.importId}:${input.chunkIndex}:${engine}`;
+  const manifestId = deterministicUuid(`kc4-manifest:${identity}`);
+  const jobId = deterministicUuid(`kc4-job:${identity}`);
+  const jobItemId = deterministicUuid(`kc4-job-item:${identity}`);
+  const estimateId = deterministicUuid(`kc4-estimate:${identity}`);
+  const chunkHash = sha256Bytes(`kc4-chunk:${identity}`);
+  const providerRequestId = `kc4-import-${identity}`;
+  const connectorVersion = "key-collector@import";
+  const entries = candidates.map(({ keyword }, sequence) => ({
+    id: deterministicUuid(`kc4-entry:${identity}:${keyword.id}`),
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    manifestId,
+    chunkIndex: 0,
+    sequence,
+    assignmentId: assignmentByKeyword.get(keyword.id)!,
+    keywordId: keyword.id,
+    keywordVersion: keyword.version,
+    keywordText: keyword.textOriginal,
+    keywordTextHash: sha256Bytes(keyword.textOriginal),
+    language: keyword.language
+  }));
+  await transaction.rankExecutionManifest.create({
+    data: {
+      id: manifestId,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      jobId,
+      estimateId,
+      sealedBy: input.actorId,
+      requestHash: sha256Bytes(`kc4-request:${identity}`),
+      provider: "KEY_COLLECTOR",
+      operation: "POSITIONS",
+      projectDomain: "key-collector-import.invalid",
+      projectStatus: "ACTIVE",
+      projectVersion: 1,
+      trackingContextId: context.id,
+      contextVersion: context.version,
+      configurationVersion: context.configurationVersion,
+      configurationHash: Buffer.from(context.configurationHash, "hex"),
+      semanticScopeHash: sha256Bytes(`kc4-semantic-scope:${identity}`),
+      scopeHash: sha256Bytes(`kc4-scope:${identity}`),
+      hashSchemaVersion: "rank-manifest@1",
+      manifestHash: sha256Bytes(`kc4-manifest-hash:${identity}`),
+      deduplicationHash: sha256Bytes(`kc4-deduplication:${identity}`),
+      pairCount: candidates.length,
+      chunkCount: 1,
+      chunkSize: candidates.length,
+      execution: json({ source: "KC4", searchEngine: engine }),
+      retention: json({
+        normalizedRankHistory: "LONG_TERM",
+        rawSerp: "NOT_COLLECTED"
+      }),
+      status: "BUILDING",
+      sealedAt: importedAt,
+      estimateExpiresAt: new Date(importedAt.getTime() + 86_400_000)
+    }
+  });
+  await transaction.rankExecutionManifestChunk.create({
+    data: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      manifestId,
+      chunkIndex: 0,
+      hashSchemaVersion: "rank-manifest-chunk@1",
+      chunkHash,
+      entryCount: entries.length
+    }
+  });
+  await transaction.rankExecutionManifestEntry.createMany({ data: entries });
+  await transaction.rankExecutionManifest.update({
+    where: { id: manifestId },
+    data: { status: "SEALED" }
+  });
+
+  const dataQualityFlags = json(["IMPORTED_KC4"]);
+  const snapshots = candidates.map((candidate, sequence) => ({
+    id: deterministicUuid(
+      `kc4-snapshot:${identity}:${candidate.keyword.id}`
+    ),
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    keywordId: candidate.keyword.id,
+    trackingContextId: context.id,
+    configurationVersion: context.configurationVersion,
+    manifestId,
+    manifestEntryId: entries[sequence]!.id,
+    chunkIndex: 0,
+    sequence,
+    jobId,
+    jobItemId,
+    observedAt: importedAt,
+    found: candidate.found,
+    position: candidate.position,
+    rankingUrl: candidate.rankingUrl,
+    normalizedRankingUrl: candidate.normalizedRankingUrl,
+    resultType: candidate.found ? "ORGANIC" : null,
+    serpFeatures: json([]),
+    dataQualityFlags,
+    provider: "KEY_COLLECTOR",
+    sourceMode: "IMPORT" as const,
+    providerRequestId,
+    connectorVersion
+  }));
+  await transaction.rankSnapshot.createMany({ data: snapshots });
+
+  const currentRanks = await transaction.currentRank.findMany({
+    where: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      trackingContextId: context.id,
+      keywordId: { in: keywordIds }
+    }
+  });
+  const currentByKeyword = new Map(
+    currentRanks.map((current) => [current.keywordId, current])
+  );
+  let currentUpdatedCount = 0;
+  for (const snapshot of snapshots) {
+    const current = currentByKeyword.get(snapshot.keywordId);
+    if (current && current.observedAt >= importedAt) continue;
+    const where = {
+      workspaceId_projectId_keywordId_trackingContextId: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        keywordId: snapshot.keywordId,
+        trackingContextId: context.id
+      }
+    } as const;
+    const values = {
+      configurationVersion: context.configurationVersion,
+      observedAt: importedAt,
+      snapshotId: snapshot.id,
+      found: snapshot.found,
+      position: snapshot.position,
+      rankingUrl: snapshot.rankingUrl,
+      normalizedRankingUrl: snapshot.normalizedRankingUrl,
+      provider: "KEY_COLLECTOR",
+      sourceMode: "IMPORT" as const,
+      dataQualityFlags,
+      updatedAt: importedAt
+    };
+    if (current) {
+      await transaction.currentRank.update({
+        where,
+        data: {
+          ...values,
+          previousPosition: current.position,
+          version: { increment: 1 }
+        }
+      });
+    } else {
+      await transaction.currentRank.create({
+        data: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          keywordId: snapshot.keywordId,
+          trackingContextId: context.id,
+          previousPosition: null,
+          ...values
+        }
+      });
+    }
+    currentUpdatedCount += 1;
+  }
+  await transaction.rankChunkIngestReceipt.create({
+    data: {
+      manifestId,
+      chunkIndex: 0,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      jobId,
+      jobItemId,
+      ingestedBy: input.actorId,
+      schemaVersion: "rank-ingest@1",
+      ingestEnvelopeHash: sha256Bytes(`kc4-ingest:${identity}`),
+      manifestChunkHash: chunkHash,
+      provider: "KEY_COLLECTOR",
+      operation: "POSITIONS",
+      providerRequestId,
+      connectorVersion,
+      observedAt: importedAt,
+      status: "APPLIED",
+      persistedCount: snapshots.length,
+      foundCount: snapshots.filter(({ found }) => found).length,
+      notFoundCount: snapshots.filter(({ found }) => !found).length,
+      currentUpdatedCount,
+      currentSkippedCount: snapshots.length - currentUpdatedCount,
+      appliedAt: importedAt
+    }
+  });
+}
+
+async function ensureImportedRankContext(
+  transaction: Prisma.TransactionClient,
+  input: Pick<
+    InternalApplySemanticImportChunkInput,
+    "workspaceId" | "projectId" | "actorId"
+  >,
+  searchEngine: "YANDEX" | "GOOGLE"
+): Promise<ImportedRankContext> {
+  const engineLabel = searchEngine === "YANDEX" ? "Яндекс" : "Google";
+  const name = `Импорт Key Collector · ${engineLabel}`;
+  const existing = await transaction.trackingContext.findFirst({
+    where: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      name,
+      status: "ACTIVE"
+    },
+    select: { id: true, version: true },
+    orderBy: { createdAt: "asc" }
+  });
+  if (existing) {
+    const configuration =
+      await transaction.trackingContextVersion.findFirst({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          contextId: existing.id,
+          searchEngine
+        },
+        orderBy: { configurationVersion: "desc" },
+        select: { configurationVersion: true, configurationHash: true }
+      });
+    if (!configuration) {
+      throw new Error("Imported rank context has no matching configuration");
+    }
+    return { id: existing.id, version: existing.version, ...configuration };
+  }
+
+  const context = await transaction.trackingContext.create({
+    data: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      name,
+      createdBy: input.actorId,
+      updatedBy: input.actorId
+    },
+    select: { id: true, version: true }
+  });
+  const configurationVersion = 1;
+  const configurationHash = sha256(
+    JSON.stringify({
+      source: "KC4",
+      searchEngine,
+      countryCode: "RU",
+      regionCode: "global",
+      language: "ru",
+      device: "DESKTOP",
+      depth: 100,
+      domainMatchMode: "ANY_PROJECT_MIRROR",
+      safeSearch: false
+    })
+  );
+  await transaction.trackingContextVersion.create({
+    data: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      contextId: context.id,
+      configurationVersion,
+      searchEngine,
+      countryCode: "RU",
+      regionCode: "global",
+      regionLabel: "Импорт Key Collector",
+      language: "ru",
+      device: "DESKTOP",
+      depth: 100,
+      domainMatchMode: "ANY_PROJECT_MIRROR",
+      safeSearch: false,
+      configurationHash,
+      createdBy: input.actorId
+    }
+  });
+  return { ...context, configurationVersion, configurationHash };
+}
+
+function payloadHash(
+  rows: readonly SemanticImportPublishRow[],
+  groupPaths?: readonly (readonly string[])[]
+): string {
+  return sha256(JSON.stringify(groupPaths ? { groupPaths, rows } : rows));
 }
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function sha256Bytes(value: string): Uint8Array<ArrayBuffer> {
+  return Uint8Array.from(Buffer.from(sha256(value), "hex"));
+}
+
+function deterministicUuid(value: string): string {
+  const hash = sha256(value).slice(0, 32).split("");
+  hash[12] = "5";
+  hash[16] = ((Number.parseInt(hash[16]!, 16) & 0x3) | 0x8).toString(16);
+  const hex = hash.join("");
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20)
+  ].join("-");
 }
 
 function json(value: unknown): Prisma.InputJsonValue {
@@ -1128,7 +1760,9 @@ function assertReceiptCommand(
     receipt.storedKeywordsLimit !==
       BigInt(input.entitlement.storedKeywords) ||
     receipt.keywordsPerProjectLimit !==
-      BigInt(input.entitlement.keywordsPerProject)
+      BigInt(input.entitlement.keywordsPerProject) ||
+    receipt.foldersPerProjectLimit !==
+      BigInt(input.entitlement.foldersPerProject)
   ) {
     throw new ConflictException(
       "Semantic import receipt already exists with another command"
@@ -1150,9 +1784,22 @@ function receiptEntitlement(
       receipt.keywordsPerProjectLimit,
       "keywordsPerProjectLimit"
     ),
+    foldersPerProject: safeNonNegativeCapacityNumber(
+      receipt.foldersPerProjectLimit,
+      "foldersPerProjectLimit"
+    ),
     // This snapshot is only used for keyword-capacity enforcement.
     trackedContextPairs: 1
   };
+}
+
+function safeNonNegativeCapacityNumber(value: bigint, field: string): number {
+  if (value < 0n) {
+    throw new Error(`Stored ${field} is invalid`);
+  }
+  return value > BigInt(Number.MAX_SAFE_INTEGER)
+    ? Number.MAX_SAFE_INTEGER
+    : Number(value);
 }
 
 function safeCapacityNumber(value: bigint, field: string): number {
@@ -1215,7 +1862,10 @@ function chunkSummary(
     createdGroups: chunk.createdGroups.toString(),
     createdPages: chunk.createdPages.toString(),
     createdTags: chunk.createdTags.toString(),
-    createdMetricSnapshots: chunk.createdMetricSnapshots.toString()
+    createdMetricSnapshots: chunk.createdMetricSnapshots.toString(),
+    trashedDuplicateCandidates: semanticImportTrashCandidates(
+      chunk.trashedDuplicateCandidates
+    )
   };
 }
 
@@ -1237,9 +1887,46 @@ function resultSummary(value: unknown): SemanticImportResultSummary | undefined 
   if (
     stringFields.some((field) => typeof record[field] !== "string") ||
     typeof record.partial !== "boolean" ||
-    !Number.isSafeInteger(record.semanticVersionNumber)
+    !Number.isSafeInteger(record.semanticVersionNumber) ||
+    (record.trashedDuplicateCandidates !== undefined &&
+      !Array.isArray(record.trashedDuplicateCandidates)) ||
+    (record.trashedDuplicateCandidatesTruncated !== undefined &&
+      typeof record.trashedDuplicateCandidatesTruncated !== "boolean")
   ) {
     return undefined;
   }
   return value as unknown as SemanticImportResultSummary;
+}
+
+function semanticImportTrashCandidates(value: unknown): Array<{
+  readonly keywordId: string;
+  readonly version: number;
+  readonly text: string;
+  readonly language: string;
+}> {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      Array.isArray(candidate)
+    ) return [];
+    const row = candidate as Readonly<Record<string, unknown>>;
+    return typeof row.keywordId === "string" &&
+      Number.isSafeInteger(row.version) &&
+      Number(row.version) > 0 &&
+      typeof row.text === "string" &&
+      row.text.length > 0 &&
+      row.text.length <= 2_000 &&
+      typeof row.language === "string" &&
+      row.language.length > 0 &&
+      row.language.length <= 16
+      ? [{
+          keywordId: row.keywordId,
+          version: Number(row.version),
+          text: row.text,
+          language: row.language
+        }]
+      : [];
+  });
 }

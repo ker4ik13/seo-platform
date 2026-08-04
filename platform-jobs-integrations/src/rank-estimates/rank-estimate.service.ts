@@ -10,7 +10,13 @@ import {
   ServiceUnavailableException
 } from "@nestjs/common";
 import {
+  currentRankProviderPolicyVersion,
+  legacyRankProviderPolicyVersion,
   rankEstimateBlockerCodes,
+  rankManifestSingleTaskChunkSize,
+  rankProviderKeywordLimit,
+  rankProviderOverflowCount,
+  xmlStockRankProviderPolicyVersion,
   type InternalCreateRankEstimateInput,
   type InternalRankExecutionParameters,
   type InternalRankEstimateScope,
@@ -26,8 +32,15 @@ import type {
   RankEstimate as StoredRankEstimate
 } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
-import { ARSENKIN_CREDENTIAL_VALIDATION_CONNECTOR_VERSION } from "../integrations/integration-credential-connector-versions.js";
+import {
+  ARSENKIN_CREDENTIAL_VALIDATION_CONNECTOR_VERSION,
+  XMLSTOCK_CREDENTIAL_VALIDATION_CONNECTOR_VERSION
+} from "../integrations/integration-credential-connector-versions.js";
 import { safeIntegrationCredentialCapabilities } from "../integrations/integration-credential-capabilities.js";
+import {
+  WorkspaceConnectorRoutingService,
+  type ResolvedConnectorRoute
+} from "../integrations/workspace-connector-routing.service.js";
 import {
   INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE,
   integrationCredentialValidationDeduplicationKey,
@@ -49,10 +62,11 @@ import {
 } from "./rank-estimate-snapshot.js";
 
 export const RANK_ESTIMATE_POLICY_VERSION =
-  "manual-arsenkin-positions@1.0.0";
+  currentRankProviderPolicyVersion;
 export const RANK_ESTIMATE_TTL_MILLISECONDS = 5 * 60 * 1_000;
-export const RANK_ESTIMATE_KEYWORD_LIMIT = 1_000;
-export const RANK_ESTIMATE_KEYWORD_CHUNK = 250;
+export const RANK_ESTIMATE_KEYWORD_LIMIT = rankProviderKeywordLimit;
+export const RANK_ESTIMATE_KEYWORD_CHUNK =
+  rankManifestSingleTaskChunkSize;
 export const RANK_ESTIMATE_VALIDATION_FRESHNESS_MILLISECONDS =
   24 * 60 * 60 * 1_000;
 
@@ -71,7 +85,7 @@ const BINDING_SELECT = {
   version: true,
   routes: {
     orderBy: [{ position: "asc" as const }, { id: "asc" as const }],
-    take: 2,
+    take: 8,
     select: {
       id: true,
       workspaceId: true,
@@ -120,10 +134,12 @@ export type EstimateTransaction = Prisma.TransactionClient;
 
 export interface ExecutionProjection {
   readonly binding?: BindingProjection;
+  readonly route?: BindingProjection["routes"][number];
   readonly validation?: ValidationProjection;
 }
 
 export interface CredentialSnapshot {
+  readonly provider?: "ARSENKIN" | "XMLSTOCK";
   readonly bindingId?: string;
   readonly bindingVersion?: number;
   readonly routeId?: string;
@@ -143,7 +159,8 @@ export interface CredentialSnapshot {
 export class RankEstimateService {
   public constructor(
     private readonly prisma: PrismaService,
-    private readonly seoData: SeoDataClient
+    private readonly seoData: SeoDataClient,
+    private readonly routing: WorkspaceConnectorRoutingService
   ) {}
 
   public async create(
@@ -159,6 +176,23 @@ export class RankEstimateService {
       requestHash
     );
     if (replay) return replay;
+
+    let resolvedRoute: ResolvedConnectorRoute | undefined;
+    try {
+      resolvedRoute = await this.routing.resolve(
+        input.workspaceId,
+        input.projectId,
+        "SERP_RANK_TRACKING",
+        input.actorId,
+        input.provider,
+        input.credentialId
+      );
+    } catch (error) {
+      // An estimate must still explain a missing/unavailable connector. Only
+      // the known routing-state conflict is converted into a blocked estimate;
+      // storage, validation and transport failures remain fail-closed.
+      if (!isConnectorNotReady(error)) throw error;
+    }
 
     const scope = await this.resolveScope(input);
     try {
@@ -181,7 +215,12 @@ export class RankEstimateService {
           const projection = await executionProjection(
             transaction,
             input.workspaceId,
-            input.projectId
+            input.projectId,
+            resolvedRoute?.provider === "ARSENKIN" ||
+              resolvedRoute?.provider === "XMLSTOCK"
+              ? resolvedRoute.provider
+              : input.provider,
+            resolvedRoute?.routeId
           );
           const [databaseClock] = await transaction.$queryRaw<
             readonly {
@@ -206,6 +245,8 @@ export class RankEstimateService {
             calculatedAt.getTime() + RANK_ESTIMATE_TTL_MILLISECONDS
           );
           const privateSnapshot = credentialSnapshot(projection);
+          const provider = rankProvider(projection, input.provider);
+          const providerPolicyVersion = rankProviderPolicyVersion(provider);
           const projectDomainHash = rankEstimateProjectDomainHash(
             input.project.domain
           );
@@ -213,17 +254,22 @@ export class RankEstimateService {
             input,
             scope,
             projectDomainHash,
-            privateSnapshot
+            privateSnapshot,
+            provider,
+            providerPolicyVersion
           );
           const execution = rankEstimateExecutionParameters(
-            scope.configuration
+            scope.configuration,
+            provider,
+            input.searchSource
           );
           const blockers = estimateBlockers(
             input,
             scope,
             projection,
             privateSnapshot,
-            calculatedAt
+            calculatedAt,
+            provider
           );
           const freshness = credentialFreshness(
             projection,
@@ -234,7 +280,11 @@ export class RankEstimateService {
           const providerTaskCount =
             keywordCount > RANK_ESTIMATE_KEYWORD_LIMIT
               ? 0
-              : Math.ceil(keywordCount / RANK_ESTIMATE_KEYWORD_CHUNK);
+              : keywordCount === 0
+                ? 0
+                : provider === "XMLSTOCK"
+                  ? keywordCount
+                  : 1;
           const estimate = publicEstimate({
             id: databaseClock.id,
             input,
@@ -243,6 +293,10 @@ export class RankEstimateService {
             blockers,
             freshness,
             providerTaskCount,
+            provider,
+            ...(resolvedRoute ? { resolvedRoute } : {}),
+            providerPolicyVersion,
+            ...(execution ? { execution } : {}),
             calculatedAt,
             expiresAt
           });
@@ -293,14 +347,20 @@ export class RankEstimateService {
               credentialValidationFinishedAt:
                 privateSnapshot.validationFinishedAt ?? null,
               credentialVerifiedAt: privateSnapshot.verifiedAt ?? null,
-              provider: "ARSENKIN",
+              provider,
               credentialMode: "BYOK_API_KEY",
-              providerPolicyVersion: RANK_ESTIMATE_POLICY_VERSION,
+              providerPolicyVersion,
               keywordCount,
               providerTaskCount,
-              minimumSubmitRequestCount: providerTaskCount,
-              minimumCheckRequestCount: providerTaskCount,
-              minimumGetRequestCount: providerTaskCount,
+              minimumSubmitRequestCount:
+                providerMinimumRequests(provider, execution, providerTaskCount)
+                  .submit,
+              minimumCheckRequestCount:
+                providerMinimumRequests(provider, execution, providerTaskCount)
+                  .check,
+              minimumGetRequestCount:
+                providerMinimumRequests(provider, execution, providerTaskCount)
+                  .get,
               blockers: blockersJson(blockers),
               responseSnapshot: rankEstimateSnapshotJson(estimate),
               executionSnapshot: execution
@@ -390,7 +450,10 @@ export function rankEstimateRequestHash(
       workspaceId: input.workspaceId,
       projectId: input.projectId,
       actorId: input.actorId,
-      trackingContextId: input.trackingContextId
+      trackingContextId: input.trackingContextId,
+      provider: input.provider ?? null,
+      credentialId: input.credentialId ?? null,
+      searchSource: input.searchSource ?? null
     })
   );
 }
@@ -399,10 +462,22 @@ export function rankEstimateProjectDomainHash(domain: string): Buffer {
   return hash(PROJECT_DOMAIN_HASH_DOMAIN, domain);
 }
 
+function isConnectorNotReady(error: unknown): boolean {
+  if (!(error instanceof ConflictException)) return false;
+  const response = error.getResponse();
+  return typeof response === "object" &&
+    response !== null &&
+    !Array.isArray(response) &&
+    (response as Readonly<Record<string, unknown>>).code ===
+      "CONNECTOR_NOT_READY";
+}
+
 export async function executionProjection(
   transaction: EstimateTransaction,
   workspaceId: string,
-  projectId: string
+  projectId: string,
+  requestedProvider?: "ARSENKIN" | "XMLSTOCK",
+  requestedRouteId?: string
 ): Promise<ExecutionProjection> {
   const binding = await transaction.projectConnectorBinding.findFirst({
     where: {
@@ -412,10 +487,22 @@ export async function executionProjection(
     },
     select: BINDING_SELECT
   });
-  if (!binding || binding.routes.length !== 1) {
+  if (!binding) {
     return binding ? { binding } : {};
   }
-  const route = binding.routes[0];
+  const matchingRoutes = requestedRouteId
+    ? binding.routes.filter(({ id }) => id === requestedRouteId)
+    : requestedProvider
+    ? binding.routes.filter(
+        ({ credential }) => credential.provider === requestedProvider
+      )
+    : binding.routes.filter(({ position }) => position === 0);
+  const primaryRoute = requestedRouteId
+    ? matchingRoutes[0]
+    : matchingRoutes.find(({ position }) => position === 0);
+  const route = primaryRoute ?? (
+    matchingRoutes.length === 1 ? matchingRoutes[0] : undefined
+  );
   if (!route) return { binding };
 
   const validation = await transaction.job.findFirst({
@@ -423,7 +510,7 @@ export async function executionProjection(
       workspaceId,
       type: INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE,
       status: "COMPLETED",
-      provider: "ARSENKIN",
+      provider: route.credential.provider,
       deduplicationKey:
         integrationCredentialValidationDeduplicationKey(
           route.credentialId,
@@ -435,6 +522,7 @@ export async function executionProjection(
   });
   return {
     binding,
+    route,
     ...(validation ? { validation } : {})
   };
 }
@@ -443,13 +531,17 @@ export function credentialSnapshot(
   projection: ExecutionProjection
 ): CredentialSnapshot {
   const binding = projection.binding;
-  const route = binding?.routes.length === 1 ? binding.routes[0] : undefined;
+  const route = projection.route;
   if (!binding || !route) {
     return binding
       ? { bindingId: binding.id, bindingVersion: binding.version }
       : {};
   }
   const base: CredentialSnapshot = {
+    ...(route.credential.provider === "ARSENKIN" ||
+    route.credential.provider === "XMLSTOCK"
+      ? { provider: route.credential.provider }
+      : {}),
     bindingId: binding.id,
     bindingVersion: binding.version,
     routeId: route.id,
@@ -468,6 +560,7 @@ export function credentialSnapshot(
     projection.validation,
     route.credential.workspaceId,
     route.credential.id,
+    route.credential.provider,
     route.credential.materialVersion,
     route.credential.verifiedAt,
     route.credential.lastSuccessAt
@@ -479,6 +572,7 @@ function currentValidationProof(
   validation: ValidationProjection | undefined,
   workspaceId: string,
   credentialId: string,
+  provider: string,
   materialVersion: number,
   verifiedAt: Date | null,
   lastSuccessAt: Date | null
@@ -492,7 +586,7 @@ function currentValidationProof(
   if (
     !validation ||
     validation.workspaceId !== workspaceId ||
-    validation.provider !== "ARSENKIN" ||
+    validation.provider !== provider ||
     validation.status !== "COMPLETED" ||
     !validation.finishedAt ||
     !verifiedAt ||
@@ -514,8 +608,7 @@ function currentValidationProof(
     if (
       input.credentialId !== credentialId ||
       input.credentialMaterialVersion !== materialVersion ||
-      input.connectorVersion !==
-        ARSENKIN_CREDENTIAL_VALIDATION_CONNECTOR_VERSION
+      input.connectorVersion !== validationConnectorVersion(provider)
     ) {
       return undefined;
     }
@@ -535,10 +628,7 @@ function credentialFreshness(
   snapshot: CredentialSnapshot,
   calculatedAt: Date
 ): RankEstimateCredentialFreshness {
-  const route =
-    projection.binding?.routes.length === 1
-      ? projection.binding.routes[0]
-      : undefined;
+  const route = projection.route;
   if (!route) return { status: "NOT_AVAILABLE" };
   if (
     !route.credential.deletedAt &&
@@ -576,7 +666,9 @@ function executionScopeHash(
   input: InternalCreateRankEstimateInput,
   scope: InternalRankEstimateScope,
   projectDomainHash: Buffer,
-  snapshot: CredentialSnapshot
+  snapshot: CredentialSnapshot,
+  provider: "ARSENKIN" | "XMLSTOCK",
+  providerPolicyVersion: string
 ): RankEstimateScopeHash {
   if (scope.semanticScopeHash.availability === "UNAVAILABLE") {
     return { availability: "UNAVAILABLE" };
@@ -608,9 +700,9 @@ function executionScopeHash(
       validationFinishedAt:
         snapshot.validationFinishedAt?.toISOString() ?? null,
       credentialVerifiedAt: snapshot.verifiedAt?.toISOString() ?? null,
-      provider: "ARSENKIN",
+      provider,
       credentialMode: "BYOK_API_KEY",
-      providerPolicyVersion: RANK_ESTIMATE_POLICY_VERSION
+      providerPolicyVersion
   });
 }
 
@@ -619,12 +711,15 @@ function estimateBlockers(
   scope: InternalRankEstimateScope,
   projection: ExecutionProjection,
   snapshot: CredentialSnapshot,
-  calculatedAt: Date
+  calculatedAt: Date,
+  provider: "ARSENKIN" | "XMLSTOCK"
 ): RankEstimateBlockerCode[] {
   const blockers = new Set<RankEstimateBlockerCode>();
   const keywordCount = Number(scope.keywordCount);
   const execution = rankEstimateExecutionParameters(
-    scope.configuration
+    scope.configuration,
+    provider,
+    input.searchSource
   );
   if (scope.contextStatus === "ARCHIVED") blockers.add("CONTEXT_ARCHIVED");
   if (keywordCount === 0) blockers.add("NO_ASSIGNED_KEYWORDS");
@@ -635,15 +730,22 @@ function estimateBlockers(
     blockers.add("SCOPE_HASH_UNAVAILABLE");
   }
   if (!execution) {
-    if (scope.configuration.searchEngine !== "GOOGLE") {
+    if (
+      !["GOOGLE", "YANDEX"].includes(scope.configuration.searchEngine)
+    ) {
       blockers.add("UNSUPPORTED_SEARCH_ENGINE");
     }
-    if (scope.configuration.depth !== 30) {
+    if (
+      ![30, 50, 100].includes(scope.configuration.depth) ||
+      (provider === "ARSENKIN" &&
+        scope.configuration.searchEngine === "YANDEX" &&
+        scope.configuration.depth !== 30)
+    ) {
       blockers.add("UNSUPPORTED_DEPTH");
     }
     if (
       !scope.configuration.regionCode ||
-      !/^[1-9]\d{0,9}$/u.test(scope.configuration.regionCode)
+      !/^\d{1,10}$/u.test(scope.configuration.regionCode)
     ) {
       blockers.add("REGION_MAPPING_UNVERIFIED");
     }
@@ -660,7 +762,7 @@ function estimateBlockers(
   }
 
   const binding = projection.binding;
-  const route = binding?.routes.length === 1 ? binding.routes[0] : undefined;
+  const route = projection.route;
   if (!binding) {
     blockers.add("BINDING_NOT_CONFIGURED");
   } else {
@@ -669,7 +771,8 @@ function estimateBlockers(
       blockers.add("BINDING_ROUTE_UNSUPPORTED");
     } else {
       if (
-        route.position !== 0 ||
+        !Number.isSafeInteger(route.position) ||
+        route.position < 0 ||
         route.sourceKind !== "WORKSPACE_CREDENTIAL" ||
         route.workspaceId !== input.workspaceId ||
         route.projectId !== input.projectId ||
@@ -679,7 +782,7 @@ function estimateBlockers(
       ) {
         blockers.add("BINDING_ROUTE_UNSUPPORTED");
       }
-      if (route.credential.provider !== "ARSENKIN") {
+      if (route.credential.provider !== provider) {
         blockers.add("CREDENTIAL_PROVIDER_MISMATCH");
       }
       if (route.credential.mode !== "BYOK_API_KEY") {
@@ -691,10 +794,12 @@ function estimateBlockers(
       ) {
         blockers.add("CREDENTIAL_NOT_ACTIVE");
       }
-      const provider = integrationProvider(route.credential.provider);
-      const capabilities = provider
+      const providerDefinition = integrationProvider(
+        route.credential.provider
+      );
+      const capabilities = providerDefinition
         ? safeIntegrationCredentialCapabilities(
-            provider,
+            providerDefinition,
             route.credential.capabilities
           )
         : [];
@@ -743,6 +848,10 @@ function publicEstimate(input: {
   readonly blockers: readonly RankEstimateBlockerCode[];
   readonly freshness: RankEstimateCredentialFreshness;
   readonly providerTaskCount: number;
+  readonly provider: "ARSENKIN" | "XMLSTOCK";
+  readonly resolvedRoute?: ResolvedConnectorRoute;
+  readonly providerPolicyVersion: string;
+  readonly execution?: InternalRankExecutionParameters;
   readonly calculatedAt: Date;
   readonly expiresAt: Date;
 }): RankEstimate {
@@ -753,7 +862,13 @@ function publicEstimate(input: {
     projectId: input.input.projectId,
     trackingContextId: input.input.trackingContextId,
     status: executionAllowed ? "READY" : "BLOCKED",
-    provider: "ARSENKIN",
+    provider: input.provider,
+    ...(input.resolvedRoute
+      ? {
+          routingScope: input.resolvedRoute.routingScope,
+          connectorAttempts: input.resolvedRoute.attempts
+        }
+      : {}),
     operation: "POSITIONS",
     credentialMode: "BYOK_API_KEY",
     scope: {
@@ -766,11 +881,23 @@ function publicEstimate(input: {
     },
     workload: {
       taskCount: String(input.providerTaskCount),
-      minimumRequestCount: String(input.providerTaskCount * 3),
+      minimumRequestCount: String(
+        providerMinimumRequestCount(
+          input.provider,
+          input.execution,
+          input.providerTaskCount
+        )
+      ),
       pollingRequestCount: { status: "NOT_AVAILABLE" },
-      requestStages: ["SET", "CHECK", "GET"],
-      keywordLimitPerTask: "250",
-      keywordLimitPerCommand: "1000",
+      requestStages:
+        input.provider === "ARSENKIN"
+          ? ["SET", "CHECK", "GET"]
+          : input.execution?.searchEngine === "YANDEX" &&
+              !input.execution.providerMappingVersion.includes("-live@")
+            ? ["SUBMIT", "POLL"]
+            : ["GET"],
+      keywordLimitPerTask: input.provider === "XMLSTOCK" ? "1" : "15000",
+      keywordLimitPerCommand: "15000",
       format: "SIMPLE",
       rawSerp: false,
       fallbackMode: "NONE"
@@ -787,7 +914,7 @@ function publicEstimate(input: {
     },
     blockers: input.blockers.map((code) => ({ code })),
     executionAllowed,
-    policyVersion: RANK_ESTIMATE_POLICY_VERSION,
+    policyVersion: input.providerPolicyVersion,
     calculatedAt: input.calculatedAt.toISOString(),
     expiresAt: input.expiresAt.toISOString()
   };
@@ -832,16 +959,23 @@ export function verifiedRankEstimate(
     snapshot.workspaceId !== stored.workspaceId ||
     snapshot.projectId !== stored.projectId ||
     snapshot.trackingContextId !== stored.trackingContextId ||
-    stored.provider !== "ARSENKIN" ||
+    (stored.provider !== "ARSENKIN" && stored.provider !== "XMLSTOCK") ||
+    snapshot.provider !== stored.provider ||
     stored.credentialMode !== "BYOK_API_KEY" ||
     stored.contextVersion !== snapshot.scope.contextVersion ||
     stored.configurationVersion !==
       snapshot.scope.configurationVersion ||
     stored.keywordCount !== Number(snapshot.scope.keywordCount) ||
     stored.providerTaskCount !== Number(snapshot.workload.taskCount) ||
-    stored.minimumSubmitRequestCount !== stored.providerTaskCount ||
-    stored.minimumCheckRequestCount !== stored.providerTaskCount ||
-    stored.minimumGetRequestCount !== stored.providerTaskCount ||
+    stored.minimumSubmitRequestCount !==
+      providerMinimumRequests(stored.provider, execution, stored.providerTaskCount)
+        .submit ||
+    stored.minimumCheckRequestCount !==
+      providerMinimumRequests(stored.provider, execution, stored.providerTaskCount)
+        .check ||
+    stored.minimumGetRequestCount !==
+      providerMinimumRequests(stored.provider, execution, stored.providerTaskCount)
+        .get ||
     !scopeHashesEqual(snapshot.scope.scopeHash, storedHash) ||
     !jsonEqual(stored.blockers, snapshot.blockers) ||
     !credentialFreshnessMatches(stored, snapshot) ||
@@ -861,10 +995,25 @@ export function verifiedRankEstimate(
 function storedExecutionScopeHash(
   stored: StoredRankEstimate
 ): RankEstimateScopeHash {
+  const policyBounds =
+    stored.providerPolicyVersion === legacyRankProviderPolicyVersion
+      ? { keywordLimit: 1_000, overflowCount: 1_001 }
+      : stored.providerPolicyVersion === currentRankProviderPolicyVersion
+        ? {
+            keywordLimit: RANK_ESTIMATE_KEYWORD_LIMIT,
+            overflowCount: rankProviderOverflowCount
+          }
+        : stored.providerPolicyVersion === xmlStockRankProviderPolicyVersion
+          ? {
+              keywordLimit: RANK_ESTIMATE_KEYWORD_LIMIT,
+              overflowCount: rankProviderOverflowCount
+            }
+          : undefined;
   if (
+    policyBounds === undefined ||
     !Number.isInteger(stored.keywordCount) ||
     stored.keywordCount < 0 ||
-    stored.keywordCount > 1_001
+    stored.keywordCount > policyBounds.overflowCount
   ) {
     throw new Error("Invalid immutable rank estimate keyword count");
   }
@@ -878,7 +1027,7 @@ function storedExecutionScopeHash(
     }
     return { availability: "UNAVAILABLE" };
   }
-  if (stored.keywordCount > RANK_ESTIMATE_KEYWORD_LIMIT) {
+  if (stored.keywordCount > policyBounds.keywordLimit) {
     throw new Error("Invalid immutable rank estimate scope hashes");
   }
   const projectDomainHash = bytes32(stored.projectDomainHash);
@@ -1074,6 +1223,63 @@ function blockersJson(
 
 function databaseBytes(value: Uint8Array): Uint8Array<ArrayBuffer> {
   return Uint8Array.from(value);
+}
+
+function rankProvider(
+  projection: ExecutionProjection,
+  requestedProvider?: "ARSENKIN" | "XMLSTOCK"
+): "ARSENKIN" | "XMLSTOCK" {
+  if (requestedProvider) return requestedProvider;
+  const candidate = projection.route?.credential.provider;
+  return candidate === "XMLSTOCK" ? "XMLSTOCK" : "ARSENKIN";
+}
+
+export function rankProviderPolicyVersion(
+  provider: "ARSENKIN" | "XMLSTOCK"
+): string {
+  return provider === "XMLSTOCK"
+    ? xmlStockRankProviderPolicyVersion
+    : RANK_ESTIMATE_POLICY_VERSION;
+}
+
+function validationConnectorVersion(provider: string): string | undefined {
+  if (provider === "ARSENKIN") {
+    return ARSENKIN_CREDENTIAL_VALIDATION_CONNECTOR_VERSION;
+  }
+  if (provider === "XMLSTOCK") {
+    return XMLSTOCK_CREDENTIAL_VALIDATION_CONNECTOR_VERSION;
+  }
+  return undefined;
+}
+
+function providerMinimumRequests(
+  provider: "ARSENKIN" | "XMLSTOCK",
+  execution: InternalRankExecutionParameters | undefined,
+  taskCount: number
+): { readonly submit: number; readonly check: number; readonly get: number } {
+  if (provider === "ARSENKIN") {
+    return { submit: taskCount, check: taskCount, get: taskCount };
+  }
+  if (
+    execution?.searchEngine === "YANDEX" &&
+    !execution.providerMappingVersion.includes("-live@")
+  ) {
+    return { submit: taskCount, check: taskCount, get: 0 };
+  }
+  return {
+    submit: 0,
+    check: 0,
+    get: taskCount * Math.ceil((execution?.depth ?? 100) / 10)
+  };
+}
+
+function providerMinimumRequestCount(
+  provider: "ARSENKIN" | "XMLSTOCK",
+  execution: InternalRankExecutionParameters | undefined,
+  taskCount: number
+): number {
+  const requests = providerMinimumRequests(provider, execution, taskCount);
+  return requests.submit + requests.check + requests.get;
 }
 
 function integrationProvider(value: string): IntegrationProvider | undefined {

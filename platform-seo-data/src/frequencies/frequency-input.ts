@@ -1,10 +1,16 @@
 import { BadRequestException } from "@nestjs/common";
 import {
+  frequencyCollectionProviders,
+  internalFrequencyPersistBatchLimit,
+  internalFrequencyResolveBatchLimit,
   semanticFrequencyTypes,
   semanticFrequencyDevices,
   semanticFrequencyQualityFlags,
+  type InternalPersistFrequencySnapshotBatchInput,
   type InternalPersistFrequencySnapshotsInput,
+  type InternalResolveFrequencyKeywordsInput,
   type InternalResolveFrequencyKeywordInput,
+  type InternalFrequencySnapshotValue,
   type SemanticFrequencyType
 } from "@seo-platform/contracts";
 
@@ -32,6 +38,35 @@ export function internalResolveFrequencyKeywordInput(
   };
 }
 
+export function internalResolveFrequencyKeywordsInput(
+  value: unknown
+): InternalResolveFrequencyKeywordsInput {
+  const input = record(value, ["workspaceId", "projectId", "actorId", "items"]);
+  if (
+    !Array.isArray(input.items) ||
+    input.items.length < 1 ||
+    input.items.length > internalFrequencyResolveBatchLimit
+  ) {
+    invalid("items");
+  }
+  const items = input.items.map((value, index) => {
+    const item = record(value, ["id", "version"]);
+    return {
+      id: uuid(item.id, `items.${index}.id`),
+      version: integer(item.version, `items.${index}.version`)
+    };
+  });
+  if (new Set(items.map((item) => item.id)).size !== items.length) {
+    invalid("items");
+  }
+  return {
+    workspaceId: uuid(input.workspaceId, "workspaceId"),
+    projectId: uuid(input.projectId, "projectId"),
+    actorId: uuid(input.actorId, "actorId"),
+    items
+  };
+}
+
 export function internalPersistFrequencySnapshotsInput(
   value: unknown
 ): InternalPersistFrequencySnapshotsInput {
@@ -45,10 +80,72 @@ export function internalPersistFrequencySnapshotsInput(
     "observedAt",
     "snapshots"
   ]);
-  if (!Array.isArray(input.snapshots) || input.snapshots.length < 1 || input.snapshots.length > 3) {
-    invalid("snapshots");
+  const snapshots = frequencySnapshotValues(input.snapshots, "snapshots");
+  return {
+    workspaceId: uuid(input.workspaceId, "workspaceId"),
+    projectId: uuid(input.projectId, "projectId"),
+    actorId: uuid(input.actorId, "actorId"),
+    jobId: uuid(input.jobId, "jobId"),
+    keywordId: uuid(input.keywordId, "keywordId"),
+    keywordVersion: integer(input.keywordVersion, "keywordVersion"),
+    observedAt: timestamp(input.observedAt),
+    snapshots
+  };
+}
+
+export function internalPersistFrequencySnapshotBatchInput(
+  value: unknown
+): InternalPersistFrequencySnapshotBatchInput {
+  const input = record(value, [
+    "workspaceId",
+    "projectId",
+    "actorId",
+    "jobId",
+    "observedAt",
+    "items"
+  ]);
+  if (
+    !Array.isArray(input.items) ||
+    input.items.length < 1 ||
+    input.items.length > internalFrequencyPersistBatchLimit
+  ) {
+    invalid("items");
   }
-  const snapshots = input.snapshots.map((value, index) => {
+  const items = input.items.map((value, index) => {
+    const item = record(value, ["keywordId", "keywordVersion", "snapshots"]);
+    return {
+      keywordId: uuid(item.keywordId, `items.${index}.keywordId`),
+      keywordVersion: integer(
+        item.keywordVersion,
+        `items.${index}.keywordVersion`
+      ),
+      snapshots: frequencySnapshotValues(
+        item.snapshots,
+        `items.${index}.snapshots`
+      )
+    };
+  });
+  if (new Set(items.map((item) => item.keywordId)).size !== items.length) {
+    invalid("items");
+  }
+  return {
+    workspaceId: uuid(input.workspaceId, "workspaceId"),
+    projectId: uuid(input.projectId, "projectId"),
+    actorId: uuid(input.actorId, "actorId"),
+    jobId: uuid(input.jobId, "jobId"),
+    observedAt: timestamp(input.observedAt),
+    items
+  };
+}
+
+function frequencySnapshotValues(
+  value: unknown,
+  field: string
+): readonly InternalFrequencySnapshotValue[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > semanticFrequencyTypes.length) {
+    invalid(field);
+  }
+  const snapshots = value.map((value, index) => {
     const snapshot = record(value, [
       "type",
       "regionCode",
@@ -62,24 +159,28 @@ export function internalPersistFrequencySnapshotsInput(
     if (
       typeof snapshot.type !== "string" ||
       !semanticFrequencyTypes.includes(snapshot.type as SemanticFrequencyType)
-    ) invalid(`snapshots.${index}.type`);
+    ) invalid(`${field}.${index}.type`);
     if (typeof snapshot.regionCode !== "string" || !REGION_PATTERN.test(snapshot.regionCode)) {
-      invalid(`snapshots.${index}.regionCode`);
+      invalid(`${field}.${index}.regionCode`);
     }
     if (
       typeof snapshot.device !== "string" ||
       !semanticFrequencyDevices.includes(snapshot.device as never)
-    ) invalid(`snapshots.${index}.device`);
+    ) invalid(`${field}.${index}.device`);
     if (
       snapshot.period !== undefined &&
       (typeof snapshot.period !== "string" ||
         !/^[0-9A-Za-z._:-]{1,32}$/u.test(snapshot.period))
-    ) invalid(`snapshots.${index}.period`);
+    ) invalid(`${field}.${index}.period`);
     if (typeof snapshot.value !== "string" || !DECIMAL_PATTERN.test(snapshot.value)) {
-      invalid(`snapshots.${index}.value`);
+      invalid(`${field}.${index}.value`);
     }
-    if (snapshot.provider !== "XMLSTOCK" || snapshot.sourceMode !== "BYOK") {
-      invalid(`snapshots.${index}.provider`);
+    if (
+      typeof snapshot.provider !== "string" ||
+      !frequencyCollectionProviders.includes(snapshot.provider as never) ||
+      snapshot.sourceMode !== "BYOK"
+    ) {
+      invalid(`${field}.${index}.provider`);
     }
     if (
       !Array.isArray(snapshot.qualityFlags) ||
@@ -90,31 +191,22 @@ export function internalPersistFrequencySnapshotsInput(
           !semanticFrequencyQualityFlags.includes(flag as never)
       ) ||
       new Set(snapshot.qualityFlags).size !== snapshot.qualityFlags.length
-    ) invalid(`snapshots.${index}.qualityFlags`);
+    ) invalid(`${field}.${index}.qualityFlags`);
     return {
       type: snapshot.type as SemanticFrequencyType,
       regionCode: snapshot.regionCode,
       device: snapshot.device as (typeof semanticFrequencyDevices)[number],
       ...(typeof snapshot.period === "string" ? { period: snapshot.period } : {}),
       value: snapshot.value,
-      provider: "XMLSTOCK" as const,
+      provider: snapshot.provider as (typeof frequencyCollectionProviders)[number],
       sourceMode: "BYOK" as const,
       qualityFlags: snapshot.qualityFlags as (typeof semanticFrequencyQualityFlags)[number][]
     };
   });
   if (new Set(snapshots.map(({ type, regionCode, device }) => `${type}:${regionCode}:${device}`)).size !== snapshots.length) {
-    invalid("snapshots");
+    invalid(field);
   }
-  return {
-    workspaceId: uuid(input.workspaceId, "workspaceId"),
-    projectId: uuid(input.projectId, "projectId"),
-    actorId: uuid(input.actorId, "actorId"),
-    jobId: uuid(input.jobId, "jobId"),
-    keywordId: uuid(input.keywordId, "keywordId"),
-    keywordVersion: integer(input.keywordVersion, "keywordVersion"),
-    observedAt: timestamp(input.observedAt),
-    snapshots
-  };
+  return snapshots;
 }
 
 function record(value: unknown, fields: readonly string[]): Readonly<Record<string, unknown>> {

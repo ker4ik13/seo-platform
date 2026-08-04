@@ -1,10 +1,16 @@
 import {
+  legacyRankManifestChunkSize,
+  legacyRankProviderKeywordLimit,
+  rankManifestSingleTaskChunkSize,
+  rankProviderKeywordLimit,
+  rankProviderOverflowCount,
   rankEstimateBlockerCodes,
   type CreateRankEstimateInput,
   type RankEstimate,
   type RankEstimateBlockerCode,
   type RankEstimateCredentialFreshness,
   type RankEstimateQuota,
+  type RankSearchSource,
   type RankEstimateScopeHash,
   type TrackingContextSummary
 } from "@seo-platform/contracts";
@@ -37,7 +43,7 @@ const blockerLabels: Readonly<
   NO_ASSIGNED_KEYWORDS:
     "В контекст не назначено ни одного запроса.",
   KEYWORD_LIMIT_EXCEEDED:
-    "В контексте более 1 000 запросов. Уменьшите scope перед запуском.",
+    "В запуске более 15 000 запросов. Уменьшите выбор перед запуском.",
   SCOPE_HASH_UNAVAILABLE:
     "Точный хеш состава запросов недоступен для переполненного scope.",
   UNSUPPORTED_SEARCH_ENGINE:
@@ -133,22 +139,41 @@ export function rankEstimatesApiPath(projectId: string): string {
 }
 
 export function rankEstimateInput(
-  trackingContextId: string
+  trackingContextId: string,
+  provider?: "ARSENKIN" | "XMLSTOCK",
+  credentialId?: string,
+  searchSource?: RankSearchSource
 ): CreateRankEstimateInput {
-  return { trackingContextId };
+  return {
+    trackingContextId,
+    ...(provider ? { provider } : {}),
+    ...(credentialId ? { credentialId } : {}),
+    ...(searchSource ? { searchSource } : {})
+  };
 }
 
 export function rankEstimatePayloadSignature(
-  trackingContextId: string
+  trackingContextId: string,
+  provider?: "ARSENKIN" | "XMLSTOCK",
+  credentialId?: string,
+  searchSource?: RankSearchSource
 ): string {
-  return JSON.stringify(rankEstimateInput(trackingContextId));
+  return JSON.stringify(
+    rankEstimateInput(trackingContextId, provider, credentialId, searchSource)
+  );
 }
 
 export function rankEstimateCommandSignature(
-  context: TrackingContextSummary
+  context: TrackingContextSummary,
+  provider?: "ARSENKIN" | "XMLSTOCK",
+  credentialId?: string,
+  searchSource?: RankSearchSource
 ): string {
   return `${rankEstimatePayloadSignature(
-    context.id
+    context.id,
+    provider,
+    credentialId,
+    searchSource
   )}:${rankEstimateContextSignature(context)}`;
 }
 
@@ -156,11 +181,14 @@ export function rankEstimateIdempotencyCommand(
   current: IdempotentCommand | undefined,
   context: TrackingContextSummary,
   explicitRecalculation: boolean,
-  createKey: () => string
+  createKey: () => string,
+  provider?: "ARSENKIN" | "XMLSTOCK",
+  credentialId?: string,
+  searchSource?: RankSearchSource
 ): IdempotentCommand {
   return stableIdempotencyCommand(
     explicitRecalculation ? undefined : current,
-    rankEstimateCommandSignature(context),
+    rankEstimateCommandSignature(context, provider, credentialId, searchSource),
     createKey
   );
 }
@@ -217,7 +245,9 @@ export function parseRankEstimate(
       ? estimate.status
       : undefined;
   const provider =
-    estimate.provider === "ARSENKIN" ? estimate.provider : undefined;
+    estimate.provider === "ARSENKIN" || estimate.provider === "XMLSTOCK"
+      ? estimate.provider
+      : undefined;
   const operation =
     estimate.operation === "POSITIONS" ? estimate.operation : undefined;
   const credentialMode =
@@ -225,8 +255,8 @@ export function parseRankEstimate(
       ? estimate.credentialMode
       : undefined;
   const scope = parseScope(estimate.scope);
-  const workload = scope
-    ? parseWorkload(estimate.workload, scope.keywordCount)
+  const workload = scope && provider
+    ? parseWorkload(estimate.workload, scope.keywordCount, provider)
     : undefined;
   const providerLimits = objectValue(estimate.providerLimits);
   const expectedDuration = objectValue(estimate.expectedDuration);
@@ -415,7 +445,10 @@ export function rankEstimateFeedback(
 }
 
 export function rankEstimateCountLabel(value: string): string {
-  if (value === "1001") return "более 1 000";
+  if (value === String(rankProviderOverflowCount)) return "более 15 000";
+  if (value === String(legacyRankProviderKeywordLimit + 1)) {
+    return "более 1 000";
+  }
   return formatDecimalInteger(value);
 }
 
@@ -494,7 +527,10 @@ function parseScope(value: unknown): RankEstimate["scope"] | undefined {
     !configurationVersion ||
     !scopeHash ||
     configurationVersion > contextVersion ||
-    (keywordCount === "1001") !==
+    ([
+      String(legacyRankProviderKeywordLimit + 1),
+      String(rankProviderOverflowCount)
+    ].includes(keywordCount)) !==
       (scopeHash.availability === "UNAVAILABLE")
   ) {
     return undefined;
@@ -511,7 +547,8 @@ function parseScope(value: unknown): RankEstimate["scope"] | undefined {
 
 function parseWorkload(
   value: unknown,
-  keywordCount: string
+  keywordCount: string,
+  provider: "ARSENKIN" | "XMLSTOCK"
 ): RankEstimate["workload"] | undefined {
   const workload = objectValue(value);
   const polling = objectValue(workload.pollingRequestCount);
@@ -524,21 +561,77 @@ function parseWorkload(
     ? BigInt(workload.minimumRequestCount)
     : undefined;
   const count = BigInt(keywordCount);
-  const expectedTaskCount =
-    count > 1000n ? 0n : (count + 249n) / 250n;
+  const legacyWorkload =
+    workload.keywordLimitPerTask === String(legacyRankManifestChunkSize) &&
+    workload.keywordLimitPerCommand === String(legacyRankProviderKeywordLimit);
+  const currentWorkload =
+    workload.keywordLimitPerTask === String(rankManifestSingleTaskChunkSize) &&
+    workload.keywordLimitPerCommand === String(rankProviderKeywordLimit);
+  const expectedTaskCount = legacyWorkload
+    ? count > BigInt(legacyRankProviderKeywordLimit)
+      ? 0n
+      : (count + BigInt(legacyRankManifestChunkSize - 1)) /
+        BigInt(legacyRankManifestChunkSize)
+    : currentWorkload
+      ? count > BigInt(rankProviderKeywordLimit)
+        ? 0n
+        : count === 0n
+          ? 0n
+          : 1n
+      : -1n;
+  const xmlStockWorkload =
+    workload.keywordLimitPerTask === "1" &&
+    workload.keywordLimitPerCommand === String(rankProviderKeywordLimit);
+  const xmlStockTasks = count > BigInt(rankProviderKeywordLimit) ? 0n : count;
+  const requestStages = workload.requestStages;
+  const arsenkinStages =
+    Array.isArray(requestStages) &&
+    requestStages.length === 3 &&
+    requestStages[0] === "SET" &&
+    requestStages[1] === "CHECK" &&
+    requestStages[2] === "GET";
+  const xmlStockYandexStages =
+    Array.isArray(requestStages) &&
+    requestStages.length === 2 &&
+    requestStages[0] === "SUBMIT" &&
+    requestStages[1] === "POLL";
+  const xmlStockGoogleStages =
+    Array.isArray(requestStages) &&
+    requestStages.length === 1 &&
+    requestStages[0] === "GET";
+  const xmlStockGooglePageCount =
+    xmlStockTasks === 0n
+      ? minimumRequestCount === 0n ? 0n : -1n
+      : minimumRequestCount !== undefined &&
+          minimumRequestCount % xmlStockTasks === 0n
+        ? minimumRequestCount / xmlStockTasks
+        : -1n;
+  const validArsenkin =
+    provider === "ARSENKIN" &&
+    (legacyWorkload || currentWorkload) &&
+    taskCount === expectedTaskCount &&
+    minimumRequestCount === expectedTaskCount * 3n &&
+    arsenkinStages;
+  const validXmlStock =
+    provider === "XMLSTOCK" &&
+    xmlStockWorkload &&
+    taskCount === xmlStockTasks &&
+    minimumRequestCount !== undefined &&
+    ((xmlStockYandexStages && minimumRequestCount === xmlStockTasks * 2n) ||
+      (xmlStockGoogleStages &&
+        (xmlStockTasks === 0n ||
+          [3n, 5n, 10n].includes(xmlStockGooglePageCount))));
+  const normalizedRequestStages: RankEstimate["workload"]["requestStages"] =
+    arsenkinStages
+      ? ["SET", "CHECK", "GET"]
+      : xmlStockYandexStages
+        ? ["SUBMIT", "POLL"]
+        : ["GET"];
   if (
     taskCount === undefined ||
     minimumRequestCount === undefined ||
-    taskCount !== expectedTaskCount ||
-    minimumRequestCount !== expectedTaskCount * 3n ||
+    (!validArsenkin && !validXmlStock) ||
     polling.status !== "NOT_AVAILABLE" ||
-    !Array.isArray(workload.requestStages) ||
-    workload.requestStages.length !== 3 ||
-    workload.requestStages[0] !== "SET" ||
-    workload.requestStages[1] !== "CHECK" ||
-    workload.requestStages[2] !== "GET" ||
-    workload.keywordLimitPerTask !== "250" ||
-    workload.keywordLimitPerCommand !== "1000" ||
     workload.format !== "SIMPLE" ||
     workload.rawSerp !== false ||
     workload.fallbackMode !== "NONE"
@@ -549,9 +642,14 @@ function parseWorkload(
     taskCount: taskCount.toString(),
     minimumRequestCount: minimumRequestCount.toString(),
     pollingRequestCount: { status: "NOT_AVAILABLE" },
-    requestStages: ["SET", "CHECK", "GET"],
-    keywordLimitPerTask: "250",
-    keywordLimitPerCommand: "1000",
+    requestStages: normalizedRequestStages,
+    keywordLimitPerTask: workload.keywordLimitPerTask as
+      | "1"
+      | "250"
+      | "15000",
+    keywordLimitPerCommand: workload.keywordLimitPerCommand as
+      | "1000"
+      | "15000",
     format: "SIMPLE",
     rawSerp: false,
     fallbackMode: "NONE"
@@ -646,7 +744,7 @@ function parseCredentialFreshness(
 function boundedScopeCount(value: unknown): string | undefined {
   if (!decimalInteger(value)) return undefined;
   const numeric = Number(value);
-  return numeric <= 1001 ? value : undefined;
+  return numeric <= rankProviderOverflowCount ? value : undefined;
 }
 
 function orderedUniqueBlockers(

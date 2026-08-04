@@ -3,6 +3,7 @@ export const supportedImportMediaTypes = [
   "text/tab-separated-values",
   "application/vnd.ms-excel",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.key-collector.project",
   "application/zip"
 ] as const;
 
@@ -17,6 +18,7 @@ export const importExtensionByMediaType: Readonly<
   "application/vnd.ms-excel": ".xls",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
     ".xlsx",
+  "application/vnd.key-collector.project": ".kc4",
   "application/zip": ".zip"
 };
 

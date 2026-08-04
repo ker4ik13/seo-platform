@@ -115,6 +115,16 @@ export function trackingContextDraftDirty(
   );
 }
 
+export function trackingContextMatchesDraft(
+  context: TrackingContextSummary,
+  draft: TrackingContextDraft
+): boolean {
+  return (
+    trackingContextPayloadSignature(trackingContextDraft(context)) ===
+    trackingContextPayloadSignature(draft)
+  );
+}
+
 export function validateTrackingContextDraft(
   draft: TrackingContextDraft
 ): TrackingContextDraftErrors {

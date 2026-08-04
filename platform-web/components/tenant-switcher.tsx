@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import { useEffect } from "react";
 
 import type {
@@ -49,7 +51,7 @@ export function TenantSwitcher({
     <div className="tenant-switcher">
       <label>
         <span>Рабочая область</span>
-        <select
+        <CustomSelect
           aria-label="Рабочая область"
           disabled={workspaces.length === 0}
           onChange={(event) => selectWorkspace(event.target.value)}
@@ -61,11 +63,11 @@ export function TenantSwitcher({
               {item.name}
             </option>
           ))}
-        </select>
+        </CustomSelect>
       </label>
       <label>
         <span>Проект</span>
-        <select
+        <CustomSelect
           aria-label="Проект"
           disabled={!workspace || projects.length === 0}
           onChange={(event) => selectProject(event.target.value)}
@@ -77,7 +79,7 @@ export function TenantSwitcher({
               {item.name}
             </option>
           ))}
-        </select>
+        </CustomSelect>
       </label>
     </div>
   );

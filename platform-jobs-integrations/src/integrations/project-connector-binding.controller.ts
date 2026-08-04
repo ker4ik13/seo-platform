@@ -23,6 +23,7 @@ import {
 } from "../internal/internal-command-context.js";
 import { IntegrationCredentialApiGuard } from "./integration-credential-api.guard.js";
 import {
+  internalInheritProjectConnectorBindingInput,
   internalCreateProjectConnectorBindingInput,
   internalUpdateProjectConnectorBindingInput
 } from "./project-connector-binding-input.js";
@@ -83,6 +84,28 @@ export class ProjectConnectorBindingController {
     return response(
       request,
       await this.bindings.update(
+        internalUuid(bindingId, "bindingId"),
+        input,
+        request.id
+      )
+    );
+  }
+
+  @Post(":bindingId/inherit")
+  public async inheritWorkspaceRoute(
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectId") projectId: string,
+    @Param("bindingId") bindingId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<ProjectConnectorBinding>> {
+    const context = projectContext(workspaceId, projectId, headers);
+    const input = internalInheritProjectConnectorBindingInput(body);
+    assertInternalContext(input, context);
+    return response(
+      request,
+      await this.bindings.inheritWorkspaceRoute(
         internalUuid(bindingId, "bindingId"),
         input,
         request.id

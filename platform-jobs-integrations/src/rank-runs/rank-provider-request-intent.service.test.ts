@@ -49,8 +49,8 @@ const ids = {
   secondKeywordId: "01900000-0000-7000-8000-000000000015"
 } as const;
 
-const providerPolicyVersion = "manual-arsenkin@1.0.0";
-const executionConnectorVersion = "arsenkin-positions@1.0.0";
+const providerPolicyVersion = "manual-arsenkin-positions@1.0.0";
+const executionConnectorVersion = "arsenkin-positions@2.0.0";
 const manifestHash = hash("d");
 
 test("validates one exact stored provider request intent replay", () => {
@@ -66,18 +66,13 @@ test("validates one exact stored provider request intent replay", () => {
 test("rejects tampered stored request, request hash and chunk hash", () => {
   const intent = requestIntent();
   const row = storedRow(intent);
-  const changedIntent = {
-    ...intent,
-    providerPolicyVersion: "manual-arsenkin@1.0.1"
-  } satisfies RankProviderRequestIntentV1;
   const candidates: readonly RankProviderRequestIntent[] = [
     {
       ...row,
-      requestSnapshot: jsonSnapshot(changedIntent),
-      requestHash: Buffer.from(
-        rankProviderRequestIntentHash(changedIntent).value,
-        "hex"
-      )
+      requestSnapshot: {
+        ...(row.requestSnapshot as Readonly<Record<string, unknown>>),
+        providerPolicyVersion: "manual-arsenkin-positions@1.0.1"
+      }
     },
     { ...row, requestHash: Buffer.alloc(32, 0xee) },
     { ...row, manifestChunkHash: Buffer.alloc(32, 0xff) }
@@ -125,7 +120,7 @@ test("rejects a graph change discovered by the second locked revalidation", asyn
   const fixture = serviceFixture({
     graphPolicyVersions: [
       providerPolicyVersion,
-      "manual-arsenkin@1.0.1"
+      "manual-arsenkin-positions@1.0.1"
     ]
   });
 
@@ -135,8 +130,7 @@ test("rejects a graph change discovered by the second locked revalidation", asyn
   );
   assert.deepEqual(fixture.events, [
     "first-locked-snapshot",
-    "get-chunk",
-    "second-locked-revalidation"
+    "get-chunk"
   ]);
   assert.equal(fixture.state.createCalls, 0);
 });

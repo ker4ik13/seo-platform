@@ -110,11 +110,15 @@ export class KeywordResearchController {
     const idempotencyKey = requiredIdempotencyKey(
       headerValue(request, "idempotency-key")
     );
-    await this.billing.semanticCapacity(tenant.workspaceId);
+    const [, jobCapacity] = await Promise.all([
+      this.billing.semanticCapacity(tenant.workspaceId),
+      this.billing.jobCapacity(tenant.workspaceId)
+    ]);
     const run = await this.jobs.createKeywordResearchRun(
       internalProjectContext(request, principal, tenant),
       createKeywordResearchRunInput(body),
-      idempotencyKey
+      idempotencyKey,
+      jobCapacity
     );
     await committed(
       this.audit,

@@ -187,11 +187,13 @@ keyword_id=$(jq -er '.data.id' "$response_body")
 api_call GET "workspaces/$workspace_id/integrations/catalog"
 expect_status 200 integration-catalog
 jq -e '
-  ([.data[].provider] | sort) == ["ARSENKIN", "KEYS_SO"] and
+  ([.data[].provider] | sort) == ["ARSENKIN", "KEYS_SO", "XMLSTOCK"] and
   ([.data[] | select(.provider == "ARSENKIN")][0].capabilities ==
-    ["SERP_RANK_TRACKING"]) and
+    ["SERP_RANK_TRACKING", "WORDSTAT"]) and
   ([.data[] | select(.provider == "KEYS_SO")][0].capabilities ==
-    ["KEYWORD_RESEARCH", "COMPETITOR_RESEARCH"])
+    ["KEYWORD_RESEARCH", "COMPETITOR_RESEARCH"]) and
+  ([.data[] | select(.provider == "XMLSTOCK")][0].capabilities ==
+    ["SERP_RANK_TRACKING", "SERP_COLLECTION", "WORDSTAT"])
 ' "$response_body" >/dev/null ||
   runtime_fail "integration catalog advertises an unsupported workflow"
 
@@ -395,7 +397,8 @@ api_call POST \
   "$crawl_automation_version"
 expect_status 200 pause-crawl-automation
 
-semantic_file=$smoke_root/semantic-smoke.xlsx
+semantic_file=${SEO_PLATFORM_SMOKE_SEMANTIC_FILE:-$smoke_root/semantic-smoke.xlsx}
+if [ -z "${SEO_PLATFORM_SMOKE_SEMANTIC_FILE:-}" ]; then
 SEMANTIC_FIXTURE="$semantic_file" \
 FFLATE_MODULE="$project_root/platform-jobs-integrations/node_modules/fflate" \
   /home/dev/.nvm/versions/node/v24.18.1/bin/node <<'NODE'
@@ -457,12 +460,29 @@ writeFileSync(process.env.SEMANTIC_FIXTURE, Buffer.from(zipSync(files)), {
   mode: 0o600
 });
 NODE
+fi
+[ -f "$semantic_file" ] || runtime_fail "semantic smoke fixture is missing"
+case "$semantic_file" in
+  *.kc4)
+    semantic_file_name=$(basename -- "$semantic_file")
+    semantic_media_type=application/vnd.key-collector.project
+    ;;
+  *.xlsx)
+    semantic_file_name=$(basename -- "$semantic_file")
+    semantic_media_type=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+    ;;
+  *) runtime_fail "semantic smoke fixture type is unsupported" ;;
+esac
+semantic_expected_min=${SEO_PLATFORM_SMOKE_EXPECTED_KEYWORDS_MIN:-2}
+case "$semantic_expected_min" in
+  ''|*[!0-9]*|0) runtime_fail "semantic expected keyword minimum is invalid" ;;
+esac
 semantic_size=$(
   LC_ALL=C wc -c < "$semantic_file" |
     tr -d '[:space:]'
 )
 api_call POST "projects/$project_id/uploads" \
-  "{\"fileName\":\"semantic-smoke.xlsx\",\"mediaType\":\"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet\",\"sizeBytes\":\"$semantic_size\"}" \
+  "$(jq -cn --arg fileName "$semantic_file_name" --arg mediaType "$semantic_media_type" --arg sizeBytes "$semantic_size" '{fileName: $fileName, mediaType: $mediaType, sizeBytes: $sizeBytes}')" \
   "smoke-upload-$(openssl rand -hex 16)"
 expect_status 201 create-semantic-upload
 upload_id=$(jq -er '.data.upload.id' "$response_body")
@@ -504,22 +524,43 @@ grep -Fqi "access-control-allow-origin: $SEO_PLATFORM_PUBLIC_URL" \
 printf 'smoke operation=object-storage-cors status=%s\n' "$preflight_status"
 
 part_headers=$smoke_root/upload-part.headers
-part_status=$(
-  curl \
-    --silent \
-    --show-error \
-    --max-time 30 \
-    --request PUT \
-    --header "Origin: $SEO_PLATFORM_PUBLIC_URL" \
-    --header 'Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' \
-    --data-binary @"$semantic_file" \
-    --dump-header "$part_headers" \
-    --output /dev/null \
-    --write-out '%{http_code}' \
-    "$part_url"
-)
-[ "$part_status" = 200 ] ||
-  runtime_fail "uploading the semantic fixture returned $part_status"
+if [ "${SEO_PLATFORM_SMOKE_STORAGE_RELAY:-false}" = true ]; then
+  part_status=$(
+    curl \
+      --silent \
+      --show-error \
+      --max-time 30 \
+      --request PUT \
+      --header "Origin: $SEO_PLATFORM_PUBLIC_URL" \
+      --header "Content-Type: $semantic_media_type" \
+      --header "x-seo-storage-url: $part_url" \
+      --data-binary @"$semantic_file" \
+      --dump-header "$part_headers" \
+      --output /dev/null \
+      --write-out '%{http_code}' \
+      "$SEO_PLATFORM_PUBLIC_URL/app/api/storage-upload"
+  )
+  [ "$part_status" = 204 ] ||
+    runtime_fail "relaying the semantic fixture returned $part_status"
+  printf 'smoke operation=relay-semantic-part status=%s\n' "$part_status"
+else
+  part_status=$(
+    curl \
+      --silent \
+      --show-error \
+      --max-time 30 \
+      --request PUT \
+      --header "Origin: $SEO_PLATFORM_PUBLIC_URL" \
+      --header "Content-Type: $semantic_media_type" \
+      --data-binary @"$semantic_file" \
+      --dump-header "$part_headers" \
+      --output /dev/null \
+      --write-out '%{http_code}' \
+      "$part_url"
+  )
+  [ "$part_status" = 200 ] ||
+    runtime_fail "uploading the semantic fixture returned $part_status"
+fi
 part_etag=$(
   awk 'tolower($1) == "etag:" { gsub(/\r/, "", $2); print $2 }' \
     "$part_headers" |
@@ -626,7 +667,7 @@ for ((attempt = 1; attempt <= 60; attempt += 1)); do
 done
 [ "$import_status" = AWAITING_CONFIRMATION ] ||
   runtime_fail "semantic import validation did not complete before the smoke timeout"
-[ "$(jq -er '.data.validation.uniqueKeywordsToProcess' "$response_body")" -ge 2 ] ||
+[ "$(jq -er '.data.validation.uniqueKeywordsToProcess' "$response_body")" -ge "$semantic_expected_min" ] ||
   runtime_fail "semantic validation did not retain the fixture keywords"
 import_version=$(jq -er '.data.version' "$response_body")
 
@@ -652,9 +693,10 @@ for ((attempt = 1; attempt <= 60; attempt += 1)); do
 done
 [ "$import_status" = COMPLETED ] ||
   runtime_fail "semantic import publication did not complete before the smoke timeout"
-[ "$(jq -er '.data.result.createdKeywords' "$response_body")" -ge 2 ] ||
+[ "$(jq -er '.data.result.createdKeywords' "$response_body")" -ge "$semantic_expected_min" ] ||
   runtime_fail "semantic import did not create the fixture keywords"
 
+if [ -z "${SEO_PLATFORM_SMOKE_SEMANTIC_FILE:-}" ]; then
 api_call GET "projects/$project_id/keywords?pageSize=100"
 expect_status 200 list-imported-keywords
 jq -e '
@@ -663,6 +705,7 @@ jq -e '
   ($keywords | index("seo аудит")) != null
 ' "$response_body" >/dev/null ||
   runtime_fail "published semantic keywords are missing from the project"
+fi
 
 printf 'smoke result=passed workspace=%s project=%s keyword=%s crawl=%s crawl_status=%s processed_urls=%s upload=%s import=%s import_status=%s\n' \
   "$workspace_id" \

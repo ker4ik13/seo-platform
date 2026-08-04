@@ -259,6 +259,14 @@ test("forwards a credential idempotency key with trusted workspace context", asy
             "COMPETITOR_RESEARCH",
             "SERP_COLLECTION"
           ],
+          quota: {
+            status: "AVAILABLE",
+            unit: "API_REQUESTS",
+            limit: 25_000,
+            used: 40,
+            remaining: 24_960,
+            observedAt: "2026-07-29T09:00:00.000Z"
+          },
           version: 1,
           createdAt: "2026-07-29T09:00:00.000Z",
           updatedAt: "2026-07-29T09:00:00.000Z"
@@ -300,6 +308,14 @@ test("forwards a credential idempotency key with trusted workspace context", asy
     );
 
     assert.equal(result.id, credentialId);
+    assert.deepEqual(result.quota, {
+      status: "AVAILABLE",
+      unit: "API_REQUESTS",
+      limit: 25_000,
+      used: 40,
+      remaining: 24_960,
+      observedAt: "2026-07-29T09:00:00.000Z"
+    });
     assert.equal(capturedBody?.workspaceId, workspaceId);
     assert.equal(capturedBody?.actorId, actorId);
     assert.equal(
@@ -345,6 +361,106 @@ test("preserves the authoritative current-material active validation in the cred
 
     assert.equal(result[0]?.activeValidation?.id, validationId);
     assert.equal(result[0]?.activeValidation?.status, "RUNNING");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("accepts the safe XMLStock account quota projection", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (): Promise<Response> =>
+    new Response(
+      JSON.stringify({
+        data: [
+          {
+            ...credentialResponseData(),
+            provider: "XMLSTOCK",
+            quota: {
+              status: "AVAILABLE",
+              unit: "XMLSTOCK_REQUESTS",
+              remaining: 0,
+              frozenRemaining: 0,
+              usedToday: 4,
+              usedMonth: 29,
+              tariffDaysRemaining: 0,
+              balance: {
+                amount: "27.27",
+                frozenAmount: "0",
+                currency: "RUB"
+              },
+              observedAt: "2026-08-04T17:43:19.000Z"
+            }
+          }
+        ]
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }
+    )) as typeof fetch;
+
+  try {
+    const result = await client().listIntegrationCredentials(
+      context("request-credential-list-xmlstock-001")
+    );
+
+    assert.deepEqual(result[0]?.quota, {
+      status: "AVAILABLE",
+      unit: "XMLSTOCK_REQUESTS",
+      remaining: 0,
+      frozenRemaining: 0,
+      usedToday: 4,
+      usedMonth: 29,
+      tariffDaysRemaining: 0,
+      balance: {
+        amount: "27.27",
+        frozenAmount: "0",
+        currency: "RUB"
+      },
+      observedAt: "2026-08-04T17:43:19.000Z"
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects malformed XMLStock monetary quota metadata", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (): Promise<Response> =>
+    new Response(
+      JSON.stringify({
+        data: [
+          {
+            ...credentialResponseData(),
+            provider: "XMLSTOCK",
+            quota: {
+              status: "AVAILABLE",
+              unit: "XMLSTOCK_REQUESTS",
+              remaining: 0,
+              balance: {
+                amount: "-10",
+                currency: "RUB"
+              }
+            }
+          }
+        ]
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }
+    )) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      client().listIntegrationCredentials(
+        context("request-credential-list-xmlstock-invalid-001")
+      ),
+      (error: unknown) =>
+        error instanceof DomainError &&
+        error.statusCode === 502 &&
+        error.code === "DEPENDENCY_UNAVAILABLE"
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -660,6 +776,66 @@ test("validates the complete project connector aggregate and tenant scope", asyn
   }
 });
 
+test("accepts the safe XMLStock quota in workspace routing credential options", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (): Promise<Response> =>
+    dataResponse({
+      bindings: [],
+      credentialOptions: [
+        {
+          ...projectCredentialOptionResponseData(),
+          provider: "XMLSTOCK",
+          label: "XMLStock primary",
+          capabilities: ["SERP_RANK_TRACKING", "WORDSTAT"],
+          quota: {
+            status: "AVAILABLE",
+            unit: "XMLSTOCK_REQUESTS",
+            remaining: 0,
+            balance: {
+              amount: "2143.29",
+              frozenAmount: "0",
+              currency: "RUB"
+            },
+            usedToday: 0,
+            usedMonth: 0,
+            frozenRemaining: 0,
+            tariffDaysRemaining: 0,
+            observedAt: "2026-08-04T17:43:20.226Z"
+          }
+        }
+      ],
+      credentialOptionsTruncated: false,
+      access: {
+        canUpdateBindings: false,
+        canManageFallback: false
+      }
+    })) as typeof fetch;
+
+  try {
+    const result = await client().workspaceConnectorRouting(
+      context("request-workspace-routing-xmlstock-quota-001")
+    );
+    assert.equal(result.credentialOptions[0]?.provider, "XMLSTOCK");
+    assert.deepEqual(result.credentialOptions[0]?.quota, {
+      status: "AVAILABLE",
+      unit: "XMLSTOCK_REQUESTS",
+      remaining: 0,
+      balance: {
+        amount: "2143.29",
+        frozenAmount: "0",
+        currency: "RUB"
+      },
+      usedToday: 0,
+      usedMonth: 0,
+      frozenRemaining: 0,
+      tariffDaysRemaining: 0,
+      observedAt: "2026-08-04T17:43:20.226Z"
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("rejects scoped, duplicate and secret-bearing project connector responses", async () => {
   const originalFetch = globalThis.fetch;
   const badPayloads: readonly unknown[] = [
@@ -898,6 +1074,7 @@ function credentialResponseData(): Readonly<Record<string, unknown>> {
       "COMPETITOR_RESEARCH",
       "SERP_COLLECTION"
     ],
+    quota: { status: "NOT_AVAILABLE" },
     version: 1,
     createdAt: "2026-07-29T09:00:00.000Z",
     updatedAt: "2026-07-29T09:00:00.000Z"

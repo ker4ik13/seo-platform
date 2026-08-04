@@ -2,16 +2,16 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import {
   getToolCapability,
-  toolCapabilities
+  publicToolCapabilities
 } from "../../../lib/tool-capabilities";
+import { PublicToolRunner } from "../../../components/public-tool-runner";
 
 interface ToolPageProps {
   readonly params: Promise<{ toolSlug: string }>;
 }
 
 export function generateStaticParams() {
-  return toolCapabilities
-    .filter((tool) => tool.access !== "project")
+  return publicToolCapabilities()
     .map((tool) => ({ toolSlug: tool.slug }));
 }
 
@@ -20,7 +20,7 @@ export async function generateMetadata({
 }: ToolPageProps): Promise<Metadata> {
   const { toolSlug } = await params;
   const tool = getToolCapability(toolSlug);
-  if (!tool || tool.access === "project") return {};
+  if (!tool || tool.runtime.kind !== "PUBLIC_CLIENT") return {};
 
   return {
     title: tool.title,
@@ -32,12 +32,15 @@ export async function generateMetadata({
 export default async function ToolPage({ params }: ToolPageProps) {
   const { toolSlug } = await params;
   const tool = getToolCapability(toolSlug);
-  if (!tool || tool.access === "project") notFound();
+  if (!tool || tool.runtime.kind !== "PUBLIC_CLIENT") notFound();
 
   return (
     <main>
       <header className="site-header">
-        <a className="brand" href="/ru"><span>S</span>SEO Workspace</a>
+        <a className="brand" href="/ru">
+          <img alt="" aria-hidden="true" height={28} src="/brand/seonorita-mark.svg" width={28} />
+          SEOньорита
+        </a>
         <nav aria-label="Навигация Toolbox">
           <a href="/tools">Все инструменты</a>
           <a href="/docs/api">API</a>
@@ -47,21 +50,10 @@ export default async function ToolPage({ params }: ToolPageProps) {
 
       <section className="public-section tool-detail">
         <a className="back-link" href="/tools">← Toolbox</a>
-        <p className="eyebrow"><i />{tool.category}</p>
         <h1>{tool.title}</h1>
         <p className="public-lead">{tool.description}</p>
 
-        <div className="tool-placeholder">
-          <div>
-            <strong>Capability</strong>
-            <code>{tool.code}</code>
-          </div>
-          <p>
-            UI запуска будет подключён к общему API handler. Временный
-            публичный результат получит noindex и ограниченный срок хранения.
-          </p>
-          <button disabled type="button">Скоро доступно</button>
-        </div>
+        <PublicToolRunner renderer={tool.runtime.renderer} />
       </section>
     </main>
   );

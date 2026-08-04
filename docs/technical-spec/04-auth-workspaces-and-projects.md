@@ -299,6 +299,7 @@ Production SMTP account, sender domain и credentials настраиваются
 - sent;
 - delivered;
 - accepted;
+- declined;
 - expired;
 - revoked;
 - bounced.
@@ -318,8 +319,25 @@ Production SMTP account, sender domain и credentials настраиваются
   только актуальный `SENT → BOUNCED`;
 - приглашение принимает только активный аккаунт с подтверждённым email,
   который точно совпадает с email приглашения;
+- активные приглашения для уже зарегистрированного адресата отображаются в
+  центре уведомлений; решение `accept/decline` принимается по account-scoped
+  endpoint без передачи invitation token в браузерный список;
+- после принятия членство и project access становятся источником списка
+  доступных рабочих областей и проектов в tenant switcher;
 - удаление участника немедленно отзывает доступ и WebSocket rooms;
 - пользовательские данные автора в исторических записях сохраняются.
+
+### 9.1. Права на интеграции проекта
+
+Integration credential принадлежит workspace. Просмотр маршрутов требует
+`integration.view`, изменение primary route — `integration.update`, выбор
+workspace credential — `integration.use_system_credentials`, настройка
+нескольких routes и fallback — `integration.manage_fallback`. Для project
+endpoint итоговое разрешение является пересечением workspace role и project
+access level: project override может только сузить доступ. Read-only workspace
+и архивный проект сохраняют чтение, но блокируют mutation. Operation history
+показывает provider и безопасную цепочку fallback, но не credential ID и не
+секрет.
 
 ## 10. Настройки рабочей области
 

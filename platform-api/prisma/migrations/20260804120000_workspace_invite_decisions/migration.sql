@@ -1,0 +1,4 @@
+ALTER TYPE "WorkspaceInviteStatus" ADD VALUE IF NOT EXISTS 'DECLINED';
+
+ALTER TABLE "workspace_invites"
+  ADD COLUMN IF NOT EXISTS "declined_at" TIMESTAMPTZ(6);

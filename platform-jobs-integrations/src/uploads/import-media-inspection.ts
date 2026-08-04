@@ -40,6 +40,7 @@ export function inspectImportMedia(
   if (
     declaredMediaType ===
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    declaredMediaType === "application/vnd.key-collector.project" ||
     declaredMediaType === "application/zip"
   ) {
     return ZIP_SIGNATURES.some((signature) => startsWith(value, signature))

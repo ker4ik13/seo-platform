@@ -39,6 +39,7 @@ type IntegrationCredentialSummaryRecord = Pick<
   | "lastErrorAt"
   | "lastErrorCode"
   | "capabilities"
+  | "providerMeta"
   | "materialVersion"
   | "version"
   | "createdAt"
@@ -58,6 +59,7 @@ const CREDENTIAL_SUMMARY_SELECT = {
   lastErrorAt: true,
   lastErrorCode: true,
   capabilities: true,
+  providerMeta: true,
   materialVersion: true,
   version: true,
   createdAt: true,
@@ -419,6 +421,11 @@ function toSummary(
       provider,
       credential.capabilities
     ),
+    quota: safeCredentialQuota(
+      provider,
+      credential.providerMeta,
+      credential.lastSuccessAt
+    ),
     ...(credential.verifiedAt
       ? { verifiedAt: credential.verifiedAt.toISOString() }
       : {}),
@@ -436,6 +443,90 @@ function toSummary(
     createdAt: credential.createdAt.toISOString(),
     updatedAt: credential.updatedAt.toISOString()
   };
+}
+
+export function safeCredentialQuota(
+  provider: IntegrationProvider,
+  providerMeta: unknown,
+  lastSuccessAt: Date | null
+): IntegrationCredentialSummary["quota"] {
+  if (!isRecord(providerMeta)) return { status: "NOT_AVAILABLE" };
+  const observedAt = lastSuccessAt?.toISOString();
+  if (provider === "ARSENKIN") {
+    const remaining = nonNegativeSafeInteger(providerMeta.limitsTotal);
+    return remaining === undefined
+      ? { status: "NOT_AVAILABLE" }
+      : {
+          status: "AVAILABLE",
+          unit: "ARSENKIN_LIMITS",
+          remaining,
+          ...(observedAt ? { observedAt } : {})
+        };
+  }
+  if (provider === "KEYS_SO" && isRecord(providerMeta.apiRequest)) {
+    const limit = nonNegativeSafeInteger(providerMeta.apiRequest.limit);
+    const used = nonNegativeSafeInteger(providerMeta.apiRequest.usedLimit);
+    if (limit === undefined || used === undefined) {
+      return { status: "NOT_AVAILABLE" };
+    }
+    return {
+      status: "AVAILABLE",
+      unit: "API_REQUESTS",
+      limit,
+      used,
+      remaining: Math.max(0, limit - used),
+      ...(observedAt ? { observedAt } : {})
+    };
+  }
+  if (provider === "XMLSTOCK" && isRecord(providerMeta.account)) {
+    const account = providerMeta.account;
+    const remaining = nonNegativeSafeInteger(account.requestLimit);
+    const frozenRemaining = nonNegativeSafeInteger(account.frozenRequestLimit);
+    const usedToday = nonNegativeSafeInteger(account.usedToday);
+    const usedMonth = nonNegativeSafeInteger(account.usedMonth);
+    const tariffDaysRemaining = nonNegativeSafeInteger(
+      account.tariffDaysRemaining
+    );
+    const amount = decimalString(account.balance);
+    const frozenAmount = decimalString(account.frozenBalance);
+    if (remaining === undefined || amount === undefined) {
+      return { status: "NOT_AVAILABLE" };
+    }
+    return {
+      status: "AVAILABLE",
+      unit: "XMLSTOCK_REQUESTS",
+      remaining,
+      balance: {
+        amount,
+        currency: "RUB",
+        ...(frozenAmount === undefined ? {} : { frozenAmount })
+      },
+      ...(frozenRemaining === undefined ? {} : { frozenRemaining }),
+      ...(usedToday === undefined ? {} : { usedToday }),
+      ...(usedMonth === undefined ? {} : { usedMonth }),
+      ...(tariffDaysRemaining === undefined
+        ? {}
+        : { tariffDaysRemaining }),
+      ...(observedAt ? { observedAt } : {})
+    };
+  }
+  return { status: "NOT_AVAILABLE" };
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nonNegativeSafeInteger(value: unknown): number | undefined {
+  return Number.isSafeInteger(value) && Number(value) >= 0
+    ? Number(value)
+    : undefined;
+}
+
+function decimalString(value: unknown): string | undefined {
+  return typeof value === "string" && /^\d+(?:\.\d{1,8})?$/u.test(value)
+    ? value
+    : undefined;
 }
 
 function providerValue(value: string): IntegrationProvider {

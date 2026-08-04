@@ -17,6 +17,17 @@ const HEADERS: Readonly<
   >
 > = {
   query: { en: "Query", ru: "Запрос" },
+  frequency: { en: "Frequency", ru: "Частотность" },
+  frequencyExact: { en: '"Frequency"', ru: '"Частотность"' },
+  frequencyFixed: { en: '"!Frequency"', ru: '"!Частотность"' },
+  wordCount: { en: "Word count", ru: "Слов" },
+  yandexPosition: { en: "Yandex position", ru: "Позиция Яндекс" },
+  googlePosition: { en: "Google position", ru: "Позиция Google" },
+  yandexRelevantUrl: { en: "Yandex relevant URL", ru: "Релевантный URL Яндекс" },
+  googleRelevantUrl: { en: "Google relevant URL", ru: "Релевантный URL Google" },
+  yandexCheckedAt: { en: "Yandex checked at", ru: "Дата съёма Яндекс" },
+  googleCheckedAt: { en: "Google checked at", ru: "Дата съёма Google" },
+  visibility: { en: "Visibility", ru: "Видимость" },
   group: { en: "Group", ru: "Группа" },
   cluster: { en: "Cluster", ru: "Кластер" },
   targetUrl: { en: "Target URL", ru: "Целевая URL" },
@@ -131,6 +142,28 @@ function systemColumnValue(
   switch (column) {
     case "query":
       return item.textOriginal;
+    case "frequency":
+      return item.frequency?.value ?? null;
+    case "frequencyExact":
+      return item.frequencies?.find(({ type }) => type === "EXACT")?.value ?? null;
+    case "frequencyFixed":
+      return item.frequencies?.find(({ type }) => type === "FIXED")?.value ?? null;
+    case "wordCount":
+      return wordCount(item.textOriginal);
+    case "yandexPosition":
+      return searchPosition(item, "YANDEX");
+    case "googlePosition":
+      return searchPosition(item, "GOOGLE");
+    case "yandexRelevantUrl":
+      return searchRelevantUrl(item, "YANDEX");
+    case "googleRelevantUrl":
+      return searchRelevantUrl(item, "GOOGLE");
+    case "yandexCheckedAt":
+      return searchCheckedAt(item, "YANDEX");
+    case "googleCheckedAt":
+      return searchCheckedAt(item, "GOOGLE");
+    case "visibility":
+      return searchVisibility(item);
     case "group":
       return item.groupPath ?? null;
     case "cluster":
@@ -148,6 +181,50 @@ function systemColumnValue(
     case "updatedAt":
       return item.updatedAt;
   }
+}
+
+function searchCheckedAt(
+  item: SemanticKeywordListItem,
+  searchEngine: "GOOGLE" | "YANDEX"
+): string | null {
+  return item.positions?.find(
+    (candidate) => candidate.searchEngine === searchEngine
+  )?.observedAt ?? null;
+}
+
+function searchRelevantUrl(
+  item: SemanticKeywordListItem,
+  searchEngine: "GOOGLE" | "YANDEX"
+): string | null {
+  return item.positions?.find(
+    (candidate) => candidate.searchEngine === searchEngine
+  )?.rankingUrl ?? null;
+}
+
+function searchVisibility(item: SemanticKeywordListItem): number {
+  const positions = item.positions?.filter(
+    ({ found, position }) => found && position !== undefined
+  ) ?? [];
+  if (positions.length === 0) return 0;
+  return positions.reduce(
+    (sum, { position = 100 }) => sum + Math.max(0, 101 - position),
+    0
+  ) / positions.length;
+}
+
+function wordCount(value: string): number {
+  const normalized = value.trim();
+  return normalized.length === 0 ? 0 : normalized.split(/\s+/u).length;
+}
+
+function searchPosition(
+  item: SemanticKeywordListItem,
+  searchEngine: "GOOGLE" | "YANDEX"
+): number | null {
+  const position = item.positions?.find(
+    (candidate) => candidate.searchEngine === searchEngine
+  );
+  return position?.found === true ? (position.position ?? null) : null;
 }
 
 function tabularValue(value: unknown): string {

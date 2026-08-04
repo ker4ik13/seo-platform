@@ -1,0 +1,76 @@
+.runner {
+  background: #fff;
+  border: 1px solid #e6e8ef;
+  border-radius: 16px;
+  box-shadow: 0 14px 40px rgb(17 24 39 / 7%);
+  display: grid;
+  gap: 18px;
+  margin-top: 28px;
+  max-width: 920px;
+  padding: 24px;
+}
+
+.field { display: grid; gap: 8px; }
+.field > span { color: #111827; font-size: 14px; font-weight: 700; }
+.field input,
+.field textarea {
+  background: #fff;
+  border: 1px solid #cfd4df;
+  border-radius: 10px;
+  color: #111827;
+  font: inherit;
+  line-height: 1.5;
+  padding: 11px 13px;
+  resize: vertical;
+  width: 100%;
+}
+.field input:focus-visible,
+.field textarea:focus-visible,
+.actions button:focus-visible,
+.result button:focus-visible { outline: 3px solid rgb(91 61 245 / 28%); outline-offset: 2px; }
+.field small { color: #667085; }
+.warning { color: #b54708 !important; font-weight: 700; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.actions button,
+.result button {
+  background: #fff;
+  border: 1px solid #dfe3eb;
+  border-radius: 10px;
+  color: #344054;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  min-height: 42px;
+  padding: 9px 16px;
+}
+.actions .primary { background: #5b3df5; border-color: #5b3df5; color: #fff; }
+.actions button:disabled,
+.result button:disabled { cursor: not-allowed; opacity: .55; }
+
+.result { background: #f7f8fc; border: 1px solid #e6e8ef; border-radius: 12px; display: grid; gap: 12px; padding: 16px; }
+.result header { align-items: center; display: flex; gap: 16px; justify-content: space-between; }
+.result header div { display: grid; gap: 4px; }
+.result header span,
+.result p { color: #667085; font-size: 13px; margin: 0; }
+.result textarea { background: #fff; border: 1px solid #dfe3eb; border-radius: 10px; font: inherit; line-height: 1.5; padding: 12px; resize: vertical; }
+
+.snippetForm { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.snippetForm label:nth-child(2) { grid-row: span 2; }
+.snippet {
+  border: 1px solid #e6e8ef;
+  border-radius: 12px;
+  max-width: 680px;
+  padding: 18px;
+}
+.snippet span { color: #3c4043; font-size: 14px; overflow-wrap: anywhere; }
+.snippet h2 { color: #1a0dab; font-size: 21px; font-weight: 400; line-height: 1.3; margin: 6px 0; }
+.snippet p { color: #4d5156; font-size: 14px; line-height: 1.55; margin: 0; }
+.note { color: #667085; font-size: 13px; margin: 0; }
+
+@media (max-width: 700px) {
+  .runner { border-radius: 12px; padding: 16px; }
+  .snippetForm { grid-template-columns: 1fr; }
+  .snippetForm label:nth-child(2) { grid-row: auto; }
+  .result header { align-items: stretch; flex-direction: column; }
+}

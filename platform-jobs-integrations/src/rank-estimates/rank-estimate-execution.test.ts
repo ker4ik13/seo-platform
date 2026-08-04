@@ -29,14 +29,34 @@ test("persists and verifies exact provider-effective execution", () => {
   );
   assert.equal(
     rankEstimateExecutionHash(execution).toString("hex"),
-    "1f3f038ee48aaf19e70f6849c930735c3c0f98a363becc7e9ef17f22da27a124"
+    "db32de5f3a4dffd582304429501ee316b684b4e2708f36ad13cbdd2ca20153ec"
   );
+});
+
+test("keeps Yandex and supported Google depths executable", () => {
+  for (const executable of [
+    { ...configuration, searchEngine: "YANDEX" as const, depth: 30 as const },
+    { ...configuration, depth: 100 as const, device: "MOBILE" as const }
+  ]) {
+    const execution = rankEstimateExecutionParameters(executable);
+    assert.ok(execution);
+    assert.equal(execution.searchEngine, executable.searchEngine);
+    assert.equal(execution.depth, executable.depth);
+    assert.deepEqual(
+      storedRankEstimateExecution(
+        execution,
+        rankEstimateExecutionHash(execution)
+      ),
+      execution
+    );
+  }
 });
 
 test("keeps incompatible estimates viewable without executable data", () => {
   for (const incompatible of [
-    { ...configuration, searchEngine: "YANDEX" as const },
     { ...configuration, regionCode: "US-NY" },
+    { ...configuration, searchEngine: "YANDEX" as const, depth: 50 as const },
+    { ...configuration, searchEngine: "YANDEX" as const, depth: 100 as const },
     {
       searchEngine: "GOOGLE" as const,
       countryCode: "US",

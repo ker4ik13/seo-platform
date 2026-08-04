@@ -8,7 +8,11 @@ import {
   Req,
   UseGuards
 } from "@nestjs/common";
-import type { ApiResponse, InternalFrequencyKeyword } from "@seo-platform/contracts";
+import type {
+  ApiResponse,
+  InternalFrequencyKeyword,
+  InternalFrequencyKeywords
+} from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
 import {
   assertInternalContext,
@@ -17,7 +21,9 @@ import {
 } from "../internal/internal-command-context.js";
 import { JobsApiGuard } from "../internal/jobs-api.guard.js";
 import {
+  internalPersistFrequencySnapshotBatchInput,
   internalPersistFrequencySnapshotsInput,
+  internalResolveFrequencyKeywordsInput,
   internalResolveFrequencyKeywordInput
 } from "./frequency-input.js";
 import { FrequencyService } from "./frequency.service.js";
@@ -42,6 +48,19 @@ export class FrequencyController {
     return response(request, await this.frequencies.resolve(input));
   }
 
+  @Post("resolve-batch")
+  public async resolveBatch(
+    @Param("projectId") projectId: string,
+    @Headers() headers: HeadersRecord,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<InternalFrequencyKeywords>> {
+    const context = routeContext(projectId, headers);
+    const input = internalResolveFrequencyKeywordsInput(body);
+    assertInternalContext(input, context);
+    return response(request, await this.frequencies.resolveBatch(input));
+  }
+
   @Post("snapshots")
   public async persist(
     @Param("projectId") projectId: string,
@@ -53,6 +72,19 @@ export class FrequencyController {
     const input = internalPersistFrequencySnapshotsInput(body);
     assertInternalContext(input, context);
     return response(request, await this.frequencies.persist(input));
+  }
+
+  @Post("snapshots-batch")
+  public async persistBatch(
+    @Param("projectId") projectId: string,
+    @Headers() headers: HeadersRecord,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<{ readonly created: number }>> {
+    const context = routeContext(projectId, headers);
+    const input = internalPersistFrequencySnapshotBatchInput(body);
+    assertInternalContext(input, context);
+    return response(request, await this.frequencies.persistBatch(input));
   }
 }
 

@@ -12,6 +12,7 @@ import {
 import type {
   ApiResponse,
   InternalUndoSemanticVersionInput,
+  SemanticVersionDetail,
   SemanticVersionListItem,
   SemanticVersionUndoPreview,
   SemanticVersionUndoResult
@@ -44,6 +45,24 @@ export class SemanticVersionController {
     const context = routeContext(projectId, headers);
     return {
       data: await this.versions.list(context.workspaceId, context.projectId),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Get(":versionId")
+  public async detail(
+    @Param("projectId") projectId: string,
+    @Param("versionId") versionId: string,
+    @Headers() headers: InternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticVersionDetail>> {
+    const context = routeContext(projectId, headers);
+    return {
+      data: await this.versions.detail(
+        context.workspaceId,
+        context.projectId,
+        internalUuid(versionId, "versionId")
+      ),
       meta: { requestId: request.id }
     };
   }

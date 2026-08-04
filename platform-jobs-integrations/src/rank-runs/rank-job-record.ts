@@ -3,6 +3,9 @@ import {
   redactRankJobSummary,
   rankJobFailureCodes,
   type InternalCreateRankRunInput,
+  type ConnectorOperationAttemptSummary,
+  type ConnectorRoutingScope,
+  type RankEstimate,
   type RankJobFailureCode,
   type RankJobResultSummary,
   type RankJobSummary
@@ -83,13 +86,18 @@ export function rankJobInputJson(
 
 export function rankJobScopeJson(
   input: InternalCreateRankRunInput,
-  trackingContextId: string
+  trackingContextId: string,
+  estimate?: Pick<RankEstimate, "routingScope" | "connectorAttempts">
 ): Prisma.InputJsonValue {
   return json({
     schemaVersion: RANK_JOB_INPUT_SCHEMA,
     workspaceId: input.workspaceId,
     projectId: input.projectId,
-    trackingContextId
+    trackingContextId,
+    ...(estimate?.routingScope ? { routingScope: estimate.routingScope } : {}),
+    ...(estimate?.connectorAttempts
+      ? { connectorAttempts: [...estimate.connectorAttempts] }
+      : {})
   });
 }
 
@@ -140,7 +148,7 @@ export function toRankJobSummary(stored: StoredRankJob): RankJobSummary {
     stored.workspaceId !== run.workspaceId ||
     stored.projectId !== run.projectId ||
     stored.projectId === null ||
-    stored.provider !== "ARSENKIN" ||
+    (stored.provider !== "ARSENKIN" && stored.provider !== "XMLSTOCK") ||
     stored.credentialMode !== "BYOK_API_KEY" ||
     stored.currency === null ||
     !/^[A-Z]{3}$/u.test(stored.currency) ||
@@ -157,7 +165,8 @@ export function toRankJobSummary(stored: StoredRankJob): RankJobSummary {
     projectId: stored.projectId,
     trackingContextId: run.trackingContextId,
     type: "MANUAL_RANK_CHECK",
-    provider: "ARSENKIN",
+    provider: stored.provider,
+    ...rankRouteSummary(stored.scopeSnapshot, stored.status),
     operation: "POSITIONS",
     credentialMode: "BYOK_API_KEY",
     progress: {
@@ -295,6 +304,56 @@ export function toRankJobSummary(stored: StoredRankJob): RankJobSummary {
     default:
       return invalid();
   }
+}
+
+function rankRouteSummary(
+  value: unknown,
+  status: string
+): {
+  readonly routingScope?: ConnectorRoutingScope;
+  readonly connectorAttempts?: readonly ConnectorOperationAttemptSummary[];
+} {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const input = value as Readonly<Record<string, unknown>>;
+  if (input.routingScope === undefined && input.connectorAttempts === undefined) return {};
+  if (
+    input.routingScope !== "WORKSPACE_DEFAULT" &&
+    input.routingScope !== "PROJECT_OVERRIDE" &&
+    input.routingScope !== "WORKSPACE_FALLBACK"
+  ) invalid();
+  if (!Array.isArray(input.connectorAttempts) || input.connectorAttempts.length < 1 || input.connectorAttempts.length > 8) invalid();
+  const storedAttempts = input.connectorAttempts;
+  const terminalSuccess = status === "COMPLETED" || status === "PARTIALLY_COMPLETED";
+  const terminalFailure = status === "FAILED" || status === "ACTION_REQUIRED";
+  const connectorAttempts = storedAttempts.map((candidate, index) => {
+    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) invalid();
+    const attempt = candidate as Readonly<Record<string, unknown>>;
+    if (
+      attempt.sequence !== index + 1 ||
+      (attempt.provider !== "XMLSTOCK" && attempt.provider !== "ARSENKIN" && attempt.provider !== "KEYS_SO") ||
+      (attempt.routingScope !== "WORKSPACE_DEFAULT" && attempt.routingScope !== "PROJECT_OVERRIDE" && attempt.routingScope !== "WORKSPACE_FALLBACK") ||
+      (attempt.outcome !== "SELECTED" && attempt.outcome !== "SUCCEEDED" && attempt.outcome !== "FALLBACK" && attempt.outcome !== "FAILED") ||
+      typeof attempt.occurredAt !== "string" ||
+      Number.isNaN(Date.parse(attempt.occurredAt)) ||
+      (attempt.reasonCode !== undefined && (typeof attempt.reasonCode !== "string" || !/^[A-Z][A-Z0-9_]{0,63}$/u.test(attempt.reasonCode)))
+    ) invalid();
+    return {
+      sequence: index + 1,
+      provider: attempt.provider,
+      routingScope: attempt.routingScope,
+      outcome:
+        terminalSuccess && attempt.outcome === "SELECTED"
+          ? "SUCCEEDED" as const
+          : terminalFailure &&
+              index === storedAttempts.length - 1 &&
+              attempt.outcome === "SELECTED"
+            ? "FAILED" as const
+          : attempt.outcome,
+      ...(attempt.reasonCode === undefined ? {} : { reasonCode: attempt.reasonCode }),
+      occurredAt: new Date(attempt.occurredAt).toISOString()
+    } as ConnectorOperationAttemptSummary;
+  });
+  return { routingScope: input.routingScope, connectorAttempts };
 }
 
 function resultSummary(

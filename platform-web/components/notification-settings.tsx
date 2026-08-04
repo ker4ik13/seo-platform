@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import { useEffect, useMemo, useState } from "react";
 import {
   browserApiRequest,
@@ -513,7 +515,7 @@ export function RuleSelectors({
     <div className="matrix-selects">
       <label>
         <small>Важность</small>
-        <select
+        <CustomSelect
           aria-label={`${label}: важность ${channelName}`}
           disabled={disabled}
           onChange={(event) =>
@@ -527,11 +529,11 @@ export function RuleSelectors({
           <option value="INFO">Любая</option>
           <option value="WARNING">Предупреждение</option>
           <option value="CRITICAL">Критическая</option>
-        </select>
+        </CustomSelect>
       </label>
       <label>
         <small>Доставка</small>
-        <select
+        <CustomSelect
           aria-label={`${label}: режим ${channelName}`}
           disabled={disabled}
           onChange={(event) =>
@@ -544,7 +546,7 @@ export function RuleSelectors({
           <option value="INSTANT">Сразу</option>
           <option value="HOURLY_DIGEST">Раз в час</option>
           <option value="DAILY_DIGEST">Раз в день</option>
-        </select>
+        </CustomSelect>
       </label>
     </div>
   );

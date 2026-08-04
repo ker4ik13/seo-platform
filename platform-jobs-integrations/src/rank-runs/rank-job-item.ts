@@ -1,3 +1,5 @@
+import { rankProviderKeywordLimit } from "@seo-platform/contracts";
+
 export interface RankJobItemReference {
   readonly manifestId: string;
   readonly chunkIndex: number;
@@ -21,7 +23,7 @@ export function rankJobItemReference(
     ) ||
     !Number.isSafeInteger(input.chunkIndex) ||
     Number(input.chunkIndex) < 0 ||
-    Number(input.chunkIndex) > 3
+    Number(input.chunkIndex) >= rankProviderKeywordLimit
   ) {
     invalid();
   }

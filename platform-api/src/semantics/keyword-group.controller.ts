@@ -19,6 +19,7 @@ import type {
 } from "@seo-platform/contracts";
 import type { FastifyReply } from "fastify";
 import { AuditService } from "../audit/audit.service.js";
+import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import type { TenantRequest } from "../authorization/authorization.types.js";
 import {
   internalProjectContext,
@@ -43,6 +44,7 @@ import {
 import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import {
   createSemanticKeywordGroupInput,
+  deleteSemanticKeywordGroupInput,
   updateSemanticKeywordGroupInput
 } from "./keyword-group-input.js";
 
@@ -52,7 +54,8 @@ export class KeywordGroupController {
 
   public constructor(
     private readonly seoData: SeoDataClient,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly billingEntitlements: BillingEntitlementService
   ) {}
 
   @Get()
@@ -95,7 +98,8 @@ export class KeywordGroupController {
     });
     const result = await this.seoData.createKeywordGroup(
       internalProjectContext(request, principal, tenant),
-      input
+      input,
+      await this.billingEntitlements.semanticCapacity(tenant.workspaceId)
     );
     await recordCommittedAudit(this.audit, this.logger, {
       actorId: principal.userId,
@@ -162,6 +166,7 @@ export class KeywordGroupController {
   @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
   public async delete(
     @Param("groupId") groupId: string,
+    @Body() body: unknown,
     @Req() request: TenantRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<void> {
@@ -169,6 +174,7 @@ export class KeywordGroupController {
     const canonicalGroupId = assertUuid(groupId, "groupId");
     const context = requestContext(request);
     const version = requiredVersion(headerValue(request, "if-match"));
+    const input = deleteSemanticKeywordGroupInput(body);
     await this.audit.record({
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
@@ -182,7 +188,8 @@ export class KeywordGroupController {
     await this.seoData.deleteKeywordGroup(
       internalProjectContext(request, principal, tenant),
       canonicalGroupId,
-      version
+      version,
+      input.deleteKeywords
     );
     await recordCommittedAudit(this.audit, this.logger, {
       actorId: principal.userId,

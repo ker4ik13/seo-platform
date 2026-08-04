@@ -19,6 +19,7 @@ import { CrawlAutomationModule } from "./crawl-automations/crawl-automation.modu
 import { KeywordResearchModule } from "./keyword-research/keyword-research.module.js";
 import { CrawlNotificationModule } from "./crawl-notifications/crawl-notification.module.js";
 import { FrequencyCollectionModule } from "./frequency-collections/frequency-collection.module.js";
+import { JobNotificationModule } from "./job-notifications/job-notification.module.js";
 
 @Module({
   imports: [
@@ -41,7 +42,8 @@ import { FrequencyCollectionModule } from "./frequency-collections/frequency-col
     CrawlAutomationModule,
     CrawlNotificationModule,
     KeywordResearchModule,
-    FrequencyCollectionModule
+    FrequencyCollectionModule,
+    JobNotificationModule
   ]
 })
 export class AppModule {}

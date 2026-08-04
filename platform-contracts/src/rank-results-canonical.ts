@@ -14,6 +14,10 @@ import type {
   RankManifestHash
 } from "./api/rank-runs.js";
 import { rankManifestChunkHashPreimage } from "./api/rank-runs.js";
+import {
+  legacyRankManifestChunkSize,
+  rankManifestSingleTaskChunkSize
+} from "./api/rank-estimates.js";
 import type {
   InternalRankHistoryFilterHashPreimage,
   InternalRankHistoryQuery
@@ -31,8 +35,9 @@ const MAX_KEYWORD_CODE_POINTS = 500;
 const MAX_KEYWORD_CODE_UNITS = MAX_KEYWORD_CODE_POINTS * 2;
 const MAX_KEYWORD_UTF8_BYTES = 2_000;
 const MAX_LANGUAGE_LENGTH = 16;
-const RANK_CHUNK_SIZE = 250;
-const RANK_CHUNK_MAX_INDEX = 3;
+const LEGACY_RANK_CHUNK_MAX_INDEX = 3;
+const XMLSTOCK_RANK_CHUNK_MAX_INDEX =
+  rankManifestSingleTaskChunkSize - 1;
 
 const INGEST_COMMAND_KEYS = [
   "schemaVersion",
@@ -167,12 +172,13 @@ export function rankChunkIngestHashPreimage(
   assertUuidV7(command.jobItemId, "jobItemId");
   assertUuidV7(command.manifestId, "manifestId");
   assertHash(command.manifestChunkHash, "manifestChunkHash");
-  assertChunkIndex(command.chunkIndex);
+  assertChunkIndex(command.chunkIndex, command.provider);
   assertIsoInstant(command.observedAt, "observedAt");
 
   if (
     command.schemaVersion !== "rank-ingest@1" ||
-    command.provider !== "ARSENKIN" ||
+    (command.provider !== "ARSENKIN" &&
+      command.provider !== "XMLSTOCK") ||
     command.operation !== "POSITIONS" ||
     typeof command.providerRequestId !== "string" ||
     !PROVIDER_REQUEST_ID_PATTERN.test(command.providerRequestId) ||
@@ -187,7 +193,7 @@ export function rankChunkIngestHashPreimage(
   assertUuidV7(sealedChunk.jobId, "sealedChunk.jobId");
   assertUuidV7(sealedChunk.manifestId, "sealedChunk.manifestId");
   assertHash(sealedChunk.chunkHash, "sealedChunk.chunkHash");
-  assertChunkIndex(sealedChunk.chunkIndex);
+  assertChunkIndex(sealedChunk.chunkIndex, command.provider);
   if (
     sealedChunk.hashSchemaVersion !== "rank-manifest-chunk@1" ||
     command.workspaceId !== sealedChunk.workspaceId ||
@@ -198,14 +204,20 @@ export function rankChunkIngestHashPreimage(
     !sameHash(command.manifestChunkHash, sealedChunk.chunkHash) ||
     !Array.isArray(sealedChunk.entries) ||
     sealedChunk.entries.length < 1 ||
-    sealedChunk.entries.length > RANK_CHUNK_SIZE ||
+    sealedChunk.entries.length > rankManifestSingleTaskChunkSize ||
+    (command.provider === "XMLSTOCK"
+      ? sealedChunk.entries.length !== 1
+      : sealedChunk.chunkIndex > 0 &&
+        sealedChunk.entries.length > legacyRankManifestChunkSize) ||
     !Array.isArray(command.results) ||
     command.results.length !== sealedChunk.entries.length
   ) {
     return invalidCanonicalRankResult("sealedChunk");
   }
 
-  const expectedFirstSequence = sealedChunk.chunkIndex * RANK_CHUNK_SIZE;
+  const expectedFirstSequence = command.provider === "XMLSTOCK"
+    ? sealedChunk.chunkIndex
+    : sealedChunk.chunkIndex * legacyRankManifestChunkSize;
   for (let index = 0; index < sealedChunk.entries.length; index += 1) {
     const entry = sealedChunk.entries[index];
     if (entry === undefined) {
@@ -414,7 +426,7 @@ function copyNormalizedResult(
     input.found !== true ||
     !Number.isSafeInteger(input.position) ||
     input.position < 1 ||
-    input.position > 30 ||
+    input.position > 100 ||
     input.resultType !== "ORGANIC" ||
     !Array.isArray(input.serpFeatures) ||
     input.serpFeatures.length !== 0
@@ -554,11 +566,17 @@ function copyHash(value: RankManifestHash): RankManifestHash {
   };
 }
 
-function assertChunkIndex(value: number): void {
+function assertChunkIndex(
+  value: number,
+  provider: InternalRankChunkIngestCommand["provider"]
+): void {
+  const maximum = provider === "XMLSTOCK"
+    ? XMLSTOCK_RANK_CHUNK_MAX_INDEX
+    : LEGACY_RANK_CHUNK_MAX_INDEX;
   if (
     !Number.isSafeInteger(value) ||
     value < 0 ||
-    value > RANK_CHUNK_MAX_INDEX
+    value > maximum
   ) {
     return invalidCanonicalRankResult("chunkIndex");
   }

@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import type {
   AutomationRunCollection,
   AutomationRunSummary,
@@ -474,7 +476,7 @@ function AutomationEditor({
           />
         </Field>
         <Field label="Контекст" error={errors.trackingContextId} wide>
-          <select
+          <CustomSelect
             aria-invalid={Boolean(errors.trackingContextId)}
             onChange={(event) =>
               onChange({ trackingContextId: event.target.value })
@@ -486,10 +488,10 @@ function AutomationEditor({
                 {context.name} · {context.assignedKeywordCount} запросов
               </option>
             ))}
-          </select>
+          </CustomSelect>
         </Field>
         <Field label="Периодичность">
-          <select
+          <CustomSelect
             onChange={(event) =>
               onChange({
                 cadence: event.target.value as RankAutomationDraft["cadence"]
@@ -499,7 +501,7 @@ function AutomationEditor({
           >
             <option value="DAILY">Каждый день</option>
             <option value="WEEKLY">По дням недели</option>
-          </select>
+          </CustomSelect>
         </Field>
         <Field label="Часовой пояс" error={errors.timezone}>
           <input

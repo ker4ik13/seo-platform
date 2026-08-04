@@ -1,7 +1,10 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import {
   domainEventTypes,
+  semanticImportMaxGroupDepth,
+  semanticKeywordIntents,
   type SemanticImportMapping,
+  type SemanticImportPositionValue,
   type SemanticImportPublishRow,
   type SemanticImportValidationSummary
 } from "@seo-platform/contracts";
@@ -129,6 +132,9 @@ export class SemanticImportValidatorService {
     const keywordColumn = mapping.columns.find(
       ({ target }) => target === "keyword.text"
     );
+    const languageColumn = mapping.columns.find(
+      ({ target }) => target === "keyword.language"
+    );
     if (!keywordColumn || keywordColumn.sourceIndex >= headers.length) {
       throw new SemanticImportValidationError("IMPORT_MAPPING_INVALID");
     }
@@ -165,7 +171,14 @@ export class SemanticImportValidatorService {
         const keyword = values[keywordColumn.sourceIndex]?.trim() ?? "";
         const issues = new Set(stringArray(row.issues) ?? []);
         if (!keyword) issues.add("KEYWORD_REQUIRED");
-        return { row, values, keyword, issues };
+        const language = importLanguage(
+          languageColumn
+            ? values[languageColumn.sourceIndex]
+            : undefined,
+          mapping.defaultLanguage,
+          issues
+        );
+        return { row, values, keyword, language, issues };
       });
       const normalizable = pending.filter(({ keyword }) => keyword);
       const normalized =
@@ -176,10 +189,10 @@ export class SemanticImportValidatorService {
               projectId: semanticImport.projectId,
               actorId: semanticImport.actorId,
               importId: semanticImport.id,
-              rows: normalizable.map(({ row, keyword }) => ({
+              rows: normalizable.map(({ row, keyword, language }) => ({
                 rowNumber: row.rowNumber.toString(),
                 text: keyword,
-                language: mapping.defaultLanguage
+                language
               }))
             });
       const normalizedByRow = new Map(
@@ -194,7 +207,8 @@ export class SemanticImportValidatorService {
               headers,
               mapping,
               keyword,
-              issues
+              issues,
+              { sourceFormat: semanticImport.sourceFormat }
             )
           : undefined;
         for (const issue of issues) {
@@ -421,7 +435,8 @@ export function canonicalImportRow(
     readonly normalizedHash: string;
     readonly language: string;
   },
-  issues: Set<string>
+  issues: Set<string>,
+  options: Readonly<{ sourceFormat?: string }> = {}
 ): SemanticImportPublishRow {
   const byTarget = new Map(
     mapping.columns.map((column) => [column.target, column])
@@ -434,7 +449,7 @@ export function canonicalImportRow(
   };
   const groupPath = splitGroupPath(
     value("group.path"),
-    mapping.groupSeparator,
+    options.sourceFormat === "KC4" ? "/" : mapping.groupSeparator,
     issues
   );
   const targetUrl = validUrl(value("page.target_url"), issues);
@@ -447,10 +462,29 @@ export function canonicalImportRow(
   );
   const observedAt = validDate(value("metric.observed_at"), issues);
   const tags = splitTags(value("keyword.tags"));
+  const priority = optionalPriority(value("keyword.priority"), issues);
+  const isFavorite = optionalBoolean(
+    value("keyword.favorite"),
+    "INVALID_FAVORITE",
+    issues
+  );
+  const intent = optionalIntent(value("keyword.intent"), issues);
+  const explicitPositions = mappedPositions(value, issues);
+  const positions = explicitPositions.length > 0
+    ? explicitPositions
+    : options.sourceFormat === "KC4" && value("ranking.position")
+      ? kc4Positions(headers, values, issues)
+      : legacyMappedPosition(value, issues);
   const customValues: Record<string, string> = {};
   for (const column of mapping.columns) {
     const raw = values[column.sourceIndex]?.trim();
     if (!raw) continue;
+    if (
+      options.sourceFormat === "KC4" &&
+      KC4_NATIVE_POSITION_HEADERS.has(headers[column.sourceIndex] ?? "")
+    ) {
+      continue;
+    }
     if (column.target === "custom" && column.customName) {
       customValues[column.customName] = raw;
     } else if (column.target === "metric.kei") {
@@ -474,9 +508,13 @@ export function canonicalImportRow(
     textNormalized: keyword.textNormalized,
     normalizedHash: keyword.normalizedHash,
     language: keyword.language,
+    ...(priority === undefined ? {} : { priority }),
+    ...(isFavorite === undefined ? {} : { isFavorite }),
+    ...(intent === undefined ? {} : { intent }),
     ...(groupPath?.length ? { groupPath } : {}),
     ...(targetUrl ? { targetUrl } : {}),
     ...(frequencies.length > 0 ? { frequencies } : {}),
+    ...(positions.length > 0 ? { positions } : {}),
     ...(observedAt ? { observedAt } : {}),
     ...(tags.length > 0 ? { tags } : {}),
     customValues
@@ -494,11 +532,250 @@ function splitGroupPath(
     .map((segment) => segment.trim())
     .filter(Boolean);
   if (segments.length === 0) return undefined;
-  if (segments.length > 10) {
+  if (segments.length > semanticImportMaxGroupDepth) {
     issues.add("GROUP_DEPTH_EXCEEDED");
-    return segments.slice(0, 10);
+    return segments.slice(0, semanticImportMaxGroupDepth);
   }
   return segments;
+}
+
+type ImportValue = (target: string) => string | undefined;
+
+function mappedPositions(
+  value: ImportValue,
+  issues: Set<string>
+): readonly SemanticImportPositionValue[] {
+  return (["YANDEX", "GOOGLE"] as const).flatMap((searchEngine) => {
+    const prefix = `ranking.${searchEngine.toLowerCase()}`;
+    const rawPosition = value(`${prefix}.position`);
+    if (!rawPosition) return [];
+    const position = importedPosition(rawPosition, issues);
+    if (position === undefined) return [];
+    const found = position > 0;
+    const rawChange = value(`${prefix}.change`);
+    const change = rawChange ? importedPositionChange(rawChange, issues) : undefined;
+    const previousPosition = found && change !== undefined
+      ? position - change
+      : undefined;
+    const rankingUrl = validRankingUrl(value(`${prefix}.url`), issues);
+    return [{
+      searchEngine,
+      found,
+      ...(found ? { position } : {}),
+      ...(previousPosition !== undefined && previousPosition > 0
+        ? { previousPosition }
+        : {}),
+      ...(rankingUrl ? { rankingUrl } : {})
+    }];
+  });
+}
+
+function legacyMappedPosition(
+  value: ImportValue,
+  issues: Set<string>
+): readonly SemanticImportPositionValue[] {
+  const rawPosition = value("ranking.position");
+  if (!rawPosition) return [];
+  const rawEngine = value("context.search_engine")?.trim().toUpperCase();
+  const searchEngine = rawEngine?.includes("ЯНД") || rawEngine === "YANDEX"
+    ? "YANDEX"
+    : rawEngine?.includes("GOOGLE") || rawEngine?.includes("ГУГЛ")
+      ? "GOOGLE"
+      : undefined;
+  if (!searchEngine) {
+    issues.add("TRACKING_CONTEXT_REQUIRED");
+    return [];
+  }
+  const position = importedPosition(rawPosition, issues);
+  if (position === undefined) return [];
+  return [{
+    searchEngine,
+    found: position > 0,
+    ...(position > 0 ? { position } : {})
+  }];
+}
+
+function importedPosition(
+  value: string,
+  issues: Set<string>
+): number | undefined {
+  const normalized = value.replace(/[\s\u00a0]+/gu, "");
+  if (!/^-?\d+$/u.test(normalized)) {
+    issues.add("INVALID_POSITION");
+    return undefined;
+  }
+  const position = Number(normalized);
+  if (!Number.isSafeInteger(position)) {
+    issues.add("INVALID_POSITION");
+    return undefined;
+  }
+  if (position <= 0 || position === 2_147_483_647) return 0;
+  if (position > 100) {
+    issues.add("INVALID_POSITION");
+    return undefined;
+  }
+  return position;
+}
+
+function importedPositionChange(
+  value: string,
+  issues: Set<string>
+): number | undefined {
+  const normalized = value.replace(/[\s\u00a0]+/gu, "");
+  if (!/^-?\d+$/u.test(normalized)) {
+    issues.add("INVALID_POSITION_CHANGE");
+    return undefined;
+  }
+  const change = Number(normalized);
+  if (!Number.isSafeInteger(change)) {
+    issues.add("INVALID_POSITION_CHANGE");
+    return undefined;
+  }
+  return change;
+}
+
+function importLanguage(
+  value: string | undefined,
+  fallback: string,
+  issues: Set<string>
+): string {
+  const candidate = value?.trim() || fallback;
+  if (candidate === "und") return candidate;
+  try {
+    const canonical = Intl.getCanonicalLocales(candidate);
+    if (canonical.length !== 1 || !canonical[0] || canonical[0].length > 16) {
+      throw new Error();
+    }
+    return canonical[0];
+  } catch {
+    issues.add("INVALID_LANGUAGE");
+    return fallback;
+  }
+}
+
+function optionalPriority(
+  value: string | undefined,
+  issues: Set<string>
+): number | undefined {
+  if (!value) return undefined;
+  const priority = Number(value.trim());
+  if (!Number.isSafeInteger(priority) || priority < 0 || priority > 100) {
+    issues.add("INVALID_PRIORITY");
+    return undefined;
+  }
+  return priority;
+}
+
+function optionalBoolean(
+  value: string | undefined,
+  issue: string,
+  issues: Set<string>
+): boolean | undefined {
+  if (!value) return undefined;
+  const normalized = value.normalize("NFKC").trim().toLowerCase();
+  if (["1", "true", "yes", "да", "истина", "избранное"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "нет", "ложь"].includes(normalized)) {
+    return false;
+  }
+  issues.add(issue);
+  return undefined;
+}
+
+function optionalIntent(
+  value: string | undefined,
+  issues: Set<string>
+): SemanticImportPublishRow["intent"] | undefined {
+  if (!value) return undefined;
+  const aliases: Readonly<Record<string, SemanticImportPublishRow["intent"]>> = {
+    informational: "INFORMATIONAL",
+    информационный: "INFORMATIONAL",
+    navigational: "NAVIGATIONAL",
+    навигационный: "NAVIGATIONAL",
+    commercial: "COMMERCIAL",
+    коммерческий: "COMMERCIAL",
+    transactional: "TRANSACTIONAL",
+    транзакционный: "TRANSACTIONAL",
+    local: "LOCAL",
+    локальный: "LOCAL",
+    mixed: "MIXED",
+    смешанный: "MIXED"
+  };
+  const normalized = value.normalize("NFKC").trim().toLowerCase();
+  const intent = aliases[normalized] ?? value.trim().toUpperCase();
+  if (!semanticKeywordIntents.some((candidate) => candidate === intent)) {
+    issues.add("INVALID_INTENT");
+    return undefined;
+  }
+  return intent as SemanticImportPublishRow["intent"];
+}
+
+const KC4_NATIVE_POSITION_HEADERS = new Set([
+  "Яндекс · Позиция",
+  "Яндекс · Изменение позиции",
+  "Яндекс · URL выдачи",
+  "Google · Позиция",
+  "Google · Изменение позиции",
+  "Google · URL выдачи"
+]);
+
+function kc4Positions(
+  headers: readonly string[],
+  values: readonly string[],
+  issues: Set<string>
+): readonly SemanticImportPositionValue[] {
+  const byHeader = new Map(headers.map((header, index) => [header, index]));
+  const value = (header: string): string | undefined => {
+    const index = byHeader.get(header);
+    return index === undefined ? undefined : values[index]?.trim();
+  };
+  return ([
+    ["YANDEX", "Яндекс"],
+    ["GOOGLE", "Google"]
+  ] as const).flatMap(([searchEngine, label]) => {
+    const rawPosition = value(`${label} · Позиция`);
+    if (!rawPosition) return [];
+    const parsedPosition = importedPosition(rawPosition, issues);
+    if (parsedPosition === undefined) return [];
+    const found = parsedPosition > 0;
+    const rankingUrl = validRankingUrl(
+      value(`${label} · URL выдачи`),
+      issues
+    );
+    const rawChange = value(`${label} · Изменение позиции`);
+    const change = rawChange
+      ? importedPositionChange(rawChange, issues)
+      : undefined;
+    const previousPosition =
+      found && Number.isSafeInteger(change)
+        ? parsedPosition - Number(change)
+        : undefined;
+    return [{
+      searchEngine,
+      found,
+      ...(found ? { position: parsedPosition } : {}),
+      ...(previousPosition !== undefined && previousPosition > 0
+        ? { previousPosition }
+        : {}),
+      ...(rankingUrl ? { rankingUrl } : {})
+    }];
+  });
+}
+
+function validRankingUrl(
+  value: string | undefined,
+  issues: Set<string>
+): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    if (!["http:", "https:"].includes(url.protocol)) throw new Error();
+    return value;
+  } catch {
+    issues.add("INVALID_RANKING_URL");
+    return undefined;
+  }
 }
 
 function validUrl(

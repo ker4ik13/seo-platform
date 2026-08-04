@@ -163,12 +163,11 @@ test("request parser rejects malformed IDs, hashes, bounds and literals", () => 
     { ...valid, executionAttempt: 0 },
     { ...valid, executionAttempt: 1_001 },
     { ...valid, purpose: "CHECK_PROVIDER" },
-    { ...valid, provider: "XMLSTOCK" },
     { ...valid, operation: "SERP" },
     { ...valid, capability: "SERP_COLLECTION" },
     { ...valid, credentialMode: "PLATFORM_PAID" },
     { ...valid, manifest: { ...valid.manifest, chunkIndex: -1 } },
-    { ...valid, manifest: { ...valid.manifest, chunkIndex: 4 } },
+    { ...valid, manifest: { ...valid.manifest, chunkIndex: 15_000 } },
     {
       ...valid,
       executionEvidenceHash: { algorithm: "SHA_256", value: "A".repeat(64) }

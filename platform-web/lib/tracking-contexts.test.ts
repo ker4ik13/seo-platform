@@ -13,6 +13,7 @@ import {
   trackingContextCreateInput,
   trackingContextDraft,
   trackingContextDraftDirty,
+  trackingContextMatchesDraft,
   trackingContextPayloadSignature,
   trackingContextsApiPath,
   trackingContextsReturnTo,
@@ -179,6 +180,40 @@ test("detects semantic draft changes after normalization", () => {
       depth: 50
     }),
     true
+  );
+});
+
+test("matches a reusable context only against the complete normalized draft", () => {
+  const draft = trackingContextDraft(context);
+  assert.equal(
+    trackingContextMatchesDraft(context, {
+      ...draft,
+      countryCode: "us",
+      name: " Google US "
+    }),
+    true
+  );
+  assert.equal(
+    trackingContextMatchesDraft(context, {
+      ...draft,
+      safeSearch: true
+    }),
+    false
+  );
+  assert.equal(
+    trackingContextMatchesDraft(context, {
+      ...draft,
+      domainMatchMode: "URL_PREFIX",
+      domainMatchValue: "https://example.test/catalog"
+    }),
+    false
+  );
+  assert.equal(
+    trackingContextMatchesDraft(context, {
+      ...draft,
+      regionLabel: "Nevada"
+    }),
+    false
   );
 });
 

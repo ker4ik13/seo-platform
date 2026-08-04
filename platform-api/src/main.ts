@@ -12,6 +12,7 @@ import {
   TRUSTED_PROXY_HOPS
 } from "./common/http-response-policy.js";
 import { loadAppConfig } from "./config/app-config.js";
+import { installKeywordBulkBodyLimit } from "./semantics/keyword-bulk-body-limit.js";
 
 async function bootstrap(): Promise<void> {
   const config = loadAppConfig();
@@ -20,6 +21,7 @@ async function bootstrap(): Promise<void> {
     trustProxy: TRUSTED_PROXY_HOPS,
     requestIdHeader: "x-request-id"
   });
+  installKeywordBulkBodyLimit(adapter.getInstance());
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     adapter

@@ -28,8 +28,29 @@ export function updateSemanticKeywordGroupInput(
   return {
     name: groupName(input.name),
     ...optionalParentId(input.parentId, true),
-    ...optionalColor(input.color, true)
+    ...optionalColor(input.color, true),
+    ...optionalPosition(input.position)
   };
+}
+
+export function deleteSemanticKeywordGroupInput(
+  value: unknown
+): Readonly<{ deleteKeywords: boolean }> {
+  if (value === undefined || value === null || value === "") {
+    return { deleteKeywords: false };
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    invalid("$", "Must be a JSON object");
+  }
+  const input = value as Readonly<Record<string, unknown>>;
+  if (
+    Object.keys(input).some((key) => key !== "deleteKeywords") ||
+    (input.deleteKeywords !== undefined &&
+      typeof input.deleteKeywords !== "boolean")
+  ) {
+    invalid("deleteKeywords", "Must be a boolean");
+  }
+  return { deleteKeywords: input.deleteKeywords === true };
 }
 
 function exactRecord(value: unknown): Readonly<Record<string, unknown>> {
@@ -39,12 +60,22 @@ function exactRecord(value: unknown): Readonly<Record<string, unknown>> {
   const input = value as Readonly<Record<string, unknown>>;
   if (
     Object.keys(input).some(
-      (key) => !["name", "parentId", "color"].includes(key)
+      (key) => !["name", "parentId", "color", "position"].includes(key)
     )
   ) {
     invalid("$", "Contains unsupported fields");
   }
   return input;
+}
+
+function optionalPosition(
+  value: unknown
+): Readonly<{ position?: number }> {
+  if (value === undefined) return {};
+  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > 1_999) {
+    invalid("position", "Must be an integer between 0 and 1999");
+  }
+  return { position: Number(value) };
 }
 
 function groupName(value: unknown): string {

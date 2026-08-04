@@ -1,5 +1,13 @@
 import { types as nodeTypes } from "node:util";
 import {
+  currentRankProviderPolicyVersion,
+  legacyRankManifestChunkSize,
+  legacyRankProviderKeywordLimit,
+  legacyRankProviderPolicyVersion,
+  rankManifestSingleTaskChunkSize,
+  rankProviderKeywordLimit,
+  xmlStockRankManifestChunkSize,
+  xmlStockRankProviderPolicyVersion,
   rankManifestChunkHashPreimage,
   type InternalRankExecutionParameters,
   type InternalRankManifestChunk,
@@ -20,9 +28,6 @@ export const RANK_PROVIDER_REQUEST_INTENT_SCHEMA =
 const MANIFEST_HASH_SCHEMA = "rank-manifest@1" as const;
 const MANIFEST_CHUNK_HASH_SCHEMA =
   "rank-manifest-chunk@1" as const;
-const RANK_CHUNK_SIZE = 250;
-const MAX_RANK_PAIRS = 1_000;
-const MAX_CHUNK_INDEX = MAX_RANK_PAIRS / RANK_CHUNK_SIZE - 1;
 const UUID_V7_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const HASH_PATTERN = /^[0-9a-f]{64}$/u;
@@ -53,7 +58,7 @@ export interface RankProviderRequestIntentV1 {
   readonly jobId: string;
   readonly jobItemId: string;
   readonly estimateId: string;
-  readonly provider: "ARSENKIN";
+  readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly operation: "POSITIONS";
   readonly project: {
     readonly domain: string;
@@ -86,6 +91,16 @@ export interface RankProviderRequestIntentBuildInput {
   readonly providerPolicyVersion: string;
 }
 
+interface RankProviderIntentBounds {
+  readonly version:
+    | typeof legacyRankProviderPolicyVersion
+    | typeof currentRankProviderPolicyVersion
+    | typeof xmlStockRankProviderPolicyVersion;
+  readonly maximumPairs: number;
+  readonly chunkSize: number;
+  readonly maximumChunkIndex: number;
+}
+
 /**
  * Builds a canonical, immutable and secret-free adapter command from the
  * authoritative sealed inputs. The complete source chunk is verified before
@@ -102,17 +117,21 @@ export function buildRankProviderRequestIntent(
     "executionConnectorVersion",
     "providerPolicyVersion"
   ]);
-  const command = manifestCommand(input.command);
+  const providerPolicy = rankProviderPolicy(
+    input.providerPolicyVersion
+  );
+  const command = manifestCommand(
+    input.command,
+    providerPolicy.maximumPairs
+  );
   const pairCount = Number(command.estimate.pairCount);
-  const chunk = manifestChunk(input.chunk, pairCount);
+  const chunk = manifestChunk(input.chunk, pairCount, providerPolicy);
   const jobItemId = uuidV7(input.jobItemId);
   const manifestHash = hash(input.manifestHash);
   const executionConnectorVersion = version(
     input.executionConnectorVersion
   );
-  const providerPolicyVersion = version(
-    input.providerPolicyVersion
-  );
+  const providerPolicyVersion = providerPolicy.version;
 
   if (
     chunk.workspaceId !== command.workspaceId ||
@@ -203,24 +222,33 @@ export function rankProviderRequestIntent(
     "hashSchemaVersion",
     "chunkHash"
   ]);
-  const pairCount = decimal(manifest.pairCount, MAX_RANK_PAIRS);
+  const providerPolicy = rankProviderPolicy(
+    input.providerPolicyVersion
+  );
+  const pairCount = decimal(
+    manifest.pairCount,
+    providerPolicy.maximumPairs
+  );
   const chunkIndex = boundedInteger(
     manifestChunk.chunkIndex,
     0,
-    MAX_CHUNK_INDEX
+    providerPolicy.maximumChunkIndex
   );
   const keywordInputs = exactArray(
     input.keywords,
     1,
-    RANK_CHUNK_SIZE
+    providerPolicy.chunkSize
   );
   const expectedKeywordCount = expectedChunkEntryCount(
     Number(pairCount),
-    chunkIndex
+    chunkIndex,
+    providerPolicy
   );
   if (
     input.schemaVersion !== RANK_PROVIDER_REQUEST_INTENT_SCHEMA ||
-    input.provider !== "ARSENKIN" ||
+    (input.provider !== "ARSENKIN" && input.provider !== "XMLSTOCK") ||
+    (input.provider === "XMLSTOCK") !==
+      (providerPolicy.version === xmlStockRankProviderPolicyVersion) ||
     input.operation !== "POSITIONS" ||
     manifest.hashSchemaVersion !== MANIFEST_HASH_SCHEMA ||
     manifestChunk.hashSchemaVersion !==
@@ -241,7 +269,11 @@ export function rankProviderRequestIntent(
     manifestChunk.manifestId
   );
   const keywords = keywordInputs.map((keyword, index) =>
-    intentKeyword(keyword, chunkIndex * RANK_CHUNK_SIZE + index)
+    intentKeyword(
+      keyword,
+      chunkIndex * providerPolicy.chunkSize + index,
+      providerPolicy.maximumPairs
+    )
   );
   assertUniqueIntentKeywords(keywords);
 
@@ -255,7 +287,7 @@ export function rankProviderRequestIntent(
     jobId,
     jobItemId,
     estimateId,
-    provider: "ARSENKIN",
+    provider: input.provider,
     operation: "POSITIONS",
     project: {
       domain: boundedText(project.domain, 1, 2_048),
@@ -277,7 +309,7 @@ export function rankProviderRequestIntent(
     executionConnectorVersion: version(
       input.executionConnectorVersion
     ),
-    providerPolicyVersion: version(input.providerPolicyVersion),
+    providerPolicyVersion: providerPolicy.version,
     keywords
   };
 
@@ -306,7 +338,8 @@ export function rankProviderRequestIntentHash(
 }
 
 function manifestCommand(
-  value: unknown
+  value: unknown,
+  maximumPairs: number
 ): InternalSealRankManifestInput {
   const input = exactRecord(value, [
     "workspaceId",
@@ -355,7 +388,7 @@ function manifestCommand(
   );
 
   if (
-    input.provider !== "ARSENKIN" ||
+    (input.provider !== "ARSENKIN" && input.provider !== "XMLSTOCK") ||
     input.operation !== "POSITIONS" ||
     projectSnapshotId !== projectId ||
     projectSnapshotWorkspaceId !== workspaceId ||
@@ -373,7 +406,7 @@ function manifestCommand(
     actorId,
     jobId,
     estimateId,
-    provider: "ARSENKIN",
+    provider: input.provider,
     operation: "POSITIONS",
     project: {
       id: projectSnapshotId,
@@ -389,7 +422,7 @@ function manifestCommand(
       configurationHash: hash(estimate.configurationHash),
       semanticScopeHash: hash(estimate.semanticScopeHash),
       scopeHash: hash(estimate.scopeHash),
-      pairCount: decimal(estimate.pairCount, MAX_RANK_PAIRS),
+      pairCount: decimal(estimate.pairCount, maximumPairs),
       expiresAt: timestamp(estimate.expiresAt)
     },
     execution: parseRankExecutionParameters(input.execution),
@@ -404,7 +437,8 @@ function manifestCommand(
 
 function manifestChunk(
   value: unknown,
-  pairCount: number
+  pairCount: number,
+  providerPolicy: RankProviderIntentBounds
 ): InternalRankManifestChunk {
   const input = exactRecord(value, [
     "workspaceId",
@@ -419,18 +453,30 @@ function manifestChunk(
   const chunkIndex = boundedInteger(
     input.chunkIndex,
     0,
-    MAX_CHUNK_INDEX
+    providerPolicy.maximumChunkIndex
   );
-  const entryInputs = exactArray(input.entries, 1, RANK_CHUNK_SIZE);
+  const entryInputs = exactArray(
+    input.entries,
+    1,
+    providerPolicy.chunkSize
+  );
   if (
     input.hashSchemaVersion !== MANIFEST_CHUNK_HASH_SCHEMA ||
     entryInputs.length !==
-      expectedChunkEntryCount(pairCount, chunkIndex)
+      expectedChunkEntryCount(
+        pairCount,
+        chunkIndex,
+        providerPolicy
+      )
   ) {
     invalid();
   }
   const entries = entryInputs.map((entry, index) =>
-    manifestEntry(entry, chunkIndex * RANK_CHUNK_SIZE + index)
+    manifestEntry(
+      entry,
+      chunkIndex * providerPolicy.chunkSize + index,
+      providerPolicy.maximumPairs
+    )
   );
   assertUniqueManifestEntries(entries);
 
@@ -454,7 +500,8 @@ function manifestChunk(
 
 function manifestEntry(
   value: unknown,
-  expectedSequence: number
+  expectedSequence: number,
+  maximumPairs: number
 ): InternalRankManifestEntry {
   const input = exactRecord(value, [
     "id",
@@ -466,7 +513,7 @@ function manifestEntry(
     "keywordTextHash",
     "language"
   ]);
-  const sequence = boundedInteger(input.sequence, 0, MAX_RANK_PAIRS - 1);
+  const sequence = boundedInteger(input.sequence, 0, maximumPairs - 1);
   const keywordText = boundedKeywordText(input.keywordText);
   const keywordTextHash = hash(input.keywordTextHash);
   if (
@@ -489,7 +536,8 @@ function manifestEntry(
 
 function intentKeyword(
   value: unknown,
-  expectedSequence: number
+  expectedSequence: number,
+  maximumPairs: number
 ): RankProviderRequestIntentKeywordV1 {
   const input = exactRecord(value, [
     "manifestEntryId",
@@ -499,7 +547,7 @@ function intentKeyword(
     "keywordTextHash",
     "language"
   ]);
-  const sequence = boundedInteger(input.sequence, 0, MAX_RANK_PAIRS - 1);
+  const sequence = boundedInteger(input.sequence, 0, maximumPairs - 1);
   const keywordText = boundedKeywordText(input.keywordText);
   const keywordTextHash = hash(input.keywordTextHash);
   if (
@@ -539,18 +587,54 @@ function assertUnique(values: readonly string[]): void {
 
 function expectedChunkEntryCount(
   pairCount: number,
-  chunkIndex: number
+  chunkIndex: number,
+  providerPolicy: RankProviderIntentBounds
 ): number {
-  const firstSequence = chunkIndex * RANK_CHUNK_SIZE;
+  const firstSequence = chunkIndex * providerPolicy.chunkSize;
   if (
     !Number.isSafeInteger(pairCount) ||
     pairCount < 1 ||
-    pairCount > MAX_RANK_PAIRS ||
+    pairCount > providerPolicy.maximumPairs ||
     firstSequence >= pairCount
   ) {
     invalid();
   }
-  return Math.min(RANK_CHUNK_SIZE, pairCount - firstSequence);
+  return Math.min(
+    providerPolicy.chunkSize,
+    pairCount - firstSequence
+  );
+}
+
+function rankProviderPolicy(value: unknown): RankProviderIntentBounds {
+  if (value === legacyRankProviderPolicyVersion) {
+    return {
+      version: legacyRankProviderPolicyVersion,
+      maximumPairs: legacyRankProviderKeywordLimit,
+      chunkSize: legacyRankManifestChunkSize,
+      maximumChunkIndex:
+        legacyRankProviderKeywordLimit /
+          legacyRankManifestChunkSize -
+        1
+    };
+  }
+  if (value === currentRankProviderPolicyVersion) {
+    return {
+      version: currentRankProviderPolicyVersion,
+      maximumPairs: rankProviderKeywordLimit,
+      chunkSize: rankManifestSingleTaskChunkSize,
+      maximumChunkIndex: 0
+    };
+  }
+  if (value === xmlStockRankProviderPolicyVersion) {
+    return {
+      version: xmlStockRankProviderPolicyVersion,
+      maximumPairs: rankProviderKeywordLimit,
+      chunkSize: xmlStockRankManifestChunkSize,
+      maximumChunkIndex:
+        rankProviderKeywordLimit / xmlStockRankManifestChunkSize - 1
+    };
+  }
+  invalid();
 }
 
 function exactRecord(

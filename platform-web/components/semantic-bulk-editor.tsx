@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import type {
   SemanticKeywordCleaningCase,
   SemanticKeywordCleaningPreview,
@@ -329,7 +331,7 @@ export function SemanticBulkEditor({
         </label>
         <label>
           <span>Избранное</span>
-          <select
+          <CustomSelect
             onChange={(event) =>
               setFavorite(event.target.value as typeof favorite)
             }
@@ -338,11 +340,11 @@ export function SemanticBulkEditor({
             <option value="KEEP">Не менять</option>
             <option value="YES">Добавить</option>
             <option value="NO">Убрать</option>
-          </select>
+          </CustomSelect>
         </label>
         <label>
           <span>Интент</span>
-          <select
+          <CustomSelect
             onChange={(event) =>
               setIntent(event.target.value as typeof intent)
             }
@@ -356,11 +358,11 @@ export function SemanticBulkEditor({
             <option value="TRANSACTIONAL">Транзакционный</option>
             <option value="LOCAL">Локальный</option>
             <option value="MIXED">Смешанный</option>
-          </select>
+          </CustomSelect>
         </label>
         <label>
           <span>Группа</span>
-          <select
+          <CustomSelect
             onChange={(event) => setGroupId(event.target.value)}
             value={groupId}
           >
@@ -371,21 +373,21 @@ export function SemanticBulkEditor({
                 {group.path}
               </option>
             ))}
-          </select>
+          </CustomSelect>
         </label>
         <label>
           <span>Кластер</span>
-          <select onChange={(event) => setClusterId(event.target.value)} value={clusterId}>
+          <CustomSelect onChange={(event) => setClusterId(event.target.value)} value={clusterId}>
             <option value="KEEP">Не менять</option>
             <option value="CLEAR">Без кластера</option>
             {clusters.map((cluster) => (
               <option key={cluster.id} value={cluster.id}>{cluster.name}</option>
             ))}
-          </select>
+          </CustomSelect>
         </label>
         <label>
           <span>Целевая URL</span>
-          <select
+          <CustomSelect
             onChange={(event) =>
               setTargetUrlMode(event.target.value as typeof targetUrlMode)
             }
@@ -394,7 +396,7 @@ export function SemanticBulkEditor({
             <option value="KEEP">Не менять</option>
             <option value="CLEAR">Очистить</option>
             <option value="SET">Задать URL</option>
-          </select>
+          </CustomSelect>
         </label>
         {targetUrlMode === "SET" && (
           <label className="semantic-bulk-url">
@@ -524,7 +526,7 @@ export function SemanticBulkEditor({
           <div className="semantic-cleaning-options">
             <label>
               <span>Регистр</span>
-              <select
+              <CustomSelect
                 disabled={Boolean(cleaningBusy)}
                 onChange={(event) => {
                   setCleaningCase(
@@ -537,7 +539,7 @@ export function SemanticBulkEditor({
                 <option value="KEEP">Не менять</option>
                 <option value="LOWER">строчные</option>
                 <option value="UPPER">ПРОПИСНЫЕ</option>
-              </select>
+              </CustomSelect>
             </label>
             <label>
               <input

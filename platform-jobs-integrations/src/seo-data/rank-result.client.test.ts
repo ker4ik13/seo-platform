@@ -100,7 +100,7 @@ function command(): InternalIngestRankChunkInput {
     provider: "ARSENKIN",
     operation: "POSITIONS",
     providerRequestId: "task-3944",
-    connectorVersion: "arsenkin-positions@1.0.0",
+    connectorVersion: "arsenkin-positions@2.0.0",
     observedAt: "2026-07-30T12:00:00.000Z",
     results: [
       {

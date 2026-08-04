@@ -6,14 +6,18 @@ import {
   Injectable,
   NotFoundException
 } from "@nestjs/common";
-import type {
-  InternalGetRankManifestChunkInput,
-  InternalRankExecutionParameters,
-  InternalRankManifestChunk,
-  InternalRankManifestEntry,
-  InternalRankManifestSeal,
-  InternalSealRankManifestInput,
-  RankManifestHash
+import {
+  legacyRankManifestChunkSize,
+  legacyRankProviderKeywordLimit,
+  rankManifestSingleTaskChunkSize,
+  xmlStockRankManifestChunkSize,
+  type InternalGetRankManifestChunkInput,
+  type InternalRankExecutionParameters,
+  type InternalRankManifestChunk,
+  type InternalRankManifestEntry,
+  type InternalRankManifestSeal,
+  type InternalSealRankManifestInput,
+  type RankManifestHash
 } from "@seo-platform/contracts";
 import {
   rankManifestChunkHashPreimage,
@@ -36,12 +40,12 @@ import {
 } from "../rank-scopes/rank-scope-bounds.js";
 import { rankExecutionParameters } from "./rank-manifest-input.js";
 
-const MANIFEST_CHUNK_SIZE = 250;
 const MANIFEST_HASH_SCHEMA = "rank-manifest@1";
 const CHUNK_HASH_SCHEMA = "rank-manifest-chunk@1";
 const REQUEST_HASH_SCHEMA = "rank-manifest-request@1";
 const RANK_MANIFEST_TRANSACTION_MAX_WAIT_MS = 5_000;
-const RANK_MANIFEST_TRANSACTION_TIMEOUT_MS = 30_000;
+const RANK_MANIFEST_TRANSACTION_TIMEOUT_MS = 120_000;
+const MANIFEST_ENTRY_INSERT_BATCH_SIZE = 1_000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const HASH_PATTERN = /^[0-9a-f]{64}$/u;
@@ -136,7 +140,9 @@ const CHUNK_SELECT = {
   manifest: {
     select: {
       jobId: true,
+      pairCount: true,
       chunkCount: true,
+      chunkSize: true,
       status: true
     }
   },
@@ -229,9 +235,11 @@ export class RankManifestService {
             assignments.length,
             snapshotAt
           );
+          const chunkSize = rankManifestChunkSize(input.provider);
           const entries = manifestEntries(
             allocation.entryIds,
-            assignments
+            assignments,
+            chunkSize
           );
           const deduplicationHash = rankManifestHash(
             rankManifestDeduplicationHashPreimage(input, entries)
@@ -252,11 +260,16 @@ export class RankManifestService {
           if (activeEquivalent) {
             equivalentRunActive();
           }
-          const chunks = manifestChunks(allocation.manifestId, entries);
+          const chunks = manifestChunks(
+            allocation.manifestId,
+            entries,
+            chunkSize
+          );
           const sealWithoutHash = manifestSealWithoutHash(
             input,
             allocation,
             chunks.length,
+            chunkSize,
             deduplicationHash
           );
           const manifestHash = rankManifestHash(
@@ -314,8 +327,7 @@ export class RankManifestService {
               entryCount: chunk.entries.length
             }))
           });
-          await transaction.rankExecutionManifestEntry.createMany({
-            data: entries.map((entry) => ({
+          const manifestEntryRows = entries.map((entry) => ({
               id: entry.id,
               workspaceId: input.workspaceId,
               projectId: input.projectId,
@@ -328,8 +340,26 @@ export class RankManifestService {
               keywordText: entry.keywordText,
               keywordTextHash: hashBytes(entry.keywordTextHash),
               language: entry.language
-            }))
-          });
+            }));
+          for (
+            let offset = 0;
+            offset < manifestEntryRows.length;
+            offset += MANIFEST_ENTRY_INSERT_BATCH_SIZE
+          ) {
+            const batch = manifestEntryRows.slice(
+              offset,
+              offset + MANIFEST_ENTRY_INSERT_BATCH_SIZE
+            );
+            const inserted =
+              await transaction.rankExecutionManifestEntry.createMany({
+                data: batch
+              });
+            if (inserted.count !== batch.length) {
+              throw new Error(
+                "Rank manifest entry batch was not fully persisted"
+              );
+            }
+          }
           await transaction.rankExecutionManifest.update({
             where: { id: seal.id },
             data: { status: "SEALED" }
@@ -619,7 +649,7 @@ async function acquireManifestSnapshot(
       statement_timestamp() AS "snapshotAt",
       pg_advisory_xact_lock(
         hashtextextended(${`rank-manifest:${projectId}`}, 0)
-      ) AS "lockAcquired"
+      ) IS NULL AS "lockAcquired"
   `;
   const snapshotAt = rows[0]?.snapshotAt;
   if (
@@ -634,7 +664,8 @@ async function acquireManifestSnapshot(
 
 function manifestEntries(
   entryIds: readonly string[],
-  assignments: readonly AssignmentRecord[]
+  assignments: readonly AssignmentRecord[],
+  chunkSize: number
 ): readonly ManifestEntrySnapshot[] {
   return assignments.map((assignment, sequence) => {
     const id = entryIds[sequence];
@@ -644,7 +675,7 @@ function manifestEntries(
     return {
       id,
       sequence,
-      chunkIndex: Math.floor(sequence / MANIFEST_CHUNK_SIZE),
+      chunkIndex: Math.floor(sequence / chunkSize),
       assignmentId: assignment.id,
       keywordId: assignment.keywordId,
       keywordVersion: assignment.keyword.version,
@@ -657,19 +688,20 @@ function manifestEntries(
 
 function manifestChunks(
   manifestId: string,
-  entries: readonly ManifestEntrySnapshot[]
+  entries: readonly ManifestEntrySnapshot[],
+  chunkSize: number
 ): readonly ManifestChunkSnapshot[] {
   const chunks: ManifestChunkSnapshot[] = [];
   for (
     let offset = 0;
     offset < entries.length;
-    offset += MANIFEST_CHUNK_SIZE
+    offset += chunkSize
   ) {
     const chunkEntries = entries.slice(
       offset,
-      offset + MANIFEST_CHUNK_SIZE
+      offset + chunkSize
     );
-    const chunkIndex = Math.floor(offset / MANIFEST_CHUNK_SIZE);
+    const chunkIndex = Math.floor(offset / chunkSize);
     const publicEntries = chunkEntries.map(manifestEntry);
     chunks.push({
       chunkIndex,
@@ -692,6 +724,7 @@ function manifestSealWithoutHash(
   input: InternalSealRankManifestInput,
   allocation: ManifestAllocation,
   chunkCount: number,
+  chunkSize: number,
   deduplicationHash: RankManifestHash
 ): Omit<InternalRankManifestSeal, "manifestHash"> {
   return {
@@ -715,7 +748,7 @@ function manifestSealWithoutHash(
     deduplicationHash,
     pairCount: input.estimate.pairCount,
     chunkCount: String(chunkCount),
-    chunkSize: String(MANIFEST_CHUNK_SIZE) as "250",
+    chunkSize: String(chunkSize) as "1" | "250" | "15000",
     execution: input.execution,
     retention: input.retention,
     status: "SEALED",
@@ -739,7 +772,7 @@ function storedManifestSeal(
       !Number.isNaN(record.closedAt.getTime()) &&
       record.closedAt.getTime() >= record.sealedAt.getTime());
   if (
-    record.provider !== "ARSENKIN" ||
+    (record.provider !== "ARSENKIN" && record.provider !== "XMLSTOCK") ||
     record.operation !== "POSITIONS" ||
     record.projectStatus !== "ACTIVE" ||
     !lifecycleValid ||
@@ -761,9 +794,11 @@ function storedManifestSeal(
     record.pairCount < 1 ||
     record.pairCount > MAX_RANK_SCOPE_ENTRIES ||
     !Number.isSafeInteger(record.chunkCount) ||
-    record.chunkCount !==
-      Math.ceil(record.pairCount / MANIFEST_CHUNK_SIZE) ||
-    record.chunkSize !== MANIFEST_CHUNK_SIZE ||
+    !validStoredManifestShape(
+      record.pairCount,
+      record.chunkCount,
+      record.chunkSize
+    ) ||
     !sealedAtValid ||
     !(record.estimateExpiresAt instanceof Date) ||
     Number.isNaN(record.estimateExpiresAt.getTime()) ||
@@ -780,8 +815,8 @@ function storedManifestSeal(
   let persistedEntries = 0;
   const chunkHashes = record.chunks.map((chunk, index) => {
     const expectedEntryCount = Math.min(
-      MANIFEST_CHUNK_SIZE,
-      record.pairCount - index * MANIFEST_CHUNK_SIZE
+      record.chunkSize,
+      record.pairCount - index * record.chunkSize
     );
     if (
       chunk.chunkIndex !== index ||
@@ -808,7 +843,7 @@ function storedManifestSeal(
     estimateExpiresAt: record.estimateExpiresAt.toISOString(),
     sealedBy: record.sealedBy,
     trackingContextId: record.trackingContextId,
-    provider: "ARSENKIN",
+    provider: record.provider,
     operation: "POSITIONS",
     project: {
       id: record.projectId,
@@ -826,7 +861,7 @@ function storedManifestSeal(
     deduplicationHash,
     pairCount: String(record.pairCount),
     chunkCount: String(record.chunkCount),
-    chunkSize: "250",
+    chunkSize: String(record.chunkSize) as "1" | "250" | "15000",
     execution,
     retention,
     status: "SEALED",
@@ -842,6 +877,47 @@ function storedManifestSeal(
     ...sealWithoutHash,
     manifestHash
   };
+}
+
+function validStoredManifestShape(
+  pairCount: number,
+  chunkCount: number,
+  chunkSize: number
+): boolean {
+  if (
+    !Number.isSafeInteger(pairCount) ||
+    !Number.isSafeInteger(chunkCount) ||
+    !Number.isSafeInteger(chunkSize)
+  ) {
+    return false;
+  }
+  if (chunkSize === legacyRankManifestChunkSize) {
+    return (
+      pairCount >= 1 &&
+      pairCount <= legacyRankProviderKeywordLimit &&
+      chunkCount ===
+        Math.ceil(pairCount / legacyRankManifestChunkSize)
+    );
+  }
+  if (chunkSize === xmlStockRankManifestChunkSize) {
+    return (
+      pairCount >= 1 &&
+      pairCount <= MAX_RANK_SCOPE_ENTRIES &&
+      chunkCount === pairCount
+    );
+  }
+  return (
+    chunkSize === rankManifestSingleTaskChunkSize &&
+    pairCount >= 1 &&
+    pairCount <= MAX_RANK_SCOPE_ENTRIES &&
+    chunkCount === 1
+  );
+}
+
+function rankManifestChunkSize(provider: "ARSENKIN" | "XMLSTOCK"): number {
+  return provider === "XMLSTOCK"
+    ? xmlStockRankManifestChunkSize
+    : rankManifestSingleTaskChunkSize;
 }
 
 function storedManifestChunk(
@@ -860,13 +936,18 @@ function storedManifestChunk(
     record.hashSchemaVersion !== CHUNK_HASH_SCHEMA ||
     record.entryCount !== record.entries.length ||
     record.entries.length < 1 ||
-    record.entries.length > MANIFEST_CHUNK_SIZE
+    !validStoredManifestShape(
+      record.manifest.pairCount,
+      record.manifest.chunkCount,
+      record.manifest.chunkSize
+    ) ||
+    record.entries.length > record.manifest.chunkSize
   ) {
     throw new Error("Stored rank manifest chunk is invalid");
   }
   const entries = record.entries.map((entry, offset) => {
     const expectedSequence =
-      record.chunkIndex * MANIFEST_CHUNK_SIZE + offset;
+      record.chunkIndex * record.manifest.chunkSize + offset;
     if (
       entry.sequence !== expectedSequence ||
       entry.keywordVersion < 1 ||

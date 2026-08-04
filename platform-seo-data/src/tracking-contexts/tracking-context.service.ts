@@ -16,14 +16,17 @@ import {
   type InternalChangeTrackingContextKeywordInput,
   type InternalChangeTrackingContextStatusInput,
   type InternalCreateTrackingContextInput,
+  type InternalReplaceTrackingContextKeywordsInput,
   type InternalUpdateTrackingContextInput,
   type TrackingContextCollection,
   type TrackingContextConfigurationInput,
   type TrackingContextConfigurationSnapshot,
   type TrackingContextEventDataV1,
   type TrackingContextKeywordAssignmentEventDataV1,
+  type TrackingContextKeywordAssignmentsReplacedEventDataV1,
   type TrackingContextKeywordAssignmentItem,
   type TrackingContextKeywordAssignmentState,
+  type TrackingContextKeywordReplacementResult,
   type TrackingContextKeywordQuery,
   type TrackingContextSummary,
   type TrackingDomainMatchRule
@@ -40,6 +43,9 @@ import {
 import { normalizeKeywordText } from "../keywords/keyword-normalization.js";
 
 const CONTEXT_LIMIT = 200;
+// Six scalar columns are inserted per assignment. Keeping a batch at 5,000
+// leaves ample headroom below PostgreSQL's 65,535 bind-parameter limit.
+const ASSIGNMENT_CREATE_BATCH_SIZE = 5_000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const CONTEXT_INCLUDE = {
@@ -122,6 +128,12 @@ export class TrackingContextService {
           return receiptReplay(concurrent, requestHash, input);
         }
         const configurationHash = hashConfiguration(input.configuration);
+        const configuration = configurationCreateData(
+          input,
+          input.configuration,
+          configurationHash,
+          1
+        );
         const context = await transaction.trackingContext.create({
           data: {
             workspaceId: input.workspaceId,
@@ -130,12 +142,9 @@ export class TrackingContextService {
             createdBy: input.actorId,
             updatedBy: input.actorId,
             configurations: {
-              create: configurationCreateData(
-                input,
-                input.configuration,
-                configurationHash,
-                1
-              )
+              // Prisma's checked nested-create input derives tenant keys from
+              // the parent relation. Supplying them here is rejected at runtime.
+              create: omitNestedContextScope(configuration)
             }
           },
           include: CONTEXT_INCLUDE
@@ -357,6 +366,219 @@ export class TrackingContextService {
     return this.changeKeywordAssignment(input, false);
   }
 
+  public async replaceKeywords(
+    input: InternalReplaceTrackingContextKeywordsInput
+  ): Promise<TrackingContextKeywordReplacementResult> {
+    const keywordSetHash = hashKeywordSet(input.keywordIds);
+    const requestHash = keywordReplacementRequestHash(input, keywordSetHash);
+    const existing = await this.findKeywordReplaceReceipt(input);
+    if (existing) {
+      return keywordReplacementReceiptReplay(
+        existing,
+        requestHash,
+        input
+      );
+    }
+
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        const concurrent =
+          await transaction.trackingContextKeywordReplaceReceipt.findUnique({
+            where: keywordReplacementReceiptWhere(input)
+          });
+        if (concurrent) {
+          return keywordReplacementReceiptReplay(
+            concurrent,
+            requestHash,
+            input
+          );
+        }
+
+        await lockContext(transaction, input, input.contextId);
+        const context = await this.requiredContext(
+          transaction,
+          input.workspaceId,
+          input.projectId,
+          input.contextId
+        );
+        assertVersion(context.version, input.version);
+        assertActive(context.status);
+
+        const keywords = await transaction.keyword.findMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            status: "ACTIVE",
+            id: { in: [...input.keywordIds] }
+          },
+          select: { id: true }
+        });
+        if (keywords.length !== input.keywordIds.length) {
+          internalError(
+            HttpStatus.NOT_FOUND,
+            "KEYWORD_NOT_FOUND",
+            "One or more keywords were not found"
+          );
+        }
+
+        const currentAssignments =
+          await transaction.trackingContextKeywordAssignment.findMany({
+            where: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              contextId: input.contextId,
+              removedAt: null,
+              keyword: { status: "ACTIVE" }
+            },
+            select: { id: true, keywordId: true }
+          });
+        const desired = new Set(input.keywordIds);
+        const currentByKeywordId = new Map(
+          currentAssignments.map((assignment) => [
+            assignment.keywordId,
+            assignment.id
+          ])
+        );
+        const addedKeywordIds = input.keywordIds.filter(
+          (keywordId) => !currentByKeywordId.has(keywordId)
+        );
+        const removedAssignmentIds = currentAssignments
+          .filter(({ keywordId }) => !desired.has(keywordId))
+          .map(({ id }) => id);
+        const unchangedKeywordCount =
+          input.keywordIds.length - addedKeywordIds.length;
+        const positiveDelta = Math.max(
+          0,
+          addedKeywordIds.length - removedAssignmentIds.length
+        );
+
+        if (positiveDelta > 0) {
+          await lockTrackedContextPairCapacity(
+            transaction,
+            input.workspaceId
+          );
+          const currentTrackedPairs =
+            await transaction.trackingContextKeywordAssignment.count({
+              where: {
+                workspaceId: input.workspaceId,
+                removedAt: null,
+                context: { status: "ACTIVE" },
+                keyword: { status: "ACTIVE" }
+              }
+            });
+          assertSemanticCapacity(
+            "trackedContextPairs",
+            BigInt(currentTrackedPairs),
+            BigInt(positiveDelta),
+            input.entitlement.trackedContextPairs,
+            input.entitlement
+          );
+        }
+
+        const now = new Date();
+        if (removedAssignmentIds.length > 0) {
+          await transaction.trackingContextKeywordAssignment.updateMany({
+            where: {
+              id: { in: removedAssignmentIds },
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              contextId: input.contextId,
+              removedAt: null
+            },
+            data: { removedBy: input.actorId, removedAt: now }
+          });
+        }
+        if (addedKeywordIds.length > 0) {
+          for (
+            let offset = 0;
+            offset < addedKeywordIds.length;
+            offset += ASSIGNMENT_CREATE_BATCH_SIZE
+          ) {
+            const keywordIds = addedKeywordIds.slice(
+              offset,
+              offset + ASSIGNMENT_CREATE_BATCH_SIZE
+            );
+            await transaction.trackingContextKeywordAssignment.createMany({
+              data: keywordIds.map((keywordId) => ({
+                workspaceId: input.workspaceId,
+                projectId: input.projectId,
+                contextId: input.contextId,
+                keywordId,
+                assignedBy: input.actorId,
+                assignedAt: now
+              }))
+            });
+          }
+        }
+
+        const changed =
+          addedKeywordIds.length > 0 || removedAssignmentIds.length > 0;
+        const version = changed
+          ? (
+              await transaction.trackingContext.update({
+                where: {
+                  workspaceId_projectId_id: {
+                    workspaceId: input.workspaceId,
+                    projectId: input.projectId,
+                    id: input.contextId
+                  }
+                },
+                data: {
+                  updatedBy: input.actorId,
+                  version: { increment: 1 }
+                },
+                select: { version: true }
+              })
+            ).version
+          : context.version;
+        const result: TrackingContextKeywordReplacementResult = {
+          contextId: input.contextId,
+          assignedKeywordCount: input.keywordIds.length,
+          addedKeywordCount: addedKeywordIds.length,
+          removedKeywordCount: removedAssignmentIds.length,
+          unchangedKeywordCount,
+          keywordSetHash: {
+            algorithm: "SHA_256",
+            value: keywordSetHash
+          },
+          version,
+          changedAt: now.toISOString()
+        };
+
+        await transaction.trackingContextKeywordReplaceReceipt.create({
+          data: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            actorId: input.actorId,
+            idempotencyKey: input.idempotencyKey,
+            requestHash,
+            contextId: input.contextId,
+            responseSnapshot: json(result)
+          }
+        });
+        if (changed) {
+          await emitKeywordAssignmentsReplacedEvent(
+            transaction,
+            input,
+            result
+          );
+        }
+        return result;
+      });
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
+      const winner = await this.findKeywordReplaceReceipt(input);
+      if (winner) {
+        return keywordReplacementReceiptReplay(
+          winner,
+          requestHash,
+          input
+        );
+      }
+      throw error;
+    }
+  }
+
   private async changeStatus(
     contextId: string,
     input: InternalChangeTrackingContextStatusInput,
@@ -430,7 +652,7 @@ export class TrackingContextService {
       await transaction.$queryRaw`
         SELECT pg_advisory_xact_lock(
           hashtextextended(${`${input.contextId}:${input.keywordId}`}, 0)
-        )
+        ) IS NULL AS "lockResult"
       `;
       const context = await transaction.trackingContext.findFirst({
         where: {
@@ -573,6 +795,14 @@ export class TrackingContextService {
       where: createReceiptWhere(input)
     });
   }
+
+  private findKeywordReplaceReceipt(
+    input: InternalReplaceTrackingContextKeywordsInput
+  ) {
+    return this.prisma.trackingContextKeywordReplaceReceipt.findUnique({
+      where: keywordReplacementReceiptWhere(input)
+    });
+  }
 }
 
 function contextSummary(context: ContextAggregate): TrackingContextSummary {
@@ -685,6 +915,14 @@ function configurationCreateData(
   };
 }
 
+function omitNestedContextScope(
+  configuration: ReturnType<typeof configurationCreateData>
+) {
+  const { workspaceId: _workspaceId, projectId: _projectId, ...nested } =
+    configuration;
+  return nested;
+}
+
 function hashConfiguration(
   configuration: TrackingContextConfigurationInput
 ): string {
@@ -711,6 +949,32 @@ function createRequestHash(
   );
 }
 
+function hashKeywordSet(keywordIds: readonly string[]): string {
+  return createHash("sha256")
+    .update([...keywordIds].sort().join("\n"))
+    .digest("hex");
+}
+
+function keywordReplacementRequestHash(
+  input: InternalReplaceTrackingContextKeywordsInput,
+  keywordSetHash: string
+): Uint8Array<ArrayBuffer> {
+  return Uint8Array.from(
+    createHash("sha256")
+      .update(
+        canonicalJson({
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          contextId: input.contextId,
+          actorId: input.actorId,
+          version: input.version,
+          keywordSetHash
+        })
+      )
+      .digest()
+  );
+}
+
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) {
     return `[${value.map(canonicalJson).join(",")}]`;
@@ -729,6 +993,19 @@ function canonicalJson(value: unknown): string {
 }
 
 function createReceiptWhere(input: InternalCreateTrackingContextInput) {
+  return {
+    workspaceId_projectId_actorId_idempotencyKey: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      actorId: input.actorId,
+      idempotencyKey: input.idempotencyKey
+    }
+  };
+}
+
+function keywordReplacementReceiptWhere(
+  input: InternalReplaceTrackingContextKeywordsInput
+) {
   return {
     workspaceId_projectId_actorId_idempotencyKey: {
       workspaceId: input.workspaceId,
@@ -772,6 +1049,88 @@ function receiptReplay(
     throw new Error("Stored tracking context receipt is inconsistent");
   }
   return snapshot;
+}
+
+function keywordReplacementReceiptReplay(
+  receipt: {
+    readonly requestHash: Uint8Array;
+    readonly responseSnapshot: unknown;
+    readonly contextId: string;
+    readonly workspaceId: string;
+    readonly projectId: string;
+  },
+  requestHash: Uint8Array<ArrayBuffer>,
+  input: InternalReplaceTrackingContextKeywordsInput
+): TrackingContextKeywordReplacementResult {
+  const stored = Buffer.from(receipt.requestHash);
+  if (
+    stored.length !== requestHash.length ||
+    !timingSafeEqual(stored, requestHash)
+  ) {
+    internalError(
+      HttpStatus.CONFLICT,
+      "IDEMPOTENCY_CONFLICT",
+      "Idempotency key was already used with another request"
+    );
+  }
+  if (
+    receipt.contextId !== input.contextId ||
+    receipt.workspaceId !== input.workspaceId ||
+    receipt.projectId !== input.projectId
+  ) {
+    throw new Error("Stored keyword replacement receipt is inconsistent");
+  }
+  return parseKeywordReplacementSnapshot(receipt.responseSnapshot, input);
+}
+
+function parseKeywordReplacementSnapshot(
+  value: unknown,
+  input: InternalReplaceTrackingContextKeywordsInput
+): TrackingContextKeywordReplacementResult {
+  const snapshot = record(value, "keyword replacement receipt");
+  const hash = record(
+    snapshot.keywordSetHash,
+    "keyword replacement receipt hash"
+  );
+  const result: TrackingContextKeywordReplacementResult = {
+    contextId: stringValue(snapshot.contextId, "contextId"),
+    assignedKeywordCount: integerValue(
+      snapshot.assignedKeywordCount,
+      "assignedKeywordCount",
+      true
+    ),
+    addedKeywordCount: integerValue(
+      snapshot.addedKeywordCount,
+      "addedKeywordCount",
+      true
+    ),
+    removedKeywordCount: integerValue(
+      snapshot.removedKeywordCount,
+      "removedKeywordCount",
+      true
+    ),
+    unchangedKeywordCount: integerValue(
+      snapshot.unchangedKeywordCount,
+      "unchangedKeywordCount",
+      true
+    ),
+    keywordSetHash: {
+      algorithm: enumValue(hash.algorithm, ["SHA_256"] as const, "algorithm"),
+      value: stringValue(hash.value, "keywordSetHash")
+    },
+    version: integerValue(snapshot.version, "version"),
+    changedAt: isoDate(snapshot.changedAt, "changedAt")
+  };
+  if (
+    result.contextId !== input.contextId ||
+    result.assignedKeywordCount !== input.keywordIds.length ||
+    result.addedKeywordCount + result.unchangedKeywordCount !==
+      result.assignedKeywordCount ||
+    !/^[0-9a-f]{64}$/u.test(result.keywordSetHash.value)
+  ) {
+    throw new Error("Stored keyword replacement receipt is invalid");
+  }
+  return result;
 }
 
 function parseSummarySnapshot(value: unknown): TrackingContextSummary {
@@ -906,6 +1265,38 @@ async function emitKeywordAssignmentEvent(
   await transaction.outboxEvent.create({
     data: {
       eventType: domainEventTypes.trackingContextKeywordAssignmentChanged,
+      aggregateId: input.contextId,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      payload: json(payload),
+      metadata: {
+        producer: "seo-data",
+        source: "tracking-context"
+      }
+    }
+  });
+}
+
+async function emitKeywordAssignmentsReplacedEvent(
+  transaction: Prisma.TransactionClient,
+  input: InternalReplaceTrackingContextKeywordsInput,
+  result: TrackingContextKeywordReplacementResult
+): Promise<void> {
+  const payload: TrackingContextKeywordAssignmentsReplacedEventDataV1 = {
+    contextId: input.contextId,
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    entityVersion: result.version,
+    assignedKeywordCount: result.assignedKeywordCount,
+    addedKeywordCount: result.addedKeywordCount,
+    removedKeywordCount: result.removedKeywordCount,
+    unchangedKeywordCount: result.unchangedKeywordCount,
+    keywordSetHash: result.keywordSetHash.value,
+    changedBy: input.actorId
+  };
+  await transaction.outboxEvent.create({
+    data: {
+      eventType: domainEventTypes.trackingContextKeywordAssignmentsReplaced,
       aggregateId: input.contextId,
       workspaceId: input.workspaceId,
       projectId: input.projectId,

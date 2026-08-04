@@ -15,6 +15,7 @@ import type {
   ApiResponse,
   InternalCreateRankRunInput,
   ProjectSummary,
+  RankOperationResult,
   RankJobSummary,
   WorkspaceSummary
 } from "@seo-platform/contracts";
@@ -22,6 +23,7 @@ import type { FastifyReply } from "fastify";
 import { AuditService } from "../audit/audit.service.js";
 import type { TenantRequest } from "../authorization/authorization.types.js";
 import { hasEffectiveProjectPermission } from "../authorization/permissions.js";
+import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import {
   internalProjectContext,
   requiredProjectTenant,
@@ -42,6 +44,7 @@ import {
   SessionAuthGuard
 } from "../identity/session-auth.guard.js";
 import { JobsClient } from "../jobs/jobs.client.js";
+import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import { TenantService } from "../tenants/tenant.service.js";
 import {
   assertEmptyRankJobCancelInput,
@@ -56,7 +59,9 @@ export class RankRunController {
   public constructor(
     private readonly jobs: JobsClient,
     private readonly tenants: TenantService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly billingEntitlements: BillingEntitlementService,
+    private readonly seoData?: SeoDataClient
   ) {}
 
   @Get("rank-runs")
@@ -72,6 +77,26 @@ export class RankRunController {
         internalProjectContext(request, principal, tenant)
       )
     });
+  }
+
+  @Get("jobs/:jobId/result")
+  @RequirePermission("ranking.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async result(
+    @Param("jobId") jobId: string,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<RankOperationResult>> {
+    const tenant = requiredProjectTenant(request);
+    const context = internalProjectContext(request, principal, tenant);
+    const canonicalJobId = assertUuid(jobId, "jobId");
+    if (!this.seoData) throw new Error("SEO data client is not available");
+    const [job, result] = await Promise.all([
+      this.jobs.getRankJob(context, canonicalJobId),
+      this.seoData.rankOperationResult(context, canonicalJobId)
+    ]);
+    const { workspaceId: _workspaceId, projectId: _projectId, ...safe } = result;
+    return apiResponse(request, { ...safe, job });
   }
 
   @Post("rank-runs")
@@ -90,9 +115,11 @@ export class RankRunController {
     );
     const tenant = requiredProjectTenant(request);
     const membership = requiredMembershipSnapshot(tenant);
-    const [workspace, project] = await Promise.all([
+    const [workspace, project, runAccess, jobCapacity] = await Promise.all([
       this.tenants.getWorkspace(principal.userId, tenant.workspaceId),
-      this.tenants.getProject(tenant.projectId)
+      this.tenants.getProject(tenant.projectId),
+      this.billingEntitlements.rankProviderRunAccess(tenant.workspaceId),
+      this.billingEntitlements.jobCapacity(tenant.workspaceId)
     ]);
     assertTenantSnapshot(tenant, workspace, project);
     assertRankRunAllowed(tenant, workspace, project);
@@ -125,10 +152,11 @@ export class RankRunController {
         membershipId: membership.id,
         membershipVersion: membership.version,
         canRunRanking: true,
-        entitlementStatus: "NOT_AVAILABLE",
-        quota: { status: "NOT_AVAILABLE" }
+        entitlementStatus: runAccess.entitlementStatus,
+        quota: runAccess.quota
       },
-      billingCurrency: workspace.billingCurrency
+      billingCurrency: workspace.billingCurrency,
+      jobCapacity
     };
     const job = await this.jobs.createRankRun(
       internalProjectContext(request, principal, tenant),

@@ -50,12 +50,14 @@ export interface TeamInviteDraft {
   readonly roleCode: AssignableWorkspaceRoleCode;
   readonly allProjects: boolean;
   readonly projectAccesses: readonly ProjectAccessAssignment[];
+  readonly message?: string;
 }
 
 export interface TeamInviteFieldErrors {
   readonly email?: string;
   readonly roleCode?: string;
   readonly projectAccesses?: string;
+  readonly message?: string;
 }
 
 export interface TeamProjectAccessDraft {
@@ -201,6 +203,7 @@ export function validateTeamInviteDraft(
     email?: string;
     roleCode?: string;
     projectAccesses?: string;
+    message?: string;
   } = {};
   if (
     email.length < 3 ||
@@ -214,17 +217,22 @@ export function validateTeamInviteDraft(
   }
   const projectAccessError = validateTeamProjectAccess(draft);
   if (projectAccessError) errors.projectAccesses = projectAccessError;
+  if ((draft.message?.normalize("NFKC").trim().length ?? 0) > 2_000) {
+    errors.message = "Сообщение должно быть не длиннее 2 000 символов.";
+  }
   return errors;
 }
 
 export function teamInviteInput(
   draft: TeamInviteDraft
 ): CreateWorkspaceInviteInput {
+  const message = draft.message?.normalize("NFKC").trim();
   return {
     email: draft.email.normalize("NFKC").trim(),
     roleCode: draft.roleCode,
     allProjects: draft.allProjects,
     projectAccesses: canonicalTeamProjectAccesses(draft),
+    ...(message ? { message } : {}),
     expiresInDays: 7
   };
 }

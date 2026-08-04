@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { IntegrationCredentialCryptoService } from "../integrations/integration-credential-crypto.service.js";
+import { IntegrationCredentialRefreshSchedulerService } from "../integrations/integration-credential-refresh-scheduler.service.js";
 import {
   KEYS_SO_KEYWORD_RESEARCH_CONNECTOR,
   type KeysSoKeywordResearchConnector
@@ -19,7 +20,9 @@ export class KeywordResearchRuntimeService {
     private readonly crypto: IntegrationCredentialCryptoService,
     @Inject(KEYS_SO_KEYWORD_RESEARCH_CONNECTOR)
     private readonly connector: KeysSoKeywordResearchConnector,
-    @Inject(APP_CONFIG) private readonly config: AppConfig
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Optional()
+    private readonly refreshScheduler?: IntegrationCredentialRefreshSchedulerService
   ) {}
 
   public async processOne(leaseOwner: string): Promise<string> {
@@ -89,6 +92,10 @@ export class KeywordResearchRuntimeService {
         })
         .catch(() => undefined);
       throw error;
+    } finally {
+      await this.refreshScheduler
+        ?.scheduleAfterProviderOperation(claim.credentialId)
+        .catch(() => undefined);
     }
   }
 }

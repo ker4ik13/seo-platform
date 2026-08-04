@@ -4,11 +4,13 @@ import { utf8Sha256 } from "@seo-platform/contracts/canonical-json";
 import type { AppConfig } from "../config/app-config.js";
 import type { IntegrationCredentialCryptoService } from "../integrations/integration-credential-crypto.service.js";
 import type { ArsenkinRankConnector } from "./arsenkin-rank.connector.js";
+import type { XmlStockRankConnector } from "./xmlstock-rank.connector.js";
 import type {
   RankConnectorPollClaim,
   RankConnectorRuntimeBrokerService,
   RankConnectorSubmitClaim
 } from "./rank-connector-runtime-broker.service.js";
+import { RankConnectorLeaseLostError } from "./rank-connector-runtime-broker.service.js";
 import { RankConnectorRuntimeService } from "./rank-connector-runtime.service.js";
 import type { RankProviderRequestIntentV1 } from "./rank-provider-request-intent.js";
 
@@ -155,10 +157,224 @@ test("polls an accepted task and stages only normalized output", async () => {
   });
 });
 
+test("rejects a malformed finished provider result instead of leaving the poll claimed", async () => {
+  let completed:
+    | {
+        readonly outcome: string;
+        readonly errorCode?: string;
+      }
+    | undefined;
+  const pollClaim: RankConnectorPollClaim = {
+    ...claim(),
+    providerTaskId: "3944",
+    request: requestIntent()
+  };
+  const broker = {
+    async claimPoll() {
+      return pollClaim;
+    },
+    async completePoll(_claim: unknown, input: typeof completed) {
+      completed = input;
+      return {
+        executionId: ids.execution,
+        status: "REJECTED",
+        executionVersion: 6
+      };
+    }
+  } as unknown as RankConnectorRuntimeBrokerService;
+  const connector = {
+    async fetchResult() {
+      return {
+        status: "READY" as const,
+        value: { code: "TASK_RESULT", task_id: "3944" }
+      };
+    }
+  } as unknown as ArsenkinRankConnector;
+
+  assert.equal(
+    await service(broker, connector, false).processOne("connector-worker"),
+    "POLL_TERMINAL"
+  );
+  assert.deepEqual(completed, {
+    outcome: "REJECTED",
+    errorCode: "INVALID_PROVIDER_RESPONSE"
+  });
+});
+
+test("claims enough lease for check plus get and caps rank request timeout", async () => {
+  const pollClaim: RankConnectorPollClaim = {
+    ...claim(),
+    leaseExpiresAt: new Date(Date.now() + 23_000).toISOString(),
+    providerTaskId: "3944",
+    request: requestIntent()
+  };
+  let claimedLeaseSeconds: number | undefined;
+  const broker = {
+    async claimPoll(
+      _leaseOwner: string,
+      leaseSeconds: number
+    ) {
+      claimedLeaseSeconds = leaseSeconds;
+      return pollClaim;
+    },
+    async completePoll() {
+      return {
+        executionId: ids.execution,
+        status: "POLL_WAIT",
+        executionVersion: 6
+      };
+    }
+  } as unknown as RankConnectorRuntimeBrokerService;
+  let providerTimeoutMs: number | undefined;
+  const connector = {
+    async fetchResult(
+      _taskId: string,
+      _secret: unknown,
+      timeoutMs: number
+    ) {
+      providerTimeoutMs = timeoutMs;
+      return { status: "PENDING" as const };
+    }
+  } as unknown as ArsenkinRankConnector;
+
+  assert.equal(
+    await service(broker, connector, false, 120_000).processOne(
+      "connector-worker"
+    ),
+    "POLL_PENDING"
+  );
+  assert.equal(claimedLeaseSeconds, 103);
+  assert.equal(providerTimeoutMs, 10_000);
+});
+
+test("claims a submit lease that fits inside the short execution grant", async () => {
+  let claimedLeaseSeconds: number | undefined;
+  const broker = {
+    async claimSubmit(
+      _leaseOwner: string,
+      leaseSeconds: number
+    ) {
+      claimedLeaseSeconds = leaseSeconds;
+      return claim();
+    },
+    async readSubmitRequest() {
+      return requestIntent();
+    },
+    async authorizeSubmit() {
+      return {
+        executionId: ids.execution,
+        workspaceId: ids.workspace,
+        executionVersion: 3,
+        submitBytesStartedAt: new Date().toISOString()
+      };
+    },
+    async completeSubmit() {
+      return {
+        executionId: ids.execution,
+        status: "POLL_WAIT",
+        executionVersion: 4
+      };
+    }
+  } as unknown as RankConnectorRuntimeBrokerService;
+  const connector = {
+    async submit() {
+      return {
+        status: "ACCEPTED" as const,
+        taskId: "3944",
+        request: {
+          tools_name: "check-top" as const,
+          data: {
+            queries: ["seo audit"],
+            is_snippet: false as const,
+            noreask: false as const,
+            se: [{ type: 11 as const, region: 1011969 }] as const,
+            depth: 30 as const
+          }
+        }
+      };
+    }
+  } as unknown as ArsenkinRankConnector;
+
+  assert.equal(
+    await service(broker, connector, true, 120_000).processOne(
+      "connector-worker"
+    ),
+    "SUBMITTED"
+  );
+  assert.equal(claimedLeaseSeconds, 13);
+});
+
+test("treats an asynchronously lost submit lease as recoverable", async () => {
+  const broker = {
+    async claimSubmit() {
+      return claim();
+    },
+    async readSubmitRequest() {
+      throw new RankConnectorLeaseLostError();
+    }
+  } as unknown as RankConnectorRuntimeBrokerService;
+
+  assert.equal(
+    await service(
+      broker,
+      {} as ArsenkinRankConnector,
+      true
+    ).processOne("connector-worker"),
+    "LEASE_LOST"
+  );
+});
+
+test("backs off XMLStock delayed Yandex polling to the documented cadence", async () => {
+  const pollClaim: RankConnectorPollClaim = {
+    ...claim(),
+    provider: "XMLSTOCK",
+    providerTaskId: "xml-request-3944",
+    request: xmlStockRequestIntent()
+  };
+  let completed:
+    | { readonly outcome: string; readonly retryAfterSeconds?: number }
+    | undefined;
+  const broker = {
+    async claimPoll() {
+      return pollClaim;
+    },
+    async completePoll(_claim: unknown, input: typeof completed) {
+      completed = input;
+      return {
+        executionId: ids.execution,
+        status: "POLL_WAIT",
+        executionVersion: 6
+      };
+    }
+  } as unknown as RankConnectorRuntimeBrokerService;
+  const xmlStockConnector = {
+    async fetchResult() {
+      return { status: "PENDING" as const };
+    }
+  } as unknown as XmlStockRankConnector;
+
+  assert.equal(
+    await service(
+      broker,
+      {} as ArsenkinRankConnector,
+      false,
+      1_000,
+      xmlStockConnector
+    ).processOne("connector-worker"),
+    "POLL_PENDING"
+  );
+  assert.deepEqual(completed, {
+    outcome: "PENDING",
+    retryAfterSeconds: 25
+  });
+});
+
 function service(
   broker: RankConnectorRuntimeBrokerService,
   connector: ArsenkinRankConnector,
-  submitEnabled: boolean
+  submitEnabled: boolean,
+  timeoutMs = 1_000,
+  xmlStockConnector = {} as XmlStockRankConnector
 ): RankConnectorRuntimeService {
   const crypto = {
     decrypt() {
@@ -166,19 +382,21 @@ function service(
     }
   } as unknown as IntegrationCredentialCryptoService;
   const config = {
-    integrationCredentialValidation: { timeoutMs: 1_000 },
+    integrationCredentialValidation: { timeoutMs },
     rankExecution: { submitEnabled }
   } as unknown as AppConfig;
   return new RankConnectorRuntimeService(
     broker,
     crypto,
     connector,
+    xmlStockConnector,
     config
   );
 }
 
 function claim(): RankConnectorSubmitClaim {
   return {
+    provider: "ARSENKIN",
     executionId: ids.execution,
     workspaceId: ids.workspace,
     credentialId: ids.credential,
@@ -238,7 +456,7 @@ function requestIntent(): RankProviderRequestIntentV1 {
       hashSchemaVersion: "rank-manifest-chunk@1",
       chunkHash: hash("b")
     },
-    executionConnectorVersion: "arsenkin-positions@1.0.0",
+    executionConnectorVersion: "arsenkin-positions@2.0.0",
     providerPolicyVersion: "manual-arsenkin-positions@1.0.0",
     keywords: [
       {
@@ -256,27 +474,40 @@ function requestIntent(): RankProviderRequestIntentV1 {
   };
 }
 
+function xmlStockRequestIntent(): RankProviderRequestIntentV1 {
+  const intent = requestIntent();
+  return {
+    ...intent,
+    provider: "XMLSTOCK",
+    execution: {
+      ...intent.execution,
+      searchEngine: "YANDEX",
+      regionCode: "213",
+      providerMappingVersion: "xmlstock-serp@1"
+    },
+    executionConnectorVersion: "xmlstock-serp@1.0.0",
+    providerPolicyVersion: "manual-xmlstock-serp@1.0.0"
+  };
+}
+
 function providerResult(): unknown {
   return {
     code: "TASK_RESULT",
     task_id: "3944",
     result: {
-      request: {
-        queries: ["seo audit"],
-        depth: 30,
-        ss: [{ ss: 11, region: 1011969 }]
+      table: {
+        "seo audit": {
+          commerce: [false],
+          position: [2],
+          top20: "[]",
+          url: "https://example.com/page"
+        }
       },
-      result: {
-        collect: [
-          [
-            [
-              "https://competitor.example/",
-              "https://example.com/page"
-            ]
-          ]
-        ]
-      }
-    }
+      summary: {},
+      format: 0
+    },
+    created_at: "2026-08-02 12:00:00",
+    finished_at: "2026-08-02 12:01:00"
   };
 }
 

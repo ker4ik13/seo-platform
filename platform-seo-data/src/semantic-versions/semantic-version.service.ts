@@ -7,6 +7,10 @@ import {
 import type {
   SemanticCapacityEntitlement,
   SemanticClusterPageSource,
+  SemanticHistoryEntityState,
+  SemanticHistoryField,
+  SemanticVersionChangeDetail,
+  SemanticVersionDetail,
   SemanticVersionChangePreview,
   SemanticVersionListItem,
   SemanticVersionReason,
@@ -15,7 +19,10 @@ import type {
 } from "@seo-platform/contracts";
 import { semanticClusterPageSources } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
-import type { SemanticVersion } from "../generated/prisma/client.js";
+import type {
+  SemanticEntityChange,
+  SemanticVersion
+} from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import {
   assertStoredKeywordCapacity,
@@ -92,11 +99,60 @@ export class SemanticVersionService {
     projectId: string
   ): Promise<readonly SemanticVersionListItem[]> {
     const rows = await this.prisma.semanticVersion.findMany({
-      where: { workspaceId, projectId },
+      where: { workspaceId, projectId, affectedCount: { gt: 0 } },
       orderBy: [{ number: "desc" }, { id: "desc" }],
       take: 100
     });
     return rows.map(versionItem);
+  }
+
+  public async detail(
+    workspaceId: string,
+    projectId: string,
+    versionId: string
+  ): Promise<SemanticVersionDetail> {
+    const version = await this.requiredVersion(
+      this.prisma,
+      workspaceId,
+      projectId,
+      versionId
+    );
+    const rows = await this.prisma.semanticEntityChange.findMany({
+      where: {
+        workspaceId,
+        projectId,
+        semanticVersionId: version.id
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      take: 501
+    });
+    const visibleRows = rows.slice(0, 500);
+    const groupIds = [
+      ...new Set(
+        visibleRows.flatMap((row) => [row.beforeState, row.afterState]
+          .flatMap((state) => {
+            const value = jsonRecord(state);
+            return typeof value?.groupId === "string" ? [value.groupId] : [];
+          }))
+      )
+    ];
+    const groups = groupIds.length === 0
+      ? []
+      : await this.prisma.keywordGroup.findMany({
+          where: { workspaceId, projectId, id: { in: groupIds } },
+          select: { id: true, name: true, path: true }
+        });
+    const groupNameById = new Map(
+      groups.map(({ id, name, path }) => [id, path || name])
+    );
+    return {
+      version: versionItem(version),
+      parameters: historyManifestFields(version.manifest),
+      changes: visibleRows.map((row) =>
+        historyChangeDetail(row, groupNameById)
+      ),
+      changesTruncated: rows.length > visibleRows.length
+    };
   }
 
   public async createWithKeywordChange(
@@ -1197,6 +1253,155 @@ function versionItem(row: SemanticVersion): SemanticVersionListItem {
       : {}),
     createdAt: row.createdAt.toISOString()
   };
+}
+
+const HISTORY_FIELD_LABELS: Readonly<Record<string, string>> = {
+  textOriginal: "Запрос",
+  language: "Язык",
+  priority: "Приоритет",
+  isFavorite: "Избранное",
+  intent: "Интент",
+  status: "Статус",
+  groupId: "Группа",
+  clusterId: "Кластер",
+  targetPageId: "Целевая страница",
+  tagIds: "Теги",
+  name: "Название",
+  primaryPageId: "Основная страница",
+  pageMappingSource: "Источник назначения страницы",
+  pageMappingConfidence: "Уверенность назначения",
+  pageMappingRationale: "Обоснование назначения",
+  isLocked: "Зафиксирован",
+  excludeFromReclustering: "Исключён из перекластеризации",
+  createdKeywords: "Добавлено запросов",
+  updatedKeywords: "Обновлено запросов",
+  skippedKeywords: "Пропущено запросов",
+  createdGroups: "Создано групп",
+  createdPages: "Создано страниц",
+  createdTags: "Создано тегов",
+  createdMetricSnapshots: "Добавлено снимков метрик",
+  duplicatePolicy: "Обработка дублей",
+  schemaVersion: "Версия формата",
+  state: "Состояние"
+};
+
+function jsonRecord(
+  value: Prisma.JsonValue | null | undefined
+): Readonly<Record<string, Prisma.JsonValue>> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, Prisma.JsonValue>>
+    : undefined;
+}
+
+function historyManifestFields(
+  value: Prisma.JsonValue | null
+): readonly SemanticHistoryField[] {
+  const manifest = jsonRecord(value);
+  if (!manifest) return [];
+  return Object.entries(manifest).map(([key, fieldValue]) => ({
+    key,
+    label: HISTORY_FIELD_LABELS[key] ?? humanizeHistoryKey(key),
+    value: historyValue(fieldValue)
+  }));
+}
+
+function historyChangeDetail(
+  row: SemanticEntityChange,
+  groupNameById: ReadonlyMap<string, string>
+): SemanticVersionChangeDetail {
+  const before = historyEntityState(row.entityType, row.entityId, row.beforeState, groupNameById);
+  const after = historyEntityState(
+    row.entityType,
+    row.entityId,
+    row.afterState,
+    groupNameById
+  ) ?? { title: row.entityId, fields: [] };
+  const beforeValues = new Map(before?.fields.map((field) => [field.key, field.value]));
+  const afterValues = new Map(after.fields.map((field) => [field.key, field.value]));
+  const changedFields = [...new Set([...beforeValues.keys(), ...afterValues.keys()])]
+    .filter((key) => beforeValues.get(key) !== afterValues.get(key))
+    .map((key) => HISTORY_FIELD_LABELS[key] ?? humanizeHistoryKey(key));
+  return {
+    entityType: row.entityType === "CLUSTER" ? "CLUSTER" : "KEYWORD",
+    entityId: row.entityId,
+    operation: ["CREATE", "DELETE"].includes(row.operation)
+      ? row.operation as "CREATE" | "DELETE"
+      : "UPDATE",
+    changedFields,
+    ...(before ? { before } : {}),
+    after
+  };
+}
+
+function historyEntityState(
+  entityType: string,
+  entityId: string,
+  value: Prisma.JsonValue | null,
+  groupNameById: ReadonlyMap<string, string>
+): SemanticHistoryEntityState | undefined {
+  const state = jsonRecord(value);
+  if (!state) return undefined;
+  const allowedKeys = entityType === "CLUSTER"
+    ? [
+        "name",
+        "status",
+        "primaryPageId",
+        "pageMappingSource",
+        "pageMappingConfidence",
+        "pageMappingRationale",
+        "isLocked",
+        "excludeFromReclustering"
+      ]
+    : [
+        "textOriginal",
+        "language",
+        "priority",
+        "isFavorite",
+        "intent",
+        "status",
+        "groupId",
+        "clusterId",
+        "targetPageId",
+        "tagIds"
+      ];
+  const fields = allowedKeys
+    .filter((key) => key in state)
+    .map((key) => ({
+      key,
+      label: HISTORY_FIELD_LABELS[key] ?? humanizeHistoryKey(key),
+      value:
+        key === "groupId" && typeof state[key] === "string"
+          ? groupNameById.get(state[key]) ?? state[key]
+          : historyValue(state[key])
+    }));
+  const titleCandidate = entityType === "CLUSTER" ? state.name : state.textOriginal;
+  return {
+    title:
+      typeof titleCandidate === "string" && titleCandidate.trim()
+        ? titleCandidate
+        : entityId,
+    fields
+  };
+}
+
+function historyValue(value: Prisma.JsonValue | undefined): string {
+  if (value === null || value === undefined || value === "") return "Не задано";
+  if (typeof value === "boolean") return value ? "Да" : "Нет";
+  if (Array.isArray(value)) {
+    return value.length === 0 ? "Нет" : value.map((item) => historyValue(item)).join(", ");
+  }
+  if (typeof value === "object") {
+    const serialized = JSON.stringify(value);
+    return serialized.length > 240 ? `${serialized.slice(0, 237)}…` : serialized;
+  }
+  return String(value);
+}
+
+function humanizeHistoryKey(value: string): string {
+  return value
+    .replace(/([a-zа-я])([A-ZА-Я])/gu, "$1 $2")
+    .replace(/_/gu, " ")
+    .replace(/^./u, (character) => character.toLocaleUpperCase("ru"));
 }
 
 function versionReason(value: string): SemanticVersionReason {

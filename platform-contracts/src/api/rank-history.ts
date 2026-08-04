@@ -39,7 +39,7 @@ interface RankHistoryItemBase {
   readonly keywordId: string;
   readonly trackingContextId: string;
   readonly configurationVersion: number;
-  readonly provider: "ARSENKIN";
+  readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly connectorVersion: string;
   readonly observedAt: string;
   readonly storedAt: string;
@@ -164,7 +164,7 @@ export function redactRankHistoryItem(
   input: RankHistoryItem
 ): RankHistoryItem {
   if (
-    input.provider !== "ARSENKIN" ||
+    !["ARSENKIN", "XMLSTOCK"].includes(input.provider) ||
     typeof input.snapshotId !== "string" ||
     !UUID_V7_PATTERN.test(input.snapshotId) ||
     typeof input.keywordId !== "string" ||
@@ -219,7 +219,7 @@ export function redactRankHistoryItem(
     input.found !== true ||
     !Number.isSafeInteger(input.position) ||
     input.position < 1 ||
-    input.position > 30 ||
+    input.position > 100 ||
     input.resultType !== "ORGANIC" ||
     !Array.isArray(input.serpFeatures) ||
     input.serpFeatures.length !== 0

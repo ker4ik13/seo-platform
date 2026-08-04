@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import type { RankJobFailureCode } from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
@@ -27,6 +27,7 @@ import {
 } from "./rank-job-record.js";
 
 const HASH_PATTERN = /^[a-f0-9]{64}$/u;
+const RANK_PROVIDER_ACTIVE_TASK_LIMIT = 5;
 
 export type RankExecutionDispatchOutcome =
   | "DISABLED"
@@ -47,6 +48,8 @@ type RankJobWithRun = Job & {
 
 @Injectable()
 export class RankExecutionDispatchService {
+  private readonly logger = new Logger(RankExecutionDispatchService.name);
+
   public constructor(
     private readonly prisma: PrismaService,
     private readonly grants: RankExecutionGrantAttemptService,
@@ -62,7 +65,7 @@ export class RankExecutionDispatchService {
   public async pendingExecutionJobIds(
     limit = 20
   ): Promise<readonly string[]> {
-    if (!this.config.rankExecution.submitEnabled) return [];
+    if (!this.config.rankPreparation.enabled) return [];
     const boundedLimit = pendingLimit(limit);
     const rows = await this.prisma.$queryRaw<
       readonly { readonly id: string }[]
@@ -111,13 +114,14 @@ export class RankExecutionDispatchService {
   public async process(
     jobId: string
   ): Promise<RankExecutionDispatchOutcome> {
-    if (!this.config.rankExecution.submitEnabled) return "DISABLED";
+    if (!this.config.rankPreparation.enabled) return "DISABLED";
     const dispatchable = await this.start(jobId);
     if (!dispatchable) return "IDLE";
-    if (dispatchable.invalid || dispatchable.itemIds.length === 0) {
+    if (dispatchable.invalid) {
       await this.finishFailure(jobId, "INTERNAL_ERROR");
       return "FAILED";
     }
+    if (dispatchable.itemIds.length === 0) return "RETRY_PENDING";
 
     for (const itemId of dispatchable.itemIds) {
       try {
@@ -138,6 +142,18 @@ export class RankExecutionDispatchService {
         }
         return "RETRY_PENDING";
       } catch (error) {
+        if (error instanceof RankExecutionGrantAttemptError) {
+          this.logger.error(
+            JSON.stringify({
+              event: "rank_execution_grant_failed",
+              jobId: dispatchable.jobId,
+              itemId,
+              code: error.code,
+              retryable: error.retryable,
+              detail: error.detail ?? "unspecified"
+            })
+          );
+        }
         if (
           error instanceof RankExecutionGrantAttemptError &&
           error.code === "SUBMIT_DISABLED"
@@ -214,23 +230,52 @@ export class RankExecutionDispatchService {
           where: {
             workspaceId: identity.workspaceId,
             projectId: identity.projectId,
-            jobId,
-            status: "QUEUED"
+            jobId
           },
           orderBy: { sequence: "asc" },
-          select: { id: true, sequence: true }
+          select: { id: true, sequence: true, status: true }
         });
+        const executions =
+          await transaction.rankConnectorExecution.findMany({
+            where: {
+              workspaceId: identity.workspaceId,
+              projectId: identity.projectId,
+              jobId
+            },
+            select: { jobItemId: true }
+          });
+        const provider = job.provider;
         const invalid =
           !run ||
+          (provider !== "ARSENKIN" && provider !== "XMLSTOCK") ||
           run.sealState !== "SEALED" ||
           run.finalizationStatus !== null ||
           run.manifestChunkCount === null ||
           items.length !== run.manifestChunkCount ||
           items.some(({ sequence }, index) => sequence !== index);
+        if (invalid) {
+          return { jobId, itemIds: [], invalid: true };
+        }
+        if (provider !== "ARSENKIN" && provider !== "XMLSTOCK") {
+          return { jobId, itemIds: [], invalid: true };
+        }
+        const capacity = await rankExecutionDispatchCapacity(
+          transaction,
+          provider
+        );
+        const executionItemIds = new Set(
+          executions.map(({ jobItemId }) => jobItemId)
+        );
         return {
           jobId,
-          itemIds: items.map(({ id }) => id),
-          invalid
+          itemIds: items
+            .filter(
+              ({ id, status }) =>
+                status === "QUEUED" && !executionItemIds.has(id)
+            )
+            .slice(0, capacity)
+            .map(({ id }) => id),
+          invalid: false
         };
       },
       { isolationLevel: "ReadCommitted" }
@@ -386,6 +431,85 @@ export class RankExecutionDispatchService {
       { isolationLevel: "ReadCommitted" }
     );
   }
+}
+
+async function rankExecutionDispatchCapacity(
+  transaction: Prisma.TransactionClient,
+  provider: "ARSENKIN" | "XMLSTOCK"
+): Promise<number> {
+  await transaction.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtextextended(
+        ${`seo-platform:rank-dispatch:${provider}`}::text,
+        0
+      )
+    )
+  `;
+  const rows = await transaction.$queryRaw<
+    readonly { readonly activeTaskCount: bigint }[]
+  >`
+    SELECT (
+      (
+        SELECT COUNT(*)
+        FROM "rank_connector_executions" execution
+        JOIN "jobs" rank_job
+          ON rank_job."workspace_id" = execution."workspace_id"
+         AND rank_job."project_id" = execution."project_id"
+         AND rank_job."id" = execution."job_id"
+        WHERE execution."provider" = ${provider}
+          AND rank_job."status" = 'RUNNING'
+          AND rank_job."cancel_requested_at" IS NULL
+          AND (
+            execution."status" IN ('SUBMITTING', 'POLL_WAIT')
+            OR (
+              execution."status" = 'READY_TO_SUBMIT'
+              AND execution."authorization_expires_at" > clock_timestamp()
+            )
+            OR (
+              execution."status" = 'CLAIMED'
+              AND execution."lease_expires_at" > clock_timestamp()
+            )
+            OR (
+              execution."status" = 'FETCHING'
+              AND execution."lease_expires_at" > clock_timestamp()
+            )
+          )
+      ) + (
+        SELECT COUNT(DISTINCT frequency_job."id")
+        FROM "jobs" frequency_job
+        JOIN "job_items" item
+          ON item."job_id" = frequency_job."id"
+         AND item."workspace_id" = frequency_job."workspace_id"
+         AND item."project_id" = frequency_job."project_id"
+        WHERE frequency_job."type" = 'FREQUENCY_COLLECTION'
+          AND frequency_job."provider" = ${provider}
+          AND (
+            (
+              frequency_job."status" IN (
+                'RUNNING',
+                'RETRY_SCHEDULED',
+                'WAITING_RATE_LIMIT',
+                'FAILED_RETRYABLE'
+              )
+              AND item."status" IN ('RUNNING', 'FAILED_RETRYABLE')
+              AND item."provider_request_id" IS NOT NULL
+            )
+            OR (
+              frequency_job."status" = 'ACTION_REQUIRED'
+              AND item."provider_request_id" ~ '^submitting:'
+            )
+          )
+      )
+    )::bigint AS "activeTaskCount"
+  `;
+  const activeTaskCount = Number(rows[0]?.activeTaskCount ?? 0n);
+  if (!Number.isSafeInteger(activeTaskCount) || activeTaskCount < 0) {
+    throw new Error("Invalid active rank provider task count");
+  }
+  return Math.max(
+    0,
+    RANK_PROVIDER_ACTIVE_TASK_LIMIT - activeTaskCount
+  );
 }
 
 function findRankJob(

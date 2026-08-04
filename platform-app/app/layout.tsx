@@ -4,8 +4,8 @@ import "./styles.css";
 
 export const metadata: Metadata = {
   title: {
-    default: "SEO Workspace",
-    template: "%s · SEO Workspace"
+    default: "SEOньорита",
+    template: "%s · SEOньорита"
   },
   description: "Рабочее пространство для SEO-команд"
 };

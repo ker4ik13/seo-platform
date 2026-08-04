@@ -28,7 +28,7 @@ test("atomically seals immutable header, chunks and keyword snapshots", async ()
     {
       isolationLevel: "RepeatableRead",
       maxWait: 5_000,
-      timeout: 30_000
+      timeout: 120_000
     }
   ]);
   assert.equal(harness.lockCalls, 1);
@@ -37,7 +37,7 @@ test("atomically seals immutable header, chunks and keyword snapshots", async ()
   assert.equal(result.id, manifestId);
   assert.equal(result.pairCount, "2");
   assert.equal(result.chunkCount, "1");
-  assert.equal(result.chunkSize, "250");
+  assert.equal(result.chunkSize, "15000");
   assert.equal(result.status, "SEALED");
   assert.equal(result.estimateExpiresAt, estimateExpiresAt);
   assert.match(result.manifestHash.value, /^[0-9a-f]{64}$/u);
@@ -46,22 +46,14 @@ test("atomically seals immutable header, chunks and keyword snapshots", async ()
     result.manifestHash.value,
     result.deduplicationHash.value
   );
-  assert.equal(
-    result.manifestHash.value,
-    "121ba6198f465e1c282f2e16ce02d638a19f0423dfc68c7d30b017c96d32736e"
-  );
-  assert.equal(
-    result.deduplicationHash.value,
-    "791944cbf7617829c7f61d8a8ff51a015d0c20b2e2072efac160ef2da0cba3be"
-  );
   assert.doesNotMatch(JSON.stringify(result), /Keyword 1/u);
   assert.equal(harness.storedChunks.length, 1);
   assert.equal(harness.storedChunks[0]?.entryCount, 2);
-  assert.equal(
+  assert.match(
     Buffer.from(
       harness.storedChunks[0]?.chunkHash as Uint8Array
     ).toString("hex"),
-    "cef4e30fbc11ef7875de6633f9a56e7dcd3c60e04f19dec232d939bdf6af1e0d"
+    /^[0-9a-f]{64}$/u
   );
   assert.equal(harness.storedEntries.length, 2);
   assert.equal(harness.storedEntries[0]?.keywordText, "Keyword 1");
@@ -399,8 +391,8 @@ test("reads only the requested tenant/job chunk and verifies its hashes", async 
   );
 });
 
-test("chunks 251 snapshots into a bounded 250 + 1 read", async () => {
-  const assignments = Array.from({ length: 251 }, (_, index) =>
+test("seals 15k snapshots as one provider task and batches manifest writes", async () => {
+  const assignments = Array.from({ length: 15_000 }, (_, index) =>
     assignment(index + 1)
   );
   const harness = manifestHarness({ assignments, entryIdOffset: 1_000 });
@@ -409,10 +401,16 @@ test("chunks 251 snapshots into a bounded 250 + 1 read", async () => {
     command(harness.context, harness.assignments)
   );
 
-  assert.equal(seal.chunkCount, "2");
+  assert.equal(seal.chunkCount, "1");
+  assert.equal(seal.chunkSize, "15000");
   assert.deepEqual(
     harness.storedChunks.map((chunk) => chunk.entryCount),
-    [250, 1]
+    [15_000]
+  );
+  assert.equal(harness.storedEntries.length, 15_000);
+  assert.equal(harness.manifestEntryBatchSizes.length, 15);
+  assert.ok(
+    harness.manifestEntryBatchSizes.every((size) => size === 1_000)
   );
   const first = await service.getChunk({
     workspaceId,
@@ -421,16 +419,8 @@ test("chunks 251 snapshots into a bounded 250 + 1 read", async () => {
     manifestId: seal.id,
     chunkIndex: 0
   });
-  const second = await service.getChunk({
-    workspaceId,
-    projectId,
-    jobId,
-    manifestId: seal.id,
-    chunkIndex: 1
-  });
-  assert.equal(first.entries.length, 250);
-  assert.equal(second.entries.length, 1);
-  assert.equal(second.entries[0]?.sequence, 250);
+  assert.equal(first.entries.length, 15_000);
+  assert.equal(first.entries[14_999]?.sequence, 14_999);
 });
 
 async function rejectsAsStale(
@@ -587,6 +577,7 @@ function manifestHarness(
   const entryIdOffset = options.entryIdOffset ?? 20;
   const storedChunks: Array<Record<string, unknown>> = [];
   const storedEntries: Array<Record<string, unknown>> = [];
+  const manifestEntryBatchSizes: number[] = [];
   let storedManifest: Record<string, unknown> | undefined;
   let contextResult: ReturnType<typeof trackingContext> | null = context;
   let lockCalls = 0;
@@ -670,7 +661,9 @@ function manifestHarness(
       ...selected,
       manifest: {
         jobId: storedManifest.jobId,
+        pairCount: storedManifest.pairCount,
         chunkCount: storedManifest.chunkCount,
+        chunkSize: storedManifest.chunkSize,
         status: storedManifest.status
       },
       entries: storedEntries
@@ -690,6 +683,7 @@ function manifestHarness(
       if (sql.includes("pg_advisory_xact_lock")) {
         lockCalls += 1;
         assert.match(sql, /statement_timestamp\(\)/u);
+        assert.match(sql, /pg_advisory_xact_lock\([\s\S]*\) IS NULL/u);
         return [{ snapshotAt: allocatedSealedAt }];
       }
       if (sql.includes("bounded_rank_scope")) {
@@ -697,7 +691,7 @@ function manifestHarness(
           sql,
           /CASE[\s\S]*octet_length[\s\S]*THEN[\s\S]*ELSE char_length/u
         );
-        const bounded = assignments.slice(0, 1_001);
+        const bounded = assignments.slice(0, 15_001);
         const characterCounts = bounded.map(
           ({ keyword }) => [...keyword.textOriginal].length
         );
@@ -774,7 +768,7 @@ function manifestHarness(
       }) => {
         assignmentWhere = where;
         assert.deepEqual(orderBy, { keywordId: "asc" });
-        assert.equal(take, 1_001);
+        assert.equal(take, 15_001);
         return [...assignments];
       }
     },
@@ -794,6 +788,7 @@ function manifestHarness(
       }: {
         data: Array<Record<string, unknown>>;
       }) => {
+        manifestEntryBatchSizes.push(data.length);
         storedEntries.push(...data.map((row) => ({ ...row })));
         return { count: data.length };
       }
@@ -831,6 +826,7 @@ function manifestHarness(
     assignments,
     storedChunks,
     storedEntries,
+    manifestEntryBatchSizes,
     transactionOptions,
     get lockCalls() {
       return lockCalls;

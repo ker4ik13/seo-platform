@@ -13,6 +13,7 @@ test("parses a bounded semantic keyword query", () => {
     limit: 100,
     sort: "CREATED_DESC"
   });
+  assert.equal(keywordListQuery({ limit: "1000" }).limit, 1_000);
   assert.deepEqual(
     keywordListQuery({
       intent: "COMMERCIAL",
@@ -42,6 +43,7 @@ test("rejects ambiguous and unbounded semantic keyword queries", () => {
     DomainError
   );
   assert.throws(() => keywordListQuery({ limit: "0" }), DomainError);
+  assert.throws(() => keywordListQuery({ limit: "1001" }), DomainError);
   assert.throws(
     () => keywordListQuery({ cursor: "not a cursor" }),
     DomainError

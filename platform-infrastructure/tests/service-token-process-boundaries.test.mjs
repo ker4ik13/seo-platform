@@ -84,6 +84,7 @@ const tokenBearingServices = [
   "jobs-integrations",
   "import-worker",
   "crawl-worker",
+  "connector-worker",
   "rank-worker",
   "auth-email-worker",
   "realtime",
@@ -101,7 +102,7 @@ const callerAudienceBoundaries = new Map([
   ],
   [
     "JOBS_TO_SEO_DATA_TOKEN",
-    ["crawl-worker", "import-worker", "jobs-integrations", "seo-data"]
+    ["connector-worker", "crawl-worker", "import-worker", "jobs-integrations", "seo-data"]
   ],
   [
     "PLATFORM_API_TO_REALTIME_TOKEN",

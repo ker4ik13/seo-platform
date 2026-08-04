@@ -1,12 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AppUser } from "../lib/app-types";
 import {
   browserApiRequest,
   BrowserApiError
 } from "../lib/browser-api";
 import { canViewWorkspaceIntegrations } from "../lib/app-permissions";
+import {
+  announceWorkspaceDropdownOpen,
+  workspaceDropdownOpenEvent
+} from "../lib/dropdown-events";
 
 export function AccountMenu({
   user,
@@ -15,6 +19,39 @@ export function AccountMenu({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !rootRef.current?.contains(target)) {
+        setOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    const closeForAnotherDropdown = (event: Event) => {
+      if ((event as CustomEvent<EventTarget>).detail !== rootRef.current) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener(
+      workspaceDropdownOpenEvent,
+      closeForAnotherDropdown
+    );
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener(
+        workspaceDropdownOpenEvent,
+        closeForAnotherDropdown
+      );
+    };
+  }, [open]);
 
   async function logout(): Promise<void> {
     setBusy(true);
@@ -35,11 +72,18 @@ export function AccountMenu({
   }
 
   return (
-    <div className="account-menu">
+    <div className="account-menu" ref={rootRef}>
       <button
         aria-expanded={open}
         className="avatar-button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={() => {
+          setOpen((value) => {
+            if (!value && rootRef.current) {
+              announceWorkspaceDropdownOpen(rootRef.current);
+            }
+            return !value;
+          });
+        }}
         type="button"
       >
         <span>{initials(user.displayName)}</span>
@@ -49,7 +93,7 @@ export function AccountMenu({
         </span>
       </button>
       {open && (
-        <div className="account-popover">
+        <div className="account-popover" data-exclusive-dropdown-layer>
           <strong>{user.displayName}</strong>
           <span>{user.email}</span>
           <a className="account-menu-link" href="/app/settings/security">

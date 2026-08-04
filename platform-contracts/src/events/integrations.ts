@@ -1,4 +1,5 @@
 import type {
+  ConnectorFallbackMode,
   IntegrationCapability,
   IntegrationCredentialMode,
   IntegrationProvider,
@@ -17,7 +18,7 @@ export type ProjectConnectorBindingChangedField =
   (typeof projectConnectorBindingChangedFields)[number];
 
 export interface ProjectConnectorBindingEventRoute {
-  readonly position: 0;
+  readonly position: number;
   readonly sourceKind: ProjectConnectorRouteSourceKind;
   readonly provider: IntegrationProvider;
   readonly credentialMode: IntegrationCredentialMode;
@@ -35,7 +36,8 @@ export interface ProjectConnectorBindingEventDataV1 {
   readonly capability: IntegrationCapability;
   readonly enabled: boolean;
   readonly route: ProjectConnectorBindingEventRoute;
-  readonly fallbackMode: "NONE";
+  readonly routes?: readonly ProjectConnectorBindingEventRoute[];
+  readonly fallbackMode: ConnectorFallbackMode;
   readonly budgetMode: "DISABLED";
   readonly availability: ProjectConnectorBindingAvailability;
   readonly version: number;

@@ -2,8 +2,10 @@ import {
   trackingDepths,
   trackingDevices,
   trackingDomainMatchModes,
+  trackingContextKeywordReplacementLimit,
   trackingSearchEngines,
   type CreateTrackingContextInput,
+  type ReplaceTrackingContextKeywordsInput,
   type TrackingContextConfigurationInput,
   type TrackingContextKeywordQuery,
   type TrackingDomainMatchRule,
@@ -19,6 +21,8 @@ const DOMAIN_MATCH_MODES = new Set<string>(
 );
 const COUNTRY_CODE_PATTERN = /^[A-Z]{2}$/u;
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,1000}$/u;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export function createTrackingContextInput(
   value: unknown
@@ -62,6 +66,32 @@ export function trackingContextKeywordQuery(
     ...(cursor ? { cursor } : {}),
     ...(search ? { search } : {})
   };
+}
+
+export function replaceTrackingContextKeywordsInput(
+  value: unknown
+): ReplaceTrackingContextKeywordsInput {
+  const input = exactRecord(value, ["keywordIds"], "$");
+  if (
+    !Array.isArray(input.keywordIds) ||
+    input.keywordIds.length < 1 ||
+    input.keywordIds.length > trackingContextKeywordReplacementLimit
+  ) {
+    invalid(
+      "keywordIds",
+      `Must contain between 1 and ${trackingContextKeywordReplacementLimit} keyword identifiers`
+    );
+  }
+  const keywordIds = input.keywordIds.map((value, index) => {
+    if (typeof value !== "string" || !UUID_PATTERN.test(value)) {
+      invalid(`keywordIds.${index}`, "Must be a UUID");
+    }
+    return value.toLowerCase();
+  });
+  if (new Set(keywordIds).size !== keywordIds.length) {
+    invalid("keywordIds", "Must not contain duplicate identifiers");
+  }
+  return { keywordIds };
 }
 
 function contextInput(

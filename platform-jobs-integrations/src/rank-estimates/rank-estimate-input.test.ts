@@ -10,6 +10,7 @@ const workspaceId = "0190abcd-0000-7000-8000-000000000001";
 const projectId = "0190abcd-0000-7000-8000-000000000002";
 const actorId = "0190abcd-0000-7000-8000-000000000003";
 const trackingContextId = "0190abcd-0000-7000-8000-000000000004";
+const credentialId = "0190abcd-0000-7000-8000-000000000005";
 
 const input = {
   workspaceId,
@@ -34,6 +35,14 @@ const input = {
 
 test("accepts an exact authoritative rank estimate command", () => {
   assert.deepEqual(internalCreateRankEstimateInput(input), input);
+  assert.deepEqual(
+    internalCreateRankEstimateInput({
+      ...input,
+      provider: "XMLSTOCK",
+      credentialId
+    }),
+    { ...input, provider: "XMLSTOCK", credentialId }
+  );
   assert.equal(
     rankEstimateIdempotencyKey("rank-estimate-0001"),
     "rank-estimate-0001"
@@ -43,6 +52,8 @@ test("accepts an exact authoritative rank estimate command", () => {
 test("rejects unknown fields, tenant mismatch and inconsistent quota", () => {
   for (const candidate of [
     { ...input, browserProjectId: projectId },
+    { ...input, provider: "UNKNOWN" },
+    { ...input, credentialId: "not-a-uuid" },
     {
       ...input,
       project: { ...input.project, workspaceId: actorId }

@@ -22,7 +22,6 @@ export default async function ProjectNotificationSettingsPage({
     >
       <section className="page-heading">
         <div>
-          <p className="eyebrow">Проект · {project.name}</p>
           <h1>Уведомления проекта</h1>
           <p>
             Переопределите профиль только для нужных типов работ или временно

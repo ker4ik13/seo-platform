@@ -1,13 +1,15 @@
-import type {
-  InternalNormalizedRankResult,
-  RankManifestHash,
-  TrackingDomainMatchRule
+import {
+  rankProviderKeywordLimit,
+  type InternalNormalizedRankResult,
+  type RankManifestHash,
+  type TrackingDomainMatchRule
 } from "@seo-platform/contracts";
 import {
   canonicalJsonSha256,
   canonicalizeJson
 } from "@seo-platform/contracts/canonical-json";
 import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
+import type { ArsenkinHttpRateLimitGate } from "../integrations/arsenkin-http-rate-limiter.js";
 import type { ProviderFetch } from "../integrations/integration-credential-validation.connector.js";
 import {
   providerJsonRequest,
@@ -21,28 +23,38 @@ import {
 const ARSENKIN_SET_URL = new URL(
   "https://arsenkin.ru/api/tools/set"
 );
+const ARSENKIN_CHECK_URL = new URL(
+  "https://arsenkin.ru/api/tools/check"
+);
 const ARSENKIN_GET_URL = new URL(
   "https://arsenkin.ru/api/tools/get"
 );
 const TASK_ID_PATTERN = /^[a-z0-9_-]{1,100}$/iu;
 const REGION_ID_PATTERN = /^[1-9]\d{0,9}$/u;
 const STAGED_RESULT_SCHEMA = "arsenkin-rank-result@1" as const;
+const ARSENKIN_RANK_RESULT_MAX_BYTES = 128 * 1_048_576;
 const TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 
 export interface ArsenkinRankWireRequest {
-  readonly tools_name: "check-top";
+  readonly tools_name: "positions";
   readonly data: {
     readonly queries: readonly string[];
-    readonly is_snippet: false;
-    readonly noreask: false;
+    readonly url: string;
+    readonly alt_urls: readonly string[];
+    readonly subdomain: boolean;
     readonly se: readonly [
-      {
-        readonly type: 11 | 12;
-        readonly region: number;
-      }
+      | {
+          readonly type: 1 | 2 | 3;
+          readonly region: number;
+        }
+      | {
+          readonly type: 11 | 12;
+          readonly region: number;
+          readonly depth: 30 | 50 | 100;
+        }
     ];
-    readonly depth: 30;
+    readonly format: 0 | 1;
   };
 }
 
@@ -90,6 +102,10 @@ export type ArsenkinRankFetchResult =
         | "INVALID_PROVIDER_RESPONSE";
     };
 
+type ArsenkinRankCheckResult =
+  | { readonly status: "READY" }
+  | Exclude<ArsenkinRankFetchResult, { readonly status: "READY" }>;
+
 export interface ArsenkinStagedRankResultV1 {
   readonly schemaVersion: "arsenkin-rank-result@1";
   readonly providerRequestId: string;
@@ -106,13 +122,16 @@ export interface ArsenkinStagedRankResult {
 /**
  * BYOK Arsenkin adapter for rank checks.
  *
- * The public operation remains POSITIONS, while the wire implementation uses
- * the documented check-top matrix and derives the first matching project URL
- * locally. Raw provider responses are never returned from normalization and
- * must not be logged or persisted by callers.
+ * Uses Arsenkin's documented `positions` tool, which receives the project URL
+ * and returns the site's measured position and relevant URL. Raw provider
+ * responses are never returned from normalization and must not be logged or
+ * persisted by callers.
  */
 export class ArsenkinRankConnector {
-  public constructor(private readonly fetcher: ProviderFetch = fetch) {}
+  public constructor(
+    private readonly rateLimiter: ArsenkinHttpRateLimitGate,
+    private readonly fetcher: ProviderFetch = fetch
+  ) {}
 
   public async submit(
     intentValue: unknown,
@@ -120,6 +139,10 @@ export class ArsenkinRankConnector {
     timeoutMs: number
   ): Promise<ArsenkinRankSubmitResult> {
     const request = buildArsenkinRankWireRequest(intentValue);
+    const permit = await this.rateLimiter.tryAcquire();
+    if (!permit.allowed) {
+      return rateLimited(permit.retryAfterSeconds);
+    }
     try {
       const response = await providerJsonRequest(
         ARSENKIN_SET_URL,
@@ -145,18 +168,41 @@ export class ArsenkinRankConnector {
     timeoutMs: number
   ): Promise<ArsenkinRankFetchResult> {
     const taskId = taskIdValueOf(taskIdValue);
+    const checkPermit = await this.rateLimiter.tryAcquire();
+    if (!checkPermit.allowed) {
+      return rateLimited(checkPermit.retryAfterSeconds);
+    }
     try {
-      const response = await providerJsonRequest(
-        ARSENKIN_GET_URL,
+      const checkResponse = await providerJsonRequest(
+        ARSENKIN_CHECK_URL,
         requestInit(secret, { task_id: taskId }),
         timeoutMs,
         this.fetcher
       );
+      const checked = checkResult(
+        checkResponse.status,
+        checkResponse.value,
+        checkResponse.retryAfterSeconds
+      );
+      if (checked.status !== "READY") return checked;
+
+      const getPermit = await this.rateLimiter.tryAcquire();
+      if (!getPermit.allowed) {
+        return rateLimited(getPermit.retryAfterSeconds);
+      }
+      const resultResponse = await providerJsonRequest(
+        ARSENKIN_GET_URL,
+        requestInit(secret, { task_id: taskId }),
+        timeoutMs,
+        this.fetcher,
+        Date.now,
+        ARSENKIN_RANK_RESULT_MAX_BYTES
+      );
       return fetchResult(
-        response.status,
-        response.value,
+        resultResponse.status,
+        resultResponse.value,
         taskId,
-        response.retryAfterSeconds
+        resultResponse.retryAfterSeconds
       );
     } catch (error) {
       if (error instanceof ProviderTransportError) {
@@ -170,24 +216,42 @@ export class ArsenkinRankConnector {
   }
 }
 
+function rateLimited(retryAfterSeconds: number): {
+  readonly status: "RETRYABLE_FAILURE";
+  readonly code: "PROVIDER_RATE_LIMITED";
+  readonly retryAfterSeconds: number;
+} {
+  return {
+    status: "RETRYABLE_FAILURE",
+    code: "PROVIDER_RATE_LIMITED",
+    retryAfterSeconds
+  };
+}
+
 export function buildArsenkinRankWireRequest(
   intentValue: unknown
 ): ArsenkinRankWireRequest {
   const intent = rankProviderRequestIntent(intentValue);
   const region = arsenkinRegion(intent.execution.regionCode);
+  const tracking = arsenkinTrackingUrls(intent);
+  const searchType = arsenkinSearchType(
+    intent.execution.searchEngine,
+    intent.execution.device,
+    intent.execution.providerMappingVersion
+  );
   return {
-    tools_name: "check-top",
+    tools_name: "positions",
     data: {
       queries: intent.keywords.map((keyword) => keyword.keywordText),
-      is_snippet: false,
-      noreask: false,
+      url: tracking.url,
+      alt_urls: tracking.altUrls,
+      subdomain: tracking.includeSubdomains,
       se: [
-        {
-          type: intent.execution.device === "MOBILE" ? 12 : 11,
-          region
-        }
+        searchType === 11 || searchType === 12
+          ? { type: searchType, region, depth: intent.execution.depth }
+          : { type: searchType, region }
       ],
-      depth: 30
+      format: 0
     }
   };
 }
@@ -202,62 +266,35 @@ export function normalizeArsenkinRankResult(
   const body = record(value);
   if (
     body.code !== "TASK_RESULT" ||
-    taskIdFromUnknown(body.task_id) !== taskId
+    taskIdFromUnknown(body.task_id) !== taskId ||
+    typeof body.created_at !== "string" ||
+    typeof body.finished_at !== "string"
   ) {
     invalidResponse();
   }
 
-  const outerResult = record(body.result);
-  const request = record(outerResult.request);
-  const providerResult = record(outerResult.result);
-  verifyRequestEcho(request, intent);
+  const providerResult = record(body.result);
+  if (providerResult.format !== 0) invalidResponse();
+  record(providerResult.summary);
+  const table = record(providerResult.table);
+  const queryTexts = new Set(
+    intent.keywords.map((keyword) => keyword.keywordText)
+  );
+  const tableKeys = Object.keys(table);
+  if (
+    tableKeys.length !== queryTexts.size ||
+    tableKeys.some((query) => !queryTexts.has(query))
+  ) {
+    invalidResponse();
+  }
 
-  const collect = array(providerResult.collect);
-  if (collect.length !== 1) invalidResponse();
-  const queryResults = array(collect[0]);
-  if (queryResults.length !== intent.keywords.length) invalidResponse();
-
-  return queryResults.map((rawUrls, index) => {
-    const urls = array(rawUrls);
-    if (urls.length > intent.execution.depth) invalidResponse();
-    const parsedUrls = urls.map(providerUrl);
-    const matchIndex = parsedUrls.findIndex(({ url }) =>
-      matchesProject(
-        url,
-        intent.project.domain,
-        intent.execution.domainMatchRule
-      )
-    );
-    const keyword = intent.keywords[index];
-    if (!keyword) invalidResponse();
-    if (matchIndex < 0) {
-      return {
-        manifestEntryId: keyword.manifestEntryId,
-        keywordId: keyword.keywordId,
-        found: false,
-        position: null,
-        dataQualityFlags: []
-      };
-    }
-    const match = parsedUrls[matchIndex];
-    if (!match) invalidResponse();
-    return {
-      manifestEntryId: keyword.manifestEntryId,
-      keywordId: keyword.keywordId,
-      found: true,
-      position: matchIndex + 1,
-      rankingUrl: match.original,
-      normalizedRankingUrl: match.normalized,
-      resultType: "ORGANIC",
-      serpFeatures: [],
-      dataQualityFlags: [
-        "ABSOLUTE_POSITION_UNAVAILABLE",
-        "PIXEL_POSITION_UNAVAILABLE",
-        "TITLE_UNAVAILABLE",
-        "SNIPPET_UNAVAILABLE"
-      ]
-    };
-  });
+  return intent.keywords.map((keyword) =>
+    normalizeArsenkinPositionRow(
+      table[keyword.keywordText],
+      keyword,
+      intent
+    )
+  );
 }
 
 export function stageArsenkinRankResult(
@@ -298,7 +335,7 @@ export function arsenkinStagedRankResult(
     typeof input.observedAt !== "string" ||
     !Array.isArray(input.results) ||
     input.results.length < 1 ||
-    input.results.length > 250 ||
+    input.results.length > rankProviderKeywordLimit ||
     !/^[a-z0-9][a-z0-9@._-]{0,63}$/u.test(input.connectorVersion)
   ) {
     throw new TypeError("Invalid staged Arsenkin rank result");
@@ -331,7 +368,7 @@ export function arsenkinRankWireRequestHash(
   const request = wireRequest(value);
   return {
     algorithm: "SHA_256",
-    value: canonicalJsonSha256("arsenkin-rank-request@1", request)
+    value: canonicalJsonSha256("arsenkin-rank-request@2", request)
   };
 }
 
@@ -351,6 +388,31 @@ function submitResult(
   return { status: "ACCEPTED", taskId, request };
 }
 
+function checkResult(
+  status: number,
+  value: unknown,
+  retryAfterSeconds: number | undefined
+): ArsenkinRankCheckResult {
+  const failure = httpFailure(status, value, retryAfterSeconds);
+  if (failure) return failure;
+  const body = record(value);
+  if (
+    body.code !== "TASK_STATUS" ||
+    !Number.isSafeInteger(body.progress) ||
+    Number(body.progress) < 0 ||
+    Number(body.progress) > 100
+  ) {
+    return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
+  }
+  if (body.status === "process" && Number(body.progress) < 100) {
+    return { status: "PENDING" };
+  }
+  if (body.status === "finish" && body.progress === 100) {
+    return { status: "READY" };
+  }
+  return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
+}
+
 function fetchResult(
   status: number,
   value: unknown,
@@ -366,9 +428,6 @@ function fetchResult(
   }
   if (body.code === "TASK_RESULT") {
     return { status: "READY", value };
-  }
-  if (typeof body.code === "string" || typeof body.status === "string") {
-    return { status: "PENDING" };
   }
   return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
 }
@@ -437,77 +496,194 @@ function wireRequest(value: unknown): ArsenkinRankWireRequest {
   const queries = array(data.queries);
   const engines = array(data.se);
   if (
-    input.tools_name !== "check-top" ||
+    input.tools_name !== "positions" ||
     Object.keys(input).length !== 2 ||
-    Object.keys(data).length !== 5 ||
+    Object.keys(data).length !== 6 ||
     queries.length < 1 ||
-    queries.length > 250 ||
+    queries.length > rankProviderKeywordLimit ||
     queries.some(
       (query) =>
         typeof query !== "string" ||
         query.length < 1 ||
         query.length > 2_048
     ) ||
-    data.is_snippet !== false ||
-    data.noreask !== false ||
-    data.depth !== 30 ||
+    typeof data.url !== "string" ||
+    typeof data.subdomain !== "boolean" ||
+    !Array.isArray(data.alt_urls) ||
+    ![0, 1].includes(Number(data.format)) ||
     engines.length !== 1
   ) {
     throw new TypeError("Invalid Arsenkin rank wire request");
   }
   const engine = record(engines[0]);
+  const type = Number(engine.type);
+  const isGoogle = type === 11 || type === 12;
   if (
-    Object.keys(engine).length !== 2 ||
-    ![11, 12].includes(Number(engine.type)) ||
+    Object.keys(engine).length !== (isGoogle ? 3 : 2) ||
+    ![1, 2, 3, 11, 12].includes(Number(engine.type)) ||
     !Number.isSafeInteger(engine.region) ||
-    Number(engine.region) <= 0
+    Number(engine.region) <= 0 ||
+    (isGoogle && ![30, 50, 100].includes(Number(engine.depth))) ||
+    (!isGoogle && engine.depth !== undefined)
   ) {
     throw new TypeError("Invalid Arsenkin rank wire request");
   }
   return {
-    tools_name: "check-top",
+    tools_name: "positions",
     data: {
       queries: queries as readonly string[],
-      is_snippet: false,
-      noreask: false,
+      url: providerUrl(data.url).normalized,
+      alt_urls: (data.alt_urls as readonly unknown[]).map(
+        (url) => providerUrl(url).normalized
+      ),
+      subdomain: data.subdomain,
       se: [
-        {
-          type: engine.type as 11 | 12,
-          region: Number(engine.region)
-        }
+        isGoogle
+          ? {
+              type: type as 11 | 12,
+              region: Number(engine.region),
+              depth: Number(engine.depth) as 30 | 50 | 100
+            }
+          : {
+              type: type as 1 | 2 | 3,
+              region: Number(engine.region)
+            }
       ],
-      depth: 30
+      format: Number(data.format) as 0 | 1
     }
   };
 }
 
-function verifyRequestEcho(
-  request: Readonly<Record<string, unknown>>,
+function normalizeArsenkinPositionRow(
+  value: unknown,
+  keyword: RankProviderRequestIntentV1["keywords"][number],
   intent: RankProviderRequestIntentV1
-): void {
-  const queries = array(request.queries);
+): InternalNormalizedRankResult {
+  const row = record(value);
+  const positions = array(row.position);
+  parseArsenkinTop20(row.top20);
   if (
-    queries.length !== intent.keywords.length ||
-    queries.some(
-      (query, index) => query !== intent.keywords[index]?.keywordText
-    ) ||
-    request.depth !== 30
+    positions.length !== 1 ||
+    !Number.isSafeInteger(positions[0])
   ) {
     invalidResponse();
   }
-  const engines = array(request.ss);
-  if (engines.length !== 1) invalidResponse();
-  const engine = record(engines[0]);
-  const expectedType = intent.execution.device === "MOBILE" ? 12 : 11;
+  const position = Number(positions[0]);
+  if (position === 1_001) {
+    if (!hasExactKeys(row, ["position", "top20"])) invalidResponse();
+    return {
+      manifestEntryId: keyword.manifestEntryId,
+      keywordId: keyword.keywordId,
+      found: false,
+      position: null,
+      dataQualityFlags: []
+    };
+  }
   if (
-    engine.ss !== expectedType ||
-    engine.region !== arsenkinRegion(intent.execution.regionCode)
+    position < 1 ||
+    position > intent.execution.depth ||
+    !hasExactKeys(row, ["commerce", "position", "top20", "url"])
   ) {
     invalidResponse();
   }
+  const commerce = array(row.commerce);
+  if (commerce.length !== 1 || typeof commerce[0] !== "boolean") {
+    invalidResponse();
+  }
+  const rankingUrl = providerUrl(row.url);
+  if (
+    !matchesProject(
+      rankingUrl.url,
+      intent.project.domain,
+      intent.execution.domainMatchRule
+    )
+  ) {
+    invalidResponse();
+  }
+  return {
+    manifestEntryId: keyword.manifestEntryId,
+    keywordId: keyword.keywordId,
+    found: true,
+    position,
+    rankingUrl: rankingUrl.original,
+    normalizedRankingUrl: rankingUrl.normalized,
+    resultType: "ORGANIC",
+    serpFeatures: [],
+    dataQualityFlags: [
+      "ABSOLUTE_POSITION_UNAVAILABLE",
+      "PIXEL_POSITION_UNAVAILABLE",
+      "TITLE_UNAVAILABLE",
+      "SNIPPET_UNAVAILABLE"
+    ]
+  };
 }
 
-function matchesProject(
+function parseArsenkinTop20(value: unknown): readonly unknown[] {
+  if (typeof value !== "string" || value.length > 1_000_000) {
+    invalidResponse();
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    invalidResponse();
+  }
+  const result = array(parsed);
+  if (result.length > 20) invalidResponse();
+  return result;
+}
+
+function hasExactKeys(
+  value: Readonly<Record<string, unknown>>,
+  expected: readonly string[]
+): boolean {
+  const actual = Object.keys(value).sort();
+  const sortedExpected = [...expected].sort();
+  return (
+    actual.length === sortedExpected.length &&
+    actual.every((key, index) => key === sortedExpected[index])
+  );
+}
+
+function arsenkinTrackingUrls(intent: RankProviderRequestIntentV1): {
+  readonly url: string;
+  readonly altUrls: readonly string[];
+  readonly includeSubdomains: boolean;
+} {
+  const rule = intent.execution.domainMatchRule;
+  if (rule.mode === "ANY_PROJECT_MIRROR") {
+    throw new TypeError(
+      "Arsenkin positions requires a sealed project mirror snapshot"
+    );
+  }
+  if (rule.mode === "SPECIFIC_URL" || rule.mode === "URL_PREFIX") {
+    return {
+      url: providerUrl(rule.value).normalized,
+      altUrls: [],
+      includeSubdomains: false
+    };
+  }
+  const canonicalHost = intent.project.domain.toLowerCase();
+  const canonicalUrl = providerUrl(`https://${canonicalHost}/`).normalized;
+  if (rule.mode !== "INCLUDE_WWW") {
+    return {
+      url: canonicalUrl,
+      altUrls: [],
+      includeSubdomains: rule.mode === "INCLUDE_SUBDOMAINS"
+    };
+  }
+  const baseHost = withoutWww(canonicalHost);
+  const alternateHost = canonicalHost.startsWith("www.")
+    ? baseHost
+    : `www.${baseHost}`;
+  return {
+    url: canonicalUrl,
+    altUrls: [providerUrl(`https://${alternateHost}/`).normalized],
+    includeSubdomains: false
+  };
+}
+
+export function matchesProject(
   url: URL,
   projectDomain: string,
   rule: TrackingDomainMatchRule
@@ -537,7 +713,7 @@ function matchesProject(
   }
 }
 
-function providerUrl(value: unknown): {
+export function providerUrl(value: unknown): {
   readonly original: string;
   readonly normalized: string;
   readonly url: URL;
@@ -585,13 +761,27 @@ function normalizedUrl(source: URL): string {
 
 function arsenkinRegion(value: string | undefined): number {
   if (!value || !REGION_ID_PATTERN.test(value)) {
-    throw new TypeError("Arsenkin requires a numeric Google region id");
+    throw new TypeError("Arsenkin requires a numeric search region id");
   }
   const region = Number(value);
   if (!Number.isSafeInteger(region)) {
-    throw new TypeError("Arsenkin requires a numeric Google region id");
+    throw new TypeError("Arsenkin requires a numeric search region id");
   }
   return region;
+}
+
+function arsenkinSearchType(
+  searchEngine: RankProviderRequestIntentV1["execution"]["searchEngine"],
+  device: RankProviderRequestIntentV1["execution"]["device"],
+  providerMappingVersion: string
+): 1 | 2 | 3 | 11 | 12 {
+  if (searchEngine === "YANDEX") {
+    if (providerMappingVersion === "arsenkin-yandex-search-api@2") {
+      return 1;
+    }
+    return device === "MOBILE" ? 3 : 2;
+  }
+  return device === "MOBILE" ? 12 : 11;
 }
 
 function taskIdValueOf(value: string): string {

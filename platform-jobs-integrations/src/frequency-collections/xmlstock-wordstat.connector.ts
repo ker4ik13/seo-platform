@@ -21,7 +21,7 @@ export type WordstatCollectionResult =
     };
 
 export class XmlStockWordstatConnector {
-  public readonly version = "xmlstock-wordstat@1.0.0";
+  public readonly version = "xmlstock-wordstat@1.2.1";
 
   public constructor(private readonly fetcher: ProviderFetch = fetch) {}
 
@@ -41,6 +41,10 @@ export class XmlStockWordstatConnector {
     url.searchParams.set("key", secret.apiKey);
     url.searchParams.set("query", wordstatQuery(input.keyword, input.type));
     url.searchParams.set("pagetype", "words");
+    // XMLStock returns an exact aggregate row for operator queries only when
+    // grouping is requested. Live responses can omit `totalCount` in that
+    // shape, so the parser below also verifies the matching result row.
+    url.searchParams.set("groupby", "1");
     url.searchParams.set(
       "regions",
       input.regionCode === "ALL" ? "all" : input.regionCode
@@ -53,7 +57,11 @@ export class XmlStockWordstatConnector {
         timeoutMs,
         this.fetcher
       );
-      const result = xmlStockWordstatResult(response.status, response.value);
+      const result = xmlStockWordstatResult(
+        response.status,
+        response.value,
+        input.keyword
+      );
       return !result.ok && result.retryable && response.retryAfterSeconds !== undefined
         ? { ...result, retryAfterSeconds: response.retryAfterSeconds }
         : result;
@@ -100,10 +108,12 @@ function validQuery(value: string): string {
 
 export function xmlStockWordstatResult(
   status: number,
-  value: unknown
+  value: unknown,
+  keyword?: string
 ): WordstatCollectionResult {
   if (status === 401 || status === 403) return failure("INVALID_CREDENTIAL", false);
   if (status === 429) return failure("PROVIDER_RATE_LIMITED", true);
+  if (status === 503) return failure("PROVIDER_RATE_LIMITED", true);
   if (status >= 500) return failure("PROVIDER_UNAVAILABLE", true);
   if (status < 200 || status >= 300) return failure("PROVIDER_REQUEST_REJECTED", false);
   const body = record(value);
@@ -113,17 +123,54 @@ export function xmlStockWordstatResult(
     if (error === "-34" || error === "401" || error === "403") {
       return failure("INVALID_CREDENTIAL", false);
     }
-    if (error === "55" || error === "429" || error === "503") {
+    if (
+      error === "32" ||
+      error === "55" ||
+      error === "429" ||
+      error === "503"
+    ) {
       return failure("PROVIDER_RATE_LIMITED", true);
     }
-    if (error === "101") return failure("PROVIDER_UNAVAILABLE", true);
+    if (error === "20" || error === "101" || error === "300") {
+      return failure("PROVIDER_UNAVAILABLE", true);
+    }
     if (error === "200") return failure("PROVIDER_LOW_BALANCE", false);
     return failure("PROVIDER_REQUEST_REJECTED", false);
   }
   const count = decimal(body.totalCount ?? body.total_count);
-  return count === undefined
-    ? failure("PROVIDER_INVALID_RESPONSE", true)
-    : { ok: true, value: count };
+  if (count !== undefined) return { ok: true, value: count };
+
+  const results = body.results;
+  if (!Array.isArray(results)) {
+    return failure("PROVIDER_INVALID_RESPONSE", true);
+  }
+  if (results.length === 0) return { ok: true, value: "0" };
+  // With groupby=1 XMLStock returns the aggregate operator result as the only
+  // row, but Yandex can normalize its displayed phrase (for example change a
+  // grammatical form). The count is still the result for the submitted query.
+  // Requiring the display phrase to equal the source keyword therefore turns
+  // a successful provider response into a false PROVIDER_INVALID_RESPONSE.
+  if (results.length === 1) {
+    const onlyRow = record(results[0]);
+    const onlyCount = decimal(onlyRow?.count);
+    return onlyCount === undefined
+      ? failure("PROVIDER_INVALID_RESPONSE", true)
+      : { ok: true, value: onlyCount };
+  }
+  const expectedPhrase = normalizedPhrase(keyword);
+  if (!expectedPhrase) return failure("PROVIDER_INVALID_RESPONSE", true);
+  for (const candidate of results) {
+    const row = record(candidate);
+    if (
+      normalizedPhrase(row?.phrase) === expectedPhrase
+    ) {
+      const rowCount = decimal(row?.count);
+      return rowCount === undefined
+        ? failure("PROVIDER_INVALID_RESPONSE", true)
+        : { ok: true, value: rowCount };
+    }
+  }
+  return failure("PROVIDER_INVALID_RESPONSE", true);
 }
 
 export class WordstatQueryError extends Error {
@@ -158,6 +205,12 @@ function decimal(value: unknown): string | undefined {
     return value;
   }
   return undefined;
+}
+
+function normalizedPhrase(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().replace(/\s+/gu, " ").toLocaleLowerCase("ru");
+  return normalized || undefined;
 }
 
 function providerError(value: unknown): string | undefined {

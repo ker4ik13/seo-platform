@@ -1,7 +1,15 @@
 import { timingSafeEqual } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import {
+  currentRankProviderPolicyVersion,
   internalRankExecutionGrantDecision,
+  legacyRankManifestChunkSize,
+  legacyRankProviderKeywordLimit,
+  legacyRankProviderPolicyVersion,
+  rankManifestSingleTaskChunkSize,
+  rankProviderKeywordLimit,
+  xmlStockRankManifestChunkSize,
+  xmlStockRankProviderPolicyVersion,
   type InternalIssueRankExecutionGrantInputV1,
   type InternalRankExecutionGrantDecisionV1
 } from "@seo-platform/contracts";
@@ -24,7 +32,6 @@ import {
   RankExecutionGrantClientError
 } from "../platform-api/rank-execution-grant.client.js";
 import {
-  RANK_ESTIMATE_POLICY_VERSION,
   credentialSnapshot,
   executionProjection,
   rankEstimateProjectDomainHash,
@@ -41,7 +48,8 @@ import {
   storedRankExecutionGrantRequest
 } from "./rank-execution-grant-attempt.js";
 import {
-  ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION
+  rankExecutionConnectorVersion,
+  rankExecutionKillSwitchVersion
 } from "./rank-execution-evidence.js";
 import {
   buildRankExecutionGrantRequest,
@@ -85,7 +93,8 @@ export type RankExecutionGrantAttemptErrorCode =
 export class RankExecutionGrantAttemptError extends Error {
   public constructor(
     public readonly code: RankExecutionGrantAttemptErrorCode,
-    public readonly retryable: boolean
+    public readonly retryable: boolean,
+    public readonly detail?: string
   ) {
     super(code);
     this.name = "RankExecutionGrantAttemptError";
@@ -144,7 +153,10 @@ export class RankExecutionGrantAttemptService {
     jobItemId: string,
     requestId: string
   ): Promise<RankExecutionGrantAttemptResult> {
-    if (!this.config.rankExecution.submitEnabled) {
+    if (
+      !this.config.rankPreparation.enabled ||
+      !this.config.rankGrantApiToken
+    ) {
       throw failure("SUBMIT_DISABLED", false);
     }
     if (!UUID_V7_PATTERN.test(jobItemId)) {
@@ -601,6 +613,7 @@ export class RankExecutionGrantAttemptService {
             grantAttemptId: current.id,
             executionAttempt: current.executionAttempt,
             jobVersion: current.jobVersion,
+            provider: rebuilt.request.provider,
             estimateId: evidence.estimateId,
             manifestId: evidence.manifest.id,
             manifestHash: Buffer.from(
@@ -702,11 +715,13 @@ async function lockedExecutionGraph(
   const projection = await executionProjection(
     transaction,
     identity.workspaceId,
-    identity.projectId
+    identity.projectId,
+    graph.rankRun?.estimate.provider as "ARSENKIN" | "XMLSTOCK" | undefined,
+    graph.rankRun?.estimate.routeId ?? undefined
   );
   const databaseNow = await databaseClock(transaction);
   if (requireCurrent && !projectionLocked) {
-    throw failure("LOCAL_STATE_INVALID", false);
+    throw failure("LOCAL_STATE_INVALID", false, "projection_lock_failed");
   }
   if (requireCurrent) {
     validateLockedGraph(
@@ -743,7 +758,7 @@ function executionProjectionIdentity(
     !estimate.routeId ||
     job.projectId === null
   ) {
-    throw failure("LOCAL_STATE_INVALID", false);
+    throw failure("LOCAL_STATE_INVALID", false, "projection_identity_incomplete");
   }
   return {
     jobId: job.id,
@@ -773,7 +788,7 @@ function validateLockedGraph(
     job.type !== MANUAL_RANK_CHECK_JOB_TYPE ||
     job.projectId === null ||
     job.actorId === null ||
-    job.provider !== "ARSENKIN" ||
+    (job.provider !== "ARSENKIN" && job.provider !== "XMLSTOCK") ||
     job.credentialMode !== "BYOK_API_KEY" ||
     !grantableJobState(job) ||
     item.workspaceId !== job.workspaceId ||
@@ -793,13 +808,15 @@ function validateLockedGraph(
     run.manifestId === null ||
     run.manifestHash === null ||
     run.manifestPairCount === null ||
-    run.manifestPairCount !== estimate.keywordCount ||
-    run.manifestPairCount < 1 ||
-    run.manifestPairCount > 1_000 ||
     run.manifestChunkCount === null ||
-    run.manifestChunkCount < 1 ||
-    run.manifestChunkCount > 4 ||
-    run.manifestChunkSize !== 250 ||
+    run.manifestChunkSize === null ||
+    run.manifestPairCount !== estimate.keywordCount ||
+    !validRankRunManifestShape(
+      run.manifestPairCount,
+      run.manifestChunkCount,
+      run.manifestChunkSize,
+      estimate.providerPolicyVersion
+    ) ||
     run.finalizationStatus !== null ||
     run.finalizedAt !== null ||
     run.cancelRequestedBy !== null ||
@@ -809,9 +826,8 @@ function validateLockedGraph(
     estimate.id !== run.estimateId ||
     estimate.workspaceId !== job.workspaceId ||
     estimate.projectId !== job.projectId ||
-    estimate.provider !== "ARSENKIN" ||
+    estimate.provider !== job.provider ||
     estimate.credentialMode !== "BYOK_API_KEY" ||
-    estimate.providerPolicyVersion !== RANK_ESTIMATE_POLICY_VERSION ||
     estimate.executionSnapshotHash === null ||
     run.projectStatus !== "ACTIVE" ||
     run.projectVersion !== estimate.projectVersion ||
@@ -820,7 +836,7 @@ function validateLockedGraph(
       estimate.projectDomainHash
     )
   ) {
-    throw failure("LOCAL_STATE_INVALID", false);
+    throw failure("LOCAL_STATE_INVALID", false, "locked_graph_base_invariant");
   }
 
   const authorization = rankJobAuthorizationSnapshot(job.inputSnapshot);
@@ -828,21 +844,25 @@ function validateLockedGraph(
     authorization.estimateId !== estimate.id ||
     authorization.projectVersion !== run.projectVersion
   ) {
-    throw failure("LOCAL_STATE_INVALID", false);
+    throw failure("LOCAL_STATE_INVALID", false, "authorization_snapshot_mismatch");
   }
   const verified = verifiedRankEstimate(estimate);
   if (!verified.execution || verified.summary.status !== "READY") {
-    throw failure("LOCAL_STATE_INVALID", false);
+    throw failure("LOCAL_STATE_INVALID", false, "estimate_not_ready");
   }
-  validateProviderRequestIntent(
-    job,
-    item,
-    run,
-    estimate,
-    verified.execution,
-    reference.chunkIndex,
-    requestIntent
-  );
+  try {
+    validateProviderRequestIntent(
+      job,
+      item,
+      run,
+      estimate,
+      verified.execution,
+      reference.chunkIndex,
+      requestIntent
+    );
+  } catch {
+    throw failure("LOCAL_STATE_INVALID", false, "request_intent_mismatch");
+  }
   try {
     assertExecutionProjectionCurrent(
       estimate,
@@ -850,25 +870,25 @@ function validateLockedGraph(
       databaseNow
     );
   } catch {
-    throw failure("LOCAL_STATE_INVALID", false);
+    throw failure("LOCAL_STATE_INVALID", false, "execution_projection_changed");
   }
 
   const binding = projection.binding;
-  const route = binding?.routes[0];
+  const route = projection.route;
   if (
     !binding ||
     !binding.enabled ||
     binding.capability !== "SERP_RANK_TRACKING" ||
-    binding.routes.length !== 1 ||
     !route ||
-    route.position !== 0 ||
+    !Number.isSafeInteger(route.position) ||
+    route.position < 0 ||
     route.sourceKind !== "WORKSPACE_CREDENTIAL" ||
-    route.credential.provider !== "ARSENKIN" ||
+    route.credential.provider !== job.provider ||
     route.credential.mode !== "BYOK_API_KEY" ||
     route.credential.status !== "ACTIVE" ||
     route.credential.deletedAt !== null
   ) {
-    throw failure("LOCAL_STATE_INVALID", false);
+    throw failure("LOCAL_STATE_INVALID", false, "routing_projection_invalid");
   }
 }
 
@@ -886,7 +906,9 @@ function requestForLockedGraph(
       locked.databaseNow
     );
     const run = locked.job.rankRun;
-    if (!run) throw failure("LOCAL_STATE_INVALID", false);
+    if (!run) {
+      throw failure("LOCAL_STATE_INVALID", false, "rank_run_missing");
+    }
     const estimate = run.estimate;
     const authorization = rankJobAuthorizationSnapshot(
       locked.job.inputSnapshot
@@ -894,7 +916,9 @@ function requestForLockedGraph(
     const reference = rankJobItemReference(locked.item.inputReference);
     const current = credentialSnapshot(locked.projection);
     const requestIntent = locked.requestIntent;
-    if (!requestIntent) throw failure("LOCAL_STATE_INVALID", false);
+    if (!requestIntent) {
+      throw failure("LOCAL_STATE_INVALID", false, "request_intent_missing");
+    }
     const facts = requestFacts(
       locked.job,
       locked.item,
@@ -908,8 +932,9 @@ function requestForLockedGraph(
       config
     );
     return buildRankExecutionGrantRequest(facts);
-  } catch {
-    throw failure("LOCAL_STATE_INVALID", false);
+  } catch (error) {
+    if (error instanceof RankExecutionGrantAttemptError) throw error;
+    throw failure("LOCAL_STATE_INVALID", false, "grant_request_build_failed");
   }
 }
 
@@ -945,6 +970,7 @@ function requestFacts(
     throw failure("LOCAL_STATE_INVALID", false);
   }
   return {
+    provider: job.provider as "ARSENKIN" | "XMLSTOCK",
     workspaceId: job.workspaceId,
     projectId: job.projectId,
     actorId: job.actorId,
@@ -976,7 +1002,10 @@ function requestFacts(
     credentialVerifiedAt: current.verifiedAt,
     estimateExecutionHash: estimate.executionSnapshotHash,
     providerPolicyVersion: estimate.providerPolicyVersion,
-    killSwitchVersion: config.rankExecution.killSwitchVersion
+    killSwitchVersion: rankExecutionKillSwitchVersion(
+      job.provider as "ARSENKIN" | "XMLSTOCK",
+      config.rankExecution.killSwitchVersion
+    )
   };
 }
 
@@ -1013,8 +1042,9 @@ function validateProviderRequestIntent(
     manifestHash: run.manifestHash,
     manifestPairCount: run.manifestPairCount,
     manifestChunkIndex,
-    executionConnectorVersion:
-      ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION,
+    executionConnectorVersion: rankExecutionConnectorVersion(
+      job.provider as "ARSENKIN" | "XMLSTOCK"
+    ),
     providerPolicyVersion: estimate.providerPolicyVersion
   };
   try {
@@ -1029,6 +1059,48 @@ function grantableJobState(job: Job): boolean {
     (job.status === "QUEUED" && job.stage === "WAITING_FOR_QUEUE") ||
     (job.status === "RUNNING" &&
       job.stage === "WAITING_EXECUTION_GRANT")
+  );
+}
+
+function validRankRunManifestShape(
+  pairCount: number | null,
+  chunkCount: number | null,
+  chunkSize: number | null,
+  policyVersion: string
+): boolean {
+  if (
+    pairCount === null ||
+    chunkCount === null ||
+    chunkSize === null ||
+    !Number.isSafeInteger(pairCount) ||
+    !Number.isSafeInteger(chunkCount) ||
+    !Number.isSafeInteger(chunkSize)
+  ) {
+    return false;
+  }
+  if (policyVersion === legacyRankProviderPolicyVersion) {
+    return (
+      pairCount >= 1 &&
+      pairCount <= legacyRankProviderKeywordLimit &&
+      chunkSize === legacyRankManifestChunkSize &&
+      chunkCount ===
+        Math.ceil(pairCount / legacyRankManifestChunkSize)
+    );
+  }
+  if (policyVersion === xmlStockRankProviderPolicyVersion) {
+    return (
+      pairCount >= 1 &&
+      pairCount <= rankProviderKeywordLimit &&
+      chunkSize === xmlStockRankManifestChunkSize &&
+      chunkCount === pairCount
+    );
+  }
+  return (
+    policyVersion === currentRankProviderPolicyVersion &&
+    pairCount >= 1 &&
+    pairCount <= rankProviderKeywordLimit &&
+    chunkSize === rankManifestSingleTaskChunkSize &&
+    chunkCount === 1
   );
 }
 
@@ -1153,7 +1225,8 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
 
 function failure(
   code: RankExecutionGrantAttemptErrorCode,
-  retryable: boolean
+  retryable: boolean,
+  detail?: string
 ): RankExecutionGrantAttemptError {
-  return new RankExecutionGrantAttemptError(code, retryable);
+  return new RankExecutionGrantAttemptError(code, retryable, detail);
 }

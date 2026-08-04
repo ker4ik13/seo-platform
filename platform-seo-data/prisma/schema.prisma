@@ -78,6 +78,11 @@ enum SemanticSavedViewScope {
   PROJECT_SHARED
 }
 
+enum KeywordGroupSystemKind {
+  UNGROUPED
+  TRASH
+}
+
 enum SemanticCustomColumnType {
   TEXT
   LONG_TEXT
@@ -185,6 +190,7 @@ model Keyword {
   @@index([workspaceId, projectId, status, updatedAt(sort: Desc), id(sort: Desc)], map: "keywords_workspace_project_status_updated_id_idx")
   @@index([workspaceId, projectId, status, textNormalized, id], map: "keywords_workspace_project_status_text_id_idx")
   @@index([workspaceId, projectId, status, priority(sort: Desc), id(sort: Desc)], map: "keywords_workspace_project_status_priority_id_idx")
+  @@index([workspaceId, projectId, status, sourceMode, id], map: "keywords_workspace_project_status_source_id_idx")
   @@index([workspaceId, projectId, status, intent, createdAt(sort: Desc), id(sort: Desc)], map: "keywords_workspace_project_status_intent_created_idx")
   @@index([textNormalized(ops: raw("gin_trgm_ops"))], type: Gin, map: "keywords_text_normalized_trgm_idx")
   @@index([projectId, clusterId, id])
@@ -271,19 +277,20 @@ model SemanticSavedView {
 }
 
 model KeywordGroup {
-  id          String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId String       @map("workspace_id") @db.Uuid
-  projectId   String       @map("project_id") @db.Uuid
-  parentId    String?      @map("parent_id") @db.Uuid
-  name        String       @db.VarChar(255)
-  path        String?      @db.Text
-  pathHash    String?      @map("path_hash") @db.Char(64)
-  color       String?      @db.VarChar(16)
-  position    Int          @default(0)
-  status      EntityStatus @default(ACTIVE)
-  version     Int          @default(1)
-  createdAt   DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  id          String                  @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String                  @map("workspace_id") @db.Uuid
+  projectId   String                  @map("project_id") @db.Uuid
+  parentId    String?                 @map("parent_id") @db.Uuid
+  name        String                  @db.VarChar(255)
+  path        String?                 @db.Text
+  pathHash    String?                 @map("path_hash") @db.Char(64)
+  color       String?                 @db.VarChar(16)
+  position    Int                     @default(0)
+  systemKind  KeywordGroupSystemKind? @map("system_kind")
+  status      EntityStatus            @default(ACTIVE)
+  version     Int                     @default(1)
+  createdAt   DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   memberships KeywordGroupMembership[]
 
@@ -338,24 +345,24 @@ model KeywordTag {
 }
 
 model Cluster {
-  id                    String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId           String       @map("workspace_id") @db.Uuid
-  projectId             String       @map("project_id") @db.Uuid
-  name                  String       @db.VarChar(255)
-  method                String       @db.VarChar(64)
-  evidence              Json?
-  primaryPageId         String?      @map("primary_page_id") @db.Uuid
-  pageMappingSource     String?      @map("page_mapping_source") @db.VarChar(16)
-  pageMappingConfidence Float?       @map("page_mapping_confidence")
-  pageMappingRationale  String?      @map("page_mapping_rationale") @db.Text
-  isLocked              Boolean      @default(false) @map("is_locked")
-  excludeFromReclustering Boolean    @default(false) @map("exclude_from_reclustering")
-  status                EntityStatus @default(ACTIVE)
-  version               Int          @default(1)
-  createdAt             DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt             DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
-  keywords              Keyword[]
-  primaryPage           Page?        @relation("ClusterPrimaryPage", fields: [workspaceId, projectId, primaryPageId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
+  id                      String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId             String       @map("workspace_id") @db.Uuid
+  projectId               String       @map("project_id") @db.Uuid
+  name                    String       @db.VarChar(255)
+  method                  String       @db.VarChar(64)
+  evidence                Json?
+  primaryPageId           String?      @map("primary_page_id") @db.Uuid
+  pageMappingSource       String?      @map("page_mapping_source") @db.VarChar(16)
+  pageMappingConfidence   Float?       @map("page_mapping_confidence")
+  pageMappingRationale    String?      @map("page_mapping_rationale") @db.Text
+  isLocked                Boolean      @default(false) @map("is_locked")
+  excludeFromReclustering Boolean      @default(false) @map("exclude_from_reclustering")
+  status                  EntityStatus @default(ACTIVE)
+  version                 Int          @default(1)
+  createdAt               DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  keywords                Keyword[]
+  primaryPage             Page?        @relation("ClusterPrimaryPage", fields: [workspaceId, projectId, primaryPageId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
 
   @@unique([workspaceId, projectId, id], map: "clusters_tenant_project_id_key")
   @@index([projectId, status, id])
@@ -400,7 +407,7 @@ model Page {
   aliases               PageAlias[]
   sources               PageSource[]
   targetKeywords        Keyword[]
-  primaryClusters       Cluster[]                    @relation("ClusterPrimaryPage")
+  primaryClusters       Cluster[]                   @relation("ClusterPrimaryPage")
   createReceipts        PageCreateReceipt[]
   crawlSnapshots        CrawlPageSnapshot[]
   crawlIssues           CrawlIssue[]
@@ -705,6 +712,7 @@ model TrackingContext {
   configurations     TrackingContextVersion[]
   keywordAssignments TrackingContextKeywordAssignment[]
   createReceipts     TrackingContextCreateReceipt[]
+  keywordReplaceReceipts TrackingContextKeywordReplaceReceipt[]
   rankManifests      RankExecutionManifest[]            @relation("RankManifestContext")
 
   @@unique([workspaceId, projectId, id], map: "tracking_contexts_tenant_project_id_key")
@@ -776,6 +784,23 @@ model TrackingContextCreateReceipt {
   @@id([workspaceId, projectId, actorId, idempotencyKey])
   @@index([workspaceId, projectId, contextId], map: "tracking_context_create_receipts_context_idx")
   @@map("tracking_context_create_receipts")
+}
+
+model TrackingContextKeywordReplaceReceipt {
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  actorId          String   @map("actor_id") @db.Uuid
+  idempotencyKey   String   @map("idempotency_key") @db.VarChar(180)
+  requestHash      Bytes    @map("request_hash")
+  contextId        String   @map("context_id") @db.Uuid
+  responseSnapshot Json     @map("response_snapshot")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  context TrackingContext @relation(fields: [workspaceId, projectId, contextId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Cascade, map: "tracking_context_keyword_replace_receipts_context_tenant_fkey")
+
+  @@id([workspaceId, projectId, actorId, idempotencyKey])
+  @@index([workspaceId, projectId, contextId], map: "tracking_context_keyword_replace_receipts_context_idx")
+  @@map("tracking_context_keyword_replace_receipts")
 }
 
 model RankExecutionManifest {
@@ -1005,24 +1030,24 @@ model CurrentRank {
 }
 
 model FrequencySnapshot {
-  id          String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId String         @map("workspace_id") @db.Uuid
-  projectId   String         @map("project_id") @db.Uuid
-  keywordId   String         @map("keyword_id") @db.Uuid
-  type        String         @db.VarChar(64)
-  regionCode  String         @map("region_code") @db.VarChar(100)
-  device      String         @default("ALL") @db.VarChar(32)
-  period      String?        @db.VarChar(32)
-  value       BigInt?
-  observedAt  DateTime       @map("observed_at") @db.Timestamptz(6)
-  provider    String         @db.VarChar(64)
-  sourceMode  DataSourceMode @map("source_mode")
-  jobId       String         @map("job_id") @db.Uuid
-  qualityFlags Json          @default("[]") @map("quality_flags")
-  createdAt   DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  id           String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId  String         @map("workspace_id") @db.Uuid
+  projectId    String         @map("project_id") @db.Uuid
+  keywordId    String         @map("keyword_id") @db.Uuid
+  type         String         @db.VarChar(64)
+  regionCode   String         @map("region_code") @db.VarChar(100)
+  device       String         @default("ALL") @db.VarChar(32)
+  period       String?        @db.VarChar(32)
+  value        BigInt?
+  observedAt   DateTime       @map("observed_at") @db.Timestamptz(6)
+  provider     String         @db.VarChar(64)
+  sourceMode   DataSourceMode @map("source_mode")
+  jobId        String         @map("job_id") @db.Uuid
+  qualityFlags Json           @default("[]") @map("quality_flags")
+  createdAt    DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
 
-  @@index([projectId, keywordId, type, regionCode, device, observedAt], map: "frequency_snapshots_keyword_context_observed_idx")
   @@unique([workspaceId, projectId, jobId, keywordId, type, regionCode, device], map: "frequency_snapshots_job_keyword_context_key")
+  @@index([projectId, keywordId, type, regionCode, device, observedAt], map: "frequency_snapshots_keyword_context_observed_idx")
   @@map("frequency_snapshots")
 }
 
@@ -1111,6 +1136,7 @@ model SemanticImportReceipt {
   planVersion             Int                         @map("plan_version")
   storedKeywordsLimit     BigInt                      @map("stored_keywords_limit")
   keywordsPerProjectLimit BigInt                      @map("keywords_per_project_limit")
+  foldersPerProjectLimit  BigInt                      @map("folders_per_project_limit")
   reservedKeywords        BigInt                      @map("reserved_keywords")
   semanticVersionId       String?                     @map("semantic_version_id") @db.Uuid
   resultSummary           Json?                       @map("result_summary")
@@ -1136,6 +1162,7 @@ model SemanticImportChunkReceipt {
   createdPages           BigInt   @default(0) @map("created_pages")
   createdTags            BigInt   @default(0) @map("created_tags")
   createdMetricSnapshots BigInt   @default(0) @map("created_metric_snapshots")
+  trashedDuplicateCandidates Json  @default("[]") @map("trashed_duplicate_candidates")
   createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   semanticImport SemanticImportReceipt @relation(fields: [importId], references: [importId], onDelete: Cascade)

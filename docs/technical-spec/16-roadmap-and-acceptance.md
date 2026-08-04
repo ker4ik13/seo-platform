@@ -177,14 +177,15 @@ gates. Общий notification email/Web Push sender остаётся в P2.
 
 Промежуточно реализованы encrypted workspace vault и каталог первой тройки,
 create/list/rotate/revoke, masked DTO, optimistic concurrency, а также
-асинхронный provider-specific validation для Arsenkin и Keys.so с
+асинхронный provider-specific validation для XMLStock, Arsenkin и Keys.so с
 идемпотентным PostgreSQL Job, lease/retry и отдельным connector worker.
-XMLStock validation остаётся заблокированным до подтверждённого provider
-contract. Project binding для `SERP_RANK_TRACKING` уже реализован как
+XMLStock проверяется read-only запросом `regionsTree` по официальной паре
+`USER ID + KEY`; действующий credential может быть выбран для Wordstat и
+SERP rank route. Project binding для `SERP_RANK_TRACKING` уже реализован как
 нормализованный BYOK route с tenant-safe FK, immutable idempotency receipt,
-CAS/ETag, redacted outbox и project settings UI. Arsenkin предоставляет эту
-capability в текущем allowlist, а существующий ключ получает её только после
-успешной повторной provider validation. Binding сам по себе не запускает
+CAS/ETag, redacted outbox и project settings UI. Arsenkin и XMLStock
+предоставляют эту capability в текущем allowlist, а существующий ключ получает
+её только после успешной повторной provider validation. Binding сам по себе не запускает
 provider operation. Versioned tracking context, provider-free оценка,
 immutable SEO Data execution manifest и durable Jobs PREPARING runtime уже
 реализованы. Внешне Jobs по-прежнему предоставляет только internal
@@ -332,7 +333,7 @@ Job/manifest finalizer реализованы. Platform API issuer сохран�
 exact 30-секундные decisions под lifecycle/RBAC locks и controlled-beta quota
 reservation. Неоднозначный submit durable переходит в
 `SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit. Runtime включается только новой
-kill-switch generation `arsenkin-positions@2`; live BYOK smoke и production
+kill-switch generation `arsenkin-positions@4`; live BYOK smoke и production
 environment evidence остаются обязательной приёмкой внешнего провайдера.
 
 До production rollout BYOK дополнительно блокируют две границы текущего
@@ -801,6 +802,15 @@ Owner создаёт workspace, приглашает Admin, SEO Specialist и Cl
 - version/undo;
 - source provenance;
 - export roundtrip на выбранных полях.
+
+Отдельно проверяется нативный `.kc4` в пределах опубликованного лимита:
+
+- container/signature/SQLite `quick_check` и fail-closed rejection;
+- активные строки без Key Collector trash;
+- пустые и вложенные группы из manifest;
+- одна фраза в нескольких группах без потери членства;
+- BASE/EXACT/FIXED, позиции, релевантные URL, KEI и неизвестные custom fields;
+- идемпотентный повтор publish.
 
 ### AC-05. Одновременная работа
 
@@ -1289,7 +1299,6 @@ Design QA выполняется на staging, а не только по мак�
 
 - нативные mobile apps;
 - desktop Key Collector plugin;
-- чтение закрытого нативного формата проекта Key Collector;
 - агентские custom domains;
 - собственная глобальная поисковая прокси-сеть;
 - хранение платёжных карт;

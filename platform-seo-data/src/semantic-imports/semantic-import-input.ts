@@ -1,6 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import {
   semanticImportDuplicatePolicies,
+  semanticImportMaxGroupDepth,
   type InternalApplySemanticImportChunkInput,
   type InternalAbortSemanticImportInput,
   type InternalBeginSemanticImportInput,
@@ -8,6 +9,7 @@ import {
   type InternalNormalizeSemanticKeywordsInput,
   type SemanticImportDuplicatePolicy,
   type SemanticImportFrequencyValue,
+  type SemanticImportPositionValue,
   type SemanticImportPublishRow
 } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
@@ -78,6 +80,27 @@ export function applySemanticImportChunkInput(
   const parsedRows = rows.map((row, index) =>
     publishRow(row, `rows.${index}`)
   );
+  const groupPaths =
+    input.groupPaths === undefined
+      ? undefined
+      : array(input.groupPaths, "groupPaths").map((value, pathIndex) => {
+          const path = array(value, `groupPaths.${pathIndex}`).map(
+            (segment, segmentIndex) =>
+              boundedString(
+                segment,
+                `groupPaths.${pathIndex}.${segmentIndex}`,
+                255
+              )
+          );
+          if (
+            path.length < 1 ||
+            path.length > semanticImportMaxGroupDepth
+          ) {
+            invalid("groupPaths");
+          }
+          return path;
+        });
+  if (groupPaths && groupPaths.length > 2_000) invalid("groupPaths");
   const keys = parsedRows.map(
     ({ language: rowLanguage, normalizedHash }) =>
       `${rowLanguage}\u0000${normalizedHash}`
@@ -89,6 +112,7 @@ export function applySemanticImportChunkInput(
     chunkIndex: nonNegativeInteger(input.chunkIndex, "chunkIndex"),
     payloadHash: hash(input.payloadHash, "payloadHash"),
     duplicatePolicy: duplicatePolicy(input.duplicatePolicy),
+    ...(groupPaths ? { groupPaths } : {}),
     rows: parsedRows
   };
 }
@@ -131,8 +155,39 @@ function publishRow(value: unknown, path: string): SemanticImportPublishRow {
       : array(input.groupPath, `${path}.groupPath`).map((segment, index) =>
           boundedString(segment, `${path}.groupPath.${index}`, 255)
         );
-  if (groupPath && (groupPath.length === 0 || groupPath.length > 10)) {
+  if (
+    groupPath &&
+    (groupPath.length === 0 ||
+      groupPath.length > semanticImportMaxGroupDepth)
+  ) {
     invalid(`${path}.groupPath`);
+  }
+  const groupPaths =
+    input.groupPaths === undefined
+      ? undefined
+      : array(input.groupPaths, `${path}.groupPaths`).map(
+          (value, groupIndex) => {
+            const parsed = array(
+              value,
+              `${path}.groupPaths.${groupIndex}`
+            ).map((segment, segmentIndex) =>
+              boundedString(
+                segment,
+                `${path}.groupPaths.${groupIndex}.${segmentIndex}`,
+                255
+              )
+            );
+            if (
+              parsed.length < 1 ||
+              parsed.length > semanticImportMaxGroupDepth
+            ) {
+              invalid(`${path}.groupPaths.${groupIndex}`);
+            }
+            return parsed;
+          }
+        );
+  if (groupPaths && groupPaths.length > 100) {
+    invalid(`${path}.groupPaths`);
   }
   const targetUrl =
     input.targetUrl === undefined
@@ -145,6 +200,21 @@ function publishRow(value: unknown, path: string): SemanticImportPublishRow {
           (frequency, index) =>
             frequencyValue(frequency, `${path}.frequencies.${index}`)
         );
+  const positions =
+    input.positions === undefined
+      ? undefined
+      : array(input.positions, `${path}.positions`).map(
+          (position, index) =>
+            positionValue(position, `${path}.positions.${index}`)
+        );
+  if (
+    positions &&
+    (positions.length > 2 ||
+      new Set(positions.map(({ searchEngine }) => searchEngine)).size !==
+        positions.length)
+  ) {
+    invalid(`${path}.positions`);
+  }
   const observedAt =
     input.observedAt === undefined
       ? undefined
@@ -178,11 +248,46 @@ function publishRow(value: unknown, path: string): SemanticImportPublishRow {
     ),
     language: language(input.language, `${path}.language`),
     ...(groupPath ? { groupPath } : {}),
+    ...(groupPaths ? { groupPaths } : {}),
     ...(targetUrl ? { targetUrl } : {}),
     ...(frequencies ? { frequencies } : {}),
+    ...(positions ? { positions } : {}),
     ...(observedAt ? { observedAt } : {}),
     ...(tags ? { tags } : {}),
     customValues
+  };
+}
+
+function positionValue(
+  value: unknown,
+  path: string
+): SemanticImportPositionValue {
+  const input = record(value);
+  if (input.searchEngine !== "YANDEX" && input.searchEngine !== "GOOGLE") {
+    invalid(`${path}.searchEngine`);
+  }
+  const found = boolean(input.found, `${path}.found`);
+  const position =
+    input.position === undefined
+      ? undefined
+      : positiveInteger(input.position, `${path}.position`);
+  const previousPosition =
+    input.previousPosition === undefined
+      ? undefined
+      : positiveInteger(input.previousPosition, `${path}.previousPosition`);
+  if ((found && position === undefined) || (!found && position !== undefined)) {
+    invalid(`${path}.position`);
+  }
+  const rankingUrl =
+    input.rankingUrl === undefined
+      ? undefined
+      : webUrl(input.rankingUrl, `${path}.rankingUrl`);
+  return {
+    searchEngine: input.searchEngine,
+    found,
+    ...(position === undefined ? {} : { position }),
+    ...(previousPosition === undefined ? {} : { previousPosition }),
+    ...(rankingUrl === undefined ? {} : { rankingUrl })
   };
 }
 

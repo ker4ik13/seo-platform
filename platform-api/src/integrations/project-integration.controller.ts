@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
@@ -97,6 +98,8 @@ export class ProjectIntegrationController {
       headerValue(request, "idempotency-key")
     );
     const input = createProjectConnectorBindingInput(body);
+    assertCanUseWorkspaceCredentials(tenant);
+    assertCanManageFallback(tenant, input);
     await this.audit.record({
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
@@ -141,6 +144,8 @@ export class ProjectIntegrationController {
     const context = requestContext(request);
     const version = requiredVersion(headerValue(request, "if-match"));
     const input = updateProjectConnectorBindingInput(body);
+    assertCanUseWorkspaceCredentials(tenant);
+    assertCanManageFallback(tenant, input);
     await this.audit.record({
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
@@ -170,6 +175,94 @@ export class ProjectIntegrationController {
     });
     setEntityVersion(reply, result.version);
     return apiResponse(request, result, result.version);
+  }
+
+  @Post(":bindingId/inherit")
+  @RequirePermission("integration.update")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async inheritWorkspaceRoute(
+    @Param("bindingId") bindingId: string,
+    @Req() request: TenantRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<ProjectConnectorBinding>> {
+    const tenant = requiredMutableProjectTenant(request);
+    const canonicalBindingId = assertUuid(bindingId, "bindingId");
+    const context = requestContext(request);
+    const version = requiredVersion(headerValue(request, "if-match"));
+    assertCanUseWorkspaceCredentials(tenant);
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "integration.project_connector_binding.inherit_requested",
+      resourceType: "project_connector_binding",
+      resourceId: canonicalBindingId,
+      outcome: "REQUESTED",
+      requestId: context.requestId
+    });
+    const result = await this.jobs.inheritProjectConnectorBinding(
+      internalProjectContext(request, principal, tenant),
+      canonicalBindingId,
+      version
+    );
+    await recordCommittedAudit(this.audit, this.logger, {
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "integration.project_connector_binding.inherited",
+      resourceType: "project_connector_binding",
+      resourceId: canonicalBindingId,
+      outcome: "SUCCESS",
+      requestId: context.requestId
+    });
+    setEntityVersion(reply, result.version);
+    return apiResponse(request, result, result.version);
+  }
+}
+
+function assertCanUseWorkspaceCredentials(
+  tenant: AuthorizedProjectTenant
+): void {
+  if (
+    !hasEffectiveProjectPermission(
+      tenant.roleCode,
+      tenant.projectAccessLevel,
+      "integration.use_system_credentials"
+    )
+  ) {
+    throw new ForbiddenException({
+      code: "FORBIDDEN",
+      message:
+        "Workspace credentials require integration.use_system_credentials"
+    });
+  }
+}
+
+function assertCanManageFallback(
+  tenant: AuthorizedProjectTenant,
+  input: {
+    readonly fallbackRoutes?: readonly unknown[];
+    readonly fallbackPolicy: { readonly mode: string };
+  }
+): void {
+  if (
+    (input.fallbackRoutes?.length ?? 0) === 0 &&
+    input.fallbackPolicy.mode === "NONE"
+  ) {
+    return;
+  }
+  if (
+    !hasEffectiveProjectPermission(
+      tenant.roleCode,
+      tenant.projectAccessLevel,
+      "integration.manage_fallback"
+    )
+  ) {
+    throw new ForbiddenException({
+      code: "FORBIDDEN",
+      message: "Fallback routing requires integration.manage_fallback"
+    });
   }
 }
 

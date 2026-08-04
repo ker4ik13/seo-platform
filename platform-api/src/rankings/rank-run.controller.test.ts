@@ -12,6 +12,7 @@ import type {
 import type { TenantRequest } from "../authorization/authorization.types.js";
 import { REQUIRED_PERMISSION } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
+import type { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import { DomainError } from "../common/domain-error.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
 import {
@@ -77,7 +78,8 @@ test("creates a trusted rank command and returns project-scoped Location", async
       }
     } as unknown as JobsClient,
     tenantService(),
-    auditService(auditRecords)
+    auditService(auditRecords),
+    billingEntitlements()
   );
 
   const response = await controller.create(
@@ -130,10 +132,21 @@ test("creates a trusted rank command and returns project-scoped Location", async
       membershipId,
       membershipVersion: 3,
       canRunRanking: true,
-      entitlementStatus: "NOT_AVAILABLE",
-      quota: { status: "NOT_AVAILABLE" }
+      entitlementStatus: "ALLOWED",
+      quota: {
+        status: "AVAILABLE",
+        limit: "200",
+        used: "0",
+        remaining: "200",
+        resetsAt: "2026-07-30T00:00:00.000Z"
+      }
     },
-    billingCurrency: "RUB"
+    billingCurrency: "RUB",
+    jobCapacity: {
+      planCode: "TRIAL",
+      planVersion: 1,
+      concurrentJobs: 1
+    }
   });
   assert.deepEqual(
     auditRecords.map(({ action, resourceId }) => ({
@@ -187,7 +200,8 @@ test("reads and cancels teammate Jobs in archived read-only projects", async () 
   const controller = new RankRunController(
     jobs as unknown as JobsClient,
     {} as TenantService,
-    auditService(auditRecords)
+    auditService(auditRecords),
+    billingEntitlements()
   );
   const readOnlyRequest = request({
     workspaceStatus: "READ_ONLY",
@@ -265,7 +279,8 @@ test("rejects stale lifecycle and access snapshots before audit or RPC", async (
         }
       } as unknown as JobsClient,
       tenantService(options),
-      auditService(auditRecords)
+      auditService(auditRecords),
+      billingEntitlements()
     );
 
     await assert.rejects(
@@ -300,7 +315,8 @@ test("rejects a non-empty cancel body before audit or RPC", async () => {
       }
     } as unknown as JobsClient,
     {} as TenantService,
-    auditService(auditRecords)
+    auditService(auditRecords),
+    billingEntitlements()
   );
 
   await assert.rejects(
@@ -374,6 +390,26 @@ function auditService(records: AuditRecord[]): AuditService {
       records.push(record);
     }
   } as unknown as AuditService;
+}
+
+function billingEntitlements(): BillingEntitlementService {
+  return {
+    jobCapacity: async () => ({
+      planCode: "TRIAL",
+      planVersion: 1,
+      concurrentJobs: 1
+    }),
+    rankProviderRunAccess: async () => ({
+      entitlementStatus: "ALLOWED",
+      quota: {
+        status: "AVAILABLE",
+        limit: "200",
+        used: "0",
+        remaining: "200",
+        resetsAt: "2026-07-30T00:00:00.000Z"
+      }
+    })
+  } as unknown as BillingEntitlementService;
 }
 
 function request(

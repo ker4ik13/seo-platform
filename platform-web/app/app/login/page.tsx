@@ -13,12 +13,11 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   return (
     <main className="auth-page">
       <a className="auth-brand" href="/">
-        <span className="brand-mark">S</span>
-        <span>SEO Workspace</span>
+        <img alt="" aria-hidden="true" className="brand-mark" height={29} src="/brand/seonorita-mark.svg" width={29} />
+        <span>SEOньорита</span>
       </a>
       <section className="auth-card">
         <header>
-          <p className="eyebrow">С возвращением</p>
           <h1>Вход в приложение</h1>
           <p>Откройте проекты, историю запусков и командное пространство.</p>
         </header>

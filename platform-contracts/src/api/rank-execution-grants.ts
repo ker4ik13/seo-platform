@@ -102,7 +102,7 @@ export interface InternalIssueRankExecutionGrantInputV1 {
    */
   readonly executionAttempt: number;
   readonly purpose: "PROVIDER_SUBMIT";
-  readonly provider: "ARSENKIN";
+  readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly operation: "POSITIONS";
   readonly capability: "SERP_RANK_TRACKING";
   readonly credentialMode: "BYOK_API_KEY";
@@ -145,7 +145,7 @@ export interface InternalRankExecutionGrantScopeHashPreimageV1 {
   readonly jobVersion: number;
   readonly executionAttempt: number;
   readonly purpose: "PROVIDER_SUBMIT";
-  readonly provider: "ARSENKIN";
+  readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly operation: "POSITIONS";
   readonly capability: "SERP_RANK_TRACKING";
   readonly credentialMode: "BYOK_API_KEY";
@@ -199,7 +199,7 @@ const DENIAL_REASONS: ReadonlySet<string> = new Set(
 );
 const GRANT_TTL_MILLISECONDS = 30_000;
 const MAX_EXECUTION_ATTEMPT = 1_000;
-const MAX_MANIFEST_CHUNK_INDEX = 3;
+const MAX_MANIFEST_CHUNK_INDEX = 14_999;
 
 const REQUEST_FIELDS = [
   "schemaVersion",
@@ -256,7 +256,7 @@ export function internalIssueRankExecutionGrantInput(
   if (
     input.schemaVersion !== rankExecutionGrantRequestSchemaVersion ||
     input.purpose !== "PROVIDER_SUBMIT" ||
-    input.provider !== "ARSENKIN" ||
+    (input.provider !== "ARSENKIN" && input.provider !== "XMLSTOCK") ||
     input.operation !== "POSITIONS" ||
     input.capability !== "SERP_RANK_TRACKING" ||
     input.credentialMode !== "BYOK_API_KEY" ||
@@ -290,7 +290,7 @@ export function internalIssueRankExecutionGrantInput(
       "executionAttempt"
     ),
     purpose: "PROVIDER_SUBMIT",
-    provider: "ARSENKIN",
+    provider: input.provider as InternalIssueRankExecutionGrantInputV1["provider"],
     operation: "POSITIONS",
     capability: "SERP_RANK_TRACKING",
     credentialMode: "BYOK_API_KEY",

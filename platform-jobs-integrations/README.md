@@ -246,9 +246,15 @@ keys, выдаёт короткоживущие signed URLs на отдельн�
 вычислить SHA-256, проверить MIME по содержимому и malware scan, после чего
 перевести объект в `READY` либо `REJECTED`.
 
-## Импорт XLSX
+## Импорт XLSX и нативного Key Collector
 
-`import-worker` поддерживает CSV/TSV и XLSX Key Collector. XLSX сначала
+`import-worker` поддерживает CSV/TSV, XLSX Key Collector и нативный `.kc4`.
+KC4 проходит signature/central-directory/zip-bomb проверки, извлекает только
+`main.tkc4` в mode-600 temp file и читает SQLite только в read-only/query-only
+режиме. Корзина Key Collector исключается, а отдельный group manifest
+сохраняет пустые папки; дубли одной фразы объединяют все group memberships.
+
+XLSX сначала
 потоково копируется в mode-600 temporary file с лимитом 256 МиБ, затем
 `unzipper-esm` читает central directory и только allowlisted OpenXML entries,
 а `saxes` потоково разбирает XML. Это позволяет обработать shared strings,
@@ -300,9 +306,16 @@ BullMQ содержит только `jobId`; dispatcher восстанавли�
 Job фиксирует `materialVersion`, поэтому результат старой проверки после
 ротации не может активировать новый secret. Успешная внешняя проверка
 обновляет сохранённый capability snapshot текущим provider allowlist; новую
-capability старый ключ получает только после revalidation. XMLStock остаётся
-`PENDING_VERIFICATION`, пока провайдер не предоставит подтверждённый
-неоплачиваемый validation endpoint и test fixtures.
+capability старый ключ получает только после revalidation. XMLStock проверяет
+пару `USER ID + KEY` read-only запросом Wordstat `pagetype=regionsTree`, после
+чего credential может обслуживать `WORDSTAT` и `SERP_RANK_TRACKING`.
+
+XMLStock rank runtime выполняет Yandex XML асинхронно (`delayed=1`, opaque
+`req_id`, poll 15/25 секунд) и Google XML постранично по 10 результатов.
+Каждый manifest chunk содержит один keyword; TOP-30/50/100 нормализуется в
+абсолютную позицию и релевантный URL без сохранения raw XML. Wordstat остаётся
+синхронным per-keyword/per-type контрактом BASE/EXACT/FIXED: provider
+`groupby` управляет числом фраз ответа и не является batch входных keywords.
 
 ## Проектные привязки connectors
 

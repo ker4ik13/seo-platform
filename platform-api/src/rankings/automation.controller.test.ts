@@ -233,6 +233,11 @@ test("creates from authoritative tenant, billing and BYOK snapshots", async () =
       planCode: "TRIAL",
       planVersion: 1,
       scheduledAutomations: 1
+    },
+    jobCapacity: {
+      planCode: "TRIAL",
+      planVersion: 1,
+      concurrentJobs: 1
     }
   });
   assert.deepEqual(
@@ -303,7 +308,12 @@ test("runs manually with a stable key and keeps requested audit fail-closed", as
       canRunRanking: true,
       entitlementStatus: "ALLOWED"
     },
-    billingCurrency: "RUB"
+    billingCurrency: "RUB",
+    jobCapacity: {
+      planCode: "TRIAL",
+      planVersion: 1,
+      concurrentJobs: 1
+    }
   });
   assert.equal(
     records[1]?.resourceType,
@@ -407,6 +417,11 @@ function controllerWith(
         scheduledAutomations: 1
       }),
       rankProviderAccess: async () => "ALLOWED",
+      jobCapacity: async () => ({
+        planCode: "TRIAL",
+        planVersion: 1,
+        concurrentJobs: 1
+      }),
       ...options.billing
     } as unknown as BillingEntitlementService,
     {

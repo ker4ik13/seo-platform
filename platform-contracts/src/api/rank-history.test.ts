@@ -198,6 +198,38 @@ test("not-found history is exact and cannot carry ranking metadata", () => {
   );
 });
 
+test("history accepts TOP-100 and rejects positions above the storage boundary", () => {
+  const item = {
+    snapshotId: ids.snapshotId,
+    keywordId: ids.keywordId,
+    trackingContextId: ids.contextId,
+    configurationVersion: 2,
+    provider: "ARSENKIN",
+    connectorVersion: "arsenkin-positions@2.0.0",
+    observedAt: "2026-07-29T12:00:00.000Z",
+    storedAt: "2026-07-29T12:00:01.000Z",
+    jobId: ids.jobId,
+    dataQualityFlags: [
+      "ABSOLUTE_POSITION_UNAVAILABLE",
+      "PIXEL_POSITION_UNAVAILABLE",
+      "TITLE_UNAVAILABLE",
+      "SNIPPET_UNAVAILABLE"
+    ],
+    found: true,
+    position: 100,
+    rankingUrl: "https://project.example/page",
+    normalizedRankingUrl: "https://project.example/page",
+    resultType: "ORGANIC",
+    serpFeatures: []
+  } as const satisfies RankHistoryItem;
+
+  assert.equal(redactRankHistoryItem(item).position, 100);
+  assert.throws(
+    () => redactRankHistoryItem({ ...item, position: 101 }),
+    /Invalid rank history item/u
+  );
+});
+
 test("internal history collection carries scope only in its internal envelope", () => {
   const item = {
     snapshotId: ids.snapshotId,

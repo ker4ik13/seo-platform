@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import { useEffect, useState, type FormEvent } from "react";
 import {
   browserApiRequest,
@@ -210,7 +212,7 @@ export function SemanticGroupManager({
           </label>
           <label>
             <span>Родительская группа</span>
-            <select
+            <CustomSelect
               onChange={(event) =>
                 updateDraft({ parentId: event.target.value })
               }
@@ -222,15 +224,26 @@ export function SemanticGroupManager({
                   {group.path}
                 </option>
               ))}
-            </select>
+            </CustomSelect>
           </label>
           <label className="semantic-group-color">
             <span>Цвет</span>
-            <input
-              onChange={(event) => updateDraft({ color: event.target.value })}
-              type="color"
-              value={editor.draft.color}
-            />
+            <div>
+              <input
+                aria-label="Выбрать цвет"
+                onChange={(event) => updateDraft({ color: event.target.value.toUpperCase() })}
+                type="color"
+                value={/^#[0-9a-f]{6}$/iu.test(editor.draft.color) ? editor.draft.color : "#6758EF"}
+              />
+              <input
+                aria-label="HEX-код цвета"
+                maxLength={7}
+                onChange={(event) => updateDraft({ color: event.target.value.toUpperCase() })}
+                pattern="#[0-9A-Fa-f]{6}"
+                required
+                value={editor.draft.color}
+              />
+            </div>
           </label>
           <div className="semantic-group-editor-actions">
             <button

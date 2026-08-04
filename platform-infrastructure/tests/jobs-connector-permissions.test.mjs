@@ -21,6 +21,7 @@ const composeUrl = new URL("../compose.dokploy.yml", import.meta.url);
 const expectedFunctions = [
   "public.list_integration_credential_execution_kek_canaries(TEXT[])",
   "public.list_due_integration_credential_validations(INTEGER)",
+  "public.schedule_integration_credential_validation_refreshes( UUID[], TIMESTAMPTZ, JSONB, TEXT, INTEGER )",
   "public.claim_integration_credential_validation(UUID, TEXT, INTEGER)",
   "public.finish_integration_credential_validation_job_failure( UUID, TEXT, UUID, INTEGER, TEXT, INTEGER )",
   "public.finish_integration_credential_validation_provider_failure( UUID, TEXT, UUID, INTEGER, TEXT, TEXT, INTEGER )",
@@ -36,7 +37,16 @@ const expectedFunctions = [
   "public.fail_keyword_research_run( UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, INTEGER )",
   "public.claim_frequency_collection_item(TEXT, INTEGER)",
   "public.complete_frequency_collection_item(UUID, UUID, TEXT, INTEGER, INTEGER)",
-  "public.fail_frequency_collection_item(UUID, UUID, TEXT, INTEGER, TEXT, INTEGER)"
+  "public.defer_frequency_collection_item(UUID, UUID, TEXT, INTEGER, TEXT, INTEGER)",
+  "public.fail_frequency_collection_item(UUID, UUID, TEXT, INTEGER, TEXT, INTEGER)",
+  "public.claim_frequency_collection_batch(TEXT, INTEGER, INTEGER)",
+  "public.complete_frequency_collection_batch(UUID, UUID[], TEXT, INTEGER, INTEGER)",
+  "public.defer_frequency_collection_batch(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)",
+  "public.fail_frequency_collection_batch(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)",
+  "public.mark_frequency_collection_batch_submitting(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)",
+  "public.renew_frequency_collection_batch_lease(UUID, UUID[], TEXT, INTEGER, INTEGER)",
+  "public.quarantine_frequency_collection_batch_submit(UUID, UUID[], TEXT, INTEGER)",
+  "public.defer_frequency_collection_batch_capacity(UUID, UUID[], TEXT, INTEGER, INTEGER)"
 ];
 
 function compactSql(sql) {

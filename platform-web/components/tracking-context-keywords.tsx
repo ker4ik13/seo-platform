@@ -333,10 +333,10 @@ export function TrackingContextKeywords({
     >
       <header>
         <div>
-          <h3>Запросы контекста</h3>
+          <h3>Ключи профиля</h3>
           <p>
-            Точечные назначения являются отдельным temporal-ресурсом.
-            Повторное добавление безопасно и не создаёт дубликат.
+            Эти запросы будут проверяться с выбранными выше параметрами.
+            Повторное добавление не создаёт дубликат.
           </p>
         </div>
         <span>
@@ -373,7 +373,7 @@ export function TrackingContextKeywords({
           <div className="tracking-keyword-column-heading">
             <div>
               <h4>Назначенные запросы</h4>
-              <p>Authoritative список именно этого контекста.</p>
+              <p>Ключи, которые входят в этот профиль съёма.</p>
             </div>
             <button
               className="text-button"
@@ -451,8 +451,8 @@ export function TrackingContextKeywords({
           {assignedPage.hasNext && (
             <div className="tracking-keyword-truncated">
               <p>
-                Назначения показаны частично. Продолжение загружается по
-                cursor, без offset.
+                Показана первая часть списка. Загрузите следующие запросы,
+                чтобы продолжить просмотр.
               </p>
               <button
                 className="secondary-button"
@@ -582,9 +582,8 @@ export function TrackingContextKeywords({
           ) : (
             <div className="tracking-keyword-empty quiet">
               <p>
-                Введите часть запроса. Глобальный флаг{" "}
-                <code>isTracked</code> не используется как источник истины для
-                этого контекста.
+                Введите часть запроса, чтобы добавить существующие ключи из
+                семантического ядра.
               </p>
             </div>
           )}
@@ -592,8 +591,7 @@ export function TrackingContextKeywords({
           {candidatePage.hasNext && (
             <div className="tracking-keyword-truncated">
               <p>
-                Результаты поиска усечены. Уточните запрос или загрузите
-                следующую cursor-страницу.
+                Найдены не все совпадения. Уточните запрос или загрузите ещё.
               </p>
               <button
                 className="secondary-button"

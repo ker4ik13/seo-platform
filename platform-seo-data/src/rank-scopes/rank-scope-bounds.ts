@@ -1,6 +1,7 @@
+import { rankProviderKeywordLimit } from "@seo-platform/contracts";
 import type { Prisma } from "../generated/prisma/client.js";
 
-export const MAX_RANK_SCOPE_ENTRIES = 1_000;
+export const MAX_RANK_SCOPE_ENTRIES = rankProviderKeywordLimit;
 
 /**
  * Arsenkin does not publish a positions-specific phrase length. Its official

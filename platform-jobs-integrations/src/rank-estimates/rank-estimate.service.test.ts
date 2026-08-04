@@ -64,8 +64,8 @@ test("calculates bounded task counts, exact TTL and a redacted immutable estimat
 
   assert.equal(estimate.status, "READY");
   assert.equal(estimate.executionAllowed, true);
-  assert.equal(estimate.workload.taskCount, "2");
-  assert.equal(estimate.workload.minimumRequestCount, "6");
+  assert.equal(estimate.workload.taskCount, "1");
+  assert.equal(estimate.workload.minimumRequestCount, "3");
   assert.equal(estimate.providerLimits.status, "NOT_AVAILABLE");
   assert.equal(estimate.expectedDuration.status, "NOT_AVAILABLE");
   assert.equal(estimate.credentialFreshness.status, "FRESH");
@@ -102,10 +102,120 @@ test("calculates bounded task counts, exact TTL and a redacted immutable estimat
   );
   assert.equal(
     harness.createdData?.minimumSubmitRequestCount,
-    2
+    1
   );
-  assert.equal(harness.createdData?.minimumCheckRequestCount, 2);
-  assert.equal(harness.createdData?.minimumGetRequestCount, 2);
+  assert.equal(harness.createdData?.minimumCheckRequestCount, 1);
+  assert.equal(harness.createdData?.minimumGetRequestCount, 1);
+});
+
+test("derives an executable XMLStock Google workload from the bound route", async () => {
+  const verifiedAt = new Date(Date.now() - 60_000);
+  const harness = estimateHarness({
+    scope: scope({ keywordCount: "3", pairCount: "3" }),
+    binding: binding({ provider: "XMLSTOCK", verifiedAt }),
+    validation: validation(verifiedAt, { provider: "XMLSTOCK" })
+  });
+  const estimate = await harness.service.create(
+    {
+      ...input,
+      access: { ...input.access, entitlementStatus: "ALLOWED" }
+    },
+    "rank-estimate-xmlstock-google"
+  );
+
+  assert.equal(estimate.status, "READY");
+  assert.equal(estimate.provider, "XMLSTOCK");
+  assert.equal(estimate.workload.taskCount, "3");
+  assert.equal(estimate.workload.minimumRequestCount, "9");
+  assert.deepEqual(estimate.workload.requestStages, ["GET"]);
+  assert.equal(estimate.workload.keywordLimitPerTask, "1");
+  assert.equal(harness.createdData?.providerPolicyVersion,
+    "manual-xmlstock-serp@1.0.0");
+  assert.equal(harness.createdData?.minimumSubmitRequestCount, 0);
+  assert.equal(harness.createdData?.minimumCheckRequestCount, 0);
+  assert.equal(harness.createdData?.minimumGetRequestCount, 9);
+});
+
+test("selects the explicitly requested provider from multiple bound routes", async () => {
+  const verifiedAt = new Date(Date.now() - 60_000);
+  const primary = binding({ verifiedAt });
+  const xml = binding({ provider: "XMLSTOCK", verifiedAt }).routes[0]!;
+  const xmlRouteId = "0190abcd-0000-7000-8000-000000000011";
+  const xmlCredentialId = "0190abcd-0000-7000-8000-000000000012";
+  const multiRouteBinding = {
+    ...primary,
+    routes: [
+      primary.routes[0]!,
+      {
+        ...xml,
+        id: xmlRouteId,
+        position: 1,
+        credentialId: xmlCredentialId,
+        credential: { ...xml.credential, id: xmlCredentialId }
+      }
+    ]
+  };
+  const harness = estimateHarness({
+    scope: scope({ keywordCount: "2", pairCount: "2" }),
+    binding: multiRouteBinding,
+    validation: validation(verifiedAt, {
+      provider: "XMLSTOCK",
+      credentialId: xmlCredentialId
+    })
+  });
+  const estimate = await harness.service.create(
+    {
+      ...input,
+      provider: "XMLSTOCK",
+      access: { ...input.access, entitlementStatus: "ALLOWED" }
+    },
+    "rank-estimate-explicit-xmlstock"
+  );
+
+  assert.deepEqual(estimate.blockers, []);
+  assert.equal(estimate.status, "READY");
+  assert.equal(estimate.provider, "XMLSTOCK");
+  assert.equal(harness.createdData?.routeId, xmlRouteId);
+  assert.equal(harness.createdData?.credentialId, xmlCredentialId);
+});
+
+test("prefers the explicitly selected primary account when a provider has another route", async () => {
+  const verifiedAt = new Date(Date.now() - 60_000);
+  const primary = binding({ provider: "XMLSTOCK", verifiedAt });
+  const secondaryCredentialId = "0190abcd-0000-7000-8000-000000000013";
+  const secondaryRouteId = "0190abcd-0000-7000-8000-000000000014";
+  const multiAccountBinding = {
+    ...primary,
+    routes: [
+      primary.routes[0]!,
+      {
+        ...primary.routes[0]!,
+        id: secondaryRouteId,
+        position: 1,
+        credentialId: secondaryCredentialId,
+        credential: {
+          ...primary.routes[0]!.credential,
+          id: secondaryCredentialId
+        }
+      }
+    ]
+  };
+  const harness = estimateHarness({
+    binding: multiAccountBinding,
+    validation: validation(verifiedAt, { provider: "XMLSTOCK" })
+  });
+  const estimate = await harness.service.create(
+    {
+      ...input,
+      provider: "XMLSTOCK",
+      access: { ...input.access, entitlementStatus: "ALLOWED" }
+    },
+    "rank-estimate-primary-xmlstock-account"
+  );
+
+  assert.equal(estimate.status, "READY");
+  assert.equal(harness.createdData?.routeId, routeId);
+  assert.equal(harness.createdData?.credentialId, credentialId);
 });
 
 test("replays without another SEO read and conflicts on another payload", async () => {
@@ -200,7 +310,7 @@ test("fails closed when a private receipt no longer matches its public snapshot"
 test("fails closed for private context corruption when the sentinel scope hash is unavailable", async () => {
   const harness = estimateHarness({
     scope: scope({
-      keywordCount: "1001",
+      keywordCount: "15001",
       semanticScopeHash: { availability: "UNAVAILABLE" }
     })
   });
@@ -290,6 +400,39 @@ test("keeps an unsupported provider mapping fail-closed before execution", async
   assert.equal(harness.createdData?.executionSnapshotHash, null);
 });
 
+test("blocks a Yandex depth that the positions request cannot represent", async () => {
+  const baseScope = scope();
+  const harness = estimateHarness({
+    scope: {
+      ...baseScope,
+      configuration: {
+        ...baseScope.configuration,
+        searchEngine: "YANDEX",
+        depth: 50
+      }
+    }
+  });
+  const estimate = await harness.service.create(
+    {
+      ...input,
+      access: {
+        ...input.access,
+        entitlementStatus: "ALLOWED"
+      }
+    },
+    "rank-estimate-yandex-depth"
+  );
+
+  assert.equal(estimate.status, "BLOCKED");
+  assert.equal(estimate.executionAllowed, false);
+  assert.deepEqual(
+    estimate.blockers.map(({ code }) => code),
+    ["UNSUPPORTED_DEPTH"]
+  );
+  assert.equal(harness.createdData?.executionSnapshot, Prisma.DbNull);
+  assert.equal(harness.createdData?.executionSnapshotHash, null);
+});
+
 test("does not accept a completed proof for another material version", async () => {
   const verifiedAt = new Date(Date.now() - 60_000);
   const harness = estimateHarness({
@@ -374,10 +517,10 @@ test("projects lifecycle, permission, entitlement and quota as deterministic blo
   assert.equal(new Set(codes).size, codes.length);
 });
 
-test("uses a bounded 1001 sentinel without fabricating a partial hash", async () => {
+test("uses a bounded 15001 sentinel without fabricating a partial hash", async () => {
   const harness = estimateHarness({
     scope: scope({
-      keywordCount: "1001",
+      keywordCount: "15001",
       semanticScopeHash: { availability: "UNAVAILABLE" }
     })
   });
@@ -386,7 +529,7 @@ test("uses a bounded 1001 sentinel without fabricating a partial hash", async ()
     "rank-estimate-limit"
   );
 
-  assert.equal(estimate.scope.keywordCount, "1001");
+  assert.equal(estimate.scope.keywordCount, "15001");
   assert.deepEqual(estimate.scope.scopeHash, {
     availability: "UNAVAILABLE"
   });
@@ -481,8 +624,8 @@ test("rejects unavailable empty and available sentinel snapshots", async () => {
         ...available,
         scope: {
           ...available.scope,
-          keywordCount: "1001",
-          pairCount: "1001"
+          keywordCount: "15001",
+          pairCount: "15001"
         },
         workload: {
           ...available.workload,
@@ -613,9 +756,49 @@ function estimateHarness(options: {
       return options.scope ?? scope();
     }
   } as unknown as SeoDataClient;
+  const routing = {
+    resolve: async (
+      _workspaceId: string,
+      _projectId: string,
+      _capability: string,
+      _actorId: string,
+      requestedProvider?: "ARSENKIN" | "XMLSTOCK"
+    ) => {
+      const selectedRoute = requestedProvider === undefined
+        ? selectedBinding?.routes[0]
+        : selectedBinding?.routes.find(
+            ({ credential }) => credential.provider === requestedProvider
+          );
+      if (!selectedBinding || !selectedRoute) {
+        throw new ConflictException({
+          code: "CONNECTOR_NOT_READY",
+          message: "No active integration route can execute this operation"
+        });
+      }
+      return {
+        bindingId: selectedBinding.id,
+        bindingVersion: selectedBinding.version,
+        routeId: selectedRoute.id,
+        credentialId: selectedRoute.credentialId,
+        provider: selectedRoute.credential.provider,
+        credentialMode: selectedRoute.credential.mode,
+        routingScope: "PROJECT_OVERRIDE",
+        position: selectedRoute.position,
+        attempts: [
+          {
+            sequence: 1,
+            provider: selectedRoute.credential.provider,
+            routingScope: "PROJECT_OVERRIDE",
+            outcome: "SELECTED",
+            occurredAt: "2026-08-04T10:00:00.000Z"
+          }
+        ]
+      };
+    }
+  };
 
   return {
-    service: new RankEstimateService(prisma, seoData),
+    service: new RankEstimateService(prisma, seoData, routing as never),
     get createdData() {
       return createdData;
     },
@@ -680,6 +863,7 @@ function binding(
   overrides: {
     readonly verifiedAt?: Date | null;
     readonly status?: string;
+    readonly provider?: "ARSENKIN" | "XMLSTOCK";
   } = {}
 ) {
   const verifiedAt =
@@ -705,7 +889,7 @@ function binding(
         credential: {
           id: credentialId,
           workspaceId,
-          provider: "ARSENKIN",
+          provider: overrides.provider ?? "ARSENKIN",
           mode: "BYOK_API_KEY",
           status: overrides.status ?? "ACTIVE",
           capabilities: ["SERP_RANK_TRACKING"],
@@ -723,22 +907,30 @@ function binding(
 
 function validation(
   finishedAt: Date | null,
-  overrides: { readonly materialVersion?: number } = {}
+  overrides: {
+    readonly materialVersion?: number;
+    readonly provider?: "ARSENKIN" | "XMLSTOCK";
+    readonly credentialId?: string;
+  } = {}
 ) {
   if (!finishedAt) return null;
   const materialVersion = overrides.materialVersion ?? 3;
+  const selectedCredentialId = overrides.credentialId ?? credentialId;
   return {
     id: validationId,
     workspaceId,
-    provider: "ARSENKIN",
+    provider: overrides.provider ?? "ARSENKIN",
     status: "COMPLETED",
     deduplicationKey:
-      `integration-credential-validation:${credentialId}:${materialVersion}`,
+      `integration-credential-validation:${selectedCredentialId}:${materialVersion}`,
     inputSnapshot: {
       kind: "integration.credential.validation.v1",
-      credentialId,
+      credentialId: selectedCredentialId,
       credentialMaterialVersion: materialVersion,
-      connectorVersion: "arsenkin@1.0.0"
+      connectorVersion:
+        overrides.provider === "XMLSTOCK"
+          ? "xmlstock@1.2.0"
+          : "arsenkin@1.0.0"
     },
     version: 5,
     finishedAt

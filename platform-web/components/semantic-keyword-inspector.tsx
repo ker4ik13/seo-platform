@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { SemanticKeywordInsights } from "@seo-platform/contracts";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import type { SemanticKeywordIntent } from "./semantic-view-types";
+import { SearchEngineLogo } from "./search-engine-logo";
 
 export interface SemanticKeywordInspectorItem {
   readonly id: string;
@@ -19,6 +20,7 @@ export interface SemanticKeywordInspectorItem {
   readonly targetUrl?: string;
   readonly tags: readonly string[];
   readonly sourceMode: "BYOK" | "PLATFORM" | "IMPORT" | "MANUAL";
+  readonly trashed?: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -86,7 +88,14 @@ export function SemanticKeywordInspector({
           <strong>{item.textOriginal}</strong>
           <small>ID: {item.id.slice(0, 8)}</small>
         </div>
-        <button aria-label="Закрыть детали" onClick={onClose} type="button">×</button>
+        <div className="semantic-sidebar-actions">
+          {!item.trashed && (
+            <button className="semantic-sidebar-edit" onClick={onEdit} type="button">
+              Изменить
+            </button>
+          )}
+          <button aria-label="Закрыть детали" onClick={onClose} type="button">×</button>
+        </div>
       </header>
       <section>
         <h3>Классификация</h3>
@@ -101,22 +110,26 @@ export function SemanticKeywordInspector({
       <section>
         <h3>Частотность</h3>
         {loading ? <span className="semantic-inspector-muted">Загружаем срезы…</span> : latestFrequencies.length > 0 ? (
-          <dl>
+          <div className="semantic-frequency-list">
             {latestFrequencies.map((frequency) => (
-              <div key={`${frequency.type}:${frequency.regionCode}:${frequency.device}`}>
-                <dt>{frequencyTypeLabel(frequency.type)} · {frequency.regionCode} · {frequencyDeviceLabel(frequency.device)}</dt>
-                <dd>
+              <div className="semantic-frequency-row" key={`${frequency.type}:${frequency.regionCode}:${frequency.device}`}>
+                <div className="semantic-frequency-context">
+                  <SearchEngineLogo engine="YANDEX" size="compact" />
+                  <span>{frequencyTypeLabel(frequency.type)}</span>
+                  <small>{frequency.regionCode} · {frequencyDeviceLabel(frequency.device)}</small>
+                </div>
+                <div className="semantic-frequency-value">
                   <strong>{frequency.value ? formatInteger(frequency.value) : "—"}</strong>
                   <small>{frequency.period ? `${frequency.period} · ` : ""}{formatDateTime(frequency.observedAt)}</small>
                   {frequency.qualityFlags.length > 0 && <small className="negative">{frequency.qualityFlags.map(frequencyQualityLabel).join(", ")}</small>}
-                </dd>
+                </div>
               </div>
             ))}
-          </dl>
+          </div>
         ) : (
           <div className="semantic-inspector-empty">
             <strong>Нет актуального среза</strong>
-            <span>Запустите сбор по выбранным запросам или импортируйте значения с контекстом.</span>
+            <span>Запустите сбор по выбранным запросам или импортируйте сохранённые значения.</span>
           </div>
         )}
       </section>
@@ -126,12 +139,12 @@ export function SemanticKeywordInspector({
           <dl>
             {insights.positions.map((position) => (
               <div key={position.trackingContextId}>
-                <dt>{position.searchEngine === "YANDEX" ? "Яндекс" : "Google"} · {position.contextName}</dt>
+                <dt className="semantic-position-context"><SearchEngineLogo engine={position.searchEngine} size="compact" /> <span>{position.contextName}</span></dt>
                 <dd>
                   <strong>{position.found ? position.position ?? "—" : "Не найден"}</strong>
-                  {position.position && position.previousPosition && (
+                  {position.position !== undefined && position.previousPosition !== undefined && (
                     <small className={position.position < position.previousPosition ? "positive" : position.position > position.previousPosition ? "negative" : undefined}>
-                      {position.position < position.previousPosition ? "▲" : position.position > position.previousPosition ? "▼" : "—"} {Math.abs(position.previousPosition - position.position) || ""}
+                      было {position.previousPosition}
                     </small>
                   )}
                 </dd>
@@ -168,15 +181,12 @@ export function SemanticKeywordInspector({
           <div><dt>Обновлён</dt><dd>{formatDateTime(item.updatedAt)}</dd></div>
         </dl>
       </section>
-      <footer>
-        <button className="secondary-button" onClick={onEdit} type="button">Изменить запрос</button>
-      </footer>
     </aside>
   );
 }
 
 function frequencyTypeLabel(type: string): string {
-  return { BASE: "Базовая", EXACT: "Фразовая", FIXED: "Точная" }[type] ?? type;
+  return { BASE: "База", EXACT: '""', FIXED: '"!"' }[type] ?? type;
 }
 
 function frequencyDeviceLabel(device: string): string {

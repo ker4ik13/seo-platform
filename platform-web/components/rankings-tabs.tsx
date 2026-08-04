@@ -1,6 +1,5 @@
 import { rankHistoryReturnTo } from "../lib/rank-history";
 import { rankAutomationsReturnTo } from "../lib/rank-automations";
-import { trackingContextsReturnTo } from "../lib/tracking-contexts";
 
 export function RankingsTabs({
   active,
@@ -20,13 +19,6 @@ export function RankingsTabs({
         href={rankHistoryReturnTo(projectId)}
       >
         История
-      </a>
-      <a
-        aria-current={active === "contexts" ? "page" : undefined}
-        className={active === "contexts" ? "active" : undefined}
-        href={trackingContextsReturnTo(projectId)}
-      >
-        Контексты
       </a>
       <a
         aria-current={active === "automations" ? "page" : undefined}

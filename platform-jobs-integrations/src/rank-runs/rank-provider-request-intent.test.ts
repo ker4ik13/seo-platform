@@ -78,7 +78,7 @@ test("builds the exact secret-free adapter command and a JCS golden hash", () =>
   );
   assert.equal(
     rankProviderRequestIntentHash(intent).value,
-    "981b22d4b32d17791a7a749345a16da8605a7b3bf90071a0e21e565cefdbc640"
+    "3b46942564e5dc6e4ad4f9f54f17ba94b3aaffad176ead53723b826e0971351f"
   );
 });
 
@@ -118,10 +118,6 @@ test("canonical hash changes for every provider-significant projection", () => {
     {
       ...intent,
       executionConnectorVersion: "arsenkin-positions@1.0.1"
-    },
-    {
-      ...intent,
-      providerPolicyVersion: "manual-arsenkin@1.0.1"
     }
   ];
 
@@ -131,6 +127,14 @@ test("canonical hash changes for every provider-significant projection", () => {
       baseline
     );
   }
+  assert.throws(
+    () =>
+      rankProviderRequestIntentHash({
+        ...intent,
+        providerPolicyVersion: "manual-arsenkin-positions@1.0.1"
+      }),
+    /Invalid rank provider request intent/u
+  );
 });
 
 test("rejects tampered source chunks and cross-tenant or incomplete slices", () => {
@@ -311,8 +315,8 @@ function buildInput(): RankProviderRequestIntentBuildInput {
     chunk: manifestChunk(),
     jobItemId: ids.jobItemId,
     manifestHash: hash("d"),
-    executionConnectorVersion: "arsenkin-positions@1.0.0",
-    providerPolicyVersion: "manual-arsenkin@1.0.0"
+    executionConnectorVersion: "arsenkin-positions@2.0.0",
+    providerPolicyVersion: "manual-arsenkin-positions@1.0.0"
   };
 }
 

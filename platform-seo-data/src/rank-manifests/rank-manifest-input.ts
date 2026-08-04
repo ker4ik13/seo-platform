@@ -12,7 +12,7 @@ import { internalUuid } from "../internal/internal-command-context.js";
 
 const HASH_PATTERN = /^[0-9a-f]{64}$/u;
 const DECIMAL_PAIR_COUNT_PATTERN =
-  /^(?:[1-9]|[1-9][0-9]|[1-9][0-9]{2}|1000)$/u;
+  /^(?:[1-9]|[1-9][0-9]{1,3}|1[0-4][0-9]{3}|15000)$/u;
 const VERSION_PATTERN = /^[A-Za-z0-9@._:-]{1,100}$/u;
 const SIMPLE_DOMAIN_MATCH_MODES = new Set<string>([
   "EXACT_HOST",
@@ -49,7 +49,9 @@ export function internalSealRankManifestInput(
   if (project.id !== projectId || project.workspaceId !== workspaceId) {
     invalid("project");
   }
-  if (input.provider !== "ARSENKIN") invalid("provider");
+  if (input.provider !== "ARSENKIN" && input.provider !== "XMLSTOCK") {
+    invalid("provider");
+  }
   if (input.operation !== "POSITIONS") invalid("operation");
   return {
     workspaceId,
@@ -57,7 +59,7 @@ export function internalSealRankManifestInput(
     actorId: uuid(input.actorId, "actorId"),
     jobId: uuid(input.jobId, "jobId"),
     estimateId: uuid(input.estimateId, "estimateId"),
-    provider: "ARSENKIN",
+    provider: input.provider,
     operation: "POSITIONS",
     project,
     estimate,
@@ -110,11 +112,15 @@ export function rankExecutionParameters(
     "fallbackMode",
     "providerMappingVersion"
   ]);
-  if (input.searchEngine !== "GOOGLE") invalid("execution.searchEngine");
+  if (input.searchEngine !== "GOOGLE" && input.searchEngine !== "YANDEX") {
+    invalid("execution.searchEngine");
+  }
   if (input.device !== "DESKTOP" && input.device !== "MOBILE") {
     invalid("execution.device");
   }
-  if (input.depth !== 30) invalid("execution.depth");
+  if (input.depth !== 30 && input.depth !== 50 && input.depth !== 100) {
+    invalid("execution.depth");
+  }
   if (typeof input.safeSearch !== "boolean") {
     invalid("execution.safeSearch");
   }
@@ -136,12 +142,12 @@ export function rankExecutionParameters(
     100
   );
   return {
-    searchEngine: "GOOGLE",
+    searchEngine: input.searchEngine,
     countryCode: countryCode(input.countryCode),
     ...(regionCode ? { regionCode } : {}),
     language: language(input.language),
     device: input.device,
-    depth: 30,
+    depth: input.depth,
     domainMatchRule: domainMatchRule(input.domainMatchRule),
     safeSearch: input.safeSearch,
     format: "SIMPLE",
@@ -389,7 +395,7 @@ function chunkIndex(value: unknown): number {
   if (
     !Number.isSafeInteger(parsed) ||
     parsed < 0 ||
-    parsed > 3
+    parsed > 14_999
   ) {
     invalid("chunkIndex");
   }

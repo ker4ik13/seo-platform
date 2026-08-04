@@ -312,11 +312,8 @@ export function TrackingContextSettings({
     setEditor(undefined);
   }
 
-  function openKeywords(contextId: string): void {
-    if (!discardCurrentDraft()) return;
-    setSelectedKeywordContextId((current) =>
-      current === contextId ? undefined : contextId
-    );
+  function selectContext(contextId: string): void {
+    setSelectedKeywordContextId(contextId);
     setOperationError(undefined);
     setSuccess(undefined);
   }
@@ -423,6 +420,7 @@ export function TrackingContextSettings({
         ? withTrackingContext(current, reconciliation.current)
         : current
     );
+    setSelectedKeywordContextId(authoritative.id);
     createCommand.current = undefined;
     setDraftErrors({});
     if (reconciliation.superseded) {
@@ -732,6 +730,10 @@ export function TrackingContextSettings({
   const restrictionMessage = restriction
     ? trackingContextRestrictionMessage(restriction)
     : undefined;
+  const selectedContext =
+    settings.contexts.find(
+      ({ id }) => id === selectedKeywordContextId
+    ) ?? settings.contexts[0];
 
   return (
     <div className="tracking-context-stack">
@@ -811,11 +813,11 @@ export function TrackingContextSettings({
       <section className="panel tracking-context-overview">
         <header className="security-card-header">
           <div>
-            <h2>Поисковые конфигурации</h2>
+            <h2>Профили съёма позиций</h2>
             <p>
-              {formatInteger(settings.contexts.length)}{" "}
-              {contextCountLabel(settings.contexts.length)} в загруженной
-              выборке. Источник данных и автоматизация настраиваются отдельно.
+              Профиль определяет, где именно проверять запросы: поисковик,
+              регион, устройство и глубину выдачи. Один запрос можно назначить
+              нескольким профилям.
             </p>
           </div>
           <div className="tracking-context-overview-actions">
@@ -841,14 +843,15 @@ export function TrackingContextSettings({
               }
               type="button"
             >
-              Создать контекст
+              Новый профиль
             </button>
           </div>
         </header>
         <div className="tracking-context-boundary-note">
           <span>
-            Здесь хранятся только engine, страна/регион, язык, устройство,
-            глубина, domain match и SafeSearch.
+            Всего {formatInteger(settings.contexts.length)}{" "}
+            {contextCountLabel(settings.contexts.length)}. Подключение Arsenkin
+            и маршруты провайдера настраиваются отдельно.
           </span>
           <a
             href={`/app/projects/${encodeURIComponent(projectId)}/settings/integrations`}
@@ -888,10 +891,10 @@ export function TrackingContextSettings({
           <span className="state-icon" aria-hidden="true">
             0
           </span>
-          <strong>Контекстов пока нет</strong>
+          <strong>Профилей съёма пока нет</strong>
           <p>
-            Создайте первую неизменяемую поисковую конфигурацию, затем
-            назначьте ей запросы семантического ядра.
+            Создайте профиль для Яндекса или Google, выберите регион и сразу
+            назначьте запросы из семантического ядра.
           </p>
           {mutationAllowed && (
             <button
@@ -899,242 +902,249 @@ export function TrackingContextSettings({
               onClick={openCreate}
               type="button"
             >
-              Создать первый контекст
+              Создать первый профиль
             </button>
           )}
         </section>
       ) : (
         <section
           aria-busy={Boolean(busyAction)}
-          aria-label="Список контекстов отслеживания"
-          className="tracking-context-list"
+          aria-label="Профили съёма позиций"
+          className="tracking-profile-workspace"
         >
-          {settings.contexts.map((context) => {
-            const actionBusy =
-              busyAction?.contextId === context.id
-                ? busyAction.kind
-                : undefined;
-            const confirmingArchive =
-              archiveConfirmId === context.id;
-            const editingContext =
-              editor?.mode === "edit" &&
-              editor.base.id === context.id;
-            return (
-              <article
-                className={`panel tracking-context-card ${
-                  context.status === "ARCHIVED" ? "archived" : ""
-                }`}
-                key={context.id}
-              >
-                <header className="tracking-context-card-header">
-                  <div>
-                    <span
-                      className={`integration-status ${
-                        context.status === "ACTIVE"
-                          ? "active"
-                          : "muted"
-                      }`}
-                    >
-                      {context.status === "ACTIVE"
-                        ? "Активен"
-                        : "В архиве"}
-                    </span>
-                    <h2>{context.name}</h2>
-                    <p>
-                      Версия записи {context.version} · конфигурация{" "}
-                      {context.configuration.configurationVersion}
-                    </p>
-                  </div>
-                  <div className="tracking-context-card-actions">
-                    <button
-                      className="secondary-button"
-                      disabled={anyBusy}
-                      onClick={() => openKeywords(context.id)}
-                      type="button"
-                    >
-                      {selectedKeywordContextId === context.id
-                        ? "Закрыть запросы"
-                        : `Запросы · ${formatInteger(
-                            context.assignedKeywordCount
-                          )}`}
-                    </button>
-                    <button
-                      className="secondary-button"
-                      disabled={
-                        !mutationAllowed ||
-                        anyBusy ||
-                        context.status === "ARCHIVED" ||
-                        editingContext
-                      }
-                      onClick={() => openEdit(context)}
-                      title={
-                        context.status === "ARCHIVED"
-                          ? "Сначала восстановите контекст"
-                          : editingContext
-                            ? "Форма этого контекста уже открыта"
-                          : undefined
-                      }
-                      type="button"
-                    >
-                      Изменить
-                    </button>
-                    {context.status === "ACTIVE" ? (
-                      <button
-                        className="text-button danger-text"
-                        disabled={
-                          !mutationAllowed ||
-                          anyBusy ||
-                          editingContext
-                        }
-                        onClick={() =>
-                          setArchiveConfirmId(
-                            confirmingArchive
-                              ? undefined
-                              : context.id
-                          )
-                        }
-                        title={
-                          editingContext
-                            ? "Сначала сохраните или закройте форму изменений"
-                            : undefined
-                        }
-                        type="button"
-                      >
-                        Архивировать
-                      </button>
-                    ) : (
-                      <button
-                        className="text-button"
-                        disabled={!mutationAllowed || anyBusy}
-                        onClick={() =>
-                          void changeStatus(context, "restore")
-                        }
-                        type="button"
-                      >
-                        {actionBusy === "restore"
-                          ? "Восстанавливаем…"
-                          : "Восстановить"}
-                      </button>
-                    )}
-                  </div>
-                </header>
-
-                <dl className="tracking-context-facts">
-                  <Fact
-                    label="Поиск"
-                    value={searchEngineLabel(
-                      context.configuration.searchEngine
-                    )}
-                  />
-                  <Fact
-                    label="География"
-                    value={geographyLabel(context)}
-                  />
-                  <Fact
-                    label="Язык"
-                    value={context.configuration.language}
-                  />
-                  <Fact
-                    label="Устройство"
-                    value={deviceLabel(context.configuration.device)}
-                  />
-                  <Fact
-                    label="Глубина"
-                    value={`TOP-${context.configuration.depth}`}
-                  />
-                  <Fact
-                    label="Сопоставление"
-                    value={domainMatchLabel(
-                      context.configuration.domainMatchRule
-                    )}
-                  />
-                  <Fact
-                    label="SafeSearch"
-                    value={
-                      context.configuration.safeSearch
-                        ? "Включён"
-                        : "Выключен"
+          <aside className="panel tracking-profile-sidebar">
+            <header>
+              <div>
+                <h2>Профили</h2>
+                <p>Выберите профиль, чтобы увидеть параметры и запросы.</p>
+              </div>
+              <span>{formatInteger(settings.contexts.length)}</span>
+            </header>
+            <ul className="tracking-profile-list">
+              {settings.contexts.map((context) => (
+                <li key={context.id}>
+                  <button
+                    aria-current={
+                      selectedContext?.id === context.id
+                        ? "true"
+                        : undefined
                     }
-                  />
-                  <Fact
-                    label="Обновлён"
-                    value={formatDate(context.updatedAt)}
-                  />
-                </dl>
-
-                <RankEstimatePanel
-                  context={context}
-                  contextLoading={loading}
-                  online={online}
-                  projectId={projectId}
-                  returnTo={returnTo}
-                />
-
-                {confirmingArchive && (
-                  <div
-                    className="inline-alert warning tracking-context-archive-confirm"
-                    role="alert"
+                    className={
+                      selectedContext?.id === context.id ? "active" : ""
+                    }
+                    onClick={() => selectContext(context.id)}
+                    type="button"
                   >
-                    <span>
-                      Архивировать «{context.name}»? История и назначения
-                      останутся доступны, но новые операции для этого
-                      контекста будут запрещены.
+                    <span
+                      aria-hidden="true"
+                      className={`tracking-profile-engine ${context.configuration.searchEngine.toLowerCase()}`}
+                    >
+                      {context.configuration.searchEngine === "YANDEX"
+                        ? "Я"
+                        : "G"}
                     </span>
-                    <div>
-                      <button
-                        className="secondary-button"
-                        onClick={() => setArchiveConfirmId(undefined)}
-                        type="button"
-                      >
-                        Отмена
-                      </button>
-                      <button
-                        className="secondary-button danger-button"
-                        disabled={!mutationAllowed || anyBusy}
-                        onClick={() =>
-                          void changeStatus(context, "archive")
-                        }
-                        type="button"
-                      >
-                        {actionBusy === "archive"
-                          ? "Архивируем…"
-                          : "Подтвердить архивирование"}
-                      </button>
-                    </div>
-                  </div>
-                )}
+                    <span className="tracking-profile-copy">
+                      <strong>{context.name}</strong>
+                      <small>
+                        {geographyLabel(context)} ·{" "}
+                        {deviceLabel(context.configuration.device)} · TOP-
+                        {context.configuration.depth}
+                      </small>
+                    </span>
+                    <span className="tracking-profile-count">
+                      {formatInteger(context.assignedKeywordCount)}
+                      <small>ключей</small>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </aside>
 
-                {selectedKeywordContextId === context.id && (
-                  <TrackingContextKeywords
-                    canMutate={
-                      mutationAllowed &&
-                      !anyBusy &&
-                      context.status === "ACTIVE"
+          {selectedContext && (
+            <article
+              className={`panel tracking-profile-detail ${
+                selectedContext.status === "ARCHIVED" ? "archived" : ""
+              }`}
+            >
+              <header className="tracking-context-card-header">
+                <div>
+                  <span
+                    className={`integration-status ${
+                      selectedContext.status === "ACTIVE"
+                        ? "active"
+                        : "muted"
+                    }`}
+                  >
+                    {selectedContext.status === "ACTIVE"
+                      ? "Активен"
+                      : "В архиве"}
+                  </span>
+                  <h2>{selectedContext.name}</h2>
+                  <p>
+                    Версия {selectedContext.version} · параметры{" "}
+                    {selectedContext.configuration.configurationVersion}
+                  </p>
+                </div>
+                <div className="tracking-context-card-actions">
+                  <button
+                    className="secondary-button"
+                    disabled={
+                      !mutationAllowed ||
+                      anyBusy ||
+                      selectedContext.status === "ARCHIVED" ||
+                      (editor?.mode === "edit" &&
+                        editor.base.id === selectedContext.id)
                     }
-                    context={context}
-                    onAccessRevalidate={revalidateSettingsAccess}
-                    onBusyChange={setKeywordBusy}
-                    onContextChange={(updated) =>
-                      setSettings((current) =>
-                        current
-                          ? withTrackingContext(current, updated)
-                          : current
-                      )
-                    }
-                    onRestriction={setRuntimeRestriction}
-                    online={online}
-                    projectId={projectId}
-                    returnTo={returnTo}
-                  />
-                )}
-              </article>
-            );
-          })}
+                    onClick={() => openEdit(selectedContext)}
+                    type="button"
+                  >
+                    Изменить профиль
+                  </button>
+                  {selectedContext.status === "ACTIVE" ? (
+                    <button
+                      className="text-button danger-text"
+                      disabled={!mutationAllowed || anyBusy}
+                      onClick={() =>
+                        setArchiveConfirmId(
+                          archiveConfirmId === selectedContext.id
+                            ? undefined
+                            : selectedContext.id
+                        )
+                      }
+                      type="button"
+                    >
+                      Архивировать
+                    </button>
+                  ) : (
+                    <button
+                      className="text-button"
+                      disabled={!mutationAllowed || anyBusy}
+                      onClick={() =>
+                        void changeStatus(selectedContext, "restore")
+                      }
+                      type="button"
+                    >
+                      {busyAction?.kind === "restore"
+                        ? "Восстанавливаем…"
+                        : "Восстановить"}
+                    </button>
+                  )}
+                </div>
+              </header>
+
+              <dl className="tracking-context-facts">
+                <Fact
+                  label="Поисковик"
+                  value={searchEngineLabel(
+                    selectedContext.configuration.searchEngine
+                  )}
+                />
+                <Fact
+                  label="Регион"
+                  value={geographyLabel(selectedContext)}
+                />
+                <Fact
+                  label="Устройство"
+                  value={deviceLabel(selectedContext.configuration.device)}
+                />
+                <Fact
+                  label="Глубина"
+                  value={`TOP-${selectedContext.configuration.depth}`}
+                />
+                <Fact
+                  label="Язык"
+                  value={selectedContext.configuration.language}
+                />
+                <Fact
+                  label="Сопоставление домена"
+                  value={domainMatchLabel(
+                    selectedContext.configuration.domainMatchRule
+                  )}
+                />
+                <Fact
+                  label="SafeSearch"
+                  value={
+                    selectedContext.configuration.safeSearch
+                      ? "Включён"
+                      : "Выключен"
+                  }
+                />
+                <Fact
+                  label="Обновлён"
+                  value={formatDate(selectedContext.updatedAt)}
+                />
+              </dl>
+
+              <RankEstimatePanel
+                context={selectedContext}
+                contextLoading={loading}
+                online={online}
+                projectId={projectId}
+                returnTo={returnTo}
+              />
+
+              {archiveConfirmId === selectedContext.id && (
+                <div
+                  className="inline-alert warning tracking-context-archive-confirm"
+                  role="alert"
+                >
+                  <span>
+                    История и назначенные запросы сохранятся, но новые съёмы
+                    для профиля будут остановлены.
+                  </span>
+                  <div>
+                    <button
+                      className="secondary-button"
+                      onClick={() => setArchiveConfirmId(undefined)}
+                      type="button"
+                    >
+                      Отмена
+                    </button>
+                    <button
+                      className="secondary-button danger-button"
+                      disabled={!mutationAllowed || anyBusy}
+                      onClick={() =>
+                        void changeStatus(selectedContext, "archive")
+                      }
+                      type="button"
+                    >
+                      {busyAction?.kind === "archive"
+                        ? "Архивируем…"
+                        : "Архивировать"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <TrackingContextKeywords
+                canMutate={
+                  mutationAllowed &&
+                  !anyBusy &&
+                  selectedContext.status === "ACTIVE"
+                }
+                context={selectedContext}
+                onAccessRevalidate={revalidateSettingsAccess}
+                onBusyChange={setKeywordBusy}
+                onContextChange={(updated) =>
+                  setSettings((current) =>
+                    current
+                      ? withTrackingContext(current, updated)
+                      : current
+                  )
+                }
+                onRestriction={setRuntimeRestriction}
+                online={online}
+                projectId={projectId}
+                returnTo={returnTo}
+              />
+            </article>
+          )}
         </section>
       )}
 
       <p className="tracking-context-footnote">
-        Контексты не удаляются автоматически. Архивирование сохраняет
+        Профили не удаляются автоматически. Архивирование сохраняет
         агрегированную историю и доступ к уже полученным результатам проекта
         «{projectName}».
       </p>

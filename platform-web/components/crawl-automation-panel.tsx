@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import type {
   CrawlAutomationSettings,
   CrawlAutomationSummary
@@ -183,7 +185,7 @@ export function CrawlAutomationPanel({
           </label>
           <label className="form-field">
             <span>Периодичность</span>
-            <select
+            <CustomSelect
               onChange={(event) =>
                 setCadence(event.target.value as "DAILY" | "WEEKLY")
               }
@@ -191,7 +193,7 @@ export function CrawlAutomationPanel({
             >
               <option value="DAILY">Ежедневно</option>
               <option value="WEEKLY">По дням недели</option>
-            </select>
+            </CustomSelect>
           </label>
           <label className="form-field">
             <span>Время запуска</span>

@@ -64,7 +64,7 @@ export class RankResultPersistenceService {
           manifestId: claim.manifestId,
           chunkIndex: claim.manifestChunkIndex,
           manifestChunkHash: claim.manifestChunkHash,
-          provider: "ARSENKIN",
+          provider: claim.request.provider,
           operation: "POSITIONS",
           providerRequestId: claim.staged.providerRequestId,
           connectorVersion: claim.staged.connectorVersion,

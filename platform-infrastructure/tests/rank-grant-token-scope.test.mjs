@@ -89,7 +89,7 @@ test("rank grant token examples stay fail-closed and validation supplies a CI-on
   assert.match(jobsExample, /^RANK_PROVIDER_SUBMIT_ENABLED=true$/mu);
   assert.match(
     jobsExample,
-    /^RANK_PROVIDER_KILL_SWITCH_VERSION=arsenkin-positions@2$/mu
+    /^RANK_PROVIDER_KILL_SWITCH_VERSION=arsenkin-positions@4$/mu
   );
   assert.match(
     packageJson.scripts["infra:validate:example"],

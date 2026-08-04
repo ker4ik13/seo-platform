@@ -3,10 +3,12 @@ import {
   trackingDepths,
   trackingDevices,
   trackingDomainMatchModes,
+  trackingContextKeywordReplacementLimit,
   trackingSearchEngines,
   type InternalChangeTrackingContextKeywordInput,
   type InternalChangeTrackingContextStatusInput,
   type InternalCreateTrackingContextInput,
+  type InternalReplaceTrackingContextKeywordsInput,
   type InternalUpdateTrackingContextInput,
   type TrackingContextConfigurationInput,
   type TrackingContextKeywordQuery,
@@ -103,6 +105,45 @@ export function internalChangeTrackingContextKeywordInput(
       requiredString(input.keywordId, "keywordId"),
       "keywordId"
     ),
+    entitlement: semanticCapacityEntitlement(input.entitlement)
+  };
+}
+
+export function internalReplaceTrackingContextKeywordsInput(
+  value: unknown
+): InternalReplaceTrackingContextKeywordsInput {
+  const input = strictRecord(value, [
+    "workspaceId",
+    "projectId",
+    "contextId",
+    "actorId",
+    "version",
+    "idempotencyKey",
+    "keywordIds",
+    "entitlement"
+  ]);
+  if (
+    !Array.isArray(input.keywordIds) ||
+    input.keywordIds.length < 1 ||
+    input.keywordIds.length > trackingContextKeywordReplacementLimit
+  ) {
+    invalid("keywordIds");
+  }
+  const keywordIds = input.keywordIds.map((value, index) =>
+    internalUuid(requiredString(value, `keywordIds.${index}`), `keywordIds.${index}`)
+  );
+  if (new Set(keywordIds).size !== keywordIds.length) {
+    invalid("keywordIds");
+  }
+  return {
+    ...scope(input),
+    contextId: internalUuid(
+      requiredString(input.contextId, "contextId"),
+      "contextId"
+    ),
+    version: positiveInteger(input.version, "version"),
+    idempotencyKey: idempotencyKey(input.idempotencyKey),
+    keywordIds,
     entitlement: semanticCapacityEntitlement(input.entitlement)
   };
 }

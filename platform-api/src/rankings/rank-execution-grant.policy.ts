@@ -1,13 +1,21 @@
 import { Injectable } from "@nestjs/common";
+import {
+  currentRankProviderPolicyVersion,
+  supportedRankProviderPolicyVersions
+} from "@seo-platform/contracts";
 import type { Prisma } from "../generated/prisma/client.js";
-import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
+import {
+  BillingEntitlementService,
+  RANK_PROVIDER_DAILY_TASK_LIMIT
+} from "../billing/billing-entitlement.service.js";
 
 export const RANK_EXECUTION_GRANT_POLICY = Symbol(
   "RANK_EXECUTION_GRANT_POLICY"
 );
 export const CONTROLLED_BETA_RANK_POLICY_VERSION =
-  "manual-arsenkin-positions@1.0.0";
-export const CONTROLLED_BETA_DAILY_PROVIDER_TASK_LIMIT = 200;
+  currentRankProviderPolicyVersion;
+export const CONTROLLED_BETA_DAILY_PROVIDER_TASK_LIMIT =
+  RANK_PROVIDER_DAILY_TASK_LIMIT;
 
 export interface RankExecutionGrantPolicyInput {
   readonly workspaceId: string;
@@ -60,7 +68,9 @@ export class ControlledBetaRankExecutionGrantPolicy
     input: RankExecutionGrantPolicyInput
   ): Promise<RankExecutionGrantPolicyDecision> {
     if (
-      input.policyVersion !== CONTROLLED_BETA_RANK_POLICY_VERSION ||
+      !supportedRankProviderPolicyVersions.includes(
+        input.policyVersion as (typeof supportedRankProviderPolicyVersions)[number]
+      ) ||
       input.usageIntent.meter !== "RANK_PROVIDER_TASK" ||
       input.usageIntent.quantity !== 1
     ) {
@@ -100,7 +110,13 @@ export class ControlledBetaRankExecutionGrantPolicy
         windowStartedAt
       }
     });
-    if (used >= CONTROLLED_BETA_DAILY_PROVIDER_TASK_LIMIT) {
+    const dailyTaskLimit =
+      await this.entitlements.rankProviderDailyTaskLimit(
+        transaction,
+        input.workspaceId,
+        clock.now
+      );
+    if (used >= dailyTaskLimit) {
       return {
         entitlement: "ALLOWED",
         quota: "EXHAUSTED"

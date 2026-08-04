@@ -21,6 +21,7 @@ import type {
   TrackingContextAccess,
   TrackingContextKeywordAssignmentItem,
   TrackingContextKeywordAssignmentState,
+  TrackingContextKeywordReplacementResult,
   TrackingContextSettings,
   TrackingContextSummary
 } from "@seo-platform/contracts";
@@ -54,6 +55,7 @@ import {
 import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import {
   createTrackingContextInput,
+  replaceTrackingContextKeywordsInput,
   trackingContextKeywordQuery,
   updateTrackingContextInput
 } from "./tracking-context-input.js";
@@ -255,6 +257,56 @@ export class TrackingContextController {
       page: result.page,
       meta: { requestId: context.requestId }
     };
+  }
+
+  @Put(":contextId/keywords")
+  @RequirePermission("ranking.configure")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async replaceKeywords(
+    @Param("contextId") contextId: string,
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<TrackingContextKeywordReplacementResult>> {
+    const tenant = requiredMutableProjectTenant(request);
+    const canonicalContextId = assertUuid(contextId, "contextId");
+    const context = requestContext(request);
+    const version = requiredVersion(headerValue(request, "if-match"));
+    const idempotencyKey = requiredIdempotencyKey(
+      headerValue(request, "idempotency-key")
+    );
+    const input = replaceTrackingContextKeywordsInput(body);
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "ranking.tracking_context.keywords_replace_requested",
+      resourceType: "tracking_context_keyword_assignments",
+      resourceId: canonicalContextId,
+      outcome: "REQUESTED",
+      requestId: context.requestId
+    });
+    const result = await this.seoData.replaceTrackingContextKeywords(
+      internalProjectContext(request, principal, tenant),
+      canonicalContextId,
+      input,
+      version,
+      idempotencyKey,
+      await this.billingEntitlements.semanticCapacity(tenant.workspaceId)
+    );
+    await recordCommittedAudit(this.audit, this.logger, {
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "ranking.tracking_context.keywords_replaced",
+      resourceType: "tracking_context_keyword_assignments",
+      resourceId: canonicalContextId,
+      outcome: "SUCCESS",
+      requestId: context.requestId
+    });
+    setEntityVersion(reply, result.version);
+    return apiResponse(request, result, result.version);
   }
 
   @Put(":contextId/keywords/:keywordId")

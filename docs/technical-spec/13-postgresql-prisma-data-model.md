@@ -225,6 +225,7 @@ Unique: `(role_id, permission_code)`.
 - status;
 - expires_at;
 - accepted_at;
+- declined_at;
 - revoked_at;
 - invited_by;
 - created_at.
@@ -233,6 +234,11 @@ Unique: `(role_id, permission_code)`.
 `[{ projectId, level }]`; после принятия он нормализуется в
 `project_member_access`. Открытый invitation token в БД, outbox, очереди и
 логах не хранится.
+
+Активные приглашения адресата читаются только по `email_normalized` его
+активного подтверждённого аккаунта. Принятие и отклонение сериализуются на
+строках пользователя, workspace и invite; `DECLINED` является отдельным
+terminal state и не подменяет отзыв приглашения администратором.
 
 #### `project_member_access`
 
@@ -324,6 +330,12 @@ Indexes:
 #### `plans`, `plan_versions`, `plan_prices`, `plan_features`
 
 Хранят versioned catalog.
+
+Лимит участников хранится в immutable JSONB snapshot `features.seats` каждой
+версии тарифа. Стартовая collaboration-сетка версии 2: Trial — 3, Solo — 10,
+Team — 20, Agency/Business/Enterprise — 50. Публикация нового лимита закрывает
+effective interval предыдущей версии и копирует цены в новую версию; уже
+созданная подписка продолжает ссылаться на свой exact `plan_version_id`.
 
 #### `subscriptions`
 
@@ -1300,6 +1312,13 @@ blast radius требует KMS/asymmetric unwrap или внешнего creden
 - version;
 - timestamps.
 
+После migration `20260804170000_workspace_project_connector_routing` binding
+также хранит `fallback_mode`, allowlisted `fallback_reasons`,
+`configuration_scope`, optional snapshot workspace binding ID/version.
+`WORKSPACE_INHERITED` требует полный workspace snapshot, а
+`PROJECT_OVERRIDE` запрещает его. Это не переносит credential ownership в
+проект.
+
 Ограничения:
 
 - unique `workspace_id + project_id + capability`;
@@ -1316,12 +1335,24 @@ blast radius требует KMS/asymmetric unwrap или внешнего creden
 - credential_id;
 - timestamps.
 
-Первый slice разрешает только один route на binding: `position=0` и
-`WORKSPACE_CREDENTIAL`. Composite FK
+Route хранит `routing_scope` и optional `workspace_route_id`. Позиции bounded
+`0..7`; project override, inherited workspace default и appended workspace
+fallback различаются явными scope. Composite FK
 `workspace_id + project_id + binding_id` запрещает подменить tenant проекта,
 а FK `workspace_id + credential_id` запрещает привязать credential другого
 workspace. Оба FK используют `ON DELETE RESTRICT`: revoke credential
 уничтожает secret и soft-deletes запись, но не удаляет историю настройки.
+
+#### `workspace_connector_bindings` и `workspace_connector_routes`
+
+Workspace binding уникален по `workspace_id + capability`, содержит enabled,
+fallback mode/reasons, actor, version и timestamps. Routes уникальны по
+binding position и credential; position ограничена `0..7`. Tenant-safe FK к
+`integration_credentials` не позволяет использовать ключ другой рабочей
+области. Project inherited bindings ссылаются на workspace binding/version,
+а materialized routes — на исходный workspace route. RLS разрешает полный
+доступ только jobs runtime; rank runtime получает SELECT только для
+`SERP_RANK_TRACKING`.
 
 #### `project_connector_binding_create_receipts`
 

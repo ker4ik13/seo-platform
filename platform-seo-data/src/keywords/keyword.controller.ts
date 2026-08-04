@@ -17,6 +17,7 @@ import {
 import type {
   ApiCollectionResponse,
   ApiResponse,
+  SemanticKeywordBulkCreateResult,
   SemanticKeywordBulkResult,
   SemanticKeywordCleaningPreview,
   SemanticKeywordCleaningResult,
@@ -33,6 +34,7 @@ import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import {
   internalCreateSemanticKeywordInput,
   internalDeleteSemanticKeywordInput,
+  internalSemanticKeywordBulkCreateInput,
   internalSemanticKeywordBulkInput,
   internalSemanticKeywordCleaningInput,
   internalUpdateSemanticKeywordInput
@@ -90,6 +92,21 @@ export class KeywordController {
     assertMutationContext(projectId, headers, input);
     return {
       data: await this.keywords.bulkUpdate(input),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Post("bulk-create")
+  public async bulkCreate(
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticKeywordBulkCreateResult>> {
+    const input = internalSemanticKeywordBulkCreateInput(body);
+    assertMutationContext(projectId, headers, input);
+    return {
+      data: await this.keywords.bulkCreate(input),
       meta: { requestId: request.id }
     };
   }

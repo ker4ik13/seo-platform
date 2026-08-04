@@ -257,6 +257,16 @@ SELECT format(
 
 SELECT format(
   'GRANT EXECUTE ON FUNCTION
+    public.schedule_integration_credential_validation_refreshes(
+      UUID[], TIMESTAMPTZ, JSONB, TEXT, INTEGER
+    )
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
     public.claim_integration_credential_validation(UUID, TEXT, INTEGER)
   TO %I',
   :'connector_user'
@@ -397,7 +407,79 @@ SELECT format(
 
 SELECT format(
   'GRANT EXECUTE ON FUNCTION
+    public.defer_frequency_collection_item(UUID, UUID, TEXT, INTEGER, TEXT, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
     public.fail_frequency_collection_item(UUID, UUID, TEXT, INTEGER, TEXT, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.claim_frequency_collection_batch(TEXT, INTEGER, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.complete_frequency_collection_batch(UUID, UUID[], TEXT, INTEGER, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.defer_frequency_collection_batch(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.fail_frequency_collection_batch(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.mark_frequency_collection_batch_submitting(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.renew_frequency_collection_batch_lease(UUID, UUID[], TEXT, INTEGER, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.quarantine_frequency_collection_batch_submit(UUID, UUID[], TEXT, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.defer_frequency_collection_batch_capacity(UUID, UUID[], TEXT, INTEGER, INTEGER)
   TO %I',
   :'connector_user'
 )
@@ -436,6 +518,7 @@ BEGIN
   allowed_routine_ids := ARRAY[
     'public.list_integration_credential_execution_kek_canaries(text[])'::regprocedure::oid,
     'public.list_due_integration_credential_validations(integer)'::regprocedure::oid,
+    'public.schedule_integration_credential_validation_refreshes(uuid[],timestamptz,jsonb,text,integer)'::regprocedure::oid,
     'public.claim_integration_credential_validation(uuid,text,integer)'::regprocedure::oid,
     'public.finish_integration_credential_validation_job_failure(uuid,text,uuid,integer,text,integer)'::regprocedure::oid,
     'public.finish_integration_credential_validation_provider_failure(uuid,text,uuid,integer,text,text,integer)'::regprocedure::oid,
@@ -452,7 +535,16 @@ BEGIN
     'public.fail_keyword_research_run(uuid,text,uuid,integer,integer,text,integer)'::regprocedure::oid,
     'public.claim_frequency_collection_item(text,integer)'::regprocedure::oid,
     'public.complete_frequency_collection_item(uuid,uuid,text,integer,integer)'::regprocedure::oid,
-    'public.fail_frequency_collection_item(uuid,uuid,text,integer,text,integer)'::regprocedure::oid
+    'public.defer_frequency_collection_item(uuid,uuid,text,integer,text,integer)'::regprocedure::oid,
+    'public.fail_frequency_collection_item(uuid,uuid,text,integer,text,integer)'::regprocedure::oid,
+    'public.claim_frequency_collection_batch(text,integer,integer)'::regprocedure::oid,
+    'public.complete_frequency_collection_batch(uuid,uuid[],text,integer,integer)'::regprocedure::oid,
+    'public.defer_frequency_collection_batch(uuid,uuid[],text,integer,text,integer)'::regprocedure::oid,
+    'public.fail_frequency_collection_batch(uuid,uuid[],text,integer,text,integer)'::regprocedure::oid,
+    'public.mark_frequency_collection_batch_submitting(uuid,uuid[],text,integer,text,integer)'::regprocedure::oid,
+    'public.renew_frequency_collection_batch_lease(uuid,uuid[],text,integer,integer)'::regprocedure::oid,
+    'public.quarantine_frequency_collection_batch_submit(uuid,uuid[],text,integer)'::regprocedure::oid,
+    'public.defer_frequency_collection_batch_capacity(uuid,uuid[],text,integer,integer)'::regprocedure::oid
   ];
 
   IF EXISTS (

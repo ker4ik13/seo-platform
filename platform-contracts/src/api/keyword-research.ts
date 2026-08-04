@@ -1,4 +1,7 @@
-import type { SemanticCapacityEntitlement } from "./billing.js";
+import type {
+  JobCapacityEntitlement,
+  SemanticCapacityEntitlement
+} from "./billing.js";
 import type { SemanticImportDuplicatePolicy } from "./semantic-imports.js";
 
 export const keysSoDatabases = [
@@ -116,6 +119,7 @@ export interface InternalCreateKeywordResearchRunInput
   readonly actorId: string;
   readonly idempotencyKey: string;
   readonly correlationId: string;
+  readonly jobCapacity: JobCapacityEntitlement;
 }
 
 export interface ConfirmKeywordResearchRunInput {

@@ -230,7 +230,7 @@ function storedHistoryItem(
   if (
     record.workspaceId !== query.workspaceId ||
     record.projectId !== query.projectId ||
-    record.provider !== "ARSENKIN" ||
+    (record.provider !== "ARSENKIN" && record.provider !== "XMLSTOCK") ||
     record.sourceMode !== "BYOK" ||
     !UUID_V7_PATTERN.test(record.id) ||
     !UUID_V7_PATTERN.test(record.keywordId) ||
@@ -250,7 +250,7 @@ function storedHistoryItem(
     keywordId: record.keywordId,
     trackingContextId: record.trackingContextId,
     configurationVersion: record.configurationVersion,
-    provider: "ARSENKIN" as const,
+    provider: record.provider as "ARSENKIN" | "XMLSTOCK",
     connectorVersion: record.connectorVersion,
     observedAt: record.observedAt.toISOString(),
     storedAt: record.createdAt.toISOString(),
@@ -280,7 +280,7 @@ function storedHistoryItem(
   if (
     record.position === null ||
     record.position < 1 ||
-    record.position > 30 ||
+    record.position > 100 ||
     record.rankingUrl === null ||
     record.normalizedRankingUrl === null ||
     record.resultType !== "ORGANIC" ||

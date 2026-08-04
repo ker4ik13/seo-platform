@@ -45,7 +45,13 @@ export function SemanticModal({
         onClose();
       }}
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
+        const bounds = event.currentTarget.getBoundingClientRect();
+        const outside =
+          event.clientX < bounds.left ||
+          event.clientX > bounds.right ||
+          event.clientY < bounds.top ||
+          event.clientY > bounds.bottom;
+        if (outside) onClose();
       }}
       ref={dialogRef}
     >

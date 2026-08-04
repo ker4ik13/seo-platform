@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ProjectConnectorBinding,
@@ -37,6 +39,7 @@ import {
   type ProjectConnectorDraft
 } from "../lib/project-integration-settings";
 import { IntegrationStatusBadge } from "./integration-status-badge";
+import { ProviderLogo } from "./provider-logo";
 
 interface RequestFeedback {
   readonly message: string;
@@ -796,7 +799,7 @@ export function ProjectIntegrationSettings({
           <div className="project-binding-source">
             <label className="form-field">
               <span>Основное подключение</span>
-              <select
+              <CustomSelect
                 aria-describedby="project-connector-source-hint project-connector-binding-health"
                 aria-invalid={sourceInvalid}
                 disabled={!canInteract || eligibleOptions.length === 0}
@@ -827,7 +830,7 @@ export function ProjectIntegrationSettings({
                     {integrationProviderLabel(credential.provider)}
                   </option>
                 ))}
-              </select>
+              </CustomSelect>
               <small id="project-connector-source-hint">
                 Выбрать можно только проверенный `ACTIVE` BYOK-ключ,
                 поддерживающий съём позиций.
@@ -836,11 +839,7 @@ export function ProjectIntegrationSettings({
 
             {selectedCredential ? (
               <div className="project-selected-credential">
-                <span className="integration-provider-mark compact">
-                  {integrationProviderLabel(
-                    selectedCredential.provider
-                  ).slice(0, 1)}
-                </span>
+                <ProviderLogo provider={selectedCredential.provider} size="compact" />
                 <span>
                   <strong>{selectedCredential.label}</strong>
                   <small>
@@ -852,12 +851,7 @@ export function ProjectIntegrationSettings({
               </div>
             ) : binding ? (
               <div className="project-selected-credential unavailable">
-                <span className="integration-provider-mark compact">
-                  {integrationProviderLabel(binding.route.provider).slice(
-                    0,
-                    1
-                  )}
-                </span>
+                <ProviderLogo provider={binding.route.provider} size="compact" />
                 <span>
                   <strong>Ранее выбранное подключение</strong>
                   <small>

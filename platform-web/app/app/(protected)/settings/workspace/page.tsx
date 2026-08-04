@@ -15,16 +15,8 @@ export default async function WorkspaceSettingsPage() {
 
   return (
     <AppShell activeSection="settings" context={context}>
-      <nav aria-label="Хлебные крошки" className="app-breadcrumbs">
-        <a href="/app">Обзор</a>
-        <span aria-hidden="true">/</span>
-        <span>Настройки</span>
-        <span aria-hidden="true">/</span>
-        <span aria-current="page">Рабочая область</span>
-      </nav>
       <section className="page-heading">
         <div>
-          <p className="eyebrow">Workspace · Основные настройки</p>
           <h1>Рабочая область</h1>
           <p>
             Управляйте названием, локалью и часовым поясом текущей рабочей

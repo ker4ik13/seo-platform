@@ -65,10 +65,7 @@ test("builds only the project-scoped collection path and encoded public filters"
       cursor: "opaque_cursor"
     }
   );
-  assert.equal(
-    rankHistoryReturnTo("project/id"),
-    "/app/projects/project%2Fid/rankings"
-  );
+  assert.equal(rankHistoryReturnTo("project/id"), "/app/semantics");
 });
 
 test("redacts unknown private fields and rejects contradictory history rows", () => {

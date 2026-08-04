@@ -32,6 +32,7 @@ export interface SemanticVersionListItem {
   readonly number: number;
   readonly reason: SemanticVersionReason;
   readonly actorId: string;
+  readonly actorDisplayName?: string;
   readonly sourceJobId?: string;
   readonly parentVersionId?: string;
   readonly summary: string;
@@ -39,6 +40,33 @@ export interface SemanticVersionListItem {
   readonly reversible: boolean;
   readonly finalizedAt?: string;
   readonly createdAt: string;
+}
+
+export interface SemanticHistoryField {
+  readonly key: string;
+  readonly label: string;
+  readonly value: string;
+}
+
+export interface SemanticHistoryEntityState {
+  readonly title: string;
+  readonly fields: readonly SemanticHistoryField[];
+}
+
+export interface SemanticVersionChangeDetail {
+  readonly entityType: "KEYWORD" | "CLUSTER";
+  readonly entityId: string;
+  readonly operation: "CREATE" | "UPDATE" | "DELETE";
+  readonly changedFields: readonly string[];
+  readonly before?: SemanticHistoryEntityState;
+  readonly after: SemanticHistoryEntityState;
+}
+
+export interface SemanticVersionDetail {
+  readonly version: SemanticVersionListItem;
+  readonly parameters: readonly SemanticHistoryField[];
+  readonly changes: readonly SemanticVersionChangeDetail[];
+  readonly changesTruncated: boolean;
 }
 
 export interface SemanticVersionChangePreview {

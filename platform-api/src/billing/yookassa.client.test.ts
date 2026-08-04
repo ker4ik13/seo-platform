@@ -123,6 +123,55 @@ test("sends Basic auth and Idempotence-Key only to the configured API", async ()
   assert.doesNotMatch(String(request.init.body), /secret|123456:/u);
 });
 
+test("retries transient network failures with the same idempotency key", async () => {
+  const originalFetch = globalThis.fetch;
+  const idempotencyKeys: string[] = [];
+  let attempts = 0;
+  globalThis.fetch = async (
+    _input: string | URL | Request,
+    init?: RequestInit
+  ) => {
+    attempts += 1;
+    idempotencyKeys.push(
+      new Headers(init?.headers).get("idempotence-key") ?? ""
+    );
+    if (attempts < 3) throw new TypeError("temporary network failure");
+    return new Response(JSON.stringify(paymentFixture), { status: 200 });
+  };
+
+  try {
+    const client = new YookassaClient(
+      loadAppConfig({
+        NODE_ENV: "test",
+        DATABASE_URL: "postgresql://test",
+        YOOKASSA_ENABLED: "true",
+        YOOKASSA_SHOP_ID: "123456",
+        YOOKASSA_SECRET_KEY: "s".repeat(32),
+        YOOKASSA_RETURN_URL: "https://app.example.test/billing/return",
+        YOOKASSA_API_BASE_URL: "http://provider.test/v3"
+      })
+    );
+    await client.createPayment({
+      idempotencyKey: "networkretry1234",
+      amountMinor: 199_000,
+      description: "Team subscription",
+      returnUrl: "https://app.example.test/billing/return",
+      orderId: "order-1",
+      workspaceId: "workspace-1",
+      savePaymentMethod: true
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(attempts, 3);
+  assert.deepEqual(idempotencyKeys, [
+    "networkretry1234",
+    "networkretry1234",
+    "networkretry1234"
+  ]);
+});
+
 test("charges a consented saved method without creating a hosted redirect", async () => {
   const originalFetch = globalThis.fetch;
   let requestBody: unknown;

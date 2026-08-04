@@ -12,7 +12,7 @@ export async function acquireWebPushUserLock(
     SELECT pg_advisory_xact_lock(
       ${key[0]}::integer,
       ${key[1]}::integer
-    )
+    ) IS NULL AS "lockResult"
   `;
 }
 
@@ -31,7 +31,7 @@ export async function acquireWebPushAdvisoryLock(
     SELECT pg_advisory_xact_lock(
       ${key[0]}::integer,
       ${key[1]}::integer
-    )
+    ) IS NULL AS "lockResult"
   `;
 }
 

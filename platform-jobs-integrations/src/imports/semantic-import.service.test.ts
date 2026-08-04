@@ -23,7 +23,10 @@ test("creates an idempotent import only from a READY project upload", async () =
       callback: (value: unknown) => Promise<unknown>
     ) =>
       callback({
+        $executeRaw: async () => 1,
+        job: { count: async () => 0 },
         semanticImport: {
+          count: async () => 0,
           create: async () => semanticImport
         },
         outboxEvent: {
@@ -48,6 +51,11 @@ test("creates an idempotent import only from a READY project upload", async () =
       actorId: semanticImport.actorId,
       uploadId: semanticImport.uploadId,
       idempotencyKey: semanticImport.idempotencyKey,
+      jobCapacity: {
+        planCode: "TRIAL",
+        planVersion: 1,
+        concurrentJobs: 1
+      },
       parse: {
         encoding: "AUTO",
         delimiter: "AUTO",
@@ -79,6 +87,7 @@ function importRecord(): SemanticImport {
     detectedEncoding: null,
     detectedDelimiter: null,
     headers: null,
+    sourceMetadata: null,
     suggestedMapping: null,
     sampleRows: null,
     confirmedMapping: null,
@@ -88,6 +97,7 @@ function importRecord(): SemanticImport {
     billingPlanVersion: null,
     storedKeywordsLimit: null,
     keywordsPerProjectLimit: null,
+    foldersPerProjectLimit: null,
     trackedContextPairsLimit: null,
     totalRows: 0n,
     validRows: 0n,

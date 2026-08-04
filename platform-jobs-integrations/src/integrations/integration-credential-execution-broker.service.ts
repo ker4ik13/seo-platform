@@ -169,6 +169,37 @@ export class IntegrationCredentialExecutionBrokerService {
     return rows.map(({ validationId }) => uuid(validationId, "validation id"));
   }
 
+  public async scheduleValidationRefreshes(input: {
+    readonly credentialIds?: readonly string[];
+    readonly staleBefore?: Date;
+    readonly connectorVersions: Readonly<Record<IntegrationProvider, string>>;
+    readonly reason: "HOURLY" | "PROVIDER_OPERATION";
+    readonly limit?: number;
+  }): Promise<readonly string[]> {
+    const limit = boundedPendingLimit(input.limit ?? 100);
+    const credentialIds = input.credentialIds?.map((id) =>
+      uuid(id, "credential id")
+    );
+    if (credentialIds && credentialIds.length > 500) {
+      throw new TypeError("Too many credential refresh targets");
+    }
+    const rows = await this.prisma.$queryRaw<readonly ValidationIdRow[]>(
+      Prisma.sql`
+        SELECT *
+        FROM public.schedule_integration_credential_validation_refreshes(
+          ${credentialIds ?? null}::uuid[],
+          ${input.staleBefore ?? null}::timestamptz,
+          ${JSON.stringify(input.connectorVersions)}::jsonb,
+          ${input.reason}::text,
+          ${limit}::integer
+        )
+      `
+    );
+    return rows.map(({ validationId }) =>
+      uuid(validationId, "validation id")
+    );
+  }
+
   public async claimValidation(
     validationId: string,
     leaseOwner: string,

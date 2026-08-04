@@ -13,7 +13,7 @@ const estimateId = "01900000-0000-7000-8000-000000000005";
 const contextId = "01900000-0000-7000-8000-000000000006";
 const jobId = "01900000-0000-7000-8000-000000000007";
 
-test("uses the dedicated boundary for create, scoped get and teammate cancel", async () => {
+test("uses the dedicated boundary for create, list, scoped get and teammate cancel", async () => {
   const originalFetch = globalThis.fetch;
   const requests: Array<{
     readonly url: URL;
@@ -36,10 +36,20 @@ test("uses the dedicated boundary for create, scoped get and teammate cancel", a
           ? JSON.parse(init.body)
           : undefined
     });
-    return new Response(JSON.stringify({ data: preparingJob() }), {
-      status: 200,
-      headers: { "content-type": "application/json" }
-    });
+    const isList =
+      init?.method === "GET" &&
+      new URL(
+        input instanceof Request ? input.url : input.toString()
+      ).pathname.endsWith("/rank-runs");
+    return new Response(
+      JSON.stringify({
+        data: isList ? { jobs: [preparingJob()] } : preparingJob()
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }
+    );
   }) as typeof fetch;
 
   try {
@@ -49,10 +59,13 @@ test("uses the dedicated boundary for create, scoped get and teammate cancel", a
       rankRunCommand(),
       "rank-run-create-0001"
     );
+    const listed = await jobs.listRankJobs(context());
     await jobs.getRankJob(context(), jobId);
     await jobs.cancelRankJob(context(), jobId);
 
-    assert.equal(requests.length, 3);
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0]?.id, jobId);
+    assert.equal(requests.length, 4);
     assert.equal(
       requests[0]?.url.pathname,
       `/internal/v1/workspaces/${workspaceId}/projects/${projectId}/rank-runs`
@@ -66,7 +79,7 @@ test("uses the dedicated boundary for create, scoped get and teammate cancel", a
 
     assert.equal(
       requests[1]?.url.pathname,
-      `/internal/v1/workspaces/${workspaceId}/projects/${projectId}/jobs/${jobId}`
+      `/internal/v1/workspaces/${workspaceId}/projects/${projectId}/rank-runs`
     );
     assert.equal(requests[1]?.method, "GET");
     assert.equal(requests[1]?.body, undefined);
@@ -74,10 +87,18 @@ test("uses the dedicated boundary for create, scoped get and teammate cancel", a
 
     assert.equal(
       requests[2]?.url.pathname,
+      `/internal/v1/workspaces/${workspaceId}/projects/${projectId}/jobs/${jobId}`
+    );
+    assert.equal(requests[2]?.method, "GET");
+    assert.equal(requests[2]?.body, undefined);
+    assert.equal(requests[2]?.headers.get("content-type"), null);
+
+    assert.equal(
+      requests[3]?.url.pathname,
       `/internal/v1/workspaces/${workspaceId}/projects/${projectId}/jobs/${jobId}/cancel`
     );
-    assert.equal(requests[2]?.method, "POST");
-    assert.deepEqual(requests[2]?.body, {
+    assert.equal(requests[3]?.method, "POST");
+    assert.deepEqual(requests[3]?.body, {
       workspaceId,
       projectId,
       actorId,
@@ -344,7 +365,12 @@ function rankRunCommand(): InternalCreateRankRunInput {
       entitlementStatus: "NOT_AVAILABLE",
       quota: { status: "NOT_AVAILABLE" }
     },
-    billingCurrency: "RUB"
+    billingCurrency: "RUB",
+    jobCapacity: {
+      planCode: "TEAM",
+      planVersion: 3,
+      concurrentJobs: 10
+    }
   };
 }
 

@@ -58,6 +58,36 @@ test("proxies an assignment PUT through the safe same-origin BFF", async () => {
   }
 });
 
+test("normalizes the legacy browser v1 prefix without duplicating it upstream", async () => {
+  const originalFetch = globalThis.fetch;
+  let upstreamUrl: string | undefined;
+  globalThis.fetch = async (input) => {
+    upstreamUrl =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : input.url;
+    return Response.json({ data: [] });
+  };
+
+  try {
+    const request = new NextRequest(
+      "http://localhost/app/api/v1/billing/plans"
+    );
+    const response = await proxyPlatformApi(request, [
+      "v1",
+      "billing",
+      "plans"
+    ]);
+
+    assert.equal(response.status, 200);
+    assert.equal(upstreamUrl, "http://localhost:4000/api/v1/billing/plans");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("forwards a manual rank create with CSRF and Idempotency-Key", async () => {
   const originalFetch = globalThis.fetch;
   let upstreamUrl: string | undefined;
@@ -314,6 +344,38 @@ test("rejects a streamed body that exceeds the BFF limit", async () => {
 
     assert.equal(response.status, 413);
     assert.equal(upstreamCalled, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("allows the exact keyword bulk route to use its bounded 8 MiB relay limit", async () => {
+  const originalFetch = globalThis.fetch;
+  let forwardedBytes = 0;
+  globalThis.fetch = async (_input, init) => {
+    forwardedBytes = init?.body instanceof ArrayBuffer ? init.body.byteLength : 0;
+    return Response.json({ data: {} });
+  };
+
+  try {
+    const body = new Uint8Array(2 * 1_024 * 1_024 + 1);
+    const request = new NextRequest(
+      "http://localhost/app/api/projects/project-id/keywords/bulk",
+      {
+        method: "POST",
+        body,
+        headers: { "Content-Type": "application/json" }
+      }
+    );
+    const response = await proxyPlatformApi(request, [
+      "projects",
+      "project-id",
+      "keywords",
+      "bulk"
+    ]);
+
+    assert.equal(response.status, 200);
+    assert.equal(forwardedBytes, body.byteLength);
   } finally {
     globalThis.fetch = originalFetch;
   }

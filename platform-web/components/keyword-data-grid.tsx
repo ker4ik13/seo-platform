@@ -1,0 +1,305 @@
+"use client";
+
+import type {
+  AriaAttributes,
+  DragEvent,
+  KeyboardEvent,
+  MouseEvent,
+  PointerEvent as ReactPointerEvent,
+  ReactNode
+} from "react";
+
+export interface KeywordDataGridColumn<Row> {
+  readonly key: string;
+  readonly header: ReactNode;
+  readonly cell: (row: Row) => ReactNode;
+  readonly ariaSort?: AriaAttributes["aria-sort"];
+  readonly headerClassName?: string;
+  readonly cellClassName?: string | ((row: Row) => string | undefined);
+  readonly width?: number;
+  readonly minWidth?: number;
+  readonly maxWidth?: number;
+  readonly resizeLabel?: string;
+  readonly onResize?: (width: number) => void;
+  readonly onResizeEnd?: (width: number) => void;
+}
+
+export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
+  actions,
+  ariaLabel,
+  columns,
+  density = "COMFORTABLE",
+  draggable = false,
+  emptyContent,
+  focusedId,
+  highlightedIds = new Set<string>(),
+  onContextMenu,
+  onDragStart,
+  onRowClick,
+  onToggleAll,
+  onToggleHighlighted,
+  onToggleRow,
+  paddingBottom = 0,
+  paddingTop = 0,
+  rows,
+  selectedIds,
+  tableClassName = "semantic-table"
+}: Readonly<{
+  actions?: (row: Row) => ReactNode;
+  ariaLabel: string;
+  columns: readonly KeywordDataGridColumn<Row>[];
+  density?: "COMFORTABLE" | "COMPACT";
+  draggable?: boolean;
+  emptyContent?: ReactNode;
+  focusedId?: string | undefined;
+  highlightedIds?: ReadonlySet<string>;
+  onContextMenu?: (event: MouseEvent<HTMLTableRowElement>, row: Row) => void;
+  onDragStart?: (event: DragEvent<HTMLTableRowElement>, row: Row) => void;
+  onRowClick?: (row: Row, event: MouseEvent<HTMLTableRowElement>) => void;
+  onToggleAll: () => void;
+  onToggleHighlighted?: () => void;
+  onToggleRow: (row: Row, event: MouseEvent<HTMLInputElement>) => void;
+  paddingBottom?: number;
+  paddingTop?: number;
+  rows: readonly Row[];
+  selectedIds: ReadonlySet<string>;
+  tableClassName?: string;
+}>) {
+  const allSelected = rows.length > 0 && rows.every(({ id }) => selectedIds.has(id));
+  const allHighlightedSelected =
+    highlightedIds.size > 0 &&
+    [...highlightedIds].every((id) => selectedIds.has(id));
+  const selectionColumnWidth = onToggleHighlighted ? 62 : 38;
+  const columnCount = columns.length + 1 + (actions ? 1 : 0);
+  const hasSizedColumns = columns.some(({ width }) => width !== undefined);
+  const tableWidth = hasSizedColumns
+    ? selectionColumnWidth +
+      columns.reduce((sum, column) => sum + (column.width ?? 132), 0) +
+      (actions ? 40 : 0)
+    : undefined;
+
+  function startColumnResize(
+    event: ReactPointerEvent<HTMLSpanElement>,
+    column: KeywordDataGridColumn<Row>
+  ): void {
+    if (column.width === undefined || !column.onResize) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const handle = event.currentTarget;
+    const pointerId = event.pointerId;
+    const startX = event.clientX;
+    const startWidth = column.width;
+    let nextWidth = startWidth;
+    let finished = false;
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      nextWidth = clampedWidth(
+        startWidth + moveEvent.clientX - startX,
+        column.minWidth,
+        column.maxWidth
+      );
+      column.onResize?.(nextWidth);
+    };
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+      window.removeEventListener("blur", finish);
+      handle.removeEventListener("lostpointercapture", finish);
+      if (handle.hasPointerCapture(pointerId)) {
+        handle.releasePointerCapture(pointerId);
+      }
+      document.body.classList.remove("semantic-column-resizing");
+      column.onResizeEnd?.(nextWidth);
+    };
+    document.body.classList.add("semantic-column-resizing");
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("pointercancel", finish, { once: true });
+    window.addEventListener("blur", finish, { once: true });
+    handle.addEventListener("lostpointercapture", finish, { once: true });
+    handle.setPointerCapture(pointerId);
+  }
+
+  function resizeColumnFromKeyboard(
+    event: KeyboardEvent<HTMLSpanElement>,
+    column: KeywordDataGridColumn<Row>
+  ): void {
+    if (column.width === undefined || !column.onResize) return;
+    const direction =
+      event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+    if (direction === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const nextWidth = clampedWidth(
+      column.width + direction * (event.shiftKey ? 32 : 8),
+      column.minWidth,
+      column.maxWidth
+    );
+    column.onResize(nextWidth);
+    column.onResizeEnd?.(nextWidth);
+  }
+
+  return (
+    <table
+      aria-label={ariaLabel}
+      className={`${tableClassName} density-${density.toLowerCase()}${hasSizedColumns ? " has-sized-columns" : ""}${onToggleHighlighted ? " has-highlight-selector" : ""}`}
+      style={
+        tableWidth
+          ? { minWidth: tableWidth, width: `max(100%, ${tableWidth}px)` }
+          : undefined
+      }
+    >
+      {hasSizedColumns && (
+        <colgroup>
+          <col style={{ width: selectionColumnWidth }} />
+          {columns.map((column) => (
+            <col key={column.key} style={{ width: column.width ?? 132 }} />
+          ))}
+          {actions && <col style={{ width: 40 }} />}
+        </colgroup>
+      )}
+      <thead>
+        <tr>
+          <th className="semantic-select-cell semantic-select-header">
+            <span className="semantic-header-selection-controls">
+              <input
+                aria-label="Выбрать все показанные запросы"
+                checked={allSelected}
+                onChange={onToggleAll}
+                title="Выбрать все показанные запросы"
+                type="checkbox"
+              />
+              {onToggleHighlighted && (
+                <input
+                  aria-label={`Выбрать подсвеченные запросы (${highlightedIds.size})`}
+                  checked={allHighlightedSelected}
+                  className="semantic-highlight-selector"
+                  disabled={highlightedIds.size === 0}
+                  onChange={onToggleHighlighted}
+                  title="Перенести подсвеченные строки в массовый выбор"
+                  type="checkbox"
+                />
+              )}
+            </span>
+          </th>
+          {columns.map((column) => (
+            <th
+              aria-sort={column.ariaSort}
+              className={`${column.headerClassName ?? ""}${column.onResize ? " semantic-resizable-column" : ""}`.trim() || undefined}
+              key={column.key}
+            >
+              {column.header}
+              {column.width !== undefined && column.onResize && (
+                <span
+                  aria-label={`Изменить ширину колонки ${column.resizeLabel ?? plainHeader(column.header, column.key)}`}
+                  aria-orientation="vertical"
+                  aria-valuemax={column.maxWidth}
+                  aria-valuemin={column.minWidth}
+                  aria-valuenow={column.width}
+                  className="semantic-column-resizer"
+                  onKeyDown={(event) => resizeColumnFromKeyboard(event, column)}
+                  onPointerDown={(event) => startColumnResize(event, column)}
+                  role="separator"
+                  tabIndex={0}
+                  title="Потяните для изменения ширины. Стрелки — с клавиатуры"
+                />
+              )}
+            </th>
+          ))}
+          {actions && <th aria-label="Действия" />}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.length === 0 && emptyContent && (
+          <tr className="semantic-data-grid-empty-row">
+            <td colSpan={columnCount}>{emptyContent}</td>
+          </tr>
+        )}
+        {paddingTop > 0 && (
+          <tr aria-hidden="true" className="semantic-virtual-spacer">
+            <td colSpan={columnCount} style={{ height: paddingTop }} />
+          </tr>
+        )}
+        {rows.map((row, index) => {
+          const selected = selectedIds.has(row.id);
+          const highlighted = highlightedIds.has(row.id);
+          const joinedPrevious =
+            selected && selectedIds.has(rows[index - 1]?.id ?? "");
+          const joinedNext =
+            selected && selectedIds.has(rows[index + 1]?.id ?? "");
+          const highlightedPrevious =
+            highlighted && highlightedIds.has(rows[index - 1]?.id ?? "");
+          const highlightedNext =
+            highlighted && highlightedIds.has(rows[index + 1]?.id ?? "");
+          return (
+            <tr
+              className={[
+                focusedId === row.id ? "focused" : "",
+                highlighted ? "highlighted" : "",
+                highlightedPrevious ? "highlighted-previous" : "",
+                highlightedNext ? "highlighted-next" : "",
+                selected ? "selected" : "",
+                joinedPrevious ? "joined-previous" : "",
+                joinedNext ? "joined-next" : ""
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined}
+              draggable={draggable}
+              key={row.id}
+              onClick={(event) => onRowClick?.(row, event)}
+              onContextMenu={(event) => onContextMenu?.(event, row)}
+              onDragStart={(event) => onDragStart?.(event, row)}
+            >
+              <td className="semantic-select-cell">
+                <input
+                  aria-label={`Выбрать запрос ${row.id}`}
+                  checked={selected}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onToggleRow(row, event);
+                  }}
+                  readOnly
+                  type="checkbox"
+                />
+              </td>
+              {columns.map((column) => (
+                <td
+                  className={
+                    typeof column.cellClassName === "function"
+                      ? column.cellClassName(row)
+                      : column.cellClassName
+                  }
+                  key={column.key}
+                >
+                  {column.cell(row)}
+                </td>
+              ))}
+              {actions && <td>{actions(row)}</td>}
+            </tr>
+          );
+        })}
+        {paddingBottom > 0 && (
+          <tr aria-hidden="true" className="semantic-virtual-spacer">
+            <td colSpan={columnCount} style={{ height: paddingBottom }} />
+          </tr>
+        )}
+      </tbody>
+    </table>
+  );
+}
+
+function clampedWidth(
+  width: number,
+  minWidth = 64,
+  maxWidth = 640
+): number {
+  return Math.min(maxWidth, Math.max(minWidth, Math.round(width)));
+}
+
+function plainHeader(header: ReactNode, fallback: string): string {
+  return typeof header === "string" || typeof header === "number"
+    ? String(header)
+    : fallback;
+}

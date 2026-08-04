@@ -113,6 +113,37 @@ test("gets an exact bounded manifest chunk through the dedicated boundary", asyn
   }
 });
 
+test("accepts a later XMLStock one-key manifest chunk", async () => {
+  const input = { ...chunkCommand(), chunkIndex: 100 };
+  const unsigned: InternalRankManifestChunk = {
+    ...input,
+    hashSchemaVersion: "rank-manifest-chunk@1",
+    chunkHash: hash("0"),
+    entries: [{ ...chunkEntry(), sequence: 100 }]
+  };
+  const expected: InternalRankManifestChunk = {
+    ...unsigned,
+    chunkHash: {
+      algorithm: "SHA_256",
+      value: canonicalJsonSha256(
+        "rank-manifest-chunk@1",
+        rankManifestChunkHashPreimage(unsigned)
+      )
+    }
+  };
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = (async () =>
+      Response.json({ data: expected, meta: { requestId: "seo-rank-xml-chunk" } })) as typeof fetch;
+    assert.deepEqual(
+      await new RankManifestClient(config).getChunk(input, ids.actorId),
+      expected
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("rejects tampered manifest entry and canonical chunk hashes", async () => {
   const originalFetch = globalThis.fetch;
   const exact = chunkReceipt();
@@ -251,7 +282,7 @@ test("rejects invalid chunk requests before network access", async () => {
     await assert.rejects(
       () =>
         new RankManifestClient(config).getChunk(
-          { ...chunkCommand(), chunkIndex: 4 },
+          { ...chunkCommand(), chunkIndex: 15_000 },
           ids.actorId
         ),
       (error: unknown) =>
@@ -322,6 +353,34 @@ test("finalizes through the same dedicated boundary and verifies the receipt has
     );
     assert.equal(headers?.get("X-Actor-Id"), ids.actorId);
     assert.equal(headers?.get("X-Internal-Token"), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("accepts truthful completed finalization counts", async () => {
+  const originalFetch = globalThis.fetch;
+  const command = finalizationCommand("COMPLETED");
+  globalThis.fetch = (async () =>
+    Response.json({
+      data: finalizationReceipt(command, {
+        persistedCount: "2",
+        foundCount: "1",
+        notFoundCount: "1",
+        missingCount: "0"
+      }),
+      meta: { requestId: "seo-finalize-completed" }
+    })) as typeof fetch;
+  try {
+    const result = await new RankManifestClient(config).finalize(command, {
+      trackingContextId: ids.contextId,
+      configurationVersion: 2,
+      pairCount: 2
+    });
+    assert.equal(result.status, "COMPLETED");
+    assert.equal(result.persistedCount, "2");
+    assert.equal(result.foundCount, "1");
+    assert.equal(result.notFoundCount, "1");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -444,6 +503,67 @@ function command(): InternalSealRankManifestInput {
   };
 }
 
+test("accepts an exact Yandex Top-50 manifest receipt", async () => {
+  const value = command();
+  const yandex = {
+    ...value,
+    execution: {
+      ...value.execution,
+      searchEngine: "YANDEX" as const,
+      regionCode: "213",
+      depth: 50 as const
+    }
+  };
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = (async () =>
+      Response.json({
+        data: receipt(yandex),
+        meta: { requestId: "seo-rank-yandex" }
+      })) as typeof fetch;
+    const result = await new RankManifestClient(config).seal(yandex);
+    assert.equal(result.execution.searchEngine, "YANDEX");
+    assert.equal(result.execution.depth, 50);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("accepts an XMLStock one-key-per-chunk manifest receipt", async () => {
+  const base = command();
+  const xmlStock: InternalSealRankManifestInput = {
+    ...base,
+    provider: "XMLSTOCK",
+    execution: {
+      ...base.execution,
+      searchEngine: "YANDEX",
+      countryCode: "RU",
+      regionCode: "213",
+      depth: 100,
+      providerMappingVersion: "xmlstock-serp@1"
+    }
+  };
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = (async () =>
+      Response.json({
+        data: {
+          ...receipt(xmlStock),
+          provider: "XMLSTOCK",
+          chunkCount: "2",
+          chunkSize: "1"
+        },
+        meta: { requestId: "seo-rank-xmlstock" }
+      })) as typeof fetch;
+    const result = await new RankManifestClient(config).seal(xmlStock);
+    assert.equal(result.provider, "XMLSTOCK");
+    assert.equal(result.chunkCount, "2");
+    assert.equal(result.chunkSize, "1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function chunkCommand(): InternalGetRankManifestChunkInput {
   return {
     workspaceId: ids.workspaceId,
@@ -487,8 +607,7 @@ function chunkReceipt(): InternalRankManifestChunk {
   };
 }
 
-function receipt() {
-  const input = command();
+function receipt(input = command()) {
   return {
     id: ids.manifestId,
     workspaceId: input.workspaceId,
@@ -519,7 +638,9 @@ function receipt() {
   };
 }
 
-function finalizationCommand(): InternalFinalizeRankCheckInput {
+function finalizationCommand(
+  status: InternalFinalizeRankCheckInput["status"] = "CANCELLED"
+): InternalFinalizeRankCheckInput {
   return {
     schemaVersion: "rank-finalize@1",
     workspaceId: ids.workspaceId,
@@ -527,12 +648,24 @@ function finalizationCommand(): InternalFinalizeRankCheckInput {
     actorId: ids.actorId,
     jobId: ids.jobId,
     manifestId: ids.manifestId,
-    status: "CANCELLED"
+    status
   };
 }
 
-function finalizationReceipt() {
-  const input = finalizationCommand();
+function finalizationReceipt(
+  input = finalizationCommand(),
+  counts: {
+    readonly persistedCount: string;
+    readonly foundCount: string;
+    readonly notFoundCount: string;
+    readonly missingCount: string;
+  } = {
+    persistedCount: "0",
+    foundCount: "0",
+    notFoundCount: "0",
+    missingCount: "2"
+  }
+) {
   return {
     schemaVersion: "rank-finalize@1",
     workspaceId: input.workspaceId,
@@ -554,10 +687,7 @@ function finalizationReceipt() {
     configurationVersion: 2,
     status: input.status,
     pairCount: "2",
-    persistedCount: "0",
-    foundCount: "0",
-    notFoundCount: "0",
-    missingCount: "2",
+    ...counts,
     finalizedAt: "2026-07-29T12:01:00.000Z"
   };
 }

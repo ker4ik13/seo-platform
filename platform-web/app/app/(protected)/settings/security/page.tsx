@@ -12,7 +12,6 @@ export default async function SecuritySettingsPage() {
     <AppShell activeSection="settings" context={context}>
       <section className="page-heading">
         <div>
-          <p className="eyebrow">Профиль · Безопасность</p>
           <h1>Безопасность аккаунта</h1>
           <p>
             Управляйте двухфакторной защитой и активными входами на всех

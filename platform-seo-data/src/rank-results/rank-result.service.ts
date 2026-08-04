@@ -7,6 +7,11 @@ import {
   NotFoundException
 } from "@nestjs/common";
 import {
+  legacyRankManifestChunkSize,
+  legacyRankProviderKeywordLimit,
+  rankManifestSingleTaskChunkSize,
+  rankProviderKeywordLimit,
+  xmlStockRankManifestChunkSize,
   rankManifestChunkHashPreimage,
   type InternalIngestRankChunkInput,
   type InternalNormalizedRankResult,
@@ -27,7 +32,8 @@ import { PrismaService } from "../database/prisma.service.js";
 const INGEST_SCHEMA = "rank-ingest@1";
 const CHUNK_SCHEMA = "rank-manifest-chunk@1";
 const RESULT_TRANSACTION_MAX_WAIT_MS = 5_000;
-const RESULT_TRANSACTION_TIMEOUT_MS = 30_000;
+const RESULT_TRANSACTION_TIMEOUT_MS = 120_000;
+const RANK_SNAPSHOT_INSERT_BATCH_SIZE = 1_000;
 const UUID_V7_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const HASH_PATTERN = /^[0-9a-f]{64}$/u;
@@ -83,6 +89,7 @@ interface LockedManifest {
   readonly operation: string;
   readonly pairCount: number;
   readonly chunkCount: number;
+  readonly chunkSize: number;
   readonly status: "BUILDING" | "SEALED" | "CLOSED";
   readonly appliedAt: Date;
 }
@@ -113,7 +120,7 @@ interface CurrentProjectionInput {
   readonly position: number | null;
   readonly rankingUrl: string | null;
   readonly normalizedRankingUrl: string | null;
-  readonly provider: "ARSENKIN";
+  readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly sourceMode: "BYOK";
   readonly dataQualityFlags: readonly string[];
   readonly updatedAt: string;
@@ -233,9 +240,24 @@ export class RankResultService {
             );
           }
         );
-        await transaction.rankSnapshot.createMany({
-          data: snapshots
-        });
+        for (
+          let offset = 0;
+          offset < snapshots.length;
+          offset += RANK_SNAPSHOT_INSERT_BATCH_SIZE
+        ) {
+          const batch = snapshots.slice(
+            offset,
+            offset + RANK_SNAPSHOT_INSERT_BATCH_SIZE
+          );
+          const inserted = await transaction.rankSnapshot.createMany({
+            data: batch
+          });
+          if (inserted.count !== batch.length) {
+            throw new Error(
+              "Rank snapshot batch was not fully persisted"
+            );
+          }
+        }
 
         const currentUpdatedCount = await upsertCurrentRanks(
           transaction,
@@ -334,6 +356,7 @@ async function lockManifest(
       "operation",
       "pair_count" AS "pairCount",
       "chunk_count" AS "chunkCount",
+      "chunk_size" AS "chunkSize",
       "status"::text AS "status",
       clock_timestamp() AS "appliedAt"
     FROM "rank_execution_manifests"
@@ -389,22 +412,54 @@ function assertManifest(
     manifest.workspaceId !== input.workspaceId ||
     manifest.projectId !== input.projectId ||
     manifest.jobId !== input.jobId ||
-    manifest.provider !== "ARSENKIN" ||
+    manifest.provider !== input.provider ||
+    (manifest.provider !== "ARSENKIN" && manifest.provider !== "XMLSTOCK") ||
     manifest.operation !== "POSITIONS" ||
     !Number.isSafeInteger(manifest.configurationVersion) ||
     manifest.configurationVersion < 1 ||
     !Number.isSafeInteger(manifest.pairCount) ||
     manifest.pairCount < 1 ||
-    manifest.pairCount > 1_000 ||
-    !Number.isSafeInteger(manifest.chunkCount) ||
-    manifest.chunkCount < 1 ||
-    manifest.chunkCount > 4 ||
+    !validManifestShape(manifest) ||
     input.chunkIndex >= manifest.chunkCount ||
     !(manifest.appliedAt instanceof Date) ||
     Number.isNaN(manifest.appliedAt.getTime())
   ) {
     throw new Error("Stored rank execution manifest is invalid");
   }
+}
+
+function validManifestShape(manifest: LockedManifest): boolean {
+  if (
+    !Number.isSafeInteger(manifest.pairCount) ||
+    !Number.isSafeInteger(manifest.chunkCount) ||
+    !Number.isSafeInteger(manifest.chunkSize)
+  ) {
+    return false;
+  }
+  if (manifest.chunkSize === legacyRankManifestChunkSize) {
+    return (
+      manifest.pairCount >= 1 &&
+      manifest.pairCount <= legacyRankProviderKeywordLimit &&
+      manifest.chunkCount ===
+        Math.ceil(
+          manifest.pairCount / legacyRankManifestChunkSize
+        )
+    );
+  }
+  if (manifest.chunkSize === xmlStockRankManifestChunkSize) {
+    return (
+      manifest.provider === "XMLSTOCK" &&
+      manifest.pairCount >= 1 &&
+      manifest.pairCount <= rankProviderKeywordLimit &&
+      manifest.chunkCount === manifest.pairCount
+    );
+  }
+  return (
+    manifest.chunkSize === rankManifestSingleTaskChunkSize &&
+    manifest.pairCount >= 1 &&
+    manifest.pairCount <= rankProviderKeywordLimit &&
+    manifest.chunkCount === 1
+  );
 }
 
 function storedSealedChunk(
@@ -423,12 +478,12 @@ function storedSealedChunk(
     chunk.hashSchemaVersion !== CHUNK_SCHEMA ||
     chunk.entryCount !== entries.length ||
     entries.length < 1 ||
-    entries.length > 250
+    entries.length > manifest.chunkSize
   ) {
     throw new Error("Stored rank manifest chunk is invalid");
   }
   const publicEntries = entries.map((entry, offset) => {
-    const expectedSequence = chunk.chunkIndex * 250 + offset;
+    const expectedSequence = chunk.chunkIndex * manifest.chunkSize + offset;
     if (
       entry.sequence !== expectedSequence ||
       !UUID_V7_PATTERN.test(entry.id) ||
@@ -564,6 +619,7 @@ function currentProjectionInput(
   if (
     !(snapshot.observedAt instanceof Date) ||
     !snapshot.id ||
+    (snapshot.provider !== "ARSENKIN" && snapshot.provider !== "XMLSTOCK") ||
     typeof snapshot.found !== "boolean"
   ) {
     throw new Error("Rank snapshot projection input is invalid");
@@ -580,7 +636,7 @@ function currentProjectionInput(
     position: snapshot.position ?? null,
     rankingUrl: snapshot.rankingUrl ?? null,
     normalizedRankingUrl: snapshot.normalizedRankingUrl ?? null,
-    provider: "ARSENKIN",
+    provider: snapshot.provider as "ARSENKIN" | "XMLSTOCK",
     sourceMode: "BYOK",
     dataQualityFlags: snapshot.dataQualityFlags as readonly string[],
     updatedAt: updatedAt.toISOString()
@@ -738,7 +794,7 @@ function storedReceipt(
   if (
     record.schemaVersion !== INGEST_SCHEMA ||
     record.status !== "APPLIED" ||
-    record.provider !== "ARSENKIN" ||
+    (record.provider !== "ARSENKIN" && record.provider !== "XMLSTOCK") ||
     record.operation !== "POSITIONS" ||
     !UUID_V7_PATTERN.test(record.manifestId) ||
     !UUID_V7_PATTERN.test(record.workspaceId) ||
@@ -748,8 +804,12 @@ function storedReceipt(
     !UUID_V7_PATTERN.test(record.ingestedBy) ||
     !Number.isSafeInteger(record.chunkIndex) ||
     record.chunkIndex < 0 ||
-    record.chunkIndex > 3 ||
-    !validCount(record.persistedCount, 1, 250) ||
+    record.chunkIndex > 14_999 ||
+    !validCount(
+      record.persistedCount,
+      1,
+      rankProviderKeywordLimit
+    ) ||
     !validCount(record.foundCount, 0, record.persistedCount) ||
     !validCount(
       record.notFoundCount,

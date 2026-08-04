@@ -1,5 +1,6 @@
 "use client";
 
+import type { PendingWorkspaceInviteSummary } from "@seo-platform/contracts";
 import { useEffect, useState } from "react";
 import {
   browserApiCollectionRequest,
@@ -8,12 +9,24 @@ import {
   type BrowserCursorPage
 } from "../lib/browser-api";
 import { publishUnreadCount } from "./notification-bell";
+import { WorkspaceInviteNotificationList } from "./workspace-invite-notification-list";
+import {
+  activateAcceptedWorkspace,
+  decideWorkspaceInvite,
+  loadPendingWorkspaceInvites
+} from "../lib/workspace-invitations";
 import {
   eventLabel,
   type NotificationEventType
 } from "./notification-settings";
+import {
+  parseOperationResultHref,
+  type OperationResultKind
+} from "../lib/operation-result-routes";
+import { OperationResultModal } from "./operation-result-modal";
 
 type NotificationSeverity = "INFO" | "WARNING" | "CRITICAL";
+const NOTIFICATION_REFRESH_INTERVAL_MS = 20_000;
 
 interface NotificationItem {
   readonly id: string;
@@ -33,8 +46,17 @@ interface ReadAllResult {
   readonly readAt: string;
 }
 
-export function NotificationCenter() {
+interface NotificationOperation {
+  readonly kind: OperationResultKind;
+  readonly operationId: string;
+  readonly projectId: string;
+  readonly title: string;
+  readonly description: string;
+}
+
+export function NotificationCenter({ projectId }: Readonly<{ projectId?: string }>) {
   const [items, setItems] = useState<readonly NotificationItem[]>([]);
+  const [invites, setInvites] = useState<readonly PendingWorkspaceInviteSummary[]>([]);
   const [page, setPage] = useState<BrowserCursorPage>({
     hasNext: false,
     unreadCount: 0
@@ -44,17 +66,23 @@ export function NotificationCenter() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [markingId, setMarkingId] = useState<string>();
   const [markingAll, setMarkingAll] = useState(false);
+  const [busyInviteId, setBusyInviteId] = useState<string>();
   const [error, setError] = useState<string>();
   const [retryVersion, setRetryVersion] = useState(0);
+  const [selectedOperation, setSelectedOperation] = useState<NotificationOperation>();
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setError(undefined);
-    void loadPage(unreadOnly, undefined, controller.signal)
-      .then((result) => {
+    void Promise.all([
+      loadPage(unreadOnly, undefined, controller.signal),
+      loadPendingWorkspaceInvites(controller.signal)
+    ])
+      .then(([result, pendingInvites]) => {
         if (controller.signal.aborted) return;
         setItems(result.data);
+        setInvites(pendingInvites.data);
         setPage(result.page);
         publishUnreadCount(result.page.unreadCount ?? 0);
       })
@@ -68,6 +96,40 @@ export function NotificationCenter() {
       });
     return () => controller.abort();
   }, [retryVersion, unreadOnly]);
+
+  useEffect(() => {
+    let active = true;
+    const refreshLatest = async (): Promise<void> => {
+      if (document.visibilityState !== "visible") return;
+      try {
+        const [result, pendingInvites] = await Promise.all([
+          loadPage(unreadOnly),
+          loadPendingWorkspaceInvites()
+        ]);
+        if (!active) return;
+        setItems((current) => mergeLatestNotifications(result.data, current));
+        setInvites(pendingInvites.data);
+        setPage((current) => ({
+          ...current,
+          unreadCount: result.page.unreadCount ?? 0
+        }));
+        publishUnreadCount(result.page.unreadCount ?? 0);
+      } catch {
+        // The primary loading/error state remains authoritative; polling is best-effort.
+      }
+    };
+    const timer = window.setInterval(
+      () => void refreshLatest(),
+      NOTIFICATION_REFRESH_INTERVAL_MS
+    );
+    const refreshAfterVisibility = () => void refreshLatest();
+    document.addEventListener("visibilitychange", refreshAfterVisibility);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refreshAfterVisibility);
+    };
+  }, [unreadOnly]);
 
   async function loadMore(): Promise<void> {
     if (!page.nextCursor || loadingMore) return;
@@ -149,8 +211,43 @@ export function NotificationCenter() {
   async function openItem(item: NotificationItem): Promise<void> {
     if (!item.deepLink) return;
     if (!item.readAt) await markRead(item.id);
+    const operation = parseOperationResultHref(item.deepLink);
+    const operationProjectId = item.projectId ?? projectId;
+    if (operation && operationProjectId) {
+      setSelectedOperation({
+        ...operation,
+        projectId: operationProjectId,
+        title: notificationOperationTitle(operation.kind),
+        description: `${item.title} · ${formatNotificationTime(item.createdAt)}`
+      });
+      return;
+    }
     window.location.assign(item.deepLink);
   }
+
+  async function decideInvite(
+    invite: PendingWorkspaceInviteSummary,
+    decision: "accept" | "decline"
+  ): Promise<void> {
+    if (busyInviteId) return;
+    setBusyInviteId(invite.id);
+    setError(undefined);
+    try {
+      if (decision === "accept") {
+        const member = await decideWorkspaceInvite(invite.id, "accept");
+        activateAcceptedWorkspace(member.workspaceId);
+        return;
+      }
+      await decideWorkspaceInvite(invite.id, "decline");
+      setInvites((current) => current.filter(({ id }) => id !== invite.id));
+    } catch (requestError) {
+      setError(notificationCenterError(requestError));
+    } finally {
+      setBusyInviteId(undefined);
+    }
+  }
+
+  const totalUnread = (page.unreadCount ?? 0) + invites.length;
 
   return (
     <div className="notification-center-stack">
@@ -171,8 +268,8 @@ export function NotificationCenter() {
             type="button"
           >
             Непрочитанные
-            {(page.unreadCount ?? 0) > 0 && (
-              <span>{page.unreadCount}</span>
+            {totalUnread > 0 && (
+              <span>{totalUnread}</span>
             )}
           </button>
         </div>
@@ -204,6 +301,13 @@ export function NotificationCenter() {
         </div>
       )}
 
+      <WorkspaceInviteNotificationList
+        {...(busyInviteId ? { busyInviteId } : {})}
+        invites={invites}
+        onAccept={(invite) => void decideInvite(invite, "accept")}
+        onDecline={(invite) => void decideInvite(invite, "decline")}
+      />
+
       {loading ? (
         <section
           className="panel notification-center-loading"
@@ -215,19 +319,21 @@ export function NotificationCenter() {
           ))}
         </section>
       ) : items.length === 0 ? (
-        <section className="panel panel-empty notification-center-empty">
-          <span className="state-icon">✓</span>
-          <strong>
-            {unreadOnly
-              ? "Все уведомления прочитаны"
-              : "Уведомлений пока нет"}
-          </strong>
-          <p>
-            {unreadOnly
-              ? "Новые события появятся здесь после выполнения работ."
-              : "Здесь будут результаты заданий, упоминания, предупреждения и отчёты."}
-          </p>
-        </section>
+        invites.length === 0 ? (
+          <section className="panel panel-empty notification-center-empty">
+            <span className="state-icon">✓</span>
+            <strong>
+              {unreadOnly
+                ? "Все уведомления прочитаны"
+                : "Уведомлений пока нет"}
+            </strong>
+            <p>
+              {unreadOnly
+                ? "Новые события появятся здесь после выполнения работ."
+                : "Здесь будут результаты заданий, упоминания, предупреждения и отчёты."}
+            </p>
+          </section>
+        ) : null
       ) : (
         <section className="panel notification-list" aria-live="polite">
           {items.map((item) => (
@@ -291,8 +397,27 @@ export function NotificationCenter() {
           {loadingMore ? "Загружаем…" : "Показать ещё"}
         </button>
       )}
+      {selectedOperation && (
+        <OperationResultModal
+          description={selectedOperation.description}
+          kind={selectedOperation.kind}
+          onClose={() => setSelectedOperation(undefined)}
+          operationId={selectedOperation.operationId}
+          projectId={selectedOperation.projectId}
+          title={selectedOperation.title}
+        />
+      )}
     </div>
   );
+}
+
+function notificationOperationTitle(kind: OperationResultKind): string {
+  return ({
+    frequency: "Сбор частотности",
+    rank: "Проверка позиций",
+    crawl: "Технический аудит",
+    research: "Сбор конкурентов"
+  } as const)[kind];
 }
 
 function loadPage(
@@ -317,6 +442,14 @@ function mergeNotifications(
 ): readonly NotificationItem[] {
   const seen = new Set(current.map(({ id }) => id));
   return [...current, ...incoming.filter(({ id }) => !seen.has(id))];
+}
+
+function mergeLatestNotifications(
+  latest: readonly NotificationItem[],
+  current: readonly NotificationItem[]
+): readonly NotificationItem[] {
+  const latestIds = new Set(latest.map(({ id }) => id));
+  return [...latest, ...current.filter(({ id }) => !latestIds.has(id))];
 }
 
 function formatNotificationTime(value: string): string {

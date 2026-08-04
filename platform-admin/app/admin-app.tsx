@@ -99,8 +99,8 @@ export function AdminApp() {
     <div className="admin-shell">
       <aside className="sidebar">
         <a className="brand" href="/">
-          <span>SW</span>
-          <div><strong>SEO Workspace</strong><small>Operations</small></div>
+          <img alt="" aria-hidden="true" height={31} src="/brand/seonorita-mark.svg" width={31} />
+          <div><strong>SEOньорита</strong><small>Operations</small></div>
         </a>
         <nav aria-label="Разделы администрирования">
           <button
@@ -130,7 +130,10 @@ export function AdminApp() {
       </aside>
       <main>
         <header className="topbar">
-          <div><span className="mobile-mark">SW</span><strong>Operations</strong></div>
+          <div>
+            <img alt="" aria-hidden="true" className="mobile-mark" height={28} src="/brand/seonorita-mark.svg" width={28} />
+            <strong>Operations</strong>
+          </div>
           <div className="topbar-actions">
             <span className="system-state"><i /> MFA · recent auth</span>
             <button className="ghost" onClick={() => void logout()} type="button">

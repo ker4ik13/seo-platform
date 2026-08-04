@@ -227,7 +227,8 @@ export class AutomationService {
                 actorId: input.actorId,
                 project: input.project,
                 access: input.access,
-                billingCurrency: input.billingCurrency
+                billingCurrency: input.billingCurrency,
+                jobCapacity: input.jobCapacity
               }
             }),
             updatedBy: input.actorId,

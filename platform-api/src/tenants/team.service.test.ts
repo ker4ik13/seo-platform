@@ -123,6 +123,107 @@ test("lists only active unexpired pending invitations with a bounded page", asyn
   );
 });
 
+test("lists only invitations addressed to the signed-in verified account", async () => {
+  const addressed = {
+    ...invite(INVITE_ID, "invite@example.com"),
+    workspace: {
+      name: "SEO team",
+      slug: "seo-team",
+      status: "ACTIVE"
+    }
+  };
+  const findCalls: Array<Readonly<Record<string, unknown>>> = [];
+  const prisma = {
+    user: {
+      findUnique: async () => ({
+        status: "ACTIVE",
+        emailNormalized: "invite@example.com",
+        emailVerifiedAt: new Date("2026-07-30T12:00:00.000Z")
+      })
+    },
+    workspaceInvite: {
+      updateMany: async () => ({ count: 0 }),
+      findMany: async (input: Readonly<Record<string, unknown>>) => {
+        findCalls.push(input);
+        return [addressed];
+      }
+    }
+  } as unknown as PrismaService;
+
+  const result = await teamService(prisma).listPendingInvitesForUser(USER_ID);
+
+  assert.equal(result.data.length, 1);
+  assert.equal(result.data[0]?.workspaceName, "SEO team");
+  assert.equal(result.data[0]?.roleCode, "VIEWER");
+  assert.deepEqual(result.page, { hasNext: false });
+  const where = findCalls[0]?.where as
+    | Readonly<Record<string, unknown>>
+    | undefined;
+  assert.equal(where?.emailNormalized, "invite@example.com");
+  assert.deepEqual(where?.status, { in: ["SENT", "DELIVERED"] });
+  assert.equal(findCalls[0]?.take, 50);
+});
+
+test("declines an addressed invitation without creating workspace membership", async () => {
+  const now = new Date("2026-07-30T12:00:00.000Z");
+  const auditCalls: unknown[] = [];
+  const outboxCalls: unknown[] = [];
+  const transaction = {
+    $queryRaw: async (parts: TemplateStringsArray) =>
+      parts.join("?").includes("clock_timestamp")
+        ? [{ now }]
+        : [{ id: USER_ID }],
+    user: {
+      findUnique: async () => member(USER_ID, "invite@example.com").user
+    },
+    workspaceInvite: {
+      findUnique: async () => invite(INVITE_ID, "invite@example.com"),
+      updateMany: async () => ({ count: 1 }),
+      findUniqueOrThrow: async () => ({
+        ...invite(INVITE_ID, "invite@example.com"),
+        status: "DECLINED",
+        declinedAt: now
+      })
+    }
+  };
+  const prisma = {
+    workspaceInvite: {
+      findUnique: async () => ({ id: INVITE_ID, workspaceId: WORKSPACE_ID })
+    },
+    $transaction: async <T>(
+      operation: (value: typeof transaction) => Promise<T>
+    ) => operation(transaction)
+  } as unknown as PrismaService;
+  const service = new TeamService(
+    prisma,
+    {
+      record: async (input: unknown) => {
+        auditCalls.push(input);
+      }
+    } as unknown as AuditService,
+    {
+      event: async (_transaction: unknown, input: unknown) => {
+        outboxCalls.push(input);
+      }
+    } as unknown as OutboxService,
+    new AuthCryptoService(CONFIG),
+    CONFIG,
+    permissiveEntitlements()
+  );
+
+  const result = await service.declineInvite(
+    USER_ID,
+    INVITE_ID,
+    REQUEST_CONTEXT
+  );
+
+  assert.equal(result.status, "DECLINED");
+  assert.equal(auditCalls.length, 1);
+  assert.match(JSON.stringify(auditCalls[0]), /workspace\.invite\.declined/u);
+  assert.equal(outboxCalls.length, 1);
+  assert.match(JSON.stringify(outboxCalls[0]), /workspace\.invite\.declined\.v1/u);
+});
+
 test("locks the account, workspace and invitation before rejecting an unverified account", async () => {
   const queries: string[] = [];
   let invitationRead = false;
@@ -153,8 +254,9 @@ test("locks the account, workspace and invitation before rejecting an unverified
     ) => operation(transaction)
   } as unknown as PrismaService;
 
+  const service = teamService(prisma);
   await assert.rejects(
-    teamService(prisma).acceptInvite(USER_ID, INVITE_TOKEN, REQUEST_CONTEXT),
+    service.acceptInvite(USER_ID, INVITE_TOKEN, REQUEST_CONTEXT),
     (error: unknown) =>
       error instanceof DomainError &&
       error.statusCode === 409 &&
@@ -199,8 +301,9 @@ test("returns a dedicated error when a valid invitation belongs to another verif
     ) => operation(transaction)
   } as unknown as PrismaService;
 
+  const service = teamService(prisma);
   await assert.rejects(
-    teamService(prisma).acceptInvite(USER_ID, INVITE_TOKEN, REQUEST_CONTEXT),
+    service.acceptInvite(USER_ID, INVITE_TOKEN, REQUEST_CONTEXT),
     (error: unknown) =>
       error instanceof DomainError &&
       error.statusCode === 403 &&
@@ -208,6 +311,16 @@ test("returns a dedicated error when a valid invitation belongs to another verif
   );
   assert.equal(queries.length, 4);
   assert.match(queries[3] ?? "", /clock_timestamp/);
+
+  queries.length = 0;
+  await assert.rejects(
+    service.acceptInviteById(USER_ID, INVITE_ID, REQUEST_CONTEXT),
+    (error: unknown) =>
+      error instanceof DomainError &&
+      error.statusCode === 404 &&
+      error.code === "NOT_FOUND"
+  );
+  assert.equal(queries.length, 4);
 });
 
 test("accepts a matching verified invitation in one authoritative transaction", async () => {
@@ -386,6 +499,7 @@ function invite(id: string, email: string): WorkspaceInvite {
     invitedBy: id,
     expiresAt: new Date("2026-08-06T12:00:00.000Z"),
     acceptedAt: null,
+    declinedAt: null,
     revokedAt: null,
     createdAt: now,
     updatedAt: now

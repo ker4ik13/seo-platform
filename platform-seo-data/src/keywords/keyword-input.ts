@@ -2,9 +2,11 @@ import { Buffer } from "node:buffer";
 import { BadRequestException } from "@nestjs/common";
 import {
   semanticKeywordCleaningCases,
+  semanticKeywordDuplicatePolicies,
   semanticKeywordIntents,
   type InternalCreateSemanticKeywordInput,
   type InternalDeleteSemanticKeywordInput,
+  type InternalSemanticKeywordBulkCreateInput,
   type InternalSemanticKeywordBulkInput,
   type InternalSemanticKeywordCleaningInput,
   type InternalUpdateSemanticKeywordInput,
@@ -15,6 +17,7 @@ import { internalUuid } from "../internal/internal-command-context.js";
 import { semanticCapacityEntitlement } from "../internal/semantic-capacity.js";
 
 const INTENTS = new Set<string>(semanticKeywordIntents);
+const MAX_KEYWORD_BULK_CREATE_BYTES = 6 * 1_024 * 1_024;
 
 export function internalCreateSemanticKeywordInput(
   value: unknown
@@ -22,6 +25,7 @@ export function internalCreateSemanticKeywordInput(
   const input = exactRecord(value, [
     ...scopeFields(),
     "entitlement",
+    "duplicatePolicy",
     ...editableFields()
   ]);
   const intent = optionalIntent(input.intent, false).intent;
@@ -39,7 +43,56 @@ export function internalCreateSemanticKeywordInput(
     ...(groupId ? { groupId } : {}),
     ...(clusterId ? { clusterId } : {}),
     ...(targetUrl ? { targetUrl } : {}),
-    tagNames: tagNames(input.tagNames)
+    tagNames: tagNames(input.tagNames),
+    duplicatePolicy: duplicatePolicy(
+      input.duplicatePolicy ?? "REJECT_EXISTING"
+    )
+  };
+}
+
+export function internalSemanticKeywordBulkCreateInput(
+  value: unknown
+): InternalSemanticKeywordBulkCreateInput {
+  if (
+    Buffer.byteLength(JSON.stringify(value) ?? "", "utf8") >
+    MAX_KEYWORD_BULK_CREATE_BYTES
+  ) {
+    invalid("$");
+  }
+  const input = exactRecord(value, [
+    ...scopeFields(),
+    "entitlement",
+    "duplicatePolicy",
+    "items"
+  ]);
+  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 2_000) {
+    invalid("items");
+  }
+  const trustedScope = scope(input);
+  const entitlement = semanticCapacityEntitlement(input.entitlement);
+  const policy = duplicatePolicy(input.duplicatePolicy);
+  return {
+    ...trustedScope,
+    entitlement,
+    duplicatePolicy: policy,
+    items: input.items.map((value) => {
+      const item = exactRecord(value, editableFields());
+      const parsed = internalCreateSemanticKeywordInput({
+        ...item,
+        ...trustedScope,
+        entitlement,
+        duplicatePolicy: policy
+      });
+      const {
+        workspaceId: _workspaceId,
+        projectId: _projectId,
+        actorId: _actorId,
+        entitlement: _entitlement,
+        duplicatePolicy: _duplicatePolicy,
+        ...keyword
+      } = parsed;
+      return keyword;
+    })
   };
 }
 
@@ -81,10 +134,13 @@ export function internalUpdateSemanticKeywordInput(
 export function internalDeleteSemanticKeywordInput(
   value: unknown
 ): InternalDeleteSemanticKeywordInput {
-  const input = exactRecord(value, [...scopeFields(), "version"]);
+  const input = exactRecord(value, [...scopeFields(), "version", "permanent"]);
   return {
     ...scope(input),
-    version: positiveInteger(input.version, "version")
+    version: positiveInteger(input.version, "version"),
+    ...(input.permanent === undefined
+      ? {}
+      : { permanent: booleanValue(input.permanent, "permanent") })
   };
 }
 
@@ -290,6 +346,18 @@ function priority(value: unknown): number {
     invalid("priority");
   }
   return Number(value);
+}
+
+function duplicatePolicy(
+  value: unknown
+): InternalCreateSemanticKeywordInput["duplicatePolicy"] {
+  if (
+    typeof value !== "string" ||
+    !semanticKeywordDuplicatePolicies.some((policy) => policy === value)
+  ) {
+    invalid("duplicatePolicy");
+  }
+  return value as InternalCreateSemanticKeywordInput["duplicatePolicy"];
 }
 
 function optionalIntent(

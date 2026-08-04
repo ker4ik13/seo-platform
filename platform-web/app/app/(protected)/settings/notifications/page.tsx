@@ -11,7 +11,6 @@ export default async function NotificationSettingsPage() {
     <AppShell activeSection="settings" context={context}>
       <section className="page-heading">
         <div>
-          <p className="eyebrow">Профиль · Уведомления</p>
           <h1>Настройки уведомлений</h1>
           <p>
             Выберите глобальные каналы, тихие часы, дайджесты и значения по

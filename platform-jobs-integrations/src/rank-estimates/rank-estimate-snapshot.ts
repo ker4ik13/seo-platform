@@ -1,4 +1,8 @@
 import {
+  connectorRoutingScopes,
+  currentRankProviderPolicyVersion,
+  legacyRankProviderPolicyVersion,
+  xmlStockRankProviderPolicyVersion,
   rankEstimateBlockerCodes,
   type RankEstimate,
   type RankEstimateBlocker,
@@ -15,6 +19,8 @@ const TOP_LEVEL_FIELDS = [
   "trackingContextId",
   "status",
   "provider",
+  "routingScope",
+  "connectorAttempts",
   "operation",
   "credentialMode",
   "scope",
@@ -35,7 +41,11 @@ const TOP_LEVEL_FIELDS = [
 const BLOCKER_CODES = new Set<string>(rankEstimateBlockerCodes);
 
 export function rankEstimateSnapshot(value: unknown): RankEstimate {
-  const input = exactRecord(value, TOP_LEVEL_FIELDS);
+  const input = exactRecordWithOptional(
+    value,
+    TOP_LEVEL_FIELDS,
+    ["routingScope", "connectorAttempts"]
+  );
   const scope = exactRecord(input.scope, [
     "keywordCount",
     "contextCount",
@@ -65,11 +75,19 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
   const blockers = blockerList(input.blockers);
   const calculatedAt = timestamp(input.calculatedAt);
   const expiresAt = timestamp(input.expiresAt);
-  const keywordCount = boundedDecimal(scope.keywordCount, 1_001);
-  const taskCount = boundedDecimal(workload.taskCount, 4);
+  const provider = rankProvider(input.provider);
+  const policy = estimatePolicy(input.policyVersion, provider);
+  const keywordCount = boundedDecimal(
+    scope.keywordCount,
+    policy.overflowCount
+  );
+  const taskCount = boundedDecimal(
+    workload.taskCount,
+    policy.maximumTaskCount
+  );
   const minimumRequestCount = boundedDecimal(
     workload.minimumRequestCount,
-    12
+    policy.maximumRequestCount
   );
   const scopeHash = hash(scope.scopeHash);
   const ready =
@@ -82,7 +100,6 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
     blockers.length > 0;
   if (
     (!ready && !blocked) ||
-    input.provider !== "ARSENKIN" ||
     input.operation !== "POSITIONS" ||
     input.credentialMode !== "BYOK_API_KEY" ||
     scope.contextCount !== "1" ||
@@ -92,21 +109,22 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
     Number(scope.configurationVersion) > Number(scope.contextVersion) ||
     (keywordCount === "0" &&
       scopeHash.availability === "UNAVAILABLE") ||
-    (keywordCount === "1001" &&
+    (keywordCount === String(policy.overflowCount) &&
       scopeHash.availability === "AVAILABLE") ||
     Number(taskCount) !==
-      (keywordCount === "1001"
+      (keywordCount === String(policy.overflowCount)
         ? 0
-        : Math.ceil(Number(keywordCount) / 250)) ||
-    Number(minimumRequestCount) !== Number(taskCount) * 3 ||
+        : policy.taskCount(Number(keywordCount))) ||
+    !policy.validMinimumRequestCount(
+      Number(taskCount),
+      Number(minimumRequestCount),
+      workload.requestStages
+    ) ||
     polling.status !== "NOT_AVAILABLE" ||
     !Array.isArray(workload.requestStages) ||
-    workload.requestStages.length !== 3 ||
-    workload.requestStages[0] !== "SET" ||
-    workload.requestStages[1] !== "CHECK" ||
-    workload.requestStages[2] !== "GET" ||
-    workload.keywordLimitPerTask !== "250" ||
-    workload.keywordLimitPerCommand !== "1000" ||
+    !policy.validRequestStages(workload.requestStages) ||
+    workload.keywordLimitPerTask !== policy.keywordLimitPerTask ||
+    workload.keywordLimitPerCommand !== policy.keywordLimitPerCommand ||
     workload.format !== "SIMPLE" ||
     workload.rawSerp !== false ||
     workload.fallbackMode !== "NONE" ||
@@ -117,9 +135,6 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
     !/^[A-Z]{3}$/u.test(input.billingCurrency) ||
     retention.normalizedRankHistory !== "LONG_TERM" ||
     retention.rawSerp !== "NOT_COLLECTED" ||
-    typeof input.policyVersion !== "string" ||
-    input.policyVersion.length < 1 ||
-    input.policyVersion.length > 64 ||
     expiresAt.getTime() - calculatedAt.getTime() !== 5 * 60 * 1_000
   ) {
     invalid();
@@ -130,7 +145,13 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
     projectId: uuid(input.projectId),
     trackingContextId: uuid(input.trackingContextId),
     status: ready ? "READY" : "BLOCKED",
-    provider: "ARSENKIN",
+    provider,
+    ...(input.routingScope === undefined
+      ? {}
+      : {
+          routingScope: member(input.routingScope, connectorRoutingScopes),
+          connectorAttempts: connectorAttempts(input.connectorAttempts)
+        }),
     operation: "POSITIONS",
     credentialMode: "BYOK_API_KEY",
     scope: {
@@ -145,9 +166,9 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
       taskCount,
       minimumRequestCount,
       pollingRequestCount: { status: "NOT_AVAILABLE" },
-      requestStages: ["SET", "CHECK", "GET"],
-      keywordLimitPerTask: "250",
-      keywordLimitPerCommand: "1000",
+      requestStages: workload.requestStages,
+      keywordLimitPerTask: policy.keywordLimitPerTask,
+      keywordLimitPerCommand: policy.keywordLimitPerCommand,
       format: "SIMPLE",
       rawSerp: false,
       fallbackMode: "NONE"
@@ -164,16 +185,157 @@ export function rankEstimateSnapshot(value: unknown): RankEstimate {
     },
     blockers,
     executionAllowed: ready,
-    policyVersion: input.policyVersion,
+    policyVersion: policy.version,
     calculatedAt: calculatedAt.toISOString(),
     expiresAt: expiresAt.toISOString()
   };
+}
+
+function connectorAttempts(value: unknown): NonNullable<RankEstimate["connectorAttempts"]> {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8) invalid();
+  return value.map((candidate, index) => {
+    const input = exactRecordWithOptional(candidate, [
+      "sequence",
+      "provider",
+      "routingScope",
+      "outcome",
+      "reasonCode",
+      "occurredAt"
+    ], ["reasonCode"]);
+    if (input.sequence !== index + 1) invalid();
+    const reasonCode = input.reasonCode;
+    if (
+      reasonCode !== undefined &&
+      (typeof reasonCode !== "string" || !/^[A-Z][A-Z0-9_]{0,63}$/u.test(reasonCode))
+    ) invalid();
+    return {
+      sequence: index + 1,
+      provider: member(input.provider, ["XMLSTOCK", "ARSENKIN", "KEYS_SO"] as const),
+      routingScope: member(input.routingScope, connectorRoutingScopes),
+      outcome: member(input.outcome, ["SELECTED", "SUCCEEDED", "FALLBACK", "FAILED"] as const),
+      ...(reasonCode === undefined ? {} : { reasonCode }),
+      occurredAt: timestamp(input.occurredAt).toISOString()
+    };
+  });
 }
 
 export function rankEstimateSnapshotJson(
   value: RankEstimate
 ): Prisma.InputJsonValue {
   return value as unknown as Prisma.InputJsonValue;
+}
+
+interface EstimatePolicy {
+  readonly version:
+    | typeof legacyRankProviderPolicyVersion
+    | typeof currentRankProviderPolicyVersion
+    | typeof xmlStockRankProviderPolicyVersion;
+  readonly overflowCount: 1_001 | 15_001;
+  readonly maximumTaskCount: 1 | 4 | 15_000;
+  readonly maximumRequestCount: number;
+  readonly keywordLimitPerTask: "1" | "250" | "15000";
+  readonly keywordLimitPerCommand: "1000" | "15000";
+  readonly taskCount: (keywordCount: number) => number;
+  readonly validRequestStages: (value: unknown) => value is RankEstimate["workload"]["requestStages"];
+  readonly validMinimumRequestCount: (
+    taskCount: number,
+    minimumRequestCount: number,
+    stages: unknown
+  ) => boolean;
+}
+
+function estimatePolicy(
+  value: unknown,
+  provider: "ARSENKIN" | "XMLSTOCK"
+): EstimatePolicy {
+  if (provider === "ARSENKIN" && value === legacyRankProviderPolicyVersion) {
+    return {
+      version: legacyRankProviderPolicyVersion,
+      overflowCount: 1_001,
+      maximumTaskCount: 4,
+      maximumRequestCount: 12,
+      keywordLimitPerTask: "250",
+      keywordLimitPerCommand: "1000",
+      taskCount: (keywordCount) => Math.ceil(keywordCount / 250),
+      validRequestStages: isArsenkinStages,
+      validMinimumRequestCount: (tasks, requests) => requests === tasks * 3
+    };
+  }
+  if (provider === "ARSENKIN" && value === currentRankProviderPolicyVersion) {
+    return {
+      version: currentRankProviderPolicyVersion,
+      overflowCount: 15_001,
+      maximumTaskCount: 1,
+      maximumRequestCount: 3,
+      keywordLimitPerTask: "15000",
+      keywordLimitPerCommand: "15000",
+      taskCount: (keywordCount) => (keywordCount === 0 ? 0 : 1),
+      validRequestStages: isArsenkinStages,
+      validMinimumRequestCount: (tasks, requests) => requests === tasks * 3
+    };
+  }
+  if (
+    provider === "XMLSTOCK" &&
+    value === xmlStockRankProviderPolicyVersion
+  ) {
+    return {
+      version: xmlStockRankProviderPolicyVersion,
+      overflowCount: 15_001,
+      maximumTaskCount: 15_000,
+      maximumRequestCount: 150_000,
+      keywordLimitPerTask: "1",
+      keywordLimitPerCommand: "15000",
+      taskCount: (keywordCount) => keywordCount,
+      validRequestStages: isXmlStockStages,
+      validMinimumRequestCount: (tasks, requests, stages) =>
+        isYandexXmlStockStages(stages)
+          ? requests === tasks * 2
+          : isGoogleXmlStockStages(stages) &&
+            requests >= tasks &&
+            requests <= tasks * 10
+    };
+  }
+  invalid();
+}
+
+function rankProvider(value: unknown): "ARSENKIN" | "XMLSTOCK" {
+  if (value !== "ARSENKIN" && value !== "XMLSTOCK") invalid();
+  return value;
+}
+
+function isArsenkinStages(
+  value: unknown
+): value is readonly ["SET", "CHECK", "GET"] {
+  return (
+    Array.isArray(value) &&
+    value.length === 3 &&
+    value[0] === "SET" &&
+    value[1] === "CHECK" &&
+    value[2] === "GET"
+  );
+}
+
+function isYandexXmlStockStages(
+  value: unknown
+): value is readonly ["SUBMIT", "POLL"] {
+  return (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    value[0] === "SUBMIT" &&
+    value[1] === "POLL"
+  );
+}
+
+function isGoogleXmlStockStages(
+  value: unknown
+): value is readonly ["GET"] {
+  return Array.isArray(value) && value.length === 1 && value[0] === "GET";
+}
+
+function isXmlStockStages(
+  value: unknown
+): value is readonly ["SUBMIT", "POLL"] | readonly ["GET"] {
+  return isYandexXmlStockStages(value) || isGoogleXmlStockStages(value);
 }
 
 function quota(value: unknown): RankEstimateQuota {
@@ -301,6 +463,29 @@ function exactRecord<const Fields extends readonly string[]>(
   const input = record(value);
   exactFields(input, fields);
   return input as Readonly<Record<Fields[number], unknown>>;
+}
+
+function exactRecordWithOptional<const Fields extends readonly string[]>(
+  value: unknown,
+  fields: Fields,
+  optional: readonly Fields[number][]
+): Readonly<Record<Fields[number], unknown>> {
+  const input = record(value);
+  const optionalFields = new Set<string>(optional);
+  const allowed = new Set<string>(fields);
+  if (
+    Object.keys(input).some((field) => !allowed.has(field)) ||
+    fields.some((field) => !optionalFields.has(field) && !(field in input))
+  ) invalid();
+  return input as Readonly<Record<Fields[number], unknown>>;
+}
+
+function member<const Values extends readonly string[]>(
+  value: unknown,
+  values: Values
+): Values[number] {
+  if (typeof value !== "string" || !values.includes(value)) invalid();
+  return value as Values[number];
 }
 
 function exactFields(

@@ -12,7 +12,10 @@ export default function ApiDocumentationPage() {
   return (
     <main>
       <header className="site-header">
-        <a className="brand" href="/ru"><span>S</span>SEO Workspace</a>
+        <a className="brand" href="/ru">
+          <img alt="" aria-hidden="true" height={28} src="/brand/seonorita-mark.svg" width={28} />
+          SEOньорита
+        </a>
         <nav aria-label="Навигация документации">
           <a href="/tools">Toolbox</a>
           <a aria-current="page" href="/docs/api">API</a>

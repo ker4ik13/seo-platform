@@ -1,4 +1,7 @@
-import type { AutomationCapacityEntitlement } from "./billing.js";
+import type {
+  AutomationCapacityEntitlement,
+  JobCapacityEntitlement
+} from "./billing.js";
 import type { InternalRankEstimateProjectSnapshot } from "./rank-estimates.js";
 
 export type AutomationSchedule =
@@ -46,6 +49,7 @@ export interface InternalCreateRankTrackingAutomationInput
   readonly access: AutomationExecutionAccessSnapshot;
   readonly billingCurrency: string;
   readonly entitlement: AutomationCapacityEntitlement;
+  readonly jobCapacity: JobCapacityEntitlement;
 }
 
 export interface InternalUpdateRankTrackingAutomationInput
@@ -59,6 +63,7 @@ export interface InternalUpdateRankTrackingAutomationInput
   readonly access: AutomationExecutionAccessSnapshot;
   readonly billingCurrency: string;
   readonly entitlement: AutomationCapacityEntitlement;
+  readonly jobCapacity: JobCapacityEntitlement;
 }
 
 export interface InternalAutomationStatusInput {
@@ -71,6 +76,7 @@ export interface InternalAutomationStatusInput {
   readonly access: AutomationExecutionAccessSnapshot;
   readonly billingCurrency: string;
   readonly entitlement: AutomationCapacityEntitlement;
+  readonly jobCapacity: JobCapacityEntitlement;
 }
 
 export interface InternalRunRankTrackingAutomationInput {
@@ -83,6 +89,7 @@ export interface InternalRunRankTrackingAutomationInput {
   readonly project: InternalRankEstimateProjectSnapshot;
   readonly access: AutomationExecutionAccessSnapshot;
   readonly billingCurrency: string;
+  readonly jobCapacity: JobCapacityEntitlement;
 }
 
 export interface RankTrackingAutomationSummary {

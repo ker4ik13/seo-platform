@@ -273,6 +273,34 @@ test("requires the trusted billing currency on create responses", () => {
   );
 });
 
+test("accepts rank progress up to 15,000 keywords and rejects overflow", () => {
+  assert.equal(
+    scopedRankJobSummary(
+      {
+        ...preparing,
+        progress: { current: "0", total: "15000", unit: "KEYWORD" }
+      },
+      workspaceId,
+      projectId,
+      jobId
+    ).progress.total,
+    "15000"
+  );
+  assert.throws(
+    () =>
+      scopedRankJobSummary(
+        {
+          ...preparing,
+          progress: { current: "0", total: "15001", unit: "KEYWORD" }
+        },
+        workspaceId,
+        projectId,
+        jobId
+      ),
+    invalidDependencyResponse
+  );
+});
+
 function actionRequired() {
   return {
     ...preparing,

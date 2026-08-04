@@ -1,0 +1,64 @@
+"use client";
+
+import { useMemo } from "react";
+import { CustomSelect } from "./custom-select";
+import {
+  seoRegionCode,
+  seoRegions,
+  type SeoRegionCodeKind
+} from "../lib/seo-regions";
+
+export function SearchableRegionSelect({
+  allowAll = false,
+  autoFocus = false,
+  kind,
+  onChange,
+  value,
+  valueLabel
+}: Readonly<{
+  allowAll?: boolean;
+  autoFocus?: boolean;
+  kind: SeoRegionCodeKind;
+  onChange: (value: { readonly code: string; readonly label: string }) => void;
+  value: string;
+  valueLabel?: string;
+}>) {
+  const options = useMemo(
+    () => {
+      const known = seoRegions.map((region) => ({
+        code: seoRegionCode(region, kind),
+        label: region.name
+      }));
+      return [
+        ...(allowAll ? [{ code: "ALL", label: "Без ограничения" }] : []),
+        ...(value && !known.some(({ code }) => code === value)
+          ? [{ code: value, label: valueLabel?.trim() || "Другой регион" }]
+          : []),
+        ...known
+      ];
+    },
+    [allowAll, kind, value, valueLabel]
+  );
+  return (
+    <CustomSelect
+      aria-label="Регион"
+      autoFocus={autoFocus}
+      onChange={(event) => {
+        const match = options.find((option) => option.code === event.target.value);
+        if (match) onChange(match);
+      }}
+      required
+      searchable
+      searchPlaceholder="Регион или код"
+      value={value}
+    >
+      {options.map((option) => (
+        <option key={option.code} value={option.code}>{display(option)}</option>
+      ))}
+    </CustomSelect>
+  );
+}
+
+function display(option: { readonly code: string; readonly label: string }): string {
+  return `${option.label} — ${option.code}`;
+}

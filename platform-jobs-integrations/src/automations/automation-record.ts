@@ -24,6 +24,7 @@ export interface StoredAutomationDefinition {
     readonly project: InternalRankEstimateProjectSnapshot;
     readonly access: AutomationExecutionAccessSnapshot;
     readonly billingCurrency: string;
+    readonly jobCapacity: InternalCreateRankTrackingAutomationInput["jobCapacity"];
   };
 }
 
@@ -42,7 +43,8 @@ export function automationDefinition(
       actorId: input.actorId,
       project: input.project,
       access: input.access,
-      billingCurrency: input.billingCurrency
+      billingCurrency: input.billingCurrency,
+      jobCapacity: input.jobCapacity
     }
   };
 }
@@ -64,7 +66,8 @@ export function automationRunDefinition(
       actorId: input.actorId,
       project: input.project,
       access: input.access,
-      billingCurrency: input.billingCurrency
+      billingCurrency: input.billingCurrency,
+      jobCapacity: input.jobCapacity
     }
   };
 }
@@ -97,7 +100,8 @@ export function storedAutomationDefinition(
     "actorId",
     "project",
     "access",
-    "billingCurrency"
+    "billingCurrency",
+    "jobCapacity"
   ]);
   const project = exactRecord(execution.project, [
     "id",
@@ -113,6 +117,14 @@ export function storedAutomationDefinition(
     "canRunRanking",
     "entitlementStatus"
   ]);
+  const jobCapacity = exactRecord(
+    execution.jobCapacity ?? {
+      planCode: "LEGACY",
+      planVersion: 1,
+      concurrentJobs: 1
+    },
+    ["planCode", "planVersion", "concurrentJobs"]
+  );
   if (
     typeof execution.actorId !== "string" ||
     !UUID_PATTERN.test(execution.actorId) ||
@@ -138,7 +150,14 @@ export function storedAutomationDefinition(
       String(access.entitlementStatus)
     ) ||
     typeof execution.billingCurrency !== "string" ||
-    !/^[A-Z]{3}$/u.test(execution.billingCurrency)
+    !/^[A-Z]{3}$/u.test(execution.billingCurrency) ||
+    typeof jobCapacity.planCode !== "string" ||
+    jobCapacity.planCode.length < 1 ||
+    jobCapacity.planCode.length > 64 ||
+    !Number.isSafeInteger(jobCapacity.planVersion) ||
+    Number(jobCapacity.planVersion) < 1 ||
+    !Number.isSafeInteger(jobCapacity.concurrentJobs) ||
+    Number(jobCapacity.concurrentJobs) < 1
   ) {
     invalid();
   }
@@ -167,7 +186,12 @@ export function storedAutomationDefinition(
         entitlementStatus:
           access.entitlementStatus as AutomationExecutionAccessSnapshot["entitlementStatus"]
       },
-      billingCurrency: execution.billingCurrency
+      billingCurrency: execution.billingCurrency,
+      jobCapacity: {
+        planCode: jobCapacity.planCode,
+        planVersion: Number(jobCapacity.planVersion),
+        concurrentJobs: Number(jobCapacity.concurrentJobs)
+      }
     }
   };
 }

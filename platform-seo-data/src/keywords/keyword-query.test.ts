@@ -32,10 +32,18 @@ test("parses bounded keyword list query", () => {
       sort: "TEXT_ASC"
     }
   );
+  assert.equal(keywordListQuery({ sort: "UPDATED_ASC" }).sort, "UPDATED_ASC");
+  assert.equal(keywordListQuery({ sort: "TEXT_DESC" }).sort, "TEXT_DESC");
+  assert.equal(
+    keywordListQuery({ sort: "PRIORITY_ASC" }).sort,
+    "PRIORITY_ASC"
+  );
+  assert.equal(keywordListQuery({ sort: "SOURCE_DESC" }).sort, "SOURCE_DESC");
+  assert.equal(keywordListQuery({ limit: "1000" }).limit, 1_000);
 });
 
 test("rejects oversized pages and malformed cursors", () => {
-  assert.throws(() => keywordListQuery({ limit: "201" }), BadRequestException);
+  assert.throws(() => keywordListQuery({ limit: "1001" }), BadRequestException);
   assert.throws(
     () => keywordListQuery({ cursor: "not a cursor" }),
     BadRequestException

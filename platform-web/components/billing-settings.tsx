@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   BillingBalanceSummary,
@@ -40,6 +42,7 @@ export function BillingSettings({
   canManagePlan,
   canTopUp,
   canManagePaymentMethods,
+  projectCount,
   readOnly
 }: Readonly<{
   workspaceId: string;
@@ -47,6 +50,7 @@ export function BillingSettings({
   canManagePlan: boolean;
   canTopUp: boolean;
   canManagePaymentMethods: boolean;
+  projectCount: number;
   readOnly: boolean;
 }>) {
   const [snapshot, setSnapshot] = useState<BillingSnapshot>();
@@ -58,13 +62,13 @@ export function BillingSettings({
   const [buyerName, setBuyerName] = useState("");
   const [buyerInn, setBuyerInn] = useState("");
   const [deliveryEmail, setDeliveryEmail] = useState(defaultEmail);
-  const [savePaymentMethod, setSavePaymentMethod] = useState(false);
+  const [savePaymentMethod, setSavePaymentMethod] = useState(true);
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [topUpRubles, setTopUpRubles] = useState("1000");
   const [refundTarget, setRefundTarget] = useState<BillingOrderSummary>();
   const [refundRubles, setRefundRubles] = useState("");
   const [refundReason, setRefundReason] = useState("");
-  const basePath = `/app/api/v1/workspaces/${encodeURIComponent(
+  const basePath = `/app/api/workspaces/${encodeURIComponent(
     workspaceId
   )}/billing`;
 
@@ -81,7 +85,7 @@ export function BillingSettings({
         receipts
       ] = await Promise.all([
         browserApiCollectionRequest<BillingPlanSummary>(
-          "/app/api/v1/billing/plans"
+          "/app/api/billing/plans"
         ),
         browserApiRequest<BillingSubscriptionSummary | null>(
           `${basePath}/subscription`
@@ -151,6 +155,11 @@ export function BillingSettings({
   const selected = useMemo(
     () => snapshot?.plans.find((plan) => plan.code === selectedPlan),
     [selectedPlan, snapshot?.plans]
+  );
+  const hasAnnualPlans = Boolean(
+    snapshot?.plans.some((plan) =>
+      plan.prices.some((price) => price.period === "ANNUAL")
+    )
   );
 
   async function mutate(
@@ -305,6 +314,32 @@ export function BillingSettings({
     );
   }
 
+  const currentPlan = snapshot.subscription
+    ? snapshot.plans.find(
+        ({ code, version }) =>
+          code === snapshot.subscription?.planCode &&
+          version === snapshot.subscription.planVersion
+      )
+    : undefined;
+  const loadedLedgerSpend = snapshot.ledger.reduce(
+    (sum, transaction) =>
+      sum +
+      transaction.entries
+        .filter(
+          ({ accountType, direction }) =>
+            direction === "DEBIT" &&
+            [
+              "CUSTOMER_PREPAID_LIABILITY",
+              "PROMOTIONAL_LIABILITY"
+            ].includes(accountType)
+        )
+        .reduce((entrySum, entry) => entrySum + entry.amountMinor, 0),
+    0
+  );
+  const activePaymentMethod = canManagePaymentMethods
+    ? snapshot.methods.find(({ status }) => status === "ACTIVE")
+    : undefined;
+
   return (
     <div className="billing-stack">
       {error && (
@@ -372,23 +407,21 @@ export function BillingSettings({
           ) : (
             <>
               <h2>Подписки нет</h2>
-              <p>Выберите тариф или активируйте Trial без карты.</p>
+              <p>Выберите платный тариф или активируйте бесплатный без карты.</p>
               {canManagePlan && (
                 <button
                   className="secondary-button"
                   disabled={Boolean(busy)}
                   onClick={() => void startTrial()}
                 >
-                  {busy === "trial"
-                    ? "Активируем…"
-                    : "Начать Trial на 14 дней"}
+                  {busy === "trial" ? "Активируем…" : "Активировать бесплатно"}
                 </button>
               )}
             </>
           )}
         </article>
         <article className="panel billing-balance-card">
-          <span className="billing-label">Data balance</span>
+          <span className="billing-label">Кредиты платформы</span>
           <h2>{money(snapshot.balance.availableMinor)}</h2>
           <p>
             {money(snapshot.balance.includedCreditsMinor)} включено ·{" "}
@@ -399,42 +432,204 @@ export function BillingSettings({
             не расходует provider balance платформы.
           </span>
         </article>
+        <article className="panel billing-payment-card">
+          <span className="billing-label">Способ оплаты</span>
+          <h2>
+            {canManagePaymentMethods
+              ? activePaymentMethod?.title ?? "Не привязан"
+              : "Скрыт правами"}
+          </h2>
+          <p>
+            {!canManagePaymentMethods
+              ? "Способ оплаты доступен владельцу и участникам с правом управления биллингом."
+              : activePaymentMethod
+              ? "Используется только для подтверждённых автоплатежей."
+              : "Карта сохраняется YooKassa только после вашего согласия."}
+          </p>
+          {canManagePaymentMethods ? (
+            <a className="secondary-button" href="#billing-checkout">
+              {activePaymentMethod ? "Управлять" : "Добавить при оплате"}
+            </a>
+          ) : (
+            <span className="billing-balance-note">Без раскрытия платёжных реквизитов</span>
+          )}
+        </article>
+        <article className="panel billing-action-card">
+          <span className="billing-label">Действия</span>
+          <button
+            className="primary-button"
+            disabled={!canManagePlan}
+            onClick={() =>
+              document
+                .getElementById("billing-plans")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" })
+            }
+          >
+            Изменить тариф
+          </button>
+          <button
+            className="secondary-button"
+            disabled={!canTopUp}
+            onClick={() => {
+              setSelectedPlan(undefined);
+              document
+                .getElementById("billing-checkout")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          >
+            Пополнить баланс
+          </button>
+        </article>
       </section>
 
-      <section className="panel">
+      <section className="panel billing-usage-panel">
+        <div className="billing-section-heading">
+          <div>
+            <span className="billing-label">Использование</span>
+            <h2>Лимиты текущего периода</h2>
+          </div>
+          <small>
+            {snapshot.subscription
+              ? `${dateLabel(snapshot.subscription.currentPeriodStart)} — ${dateLabel(snapshot.subscription.currentPeriodEnd)}`
+              : "Подписка не активна"}
+          </small>
+        </div>
+        <div className="billing-usage-grid">
+          <BillingUsageMeter
+            label="Активные проекты"
+            {...(currentPlan
+              ? { limit: currentPlan.features.projects }
+              : {})}
+            unit="проектов"
+            value={projectCount}
+          />
+          <BillingUsageMeter
+            label="Доступные кредиты"
+            unit="₽"
+            value={snapshot.balance.availableMinor / 100}
+          />
+          <BillingUsageMeter
+            label="Списания в загруженном журнале"
+            unit="₽"
+            value={loadedLedgerSpend / 100}
+          />
+          <BillingUsageMeter
+            label="Хранимые запросы"
+            {...(currentPlan
+              ? { limit: currentPlan.features.storedKeywords }
+              : {})}
+            unit="запросов"
+          />
+          <BillingUsageMeter
+            label="Поисковые контексты"
+            {...(currentPlan
+              ? { limit: currentPlan.features.trackedContextPairs }
+              : {})}
+            unit="пар"
+          />
+          <BillingUsageMeter
+            label="Автоматизации"
+            {...(currentPlan
+              ? { limit: currentPlan.features.scheduledAutomations }
+              : {})}
+            unit="правил"
+          />
+          <BillingUsageMeter
+            label="Участники"
+            {...(currentPlan
+              ? { limit: currentPlan.features.seats }
+              : {})}
+            unit="мест"
+          />
+          <BillingUsageMeter
+            label="Хранилище"
+            {...(currentPlan
+              ? { limit: currentPlan.features.storageBytes }
+              : {})}
+            unit="байт"
+          />
+        </div>
+        <p className="billing-usage-note">
+          Тариф принадлежит рабочей области, а не отдельному пользователю.
+          Все приглашённые участники получают возможности тарифа только в
+          рамках этой рабочей области. Лимиты применяются сервером атомарно
+          при создании проекта, папки, приглашении участника, импорте
+          запросов и запуске фоновой задачи. Значение «—» означает, что
+          сервис-владелец ещё не отдал агрегированный расход; лимит при этом
+          всё равно проверяется.
+        </p>
+      </section>
+
+      {currentPlan && (
+        <section className="panel billing-entitlements-panel">
+          <div className="billing-section-heading">
+            <div>
+              <span className="billing-label">Возможности плана</span>
+              <h2>Что доступно на {currentPlan.name}</h2>
+            </div>
+            <span className="billing-server-check">Проверяется сервером</span>
+          </div>
+          <div className="billing-entitlements-grid">
+            <BillingEntitlement label="Запросов в проекте" value={number(currentPlan.features.keywordsPerProject)} />
+            <BillingEntitlement
+              label="Папок в проекте"
+              value={currentPlan.features.foldersPerProject === 0
+                ? "Без ограничений"
+                : number(currentPlan.features.foldersPerProject)}
+            />
+            <BillingEntitlement label="Одновременных задач" value={number(currentPlan.features.concurrentJobs)} />
+            <BillingEntitlement label="Участников рабочей области" value={number(currentPlan.features.seats)} />
+            <BillingEntitlement label="Хранение SERP" value={`${number(currentPlan.features.rawSerpRetentionDays)} дней`} />
+            <BillingEntitlement label="Гостевые отчёты" value={number(currentPlan.features.guestReports)} />
+            <BillingEntitlement label="API-доступ" value={currentPlan.features.publicApi === "BASIC" ? "Базовый" : "Песочница"} />
+            <BillingEntitlement label="Собственные API-ключи" value={currentPlan.features.byok ? "Доступны" : "Недоступны"} />
+            <BillingEntitlement label="Клиентская роль" value={currentPlan.features.clientRole ? "Доступна" : "Недоступна"} />
+            <BillingEntitlement label="White label" value={currentPlan.features.whiteLabel ? "Доступен" : "Недоступен"} />
+            <BillingEntitlement label="Приоритет очереди" value={queuePriorityLabel(currentPlan.features.queuePriority)} />
+          </div>
+        </section>
+      )}
+
+      <section className="panel" id="billing-plans">
         <div className="billing-section-heading">
           <div>
             <span className="billing-label">Подписка</span>
             <h2>Выберите тариф</h2>
           </div>
-          <div
-            className="billing-period"
-            role="group"
-            aria-label="Период оплаты"
-          >
-            <button
-              className={period === "MONTHLY" ? "active" : undefined}
-              onClick={() => setPeriod("MONTHLY")}
+          {hasAnnualPlans && (
+            <div
+              className="billing-period"
+              role="group"
+              aria-label="Период оплаты"
             >
-              Месяц
-            </button>
-            <button
-              className={period === "ANNUAL" ? "active" : undefined}
-              onClick={() => setPeriod("ANNUAL")}
-            >
-              Год −15%
-            </button>
-          </div>
+              <button
+                className={period === "MONTHLY" ? "active" : undefined}
+                onClick={() => setPeriod("MONTHLY")}
+              >
+                Месяц
+              </button>
+              <button
+                className={period === "ANNUAL" ? "active" : undefined}
+                onClick={() => setPeriod("ANNUAL")}
+              >
+                Год
+              </button>
+            </div>
+          )}
         </div>
         <div className="billing-plans">
-          {snapshot.plans
-            .filter((plan) => plan.code !== "TRIAL")
-            .map((plan) => (
+          {snapshot.plans.map((plan) => (
               <PlanCard
                 canManage={canManagePlan}
                 current={snapshot.subscription?.planCode === plan.code}
                 key={plan.code}
-                onSelect={() => setSelectedPlan(plan.code)}
+                onSelect={() => {
+                  if (plan.code === "TRIAL") {
+                    void startTrial();
+                    return;
+                  }
+                  setSelectedPlan(plan.code);
+                }}
                 period={period}
                 plan={plan}
                 selected={selectedPlan === plan.code}
@@ -444,7 +639,7 @@ export function BillingSettings({
       </section>
 
       {(selected || canTopUp) && (
-        <section className="panel billing-checkout">
+        <section className="panel billing-checkout" id="billing-checkout">
           <div>
             <span className="billing-label">Hosted checkout YooKassa</span>
             <h2>
@@ -460,7 +655,7 @@ export function BillingSettings({
           <div className="billing-form-grid">
             <label>
               Тип плательщика
-              <select
+              <CustomSelect
                 value={buyerType}
                 onChange={(event) =>
                   setBuyerType(event.target.value as BuyerType)
@@ -469,7 +664,7 @@ export function BillingSettings({
                 <option value="INDIVIDUAL">Физическое лицо</option>
                 <option value="INDIVIDUAL_ENTREPRENEUR">ИП</option>
                 <option value="LEGAL_ENTITY">Юридическое лицо</option>
-              </select>
+              </CustomSelect>
             </label>
             <label>
               Email для чека
@@ -785,14 +980,81 @@ function PlanCard({
       <ul>
         <li>{number(plan.features.seats)} пользователей</li>
         <li>{number(plan.features.projects)} проектов</li>
-        <li>{number(plan.features.trackedContextPairs)} tracked pairs</li>
+        <li>
+          {plan.features.foldersPerProject === 0
+            ? "Без лимита папок"
+            : `${number(plan.features.foldersPerProject)} папок на проект`}
+        </li>
+        <li>{number(plan.features.keywordsPerProject)} ключей на проект</li>
+        <li>{number(plan.features.concurrentJobs)} одновременных задач</li>
         <li>{money(plan.includedDataCreditsMinor)} data credits</li>
       </ul>
       {canManage && price && (
-        <button className="secondary-button" onClick={onSelect}>
-          {current ? "Продлить" : "Выбрать"}
+        <button
+          className="secondary-button"
+          disabled={current && price.amountMinor === 0}
+          onClick={onSelect}
+        >
+          {current
+            ? price.amountMinor === 0
+              ? "Текущий тариф"
+              : "Продлить"
+            : price.amountMinor === 0
+            ? "Активировать"
+            : "Выбрать"}
         </button>
       )}
+    </article>
+  );
+}
+
+function BillingEntitlement({
+  label,
+  value
+}: Readonly<{ label: string; value: string }>) {
+  return (
+    <div className="billing-entitlement">
+      <span aria-hidden="true">✓</span>
+      <div>
+        <small>{label}</small>
+        <strong>{value}</strong>
+      </div>
+    </div>
+  );
+}
+
+function BillingUsageMeter({
+  label,
+  limit,
+  unit,
+  value
+}: Readonly<{
+  label: string;
+  limit?: number;
+  unit: string;
+  value?: number;
+}>) {
+  const ratio =
+    value !== undefined && limit !== undefined && limit > 0
+      ? Math.min(100, Math.round((value / limit) * 100))
+      : undefined;
+  return (
+    <article className="billing-usage-meter">
+      <span>{label}</span>
+      <strong>
+        {value === undefined ? "—" : number(value)}
+        {limit === undefined ? ` ${unit}` : ` из ${number(limit)} ${unit}`}
+      </strong>
+      <div aria-hidden="true">
+        <i style={{ width: `${ratio ?? (value === undefined ? 0 : 100)}%` }} />
+      </div>
+      <small>
+        {ratio === undefined
+          ? value === undefined
+            ? "Метрика появится после подключения агрегатора использования"
+            : "Текущее значение"
+          : `${ratio}% лимита`}
+      </small>
     </article>
   );
 }
@@ -827,6 +1089,21 @@ function money(minor: number): string {
     currency: "RUB",
     maximumFractionDigits: minor % 100 === 0 ? 0 : 2
   }).format(minor / 100);
+}
+
+function queuePriorityLabel(
+  priority: BillingPlanSummary["features"]["queuePriority"]
+): string {
+  const labels: Readonly<
+    Record<BillingPlanSummary["features"]["queuePriority"], string>
+  > = {
+    TRIAL: "Пробный",
+    NORMAL: "Обычный",
+    NORMAL_PLUS: "Повышенный",
+    HIGH: "Высокий",
+    HIGHEST_FAIR_USE: "Максимальный fair use"
+  };
+  return labels[priority];
 }
 
 function number(value: number): string {

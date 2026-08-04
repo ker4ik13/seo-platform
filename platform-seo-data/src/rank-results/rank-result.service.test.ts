@@ -53,7 +53,7 @@ test("persists one sealed chunk and updates current ranks atomically", async () 
     {
       isolationLevel: "ReadCommitted",
       maxWait: 5_000,
-      timeout: 30_000
+      timeout: 120_000
     }
   ]);
   assert.deepEqual(
@@ -143,17 +143,39 @@ test("keeps a foreign tenant indistinguishable from a missing manifest", async (
   assert.equal(harness.snapshotWrites, 0);
 });
 
-function validInput(): InternalIngestRankChunkInput {
-  const value = command();
+test("persists 15k rank snapshots in bounded createMany batches", async () => {
+  const harness = resultHarness(15_000);
+
+  const result = await new RankResultService(
+    harness.prisma
+  ).ingest(validInput(15_000));
+
+  assert.equal(result.persistedCount, "15000");
+  assert.equal(harness.snapshotWrites, 15);
+  assert.equal(harness.snapshotBatchSizes.length, 15);
+  assert.ok(
+    harness.snapshotBatchSizes.every((size) => size === 1_000)
+  );
+  assert.equal(harness.currentUpserts, 1);
+  assert.equal(harness.receiptWrites, 1);
+});
+
+function validInput(entryCount = 1): InternalIngestRankChunkInput {
+  const value = command({}, entryCount);
   return {
     ...value,
-    ingestEnvelopeHash: rankChunkIngestHash(value, sealedChunk())
+    ingestEnvelopeHash: rankChunkIngestHash(
+      value,
+      sealedChunk(entryCount)
+    )
   };
 }
 
 function command(
-  overrides: Partial<InternalRankChunkIngestCommand> = {}
+  overrides: Partial<InternalRankChunkIngestCommand> = {},
+  entryCount = 1
 ): InternalRankChunkIngestCommand {
+  const chunk = sealedChunk(entryCount);
   return {
     schemaVersion: "rank-ingest@1",
     workspaceId,
@@ -163,16 +185,15 @@ function command(
     jobItemId,
     manifestId,
     chunkIndex: 0,
-    manifestChunkHash: sealedChunk().chunkHash,
+    manifestChunkHash: chunk.chunkHash,
     provider: "ARSENKIN",
     operation: "POSITIONS",
     providerRequestId: "provider-task-1",
     connectorVersion: "1.0.0",
     observedAt,
-    results: [
-      {
-        manifestEntryId: entryId,
-        keywordId,
+    results: chunk.entries.map((entry, index) => ({
+        manifestEntryId: entry.id,
+        keywordId: entry.keywordId,
         dataQualityFlags: [
           "ABSOLUTE_POSITION_UNAVAILABLE",
           "PIXEL_POSITION_UNAVAILABLE",
@@ -180,28 +201,26 @@ function command(
           "SNIPPET_UNAVAILABLE"
         ],
         found: true,
-        position: 4,
-        rankingUrl: "https://example.com/rank",
-        normalizedRankingUrl: "https://example.com/rank",
+        position: index === 0 ? 4 : (index % 100) + 1,
+        rankingUrl:
+          index === 0
+            ? "https://example.com/rank"
+            : `https://example.com/rank/${index}`,
+        normalizedRankingUrl:
+          index === 0
+            ? "https://example.com/rank"
+            : `https://example.com/rank/${index}`,
         resultType: "ORGANIC",
         serpFeatures: []
-      }
-    ],
+      })),
     ...overrides
   };
 }
 
-function sealedChunk(): InternalRankManifestChunk {
-  const entry = {
-    id: entryId,
-    sequence: 0,
-    assignmentId,
-    keywordId,
-    keywordVersion: 1,
-    keywordText,
-    keywordTextHash: hash(utf8Sha256(keywordText)),
-    language: "en"
-  };
+function sealedChunk(entryCount = 1): InternalRankManifestChunk {
+  const entries = Array.from({ length: entryCount }, (_, index) =>
+    manifestEntry(index)
+  );
   const withoutHash: InternalRankManifestChunk = {
     workspaceId,
     projectId,
@@ -210,7 +229,7 @@ function sealedChunk(): InternalRankManifestChunk {
     chunkIndex: 0,
     hashSchemaVersion: "rank-manifest-chunk@1",
     chunkHash: hash("0".repeat(64)),
-    entries: [entry]
+    entries
   };
   return {
     ...withoutHash,
@@ -223,21 +242,40 @@ function sealedChunk(): InternalRankManifestChunk {
   };
 }
 
+function manifestEntry(index: number) {
+  const text = index === 0 ? keywordText : `seo platform ${index}`;
+  return {
+    id: index === 0 ? entryId : testUuid(100_000 + index),
+    sequence: index,
+    assignmentId:
+      index === 0 ? assignmentId : testUuid(200_000 + index),
+    keywordId: index === 0 ? keywordId : testUuid(300_000 + index),
+    keywordVersion: 1,
+    keywordText: text,
+    keywordTextHash: hash(utf8Sha256(text)),
+    language: "en"
+  };
+}
+
+function testUuid(suffix: number): string {
+  return `01900000-0000-7000-8000-${String(suffix).padStart(12, "0")}`;
+}
+
 function hash(value: string): RankManifestHash {
   return { algorithm: "SHA_256", value };
 }
 
-function resultHarness() {
+function resultHarness(entryCount = 1) {
   let status: "SEALED" | "CLOSED" = "SEALED";
   let receipt: Record<string, unknown> | null = null;
   let snapshotWrites = 0;
   let currentUpserts = 0;
   let receiptWrites = 0;
   let persistedSnapshot: unknown;
+  const snapshotBatchSizes: number[] = [];
   const transactionOptions: unknown[] = [];
 
-  const chunk = sealedChunk();
-  const entry = chunk.entries[0]!;
+  const chunk = sealedChunk(entryCount);
   const transaction = {
     $queryRaw: async (
       strings: TemplateStringsArray,
@@ -263,8 +301,9 @@ function resultHarness() {
             configurationVersion: 2,
             provider: "ARSENKIN",
             operation: "POSITIONS",
-            pairCount: 1,
+            pairCount: entryCount,
             chunkCount: 1,
+            chunkSize: 15_000,
             status,
             appliedAt
           }
@@ -281,22 +320,28 @@ function resultHarness() {
             chunkIndex: 0,
             hashSchemaVersion: "rank-manifest-chunk@1",
             chunkHash: Buffer.from(chunk.chunkHash.value, "hex"),
-            entryCount: 1
+            entryCount
           }
         ];
       }
       if (sql.includes("SELECT ARRAY(")) {
-        return [{ ids: [snapshotId] }];
+        return [
+          {
+            ids: Array.from({ length: entryCount }, (_, index) =>
+              index === 0 ? snapshotId : testUuid(400_000 + index)
+            )
+          }
+        ];
       }
       if (sql.includes('INSERT INTO "current_ranks"')) {
         currentUpserts += 1;
-        return [{ updatedCount: 1 }];
+        return [{ updatedCount: entryCount }];
       }
       throw new Error(`Unexpected SQL in rank result test: ${sql}`);
     },
     rankExecutionManifestEntry: {
-      findMany: async () => [
-        {
+      findMany: async () =>
+        chunk.entries.map((entry) => ({
           id: entry.id,
           sequence: entry.sequence,
           assignmentId: entry.assignmentId,
@@ -308,8 +353,7 @@ function resultHarness() {
             "hex"
           ),
           language: entry.language
-        }
-      ]
+        }))
     },
     rankChunkIngestReceipt: {
       findUnique: async () => receipt,
@@ -331,9 +375,9 @@ function resultHarness() {
         data: readonly unknown[];
       }) => {
         snapshotWrites += 1;
-        assert.equal(data.length, 1);
-        persistedSnapshot = data[0];
-        return { count: 1 };
+        snapshotBatchSizes.push(data.length);
+        persistedSnapshot ??= data[0];
+        return { count: data.length };
       }
     }
   };
@@ -350,6 +394,7 @@ function resultHarness() {
   return {
     prisma,
     transactionOptions,
+    snapshotBatchSizes,
     closeManifest() {
       status = "CLOSED";
     },

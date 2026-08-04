@@ -18,8 +18,46 @@ export function createRankEstimateInput(
       "Must be a valid UUID"
     );
   }
+  if (
+    input.provider !== undefined &&
+    input.provider !== "ARSENKIN" &&
+    input.provider !== "XMLSTOCK"
+  ) {
+    throw validationError(
+      "provider",
+      "INVALID_ENUM",
+      "Must be ARSENKIN or XMLSTOCK"
+    );
+  }
+  if (
+    input.credentialId !== undefined &&
+    (typeof input.credentialId !== "string" ||
+      !UUID_PATTERN.test(input.credentialId))
+  ) {
+    throw validationError(
+      "credentialId",
+      "INVALID_UUID",
+      "Must be a valid UUID"
+    );
+  }
+  if (
+    input.searchSource !== undefined &&
+    input.searchSource !== "SEARCH_API" &&
+    input.searchSource !== "LIVE"
+  ) {
+    throw validationError(
+      "searchSource",
+      "INVALID_ENUM",
+      "Must be SEARCH_API or LIVE"
+    );
+  }
   return {
-    trackingContextId: input.trackingContextId.toLowerCase()
+    trackingContextId: input.trackingContextId.toLowerCase(),
+    ...(input.provider ? { provider: input.provider } : {}),
+    ...(typeof input.credentialId === "string"
+      ? { credentialId: input.credentialId.toLowerCase() }
+      : {}),
+    ...(input.searchSource ? { searchSource: input.searchSource } : {})
   };
 }
 
@@ -40,14 +78,18 @@ function exactRecord(
   const input = value as Readonly<Record<string, unknown>>;
   if (
     Object.keys(input).some(
-      (key) => key !== "trackingContextId"
+      (key) =>
+        key !== "trackingContextId" &&
+        key !== "provider" &&
+        key !== "credentialId" &&
+        key !== "searchSource"
     ) ||
     !Object.hasOwn(input, "trackingContextId")
   ) {
     throw validationError(
       "$",
       "UNKNOWN_FIELD",
-      "Only trackingContextId is allowed"
+      "Only trackingContextId, provider, credentialId and searchSource are allowed"
     );
   }
   return input;

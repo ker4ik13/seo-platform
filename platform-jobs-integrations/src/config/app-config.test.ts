@@ -32,7 +32,7 @@ test("keeps optional adapters disabled by default", () => {
   assert.equal(config.rankExecution.submitEnabled, false);
   assert.equal(
     config.rankExecution.killSwitchVersion,
-    "arsenkin-positions@2"
+    "arsenkin-positions@4"
   );
 });
 
@@ -215,16 +215,17 @@ test("allows recorded provider submit only on the execution connector worker", (
   const development = loadAppConfig({
     NODE_ENV: "production",
     DATABASE_URL: "postgresql://test",
+    JOBS_TO_SEO_DATA_TOKEN: "s".repeat(32),
     INTEGRATION_CREDENTIAL_ROLE: "EXECUTION",
     INTEGRATION_CREDENTIAL_KEYS: `1:${encryptionKey}`,
     INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1",
     RANK_PROVIDER_SUBMIT_ENABLED: "true",
-    RANK_PROVIDER_KILL_SWITCH_VERSION: "arsenkin-positions@2"
+    RANK_PROVIDER_KILL_SWITCH_VERSION: "arsenkin-positions@4"
   });
   assert.equal(development.rankExecution.submitEnabled, true);
   assert.equal(
     development.rankExecution.killSwitchVersion,
-    "arsenkin-positions@2"
+    "arsenkin-positions@4"
   );
 
   assert.throws(
@@ -373,11 +374,12 @@ test("loads a least-privilege execution credential role", () => {
   assert.equal(config.integrationCredentialApiToken, undefined);
 });
 
-test("allows a production execution worker without internal API or NATS credentials", () => {
+test("allows a production execution worker with only SEO publication auth", () => {
   const encryptionKey = Buffer.alloc(32, 1).toString("base64url");
   const config = loadAppConfig({
     NODE_ENV: "production",
     DATABASE_URL: "postgresql://test",
+    JOBS_TO_SEO_DATA_TOKEN: "s".repeat(32),
     INTEGRATION_CREDENTIAL_ROLE: "EXECUTION",
     INTEGRATION_CREDENTIAL_KEYS: `1:${encryptionKey}`,
     INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1"
@@ -385,7 +387,7 @@ test("allows a production execution worker without internal API or NATS credenti
 
   assert.equal(config.integrationCredentials.role, "EXECUTION");
   assert.equal(config.platformApiToken, undefined);
-  assert.equal(config.seoDataApiToken, undefined);
+  assert.equal(config.seoDataApiToken, "s".repeat(32));
   assert.equal(config.nats.user, undefined);
   assert.equal(config.nats.password, undefined);
 });
@@ -438,7 +440,7 @@ test("rejects unrelated secrets on an execution-only worker", () => {
           INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1",
           ...extra
         }),
-      /Only the (?:Jobs HTTP|auth-email worker) process may receive|must not receive management, internal API, NATS, S3 or SMTP credentials|must not receive (?:NATS|S3|SMTP)|must be configured together/u
+      /Only the (?:Jobs HTTP|auth-email worker) process may receive|must not receive management, Platform API, NATS, S3 or SMTP credentials|must not receive (?:NATS|S3|SMTP)|must be configured together/u
     );
   }
 });
@@ -577,7 +579,7 @@ test("keeps the credential caller token separate from HTTP audience auth", () =>
   );
 });
 
-test("allows SEO Data auth only on HTTP, import and crawl worker roles", () => {
+test("allows SEO Data auth only on HTTP and SEO-calling worker roles", () => {
   const token = "s".repeat(32);
   const importConfig = loadAppConfig(
     {
@@ -600,11 +602,21 @@ test("allows SEO Data auth only on HTTP, import and crawl worker roles", () => {
   );
   assert.equal(crawlConfig.seoDataApiToken, token);
   assert.equal(crawlConfig.crawl.enabled, true);
-
-  for (const role of [
-    "INSPECTION_WORKER",
+  const encryptionKey = Buffer.alloc(32, 1).toString("base64url");
+  const connectorConfig = loadAppConfig(
+    {
+      NODE_ENV: "production",
+      DATABASE_URL: "postgresql://test",
+      JOBS_TO_SEO_DATA_TOKEN: token,
+      INTEGRATION_CREDENTIAL_ROLE: "EXECUTION",
+      INTEGRATION_CREDENTIAL_KEYS: `1:${encryptionKey}`,
+      INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1"
+    },
     "CONNECTOR_WORKER"
-  ] as const) {
+  );
+  assert.equal(connectorConfig.seoDataApiToken, token);
+
+  for (const role of ["INSPECTION_WORKER"] as const) {
     assert.throws(
       () =>
         loadAppConfig(
@@ -615,7 +627,7 @@ test("allows SEO Data auth only on HTTP, import and crawl worker roles", () => {
           },
           role
         ),
-      /Only the Jobs HTTP, import-worker and crawl-worker processes/u
+      /Only the Jobs HTTP, import-worker, crawl-worker and connector-worker processes/u
     );
   }
   assert.throws(
@@ -968,6 +980,7 @@ test("rejects every undeclared adapter capability by process role", () => {
     CONNECTOR_WORKER: {
       NODE_ENV: "test",
       DATABASE_URL: "postgresql://test",
+      JOBS_TO_SEO_DATA_TOKEN: "s".repeat(32),
       INTEGRATION_CREDENTIAL_ROLE: "EXECUTION",
       INTEGRATION_CREDENTIAL_KEYS: `1:${connectorKey}`,
       INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: "1"

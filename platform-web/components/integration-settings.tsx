@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   IntegrationCredentialSummary,
@@ -17,7 +19,8 @@ import {
   integrationProviderLabel
 } from "../lib/integration-presentation";
 import { IntegrationCredentialValidation } from "./integration-credential-validation";
-import { IntegrationStatusBadge } from "./integration-status-badge";
+import { ProviderLogo } from "./provider-logo";
+import { WorkspaceIntegrationRouting } from "./workspace-integration-routing";
 
 type Provider = IntegrationProvider;
 type ProviderCatalogItem = IntegrationProviderCatalogItem;
@@ -71,6 +74,8 @@ export function IntegrationSettings({
   const [credentials, setCredentials] = useState<readonly Credential[]>([]);
   const [draft, setDraft] = useState<CredentialDraft>(EMPTY_DRAFT);
   const [editing, setEditing] = useState<Credential>();
+  const [revokeTarget, setRevokeTarget] = useState<Credential>();
+  const [showCreate, setShowCreate] = useState(false);
   const [editLabel, setEditLabel] = useState("");
   const [editApiKey, setEditApiKey] = useState("");
   const [editAccountIdentifier, setEditAccountIdentifier] = useState("");
@@ -81,6 +86,8 @@ export function IntegrationSettings({
   const [createError, setCreateError] =
     useState<IntegrationOperationError>();
   const [editError, setEditError] =
+    useState<IntegrationOperationError>();
+  const [revokeError, setRevokeError] =
     useState<IntegrationOperationError>();
   const [listError, setListError] =
     useState<IntegrationOperationError>();
@@ -99,6 +106,9 @@ export function IntegrationSettings({
     credentialOperations[CREATE_OPERATION_KEY] === "create";
   const editingOperation = editing
     ? credentialOperations[editing.id]
+    : undefined;
+  const revokeOperation = revokeTarget
+    ? credentialOperations[revokeTarget.id]
     : undefined;
 
   useEffect(() => {
@@ -130,6 +140,26 @@ export function IntegrationSettings({
       });
     return () => controller.abort();
   }, [reload, workspaceId]);
+
+  useEffect(() => {
+    if (!showCreate) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !saving) setShowCreate(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [saving, showCreate]);
+
+  useEffect(() => {
+    if (!editing && !revokeTarget) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (editing && !editingOperation) closeEdit();
+      if (revokeTarget && !revokeOperation) closeRevoke();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [editing, editingOperation, revokeOperation, revokeTarget]);
 
   const selectedProvider = useMemo(
     () => catalog.find((item) => item.provider === draft.provider),
@@ -198,6 +228,7 @@ export function IntegrationSettings({
       setCredentials((current) => [credential, ...current]);
       createIdempotencyKey.current = undefined;
       setDraft({ ...EMPTY_DRAFT, provider: draft.provider });
+      setShowCreate(false);
       setCreateFieldErrors({});
       setSuccess(
         `${integrationProviderLabel(credential.provider)} сохранён в зашифрованном vault`
@@ -296,17 +327,23 @@ export function IntegrationSettings({
     }
   }
 
-  async function revoke(credential: Credential): Promise<void> {
-    if (
-      isCredentialOperationActive(credential.id) ||
-      !window.confirm(
-        `Отключить «${credential.label}»? Ключ будет отозван и перезаписан в активном vault.`
-      )
-    ) {
-      return;
-    }
+  function beginRevoke(credential: Credential): void {
+    if (isCredentialOperationActive(credential.id)) return;
+    setRevokeTarget(credential);
+    setRevokeError(undefined);
+    setSuccess(undefined);
+  }
+
+  function closeRevoke(): void {
+    setRevokeTarget(undefined);
+    setRevokeError(undefined);
+  }
+
+  async function revoke(): Promise<void> {
+    const credential = revokeTarget;
+    if (!credential || isCredentialOperationActive(credential.id)) return;
     if (!acquireCredentialOperation("revoke", credential.id)) return;
-    setListError(undefined);
+    setRevokeError(undefined);
     setSuccess(undefined);
     try {
       await browserApiRequest<{ readonly revoked: true }>(
@@ -317,9 +354,10 @@ export function IntegrationSettings({
         current.filter((item) => item.id !== credential.id)
       );
       if (editing?.id === credential.id) closeEdit();
+      closeRevoke();
       setSuccess("Подключение отключено, секрет перезаписан в активном vault");
     } catch (requestError) {
-      setListError(integrationOperationError(requestError));
+      setRevokeError(integrationOperationError(requestError));
     } finally {
       releaseCredentialOperation("revoke", credential.id);
     }
@@ -383,60 +421,97 @@ export function IntegrationSettings({
 
   return (
     <div className="integration-settings-stack">
+      <div className="integration-page-actions">
+        <div>
+          <strong>Подключения и квоты</strong>
+          <span>
+            Статусы, проверка ключей и фактические остатки провайдеров.
+          </span>
+        </div>
+        {canManage && (
+          <button
+            className="primary-button"
+            onClick={() => {
+              setCreateError(undefined);
+              setShowCreate(true);
+            }}
+            type="button"
+          >
+            + Добавить интеграцию
+          </button>
+        )}
+      </div>
       {success && (
         <div className="inline-alert success" role="status">
           {success}
         </div>
       )}
 
-      <section className="integration-catalog-grid" aria-label="Провайдеры">
-        {catalog.map((provider) => (
-          <article className="panel integration-provider-card" key={provider.provider}>
-            <header>
-              <span className="integration-provider-mark">
-                {provider.displayName.slice(0, 1)}
-              </span>
-              <div>
-                <h2>{provider.displayName}</h2>
-                <p>{providerDescription(provider.provider)}</p>
-              </div>
-            </header>
-            <div className="integration-capabilities">
-              {provider.capabilities.map((capability) => (
-                <span key={capability}>
-                  {integrationCapabilityLabel(capability)}
-                </span>
-              ))}
-            </div>
-            <small>{providerNotice(provider.provider)}</small>
-            {provider.provider === "KEYS_SO" && (
-              <a className="text-button integration-workflow-link" href="/app/competitors">
-                Собрать семантику конкурента →
-              </a>
-            )}
-            {provider.provider === "ARSENKIN" && (
-              <a className="text-button integration-workflow-link" href="/app/rankings">
-                Настроить съём позиций →
-              </a>
-            )}
-          </article>
-        ))}
+      <section
+        className="integration-overview-grid"
+        aria-label="Состояние подключений"
+      >
+        <IntegrationOverviewStat
+          icon="link"
+          label="подключения"
+          value={credentials.length}
+        />
+        <IntegrationOverviewStat
+          icon="success"
+          label="активны"
+          tone="success"
+          value={credentials.filter(({ status }) => status === "ACTIVE").length}
+        />
+        <IntegrationOverviewStat
+          icon="warning"
+          label="требуют внимания"
+          tone="warning"
+          value={credentials.filter(({ status }) =>
+            ["DEGRADED", "RATE_LIMITED", "LOW_BALANCE", "EXPIRED", "INVALID"].includes(status)
+          ).length}
+        />
+        <IntegrationOverviewStat
+          icon="disabled"
+          label="сервисов в каталоге"
+          value={catalog.length}
+        />
       </section>
 
-      {canManage ? (
+      {canManage && showCreate ? (
+        <div
+          className="integration-dialog-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !saving) {
+              setShowCreate(false);
+            }
+          }}
+        >
         <section
           aria-busy={saving}
           className="panel integration-connect-card"
+          id="new-integration"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="new-integration-title"
         >
           <header className="security-card-header">
             <div>
-              <h2>Новое подключение</h2>
+              <h2 id="new-integration-title">Новое подключение</h2>
               <p>
                 Браузер передаёт ключ в same-origin API по защищённому
                 HTTPS-соединению. Внутри платформы секрет обрабатывается
                 сервисом интеграций и сохраняется через AES-256-GCM.
               </p>
             </div>
+            <button
+              aria-label="Закрыть окно"
+              className="integration-dialog-close"
+              disabled={saving}
+              onClick={() => setShowCreate(false)}
+              type="button"
+            >
+              ×
+            </button>
           </header>
           {createError && (
             <IntegrationErrorAlert error={createError} />
@@ -444,7 +519,7 @@ export function IntegrationSettings({
           <div className="integration-form-grid">
             <label className="form-field">
               <span>Провайдер</span>
-              <select
+              <CustomSelect
                 disabled={saving}
                 onChange={(event) => {
                   setDraft({
@@ -465,7 +540,7 @@ export function IntegrationSettings({
                     {item.displayName}
                   </option>
                 ))}
-              </select>
+              </CustomSelect>
             </label>
             <label className="form-field">
               <span>Название подключения (обязательно)</span>
@@ -595,8 +670,9 @@ export function IntegrationSettings({
             </span>
           </div>
         </section>
+        </div>
       ) : (
-        <div className="inline-alert warning">
+        !canManage && <div className="inline-alert warning">
           {readOnly
             ? "Workspace работает в режиме только для чтения: существующие подключения видны, новые операции временно заблокированы."
             : "Просмотр доступен. Добавлять, менять и удалять workspace-ключи может только владелец или администратор."}
@@ -630,79 +706,83 @@ export function IntegrationSettings({
           <div className="integration-list">
             {credentials.map((credential) => (
               <article className="integration-credential-row" key={credential.id}>
-                <div className="integration-credential-main">
-                  <span className="integration-provider-mark compact">
-                    {integrationProviderLabel(credential.provider).slice(0, 1)}
-                  </span>
-                  <div>
-                    <strong>{credential.label}</strong>
+                <div className="integration-credential-card-body">
+                  <header className="integration-credential-header">
+                    <div className="integration-credential-main">
+                      <ProviderLogo provider={credential.provider} size="compact" />
+                      <div>
+                        <strong>{credential.label}</strong>
+                        <span>
+                          {integrationProviderLabel(credential.provider)} ·{" "}
+                          <code>{credential.displayHint}</code>
+                        </span>
+                      </div>
+                    </div>
+                    <IntegrationCredentialValidation
+                      activeValidation={credential.activeValidation}
+                      canTest={canTest}
+                      credentialId={credential.id}
+                      credentialLastErrorCode={credential.lastErrorCode}
+                      credentialLabel={credential.label}
+                      credentialStatus={credential.status}
+                      credentialVersion={credential.version}
+                      key={`${credential.id}:${credential.version}`}
+                      onAcquireOperation={() =>
+                        acquireCredentialOperation(
+                          "validation",
+                          credential.id
+                        )
+                      }
+                      onReleaseOperation={() =>
+                        releaseCredentialOperation(
+                          "validation",
+                          credential.id
+                        )
+                      }
+                      onResolveConflict={async () =>
+                        (
+                          await refreshCredential(credential.id)
+                        )?.activeValidation
+                      }
+                      onTerminal={async () => {
+                        await refreshCredential(credential.id);
+                      }}
+                      operationBlocked={Boolean(
+                        (credentialOperations[credential.id] &&
+                          credentialOperations[credential.id] !==
+                            "validation") ||
+                          editing?.id === credential.id ||
+                          revokeTarget?.id === credential.id
+                      )}
+                      provider={credential.provider}
+                      readOnly={readOnly}
+                      validationMode={
+                        catalog.find(
+                          ({ provider }) => provider === credential.provider
+                        )?.credentialValidationMode
+                      }
+                      workspaceId={workspaceId}
+                    />
+                  </header>
+                  <div className="integration-credential-meta">
+                    <span>{integrationCredentialModeLabel(credential.mode)}</span>
                     <span>
-                      {integrationProviderLabel(credential.provider)} ·{" "}
-                      <code>{credential.displayHint}</code>
+                      Обновлено{" "}
+                      {new Intl.DateTimeFormat("ru", {
+                        dateStyle: "medium"
+                      }).format(new Date(credential.updatedAt))}
                     </span>
+                    <IntegrationCredentialQuota credential={credential} />
                   </div>
                 </div>
-                <IntegrationStatusBadge status={credential.status} />
-                <div className="integration-credential-meta">
-                  <span>{integrationCredentialModeLabel(credential.mode)}</span>
-                  <span>
-                    Обновлено{" "}
-                    {new Intl.DateTimeFormat("ru", {
-                      dateStyle: "medium"
-                    }).format(new Date(credential.updatedAt))}
-                  </span>
-                </div>
-                <div className="integration-row-actions">
-                  <IntegrationCredentialValidation
-                    activeValidation={credential.activeValidation}
-                    canTest={canTest}
-                    credentialId={credential.id}
-                    credentialLastErrorCode={credential.lastErrorCode}
-                    credentialLabel={credential.label}
-                    credentialStatus={credential.status}
-                    credentialVersion={credential.version}
-                    key={`${credential.id}:${credential.version}`}
-                    onAcquireOperation={() =>
-                      acquireCredentialOperation(
-                        "validation",
-                        credential.id
-                      )
-                    }
-                    onReleaseOperation={() =>
-                      releaseCredentialOperation(
-                        "validation",
-                        credential.id
-                      )
-                    }
-                    onResolveConflict={async () =>
-                      (
-                        await refreshCredential(credential.id)
-                      )?.activeValidation
-                    }
-                    onTerminal={async () => {
-                      await refreshCredential(credential.id);
-                    }}
-                    operationBlocked={Boolean(
-                      (credentialOperations[credential.id] &&
-                        credentialOperations[credential.id] !==
-                          "validation") ||
-                        editing?.id === credential.id
-                    )}
-                    provider={credential.provider}
-                    readOnly={readOnly}
-                    validationMode={
-                      catalog.find(
-                        ({ provider }) => provider === credential.provider
-                      )?.credentialValidationMode
-                    }
-                    workspaceId={workspaceId}
-                  />
-                  {canManage && (
+                {canManage && (
+                  <footer className="integration-row-actions">
                     <div className="integration-credential-actions">
                       <button
-                        className="text-button"
+                        className="secondary-button integration-card-action"
                         disabled={Boolean(
-                          credentialOperations[credential.id]
+                          credentialOperations[credential.id] ||
+                            revokeTarget?.id === credential.id
                         )}
                         onClick={() => beginEdit(credential)}
                         type="button"
@@ -710,57 +790,122 @@ export function IntegrationSettings({
                         Изменить
                       </button>
                       <button
-                        className="text-button danger-text"
+                        className="secondary-button danger-button integration-card-action"
                         disabled={Boolean(
-                          credentialOperations[credential.id]
+                          credentialOperations[credential.id] ||
+                            editing?.id === credential.id
                         )}
-                        onClick={() => void revoke(credential)}
+                        onClick={() => beginRevoke(credential)}
                         type="button"
                       >
-                        {credentialOperations[credential.id] === "revoke"
-                          ? "Отключаем…"
-                          : "Отключить"}
+                        Отключить
                       </button>
                     </div>
-                  )}
-                </div>
+                  </footer>
+                )}
               </article>
             ))}
           </div>
         )}
       </section>
+      <WorkspaceIntegrationRouting workspaceId={workspaceId} />
+
+      <section className="integration-catalog-section" aria-label="Каталог сервисов">
+        <header>
+          <div>
+            <h2>Каталог сервисов</h2>
+            <p>Доступные источники данных и поддерживаемые возможности.</p>
+          </div>
+        </header>
+        <div className="integration-catalog-grid">
+          {catalog.map((provider) => (
+            <article className="panel integration-provider-card" key={provider.provider}>
+              <header>
+                <ProviderLogo provider={provider.provider} />
+                <div>
+                  <h2>{provider.displayName}</h2>
+                  <p>{providerDescription(provider.provider)}</p>
+                </div>
+              </header>
+              <div className="integration-capabilities">
+                {provider.capabilities.map((capability) => (
+                  <span key={capability}>
+                    {integrationCapabilityLabel(capability)}
+                  </span>
+                ))}
+              </div>
+              <small>{providerNotice(provider.provider)}</small>
+              <div className="integration-provider-actions">
+                {provider.provider === "KEYS_SO" && (
+                  <a className="text-button integration-workflow-link" href="/app/competitors">
+                    Собрать семантику конкурента
+                  </a>
+                )}
+                {provider.provider === "ARSENKIN" && (
+                  <a className="text-button integration-workflow-link" href="/app/semantics">
+                    Проверить позиции
+                  </a>
+                )}
+                {canManage && (
+                  <button
+                    className="secondary-button"
+                    onClick={() => {
+                      setDraft({ ...EMPTY_DRAFT, provider: provider.provider });
+                      setCreateError(undefined);
+                      setShowCreate(true);
+                    }}
+                    type="button"
+                  >
+                    Подключить
+                  </button>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
 
       {editing && (
-        <section
-          aria-busy={
-            editingOperation === "update" ||
-            editingOperation === "revoke"
-          }
-          aria-label="Изменение подключения"
-          className="panel integration-edit-card"
+        <div
+          className="integration-dialog-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !editingOperation) {
+              closeEdit();
+            }
+          }}
         >
-          <header className="security-card-header">
-            <div>
-              <h2>Изменить «{editing.label}»</h2>
-              <p>
-                Оставьте новый ключ пустым, чтобы изменить только название.
-                При ротации старый секрет будет полностью заменён.
-                {editing.provider === "XMLSTOCK"
-                  ? " Введите одновременно новый API-ключ и XMLStock user ID."
-                  : ""}
-              </p>
-            </div>
-            <button
-              className="text-button"
-              disabled={Boolean(editingOperation)}
-              onClick={closeEdit}
-              type="button"
-            >
-              Закрыть
-            </button>
-          </header>
-          {editError && <IntegrationErrorAlert error={editError} />}
-          <div className="integration-form-grid">
+          <section
+            aria-busy={editingOperation === "update"}
+            aria-labelledby="integration-edit-title"
+            aria-modal="true"
+            className="panel integration-edit-card"
+            role="dialog"
+          >
+            <header className="security-card-header">
+              <div>
+                <h2 id="integration-edit-title">
+                  Изменить «{editing.label}»
+                </h2>
+                <p>
+                  Оставьте новый ключ пустым, чтобы изменить только название.
+                  При ротации старый секрет будет полностью заменён.
+                  {editing.provider === "XMLSTOCK"
+                    ? " Введите одновременно новый API-ключ и XMLStock user ID."
+                    : ""}
+                </p>
+              </div>
+              <button
+                aria-label="Закрыть окно"
+                className="integration-dialog-close"
+                disabled={Boolean(editingOperation)}
+                onClick={closeEdit}
+                type="button"
+              >
+                ×
+              </button>
+            </header>
+            {editError && <IntegrationErrorAlert error={editError} />}
+            <div className="integration-form-grid">
             <label className="form-field">
               <span>Название (обязательно)</span>
               <input
@@ -866,23 +1011,99 @@ export function IntegrationSettings({
                 )}
               </label>
             )}
-          </div>
-          <div className="integration-form-actions">
-            <button
-              className="primary-button"
-              disabled={Boolean(editingOperation)}
-              onClick={() => void saveEdit()}
-              type="button"
-            >
-              {editingOperation === "update" ? "Сохраняем…" : "Сохранить"}
-            </button>
-            {(editApiKey.trim() || editAccountIdentifier.trim()) && (
-              <span>
-                После ротации статус вернётся в «ожидает проверки».
-              </span>
-            )}
-          </div>
-        </section>
+            </div>
+            <div className="integration-form-actions integration-dialog-actions">
+              <button
+                className="secondary-button"
+                disabled={Boolean(editingOperation)}
+                onClick={closeEdit}
+                type="button"
+              >
+                Отмена
+              </button>
+              <button
+                className="primary-button"
+                disabled={Boolean(editingOperation)}
+                onClick={() => void saveEdit()}
+                type="button"
+              >
+                {editingOperation === "update" ? "Сохраняем…" : "Сохранить"}
+              </button>
+              {(editApiKey.trim() || editAccountIdentifier.trim()) && (
+                <span>
+                  После ротации статус вернётся в «ожидает проверки».
+                </span>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+
+      {revokeTarget && (
+        <div
+          className="integration-dialog-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !revokeOperation) {
+              closeRevoke();
+            }
+          }}
+        >
+          <section
+            aria-busy={revokeOperation === "revoke"}
+            aria-labelledby="integration-revoke-title"
+            aria-modal="true"
+            className="panel integration-revoke-dialog"
+            role="alertdialog"
+          >
+            <header className="security-card-header">
+              <div>
+                <h2 id="integration-revoke-title">Отключить подключение?</h2>
+                <p>
+                  После подтверждения ключ «{revokeTarget.label}» будет
+                  отозван и перезаписан в активном vault.
+                </p>
+              </div>
+              <button
+                aria-label="Закрыть окно"
+                className="integration-dialog-close"
+                disabled={Boolean(revokeOperation)}
+                onClick={closeRevoke}
+                type="button"
+              >
+                ×
+              </button>
+            </header>
+            <div className="integration-revoke-summary">
+              <ProviderLogo provider={revokeTarget.provider} size="compact" />
+              <div>
+                <strong>{revokeTarget.label}</strong>
+                <span>
+                  {integrationProviderLabel(revokeTarget.provider)} ·{" "}
+                  <code>{revokeTarget.displayHint}</code>
+                </span>
+              </div>
+            </div>
+            {revokeError && <IntegrationErrorAlert error={revokeError} />}
+            <div className="integration-dialog-actions">
+              <button
+                className="secondary-button"
+                disabled={Boolean(revokeOperation)}
+                onClick={closeRevoke}
+                type="button"
+              >
+                Отмена
+              </button>
+              <button
+                className="danger-button"
+                disabled={Boolean(revokeOperation)}
+                onClick={() => void revoke()}
+                type="button"
+              >
+                {revokeOperation === "revoke" ? "Отключаем…" : "Отключить"}
+              </button>
+            </div>
+          </section>
+        </div>
       )}
     </div>
   );
@@ -915,6 +1136,109 @@ function IntegrationErrorAlert({
       )}
     </div>
   );
+}
+
+function IntegrationOverviewStat({
+  icon,
+  label,
+  tone = "neutral",
+  value
+}: Readonly<{
+  icon: "disabled" | "link" | "success" | "warning";
+  label: string;
+  tone?: "neutral" | "success" | "warning";
+  value: number;
+}>) {
+  const glyphs = { disabled: "○", link: "↗", success: "✓", warning: "!" };
+  return (
+    <article className={`integration-overview-stat ${tone}`}>
+      <span aria-hidden="true">{glyphs[icon]}</span>
+      <div>
+        <strong>{value}</strong>
+        <small>{label}</small>
+      </div>
+    </article>
+  );
+}
+
+function IntegrationCredentialQuota({
+  credential
+}: Readonly<{ credential: IntegrationCredentialSummary }>) {
+  const quota = credential.quota;
+  if (quota.status === "NOT_AVAILABLE") {
+    return (
+      <span className="integration-quota-unavailable">
+        {credential.verifiedAt
+          ? "Провайдер не вернул числовую квоту"
+          : "Проверьте подключение, чтобы получить квоту"}
+      </span>
+    );
+  }
+  const usedRatio =
+    quota.limit !== undefined && quota.limit > 0 && quota.used !== undefined
+      ? Math.min(100, Math.round((quota.used / quota.limit) * 100))
+      : undefined;
+  const quotaLabel = quota.unit === "ARSENKIN_LIMITS"
+    ? "Лимиты Arsenkin"
+    : quota.unit === "XMLSTOCK_REQUESTS"
+      ? "Лимиты XMLStock"
+      : "API-запросы";
+  return (
+    <div className="integration-quota" aria-label="Квота провайдера">
+      <span>
+        {quotaLabel}
+        <strong>{formatNumber(quota.remaining)} осталось</strong>
+      </span>
+      {quota.balance && (
+        <strong className="integration-provider-balance">
+          Баланс: {formatMoney(quota.balance.amount, quota.balance.currency)}
+        </strong>
+      )}
+      {(quota.usedToday !== undefined || quota.usedMonth !== undefined) && (
+        <small>
+          Расход: {formatNumber(quota.usedToday ?? 0)} сегодня · {formatNumber(quota.usedMonth ?? 0)} за месяц
+        </small>
+      )}
+      {quota.limit !== undefined && quota.used !== undefined && (
+        <>
+          <div
+            aria-label={`Использовано ${usedRatio ?? 0}%`}
+            aria-valuemax={100}
+            aria-valuemin={0}
+            aria-valuenow={usedRatio ?? 0}
+            role="progressbar"
+          >
+            <i style={{ width: `${usedRatio ?? 0}%` }} />
+          </div>
+          <small>
+            {formatNumber(quota.used)} из {formatNumber(quota.limit)} использовано
+          </small>
+        </>
+      )}
+      {quota.observedAt && (
+        <small>Проверено {formatDateTime(quota.observedAt)}</small>
+      )}
+    </div>
+  );
+}
+
+function formatNumber(value: number): string {
+  return new Intl.NumberFormat("ru-RU").format(value);
+}
+
+function formatMoney(value: string, currency: "RUB"): string {
+  return new Intl.NumberFormat("ru-RU", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2
+  }).format(Number(value));
+}
+
+function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat("ru-RU", {
+    dateStyle: "short",
+    timeStyle: "short"
+  }).format(new Date(value));
 }
 
 function providerDescription(provider: Provider): string {

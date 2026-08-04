@@ -20,6 +20,7 @@ import type {
   TrackingContextCollection,
   TrackingContextKeywordAssignmentItem,
   TrackingContextKeywordAssignmentState,
+  TrackingContextKeywordReplacementResult,
   TrackingContextSummary
 } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
@@ -34,6 +35,7 @@ import {
   internalChangeTrackingContextKeywordInput,
   internalChangeTrackingContextStatusInput,
   internalCreateTrackingContextInput,
+  internalReplaceTrackingContextKeywordsInput,
   internalUpdateTrackingContextInput,
   trackingContextKeywordQuery
 } from "./tracking-context-input.js";
@@ -171,6 +173,23 @@ export class TrackingContextController {
     );
   }
 
+  @Put(":contextId/keywords")
+  @HttpCode(200)
+  public async replaceKeywords(
+    @Param("projectId") projectId: string,
+    @Param("contextId") contextId: string,
+    @Body() body: unknown,
+    @Headers() headers: InternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<TrackingContextKeywordReplacementResult>> {
+    const input = internalReplaceTrackingContextKeywordsInput(body);
+    assertKeywordReplacement(projectId, contextId, headers, input);
+    return response(
+      request,
+      await this.trackingContexts.replaceKeywords(input)
+    );
+  }
+
   @Put(":contextId/keywords/:keywordId")
   @HttpCode(200)
   public async assignKeyword(
@@ -263,6 +282,20 @@ function assertKeywordMutation(
   ) {
     throw new BadRequestException(
       "Route identifiers do not match the command"
+    );
+  }
+}
+
+function assertKeywordReplacement(
+  routeProjectId: string,
+  routeContextId: string,
+  headers: InternalHeaders,
+  input: InternalCommandContext & { readonly contextId: string }
+): void {
+  assertMutation(routeProjectId, headers, input);
+  if (internalUuid(routeContextId, "contextId") !== input.contextId) {
+    throw new BadRequestException(
+      "Route context identifier does not match the command"
     );
   }
 }

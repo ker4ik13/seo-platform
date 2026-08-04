@@ -34,6 +34,13 @@ test("requires container signatures for Excel and ZIP", () => {
     ).rejectionCode,
     "MIME_SIGNATURE_MISMATCH"
   );
+  assert.equal(
+    inspectImportMedia(
+      Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00]),
+      "application/vnd.key-collector.project"
+    ).accepted,
+    true
+  );
 });
 
 test("rejects executable and binary content disguised as CSV", () => {

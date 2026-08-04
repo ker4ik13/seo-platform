@@ -16,6 +16,7 @@ const entitlement = {
   planVersion: 1,
   storedKeywords: 2_000_000,
   keywordsPerProject: 2_000_000,
+  foldersPerProject: 500,
   trackedContextPairs: 50_000
 } as const;
 
@@ -220,4 +221,60 @@ test("returns an applied chunk idempotently and rejects payload substitution", a
       }),
     BadRequestException
   );
+});
+
+test("binds a KC4 group manifest into the idempotent chunk hash", async () => {
+  const rows = [
+    {
+      sourceRowNumber: "1",
+      textOriginal: "SEO",
+      textNormalized: "seo",
+      normalizedHash: "d".repeat(64),
+      language: "en",
+      customValues: {}
+    }
+  ];
+  const groupPaths = [["Статьи"], ["Статьи", "Пустая папка"]] as const;
+  const payloadHash = createHash("sha256")
+    .update(JSON.stringify({ groupPaths, rows }))
+    .digest("hex");
+  const service = new SemanticImportService({
+    semanticImportReceipt: {
+      findUnique: async () => ({
+        ...context,
+        status: "RECEIVING",
+        mappingHash: "b".repeat(64),
+        duplicatePolicy: "SKIP_EXISTING",
+        expectedChunks: 1,
+        expectedUniqueRows: 1n
+      })
+    },
+    semanticImportChunkReceipt: {
+      findUnique: async () => ({
+        importId: context.importId,
+        chunkIndex: 0,
+        payloadHash,
+        inputRows: 1,
+        createdKeywords: 1n,
+        updatedKeywords: 0n,
+        skippedKeywords: 0n,
+        createdGroups: 2n,
+        createdPages: 0n,
+        createdTags: 0n,
+        createdMetricSnapshots: 0n,
+        createdAt: new Date()
+      })
+    }
+  } as unknown as PrismaService);
+
+  const result = await service.applyChunk({
+    ...context,
+    chunkIndex: 0,
+    payloadHash,
+    duplicatePolicy: "SKIP_EXISTING",
+    groupPaths,
+    rows
+  });
+
+  assert.equal(result.createdGroups, "2");
 });

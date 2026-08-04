@@ -1,7 +1,8 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { IntegrationCredentialCryptoService } from "../integrations/integration-credential-crypto.service.js";
+import { IntegrationCredentialRefreshSchedulerService } from "../integrations/integration-credential-refresh-scheduler.service.js";
 import {
   ArsenkinRankConnector,
   arsenkinRankWireRequestHash,
@@ -15,10 +16,24 @@ import {
   type RankConnectorSubmitClaim
 } from "./rank-connector-runtime-broker.service.js";
 import { ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION } from "./rank-execution-evidence.js";
+import {
+  XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION
+} from "./rank-execution-evidence.js";
+import {
+  XmlStockRankConnector,
+  buildXmlStockRankWireRequest,
+  stageXmlStockRankResult,
+  xmlStockRankWireRequestHash
+} from "./xmlstock-rank.connector.js";
 
 export const ARSENKIN_RANK_CONNECTOR = Symbol(
   "ARSENKIN_RANK_CONNECTOR"
 );
+export const XMLSTOCK_RANK_CONNECTOR = Symbol("XMLSTOCK_RANK_CONNECTOR");
+
+const RANK_PROVIDER_REQUEST_TIMEOUT_MAX_MS = 10_000;
+const RANK_CONNECTOR_LEASE_MARGIN_MS = 3_000;
+const RANK_CONNECTOR_SUBMIT_LEASE_MAX_SECONDS = 25;
 
 export type RankConnectorRuntimeOutcome =
   | "DISABLED"
@@ -37,32 +52,39 @@ export class RankConnectorRuntimeService {
     private readonly crypto: IntegrationCredentialCryptoService,
     @Inject(ARSENKIN_RANK_CONNECTOR)
     private readonly connector: ArsenkinRankConnector,
-    @Inject(APP_CONFIG) private readonly config: AppConfig
+    @Inject(XMLSTOCK_RANK_CONNECTOR)
+    private readonly xmlStockConnector: XmlStockRankConnector,
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Optional()
+    private readonly refreshScheduler?: IntegrationCredentialRefreshSchedulerService
   ) {}
 
   /**
-   * Performs at most one provider HTTP request. The BullMQ queue shared with
-   * credential validation supplies the provider-wide rate limit.
+   * Performs one submit/status request, plus one result request only after a
+   * finished status. The BullMQ queue shared with credential validation uses
+   * a conservative per-job limit because a finished poll costs two requests.
    */
   public async processOne(
     leaseOwner: string
   ): Promise<RankConnectorRuntimeOutcome> {
     try {
       if (this.config.rankExecution.submitEnabled) {
-        const submit = await this.broker.claimSubmit(
-          leaseOwner,
-          this.leaseSeconds(),
-          ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION
-        );
-        if (submit) return this.submit(submit);
+        const submit = await this.claimSubmit(leaseOwner);
+        if (submit) {
+          return await this.withCredentialRefresh(
+            submit.credentialId,
+            () => this.submit(submit)
+          );
+        }
       }
 
-      const poll = await this.broker.claimPoll(
-        leaseOwner,
-        this.leaseSeconds(),
-        ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION
-      );
-      if (poll) return this.poll(poll);
+      const poll = await this.claimPoll(leaseOwner);
+      if (poll) {
+        return await this.withCredentialRefresh(
+          poll.credentialId,
+          () => this.poll(poll)
+        );
+      }
       return this.config.rankExecution.submitEnabled ? "IDLE" : "DISABLED";
     } catch (error) {
       if (error instanceof RankConnectorLeaseLostError) {
@@ -72,36 +94,66 @@ export class RankConnectorRuntimeService {
     }
   }
 
+  private async withCredentialRefresh<T>(
+    credentialId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    try {
+      return await operation();
+    } finally {
+      await this.refreshScheduler
+        ?.scheduleAfterProviderOperation(credentialId)
+        .catch(() => undefined);
+    }
+  }
+
   private async submit(
     claim: RankConnectorSubmitClaim
   ): Promise<RankConnectorRuntimeOutcome> {
     const requestIntent = await this.broker.readSubmitRequest(claim);
-    const wireRequest = buildArsenkinRankWireRequest(requestIntent);
-    const wireRequestHash = Buffer.from(
-      arsenkinRankWireRequestHash(wireRequest).value,
-      "hex"
-    );
-    this.assertNetworkBudget(claim.leaseExpiresAt);
+    const built = claim.provider === "XMLSTOCK"
+      ? (() => {
+          const request = buildXmlStockRankWireRequest(requestIntent);
+          return {
+            request,
+            hash: xmlStockRankWireRequestHash(request).value
+          };
+        })()
+      : (() => {
+          const request = buildArsenkinRankWireRequest(requestIntent);
+          return {
+            request,
+            hash: arsenkinRankWireRequestHash(request).value
+          };
+        })();
+    const wireRequestHash = Buffer.from(built.hash, "hex");
+    this.assertNetworkBudget(claim.leaseExpiresAt, 1);
     const secret = this.crypto.decrypt(
       claim.workspaceId,
-      "ARSENKIN",
+      claim.provider,
       claim.credentialId,
       claim.encryptedCredential
     );
     const permit = await this.broker.authorizeSubmit(
       claim,
-      ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION
+      connectorVersion(claim.provider)
     );
-    const outcome = await this.connector.submit(
-      requestIntent,
-      secret,
-      this.config.integrationCredentialValidation.timeoutMs
-    );
+    const outcome = claim.provider === "XMLSTOCK"
+      ? await this.xmlStockConnector.submit(
+          requestIntent,
+          secret,
+          this.providerRequestTimeoutMs()
+        )
+      : await this.connector.submit(
+          requestIntent,
+          secret,
+          this.providerRequestTimeoutMs()
+        );
     await this.broker.completeSubmit(
       claim,
       permit,
       outcome,
-      wireRequest,
+      built.request,
       wireRequestHash
     );
     return outcome.status === "ACCEPTED"
@@ -112,21 +164,39 @@ export class RankConnectorRuntimeService {
   private async poll(
     claim: RankConnectorPollClaim
   ): Promise<RankConnectorRuntimeOutcome> {
-    this.assertNetworkBudget(claim.leaseExpiresAt);
+    this.assertNetworkBudget(
+      claim.leaseExpiresAt,
+      claim.provider === "XMLSTOCK" &&
+        claim.request.execution.searchEngine === "GOOGLE"
+        ? Math.ceil(claim.request.execution.depth / 10)
+        : 2
+    );
     const secret = this.crypto.decrypt(
       claim.workspaceId,
-      "ARSENKIN",
+      claim.provider,
       claim.credentialId,
       claim.encryptedCredential
     );
-    const outcome = await this.connector.fetchResult(
-      claim.providerTaskId,
-      secret,
-      this.config.integrationCredentialValidation.timeoutMs
-    );
+    const outcome = claim.provider === "XMLSTOCK"
+      ? await this.xmlStockConnector.fetchResult(
+          claim.providerTaskId,
+          secret,
+          this.providerRequestTimeoutMs(),
+          claim.request
+        )
+      : await this.connector.fetchResult(
+          claim.providerTaskId,
+          secret,
+          this.providerRequestTimeoutMs()
+        );
     switch (outcome.status) {
       case "PENDING":
-        await this.broker.completePoll(claim, { outcome: "PENDING" });
+        await this.broker.completePoll(claim, {
+          outcome: "PENDING",
+          ...(claim.provider === "XMLSTOCK"
+            ? { retryAfterSeconds: 25 }
+            : {})
+        });
         return "POLL_PENDING";
       case "RETRYABLE_FAILURE":
         await this.broker.completePoll(claim, {
@@ -145,12 +215,31 @@ export class RankConnectorRuntimeService {
         return "POLL_TERMINAL";
       case "READY": {
         const observedAt = new Date().toISOString();
-        const staged = stageArsenkinRankResult(
-          outcome.value,
-          claim.providerTaskId,
-          claim.request,
-          observedAt
-        );
+        let staged:
+          | ReturnType<typeof stageArsenkinRankResult>
+          | ReturnType<typeof stageXmlStockRankResult>;
+        try {
+          staged = claim.provider === "XMLSTOCK"
+            ? stageXmlStockRankResult(
+                outcome.value,
+                claim.providerTaskId,
+                claim.request,
+                observedAt
+              )
+            : stageArsenkinRankResult(
+                outcome.value,
+                claim.providerTaskId,
+                claim.request,
+                observedAt
+              );
+        } catch (error) {
+          if (!(error instanceof TypeError)) throw error;
+          await this.broker.completePoll(claim, {
+            outcome: "REJECTED",
+            errorCode: "INVALID_PROVIDER_RESPONSE"
+          });
+          return "POLL_TERMINAL";
+        }
         await this.broker.completePoll(claim, {
           outcome: "READY",
           observedAt,
@@ -162,27 +251,97 @@ export class RankConnectorRuntimeService {
     }
   }
 
-  private leaseSeconds(): number {
+  private submitLeaseSeconds(): number {
+    // The authoritative execution grant is intentionally short lived. Submit
+    // performs one provider request, so reserving the much longer Google
+    // pagination lease here can make an otherwise valid grant unclaimable.
     return Math.min(
-      25,
+      RANK_CONNECTOR_SUBMIT_LEASE_MAX_SECONDS,
       Math.max(
         5,
         Math.ceil(
-          (this.config.integrationCredentialValidation.timeoutMs + 2_000) /
+          (this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS) /
             1_000
         )
       )
     );
   }
 
-  private assertNetworkBudget(leaseExpiresAt: string): void {
+  private pollLeaseSeconds(): number {
+    // Google XML can require up to ten sequential page requests for Top-100.
+    // Keep one lease long enough for the largest documented request while the
+    // broker still fences stale workers by generation and token.
+    const worstCasePollMs =
+      this.providerRequestTimeoutMs() * 10 +
+      RANK_CONNECTOR_LEASE_MARGIN_MS;
+    return Math.min(
+      120,
+      Math.max(
+        5,
+        Math.ceil(worstCasePollMs / 1_000)
+      )
+    );
+  }
+
+  private providerRequestTimeoutMs(): number {
+    return Math.min(
+      this.config.integrationCredentialValidation.timeoutMs,
+      RANK_PROVIDER_REQUEST_TIMEOUT_MAX_MS
+    );
+  }
+
+  private assertNetworkBudget(
+    leaseExpiresAt: string,
+    maximumRequestCount: number
+  ): void {
     const remainingMs = Date.parse(leaseExpiresAt) - Date.now();
     if (
       !Number.isFinite(remainingMs) ||
       remainingMs <
-        this.config.integrationCredentialValidation.timeoutMs + 1_000
+        this.providerRequestTimeoutMs() * maximumRequestCount +
+          1_000
     ) {
       throw new RankConnectorLeaseLostError();
     }
   }
+
+  private async claimSubmit(
+    leaseOwner: string
+  ): Promise<RankConnectorSubmitClaim | undefined> {
+    return (
+      (await this.broker.claimSubmit(
+        leaseOwner,
+        this.submitLeaseSeconds(),
+        ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION
+      )) ??
+      this.broker.claimSubmit(
+        leaseOwner,
+        this.submitLeaseSeconds(),
+        XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION
+      )
+    );
+  }
+
+  private async claimPoll(
+    leaseOwner: string
+  ): Promise<RankConnectorPollClaim | undefined> {
+    return (
+      (await this.broker.claimPoll(
+        leaseOwner,
+        this.pollLeaseSeconds(),
+        ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION
+      )) ??
+      this.broker.claimPoll(
+        leaseOwner,
+        this.pollLeaseSeconds(),
+        XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION
+      )
+    );
+  }
+}
+
+function connectorVersion(provider: "ARSENKIN" | "XMLSTOCK"): string {
+  return provider === "XMLSTOCK"
+    ? XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION
+    : ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION;
 }

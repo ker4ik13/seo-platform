@@ -6,19 +6,31 @@ import { SemanticCoreTable } from "./semantic-core-table";
 import { SemanticCustomColumnManager } from "./semantic-custom-column-manager";
 import { SemanticModal } from "./semantic-modal";
 import { SemanticUpload } from "./semantic-upload";
-import { SemanticVersionHistory } from "./semantic-version-history";
+import {
+  SemanticTrashRecoveryDialog,
+  type SemanticTrashRecoveryItem
+} from "./semantic-trash-recovery-dialog";
+import type { AppProject } from "../lib/app-types";
 
-type SemanticTool = "IMPORT" | "CLUSTERS" | "COLUMNS" | "HISTORY";
+type SemanticTool = "IMPORT" | "CLUSTERS" | "COLUMNS";
 
 export function SemanticsWorkspace({
   projectId,
-  projectName
-}: Readonly<{ projectId: string; projectName: string }>) {
+  projectName,
+  projects
+}: Readonly<{
+  projectId: string;
+  projectName: string;
+  projects: readonly AppProject[];
+}>) {
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [groupRefreshVersion, setGroupRefreshVersion] = useState(0);
   const [clusterRefreshVersion, setClusterRefreshVersion] = useState(0);
   const [columnRefreshVersion, setColumnRefreshVersion] = useState(0);
   const [activeTool, setActiveTool] = useState<SemanticTool>();
+  const [trashRecoveryItems, setTrashRecoveryItems] = useState<
+    readonly SemanticTrashRecoveryItem[]
+  >([]);
 
   return (
     <div className="semantic-workspace">
@@ -29,10 +41,10 @@ export function SemanticsWorkspace({
         onGroupsChanged={() => setGroupRefreshVersion((value) => value + 1)}
         onOpenClusters={() => setActiveTool("CLUSTERS")}
         onOpenColumns={() => setActiveTool("COLUMNS")}
-        onOpenHistory={() => setActiveTool("HISTORY")}
         onOpenImport={() => setActiveTool("IMPORT")}
         projectId={projectId}
         projectName={projectName}
+        projects={projects}
         refreshVersion={refreshVersion}
       />
       {activeTool && (
@@ -45,9 +57,25 @@ export function SemanticsWorkspace({
           <div className="semantic-tool-modal-content">
             {activeTool === "IMPORT" && (
               <SemanticUpload
-                onPublished={() => {
+                onPublished={(result) => {
                   setRefreshVersion((value) => value + 1);
                   setGroupRefreshVersion((value) => value + 1);
+                  if (result.trashedDuplicateCandidates?.length) {
+                    setActiveTool(undefined);
+                    setTrashRecoveryItems(
+                      result.trashedDuplicateCandidates.map((candidate) => ({
+                        keywordId: candidate.keywordId,
+                        text: candidate.text,
+                        input: {
+                          text: candidate.text,
+                          language: candidate.language,
+                          priority: 0,
+                          isFavorite: false,
+                          tagNames: []
+                        }
+                      }))
+                    );
+                  }
                 }}
                 projectId={projectId}
               />
@@ -64,15 +92,20 @@ export function SemanticsWorkspace({
                 projectId={projectId}
               />
             )}
-            {activeTool === "HISTORY" && (
-              <SemanticVersionHistory
-                onRestored={() => setRefreshVersion((value) => value + 1)}
-                projectId={projectId}
-                refreshVersion={refreshVersion}
-              />
-            )}
           </div>
         </SemanticModal>
+      )}
+      {trashRecoveryItems.length > 0 && (
+        <SemanticTrashRecoveryDialog
+          items={trashRecoveryItems}
+          onClose={() => setTrashRecoveryItems([])}
+          onCompleted={() => {
+            setTrashRecoveryItems([]);
+            setRefreshVersion((value) => value + 1);
+            setGroupRefreshVersion((value) => value + 1);
+          }}
+          projectId={projectId}
+        />
       )}
     </div>
   );
@@ -86,8 +119,6 @@ function toolLabel(tool: SemanticTool): string {
       return "Кластеры запросов";
     case "COLUMNS":
       return "Колонки и представления";
-    case "HISTORY":
-      return "История семантического ядра";
   }
 }
 
@@ -99,7 +130,5 @@ function toolDescription(tool: SemanticTool): string {
       return "Создание, объединение, разделение и привязка кластеров к страницам.";
     case "COLUMNS":
       return "Типизированные пользовательские поля и настройка рабочей таблицы.";
-    case "HISTORY":
-      return "Версии, изменения и безопасный откат без перезаписи новых правок.";
   }
 }

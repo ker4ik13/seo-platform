@@ -178,7 +178,12 @@ function body(): Readonly<Record<string, unknown>> {
         remaining: "10"
       }
     },
-    billingCurrency: "RUB"
+    billingCurrency: "RUB",
+    jobCapacity: {
+      planCode: "PRO",
+      planVersion: 2,
+      concurrentJobs: 10
+    }
   };
 }
 

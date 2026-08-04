@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import {
   assignableWorkspaceRoleCodes,
   projectAccessLevels,
@@ -115,6 +117,7 @@ export function TeamManagement({
   const [confirmation, setConfirmation] = useState<TeamConfirmation>();
   const [confirmationError, setConfirmationError] = useState<TeamFailure>();
   const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteMessage, setInviteMessage] = useState("");
   const [inviteRole, setInviteRole] =
     useState<AssignableWorkspaceRoleCode>("SEO_SPECIALIST");
   const [inviteAllProjects, setInviteAllProjects] = useState(true);
@@ -382,7 +385,8 @@ export function TeamManagement({
       email: inviteEmail,
       roleCode: inviteRole,
       allProjects: inviteAllProjects,
-      projectAccesses: inviteProjectAccesses
+      projectAccesses: inviteProjectAccesses,
+      message: inviteMessage
     };
     const errors = validateTeamInviteDraft(draft);
     if (Object.keys(errors).length > 0) {
@@ -423,6 +427,7 @@ export function TeamManagement({
           : current
       );
       setInviteEmail("");
+      setInviteMessage("");
       setInviteAllProjects(true);
       setInviteProjectAccesses([]);
       setFeedback({
@@ -758,7 +763,7 @@ export function TeamManagement({
               </label>
               <label className="form-field">
                 <span>Системная роль</span>
-                <select
+                <CustomSelect
                   aria-describedby={
                     inviteErrors.roleCode ? "team-invite-role-error" : undefined
                   }
@@ -780,7 +785,7 @@ export function TeamManagement({
                       {workspaceRoleLabel(roleCode)}
                     </option>
                   ))}
-                </select>
+                </CustomSelect>
                 {inviteErrors.roleCode && (
                   <small className="field-error" id="team-invite-role-error">
                     {inviteErrors.roleCode}
@@ -788,6 +793,35 @@ export function TeamManagement({
                 )}
               </label>
             </div>
+            <label className="form-field">
+              <span>Сообщение участнику (необязательно)</span>
+              <textarea
+                aria-describedby={
+                  inviteErrors.message ? "team-invite-message-error" : undefined
+                }
+                aria-invalid={Boolean(inviteErrors.message)}
+                disabled={
+                  !statusAllowsManage ||
+                  Boolean(runtimeRestriction) ||
+                  Boolean(operation)
+                }
+                maxLength={2_000}
+                onChange={(event) => {
+                  setInviteMessage(event.target.value);
+                  setInviteErrors({});
+                  setFeedback(undefined);
+                }}
+                placeholder="Например: присоединяйтесь к SEO-команде проекта"
+                rows={3}
+                value={inviteMessage}
+              />
+              <small>{inviteMessage.length} из 2 000</small>
+              {inviteErrors.message && (
+                <small className="field-error" id="team-invite-message-error">
+                  {inviteErrors.message}
+                </small>
+              )}
+            </label>
             <ProjectAccessEditor
               allProjects={inviteAllProjects}
               assignments={inviteProjectAccesses}
@@ -912,8 +946,8 @@ function MembersPanel({
         <div>
           <h2>Участники</h2>
           <p>
-            Роль определяет возможности во всём workspace; project overrides
-            могут только сузить доступ.
+            Системная роль определяет возможности в рабочей области, а роль в
+            каждом проекте может только сузить эти права.
           </p>
         </div>
         {state.phase === "ready" && (
@@ -1234,8 +1268,8 @@ function ProjectAccessEditor({
         <span>
           <strong>Все текущие и будущие проекты</strong>
           <small>
-            Выключите, чтобы разрешить только явно выбранные проекты. При
-            включённом правиле можно задать сужающие project overrides.
+            Выключите, чтобы разрешить только явно выбранные проекты. Для
+            каждого проекта можно назначить более узкую роль.
           </small>
         </span>
       </label>
@@ -1290,8 +1324,8 @@ function ProjectAccessEditor({
                   </div>
                 </div>
                 <label className="form-field">
-                  <span>Уровень доступа</span>
-                  <select
+                  <span>Роль в проекте</span>
+                  <CustomSelect
                     aria-label={`Доступ к проекту ${project.name}`}
                     disabled={disabled}
                     onChange={(event) =>
@@ -1301,7 +1335,7 @@ function ProjectAccessEditor({
                   >
                     {allProjects && (
                       <option value="INHERIT">
-                        По системной роли (без override)
+                        По системной роли
                       </option>
                     )}
                     {projectAccessLevels.map((accessLevel) => (
@@ -1309,7 +1343,12 @@ function ProjectAccessEditor({
                         {projectAccessLabel(accessLevel)}
                       </option>
                     ))}
-                  </select>
+                  </CustomSelect>
+                  <small>
+                    {projectAccessDescription(
+                      level ?? (allProjects ? "INHERIT" : "NONE")
+                    )}
+                  </small>
                 </label>
               </li>
             );
@@ -1403,7 +1442,7 @@ function MemberRow({
         </div>
         <label className="form-field">
           <span>Системная роль</span>
-          <select
+          <CustomSelect
             aria-label={`Роль участника ${member.email}`}
             disabled={!canMutate || owner || Boolean(operation)}
             onChange={(event) => setRoleCode(event.target.value)}
@@ -1415,7 +1454,7 @@ function MemberRow({
                 {workspaceRoleLabel(role)}
               </option>
             ))}
-          </select>
+          </CustomSelect>
           {owner && (
             <small>
               Владельца нельзя изменить или удалить обычным flow. Сначала
@@ -1754,12 +1793,16 @@ function inviteApiFieldErrors(error: unknown): TeamInviteFieldErrors {
     email?: string;
     roleCode?: string;
     projectAccesses?: string;
+    message?: string;
   } = {};
   for (const fieldError of error.fieldErrors) {
     const path = fieldError.path.split(".");
     const field = path.at(-1);
     if (field === "email") errors.email = "Проверьте email.";
     if (field === "roleCode") errors.roleCode = "Выберите доступную роль.";
+    if (field === "message") {
+      errors.message = "Сообщение должно быть не длиннее 2 000 символов.";
+    }
     if (
       path.includes("projectAccesses") ||
       path.includes("allProjects")
@@ -1819,6 +1862,11 @@ function teamFailure(
   if (error.code === "DUPLICATE") {
     return withRequestId(
       "Участник уже состоит в workspace или для этого email уже есть активное приглашение."
+    );
+  }
+  if (error.code === "QUOTA_EXCEEDED") {
+    return withRequestId(
+      "Достигнут лимит участников тарифа. Увеличьте его в разделе «Тариф и оплата»."
     );
   }
   if (error.status === 409) {
@@ -1910,9 +1958,19 @@ function projectAccessValue(value: string): ProjectAccessLevel | undefined {
 
 function projectAccessLabel(level: ProjectAccessLevel): string {
   if (level === "NONE") return "Нет доступа";
-  if (level === "VIEWER") return "Просмотр";
+  if (level === "VIEWER") return "Наблюдатель";
   if (level === "MEMBER") return "Участник";
-  return "Менеджер";
+  return "Менеджер проекта";
+}
+
+function projectAccessDescription(
+  level: ProjectAccessLevel | "INHERIT"
+): string {
+  if (level === "INHERIT") return "Права определяет системная роль.";
+  if (level === "NONE") return "Проект скрыт и недоступен.";
+  if (level === "VIEWER") return "Просмотр данных без изменений.";
+  if (level === "MEMBER") return "Работа с данными в рамках системной роли.";
+  return "Управление проектом и его участниками в рамках системной роли.";
 }
 
 function clearTenantPreference(name: string): void {

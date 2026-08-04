@@ -7,15 +7,22 @@ import {
 } from "@nestjs/common";
 import {
   domainEventTypes,
+  connectorFallbackModes,
+  connectorFallbackReasons,
   integrationCapabilities,
   integrationProviders,
   projectConnectorBindingChangedFields,
   projectConnectorBindingAvailabilities,
   type IntegrationCapability,
   type IntegrationProvider,
+  type ConnectorFallbackMode,
+  type ConnectorFallbackReason,
+  type ConnectorRoutingScope,
   type InternalCreateProjectConnectorBindingInput,
+  type InternalInheritProjectConnectorBindingInput,
   type InternalUpdateProjectConnectorBindingInput,
   type ProjectConnectorBinding,
+  type ProjectConnectorRoute,
   type ProjectConnectorBindingAvailability,
   type ProjectConnectorBindingChangedField,
   type ProjectConnectorBindingEventDataV1,
@@ -28,12 +35,15 @@ import type {
 } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { safeIntegrationCredentialCapabilities } from "./integration-credential-capabilities.js";
+import { safeCredentialQuota } from "./integration-credential.service.js";
 
 const CAPABILITIES = new Set<string>(integrationCapabilities);
 const PROVIDERS = new Set<string>(integrationProviders);
 const AVAILABILITIES = new Set<string>(
   projectConnectorBindingAvailabilities
 );
+const FALLBACK_MODES = new Set<string>(connectorFallbackModes);
+const FALLBACK_REASONS = new Set<string>(connectorFallbackReasons);
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const MAX_CREDENTIAL_OPTIONS = 500;
@@ -46,6 +56,8 @@ const BINDING_CREDENTIAL_SELECT = {
   mode: true,
   status: true,
   capabilities: true,
+  providerMeta: true,
+  lastSuccessAt: true,
   deletedAt: true
 } as const satisfies Prisma.IntegrationCredentialSelect;
 
@@ -60,8 +72,23 @@ const BINDING_INCLUDE = {
   }
 } as const satisfies Prisma.ProjectConnectorBindingInclude;
 
+const WORKSPACE_BINDING_INCLUDE = {
+  routes: {
+    include: {
+      credential: {
+        select: BINDING_CREDENTIAL_SELECT
+      }
+    },
+    orderBy: [{ position: "asc" as const }, { id: "asc" as const }]
+  }
+} as const satisfies Prisma.WorkspaceConnectorBindingInclude;
+
 type BindingRecord = Prisma.ProjectConnectorBindingGetPayload<{
   include: typeof BINDING_INCLUDE;
+}>;
+
+type WorkspaceBindingRecord = Prisma.WorkspaceConnectorBindingGetPayload<{
+  include: typeof WORKSPACE_BINDING_INCLUDE;
 }>;
 
 type BindingCredentialRecord = Prisma.IntegrationCredentialGetPayload<{
@@ -77,6 +104,8 @@ type CredentialOptionRecord = Pick<
   | "mode"
   | "status"
   | "capabilities"
+  | "providerMeta"
+  | "lastSuccessAt"
 >;
 
 const CREDENTIAL_OPTION_SELECT = {
@@ -86,7 +115,9 @@ const CREDENTIAL_OPTION_SELECT = {
   label: true,
   mode: true,
   status: true,
-  capabilities: true
+  capabilities: true,
+  providerMeta: true,
+  lastSuccessAt: true
 } as const;
 
 @Injectable()
@@ -139,10 +170,12 @@ export class ProjectConnectorBindingService {
 
     try {
       return await this.prisma.$transaction(async (transaction) => {
-        await assertCredentialAvailable(
+        const routes = requestedRoutes(input.route, input.fallbackRoutes);
+        assertFallbackConfiguration(input.fallbackPolicy.mode, routes.length);
+        await assertRoutesAvailable(
           transaction,
           input.workspaceId,
-          input.route.credentialId,
+          routes,
           input.capability
         );
         const binding =
@@ -152,19 +185,22 @@ export class ProjectConnectorBindingService {
               projectId: input.projectId,
               capability: input.capability,
               enabled: input.enabled,
+              fallbackMode: input.fallbackPolicy.mode,
+              fallbackReasons: fallbackReasonsJson(input.fallbackPolicy.reasons),
               createdBy: input.actorId,
               updatedBy: input.actorId
             }
           });
-        await transaction.projectConnectorRoute.create({
-          data: {
+        await transaction.projectConnectorRoute.createMany({
+          data: routes.map((route) => ({
             workspaceId: input.workspaceId,
             projectId: input.projectId,
             bindingId: binding.id,
-            position: 0,
+            position: route.position,
             sourceKind: "WORKSPACE_CREDENTIAL",
-            credentialId: input.route.credentialId
-          }
+            credentialId: route.credentialId,
+            routingScope: "PROJECT_OVERRIDE"
+          }))
         });
         const created = await transaction.projectConnectorBinding.findFirst({
           where: {
@@ -222,15 +258,16 @@ export class ProjectConnectorBindingService {
       throw versionConflict(current.version);
     }
     const currentSummary = projectConnectorBindingSummary(current);
-    const routeChanges =
-      currentSummary.route.credentialId !== input.route.credentialId;
+    const routes = requestedRoutes(input.route, input.fallbackRoutes);
+    assertFallbackConfiguration(input.fallbackPolicy.mode, routes.length);
+    const routeChanges = !sameRoutes(currentSummary.routes ?? [currentSummary.route], routes);
 
     return this.prisma.$transaction(async (transaction) => {
       if (input.enabled || routeChanges) {
-        await assertCredentialAvailable(
+        await assertRoutesAvailable(
           transaction,
           input.workspaceId,
-          input.route.credentialId,
+          routes,
           currentSummary.capability
         );
       }
@@ -245,6 +282,11 @@ export class ProjectConnectorBindingService {
           },
           data: {
             enabled: input.enabled,
+            configurationScope: "PROJECT_OVERRIDE",
+            workspaceBindingId: null,
+            workspaceBindingVersion: null,
+            fallbackMode: input.fallbackPolicy.mode,
+            fallbackReasons: fallbackReasonsJson(input.fallbackPolicy.reasons),
             updatedBy: input.actorId,
             version: { increment: 1 }
           }
@@ -263,20 +305,44 @@ export class ProjectConnectorBindingService {
         throw versionConflict(winner.version);
       }
 
-      const routeChanged =
-        await transaction.projectConnectorRoute.updateMany({
-          where: {
-            workspaceId: input.workspaceId,
-            projectId: input.projectId,
-            bindingId,
-            position: 0,
-            sourceKind: "WORKSPACE_CREDENTIAL"
-          },
-          data: { credentialId: input.route.credentialId }
-        });
-      if (routeChanged.count !== 1) {
-        throw new Error("Connector binding route projection is invalid");
+      const existingRoutes = await transaction.projectConnectorRoute.findMany({
+        where: { workspaceId: input.workspaceId, projectId: input.projectId, bindingId },
+        select: { id: true, position: true }
+      });
+      for (const route of routes) {
+        const existingRoute = existingRoutes.find(({ position }) => position === route.position);
+        if (existingRoute) {
+          await transaction.projectConnectorRoute.update({
+            where: { id: existingRoute.id },
+            data: {
+              credentialId: route.credentialId,
+              routingScope: "PROJECT_OVERRIDE",
+              workspaceRouteId: null
+            }
+          });
+        } else {
+          await transaction.projectConnectorRoute.create({
+            data: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              bindingId,
+              position: route.position,
+              sourceKind: "WORKSPACE_CREDENTIAL",
+              credentialId: route.credentialId,
+              routingScope: "PROJECT_OVERRIDE"
+            }
+          });
+        }
       }
+      const retainedPositions = routes.map(({ position }) => position);
+      await transaction.projectConnectorRoute.deleteMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          bindingId,
+          position: { notIn: retainedPositions }
+        }
+      });
 
       const updated =
         await transaction.projectConnectorBinding.findFirst({
@@ -287,6 +353,94 @@ export class ProjectConnectorBindingService {
           },
           include: BINDING_INCLUDE
         });
+      if (!updated) throw bindingNotFound();
+      const summary = projectConnectorBindingSummary(updated);
+      await writeBindingEvent(
+        transaction,
+        domainEventTypes.projectConnectorBindingUpdated,
+        summary,
+        currentSummary,
+        input.actorId,
+        requestId
+      );
+      return summary;
+    });
+  }
+
+  public async inheritWorkspaceRoute(
+    bindingId: string,
+    input: InternalInheritProjectConnectorBindingInput,
+    requestId: string
+  ): Promise<ProjectConnectorBinding> {
+    const current = await this.load(
+      bindingId,
+      input.workspaceId,
+      input.projectId
+    );
+    if (current.version !== input.version) {
+      throw versionConflict(current.version);
+    }
+    const currentSummary = projectConnectorBindingSummary(current);
+
+    return this.prisma.$transaction(async (transaction) => {
+      const workspace = await transaction.workspaceConnectorBinding.findUnique({
+        where: {
+          workspaceId_capability: {
+            workspaceId: input.workspaceId,
+            capability: current.capability
+          }
+        },
+        include: WORKSPACE_BINDING_INCLUDE
+      });
+      if (!workspace || workspace.routes.length === 0) {
+        throw workspaceRouteUnavailable();
+      }
+      const changed = await transaction.projectConnectorBinding.updateMany({
+        where: {
+          id: bindingId,
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          version: input.version
+        },
+        data: {
+          enabled: workspace.enabled,
+          fallbackMode: workspace.fallbackMode,
+          fallbackReasons: workspace.fallbackReasons as Prisma.InputJsonValue,
+          configurationScope: "WORKSPACE_INHERITED",
+          workspaceBindingId: workspace.id,
+          workspaceBindingVersion: workspace.version,
+          updatedBy: input.actorId,
+          version: { increment: 1 }
+        }
+      });
+      if (changed.count !== 1) {
+        const winner = await transaction.projectConnectorBinding.findFirst({
+          where: {
+            id: bindingId,
+            workspaceId: input.workspaceId,
+            projectId: input.projectId
+          },
+          select: { version: true }
+        });
+        if (!winner) throw bindingNotFound();
+        throw versionConflict(winner.version);
+      }
+
+      await replaceWithWorkspaceRoutes(
+        transaction,
+        bindingId,
+        input.workspaceId,
+        input.projectId,
+        workspace
+      );
+      const updated = await transaction.projectConnectorBinding.findFirst({
+        where: {
+          id: bindingId,
+          workspaceId: input.workspaceId,
+          projectId: input.projectId
+        },
+        include: BINDING_INCLUDE
+      });
       if (!updated) throw bindingNotFound();
       const summary = projectConnectorBindingSummary(updated);
       await writeBindingEvent(
@@ -332,17 +486,15 @@ export class ProjectConnectorBindingService {
     if (!requestHashMatches(receipt.requestHash, requestHash)) {
       throw idempotencyConflict();
     }
-    const snapshot = projectConnectorBindingSnapshot(
-      receipt.responseSnapshot
-    );
+    const binding = projectConnectorBindingSnapshot(receipt.responseSnapshot);
     if (
-      snapshot.workspaceId !== input.workspaceId ||
-      snapshot.projectId !== input.projectId ||
-      snapshot.id !== receipt.bindingId
+      receipt.bindingId !== binding.id ||
+      binding.workspaceId !== input.workspaceId ||
+      binding.projectId !== input.projectId
     ) {
       throw invalidStoredReceipt();
     }
-    return snapshot;
+    return binding;
   }
 }
 
@@ -373,10 +525,7 @@ function projectConnectorBindingSummary(
   binding: BindingRecord
 ): ProjectConnectorBinding {
   const capability = capabilityValue(binding.capability);
-  if (binding.routes.length !== 1) {
-    throw new Error("Connector binding must contain exactly one route");
-  }
-  const route = binding.routes[0];
+  const route = binding.routes.find(({ position }) => position === 0);
   if (
     !route ||
     route.workspaceId !== binding.workspaceId ||
@@ -389,32 +538,62 @@ function projectConnectorBindingSummary(
   ) {
     throw new Error("Connector binding route projection is invalid");
   }
-  const provider = providerValue(route.credential.provider);
+  const routes = binding.routes.map((candidate) => {
+    if (
+      candidate.workspaceId !== binding.workspaceId ||
+      candidate.projectId !== binding.projectId ||
+      candidate.bindingId !== binding.id ||
+      candidate.position < 0 ||
+      candidate.position > 7 ||
+      candidate.sourceKind !== "WORKSPACE_CREDENTIAL" ||
+      candidate.credential.workspaceId !== binding.workspaceId ||
+      candidate.credentialId !== candidate.credential.id
+    ) {
+      throw new Error("Connector binding route projection is invalid");
+    }
+    return {
+      id: candidate.id,
+      bindingId: candidate.bindingId,
+      workspaceId: candidate.workspaceId,
+      projectId: candidate.projectId,
+      position: candidate.position,
+      sourceKind: "WORKSPACE_CREDENTIAL" as const,
+      credentialId: candidate.credentialId,
+      provider: providerValue(candidate.credential.provider),
+      credentialMode: candidate.credential.mode,
+      routingScope: candidate.routingScope as ConnectorRoutingScope,
+      ...(candidate.workspaceRouteId
+        ? { workspaceRouteId: candidate.workspaceRouteId }
+        : {}),
+      createdAt: candidate.createdAt.toISOString(),
+      updatedAt: candidate.updatedAt.toISOString()
+    };
+  });
+  if (routes.some((candidate, index) => candidate.position !== index)) {
+    throw new Error("Connector binding route positions must be contiguous");
+  }
+  const primary = routes[0];
+  if (!primary) throw new Error("Connector binding primary route is missing");
+  const fallbackMode = fallbackModeValue(binding.fallbackMode);
+  const fallbackReasons = fallbackReasonValues(binding.fallbackReasons);
   return {
     id: binding.id,
     workspaceId: binding.workspaceId,
     projectId: binding.projectId,
     capability,
     enabled: binding.enabled,
-    route: {
-      id: route.id,
-      bindingId: route.bindingId,
-      workspaceId: route.workspaceId,
-      projectId: route.projectId,
-      position: 0,
-      sourceKind: "WORKSPACE_CREDENTIAL",
-      credentialId: route.credentialId,
-      provider,
-      credentialMode: route.credential.mode,
-      createdAt: route.createdAt.toISOString(),
-      updatedAt: route.updatedAt.toISOString()
-    },
-    fallbackPolicy: { mode: "NONE" },
+    configurationScope: binding.configurationScope as "PROJECT_OVERRIDE" | "WORKSPACE_INHERITED",
+    ...(binding.workspaceBindingId ? { workspaceBindingId: binding.workspaceBindingId } : {}),
+    route: primary,
+    routes,
+    fallbackPolicy: { mode: fallbackMode, reasons: fallbackReasons },
     budgetPolicy: { mode: "DISABLED" },
-    availability: bindingAvailability(binding.enabled, capability, {
-      ...route.credential,
-      provider
-    }),
+    availability: bindingAvailabilityForRoutes(
+      binding.enabled,
+      capability,
+      binding.routes,
+      fallbackMode
+    ),
     version: binding.version,
     createdBy: binding.createdBy,
     updatedBy: binding.updatedBy,
@@ -477,6 +656,11 @@ function credentialOption(
   credential: CredentialOptionRecord
 ): ProjectConnectorCredentialOption {
   const provider = providerValue(credential.provider);
+  const quota = safeCredentialQuota(
+    provider,
+    credential.providerMeta,
+    credential.lastSuccessAt
+  );
   return {
     id: credential.id,
     workspaceId: credential.workspaceId,
@@ -487,7 +671,8 @@ function credentialOption(
     capabilities: safeIntegrationCredentialCapabilities(
       provider,
       credential.capabilities
-    )
+    ),
+    ...(quota.status === "AVAILABLE" ? { quota } : {})
   };
 }
 
@@ -515,6 +700,134 @@ function bindingAvailability(
   ).includes(capability)
     ? "READY"
     : "CAPABILITY_MISMATCH";
+}
+
+function bindingAvailabilityForRoutes(
+  enabled: boolean,
+  capability: IntegrationCapability,
+  routes: readonly BindingRecord["routes"][number][],
+  fallbackMode: ConnectorFallbackMode
+): ProjectConnectorBindingAvailability {
+  if (!enabled) return "DISABLED";
+  const availabilities = routes.map((route) =>
+    bindingAvailability(enabled, capability, {
+      ...route.credential,
+      provider: providerValue(route.credential.provider)
+    })
+  );
+  const primary = availabilities[0] ?? "CREDENTIAL_UNAVAILABLE";
+  if (primary === "READY" || fallbackMode === "NONE") return primary;
+  return availabilities.slice(1).includes("READY") ? "READY" : primary;
+}
+
+function requestedRoutes(
+  primary: InternalCreateProjectConnectorBindingInput["route"],
+  fallbacks: readonly InternalCreateProjectConnectorBindingInput["route"][] | undefined
+): readonly InternalCreateProjectConnectorBindingInput["route"][] {
+  const routes = [primary, ...(fallbacks ?? [])];
+  if (
+    routes.length > 8 ||
+    routes.some((route, index) => route.position !== index) ||
+    new Set(routes.map(({ credentialId }) => credentialId)).size !== routes.length
+  ) {
+    throw new ConflictException({
+      code: "INVALID_CONNECTOR_ROUTE_CHAIN",
+      message: "Connector routes must be unique and have contiguous positions"
+    });
+  }
+  return routes;
+}
+
+function sameRoutes(
+  current: readonly ProjectConnectorBinding["route"][],
+  requested: readonly InternalCreateProjectConnectorBindingInput["route"][]
+): boolean {
+  return current.length === requested.length && current.every((route, index) =>
+    route.position === requested[index]?.position &&
+    route.credentialId === requested[index]?.credentialId
+  );
+}
+
+function assertFallbackConfiguration(
+  mode: ConnectorFallbackMode,
+  routeCount: number
+): void {
+  if (mode === "NONE" && routeCount > 1) {
+    throw new ConflictException({
+      code: "INVALID_CONNECTOR_FALLBACK",
+      message: "Fallback routes require an enabled fallback policy"
+    });
+  }
+  if (mode === "NEXT_AVAILABLE" && routeCount < 2) {
+    throw new ConflictException({
+      code: "INVALID_CONNECTOR_FALLBACK",
+      message: "NEXT_AVAILABLE requires at least two project routes"
+    });
+  }
+}
+
+function fallbackModeValue(value: string): ConnectorFallbackMode {
+  if (!FALLBACK_MODES.has(value)) {
+    throw new Error("Unsupported connector fallback mode in storage");
+  }
+  return value as ConnectorFallbackMode;
+}
+
+function fallbackReasonValues(value: Prisma.JsonValue): readonly ConnectorFallbackReason[] {
+  if (
+    !Array.isArray(value) ||
+    value.some((reason) => typeof reason !== "string" || !FALLBACK_REASONS.has(reason)) ||
+    new Set(value).size !== value.length
+  ) {
+    throw new Error("Invalid connector fallback reasons in storage");
+  }
+  return value as ConnectorFallbackReason[];
+}
+
+function fallbackReasonsJson(
+  reasons: readonly ConnectorFallbackReason[] | undefined
+): Prisma.InputJsonValue {
+  return [...(reasons ?? [])];
+}
+
+async function replaceWithWorkspaceRoutes(
+  transaction: Prisma.TransactionClient,
+  bindingId: string,
+  workspaceId: string,
+  projectId: string,
+  workspace: WorkspaceBindingRecord
+): Promise<void> {
+  await transaction.projectConnectorRoute.deleteMany({
+    where: { bindingId, workspaceId, projectId }
+  });
+  await transaction.projectConnectorRoute.createMany({
+    data: workspace.routes.map((route, position) => ({
+      workspaceId,
+      projectId,
+      bindingId,
+      position,
+      sourceKind: "WORKSPACE_CREDENTIAL",
+      credentialId: route.credentialId,
+      routingScope: "WORKSPACE_DEFAULT",
+      workspaceRouteId: route.id
+    }))
+  });
+}
+
+async function assertRoutesAvailable(
+  transaction: Prisma.TransactionClient,
+  workspaceId: string,
+  routes: readonly InternalCreateProjectConnectorBindingInput["route"][],
+  capability: IntegrationCapability
+): Promise<void> {
+  for (const route of routes) {
+    await assertCredentialAvailable(
+      transaction,
+      workspaceId,
+      route.credentialId,
+      capability
+    );
+  }
 }
 
 async function assertCredentialAvailable(
@@ -576,6 +889,12 @@ async function writeBindingEvent(
       provider: binding.route.provider,
       credentialMode: binding.route.credentialMode
     },
+    routes: (binding.routes ?? [binding.route]).map((route) => ({
+      position: route.position,
+      sourceKind: route.sourceKind,
+      provider: route.provider,
+      credentialMode: route.credentialMode
+    })),
     fallbackMode: binding.fallbackPolicy.mode,
     budgetMode: binding.budgetPolicy.mode,
     availability: binding.availability,
@@ -606,22 +925,34 @@ function bindingChangedFields(
 
   const fields: ProjectConnectorBindingChangedField[] = [];
   if (previous.enabled !== current.enabled) fields.push("enabled");
-  if (
-    previous.route.credentialId !== current.route.credentialId ||
-    previous.route.provider !== current.route.provider ||
-    previous.route.credentialMode !== current.route.credentialMode ||
-    previous.route.sourceKind !== current.route.sourceKind ||
-    previous.route.position !== current.route.position
-  ) {
+  if (!samePublicRoutes(previous.routes ?? [previous.route], current.routes ?? [current.route])) {
     fields.push("route");
   }
-  if (previous.fallbackPolicy.mode !== current.fallbackPolicy.mode) {
+  if (
+    previous.fallbackPolicy.mode !== current.fallbackPolicy.mode ||
+    JSON.stringify(previous.fallbackPolicy.reasons ?? []) !==
+      JSON.stringify(current.fallbackPolicy.reasons ?? [])
+  ) {
     fields.push("fallbackPolicy");
   }
   if (previous.budgetPolicy.mode !== current.budgetPolicy.mode) {
     fields.push("budgetPolicy");
   }
   return fields;
+}
+
+function samePublicRoutes(
+  left: readonly ProjectConnectorBinding["route"][],
+  right: readonly ProjectConnectorBinding["route"][]
+): boolean {
+  return left.length === right.length && left.every((route, index) => {
+    const candidate = right[index];
+    return candidate !== undefined &&
+      route.position === candidate.position &&
+      route.credentialId === candidate.credentialId &&
+      route.provider === candidate.provider &&
+      route.credentialMode === candidate.credentialMode;
+  });
 }
 
 function capabilityValue(value: string): IntegrationCapability {
@@ -670,7 +1001,23 @@ function bindingSnapshotJson(
       createdAt: binding.route.createdAt,
       updatedAt: binding.route.updatedAt
     },
-    fallbackPolicy: { mode: binding.fallbackPolicy.mode },
+    routes: (binding.routes ?? [binding.route]).map((route) => ({
+      id: route.id,
+      bindingId: route.bindingId,
+      workspaceId: route.workspaceId,
+      projectId: route.projectId,
+      position: route.position,
+      sourceKind: route.sourceKind,
+      credentialId: route.credentialId,
+      provider: route.provider,
+      credentialMode: route.credentialMode,
+      createdAt: route.createdAt,
+      updatedAt: route.updatedAt
+    })),
+    fallbackPolicy: {
+      mode: binding.fallbackPolicy.mode,
+      reasons: [...(binding.fallbackPolicy.reasons ?? [])]
+    },
     budgetPolicy: { mode: binding.budgetPolicy.mode },
     availability: binding.availability,
     version: binding.version,
@@ -684,7 +1031,7 @@ function bindingSnapshotJson(
 function projectConnectorBindingSnapshot(
   value: Prisma.JsonValue
 ): ProjectConnectorBinding {
-  const binding = exactStoredRecord(value, [
+  const requiredFields = [
     "id",
     "workspaceId",
     "projectId",
@@ -699,8 +1046,82 @@ function projectConnectorBindingSnapshot(
     "updatedBy",
     "createdAt",
     "updatedAt"
-  ]);
-  const route = exactStoredRecord(binding.route, [
+  ] as const;
+  const binding = exactStoredRecordWithOptional(
+    value,
+    requiredFields,
+    ["routes"]
+  );
+  const route = projectConnectorRouteSnapshot(binding.route);
+  const routes = binding.routes === undefined
+    ? [route]
+    : storedRouteList(binding.routes);
+  const fallback = exactStoredRecordWithOptional(
+    binding.fallbackPolicy,
+    ["mode"],
+    ["reasons"]
+  );
+  const budget = exactStoredRecord(binding.budgetPolicy, ["mode"]);
+  const id = storedUuid(binding.id);
+  const workspaceId = storedUuid(binding.workspaceId);
+  const projectId = storedUuid(binding.projectId);
+  const availability = storedString(binding.availability);
+  const fallbackMode = storedString(fallback.mode);
+  const fallbackReasonValues = storedFallbackReasons(fallback.reasons);
+  if (
+    (binding.enabled !== true && binding.enabled !== false) ||
+    !Number.isSafeInteger(binding.version) ||
+    Number(binding.version) < 1 ||
+    budget.mode !== "DISABLED" ||
+    !AVAILABILITIES.has(availability) ||
+    !FALLBACK_MODES.has(fallbackMode) ||
+    routes.length < 1 ||
+    routes.length > 8 ||
+    routes[0]?.id !== route.id ||
+    routes.some((candidate, index) => candidate.position !== index) ||
+    (fallbackMode === "NONE" &&
+      (routes.length !== 1 || fallbackReasonValues.length > 0)) ||
+    (fallbackMode !== "NONE" && routes.length < 2)
+  ) {
+    throw invalidStoredReceipt();
+  }
+  if (
+    routes.some(
+      (candidate) =>
+        candidate.bindingId !== id ||
+        candidate.workspaceId !== workspaceId ||
+        candidate.projectId !== projectId
+    )
+  ) {
+    throw invalidStoredReceipt();
+  }
+  return {
+    id,
+    workspaceId,
+    projectId,
+    capability: capabilityValue(storedString(binding.capability)),
+    enabled: binding.enabled,
+    route,
+    routes,
+    fallbackPolicy: {
+      mode: fallbackMode as ConnectorFallbackMode,
+      reasons: fallbackReasonValues
+    },
+    budgetPolicy: { mode: "DISABLED" },
+    availability:
+      availability as ProjectConnectorBindingAvailability,
+    version: Number(binding.version),
+    createdBy: storedUuid(binding.createdBy),
+    updatedBy: storedUuid(binding.updatedBy),
+    createdAt: storedTimestamp(binding.createdAt),
+    updatedAt: storedTimestamp(binding.updatedAt)
+  };
+}
+
+function projectConnectorRouteSnapshot(
+  value: unknown
+): ProjectConnectorRoute {
+  const route = exactStoredRecord(value, [
     "id",
     "bindingId",
     "workspaceId",
@@ -713,67 +1134,49 @@ function projectConnectorBindingSnapshot(
     "createdAt",
     "updatedAt"
   ]);
-  const fallback = exactStoredRecord(binding.fallbackPolicy, ["mode"]);
-  const budget = exactStoredRecord(binding.budgetPolicy, ["mode"]);
-  const id = storedUuid(binding.id);
-  const workspaceId = storedUuid(binding.workspaceId);
-  const projectId = storedUuid(binding.projectId);
-  const availability = storedString(binding.availability);
   const credentialMode = storedString(route.credentialMode);
   if (
-    (binding.enabled !== true && binding.enabled !== false) ||
-    !Number.isSafeInteger(binding.version) ||
-    Number(binding.version) < 1 ||
-    route.position !== 0 ||
+    !Number.isSafeInteger(route.position) ||
+    Number(route.position) < 0 ||
     route.sourceKind !== "WORKSPACE_CREDENTIAL" ||
-    fallback.mode !== "NONE" ||
-    budget.mode !== "DISABLED" ||
-    !AVAILABILITIES.has(availability) ||
-    credentialMode !== "BYOK_API_KEY" ||
-    availability !== (binding.enabled ? "READY" : "DISABLED")
-  ) {
-    throw invalidStoredReceipt();
-  }
-  const routeBindingId = storedUuid(route.bindingId);
-  const routeWorkspaceId = storedUuid(route.workspaceId);
-  const routeProjectId = storedUuid(route.projectId);
-  if (
-    routeBindingId !== id ||
-    routeWorkspaceId !== workspaceId ||
-    routeProjectId !== projectId
+    credentialMode !== "BYOK_API_KEY"
   ) {
     throw invalidStoredReceipt();
   }
   return {
-    id,
-    workspaceId,
-    projectId,
-    capability: capabilityValue(storedString(binding.capability)),
-    enabled: binding.enabled,
-    route: {
-      id: storedUuid(route.id),
-      bindingId: routeBindingId,
-      workspaceId: routeWorkspaceId,
-      projectId: routeProjectId,
-      position: 0,
-      sourceKind: "WORKSPACE_CREDENTIAL",
-      credentialId: storedUuid(route.credentialId),
-      provider: providerValue(storedString(route.provider)),
-      credentialMode:
-        credentialMode as ProjectConnectorBinding["route"]["credentialMode"],
-      createdAt: storedTimestamp(route.createdAt),
-      updatedAt: storedTimestamp(route.updatedAt)
-    },
-    fallbackPolicy: { mode: "NONE" },
-    budgetPolicy: { mode: "DISABLED" },
-    availability:
-      availability as ProjectConnectorBindingAvailability,
-    version: Number(binding.version),
-    createdBy: storedUuid(binding.createdBy),
-    updatedBy: storedUuid(binding.updatedBy),
-    createdAt: storedTimestamp(binding.createdAt),
-    updatedAt: storedTimestamp(binding.updatedAt)
+    id: storedUuid(route.id),
+    bindingId: storedUuid(route.bindingId),
+    workspaceId: storedUuid(route.workspaceId),
+    projectId: storedUuid(route.projectId),
+    position: Number(route.position),
+    sourceKind: "WORKSPACE_CREDENTIAL",
+    credentialId: storedUuid(route.credentialId),
+    provider: providerValue(storedString(route.provider)),
+    credentialMode:
+      credentialMode as ProjectConnectorRoute["credentialMode"],
+    createdAt: storedTimestamp(route.createdAt),
+    updatedAt: storedTimestamp(route.updatedAt)
   };
+}
+
+function storedRouteList(value: unknown): readonly ProjectConnectorRoute[] {
+  if (!Array.isArray(value)) throw invalidStoredReceipt();
+  return value.map(projectConnectorRouteSnapshot);
+}
+
+function storedFallbackReasons(
+  value: unknown
+): readonly ConnectorFallbackReason[] {
+  if (value === undefined) return [];
+  if (
+    !Array.isArray(value) ||
+    value.some(
+      (reason) => typeof reason !== "string" || !FALLBACK_REASONS.has(reason)
+    )
+  ) {
+    throw invalidStoredReceipt();
+  }
+  return value as ConnectorFallbackReason[];
 }
 
 function exactStoredRecord(
@@ -789,6 +1192,25 @@ function exactStoredRecord(
     Object.keys(record).length !== fields.length ||
     Object.keys(record).some((field) => !expected.has(field)) ||
     fields.some((field) => !(field in record))
+  ) {
+    throw invalidStoredReceipt();
+  }
+  return record;
+}
+
+function exactStoredRecordWithOptional(
+  value: unknown,
+  requiredFields: readonly string[],
+  optionalFields: readonly string[]
+): Readonly<Record<string, unknown>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw invalidStoredReceipt();
+  }
+  const record = value as Readonly<Record<string, unknown>>;
+  const allowed = new Set([...requiredFields, ...optionalFields]);
+  if (
+    Object.keys(record).some((field) => !allowed.has(field)) ||
+    requiredFields.some((field) => !(field in record))
   ) {
     throw invalidStoredReceipt();
   }
@@ -889,6 +1311,13 @@ function credentialUnavailable(): ConflictException {
     code: "RESOURCE_STATE_CONFLICT",
     message:
       "Credential is not active or does not support the requested capability"
+  });
+}
+
+function workspaceRouteUnavailable(): ConflictException {
+  return new ConflictException({
+    code: "CONNECTOR_NOT_READY",
+    message: "Workspace route is not configured for this capability"
   });
 }
 

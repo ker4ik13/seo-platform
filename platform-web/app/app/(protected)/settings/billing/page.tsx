@@ -20,7 +20,6 @@ export default async function BillingSettingsPage() {
     <AppShell activeSection="settings" context={context}>
       <section className="page-heading">
         <div>
-          <p className="eyebrow">Workspace · Биллинг</p>
           <h1>Тариф, баланс и оплата</h1>
           <p>
             Подписка оплачивает доступ к платформе, а системные SEO API
@@ -61,6 +60,9 @@ export default async function BillingSettingsPage() {
           canManagePlan={canManageWorkspacePlan(roleCode)}
           canTopUp={canTopUpWorkspaceBalance(roleCode)}
           defaultEmail={context.user.email}
+          projectCount={context.projects.filter(
+            ({ status }) => status !== "ARCHIVED"
+          ).length}
           readOnly={context.workspace.status === "READ_ONLY"}
           workspaceId={context.workspace.id}
         />

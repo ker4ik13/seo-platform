@@ -32,6 +32,7 @@ test("returns tenant-scoped history and authenticates its keyset cursor", async 
   assert.equal(first.projectId, projectId);
   assert.equal(first.items.length, 1);
   assert.equal(first.items[0]?.snapshotId, firstSnapshotId);
+  assert.equal(first.items[0]?.position, 100);
   assert.equal(first.page.hasNext, true);
   assert.ok(first.page.nextCursor);
   assert.equal(harness.calls, 1);
@@ -149,7 +150,7 @@ function foundRow() {
     jobId,
     observedAt: new Date("2026-07-29T12:00:00.000Z"),
     found: true,
-    position: 4,
+    position: 100,
     absolutePosition: null,
     pixelPosition: null,
     rankingUrl: "https://example.com/rank",

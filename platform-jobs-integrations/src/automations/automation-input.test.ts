@@ -30,7 +30,12 @@ const trusted = {
     canRunRanking: true,
     entitlementStatus: "ALLOWED"
   },
-  billingCurrency: "RUB"
+  billingCurrency: "RUB",
+  jobCapacity: {
+    planCode: "TRIAL",
+    planVersion: 1,
+    concurrentJobs: 1
+  }
 } as const;
 
 test("parses and normalizes a trusted weekly schedule", () => {

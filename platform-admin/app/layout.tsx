@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import "./styles.css";
 
 export const metadata: Metadata = {
-  title: "Operations · SEO Workspace",
+  title: "Operations · SEOньорита",
   description: "Внутренняя административная панель платформы",
   robots: {
     index: false,

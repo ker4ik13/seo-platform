@@ -10,6 +10,7 @@ export * from "./api/integrations.js";
 export * from "./api/keywords.js";
 export * from "./api/keyword-research.js";
 export * from "./api/notifications.js";
+export * from "./api/operation-results.js";
 export * from "./api/pages.js";
 export * from "./api/rank-estimates.js";
 export * from "./api/rank-execution-grants.js";

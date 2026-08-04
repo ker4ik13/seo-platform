@@ -33,7 +33,17 @@ const UUID_PATTERN =
 export function internalCreateRankEstimateInput(
   value: unknown
 ): InternalCreateRankEstimateInput {
-  const input = exactRecord(value, INPUT_FIELDS, "rankEstimate");
+  const raw = record(value, "rankEstimate");
+  const input = exactRecord(
+    value,
+    [
+      ...INPUT_FIELDS,
+      ...(Object.hasOwn(raw, "provider") ? ["provider"] : []),
+      ...(Object.hasOwn(raw, "credentialId") ? ["credentialId"] : []),
+      ...(Object.hasOwn(raw, "searchSource") ? ["searchSource"] : [])
+    ],
+    "rankEstimate"
+  );
   const project = exactRecord(input.project, PROJECT_FIELDS, "project");
   const access = exactRecord(input.access, ACCESS_FIELDS, "access");
   const workspaceId = uuid(input.workspaceId, "workspaceId");
@@ -84,6 +94,15 @@ export function internalCreateRankEstimateInput(
       input.trackingContextId,
       "trackingContextId"
     ),
+    ...(input.provider === undefined
+      ? {}
+      : { provider: rankProvider(input.provider, "provider") }),
+    ...(input.credentialId === undefined
+      ? {}
+      : { credentialId: uuid(input.credentialId, "credentialId") }),
+    ...(input.searchSource === undefined
+      ? {}
+      : { searchSource: rankSearchSource(input.searchSource) }),
     project: {
       id: snapshotProjectId,
       workspaceId: projectWorkspaceId,
@@ -102,6 +121,21 @@ export function internalCreateRankEstimateInput(
     billingCurrency,
     quota: quota(input.quota)
   };
+}
+
+function rankSearchSource(value: unknown): "SEARCH_API" | "LIVE" {
+  if (value !== "SEARCH_API" && value !== "LIVE") {
+    invalid("searchSource");
+  }
+  return value;
+}
+
+function rankProvider(
+  value: unknown,
+  field: string
+): "ARSENKIN" | "XMLSTOCK" {
+  if (value !== "ARSENKIN" && value !== "XMLSTOCK") invalid(field);
+  return value;
 }
 
 export function rankEstimateIdempotencyKey(value: unknown): string {

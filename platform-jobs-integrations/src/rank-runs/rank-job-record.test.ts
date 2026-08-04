@@ -265,7 +265,12 @@ function rankRunInput(): InternalCreateRankRunInput {
         remaining: "10"
       }
     },
-    billingCurrency: "RUB"
+    billingCurrency: "RUB",
+    jobCapacity: {
+      planCode: "TEAM",
+      planVersion: 3,
+      concurrentJobs: 10
+    }
   };
 }
 

@@ -90,7 +90,8 @@ export class SemanticExportService {
         details: { missingCount: wanted.size - found.size }
       });
     }
-    return keywordIds.map((id) => found.get(id)!);
+    const items = keywordIds.map((id) => found.get(id)!);
+    return sort ? [...items].sort(keywordComparator(sort)) : items;
   }
 
   private async groupSubtreeItems(
@@ -184,17 +185,103 @@ function keywordComparator(
         return compare(left.createdAt, right.createdAt) || compare(left.id, right.id);
       case "UPDATED_DESC":
         return compare(right.updatedAt, left.updatedAt) || compare(right.id, left.id);
+      case "UPDATED_ASC":
+        return compare(left.updatedAt, right.updatedAt) || compare(left.id, right.id);
       case "TEXT_ASC":
         return (
           compare(left.textNormalized, right.textNormalized) ||
           compare(left.id, right.id)
         );
+      case "TEXT_DESC":
+        return (
+          compare(right.textNormalized, left.textNormalized) ||
+          compare(right.id, left.id)
+        );
       case "PRIORITY_DESC":
         return right.priority - left.priority || compare(right.id, left.id);
+      case "PRIORITY_ASC":
+        return left.priority - right.priority || compare(left.id, right.id);
+      case "SOURCE_ASC":
+        return compare(left.sourceMode, right.sourceMode) || compare(left.id, right.id);
+      case "SOURCE_DESC":
+        return compare(right.sourceMode, left.sourceMode) || compare(right.id, left.id);
+      case "FREQUENCY_BASE_DESC":
+      case "FREQUENCY_BASE_ASC":
+      case "FREQUENCY_EXACT_DESC":
+      case "FREQUENCY_EXACT_ASC":
+      case "FREQUENCY_FIXED_DESC":
+      case "FREQUENCY_FIXED_ASC":
+        return compareMetric(left, right, selected);
+      case "YANDEX_POSITION_ASC":
+      case "YANDEX_POSITION_DESC":
+      case "GOOGLE_POSITION_ASC":
+      case "GOOGLE_POSITION_DESC":
+        return comparePosition(left, right, selected);
+      case "YANDEX_CHECKED_AT_ASC":
+      case "YANDEX_CHECKED_AT_DESC":
+      case "GOOGLE_CHECKED_AT_ASC":
+      case "GOOGLE_CHECKED_AT_DESC":
+        return compareCheckedAt(left, right, selected);
       case "CREATED_DESC":
         return compare(right.createdAt, left.createdAt) || compare(right.id, left.id);
     }
   };
+}
+
+function compareMetric(
+  left: SemanticKeywordListItem,
+  right: SemanticKeywordListItem,
+  sort: SemanticKeywordSort
+): number {
+  const type = sort.includes("_EXACT_") ? "EXACT" : sort.includes("_FIXED_") ? "FIXED" : "BASE";
+  const value = (item: SemanticKeywordListItem) => {
+    const raw = item.frequencies?.find((entry) => entry.type === type)?.value;
+    return raw === undefined ? null : BigInt(raw);
+  };
+  const leftValue = value(left);
+  const rightValue = value(right);
+  if (leftValue === null || rightValue === null) {
+    if (leftValue === rightValue) return compare(left.id, right.id);
+    return leftValue === null ? 1 : -1;
+  }
+  const comparison = leftValue < rightValue ? -1 : leftValue > rightValue ? 1 : 0;
+  return (sort.endsWith("_ASC") ? comparison : -comparison) || compare(left.id, right.id);
+}
+
+function comparePosition(
+  left: SemanticKeywordListItem,
+  right: SemanticKeywordListItem,
+  sort: SemanticKeywordSort
+): number {
+  const engine = sort.startsWith("YANDEX") ? "YANDEX" : "GOOGLE";
+  const value = (item: SemanticKeywordListItem) =>
+    item.positions?.find((entry) => entry.searchEngine === engine)?.position ?? null;
+  const leftValue = value(left);
+  const rightValue = value(right);
+  if (leftValue === null || rightValue === null) {
+    if (leftValue === rightValue) return compare(left.id, right.id);
+    return leftValue === null ? 1 : -1;
+  }
+  const comparison = leftValue - rightValue;
+  return (sort.endsWith("_ASC") ? comparison : -comparison) || compare(left.id, right.id);
+}
+
+function compareCheckedAt(
+  left: SemanticKeywordListItem,
+  right: SemanticKeywordListItem,
+  sort: SemanticKeywordSort
+): number {
+  const engine = sort.startsWith("YANDEX") ? "YANDEX" : "GOOGLE";
+  const value = (item: SemanticKeywordListItem) =>
+    item.positions?.find((entry) => entry.searchEngine === engine)?.observedAt ?? null;
+  const leftValue = value(left);
+  const rightValue = value(right);
+  if (leftValue === null || rightValue === null) {
+    if (leftValue === rightValue) return compare(left.id, right.id);
+    return leftValue === null ? 1 : -1;
+  }
+  const comparison = compare(leftValue, rightValue);
+  return (sort.endsWith("_ASC") ? comparison : -comparison) || compare(left.id, right.id);
 }
 
 function compare(left: string, right: string): number {

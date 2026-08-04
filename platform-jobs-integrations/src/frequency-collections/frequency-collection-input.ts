@@ -1,5 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import {
+  arsenkinWordstatKeywordLimit,
   semanticFrequencyDevices,
   semanticFrequencyTypes,
   type InternalCancelFrequencyCollectionInput,
@@ -23,12 +24,17 @@ export function internalCreateFrequencyCollectionInput(
     "actorId",
     "idempotencyKey",
     "correlationId",
+    "jobCapacity",
     "items",
     "types",
     "regionCode",
     "device"
   ]);
-  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 200) {
+  if (
+    !Array.isArray(input.items) ||
+    input.items.length < 1 ||
+    input.items.length > arsenkinWordstatKeywordLimit
+  ) {
     invalid("items");
   }
   const items = input.items.map((value, index) => {
@@ -50,10 +56,20 @@ export function internalCreateFrequencyCollectionInput(
     actorId: uuid(input.actorId, "actorId"),
     idempotencyKey: pattern(input.idempotencyKey, "idempotencyKey", KEY_PATTERN),
     correlationId: bounded(input.correlationId, "correlationId", 100),
+    jobCapacity: jobCapacity(input.jobCapacity),
     items,
     types,
     regionCode: pattern(input.regionCode, "regionCode", REGION_PATTERN),
     device: frequencyDevice(input.device)
+  };
+}
+
+function jobCapacity(value: unknown): InternalCreateFrequencyCollectionInput["jobCapacity"] {
+  const input = record(value, ["planCode", "planVersion", "concurrentJobs"]);
+  return {
+    planCode: bounded(input.planCode, "jobCapacity.planCode", 64),
+    planVersion: integer(input.planVersion, "jobCapacity.planVersion", 1),
+    concurrentJobs: integer(input.concurrentJobs, "jobCapacity.concurrentJobs", 1)
   };
 }
 

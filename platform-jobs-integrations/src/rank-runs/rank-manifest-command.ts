@@ -1,9 +1,10 @@
 import { timingSafeEqual } from "node:crypto";
-import type {
-  InternalCreateRankRunInput,
-  InternalRankExecutionParameters,
-  InternalSealRankManifestInput,
-  RankManifestHash
+import {
+  rankProviderKeywordLimit,
+  type InternalCreateRankRunInput,
+  type InternalRankExecutionParameters,
+  type InternalSealRankManifestInput,
+  type RankManifestHash
 } from "@seo-platform/contracts";
 import {
   canonicalJsonSha256,
@@ -39,7 +40,7 @@ export function rankManifestCommand(
     estimate.semanticScopeHash === null ||
     estimate.scopeHash === null ||
     estimate.keywordCount < 1 ||
-    estimate.keywordCount > 1_000
+    estimate.keywordCount > rankProviderKeywordLimit
   ) {
     invalid();
   }
@@ -49,7 +50,7 @@ export function rankManifestCommand(
     actorId: input.actorId,
     jobId,
     estimateId: estimate.id,
-    provider: "ARSENKIN",
+    provider: storedProvider(estimate.provider),
     operation: "POSITIONS",
     project: {
       id: input.project.id,
@@ -172,9 +173,12 @@ function parseCommand(value: unknown): InternalSealRankManifestInput {
   const jobId = uuid(input.jobId);
   const estimateId = uuid(input.estimateId);
   const trackingContextId = uuid(estimate.trackingContextId);
-  const pairCount = decimal(estimate.pairCount, 1_000);
+  const pairCount = decimal(
+    estimate.pairCount,
+    rankProviderKeywordLimit
+  );
   if (
-    input.provider !== "ARSENKIN" ||
+    (input.provider !== "ARSENKIN" && input.provider !== "XMLSTOCK") ||
     input.operation !== "POSITIONS" ||
     uuid(project.id) !== projectId ||
     uuid(project.workspaceId) !== workspaceId ||
@@ -200,7 +204,7 @@ function parseCommand(value: unknown): InternalSealRankManifestInput {
     actorId,
     jobId,
     estimateId,
-    provider: "ARSENKIN",
+    provider: input.provider,
     operation: "POSITIONS",
     project: {
       id: projectId,
@@ -225,6 +229,11 @@ function parseCommand(value: unknown): InternalSealRankManifestInput {
       rawSerp: "NOT_COLLECTED"
     }
   };
+}
+
+function storedProvider(value: string): "ARSENKIN" | "XMLSTOCK" {
+  if (value !== "ARSENKIN" && value !== "XMLSTOCK") invalid();
+  return value;
 }
 
 function copyExecution(

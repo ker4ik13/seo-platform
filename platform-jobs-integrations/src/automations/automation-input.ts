@@ -7,7 +7,8 @@ import type {
   InternalCreateRankTrackingAutomationInput,
   InternalRankEstimateProjectSnapshot,
   InternalRunRankTrackingAutomationInput,
-  InternalUpdateRankTrackingAutomationInput
+  InternalUpdateRankTrackingAutomationInput,
+  JobCapacityEntitlement
 } from "@seo-platform/contracts";
 
 const UUID_PATTERN =
@@ -33,7 +34,8 @@ export function internalCreateAutomationInput(
     "project",
     "access",
     "billingCurrency",
-    "entitlement"
+    "entitlement",
+    "jobCapacity"
   ]);
   const idempotencyKey = text(input.idempotencyKey, "idempotencyKey");
   if (!IDEMPOTENCY_PATTERN.test(idempotencyKey)) {
@@ -48,7 +50,8 @@ export function internalCreateAutomationInput(
     project: projectSnapshot(input.project),
     access: accessSnapshot(input.access),
     billingCurrency: currency(input.billingCurrency),
-    entitlement: automationCapacityEntitlement(input.entitlement)
+    entitlement: automationCapacityEntitlement(input.entitlement),
+    jobCapacity: jobCapacityEntitlement(input.jobCapacity)
   };
 }
 
@@ -71,7 +74,8 @@ export function internalUpdateAutomationInput(
     "project",
     "access",
     "billingCurrency",
-    "entitlement"
+    "entitlement",
+    "jobCapacity"
   ]);
   return {
     ...automationFields(input),
@@ -86,7 +90,8 @@ export function internalUpdateAutomationInput(
     project: projectSnapshot(input.project),
     access: accessSnapshot(input.access),
     billingCurrency: currency(input.billingCurrency),
-    entitlement: automationCapacityEntitlement(input.entitlement)
+    entitlement: automationCapacityEntitlement(input.entitlement),
+    jobCapacity: jobCapacityEntitlement(input.jobCapacity)
   };
 }
 
@@ -102,7 +107,8 @@ export function internalAutomationStatusInput(
     "project",
     "access",
     "billingCurrency",
-    "entitlement"
+    "entitlement",
+    "jobCapacity"
   ]);
   return {
     workspaceId: uuid(input.workspaceId, "workspaceId"),
@@ -116,7 +122,8 @@ export function internalAutomationStatusInput(
     project: projectSnapshot(input.project),
     access: accessSnapshot(input.access),
     billingCurrency: currency(input.billingCurrency),
-    entitlement: automationCapacityEntitlement(input.entitlement)
+    entitlement: automationCapacityEntitlement(input.entitlement),
+    jobCapacity: jobCapacityEntitlement(input.jobCapacity)
   };
 }
 
@@ -132,7 +139,8 @@ export function internalRunAutomationInput(
     "idempotencyKey",
     "project",
     "access",
-    "billingCurrency"
+    "billingCurrency",
+    "jobCapacity"
   ]);
   const idempotencyKey = text(input.idempotencyKey, "idempotencyKey");
   if (!IDEMPOTENCY_PATTERN.test(idempotencyKey)) {
@@ -150,7 +158,8 @@ export function internalRunAutomationInput(
     idempotencyKey,
     project: projectSnapshot(input.project),
     access: accessSnapshot(input.access),
-    billingCurrency: currency(input.billingCurrency)
+    billingCurrency: currency(input.billingCurrency),
+    jobCapacity: jobCapacityEntitlement(input.jobCapacity)
   };
 }
 
@@ -206,6 +215,31 @@ export function automationCapacityEntitlement(
     scheduledAutomations: positiveInteger(
       input.scheduledAutomations,
       "entitlement.scheduledAutomations"
+    )
+  };
+}
+
+export function jobCapacityEntitlement(
+  value: unknown
+): JobCapacityEntitlement {
+  const input = exactRecord(value, "jobCapacity", [
+    "planCode",
+    "planVersion",
+    "concurrentJobs"
+  ]);
+  const planCode = text(input.planCode, "jobCapacity.planCode");
+  if (!PLAN_CODE_PATTERN.test(planCode)) {
+    invalid("jobCapacity.planCode");
+  }
+  return {
+    planCode,
+    planVersion: positiveInteger(
+      input.planVersion,
+      "jobCapacity.planVersion"
+    ),
+    concurrentJobs: positiveInteger(
+      input.concurrentJobs,
+      "jobCapacity.concurrentJobs"
     )
   };
 }

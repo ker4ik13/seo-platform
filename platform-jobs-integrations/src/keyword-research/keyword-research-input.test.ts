@@ -18,6 +18,11 @@ test("normalizes a trusted Keys.so research command", () => {
       actorId: ACTOR_ID,
       idempotencyKey: "keyword-research-001",
       correlationId: "request-001",
+      jobCapacity: {
+        planCode: "PRO",
+        planVersion: 2,
+        concurrentJobs: 10
+      },
       domain: "https://Example.RU/",
       database: "msk",
       maxKeywords: 100
@@ -28,6 +33,11 @@ test("normalizes a trusted Keys.so research command", () => {
       actorId: ACTOR_ID,
       idempotencyKey: "keyword-research-001",
       correlationId: "request-001",
+      jobCapacity: {
+        planCode: "PRO",
+        planVersion: 2,
+        concurrentJobs: 10
+      },
       domain: "example.ru",
       database: "msk",
       maxKeywords: 100
@@ -49,6 +59,7 @@ test("accepts only explicit selected rows and current entitlement", () => {
         planVersion: 2,
         storedKeywords: 100_000,
         keywordsPerProject: 50_000,
+        foldersPerProject: 500,
         trackedContextPairs: 10_000
       }
     }).selectedRowIds,
@@ -64,6 +75,11 @@ test("rejects an URL path and duplicate row selection", () => {
       actorId: ACTOR_ID,
       idempotencyKey: "keyword-research-001",
       correlationId: "request-001",
+      jobCapacity: {
+        planCode: "PRO",
+        planVersion: 2,
+        concurrentJobs: 10
+      },
       domain: "https://example.ru/catalog",
       database: "msk",
       maxKeywords: 100
@@ -82,6 +98,7 @@ test("rejects an URL path and duplicate row selection", () => {
         planVersion: 2,
         storedKeywords: 100_000,
         keywordsPerProject: 50_000,
+        foldersPerProject: 500,
         trackedContextPairs: 10_000
       }
     })

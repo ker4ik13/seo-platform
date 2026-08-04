@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import {
   keysSoDatabases,
   type KeywordResearchCollection,
@@ -18,6 +20,7 @@ import {
   BrowserApiError,
   browserApiRequest
 } from "../lib/browser-api";
+import { ProviderLogo } from "./provider-logo";
 
 const ACTIVE = new Set([
   "QUEUED",
@@ -186,7 +189,7 @@ export function KeywordResearchWorkspace({
       <section className="panel">
         <div className="section-heading">
           <div>
-            <p className="eyebrow">Keys.so · organic keywords</p>
+            <p className="eyebrow provider-inline"><ProviderLogo provider="KEYS_SO" size="compact" /> Keys.so · organic keywords</p>
             <h2>Собрать запросы конкурента</h2>
             <p>
               Сначала сервис показывает найденные запросы. В ядро попадут
@@ -210,7 +213,7 @@ export function KeywordResearchWorkspace({
           </label>
           <label className="form-field">
             <span>База Keys.so</span>
-            <select
+            <CustomSelect
               onChange={(event) =>
                 setDatabase(event.target.value as KeysSoDatabase)
               }
@@ -221,7 +224,7 @@ export function KeywordResearchWorkspace({
                   {databaseLabel(code)}
                 </option>
               ))}
-            </select>
+            </CustomSelect>
           </label>
           <label className="form-field">
             <span>Максимум запросов</span>
@@ -402,7 +405,7 @@ function RunPreview({
         <div className="button-row">
           <label className="form-field">
             <span>Если запрос уже есть</span>
-            <select
+            <CustomSelect
               onChange={(event) =>
                 onDuplicatePolicy(
                   event.target.value as SemanticImportDuplicatePolicy
@@ -412,7 +415,7 @@ function RunPreview({
             >
               <option value="SKIP_EXISTING">Пропустить</option>
               <option value="OVERWRITE_MAPPED">Обновить метрики</option>
-            </select>
+            </CustomSelect>
           </label>
           <button
             className="primary-button"

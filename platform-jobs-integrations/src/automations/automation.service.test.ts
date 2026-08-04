@@ -165,6 +165,11 @@ function createInput(): InternalCreateRankTrackingAutomationInput {
       planCode: "TRIAL",
       planVersion: 1,
       scheduledAutomations: 1
+    },
+    jobCapacity: {
+      planCode: "TRIAL",
+      planVersion: 1,
+      concurrentJobs: 1
     }
   };
 }
@@ -180,7 +185,8 @@ function statusInput(): InternalAutomationStatusInput {
     project: input.project,
     access: input.access,
     billingCurrency: input.billingCurrency,
-    entitlement: input.entitlement
+    entitlement: input.entitlement,
+    jobCapacity: input.jobCapacity
   };
 }
 
@@ -203,7 +209,8 @@ function automation(
         actorId,
         project: input.project,
         access: input.access,
-        billingCurrency: input.billingCurrency
+        billingCurrency: input.billingCurrency,
+        jobCapacity: input.jobCapacity
       }
     },
     timezone: input.timezone,

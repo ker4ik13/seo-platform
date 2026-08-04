@@ -16,6 +16,7 @@ import type {
 } from "@seo-platform/contracts";
 import { Prisma, type TechnicalCrawl } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { assertJobCapacity } from "../jobs/job-capacity.js";
 import { QueueService } from "../queue/queue.service.js";
 import {
   crawlCheckpointJson,
@@ -62,6 +63,11 @@ export class CrawlService {
     let crawl: TechnicalCrawl;
     try {
       crawl = await this.prisma.$transaction(async (transaction) => {
+        await assertJobCapacity(
+          transaction,
+          input.workspaceId,
+          input.jobCapacity
+        );
         const job = await transaction.job.create({
           data: {
             workspaceId: input.workspaceId,

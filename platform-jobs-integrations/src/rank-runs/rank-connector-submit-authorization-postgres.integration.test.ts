@@ -20,7 +20,7 @@ const authorizationMigration = readFile(
   ),
   "utf8"
 );
-const CONNECTOR_VERSION = "arsenkin-positions@1.0.0";
+const CONNECTOR_VERSION = "arsenkin-positions@2.0.0";
 const POLICY_VERSION = "manual-arsenkin-positions@1.0.0";
 const VALIDATION_CONNECTOR_VERSION = "arsenkin@1.0.0";
 const HASH = {

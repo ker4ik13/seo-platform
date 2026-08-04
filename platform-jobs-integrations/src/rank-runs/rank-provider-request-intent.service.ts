@@ -1,9 +1,17 @@
 import { timingSafeEqual } from "node:crypto";
 import { Injectable } from "@nestjs/common";
-import type {
-  InternalGetRankManifestChunkInput,
-  InternalRankExecutionParameters,
-  RankManifestHash
+import {
+  currentRankProviderPolicyVersion,
+  legacyRankManifestChunkSize,
+  legacyRankProviderKeywordLimit,
+  legacyRankProviderPolicyVersion,
+  rankManifestSingleTaskChunkSize,
+  rankProviderKeywordLimit,
+  xmlStockRankManifestChunkSize,
+  xmlStockRankProviderPolicyVersion,
+  type InternalGetRankManifestChunkInput,
+  type InternalRankExecutionParameters,
+  type RankManifestHash
 } from "@seo-platform/contracts";
 import { canonicalizeJson } from "@seo-platform/contracts/canonical-json";
 import { Prisma } from "../generated/prisma/client.js";
@@ -19,9 +27,7 @@ import {
   RankManifestClient,
   RankManifestClientError
 } from "../seo-data/rank-manifest.client.js";
-import {
-  ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION
-} from "./rank-execution-evidence.js";
+import { rankExecutionConnectorVersion } from "./rank-execution-evidence.js";
 import {
   lockRankJobGraph,
   lockRankJobItem
@@ -222,7 +228,15 @@ export function storedRankProviderRequestIntent(
   row: RankProviderRequestIntent,
   binding: RankProviderRequestIntentBinding
 ): RankProviderRequestIntentV1 {
-  const intent = rankProviderRequestIntent(row.requestSnapshot);
+  let intent: RankProviderRequestIntentV1;
+  try {
+    intent = rankProviderRequestIntent(row.requestSnapshot);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw intentFailure("LOCAL_STATE_INVALID", false);
+    }
+    throw error;
+  }
   const requestHash = rankProviderRequestIntentHash(intent);
   if (
     row.schemaVersion !== RANK_PROVIDER_REQUEST_INTENT_SCHEMA ||
@@ -322,7 +336,7 @@ function intentSource(
     job.type !== MANUAL_RANK_CHECK_JOB_TYPE ||
     job.projectId === null ||
     job.actorId === null ||
-    job.provider !== "ARSENKIN" ||
+    (job.provider !== "ARSENKIN" && job.provider !== "XMLSTOCK") ||
     job.credentialMode !== "BYOK_API_KEY" ||
     !grantableJobState(job) ||
     job.cancelRequestedAt !== null ||
@@ -344,19 +358,21 @@ function intentSource(
     run.manifestHash === null ||
     run.manifestPairCount !== estimate.keywordCount ||
     run.manifestPairCount === null ||
-    run.manifestPairCount < 1 ||
-    run.manifestPairCount > 1_000 ||
     run.manifestChunkCount === null ||
-    run.manifestChunkCount < 1 ||
-    run.manifestChunkCount > 4 ||
-    run.manifestChunkSize !== 250 ||
+    run.manifestChunkSize === null ||
+    !validRankRunManifestShape(
+      run.manifestPairCount,
+      run.manifestChunkCount,
+      run.manifestChunkSize,
+      estimate.providerPolicyVersion
+    ) ||
     run.finalizationStatus !== null ||
     run.finalizedAt !== null ||
     run.cancelRequestedBy !== null ||
     estimate.id !== run.estimateId ||
     estimate.workspaceId !== job.workspaceId ||
     estimate.projectId !== job.projectId ||
-    estimate.provider !== "ARSENKIN" ||
+    estimate.provider !== job.provider ||
     estimate.credentialMode !== "BYOK_API_KEY" ||
     run.projectStatus !== "ACTIVE" ||
     run.projectVersion !== estimate.projectVersion
@@ -413,8 +429,7 @@ function intentSource(
     manifestHash: Buffer.from(run.manifestHash),
     manifestPairCount: run.manifestPairCount,
     manifestChunkIndex: reference.chunkIndex,
-    executionConnectorVersion:
-      ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION,
+    executionConnectorVersion: rankExecutionConnectorVersion(job.provider),
     providerPolicyVersion: estimate.providerPolicyVersion
   };
   return {
@@ -436,6 +451,48 @@ function grantableJobState(job: Job): boolean {
     (job.status === "QUEUED" && job.stage === "WAITING_FOR_QUEUE") ||
     (job.status === "RUNNING" &&
       job.stage === "WAITING_EXECUTION_GRANT")
+  );
+}
+
+function validRankRunManifestShape(
+  pairCount: number | null,
+  chunkCount: number | null,
+  chunkSize: number | null,
+  policyVersion: string
+): boolean {
+  if (
+    pairCount === null ||
+    chunkCount === null ||
+    chunkSize === null ||
+    !Number.isSafeInteger(pairCount) ||
+    !Number.isSafeInteger(chunkCount) ||
+    !Number.isSafeInteger(chunkSize)
+  ) {
+    return false;
+  }
+  if (policyVersion === legacyRankProviderPolicyVersion) {
+    return (
+      pairCount >= 1 &&
+      pairCount <= legacyRankProviderKeywordLimit &&
+      chunkSize === legacyRankManifestChunkSize &&
+      chunkCount ===
+        Math.ceil(pairCount / legacyRankManifestChunkSize)
+    );
+  }
+  if (policyVersion === xmlStockRankProviderPolicyVersion) {
+    return (
+      pairCount >= 1 &&
+      pairCount <= rankProviderKeywordLimit &&
+      chunkSize === xmlStockRankManifestChunkSize &&
+      chunkCount === pairCount
+    );
+  }
+  return (
+    policyVersion === currentRankProviderPolicyVersion &&
+    pairCount >= 1 &&
+    pairCount <= rankProviderKeywordLimit &&
+    chunkSize === rankManifestSingleTaskChunkSize &&
+    chunkCount === 1
   );
 }
 

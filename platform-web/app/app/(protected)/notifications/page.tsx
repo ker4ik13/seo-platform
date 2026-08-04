@@ -10,7 +10,6 @@ export default async function NotificationsPage() {
     <AppShell activeSection="notifications" context={context}>
       <section className="page-heading">
         <div>
-          <p className="eyebrow">Профиль · События</p>
           <h1>Центр уведомлений</h1>
           <p>
             Результаты работ, упоминания, предупреждения, отчёты и системные
@@ -18,7 +17,7 @@ export default async function NotificationsPage() {
           </p>
         </div>
       </section>
-      <NotificationCenter />
+      <NotificationCenter {...(context.project ? { projectId: context.project.id } : {})} />
     </AppShell>
   );
 }

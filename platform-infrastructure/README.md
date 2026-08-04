@@ -139,7 +139,7 @@ startup. Обычные internal HTTP-вызовы разделены так:
 |---|---|---|
 | `PLATFORM_API_TO_SEO_DATA_TOKEN` | `platform-api` | `seo-data` |
 | `PLATFORM_API_TO_JOBS_TOKEN` | `platform-api` | `jobs-integrations` HTTP |
-| `JOBS_TO_SEO_DATA_TOKEN` | `jobs-integrations` HTTP и `import-worker` | `seo-data` |
+| `JOBS_TO_SEO_DATA_TOKEN` | `jobs-integrations` HTTP, `import-worker`, `crawl-worker`, `connector-worker` | `seo-data` |
 | `PLATFORM_API_TO_REALTIME_TOKEN` | `platform-api` | `realtime` general HTTP |
 | `PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN` | `platform-api` | `realtime` device lifecycle и notification fanout |
 | `REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN` | `web-push-worker` | `platform-api` fresh delivery authorization |
@@ -184,7 +184,7 @@ anchor со всеми секретами:
 | `system-worker` | только Redis и concurrency |
 | `rank-worker` | Отдельный `jobs_rank_runtime`, Redis, SEO rank manifest и Platform rank grant; остальное запрещено |
 | `crawl-worker` | Jobs DB, отдельный Redis keyspace, SEO Data и outbound HTTP(S); NATS/S3/SMTP/vault/provider secrets запрещены |
-| `connector-worker` | `jobs_connector`, Redis и execution KEK; management/general/NATS/S3/SMTP запрещены |
+| `connector-worker` | `jobs_connector`, Redis, execution KEK и SEO Data publication для frequency runtime; management/NATS/S3/SMTP запрещены |
 | `auth-email-worker` | `jobs_auth_email_runtime`, dedicated NATS consumer, Platform JIT token и SMTP; Redis/general/vault/rank/S3 запрещены |
 
 Config loader получает явную process role; `system-worker` использует

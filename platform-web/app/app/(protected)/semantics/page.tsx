@@ -21,6 +21,7 @@ export default async function SemanticsPage() {
         <SemanticsWorkspace
           projectId={context.project.id}
           projectName={context.project.name}
+          projects={context.projects}
         />
       )}
     </AppShell>

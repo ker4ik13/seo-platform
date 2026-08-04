@@ -1,9 +1,15 @@
 import {
+  arsenkinWordstatKeywordLimit,
   frequencyCollectionStatuses,
+  frequencyCollectionProviders,
+  connectorRoutingScopes,
   semanticFrequencyDevices,
   semanticFrequencyTypes,
   type FrequencyCollectionStatus,
   type FrequencyCollectionSummary,
+  type ConnectorOperationAttemptSummary,
+  type InternalFrequencyOperationScope,
+  type InternalFrequencyOperationScopeItem,
   type SemanticFrequencyDevice,
   type SemanticFrequencyType
 } from "@seo-platform/contracts";
@@ -24,22 +30,48 @@ export function scopedFrequencyCollection(
     input.workspaceId !== workspaceId ||
     input.projectId !== projectId ||
     (expectedId !== undefined && id !== expectedId) ||
-    input.provider !== "XMLSTOCK"
+    typeof input.provider !== "string" ||
+    !frequencyCollectionProviders.includes(input.provider as never)
   ) invalid();
-  if (!Array.isArray(input.types) || input.types.length < 1 || input.types.length > 3) {
+  if (
+    !Array.isArray(input.types) ||
+    input.types.length < 1 ||
+    input.types.length > semanticFrequencyTypes.length
+  ) {
     invalid();
   }
   const types = input.types.map((value) => member(value, semanticFrequencyTypes));
+  const hasRoutingScope = input.routingScope !== undefined;
+  const hasConnectorAttempts = input.connectorAttempts !== undefined;
+  if (hasRoutingScope !== hasConnectorAttempts) invalid();
   return {
     id,
     workspaceId,
     projectId,
-    provider: "XMLSTOCK",
+    provider: member(input.provider, frequencyCollectionProviders),
+    ...(!hasRoutingScope
+      ? {}
+      : { routingScope: member(input.routingScope, connectorRoutingScopes) }),
+    ...(!hasConnectorAttempts
+      ? {}
+      : { connectorAttempts: connectorAttempts(input.connectorAttempts) }),
     status: member(input.status, frequencyCollectionStatuses),
     ...optionalString(input.stage, "stage", 64),
-    selectedKeywords: integer(input.selectedKeywords, 1, 200),
-    completedKeywords: integer(input.completedKeywords, 0, 200),
-    failedKeywords: integer(input.failedKeywords, 0, 200),
+    selectedKeywords: integer(
+      input.selectedKeywords,
+      1,
+      arsenkinWordstatKeywordLimit
+    ),
+    completedKeywords: integer(
+      input.completedKeywords,
+      0,
+      arsenkinWordstatKeywordLimit
+    ),
+    failedKeywords: integer(
+      input.failedKeywords,
+      0,
+      arsenkinWordstatKeywordLimit
+    ),
     types,
     regionCode: string(input.regionCode, 100),
     device: member(input.device, semanticFrequencyDevices),
@@ -51,6 +83,85 @@ export function scopedFrequencyCollection(
     ...optionalTimestamp(input.startedAt, "startedAt"),
     ...optionalTimestamp(input.finishedAt, "finishedAt")
   };
+}
+
+function connectorAttempts(value: unknown): readonly ConnectorOperationAttemptSummary[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8) invalid();
+  return value.map((candidate, index) => {
+    const input = record(candidate);
+    if (input.sequence !== index + 1) invalid();
+    const occurredAt = timestamp(input.occurredAt);
+    const outcome = member(input.outcome, ["SELECTED", "SUCCEEDED", "FALLBACK", "FAILED"] as const);
+    const provider = member(input.provider, ["XMLSTOCK", "ARSENKIN", "KEYS_SO"] as const);
+    return {
+      sequence: index + 1,
+      provider,
+      routingScope: member(input.routingScope, connectorRoutingScopes),
+      outcome,
+      ...optionalString(input.reasonCode, "reasonCode", 64),
+      occurredAt
+    };
+  });
+}
+
+export function scopedFrequencyOperationScope(
+  value: unknown,
+  workspaceId: string,
+  projectId: string,
+  jobId: string
+): InternalFrequencyOperationScope {
+  const input = record(value);
+  if (
+    input.workspaceId !== workspaceId ||
+    input.projectId !== projectId ||
+    uuid(input.jobId) !== jobId ||
+    !Array.isArray(input.items) ||
+    input.items.length > arsenkinWordstatKeywordLimit
+  ) {
+    invalid();
+  }
+  const keywordIds = new Set<string>();
+  const sequences = new Set<number>();
+  const items = input.items.map((value): InternalFrequencyOperationScopeItem => {
+    const item = record(value);
+    const keywordId = uuid(item.keywordId);
+    const sequence = integer(
+      item.sequence,
+      0,
+      arsenkinWordstatKeywordLimit - 1
+    );
+    if (
+      keywordIds.has(keywordId) ||
+      sequences.has(sequence) ||
+      typeof item.status !== "string" ||
+      ![
+        "PENDING",
+        "QUEUED",
+        "RUNNING",
+        "COMPLETED",
+        "FAILED_RETRYABLE",
+        "FAILED_FINAL",
+        "CANCELLED"
+      ].includes(item.status) ||
+      (item.errorCode !== undefined &&
+        (typeof item.errorCode !== "string" ||
+          !/^[A-Z][A-Z0-9_]{0,63}$/u.test(item.errorCode)))
+    ) {
+      invalid();
+    }
+    keywordIds.add(keywordId);
+    sequences.add(sequence);
+    return {
+      sequence,
+      keywordId,
+      status: item.status as InternalFrequencyOperationScopeItem["status"],
+      ...(typeof item.errorCode === "string"
+        ? { errorCode: item.errorCode }
+        : {})
+    };
+  });
+  if (items.some((item, index) => item.sequence !== index)) invalid();
+  return { workspaceId, projectId, jobId, items };
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> {
@@ -97,7 +208,7 @@ function optionalTimestamp(
 
 function optionalString(
   value: unknown,
-  key: "stage" | "failureCode",
+  key: "stage" | "failureCode" | "reasonCode",
   max: number
 ): Partial<Record<typeof key, string>> {
   return value === undefined ? {} : { [key]: string(value, max) };

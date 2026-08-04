@@ -6,8 +6,13 @@ export const metadata: Metadata = {
   metadataBase: new URL(
     process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
   ),
-  title: "SEO Workspace",
-  description: "Единое рабочее пространство для SEO-команд"
+  title: "SEOньорита",
+  description: "SEOньорита — единое рабочее пространство для SEO-команд",
+  icons: {
+    icon: [{ url: "/brand/seonorita-mark.svg", type: "image/svg+xml" }],
+    shortcut: "/brand/seonorita-mark.svg",
+    apple: "/brand/seonorita-mark.svg"
+  }
 };
 
 export const viewport: Viewport = {

@@ -131,6 +131,8 @@ test("returns project-scoped aggregate and fails malformed capability JSON close
     mode: true,
     status: true,
     capabilities: true,
+    providerMeta: true,
+    lastSuccessAt: true,
     deletedAt: true
   });
   assert.equal("ciphertext" in credentialSelect, false);
@@ -421,24 +423,28 @@ test("creates binding, route and redacted outbox event in one transaction", asyn
             findFirst: async () => binding
           },
           projectConnectorRoute: {
-            create: async ({
+            createMany: async ({
               data
             }: {
-              data: Readonly<Record<string, unknown>>;
+              data: readonly Readonly<Record<string, unknown>>[];
             }) => {
               assert.equal(inTransaction, true);
+              const first = data[0];
+              if (!first) throw new Error("Missing route create fixture");
               route = {
                 id: routeId,
-                workspaceId: String(data.workspaceId),
-                projectId: String(data.projectId),
+                workspaceId: String(first.workspaceId),
+                projectId: String(first.projectId),
                 bindingId: bindingId,
-                position: Number(data.position),
+                position: Number(first.position),
                 sourceKind: "WORKSPACE_CREDENTIAL",
-                credentialId: String(data.credentialId),
+                credentialId: String(first.credentialId),
+                routingScope: "PROJECT_OVERRIDE",
+                workspaceRouteId: null,
                 createdAt: now,
                 updatedAt: now
               };
-              return route;
+              return { count: data.length };
             }
           },
           outboxEvent: {
@@ -587,7 +593,10 @@ test("uses CAS, swaps one tenant-scoped route and writes a redacted update event
           findFirst: async () => state
         },
         projectConnectorRoute: {
-          updateMany: async ({
+          findMany: async () => [
+            { id: routeId, position: 0 }
+          ],
+          update: async ({
             where,
             data
           }: {
@@ -608,8 +617,12 @@ test("uses CAS, swaps one tenant-scoped route and writes a redacted update event
                 }
               ]
             };
-            return { count: 1 };
-          }
+            return state.routes[0];
+          },
+          create: async () => {
+            throw new Error("Existing route must be updated");
+          },
+          deleteMany: async () => ({ count: 0 })
         },
         outboxEvent: {
           create: async ({
@@ -651,13 +664,7 @@ test("uses CAS, swaps one tenant-scoped route and writes a redacted update event
     projectId,
     version: 1
   });
-  assert.deepEqual(routeWhere, {
-    workspaceId,
-    projectId,
-    bindingId,
-    position: 0,
-    sourceKind: "WORKSPACE_CREDENTIAL"
-  });
+  assert.deepEqual(routeWhere, { id: routeId });
   assert.ok(event);
   assert.equal(
     (event as Readonly<Record<string, unknown>>).eventType,
@@ -696,7 +703,14 @@ test("allows disabling a binding whose current credential is no longer active", 
           findFirst: async () => state
         },
         projectConnectorRoute: {
-          updateMany: async () => ({ count: 1 })
+          findMany: async () => [
+            { id: routeId, position: 0 }
+          ],
+          update: async () => state.routes[0],
+          create: async () => {
+            throw new Error("Existing route must be updated");
+          },
+          deleteMany: async () => ({ count: 0 })
         },
         outboxEvent: {
           create: async () => ({})
@@ -906,6 +920,11 @@ function bindingRecord(
     projectId,
     capability: "SERP_RANK_TRACKING",
     enabled: true,
+    fallbackMode: "NONE",
+    fallbackReasons: [],
+    configurationScope: "PROJECT_OVERRIDE",
+    workspaceBindingId: null,
+    workspaceBindingVersion: null,
     createdBy: actorId,
     updatedBy: actorId,
     version: 1,
@@ -924,6 +943,8 @@ function bindingRecord(
         position: 0,
         sourceKind: "WORKSPACE_CREDENTIAL" as const,
         credentialId: credential.id,
+        routingScope: "PROJECT_OVERRIDE",
+        workspaceRouteId: null,
         createdAt: now,
         updatedAt: now,
         credential

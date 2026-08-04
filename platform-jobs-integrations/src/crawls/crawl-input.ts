@@ -11,6 +11,7 @@ import {
   normalizedScopeUrl,
   validCrawlPathPattern
 } from "./crawl-scope.js";
+import { jobCapacityInput } from "../jobs/job-capacity-input.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -34,7 +35,8 @@ export function internalCreateTechnicalCrawlInput(
     "maxDepth",
     "maxRuntimeSeconds",
     "requestsPerMinute",
-    "obeyRobots"
+    "obeyRobots",
+    "jobCapacity"
   ]);
   return {
     workspaceId: uuid(input.workspaceId, "workspaceId"),
@@ -46,6 +48,7 @@ export function internalCreateTechnicalCrawlInput(
       KEY_PATTERN
     ),
     correlationId: boundedString(input.correlationId, "correlationId", 100),
+    jobCapacity: jobCapacityInput(input.jobCapacity),
     ...crawlConfig(input)
   };
 }

@@ -1,6 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import {
   normalizedRankDataQualityFlags,
+  rankProviderKeywordLimit,
   type InternalIngestRankChunkInput,
   type InternalNormalizedRankResult,
   type NormalizedRankDataQualityFlag,
@@ -44,7 +45,7 @@ export function internalIngestRankChunkInput(
   ]);
   if (
     input.schemaVersion !== "rank-ingest@1" ||
-    input.provider !== "ARSENKIN" ||
+    (input.provider !== "ARSENKIN" && input.provider !== "XMLSTOCK") ||
     input.operation !== "POSITIONS"
   ) {
     invalid("contract");
@@ -64,7 +65,7 @@ export function internalIngestRankChunkInput(
   if (
     !Array.isArray(input.results) ||
     input.results.length < 1 ||
-    input.results.length > 250
+    input.results.length > rankProviderKeywordLimit
   ) {
     invalid("results");
   }
@@ -81,7 +82,7 @@ export function internalIngestRankChunkInput(
       input.manifestChunkHash,
       "manifestChunkHash"
     ),
-    provider: "ARSENKIN",
+    provider: input.provider,
     operation: "POSITIONS",
     providerRequestId: input.providerRequestId,
     connectorVersion: input.connectorVersion,
@@ -98,10 +99,10 @@ export function resultChunkIndex(value: unknown): number {
   const parsed =
     typeof value === "number"
       ? value
-      : typeof value === "string" && /^(?:0|[1-3])$/u.test(value)
+      : typeof value === "string" && /^(?:0|[1-9]\d{0,3}|1[0-4]\d{3})$/u.test(value)
         ? Number(value)
         : Number.NaN;
-  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 3) {
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 14_999) {
     invalid("chunkIndex");
   }
   return parsed;
@@ -161,7 +162,7 @@ function normalizedResult(
     input.found !== true ||
     !Number.isSafeInteger(input.position) ||
     Number(input.position) < 1 ||
-    Number(input.position) > 30 ||
+    Number(input.position) > 100 ||
     input.resultType !== "ORGANIC" ||
     !Array.isArray(input.serpFeatures) ||
     input.serpFeatures.length !== 0

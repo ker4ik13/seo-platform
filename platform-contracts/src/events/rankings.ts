@@ -2,6 +2,7 @@ import type {
   InternalRankCheckFinalizationReceipt,
   RankCheckFinalStatus
 } from "../api/rank-runs.js";
+import { rankProviderKeywordLimit } from "../api/rank-estimates.js";
 
 export type RankCheckCompletedStatus = Extract<
   RankCheckFinalStatus,
@@ -132,13 +133,14 @@ function assertRankCheckCompletedCounts(input: {
   const persistedCount = parseCount(input.persistedCount);
   const foundCount = parseCount(input.foundCount);
   const notFoundCount = parseCount(input.notFoundCount);
+  const maximumPairCount = BigInt(rankProviderKeywordLimit);
 
   if (
     pairCount === 0n ||
-    pairCount > 1_000n ||
-    persistedCount > 1_000n ||
-    foundCount > 1_000n ||
-    notFoundCount > 1_000n ||
+    pairCount > maximumPairCount ||
+    persistedCount > maximumPairCount ||
+    foundCount > maximumPairCount ||
+    notFoundCount > maximumPairCount ||
     persistedCount !== foundCount + notFoundCount ||
     persistedCount > pairCount ||
     (input.status === "COMPLETED" && persistedCount !== pairCount) ||
@@ -153,7 +155,7 @@ function parseCount(value: string): bigint {
   if (
     typeof value !== "string" ||
     value.length < 1 ||
-    value.length > 4 ||
+    value.length > 5 ||
     !/^(0|[1-9]\d*)$/u.test(value)
   ) {
     throw new TypeError("Invalid rank check completion counts");

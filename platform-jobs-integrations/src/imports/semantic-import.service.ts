@@ -27,12 +27,14 @@ import {
   type SemanticImport
 } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { assertJobCapacity } from "../jobs/job-capacity.js";
 import { QueueService } from "../queue/queue.service.js";
 
 const SUPPORTED_SOURCE_FORMATS: Readonly<Record<string, string>> = {
   "text/csv": "CSV",
   "text/tab-separated-values": "TSV",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "XLSX"
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "XLSX",
+  "application/vnd.key-collector.project": "KC4"
 };
 
 @Injectable()
@@ -79,6 +81,11 @@ export class SemanticImportService {
     let created: SemanticImport;
     try {
       created = await this.prisma.$transaction(async (transaction) => {
+        await assertJobCapacity(
+          transaction,
+          input.workspaceId,
+          input.jobCapacity
+        );
         const semanticImport = await transaction.semanticImport.create({
           data: {
             workspaceId: input.workspaceId,
@@ -235,6 +242,9 @@ export class SemanticImportService {
         ),
         keywordsPerProjectLimit: BigInt(
           input.entitlement.keywordsPerProject
+        ),
+        foldersPerProjectLimit: BigInt(
+          input.entitlement.foldersPerProject
         ),
         trackedContextPairsLimit: BigInt(
           input.entitlement.trackedContextPairs
@@ -566,11 +576,37 @@ export function safeResult(
   if (
     fields.some((field) => typeof record[field] !== "string") ||
     typeof record.partial !== "boolean" ||
-    !Number.isSafeInteger(record.semanticVersionNumber)
+    !Number.isSafeInteger(record.semanticVersionNumber) ||
+    (record.trashedDuplicateCandidates !== undefined &&
+      !safeTrashCandidates(record.trashedDuplicateCandidates)) ||
+    (record.trashedDuplicateCandidatesTruncated !== undefined &&
+      typeof record.trashedDuplicateCandidatesTruncated !== "boolean")
   ) {
     return undefined;
   }
   return value as unknown as SemanticImportResultSummary;
+}
+
+function safeTrashCandidates(value: unknown): boolean {
+  return Array.isArray(value) &&
+    value.length <= 2_000 &&
+    value.every((candidate) => {
+      if (
+        typeof candidate !== "object" ||
+        candidate === null ||
+        Array.isArray(candidate)
+      ) return false;
+      const row = candidate as Readonly<Record<string, unknown>>;
+      return typeof row.keywordId === "string" &&
+        Number.isSafeInteger(row.version) &&
+        Number(row.version) > 0 &&
+        typeof row.text === "string" &&
+        row.text.length > 0 &&
+        row.text.length <= 2_000 &&
+        typeof row.language === "string" &&
+        row.language.length > 0 &&
+        row.language.length <= 16;
+    });
 }
 
 interface NormalizedOptions {

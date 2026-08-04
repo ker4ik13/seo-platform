@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import { useState, type FormEvent } from "react";
 import type { AppWorkspace } from "../lib/app-types";
 import {
@@ -44,7 +46,6 @@ export function WorkspaceOnboarding() {
     <section className="onboarding-panel">
       <span className="state-icon">1</span>
       <div>
-        <p className="eyebrow">Первый шаг</p>
         <h1>Создайте рабочую область</h1>
         <p>
           В ней будут храниться проекты, команда, интеграции, тариф и общий
@@ -70,22 +71,22 @@ export function WorkspaceOnboarding() {
         <div className="form-row">
           <label className="form-field">
             <span>Страна</span>
-            <select defaultValue="RU" name="country">
+            <CustomSelect defaultValue="RU" name="country">
               <option value="RU">Россия</option>
               <option value="KZ">Казахстан</option>
               <option value="US">США</option>
               <option value="GB">Великобритания</option>
               <option value="DE">Германия</option>
               <option value="">Другая</option>
-            </select>
+            </CustomSelect>
           </label>
           <label className="form-field">
             <span>Валюта</span>
-            <select defaultValue="RUB" name="billingCurrency">
+            <CustomSelect defaultValue="RUB" name="billingCurrency">
               <option value="RUB">RUB</option>
               <option value="USD">USD</option>
               <option value="EUR">EUR</option>
-            </select>
+            </CustomSelect>
           </label>
         </div>
         <button className="primary-button" disabled={busy} type="submit">
@@ -145,7 +146,6 @@ export function ProjectOnboarding({
     <section className="onboarding-panel">
       <span className="state-icon">2</span>
       <div>
-        <p className="eyebrow">{workspace.name}</p>
         <h1>Создайте первый проект</h1>
         <p>
           Добавьте домен. Поисковые контексты, конкурентов и импорт семантики

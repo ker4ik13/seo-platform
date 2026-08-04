@@ -4,7 +4,28 @@ import { canonicalJsonSha256 } from "@seo-platform/contracts/canonical-json";
 export const RANK_EXECUTION_EVIDENCE_SCHEMA =
   "rank-execution-evidence@2" as const;
 export const ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION =
-  "arsenkin-positions@1.0.0" as const;
+  "arsenkin-positions@2.0.0" as const;
+export const XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION =
+  "xmlstock-serp@1.0.0" as const;
+export const XMLSTOCK_RANK_KILL_SWITCH_VERSION =
+  "xmlstock-serp@1" as const;
+
+export function rankExecutionConnectorVersion(
+  provider: "ARSENKIN" | "XMLSTOCK"
+): string {
+  return provider === "XMLSTOCK"
+    ? XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION
+    : ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION;
+}
+
+export function rankExecutionKillSwitchVersion(
+  provider: "ARSENKIN" | "XMLSTOCK",
+  configuredArsenkinVersion: string
+): string {
+  return provider === "XMLSTOCK"
+    ? XMLSTOCK_RANK_KILL_SWITCH_VERSION
+    : configuredArsenkinVersion;
+}
 
 export interface RankExecutionEvidenceV2 {
   readonly schemaVersion: "rank-execution-evidence@2";
@@ -112,7 +133,7 @@ export function rankExecutionEvidence(
     providerRequestIntent.schemaVersion !==
       "rank-provider-request-intent@1" ||
     !boundedInteger(input.executionAttempt, 1, 1_000) ||
-    !boundedInteger(manifest.chunkIndex, 0, 3) ||
+    !boundedInteger(manifest.chunkIndex, 0, 14_999) ||
     typeof input.executionConnectorVersion !== "string" ||
     !VERSION_PATTERN.test(input.executionConnectorVersion) ||
     typeof input.providerPolicyVersion !== "string" ||

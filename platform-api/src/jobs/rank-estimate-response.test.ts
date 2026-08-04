@@ -145,6 +145,115 @@ test("accepts the bounded overflow sentinel only with unavailable hash", () => {
   );
 });
 
+test("accepts one 15,000-keyword provider task and rejects a wider scope", () => {
+  const current = {
+    ...blockedEstimate,
+    scope: {
+      ...blockedEstimate.scope,
+      keywordCount: "15000",
+      pairCount: "15000"
+    },
+    workload: {
+      ...blockedEstimate.workload,
+      taskCount: "1",
+      minimumRequestCount: "3",
+      keywordLimitPerTask: "15000",
+      keywordLimitPerCommand: "15000"
+    }
+  };
+  assert.equal(
+    scopedRankEstimate(current, workspaceId, projectId, contextId).workload
+      .taskCount,
+    "1"
+  );
+
+  const overflow = {
+    ...current,
+    scope: {
+      ...current.scope,
+      keywordCount: "15001",
+      pairCount: "15001",
+      scopeHash: { availability: "UNAVAILABLE" }
+    },
+    workload: {
+      ...current.workload,
+      taskCount: "0",
+      minimumRequestCount: "0"
+    },
+    blockers: [
+      { code: "KEYWORD_LIMIT_EXCEEDED" },
+      { code: "SCOPE_HASH_UNAVAILABLE" }
+    ]
+  };
+  assert.equal(
+    scopedRankEstimate(overflow, workspaceId, projectId, contextId).scope
+      .keywordCount,
+    "15001"
+  );
+  assert.throws(
+    () =>
+      scopedRankEstimate(
+        {
+          ...overflow,
+          scope: {
+            ...overflow.scope,
+            keywordCount: "15002",
+            pairCount: "15002"
+          }
+        },
+        workspaceId,
+        projectId,
+        contextId
+      ),
+    invalidDependencyResponse
+  );
+});
+
+test("accepts XMLStock Yandex and Google workloads without truncating requests", () => {
+  const xmlBase = {
+    ...blockedEstimate,
+    provider: "XMLSTOCK",
+    scope: {
+      ...blockedEstimate.scope,
+      keywordCount: "15000",
+      pairCount: "15000"
+    },
+    workload: {
+      ...blockedEstimate.workload,
+      taskCount: "15000",
+      minimumRequestCount: "30000",
+      requestStages: ["SUBMIT", "POLL"],
+      keywordLimitPerTask: "1",
+      keywordLimitPerCommand: "15000"
+    },
+    policyVersion: "manual-xmlstock-serp@1.0.0"
+  };
+  assert.equal(
+    scopedRankEstimate(xmlBase, workspaceId, projectId, contextId).provider,
+    "XMLSTOCK"
+  );
+  const google = {
+    ...xmlBase,
+    workload: {
+      ...xmlBase.workload,
+      minimumRequestCount: "150000",
+      requestStages: ["GET"]
+    }
+  };
+  assert.equal(
+    scopedRankEstimate(google, workspaceId, projectId, contextId).workload
+      .minimumRequestCount,
+    "150000"
+  );
+  assert.throws(
+    () => scopedRankEstimate({
+      ...google,
+      workload: { ...google.workload, minimumRequestCount: "150001" }
+    }, workspaceId, projectId, contextId),
+    invalidDependencyResponse
+  );
+});
+
 function invalidDependencyResponse(error: unknown): boolean {
   return (
     error instanceof DomainError &&

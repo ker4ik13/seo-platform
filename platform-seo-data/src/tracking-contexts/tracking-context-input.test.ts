@@ -4,6 +4,7 @@ import { BadRequestException } from "@nestjs/common";
 import {
   internalChangeTrackingContextKeywordInput,
   internalCreateTrackingContextInput,
+  internalReplaceTrackingContextKeywordsInput,
   trackingContextKeywordQuery
 } from "./tracking-context-input.js";
 
@@ -101,6 +102,7 @@ test("bounds keyword queries and validates point command identifiers", () => {
     planVersion: 1,
     storedKeywords: 2_000_000,
     keywordsPerProject: 2_000_000,
+    foldersPerProject: 500,
     trackedContextPairs: 50_000
   } as const;
   assert.deepEqual(trackingContextKeywordQuery({}), { limit: 100 });
@@ -135,3 +137,60 @@ test("bounds keyword queries and validates point command identifiers", () => {
     }
   );
 });
+
+test("validates an exact 15,000-keyword replacement command", () => {
+  const keywordIds = keywordIdentifiers(15_000);
+  const result = internalReplaceTrackingContextKeywordsInput({
+    workspaceId,
+    projectId,
+    actorId,
+    contextId,
+    version: 7,
+    idempotencyKey: "replace-keywords-001",
+    keywordIds,
+    entitlement: {
+      planCode: "TEAM",
+      planVersion: 1,
+      storedKeywords: 2_000_000,
+      keywordsPerProject: 2_000_000,
+      foldersPerProject: 500,
+      trackedContextPairs: 50_000
+    }
+  });
+
+  assert.equal(result.keywordIds.length, 15_000);
+  assert.equal(result.version, 7);
+  assert.equal(result.idempotencyKey, "replace-keywords-001");
+});
+
+test("rejects a 15,001-keyword replacement before persistence", () => {
+  assert.throws(
+    () =>
+      internalReplaceTrackingContextKeywordsInput({
+        workspaceId,
+        projectId,
+        actorId,
+        contextId,
+        version: 1,
+        idempotencyKey: "replace-keywords-001",
+        keywordIds: keywordIdentifiers(15_001),
+        entitlement: {
+          planCode: "TEAM",
+          planVersion: 1,
+          storedKeywords: 2_000_000,
+          keywordsPerProject: 2_000_000,
+          foldersPerProject: 500,
+          trackedContextPairs: 50_000
+        }
+      }),
+    BadRequestException
+  );
+});
+
+function keywordIdentifiers(count: number): readonly string[] {
+  return Array.from(
+    { length: count },
+    (_, index) =>
+      `01900000-0000-7000-8000-${String(index + 1).padStart(12, "0")}`
+  );
+}

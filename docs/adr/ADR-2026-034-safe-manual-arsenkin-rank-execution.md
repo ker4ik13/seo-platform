@@ -1,6 +1,6 @@
 # ADR-2026-034: безопасный manual rank execution через Arsenkin
 
-Статус: принято; live submit заблокирован внешним contract gate
+Статус: принято; документированный request активирован с fail-closed result gate
 Дата: 29 июля 2026 года
 
 ## Контекст
@@ -64,8 +64,13 @@ schema, exhaustive status vocabulary и idempotency/recovery contract. Поэт�
 - `rawSerp=false`;
 - fallback `NONE`;
 - platform provider charge равен нулю, допускается только тарифная SaaS quota;
-- начальный chunk — не более 250 keywords, hard cap команды — 1 000 до
-  benchmark;
+- текущая policy `manual-arsenkin-positions@2.0.0` создаёт один provider task
+  на весь scope от 1 до 15 000 keywords; автоматическое деление на несколько
+  платных `set` запрещено, а ограничение пользовательского тарифа возвращается
+  как явный provider plan/request rejection;
+- запечатанные execution старой policy `@1.0.0` с chunk size 250 и hard cap
+  1 000 остаются читаемыми, опрашиваемыми и финализируемыми, но новые команды
+  по этой policy не создаются;
 - Google Desktop/Mobile TOP-30;
 - Яндекс и дополнительные depths включаются только после recorded contract;
 - любая непредставимая часть tracking configuration блокирует estimate:
@@ -75,6 +80,42 @@ schema, exhaustive status vocabulary и idempotency/recovery contract. Поэт�
 Boolean `safeSearch` текущего contract не заменяется молча provider default.
 Если provider не позволяет представить оба значения, compatibility остаётся
 blocked. Возможный tri-state требует совместимой новой версии contract и ADR.
+
+## Дополнение от 2 августа 2026 года
+
+Ранее реализованный adapter ошибочно отправлял `check-top` — инструмент
+выгрузки выдачи, а не проверки позиции проекта. Исполнение переведено на
+официальный request `tools_name=positions` с `queries`, `url`, `alt_urls`,
+`subdomain`, `se` и `format=0`. Семантика request изменилась, поэтому runtime
+использует новый connector version `arsenkin-positions@2.0.0`, wire hash
+domain `arsenkin-rank-request@2` и kill-switch generation
+`arsenkin-positions@4`. Миграции запрещают переключение, пока существует
+старый автоматически возобновляемый execution; неизвестный response shape
+по-прежнему завершается fail-closed без сохранения raw provider body.
+
+`depth` передаётся только для Google (`type=11/12`), как требует публичный
+request contract. Для Яндекса (`type=2/3`) внутренний профиль канонизирован к
+TOP-30, но wire-поле отсутствует; выбор TOP-50/TOP-100 блокируется на estimate,
+чтобы UI и API не обещали провайдеру параметр, которого в contract нет.
+Live canary 2 августа 2026 года зафиксировал фактический async contract:
+после `set` connector опрашивает `check`, принимает только
+`TASK_STATUS/process` с progress 0–99 как pending и вызывает `get` только при
+`TASK_STATUS/finish` с progress 100. Преждевременный `TASK_RESULT` из `get`
+не является доказательством завершения и не нормализуется.
+Для одного большого task bounded poll horizon составляет 720 попыток.
+Финальный `get` ограничен 128 MiB одновременно по `Content-Length` и по
+фактически прочитанному stream; превышение завершается как invalid provider
+response до JSON materialization.
+
+Финальный `format=0` результат содержит `result.table`, где ключом является
+исходный текст запроса. Найденная строка имеет exact поля `commerce`,
+`position`, `top20`, `url`; ненайденная — только `position`, `top20` и
+provider sentinel `position=[1001]`. Normalizer проверяет task ID, exact query
+set, число search-engine значений, URL scope проекта и sealed depth. Поля
+title/snippet для format 0 помечаются unavailable, а raw `top20`, summary и
+provider body не сохраняются. TOP-100 разрешён в canonical/public/SEO Data
+boundaries; additive migration `20260802130000_rank_position_top100`
+расширяет CHECK constraints обеих rank projections с 30 до 100.
 
 ## Public command flow
 
@@ -195,11 +236,16 @@ constraint trigger запрещает committed `BUILDING`; прямой insert
 контексту/ключу и точное состояние keyword snapshot.
 
 Перед materialization SEO Data выполняет bounded byte-first preflight:
-максимум 1 000 ключей, 500 Unicode code points и 2 000 UTF-8 bytes на ключ,
-2 000 000 bytes на весь scope; chunk size — 250. Лимит 500 символов принят
-консервативно из опубликованного Projects API Arsenkin, поскольку отдельный
-лимит `positions` не опубликован. Provider-incompatible bounded scope
-возвращает unavailable hash и не загружает большие тексты в Node.
+максимум 15 000 ключей, 500 Unicode code points и 2 000 UTF-8 bytes на ключ,
+30 000 000 bytes на весь scope; текущий manifest состоит из одного chunk
+размером до 15 000. Лимит 500 символов принят консервативно из опубликованного
+Projects API Arsenkin, поскольку отдельный лимит `positions` не опубликован.
+Provider-incompatible bounded scope возвращает unavailable hash и не загружает
+большие тексты в Node. Manifest entries и normalized snapshots записываются
+SQL-пакетами по 1 000 строк, не приближаясь к PostgreSQL bind-parameter limit;
+manifest/result transaction имеют timeout 120 секунд, terminal finalization —
+60 секунд. Для immutable manifest старой policy сохраняется представление
+1 000/250 без преобразования истории.
 
 Secret-bearing endpoints seal/chunk используют отдельный
 `JOBS_TO_SEO_RANK_TOKEN` и header `x-rank-execution-token`; ни один general

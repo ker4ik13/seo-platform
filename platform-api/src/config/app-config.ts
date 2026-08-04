@@ -752,7 +752,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
         10,
         "AUTH_RECENT_AUTHENTICATION_MINUTES"
       ),
-      totpIssuer: env.AUTH_TOTP_ISSUER?.trim() || "SEO Workspace",
+      totpIssuer: env.AUTH_TOTP_ISSUER?.trim() || "SEOньорита",
       cookieSecure: booleanValue(
         env.AUTH_COOKIE_SECURE,
         nodeEnv === "production",

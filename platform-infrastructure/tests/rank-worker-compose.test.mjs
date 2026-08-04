@@ -66,7 +66,7 @@ test("rank worker has an explicit least-capability runtime boundary", async () =
   assert.match(environment, /RANK_PROVIDER_SUBMIT_ENABLED: "false"/u);
   assert.match(
     environment,
-    /RANK_PROVIDER_KILL_SWITCH_VERSION: \$\{RANK_PROVIDER_KILL_SWITCH_VERSION:-arsenkin-positions@2\}/u
+    /RANK_PROVIDER_KILL_SWITCH_VERSION: \$\{RANK_PROVIDER_KILL_SWITCH_VERSION:-arsenkin-positions@4\}/u
   );
   assert.match(environment, /INTEGRATION_CREDENTIAL_ROLE: DISABLED/u);
   assert.match(environment, /PLATFORM_API_URL: http:\/\/platform-api:4000/u);

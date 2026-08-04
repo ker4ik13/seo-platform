@@ -7,6 +7,7 @@ import {
   Logger,
   Param,
   Post,
+  Query,
   Req,
   Res,
   UseGuards
@@ -19,10 +20,12 @@ import type {
   ProjectCrawlIssueCollection,
   TechnicalCrawlAccess,
   TechnicalCrawlSettings,
-  TechnicalCrawlSummary
+  TechnicalCrawlSummary,
+  CrawlOperationResultPage
 } from "@seo-platform/contracts";
 import type { FastifyReply } from "fastify";
 import { AuditService } from "../audit/audit.service.js";
+import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import type { TenantRequest } from "../authorization/authorization.types.js";
 import { hasEffectiveProjectPermission } from "../authorization/permissions.js";
 import {
@@ -34,6 +37,7 @@ import {
 import { RequirePermission } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
 import { apiResponse } from "../common/api-response.js";
+import { DomainError } from "../common/domain-error.js";
 import { recordCommittedAudit } from "../common/committed-audit.js";
 import { setEntityVersion } from "../common/entity-version.js";
 import { requiredIdempotencyKey } from "../common/idempotency-key.js";
@@ -61,7 +65,8 @@ export class CrawlController {
   public constructor(
     private readonly jobs: JobsClient,
     private readonly seoData: SeoDataClient,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly billing: BillingEntitlementService
   ) {}
 
   @Get("crawls")
@@ -164,6 +169,34 @@ export class CrawlController {
     return apiResponse(request, crawl, crawl.version);
   }
 
+  @Get("crawls/:crawlId/result")
+  @RequirePermission("page.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async result(
+    @Param("crawlId") crawlId: string,
+    @Query("limit") limitValue: unknown,
+    @Query("cursor") cursorValue: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<CrawlOperationResultPage>> {
+    const tenant = requiredProjectTenant(request);
+    const context = internalProjectContext(request, principal, tenant);
+    const canonicalCrawlId = assertUuid(crawlId, "crawlId");
+    const limit = crawlResultLimit(limitValue);
+    const cursor = crawlResultCursor(cursorValue);
+    const [crawl, result] = await Promise.all([
+      this.jobs.getTechnicalCrawl(context, canonicalCrawlId),
+      this.seoData.crawlOperationResult(
+        context,
+        canonicalCrawlId,
+        limit,
+        cursor
+      )
+    ]);
+    const { workspaceId: _workspaceId, projectId: _projectId, ...safe } = result;
+    return apiResponse(request, { ...safe, crawl });
+  }
+
   @Post("crawls")
   @HttpCode(HttpStatus.ACCEPTED)
   @RequirePermission("page.manage")
@@ -192,7 +225,8 @@ export class CrawlController {
     const crawl = await this.jobs.createTechnicalCrawl(
       internalProjectContext(request, principal, tenant),
       input,
-      idempotencyKey
+      idempotencyKey,
+      await this.billing.jobCapacity(tenant.workspaceId)
     );
     await committed(
       this.audit,
@@ -255,6 +289,31 @@ export class CrawlController {
     setEntityVersion(reply, crawl.version);
     return apiResponse(request, crawl, crawl.version);
   }
+}
+
+function crawlResultLimit(value: unknown): number {
+  if (value === undefined) return 100;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 100) {
+    throw new DomainError({
+      statusCode: 400,
+      code: "VALIDATION_FAILED",
+      message: "Invalid crawl result limit"
+    });
+  }
+  return parsed;
+}
+
+function crawlResultCursor(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,3})$/u.test(value)) {
+    throw new DomainError({
+      statusCode: 400,
+      code: "VALIDATION_FAILED",
+      message: "Invalid crawl result cursor"
+    });
+  }
+  return value;
 }
 
 function crawlAccess(tenant: AuthorizedProjectTenant): TechnicalCrawlAccess {

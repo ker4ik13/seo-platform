@@ -4,12 +4,11 @@ export default function ResetPasswordPage() {
   return (
     <main className="auth-page">
       <a className="auth-brand" href="/">
-        <span className="brand-mark">S</span>
-        <span>SEO Workspace</span>
+        <img alt="" aria-hidden="true" className="brand-mark" height={29} src="/brand/seonorita-mark.svg" width={29} />
+        <span>SEOньорита</span>
       </a>
       <section className="auth-card">
         <header>
-          <p className="eyebrow">Безопасность</p>
           <h1>Новый пароль</h1>
           <p>
             После смены пароля все прежние сессии будут завершены, а текущий

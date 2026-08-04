@@ -35,6 +35,18 @@ test("parses a CSV upload declaration", () => {
       sizeBytes: "2048"
     }
   );
+  assert.deepEqual(
+    createUploadInput({
+      fileName: "project.kc4",
+      mediaType: "application/vnd.key-collector.project",
+      sizeBytes: "70406"
+    }),
+    {
+      fileName: "project.kc4",
+      mediaType: "application/vnd.key-collector.project",
+      sizeBytes: "70406"
+    }
+  );
 });
 
 test("rejects unsupported files and missing idempotency keys", () => {

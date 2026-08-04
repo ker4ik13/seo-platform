@@ -19,9 +19,9 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <a className="brand" href="/" aria-label="SEO Workspace">
-          <span className="brand-mark">S</span>
-          <span>SEO Workspace</span>
+        <a className="brand" href="/" aria-label="SEOньорита">
+          <img alt="" aria-hidden="true" className="brand-mark" height={29} src="/brand/seonorita-mark.svg" width={29} />
+          <span>SEOньорита</span>
         </a>
 
         <button className="project-switcher" type="button">
@@ -62,8 +62,8 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
       <div className="main-column">
         <header className="topbar">
           <div className="mobile-brand">
-            <span className="brand-mark">S</span>
-            <strong>Workspace</strong>
+            <img alt="" aria-hidden="true" className="brand-mark" height={27} src="/brand/seonorita-mark.svg" width={27} />
+            <strong>SEOньорита</strong>
           </div>
           <label className="global-search">
             <Icon name="search" />

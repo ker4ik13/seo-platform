@@ -65,7 +65,7 @@ test("sends an official NPD receipt and durably completes its Platform state", a
   assert.equal(fixture.calls.messages.length, 1);
   assert.equal(
     fixture.calls.messages[0]?.subject,
-    "Ваш чек об оплате SEO Workspace"
+    "Ваш чек об оплате SEOньорита"
   );
   assert.match(
     fixture.calls.messages[0]?.text ?? "",

@@ -197,6 +197,35 @@ export interface InternalCreateProjectNotificationReceipt {
   readonly reason?: "POLICY_DISABLED" | "OWN_JOB_DISABLED";
 }
 
+export const terminalJobNotificationStatuses = [
+  "COMPLETED",
+  "PARTIALLY_COMPLETED",
+  "CANCELLED",
+  "FAILED_FINAL",
+  "ACTION_REQUIRED"
+] as const;
+
+export type TerminalJobNotificationStatus =
+  (typeof terminalJobNotificationStatuses)[number];
+
+export interface InternalDeliverJobNotificationInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly jobId: string;
+  readonly jobType: string;
+  readonly status: TerminalJobNotificationStatus;
+  readonly progressCurrent: number;
+  readonly progressTotal: number | null;
+  readonly errorCode: string | null;
+  readonly idempotencyKey: string;
+}
+
+export interface InternalDeliverJobNotificationReceipt {
+  readonly accepted: true;
+  readonly outcome: ProjectNotificationCreationOutcome;
+}
+
 export interface InternalAuthorizeProjectNotificationDeliveryInput {
   readonly userId: string;
   readonly workspaceId: string;

@@ -11,7 +11,11 @@ import {
   Req,
   UseGuards
 } from "@nestjs/common";
-import type { ApiResponse, FrequencyCollectionSummary } from "@seo-platform/contracts";
+import type {
+  ApiResponse,
+  FrequencyCollectionSummary,
+  FrequencyOperationResult
+} from "@seo-platform/contracts";
 import { AuditService } from "../audit/audit.service.js";
 import { RequirePermission } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
@@ -33,6 +37,7 @@ import {
   SessionAuthGuard
 } from "../identity/session-auth.guard.js";
 import { JobsClient } from "../jobs/jobs.client.js";
+import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import {
   createFrequencyCollectionInput,
   frequencyCancelInput,
@@ -46,7 +51,8 @@ export class FrequencyCollectionController {
   public constructor(
     private readonly jobs: JobsClient,
     private readonly billing: BillingEntitlementService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    private readonly seoData?: SeoDataClient
   ) {}
 
   @Get()
@@ -64,6 +70,42 @@ export class FrequencyCollectionController {
     });
   }
 
+  @Get(":jobId/result")
+  @RequirePermission("collector.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async result(
+    @Param("jobId") jobId: string,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<FrequencyOperationResult>> {
+    const tenant = requiredProjectTenant(request);
+    const context = internalProjectContext(request, principal, tenant);
+    const canonicalJobId = assertUuid(jobId, "jobId");
+    const [collection, scope] = await Promise.all([
+      this.jobs.getFrequencyCollection(context, canonicalJobId),
+      this.jobs.getFrequencyOperationScope(context, canonicalJobId)
+    ]);
+    if (!this.seoData) throw new Error("SEO data client is not available");
+    const result = await this.seoData.frequencyOperationResult(
+      context,
+      canonicalJobId,
+      scope.items.map(({ keywordId }) => keywordId)
+    );
+    const byKeywordId = new Map(
+      result.rows.map((row) => [row.keywordId, row])
+    );
+    return apiResponse(request, {
+      collection,
+      rows: scope.items.map((item) => {
+        const row = byKeywordId.get(item.keywordId);
+        if (!row) {
+          throw new Error("Frequency operation result join is incomplete");
+        }
+        return { ...row, ...item };
+      })
+    });
+  }
+
   @Post()
   @HttpCode(HttpStatus.ACCEPTED)
   @RequirePermission("collector.run")
@@ -78,7 +120,10 @@ export class FrequencyCollectionController {
     const context = requestContext(request);
     const input = createFrequencyCollectionInput(body);
     const canonicalIdempotencyKey = frequencyIdempotencyKey(idempotencyKey);
-    await this.billing.semanticCapacity(tenant.workspaceId);
+    const [, jobCapacity] = await Promise.all([
+      this.billing.semanticCapacity(tenant.workspaceId),
+      this.billing.jobCapacity(tenant.workspaceId)
+    ]);
     await this.audit.record({
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
@@ -91,7 +136,8 @@ export class FrequencyCollectionController {
     const result = await this.jobs.createFrequencyCollection(
       internalProjectContext(request, principal, tenant),
       input,
-      canonicalIdempotencyKey
+      canonicalIdempotencyKey,
+      jobCapacity
     );
     await committed(
       this.audit,

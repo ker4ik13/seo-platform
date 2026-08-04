@@ -1,7 +1,7 @@
 {
   "asyncapi": "2.6.0",
   "info": {
-    "title": "SEO Platform identity events",
+    "title": "SEOnorita identity events",
     "version": "1.0.0",
     "description": "Minimal contract for durable terminal session-family revocation delivery over environment-isolated NATS JetStream."
   },

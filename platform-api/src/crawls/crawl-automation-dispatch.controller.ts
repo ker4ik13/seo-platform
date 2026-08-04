@@ -103,7 +103,8 @@ export class CrawlAutomationDispatchController {
         requestId: request.id
       },
       input.config,
-      input.idempotencyKey
+      input.idempotencyKey,
+      await this.billing.jobCapacity(input.workspaceId)
     );
     await recordCommittedAudit(this.audit, this.logger, {
       actorId: input.actorId,

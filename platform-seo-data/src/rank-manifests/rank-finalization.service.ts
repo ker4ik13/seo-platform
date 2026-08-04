@@ -9,6 +9,7 @@ import {
 import {
   domainEventTypes,
   rankCheckCompletedEventDataV1,
+  rankProviderKeywordLimit,
   type InternalFinalizeRankCheckInput,
   type InternalRankCheckFinalizationReceipt,
   type RankCheckFinalStatus,
@@ -20,7 +21,7 @@ import { PrismaService } from "../database/prisma.service.js";
 
 const FINALIZE_SCHEMA = "rank-finalize@1";
 const FINALIZATION_TRANSACTION_MAX_WAIT_MS = 5_000;
-const FINALIZATION_TRANSACTION_TIMEOUT_MS = 15_000;
+const FINALIZATION_TRANSACTION_TIMEOUT_MS = 60_000;
 const HASH_PATTERN = /^[0-9a-f]{64}$/u;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -229,7 +230,11 @@ async function aggregateIngestReceipts(
     notFoundCount: aggregate._sum.notFoundCount ?? 0
   };
   if (
-    !validCount(result.persistedCount, 0, 1_000) ||
+    !validCount(
+      result.persistedCount,
+      0,
+      rankProviderKeywordLimit
+    ) ||
     !validCount(result.foundCount, 0, result.persistedCount) ||
     !validCount(result.notFoundCount, 0, result.persistedCount) ||
     result.persistedCount !==
@@ -365,7 +370,7 @@ function assertLockedManifest(manifest: LockedManifest): void {
     manifest.configurationVersion < 1 ||
     !Number.isSafeInteger(manifest.pairCount) ||
     manifest.pairCount < 1 ||
-    manifest.pairCount > 1_000 ||
+    manifest.pairCount > rankProviderKeywordLimit ||
     !(manifest.sealedAt instanceof Date) ||
     Number.isNaN(manifest.sealedAt.getTime()) ||
     !(manifest.finalizedAt instanceof Date) ||
@@ -395,7 +400,7 @@ function finalizationOutcomeIsValid(
   persistedCount: number
 ): boolean {
   if (
-    !validCount(pairCount, 1, 1_000) ||
+    !validCount(pairCount, 1, rankProviderKeywordLimit) ||
     !validCount(persistedCount, 0, pairCount)
   ) {
     return false;

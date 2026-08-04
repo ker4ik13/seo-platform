@@ -11,6 +11,7 @@ export const domainEventTypes = {
   workspaceUpdated: "workspace.updated.v1",
   workspaceInviteRequested: "workspace.invite.requested.v1",
   workspaceInviteAccepted: "workspace.invite.accepted.v1",
+  workspaceInviteDeclined: "workspace.invite.declined.v1",
   workspaceInviteRevoked: "workspace.invite.revoked.v1",
   workspaceMemberChanged: "workspace.member.changed.v1",
   projectCreated: "project.created.v1",
@@ -42,6 +43,8 @@ export const domainEventTypes = {
   trackingContextRestored: "seo.tracking-context.restored.v1",
   trackingContextKeywordAssignmentChanged:
     "seo.tracking-context.keyword-assignment.changed.v1",
+  trackingContextKeywordAssignmentsReplaced:
+    "seo.tracking-context.keyword-assignments.replaced.v1",
   rankCheckCompleted: "seo.rank-check.completed.v1",
   billingReservationCreated: "billing.reservation.created.v1",
   billingReservationSettled: "billing.reservation.settled.v1",

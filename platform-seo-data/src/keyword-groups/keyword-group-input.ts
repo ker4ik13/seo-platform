@@ -5,6 +5,7 @@ import type {
   InternalUpdateSemanticKeywordGroupInput
 } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
+import { semanticCapacityEntitlement } from "../internal/semantic-capacity.js";
 
 const COLOR_PATTERN = /^#[0-9a-f]{6}$/iu;
 
@@ -13,6 +14,7 @@ export function internalCreateSemanticKeywordGroupInput(
 ): InternalCreateSemanticKeywordGroupInput {
   const input = exactRecord(value, [
     ...scopeFields(),
+    "entitlement",
     "name",
     "parentId",
     "color"
@@ -21,6 +23,7 @@ export function internalCreateSemanticKeywordGroupInput(
   const color = optionalColor(input.color, false);
   return {
     ...scope(input),
+    entitlement: semanticCapacityEntitlement(input.entitlement),
     name: groupName(input.name),
     ...(parentId ? { parentId } : {}),
     ...(color ? { color } : {})
@@ -35,24 +38,44 @@ export function internalUpdateSemanticKeywordGroupInput(
     "version",
     "name",
     "parentId",
-    "color"
+    "color",
+    "position"
   ]);
   return {
     ...scope(input),
     version: positiveInteger(input.version, "version"),
     name: groupName(input.name),
     ...nullableUuid(input.parentId, "parentId"),
-    ...nullableColor(input.color)
+    ...nullableColor(input.color),
+    ...optionalPosition(input.position)
   };
+}
+
+function optionalPosition(
+  value: unknown
+): Readonly<{ position?: number }> {
+  if (value === undefined) return {};
+  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > 1_999) {
+    invalid("position");
+  }
+  return { position: Number(value) };
 }
 
 export function internalDeleteSemanticKeywordGroupInput(
   value: unknown
 ): InternalDeleteSemanticKeywordGroupInput {
-  const input = exactRecord(value, [...scopeFields(), "version"]);
+  const input = exactRecord(value, [
+    ...scopeFields(),
+    "version",
+    "deleteKeywords"
+  ]);
   return {
     ...scope(input),
-    version: positiveInteger(input.version, "version")
+    version: positiveInteger(input.version, "version"),
+    deleteKeywords:
+      input.deleteKeywords === undefined
+        ? false
+        : booleanValue(input.deleteKeywords, "deleteKeywords")
   };
 }
 
@@ -121,6 +144,11 @@ function uuid(value: unknown, field: string): string {
 function positiveInteger(value: unknown, field: string): number {
   if (!Number.isSafeInteger(value) || Number(value) < 1) invalid(field);
   return Number(value);
+}
+
+function booleanValue(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") invalid(field);
+  return value;
 }
 
 function exactRecord(

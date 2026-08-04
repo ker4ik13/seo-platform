@@ -9,11 +9,14 @@ import { IntegrationCredentialService } from "./integration-credential.service.j
 import { IntegrationCredentialValidationService } from "./integration-credential-validation.service.js";
 import { ProjectConnectorBindingController } from "./project-connector-binding.controller.js";
 import { ProjectConnectorBindingService } from "./project-connector-binding.service.js";
+import { WorkspaceConnectorRoutingController } from "./workspace-connector-routing.controller.js";
+import { WorkspaceConnectorRoutingService } from "./workspace-connector-routing.service.js";
 
 @Module({
   controllers: [
     IntegrationCredentialController,
-    ProjectConnectorBindingController
+    ProjectConnectorBindingController,
+    WorkspaceConnectorRoutingController
   ],
   providers: [
     IntegrationCredentialApiGuard,
@@ -23,8 +26,9 @@ import { ProjectConnectorBindingService } from "./project-connector-binding.serv
     IntegrationCredentialKeyCoverageService,
     IntegrationCredentialService,
     IntegrationCredentialValidationService,
-    ProjectConnectorBindingService
+    ProjectConnectorBindingService,
+    WorkspaceConnectorRoutingService
   ],
-  exports: [IntegrationCredentialApiGuard]
+  exports: [IntegrationCredentialApiGuard, WorkspaceConnectorRoutingService]
 })
 export class IntegrationModule {}

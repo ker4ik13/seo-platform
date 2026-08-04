@@ -56,6 +56,39 @@ test("protects Google Sheets CSV and preserves typed JSON values", () => {
   ]);
 });
 
+test("exports current frequency, word count and search positions", () => {
+  const document = semanticExportDocument(dataset(), {
+    format: "JSON",
+    scope: "FULL_CORE",
+    locale: "ru",
+    columns: [
+      "frequency",
+      "frequencyExact",
+      "frequencyFixed",
+      "wordCount",
+      "yandexPosition",
+      "yandexRelevantUrl",
+      "googlePosition",
+      "googleRelevantUrl",
+      "visibility"
+    ]
+  });
+
+  assert.deepEqual(JSON.parse(Buffer.from(document.bytes).toString("utf8")), [
+    {
+      frequency: "12890",
+      frequencyExact: "5123",
+      frequencyFixed: "5122",
+      wordCount: 1,
+      yandexPosition: 5,
+      yandexRelevantUrl: "https://example.com/ranking-page",
+      googlePosition: null,
+      googleRelevantUrl: null,
+      visibility: 96
+    }
+  ]);
+});
+
 function dataset(): SemanticExportDataset {
   return {
     items: [keyword()],
@@ -80,6 +113,54 @@ function keyword(): SemanticKeywordListItem {
         value: 42,
         version: 1,
         updatedAt: "2026-07-30T10:00:00.000Z"
+      }
+    ],
+    frequency: {
+      value: "12890",
+      regionCode: "213",
+      device: "ALL",
+      provider: "XMLSTOCK",
+      observedAt: "2026-07-30T10:00:00.000Z"
+    },
+    frequencies: [
+      {
+        type: "BASE",
+        value: "12890",
+        regionCode: "213",
+        device: "ALL",
+        provider: "XMLSTOCK",
+        observedAt: "2026-07-30T10:00:00.000Z"
+      },
+      {
+        type: "EXACT",
+        value: "5123",
+        regionCode: "213",
+        device: "ALL",
+        provider: "ARSENKIN",
+        observedAt: "2026-07-30T10:00:00.000Z"
+      },
+      {
+        type: "FIXED",
+        value: "5122",
+        regionCode: "213",
+        device: "ALL",
+        provider: "ARSENKIN",
+        observedAt: "2026-07-30T10:00:00.000Z"
+      }
+    ],
+    positions: [
+      {
+        searchEngine: "YANDEX",
+        found: true,
+        position: 5,
+        previousPosition: 7,
+        rankingUrl: "https://example.com/ranking-page",
+        observedAt: "2026-07-30T10:00:00.000Z"
+      },
+      {
+        searchEngine: "GOOGLE",
+        found: false,
+        observedAt: "2026-07-30T10:00:00.000Z"
       }
     ],
     sourceMode: "IMPORT",

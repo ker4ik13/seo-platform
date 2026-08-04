@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
   semanticKeywordIntents,
+  semanticKeywordCreateOutcomes,
   semanticKeywordCleaningStates,
   semanticKeywordSourceModes,
   semanticKeywordSorts,
@@ -21,6 +22,7 @@ import {
   type CreateSemanticClusterInput,
   type CreateSemanticKeywordGroupInput,
   type InternalCreateSemanticKeywordInput,
+  type InternalSemanticKeywordBulkCreateInput,
   type InternalCreateSemanticClusterInput,
   type InternalCreateSemanticKeywordGroupInput,
   type InternalDeleteSemanticKeywordInput,
@@ -47,8 +49,13 @@ import {
   type InternalChangeProjectPageStatusInput,
   type InternalCreateProjectPageInput,
   type InternalCreateTrackingContextInput,
+  type InternalReplaceTrackingContextKeywordsInput,
   type InternalUpdateProjectPageInput,
   type InternalUpdateTrackingContextInput,
+  type InternalCrawlOperationResultPage,
+  type InternalFrequencyOperationResult,
+  type InternalFrequencyOperationResultInput,
+  type InternalRankOperationResult,
   type KeywordListQuery,
   type RankHistoryQuery,
   type CreateProjectPageInput,
@@ -72,6 +79,8 @@ import {
   type SemanticClusterPageBulkResult,
   type SemanticClusterPageSource,
   type SemanticKeywordBulkInput,
+  type SemanticKeywordBulkCreateInput,
+  type SemanticKeywordBulkCreateResult,
   type SemanticKeywordBulkResult,
   type SemanticKeywordCleaningInput,
   type SemanticKeywordCleaningPreview,
@@ -88,6 +97,7 @@ import {
   type SemanticSavedViewConfig,
   type SemanticCapacityEntitlement,
   type SemanticVersionListItem,
+  type SemanticVersionDetail,
   type SemanticVersionUndoPreview,
   type SemanticVersionUndoResult,
   type UpdateSemanticSavedViewInput,
@@ -95,8 +105,10 @@ import {
   type UpdateSemanticCustomColumnInput,
   type TrackingContextCollection,
   type TrackingContextKeywordAssignmentState,
+  type TrackingContextKeywordReplacementResult,
   type TrackingContextKeywordQuery,
   type TrackingContextSummary,
+  type ReplaceTrackingContextKeywordsInput,
   type UpdateSemanticKeywordInput,
   type UpdateSemanticClusterInput,
   type UpdateProjectPageInput,
@@ -114,11 +126,13 @@ import {
 import {
   scopedTrackingContext,
   scopedTrackingContextKeywordState,
+  scopedTrackingContextKeywordReplacement,
   trackingContextCollection,
   trackingContextKeywordPage,
   type TrackingContextKeywordPage
 } from "../rankings/tracking-context-response.js";
 import {
+  semanticVersionDetailResponse,
   semanticVersionsResponse,
   semanticVersionUndoPreviewResponse,
   semanticVersionUndoResultResponse
@@ -131,6 +145,11 @@ import { crawlIssueCollection } from "../crawls/crawl-issue-response.js";
 import { crawlPageChangeCollection } from "../crawls/crawl-change-response.js";
 import { crawlDuplicateGroupCollection } from "../crawls/crawl-duplicate-response.js";
 import { crawlAbsentPageCollection } from "../crawls/crawl-absence-response.js";
+import {
+  scopedInternalCrawlOperationResultPage,
+  scopedInternalFrequencyOperationResult,
+  scopedInternalRankOperationResult
+} from "./operation-result-response.js";
 
 interface InternalContext {
   readonly tenant: TenantAuthorization;
@@ -198,6 +217,87 @@ export class SeoDataClient {
     return semanticKeywordInsights(responseData(payload), keywordId);
   }
 
+  public async frequencyOperationResult(
+    context: InternalContext,
+    jobId: string,
+    keywordIds: readonly string[]
+  ): Promise<InternalFrequencyOperationResult> {
+    const scope = trackingScope(context);
+    const body: InternalFrequencyOperationResultInput = {
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      jobId,
+      keywordIds
+    };
+    const payload = await this.request(
+      "POST",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(
+          scope.projectId
+        )}/operation-results/frequency/${encodeURIComponent(jobId)}`,
+        this.config.services.seoData
+      ),
+      context,
+      body
+    );
+    return scopedInternalFrequencyOperationResult(
+      responseData(payload),
+      scope.workspaceId,
+      scope.projectId,
+      jobId,
+      keywordIds
+    );
+  }
+
+  public async rankOperationResult(
+    context: InternalContext,
+    jobId: string
+  ): Promise<InternalRankOperationResult> {
+    const scope = trackingScope(context);
+    const payload = await this.request(
+      "GET",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(
+          scope.projectId
+        )}/operation-results/rank/${encodeURIComponent(jobId)}`,
+        this.config.services.seoData
+      ),
+      context
+    );
+    return scopedInternalRankOperationResult(
+      responseData(payload),
+      scope.workspaceId,
+      scope.projectId,
+      jobId
+    );
+  }
+
+  public async crawlOperationResult(
+    context: InternalContext,
+    crawlId: string,
+    limit: number,
+    cursor?: string
+  ): Promise<InternalCrawlOperationResultPage> {
+    const scope = trackingScope(context);
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(
+        scope.projectId
+      )}/operation-results/crawl/${encodeURIComponent(crawlId)}`,
+      this.config.services.seoData
+    );
+    url.searchParams.set("limit", String(limit));
+    if (cursor !== undefined) url.searchParams.set("cursor", cursor);
+    const payload = await this.request("GET", url, context);
+    return scopedInternalCrawlOperationResultPage(
+      responseData(payload),
+      scope.workspaceId,
+      scope.projectId,
+      crawlId,
+      limit
+    );
+  }
+
   public async createKeyword(
     context: InternalContext,
     input: CreateSemanticKeywordInput,
@@ -209,7 +309,8 @@ export class SeoDataClient {
       workspaceId: scope.workspaceId,
       projectId: scope.projectId,
       actorId: context.actorId,
-      entitlement
+      entitlement,
+      duplicatePolicy: input.duplicatePolicy ?? "REJECT_EXISTING"
     };
     const payload = await this.request(
       "POST",
@@ -218,6 +319,28 @@ export class SeoDataClient {
       body
     );
     return semanticKeywordItem(responseData(payload));
+  }
+
+  public async bulkCreateKeywords(
+    context: InternalContext,
+    input: SemanticKeywordBulkCreateInput,
+    entitlement: SemanticCapacityEntitlement
+  ): Promise<SemanticKeywordBulkCreateResult> {
+    const scope = trackingScope(context);
+    const body: InternalSemanticKeywordBulkCreateInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      entitlement
+    };
+    const payload = await this.request(
+      "POST",
+      keywordUrl(context, this.config.services.seoData, "bulk-create"),
+      context,
+      body
+    );
+    return semanticKeywordBulkCreateResult(responseData(payload), input);
   }
 
   public async updateKeyword(
@@ -246,14 +369,16 @@ export class SeoDataClient {
   public async deleteKeyword(
     context: InternalContext,
     keywordId: string,
-    version: number
+    version: number,
+    permanent = false
   ): Promise<void> {
     const scope = trackingScope(context);
     const body: InternalDeleteSemanticKeywordInput = {
       workspaceId: scope.workspaceId,
       projectId: scope.projectId,
       actorId: context.actorId,
-      version
+      version,
+      ...(permanent ? { permanent: true } : {})
     };
     await this.request(
       "DELETE",
@@ -336,14 +461,16 @@ export class SeoDataClient {
 
   public async createKeywordGroup(
     context: InternalContext,
-    input: CreateSemanticKeywordGroupInput
+    input: CreateSemanticKeywordGroupInput,
+    entitlement: SemanticCapacityEntitlement
   ): Promise<SemanticKeywordGroup> {
     const scope = trackingScope(context);
     const body: InternalCreateSemanticKeywordGroupInput = {
       ...input,
       workspaceId: scope.workspaceId,
       projectId: scope.projectId,
-      actorId: context.actorId
+      actorId: context.actorId,
+      entitlement
     };
     const payload = await this.request(
       "POST",
@@ -380,14 +507,16 @@ export class SeoDataClient {
   public async deleteKeywordGroup(
     context: InternalContext,
     groupId: string,
-    version: number
+    version: number,
+    deleteKeywords = false
   ): Promise<void> {
     const scope = trackingScope(context);
     const body: InternalDeleteSemanticKeywordGroupInput = {
       workspaceId: scope.workspaceId,
       projectId: scope.projectId,
       actorId: context.actorId,
-      version
+      version,
+      deleteKeywords
     };
     await this.request(
       "DELETE",
@@ -630,6 +759,22 @@ export class SeoDataClient {
       context
     );
     return semanticVersionsResponse(responseData(payload));
+  }
+
+  public async getSemanticVersionDetail(
+    context: InternalContext,
+    versionId: string
+  ): Promise<SemanticVersionDetail> {
+    const payload = await this.request(
+      "GET",
+      semanticVersionUrl(
+        context,
+        this.config.services.seoData,
+        versionId
+      ),
+      context
+    );
+    return semanticVersionDetailResponse(responseData(payload));
   }
 
   public async previewSemanticVersionUndo(
@@ -1085,6 +1230,41 @@ export class SeoDataClient {
     );
   }
 
+  public async replaceTrackingContextKeywords(
+    context: InternalContext,
+    contextId: string,
+    input: ReplaceTrackingContextKeywordsInput,
+    version: number,
+    idempotencyKey: string,
+    entitlement: SemanticCapacityEntitlement
+  ): Promise<TrackingContextKeywordReplacementResult> {
+    const scope = trackingScope(context);
+    const body: InternalReplaceTrackingContextKeywordsInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      contextId,
+      actorId: context.actorId,
+      version,
+      idempotencyKey,
+      entitlement
+    };
+    const payload = await this.request(
+      "PUT",
+      trackingContextUrl(
+        context,
+        this.config.services.seoData,
+        `${contextId}/keywords`
+      ),
+      context,
+      body
+    );
+    return scopedTrackingContextKeywordReplacement(
+      responseData(payload),
+      contextId
+    );
+  }
+
   public async listProjectPages(
     context: InternalContext,
     query: ProjectPageListQuery
@@ -1453,6 +1633,9 @@ export function semanticKeywordItem(
 
   const tags = item.tags;
   const customValues = item.customValues ?? [];
+  const frequency = optionalSemanticKeywordListFrequency(item.frequency);
+  const frequencies = semanticKeywordListFrequencies(item.frequencies);
+  const positions = semanticKeywordListPositions(item.positions);
   const sourceMode = item.sourceMode;
   if (
     !requiredString(item.id) ||
@@ -1475,6 +1658,11 @@ export function semanticKeywordItem(
     !tags.every((tag) => typeof tag === "string") ||
     !Array.isArray(customValues) ||
     typeof item.tagsTruncated !== "boolean" ||
+    (item.trashed !== undefined && typeof item.trashed !== "boolean") ||
+    (item.createOutcome !== undefined &&
+      !["CREATED", "RESTORED", "SKIPPED_EXISTING"].includes(
+        String(item.createOutcome)
+      )) ||
     typeof sourceMode !== "string" ||
     !semanticKeywordSourceModes.some((mode) => mode === sourceMode) ||
     !validDate(item.createdAt) ||
@@ -1519,12 +1707,146 @@ export function semanticKeywordItem(
     tags: tags as string[],
     tagsTruncated: item.tagsTruncated,
     customValues: customValues.map(semanticKeywordCustomValue),
+    ...(frequency ? { frequency } : {}),
+    ...(frequencies.length > 0 ? { frequencies } : {}),
+    ...(positions.length > 0 ? { positions } : {}),
     sourceMode:
       sourceMode as SemanticKeywordListItem["sourceMode"],
+    ...(item.trashed === true ? { trashed: true } : {}),
+    ...(typeof item.createOutcome === "string"
+      ? {
+          createOutcome:
+            item.createOutcome as NonNullable<
+              SemanticKeywordListItem["createOutcome"]
+            >
+        }
+      : {}),
     createdAt: item.createdAt as string,
     updatedAt: item.updatedAt as string,
     version: item.version as number
   };
+}
+
+function optionalSemanticKeywordListFrequency(
+  value: unknown
+): SemanticKeywordListItem["frequency"] {
+  if (value === undefined) return undefined;
+  const frequency = exactRecord(value, [
+    "value",
+    "regionCode",
+    "device",
+    "provider",
+    "observedAt"
+  ]);
+  if (
+    (frequency.value !== undefined &&
+      (typeof frequency.value !== "string" || !/^\d+$/u.test(frequency.value))) ||
+    !requiredString(frequency.regionCode) ||
+    !["ALL", "DESKTOP", "MOBILE"].includes(String(frequency.device)) ||
+    !requiredString(frequency.provider) ||
+    !validDate(frequency.observedAt)
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    ...(typeof frequency.value === "string" ? { value: frequency.value } : {}),
+    regionCode: frequency.regionCode,
+    device: frequency.device as "ALL" | "DESKTOP" | "MOBILE",
+    provider: frequency.provider,
+    observedAt: frequency.observedAt as string
+  };
+}
+
+function semanticKeywordListFrequencies(
+  value: unknown
+): NonNullable<SemanticKeywordListItem["frequencies"]> {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 3) throw invalidResponse();
+  const seen = new Set<string>();
+  return value.map((entry) => {
+    const frequency = exactRecord(entry, [
+      "type",
+      "value",
+      "regionCode",
+      "device",
+      "provider",
+      "observedAt"
+    ]);
+    if (
+      !["BASE", "EXACT", "FIXED"].includes(String(frequency.type)) ||
+      seen.has(String(frequency.type)) ||
+      (frequency.value !== undefined &&
+        (typeof frequency.value !== "string" || !/^\d+$/u.test(frequency.value))) ||
+      !requiredString(frequency.regionCode) ||
+      !["ALL", "DESKTOP", "MOBILE"].includes(String(frequency.device)) ||
+      !requiredString(frequency.provider) ||
+      !validDate(frequency.observedAt)
+    ) {
+      throw invalidResponse();
+    }
+    seen.add(String(frequency.type));
+    return {
+      type: frequency.type as "BASE" | "EXACT" | "FIXED",
+      ...(typeof frequency.value === "string" ? { value: frequency.value } : {}),
+      regionCode: frequency.regionCode,
+      device: frequency.device as "ALL" | "DESKTOP" | "MOBILE",
+      provider: frequency.provider,
+      observedAt: frequency.observedAt as string
+    };
+  });
+}
+
+function semanticKeywordListPositions(
+  value: unknown
+): NonNullable<SemanticKeywordListItem["positions"]> {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 2) throw invalidResponse();
+  const positions = value.map((entry) => {
+    const position = exactRecord(entry, [
+      "searchEngine",
+      "found",
+      "position",
+      "previousPosition",
+      "rankingUrl",
+      "observedAt"
+    ]);
+    if (
+      !["GOOGLE", "YANDEX"].includes(String(position.searchEngine)) ||
+      typeof position.found !== "boolean" ||
+      !validOptionalPositivePosition(position.position) ||
+      !validOptionalPositivePosition(position.previousPosition) ||
+      (position.rankingUrl !== undefined && typeof position.rankingUrl !== "string") ||
+      !validDate(position.observedAt) ||
+      (!position.found && position.position !== undefined)
+    ) {
+      throw invalidResponse();
+    }
+    return {
+      searchEngine: position.searchEngine as "GOOGLE" | "YANDEX",
+      found: position.found,
+      ...(typeof position.position === "number"
+        ? { position: position.position }
+        : {}),
+      ...(typeof position.previousPosition === "number"
+        ? { previousPosition: position.previousPosition }
+        : {}),
+      ...(typeof position.rankingUrl === "string"
+        ? { rankingUrl: position.rankingUrl }
+        : {}),
+      observedAt: position.observedAt as string
+    };
+  });
+  if (new Set(positions.map(({ searchEngine }) => searchEngine)).size !== positions.length) {
+    throw invalidResponse();
+  }
+  return positions;
+}
+
+function validOptionalPositivePosition(value: unknown): boolean {
+  return (
+    value === undefined ||
+    (Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= 1_000)
+  );
 }
 
 function keywordUrl(
@@ -1647,6 +1969,113 @@ export function semanticKeywordBulkResult(
     conflictedIds: result.conflictedIds as string[],
     skippedIds: result.skippedIds as string[],
     failedIds: result.failedIds as string[]
+  };
+}
+
+export function semanticKeywordBulkCreateResult(
+  value: unknown,
+  input: SemanticKeywordBulkCreateInput
+): SemanticKeywordBulkCreateResult {
+  const result = exactRecord(value, [
+    "selected",
+    "created",
+    "restored",
+    "skipped",
+    "rejected",
+    "failed",
+    "rows"
+  ]);
+  if (!Array.isArray(result.rows)) throw invalidResponse();
+  const rows = result.rows.map((value) => {
+    const row = exactRecord(value, [
+      "index",
+      "outcome",
+      "keywordId",
+      "version",
+      "trashed",
+      "errorCode"
+    ]);
+    if (
+      !Number.isSafeInteger(row.index) ||
+      Number(row.index) < 0 ||
+      Number(row.index) >= input.items.length ||
+      typeof row.outcome !== "string" ||
+      !semanticKeywordCreateOutcomes.some(
+        (outcome) => outcome === row.outcome
+      )
+    ) {
+      throw invalidResponse();
+    }
+    const successful = [
+      "CREATED",
+      "RESTORED",
+      "SKIPPED_EXISTING"
+    ].includes(row.outcome);
+    if (
+      (successful &&
+        (!requiredString(row.keywordId) ||
+          !Number.isSafeInteger(row.version) ||
+          Number(row.version) < 1 ||
+          row.errorCode !== undefined)) ||
+      (!successful &&
+        (!requiredString(row.errorCode) ||
+          row.keywordId !== undefined ||
+          row.version !== undefined))
+    ) {
+      throw invalidResponse();
+    }
+    if (
+      row.trashed !== undefined &&
+      (row.trashed !== true || row.outcome !== "SKIPPED_EXISTING")
+    ) {
+      throw invalidResponse();
+    }
+    return {
+      index: Number(row.index),
+      outcome: row.outcome as SemanticKeywordBulkCreateResult["rows"][number]["outcome"],
+      ...(typeof row.keywordId === "string"
+        ? { keywordId: row.keywordId }
+        : {}),
+      ...(typeof row.version === "number" ? { version: row.version } : {}),
+      ...(row.trashed === true ? { trashed: true } : {}),
+      ...(typeof row.errorCode === "string"
+        ? { errorCode: row.errorCode }
+        : {})
+    };
+  });
+  const counts = {
+    selected: result.selected,
+    created: result.created,
+    restored: result.restored,
+    skipped: result.skipped,
+    rejected: result.rejected,
+    failed: result.failed
+  };
+  const count = (outcome: string): number =>
+    rows.filter((row) => row.outcome === outcome).length;
+  if (
+    Object.values(counts).some(
+      (entry) => !Number.isSafeInteger(entry) || Number(entry) < 0
+    ) ||
+    Number(counts.selected) !== input.items.length ||
+    rows.length !== input.items.length ||
+    new Set(rows.map(({ index }) => index)).size !== rows.length ||
+    Number(counts.created) !== count("CREATED") ||
+    Number(counts.restored) !== count("RESTORED") ||
+    Number(counts.skipped) !== count("SKIPPED_EXISTING") ||
+    Number(counts.rejected) !== count("REJECTED_EXISTING") ||
+    Number(counts.failed) !== count("FAILED")
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    selected: Number(counts.selected),
+    created: Number(counts.created),
+    restored: Number(counts.restored),
+    skipped: Number(counts.skipped),
+    rejected: Number(counts.rejected),
+    failed: Number(counts.failed),
+    rows
   };
 }
 
@@ -1784,6 +2213,8 @@ export function semanticKeywordGroup(value: unknown): SemanticKeywordGroup {
     (group.color !== undefined &&
       (typeof group.color !== "string" ||
         !/^#[0-9a-f]{6}$/iu.test(group.color))) ||
+    (group.systemKind !== undefined &&
+      !["UNGROUPED", "TRASH"].includes(String(group.systemKind))) ||
     !Number.isSafeInteger(group.position) ||
     Number(group.position) < 0 ||
     !Number.isSafeInteger(group.keywordCount) ||
@@ -1805,6 +2236,9 @@ export function semanticKeywordGroup(value: unknown): SemanticKeywordGroup {
     ...(typeof group.color === "string" ? { color: group.color } : {}),
     position: group.position as number,
     keywordCount: group.keywordCount as number,
+    ...(group.systemKind === "UNGROUPED" || group.systemKind === "TRASH"
+      ? { systemKind: group.systemKind }
+      : {}),
     version: group.version as number,
     createdAt: group.createdAt as string,
     updatedAt: group.updatedAt as string

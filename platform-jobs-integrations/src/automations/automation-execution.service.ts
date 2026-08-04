@@ -147,7 +147,8 @@ export class AutomationExecutionService {
             definition.execution.access.entitlementStatus,
           quota: { status: "NOT_AVAILABLE" }
         },
-        billingCurrency: definition.execution.billingCurrency
+        billingCurrency: definition.execution.billingCurrency,
+        jobCapacity: definition.execution.jobCapacity
       };
       const job = await this.rankRuns.create(
         runInput,

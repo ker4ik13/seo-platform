@@ -5,7 +5,10 @@ import {
 } from "@nestjs/common";
 import type {
   InternalFrequencyKeyword,
+  InternalFrequencyKeywords,
+  InternalPersistFrequencySnapshotBatchInput,
   InternalPersistFrequencySnapshotsInput,
+  InternalResolveFrequencyKeywordsInput,
   InternalResolveFrequencyKeywordInput
 } from "@seo-platform/contracts";
 import { PrismaService } from "../database/prisma.service.js";
@@ -31,6 +34,41 @@ export class FrequencyService {
       throw new ConflictException("Keyword changed after collection started");
     }
     return { id: keyword.id, text: keyword.textOriginal, version: keyword.version };
+  }
+
+  public async resolveBatch(
+    input: InternalResolveFrequencyKeywordsInput
+  ): Promise<InternalFrequencyKeywords> {
+    const keywords = await this.prisma.keyword.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        status: "ACTIVE",
+        id: { in: input.items.map((item) => item.id) }
+      },
+      select: { id: true, textOriginal: true, version: true }
+    });
+    if (keywords.length !== input.items.length) {
+      throw new NotFoundException("One or more frequency keywords were not found");
+    }
+    const byId = new Map(keywords.map((keyword) => [keyword.id, keyword]));
+    const items = input.items.map((item) => {
+      const keyword = byId.get(item.id);
+      if (!keyword) {
+        throw new NotFoundException("One or more frequency keywords were not found");
+      }
+      if (keyword.version !== item.version) {
+        throw new ConflictException(
+          "One or more keywords changed after collection started"
+        );
+      }
+      return {
+        id: keyword.id,
+        text: keyword.textOriginal,
+        version: keyword.version
+      };
+    });
+    return { items };
   }
 
   public async persist(
@@ -66,6 +104,60 @@ export class FrequencyService {
           jobId: input.jobId,
           qualityFlags: [...snapshot.qualityFlags]
         })),
+        skipDuplicates: true
+      });
+      return { created: result.count };
+    });
+  }
+
+  public async persistBatch(
+    input: InternalPersistFrequencySnapshotBatchInput
+  ): Promise<{ readonly created: number }> {
+    return this.prisma.$transaction(async (transaction) => {
+      const keywords = await transaction.keyword.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "ACTIVE",
+          id: { in: input.items.map((item) => item.keywordId) }
+        },
+        select: { id: true, version: true }
+      });
+      if (keywords.length !== input.items.length) {
+        throw new NotFoundException(
+          "One or more frequency keywords were not found"
+        );
+      }
+      const versions = new Map(
+        keywords.map((keyword) => [keyword.id, keyword.version])
+      );
+      if (
+        input.items.some(
+          (item) => versions.get(item.keywordId) !== item.keywordVersion
+        )
+      ) {
+        throw new ConflictException(
+          "One or more keywords changed before frequency persistence"
+        );
+      }
+      const result = await transaction.frequencySnapshot.createMany({
+        data: input.items.flatMap((item) =>
+          item.snapshots.map((snapshot) => ({
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            keywordId: item.keywordId,
+            type: snapshot.type,
+            regionCode: snapshot.regionCode,
+            device: snapshot.device,
+            ...(snapshot.period ? { period: snapshot.period } : {}),
+            value: BigInt(snapshot.value),
+            observedAt: new Date(input.observedAt),
+            provider: snapshot.provider,
+            sourceMode: snapshot.sourceMode,
+            jobId: input.jobId,
+            qualityFlags: [...snapshot.qualityFlags]
+          }))
+        ),
         skipDuplicates: true
       });
       return { created: result.count };

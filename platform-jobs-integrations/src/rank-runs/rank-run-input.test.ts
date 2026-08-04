@@ -31,7 +31,12 @@ const input = {
       remaining: "900"
     }
   },
-  billingCurrency: "RUB"
+  billingCurrency: "RUB",
+  jobCapacity: {
+    planCode: "PRO",
+    planVersion: 2,
+    concurrentJobs: 10
+  }
 } as const;
 
 test("accepts the exact authoritative run command", () => {

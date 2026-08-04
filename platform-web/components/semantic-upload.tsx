@@ -1,5 +1,13 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+import { Icon } from "./icon";
+import { SearchEngineLogo } from "./search-engine-logo";
+import {
+  semanticImportTargets,
+  type SemanticImportTarget
+} from "@seo-platform/contracts";
+
 import {
   useEffect,
   useMemo,
@@ -78,6 +86,13 @@ interface SemanticImportResult {
   readonly createdPages: string;
   readonly createdTags: string;
   readonly createdMetricSnapshots: string;
+  readonly trashedDuplicateCandidates?: readonly Readonly<{
+    keywordId: string;
+    version: number;
+    text: string;
+    language: string;
+  }>[];
+  readonly trashedDuplicateCandidatesTruncated?: boolean;
 }
 
 interface SemanticImportSummary {
@@ -85,6 +100,7 @@ interface SemanticImportSummary {
   readonly uploadId: string;
   readonly status: string;
   readonly stage: string;
+  readonly sourceFormat: string;
   readonly progressBytes: string;
   readonly totalBytes: string;
   readonly preview?: SemanticImportPreview;
@@ -121,6 +137,7 @@ type UploadStage =
   | "import-pending"
   | "preview"
   | "import-failed"
+  | "publish-failed"
   | "uploaded"
   | "ready"
   | "completed"
@@ -133,7 +150,10 @@ const INSPECTION_TIMEOUT_MS = 30 * 60 * 1_000;
 export function SemanticUpload({
   projectId,
   onPublished
-}: Readonly<{ projectId: string; onPublished?: () => void }>) {
+}: Readonly<{
+  projectId: string;
+  onPublished?: (result: SemanticImportResult) => void;
+}>) {
   const [file, setFile] = useState<File>();
   const [stage, setStage] = useState<UploadStage>("idle");
   const [progress, setProgress] = useState(0);
@@ -166,6 +186,7 @@ export function SemanticUpload({
     "preview",
     "validation-ready",
     "import-failed",
+    "publish-failed",
     "ready",
     "completed",
     "rejected",
@@ -193,7 +214,7 @@ export function SemanticUpload({
       return;
     }
     notifiedSemanticVersions.current.add(result.semanticVersionId);
-    onPublished?.();
+    onPublished?.(result);
   }
 
   useEffect(
@@ -204,6 +225,8 @@ export function SemanticUpload({
   function selectFile(event: ChangeEvent<HTMLInputElement>): void {
     backgroundRequest.current?.abort();
     const selected = event.target.files?.[0];
+    const nativeKeyCollector =
+      selected?.name.toLowerCase().endsWith(".kc4") ?? false;
     setFile(selected);
     setStage("idle");
     setProgress(0);
@@ -211,8 +234,11 @@ export function SemanticUpload({
     setCompletedImportId(undefined);
     setImportPreview(undefined);
     setMappingColumns([]);
-    setDefaultLanguage("und");
+    setDefaultLanguage(nativeKeyCollector ? "ru" : "und");
     setGroupSeparator("/");
+    setDuplicatePolicy(
+      nativeKeyCollector ? "OVERWRITE_MAPPED" : "SKIP_EXISTING"
+    );
     setValidation(undefined);
     setImportResult(undefined);
     setImportVersion(undefined);
@@ -248,24 +274,30 @@ export function SemanticUpload({
         semanticImport.status === "AWAITING_MAPPING" &&
         semanticImport.preview
       ) {
+        const columns =
+          semanticImport.mapping?.columns ??
+          suggestedMapping(semanticImport.preview);
+        const resolvedDuplicatePolicy =
+          semanticImport.mapping?.duplicatePolicy ??
+          (semanticImport.sourceFormat === "KC4"
+            ? "OVERWRITE_MAPPED"
+            : "SKIP_EXISTING");
+        const resolvedLanguage =
+          semanticImport.mapping?.defaultLanguage ??
+          (semanticImport.sourceFormat === "KC4" ? "ru" : "und");
+        const resolvedGroupSeparator =
+          semanticImport.mapping?.groupSeparator ?? "/";
         setValidation(undefined);
         setImportResult(undefined);
-        setMappingColumns(
-          semanticImport.mapping?.columns ??
-            suggestedMapping(semanticImport.preview)
-        );
-        setDuplicatePolicy(
-          semanticImport.mapping?.duplicatePolicy ?? "SKIP_EXISTING"
-        );
-        setDefaultLanguage(
-          semanticImport.mapping?.defaultLanguage ?? "und"
-        );
-        setGroupSeparator(
-          semanticImport.mapping?.groupSeparator ?? "/"
-        );
+        setMappingColumns(columns);
+        setDuplicatePolicy(resolvedDuplicatePolicy);
+        setDefaultLanguage(resolvedLanguage);
+        setGroupSeparator(resolvedGroupSeparator);
         setStage("preview");
         setMessage(
-          `Распознано ${formatInteger(semanticImport.preview.totalRows)} строк. Проверьте предложенное сопоставление колонок.`
+          semanticImport.sourceFormat === "KC4"
+            ? `Проект Key Collector распознан: ${formatInteger(semanticImport.preview.totalRows)} строк. Выберите нужные поля, ненужным назначьте «Не импортировать».`
+            : `Распознано ${formatInteger(semanticImport.preview.totalRows)} строк. Проверьте предложенное сопоставление колонок.`
         );
       } else if (
         semanticImport.status === "AWAITING_CONFIRMATION" &&
@@ -308,7 +340,11 @@ export function SemanticUpload({
             : "Импорт отменён до публикации данных."
         );
       } else {
-        setStage("import-failed");
+        setStage(
+          semanticImport.failureCode === "SEO_DATA_PUBLISH_REJECTED"
+            ? "publish-failed"
+            : "import-failed"
+        );
         setError(importFailureMessage(semanticImport.failureCode));
       }
     } catch (importError) {
@@ -407,6 +443,20 @@ export function SemanticUpload({
           ? { ...column, customName }
           : column
       )
+    );
+  }
+
+  function applyKeyCollectorPreset(): void {
+    if (!importPreview) return;
+    const nativeProject = file?.name.toLowerCase().endsWith(".kc4") ?? false;
+    setMappingColumns(suggestedMapping(importPreview));
+    setDefaultLanguage("ru");
+    setGroupSeparator(nativeProject ? "/" : "\\");
+    setDuplicatePolicy(nativeProject ? "OVERWRITE_MAPPED" : "MERGE_NON_EMPTY");
+    setMessage(
+      nativeProject
+        ? "Профиль Key Collector применён: иерархия групп, запросы, URL, частотности и сохранённые позиции Яндекса и Google импортируются из KC4."
+        : "Профиль Key Collector применён: запросы, группы, URL и три частотности сопоставлены, остальные колонки будут сохранены как пользовательские."
     );
   }
 
@@ -522,7 +572,8 @@ export function SemanticUpload({
           [
             "text/csv",
             "text/tab-separated-values",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.key-collector.project"
           ].includes(mediaType(file))
         ) {
           await startSemanticImport(inspected.id, controller.signal);
@@ -691,7 +742,7 @@ export function SemanticUpload({
       )}
       <label className="upload-dropzone" data-disabled={busy || undefined}>
         <input
-          accept=".csv,.tsv,.xlsx"
+          accept=".csv,.tsv,.xlsx,.kc4"
           disabled={busy}
           onChange={selectFile}
           type="file"
@@ -704,7 +755,7 @@ export function SemanticUpload({
           <small>
             {file
               ? `${formatBytes(file.size)} · файл готов к загрузке`
-              : "CSV, TSV или XLSX из Key Collector · до 5 ГБ"}
+              : "CSV, TSV, XLSX или проект .kc4 · до 5 ГБ"}
           </small>
         </span>
         <span className="upload-dropzone-action">
@@ -742,7 +793,7 @@ export function SemanticUpload({
             <table>
               <thead>
                 <tr>
-                  {importPreview.columns.slice(0, 12).map((column) => {
+                  {importPreview.columns.map((column) => {
                     const selected =
                       mappingColumns.find(
                         ({ sourceIndex }) => sourceIndex === column.index
@@ -753,7 +804,7 @@ export function SemanticUpload({
                     return (
                       <th key={column.index}>
                         <span>{column.sourceName}</span>
-                        <select
+                        <CustomSelect
                           aria-label={`Назначение колонки ${column.sourceName}`}
                           disabled={stage !== "preview"}
                           onChange={(event) =>
@@ -767,10 +818,13 @@ export function SemanticUpload({
                         >
                           {MAPPING_TARGETS.map((target) => (
                             <option key={target} value={target}>
-                              {mappingTargetLabel(target)}
+                              <span className="import-mapping-target-option">
+                                {mappingTargetIcon(target)}
+                                <span>{mappingTargetLabel(target)}</span>
+                              </span>
                             </option>
                           ))}
-                        </select>
+                        </CustomSelect>
                         {selected.target === "custom" && (
                           <input
                             aria-label={`Имя пользовательской колонки ${column.sourceName}`}
@@ -793,7 +847,7 @@ export function SemanticUpload({
               <tbody>
                 {importPreview.sampleRows.slice(0, 5).map((row, rowIndex) => (
                   <tr key={rowIndex}>
-                    {importPreview.columns.slice(0, 12).map((column) => (
+                    {importPreview.columns.map((column) => (
                       <td key={column.index}>
                         {row[column.index] || "—"}
                       </td>
@@ -803,15 +857,16 @@ export function SemanticUpload({
               </tbody>
             </table>
           </div>
-          {importPreview.columns.length > 12 && (
-            <small className="upload-note">
-              В preview показаны первые 12 колонок из{" "}
-              {importPreview.columns.length}; остальные значения сохранены в
-              staging.
-            </small>
-          )}
+          <small className="upload-note">
+            Для каждой исходной колонки выберите поле назначения, «Своя
+            колонка» или «Не импортировать». Таблица прокручивается по
+            горизонтали.
+          </small>
           {stage === "preview" && (
             <div className="import-mapping-options">
+              <button className="secondary-button import-keycollector-preset" onClick={applyKeyCollectorPreset} type="button">
+                Применить профиль Key Collector
+              </button>
               <label>
                 Язык запросов
                 <input
@@ -837,7 +892,7 @@ export function SemanticUpload({
               </label>
               <label>
                 Дубли в проекте
-                <select
+                <CustomSelect
                   onChange={(event) =>
                     setDuplicatePolicy(event.target.value)
                   }
@@ -852,7 +907,7 @@ export function SemanticUpload({
                   <option value="OVERWRITE_MAPPED">
                     Обновить сопоставленные поля
                   </option>
-                </select>
+                </CustomSelect>
               </label>
             </div>
           )}
@@ -1124,7 +1179,11 @@ function uploadPart(
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     activeRequests.add(request);
-    request.open("PUT", url);
+    const relay = storageRelayRequest(url);
+    request.open("PUT", relay.url);
+    if (relay.signedUrl) {
+      request.setRequestHeader("x-seo-storage-url", relay.signedUrl);
+    }
     request.upload.onprogress = (event) => onProgress(event.loaded);
     request.onerror = () => reject(new Error("S3 upload failed"));
     request.onabort = () => reject(new Error("S3 upload aborted"));
@@ -1144,6 +1203,30 @@ function uploadPart(
     request.onloadend = () => activeRequests.delete(request);
     request.send(body);
   });
+}
+
+function storageRelayRequest(url: string): {
+  readonly url: string;
+  readonly signedUrl?: string;
+} {
+  if (typeof window === "undefined") return { url };
+  try {
+    const signed = new URL(url);
+    if (
+      signed.protocol === "https:" &&
+      signed.hostname === window.location.hostname &&
+      signed.port === "9443" &&
+      signed.origin !== window.location.origin
+    ) {
+      return {
+        url: "/app/api/storage-upload",
+        signedUrl: signed.toString()
+      };
+    }
+  } catch {
+    return { url };
+  }
+  return { url };
 }
 
 function completedSize(
@@ -1229,6 +1312,7 @@ function mediaType(file: File): string {
     tsv: "text/tab-separated-values",
     xls: "application/vnd.ms-excel",
     xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    kc4: "application/vnd.key-collector.project",
     zip: "application/zip"
   };
   return (extension && byExtension[extension]) || file.type || "";
@@ -1345,6 +1429,7 @@ function uploadStatus(stage: UploadStage, progress: number): string {
   if (stage === "import-pending") return "Импорт обрабатывается в фоне";
   if (stage === "preview") return "Предпросмотр импорта готов";
   if (stage === "import-failed") return "Файл не удалось разобрать";
+  if (stage === "publish-failed") return "Публикация не выполнена";
   if (stage === "ready") return "Файл проверен и готов";
   if (stage === "completed") return "Импорт завершён";
   if (stage === "rejected") return "Файл отклонён";
@@ -1360,7 +1445,7 @@ function importStartErrorMessage(error: unknown): string {
       return "Проект доступен только для чтения. Новый импорт временно недоступен.";
     }
     if (error.code === "VALIDATION_FAILED") {
-      return "Этот формат пока нельзя разобрать. Поддерживаются CSV, TSV и XLSX; legacy XLS и ZIP требуют отдельного конвертера.";
+      return "Этот формат пока нельзя разобрать. Поддерживаются CSV, TSV, XLSX и нативные проекты Key Collector .kc4; legacy XLS и произвольные ZIP требуют отдельного конвертера.";
     }
     if (error.code === "DEPENDENCY_UNAVAILABLE") {
       return "Очередь импорта временно недоступна. Проверенный файл сохранён — повторите позже.";
@@ -1409,6 +1494,12 @@ function importFailureMessage(code: string | undefined): string {
       "XLSX отклонён: распакованный workbook превышает безопасный лимит.",
     XLSX_SHARED_STRINGS_TOO_LARGE:
       "XLSX содержит слишком большой словарь строк. Экспортируйте ядро в CSV/TSV.",
+    INVALID_KC4:
+      "Проект .kc4 повреждён, зашифрован или имеет неподдерживаемую структуру Key Collector.",
+    KC4_TOO_LARGE:
+      "Проект .kc4 превышает безопасный лимит нативного импорта.",
+    KC4_ARCHIVE_TOO_LARGE:
+      "Проект .kc4 отклонён: распакованная база превышает безопасный лимит.",
     IMPORT_MAPPING_INVALID:
       "Сопоставление колонок устарело или повреждено. Вернитесь к настройке импорта.",
     SEO_DATA_VALIDATION_REJECTED:
@@ -1420,7 +1511,7 @@ function importFailureMessage(code: string | undefined): string {
     IMPORT_TOO_MANY_CHUNKS:
       "Импорт превышает безопасный лимит одной операции.",
     SEO_DATA_PUBLISH_REJECTED:
-      "Сервис семантики отклонил публикацию. Данные staging сохранены для диагностики."
+      "Сервис семантики отклонил публикацию. Данные проекта не изменены — загрузите файл повторно."
   };
   return (
     (code && messages[code]) ||
@@ -1428,15 +1519,25 @@ function importFailureMessage(code: string | undefined): string {
   );
 }
 
-function mappingTargetLabel(value: string): string {
+function mappingTargetLabel(value: SemanticImportTarget): string {
   const labels: Readonly<Record<string, string>> = {
     "keyword.text": "Ключевая фраза",
+    "keyword.language": "Язык",
+    "keyword.priority": "Приоритет",
+    "keyword.favorite": "Избранное",
+    "keyword.intent": "Интент",
     "group.path": "Путь группы",
     "page.target_url": "Целевая страница",
-    "frequency.base": "Базовая частотность",
-    "frequency.exact": "Точная частотность",
-    "frequency.fixed": "Фиксированная частотность",
-    "ranking.position": "Позиция",
+    "frequency.base": "Яндекс · База",
+    "frequency.exact": 'Яндекс · ""',
+    "frequency.fixed": 'Яндекс · "!"',
+    "ranking.position": "Позиция (по колонке поисковика)",
+    "ranking.yandex.position": "Яндекс · Позиция",
+    "ranking.yandex.change": "Яндекс · Изменение позиции",
+    "ranking.yandex.url": "Яндекс · Релевантный URL",
+    "ranking.google.position": "Google · Позиция",
+    "ranking.google.change": "Google · Изменение позиции",
+    "ranking.google.url": "Google · Релевантный URL",
     "context.search_engine": "Поисковая система",
     "context.region": "Регион",
     "metric.observed_at": "Дата проверки",
@@ -1446,6 +1547,33 @@ function mappingTargetLabel(value: string): string {
     ignore: "Не импортировать"
   };
   return labels[value] ?? "Своя колонка";
+}
+
+function mappingTargetIcon(value: SemanticImportTarget) {
+  if (value.startsWith("ranking.yandex") || value.startsWith("frequency.")) {
+    return <SearchEngineLogo engine="YANDEX" size="compact" />;
+  }
+  if (value.startsWith("ranking.google")) {
+    return <SearchEngineLogo engine="GOOGLE" size="compact" />;
+  }
+  const icon = value === "keyword.text" || value === "keyword.language"
+    ? "semantic"
+    : value === "group.path"
+      ? "projects"
+      : value === "page.target_url"
+        ? "pages"
+        : value === "keyword.tags"
+          ? "tag"
+          : value === "ranking.position"
+            ? "rankCheck"
+            : value === "metric.observed_at"
+              ? "history"
+              : value === "ignore"
+                ? "close"
+                : value === "custom"
+                  ? "plus"
+                  : "trend";
+  return <Icon className="import-mapping-target-icon" name={icon} />;
 }
 
 function suggestedMapping(
@@ -1478,6 +1606,13 @@ function importIssueLabel(value: string): string {
     KEYWORD_REQUIRED: "нет ключевой фразы",
     INVALID_TARGET_URL: "некорректный URL",
     INVALID_FREQUENCY: "некорректная частотность",
+    INVALID_POSITION: "некорректная позиция",
+    INVALID_POSITION_CHANGE: "некорректное изменение позиции",
+    INVALID_RANKING_URL: "некорректный релевантный URL",
+    INVALID_LANGUAGE: "некорректный язык",
+    INVALID_PRIORITY: "приоритет должен быть целым числом от 0 до 100",
+    INVALID_FAVORITE: "некорректное значение избранного",
+    INVALID_INTENT: "неизвестный интент",
     INVALID_OBSERVED_AT: "некорректная дата",
     GROUP_DEPTH_EXCEEDED: "группа глубже 10 уровней",
     TRACKING_CONTEXT_REQUIRED: "позиции сохранены до выбора контекста"
@@ -1485,22 +1620,9 @@ function importIssueLabel(value: string): string {
   return labels[value] ?? value;
 }
 
-const MAPPING_TARGETS = [
-  "ignore",
-  "keyword.text",
-  "group.path",
-  "page.target_url",
-  "frequency.base",
-  "frequency.exact",
-  "frequency.fixed",
-  "ranking.position",
-  "context.search_engine",
-  "context.region",
-  "metric.observed_at",
-  "keyword.tags",
-  "metric.kei",
-  "custom"
-] as const;
+// The UI consumes the canonical contract list so a newly supported import
+// field cannot silently disappear from the mapping dropdown.
+const MAPPING_TARGETS = semanticImportTargets;
 
 function formatInteger(value: string): string {
   const parsed = Number(value);

@@ -26,7 +26,7 @@ import {
 
 const jobItemId = "01900000-0000-7000-8000-000000000004";
 
-test("does not prepare an intent while the submit gate is closed", async () => {
+test("does not prepare an intent outside the enabled rank worker", async () => {
   const fixture = service(false);
   await assert.rejects(
     fixture.service.issueForItem(jobItemId, "request-1"),
@@ -220,6 +220,8 @@ function service(
     client,
     requestIntents,
     {
+      rankGrantApiToken: submitEnabled ? "grant-token" : undefined,
+      rankPreparation: { enabled: submitEnabled },
       rankExecution: {
         submitEnabled,
         killSwitchVersion: "arsenkin-positions@1"

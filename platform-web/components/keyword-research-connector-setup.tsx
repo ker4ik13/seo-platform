@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import type {
   ProjectConnectorBinding,
   ProjectConnectorSettings
@@ -20,6 +22,7 @@ import {
   integrationCredentialStatusPresentation,
   integrationProviderLabel
 } from "../lib/integration-presentation";
+import { ProviderLogo } from "./provider-logo";
 
 const CAPABILITY = "COMPETITOR_RESEARCH";
 
@@ -216,8 +219,11 @@ export function KeywordResearchConnectorSetup({
   return (
     <details className="panel competitor-connector" open={!ready}>
       <summary>
-        <span className={ready ? "connector-ready-mark" : "connector-pending-mark"}>
-          {ready ? "✓" : "!"}
+        <span className="connector-provider-mark">
+          <ProviderLogo provider="KEYS_SO" size="compact" />
+          <span className={ready ? "connector-ready-mark" : "connector-pending-mark"}>
+            {ready ? "✓" : "!"}
+          </span>
         </span>
         <span>
           <strong>Источник данных · Keys.so</strong>
@@ -236,7 +242,7 @@ export function KeywordResearchConnectorSetup({
         {notice && <div className="inline-success" role="status">{notice}</div>}
         <label className="form-field">
           <span>Подключение Keys.so</span>
-          <select
+          <CustomSelect
             disabled={saving || settings.access.canUpdateBindings !== true}
             onChange={(event) => {
               setCredentialId(event.target.value);
@@ -259,7 +265,7 @@ export function KeywordResearchConnectorSetup({
                 {credential.label} · {integrationProviderLabel(credential.provider)}
               </option>
             ))}
-          </select>
+          </CustomSelect>
           <small>
             Используется только для сбора запросов конкурентов; импорт всегда
             подтверждается вручную.

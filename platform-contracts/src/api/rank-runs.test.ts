@@ -396,7 +396,12 @@ test("internal create carries trusted project and access snapshots without execu
         resetsAt: "2026-08-01T00:00:00.000Z"
       }
     },
-    billingCurrency: "RUB"
+    billingCurrency: "RUB",
+    jobCapacity: {
+      planCode: "TEAM",
+      planVersion: 3,
+      concurrentJobs: 10
+    }
   } as const satisfies InternalCreateRankRunInput;
 
   assert.equal(input.project.workspaceId, input.workspaceId);

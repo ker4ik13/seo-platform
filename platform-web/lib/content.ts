@@ -13,7 +13,7 @@ export interface MarketingPage {
 
 const fallback: Record<Locale, Omit<MarketingPage, "source">> = {
   ru: {
-    title: "SEO Workspace — платформа для SEO-команд",
+    title: "SEOньорита — платформа для SEO-команд",
     description:
       "Семантика, позиции, частотность, конкуренты и командная работа в едином пространстве.",
     heroTitle: "SEO-работа без хаоса между таблицами и сервисами",
@@ -24,7 +24,7 @@ const fallback: Record<Locale, Omit<MarketingPage, "source">> = {
     eyebrow: "Рабочее пространство для SEO-команд"
   },
   en: {
-    title: "SEO Workspace — one platform for SEO teams",
+    title: "SEOnorita — one platform for SEO teams",
     description:
       "Semantics, rankings, search volume, competitors and collaboration in one workspace.",
     heroTitle: "SEO operations without spreadsheet chaos",

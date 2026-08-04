@@ -2,14 +2,22 @@ import type {
   TrackingContextConfigurationInput,
   TrackingContextStatus
 } from "./tracking-contexts.js";
+import type {
+  ConnectorOperationAttemptSummary,
+  ConnectorRoutingScope
+} from "./integrations.js";
 
 export const rankEstimateStatuses = ["READY", "BLOCKED"] as const;
 
 export type RankEstimateStatus = (typeof rankEstimateStatuses)[number];
 
-export const rankEstimateProviders = ["ARSENKIN"] as const;
+export const rankEstimateProviders = ["ARSENKIN", "XMLSTOCK"] as const;
 
 export type RankEstimateProvider = (typeof rankEstimateProviders)[number];
+
+export const rankSearchSources = ["SEARCH_API", "LIVE"] as const;
+
+export type RankSearchSource = (typeof rankSearchSources)[number];
 
 export const rankEstimateOperations = ["POSITIONS"] as const;
 
@@ -19,6 +27,37 @@ export const rankEstimateCredentialModes = ["BYOK_API_KEY"] as const;
 
 export type RankEstimateCredentialMode =
   (typeof rankEstimateCredentialModes)[number];
+
+/**
+ * Arsenkin positions accepts one provider task per launch. The production
+ * contract uses the largest published Corporate launch size and deliberately
+ * does not split a command behind the user's back: a smaller provider plan is
+ * expected to reject the single task with a provider-facing error.
+ */
+export const rankProviderKeywordLimit = 15_000 as const;
+export const rankProviderOverflowCount = 15_001 as const;
+export const rankManifestSingleTaskChunkSize = 15_000 as const;
+
+/** Read-only compatibility for immutable runs sealed before the 15k policy. */
+export const legacyRankProviderKeywordLimit = 1_000 as const;
+export const legacyRankManifestChunkSize = 250 as const;
+
+export const legacyRankProviderPolicyVersion =
+  "manual-arsenkin-positions@1.0.0" as const;
+export const currentRankProviderPolicyVersion =
+  "manual-arsenkin-positions@2.0.0" as const;
+export const xmlStockRankProviderPolicyVersion =
+  "manual-xmlstock-serp@1.0.0" as const;
+export const xmlStockRankManifestChunkSize = 1 as const;
+
+export const supportedRankProviderPolicyVersions = [
+  legacyRankProviderPolicyVersion,
+  currentRankProviderPolicyVersion,
+  xmlStockRankProviderPolicyVersion
+] as const;
+
+export type RankProviderPolicyVersion =
+  (typeof supportedRankProviderPolicyVersions)[number];
 
 export const rankEstimateScopeHashAvailabilities = [
   "AVAILABLE",
@@ -139,6 +178,15 @@ export type RankEstimateEntitlementStatus =
 
 export interface CreateRankEstimateInput {
   readonly trackingContextId: string;
+  /** Explicit execution provider selected for this immutable launch. */
+  readonly provider?: RankEstimateProvider;
+  /**
+   * Exact configured BYOK connection selected for this immutable launch.
+   * The connection must belong to the effective project routing chain.
+   */
+  readonly credentialId?: string;
+  /** Provider SERP family sealed into the immutable estimate. */
+  readonly searchSource?: RankSearchSource;
 }
 
 /**
@@ -195,8 +243,8 @@ export interface InternalRankEstimateScope {
   readonly configurationHash: string;
   readonly configuration: TrackingContextConfigurationInput;
   /**
-   * Exact values through 1,000. The value "1001" is a bounded overflow
-   * sentinel meaning "at least 1,001", not an exact total.
+   * Exact values through 15,000. The value "15001" is a bounded overflow
+   * sentinel meaning "at least 15,001", not an exact total.
    */
   readonly keywordCount: string;
   readonly contextCount: "1";
@@ -224,9 +272,14 @@ export interface RankEstimateProviderWorkload {
   readonly pollingRequestCount: {
     readonly status: "NOT_AVAILABLE";
   };
-  readonly requestStages: readonly ["SET", "CHECK", "GET"];
-  readonly keywordLimitPerTask: "250";
-  readonly keywordLimitPerCommand: "1000";
+  readonly requestStages:
+    | readonly ["SET", "CHECK", "GET"]
+    | readonly ["SUBMIT", "POLL"]
+    | readonly ["GET"];
+  /** New estimates use 15000; 250 remains representable for stored v1 runs. */
+  readonly keywordLimitPerTask: "1" | "250" | "15000";
+  /** New estimates use 15000; 1000 remains representable for stored v1 runs. */
+  readonly keywordLimitPerCommand: "1000" | "15000";
   readonly format: "SIMPLE";
   readonly rawSerp: false;
   readonly fallbackMode: "NONE";
@@ -256,6 +309,10 @@ export interface RankEstimate {
   readonly trackingContextId: string;
   readonly status: RankEstimateStatus;
   readonly provider: RankEstimateProvider;
+  /** Safe provenance of the effective workspace/project route. */
+  readonly routingScope?: ConnectorRoutingScope;
+  /** Bounded, secret-free route decisions made before provider submission. */
+  readonly connectorAttempts?: readonly ConnectorOperationAttemptSummary[];
   readonly operation: RankEstimateOperation;
   readonly credentialMode: RankEstimateCredentialMode;
   readonly scope: RankEstimateScopeSummary;

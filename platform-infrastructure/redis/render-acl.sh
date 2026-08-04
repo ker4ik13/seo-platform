@@ -108,7 +108,7 @@ case "$instance" in
       '~seo-platform:jobs:v1:crawls:* resetchannels' "$jobs_commands"
     append_user seo_jobs_connector REDIS_JOBS_CONNECTOR_PASSWORD \
       '~seo-platform:jobs:v1:integration-credential-validation:* resetchannels' \
-      "$jobs_commands"
+      "$jobs_commands +time"
     unset jobs_commands
     ;;
   realtime)

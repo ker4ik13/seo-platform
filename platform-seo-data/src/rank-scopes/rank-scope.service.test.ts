@@ -177,14 +177,14 @@ test("returns an unavailable hash for a bounded over-limit scope", async () => {
   const sentinelKeywordId =
     "01900000-0000-7000-8000-000000009999";
   const sentinelText = "SENTINEL_PRIVATE_KEYWORD_TEXT";
-  const rows = Array.from({ length: 1_001 }, (_, index) =>
+  const rows = Array.from({ length: 15_001 }, (_, index) =>
     assignment(index + 1)
   );
-  rows[1_000] = {
-    ...rows[1_000]!,
+  rows[15_000] = {
+    ...rows[15_000]!,
     keywordId: sentinelKeywordId,
     keyword: {
-      ...rows[1_000]!.keyword,
+      ...rows[15_000]!.keyword,
       id: sentinelKeywordId,
       textOriginal: sentinelText
     }
@@ -193,8 +193,8 @@ test("returns an unavailable hash for a bounded over-limit scope", async () => {
   const result = await scopeService(context(), rows).calculate(command);
   const serialized = JSON.stringify(result);
 
-  assert.equal(result.keywordCount, "1001");
-  assert.equal(result.pairCount, "1001");
+  assert.equal(result.keywordCount, "15001");
+  assert.equal(result.pairCount, "15001");
   assert.deepEqual(result.semanticScopeHash, {
     availability: "UNAVAILABLE"
   });
@@ -281,7 +281,7 @@ function scopeService(
             strings.join(""),
             /CASE[\s\S]*octet_length[\s\S]*THEN[\s\S]*ELSE char_length/u
           );
-          const bounded = assignments.slice(0, 1_001);
+          const bounded = assignments.slice(0, 15_001);
           const characterCounts = bounded.map(
             ({ keyword }) => [...keyword.textOriginal].length
           );
@@ -321,7 +321,7 @@ function scopeService(
           }) => {
             observed.push(where);
             assert.deepEqual(orderBy, { keywordId: "asc" });
-            assert.equal(take, 1_001);
+            assert.equal(take, 15_001);
             return [...assignments].sort((left, right) =>
               left.keywordId < right.keywordId
                 ? -1

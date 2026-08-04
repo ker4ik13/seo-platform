@@ -41,6 +41,40 @@ test("exports selected rows in the explicit selection order", async () => {
   assert.deepEqual(rows, [{ query: "second" }, { query: "first" }]);
 });
 
+test("uses the requested server-compatible source sort for exports", async () => {
+  const manual = keyword("01900000-0000-7000-8000-000000000010", "manual");
+  const platform = {
+    ...keyword("01900000-0000-7000-8000-000000000011", "platform"),
+    sourceMode: "PLATFORM" as const
+  };
+  const service = new SemanticExportService({
+    listKeywords: async () => ({
+      data: [platform, manual],
+      page: { hasNext: false, totalApprox: 2 }
+    }),
+    listSemanticCustomColumns: async () => []
+  } as unknown as SeoDataClient);
+
+  const document = await service.create(context, {
+    format: "NDJSON",
+    scope: "SELECTED",
+    locale: "en",
+    columns: ["query", "source"],
+    keywordIds: [platform.id, manual.id],
+    sort: "SOURCE_ASC"
+  });
+  const rows = Buffer.from(document.bytes)
+    .toString("utf8")
+    .trim()
+    .split("\n")
+    .map((row) => JSON.parse(row) as { query: string; source: string });
+
+  assert.deepEqual(rows, [
+    { query: "manual", source: "MANUAL" },
+    { query: "platform", source: "PLATFORM" }
+  ]);
+});
+
 function keyword(id: string, text: string): SemanticKeywordListItem {
   return {
     id,

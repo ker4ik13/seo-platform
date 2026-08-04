@@ -90,6 +90,7 @@ export interface InternalCreateTechnicalCrawlInput
   readonly actorId: string;
   readonly idempotencyKey: string;
   readonly correlationId: string;
+  readonly jobCapacity: JobCapacityEntitlement;
 }
 
 export interface InternalCancelTechnicalCrawlInput {
@@ -334,3 +335,4 @@ export interface ProjectCrawlDuplicateGroupSummary {
 export interface ProjectCrawlDuplicateGroupCollection {
   readonly groups: readonly ProjectCrawlDuplicateGroupSummary[];
 }
+import type { JobCapacityEntitlement } from "./billing.js";

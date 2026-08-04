@@ -33,7 +33,10 @@ export interface ParsedRankHistoryCollection {
 }
 
 export function rankHistoryReturnTo(projectId: string): string {
-  return `/app/projects/${encodeURIComponent(projectId)}/rankings`;
+  if (!projectId.trim()) {
+    throw new TypeError("Project id is required");
+  }
+  return "/app/semantics";
 }
 
 export function defaultRankHistoryDateSelection(

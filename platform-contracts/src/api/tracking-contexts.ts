@@ -158,6 +158,38 @@ export interface TrackingContextKeywordAssignmentState {
   readonly changedAt?: string;
 }
 
+/** Maximum exact desired set accepted by one Arsenkin positions launch. */
+export const trackingContextKeywordReplacementLimit = 15_000 as const;
+
+export interface ReplaceTrackingContextKeywordsInput {
+  readonly keywordIds: readonly string[];
+}
+
+export interface InternalReplaceTrackingContextKeywordsInput
+  extends ReplaceTrackingContextKeywordsInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly contextId: string;
+  readonly actorId: string;
+  readonly version: number;
+  readonly idempotencyKey: string;
+  readonly entitlement: import("./billing.js").SemanticCapacityEntitlement;
+}
+
+export interface TrackingContextKeywordReplacementResult {
+  readonly contextId: string;
+  readonly assignedKeywordCount: number;
+  readonly addedKeywordCount: number;
+  readonly removedKeywordCount: number;
+  readonly unchangedKeywordCount: number;
+  readonly keywordSetHash: {
+    readonly algorithm: "SHA_256";
+    readonly value: string;
+  };
+  readonly version: number;
+  readonly changedAt: string;
+}
+
 export interface InternalChangeTrackingContextKeywordInput {
   readonly workspaceId: string;
   readonly projectId: string;

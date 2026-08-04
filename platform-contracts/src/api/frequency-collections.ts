@@ -1,4 +1,23 @@
+import type { JobCapacityEntitlement } from "./billing.js";
 import type { SemanticKeywordBulkSelection } from "./keywords.js";
+import type {
+  ConnectorOperationAttemptSummary,
+  ConnectorRoutingScope
+} from "./integrations.js";
+
+export const frequencyCollectionProviders = ["XMLSTOCK", "ARSENKIN"] as const;
+export type FrequencyCollectionProvider =
+  (typeof frequencyCollectionProviders)[number];
+
+/** One remote Wordstat task accepted by Arsenkin. */
+export const arsenkinWordstatKeywordLimit = 10_000 as const;
+
+/** Legacy per-command scope; XMLStock is still executed one keyword at a time. */
+export const xmlStockWordstatKeywordLimit = 200 as const;
+
+/** Bounded internal transport chunks; these are not provider task limits. */
+export const internalFrequencyResolveBatchLimit = 1_000 as const;
+export const internalFrequencyPersistBatchLimit = 500 as const;
 
 export const semanticFrequencyTypes = ["BASE", "EXACT", "FIXED"] as const;
 export type SemanticFrequencyType = (typeof semanticFrequencyTypes)[number];
@@ -52,6 +71,7 @@ export interface InternalCreateFrequencyCollectionInput
   readonly actorId: string;
   readonly idempotencyKey: string;
   readonly correlationId: string;
+  readonly jobCapacity: JobCapacityEntitlement;
 }
 
 export interface InternalCancelFrequencyCollectionInput {
@@ -68,7 +88,9 @@ export interface FrequencyCollectionSummary {
   readonly id: string;
   readonly workspaceId: string;
   readonly projectId: string;
-  readonly provider: "XMLSTOCK";
+  readonly provider: FrequencyCollectionProvider;
+  readonly routingScope?: ConnectorRoutingScope;
+  readonly connectorAttempts?: readonly ConnectorOperationAttemptSummary[];
   readonly status: FrequencyCollectionStatus;
   readonly stage?: string;
   readonly selectedKeywords: number;
@@ -113,6 +135,17 @@ export interface InternalFrequencyKeyword {
   readonly version: number;
 }
 
+export interface InternalResolveFrequencyKeywordsInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly items: readonly SemanticKeywordBulkSelection[];
+}
+
+export interface InternalFrequencyKeywords {
+  readonly items: readonly InternalFrequencyKeyword[];
+}
+
 export interface InternalPersistFrequencySnapshotsInput {
   readonly workspaceId: string;
   readonly projectId: string;
@@ -130,9 +163,24 @@ export interface InternalFrequencySnapshotValue {
   readonly device: SemanticFrequencyDevice;
   readonly period?: string;
   readonly value: string;
-  readonly provider: "XMLSTOCK";
+  readonly provider: FrequencyCollectionProvider;
   readonly sourceMode: "BYOK";
   readonly qualityFlags: readonly SemanticFrequencyQualityFlag[];
+}
+
+export interface InternalPersistFrequencySnapshotBatchItem {
+  readonly keywordId: string;
+  readonly keywordVersion: number;
+  readonly snapshots: readonly InternalFrequencySnapshotValue[];
+}
+
+export interface InternalPersistFrequencySnapshotBatchInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly jobId: string;
+  readonly observedAt: string;
+  readonly items: readonly InternalPersistFrequencySnapshotBatchItem[];
 }
 
 export interface SemanticKeywordInsights {

@@ -42,6 +42,37 @@ test("accepts an exact normalized found result", () => {
   assert.equal(parsed.results[0]?.position, 3);
 });
 
+test("accepts TOP-100 and rejects positions outside the database contract", () => {
+  const found = {
+    manifestEntryId,
+    keywordId,
+    dataQualityFlags: [
+      "ABSOLUTE_POSITION_UNAVAILABLE",
+      "PIXEL_POSITION_UNAVAILABLE",
+      "TITLE_UNAVAILABLE",
+      "SNIPPET_UNAVAILABLE"
+    ],
+    found: true,
+    position: 100,
+    rankingUrl: "https://example.com/page",
+    normalizedRankingUrl: "https://example.com/page",
+    resultType: "ORGANIC",
+    serpFeatures: []
+  } as const;
+
+  assert.equal(
+    internalIngestRankChunkInput(command(found)).results[0]?.position,
+    100
+  );
+  assert.throws(
+    () =>
+      internalIngestRankChunkInput(
+        command({ ...found, position: 101 })
+      ),
+    BadRequestException
+  );
+});
+
 test("accepts not-found only with provider timestamp provenance", () => {
   const parsed = internalIngestRankChunkInput(
     command({

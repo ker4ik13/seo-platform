@@ -23,7 +23,8 @@ h1, h2, p { margin: 0; }
 .admin-shell { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 100vh; }
 .sidebar { background: #111318; border-right: 1px solid var(--line); display: flex; flex-direction: column; height: 100vh; padding: 20px 13px; position: sticky; top: 0; }
 .brand { align-items: center; display: flex; gap: 10px; padding: 0 9px 26px; }
-.brand > span, .mobile-mark { align-items: center; background: var(--brand); border-radius: 8px; color: white; display: inline-flex; font-size: 11px; font-weight: 800; height: 31px; justify-content: center; width: 31px; }
+.brand > img { border-radius: 8px; display: block; height: 31px; object-fit: contain; width: 31px; }
+.mobile-mark { border-radius: 8px; height: 31px; object-fit: contain; width: 31px; }
 .brand strong, .brand small { display: block; }
 .brand strong { font-size: 13px; }
 .brand small { color: var(--muted); font-size: 11px; letter-spacing: .08em; margin-top: 3px; text-transform: uppercase; }
@@ -164,7 +165,7 @@ h1, h2, p { margin: 0; }
   .admin-shell { display: block; }
   .sidebar { display: none; }
   .topbar { padding: 0 16px; }
-  .mobile-mark { display: inline-flex; height: 28px; width: 28px; }
+  .mobile-mark { display: block; height: 28px; width: 28px; }
   .content { padding: 25px 14px 45px; }
   .heading { align-items: flex-start; flex-direction: column; gap: 8px; }
   .metric-grid { gap: 8px; }

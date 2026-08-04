@@ -1,9 +1,14 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import type {
-  InternalFinalizeRankCheckInput,
-  InternalRankManifestSeal,
-  RankJobFailureCode,
-  RankJobSummary
+import {
+  legacyRankManifestChunkSize,
+  legacyRankProviderKeywordLimit,
+  rankManifestSingleTaskChunkSize,
+  rankProviderKeywordLimit,
+  xmlStockRankManifestChunkSize,
+  type InternalFinalizeRankCheckInput,
+  type InternalRankManifestSeal,
+  type RankJobFailureCode,
+  type RankJobSummary
 } from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
@@ -257,9 +262,7 @@ export class RankPreparationService {
           seal.estimateId !== currentRun.estimateId ||
           seal.trackingContextId !== currentRun.trackingContextId ||
           Number(seal.pairCount) !== Number(current.progressTotal) ||
-          Number(seal.chunkCount) !==
-            Math.ceil(Number(seal.pairCount) / 250) ||
-          seal.chunkSize !== "250"
+          !validManifestSealShape(seal)
         ) {
           throw new Error("Rank manifest receipt does not match claimed Job");
         }
@@ -751,6 +754,36 @@ function assertLeaseOwner(value: string): void {
   if (!LEASE_OWNER_PATTERN.test(value)) {
     throw new Error("Invalid rank preparation lease owner");
   }
+}
+
+function validManifestSealShape(seal: InternalRankManifestSeal): boolean {
+  const pairCount = Number(seal.pairCount);
+  const chunkCount = Number(seal.chunkCount);
+  if (!Number.isSafeInteger(pairCount) || !Number.isSafeInteger(chunkCount)) {
+    return false;
+  }
+  if (seal.chunkSize === String(legacyRankManifestChunkSize)) {
+    return (
+      pairCount >= 1 &&
+      pairCount <= legacyRankProviderKeywordLimit &&
+      chunkCount ===
+        Math.ceil(pairCount / legacyRankManifestChunkSize)
+    );
+  }
+  if (seal.chunkSize === String(xmlStockRankManifestChunkSize)) {
+    return (
+      seal.provider === "XMLSTOCK" &&
+      pairCount >= 1 &&
+      pairCount <= rankProviderKeywordLimit &&
+      chunkCount === pairCount
+    );
+  }
+  return (
+    seal.chunkSize === String(rankManifestSingleTaskChunkSize) &&
+    pairCount >= 1 &&
+    pairCount <= rankProviderKeywordLimit &&
+    chunkCount === 1
+  );
 }
 
 function pendingLimit(value: number): number {

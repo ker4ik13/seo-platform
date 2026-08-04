@@ -1,4 +1,4 @@
-# SEO Platform
+# SEOньорита / SEOnorita
 
 Единый source monorepo независимо разворачиваемых сервисов международной
 SEO-платформы. Публичный сайт, Toolbox, API docs и приложение `/app` находятся

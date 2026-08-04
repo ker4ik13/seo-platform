@@ -13,7 +13,8 @@ const CREATE_FIELDS = [
   "estimateId",
   "project",
   "access",
-  "billingCurrency"
+  "billingCurrency",
+  "jobCapacity"
 ] as const;
 const PROJECT_FIELDS = [
   "id",
@@ -43,6 +44,11 @@ export function internalCreateRankRunInput(
   const input = exactRecord(value, CREATE_FIELDS, "rankRun");
   const project = exactRecord(input.project, PROJECT_FIELDS, "project");
   const access = exactRecord(input.access, ACCESS_FIELDS, "access");
+  const jobCapacity = exactRecord(
+    input.jobCapacity,
+    ["planCode", "planVersion", "concurrentJobs"],
+    "jobCapacity"
+  );
   const workspaceId = uuid(input.workspaceId, "workspaceId");
   const projectId = uuid(input.projectId, "projectId");
   const actorId = uuid(input.actorId, "actorId");
@@ -65,7 +71,12 @@ export function internalCreateRankRunInput(
     ) ||
     !positiveInteger(access.membershipVersion) ||
     typeof input.billingCurrency !== "string" ||
-    !/^[A-Z]{3}$/u.test(input.billingCurrency)
+    !/^[A-Z]{3}$/u.test(input.billingCurrency) ||
+    typeof jobCapacity.planCode !== "string" ||
+    jobCapacity.planCode.length < 1 ||
+    jobCapacity.planCode.length > 64 ||
+    !positiveInteger(jobCapacity.planVersion) ||
+    !positiveInteger(jobCapacity.concurrentJobs)
   ) {
     invalid("rankRun");
   }
@@ -92,7 +103,12 @@ export function internalCreateRankRunInput(
         access.entitlementStatus as InternalCreateRankRunInput["access"]["entitlementStatus"],
       quota: quota(access.quota)
     },
-    billingCurrency: input.billingCurrency
+    billingCurrency: input.billingCurrency,
+    jobCapacity: {
+      planCode: jobCapacity.planCode,
+      planVersion: Number(jobCapacity.planVersion),
+      concurrentJobs: Number(jobCapacity.concurrentJobs)
+    }
   };
 }
 

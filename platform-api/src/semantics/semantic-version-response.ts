@@ -2,6 +2,7 @@ import {
   semanticVersionChangeStates,
   semanticVersionReasons,
   type SemanticVersionChangePreview,
+  type SemanticVersionDetail,
   type SemanticVersionListItem,
   type SemanticVersionUndoPreview,
   type SemanticVersionUndoResult
@@ -26,6 +27,67 @@ export function semanticVersionsResponse(
     invalid();
   }
   return versions;
+}
+
+export function semanticVersionDetailResponse(value: unknown): SemanticVersionDetail {
+  const input = exactRecord(value, [
+    "version",
+    "parameters",
+    "changes",
+    "changesTruncated"
+  ]);
+  if (!Array.isArray(input.parameters) || input.parameters.length > 100) invalid();
+  if (!Array.isArray(input.changes) || input.changes.length > 500) invalid();
+  if (typeof input.changesTruncated !== "boolean") invalid();
+  return {
+    version: semanticVersionResponse(input.version),
+    parameters: input.parameters.map(historyFieldResponse),
+    changes: input.changes.map((value) => {
+      const change = exactRecord(value, [
+        "entityType",
+        "entityId",
+        "operation",
+        "changedFields",
+        "before",
+        "after"
+      ]);
+      if (
+        !["KEYWORD", "CLUSTER"].includes(String(change.entityType)) ||
+        !uuid(change.entityId) ||
+        !["CREATE", "UPDATE", "DELETE"].includes(String(change.operation)) ||
+        !Array.isArray(change.changedFields) ||
+        change.changedFields.some((field) => typeof field !== "string")
+      ) invalid();
+      return {
+        entityType: change.entityType as "KEYWORD" | "CLUSTER",
+        entityId: change.entityId,
+        operation: change.operation as "CREATE" | "UPDATE" | "DELETE",
+        changedFields: change.changedFields as string[],
+        ...(change.before === undefined ? {} : { before: historyStateResponse(change.before) }),
+        after: historyStateResponse(change.after)
+      };
+    }),
+    changesTruncated: input.changesTruncated
+  };
+}
+
+function historyStateResponse(value: unknown) {
+  const input = exactRecord(value, ["title", "fields"]);
+  if (typeof input.title !== "string" || !Array.isArray(input.fields)) invalid();
+  return {
+    title: input.title,
+    fields: input.fields.map(historyFieldResponse)
+  };
+}
+
+function historyFieldResponse(value: unknown) {
+  const input = exactRecord(value, ["key", "label", "value"]);
+  if (
+    typeof input.key !== "string" ||
+    typeof input.label !== "string" ||
+    typeof input.value !== "string"
+  ) invalid();
+  return { key: input.key, label: input.label, value: input.value };
 }
 
 export function semanticVersionUndoPreviewResponse(
@@ -89,6 +151,7 @@ function semanticVersionResponse(value: unknown): SemanticVersionListItem {
     "number",
     "reason",
     "actorId",
+    "actorDisplayName",
     "sourceJobId",
     "parentVersionId",
     "summary",
@@ -104,6 +167,7 @@ function semanticVersionResponse(value: unknown): SemanticVersionListItem {
     typeof input.reason !== "string" ||
     !semanticVersionReasons.some((reason) => reason === input.reason) ||
     !uuid(input.actorId) ||
+    (input.actorDisplayName !== undefined && typeof input.actorDisplayName !== "string") ||
     (input.sourceJobId !== undefined && !uuid(input.sourceJobId)) ||
     (input.parentVersionId !== undefined && !uuid(input.parentVersionId)) ||
     typeof input.summary !== "string" ||
@@ -122,6 +186,9 @@ function semanticVersionResponse(value: unknown): SemanticVersionListItem {
     number: Number(input.number),
     reason: input.reason,
     actorId: input.actorId,
+    ...(typeof input.actorDisplayName === "string"
+      ? { actorDisplayName: input.actorDisplayName }
+      : {}),
     ...(typeof input.sourceJobId === "string"
       ? { sourceJobId: input.sourceJobId }
       : {}),
@@ -231,7 +298,7 @@ function exactRecord(
     Object.keys(input).some((key) => !keys.includes(key)) ||
     keys.some(
       (key) =>
-        !["sourceJobId", "parentVersionId", "finalizedAt", "createdVersion", "currentVersion", "conflictCode"].includes(
+        !["sourceJobId", "parentVersionId", "finalizedAt", "createdVersion", "currentVersion", "conflictCode", "actorDisplayName", "before"].includes(
           key
         ) && !(key in input)
     )

@@ -1,5 +1,6 @@
 import {
   trackingContextStatuses,
+  trackingContextKeywordReplacementLimit,
   trackingDepths,
   trackingDevices,
   trackingDomainMatchModes,
@@ -9,6 +10,7 @@ import {
   type TrackingContextConfigurationSnapshot,
   type TrackingContextKeywordAssignmentItem,
   type TrackingContextKeywordAssignmentState,
+  type TrackingContextKeywordReplacementResult,
   type TrackingContextSummary,
   type TrackingDomainMatchRule
 } from "@seo-platform/contracts";
@@ -234,6 +236,64 @@ export function scopedTrackingContextKeywordState(
     ...(assignmentId ? { assignmentId } : {}),
     ...(changedAt ? { changedAt } : {})
   };
+}
+
+export function scopedTrackingContextKeywordReplacement(
+  value: unknown,
+  contextId: string
+): TrackingContextKeywordReplacementResult {
+  const input = exactRecord(value, [
+    "contextId",
+    "assignedKeywordCount",
+    "addedKeywordCount",
+    "removedKeywordCount",
+    "unchangedKeywordCount",
+    "keywordSetHash",
+    "version",
+    "changedAt"
+  ]);
+  const responseContextId = uuidValue(input.contextId);
+  const assignedKeywordCount = boundedCount(input.assignedKeywordCount);
+  const addedKeywordCount = boundedCount(input.addedKeywordCount);
+  const removedKeywordCount = boundedCount(input.removedKeywordCount);
+  const unchangedKeywordCount = boundedCount(input.unchangedKeywordCount);
+  const keywordSetHash = exactRecord(input.keywordSetHash, [
+    "algorithm",
+    "value"
+  ]);
+  if (
+    responseContextId !== contextId.toLowerCase() ||
+    addedKeywordCount + unchangedKeywordCount !== assignedKeywordCount ||
+    keywordSetHash.algorithm !== "SHA_256" ||
+    typeof keywordSetHash.value !== "string" ||
+    !/^[0-9a-f]{64}$/u.test(keywordSetHash.value)
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    contextId: responseContextId,
+    assignedKeywordCount,
+    addedKeywordCount,
+    removedKeywordCount,
+    unchangedKeywordCount,
+    keywordSetHash: {
+      algorithm: "SHA_256",
+      value: keywordSetHash.value
+    },
+    version: positiveInteger(input.version),
+    changedAt: isoDateValue(input.changedAt)
+  };
+}
+
+function boundedCount(value: unknown): number {
+  if (
+    !Number.isSafeInteger(value) ||
+    Number(value) < 0 ||
+    Number(value) > trackingContextKeywordReplacementLimit
+  ) {
+    throw invalidResponse();
+  }
+  return Number(value);
 }
 
 function trackingConfiguration(

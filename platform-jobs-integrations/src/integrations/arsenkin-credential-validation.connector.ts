@@ -6,6 +6,7 @@ import {
 } from "./integration-credential-validation.connector.js";
 import type { IntegrationCredentialSecret } from "./integration-credential-crypto.service.js";
 import { ARSENKIN_CREDENTIAL_VALIDATION_CONNECTOR_VERSION } from "./integration-credential-connector-versions.js";
+import type { ArsenkinHttpRateLimitGate } from "./arsenkin-http-rate-limiter.js";
 import {
   providerJsonRequest,
   ProviderTransportError
@@ -21,12 +22,22 @@ export class ArsenkinCredentialValidationConnector
   public readonly version =
     ARSENKIN_CREDENTIAL_VALIDATION_CONNECTOR_VERSION;
 
-  public constructor(private readonly fetcher: ProviderFetch = fetch) {}
+  public constructor(
+    private readonly rateLimiter: ArsenkinHttpRateLimitGate,
+    private readonly fetcher: ProviderFetch = fetch
+  ) {}
 
   public async validate(
     secret: IntegrationCredentialSecret,
     timeoutMs: number
   ): Promise<CredentialValidationResult> {
+    const permit = await this.rateLimiter.tryAcquire();
+    if (!permit.allowed) {
+      return withProviderRetryAfter(
+        rateLimited(),
+        permit.retryAfterSeconds
+      );
+    }
     try {
       const response = await providerJsonRequest(
         ARSENKIN_LIMITS_URL,

@@ -47,6 +47,22 @@ test("validates and canonicalizes a manifest seal command", () => {
   ]);
 });
 
+test("accepts a Yandex Top-50 execution without weakening the sealed shape", () => {
+  const input = internalSealRankManifestInput({
+    ...command(),
+    execution: {
+      ...command().execution,
+      searchEngine: "YANDEX",
+      regionCode: "213",
+      depth: 50
+    }
+  });
+
+  assert.equal(input.execution.searchEngine, "YANDEX");
+  assert.equal(input.execution.regionCode, "213");
+  assert.equal(input.execution.depth, 50);
+});
+
 test("rejects unknown fields, malformed hashes and forged project scope", () => {
   assert.throws(
     () =>
@@ -135,7 +151,7 @@ test("normalizes a bounded manifest chunk query", () => {
         projectId,
         jobId,
         manifestId,
-        chunkIndex: "4"
+        chunkIndex: "15000"
       }),
     BadRequestException
   );

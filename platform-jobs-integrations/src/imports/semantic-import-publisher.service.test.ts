@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { canonicalPublishRow } from "./semantic-import-publisher.service.js";
+import {
+  canonicalPublishRow,
+  mergeCanonicalPublishRows
+} from "./semantic-import-publisher.service.js";
 
 test("canonicalizes PostgreSQL JSON field order before hashing a publish chunk", () => {
   const storedJson = {
@@ -67,6 +70,107 @@ test("rejects non-string custom values and malformed optional fields", () => {
   assert.equal(
     canonicalPublishRow({ ...required, targetUrl: 42 }),
     undefined
+  );
+});
+
+test("preserves every Key Collector group membership for a duplicate phrase", () => {
+  const baseRow = {
+    sourceRowNumber: "7",
+    textOriginal: "купить слона",
+    textNormalized: "купить слона",
+    normalizedHash: "b".repeat(64),
+    language: "ru",
+    tags: ["приоритет"],
+    customValues: { source: "Key Collector" }
+  } as const;
+
+  const merged = mergeCanonicalPublishRows([
+    { ...baseRow, groupPath: ["Коммерция", "Москва"] },
+    {
+      ...baseRow,
+      sourceRowNumber: "18",
+      groupPath: ["Продажи"],
+      tags: ["приоритет", "горячие"]
+    }
+  ]);
+
+  assert.deepEqual(merged.groupPaths, [
+    ["Коммерция", "Москва"],
+    ["Продажи"]
+  ]);
+  assert.deepEqual(merged.tags, ["приоритет", "горячие"]);
+  assert.deepEqual(Object.keys(merged), [
+    "sourceRowNumber",
+    "textOriginal",
+    "textNormalized",
+    "normalizedHash",
+    "language",
+    "groupPaths",
+    "tags",
+    "customValues"
+  ]);
+});
+
+test("canonicalizes nested KC4 position fields before hashing a publish chunk", () => {
+  const canonical = canonicalPublishRow({
+    language: "ru",
+    groupPath: ["Статьи", "Информационка"],
+    positions: [
+      {
+        found: true,
+        position: 7,
+        rankingUrl: "https://example.com/page",
+        searchEngine: "YANDEX"
+      },
+      {
+        found: false,
+        searchEngine: "GOOGLE"
+      }
+    ],
+    frequencies: [{ value: "120", type: "BASE" }],
+    customValues: {},
+    textOriginal: "продвижение сайта",
+    normalizedHash: "c".repeat(64),
+    textNormalized: "продвижение сайта",
+    sourceRowNumber: "2"
+  });
+
+  assert.ok(canonical);
+  assert.deepEqual(canonical.positions, [
+    {
+      searchEngine: "YANDEX",
+      found: true,
+      position: 7,
+      rankingUrl: "https://example.com/page"
+    },
+    { searchEngine: "GOOGLE", found: false }
+  ]);
+  assert.deepEqual(canonical.frequencies, [
+    { type: "BASE", value: "120" }
+  ]);
+  assert.equal(
+    sha256([canonical]),
+    sha256([
+      {
+        sourceRowNumber: "2",
+        textOriginal: "продвижение сайта",
+        textNormalized: "продвижение сайта",
+        normalizedHash: "c".repeat(64),
+        language: "ru",
+        groupPath: ["Статьи", "Информационка"],
+        frequencies: [{ type: "BASE", value: "120" }],
+        positions: [
+          {
+            searchEngine: "YANDEX",
+            found: true,
+            position: 7,
+            rankingUrl: "https://example.com/page"
+          },
+          { searchEngine: "GOOGLE", found: false }
+        ],
+        customValues: {}
+      }
+    ])
   );
 });
 

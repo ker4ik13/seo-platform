@@ -29,6 +29,7 @@ const FORWARDED_RESPONSE_HEADERS = [
   "x-trace-id"
 ] as const;
 const MAX_BROWSER_API_BODY_BYTES = 2 * 1_024 * 1_024;
+const MAX_SEMANTIC_KEYWORD_BULK_BODY_BYTES = 8 * 1_024 * 1_024;
 const MAX_PUSH_SUBSCRIPTION_BODY_BYTES = 8 * 1_024;
 const MAX_BROWSER_API_BODY_READ_MS = 10_000;
 
@@ -37,9 +38,11 @@ export async function proxyPlatformApi(
   pathSegments: readonly string[],
   options: { readonly csrfFromCookie?: boolean } = {}
 ): Promise<Response> {
+  const upstreamPathSegments =
+    pathSegments[0] === "v1" ? pathSegments.slice(1) : pathSegments;
   if (
     !ALLOWED_METHODS.has(request.method) ||
-    !isSafeBrowserApiPath(pathSegments)
+    !isSafeBrowserApiPath(upstreamPathSegments)
   ) {
     return errorResponse(404, "NOT_FOUND", "API route not found");
   }
@@ -70,7 +73,7 @@ export async function proxyPlatformApi(
       "Cross-origin browser API requests are not allowed"
     );
   }
-  const maxBodyBytes = browserApiBodyLimit(pathSegments);
+  const maxBodyBytes = browserApiBodyLimit(upstreamPathSegments);
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (
     Number.isFinite(contentLength) &&
@@ -101,7 +104,7 @@ export async function proxyPlatformApi(
     : { ok: true as const, body: undefined };
   if (!boundedBody.ok) return boundedBody.response;
   const upstreamUrl = new URL(
-    `/api/v1/${pathSegments.map(encodeURIComponent).join("/")}`,
+    `/api/v1/${upstreamPathSegments.map(encodeURIComponent).join("/")}`,
     process.env.PLATFORM_API_INTERNAL_URL ?? "http://localhost:4000"
   );
   upstreamUrl.search = request.nextUrl.search;
@@ -284,9 +287,18 @@ async function readBoundedRequestBody(
 }
 
 function browserApiBodyLimit(pathSegments: readonly string[]): number {
-  return pathSegments[0] === "me" && pathSegments[1] === "push-subscriptions"
-    ? MAX_PUSH_SUBSCRIPTION_BODY_BYTES
-    : MAX_BROWSER_API_BODY_BYTES;
+  if (pathSegments[0] === "me" && pathSegments[1] === "push-subscriptions") {
+    return MAX_PUSH_SUBSCRIPTION_BODY_BYTES;
+  }
+  if (
+    pathSegments.length === 4 &&
+    pathSegments[0] === "projects" &&
+    pathSegments[2] === "keywords" &&
+    pathSegments[3] === "bulk"
+  ) {
+    return MAX_SEMANTIC_KEYWORD_BULK_BODY_BYTES;
+  }
+  return MAX_BROWSER_API_BODY_BYTES;
 }
 
 export function responseCookies(headers: Headers): readonly string[] {

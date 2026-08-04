@@ -5,7 +5,7 @@ import "./styles.css";
 export const metadata: Metadata = {
   title: {
     default: "Рабочее пространство",
-    template: "%s · SEO Workspace"
+    template: "%s · SEOньорита"
   },
   robots: {
     index: false,

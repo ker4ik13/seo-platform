@@ -18,16 +18,8 @@ export default async function TeamSettingsPage() {
 
   return (
     <AppShell activeSection="settings" context={context}>
-      <nav aria-label="Хлебные крошки" className="app-breadcrumbs">
-        <a href="/app">Обзор</a>
-        <span aria-hidden="true">/</span>
-        <span>Настройки</span>
-        <span aria-hidden="true">/</span>
-        <span aria-current="page">Команда</span>
-      </nav>
       <section className="page-heading">
         <div>
-          <p className="eyebrow">Workspace · Доступ</p>
           <h1>Команда</h1>
           <p>
             Управляйте участниками, системными ролями и ожидающими

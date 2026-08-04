@@ -361,6 +361,41 @@ test("keeps requested audit fail-closed before calling Jobs", async () => {
   assert.equal(jobsCalls, 0);
 });
 
+test("rejects workspace credentials without their dedicated permission before audit and Jobs", async () => {
+  let dependencyCalled = false;
+  const controller = new ProjectIntegrationController(
+    {
+      createProjectConnectorBinding: async () => {
+        dependencyCalled = true;
+        return binding;
+      }
+    } as unknown as JobsClient,
+    {
+      record: async () => {
+        dependencyCalled = true;
+      }
+    } as unknown as AuditService
+  );
+
+  await assert.rejects(
+    controller.create(
+      createInput,
+      tenantRequest({
+        roleCode: "ANALYST",
+        headers: { "idempotency-key": "project-binding-create-001" }
+      }),
+      reply().value,
+      principal
+    ),
+    (error: unknown) =>
+      error instanceof Error &&
+      "getStatus" in error &&
+      typeof error.getStatus === "function" &&
+      error.getStatus() === 403
+  );
+  assert.equal(dependencyCalled, false);
+});
+
 test("rejects archived mutations before idempotency, audit and jobs", async () => {
   let dependencyCalled = false;
   const controller = new ProjectIntegrationController(

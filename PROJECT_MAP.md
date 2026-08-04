@@ -1,6 +1,6 @@
 # Карта проекта
 
-Последнее обновление: 1 августа 2026 года
+Последнее обновление: 4 августа 2026 года
 
 Текущий инкремент: проверенный single-node VPS runtime и закрытие оставшихся
 пользовательских P1/P2-контуров по ТЗ. На VPS без Docker/sudo собран
@@ -101,32 +101,298 @@ intent, группу, кластер, target URL и теги без blind overwr
 semantic version `CLEANING`, поэтому результат доступен в истории и undo.
 Серверный keyword read model поддерживает allowlisted
 intent/group/cluster/favorite/tracked/priority
-filters и пять стабильных keyset sorts; cursor криптографически связан с
-фильтрами и сортировкой через SHA-256 fingerprint. Private и project-shared saved views сохраняют
+filters и двадцать стабильных keyset sorts: двунаправленно по created/updated,
+тексту, приоритету, источнику, трём Wordstat-метрикам и текущей позиции
+Яндекс/Google; cursor криптографически связан с фильтрами и
+сортировкой через SHA-256 fingerprint. Private и project-shared saved views сохраняют
 строго валидируемый versioned DSL (фильтры, сортировка, видимость/порядок
 колонок и плотность), имеют owner boundary, CAS, soft delete и browser UI.
 Web workspace семантики следует проверенным паттернам Key Collector:
-постоянное дерево групп, плотная таблица, быстрый поиск/фильтры и массовые
-операции находятся на основном экране без промежуточного отступа от общего
-sidebar. Ручное добавление принимает в textarea до 2 000 запросов по одному
-в строке, нормализует пробелы, пропускает дубли и при частичной ошибке
-оставляет для повтора только необработанные строки. Группы поддерживают
+компактные header/command bar, постоянное дерево групп, плотная таблица,
+быстрый поиск/фильтры и массовые операции находятся на основном экране без
+промежуточного отступа от общего sidebar. Выбор строк показывается компактным
+chip в существующей панели и не меняет высоту таблицы; системные результаты
+операций выводятся overlay-toast сверху и также не двигают рабочую область.
+Системные группы «Без группы» и «Корзина» закреплены отдельной нижней секцией
+дерева и не уезжают вместе с обычной иерархией; корневая строка «Все запросы»
+получает независимый project-wide count и не подменяет его числом текущего
+фильтра. После keyword/group-мутации дерево повторно загружает авторитетные
+project-wide counts, поэтому «Корзина», «Без группы» и обычные папки обновляются без
+перезагрузки страницы. Раскрытие папок использует выровненный SVG-chevron, табличные
+checkbox имеют единый доступный state. Desktop-дерево групп имеет
+доступный drag/keyboard separator с per-project browser persistence ширины;
+папки не перегружены постоянными checkbox, Ctrl/Cmd-клик и контекстное меню
+задают их multi-select отдельно от открытия, а глубина вложенности остаётся
+компактной. Глубокая иерархия прокручивается внутри дерева и не расширяет
+табличную область; toolbar остаётся вне горизонтального scroll-контекста
+колонок, а resize дерева и колонок завершается также при blur/pointer-cancel.
+Размер cursor-блока infinite scroll выбирается в footer таблицы из 100, 200,
+500 или 1 000 строк и сохраняется в per-project layout preferences; публичная
+API-граница остаётся ограниченной максимумом 1 000 строк.
+Обычный клик фокусирует и
+подсвечивает строку, Shift расширяет отдельный непрерывный диапазон копирования
+по уже загруженным строкам, а Ctrl/Cmd+C копирует его по одному запросу в
+строке. Checkbox-selection не меняется от клика по строке и независимо задаёт
+bulk scope для сбора частотности, позиций и остальных массовых команд. В
+заголовке grid первый checkbox выбирает показанные строки, а второй переносит
+отдельный highlighted/Shift-диапазон в bulk scope; оба сохраняют мягкие углы,
+но имеют строго квадратное соотношение сторон; второй в пустом состоянии
+имеет небольшой внутренний квадрат и визуально отличается от bulk-checkbox. Команды основного toolbar и
+карточки Toolbox используют семантические SVG-иконки вместо текстовых glyph.
+Все provider-specific поверхности используют единый `ProviderLogo` с
+локальными официальными знаками Arsenkin Tools и Keys.so; для XMLStock
+показывается только голубой знак `<XML>` без текстовой части `stock`.
+Изображение каждого провайдера геометрически центрируется внутри фиксированного
+контейнера независимо от собственного SVG viewBox, поэтому карточки, задачи и
+диалоги используют одну оптическую ось.
+Desktop workspace занимает ровно один dynamic viewport без scroll документа:
+общий sidebar, дерево групп, таблица и правый inspector имеют независимый
+bounded overflow, inspector занимает всю высоту ниже app-шапки и двух
+семантических строк, а
+выбранные строки получают внутреннюю рамку без изменения геометрии таблицы.
+Единый проектный экран `/app/tasks` собирает tenant-scoped фоновые операции
+из четырёх реальных Jobs read models: частотность, проверки позиций,
+технические аудиты и сбор конкурентов Keys.so. Он поддерживает периодическое
+live-обновление раз в две секунды без визуальной перезагрузки и без зависимости
+от WebSocket; тот же режим используется правым журналом семантики и отдельной
+страницей результата, поэтому progress/result rows появляются по мере их
+сохранения. Доступны поиск и фильтр по типу, построчный
+журнал по времени и частично деградированный режим. Любая строка журнала и
+карточка semantic operations drawer открывают один общий fullscreen modal с
+живым прогрессом, фактическими строками результата и итоговыми счётчиками.
+Доступны переход к
+результату, отмена допустимых операций и повтор ошибочных элементов
+частотности; keyword texts, credentials и raw provider payload в журнал не
+попадают.
+Точные результаты операций читаются отдельными tenant-scoped проекциями, а не
+восстанавливаются из агрегатов журнала: Jobs отдаёт только точный состав и
+статусы элементов частотности, SEO Data — нормализованные frequency snapshots,
+rank manifest entries и cursor-страницы crawl snapshots. Platform API объединяет
+эти read models после проверки workspace/project и публикует bounded маршруты
+`frequency-collections/:jobId/result`, `jobs/:jobId/result` и
+`crawls/:crawlId/result`; новый модуль `platform-seo-data/src/operation-results`
+не принимает browser identity и не возвращает provider payload или секреты.
+Ручное добавление принимает в textarea до 2 000 запросов по одному
+в строке и по умолчанию выбирает открытую папку (кроме «Корзины»). Доступная
+галочка «Не добавлять дубли» по умолчанию нормализует и дедуплицирует textarea,
+пропускает активные совпадения и возвращает совпадения из «Корзины» отдельными
+recovery candidates. После ручного добавления или завершения импорта Web
+показывает их следующей таблицей с checkbox; только подтверждённые строки
+восстанавливаются явной политикой `RESTORE_TRASHED`, остальные остаются в
+«Корзине». При выключенной галочке сервер отклоняет совпадения и
+оставляет их в textarea вместе с другими необработанными строками. Web
+последовательно отправляет bounded bulk-чанки не более 100 строк, агрегирует
+счётчики добавленных, восстановленных и пропущенных запросов, а при сетевом
+обрыве сохраняет для повтора текущий неподтверждённый чанк, весь хвост и
+ранние rejected/failed в исходном порядке. Public и trusted bulk-create routes
+имеют отдельный 8 MiB body limit при сохранении стандартного лимита остальных
+маршрутов; parser дополнительно ограничивает JSON payload шестью MiB. Группы поддерживают
 collapse, multi-select, right-click menu и
-drag-and-drop перенос с server-side CAS; строки имеют row context menu, bulk
-bar, drag-and-drop в дерево и правый inspector. Таблица использует
+drag-and-drop перенос с server-side CAS, а соседние группы можно явно
+переставлять в произвольном порядке через edge drop и сохраняемый `position`;
+drop в свободную область дерева переносит выбранные верхнеуровневые элементы
+в корень без отдельного confirmation dialog, а center drop сохраняет сценарий
+вложения. Строки имеют row context menu, bulk
+bar, drag-and-drop в дерево и правый inspector. Частотность и съём позиций
+запускаются прямо из семантики: modal scope позволяет найти и отметить
+конкретные запросы (текущее табличное выделение используется как начальное)
+либо выбрать несколько папок вместе с их поддеревьями. Состав и версии
+запросов фиксируются до постановки Job. Отдельный
+пользовательский экран «Позиции» и его пункт навигации удалены, а старые
+`/app/rankings` и `/projects/:projectId/rankings[/contexts|/automations]`
+перенаправляются на
+`/app/semantics`. Единый `KeywordDataGrid` сохраняет геометрию строк,
+выделение, stacked inside-border, infinite-scroll hooks и модель колонок.
+Таблица использует
 cursor-based infinite scroll с оконным DOM-render и догружает следующий
 cursor только у нижней границы scroll-контейнера, а не постраничной
-навигацией. Импорт, управление группами/колонками, кластерами и
+навигацией. List projection дополняет каждую текущую страницу последними
+BASE/EXACT/FIXED frequency snapshots и актуальными Yandex/Google current ranks
+одним bounded batch, поэтому основной grid и экспорт показывают отдельные
+Wordstat-колонки без операторов, `"..."` и `"!..."`, число слов и позиции без
+row-by-row запросов. Правый журнал операций использует тот же bounded sidebar
+slot, что и inspector запроса; одновременно отображается один из них, а
+таблица и toolbar сохраняют внутренний горизонтальный scroll вместо сжатия
+колонок. Применение серверного фильтра или сортировки заменяет строки в
+существующем grid без размонтирования таблицы и сохраняет допустимую позицию
+внутреннего scroll-контейнера. Позиции Яндекс и Google отображаются с
+логотипом поисковика, текущим значением и компактным предыдущим значением в
+одной колонке; отдельные технические `delta`-колонки в UI отсутствуют, а
+рост/падение кодируется доступным текстом и цветом. Wordstat-колонки называются
+«База», `""` и `"!"` и имеют маркер Яндекса. Представления и настройка таблицы открываются как привязанные
+dropdown без изменения layout; порядок колонок меняется drag-and-drop или
+клавиатурно доступными кнопками и сохраняется во внутреннем
+`PROJECT_SHARED` view для всего проекта вместе с плотностью. Ширина каждой
+видимой колонки меняется pointer/keyboard separator в заголовке, ограничивается
+безопасными min/max и сохраняется в per-project browser layout preferences;
+горизонтальный overflow остаётся внутри grid. Сортировка по
+заголовкам запроса, приоритета, источника и даты выполняется на сервере до
+cursor pagination и отдельно сохраняется для корня и каждой группы во
+внутреннем project-shared view, поэтому infinite scroll не смешивает порядок,
+а все участники проекта видят одну настройку папки. Индекс
+`20260801212000_keyword_source_sort_index` закрывает source sort на больших
+ядрах. Импорт,
+управление группами/пользовательскими колонками, экспорт, кластерами и
 история открываются в native modal/dialog layers и не вытесняют ядро. Импорт начинает
 с компактного выбора CSV/TSV/XLSX, а mapping, preview, validation и публикация
 раскрываются только по мере прохождения этапов. Из того же toolbar доступен рабочий Keys.so-сценарий сбора запросов
 конкурентов с preview и явным подтверждением импорта в текущее ядро.
-Сбор частотности запускается из семантики как durable XMLStock Wordstat Job,
+Сбор частотности запускается из семантики как durable XMLStock или Arsenkin
+Wordstat Job: modal показывает только реально активные workspace credentials,
+при выборе атомарно создаёт/обновляет project binding и использует общий
+поисковый selector региона в формате «название — provider code». Job
 показывает прогресс/историю/повтор/отмену в правом журнале и до запуска
-проверяет project binding. Проверка позиций назначает выбранные запросы
-контексту, получает estimate и создаёт Arsenkin Job; если контекстов ещё нет,
-modal создаёт первый совместимый Google Top-30 контекст inline и продолжает
-тот же запуск без перехода на отдельную страницу.
+проверяет project binding. Окна частотности и позиций показывают безопасную
+актуальную provider-квоту и предварительную оценку расхода: XMLStock — в
+запросах и рублёвом балансе, Arsenkin — в лимитах/пакетах без выдуманной
+денежной цены. Arsenkin Wordstat runtime отправляет все 1–10 000
+выбранных запросов одного Job одним документированным `set` batch, хранит
+один opaque task ID на всех элементах пакета, опрашивает документированный
+`check` и вызывает `get` только после статуса `finish`; final payload
+нормализуется по exact task ID, query set и выбранному региону.
+Дубликаты текста дедуплицируются только на provider wire, но результат
+сохраняется для каждого keyword ID. Старые per-keyword task ID продолжают
+опрашиваться по отдельности; XMLStock остаётся single-key execution из-за его
+синхронного per-query contract. Проверка позиций уже использует один
+`positions` submit на единый sealed provider task до 15 000 ключей, а не
+последовательный submit на keyword. Estimate и запуск проверки позиций
+используют один и тот же явно выбранный `credentialId`: запуск не изменяет
+project binding после построения immutable estimate и поэтому не инвалидирует
+оценку и подготовленный Job. Выбор источника входит в estimate hash и request
+snapshot: `SEARCH_API` и `LIVE` нельзя подменить между оценкой, reservation и
+provider submit.
+Модалка проверки позиций повторяет структуру запуска частотности: слева
+выбирается конкретный активный workspace account Arsenkin/XMLStock с логотипом,
+справа — компактные custom-select параметры поисковика, устройства, страны,
+языка, региона и глубины. Выбранный account атомарно становится primary route
+project binding; estimate и запуск проверяют immutable policy именно выбранного
+provider, поэтому XMLStock estimate не сравнивается с generation Arsenkin.
+Актуальные mapping profiles разделяют Arsenkin Яндекс Search API (`type=1`),
+Яндекс Live (`type=2/3`) и Google Live Desktop/Mobile (`type=11/12`). Для
+Arsenkin Яндекс доступен TOP-30, Google — TOP-30/50/100. Оценка расхода
+показывает 2 лимита Arsenkin на Яндекс-ключ и 2/3/5 лимитов на Google-ключ для
+TOP-30/50/100; XMLStock показывает один Search API request либо
+`ceil(depth / 10)` Live requests на ключ.
+
+XMLStock полностью подключён как второй BYOK-контур частотности и позиций.
+Credential validation сначала выполняет безопасный read-only account request
+`/api/`, нормализует доступные запросы, замороженный остаток, расход за день и
+месяц, рублёвый баланс и срок тарифа, затем независимо проверяет каталог
+регионов `regionsTree`; зашифрованные `USER ID + KEY` не попадают в URL
+snapshot, Job, очередь или лог. Wordstat использует документированный
+`/wordstat/json/` и
+сохраняет BASE (`query`), EXACT (`"query"`) и FIXED (`"!query"`) отдельно для
+региона/устройства. Один XMLStock Wordstat request обслуживает один keyword и
+один тип: параметр `groupby` у провайдера управляет количеством связанных
+фраз ответа, а не batch входных запросов. При `groupby=1` единственная
+агрегатная строка принимается по валидному `count`, даже если Wordstat
+морфологически нормализовал отображаемую `phrase`; несколько несовпадающих
+строк по-прежнему отклоняются как неоднозначный ответ.
+
+Rank runtime использует один sealed keyword на XMLStock execution. Для Яндекс
+Search API вызывается `/yandex/xml/` с `delayed=1`, сохраняется только opaque
+`req_id`, первый poll назначается через 15 секунд, последующие pending poll —
+через 25 секунд; `groupby` задаёт TOP-30/50/100. Для Яндекс Live вызывается
+`/yandexlive/xml/`; одна страница даёт 10 результатов, поэтому TOP-30/50/100
+собирается из 3/5/10 страниц. Google Live использует такой же постраничный
+расчёт глубины. Все варианты нормализуются в абсолютную позицию и релевантный
+URL, внешний raw XML не сохраняется. Migrations `20260802213000_xmlstock_rank_runtime`,
+`20260802213000_xmlstock_rank_results` и
+`20260802223000_xmlstock_rank_poll_cadence` расширяют provider union,
+one-key manifests/results и provider-specific cadence без изменения границ
+владения Jobs/SEO Data.
+Migrations `20260802224500_xmlstock_validation_and_rank_lease` и
+`20260802225000_retry_pre_xmlstock_validation_failures` добавляют exact
+XMLStock success metadata/capabilities в DB broker, исправляют реальную
+pre-authorization lease boundary на 120 секунд и один раз возвращают в очередь
+только исчерпанные проверки текущего pending XMLStock material.
+Migration `20260803074500_xmlstock_manual_rank_job_shape` синхронизирует
+защитный trigger `MANUAL_RANK_CHECK` с provider union Arsenkin/XMLStock и
+единым bounded scope до 15 000 ключей; XMLStock Job теперь создаётся до
+асинхронной подготовки, не ослабляя остальные lifecycle/receipt invariants.
+Migration `20260803080000_xmlstock_rank_quota_policy` в `platform-api`
+добавляет `manual-xmlstock-serp@1.0.0` в допустимую неизменяемую историю
+reservation policy, поэтому authoritative execution grant выдаётся до первого
+обращения коннектора к XMLStock.
+Migration `20260803091000_xmlstock_rank_claim_provider` исправляет фактическую
+submit-границу connector worker: Arsenkin-only predicates удалены из реальной
+`claim_rank_connector_execution_pre_authorization`, provider сверяется с
+immutable execution/credential/validation/control graph, а sealed manifest
+остаётся ограничен 15 000 ключами и 120-секундной network lease.
+Connector runtime использует отдельные leases: submit ограничен 25 секундами
+и гарантированно помещается в короткий execution grant, а poll получает до
+120 секунд для последовательной XMLStock Google pagination. Поэтому длинная
+TOP-100 проверка не блокирует первоначальную отправку задания провайдеру.
+Grant evidence также выбирает provider-specific kill-switch: конфигурационная
+версия Arsenkin не может попасть в XMLStock execution, который связывается с
+неизменяемым control `xmlstock-serp@1` до любого сетевого обращения.
+Parser immutable `rank-job-item@1` принимает весь общий bounded диапазон
+chunk index `0..14999`; provider-specific manifest checks по-прежнему
+проверяют фактический chunk shape. Поэтому XMLStock batch больше четырёх
+ключей не обрывается на пятом JobItem до обращения к провайдеру.
+Rank dispatcher выдаёт короткоживущие execution grants окном не более пяти
+активных provider tasks вместо предварительной авторизации всего XMLStock
+batch. Migration `20260803103500_rank_dispatch_window` не считает истёкшие
+`CLAIMED/FETCHING` leases активными и позволяет connector worker безопасно
+вернуть их в работу; `READY_TO_SUBMIT` занимает слот только до окончания
+авторизации. Следующая migration
+`20260803110000_rank_submit_claim_capacity` отделяет очередь выданных grants
+от уже занятых connector slots: submit broker не считает собственные
+`READY_TO_SUBMIT` candidates активными и поэтому может дренировать полное
+окно без взаимной блокировки. Migration
+`20260803111500_rank_bounded_submit_request` разрешает читать неизменяемый
+request snapshot текущего claimed execution без прежнего требования заранее
+создать executions для всех следующих элементов sealed manifest; hash и
+lease/authorization fences текущего запроса сохраняются. Финализатор принимает весь bounded диапазон до 15 000 chunks,
+поэтому многострочный XMLStock run проходит полный путь до terminal receipt.
+Manifest storage guard для chunk/entry таблиц читает специфичные поля trigger
+row через `to_jsonb(NEW)`: PostgreSQL не пытается разрешить `entry_count` у
+entry-строки, подготовка не зацикливается на `PREPARING`, при этом границы
+единственного 15 000-key provider task продолжают проверяться в БД.
+Migration `20260803114500_rank_live_progress` атомарно увеличивает
+`Job.progress_current` после первого успешного перехода connector execution в
+`PERSISTED` и сверяет размер по immutable `request_snapshot.keywords`. Повтор
+того же provider result не может задвоить счётчик; migration также
+пересчитывает уже выполняющиеся операции из authoritative persisted set, а
+финализатор сохраняет terminal projection. Поэтому журнал операций и правый
+sidebar показывают промежуточный прогресс из Jobs без обращения к SEO Data.
+Rank preparation и connector runtime запускают до пяти независимых Jobs
+параллельно; каждый Job остаётся одним Arsenkin `positions` task, а общий
+provider rate limit и bounded active-task guard продолжают действовать.
+Проверка позиций использует единый
+`SemanticPositionDialog` только в семантике: пользователь каждый раз задаёт
+поисковик, регион, устройство, язык и глубину, после чего UI получает estimate
+и создаёт Arsenkin Job. Tracking context остаётся внутренним versioned снимком
+параметров для воспроизводимой истории и не является отдельным
+пользовательским объектом; устаревший URL `/rankings/contexts` после проверки
+доступа перенаправляет в семантику. Одинаковые технические параметры и exact
+состав scope повторно используют существующий внутренний snapshot; assignment
+перед estimate синхронизируется удалением лишних и добавлением недостающих
+keyword ID, поэтому старые ключи не могут попасть в новый запуск.
+Migration `20260801213000_frequency_terminal_stage_guard` нормализует stage
+terminal frequency jobs в `finished` и backfill-ит ранее завершённые строки,
+чтобы завершённый сбор не оставался в UI на стадии ожидания провайдера.
+Все одиночные select controls Web заменены общим `CustomSelect`: портал не
+обрезается таблицами/dialog overflow, поддерживает mouse/keyboard, Escape,
+outside click, disabled/error состояния и optional search. Native browser
+popup больше не используется в sidebar, tenant/team settings, семантике,
+импорте, аудитах и rank screens. Глобальный dropdown coordinator гарантирует,
+что одновременно открыт только один select/details/account popover; открытие
+следующего, Escape или pointer outside закрывают предыдущий слой.
+Checkbox/radio controls семантики имеют общий доступный visual state,
+`focus-visible`, disabled/error состояния и одинаковую геометрию; цвет группы
+редактируется связанными color swatch и валидируемым `#RRGGBB` полем, поэтому
+код можно вставить с клавиатуры без растягивания label на всю форму.
+Продукт называется `SEOньорита` в русскоязычном UI и `SEOnorita` в
+англоязычном UI. Переданный владельцем vector mark хранится локально в Web,
+legacy App и Admin, используется в sidebar/auth/public header и как favicon;
+инфраструктурные package names, event URN и runtime keyspace намеренно не
+переименовываются. Общие Web-токены приведены к архивному UI-эталону:
+`#5B3DF5`, `#111827`, `#F7F8FC`, `#E6E8EF`, 4px spacing grid, компактная
+плотность и WCAG-visible focus. На экране семантики сохранена отдельная
+компактная 48px app-шапка с поиском, уведомлениями и профилем; title row и
+command bar уменьшены до 44px и 34px, а рабочая область начинается сразу
+после общего sidebar без внешнего отступа.
 Custom columns базовых типов реализованы отдельными tenant-scoped definitions
 и typed EAV values: text/long text/integer/decimal/boolean/date/datetime/
 select/multi-select/URL/user/status. Каждая ячейка имеет CAS; PostgreSQL
@@ -149,8 +415,10 @@ injection. Табличные заголовки локализуются, CSV �
 update, cluster merge и пакетного назначения cluster primary Page. Before/after state
 записывается в той же PostgreSQL-транзакции, bulk version остаётся
 необратимой до финализации, а общий advisory lock сериализует ручные правки,
-import chunks и undo. Web показывает последние версии и сначала запрашивает
-preview; undo применяет только строки с exact current version и доступными
+import chunks и undo. Web объединяет последовательные версии одного actor,
+reason/source job и временного окна в одну пользовательскую операцию: список
+истории показывает пачку, а detail modal — компактную таблицу всех сохранённых
+запросов/групп и изменённых полей. Технический undo применяет только строки с exact current version и доступными
 cluster/group/page/tag dependencies, включая primary Page кластера, не
 перезаписывает более новые изменения,
 сообщает конфликты и сам создаёт новую откатываемую версию. Undo требует
@@ -195,8 +463,8 @@ Job/Run/Item graph вокруг bounded чтения sealed manifest chunk, со
 `rank_provider_request_intents` snapshot и связывает его ID, request hash и
 chunk hash с private execution evidence и connector execution FK.
 
-Controlled-beta policy выдаёт grant только для exact
-`manual-arsenkin-positions@1.0.0`, резервирует одну immutable
+Controlled-beta policy создаёт новые grants только для exact
+`manual-arsenkin-positions@2.0.0`, резервирует одну immutable
 `RANK_PROVIDER_TASK` на JobItem/attempt и ограничивает workspace 200 provider
 tasks на календарные UTC-сутки. Receipt связан с reservation составным
 tenant/job/item FK. Rank dispatcher восстанавливает готовые sealed Jobs из
@@ -211,25 +479,53 @@ table DML. Submit authorization повторно блокирует полный
 сверяет owner/token/lease generation/row version и атомарно фиксирует
 `SUBMITTING` с durable marker до возможных network bytes.
 
-Реальный Arsenkin runtime замкнут: connector-worker отправляет документированный
-`check-top` POST, соблюдает общий лимит 30 запросов/минуту и не более пяти
-одновременных provider tasks, durable сохраняет wire snapshot/hash и task ID,
-poll-ит результат, но никогда не хранит raw provider body. Нормализованный
+Реальный Arsenkin runtime замкнут: connector-worker версии
+`arsenkin-positions@2.0.0` отправляет документированный `positions` POST с
+project URL, alternative URL, subdomain policy и одним поисковым контекстом.
+Общий для всех Arsenkin connector workflows и replicas Redis sliding-window
+limiter считает каждый `set`, `check`, `get` и credential `info` HTTP request
+и разрешает не более 30 запросов за 60 секунд; при недоступности Redis он
+fail-closed. Fenced DB-bound cap резервирует не более пяти одновременных
+Arsenkin provider tasks суммарно для Rank и Wordstat; ожидание slot не
+расходует poll attempt.
+Rank request timeout ограничен 10 секундами, а poll lease рассчитывается на
+максимальные десять последовательных Google XML page requests с запасом
+(103 секунды при максимальном timeout) и остаётся в broker-bound диапазоне
+5–120 секунд. Runtime durable
+сохраняет wire snapshot/hash и task ID, опрашивает `check` и
+вызывает `get` только после `TASK_STATUS/finish` с progress 100, но никогда не
+хранит raw provider body. Нормализованный
 found/not-found chunk проходит через отдельный SEO Data result boundary,
 после чего rank-worker атомарно закрывает Job/JobItems/manifest как
 `COMPLETED`, `PARTIALLY_COMPLETED`, `FAILED` или `ACTION_REQUIRED`.
-Поддержанный первый production profile ограничен Google, глубиной 30,
-числовым Arsenkin region ID, выключенным safe search и однозначными URL rules;
+Поддержанный runtime profile включает Google Desktop/Mobile с глубиной
+30/50/100 и Яндекс Desktop/Mobile с канонической внутренней глубиной 30,
+числовой Arsenkin region ID, выключенный safe search и однозначные URL rules.
+Для Яндекса wire request не содержит `depth`, а другой выбор блокируется на
+estimate. Arsenkin `positions` mapping использует types `2/3`
+для Яндекс Desktop/Mobile и `11/12` для Google Desktop/Mobile;
 несовместимая конфигурация блокируется ещё на estimate, до provider call.
 Устаревшие unconditional beta-blockers с estimate-path удалены: Platform API
 теперь получает BYOK entitlement из действующего тарифа, а executable estimate
 становится `READY` только при полном совпадении этого production profile,
-активном binding и свежей validation. Неизвестный/неподдержанный mapping
-остаётся fail-closed с точным blocker code.
-Миграция activation переводит DB-control на новую kill-switch generation
-`arsenkin-positions@2`; Compose включает submit только в isolated
-connector-worker. Старые execution evidence поколения `@1` активироваться
-задним числом не могут.
+активном binding и свежей validation. Live canary 2 августа 2026 года
+зафиксировал `format=0` result contract: `result.table` индексирован исходным
+query, найденная строка содержит `commerce/position/top20/url`, ненайденная —
+`position/top20` с sentinel 1001. Normalizer проверяет exact task/query set,
+sealed depth и project URL scope; неизвестный mapping/layout и premature
+result остаются fail-closed. Additive migration
+`20260802130000_rank_position_top100` расширяет canonical/public и две SEO Data
+rank projections до поддержанного TOP-100.
+Миграция `20260802090000_arsenkin_positions_connector_v2` отказывается
+активироваться при старых автоматически возобновляемых execution, затем
+переводит DB-control на connector `arsenkin-positions@2.0.0` и новую
+kill-switch generation `arsenkin-positions@3`. Следующая policy-активация
+`20260802182100_arsenkin_positions_policy_v2_control` переводит текущий
+single-task runtime на generation `arsenkin-positions@4`; Compose включает
+submit только в isolated connector-worker. Старые execution evidence поколения `@1`
+активироваться задним числом не могут. Policy `@1.0.0` при этом сохраняется
+только для чтения и завершения уже запечатанных manifest: chunk 250 и scope до
+1 000 не переписываются в новую форму.
 
 Rank-tracking automation теперь является рабочим сквозным модулем. Public
 Platform API и private Web позволяют создать и изменить daily/weekly
@@ -261,10 +557,11 @@ provenance. Public Platform API предоставляет bounded keyset list, 
 `page.view/page.manage`, CSRF и immutable tenant context, пишет requested и
 committed audit и строго валидирует owner-response. Private/noindex Web route
 `/app/projects/:projectId/pages` включён в навигацию: доступны поиск и
-фильтры, создание/редактирование, алиасы и SEO-метаданные, архив,
-восстановление, loading/empty/error/offline/read-only states и фактическое
-число назначенных запросов. Fresh migration-chain и DB smoke подтверждают
-tenant FK и конфликт canonical/alias.
+фильтры, создание/редактирование в overlay dialog, алиасы и SEO-метаданные,
+архив, восстановление, loading/empty/error/offline/read-only states,
+фактическое число назначенных запросов и sticky inspector выбранной страницы
+без сдвига таблицы. Fresh migration-chain и DB smoke подтверждают tenant FK и
+конфликт canonical/alias.
 
 Первый production technical crawl vertical замкнут сквозным образом.
 Platform API создаёт идемпотентный асинхронный Job, проверяет
@@ -415,6 +712,15 @@ multipart-записи. Параллельные загрузки не обхо�
 и workspace advisory lock; platform-paid settlement остаётся следующей частью
 enforcement.
 
+Экран настроек использует живые server-owned данные вместо демонстрационных
+значений: статус MFA/email, каналы уведомлений, workspace team, plan feature
+snapshot, фактический platform credit balance и состояния BYOK-подключений.
+Интеграционный credential DTO теперь дополнительно выдаёт узкую безопасную
+`quota` projection из последней успешной проверки: остаток внутренних лимитов
+Arsenkin, `limit/used/remaining` Keys.so API requests либо доступные запросы,
+расход и рублёвый баланс XMLStock. Сырой `providerMeta` и неизвестные
+provider-поля остаются внутри `platform-jobs-integrations`.
+
 Browser Web Push lifecycle и delivery реализованы по ADR-2026-035/039:
 профиль владеет устройствами, Platform API управляет ими через отдельный
 Realtime token, secret material хранится в `realtime_db` под AES-256-GCM и
@@ -423,8 +729,31 @@ Realtime token, secret material хранится в `realtime_db` под AES-256
 attempt. Isolated sender выполняет fresh permission check до decrypt,
 lease/retry, `404/410` terminal expiry и global provider-expiry sweep.
 Persistent canaries запрещают same-version replacement keyring bytes.
-Production profile и test send по умолчанию выключены до операторских VAPID
-credentials/canary; общий notification email/digest ещё не реализован.
+VPS preview profile теперь активируется отдельной безопасной командой
+`configure-web-push.sh`: она создаёт VAPID, AES-256-GCM и HMAC keyrings только
+в mode-600 `runtime.env`, а `start-runtime.sh` запускает отдельный
+`web-push-worker`. Realtime HTTP получает только public VAPID/keyrings для
+регистрации, private VAPID и fresh Platform authorization token получает
+только sender. YooKassa runtime wiring принимает operator-owned shop/secret
+настройки, но по умолчанию остаётся выключенным и не генерирует фиктивные
+merchant credentials. Общий notification email/digest ещё не реализован.
+Публичный billing catalog v3 закрепляет workspace-scoped тарифы
+`Бесплатный / Старт / Профессиональный / Максимальный`: 1/3/10/30 проектов,
+50/200/500/без лимита папок на проект, 1 000/5 000/10 000/100 000 keywords на
+проект, 1/5/10/30 одновременно выполняемых задач и 3/10/20/50 участников.
+Доступ приглашённых участников определяется тарифом текущей рабочей области и
+их проектными правами. Project, invite/member, semantic folder/keyword и job
+capacity проверяются атомарно; semantic import переносит immutable entitlement
+snapshot между Jobs и SEO Data, поэтому импорт не обходит лимит папок.
+VPS runtime настраивает YooKassa только через mode-600 `runtime.env`, а
+отдельный Caddy server публикует на HTTPS только exact webhook route
+`/api/v1/billing/providers/yookassa/webhook`; checkout, сохранённый способ
+оплаты, ежемесячный recurring charge, webhook inbox и reconciliation остаются
+идемпотентными.
+Web Push user/session serialization lock возвращает Prisma-совместимую
+boolean projection вместо PostgreSQL `void`, поэтому list/register/reconcile
+device routes работают с Prisma 7 adapter, а не падают после успешной
+конфигурации VAPID.
 
 Transactional email срез по ADR-2026-038 реализует отдельный путь для
 подтверждения email, password reset, workspace invite и NPD receipt. Platform API пишет
@@ -529,7 +858,6 @@ boundary и при реальной операционной необходим�
 | `platform-web` | public site, Toolbox, API docs и приложение `/app` | да |
 | `platform-admin` | защищённая operations-панель НПД и platform roles | да, отдельный edge origin |
 | `platform-infrastructure` | Compose/Dokploy, monitoring, runbooks | конфигурация |
-| `.github/workflows/ci.yml` | Node.js 24 workspace quality gate | GitHub Actions |
 | `docs/technical-spec` | нормативное ТЗ | нет |
 | `semaflow-seo-platform-design` | исходный статический дизайн-прототип | нет |
 
@@ -579,8 +907,10 @@ Tracking context читается и изменяется через Platform AP
 в SEO Data. Platform API передаёт проверенный tenant/actor context по internal
 HTTP с `PLATFORM_API_TO_SEO_DATA_TOKEN`; SEO Data повторно сверяет
 route/project scope и атомарно пишет redacted outbox event вместе с domain
-change. Jobs HTTP, import и crawl worker обращаются к SEO Data только с отдельным
-`JOBS_TO_SEO_DATA_TOKEN`. Realtime general HTTP принимает от Platform API
+change. Jobs HTTP, import, crawl и connector worker обращаются к SEO Data
+только с отдельным `JOBS_TO_SEO_DATA_TOKEN`; connector использует его для
+проверки версии ключа и идемпотентной публикации frequency snapshots.
+Realtime general HTTP принимает от Platform API
 `PLATFORM_API_TO_REALTIME_TOKEN`, а browser device lifecycle — отдельный
 notification credential.
 Оценка готовности позиций вызывается Web через Platform API. Platform API
@@ -658,7 +988,7 @@ outbox/inbox foundations либо собственные producer rows.
   всех четырёх backend. General internal HTTP разделён на exact pairs:
   `PLATFORM_API_TO_SEO_DATA_TOKEN` (Platform API → SEO Data),
   `PLATFORM_API_TO_JOBS_TOKEN` (Platform API → Jobs HTTP),
-  `JOBS_TO_SEO_DATA_TOKEN` (Jobs HTTP/import/crawl → SEO Data) и
+  `JOBS_TO_SEO_DATA_TOKEN` (Jobs HTTP/import/crawl/connector → SEO Data) и
   `PLATFORM_API_TO_REALTIME_TOKEN` (Platform API → Realtime).
 - `PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN` отличается от general tokens и
   выдаётся только Platform API и credential-capable jobs/integrations HTTP
@@ -859,8 +1189,9 @@ Backend convention:
   reads используют `semantic.view`, definitions защищены
   `semantic.manage_custom_columns`, mutations — CSRF, tenant lifecycle,
   optimistic locking и audit;
-- `platform-api/src/rankings` — public tracking context CRUD/archive/restore
-  и point keyword assignments с `ranking.view/configure`, CSRF,
+- `platform-api/src/rankings` — public tracking context CRUD/archive/restore,
+  point keyword assignments и атомарная desired-set замена до 15 000
+  назначений с `ranking.view/configure`, CSRF,
   idempotency/OCC и audit, а также provider-free rank estimate с
   `ranking.view` и trusted lifecycle/access snapshot, public manual Job
   lifecycle, bounded read-only rank history proxy, audited rank-tracking
@@ -955,9 +1286,27 @@ Backend convention:
 - `platform-jobs-integrations/src/uploads` — multipart lifecycle, opaque
   object keys, size verification, lease/heartbeat inspection и upload outbox
   events;
-- `platform-jobs-integrations/src/imports` — потоковый CSV/TSV parser,
-  Key Collector header mapping, raw/validated staging, lease/heartbeat,
+- `platform-jobs-integrations/src/imports` — потоковый CSV/TSV/XLSX parser,
+  нативный bounded `.kc4` reader поверх allowlisted ZIP + read-only SQLite,
+  Key Collector header mapping, `ParentId`-иерархия до 64 уровней, manifest
+  пустых/вложенных групп и typed import сохранённых позиций Яндекс/Google,
+  `OVERWRITE_MAPPED` по умолчанию для повторного нативного KC4-импорта,
+  объединение multi-group дублей, raw/validated staging, lease/heartbeat,
   validation summary и chunked publisher;
+- `platform-jobs-integrations/prisma/migrations/20260801223500_kc4_group_manifest`
+  — bounded source metadata для воспроизводимой публикации пустых KC4 групп;
+- `platform-seo-data/prisma/migrations/20260803211500_key_collector_rank_import`
+  — сохранённые позиции Key Collector проходят через synthetic sealed
+  manifest, immutable `RankSnapshot`/ingest receipt и только затем обновляют
+  `CurrentRank`; прямое создание read-model строки импортом запрещено;
+- `platform-seo-data/prisma/migrations/20260801223000_semantic_system_groups`
+  — уникальные project-scoped системные группы `UNGROUPED`/`TRASH`; обычное
+  удаление ключа становится переносом в корзину, permanent delete допускается
+  только из неё, а удаление дерева групп атомарно выбирает корзину либо
+  «Без группы» для осиротевших запросов. Окончательное удаление в одной
+  SEO Data-транзакции сначала очищает current/history позиций, rank-manifest
+  entries, tracking assignments и снимки частотности; Web отправляет
+  массовую очистку ограниченными batch без перегрузки project-lock/пула БД;
 - `platform-jobs-integrations/src/keyword-research` — production BYOK
   collection органических запросов конкурента через документированный
   Keys.so `organic/keywords`: tenant/idempotency boundary, bounded
@@ -970,15 +1319,72 @@ Backend convention:
   `SECURITY DEFINER` функции без table DML у connector role;
 - `platform-jobs-integrations/src/frequency-collections` — асинхронный
   `FREQUENCY_COLLECTION` Job для 1–200 явных keyword ID/version через XMLStock
-  Wordstat BYOK. Job/JobItem содержат только ссылки и параметры; connector
+  либо до 10 000 через Arsenkin Wordstat BYOK. Job/JobItem содержат только
+  ссылки и параметры;
+  XMLStock выполняет синхронный allowlisted запрос на frequency type, а
+  Arsenkin — durable `set → check → get` с сохранением только opaque task ID и
+  lease-fenced poll; connector
   получает encrypted credential только через exact `SECURITY DEFINER` claim,
   расшифровывает его в памяти, собирает BASE/EXACT/FIXED и сохраняет
   normalized snapshots через отдельную Jobs → SEO Data границу. Retry,
   частичный результат, отмена и server-side history видны в журнале операций;
+- `platform-jobs-integrations/src/job-notifications` и migration
+  `20260802170000_terminal_job_notifications` — bounded PostgreSQL
+  reconciler terminal Jobs, durable outbox-доставка с retry и partial unique
+  idempotency по `event_type + job_id`; actor/workspace/project/progress и
+  конечный код ошибки передаются в Platform API без keyword, URL, provider
+  payload или credential material;
 - migration `20260801144000_frequency_collection_runtime` добавляет три exact
   broker-функции claim/complete/fail без table DML у connector role, а
   `platform-infrastructure/postgres/permissions/jobs-connector.sql` включает
   только эти сигнатуры в allowlist;
+- migration `20260801190000_multi_provider_frequency_runtime` расширяет claim
+  на точный provider union `XMLSTOCK | ARSENKIN`, добавляет fenced defer/poll
+  routine и актуализирует сохранённые Arsenkin capability snapshots без
+  доступа connector role к таблицам;
+- migration `20260801210000_arsenkin_wordstat_capability_guard` backfill-ит
+  `WORDSTAT` в уже проверенных active Arsenkin credentials и защищает этот
+  capability trigger-ом от отката старой credential-validation DB-функцией;
+  trigger применяется только к verified ACTIVE Arsenkin material и не
+  доверяет browser input;
+- migration `20260801193000_fix_frequency_claim_attempt_ambiguity` устраняет
+  PL/pgSQL collision output-параметра `attempt` с колонкой locked JobItem;
+  regression test и rollback diagnostic подтверждают, что connector claim
+  доходит до внешнего вызова, не расширяя grants;
+- migration `20260801194000_fix_frequency_claim_return_types` fail-closed
+  приводит bounded provider/request-id varchar к опубликованному `TEXT`
+  return contract broker-функции; unexpected body version миграция отклоняет;
+- migration `20260802120000_arsenkin_wordstat_batch_runtime` добавляет exact
+  batch claim/complete/defer/fail boundary: Arsenkin claim атомарно объединяет
+  текущий bounded scope до 10 000 несданных items или все due items одного
+  provider task ID после additive расширения `20260802140000`, а
+  XMLStock claim остаётся из одного item. Connector role получает только
+  `EXECUTE` этих fenced functions; прямого table DML нет. Legacy single-item
+  functions временно сохранены в allowlist для безопасного rolling rollout;
+- migration `20260802130000_fix_frequency_batch_claim_attempt_ambiguity`
+  forward-only исправляет повторно внесённую batch runtime коллизию
+  output-параметра `attempt` с колонкой `job_items.attempt`; миграция
+  fail-closed обновляет только ожидаемое определение функции и сохраняет
+  прежнюю exact `EXECUTE` boundary connector role;
+- migration `20260802140000_arsenkin_wordstat_10000` расширяет только
+  Arsenkin Wordstat batch до 10 000 keyword items и сохраняет соответствие
+  «один Job — один provider task». Внутренние owner-boundary вызовы читают
+  ключи пакетами до 1 000 и записывают snapshots пакетами до 500 с renewal
+  lease между окнами. Перед первым HTTP submit fenced DB-команда ставит
+  durable marker и резервирует общий с rank cap пяти Arsenkin tasks; после
+  неоднозначного transport outcome Job переводится в `ACTION_REQUIRED` без
+  автоматического или ручного повторного платного submit. XMLStock сохраняет
+  per-keyword execution и прежнюю границу 200;
+- migration `20260802150000_frequency_collection_lease_window` расширяет
+  fenced lease только для frequency connector до 120 секунд. Это покрывает
+  production timeout одного bounded SEO Data вызова (60 секунд) вместе с
+  обязательным persistence margin и не меняет table grants или provider
+  batch: один Arsenkin Job по-прежнему создаёт ровно один платный task;
+- migration `20260802151000_frequency_submit_lock_fairness` устраняет
+  starvation синхронных rank/Wordstat scheduler ticks: frequency submit ждёт
+  короткую transaction-scoped секцию общего Arsenkin lock, но fail-closed
+  прекращает ожидание через две секунды. Provider cap и durable submit marker
+  остаются внутри той же fenced DB-команды;
 - `platform-seo-data/src/frequencies` и migration
   `20260801143000_frequency_snapshot_job_idempotency` — owner-side resolve
   keyword version и идемпотентная запись snapshot по
@@ -1016,6 +1422,30 @@ Backend convention:
   normalized result persistence и terminal Job/manifest finalizer. Provider
   lifecycle запрещает auto-resubmit после ambiguous submit и переводит такой
   исход в проверяемый `ACTION_REQUIRED`;
+- `platform-contracts/src/rank-results-canonical.ts` — единый canonical
+  `rank-ingest@1` валидирует и хеширует нормализованные позиции обоих
+  разрешённых provider (`ARSENKIN | XMLSTOCK`). Provider остаётся частью
+  immutable ingest envelope; неподдерживаемые значения по-прежнему
+  отклоняются fail-closed до записи в SEO Data. Для XMLStock canonical chunk
+  сохраняет provider-модель «один запрос — один chunk»: sequence равен
+  chunk index и допускается полный bounded диапазон до 15 000 запросов;
+- migrations
+  `platform-jobs-integrations/.../20260802143000_arsenkin_positions_single_task_15k`
+  и `platform-seo-data/.../20260802143000_arsenkin_positions_single_task_15k`
+  вводят policy `manual-arsenkin-positions@2.0.0`: один sealed manifest chunk,
+  один JobItem и один provider `set` на 1–15 000 ключей. Историческая policy
+  `@1.0.0` с пределом 1 000 и chunks по 250 остаётся валидной только для
+  чтения/опроса/финализации уже созданных execution;
+- migrations
+  `platform-api/.../20260802182000_rank_quota_policy_v2` и
+  `platform-jobs-integrations/.../20260802182100_arsenkin_positions_policy_v2_control`
+  разрешают текущей policy `@2.0.0` создать immutable UTC-day quota
+  reservation и атомарно активируют её отдельным kill-switch generation;
+  старые `@1.0.0` reservations и terminal executions остаются валидными;
+- migration
+  `platform-jobs-integrations/.../20260802144000_rank_connector_poll_horizon_15k`
+  расширяет только bounded rank poll horizon с 180 до 720 попыток. Она не
+  меняет submit authorization, connector version и общий Arsenkin cap;
 - `platform-jobs-integrations/src/crawls` — tenant-scoped crawl Job sidecar,
   SSRF/DNS-rebinding-safe HTTP client, streaming HTML analysis, robots rules,
   bounded XML/XML.GZ sitemap/index traversal, include/exclude/query scope,
@@ -1082,8 +1512,8 @@ Backend convention:
   tokens, staged-result ingest и terminal finalization;
 - `platform-jobs-integrations/src/connector-worker.main.ts` — isolated
   credential-validation, Arsenkin submit/poll и Keys.so competitor-keyword
-  runtime в одном
-  provider-wide BullMQ limiter; credential material расшифровывается только
+  runtime; каждый Arsenkin HTTP request проходит через общий provider-wide
+  Redis sliding-window limiter; credential material расшифровывается только
   после lease-fenced DB claim; payload очереди содержит только runtime tick;
 - `platform-jobs-integrations/src/import-worker.main.ts` — кроме file import
   восстанавливает подтверждённый Keys.so preview через ту же
@@ -1099,7 +1529,10 @@ Backend convention:
   HTTP client владельца semantic core и bounded rank-estimate scope;
 - `platform-seo-data/src/semantic-imports` — нормализация, import receipts,
   quota reservation, идемпотентное применение chunks, abort/partial
-  finalization и semantic version;
+  finalization и semantic version; migration
+  `20260803143000_semantic_import_trash_recovery` сохраняет bounded recovery
+  candidates для следующего пользовательского шага без автоматического
+  извлечения запросов из «Корзины»;
 - `platform-seo-data/src/internal/semantic-capacity.ts` — единый exact parser,
   workspace advisory locks и атомарные keyword/tracked-pair counters для
   всех SEO Data writers;
@@ -1108,6 +1541,9 @@ Backend convention:
   keyset sorts с filter-bound cursor, CRUD с CAS, cluster/group/tag/page relations,
   derived `isTracked` по активным temporal assignments и deterministic
   duplicate-aware keyword cleaner с preview, partial apply и reversible version;
+  permanent delete из «Корзины» необратимо редактирует пользовательские поля и
+  освобождает identity, сохраняя непрозрачный tombstone только ради immutable
+  rank provenance;
 - `platform-seo-data/src/keyword-groups` — bounded tree query, nested create,
   rename/move с cycle guard и descendant path rewrite, CAS и безопасное
   удаление только пустой группы;
@@ -1153,7 +1589,9 @@ Backend convention:
   — `keywords.is_favorite`, allowlisted `intent` и active favorite index;
 - `platform-seo-data/src/tracking-contexts` — logical context,
   immutable configuration versions, temporal keyword assignments,
-  create receipts и transactional redacted outbox events;
+  create/atomic keyword desired-set receipts и transactional redacted summary
+  outbox events; замена до 15 000 назначений использует один context lock,
+  positive-delta capacity check и chunked writes без per-keyword событий;
 - `platform-seo-data/src/rank-scopes` — атомарный bounded snapshot контекста,
   конфигурации и temporal assignments с domain-separated semantic hash без
   передачи keyword IDs/text;
@@ -1188,6 +1626,31 @@ Backend convention:
 - `platform-realtime/src/internal` — `PlatformApiGuard` general HTTP audience,
   отдельный Web Push guard и проверенный actor/tenant/membership context;
 - `platform-web/app` — public, tools, docs и private `/app` App Router screens;
+- `platform-web/app/app/(protected)/projects`,
+  `components/project-catalog.tsx` — полноширинный каталог проектов workspace:
+  поиск, lifecycle/access состояния, выбор активного проекта и доступное
+  создание в modal без изменения основного layout;
+- `platform-web/app/app/(protected)/tools` — проектный каталог рабочих
+  контуров и быстрых инструментов; действия ведут в реальные Semantics,
+  Rankings, Page Map, Competitors, Tasks либо публичный Toolbox, disabled-
+  заглушек запуска больше нет;
+- `platform-web/app/tools`, `components/public-tool-runner.tsx` и
+  `lib/tool-capabilities.ts` — публично показывают только два реально
+  исполняемых в браузере инструмента: очистку/дедупликацию до 500 запросов и
+  SERP snippet preview. Проектные HTTP/indexability/sitemap проверки не
+  маскируются под анонимные заглушки, а ведут в SSRF-защищённый Page Map;
+  синхронные client-only операции честно не обещают серверную историю;
+- `platform-web/app/app/(protected)/tasks/[kind]/[operationId]`,
+  `components/operation-result-workspace.tsx`,
+  `components/operation-result-modal.tsx` и
+  `lib/operation-result-routes.ts` — tenant-scoped fallback-страницы для
+  прямых ссылок и единый fullscreen result modal для четырёх фактических
+  async-процессов: частотности, позиций, crawl-аудита и Keys.so research.
+  Task Center, dashboard, semantic operations drawer, колокольчик и полная
+  страница уведомлений открывают результат в одной модалке без навигации;
+  результат отображается таблицей с loading/empty/error/active
+  polling states, crawl догружается bounded cursor-страницами, внешние URL
+  открываются только после проверки `http/https`;
 - `platform-web/lib/http-security-policy.ts` + `next.config.ts` — общие
   nosniff/frame/referrer/permissions headers без изменения public marketing
   cache, production HSTS и отдельные private/no-store/noindex rules для
@@ -1200,6 +1663,12 @@ Backend convention:
   `lib/tenant-settings.ts` — private/noindex workspace/project settings с
   role/read-only guards, `If-Match`, draft-preserving `412` recovery,
   explicit duplicate-domain retry и exact-name archive/restore confirmation;
+- `platform-web/app/app/(protected)/settings`, `settings/projects`,
+  `settings/roles`, `components/settings-overview.tsx` и
+  `components/workspace-role-catalog.tsx` — единый settings-контур без
+  изменения основной app-шапки/сайдбара: обзор личного/workspace/project
+  context, встроенный каталог проектов и read-only матрица фактических
+  системных ролей; общая settings rail permission-aware и адаптивна;
 - `platform-web/app/app/(protected)/settings/team`,
   `components/team-management.tsx`, `lib/team-management.ts` — private/noindex
   bounded team/invite lists, owner/admin mutations с `If-Match`, явный
@@ -1216,14 +1685,16 @@ Backend convention:
   `app/app/workspace-invites/accept` — строгий single-token fragment parser,
   немедленное удаление fragment из history и same-origin acceptance flow;
 - `platform-web/app/app/(protected)/projects/[projectId]/rankings/contexts` —
-  private/noindex экран контекстов позиций; UI-компоненты находятся в
-  `platform-web/components/tracking-context-*`, provider-free estimate —
-  в `rank-estimate-panel.tsx`;
-- `platform-web/app/app/(protected)/projects/[projectId]/rankings`,
-  `components/rank-history.tsx`, `components/rankings-tabs.tsx` и
-  `lib/rank-history.ts` — private/noindex история позиций с UTC range,
-  context/keyword filters, cursor-дозагрузкой и явными archived/read-only
-  состояниями;
+  совместимый private/noindex redirect в семантику; технические
+  tracking context API и `tracking-context-*` остаются внутренней доменной
+  инфраструктурой истории и автоматизаций;
+- `platform-web/app/app/(protected)/rankings`,
+  `projects/[projectId]/rankings[/contexts|/automations]` — совместимые
+  private/noindex redirects в `/app/semantics`; отдельный рабочий стол позиций
+  и пункт навигации не монтируются. `components/positions-workspace.tsx` и
+  `lib/rank-history.ts` сохранены только как изолированные legacy presenters,
+  а текущая SEO Data проекция трёх частотностей, Яндекс/Google, предыдущих
+  позиций и релевантных URL отображается единым `KeywordDataGrid` семантики;
 - `platform-web/app/app/(protected)/projects/[projectId]/rankings/automations`,
   `components/rank-automations.tsx` и `lib/rank-automations.ts` —
   private/noindex редактор daily/weekly расписаний, тарифный счётчик,
@@ -1379,10 +1850,10 @@ Entrypoints:
 | Admin operations | vertical slice: MFA + persisted roles + NPD operations |
 | Auth core | vertical slice: identity lifecycle + transactional verification/reset email transport |
 | Workspaces/projects/team access | vertical slice: включая transactional invite email/fragment acceptance |
-| Semantics/import | vertical slice: Key Collector-style groups/manual clusters/table/tools + CSV/TSV/XLSX → mapping → validation → quota reservation → publish/abort → query; manual cluster→primary Page, derived missing/cannibalization diagnostics, lock/exclude, bounded cluster merge/split и keyword cleaner с preview/history/undo закрыты; background merge/split, full SERP-based auto-clustering proposals, alternate pages и расширенное SERP evidence ещё не закрыты |
-| Notifications | vertical slice: preferences → effective policy → read center → encrypted browser device lifecycle + durable terminal crawl in-app notifications |
+| Semantics/import | vertical slice: Key Collector-style groups/manual clusters/table/tools + CSV/TSV/XLSX/native KC4 → mapping → validation → quota reservation → publish/abort → query; KC4 сохраняет пустые папки и multi-group membership, системные «Без группы»/«Корзина» закрывают двухэтапное удаление; manual cluster→primary Page, derived missing/cannibalization diagnostics, lock/exclude, bounded cluster merge/split и keyword cleaner с preview/history/undo закрыты; background merge/split, full SERP-based auto-clustering proposals, alternate pages и расширенное SERP evidence ещё не закрыты |
+| Notifications | vertical slice: preferences → effective policy → dropdown/full read center → encrypted browser device lifecycle + durable terminal crawl и generic Job in-app notifications + operation toast/sound |
 | Integrations | vertical slice: operational catalog + encrypted BYOK vault + validation + SERP/competitor project bindings |
-| Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary остаётся gate |
+| Rankings | vertical slice: contexts + estimate/preparation + persisted/public history + реальный Arsenkin submit/poll/normalize/finalize; live BYOK canary пройден 1 августа 2026, остаются incident telemetry/circuit breaker |
 | Automations | vertical slice: rank schedule CRUD + тарифный capacity + BullMQ scheduler + manual/scheduled execution + no-overlap/recovery/history/auto-pause + Web |
 | Pages/technical audit | vertical slice: compact Page Map с command bar, 4 смысловыми колонками и progressive editor + CRUD/assignment + SSRF-safe async crawl + sitemap/include/exclude/query scope + conditional 304 reuse/global host backoff/24h site auto-pause + immutable snapshots/current issues/page-change/duplicate/exact-scope disappearance history + lease/checkpoint recovery + единая tab-панель проблем/запусков/дублей/исчезновений/Radar + компактное расписание Radar + in-app notification |
 | Billing/YooKassa | vertical slice: catalog + hosted/recurring payment + webhook/reconciliation + ledger/refund/NPD obligation + Web UI + protected manual receipt operations + durable receipt email delivery; live provider/SMTP canary остаётся gate |
@@ -1433,6 +1904,18 @@ Tenant core содержит workspace/project CRUD, системную RBAC-м�
 одноразовые workspace invitations, optimistic locking участников и
 `project_member_access`. Проектное назначение только сужает workspace role;
 `NONE` и отсутствие назначения при `all_projects=false` скрывают проект.
+Активному пользователю с подтверждённым email доступен account-scoped список
+ожидающих приглашений без передачи invite token: принять или отклонить такое
+приглашение можно из центра уведомлений. Принятие атомарно создаёт membership,
+применяет проектные назначения и добавляет workspace в переключатель tenant;
+отклонение переводит приглашение в терминальный `DECLINED` и сохраняет
+`declined_at` для аудита.
+
+Seat capacity остаётся частью immutable billing entitlement: опубликованная
+версия 2 задаёт 3 места для Trial, 10 для Solo, 20 для Team и максимум 50 для
+Agency/Business/Enterprise. Создание приглашения резервирует место вместе с
+active/suspended membership, а принятие повторно проверяет тот же тарифный
+лимит под workspace lock; произвольного browser-supplied override нет.
 
 Private Web содержит same-origin BFF, регистрацию/вход/подтверждение email,
 запрос и установку нового пароля, refresh/logout, session gate, создание и
@@ -1442,14 +1925,17 @@ Private Web содержит same-origin BFF, регистрацию/вход/п
 malformed и zone-id значения. Verification/password/invite links принимают
 token только во fragment, немедленно очищают browser history и передают его
 Platform API только через same-origin BFF; invite acceptance доступен по
-`/app/workspace-invites/accept`. Для Realtime ticket BFF передаёт browser
+`/app/workspace-invites/accept`, а приглашения подтверждённого аккаунта также
+отображаются в bell/full-page notification center с действиями
+«Принять»/«Отклонить». Для Realtime ticket BFF передаёт browser
 `Origin` только при exact canonical совпадении с текущим Web origin и
 отклоняет cross-origin запрос до Platform API. Workspace/project settings
 редактируют только
 разрешённые поля через OCC, показывают read-only/suspended/archived состояния
-и сохраняют данные при archive/restore; delete flow намеренно отсутствует. До
-появления SEO-данных dashboard показывает empty states, а не демонстрационные
-значения.
+и сохраняют данные при archive/restore; delete flow намеренно отсутствует.
+Проектный dashboard агрегирует реальные bounded read models семантики,
+частотности, позиций, технических аудитов и Keys.so операций; до появления
+SEO-данных он показывает empty/degraded states, а не демонстрационные значения.
 
 Первый import slice содержит публичные project upload endpoints, внутренний
 multipart lifecycle в jobs database, прямую browser → S3 загрузку частей,
@@ -1457,6 +1943,14 @@ resume через `sessionStorage`, retry/cancel, обязательную пр�
 набора частей и фактического размера. `upload.completed.v1` означает только
 статус `UPLOADED`; использовать объект для импорта можно лишь после inspection
 worker и статуса `READY`.
+
+Для VPS preview с object storage на отдельном `:9443` Web имеет узкий
+потоковый same-origin upload relay. Он включается клиентом только для HTTPS
+signed URL того же hostname и порта `9443`, повторно проверяет exact browser
+origin, hostname/port и обязательные multipart signature parameters, не
+буферизует часть файла и не следует redirect. Это сохраняет основной прямой
+browser → S3 путь в production, но не оставляет импорт в `UPLOADING`, когда
+клиентская сеть блокирует нестандартный порт.
 
 Inspection worker читает S3 строго потоком, удерживает восстанавливаемый
 lease/heartbeat, считает фактический SHA-256 и размер, проверяет сигнатуру
@@ -1557,7 +2051,8 @@ consumer доставляет exact envelope в handler, ack-ит source тол�
 проверяет source/DLQ streams и durable consumer; runtime topology не меняет.
 
 Центр уведомлений доступен по `/app/notifications`; колокольчик получает
-user-scoped unread count, а список использует keyset cursor
+user-scoped unread count, показывает bounded dropdown новых/прочитанных
+событий, а список использует keyset cursor
 `created_at DESC, id DESC`, связанный с фильтром `unreadOnly`. Публичные
 `GET /api/v1/notifications`, `PATCH /:id/read` и `POST /read-all` проходят
 только через Platform API. Realtime DB хранит явные event type, severity,
@@ -1569,6 +2064,14 @@ Jobs dispatcher повторяет доставку, Platform API заново �
 проект и `page.view` инициатора, а Realtime применяет effective
 profile/project policy, `notifyOwnJobs` и unique `userId + dedupeKey`.
 Результат виден в центре уведомлений как локальный переход к Page Map.
+Для остальных terminal Jobs (`COMPLETED`, `PARTIALLY_COMPLETED`, `CANCELLED`,
+`FAILED_FINAL`, `ACTION_REQUIRED`) Jobs HTTP process восстанавливает bounded
+outbox intent из PostgreSQL и вызывает отдельный internal Platform API
+command. Platform API заново проверяет actor membership и project lifecycle,
+после чего Realtime создаёт единственное policy-aware уведомление с локальным
+deep link на типизированный экран результата. Web polling показывает его в
+dropdown и полноэкранном центре; новые operation-события создают corner toast
+и best-effort Web Audio сигнал без хранения/передачи секретов.
 Если пользователь включил Web Push и оператор активировал sender profile, та
 же effective policy создаёт idempotent per-device attempt с quiet-hour/digest
 schedule. Отзыв membership после fanout отменяет attempt до decrypt через
@@ -1613,23 +2116,57 @@ JSON для `2xx`, body limit 1 MiB и нормализацией ошибок.
 Terminal update атомарно сверяет workspace и `material_version`: замена или
 revoke credential делает старую проверку `STALE`, не перезаписывая новый
 материал. Retry учитывает ограниченный `Retry-After`. XMLStock теперь входит
-в operational catalog: credential validation использует документированный
-read-only `regionsTree` Wordstat endpoint, нормализует JSON error codes даже
-при HTTP 200 и не пишет query URL с user/key в логи. Arsenkin рекламирует
-только рабочий съём позиций, Keys.so — keyword/competitor research.
+в operational catalog: credential validation использует документированные
+read-only account API и `regionsTree` Wordstat endpoint, нормализует JSON error
+codes даже при HTTP 200 и не пишет query URL с user/key в логи. Arsenkin рекламирует
+рабочий съём позиций и Wordstat frequency, Keys.so — keyword/competitor
+research.
 Partial unique active dedup key ограничивает один validation на пару
 credential/material даже при разных `Idempotency-Key`.
+Migration `20260804190000_integration_credential_auto_refresh` добавляет
+bounded DB broker для secret-free проверок: connector worker планирует только
+подключения со stale metadata старше часа, а rank/frequency/keyword-research
+runtime после каждого фактического provider execution ставит точечную
+проверку использованного credential. Active-job dedup не допускает параллельных
+проверок одного material version, а ошибка фонового refresh не блокирует
+пользовательскую или платную операцию.
+Migration `20260804191000_xmlstock_account_quota_metadata` расширяет
+защищённый success-boundary XMLStock только строго типизированными read-only
+полями квоты, дневного/месячного расхода и RUB-баланса; произвольный
+`provider_meta` по-прежнему отклоняется на уровне БД.
+Migration `20260804192000_xmlstock_account_quota_guard_precedence` явно
+применяет allowlist к вложенному JSONB-объекту `account`, исключая
+неоднозначность SQL-операторов при фактическом завершении проверки.
+Preview canary 2 августа 2026 завершился `ACTIVE/COMPLETED` через реальный
+read-only `regionsTree` ответ XMLStock.
 
-Проектные источники настраиваются через
-`/app/projects/:projectId/settings/integrations` для `SERP_RANK_TRACKING`,
-а `COMPETITOR_RESEARCH` назначается прямо в рабочем экране конкурентов.
-Оба сценария используют общий capability-based contract. На пару
-`workspace + project + capability` существует одна
-привязка и один нормализованный route `WORKSPACE_CREDENTIAL` с `position=0`.
-Создание разрешает только non-deleted `ACTIVE BYOK_API_KEY`, принадлежащий
-workspace и поддерживающий capability одновременно в сохранённом credential и
-текущем provider catalog. Отключить уже сломанную привязку можно без активного
-ключа; включение и смена route повторяют строгую проверку.
+Credential всегда принадлежит workspace и никогда не копируется в проект.
+Маршруты workspace настраиваются по каждой capability в
+`/app/settings/integrations`, а проект либо наследует такой маршрут, либо
+задаёт override в `/app/projects/:projectId/settings/integrations`. Поддержаны
+`SERP_RANK_TRACKING`, `SERP_COLLECTION`, `WORDSTAT`, `CLUSTERING`,
+`INDEXATION`, `KEYWORD_RESEARCH` и `COMPETITOR_RESEARCH`. В каждой цепочке
+разрешено до восьми проверенных `ACTIVE BYOK_API_KEY` credentials одного
+workspace. Project override может сначала использовать собственную цепочку,
+а затем явно продолжить workspace fallback.
+
+Resolver последовательно проверяет capability, lifecycle и безопасный
+provider status. Переход к следующему route возможен только для явно
+разрешённых `CREDENTIAL_UNAVAILABLE`, `LOW_BALANCE`, `RATE_LIMITED` и
+`RETRYABLE_PROVIDER_ERROR` (последняя — для уже известного `DEGRADED`) и только до
+неоднозначного внешнего side effect. После потенциально принятой платной
+provider-команды автоматическое переключение запрещено, чтобы не создать
+двойной расход. В immutable operation snapshot сохраняются фактический
+provider, scope `PROJECT_OVERRIDE/WORKSPACE_DEFAULT/WORKSPACE_FALLBACK` и
+bounded цепочка попыток с безопасным reason code. Credential ID и secret в
+public response, событие, очередь или журнал не попадают.
+
+Workspace route mutation требует `integration.update`, а цепочка/fallback —
+дополнительно `integration.manage_fallback`. Проектный endpoint применяет
+effective permission: project access может только сузить workspace role;
+использование workspace credential также требует
+`integration.use_system_credentials`. Billing read-only и архивный проект
+оставляют чтение, но запрещают mutation.
 
 POST требует `Idempotency-Key`: binding, route, immutable create receipt с
 32-byte request hash/исходным response snapshot и redacted outbox event
@@ -1637,9 +2174,10 @@ POST требует `Idempotency-Key`: binding, route, immutable create receipt 
 ответ создания. PATCH требует `If-Match`, использует CAS и при гонке отвечает
 `412 VERSION_CONFLICT` с безопасным `currentVersion`. Billing `READ_ONLY` и
 архивный проект сохраняют просмотр, но не разрешают новые изменения; проекты
-и bindings автоматически не удаляются. Platform keys, fallback и budgets
-пока возвращают `FEATURE_NOT_AVAILABLE`, а credential options не содержат
-секрет, masked hint или provider metadata.
+и bindings автоматически не удаляются. Platform keys и hard budgets пока
+возвращают `FEATURE_NOT_AVAILABLE`; workspace/project fallback для BYOK
+реализован. Credential options не содержат secret, masked hint или provider
+metadata.
 Aggregate читается одним `RepeatableRead` snapshot и возвращает не более 500
 options; при большем vault выставляет `credentialOptionsTruncated`, сохраняя
 в выдаче credentials уже назначенных bindings. Create/enable/swap держат
@@ -1684,8 +2222,8 @@ Provider-free estimate доступен через
 состояние connector возвращаются finite blockers. Jobs-owned internal
 resource использует
 dedicated caller token, stable-intent request hash и immutable public/private
-snapshot. SEO Data возвращает exact count до 1 000 либо sentinel `1001`,
-а для provider-incompatible bounded scope 1..1 000 либо overflow `1001`
+snapshot. SEO Data возвращает exact count до 15 000 либо sentinel `15001`,
+а для provider-incompatible bounded scope 1..15 000 либо overflow `15001`
 возвращает согласованные unavailable semantic/final hashes. Пустой scope
 всегда materializable. TTL receipt — пять минут;
 replay после drift project/access/quota возвращает исходный ответ.
@@ -1711,7 +2249,9 @@ semantic dedup. Shared allowlist preimage builders и golden vectors
 синхронизируют producer/verifier; full hash включает `sealedBy`, semantic hash
 не меняется от clone/rename tracking context, display label, metadata или
 remove/reassign, если provider-effective work остаётся тем же. Interactive
-manifest transaction использует явные `maxWait=5s` и `timeout=30s`.
+manifest/result transaction используют явные `maxWait=5s` и `timeout=120s`,
+terminal finalization — `timeout=60s`; массовые manifest entries и snapshots
+пишутся SQL-пакетами по 1 000 строк.
 
 Jobs `PREPARING`/JobItem preparation runtime и cancellation finalize
 реализованы. PostgreSQL хранит exact command до HTTP, BullMQ получает только
@@ -1735,8 +2275,21 @@ SEO Data с одним manifest lock и запретом late ingest. Internal h
 redact-ит ответ SEO Data и отдаёт collection envelope. Private/noindex Web
 экран использует bounded UTC range, optional context/keyword filters и
 load-more. Platform API execution-grant issuer использует controlled-beta
-authoritative quota: максимум 200 provider tasks на workspace/UTC day с
-immutable reservation и exact receipt binding. Jobs bounded client и durable
+authoritative quota: по умолчанию максимум 200 provider tasks на
+workspace/UTC day с immutable reservation и exact receipt binding. Таблица
+`rank_execution_quota_overrides` из migration
+`20260803114500_rank_execution_quota_overrides` позволяет владельцу платформы
+явно увеличить дневной лимит отдельной workspace до 1 000 000 без изменения
+ограничений остальных tenants; истёкший override автоматически возвращает
+default. Проектная capacity также остаётся тарифной по умолчанию, но
+tenant-owned таблица `project_capacity_overrides` из migration
+`20260803153000_project_capacity_overrides` позволяет оператору выдать
+явный bounded preview/enterprise override до 100 000 проектов отдельной
+workspace без подмены immutable plan version. `assertCanCreateProject`
+сериализует проверку тем же workspace lock и учитывает override вместе с
+активными/архивными проектами. Web-форма создания отличает исчерпанную квоту,
+read-only workspace, отсутствие permission, field validation и временный
+сбой, сохраняя введённые данные для повторной отправки. Jobs bounded client и durable
 grant intent/decision history реализованы: network intent
 записывается первым, exact replay сохраняется, а неистёкшее положительное
 решение атомарно связывается с secret-free scoped connector execution и
@@ -2135,21 +2688,24 @@ exact connector permission и атомарный authorize/`SUBMITTING` гото
 Immutable exact
 provider request intent до grant теперь также хранится append-only, повторно
 проверяется при grant replay и обязательно связан с connector execution.
-Connector записывает documented wire request/task ID, durable poll state и
+Connector v2 записывает documented `positions` wire request/task ID, durable poll state и
 только normalized staged output; rank-worker отправляет exact ingest и
 terminal finalize receipts. DB/Compose activation использует новую
-kill-switch generation `arsenkin-positions@2`, а общий BullMQ limiter
-ограничивает провайдера 30 запросами/минуту. Остаются live smoke с реальным
-BYOK credential, операционные alert/circuit-breaker evidence и schedules.
+kill-switch generation `arsenkin-positions@4`, а общий Redis sliding-window
+limiter разрешает не более 30 Arsenkin HTTP-запросов за 60 секунд и считает
+каждый `set`, `check`, `get` и credential `info` независимо от числа BullMQ
+jobs и replicas. Live BYOK
+request/status/result canary выполнен 2 августа 2026 года. Остаются
+операционные alert/circuit-breaker evidence и мониторинг schedules.
 Неоднозначность manifest preparation уже fail-closed переходит в
 `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN` без бесконечного auto-retry.
 
-Terminal crawl notifications проходят effective profile/project policy,
+Terminal crawl и generic Job notifications проходят effective profile/project policy,
 durable idempotent in-app delivery и production-ready browser Web Push
 transport по ADR-2026-039. Source outbox/dispatcher остаётся at-least-once, а
 Realtime-owned DB attempts являются локальной durable queue. Операторские
 VAPID credentials/profile в preview намеренно выключены. Следующему срезу
-остаются source events остальных категорий, общий email/digest и delivery
+остаются source events не-job категорий, общий email/digest и delivery
 history/test UI. Transactional auth-email по ADR-2026-038 остаётся отдельным
 security flow.
 OAuth/OIDC выполняется после подтверждения зависимости `jose`; QR для TOTP —
@@ -2313,7 +2869,8 @@ OAuth/OIDC выполняется после подтверждения зави
 - Terminal credential validation пока не создаёт transactional outbox event:
   email/Web Push и полный durable audit результата требуют отдельного
   redacted события.
-- Credential validation имеет global BullMQ limiter и DB-enforced
+- Credential validation использует общий для всех Arsenkin workflows и
+  replicas Redis sliding-window HTTP limiter и DB-enforced
   per-credential/material single-active cap, но ещё не имеет server-side
   per-workspace/provider quota и справедливого планирования между tenants.
 - Connector worker использует отдельный PostgreSQL login без direct table
@@ -2348,13 +2905,20 @@ OAuth/OIDC выполняется после подтверждения зави
 - QR для TOTP пока представлен локальным `otpauth://` URI и ручным ключом;
   UI QR появится после подтверждения зависимости `qrcode`.
 - Arsenkin position execution и daily/weekly schedule orchestration
-  реализованы; до production live BYOK canary остаются обязательны provider
-  credentials владельца и incident telemetry/circuit breaker. Keys.so теперь
+  реализованы; live BYOK submit/poll/result canary на текущем ключе владельца
+  с фактическим `positions` result.table успешно завершён 4 августа 2026, до
+  production остаются provider incident
+  telemetry/circuit breaker. Keys.so теперь
   поддерживает credential validation и полный competitor organic keywords
   collection/preview/import; до production остаётся live canary на реальном
   тарифе владельца. XMLStock validation и Wordstat runtime реализованы по
-  официальному contract; до production остаётся live canary на реальном
-  ключе/балансе владельца и provider incident telemetry/circuit breaker.
+  официальному contract; live validation canary на текущем ключе владельца
+  успешно завершён 2 августа 2026. XMLStock rank submit/result canary на одном
+  ключе успешно завершён 4 августа 2026; отдельным production gate остаются
+  Wordstat canary и incident telemetry/circuit breaker.
+  Arsenkin Wordstat runtime также реализован через documented async API, а
+  live result-shape canary на текущем тарифе владельца успешно завершён
+  1 августа 2026.
 - Technical crawl production vertical закрывает ручной bounded обход,
   sitemap/include/exclude/query scope, conditional page requests, global
   host backoff, current issues, page diff history, группы дублей

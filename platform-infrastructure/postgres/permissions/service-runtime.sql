@@ -367,6 +367,7 @@ SELECT format(
     result_summary,
     version,
     queued_at,
+    started_at,
     finished_at,
     lease_owner,
     lease_expires_at,

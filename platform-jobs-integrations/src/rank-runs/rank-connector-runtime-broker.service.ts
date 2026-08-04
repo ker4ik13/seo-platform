@@ -13,6 +13,11 @@ import type {
   ArsenkinStagedRankResultV1,
   ArsenkinRankWireRequest
 } from "./arsenkin-rank.connector.js";
+import type {
+  XmlStockRankSubmitResult,
+  XmlStockRankWireRequest,
+  XmlStockStagedRankResultV1
+} from "./xmlstock-rank.connector.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -26,6 +31,7 @@ const STATUS_VALUES = new Set([
 ]);
 
 export interface RankConnectorClaim {
+  readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly executionId: string;
   readonly workspaceId: string;
   readonly credentialId: string;
@@ -174,8 +180,8 @@ export class RankConnectorRuntimeBrokerService {
   public completeSubmit(
     claimValue: RankConnectorSubmitClaim,
     permit: RankConnectorSubmitPermit,
-    outcome: ArsenkinRankSubmitResult,
-    wireRequest: ArsenkinRankWireRequest,
+    outcome: ArsenkinRankSubmitResult | XmlStockRankSubmitResult,
+    wireRequest: ArsenkinRankWireRequest | XmlStockRankWireRequest,
     wireRequestHash: Buffer
   ): Promise<RankConnectorCompletion> {
     const mapped = submitOutcome(outcome);
@@ -241,7 +247,9 @@ export class RankConnectorRuntimeBrokerService {
       | {
           readonly outcome: "READY";
           readonly observedAt: string;
-          readonly snapshot: ArsenkinStagedRankResultV1;
+          readonly snapshot:
+            | ArsenkinStagedRankResultV1
+            | XmlStockStagedRankResultV1;
           readonly hash: Buffer;
         }
   ): Promise<RankConnectorCompletion> {
@@ -316,6 +324,7 @@ export class RankConnectorLeaseLostError extends Error {
 }
 
 interface EncryptedCredentialRow {
+  readonly provider: string;
   readonly executionId: string;
   readonly leaseToken: string;
   readonly leaseExpiresAt: Date;
@@ -333,11 +342,10 @@ interface EncryptedCredentialRow {
   readonly executionVersion: number;
 }
 
-interface SubmitClaimRow extends EncryptedCredentialRow {
-  readonly provider: string;
-}
+interface SubmitClaimRow extends EncryptedCredentialRow {}
 
 interface PollClaimRow extends EncryptedCredentialRow {
+  readonly provider: string;
   readonly providerTaskId: string;
   readonly requestSnapshot: unknown;
 }
@@ -368,6 +376,7 @@ function claim(
   leaseOwner: string
 ): RankConnectorClaim {
   return {
+    provider: rankProvider(row.provider),
     executionId: uuid(row.executionId, "execution id"),
     workspaceId: uuid(row.workspaceId, "workspace id"),
     credentialId: uuid(row.credentialId, "credential id"),
@@ -405,7 +414,9 @@ function claim(
   };
 }
 
-function submitOutcome(value: ArsenkinRankSubmitResult): {
+function submitOutcome(
+  value: ArsenkinRankSubmitResult | XmlStockRankSubmitResult
+): {
   readonly outcome:
     | "ACCEPTED"
     | "OUTCOME_UNKNOWN"
@@ -435,11 +446,18 @@ function validateClaimInput(
     !/^[A-Za-z0-9][A-Za-z0-9._:@-]{0,99}$/u.test(leaseOwner) ||
     !Number.isSafeInteger(leaseSeconds) ||
     leaseSeconds < 5 ||
-    leaseSeconds > 25
+    leaseSeconds > 120
   ) {
     throw new TypeError("Invalid rank connector claim");
   }
   version(connectorVersion);
+}
+
+function rankProvider(value: string): "ARSENKIN" | "XMLSTOCK" {
+  if (value !== "ARSENKIN" && value !== "XMLSTOCK") {
+    invalid("provider");
+  }
+  return value;
 }
 
 function boundedRetryAfter(value: number | undefined): number | undefined {

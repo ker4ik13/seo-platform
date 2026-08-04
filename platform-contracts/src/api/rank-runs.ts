@@ -1,11 +1,17 @@
-import type {
-  RankEstimateEntitlementStatus,
-  RankEstimateQuota
+import {
+  rankProviderKeywordLimit,
+  type RankEstimateEntitlementStatus,
+  type RankEstimateQuota
 } from "./rank-estimates.js";
 import type {
   TrackingDevice,
   TrackingDomainMatchRule
 } from "./tracking-contexts.js";
+import type { JobCapacityEntitlement } from "./billing.js";
+import type {
+  ConnectorOperationAttemptSummary,
+  ConnectorRoutingScope
+} from "./integrations.js";
 
 export interface CreateRankRunInput {
   readonly estimateId: string;
@@ -202,7 +208,9 @@ interface RankJobSummaryBase {
   readonly projectId: string;
   readonly trackingContextId: string;
   readonly type: "MANUAL_RANK_CHECK";
-  readonly provider: "ARSENKIN";
+  readonly provider: "ARSENKIN" | "XMLSTOCK";
+  readonly routingScope?: ConnectorRoutingScope;
+  readonly connectorAttempts?: readonly ConnectorOperationAttemptSummary[];
   readonly operation: "POSITIONS";
   readonly credentialMode: "BYOK_API_KEY";
   readonly progress: RankJobProgress;
@@ -311,7 +319,7 @@ export type RankJobSummary =
 export function redactRankJobSummary(input: RankJobSummary): RankJobSummary {
   if (
     input.type !== "MANUAL_RANK_CHECK" ||
-    input.provider !== "ARSENKIN" ||
+    !["ARSENKIN", "XMLSTOCK"].includes(input.provider) ||
     input.operation !== "POSITIONS" ||
     input.credentialMode !== "BYOK_API_KEY" ||
     input.progress.unit !== "KEYWORD" ||
@@ -327,6 +335,10 @@ export function redactRankJobSummary(input: RankJobSummary): RankJobSummary {
     trackingContextId: input.trackingContextId,
     type: input.type,
     provider: input.provider,
+    ...(input.routingScope ? { routingScope: input.routingScope } : {}),
+    ...(input.connectorAttempts
+      ? { connectorAttempts: input.connectorAttempts.map((attempt) => ({ ...attempt })) }
+      : {}),
     operation: input.operation,
     credentialMode: input.credentialMode,
     progress: {
@@ -617,6 +629,7 @@ export interface InternalCreateRankRunInput extends CreateRankRunInput {
   readonly project: InternalRankRunProjectSnapshot;
   readonly access: InternalRankRunAccessSnapshot;
   readonly billingCurrency: string;
+  readonly jobCapacity: JobCapacityEntitlement;
 }
 
 /**
@@ -664,12 +677,12 @@ export interface RankManifestHash {
  * silently drop country, region, language, safe search or domain matching.
  */
 export interface InternalRankExecutionParameters {
-  readonly searchEngine: "GOOGLE";
+  readonly searchEngine: "GOOGLE" | "YANDEX";
   readonly countryCode: string;
   readonly regionCode?: string;
   readonly language: string;
   readonly device: TrackingDevice;
-  readonly depth: 30;
+  readonly depth: 30 | 50 | 100;
   readonly domainMatchRule: TrackingDomainMatchRule;
   readonly safeSearch: boolean;
   readonly format: "SIMPLE";
@@ -708,7 +721,7 @@ export interface InternalSealRankManifestInput {
   readonly actorId: string;
   readonly jobId: string;
   readonly estimateId: string;
-  readonly provider: "ARSENKIN";
+  readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly operation: "POSITIONS";
   readonly project: InternalRankRunProjectSnapshot;
   readonly estimate: InternalRankManifestEstimateSeal;
@@ -721,8 +734,9 @@ export interface InternalSealRankManifestInput {
 
 /**
  * Immutable manifest header. chunkCount and pairCount are exact decimal
- * integers, every chunk except the last has 250 entries, and manifestHash
- * covers the header plus ordered chunk hashes.
+ * integers. New manifests contain one chunk up to 15,000 entries; immutable
+ * legacy manifests retain 250-entry chunks. manifestHash covers the header
+ * plus ordered chunk hashes.
  */
 export interface InternalRankManifestSeal {
   readonly id: string;
@@ -741,7 +755,7 @@ export interface InternalRankManifestSeal {
    */
   readonly sealedBy: string;
   readonly trackingContextId: string;
-  readonly provider: "ARSENKIN";
+  readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly operation: "POSITIONS";
   readonly project: InternalRankRunProjectSnapshot;
   readonly contextVersion: number;
@@ -781,7 +795,7 @@ export interface InternalRankManifestSeal {
   readonly deduplicationHash: RankManifestHash;
   readonly pairCount: string;
   readonly chunkCount: string;
-  readonly chunkSize: "250";
+  readonly chunkSize: "1" | "250" | "15000";
   readonly execution: InternalRankExecutionParameters;
   readonly retention: {
     readonly normalizedRankHistory: "LONG_TERM";
@@ -844,7 +858,7 @@ export interface InternalRankManifestChunk {
    */
   readonly chunkHash: RankManifestHash;
   /**
-   * Ordered by sequence, unique by entry/keyword and bounded to 250 rows.
+   * Ordered by sequence, unique by entry/keyword and bounded to 15,000 rows.
    */
   readonly entries: readonly InternalRankManifestEntry[];
 }
@@ -878,7 +892,7 @@ export interface InternalRankManifestDeduplicationHashPreimage {
   readonly project: {
     readonly domain: string;
   };
-  readonly provider: "ARSENKIN";
+  readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly operation: "POSITIONS";
   readonly execution: InternalRankExecutionParameters;
   readonly retention: {
@@ -1082,8 +1096,8 @@ export const normalizedRankDataQualityFlags = [
 export type NormalizedRankDataQualityFlag =
   (typeof normalizedRankDataQualityFlags)[number];
 
-export const rankResultChunkMaxCount = 250 as const;
-export const rankResultPairMaxCount = 1_000 as const;
+export const rankResultChunkMaxCount = rankProviderKeywordLimit;
+export const rankResultPairMaxCount = rankProviderKeywordLimit;
 
 interface InternalNormalizedRankResultBase {
   readonly manifestEntryId: string;
@@ -1099,7 +1113,7 @@ interface InternalNormalizedRankResultBase {
 }
 
 /**
- * position is an integer from 1 through the sealed depth (30). Optional
+ * position is an integer from 1 through the sealed depth. Optional
  * absolute/pixel positions are non-negative integers when present.
  */
 export interface InternalNormalizedRankFoundResult
@@ -1158,7 +1172,7 @@ export interface InternalRankChunkIngestCommand {
    * against SEO Data before persistence.
    */
   readonly manifestChunkHash: RankManifestHash;
-  readonly provider: "ARSENKIN";
+  readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly operation: "POSITIONS";
   /**
    * Internal traceability only; it must never cross public/event/log
@@ -1205,7 +1219,7 @@ export interface InternalIngestRankChunkInput
  * with another hash is an idempotency conflict. currentSkippedCount records
  * observations that lost the monotonic `(observedAt, snapshotId)` current
  * projection comparison. All decimal counts are canonical non-negative
- * integers bounded by 250.
+ * integers bounded by 15,000.
  */
 export interface InternalRankChunkIngestReceipt {
   readonly schemaVersion: "rank-ingest@1";

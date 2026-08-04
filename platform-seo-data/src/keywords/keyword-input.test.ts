@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
 import {
+  internalCreateSemanticKeywordInput,
+  internalDeleteSemanticKeywordInput,
+  internalSemanticKeywordBulkCreateInput,
   internalSemanticKeywordBulkInput,
   internalSemanticKeywordCleaningInput
 } from "./keyword-input.js";
@@ -10,6 +13,74 @@ const workspaceId = "01900000-0000-7000-8000-000000000001";
 const projectId = "01900000-0000-7000-8000-000000000002";
 const actorId = "01900000-0000-7000-8000-000000000003";
 const keywordId = "01900000-0000-7000-8000-000000000004";
+const entitlement = {
+  planCode: "PRO",
+  planVersion: 1,
+  storedKeywords: 10_000,
+  keywordsPerProject: 5_000,
+  foldersPerProject: 200,
+  trackedContextPairs: 5_000
+};
+
+test("keeps duplicate policy explicit across the trusted create boundary", () => {
+  const input = internalCreateSemanticKeywordInput({
+    workspaceId,
+    projectId,
+    actorId,
+    entitlement,
+    text: "SEO аудит",
+    language: "RU",
+    priority: 0,
+    isFavorite: false,
+    tagNames: [],
+    duplicatePolicy: "SKIP_EXISTING"
+  });
+  assert.equal(input.language, "ru");
+  assert.equal(input.duplicatePolicy, "SKIP_EXISTING");
+
+  const bulk = internalSemanticKeywordBulkCreateInput({
+    workspaceId,
+    projectId,
+    actorId,
+    entitlement,
+    duplicatePolicy: "REJECT_EXISTING",
+    items: [
+      {
+        text: "SEO аудит",
+        language: "ru",
+        priority: 0,
+        isFavorite: false,
+        tagNames: []
+      }
+    ]
+  });
+  assert.equal(bulk.items.length, 1);
+  assert.equal(bulk.duplicatePolicy, "REJECT_EXISTING");
+});
+
+test("accepts an explicit permanent delete only as a trusted boolean", () => {
+  assert.deepEqual(
+    internalDeleteSemanticKeywordInput({
+      workspaceId,
+      projectId,
+      actorId,
+      version: 3,
+      permanent: true
+    }),
+    { workspaceId, projectId, actorId, version: 3, permanent: true }
+  );
+  assert.throws(
+    () =>
+      internalDeleteSemanticKeywordInput({
+        workspaceId,
+        projectId,
+        actorId,
+        version: 3,
+        permanent: "yes"
+      }),
+    BadRequestException
+  );
+});
 
 test("accepts an exact tenant-scoped semantic bulk command", () => {
   const input = internalSemanticKeywordBulkInput({

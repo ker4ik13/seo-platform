@@ -26,7 +26,8 @@ const createBody = {
     sourceKind: "WORKSPACE_CREDENTIAL",
     credentialId
   },
-  fallbackPolicy: { mode: "NONE" },
+  fallbackRoutes: [],
+  fallbackPolicy: { mode: "NONE", reasons: [] },
   budgetPolicy: { mode: "DISABLED" }
 } as const;
 
@@ -53,6 +54,7 @@ test("parses a complete canonical project binding command", () => {
       version: 2,
       enabled: false,
       route: createBody.route,
+      fallbackRoutes: createBody.fallbackRoutes,
       fallbackPolicy: createBody.fallbackPolicy,
       budgetPolicy: createBody.budgetPolicy
     }),
@@ -63,6 +65,7 @@ test("parses a complete canonical project binding command", () => {
       version: 2,
       enabled: false,
       route: createBody.route,
+      fallbackRoutes: createBody.fallbackRoutes,
       fallbackPolicy: createBody.fallbackPolicy,
       budgetPolicy: createBody.budgetPolicy
     }
@@ -96,7 +99,7 @@ test("rejects unknown and missing fields instead of silently ignoring them", () 
   );
 });
 
-test("honestly rejects platform, fallback and budget features", () => {
+test("honestly rejects unavailable platform and budget features", () => {
   for (const body of [
     {
       ...createBody,
@@ -104,14 +107,6 @@ test("honestly rejects platform, fallback and budget features", () => {
         ...createBody.route,
         sourceKind: "PLATFORM_CREDENTIAL"
       }
-    },
-    {
-      ...createBody,
-      route: { ...createBody.route, position: 1 }
-    },
-    {
-      ...createBody,
-      fallbackPolicy: { mode: "ON_RETRYABLE_ERROR" }
     },
     {
       ...createBody,
@@ -130,6 +125,24 @@ test("honestly rejects platform, fallback and budget features", () => {
         );
         return true;
       }
+    );
+  }
+});
+
+test("rejects malformed primary positions and unknown fallback policies", () => {
+  for (const body of [
+    {
+      ...createBody,
+      route: { ...createBody.route, position: 1 }
+    },
+    {
+      ...createBody,
+      fallbackPolicy: { mode: "ON_RETRYABLE_ERROR" }
+    }
+  ]) {
+    assert.throws(
+      () => internalCreateProjectConnectorBindingInput(body),
+      BadRequestException
     );
   }
 });

@@ -6,6 +6,18 @@ const migrationUrl = new URL(
   "../../prisma/migrations/20260729220000_rank_result_persistence/migration.sql",
   import.meta.url
 );
+const connectorVersionMigrationUrl = new URL(
+  "../../prisma/migrations/20260801202000_rank_connector_version_pattern/migration.sql",
+  import.meta.url
+);
+const providerRequestMigrationUrl = new URL(
+  "../../prisma/migrations/20260801203000_rank_provider_request_id_pattern/migration.sql",
+  import.meta.url
+);
+const foundQualificationMigrationUrl = new URL(
+  "../../prisma/migrations/20260801204000_rank_receipt_found_qualification/migration.sql",
+  import.meta.url
+);
 
 test("rank result migration is transactional and fails closed on legacy rows", async () => {
   const sql = await readFile(migrationUrl, "utf8");
@@ -123,4 +135,55 @@ test("completion receipt and outbox require each other at commit", async () => {
   ]) {
     assert.doesNotMatch(sql, new RegExp(`'${forbidden}'`, "u"));
   }
+});
+
+test("connector version migration keeps SQL and API validation aligned", async () => {
+  const sql = await readFile(connectorVersionMigrationUrl, "utf8");
+
+  assert.match(sql, /^BEGIN;/u);
+  assert.match(sql, /COMMIT;\s*$/u);
+  for (const constraint of [
+    "rank_chunk_ingest_receipts_connector_version",
+    "rank_snapshots_connector_version"
+  ]) {
+    assert.match(sql, new RegExp(`DROP CONSTRAINT "${constraint}"`, "u"));
+    assert.match(sql, new RegExp(`ADD CONSTRAINT "${constraint}"`, "u"));
+  }
+  assert.equal(
+    (sql.match(/\^\[a-z0-9\]\[a-z0-9@\._-\]\{0,63\}\$/gu) ?? []).length,
+    2
+  );
+});
+
+test("provider request migration avoids unsupported regex repetition counts", async () => {
+  const sql = await readFile(providerRequestMigrationUrl, "utf8");
+
+  assert.match(sql, /^BEGIN;/u);
+  assert.match(sql, /COMMIT;\s*$/u);
+  assert.doesNotMatch(sql, /\{1,256\}/u);
+  assert.equal(
+    (sql.match(/length\("provider_request_id"\) BETWEEN 1 AND 256/gu) ?? [])
+      .length,
+    2
+  );
+  assert.equal(
+    (sql.match(/"provider_request_id" ~ '\^\[ -~\]\+\$'/gu) ?? []).length,
+    2
+  );
+});
+
+test("receipt guard qualifies found against the snapshot table", async () => {
+  const sql = await readFile(foundQualificationMigrationUrl, "utf8");
+
+  assert.match(sql, /^BEGIN;/u);
+  assert.match(sql, /COMMIT;\s*$/u);
+  assert.match(
+    sql,
+    /count\(\*\) FILTER \(WHERE "snapshot"\."found"\)::integer/u
+  );
+  assert.match(
+    sql,
+    /count\(\*\) FILTER \(WHERE NOT "snapshot"\."found"\)::integer/u
+  );
+  assert.doesNotMatch(sql, /FILTER \(WHERE "found"\)/u);
 });

@@ -42,6 +42,7 @@ const credential: IntegrationCredentialSummary = {
   status: "PENDING_VERIFICATION",
   displayHint: "••••-key",
   capabilities: ["KEYWORD_RESEARCH", "COMPETITOR_RESEARCH"],
+  quota: { status: "NOT_AVAILABLE" },
   version: 1,
   createdAt: "2026-07-29T09:00:00.000Z",
   updatedAt: "2026-07-29T09:00:00.000Z"

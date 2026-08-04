@@ -2,6 +2,8 @@ import { Injectable } from "@nestjs/common";
 import type {
   AutomationCapacityEntitlement,
   BillingPlanFeatures,
+  JobCapacityEntitlement,
+  RankEstimateQuota,
   SemanticCapacityEntitlement,
   StorageCapacityEntitlement
 } from "@seo-platform/contracts";
@@ -35,6 +37,15 @@ export type RankProviderEntitlement =
   | "DENIED"
   | "NOT_AVAILABLE";
 
+export interface RankProviderRunAccess {
+  readonly entitlementStatus: RankProviderEntitlement;
+  readonly quota: RankEstimateQuota;
+}
+
+export const RANK_PROVIDER_DAILY_TASK_LIMIT = 200;
+export const MAX_RANK_PROVIDER_DAILY_TASK_LIMIT = 1_000_000;
+export const MAX_PROJECT_CAPACITY_OVERRIDE = 100_000;
+
 @Injectable()
 export class BillingEntitlementService {
   public constructor(private readonly prisma: PrismaService) {}
@@ -60,7 +71,24 @@ export class BillingEntitlementService {
         planVersion: entitlement.planVersion,
         storedKeywords: entitlement.features.storedKeywords,
         keywordsPerProject: entitlement.features.keywordsPerProject,
+        foldersPerProject: entitlement.features.foldersPerProject,
         trackedContextPairs: entitlement.features.trackedContextPairs
+      };
+    });
+  }
+
+  public async jobCapacity(
+    workspaceId: string
+  ): Promise<JobCapacityEntitlement> {
+    return this.prisma.$transaction(async (transaction) => {
+      const entitlement = await this.requiredEntitlement(
+        transaction,
+        workspaceId
+      );
+      return {
+        planCode: entitlement.planCode,
+        planVersion: entitlement.planVersion,
+        concurrentJobs: entitlement.features.concurrentJobs
       };
     });
   }
@@ -146,12 +174,38 @@ export class BillingEntitlementService {
         status: { notIn: ["DELETING", "DELETED"] }
       }
     });
+    const projectLimit = await this.projectCapacityLimit(
+      transaction,
+      workspaceId,
+      entitlement.features.projects
+    );
     this.assertCapacity(
       "projects",
       current,
-      entitlement.features.projects,
+      projectLimit,
       entitlement
     );
+  }
+
+  public async projectCapacityLimit(
+    transaction: Prisma.TransactionClient,
+    workspaceId: string,
+    planLimit: number
+  ): Promise<number> {
+    const override =
+      await transaction.projectCapacityOverride.findUnique({
+        where: { workspaceId },
+        select: { projectLimit: true }
+      });
+    if (!override) return planLimit;
+    if (
+      !Number.isSafeInteger(override.projectLimit) ||
+      override.projectLimit < 1 ||
+      override.projectLimit > MAX_PROJECT_CAPACITY_OVERRIDE
+    ) {
+      throw new Error("Invalid project capacity override");
+    }
+    return override.projectLimit;
   }
 
   public async assertCanCreateInvite(
@@ -232,6 +286,81 @@ export class BillingEntitlementService {
     return this.prisma.$transaction((transaction) =>
       this.rankProviderEntitlement(transaction, workspaceId)
     );
+  }
+
+  public async rankProviderRunAccess(
+    workspaceId: string
+  ): Promise<RankProviderRunAccess> {
+    return this.prisma.$transaction(async (transaction) => {
+      const entitlementStatus = await this.rankProviderEntitlement(
+        transaction,
+        workspaceId
+      );
+      if (entitlementStatus !== "ALLOWED") {
+        return {
+          entitlementStatus,
+          quota: { status: "NOT_AVAILABLE" }
+        };
+      }
+      const now = await this.databaseNow(transaction);
+      const dailyTaskLimit = await this.rankProviderDailyTaskLimit(
+        transaction,
+        workspaceId,
+        now
+      );
+      const windowStartedAt = utcDay(now);
+      const resetsAt = new Date(
+        windowStartedAt.getTime() + 24 * 60 * 60 * 1_000
+      );
+      const used = await transaction.rankExecutionQuotaReservation.count({
+        where: {
+          workspaceId,
+          meter: "RANK_PROVIDER_TASK",
+          windowStartedAt
+        }
+      });
+      const boundedUsed = Math.min(
+        Math.max(used, 0),
+        dailyTaskLimit
+      );
+      const remaining = dailyTaskLimit - boundedUsed;
+      return {
+        entitlementStatus,
+        quota: {
+          status: remaining > 0 ? "AVAILABLE" : "EXHAUSTED",
+          limit: String(dailyTaskLimit),
+          used: String(boundedUsed),
+          remaining: String(remaining),
+          resetsAt: resetsAt.toISOString()
+        }
+      };
+    });
+  }
+
+  public async rankProviderDailyTaskLimit(
+    transaction: Prisma.TransactionClient,
+    workspaceId: string,
+    now: Date
+  ): Promise<number> {
+    const override =
+      await transaction.rankExecutionQuotaOverride.findUnique({
+        where: { workspaceId },
+        select: {
+          dailyTaskLimit: true,
+          expiresAt: true
+        }
+      });
+    if (!override || (override.expiresAt && override.expiresAt <= now)) {
+      return RANK_PROVIDER_DAILY_TASK_LIMIT;
+    }
+    if (
+      !Number.isSafeInteger(override.dailyTaskLimit) ||
+      override.dailyTaskLimit < 1 ||
+      override.dailyTaskLimit > MAX_RANK_PROVIDER_DAILY_TASK_LIMIT
+    ) {
+      throw new Error("Invalid rank execution quota override");
+    }
+    return override.dailyTaskLimit;
   }
 
   private async snapshotInTransaction(
@@ -380,6 +509,14 @@ function automationCapacity(
     planVersion: entitlement.planVersion,
     scheduledAutomations: entitlement.features.scheduledAutomations
   };
+}
+
+function utcDay(value: Date): Date {
+  return new Date(Date.UTC(
+    value.getUTCFullYear(),
+    value.getUTCMonth(),
+    value.getUTCDate()
+  ));
 }
 
 function missingEntitlement(workspaceId: string): DomainError {

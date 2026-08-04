@@ -2,25 +2,33 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   HttpStatus,
   Param,
   Patch,
+  NotFoundException,
   Post,
+  Put,
   Req,
   UseGuards
 } from "@nestjs/common";
+import { integrationCapabilities } from "@seo-platform/contracts";
 import type {
   ApiCollectionResponse,
   ApiResponse,
   IntegrationCredentialValidationSummary,
   IntegrationCredentialSummary,
-  IntegrationProviderCatalogItem
+  IntegrationProviderCatalogItem,
+  IntegrationCapability,
+  WorkspaceConnectorBinding,
+  WorkspaceConnectorRoutingSettings
 } from "@seo-platform/contracts";
 import { AuditService } from "../audit/audit.service.js";
 import { RequirePermission } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
+import { hasSystemPermission } from "../authorization/permissions.js";
 import type {
   TenantAuthorization,
   TenantRequest
@@ -46,6 +54,9 @@ import {
   createIntegrationCredentialInput,
   updateIntegrationCredentialInput
 } from "./integration-input.js";
+import { upsertWorkspaceConnectorBindingInput } from "./workspace-integration-input.js";
+
+const INTEGRATION_CAPABILITIES = new Set<string>(integrationCapabilities);
 
 @Controller("api/v1/workspaces/:workspaceId/integrations")
 export class IntegrationController {
@@ -83,6 +94,76 @@ export class IntegrationController {
         internalContext(request, principal)
       )
     );
+  }
+
+  @Get("routing")
+  @RequirePermission("integration.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async routing(
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<WorkspaceConnectorRoutingSettings>> {
+    const tenant = requiredTenant(request);
+    const settings = await this.jobs.workspaceConnectorRouting(
+      internalContext(request, principal)
+    );
+    const mutable = tenant.workspaceStatus !== "READ_ONLY";
+    return apiResponse(request, {
+      ...settings,
+      access: {
+        canUpdateBindings:
+          mutable && hasSystemPermission(tenant.roleCode, "integration.update"),
+        canManageFallback:
+          mutable && hasSystemPermission(tenant.roleCode, "integration.manage_fallback")
+      }
+    });
+  }
+
+  @Put("routing/:capability")
+  @RequirePermission("integration.update")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async upsertRouting(
+    @Param("capability") capabilityValue: string,
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<WorkspaceConnectorBinding>> {
+    const tenant = requiredTenant(request);
+    const capability = integrationCapability(capabilityValue);
+    const input = upsertWorkspaceConnectorBindingInput(body);
+    if (
+      (input.routes.length > 1 || input.fallbackPolicy.mode !== "NONE") &&
+      !hasSystemPermission(tenant.roleCode, "integration.manage_fallback")
+    ) {
+      throw new ForbiddenException({
+        code: "FORBIDDEN",
+        message: "Fallback routing requires integration.manage_fallback"
+      });
+    }
+    const context = requestContext(request);
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      action: "integration.workspace_connector_routing.update_requested",
+      resourceType: "workspace_connector_binding",
+      outcome: "REQUESTED",
+      requestId: context.requestId
+    });
+    const result = await this.jobs.upsertWorkspaceConnectorBinding(
+      internalContext(request, principal),
+      capability,
+      input
+    );
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      action: "integration.workspace_connector_routing.updated",
+      resourceType: "workspace_connector_binding",
+      resourceId: result.id,
+      outcome: "SUCCESS",
+      requestId: context.requestId
+    });
+    return apiResponse(request, result, result.version);
   }
 
   @Post("credentials")
@@ -314,4 +395,14 @@ function requiredTenant(request: TenantRequest): TenantAuthorization {
     throw new Error("Workspace authorization is missing");
   }
   return tenant;
+}
+
+function integrationCapability(value: string): IntegrationCapability {
+  if (!INTEGRATION_CAPABILITIES.has(value)) {
+    throw new NotFoundException({
+      code: "NOT_FOUND",
+      message: "Integration capability was not found"
+    });
+  }
+  return value as IntegrationCapability;
 }

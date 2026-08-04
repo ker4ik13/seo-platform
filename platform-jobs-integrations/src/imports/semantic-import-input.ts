@@ -18,6 +18,7 @@ import {
   type SemanticCapacityEntitlement
 } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
+import { jobCapacityInput } from "../jobs/job-capacity-input.js";
 
 const IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{8,180}$/u;
 const PLAN_CODE_PATTERN = /^[A-Z][A-Z0-9_-]{0,63}$/u;
@@ -38,6 +39,7 @@ export function internalCreateSemanticImportInput(
     actorId: uuid(input, "actorId"),
     uploadId: uuid(input, "uploadId"),
     idempotencyKey,
+    jobCapacity: jobCapacityInput(input.jobCapacity),
     parse: {
       encoding: enumValue<SemanticImportEncoding>(
         parse.encoding,
@@ -171,6 +173,7 @@ function semanticCapacityEntitlement(
           "planVersion",
           "storedKeywords",
           "keywordsPerProject",
+          "foldersPerProject",
           "trackedContextPairs"
         ].includes(key)
     ) ||
@@ -184,8 +187,14 @@ function semanticCapacityEntitlement(
     planVersion: positiveVersion(input.planVersion),
     storedKeywords: positiveVersion(input.storedKeywords),
     keywordsPerProject: positiveVersion(input.keywordsPerProject),
+    foldersPerProject: nonNegativeVersion(input.foldersPerProject),
     trackedContextPairs: positiveVersion(input.trackedContextPairs)
   };
+}
+
+function nonNegativeVersion(value: unknown): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) invalid("entitlement");
+  return Number(value);
 }
 
 function mappingColumn(

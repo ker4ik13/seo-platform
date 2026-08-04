@@ -1,6 +1,6 @@
-# Runtime SEO Platform на текущем VPS
+# Runtime SEOньорита на текущем VPS
 
-Этот каталог поднимает production-сборки SEO Platform без Docker и без
+Этот каталог поднимает production-сборки SEOньорита без Docker и без
 `sudo`. Все данные и локальные секреты находятся вне Git в
 `/home/dev/.local/share/seo-platform-runtime`, а процессы переживают разрыв SSH
 в отдельной `tmux`-сессии `seo-platform-runtime`.
@@ -47,6 +47,41 @@ SEO_PLATFORM_SMOKE_CONFIRM=CREATE_TEST_DATA \
 platform-infrastructure/vps/stop-runtime.sh
 ```
 
+Browser Web Push включается отдельной операторской командой только на
+остановленном runtime. Команда создаёт VAPID, AES-256-GCM и HMAC ключи,
+атомарно сохраняет их исключительно в mode-600 `runtime.env`; приватный VAPID
+ключ получает только isolated sender process:
+
+```bash
+platform-infrastructure/vps/stop-runtime.sh
+SEO_PLATFORM_WEB_PUSH_SUBJECT=mailto:monitored@example.com \
+  platform-infrastructure/vps/configure-web-push.sh
+platform-infrastructure/vps/start-runtime.sh
+```
+
+Для preview допустим default contact subject команды. Перед production
+release его необходимо заменить на контролируемый адрес. Повторный запуск не
+вращает существующую пару ключей.
+
+YooKassa adapter входит в Platform API. Подключение выполняется только на
+остановленном runtime: shop ID передаётся как переменная, а secret вводится
+без echo и остаётся в mode-600 `runtime.env`. Команда также включает
+обязательную reconciliation и прямой Caddy route на стандартном HTTPS-порту:
+
+```bash
+platform-infrastructure/vps/stop-runtime.sh
+SEO_PLATFORM_YOOKASSA_SHOP_ID=123456 \
+  platform-infrastructure/vps/configure-yookassa.sh
+platform-infrastructure/vps/start-runtime.sh
+```
+
+Webhook YooKassa для текущего preview нужно направить на
+`https://<PUBLIC_HOST>/api/v1/billing/providers/yookassa/webhook`. В кабинете
+нужно включить события `payment.waiting_for_capture`, `payment.succeeded`,
+`payment.canceled` и `refund.succeeded`. Caddy публикует только этот endpoint
+на порту 443; Platform API остаётся на loopback. Merchant credentials runner
+не генерирует, не выводит и в repository не сохраняет.
+
 `bootstrap-runtime.sh` принимает уже проверенные локальные пути
 `POSTGRES_DISTRIBUTION_ROOT`, `REDIS_SERVER_BINARY`, `REDIS_CLI_BINARY` и
 `NATS_SERVER_BINARY`, проверяет точные major/version, создаёт mode-600
@@ -62,6 +97,7 @@ runtime directory до `start-runtime.sh`; start завершится ошибк
 3. запускает Redis/NATS и provision-ит точную JetStream topology;
 4. provision-ит versioned MinIO buckets, least-privilege app policy и CORS;
 5. запускает ClamAV, сервисы и отдельные workers;
+   при настроенном Web Push также запускает isolated sender;
 6. ждёт readiness каждого обязательного компонента.
 
 Полные логи находятся в
@@ -79,6 +115,23 @@ ClamAV inspection → semantic import → mapping/validation → publish`.
 Smoke не вызывает платных внешних SEO API и не создаёт реальную оплату.
 После проверки тестовые tenant-данные остаются в локальной БД для
 диагностики.
+
+Для сквозной проверки пользовательского семантического файла вместо
+встроенного XLSX-fixture можно передать абсолютный путь и минимально ожидаемое
+число уникальных запросов. Поддерживаются те же форматы, что и в UI, включая
+нативный проект Key Collector `.kc4`:
+
+```bash
+SEO_PLATFORM_SMOKE_CONFIRM=CREATE_TEST_DATA \
+SEO_PLATFORM_SMOKE_SEMANTIC_FILE=/absolute/path/project.kc4 \
+SEO_PLATFORM_SMOKE_EXPECTED_KEYWORDS_MIN=1 \
+SEO_PLATFORM_SMOKE_STORAGE_RELAY=true \
+  platform-infrastructure/vps/smoke-runtime.sh
+```
+
+`SEO_PLATFORM_SMOKE_STORAGE_RELAY=true` дополнительно проверяет браузерный
+same-origin fallback для сетей, из которых отдельный storage-порт `9443`
+недоступен. Signed URL не выводится и не попадает в application logs.
 
 ## Ротация
 

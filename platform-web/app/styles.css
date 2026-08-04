@@ -27,7 +27,7 @@ h1, h2, p { margin: 0; }
 }
 
 .brand { align-items: center; display: inline-flex; font-size: 13px; font-weight: 750; gap: 9px; }
-.brand span { align-items: center; background: var(--ink); border-radius: 8px; color: white; display: inline-flex; font-size: 11px; height: 28px; justify-content: center; width: 28px; }
+.brand img { border-radius: 8px; display: block; height: 28px; object-fit: contain; width: 28px; }
 .site-header nav { display: flex; gap: clamp(18px, 3vw, 34px); }
 .site-header nav a { color: #555860; font-size: 11px; font-weight: 550; }
 .site-header nav a:hover { color: var(--ink); }

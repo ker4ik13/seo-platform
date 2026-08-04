@@ -53,16 +53,12 @@ svg { display: block; }
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 20px; font-size: 15px; font-weight: 750; }
 
 .brand-mark {
-  align-items: center;
-  background: linear-gradient(145deg, #7668ff, #5140d9);
+  background: transparent;
   border-radius: 9px;
   box-shadow: 0 5px 14px rgba(103, 88, 239, .24);
-  color: white;
-  display: inline-flex;
-  font-size: 13px;
-  font-weight: 800;
+  display: block;
   height: 29px;
-  justify-content: center;
+  object-fit: contain;
   width: 29px;
 }
 

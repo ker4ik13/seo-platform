@@ -208,36 +208,41 @@ export class BillingService {
         message: "Verify the workspace owner email before starting a trial"
       });
     }
-    const priorClaim =
-      await this.prisma.billingTrialClaim.findUnique({
-        where: { ownerUserId: owner.id }
-      });
-    if (priorClaim) {
-      throw trialAlreadyUsed();
-    }
     const version = await this.currentPlanVersion("TRIAL", "MONTHLY");
+    const isPermanentFreePlan = version.trialDays === 0;
+    if (!isPermanentFreePlan) {
+      const priorClaim =
+        await this.prisma.billingTrialClaim.findUnique({
+          where: { ownerUserId: owner.id }
+        });
+      if (priorClaim) throw trialAlreadyUsed();
+    }
     const now = new Date();
-    const trialEnd = addDays(now, version.trialDays);
+    const periodEnd = isPermanentFreePlan
+      ? new Date("9999-12-31T23:59:59.000Z")
+      : addDays(now, version.trialDays);
     try {
       const created = await this.prisma.$transaction(async (transaction) => {
-        await transaction.billingTrialClaim.create({
-          data: {
-            ownerUserId: owner.id,
-            workspaceId
-          }
-        });
+        if (!isPermanentFreePlan) {
+          await transaction.billingTrialClaim.create({
+            data: {
+              ownerUserId: owner.id,
+              workspaceId
+            }
+          });
+        }
         const subscription =
           await transaction.billingSubscription.create({
             data: {
               workspaceId,
               planVersionId: version.id,
-              status: "TRIALING",
+              status: isPermanentFreePlan ? "ACTIVE" : "TRIALING",
               period: "MONTHLY",
               currency: CURRENCY,
               startedAt: now,
               currentPeriodStart: now,
-              currentPeriodEnd: trialEnd,
-              trialEnd
+              currentPeriodEnd: periodEnd,
+              trialEnd: isPermanentFreePlan ? null : periodEnd
             },
             include: {
               planVersion: { include: { plan: true } },
@@ -248,7 +253,9 @@ export class BillingService {
           {
             actorId,
             workspaceId,
-            action: "billing.trial.started",
+            action: isPermanentFreePlan
+              ? "billing.free_plan.activated"
+              : "billing.trial.started",
             resourceType: "billing_subscription",
             resourceId: subscription.id,
             requestId: context.requestId
@@ -270,11 +277,13 @@ export class BillingService {
             }
           });
         if (replay) return subscriptionSummary(replay);
-        const claim =
-          await this.prisma.billingTrialClaim.findUnique({
-            where: { ownerUserId: owner.id }
-          });
-        if (claim) throw trialAlreadyUsed();
+        if (!isPermanentFreePlan) {
+          const claim =
+            await this.prisma.billingTrialClaim.findUnique({
+              where: { ownerUserId: owner.id }
+            });
+          if (claim) throw trialAlreadyUsed();
+        }
       }
       throw error;
     }

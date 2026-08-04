@@ -1,4 +1,6 @@
 import {
+  connectorRoutingScopes,
+  rankProviderKeywordLimit,
   rankJobFailureCodes,
   redactRankJobSummary,
   type RankJobFailureCode,
@@ -11,8 +13,8 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const DECIMAL_PATTERN = /^(?:0|[1-9][0-9]*)$/u;
 const CURRENCY_PATTERN = /^[A-Z]{3}$/u;
-const MAX_FIRST_SLICE_PAIR_COUNT = 1_000n;
-const MAX_RANK_DECIMAL_DIGITS = 4;
+const MAX_FIRST_SLICE_PAIR_COUNT = BigInt(rankProviderKeywordLimit);
+const MAX_RANK_DECIMAL_DIGITS = String(rankProviderKeywordLimit).length;
 const FAILURE_CODES = new Set<string>(rankJobFailureCodes);
 const RESPONSE_FIELDS = [
   "id",
@@ -21,6 +23,8 @@ const RESPONSE_FIELDS = [
   "trackingContextId",
   "type",
   "provider",
+  "routingScope",
+  "connectorAttempts",
   "operation",
   "credentialMode",
   "status",
@@ -67,6 +71,11 @@ export function scopedRankJobSummary(
     input.failure === undefined
       ? undefined
       : rankJobFailure(input.failure);
+  const provider =
+    input.provider === "ARSENKIN" || input.provider === "XMLSTOCK"
+      ? input.provider
+      : undefined;
+  const routing = routeSummary(input.routingScope, input.connectorAttempts);
 
   if (
     responseWorkspaceId !== workspaceId ||
@@ -75,7 +84,7 @@ export function scopedRankJobSummary(
     (expectedBillingCurrency !== undefined &&
       billingCurrency !== expectedBillingCurrency) ||
     input.type !== "MANUAL_RANK_CHECK" ||
-    input.provider !== "ARSENKIN" ||
+    provider === undefined ||
     input.operation !== "POSITIONS" ||
     input.credentialMode !== "BYOK_API_KEY" ||
     input.platformChargeMicro !== "0" ||
@@ -93,7 +102,8 @@ export function scopedRankJobSummary(
     projectId: responseProjectId,
     trackingContextId,
     type: "MANUAL_RANK_CHECK",
-    provider: "ARSENKIN",
+    provider,
+    ...routing,
     operation: "POSITIONS",
     credentialMode: "BYOK_API_KEY",
     progress,
@@ -268,6 +278,43 @@ export function scopedRankJobSummary(
     if (error instanceof DomainError) throw error;
     throw invalidResponse();
   }
+}
+
+function routeSummary(
+  routingScope: unknown,
+  attempts: unknown
+): Pick<RankJobSummary, "routingScope" | "connectorAttempts"> {
+  if (routingScope === undefined && attempts === undefined) return {};
+  if (routingScope === undefined || !Array.isArray(attempts) || attempts.length < 1 || attempts.length > 8) {
+    throw invalidResponse();
+  }
+  return {
+    routingScope: member(routingScope, connectorRoutingScopes),
+    connectorAttempts: attempts.map((candidate, index) => {
+      const input = exactRecord(candidate, [
+        "sequence",
+        "provider",
+        "routingScope",
+        "outcome",
+        "reasonCode",
+        "occurredAt"
+      ]);
+      if (input.sequence !== index + 1) throw invalidResponse();
+      const reasonCode = input.reasonCode;
+      if (
+        reasonCode !== undefined &&
+        (typeof reasonCode !== "string" || !/^[A-Z][A-Z0-9_]{0,63}$/u.test(reasonCode))
+      ) throw invalidResponse();
+      return {
+        sequence: index + 1,
+        provider: member(input.provider, ["XMLSTOCK", "ARSENKIN", "KEYS_SO"] as const),
+        routingScope: member(input.routingScope, connectorRoutingScopes),
+        outcome: member(input.outcome, ["SELECTED", "SUCCEEDED", "FALLBACK", "FAILED"] as const),
+        ...(reasonCode === undefined ? {} : { reasonCode }),
+        occurredAt: timestamp(input.occurredAt)
+      };
+    })
+  };
 }
 
 function rankJobProgress(value: unknown): RankJobSummary["progress"] {
@@ -465,6 +512,16 @@ function timestamp(value: unknown): string {
     throw invalidResponse();
   }
   return value;
+}
+
+function member<const Values extends readonly string[]>(
+  value: unknown,
+  values: Values
+): Values[number] {
+  if (typeof value !== "string" || !values.includes(value)) {
+    throw invalidResponse();
+  }
+  return value as Values[number];
 }
 
 function requiredExactRecord(

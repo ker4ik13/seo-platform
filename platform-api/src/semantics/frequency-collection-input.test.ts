@@ -39,3 +39,34 @@ test("rejects duplicate keywords, unknown fields and blind retries", () => {
   assert.throws(() => frequencyCancelInput({ version: 0 }));
   assert.throws(() => frequencyCancelInput({ version: 1, force: true }));
 });
+
+test("accepts one 10,000-keyword Arsenkin batch and rejects overflow", () => {
+  const items = Array.from({ length: 10_000 }, (_, index) => ({
+    id: keywordIdAt(index),
+    version: 1
+  }));
+
+  assert.equal(
+    createFrequencyCollectionInput({
+      items,
+      types: ["BASE"],
+      regionCode: "213",
+      device: "ALL"
+    }).items.length,
+    10_000
+  );
+  assert.throws(() =>
+    createFrequencyCollectionInput({
+      items: [...items, { id: keywordIdAt(10_000), version: 1 }],
+      types: ["BASE"],
+      regionCode: "213",
+      device: "ALL"
+    })
+  );
+});
+
+function keywordIdAt(index: number): string {
+  return `01900000-0000-7000-8000-${(index + 1)
+    .toString(16)
+    .padStart(12, "0")}`;
+}

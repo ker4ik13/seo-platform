@@ -12,14 +12,11 @@ import type {
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { ensureKeywordSystemGroupIds } from "./semantic-system-groups.js";
 
 const GROUP_INCLUDE = {
   _count: {
-    select: {
-      memberships: {
-        where: { keyword: { status: "ACTIVE" as const } }
-      }
-    }
+    select: { memberships: true }
   }
 } satisfies Prisma.KeywordGroupInclude;
 
@@ -35,13 +32,17 @@ export class KeywordGroupService {
     workspaceId: string,
     projectId: string
   ): Promise<readonly SemanticKeywordGroup[]> {
-    const rows = await this.prisma.keywordGroup.findMany({
-      where: { workspaceId, projectId, status: "ACTIVE" },
-      orderBy: [{ path: "asc" }, { position: "asc" }, { id: "asc" }],
-      take: 2_000,
-      include: GROUP_INCLUDE
+    return this.prisma.$transaction(async (transaction) => {
+      await lockGroupTree(transaction, projectId);
+      await ensureSystemGroups(transaction, workspaceId, projectId);
+      const rows = await transaction.keywordGroup.findMany({
+        where: { workspaceId, projectId, status: "ACTIVE" },
+        orderBy: [{ position: "asc" }, { id: "asc" }],
+        take: 2_000,
+        include: GROUP_INCLUDE
+      });
+      return rows.map(groupItem);
     });
-    return rows.map(groupItem);
   }
 
   public async create(
@@ -50,6 +51,12 @@ export class KeywordGroupService {
     try {
       return await this.prisma.$transaction(async (transaction) => {
         await lockGroupTree(transaction, input.projectId);
+        await ensureSystemGroups(
+          transaction,
+          input.workspaceId,
+          input.projectId
+        );
+        await assertGroupCapacity(transaction, input);
         const parent = input.parentId
           ? await requiredGroup(
               transaction,
@@ -58,6 +65,7 @@ export class KeywordGroupService {
               input.parentId
             )
           : undefined;
+        assertRegularParent(parent);
         const path = groupPath(parent?.path ?? parent?.name, input.name);
         const lastSibling = await transaction.keywordGroup.findFirst({
           where: {
@@ -110,6 +118,7 @@ export class KeywordGroupService {
           input.projectId,
           groupId
         );
+        assertMutableGroup(current);
         const currentPath = current.path ?? current.name;
         assertVersion(current.version, input.version);
         if (input.parentId === groupId) {
@@ -133,6 +142,7 @@ export class KeywordGroupService {
                   input.projectId,
                   input.parentId
                 );
+        assertRegularParent(parent);
         const parentPath = parent?.path ?? parent?.name;
         if (
           parentPath === currentPath ||
@@ -141,6 +151,30 @@ export class KeywordGroupService {
           throw groupConflict("A group cannot be moved under its descendant");
         }
         const nextPath = groupPath(parentPath, input.name);
+        const targetParentId = parent?.id ?? null;
+        const siblings = await transaction.keywordGroup.findMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            parentId: targetParentId,
+            status: "ACTIVE",
+            id: { not: groupId }
+          },
+          orderBy: [{ position: "asc" }, { id: "asc" }],
+          select: { id: true, position: true }
+        });
+        const currentSiblingIndex = siblings.filter(
+          ({ position, id }) =>
+            position < current.position ||
+            (position === current.position && id < current.id)
+        ).length;
+        const targetPosition = Math.min(
+          input.position ??
+            (targetParentId === current.parentId
+              ? currentSiblingIndex
+              : siblings.length),
+          siblings.length
+        );
         const descendants =
           nextPath === currentPath
             ? []
@@ -164,11 +198,23 @@ export class KeywordGroupService {
                 : input.parentId,
             color:
               input.color === undefined ? current.color : input.color,
+            position: targetPosition,
             path: nextPath,
             pathHash: sha256(nextPath),
             version: { increment: 1 }
           }
         });
+        const orderedSiblingIds = siblings.map(({ id }) => id);
+        orderedSiblingIds.splice(targetPosition, 0, groupId);
+        for (const [position, siblingId] of orderedSiblingIds.entries()) {
+          if (siblingId === groupId) continue;
+          const sibling = siblings.find(({ id }) => id === siblingId);
+          if (sibling?.position === position) continue;
+          await transaction.keywordGroup.update({
+            where: { id: siblingId },
+            data: { position, version: { increment: 1 } }
+          });
+        }
         for (const descendant of descendants) {
           const descendantPath = descendant.path ?? "";
           const path = `${nextPath}${descendantPath.slice(currentPath.length)}`;
@@ -209,41 +255,91 @@ export class KeywordGroupService {
         input.projectId,
         groupId
       );
+      assertMutableGroup(current);
       assertVersion(current.version, input.version);
-      const [childCount, membershipCount] = await Promise.all([
-        transaction.keywordGroup.count({
-          where: {
-            workspaceId: input.workspaceId,
-            projectId: input.projectId,
-            parentId: groupId,
-            status: "ACTIVE"
-          }
-        }),
-        transaction.keywordGroupMembership.count({
-          where: {
-            projectId: input.projectId,
-            groupId,
-            keyword: { status: "ACTIVE" }
-          }
-        })
-      ]);
-      if (childCount > 0 || membershipCount > 0) {
-        throw groupConflict(
-          "Move nested groups and keywords before deleting this group"
+      const systemGroups = await ensureSystemGroups(
+        transaction,
+        input.workspaceId,
+        input.projectId
+      );
+      const currentPath = current.path ?? current.name;
+      const subtree = await transaction.keywordGroup.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "ACTIVE",
+          OR: [{ id: groupId }, { path: { startsWith: `${currentPath} / ` } }]
+        },
+        select: { id: true }
+      });
+      const groupIds = subtree.map(({ id }) => id);
+      if (input.deleteKeywords) {
+        await moveSubtreeKeywordsToTrash(
+          transaction,
+          input.projectId,
+          groupIds,
+          systemGroups.TRASH.id,
+          input.actorId
+        );
+      } else {
+        await moveOrphanedSubtreeKeywordsToUngrouped(
+          transaction,
+          input.projectId,
+          groupIds,
+          systemGroups.UNGROUPED.id
         );
       }
-      const tombstonePath = `${current.path ?? current.name} [deleted ${groupId}]`;
-      await transaction.keywordGroup.update({
-        where: { id: groupId },
+      await transaction.keywordGroup.updateMany({
+        where: { id: { in: groupIds } },
         data: {
           status: "DELETED",
-          path: tombstonePath,
-          pathHash: sha256(tombstonePath),
+          parentId: null,
+          path: null,
+          pathHash: null,
           version: { increment: 1 }
         }
       });
     });
   }
+}
+
+async function assertGroupCapacity(
+  transaction: Prisma.TransactionClient,
+  input: InternalCreateSemanticKeywordGroupInput
+): Promise<void> {
+  const limit = input.entitlement.foldersPerProject;
+  if (limit === 0) return;
+  await transaction.$executeRaw`
+    SELECT pg_advisory_xact_lock(
+      hashtextextended(${`billing-capacity:semantic-groups:${input.projectId}`}, 0)
+    )
+  `;
+  const current = await transaction.keywordGroup.count({
+    where: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      kind: "REGULAR",
+      status: "ACTIVE"
+    }
+  });
+  if (current < limit) return;
+  throw new HttpException(
+    {
+      error: {
+        code: "QUOTA_EXCEEDED",
+        message: "The foldersPerProject limit for the current plan would be exceeded",
+        details: {
+          resource: "foldersPerProject",
+          current: String(current),
+          additional: "1",
+          limit: String(limit),
+          planCode: input.entitlement.planCode,
+          planVersion: input.entitlement.planVersion
+        }
+      }
+    },
+    HttpStatus.CONFLICT
+  );
 }
 
 async function requiredGroup(
@@ -300,14 +396,130 @@ function groupItem(group: GroupAggregate): SemanticKeywordGroup {
     id: group.id,
     ...(group.parentId ? { parentId: group.parentId } : {}),
     name: group.name,
-    path: group.path ?? group.name,
+    path: group.systemKind ? group.name : (group.path ?? group.name),
     ...(group.color ? { color: group.color } : {}),
     position: group.position,
     keywordCount: group._count.memberships,
+    ...(group.systemKind ? { systemKind: group.systemKind } : {}),
     version: group.version,
     createdAt: group.createdAt.toISOString(),
     updatedAt: group.updatedAt.toISOString()
   };
+}
+
+async function ensureSystemGroups(
+  transaction: Prisma.TransactionClient,
+  workspaceId: string,
+  projectId: string
+): Promise<Readonly<Record<"UNGROUPED" | "TRASH", GroupAggregate>>> {
+  const ids = await ensureKeywordSystemGroupIds(
+    transaction,
+    workspaceId,
+    projectId
+  );
+  return {
+    UNGROUPED: await requiredGroup(
+      transaction,
+      workspaceId,
+      projectId,
+      ids.UNGROUPED
+    ),
+    TRASH: await requiredGroup(
+      transaction,
+      workspaceId,
+      projectId,
+      ids.TRASH
+    )
+  };
+}
+
+function assertMutableGroup(group: GroupAggregate): void {
+  if (group.systemKind) {
+    throw groupConflict("System groups cannot be changed or deleted");
+  }
+}
+
+function assertRegularParent(group: GroupAggregate | undefined): void {
+  if (group?.systemKind) {
+    throw groupConflict("Groups cannot be created inside a system group");
+  }
+}
+
+async function moveSubtreeKeywordsToTrash(
+  transaction: Prisma.TransactionClient,
+  projectId: string,
+  groupIds: readonly string[],
+  trashGroupId: string,
+  actorId: string
+): Promise<void> {
+  if (groupIds.length === 0) return;
+  const targetRows = await transaction.keywordGroupMembership.findMany({
+    where: { projectId, groupId: { in: [...groupIds] } },
+    select: { keywordId: true },
+    distinct: ["keywordId"]
+  });
+  const keywordIds = targetRows.map(({ keywordId }) => keywordId);
+  if (keywordIds.length === 0) return;
+  await transaction.keyword.updateMany({
+    where: { projectId, id: { in: keywordIds }, status: "ACTIVE" },
+    data: {
+      status: "DELETED",
+      deletedAt: new Date(),
+      updatedBy: actorId,
+      version: { increment: 1 }
+    }
+  });
+  await transaction.keywordGroupMembership.deleteMany({
+    where: { projectId, keywordId: { in: keywordIds } }
+  });
+  await transaction.keywordGroupMembership.createMany({
+    data: keywordIds.map((keywordId) => ({
+      projectId,
+      keywordId,
+      groupId: trashGroupId
+    })),
+    skipDuplicates: true
+  });
+}
+
+async function moveOrphanedSubtreeKeywordsToUngrouped(
+  transaction: Prisma.TransactionClient,
+  projectId: string,
+  groupIds: readonly string[],
+  ungroupedGroupId: string
+): Promise<void> {
+  if (groupIds.length === 0) return;
+  const targetRows = await transaction.keywordGroupMembership.findMany({
+    where: { projectId, groupId: { in: [...groupIds] } },
+    select: { keywordId: true },
+    distinct: ["keywordId"]
+  });
+  const keywordIds = targetRows.map(({ keywordId }) => keywordId);
+  if (keywordIds.length === 0) return;
+  const outsideRows = await transaction.keywordGroupMembership.findMany({
+    where: {
+      projectId,
+      keywordId: { in: keywordIds },
+      groupId: { notIn: [...groupIds] }
+    },
+    select: { keywordId: true },
+    distinct: ["keywordId"]
+  });
+  const assignedOutside = new Set(outsideRows.map(({ keywordId }) => keywordId));
+  await transaction.keywordGroupMembership.deleteMany({
+    where: { projectId, groupId: { in: [...groupIds] } }
+  });
+  const orphanedIds = keywordIds.filter((id) => !assignedOutside.has(id));
+  if (orphanedIds.length > 0) {
+    await transaction.keywordGroupMembership.createMany({
+      data: orphanedIds.map((keywordId) => ({
+        projectId,
+        keywordId,
+        groupId: ungroupedGroupId
+      })),
+      skipDuplicates: true
+    });
+  }
 }
 
 function groupPath(parentPath: string | null | undefined, name: string): string {

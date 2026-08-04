@@ -1,7 +1,10 @@
 import {
+  connectorRoutingScopes,
   rankJobFailureCodes,
   rankJobStages,
   rankJobStatuses,
+  type ConnectorOperationAttemptSummary,
+  type ConnectorRoutingScope,
   type CreateRankRunInput,
   type RankJobFailureCode,
   type RankJobResultSummary,
@@ -204,6 +207,11 @@ export function parseRankJobSummary(
     CURRENCY_PATTERN.test(input.billingCurrency)
       ? input.billingCurrency
       : undefined;
+  const provider =
+    input.provider === "ARSENKIN" || input.provider === "XMLSTOCK"
+      ? input.provider
+      : undefined;
+  const route = parseConnectorRoute(input);
 
   if (
     !id ||
@@ -215,7 +223,8 @@ export function parseRankJobSummary(
     trackingContextId !== expected.trackingContextId ||
     (expected.jobId !== undefined && id !== expected.jobId) ||
     input.type !== "MANUAL_RANK_CHECK" ||
-    input.provider !== "ARSENKIN" ||
+    !provider ||
+    route === null ||
     input.operation !== "POSITIONS" ||
     input.credentialMode !== "BYOK_API_KEY" ||
     input.platformChargeMicro !== "0" ||
@@ -234,7 +243,8 @@ export function parseRankJobSummary(
     projectId,
     trackingContextId,
     type: "MANUAL_RANK_CHECK",
-    provider: "ARSENKIN",
+    provider,
+    ...route,
     operation: "POSITIONS",
     credentialMode: "BYOK_API_KEY",
     progress,
@@ -424,6 +434,66 @@ export function parseRankJobSummary(
       };
     }
   }
+}
+
+function parseConnectorRoute(
+  input: Readonly<Record<string, unknown>>
+): {
+  readonly routingScope?: ConnectorRoutingScope;
+  readonly connectorAttempts?: readonly ConnectorOperationAttemptSummary[];
+} | null {
+  const hasRoutingScope = input.routingScope !== undefined;
+  const hasConnectorAttempts = input.connectorAttempts !== undefined;
+  if (hasRoutingScope !== hasConnectorAttempts) return null;
+  if (!hasRoutingScope) return {};
+  if (
+    typeof input.routingScope !== "string" ||
+    !connectorRoutingScopes.includes(input.routingScope as ConnectorRoutingScope) ||
+    !Array.isArray(input.connectorAttempts) ||
+    input.connectorAttempts.length < 1 ||
+    input.connectorAttempts.length > 8
+  ) {
+    return null;
+  }
+  const attempts: ConnectorOperationAttemptSummary[] = [];
+  for (const [index, candidate] of input.connectorAttempts.entries()) {
+    const attempt = record(candidate);
+    const occurredAt = timestamp(attempt.occurredAt);
+    if (
+      attempt.sequence !== index + 1 ||
+      (attempt.provider !== "XMLSTOCK" &&
+        attempt.provider !== "ARSENKIN" &&
+        attempt.provider !== "KEYS_SO") ||
+      typeof attempt.routingScope !== "string" ||
+      !connectorRoutingScopes.includes(
+        attempt.routingScope as ConnectorRoutingScope
+      ) ||
+      (attempt.outcome !== "SELECTED" &&
+        attempt.outcome !== "SUCCEEDED" &&
+        attempt.outcome !== "FALLBACK" &&
+        attempt.outcome !== "FAILED") ||
+      !occurredAt ||
+      (attempt.reasonCode !== undefined &&
+        (typeof attempt.reasonCode !== "string" ||
+          !/^[A-Z][A-Z0-9_]{0,63}$/u.test(attempt.reasonCode)))
+    ) {
+      return null;
+    }
+    attempts.push({
+      sequence: index + 1,
+      provider: attempt.provider,
+      routingScope: attempt.routingScope as ConnectorRoutingScope,
+      outcome: attempt.outcome,
+      ...(typeof attempt.reasonCode === "string"
+        ? { reasonCode: attempt.reasonCode }
+        : {}),
+      occurredAt
+    });
+  }
+  return {
+    routingScope: input.routingScope as ConnectorRoutingScope,
+    connectorAttempts: attempts
+  };
 }
 
 export function isActiveRankJob(job: RankJobSummary): boolean {

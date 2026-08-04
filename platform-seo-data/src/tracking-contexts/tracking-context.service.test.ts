@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { HttpException } from "@nestjs/common";
 import type {
   InternalChangeTrackingContextKeywordInput,
   InternalCreateTrackingContextInput,
+  InternalReplaceTrackingContextKeywordsInput,
   InternalUpdateTrackingContextInput,
   TrackingContextConfigurationInput
 } from "@seo-platform/contracts";
@@ -16,6 +18,17 @@ const projectId = "01900000-0000-7000-8000-000000000002";
 const actorId = "01900000-0000-7000-8000-000000000003";
 const contextId = "01900000-0000-7000-8000-000000000004";
 const keywordId = "01900000-0000-7000-8000-000000000005";
+
+test("assignment advisory lock exposes a Prisma-supported scalar", async () => {
+  const source = await readFile(
+    new URL("./tracking-context.service.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(
+    source,
+    /pg_advisory_xact_lock\([\s\S]*?\) IS NULL AS "lockResult"/u
+  );
+});
 
 const configuration: TrackingContextConfigurationInput = {
   searchEngine: "GOOGLE",
@@ -46,6 +59,8 @@ test("replays the immutable create receipt and rejects key reuse", async () => {
         data: Record<string, any>;
       }) => {
         const version = data.configurations.create;
+        assert.equal("workspaceId" in version, false);
+        assert.equal("projectId" in version, false);
         return {
           id: contextId,
           workspaceId,
@@ -252,6 +267,7 @@ test("point assignments are temporal and naturally idempotent", async () => {
       planVersion: 1,
       storedKeywords: 2_000_000,
       keywordsPerProject: 2_000_000,
+      foldersPerProject: 500,
       trackedContextPairs: 50_000
     }
   };
@@ -273,6 +289,133 @@ test("point assignments are temporal and naturally idempotent", async () => {
   assert.equal(removedAssignments, 1);
   assert.equal(events.length, 2);
 });
+
+test("bulk replacement is atomic, versioned and replay-safe without per-key events", async () => {
+  const replacementKeywordIds = Array.from(
+    { length: 15_000 },
+    (_, index) => keywordIdAt(index + 5)
+  );
+  const secondKeywordId = replacementKeywordIds[1]!;
+  const currentAssignmentId = "01900000-0000-7000-8000-000000000007";
+  const state: any = aggregate();
+  let receipt: Record<string, any> | undefined;
+  let createdAssignments = 0;
+  const createBatchSizes: number[] = [];
+  let removedAssignments = 0;
+  let capacityReads = 0;
+  const events: Array<Record<string, any>> = [];
+  const transaction = {
+    $queryRaw: async () => [],
+    $executeRaw: async () => 1,
+    trackingContextKeywordReplaceReceipt: {
+      findUnique: async () => receipt,
+      create: async ({ data }: { data: Record<string, any> }) => {
+        receipt = structuredClone(data);
+        return receipt;
+      }
+    },
+    trackingContext: {
+      findFirst: async () => state,
+      update: async () => {
+        state.version += 1;
+        return { version: state.version };
+      }
+    },
+    keyword: {
+      findMany: async () =>
+        replacementKeywordIds.map((id) => ({ id }))
+    },
+    trackingContextKeywordAssignment: {
+      findMany: async () => [
+        {
+          id: currentAssignmentId,
+          keywordId
+        }
+      ],
+      count: async () => {
+        capacityReads += 1;
+        return 10;
+      },
+      updateMany: async ({ where }: { where: { id: { in: string[] } } }) => {
+        removedAssignments += where.id.in.length;
+        return { count: where.id.in.length };
+      },
+      createMany: async ({ data }: { data: readonly unknown[] }) => {
+        createBatchSizes.push(data.length);
+        createdAssignments += data.length;
+        return { count: data.length };
+      }
+    },
+    outboxEvent: {
+      create: async ({ data }: { data: Record<string, any> }) => {
+        events.push(data);
+        return data;
+      }
+    }
+  };
+  const service = new TrackingContextService({
+    trackingContextKeywordReplaceReceipt: {
+      findUnique: async () => receipt
+    },
+    $transaction: async (work: (value: unknown) => unknown) =>
+      work(transaction)
+  } as unknown as PrismaService);
+  const input: InternalReplaceTrackingContextKeywordsInput = {
+    workspaceId,
+    projectId,
+    contextId,
+    actorId,
+    version: 1,
+    idempotencyKey: "replace-keywords-001",
+    keywordIds: replacementKeywordIds,
+    entitlement: {
+      planCode: "TEAM",
+      planVersion: 1,
+      storedKeywords: 2_000_000,
+      keywordsPerProject: 2_000_000,
+      foldersPerProject: 500,
+      trackedContextPairs: 50_000
+    }
+  };
+
+  const result = await service.replaceKeywords(input);
+  const replay = await service.replaceKeywords(input);
+
+  assert.deepEqual(replay, result);
+  assert.equal(result.assignedKeywordCount, 15_000);
+  assert.equal(result.addedKeywordCount, 14_999);
+  assert.equal(result.removedKeywordCount, 0);
+  assert.equal(result.unchangedKeywordCount, 1);
+  assert.equal(result.version, 2);
+  assert.match(result.keywordSetHash.value, /^[0-9a-f]{64}$/u);
+  assert.equal(createdAssignments, 14_999);
+  assert.deepEqual(createBatchSizes, [5_000, 5_000, 4_999]);
+  assert.ok(createBatchSizes.every((size) => size <= 5_000));
+  assert.equal(removedAssignments, 0);
+  assert.equal(capacityReads, 1);
+  assert.equal(events.length, 1);
+  assert.equal(
+    events[0]?.eventType,
+    "seo.tracking-context.keyword-assignments.replaced.v1"
+  );
+  assert.doesNotMatch(JSON.stringify(events[0]), new RegExp(secondKeywordId));
+
+  await assert.rejects(
+    () =>
+      service.replaceKeywords({
+        ...input,
+        keywordIds: [keywordId]
+      }),
+    (error: unknown) =>
+      error instanceof HttpException && error.getStatus() === 409
+  );
+});
+
+function keywordIdAt(value: number): string {
+  return `01900000-0000-7000-8000-${value
+    .toString(16)
+    .padStart(12, "0")}`;
+}
 
 test("archive and restore use entity CAS without changing configuration", async () => {
   const state: any = aggregate();

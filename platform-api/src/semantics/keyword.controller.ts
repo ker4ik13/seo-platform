@@ -17,6 +17,7 @@ import {
 import type {
   ApiCollectionResponse,
   ApiResponse,
+  SemanticKeywordBulkCreateResult,
   SemanticKeywordListItem,
   SemanticKeywordInsights
 } from "@seo-platform/contracts";
@@ -49,6 +50,8 @@ import {
 import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import {
   createSemanticKeywordInput,
+  deleteSemanticKeywordInput,
+  semanticKeywordBulkCreateInput,
   updateSemanticKeywordInput
 } from "./keyword-input.js";
 import { keywordListQuery } from "./keyword-query.js";
@@ -117,7 +120,12 @@ export class KeywordController {
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
       projectId: tenant.projectId,
-      action: "semantic.keyword.created",
+      action:
+        result.createOutcome === "RESTORED"
+          ? "semantic.keyword.restored"
+          : result.createOutcome === "SKIPPED_EXISTING"
+            ? "semantic.keyword.create_skipped"
+            : "semantic.keyword.created",
       resourceType: "semantic_keyword",
       resourceId: result.id,
       outcome: "SUCCESS",
@@ -125,6 +133,45 @@ export class KeywordController {
     });
     setEntityVersion(reply, result.version);
     return apiResponse(request, result, result.version);
+  }
+
+  @Post("bulk")
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission("semantic.create")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async bulkCreate(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticKeywordBulkCreateResult>> {
+    const tenant = requiredMutableProjectTenant(request);
+    const context = requestContext(request);
+    const input = semanticKeywordBulkCreateInput(body);
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.keyword.bulk_create_requested",
+      resourceType: "semantic_keyword",
+      outcome: "REQUESTED",
+      requestId: context.requestId
+    });
+    const result = await this.seoData.bulkCreateKeywords(
+      internalProjectContext(request, principal, tenant),
+      input,
+      await this.billingEntitlements.semanticCapacity(tenant.workspaceId)
+    );
+    await recordCommittedAudit(this.audit, this.logger, {
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.keyword.bulk_create_completed",
+      resourceType: "semantic_keyword",
+      outcome:
+        result.failed > 0 || result.rejected > 0 ? "PARTIAL" : "SUCCESS",
+      requestId: context.requestId
+    });
+    return apiResponse(request, result);
   }
 
   @Get(":keywordId/insights")
@@ -197,6 +244,7 @@ export class KeywordController {
   @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
   public async delete(
     @Param("keywordId") keywordId: string,
+    @Body() body: unknown,
     @Req() request: TenantRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<void> {
@@ -204,6 +252,7 @@ export class KeywordController {
     const canonicalKeywordId = assertUuid(keywordId, "keywordId");
     const context = requestContext(request);
     const version = requiredVersion(headerValue(request, "if-match"));
+    const input = deleteSemanticKeywordInput(body);
     await this.audit.record({
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
@@ -217,13 +266,16 @@ export class KeywordController {
     await this.seoData.deleteKeyword(
       internalProjectContext(request, principal, tenant),
       canonicalKeywordId,
-      version
+      version,
+      input.permanent === true
     );
     await recordCommittedAudit(this.audit, this.logger, {
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
       projectId: tenant.projectId,
-      action: "semantic.keyword.deleted",
+      action: input.permanent === true
+        ? "semantic.keyword.permanently_deleted"
+        : "semantic.keyword.trashed",
       resourceType: "semantic_keyword",
       resourceId: canonicalKeywordId,
       outcome: "SUCCESS",

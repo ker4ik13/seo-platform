@@ -15,6 +15,7 @@ import type {
   ApiCollectionResponse,
   ApiResponse,
   CreateWorkspaceInviteResult,
+  PendingWorkspaceInviteSummary,
   WorkspaceInviteSummary,
   WorkspaceMemberSummary
 } from "@seo-platform/contracts";
@@ -125,6 +126,16 @@ export class TeamController {
     );
   }
 
+  @Get("me/workspace-invites")
+  @UseGuards(SessionAuthGuard)
+  public async myPendingInvites(
+    @Req() request: FastifyRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiCollectionResponse<PendingWorkspaceInviteSummary>> {
+    const result = await this.team.listPendingInvitesForUser(principal.userId);
+    return collectionResponse(request, result.data, result.page);
+  }
+
   @Post("workspaces/:workspaceId/invites")
   @RequirePermission("member.invite")
   @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
@@ -179,6 +190,40 @@ export class TeamController {
     );
     reply.header("ETag", `"v${member.version}"`);
     return apiResponse(request, member, member.version);
+  }
+
+  @Post("workspace-invites/:inviteId/accept")
+  @UseGuards(CsrfSessionGuard)
+  @HttpCode(200)
+  public async acceptInviteFromAccount(
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<WorkspaceMemberSummary>> {
+    const member = await this.team.acceptInviteById(
+      principal.userId,
+      routeParam(request, "inviteId"),
+      requestContext(request)
+    );
+    reply.header("ETag", `"v${member.version}"`);
+    return apiResponse(request, member, member.version);
+  }
+
+  @Post("workspace-invites/:inviteId/decline")
+  @UseGuards(CsrfSessionGuard)
+  @HttpCode(200)
+  public async declineInviteFromAccount(
+    @Req() request: FastifyRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<WorkspaceInviteSummary>> {
+    return apiResponse(
+      request,
+      await this.team.declineInvite(
+        principal.userId,
+        routeParam(request, "inviteId"),
+        requestContext(request)
+      )
+    );
   }
 }
 

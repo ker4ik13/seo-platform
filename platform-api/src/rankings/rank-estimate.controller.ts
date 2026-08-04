@@ -56,10 +56,10 @@ export class RankEstimateController {
     const idempotencyKey = requiredIdempotencyKey(
       headerValue(request, "idempotency-key")
     );
-    const [workspace, project, entitlementStatus] = await Promise.all([
+    const [workspace, project, runAccess] = await Promise.all([
       this.tenants.getWorkspace(principal.userId, tenant.workspaceId),
       this.tenants.getProject(tenant.projectId),
-      this.billingEntitlements.rankProviderAccess(tenant.workspaceId)
+      this.billingEntitlements.rankProviderRunAccess(tenant.workspaceId)
     ]);
     if (
       project.id !== tenant.projectId ||
@@ -71,6 +71,9 @@ export class RankEstimateController {
 
     const command: InternalCreateRankEstimateInput = {
       trackingContextId: input.trackingContextId,
+      ...(input.provider ? { provider: input.provider } : {}),
+      ...(input.credentialId ? { credentialId: input.credentialId } : {}),
+      ...(input.searchSource ? { searchSource: input.searchSource } : {}),
       workspaceId: workspace.id,
       projectId: project.id,
       actorId: principal.userId,
@@ -88,10 +91,10 @@ export class RankEstimateController {
           tenant.projectAccessLevel,
           "ranking.run"
         ),
-        entitlementStatus
+        entitlementStatus: runAccess.entitlementStatus
       },
       billingCurrency: workspace.billingCurrency,
-      quota: { status: "NOT_AVAILABLE" }
+      quota: runAccess.quota
     };
     const result = await this.jobs.createRankEstimate(
       internalProjectContext(request, principal, tenant),

@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import { useState, type FormEvent } from "react";
 import type { SemanticKeywordBulkResult } from "@seo-platform/contracts";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
@@ -60,12 +62,12 @@ export function SemanticKeywordMoveDialog({
       <form className="semantic-dialog-form" onSubmit={(event) => void submit(event)}>
         <label>
           <span>Целевая группа</span>
-          <select autoFocus onChange={(event) => setGroupId(event.target.value)} value={groupId}>
+          <CustomSelect autoFocus onChange={(event) => setGroupId(event.target.value)} value={groupId}>
             <option value="">Без группы</option>
             {groups.map((group) => (
               <option key={group.id} value={group.id}>{group.path}</option>
             ))}
-          </select>
+          </CustomSelect>
         </label>
         <div className="semantic-dialog-selection">
           {selections.slice(0, 8).map((selection) => (

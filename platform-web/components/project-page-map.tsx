@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import {
   pageContentStatuses,
   pageIndexabilities,
@@ -69,6 +71,7 @@ export function ProjectPageMap({
   const [busyId, setBusyId] = useState<string>();
   const [online, setOnline] = useState(true);
   const [reload, setReload] = useState(0);
+  const [selectedPageId, setSelectedPageId] = useState<string>();
 
   const load = useCallback(
     async (signal?: AbortSignal) => {
@@ -109,6 +112,15 @@ export function ProjectPageMap({
       globalThis.removeEventListener("offline", update);
     };
   }, []);
+
+  useEffect(() => {
+    if (!editor) return;
+    function closeOnEscape(event: KeyboardEvent): void {
+      if (event.key === "Escape" && busyId === undefined) setEditor(undefined);
+    }
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [busyId, editor]);
 
   const canManage = online && collection?.access.canManage === true;
 
@@ -272,6 +284,7 @@ export function ProjectPageMap({
 
   if (!collection) return null;
   const activeFilterCount = filterCount(appliedFilters);
+  const selectedPage = collection.pages.find(({ id }) => id === selectedPageId);
 
   return (
     <div className="page-map">
@@ -312,14 +325,14 @@ export function ProjectPageMap({
           <button className="secondary-button page-map-search-button" type="submit">
             Найти
           </button>
-          <details className="page-map-filter-disclosure">
+          <details className="page-map-filter-disclosure" data-exclusive-dropdown>
             <summary>
               Фильтры{activeFilterCount > 0 ? ` · ${activeFilterCount}` : ""}
             </summary>
             <div className="page-map-filter-popover">
               <label className="form-field">
                 <span>Тип</span>
-                <select
+                <CustomSelect
                   onChange={(event) =>
                     setFilters((value) => ({
                       ...value,
@@ -334,11 +347,11 @@ export function ProjectPageMap({
                       {pageTypeLabel(value)}
                     </option>
                   ))}
-                </select>
+                </CustomSelect>
               </label>
               <label className="form-field">
                 <span>Индексируемость</span>
-                <select
+                <CustomSelect
                   onChange={(event) =>
                     setFilters((value) => ({
                       ...value,
@@ -353,11 +366,11 @@ export function ProjectPageMap({
                       {indexabilityLabel(value)}
                     </option>
                   ))}
-                </select>
+                </CustomSelect>
               </label>
               <label className="form-field">
                 <span>Раздел</span>
-                <select
+                <CustomSelect
                   onChange={(event) =>
                     setFilters((value) => ({
                       ...value,
@@ -369,7 +382,7 @@ export function ProjectPageMap({
                 >
                   <option value="ACTIVE">Активные</option>
                   <option value="ARCHIVED">Архив</option>
-                </select>
+                </CustomSelect>
               </label>
               <div className="page-map-filter-actions">
                 <button
@@ -398,19 +411,30 @@ export function ProjectPageMap({
       </section>
 
       {editor && (
-        <PageEditor
-          busy={busyId !== undefined}
-          draft={editor.draft}
-          errors={errors}
-          existing={editor.page !== undefined}
-          onCancel={() => setEditor(undefined)}
-          onChange={changeDraft}
-          onSubmit={submitPage}
-        />
+        <div
+          className="page-map-editor-backdrop"
+          onMouseDown={(event) => {
+            if (event.currentTarget === event.target && busyId === undefined) {
+              setEditor(undefined);
+            }
+          }}
+          role="presentation"
+        >
+          <PageEditor
+            busy={busyId !== undefined}
+            draft={editor.draft}
+            errors={errors}
+            existing={editor.page !== undefined}
+            onCancel={() => setEditor(undefined)}
+            onChange={changeDraft}
+            onSubmit={submitPage}
+          />
+        </div>
       )}
 
-      {collection.pages.length === 0 ? (
-        <section className="panel page-map-empty">
+      <div className={selectedPage ? "page-map-content has-inspector" : "page-map-content"}>
+        {collection.pages.length === 0 ? (
+          <section className="panel page-map-empty">
           <h2>
             {appliedFilters.lifecycleStatus === "ARCHIVED"
               ? "Архив пуст"
@@ -428,11 +452,11 @@ export function ProjectPageMap({
               Добавить первую страницу
             </button>
           )}
-        </section>
-      ) : (
-        <section className="panel page-map-list">
-          <div className="page-map-table-wrap">
-            <table className="page-map-table">
+          </section>
+        ) : (
+          <section className="panel page-map-list">
+            <div className="page-map-table-wrap">
+              <table className="page-map-table">
               <thead>
                 <tr>
                   <th>Страница</th>
@@ -442,41 +466,52 @@ export function ProjectPageMap({
                   <th aria-label="Действия" />
                 </tr>
               </thead>
-              <tbody>
-                {collection.pages.map((page) => (
-                  <PageRow
-                    busy={busyId === page.id}
-                    canManage={canManage}
-                    key={page.id}
-                    onEdit={() => startEdit(page)}
-                    onStatus={() =>
-                      void changeStatus(
-                        page,
-                        page.lifecycleStatus === "ACTIVE"
-                          ? "archive"
-                          : "restore"
-                      )
-                    }
-                    page={page}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {collection.nextCursor && (
-            <footer className="page-map-footer">
-              <button
-                className="secondary-button"
-                disabled={loadingMore}
-                onClick={() => void loadMore()}
-                type="button"
-              >
-                {loadingMore ? "Загрузка…" : "Показать ещё"}
-              </button>
-            </footer>
-          )}
-        </section>
-      )}
+                <tbody>
+                  {collection.pages.map((page) => (
+                    <PageRow
+                      busy={busyId === page.id}
+                      canManage={canManage}
+                      key={page.id}
+                      onEdit={() => startEdit(page)}
+                      onSelect={() => setSelectedPageId(page.id)}
+                      onStatus={() =>
+                        void changeStatus(
+                          page,
+                          page.lifecycleStatus === "ACTIVE"
+                            ? "archive"
+                            : "restore"
+                        )
+                      }
+                      page={page}
+                      selected={selectedPageId === page.id}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {collection.nextCursor && (
+              <footer className="page-map-footer">
+                <button
+                  className="secondary-button"
+                  disabled={loadingMore}
+                  onClick={() => void loadMore()}
+                  type="button"
+                >
+                  {loadingMore ? "Загрузка…" : "Показать ещё"}
+                </button>
+              </footer>
+            )}
+          </section>
+        )}
+        {selectedPage && (
+          <PageInspector
+            canManage={canManage}
+            onClose={() => setSelectedPageId(undefined)}
+            onEdit={() => startEdit(selectedPage)}
+            page={selectedPage}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -506,11 +541,11 @@ function PageEditor({
     errors.ownerId
   );
   return (
-    <section className="panel page-map-editor">
+    <section aria-labelledby="page-map-editor-title" aria-modal="true" className="panel page-map-editor" role="dialog">
       <header>
         <div>
           <p className="eyebrow">{existing ? "Редактирование" : "Новая страница"}</p>
-          <h2>{existing ? "Параметры страницы" : "Добавить в карту"}</h2>
+          <h2 id="page-map-editor-title">{existing ? "Параметры страницы" : "Добавить в карту"}</h2>
         </div>
         <button className="text-button" onClick={onCancel} type="button">
           Закрыть
@@ -532,7 +567,7 @@ function PageEditor({
           />
         </EditorField>
         <EditorField label="Тип">
-          <select
+          <CustomSelect
             onChange={(event) =>
               onChange({ pageType: event.target.value as PageType })
             }
@@ -541,10 +576,10 @@ function PageEditor({
             {pageTypes.map((value) => (
               <option key={value} value={value}>{pageTypeLabel(value)}</option>
             ))}
-          </select>
+          </CustomSelect>
         </EditorField>
         <EditorField label="Индексируемость">
-          <select
+          <CustomSelect
             onChange={(event) =>
               onChange({
                 indexability: event.target.value as PageIndexability
@@ -557,7 +592,7 @@ function PageEditor({
                 {indexabilityLabel(value)}
               </option>
             ))}
-          </select>
+          </CustomSelect>
         </EditorField>
         <EditorField error={errors.priority} label="Приоритет">
           <input
@@ -582,7 +617,7 @@ function PageEditor({
           />
         </EditorField>
         <EditorField label="Статус контента">
-          <select
+          <CustomSelect
             onChange={(event) =>
               onChange({
                 contentStatus: event.target.value as PageContentStatus | ""
@@ -594,7 +629,7 @@ function PageEditor({
             {pageContentStatuses.map((value) => (
               <option key={value} value={value}>{contentStatusLabel(value)}</option>
             ))}
-          </select>
+          </CustomSelect>
         </EditorField>
         <details className="page-map-advanced" open={hasAdvancedErrors || undefined}>
           <summary>Дополнительные параметры</summary>
@@ -712,17 +747,32 @@ function PageRow({
   busy,
   canManage,
   onEdit,
+  onSelect,
   onStatus,
-  page
+  page,
+  selected
 }: Readonly<{
   busy: boolean;
   canManage: boolean;
   onEdit: () => void;
+  onSelect: () => void;
   onStatus: () => void;
   page: ProjectPageSummary;
+  selected: boolean;
 }>) {
   return (
-    <tr>
+    <tr
+      aria-selected={selected}
+      className={selected ? "selected" : undefined}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onSelect();
+        }
+      }}
+      onClick={onSelect}
+      tabIndex={0}
+    >
       <td>
         <div className="page-map-url">
           <a href={page.normalizedUrl} rel="noreferrer" target="_blank">
@@ -760,7 +810,10 @@ function PageRow({
             <button
               className="text-button"
               disabled={!canManage || busy}
-              onClick={onEdit}
+              onClick={(event) => {
+                event.stopPropagation();
+                onEdit();
+              }}
               type="button"
             >
               Изменить
@@ -769,7 +822,10 @@ function PageRow({
           <button
             className="text-button"
             disabled={!canManage || busy}
-            onClick={onStatus}
+            onClick={(event) => {
+              event.stopPropagation();
+              onStatus();
+            }}
             type="button"
           >
             {busy
@@ -782,6 +838,79 @@ function PageRow({
       </td>
     </tr>
   );
+}
+
+function PageInspector({
+  canManage,
+  onClose,
+  onEdit,
+  page
+}: Readonly<{
+  canManage: boolean;
+  onClose: () => void;
+  onEdit: () => void;
+  page: ProjectPageSummary;
+}>) {
+  return (
+    <aside className="page-map-inspector" aria-label="Информация о странице">
+      <header>
+        <div>
+          <span>Страница</span>
+          <h2>{page.title || page.normalizedUrl}</h2>
+          {page.title && <a href={page.normalizedUrl} rel="noreferrer" target="_blank">{page.normalizedUrl}</a>}
+        </div>
+        <div className="page-map-inspector-actions">
+          {page.lifecycleStatus === "ACTIVE" && (
+            <button className="secondary-button" disabled={!canManage} onClick={onEdit} type="button">Изменить</button>
+          )}
+          <button aria-label="Закрыть" className="page-map-inspector-close" onClick={onClose} type="button">×</button>
+        </div>
+      </header>
+      <div className="page-map-inspector-body">
+        <section>
+          <h3>Состояние</h3>
+          <dl>
+            <div><dt>Индексируемость</dt><dd><span className={`status-pill page-index-${page.indexability.toLowerCase()}`}>{indexabilityLabel(page.indexability)}</span></dd></div>
+            <div><dt>Тип</dt><dd>{pageTypeLabel(page.pageType)}</dd></div>
+            <div><dt>HTTP</dt><dd>{page.httpStatus ?? "—"}</dd></div>
+            <div><dt>Robots</dt><dd>{page.robots || "—"}</dd></div>
+          </dl>
+        </section>
+        <section>
+          <h3>Семантика</h3>
+          <dl>
+            <div><dt>Запросов</dt><dd>{page.assignedKeywordCount}</dd></div>
+            <div><dt>Кластеров</dt><dd>{page.assignedClusterCount}</dd></div>
+            <div><dt>Приоритет</dt><dd>{page.priority}</dd></div>
+          </dl>
+        </section>
+        <section>
+          <h3>Контент</h3>
+          <dl>
+            <div><dt>Статус</dt><dd>{page.contentStatus ? contentStatusLabel(page.contentStatus) : "Не задан"}</dd></div>
+            <div><dt>H1</dt><dd>{page.h1 || "—"}</dd></div>
+            <div><dt>Язык</dt><dd>{page.language || "—"}</dd></div>
+          </dl>
+          {page.description && <p>{page.description}</p>}
+        </section>
+        <section>
+          <h3>Источники и даты</h3>
+          <dl>
+            <div><dt>Источники</dt><dd>{page.sources.map(({ source }) => sourceLabel(source)).join(", ") || "—"}</dd></div>
+            <div><dt>Обновлена</dt><dd>{formatPageDate(page.updatedAt)}</dd></div>
+            <div><dt>Crawl</dt><dd>{page.crawledAt ? formatPageDate(page.crawledAt) : "Не запускался"}</dd></div>
+          </dl>
+        </section>
+      </div>
+    </aside>
+  );
+}
+
+function formatPageDate(value: string): string {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? value
+    : new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(parsed);
 }
 
 function pagesUrl(

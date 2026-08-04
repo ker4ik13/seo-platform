@@ -9,7 +9,11 @@ import {
   Req,
   UseGuards
 } from "@nestjs/common";
-import type { ApiResponse, FrequencyCollectionSummary } from "@seo-platform/contracts";
+import type {
+  ApiResponse,
+  FrequencyCollectionSummary,
+  InternalFrequencyOperationScope
+} from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
 import {
   assertInternalContext,
@@ -70,6 +74,25 @@ export class FrequencyCollectionController {
     return response(
       request,
       await this.collections.get(
+        context.workspaceId,
+        context.projectId,
+        internalUuid(jobId, "jobId")
+      )
+    );
+  }
+
+  @Get(":jobId/result-scope")
+  public async resultScope(
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectId") projectId: string,
+    @Param("jobId") jobId: string,
+    @Headers() headers: HeadersRecord,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<InternalFrequencyOperationScope>> {
+    const context = routeContext(workspaceId, projectId, headers);
+    return response(
+      request,
+      await this.collections.resultScope(
         context.workspaceId,
         context.projectId,
         internalUuid(jobId, "jobId")

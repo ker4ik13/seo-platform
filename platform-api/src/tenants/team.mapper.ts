@@ -2,6 +2,7 @@ import {
   assignableWorkspaceRoleCodes,
   projectAccessLevels,
   type ProjectAccessAssignment,
+  type PendingWorkspaceInviteSummary,
   type WorkspaceInviteSummary,
   type WorkspaceMemberSummary
 } from "@seo-platform/contracts";
@@ -15,6 +16,14 @@ import type {
 type MemberWithRelations = WorkspaceMember & {
   readonly user: User;
   readonly projectAccesses: readonly ProjectMemberAccess[];
+};
+
+type InviteWithWorkspace = WorkspaceInvite & {
+  readonly workspace: {
+    readonly name: string;
+    readonly slug: string;
+    readonly status: string;
+  };
 };
 
 export function toWorkspaceMemberSummary(
@@ -68,6 +77,33 @@ export function toWorkspaceInviteSummary(
     ...(invite.message ? { message: invite.message } : {}),
     expiresAt: invite.expiresAt.toISOString(),
     createdAt: invite.createdAt.toISOString()
+  };
+}
+
+export function toPendingWorkspaceInviteSummary(
+  invite: InviteWithWorkspace
+): PendingWorkspaceInviteSummary {
+  const summary = toWorkspaceInviteSummary(invite);
+  if (
+    !["ACTIVE", "READ_ONLY", "SUSPENDED"].includes(invite.workspace.status)
+  ) {
+    throw new Error(
+      `Unsupported workspace status for pending invite: ${invite.workspace.status}`
+    );
+  }
+  return {
+    id: summary.id,
+    workspaceId: summary.workspaceId,
+    workspaceName: invite.workspace.name,
+    workspaceSlug: invite.workspace.slug,
+    workspaceStatus: invite.workspace
+      .status as PendingWorkspaceInviteSummary["workspaceStatus"],
+    roleCode: summary.roleCode,
+    allProjects: summary.allProjects,
+    projectAccesses: summary.projectAccesses,
+    ...(summary.message ? { message: summary.message } : {}),
+    expiresAt: summary.expiresAt,
+    createdAt: summary.createdAt
   };
 }
 

@@ -1,4 +1,5 @@
 import {
+  arsenkinWordstatKeywordLimit,
   semanticFrequencyDevices,
   semanticFrequencyTypes,
   type CreateFrequencyCollectionInput,
@@ -16,7 +17,11 @@ export function createFrequencyCollectionInput(
   value: unknown
 ): CreateFrequencyCollectionInput {
   const input = record(value, ["items", "types", "regionCode", "device"]);
-  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 200) {
+  if (
+    !Array.isArray(input.items) ||
+    input.items.length < 1 ||
+    input.items.length > arsenkinWordstatKeywordLimit
+  ) {
     invalid("items");
   }
   const items = input.items.map((value, index) => {
@@ -30,7 +35,11 @@ export function createFrequencyCollectionInput(
     return { id: item.id.toLowerCase(), version: Number(item.version) };
   });
   if (new Set(items.map(({ id }) => id)).size !== items.length) invalid("items");
-  if (!Array.isArray(input.types) || input.types.length < 1 || input.types.length > 3) {
+  if (
+    !Array.isArray(input.types) ||
+    input.types.length < 1 ||
+    input.types.length > semanticFrequencyTypes.length
+  ) {
     invalid("types");
   }
   const types = input.types.map((value): SemanticFrequencyType => {

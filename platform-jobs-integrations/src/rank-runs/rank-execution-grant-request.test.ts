@@ -71,6 +71,7 @@ test("rejects malformed binary evidence before building a request", () => {
 
 function facts(): RankExecutionGrantRequestFacts {
   return {
+    provider: "ARSENKIN",
     workspaceId: ids[0] as string,
     projectId: ids[1] as string,
     actorId: ids[2] as string,

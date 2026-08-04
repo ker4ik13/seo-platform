@@ -20,12 +20,13 @@ import type {
   RankEstimate
 } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { assertJobCapacity } from "../jobs/job-capacity.js";
 import { QueueService } from "../queue/queue.service.js";
 import {
   RANK_ESTIMATE_VALIDATION_FRESHNESS_MILLISECONDS,
-  RANK_ESTIMATE_POLICY_VERSION,
   credentialSnapshot,
   executionProjection,
+  rankProviderPolicyVersion,
   rankEstimateProjectDomainHash,
   verifiedRankEstimate,
   type CredentialSnapshot
@@ -95,6 +96,11 @@ export class RankRunService {
             assertReplay(transactionReplay, input, requestHash);
             return transactionReplay;
           }
+          await assertJobCapacity(
+            transaction,
+            input.workspaceId,
+            input.jobCapacity
+          );
 
           const estimate = await transaction.rankEstimate.findFirst({
             where: {
@@ -128,7 +134,9 @@ export class RankRunService {
           const currentProjection = await executionProjection(
             transaction,
             input.workspaceId,
-            input.projectId
+            input.projectId,
+            estimate.provider as "ARSENKIN" | "XMLSTOCK",
+            estimate.routeId ?? undefined
           );
           assertExecutionProjectionCurrent(
             estimate,
@@ -167,7 +175,8 @@ export class RankRunService {
               inputSnapshot: rankJobInputJson(input),
               scopeSnapshot: rankJobScopeJson(
                 input,
-                estimate.trackingContextId
+                estimate.trackingContextId,
+                verified.summary
               ),
               progressCurrent: 0n,
               progressTotal: BigInt(estimate.keywordCount),
@@ -175,7 +184,7 @@ export class RankRunService {
               estimatedCostMicro: 0n,
               currency: input.billingCurrency,
               credentialMode: "BYOK_API_KEY",
-              provider: "ARSENKIN",
+              provider: estimate.provider,
               maxAttempts: RANK_PREPARATION_MAX_ATTEMPTS,
               correlationId: boundedRequestId(requestId)
             }
@@ -458,7 +467,10 @@ function assertExecutableEstimate(
     !verified.summary.executionAllowed ||
     verified.summary.blockers.length !== 0 ||
     !verified.execution ||
-    stored.providerPolicyVersion !== RANK_ESTIMATE_POLICY_VERSION
+    !rankEstimatePolicyMatchesProvider(
+      stored.provider,
+      stored.providerPolicyVersion
+    )
   ) {
     throw rankJobConflict(
       "ESTIMATE_STALE",
@@ -491,6 +503,14 @@ function assertExecutableEstimate(
       "Current access does not allow a rank run"
     );
   }
+}
+
+export function rankEstimatePolicyMatchesProvider(
+  provider: string,
+  providerPolicyVersion: string
+): boolean {
+  if (provider !== "ARSENKIN" && provider !== "XMLSTOCK") return false;
+  return providerPolicyVersion === rankProviderPolicyVersion(provider);
 }
 
 export function assertExecutionProjectionCurrent(

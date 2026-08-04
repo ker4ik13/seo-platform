@@ -116,6 +116,7 @@ test("declares ranking read and configure permission boundaries", () => {
     prototype.update,
     prototype.archive,
     prototype.restore,
+    prototype.replaceKeywords,
     prototype.assignKeyword,
     prototype.removeKeyword
   ]) {
@@ -382,6 +383,67 @@ test("lists and changes point keyword assignments without bulk ambiguity", async
         keywordId
       ],
       ["ranking.tracking_context.keyword_removed", keywordId]
+    ]
+  );
+});
+
+test("atomically replaces keyword assignments with CAS, idempotency and one audit pair", async () => {
+  const calls: readonly unknown[][] = [];
+  const mutableCalls = calls as unknown[][];
+  const records: AuditRecord[] = [];
+  const controller = controllerWith(
+    {
+      replaceTrackingContextKeywords: async (...args: unknown[]) => {
+        mutableCalls.push(args);
+        return {
+          contextId,
+          assignedKeywordCount: 1,
+          addedKeywordCount: 1,
+          removedKeywordCount: 0,
+          unchangedKeywordCount: 0,
+          keywordSetHash: {
+            algorithm: "SHA_256",
+            value: "a".repeat(64)
+          },
+          version: 2,
+          changedAt: "2026-07-29T10:05:00.000Z"
+        };
+      }
+    },
+    records
+  );
+  const response = reply();
+
+  const result = await controller.replaceKeywords(
+    contextId,
+    { keywordIds: [keywordId] },
+    tenantRequest({
+      headers: {
+        "if-match": "\"v1\"",
+        "idempotency-key": "replace-keywords-001"
+      }
+    }),
+    response.value,
+    principal
+  );
+
+  assert.equal(result.data.assignedKeywordCount, 1);
+  assert.equal(result.meta.version, 2);
+  assert.equal(response.headers.get("etag"), "\"v2\"");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]?.[1], contextId);
+  assert.deepEqual(calls[0]?.[2], { keywordIds: [keywordId] });
+  assert.equal(calls[0]?.[3], 1);
+  assert.equal(calls[0]?.[4], "replace-keywords-001");
+  assert.deepEqual(calls[0]?.[5], entitlement);
+  assert.deepEqual(
+    records.map(({ action, resourceId }) => [action, resourceId]),
+    [
+      [
+        "ranking.tracking_context.keywords_replace_requested",
+        contextId
+      ],
+      ["ranking.tracking_context.keywords_replaced", contextId]
     ]
   );
 });

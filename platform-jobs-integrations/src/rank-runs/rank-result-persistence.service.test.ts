@@ -182,7 +182,7 @@ function claim(): RankResultPersistenceClaim {
         hashSchemaVersion: "rank-manifest-chunk@1",
         chunkHash: chunk.chunkHash
       },
-      executionConnectorVersion: "arsenkin-positions@1.0.0",
+      executionConnectorVersion: "arsenkin-positions@2.0.0",
       providerPolicyVersion: "rank-estimate@1",
       keywords: [
         {
@@ -198,7 +198,7 @@ function claim(): RankResultPersistenceClaim {
     staged: {
       schemaVersion: "arsenkin-rank-result@1",
       providerRequestId: "task-3944",
-      connectorVersion: "arsenkin-positions@1.0.0",
+      connectorVersion: "arsenkin-positions@2.0.0",
       observedAt: "2026-07-30T12:00:00.000Z",
       results: [
         {

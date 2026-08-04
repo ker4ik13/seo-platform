@@ -1,4 +1,10 @@
 import {
+  connectorRoutingScopes,
+  legacyRankManifestChunkSize,
+  legacyRankProviderKeywordLimit,
+  rankManifestSingleTaskChunkSize,
+  rankProviderKeywordLimit,
+  rankProviderOverflowCount,
   rankEstimateBlockerCodes,
   type RankEstimate,
   type RankEstimateBlocker,
@@ -15,7 +21,7 @@ const DECIMAL_PATTERN = /^(?:0|[1-9][0-9]*)$/u;
 const CURRENCY_PATTERN = /^[A-Z]{3}$/u;
 const POLICY_VERSION_PATTERN = /^[a-z0-9][a-z0-9@._-]{0,63}$/u;
 const BLOCKER_CODES = new Set<string>(rankEstimateBlockerCodes);
-const MAX_SCOPE_COUNT = 1_001n;
+const MAX_SCOPE_COUNT = BigInt(rankProviderOverflowCount);
 const TTL_MILLISECONDS = 5 * 60 * 1_000;
 
 /** Maps only the redacted estimate owned by Jobs into the trusted project scope. */
@@ -32,6 +38,8 @@ export function scopedRankEstimate(
     "trackingContextId",
     "status",
     "provider",
+    "routingScope",
+    "connectorAttempts",
     "operation",
     "credentialMode",
     "scope",
@@ -53,8 +61,17 @@ export function scopedRankEstimate(
   const responseWorkspaceId = uuid(estimate.workspaceId);
   const responseProjectId = uuid(estimate.projectId);
   const responseContextId = uuid(estimate.trackingContextId);
+  const provider =
+    estimate.provider === "ARSENKIN" || estimate.provider === "XMLSTOCK"
+      ? estimate.provider
+      : undefined;
   const scope = scopeSummary(estimate.scope);
-  const workload = providerWorkload(estimate.workload, scope.keywordCount);
+  if (!provider) throw invalidResponse();
+  const workload = providerWorkload(
+    estimate.workload,
+    scope.keywordCount,
+    provider
+  );
   const blockers = blockerList(estimate.blockers);
   const calculatedAt = isoDate(estimate.calculatedAt);
   const expiresAt = isoDate(estimate.expiresAt);
@@ -64,7 +81,7 @@ export function scopedRankEstimate(
     responseProjectId !== projectId ||
     responseContextId !== trackingContextId ||
     !["READY", "BLOCKED"].includes(String(estimate.status)) ||
-    estimate.provider !== "ARSENKIN" ||
+    provider === undefined ||
     estimate.operation !== "POSITIONS" ||
     estimate.credentialMode !== "BYOK_API_KEY" ||
     exactStatus(estimate.providerLimits) !== "NOT_AVAILABLE" ||
@@ -96,7 +113,13 @@ export function scopedRankEstimate(
     projectId: responseProjectId,
     trackingContextId: responseContextId,
     status: estimate.status as RankEstimate["status"],
-    provider: "ARSENKIN",
+    provider,
+    ...(estimate.routingScope === undefined
+      ? {}
+      : {
+          routingScope: member(estimate.routingScope, connectorRoutingScopes),
+          connectorAttempts: connectorAttempts(estimate.connectorAttempts)
+        }),
     operation: "POSITIONS",
     credentialMode: "BYOK_API_KEY",
     scope,
@@ -116,6 +139,36 @@ export function scopedRankEstimate(
     calculatedAt,
     expiresAt
   };
+}
+
+function connectorAttempts(value: unknown): NonNullable<RankEstimate["connectorAttempts"]> {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8) {
+    throw invalidResponse();
+  }
+  return value.map((candidate, index) => {
+    const input = exactRecord(candidate, [
+      "sequence",
+      "provider",
+      "routingScope",
+      "outcome",
+      "reasonCode",
+      "occurredAt"
+    ]);
+    if (input.sequence !== index + 1) throw invalidResponse();
+    const reasonCode = input.reasonCode;
+    if (
+      reasonCode !== undefined &&
+      (typeof reasonCode !== "string" || !/^[A-Z][A-Z0-9_]{0,63}$/u.test(reasonCode))
+    ) throw invalidResponse();
+    return {
+      sequence: index + 1,
+      provider: member(input.provider, ["XMLSTOCK", "ARSENKIN", "KEYS_SO"] as const),
+      routingScope: member(input.routingScope, connectorRoutingScopes),
+      outcome: member(input.outcome, ["SELECTED", "SUCCEEDED", "FALLBACK", "FAILED"] as const),
+      ...(reasonCode === undefined ? {} : { reasonCode }),
+      occurredAt: isoDate(input.occurredAt)
+    };
+  });
 }
 
 function scopeSummary(value: unknown): RankEstimate["scope"] {
@@ -152,7 +205,8 @@ function scopeSummary(value: unknown): RankEstimate["scope"] {
 
 function providerWorkload(
   value: unknown,
-  keywordCount: string
+  keywordCount: string,
+  provider: "ARSENKIN" | "XMLSTOCK"
 ): RankEstimate["workload"] {
   const workload = exactRecord(value, [
     "taskCount",
@@ -166,26 +220,81 @@ function providerWorkload(
     "fallbackMode"
   ]);
   const taskCount = boundedCount(workload.taskCount);
-  const minimumRequestCount = boundedCount(
-    workload.minimumRequestCount
-  );
+  const minimumRequestCount = boundedRequestCount(workload.minimumRequestCount);
   const keywordCountValue = BigInt(keywordCount);
-  const expectedTasks =
-    keywordCountValue > 1_000n
+  const legacyWorkload =
+    workload.keywordLimitPerTask === String(legacyRankManifestChunkSize) &&
+    workload.keywordLimitPerCommand === String(legacyRankProviderKeywordLimit);
+  const currentWorkload =
+    workload.keywordLimitPerTask === String(rankManifestSingleTaskChunkSize) &&
+    workload.keywordLimitPerCommand === String(rankProviderKeywordLimit);
+  const expectedTasks = legacyWorkload
+    ? keywordCountValue > BigInt(legacyRankProviderKeywordLimit)
       ? 0n
-      : (keywordCountValue + 249n) / 250n;
+      : (keywordCountValue + BigInt(legacyRankManifestChunkSize - 1)) /
+        BigInt(legacyRankManifestChunkSize)
+    : currentWorkload
+      ? keywordCountValue > BigInt(rankProviderKeywordLimit)
+        ? 0n
+        : keywordCountValue === 0n
+          ? 0n
+          : 1n
+      : -1n;
+  const xmlStockWorkload =
+    workload.keywordLimitPerTask === "1" &&
+    workload.keywordLimitPerCommand === String(rankProviderKeywordLimit);
+  const xmlStockTasks =
+    keywordCountValue > BigInt(rankProviderKeywordLimit)
+      ? 0n
+      : keywordCountValue;
   const requestStages = workload.requestStages;
+  const arsenkinStages =
+    Array.isArray(requestStages) &&
+    requestStages.length === 3 &&
+    requestStages[0] === "SET" &&
+    requestStages[1] === "CHECK" &&
+    requestStages[2] === "GET";
+  const xmlStockYandexStages =
+    Array.isArray(requestStages) &&
+    requestStages.length === 2 &&
+    requestStages[0] === "SUBMIT" &&
+    requestStages[1] === "POLL";
+  const xmlStockGoogleStages =
+    Array.isArray(requestStages) &&
+    requestStages.length === 1 &&
+    requestStages[0] === "GET";
+  const xmlStockGooglePageCount =
+    xmlStockTasks === 0n
+      ? BigInt(minimumRequestCount) === 0n
+        ? 0n
+        : -1n
+      : BigInt(minimumRequestCount) % xmlStockTasks === 0n
+        ? BigInt(minimumRequestCount) / xmlStockTasks
+        : -1n;
+  const validArsenkin =
+    provider === "ARSENKIN" &&
+    (legacyWorkload || currentWorkload) &&
+    BigInt(taskCount) === expectedTasks &&
+    BigInt(minimumRequestCount) === expectedTasks * 3n &&
+    arsenkinStages;
+  const validXmlStock =
+    provider === "XMLSTOCK" &&
+    xmlStockWorkload &&
+    BigInt(taskCount) === xmlStockTasks &&
+    ((xmlStockYandexStages &&
+      BigInt(minimumRequestCount) === xmlStockTasks * 2n) ||
+      (xmlStockGoogleStages &&
+        (xmlStockTasks === 0n ||
+          [3n, 5n, 10n].includes(xmlStockGooglePageCount))));
+  const normalizedRequestStages: RankEstimate["workload"]["requestStages"] =
+    arsenkinStages
+      ? ["SET", "CHECK", "GET"]
+      : xmlStockYandexStages
+        ? ["SUBMIT", "POLL"]
+        : ["GET"];
   if (
-    BigInt(taskCount) !== expectedTasks ||
-    BigInt(minimumRequestCount) !== expectedTasks * 3n ||
+    (!validArsenkin && !validXmlStock) ||
     exactStatus(workload.pollingRequestCount) !== "NOT_AVAILABLE" ||
-    !Array.isArray(requestStages) ||
-    requestStages.length !== 3 ||
-    requestStages[0] !== "SET" ||
-    requestStages[1] !== "CHECK" ||
-    requestStages[2] !== "GET" ||
-    workload.keywordLimitPerTask !== "250" ||
-    workload.keywordLimitPerCommand !== "1000" ||
     workload.format !== "SIMPLE" ||
     workload.rawSerp !== false ||
     workload.fallbackMode !== "NONE"
@@ -196,9 +305,14 @@ function providerWorkload(
     taskCount,
     minimumRequestCount,
     pollingRequestCount: { status: "NOT_AVAILABLE" },
-    requestStages: ["SET", "CHECK", "GET"],
-    keywordLimitPerTask: "250",
-    keywordLimitPerCommand: "1000",
+    requestStages: normalizedRequestStages,
+    keywordLimitPerTask: workload.keywordLimitPerTask as
+      | "1"
+      | "250"
+      | "15000",
+    keywordLimitPerCommand: workload.keywordLimitPerCommand as
+      | "1000"
+      | "15000",
     format: "SIMPLE",
     rawSerp: false,
     fallbackMode: "NONE"
@@ -366,6 +480,14 @@ function boundedCount(value: unknown): string {
   return result;
 }
 
+function boundedRequestCount(value: unknown): string {
+  const result = decimal(value);
+  if (BigInt(result) > BigInt(rankProviderKeywordLimit * 10)) {
+    throw invalidResponse();
+  }
+  return result;
+}
+
 function decimal(value: unknown): string {
   if (typeof value !== "string" || !DECIMAL_PATTERN.test(value)) {
     throw invalidResponse();
@@ -400,6 +522,16 @@ function record(value: unknown): Readonly<Record<string, unknown>> {
     throw invalidResponse();
   }
   return value as Readonly<Record<string, unknown>>;
+}
+
+function member<const Values extends readonly string[]>(
+  value: unknown,
+  values: Values
+): Values[number] {
+  if (typeof value !== "string" || !values.includes(value)) {
+    throw invalidResponse();
+  }
+  return value as Values[number];
 }
 
 function exactRecord(

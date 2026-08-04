@@ -1,5 +1,9 @@
 import { Inject, Injectable } from "@nestjs/common";
 import {
+  connectorFallbackModes,
+  connectorFallbackReasons,
+  connectorRoutingScopes,
+  type ConnectorFallbackReason,
   integrationCapabilities,
   integrationCredentialModes,
   integrationCredentialStatuses,
@@ -87,7 +91,14 @@ import type {
   InternalCreateFrequencyCollectionInput,
   InternalCancelFrequencyCollectionInput,
   InternalRetryFrequencyCollectionInput,
-  FrequencyCollectionSummary
+  FrequencyCollectionSummary,
+  InternalFrequencyOperationScope,
+  IntegrationCapability,
+  InternalUpsertWorkspaceConnectorBindingInput,
+  UpsertWorkspaceConnectorBindingInput,
+  WorkspaceConnectorBinding,
+  WorkspaceConnectorRoute,
+  WorkspaceConnectorRoutingSettings
 } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
@@ -108,7 +119,10 @@ import {
   scopedCrawlAutomationRuns
 } from "./crawl-automation-response.js";
 import { scopedKeywordResearchRun } from "./keyword-research-response.js";
-import { scopedFrequencyCollection } from "./frequency-collection-response.js";
+import {
+  scopedFrequencyCollection,
+  scopedFrequencyOperationScope
+} from "./frequency-collection-response.js";
 
 interface InternalContext {
   readonly tenant: TenantAuthorization;
@@ -120,6 +134,7 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const CONNECTOR_VERSION_PATTERN = /^[a-z0-9][a-z0-9@._-]{0,31}$/u;
 const PROVIDER_ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,99}$/u;
+const NON_NEGATIVE_MONEY_PATTERN = /^(?:0|[1-9][0-9]*)(?:\.[0-9]{1,2})?$/u;
 const CAPABILITIES = new Set<string>(integrationCapabilities);
 const CREDENTIAL_MODES = new Set<string>(integrationCredentialModes);
 const CREDENTIAL_STATUSES = new Set<string>(
@@ -138,6 +153,9 @@ const PROJECT_BINDING_AVAILABILITIES = new Set<string>(
 const PROJECT_ROUTE_SOURCE_KINDS = new Set<string>(
   projectConnectorRouteSourceKinds
 );
+const CONNECTOR_FALLBACK_MODES = new Set<string>(connectorFallbackModes);
+const CONNECTOR_FALLBACK_REASONS = new Set<string>(connectorFallbackReasons);
+const CONNECTOR_ROUTING_SCOPES = new Set<string>(connectorRoutingScopes);
 const MAX_PROJECT_BINDINGS = integrationCapabilities.length;
 const MAX_PROJECT_CREDENTIAL_OPTIONS = 500;
 /**
@@ -241,7 +259,8 @@ export class JobsClient {
   public async createFrequencyCollection(
     context: InternalContext,
     input: CreateFrequencyCollectionInput,
-    idempotencyKey: string
+    idempotencyKey: string,
+    jobCapacity: InternalCreateFrequencyCollectionInput["jobCapacity"]
   ): Promise<FrequencyCollectionSummary> {
     const projectId = requiredProjectId(context.tenant);
     const body: InternalCreateFrequencyCollectionInput = {
@@ -250,7 +269,8 @@ export class JobsClient {
       projectId,
       actorId: context.actorId,
       idempotencyKey,
-      correlationId: context.requestId
+      correlationId: context.requestId,
+      jobCapacity
     };
     const value = await this.request<unknown>(
       "POST",
@@ -278,6 +298,27 @@ export class JobsClient {
       context
     );
     return scopedFrequencyCollection(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      jobId
+    );
+  }
+
+  public async getFrequencyOperationScope(
+    context: InternalContext,
+    jobId: string
+  ): Promise<InternalFrequencyOperationScope> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      `${frequencyCollectionPath(
+        context.tenant.workspaceId,
+        projectId
+      )}/${encodeURIComponent(jobId)}/result-scope`,
+      context
+    );
+    return scopedFrequencyOperationScope(
       value,
       context.tenant.workspaceId,
       projectId,
@@ -340,7 +381,8 @@ export class JobsClient {
   public async createKeywordResearchRun(
     context: InternalContext,
     input: CreateKeywordResearchRunInput,
-    idempotencyKey: string
+    idempotencyKey: string,
+    jobCapacity: InternalCreateKeywordResearchRunInput["jobCapacity"]
   ): Promise<KeywordResearchRunSummary> {
     const projectId = requiredProjectId(context.tenant);
     const body: InternalCreateKeywordResearchRunInput = {
@@ -349,7 +391,8 @@ export class JobsClient {
       projectId,
       actorId: context.actorId,
       idempotencyKey,
-      correlationId: context.requestId
+      correlationId: context.requestId,
+      jobCapacity
     };
     const value = await this.request<unknown>(
       "POST",
@@ -452,7 +495,8 @@ export class JobsClient {
   public async createTechnicalCrawl(
     context: InternalContext,
     input: CreateTechnicalCrawlInput,
-    idempotencyKey: string
+    idempotencyKey: string,
+    jobCapacity: InternalCreateTechnicalCrawlInput["jobCapacity"]
   ): Promise<TechnicalCrawlSummary> {
     const projectId = requiredProjectId(context.tenant);
     const body: InternalCreateTechnicalCrawlInput = {
@@ -462,7 +506,8 @@ export class JobsClient {
       projectId,
       actorId: context.actorId,
       idempotencyKey,
-      correlationId: context.requestId
+      correlationId: context.requestId,
+      jobCapacity
     };
     const value = await this.request<unknown>(
       "POST",
@@ -856,14 +901,16 @@ export class JobsClient {
   public createSemanticImport(
     context: InternalContext,
     input: CreateSemanticImportInput,
-    idempotencyKey: string
+    idempotencyKey: string,
+    jobCapacity: InternalCreateSemanticImportInput["jobCapacity"]
   ): Promise<SemanticImportSummary> {
     const body: InternalCreateSemanticImportInput = {
       ...input,
       workspaceId: context.tenant.workspaceId,
       projectId: requiredProjectId(context.tenant),
       actorId: context.actorId,
-      idempotencyKey
+      idempotencyKey,
+      jobCapacity
     };
     return this.request("POST", "/internal/v1/imports", context, body);
   }
@@ -959,6 +1006,40 @@ export class JobsClient {
       context
     );
     return credentialCollection(value);
+  }
+
+  public async workspaceConnectorRouting(
+    context: InternalContext
+  ): Promise<WorkspaceConnectorRoutingSettings> {
+    const value = await this.requestIntegration<unknown>(
+      "GET",
+      workspaceIntegrationRoutingPath(context),
+      context
+    );
+    return workspaceConnectorRoutingSettings(
+      value,
+      context.tenant.workspaceId
+    );
+  }
+
+  public async upsertWorkspaceConnectorBinding(
+    context: InternalContext,
+    capability: IntegrationCapability,
+    input: UpsertWorkspaceConnectorBindingInput
+  ): Promise<WorkspaceConnectorBinding> {
+    const body: InternalUpsertWorkspaceConnectorBindingInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      capability,
+      actorId: context.actorId
+    };
+    const value = await this.requestIntegration<unknown>(
+      "PUT",
+      `${workspaceIntegrationRoutingPath(context)}/${encodeURIComponent(capability)}`,
+      context,
+      body
+    );
+    return workspaceConnectorBinding(value, context.tenant.workspaceId, capability);
   }
 
   public async createIntegrationCredential(
@@ -1156,6 +1237,34 @@ export class JobsClient {
     );
   }
 
+  public async inheritProjectConnectorBinding(
+    context: InternalContext,
+    bindingId: string,
+    version: number
+  ): Promise<ProjectConnectorBinding> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.requestIntegration<unknown>(
+      "POST",
+      `${projectIntegrationPath(
+        context,
+        projectId
+      )}/${encodeURIComponent(bindingId)}/inherit`,
+      context,
+      {
+        workspaceId: context.tenant.workspaceId,
+        projectId,
+        actorId: context.actorId,
+        version
+      }
+    );
+    return scopedProjectConnectorBinding(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      bindingId
+    );
+  }
+
   public async createRankEstimate(
     context: InternalContext,
     input: InternalCreateRankEstimateInput,
@@ -1208,7 +1317,7 @@ export class JobsClient {
     context: InternalContext
   ): Promise<readonly RankJobSummary[]> {
     const projectId = requiredProjectId(context.tenant);
-    const value = await this.request<unknown>(
+    const value = await this.requestIntegration<unknown>(
       "GET",
       rankRunCollectionPath(context.tenant.workspaceId, projectId),
       context
@@ -1278,7 +1387,7 @@ export class JobsClient {
   }
 
   private requestIntegration<Data>(
-    method: "GET" | "POST" | "PATCH" | "DELETE",
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     path: string,
     context: InternalContext,
     body?: unknown,
@@ -1295,7 +1404,7 @@ export class JobsClient {
   }
 
   private async request<Data>(
-    method: "GET" | "POST" | "PATCH" | "DELETE",
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     path: string,
     context: InternalContext,
     body?: unknown,
@@ -1410,6 +1519,14 @@ function integrationPath(
   return `/internal/v1/workspaces/${encodeURIComponent(
     context.tenant.workspaceId
   )}/integrations/${suffix}`;
+}
+
+function workspaceIntegrationRoutingPath(
+  context: InternalContext
+): string {
+  return `/internal/v1/workspaces/${encodeURIComponent(
+    context.tenant.workspaceId
+  )}/integration-routing`;
 }
 
 function projectIntegrationPath(
@@ -2004,17 +2121,19 @@ function projectConnectorBindingsAggregate(
     credentialOptions.map((credential) => [credential.id, credential])
   );
   for (const binding of bindings) {
-    const credential = credentialsById.get(binding.route.credentialId);
-    if (
-      credential &&
-      (credential.provider !== binding.route.provider ||
-        credential.mode !== binding.route.credentialMode)
-    ) {
-      throw invalidJobsResponse();
+    for (const route of binding.routes ?? [binding.route]) {
+      const credential = credentialsById.get(route.credentialId);
+      if (
+        credential &&
+        (credential.provider !== route.provider ||
+          credential.mode !== route.credentialMode)
+      ) {
+        throw invalidJobsResponse();
+      }
     }
     if (
       binding.availability !==
-      expectedProjectBindingAvailability(binding, credential)
+      expectedProjectBindingAvailability(binding, credentialsById)
     ) {
       throw invalidJobsResponse();
     }
@@ -2026,11 +2145,172 @@ function projectConnectorBindingsAggregate(
   };
 }
 
+function workspaceConnectorRoutingSettings(
+  value: unknown,
+  workspaceId: string
+): WorkspaceConnectorRoutingSettings {
+  const input = exactRecord(value, [
+    "bindings",
+    "credentialOptions",
+    "credentialOptionsTruncated",
+    "access"
+  ]);
+  if (
+    !Array.isArray(input.bindings) ||
+    input.bindings.length > integrationCapabilities.length ||
+    !Array.isArray(input.credentialOptions) ||
+    input.credentialOptions.length > MAX_PROJECT_CREDENTIAL_OPTIONS ||
+    typeof input.credentialOptionsTruncated !== "boolean"
+  ) {
+    throw invalidJobsResponse();
+  }
+  const access = exactRecord(input.access, [
+    "canUpdateBindings",
+    "canManageFallback"
+  ]);
+  if (
+    typeof access.canUpdateBindings !== "boolean" ||
+    typeof access.canManageFallback !== "boolean"
+  ) {
+    throw invalidJobsResponse();
+  }
+  const bindings = input.bindings.map((binding) =>
+    workspaceConnectorBinding(binding, workspaceId)
+  );
+  const credentialOptions = input.credentialOptions.map((credential) =>
+    projectConnectorCredentialOption(credential, workspaceId)
+  );
+  assertUnique(
+    bindings.map(({ id }) => id),
+    bindings.map(({ capability }) => capability),
+    credentialOptions.map(({ id }) => id)
+  );
+  return {
+    bindings,
+    credentialOptions,
+    credentialOptionsTruncated: input.credentialOptionsTruncated,
+    access: {
+      canUpdateBindings: access.canUpdateBindings,
+      canManageFallback: access.canManageFallback
+    }
+  };
+}
+
+function workspaceConnectorBinding(
+  value: unknown,
+  workspaceId: string,
+  expectedCapability?: IntegrationCapability
+): WorkspaceConnectorBinding {
+  const input = exactRecord(value, [
+    "id",
+    "workspaceId",
+    "capability",
+    "enabled",
+    "routes",
+    "fallbackPolicy",
+    "version",
+    "createdBy",
+    "updatedBy",
+    "createdAt",
+    "updatedAt"
+  ]);
+  const responseWorkspaceId = uuidValue(input.workspaceId);
+  const id = uuidValue(input.id);
+  const capability = capabilityValue(input.capability);
+  if (
+    responseWorkspaceId !== workspaceId ||
+    (expectedCapability !== undefined && capability !== expectedCapability) ||
+    typeof input.enabled !== "boolean" ||
+    !Array.isArray(input.routes) ||
+    input.routes.length < 1 ||
+    input.routes.length > 8
+  ) {
+    throw invalidJobsResponse();
+  }
+  const routes = input.routes.map((route, index) => {
+    const parsed = workspaceConnectorRoute(route, workspaceId, id);
+    if (parsed.position !== index) throw invalidJobsResponse();
+    return parsed;
+  });
+  if (new Set(routes.map(({ credentialId }) => credentialId)).size !== routes.length) {
+    throw invalidJobsResponse();
+  }
+  return {
+    id,
+    workspaceId,
+    capability,
+    enabled: input.enabled,
+    routes,
+    fallbackPolicy: projectFallbackPolicy(input.fallbackPolicy),
+    version: positiveInteger(input.version),
+    createdBy: uuidValue(input.createdBy),
+    updatedBy: uuidValue(input.updatedBy),
+    createdAt: isoDateValue(input.createdAt),
+    updatedAt: isoDateValue(input.updatedAt)
+  };
+}
+
+function workspaceConnectorRoute(
+  value: unknown,
+  workspaceId: string,
+  bindingId: string
+): WorkspaceConnectorRoute {
+  const input = exactRecord(value, [
+    "id",
+    "bindingId",
+    "workspaceId",
+    "position",
+    "credentialId",
+    "provider",
+    "credentialMode",
+    "availability",
+    "createdAt",
+    "updatedAt"
+  ]);
+  if (
+    uuidValue(input.workspaceId) !== workspaceId ||
+    uuidValue(input.bindingId) !== bindingId ||
+    !Number.isSafeInteger(input.position) ||
+    Number(input.position) < 0 ||
+    Number(input.position) > 7
+  ) {
+    throw invalidJobsResponse();
+  }
+  return {
+    id: uuidValue(input.id),
+    bindingId,
+    workspaceId,
+    position: Number(input.position),
+    credentialId: uuidValue(input.credentialId),
+    provider: providerValue(input.provider),
+    credentialMode: credentialModeValue(input.credentialMode),
+    availability: projectBindingAvailabilityValue(input.availability),
+    createdAt: isoDateValue(input.createdAt),
+    updatedAt: isoDateValue(input.updatedAt)
+  };
+}
+
 function expectedProjectBindingAvailability(
   binding: ProjectConnectorBinding,
-  credential: ProjectConnectorCredentialOption | undefined
+  credentials: ReadonlyMap<string, ProjectConnectorCredentialOption>
 ): ProjectConnectorBinding["availability"] {
   if (!binding.enabled) return "DISABLED";
+  const routes = binding.routes ?? [binding.route];
+  const values = routes.map((route) => routeAvailability(
+    binding.capability,
+    credentials.get(route.credentialId)
+  ));
+  const primary = values[0] ?? "CREDENTIAL_UNAVAILABLE";
+  if (primary === "READY" || binding.fallbackPolicy.mode === "NONE") {
+    return primary;
+  }
+  return values.slice(1).includes("READY") ? "READY" : primary;
+}
+
+function routeAvailability(
+  capability: ProjectConnectorBinding["capability"],
+  credential: ProjectConnectorCredentialOption | undefined
+): ProjectConnectorBinding["availability"] {
   if (!credential) return "CREDENTIAL_UNAVAILABLE";
   if (credential.status === "PENDING_VERIFICATION") {
     return "CREDENTIAL_PENDING";
@@ -2041,7 +2321,7 @@ function expectedProjectBindingAvailability(
   ) {
     return "CREDENTIAL_UNAVAILABLE";
   }
-  return credential.capabilities.includes(binding.capability)
+  return credential.capabilities.includes(capability)
     ? "READY"
     : "CAPABILITY_MISMATCH";
 }
@@ -2052,13 +2332,20 @@ function scopedProjectConnectorBinding(
   projectId: string,
   bindingId?: string
 ): ProjectConnectorBinding {
+  const rawBinding = unknownRecord(value);
+  const hasRoutes = rawBinding !== undefined && "routes" in rawBinding;
+  const hasConfigurationScope = rawBinding !== undefined && "configurationScope" in rawBinding;
+  const hasWorkspaceBindingId = rawBinding !== undefined && "workspaceBindingId" in rawBinding;
   const input = exactRecord(value, [
     "id",
     "workspaceId",
     "projectId",
     "capability",
     "enabled",
+    ...(hasConfigurationScope ? ["configurationScope"] : []),
+    ...(hasWorkspaceBindingId ? ["workspaceBindingId"] : []),
     "route",
+    ...(hasRoutes ? ["routes"] : []),
     "fallbackPolicy",
     "budgetPolicy",
     "availability",
@@ -2081,6 +2368,23 @@ function scopedProjectConnectorBinding(
     responseProjectId,
     id
   );
+  const routeValues = hasRoutes ? input.routes : [input.route];
+  if (!Array.isArray(routeValues) || routeValues.length < 1 || routeValues.length > 8) {
+    throw invalidJobsResponse();
+  }
+  const routes = routeValues.map((candidate, index) => {
+    const parsed = projectConnectorRoute(
+      candidate,
+      responseWorkspaceId,
+      responseProjectId,
+      id
+    );
+    if (parsed.position !== index) throw invalidJobsResponse();
+    return parsed;
+  });
+  if (routes[0]?.id !== route.id || new Set(routes.map(({ credentialId }) => credentialId)).size !== routes.length) {
+    throw invalidJobsResponse();
+  }
   const version = positiveInteger(input.version);
   const createdBy = uuidValue(input.createdBy);
   const updatedBy = uuidValue(input.updatedBy);
@@ -2094,13 +2398,34 @@ function scopedProjectConnectorBinding(
   ) {
     throw invalidJobsResponse();
   }
+  const configurationScope = hasConfigurationScope
+    ? input.configurationScope
+    : "PROJECT_OVERRIDE";
+  if (
+    configurationScope !== "PROJECT_OVERRIDE" &&
+    configurationScope !== "WORKSPACE_INHERITED"
+  ) {
+    throw invalidJobsResponse();
+  }
+  const workspaceBindingId = hasWorkspaceBindingId
+    ? uuidValue(input.workspaceBindingId)
+    : undefined;
+  if (
+    (configurationScope === "PROJECT_OVERRIDE" && workspaceBindingId !== undefined) ||
+    (configurationScope === "WORKSPACE_INHERITED" && workspaceBindingId === undefined)
+  ) {
+    throw invalidJobsResponse();
+  }
   return {
     id,
     workspaceId: responseWorkspaceId,
     projectId: responseProjectId,
     capability,
     enabled: input.enabled,
+    configurationScope,
+    ...(workspaceBindingId ? { workspaceBindingId } : {}),
     route,
+    routes,
     fallbackPolicy: projectFallbackPolicy(input.fallbackPolicy),
     budgetPolicy: projectBudgetPolicy(input.budgetPolicy),
     availability,
@@ -2118,6 +2443,9 @@ function projectConnectorRoute(
   projectId: string,
   bindingId: string
 ): ProjectConnectorRoute {
+  const rawRoute = unknownRecord(value);
+  const hasRoutingScope = rawRoute !== undefined && "routingScope" in rawRoute;
+  const hasWorkspaceRouteId = rawRoute !== undefined && "workspaceRouteId" in rawRoute;
   const input = exactRecord(value, [
     "id",
     "bindingId",
@@ -2128,6 +2456,8 @@ function projectConnectorRoute(
     "credentialId",
     "provider",
     "credentialMode",
+    ...(hasRoutingScope ? ["routingScope"] : []),
+    ...(hasWorkspaceRouteId ? ["workspaceRouteId"] : []),
     "createdAt",
     "updatedAt"
   ]);
@@ -2140,20 +2470,30 @@ function projectConnectorRoute(
     routeWorkspaceId !== workspaceId ||
     routeProjectId !== projectId ||
     routeBindingId !== bindingId ||
-    input.position !== 0
+    !Number.isSafeInteger(input.position) ||
+    Number(input.position) < 0 ||
+    Number(input.position) > 7
   ) {
     throw invalidJobsResponse();
   }
+  const routingScope = hasRoutingScope
+    ? connectorRoutingScopeValue(input.routingScope)
+    : undefined;
+  const workspaceRouteId = hasWorkspaceRouteId
+    ? uuidValue(input.workspaceRouteId)
+    : undefined;
   return {
     id: uuidValue(input.id),
     bindingId: routeBindingId,
     workspaceId: routeWorkspaceId,
     projectId: routeProjectId,
-    position: 0,
+    position: Number(input.position),
     sourceKind,
     credentialId: uuidValue(input.credentialId),
     provider: providerValue(input.provider),
     credentialMode,
+    ...(routingScope ? { routingScope } : {}),
+    ...(workspaceRouteId ? { workspaceRouteId } : {}),
     createdAt: isoDateValue(input.createdAt),
     updatedAt: isoDateValue(input.updatedAt)
   };
@@ -2163,6 +2503,8 @@ function projectConnectorCredentialOption(
   value: unknown,
   workspaceId: string
 ): ProjectConnectorCredentialOption {
+  const rawOption = unknownRecord(value);
+  const hasQuota = rawOption !== undefined && "quota" in rawOption;
   const input = exactRecord(value, [
     "id",
     "workspaceId",
@@ -2170,7 +2512,8 @@ function projectConnectorCredentialOption(
     "label",
     "mode",
     "status",
-    "capabilities"
+    "capabilities",
+    ...(hasQuota ? ["quota"] : [])
   ]);
   const responseWorkspaceId = uuidValue(input.workspaceId);
   const capabilities = stringArray(input.capabilities);
@@ -2186,6 +2529,9 @@ function projectConnectorCredentialOption(
   ) {
     throw invalidJobsResponse();
   }
+  const quota = hasQuota
+    ? credentialQuotaSummary(input.quota)
+    : undefined;
   return {
     id: uuidValue(input.id),
     workspaceId: responseWorkspaceId,
@@ -2194,16 +2540,32 @@ function projectConnectorCredentialOption(
     mode: credentialModeValue(input.mode),
     status: credentialStatusValue(input.status),
     capabilities:
-      capabilities as ProjectConnectorCredentialOption["capabilities"]
+      capabilities as ProjectConnectorCredentialOption["capabilities"],
+    ...(quota ? { quota } : {})
   };
 }
 
 function projectFallbackPolicy(
   value: unknown
 ): ProjectConnectorFallbackPolicy {
-  const input = exactRecord(value, ["mode"]);
-  if (input.mode !== "NONE") throw invalidJobsResponse();
-  return { mode: "NONE" };
+  const rawPolicy = unknownRecord(value);
+  const hasReasons = rawPolicy !== undefined && "reasons" in rawPolicy;
+  const input = exactRecord(value, ["mode", ...(hasReasons ? ["reasons"] : [])]);
+  const reasons = hasReasons ? input.reasons : [];
+  if (
+    typeof input.mode !== "string" ||
+    !CONNECTOR_FALLBACK_MODES.has(input.mode) ||
+    !Array.isArray(reasons) ||
+    reasons.some((reason) => typeof reason !== "string" || !CONNECTOR_FALLBACK_REASONS.has(reason)) ||
+    new Set(reasons).size !== reasons.length ||
+    (input.mode === "NONE" && reasons.length > 0)
+  ) {
+    throw invalidJobsResponse();
+  }
+  return {
+    mode: input.mode as ProjectConnectorFallbackPolicy["mode"],
+    reasons: reasons as readonly ConnectorFallbackReason[]
+  };
 }
 
 function projectBudgetPolicy(value: unknown): ProjectConnectorBudgetPolicy {
@@ -2243,6 +2605,15 @@ function projectRouteSourceKindValue(
     throw invalidJobsResponse();
   }
   return value as ProjectConnectorRoute["sourceKind"];
+}
+
+function connectorRoutingScopeValue(
+  value: unknown
+): ProjectConnectorRoute["routingScope"] {
+  if (typeof value !== "string" || !CONNECTOR_ROUTING_SCOPES.has(value)) {
+    throw invalidJobsResponse();
+  }
+  return value as NonNullable<ProjectConnectorRoute["routingScope"]>;
 }
 
 function credentialModeValue(
@@ -2384,6 +2755,7 @@ function credentialSummary(value: unknown): IntegrationCredentialSummary {
     input.activeValidation === undefined
       ? undefined
       : credentialValidationSummary(input.activeValidation);
+  const quota = credentialQuotaSummary(input.quota);
   if (
     activeValidation &&
     (activeValidation.workspaceId !== input.workspaceId ||
@@ -2408,6 +2780,7 @@ function credentialSummary(value: unknown): IntegrationCredentialSummary {
     displayHint: input.displayHint,
     capabilities:
       capabilities as IntegrationCredentialSummary["capabilities"],
+    quota,
     ...(typeof input.verifiedAt === "string"
       ? { verifiedAt: input.verifiedAt }
       : {}),
@@ -2425,6 +2798,104 @@ function credentialSummary(value: unknown): IntegrationCredentialSummary {
     createdAt: input.createdAt,
     updatedAt: input.updatedAt
   };
+}
+
+function credentialQuotaSummary(
+  value: unknown
+): IntegrationCredentialSummary["quota"] {
+  const input = record(value);
+  if (input.status === "NOT_AVAILABLE") {
+    if (Object.keys(input).length !== 1) throw invalidJobsResponse();
+    return { status: "NOT_AVAILABLE" };
+  }
+  const balance =
+    input.balance === undefined
+      ? undefined
+      : credentialProviderBalance(input.balance);
+  if (
+    input.status !== "AVAILABLE" ||
+    ![
+      "ARSENKIN_LIMITS",
+      "API_REQUESTS",
+      "XMLSTOCK_REQUESTS"
+    ].includes(String(input.unit)) ||
+    !Number.isSafeInteger(input.remaining) ||
+    Number(input.remaining) < 0 ||
+    (input.limit !== undefined &&
+      (!Number.isSafeInteger(input.limit) || Number(input.limit) < 0)) ||
+    (input.used !== undefined &&
+      (!Number.isSafeInteger(input.used) || Number(input.used) < 0)) ||
+    !optionalNonNegativeInteger(input.usedToday) ||
+    !optionalNonNegativeInteger(input.usedMonth) ||
+    !optionalNonNegativeInteger(input.frozenRemaining) ||
+    !optionalNonNegativeInteger(input.tariffDaysRemaining) ||
+    (input.observedAt !== undefined &&
+      (typeof input.observedAt !== "string" || !isIsoDate(input.observedAt)))
+  ) {
+    throw invalidJobsResponse();
+  }
+  return {
+    status: "AVAILABLE",
+    unit: input.unit as
+      | "ARSENKIN_LIMITS"
+      | "API_REQUESTS"
+      | "XMLSTOCK_REQUESTS",
+    remaining: Number(input.remaining),
+    ...(typeof input.limit === "number" ? { limit: input.limit } : {}),
+    ...(typeof input.used === "number" ? { used: input.used } : {}),
+    ...(balance ? { balance } : {}),
+    ...(typeof input.usedToday === "number"
+      ? { usedToday: input.usedToday }
+      : {}),
+    ...(typeof input.usedMonth === "number"
+      ? { usedMonth: input.usedMonth }
+      : {}),
+    ...(typeof input.frozenRemaining === "number"
+      ? { frozenRemaining: input.frozenRemaining }
+      : {}),
+    ...(typeof input.tariffDaysRemaining === "number"
+      ? { tariffDaysRemaining: input.tariffDaysRemaining }
+      : {}),
+    ...(typeof input.observedAt === "string"
+      ? { observedAt: input.observedAt }
+      : {})
+  };
+}
+
+function credentialProviderBalance(
+  value: unknown
+): {
+  readonly amount: string;
+  readonly frozenAmount?: string;
+  readonly currency: "RUB";
+} {
+  const input = record(value);
+  const allowed = new Set(["amount", "frozenAmount", "currency"]);
+  if (
+    Object.keys(input).some((field) => !allowed.has(field)) ||
+    typeof input.amount !== "string" ||
+    !NON_NEGATIVE_MONEY_PATTERN.test(input.amount) ||
+    (input.frozenAmount !== undefined &&
+      (typeof input.frozenAmount !== "string" ||
+        !NON_NEGATIVE_MONEY_PATTERN.test(input.frozenAmount))) ||
+    input.currency !== "RUB"
+  ) {
+    throw invalidJobsResponse();
+  }
+  return {
+    amount: input.amount,
+    ...(typeof input.frozenAmount === "string"
+      ? { frozenAmount: input.frozenAmount }
+      : {}),
+    currency: "RUB"
+  };
+}
+
+function optionalNonNegativeInteger(value: unknown): boolean {
+  return (
+    value === undefined ||
+    (Number.isSafeInteger(value) && Number(value) >= 0)
+  );
 }
 
 function credentialValidationSummary(

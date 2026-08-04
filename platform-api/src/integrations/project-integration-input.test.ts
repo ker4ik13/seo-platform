@@ -29,7 +29,8 @@ test("parses an explicit workspace credential binding", () => {
         sourceKind: "WORKSPACE_CREDENTIAL",
         credentialId
       },
-      fallbackPolicy: { mode: "NONE" },
+      fallbackRoutes: [],
+      fallbackPolicy: { mode: "NONE", reasons: [] },
       budgetPolicy: { mode: "DISABLED" }
     }
   );
@@ -55,7 +56,7 @@ test("keeps the binding capability immutable on update", () => {
   );
 });
 
-test("rejects unavailable platform, fallback and budget policies honestly", () => {
+test("rejects unavailable platform and budget policies honestly", () => {
   for (const input of [
     {
       capability: "SERP_COLLECTION",
@@ -76,17 +77,6 @@ test("rejects unavailable platform, fallback and budget policies honestly", () =
         sourceKind: "WORKSPACE_CREDENTIAL",
         credentialId
       },
-      fallbackPolicy: { mode: "FIRST_AVAILABLE" },
-      budgetPolicy: { mode: "DISABLED" }
-    },
-    {
-      capability: "SERP_COLLECTION",
-      enabled: true,
-      route: {
-        position: 0,
-        sourceKind: "WORKSPACE_CREDENTIAL",
-        credentialId
-      },
       fallbackPolicy: { mode: "NONE" },
       budgetPolicy: { mode: "PLATFORM_SPEND" }
     }
@@ -95,9 +85,29 @@ test("rejects unavailable platform, fallback and budget policies honestly", () =
       () => createProjectConnectorBindingInput(input),
       (error: unknown) =>
         error instanceof DomainError &&
-        error.code === "FEATURE_NOT_AVAILABLE"
+        error.code === "VALIDATION_FAILED" &&
+        error.fieldErrors?.[0]?.code === "FEATURE_NOT_AVAILABLE"
     );
   }
+});
+
+test("rejects an unknown fallback policy instead of silently changing it", () => {
+  assert.throws(
+    () => createProjectConnectorBindingInput({
+      capability: "SERP_COLLECTION",
+      enabled: true,
+      route: {
+        position: 0,
+        sourceKind: "WORKSPACE_CREDENTIAL",
+        credentialId
+      },
+      fallbackPolicy: { mode: "FIRST_AVAILABLE" },
+      budgetPolicy: { mode: "DISABLED" }
+    }),
+    (error: unknown) =>
+      error instanceof DomainError &&
+      error.code === "VALIDATION_FAILED"
+  );
 });
 
 test("rejects malformed identifiers and unknown fields", () => {

@@ -69,6 +69,41 @@ test("rejects non-JSON and streamed oversized provider responses", async () => {
   );
 });
 
+test("enforces a path-specific response cap for declared and streamed bodies", async () => {
+  const maximumBytes = 2_048;
+  for (const response of [
+    () =>
+      new Response("{}", {
+        headers: {
+          "Content-Length": String(maximumBytes + 1),
+          "Content-Type": "application/json"
+        }
+      }),
+    () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array(maximumBytes + 1));
+            controller.close();
+          }
+        }),
+        { headers: { "Content-Type": "application/json" } }
+      )
+  ]) {
+    await assert.rejects(
+      providerJsonRequest(
+        new URL("https://provider.example/path-limit"),
+        {},
+        1_000,
+        async () => response(),
+        Date.now,
+        maximumBytes
+      ),
+      ProviderTransportError
+    );
+  }
+});
+
 test("preserves non-JSON error status and a bounded Retry-After hint", async () => {
   const unauthorized = await providerJsonRequest(
     new URL("https://provider.example/limits"),

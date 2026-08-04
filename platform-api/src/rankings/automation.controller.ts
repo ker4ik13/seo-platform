@@ -414,6 +414,9 @@ export class AutomationController {
     readonly entitlement: Awaited<
       ReturnType<BillingEntitlementService["automationCapacity"]>
     >;
+    readonly jobCapacity: Awaited<
+      ReturnType<BillingEntitlementService["jobCapacity"]>
+    >;
   }> {
     const membershipId = tenant.membershipId;
     const membershipVersion = tenant.membershipVersion;
@@ -424,12 +427,19 @@ export class AutomationController {
     ) {
       throw tenantChanged();
     }
-    const [workspace, project, entitlementStatus, entitlement] =
+    const [
+      workspace,
+      project,
+      entitlementStatus,
+      entitlement,
+      jobCapacity
+    ] =
       await Promise.all([
         this.tenants.getWorkspace(actorId, tenant.workspaceId),
         this.tenants.getProject(tenant.projectId),
         this.billing.rankProviderAccess(tenant.workspaceId),
-        this.billing.automationCapacity(tenant.workspaceId)
+        this.billing.automationCapacity(tenant.workspaceId),
+        this.billing.jobCapacity(tenant.workspaceId)
       ]);
     if (
       workspace.id !== tenant.workspaceId ||
@@ -458,7 +468,8 @@ export class AutomationController {
         entitlementStatus
       },
       billingCurrency: workspace.billingCurrency,
-      entitlement
+      entitlement,
+      jobCapacity
     };
   }
 }

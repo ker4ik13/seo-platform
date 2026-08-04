@@ -17,6 +17,7 @@ const entitlement = {
   planVersion: 1,
   storedKeywords: 2_000_000,
   keywordsPerProject: 2_000_000,
+  foldersPerProject: 500,
   trackedContextPairs: 50_000
 } as const;
 

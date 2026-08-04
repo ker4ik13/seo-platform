@@ -13,6 +13,7 @@ export function semanticCapacityEntitlement(
     "planVersion",
     "storedKeywords",
     "keywordsPerProject",
+    "foldersPerProject",
     "trackedContextPairs"
   ]);
   if (
@@ -34,6 +35,10 @@ export function semanticCapacityEntitlement(
     keywordsPerProject: positiveSafeInteger(
       input.keywordsPerProject,
       `${path}.keywordsPerProject`
+    ),
+    foldersPerProject: nonNegativeSafeInteger(
+      input.foldersPerProject,
+      `${path}.foldersPerProject`
     ),
     trackedContextPairs: positiveSafeInteger(
       input.trackedContextPairs,
@@ -155,6 +160,11 @@ function exactRecord(
 
 function positiveSafeInteger(value: unknown, path: string): number {
   if (!Number.isSafeInteger(value) || Number(value) <= 0) invalid(path);
+  return Number(value);
+}
+
+function nonNegativeSafeInteger(value: unknown, path: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) invalid(path);
   return Number(value);
 }
 

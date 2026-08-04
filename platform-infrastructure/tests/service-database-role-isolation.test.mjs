@@ -314,7 +314,7 @@ test("bootstrap and post-migration provisioners are secret-safe and fail closed"
     "job_items:SELECT, INSERT",
     "job_items:UPDATE ( status, provider_request_id, output_reference, actual_cost_micro, error, attempt, retry_at, updated_at )",
     "jobs:SELECT",
-    "jobs:UPDATE ( status, stage, progress_current, attempt, error_summary, result_summary, version, queued_at, finished_at, lease_owner, lease_expires_at, retry_at, updated_at )",
+    "jobs:UPDATE ( status, stage, progress_current, attempt, error_summary, result_summary, version, queued_at, started_at, finished_at, lease_owner, lease_expires_at, retry_at, updated_at )",
     "project_connector_bindings:SELECT",
     "project_connector_bindings:UPDATE (id)",
     "project_connector_routes:SELECT",

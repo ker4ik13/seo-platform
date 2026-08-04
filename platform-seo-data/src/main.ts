@@ -7,6 +7,8 @@ import {
 import { AppModule } from "./app.module.js";
 import { loadAppConfig } from "./config/app-config.js";
 import { installPrivateHttpResponsePolicy } from "./internal/http-response-policy.js";
+import { installKeywordBulkBodyLimit } from "./keywords/keyword-bulk-body-limit.js";
+import { installRankResultBodyLimit } from "./rank-results/rank-result-body-limit.js";
 
 async function bootstrap(): Promise<void> {
   const config = loadAppConfig();
@@ -14,6 +16,8 @@ async function bootstrap(): Promise<void> {
     logger: config.nodeEnv !== "test",
     requestIdHeader: "x-request-id"
   });
+  installKeywordBulkBodyLimit(adapter.getInstance());
+  installRankResultBodyLimit(adapter.getInstance());
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     adapter

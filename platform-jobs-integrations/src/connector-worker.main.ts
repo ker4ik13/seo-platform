@@ -8,6 +8,7 @@ import type { AppConfig } from "./config/app-config.js";
 import { APP_CONFIG } from "./config/config.module.js";
 import { ConnectorWorkerModule } from "./connector-worker.module.js";
 import { IntegrationCredentialValidationWorkerService } from "./integrations/integration-credential-validation-worker.service.js";
+import { IntegrationCredentialRefreshSchedulerService } from "./integrations/integration-credential-refresh-scheduler.service.js";
 import { RankConnectorRuntimeService } from "./rank-runs/rank-connector-runtime.service.js";
 import { KeywordResearchRuntimeService } from "./keyword-research/keyword-research-runtime.service.js";
 import { bullMqConnectionOptions } from "./queue/bullmq-keyspace.js";
@@ -35,6 +36,7 @@ import {
 } from "./queue/frequency-collection-runtime.queue.js";
 
 const logger = new Logger("IntegrationConnectorWorker");
+const RANK_CONNECTOR_RUNTIME_BURST = 5;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -51,6 +53,9 @@ async function bootstrap(): Promise<void> {
   }
   const validations = app.get(
     IntegrationCredentialValidationWorkerService
+  );
+  const refreshScheduler = app.get(
+    IntegrationCredentialRefreshSchedulerService
   );
   const rankRuntime = app.get(RankConnectorRuntimeService);
   const keywordResearchRuntime = app.get(KeywordResearchRuntimeService);
@@ -124,11 +129,7 @@ async function bootstrap(): Promise<void> {
     {
       ...bullMqConnectionOptions(workerConnection),
       concurrency:
-        config.integrationCredentialValidation.concurrency,
-      limiter: {
-        max: 30,
-        duration: 60_000
-      }
+        config.integrationCredentialValidation.concurrency
     }
   );
 
@@ -137,17 +138,26 @@ async function bootstrap(): Promise<void> {
     if (dispatching) return;
     dispatching = true;
     try {
+      try {
+        await refreshScheduler.scheduleHourlyRefreshes();
+      } catch {
+        // Refresh is best-effort and must never stop paid/user operations.
+        logger.warn("Unable to schedule hourly credential refreshes");
+      }
       const validationJobIds = await validations.pendingValidationIds();
       for (const validationJobId of validationJobIds) {
         await enqueueIntegrationCredentialValidation(queue, validationJobId);
       }
-      await enqueueRankConnectorRuntime(
-        rankQueue,
-        Math.floor(
-          Date.now() /
-            (config.integrationCredentialValidation.dispatchSeconds * 1_000)
-        )
+      const dispatchBucket = Math.floor(
+        Date.now() /
+          (config.integrationCredentialValidation.dispatchSeconds * 1_000)
       );
+      for (let slot = 0; slot < RANK_CONNECTOR_RUNTIME_BURST; slot += 1) {
+        await enqueueRankConnectorRuntime(
+          rankQueue,
+          dispatchBucket * RANK_CONNECTOR_RUNTIME_BURST + slot
+        );
+      }
       await enqueueKeywordResearchRuntime(
         keywordResearchQueue,
         Math.floor(

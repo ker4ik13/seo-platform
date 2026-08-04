@@ -3,6 +3,7 @@ import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
 import {
   createTrackingContextInput,
+  replaceTrackingContextKeywordsInput,
   trackingContextKeywordQuery,
   updateTrackingContextInput
 } from "./tracking-context-input.js";
@@ -122,3 +123,40 @@ test("rejects unknown, ambiguous and unbounded query values", () => {
     DomainError
   );
 });
+
+test("accepts exactly 15,000 unique keyword identifiers for atomic replacement", () => {
+  const keywordIds = keywordIdentifiers(15_000);
+  const result = replaceTrackingContextKeywordsInput({ keywordIds });
+
+  assert.equal(result.keywordIds.length, 15_000);
+  assert.equal(result.keywordIds[0], keywordIds[0]);
+  assert.equal(result.keywordIds.at(-1), keywordIds.at(-1));
+});
+
+test("rejects replacement overflow and duplicate identifiers", () => {
+  assert.throws(
+    () =>
+      replaceTrackingContextKeywordsInput({
+        keywordIds: keywordIdentifiers(15_001)
+      }),
+    DomainError
+  );
+  assert.throws(
+    () =>
+      replaceTrackingContextKeywordsInput({
+        keywordIds: [
+          "01900000-0000-7000-8000-000000000001",
+          "01900000-0000-7000-8000-000000000001"
+        ]
+      }),
+    DomainError
+  );
+});
+
+function keywordIdentifiers(count: number): readonly string[] {
+  return Array.from(
+    { length: count },
+    (_, index) =>
+      `01900000-0000-7000-8000-${String(index + 1).padStart(12, "0")}`
+  );
+}

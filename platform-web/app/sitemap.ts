@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { toolCapabilities } from "../lib/tool-capabilities";
+import { publicToolCapabilities } from "../lib/tool-capabilities";
 import { locales } from "../lib/locales";
 
 export default function sitemap(): MetadataRoute.Sitemap {
@@ -21,7 +21,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: "weekly",
       priority: 0.9
     },
-    ...toolCapabilities.map((tool) => ({
+    ...publicToolCapabilities().map((tool) => ({
       url: `${siteUrl}/tools/${tool.slug}`,
       lastModified,
       changeFrequency: "monthly" as const,

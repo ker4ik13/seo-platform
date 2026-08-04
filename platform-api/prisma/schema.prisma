@@ -60,6 +60,7 @@ enum WorkspaceInviteStatus {
   SENT
   DELIVERED
   ACCEPTED
+  DECLINED
   EXPIRED
   REVOKED
   BOUNCED
@@ -443,10 +444,38 @@ model Workspace {
   billingPaymentMethods BillingPaymentMethod[]
   billingLedgerAccounts BillingLedgerAccount[]
   npdReceiptObligations NpdReceiptObligation[]
+  rankExecutionQuotaOverride RankExecutionQuotaOverride?
+  projectCapacityOverride ProjectCapacityOverride?
 
   @@index([ownerUserId])
   @@index([status, createdAt])
   @@map("workspaces")
+}
+
+model RankExecutionQuotaOverride {
+  workspaceId   String    @id @map("workspace_id") @db.Uuid
+  dailyTaskLimit Int      @map("daily_task_limit")
+  reason        String    @db.VarChar(255)
+  expiresAt     DateTime? @map("expires_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("rank_execution_quota_overrides")
+}
+
+model ProjectCapacityOverride {
+  workspaceId  String   @id @map("workspace_id") @db.Uuid
+  projectLimit Int      @map("project_limit")
+  reason       String   @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("project_capacity_overrides")
 }
 
 model WorkspaceMember {
@@ -485,6 +514,7 @@ model WorkspaceInvite {
   invitedBy       String                @map("invited_by") @db.Uuid
   expiresAt       DateTime              @map("expires_at") @db.Timestamptz(6)
   acceptedAt      DateTime?             @map("accepted_at") @db.Timestamptz(6)
+  declinedAt      DateTime?             @map("declined_at") @db.Timestamptz(6)
   revokedAt       DateTime?             @map("revoked_at") @db.Timestamptz(6)
   createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)

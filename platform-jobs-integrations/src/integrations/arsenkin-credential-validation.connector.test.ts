@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { ArsenkinHttpRateLimitGate } from "./arsenkin-http-rate-limiter.js";
 import {
   ArsenkinCredentialValidationConnector,
   arsenkinResult
@@ -9,6 +10,7 @@ test("validates Arsenkin through the read-only limits endpoint", async () => {
   let receivedUrl = "";
   let receivedAuthorization = "";
   const connector = new ArsenkinCredentialValidationConnector(
+    allowAll(),
     async (input, init) => {
       receivedUrl = String(input);
       receivedAuthorization = String(
@@ -34,6 +36,33 @@ test("validates Arsenkin through the read-only limits endpoint", async () => {
   assert.equal(receivedUrl, "https://arsenkin.ru/api/tools/info");
   assert.equal(receivedAuthorization, "Bearer secret-token");
   assert.equal(receivedUrl.includes("secret-token"), false);
+});
+
+test("rate limits validation before provider bytes are sent", async () => {
+  let providerCalls = 0;
+  const connector = new ArsenkinCredentialValidationConnector(
+    {
+      async tryAcquire() {
+        return { allowed: false, retryAfterSeconds: 9 };
+      }
+    },
+    async () => {
+      providerCalls += 1;
+      return Response.json({ limits_total: 1_000 });
+    }
+  );
+
+  assert.deepEqual(
+    await connector.validate({ apiKey: "secret-token" }, 1_000),
+    {
+      ok: false,
+      errorCode: "PROVIDER_RATE_LIMITED",
+      retryable: true,
+      retryAfterSeconds: 9,
+      credentialStatus: "RATE_LIMITED"
+    }
+  );
+  assert.equal(providerCalls, 0);
 });
 
 test("normalizes Arsenkin authentication and rate limit errors", () => {
@@ -82,3 +111,11 @@ test("normalizes Arsenkin authentication and rate limit errors", () => {
     }
   );
 });
+
+function allowAll(): ArsenkinHttpRateLimitGate {
+  return {
+    async tryAcquire() {
+      return { allowed: true };
+    }
+  };
+}

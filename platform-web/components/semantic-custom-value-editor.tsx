@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import { useState, type FormEvent } from "react";
 import {
   BrowserApiError,
@@ -148,13 +150,13 @@ function CustomValueControl({
     return (
       <label>
         <span>Значение</span>
-        <select
+        <CustomSelect
           onChange={(event) => onChange(event.target.value === "true")}
           value={String(value)}
         >
           <option value="true">Да</option>
           <option value="false">Нет</option>
-        </select>
+        </CustomSelect>
       </label>
     );
   }
@@ -162,7 +164,7 @@ function CustomValueControl({
     return (
       <label>
         <span>Значение</span>
-        <select
+        <CustomSelect
           onChange={(event) => onChange(event.target.value)}
           required
           value={String(value)}
@@ -172,7 +174,7 @@ function CustomValueControl({
               {option.label}
             </option>
           ))}
-        </select>
+        </CustomSelect>
       </label>
     );
   }

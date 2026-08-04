@@ -78,9 +78,24 @@ export interface WorkspaceInviteSummary {
     | "SENT"
     | "DELIVERED"
     | "ACCEPTED"
+    | "DECLINED"
     | "EXPIRED"
     | "REVOKED"
     | "BOUNCED";
+  readonly allProjects: boolean;
+  readonly projectAccesses: readonly ProjectAccessAssignment[];
+  readonly message?: string;
+  readonly expiresAt: string;
+  readonly createdAt: string;
+}
+
+export interface PendingWorkspaceInviteSummary {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly workspaceName: string;
+  readonly workspaceSlug: string;
+  readonly workspaceStatus: "ACTIVE" | "READ_ONLY" | "SUSPENDED";
+  readonly roleCode: AssignableWorkspaceRoleCode;
   readonly allProjects: boolean;
   readonly projectAccesses: readonly ProjectAccessAssignment[];
   readonly message?: string;

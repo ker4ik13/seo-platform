@@ -31,7 +31,9 @@ Tracking configuration содержит только:
 Остальные данные принадлежат другим агрегатам:
 
 - provider и credential выбираются project connector binding в
-  `platform-jobs-integrations`;
+  `platform-jobs-integrations`; route с `position=0` остаётся основным,
+  дополнительные provider routes доступны только при явном выборе provider
+  в immutable estimate запуска;
 - fallback и budget принадлежат connector/job policy;
 - schedule, timezone, overlap и missed-run policy принадлежат automation;
 - фактически использованные provider, credential mode, provider region ID и
@@ -48,7 +50,9 @@ Keyword assignment является отдельным temporal ресурсом
 
 ## Последствия
 
-- один provider route на capability остаётся в одном владельце данных;
+- provider routes на capability остаются в одном владельце данных; основной
+  route имеет `position=0`, а явный запуск может выбрать ровно один
+  дополнительный route того же binding без автоматического fallback;
 - rank snapshot сможет ссылаться на logical context и точную configuration
   version;
 - смена расписания или ключа не создаёт фиктивную поисковую конфигурацию;

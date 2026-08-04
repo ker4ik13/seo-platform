@@ -296,6 +296,31 @@ function suggestedTarget(header: string): {
   readonly suggestedTarget: string;
   readonly confidence: number;
 } {
+  const raw = header.normalize("NFKC").toLowerCase().replace(/ё/gu, "е");
+  if (/(яндекс|yandex).*(изменен|change|дельт)/u.test(raw)) {
+    return { suggestedTarget: "ranking.yandex.change", confidence: 0.99 };
+  }
+  if (/(google|гугл).*(изменен|change|дельт)/u.test(raw)) {
+    return { suggestedTarget: "ranking.google.change", confidence: 0.99 };
+  }
+  if (/(яндекс|yandex).*(url|урл|ссылк|страниц)/u.test(raw)) {
+    return { suggestedTarget: "ranking.yandex.url", confidence: 0.99 };
+  }
+  if (/(google|гугл).*(url|урл|ссылк|страниц)/u.test(raw)) {
+    return { suggestedTarget: "ranking.google.url", confidence: 0.99 };
+  }
+  if (/(яндекс|yandex).*(позици|position|rank)/u.test(raw)) {
+    return { suggestedTarget: "ranking.yandex.position", confidence: 0.99 };
+  }
+  if (/(google|гугл).*(позици|position|rank)/u.test(raw)) {
+    return { suggestedTarget: "ranking.google.position", confidence: 0.99 };
+  }
+  if (/(?:"|«)\s*!.*(?:частот|wordstat|frequency)/u.test(raw)) {
+    return { suggestedTarget: "frequency.fixed", confidence: 0.99 };
+  }
+  if (/(?:"|«).*?(?:частот|wordstat|frequency)/u.test(raw)) {
+    return { suggestedTarget: "frequency.exact", confidence: 0.98 };
+  }
   const value = normalizeHeader(header);
   const rules: readonly [RegExp, string, number][] = [
     [
@@ -325,6 +350,10 @@ function suggestedTarget(header: string): {
     [/(регион|region|гео)/u, "context.region", 0.86],
     [/(дата.*проверк|checked at|check date)/u, "metric.observed_at", 0.86],
     [/(тег|метк|tag|label)/u, "keyword.tags", 0.82],
+    [/^(язык|language|locale)$/u, "keyword.language", 0.9],
+    [/(приоритет|priority)/u, "keyword.priority", 0.9],
+    [/(избранн|favorite|favourite)/u, "keyword.favorite", 0.9],
+    [/(интент|intent)/u, "keyword.intent", 0.9],
     [/(^kei$|эффективност.*ключ)/u, "metric.kei", 0.84]
   ];
   for (const [pattern, target, confidence] of rules) {

@@ -216,6 +216,100 @@ test("accepts the sealed execution connector version vocabulary", () => {
   );
 });
 
+test("accepts canonical XMLStock position ingest commands", () => {
+  const baseChunk = sealedChunk();
+  const firstEntry = baseChunk.entries[0];
+  const firstResult = ingestCommand().results[0];
+  if (!firstEntry || !firstResult) {
+    throw new Error("Fixture is invalid");
+  }
+  const chunk = rehashChunk({
+    ...baseChunk,
+    entries: [firstEntry]
+  });
+  const command = {
+    ...ingestCommand(),
+    manifestChunkHash: chunk.chunkHash,
+    provider: "XMLSTOCK",
+    providerRequestId: "xmlstock-task-42",
+    connectorVersion: "xmlstock-serp@1",
+    results: [firstResult]
+  } satisfies InternalRankChunkIngestCommand;
+
+  assert.equal(
+    rankChunkIngestHashPreimage(command, chunk).provider,
+    "XMLSTOCK"
+  );
+  assert.equal(
+    rankChunkIngestHash(command, chunk).algorithm,
+    "SHA_256"
+  );
+});
+
+test("accepts XMLStock per-keyword chunks after the first chunk", () => {
+  const baseChunk = sealedChunk();
+  const firstEntry = baseChunk.entries[0];
+  const firstResult = ingestCommand().results[0];
+  if (!firstEntry || !firstResult) {
+    throw new Error("Fixture is invalid");
+  }
+  const chunk = rehashChunk({
+    ...baseChunk,
+    chunkIndex: 1,
+    entries: [{ ...firstEntry, sequence: 1 }]
+  });
+  const command = {
+    ...ingestCommand(),
+    chunkIndex: 1,
+    manifestChunkHash: chunk.chunkHash,
+    provider: "XMLSTOCK",
+    providerRequestId: "xmlstock-task-43",
+    connectorVersion: "xmlstock-serp@1",
+    results: [firstResult]
+  } satisfies InternalRankChunkIngestCommand;
+
+  assert.equal(
+    rankChunkIngestHashPreimage(command, chunk).chunkIndex,
+    1
+  );
+});
+
+test("accepts TOP-100 and rejects positions outside the persisted contract", () => {
+  const command = ingestCommand();
+  const found = command.results[0];
+  assert.equal(found?.found, true);
+  if (found?.found !== true) {
+    throw new Error("Fixture is invalid");
+  }
+  const top100 = {
+    ...command,
+    results: [
+      { ...found, position: 100 },
+      command.results[1]!
+    ]
+  } satisfies InternalRankChunkIngestCommand;
+
+  assert.equal(
+    rankChunkIngestHashPreimage(top100, sealedChunk()).results[0]
+      ?.position,
+    100
+  );
+  assert.throws(
+    () =>
+      rankChunkIngestHashPreimage(
+        {
+          ...top100,
+          results: [
+            { ...found, position: 101 },
+            command.results[1]!
+          ]
+        },
+        sealedChunk()
+      ),
+    /Invalid canonical rank result field: foundResult/u
+  );
+});
+
 test("equivalent quality-flag order has one ingest hash", () => {
   const first = ingestCommand();
   const second = ingestCommand();

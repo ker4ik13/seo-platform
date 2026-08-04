@@ -3,8 +3,12 @@ import {
   UnprocessableEntityException
 } from "@nestjs/common";
 import {
+  connectorFallbackModes,
+  connectorFallbackReasons,
   integrationCapabilities,
+  type ConnectorFallbackReason,
   type InternalCreateProjectConnectorBindingInput,
+  type InternalInheritProjectConnectorBindingInput,
   type InternalUpdateProjectConnectorBindingInput,
   type ProjectConnectorBudgetPolicy,
   type ProjectConnectorFallbackPolicy,
@@ -15,6 +19,8 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const IDEMPOTENCY_PATTERN = /^[A-Za-z0-9._:-]{8,180}$/u;
 const CAPABILITIES = new Set<string>(integrationCapabilities);
+const FALLBACK_MODES = new Set<string>(connectorFallbackModes);
+const FALLBACK_REASONS = new Set<string>(connectorFallbackReasons);
 
 const CREATE_FIELDS = [
   "workspaceId",
@@ -24,6 +30,7 @@ const CREATE_FIELDS = [
   "capability",
   "enabled",
   "route",
+  "fallbackRoutes",
   "fallbackPolicy",
   "budgetPolicy"
 ] as const;
@@ -35,6 +42,7 @@ const UPDATE_FIELDS = [
   "version",
   "enabled",
   "route",
+  "fallbackRoutes",
   "fallbackPolicy",
   "budgetPolicy"
 ] as const;
@@ -42,7 +50,11 @@ const UPDATE_FIELDS = [
 export function internalCreateProjectConnectorBindingInput(
   value: unknown
 ): InternalCreateProjectConnectorBindingInput {
-  const input = exactRecord(value, CREATE_FIELDS, "binding");
+  const input = exactRecord(
+    withDefault(value, "fallbackRoutes", []),
+    CREATE_FIELDS,
+    "binding"
+  );
   const idempotencyKey = stringField(input, "idempotencyKey");
   if (!IDEMPOTENCY_PATTERN.test(idempotencyKey)) {
     invalid("idempotencyKey");
@@ -57,7 +69,8 @@ export function internalCreateProjectConnectorBindingInput(
     capability:
       capability as InternalCreateProjectConnectorBindingInput["capability"],
     enabled: booleanField(input, "enabled"),
-    route: routeField(input.route),
+    route: routeField(input.route, 0),
+    fallbackRoutes: fallbackRouteFields(input.fallbackRoutes),
     fallbackPolicy: fallbackPolicyField(input.fallbackPolicy),
     budgetPolicy: budgetPolicyField(input.budgetPolicy)
   };
@@ -66,44 +79,112 @@ export function internalCreateProjectConnectorBindingInput(
 export function internalUpdateProjectConnectorBindingInput(
   value: unknown
 ): InternalUpdateProjectConnectorBindingInput {
-  const input = exactRecord(value, UPDATE_FIELDS, "binding");
+  const input = exactRecord(
+    withDefault(value, "fallbackRoutes", []),
+    UPDATE_FIELDS,
+    "binding"
+  );
   return {
     workspaceId: uuidField(input, "workspaceId"),
     projectId: uuidField(input, "projectId"),
     actorId: uuidField(input, "actorId"),
     version: versionField(input),
     enabled: booleanField(input, "enabled"),
-    route: routeField(input.route),
+    route: routeField(input.route, 0),
+    fallbackRoutes: fallbackRouteFields(input.fallbackRoutes),
     fallbackPolicy: fallbackPolicyField(input.fallbackPolicy),
     budgetPolicy: budgetPolicyField(input.budgetPolicy)
   };
 }
 
-function routeField(value: unknown): ProjectConnectorRouteInput {
+export function internalInheritProjectConnectorBindingInput(
+  value: unknown
+): InternalInheritProjectConnectorBindingInput {
+  const input = exactRecord(
+    value,
+    ["workspaceId", "projectId", "actorId", "version"] as const,
+    "binding"
+  );
+  return {
+    workspaceId: uuidField(input, "workspaceId"),
+    projectId: uuidField(input, "projectId"),
+    actorId: uuidField(input, "actorId"),
+    version: versionField(input)
+  };
+}
+
+function routeField(
+  value: unknown,
+  expectedPosition: number
+): ProjectConnectorRouteInput {
   const route = exactRecord(
     value,
     ["position", "sourceKind", "credentialId"] as const,
     "route"
   );
-  if (route.position !== 0) featureNotAvailable("fallback routes");
+  if (route.position !== expectedPosition) invalid("route.position");
   if (route.sourceKind !== "WORKSPACE_CREDENTIAL") {
     featureNotAvailable("platform credentials");
   }
   return {
-    position: 0,
+    position: expectedPosition,
     sourceKind: "WORKSPACE_CREDENTIAL",
     credentialId: uuidField(route, "credentialId")
   };
 }
 
+function fallbackRouteFields(value: unknown): readonly ProjectConnectorRouteInput[] {
+  if (!Array.isArray(value) || value.length > 7) invalid("fallbackRoutes");
+  const routes = value.map((route, index) => routeField(route, index + 1));
+  if (new Set(routes.map(({ credentialId }) => credentialId)).size !== routes.length) {
+    invalid("fallbackRoutes.credentialId");
+  }
+  return routes;
+}
+
 function fallbackPolicyField(
   value: unknown
 ): ProjectConnectorFallbackPolicy {
-  const policy = exactRecord(value, ["mode"] as const, "fallbackPolicy");
-  if (policy.mode !== "NONE") {
-    featureNotAvailable("connector fallback");
+  const rawPolicy = value as { readonly mode?: unknown };
+  const policy = exactRecord(
+    withDefault(
+      value,
+      "reasons",
+      rawPolicy?.mode === "NONE" ? [] : [...connectorFallbackReasons]
+    ),
+    ["mode", "reasons"] as const,
+    "fallbackPolicy"
+  );
+  if (typeof policy.mode !== "string" || !FALLBACK_MODES.has(policy.mode)) {
+    invalid("fallbackPolicy.mode");
   }
-  return { mode: "NONE" };
+  if (!Array.isArray(policy.reasons) || policy.reasons.length > connectorFallbackReasons.length) {
+    invalid("fallbackPolicy.reasons");
+  }
+  const reasons = policy.reasons as unknown[];
+  if (
+    reasons.some((reason) => typeof reason !== "string" || !FALLBACK_REASONS.has(reason)) ||
+    new Set(reasons).size !== reasons.length ||
+    (policy.mode === "NONE" && reasons.length > 0)
+  ) {
+    invalid("fallbackPolicy.reasons");
+  }
+  return {
+    mode: policy.mode as ProjectConnectorFallbackPolicy["mode"],
+    reasons: reasons as readonly ConnectorFallbackReason[]
+  };
+}
+
+function withDefault(
+  value: unknown,
+  field: string,
+  defaultValue: unknown
+): unknown {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return value;
+  }
+  const input = value as Readonly<Record<string, unknown>>;
+  return field in input ? input : { ...input, [field]: defaultValue };
 }
 
 function budgetPolicyField(value: unknown): ProjectConnectorBudgetPolicy {

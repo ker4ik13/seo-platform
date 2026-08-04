@@ -84,3 +84,140 @@ test("keeps a valid keyword while reporting invalid optional values", () => {
     new Set(["INVALID_TARGET_URL", "INVALID_FREQUENCY"])
   );
 });
+
+test("preserves native KC4 hierarchy and imports search engine positions", () => {
+  const issues = new Set<string>();
+  const result = canonicalImportRow(
+    4n,
+    [
+      "SEO",
+      "Корень/Раздел/Подраздел",
+      "25",
+      "-2",
+      "https://example.com/yandex-result",
+      "2147483647",
+      "0",
+      ""
+    ],
+    [
+      "Фраза",
+      "Группа",
+      "Яндекс · Позиция",
+      "Яндекс · Изменение позиции",
+      "Яндекс · URL выдачи",
+      "Google · Позиция",
+      "Google · Изменение позиции",
+      "Google · URL выдачи"
+    ],
+    {
+      columns: [
+        { sourceIndex: 0, target: "keyword.text" },
+        { sourceIndex: 1, target: "group.path" },
+        { sourceIndex: 2, target: "ranking.position" }
+      ],
+      defaultLanguage: "ru",
+      // A persisted delimiter from an earlier CSV import must not flatten a
+      // native KC4 tree: KC4 paths always use the parser's slash separator.
+      groupSeparator: " > ",
+      duplicatePolicy: "MERGE_NON_EMPTY"
+    },
+    {
+      textOriginal: "SEO",
+      textNormalized: "seo",
+      normalizedHash: "a".repeat(64),
+      language: "ru"
+    },
+    issues,
+    { sourceFormat: "KC4" }
+  );
+
+  assert.deepEqual(result.groupPath, ["Корень", "Раздел", "Подраздел"]);
+  assert.deepEqual(result.positions, [
+    {
+      searchEngine: "YANDEX",
+      found: true,
+      position: 25,
+      previousPosition: 27,
+      rankingUrl: "https://example.com/yandex-result"
+    },
+    { searchEngine: "GOOGLE", found: false }
+  ]);
+  assert.deepEqual(result.customValues, {});
+  assert.deepEqual([...issues], []);
+});
+
+test("maps independently selectable keyword fields and both search engines", () => {
+  const issues = new Set<string>();
+  const result = canonicalImportRow(
+    5n,
+    [
+      "SEO audit",
+      "37",
+      "2",
+      "https://example.com/yandex",
+      "11",
+      "-3",
+      "https://example.com/google",
+      "83",
+      "да",
+      "Коммерческий"
+    ],
+    [
+      "Фраза",
+      "Яндекс · Позиция",
+      "Яндекс · Изменение позиции",
+      "Яндекс · URL выдачи",
+      "Google · Позиция",
+      "Google · Изменение позиции",
+      "Google · URL выдачи",
+      "Приоритет",
+      "Избранное",
+      "Интент"
+    ],
+    {
+      columns: [
+        { sourceIndex: 0, target: "keyword.text" },
+        { sourceIndex: 1, target: "ranking.yandex.position" },
+        { sourceIndex: 2, target: "ranking.yandex.change" },
+        { sourceIndex: 3, target: "ranking.yandex.url" },
+        { sourceIndex: 4, target: "ranking.google.position" },
+        { sourceIndex: 5, target: "ranking.google.change" },
+        { sourceIndex: 6, target: "ranking.google.url" },
+        { sourceIndex: 7, target: "keyword.priority" },
+        { sourceIndex: 8, target: "keyword.favorite" },
+        { sourceIndex: 9, target: "keyword.intent" }
+      ],
+      defaultLanguage: "ru",
+      groupSeparator: "/",
+      duplicatePolicy: "OVERWRITE_MAPPED"
+    },
+    {
+      textOriginal: "SEO audit",
+      textNormalized: "seo audit",
+      normalizedHash: "b".repeat(64),
+      language: "ru"
+    },
+    issues
+  );
+
+  assert.equal(result.priority, 83);
+  assert.equal(result.isFavorite, true);
+  assert.equal(result.intent, "COMMERCIAL");
+  assert.deepEqual(result.positions, [
+    {
+      searchEngine: "YANDEX",
+      found: true,
+      position: 37,
+      previousPosition: 35,
+      rankingUrl: "https://example.com/yandex"
+    },
+    {
+      searchEngine: "GOOGLE",
+      found: true,
+      position: 11,
+      previousPosition: 14,
+      rankingUrl: "https://example.com/google"
+    }
+  ]);
+  assert.deepEqual([...issues], []);
+});

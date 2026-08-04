@@ -84,12 +84,21 @@ test("detects a stable delimiter outside quoted values", () => {
 });
 
 test("recognizes Key Collector headers and preserves unknown columns", () => {
-  const headers = ["Фраза", "Группа", "Точная частотность", "Мой балл"];
-  assert.equal(resolveHeaderMode([headers, ["seo", "main", "10", "5"]], "AUTO"), "PRESENT");
+  const headers = ["Фраза", "Группа", "Частотность", '"Частотность"', '"!Частотность"', "Позиция Яндекс", "Релевантная страница Google", "Комментарий"];
+  assert.equal(resolveHeaderMode([headers, ["seo", "main", "20", "15", "10", "4", "https://example.com", "важно"]], "AUTO"), "PRESENT");
   assert.deepEqual(importHeaders(headers, "PRESENT"), headers);
   assert.deepEqual(
     suggestColumnMapping(headers).map(({ suggestedTarget }) => suggestedTarget),
-    ["keyword.text", "group.path", "frequency.exact", "custom"]
+    [
+      "keyword.text",
+      "group.path",
+      "frequency.base",
+      "frequency.exact",
+      "frequency.fixed",
+      "ranking.position",
+      "page.target_url",
+      "custom"
+    ]
   );
 });
 

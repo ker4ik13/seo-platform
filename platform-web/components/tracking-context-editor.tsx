@@ -1,3 +1,5 @@
+import { CustomSelect } from "./custom-select";
+import { SearchableRegionSelect } from "./searchable-region-select";
 import type {
   TrackingDepth,
   TrackingDevice,
@@ -62,16 +64,16 @@ export function TrackingContextEditor({
       <header className="security-card-header">
         <div>
           <p className="eyebrow">
-            {mode === "create" ? "Новый контекст" : "Новая версия"}
+            {mode === "create" ? "Новый профиль" : "Новая версия"}
           </p>
           <h2>
             {mode === "create"
-              ? "Создать поисковую конфигурацию"
-              : `Изменить «${draft.name || "контекст"}»`}
+              ? "Создать профиль съёма"
+              : `Изменить «${draft.name || "профиль"}»`}
           </h2>
           <p>
-            Provider, credential и расписание не входят в эту форму и не
-            создают фиктивных версий поисковой конфигурации.
+            Выберите поисковик, регион, устройство и глубину. Подключение
+            провайдера и расписание настраиваются отдельно.
           </p>
         </div>
       </header>
@@ -98,7 +100,7 @@ export function TrackingContextEditor({
       <div className="tracking-context-form-grid">
         <DraftField
           error={errors.name}
-          label="Название контекста"
+          label="Название профиля"
           wide
         >
           <input
@@ -115,12 +117,14 @@ export function TrackingContextEditor({
         </DraftField>
 
         <DraftField label="Поисковая система">
-          <select
+          <CustomSelect
             onChange={(event) =>
               onChange({
                 ...draft,
                 searchEngine: event.target
-                  .value as TrackingSearchEngine
+                  .value as TrackingSearchEngine,
+                regionCode: "",
+                regionLabel: ""
               })
             }
             value={draft.searchEngine}
@@ -130,11 +134,11 @@ export function TrackingContextEditor({
                 {trackingSearchEngineLabel(engine)}
               </option>
             ))}
-          </select>
+          </CustomSelect>
         </DraftField>
 
         <DraftField label="Устройство">
-          <select
+          <CustomSelect
             onChange={(event) =>
               onChange({
                 ...draft,
@@ -148,7 +152,7 @@ export function TrackingContextEditor({
                 {trackingDeviceLabel(device)}
               </option>
             ))}
-          </select>
+          </CustomSelect>
         </DraftField>
 
         <DraftField
@@ -190,39 +194,31 @@ export function TrackingContextEditor({
         </DraftField>
 
         <DraftField
-          error={errors.regionCode}
-          hint="Необязательно"
-          label="Канонический код региона"
+          error={errors.regionCode ?? errors.regionLabel}
+          hint="Поиск по названию или коду"
+          label="Регион"
+          wide
         >
-          <input
-            aria-invalid={Boolean(errors.regionCode)}
-            maxLength={100}
-            onChange={(event) =>
-              onChange({ ...draft, regionCode: event.target.value })
+          <SearchableRegionSelect
+            kind={
+              draft.searchEngine === "YANDEX"
+                ? "YANDEX_RANK"
+                : "GOOGLE_RANK"
             }
-            placeholder="Например, us-ca или 213"
+            onChange={(region) =>
+              onChange({
+                ...draft,
+                regionCode: region.code,
+                regionLabel: region.label
+              })
+            }
             value={draft.regionCode}
-          />
-        </DraftField>
-
-        <DraftField
-          error={errors.regionLabel}
-          hint="Необязательно"
-          label="Название региона"
-        >
-          <input
-            aria-invalid={Boolean(errors.regionLabel)}
-            maxLength={160}
-            onChange={(event) =>
-              onChange({ ...draft, regionLabel: event.target.value })
-            }
-            placeholder="California"
-            value={draft.regionLabel}
+            valueLabel={draft.regionLabel}
           />
         </DraftField>
 
         <DraftField label="Глубина выдачи">
-          <select
+          <CustomSelect
             onChange={(event) =>
               onChange({
                 ...draft,
@@ -236,11 +232,11 @@ export function TrackingContextEditor({
                 TOP-{depth}
               </option>
             ))}
-          </select>
+          </CustomSelect>
         </DraftField>
 
         <DraftField label="Правило сопоставления домена">
-          <select
+          <CustomSelect
             onChange={(event) =>
               onChange({
                 ...draft,
@@ -256,7 +252,7 @@ export function TrackingContextEditor({
                 {trackingDomainMatchModeLabel(domainMode)}
               </option>
             ))}
-          </select>
+          </CustomSelect>
         </DraftField>
 
         {domainMatchNeedsValue(draft.domainMatchMode) && (
@@ -292,8 +288,7 @@ export function TrackingContextEditor({
         <span>
           <strong>SafeSearch</strong>
           <small>
-            Фиксируется в версии конфигурации и применяется ко всем будущим
-            снимкам этого контекста.
+            Применяется ко всем будущим проверкам этого профиля.
           </small>
         </span>
         <input
@@ -309,8 +304,8 @@ export function TrackingContextEditor({
       <footer className="tracking-context-editor-actions">
         <span>
           {mode === "edit"
-            ? "Изменение поисковых параметров создаст новую immutable configuration version; переименование — только revision."
-            : "После ответа POST контекст будет перечитан отдельным GET."}
+            ? "Изменение поисковых параметров создаст новую версию профиля и не перепишет прошлые результаты."
+            : "После создания назначьте профилю запросы из семантического ядра."}
         </span>
         <button
           className="secondary-button"

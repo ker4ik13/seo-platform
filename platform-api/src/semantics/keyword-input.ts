@@ -1,8 +1,10 @@
 import { Buffer } from "node:buffer";
 import {
   semanticKeywordCleaningCases,
+  semanticKeywordDuplicatePolicies,
   semanticKeywordIntents,
   type CreateSemanticKeywordInput,
+  type SemanticKeywordBulkCreateInput,
   type SemanticKeywordBulkInput,
   type SemanticKeywordBulkPatch,
   type SemanticKeywordCleaningInput,
@@ -13,13 +15,18 @@ import {
 import { validationError } from "../common/domain-error.js";
 
 const INTENTS = new Set<string>(semanticKeywordIntents);
+const MAX_KEYWORD_BULK_CREATE_BYTES = 6 * 1_024 * 1_024;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export function createSemanticKeywordInput(
   value: unknown
 ): CreateSemanticKeywordInput {
-  const input = exactRecord(value, editableFields(), "$");
+  const input = exactRecord(
+    value,
+    [...editableFields(), "duplicatePolicy"],
+    "$"
+  );
   const intent = optionalIntent(input.intent, false).intent;
   const groupId = optionalGroupId(input.groupId, false).groupId;
   const clusterId = optionalClusterId(input.clusterId, false).clusterId;
@@ -33,7 +40,34 @@ export function createSemanticKeywordInput(
     ...(groupId ? { groupId } : {}),
     ...(clusterId ? { clusterId } : {}),
     ...(targetUrl ? { targetUrl } : {}),
-    tagNames: tagNames(input.tagNames ?? [])
+    tagNames: tagNames(input.tagNames ?? []),
+    duplicatePolicy: duplicatePolicy(
+      input.duplicatePolicy ?? "REJECT_EXISTING"
+    )
+  };
+}
+
+export function semanticKeywordBulkCreateInput(
+  value: unknown
+): SemanticKeywordBulkCreateInput {
+  if (
+    Buffer.byteLength(JSON.stringify(value) ?? "", "utf8") >
+    MAX_KEYWORD_BULK_CREATE_BYTES
+  ) {
+    invalid("$", "Bulk keyword payload is too large");
+  }
+  const input = exactRecord(value, ["items", "duplicatePolicy"], "$");
+  if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 2_000) {
+    invalid("items", "Must contain between 1 and 2000 keywords");
+  }
+  const policy = duplicatePolicy(input.duplicatePolicy);
+  return {
+    duplicatePolicy: policy,
+    items: input.items.map((item) => {
+      const parsed = createSemanticKeywordInput(item);
+      const { duplicatePolicy: _ignored, ...keyword } = parsed;
+      return keyword;
+    })
   };
 }
 
@@ -63,6 +97,18 @@ export function updateSemanticKeywordInput(
       ? {}
       : { tagNames: tagNames(input.tagNames) })
   };
+}
+
+export function deleteSemanticKeywordInput(
+  value: unknown
+): Readonly<{ permanent?: boolean }> {
+  if (value === undefined || value === null || value === "") return {};
+  const input = exactRecord(value, ["permanent"], "$");
+  if (input.permanent === undefined) return {};
+  if (typeof input.permanent !== "boolean") {
+    invalid("permanent", "Must be a boolean");
+  }
+  return { permanent: input.permanent };
 }
 
 export function semanticKeywordBulkInput(
@@ -260,6 +306,21 @@ function priority(value: unknown): number {
     invalid("priority", "Must be an integer between 0 and 100");
   }
   return Number(value);
+}
+
+function duplicatePolicy(
+  value: unknown
+): SemanticKeywordBulkCreateInput["duplicatePolicy"] {
+  if (
+    typeof value !== "string" ||
+    !semanticKeywordDuplicatePolicies.some((policy) => policy === value)
+  ) {
+    invalid(
+      "duplicatePolicy",
+      "Must be SKIP_EXISTING or REJECT_EXISTING"
+    );
+  }
+  return value as SemanticKeywordBulkCreateInput["duplicatePolicy"];
 }
 
 function optionalIntent(

@@ -15,6 +15,12 @@
 
 Один проект может иметь несколько активных контекстов. Контексты имеют человекочитаемые названия.
 
+В пользовательском интерфейсе tracking context называется «профиль съёма»:
+это сохранённое сочетание поисковика, региона, устройства, языка, глубины и
+правила определения URL проекта. Экран профилей использует master-detail:
+компактный список профилей, параметры выбранного профиля, оценку запуска и
+назначенные ему ключи без отдельного перехода.
+
 По ADR-2026-033 provider/credential принадлежат project connector binding, а
 schedule/timezone — automation. Экран может показывать их effective projection
 рядом с context, но они не входят в immutable tracking configuration.
@@ -62,17 +68,31 @@ Wizard:
 - fallback max cost;
 - данные, которые будут сохранены.
 
-### 3.1. Первый manual BYOK slice
+### 3.1. Manual BYOK slice Arsenkin
 
-По ADR-2026-034 первый execution slice использует Arsenkin `check-top` после
+По ADR-2026-034 execution slice использует Arsenkin `positions` после
 provider contract, quota, credential freshness и compatibility gates.
 Context, assignment, binding, estimate и compatibility UI не делают сетевой
 запрос; live submit выполняет только isolated connector-worker под новой
 kill-switch generation.
 
-Первый scope ограничен Google Desktop/Mobile TOP-30, simple format, одним
-context на provider task, chunk до 250 keywords и 1 000 keywords на command.
-Яндекс, raw SERP, fallback и platform-paid route в этот slice не входят.
+Исполняемый scope поддерживает Google Live Desktop/Mobile с глубиной TOP-30,
+TOP-50 или TOP-100 и Яндекс Search API/Live с канонической внутренней
+глубиной TOP-30, simple format, одним context на provider task и до 15 000
+keywords в одном provider command. Публичный contract `positions` не
+принимает `depth` для Яндекса: поле не отправляется провайдеру, а значения
+TOP-50/TOP-100 блокируются на estimate вместо молчаливого отбрасывания.
+Adapter отображает профили в зафиксированные Arsenkin `positions` search
+types: Яндекс Search API — `1`, Яндекс Live Desktop/Mobile — `2/3`, Google
+Live Desktop/Mobile — `11/12`; регион передаётся только как проверенный
+числовой provider ID. Выбранный `SEARCH_API`/`LIVE` является частью immutable
+estimate и не может быть заменён при запуске. Raw SERP и platform-paid route
+в этот slice не входят; fallback выполняется только через явно настроенный
+connector route.
+Каждый sealed provider task является одним provider batch: connector вызывает
+Arsenkin `set` ровно один раз с массивом `queries` до 15 000 элементов, затем
+poll-ит один task ID и нормализует весь task. Делить task на последовательные
+paid submit по одному keyword запрещено.
 Country, language, safe search и domain rule запрещено молча отбрасывать:
 непредставимый context получает compatibility blocker ещё в estimate.
 
@@ -98,7 +118,7 @@ credential, не вызывает Arsenkin и не создаёт domain event:
    credential, домен, quota или lifecycle.
 2. Jobs/integrations по internal HTTP запрашивает у SEO Data атомарный scope.
 3. SEO Data в `RepeatableRead` читает context, последнюю immutable
-   configuration и до 1 001 активного temporal assignment. Для допустимого
+   configuration и до 15 001 активного temporal assignment. Для допустимого
    scope рассчитывается domain-separated SHA-256; keyword ID/text наружу не
    возвращаются.
 4. Jobs/integrations в собственной `RepeatableRead` транзакции читает только
@@ -106,9 +126,9 @@ credential, не вызывает Arsenkin и не создаёт domain event:
    текущего material, рассчитывает blockers и записывает immutable
    пяти­минутный receipt.
 
-Значение `1001` является bounded sentinel «не менее 1 001», а не точным
+Значение `15001` является bounded sentinel «не менее 15 001», а не точным
 count; hash такого неполного множества имеет состояние `UNAVAILABLE`.
-Bounded scope `1..1000` также возвращает `UNAVAILABLE`, если keyword text
+Bounded scope `1..15000` также возвращает `UNAVAILABLE`, если keyword text
 нарушает provider character/UTF-8/total-byte preflight; пустой scope всегда
 hashable. Final
 scope hash включает semantic scope, project domain/version и версии
@@ -154,9 +174,15 @@ replay снова проверяет authoritative SEO Data chunk, поэтом�
 encrypted credential projection. `PUBLIC` execute отозван, а authorize
 повторно проверяет graph/lease/control fence и атомарно фиксирует
 `SUBMITTING` до возможных network bytes. Isolated connector-worker затем
-отправляет documented Arsenkin `check-top`, durable хранит exact wire
-snapshot/hash и task ID, poll-ит результат и сохраняет только normalized
-found/not-found output без raw provider body.
+отправляет documented Arsenkin `positions`, durable хранит exact wire
+snapshot/hash и task ID, опрашивает `check` и вызывает `get` только после
+`TASK_STATUS/finish` с progress 100. Финальный `format=0` ответ
+нормализуется из `result.table`: exact query set связывается с sealed manifest,
+`position=[1001]` означает not-found, а найденная позиция обязана находиться
+в диапазоне 1..sealed depth и иметь URL в разрешённом scope проекта.
+Сохраняется только normalized found/not-found output без raw provider body.
+Premature `get`, неполный/лишний query set и неизвестные row layouts
+завершаются fail-closed.
 
 Platform API issuer принимает exact Jobs request без
 binding/credential IDs, повторно проверяет owned lifecycle/RBAC state и
@@ -169,8 +195,20 @@ client сохраняет durable `REQUESTED`
 secret-free scoped execution и становится `CONSUMED`. Dispatcher вызывает
 service по одному sealed chunk. Использованные kill-switch versions immutable
 и не переиспользуются; runtime activation выдаётся только новой generation
-`arsenkin-positions@2`. Connector permission allowlist содержит только exact
+`arsenkin-positions@4`. Connector permission allowlist содержит только exact
 claim/authorize/runtime broker execute и не выдаёт table DML.
+
+Каждый HTTP-запрос к Arsenkin (`set`, `check`, `get` и credential `info`)
+получает разрешение через общий для всех connector workflows и replicas
+Redis sliding-window limiter: не более 30 запросов за 60 секунд. Limiter
+fail-closed при недоступности Redis и не подменяется ограничением числа
+BullMQ jobs; worker concurrency остаётся независимой настройкой. Rank request
+timeout ограничен 10 секундами независимо от более широкого timeout credential
+validation, а claim lease рассчитывается для двух последовательных request с
+запасом и остаётся в broker-bound диапазоне 5–25 секунд. DB-bound ограничение
+пяти одновременных provider tasks сейчас покрывает rank lifecycle. Единый
+cross-workflow cap для одновременных Rank и Wordstat tasks обязателен до
+multi-tenant beta.
 
 ### 3.4. Реализованный read slice истории
 
@@ -194,12 +232,19 @@ base64url cursor. Array/unknown parameters и некогерентный диа�
 порядок, дубликаты и pagination coherence ответа SEO Data, redact-ит private
 поля и возвращает collection `data + page + meta`.
 
+Семантическая таблица показывает для Яндекса и Google текущую позицию,
+релевантный URL и дату последнего съёма. `observedAt` заполняется и для
+нормализованного `not-found`: в этом случае позиция и URL отображаются красным
+крестом, а дата остаётся доступной. Колонки дат участвуют в server-side sort,
+поэтому их порядок сохраняется при cursor pagination и infinite scroll.
+
 Private/noindex Web route
 `/app/projects/:projectId/rankings` показывает UTC date range,
 context/keyword filters, load-more, loading/empty/error/offline states и
 явные archived/read-only пояснения. Сбор запускается только для
-provider-compatible Google/depth-30/numeric-region конфигурации и свежего
-пользовательского Arsenkin BYOK credential; неподдержанные safe-search,
+provider-compatible Google depth 30/50/100 или Яндекс с внутренней depth 30, numeric-region
+конфигурации и свежего пользовательского Arsenkin BYOK credential;
+неподдержанные safe-search,
 canonical/mirror rules и нечисловой регион блокируются до provider call.
 
 ## 4. Rank snapshot
@@ -256,7 +301,7 @@ canonical/mirror rules и нечисловой регион блокируютс
 
 ### Controls
 
-- context;
+- search engine, region, device, language and depth configured at run time;
 - period;
 - comparison period;
 - group/tag/view;
@@ -287,6 +332,17 @@ canonical/mirror rules и нечисловой регион блокируютс
 - features;
 - freshness;
 - data quality.
+
+Таблица мониторинга использует тот же grid contract, что семантика: набор
+колонок отличается, но выделение, infinite scroll, сортировка, плотность и
+перестановка колонок едины. Обязательны три Wordstat-колонки, текущая и
+предыдущая позиция, а также отдельные ranking URL Яндекс и Google.
+
+Tracking context остаётся внутренним immutable/versioned снимком параметров,
+без которого нельзя воспроизвести историю. Пользователь не создаёт и не
+выбирает его отдельно: при каждом ручном запуске одинаковое окно на страницах
+семантики и позиций собирает параметры и атомарно создаёт техническую версию
+профиля вместе с назначением выбранных запросов.
 
 ## 7. Детальная история запроса
 
@@ -394,6 +450,63 @@ canonical/mirror rules и нечисловой регион блокируютс
 - target group;
 - estimate;
 - schedule.
+
+Для Arsenkin Wordstat один публичный Job принимает 1–10 000 keyword ID/version и
+отправляет один `set` с массивом всех уникальных нормализованных query texts.
+Сам Job и его 10 000 JobItems создаются атомарно; owner-side записи разбиваются
+на SQL batches до 2 000 строк, чтобы public limit не зависел от PostgreSQL bind
+parameter limit. Connector читает keyword ID/version пакетами до 1 000 и
+сохраняет нормализованные snapshots пакетами до 500, продлевая fenced lease
+между внутренними окнами. Эти chunks не создают дополнительные provider tasks.
+Один opaque task ID сохраняется на каждом JobItem пакета; connector опрашивает
+`check` и вызывает `get` только после статуса `finish`. Итоговый `get` обязан
+вернуть однозначно привязанный результат для каждого query, после чего
+все keyword snapshots сохраняются идемпотентно и JobItems завершаются одной
+lease/version-fenced DB-командой. Missing, duplicate-conflicting или unknown
+query rows отклоняются как invalid provider response. Уже существующие
+per-keyword task ID опрашиваются без повторного submit. Неоднозначный transport
+outcome submit не ретраится, чтобы не создать второй платный task. XMLStock
+не объединяется и выполняется по одному keyword, сохраняя все выбранные типы.
+
+XMLStock Wordstat следует provider contract `/wordstat/json/`: один внешний
+request содержит один `query` и один `pagetype=words`. BASE использует запрос
+без операторов, EXACT — запрос в кавычках, FIXED — запрос в кавычках с `!`
+перед словами. `groupby` ограничивает число связанных фраз в provider answer и
+не является batch входных keywords, поэтому объединять несколько ключей в
+один такой request нельзя. Регион и устройство являются частью контекста
+snapshot и ключа идемпотентности.
+
+Для XMLStock rank один manifest chunk содержит один keyword. Яндекс Search API
+работает асинхронно через `delayed=1`: connector сохраняет только `req_id`,
+ждёт 15 секунд до первого poll и 25 секунд между pending ответами; коды
+`202/210` означают ещё не готовый результат. Яндекс Live и Google Live
+синхронны и при глубине TOP-30/50/100 выполняют 3/5/10 страниц по 10
+результатов. Все найденные позиции переводятся в абсолютный индекс; matching
+URL сохраняется как ranking/relevant URL, raw XML отбрасывается после строгой
+нормализации.
+
+Источник выдачи является обязательной частью immutable estimate и request
+snapshot. В первом контуре поддерживаются XMLStock Яндекс Search API, Яндекс
+Live и Google Live, а также Arsenkin Яндекс Search API, Яндекс Live и Google
+Live. Для Arsenkin Яндекс доступен TOP-30; для Google — TOP-30/50/100. Estimate
+показывает расход в единицах провайдера: Arsenkin Google требует соответственно
+2/3/5 лимитов на ключ, Яндекс — 2 лимита; XMLStock Search API выполняет один
+request на ключ, Live — `ceil(depth / 10)` requests на ключ. Запуск передаёт
+ровно выбранный `credentialId` и не мутирует routing binding после estimate.
+Перед внешним `set` connector после Redis permit атомарно резервирует один из
+пяти общих для rank/Wordstat Arsenkin slots и записывает durable submit marker.
+Если worker теряет подтверждение submit или перезапускается с marker без task
+ID, Job остаётся в `ACTION_REQUIRED` до ручной сверки с провайдером; обычная
+команда retry такой Job не переотправляет. Poll horizon для большого task — до
+720 попыток с provider-controlled delay, а ожидание свободного slot не расходует
+attempt.
+Fenced lease frequency connector равен 120 секундам: это покрывает один
+внутренний SEO Data timeout до 60 секунд и обязательный запас на запись;
+между bounded resolve/persist окнами lease продлевается.
+Одновременно пришедшие rank и Wordstat ticks сериализуют короткую секцию
+резервирования provider slot общим transaction-scoped lock; Wordstat ждёт её
+не более двух секунд, поэтому одинаковый scheduler bucket не вызывает
+бесконечное `waiting_provider_capacity`.
 
 ## 12. Search suggestions
 

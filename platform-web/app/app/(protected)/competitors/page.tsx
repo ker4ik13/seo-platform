@@ -28,7 +28,6 @@ export default async function CompetitorsPage() {
         <>
           <section className="page-heading">
             <div>
-              <p className="eyebrow">Проект · {context.project.name}</p>
               <h1>Конкуренты и сбор семантики</h1>
               <p>
                 Получайте органические запросы конкурентов через собственный

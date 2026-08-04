@@ -4,6 +4,8 @@ import {
   ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION,
   rankExecutionEvidence,
   rankExecutionEvidenceHash,
+  rankExecutionKillSwitchVersion,
+  XMLSTOCK_RANK_KILL_SWITCH_VERSION,
   type RankExecutionEvidenceV2
 } from "./rank-execution-evidence.js";
 
@@ -44,7 +46,7 @@ test("rejects extensible, disabled and malformed execution evidence", () => {
     { ...value, executionAttempt: 0 },
     {
       ...value,
-      manifest: { ...value.manifest, chunkIndex: 4 }
+      manifest: { ...value.manifest, chunkIndex: 15_000 }
     },
     {
       ...value,
@@ -71,6 +73,23 @@ test("rejects extensible, disabled and malformed execution evidence", () => {
   ]) {
     assert.throws(() => rankExecutionEvidence(candidate), TypeError);
   }
+});
+
+test("uses the provider-specific kill-switch version", () => {
+  assert.equal(
+    rankExecutionKillSwitchVersion(
+      "ARSENKIN",
+      "arsenkin-positions@4"
+    ),
+    "arsenkin-positions@4"
+  );
+  assert.equal(
+    rankExecutionKillSwitchVersion(
+      "XMLSTOCK",
+      "arsenkin-positions@4"
+    ),
+    XMLSTOCK_RANK_KILL_SWITCH_VERSION
+  );
 });
 
 function evidence(): RankExecutionEvidenceV2 {

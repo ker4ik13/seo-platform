@@ -346,7 +346,7 @@ Permission Web Push запрашивается только по нажатию 
 - loading, saving, saved, validation, conflict, error и blocked-channel states.
 
 Текущий repository slice реализует хранение и API профильных/проектных
-настроек, effective policy, in-app центр, lifecycle devices по ADR-2026-035 и
+настроек, effective policy, in-app dropdown и полный центр, lifecycle devices по ADR-2026-035 и
 durable browser Web Push delivery по ADR-2026-039. Notification и exact
 per-device attempt создаются атомарно; sender имеет lease/retry, fresh
 membership authorization, `404/410` expiry, global provider-expiry sweeper и
@@ -354,6 +354,14 @@ persistent key canaries. По умолчанию profile выключен, по�
 возвращает `deliveryAvailable=false`; оператор включает его только вместе с
 проверенным VAPID/keyring/profile rollout. `testDeliveryAvailable=false` до
 отдельной rate-limited test command.
+
+Terminal Jobs восстанавливаются bounded PostgreSQL reconciler-ом из
+authoritative Jobs DB. Для каждого terminal status создаётся не более одного
+outbox intent; перед созданием notification Platform API повторно проверяет
+actor membership, workspace/project lifecycle и `project.view`. Realtime
+применяет profile/project policy и `notifyOwnJobs`, а Web показывает событие
+в dropdown/центре, corner toast и best-effort звуковой сигнал. Payload не
+содержит query text, URL, provider response или credential material.
 
 Следующий вертикальный срез общего notification-контура:
 `остальные redacted domain events → effective policy → idempotent Email/Web

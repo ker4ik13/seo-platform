@@ -180,7 +180,7 @@ function renderReceiptEmail(
   const copy =
     locale === "ru"
       ? {
-          subject: "Ваш чек об оплате SEO Workspace",
+          subject: "Ваш чек об оплате SEOньорита",
           heading: "Чек об оплате",
           introduction:
             "Оплата зарегистрирована. Официальный чек ФНС доступен по ссылке ниже.",
@@ -190,7 +190,7 @@ function renderReceiptEmail(
           identifier: "Номер чека"
         }
       : {
-          subject: "Your SEO Workspace payment receipt",
+          subject: "Your SEOnorita payment receipt",
           heading: "Payment receipt",
           introduction:
             "Your payment has been registered. The official FNS receipt is available below.",

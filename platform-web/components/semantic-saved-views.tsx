@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import { useEffect, useState, type FormEvent } from "react";
 import {
   BrowserApiError,
@@ -9,6 +11,7 @@ import type {
   SemanticSavedView,
   SemanticViewConfig
 } from "./semantic-view-types";
+import { isInternalSemanticViewName } from "./semantic-view-types";
 
 interface SemanticSavedViewsProps {
   readonly config: SemanticViewConfig;
@@ -29,6 +32,9 @@ export function SemanticSavedViews({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
+  const visibleViews = views.filter(
+    ({ name: viewName }) => !isInternalSemanticViewName(viewName)
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -113,17 +119,17 @@ export function SemanticSavedViews({
   }
 
   return (
-    <details className="semantic-saved-views">
+    <details className="semantic-saved-views" data-exclusive-dropdown>
       <summary>
         Представления
-        <span>{loading ? "…" : views.length}</span>
+        <span>{loading ? "…" : visibleViews.length}</span>
       </summary>
       <div className="semantic-saved-views-body">
-        {views.length === 0 && !loading ? (
+        {visibleViews.length === 0 && !loading ? (
           <p>Сохранённых представлений пока нет.</p>
         ) : (
           <ul>
-            {views.map((view) => (
+            {visibleViews.map((view) => (
               <li key={view.id}>
                 <button
                   className="semantic-view-name"
@@ -167,7 +173,7 @@ export function SemanticSavedViews({
               value={name}
             />
           </label>
-          <select
+          <CustomSelect
             aria-label="Доступ к представлению"
             onChange={(event) =>
               setScope(event.target.value as typeof scope)
@@ -176,7 +182,7 @@ export function SemanticSavedViews({
           >
             <option value="PRIVATE">Личное</option>
             <option value="PROJECT_SHARED">Общее для проекта</option>
-          </select>
+          </CustomSelect>
           <button className="secondary-button" disabled={saving} type="submit">
             {saving ? "Сохраняем…" : "Сохранить вид"}
           </button>

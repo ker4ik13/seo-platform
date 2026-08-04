@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import {
   useEffect,
   useMemo,
@@ -39,6 +41,7 @@ import {
   trackingGeographyLabel,
   trackingSearchEngineLabel
 } from "../lib/tracking-context-presentation";
+import { ProviderLogo } from "./provider-logo";
 
 interface HistoryFailure {
   readonly kind:
@@ -445,7 +448,7 @@ export function RankHistory({
             <div className="rank-history-filter-grid">
               <label className="form-field rank-history-context-field">
                 <span>Контекст</span>
-                <select
+                <CustomSelect
                   onChange={(event) => selectContext(event.target.value)}
                   required
                   value={selectedContextId}
@@ -465,7 +468,7 @@ export function RankHistory({
                         : ""}
                     </option>
                   ))}
-                </select>
+                </CustomSelect>
                 {selectedContext && (
                   <small>
                     {trackingGeographyLabel(selectedContext)} · конфигурация v
@@ -493,7 +496,7 @@ export function RankHistory({
               </label>
               <label className="form-field rank-history-keyword-field">
                 <span>Назначенный запрос</span>
-                <select
+                <CustomSelect
                   disabled={keywordsLoading || keywordOptions.length === 0}
                   onChange={(event) =>
                     setSelectedKeywordId(event.target.value)
@@ -513,7 +516,7 @@ export function RankHistory({
                       {keyword.textOriginal}
                     </option>
                   ))}
-                </select>
+                </CustomSelect>
                 <small>
                   {keywordsFailure ??
                     (keywordsTruncated
@@ -676,7 +679,7 @@ function HistoryRows({
                   <RankingUrl item={item} />
                 </td>
                 <td>
-                  <strong>Arsenkin</strong>
+                  <strong className="provider-inline"><ProviderLogo provider={item.provider} size="compact" /> {providerLabel(item.provider)}</strong>
                   <small>
                     {item.connectorVersion} · cfg v
                     {item.configurationVersion}
@@ -713,8 +716,8 @@ function HistoryRows({
               </div>
               <div>
                 <dt>Источник</dt>
-                <dd>
-                  Arsenkin · {item.connectorVersion} · cfg v
+                <dd className="provider-inline">
+                  <ProviderLogo provider={item.provider} size="compact" /> {providerLabel(item.provider)} · {item.connectorVersion} · cfg v
                   {item.configurationVersion}
                 </dd>
               </div>
@@ -730,6 +733,10 @@ function HistoryRows({
       </ol>
     </>
   );
+}
+
+function providerLabel(provider: "ARSENKIN" | "XMLSTOCK"): string {
+  return provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin";
 }
 
 function PositionValue({

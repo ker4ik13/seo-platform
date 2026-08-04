@@ -19,6 +19,8 @@ export function billingPlanFeatures(
     }
     return candidate;
   };
+  const compatibleNumber = (key: string, fallback: number): number =>
+    feature[key] === undefined ? fallback : number(key);
   const boolean = (key: string): boolean => {
     const candidate = feature[key];
     if (typeof candidate !== "boolean") {
@@ -45,6 +47,8 @@ export function billingPlanFeatures(
     projects: number("projects"),
     storedKeywords: number("storedKeywords"),
     keywordsPerProject: number("keywordsPerProject"),
+    foldersPerProject: compatibleNumber("foldersPerProject", 50),
+    concurrentJobs: compatibleNumber("concurrentJobs", 1),
     trackedContextPairs: number("trackedContextPairs"),
     storageBytes: number("storageBytes"),
     rawSerpRetentionDays: number("rawSerpRetentionDays"),

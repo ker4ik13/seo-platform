@@ -34,3 +34,16 @@ export interface TrackingContextKeywordAssignmentEventDataV1 {
   readonly operation: "ASSIGNED" | "REMOVED";
   readonly changedBy: string;
 }
+
+export interface TrackingContextKeywordAssignmentsReplacedEventDataV1 {
+  readonly contextId: string;
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly entityVersion: number;
+  readonly assignedKeywordCount: number;
+  readonly addedKeywordCount: number;
+  readonly removedKeywordCount: number;
+  readonly unchangedKeywordCount: number;
+  readonly keywordSetHash: string;
+  readonly changedBy: string;
+}

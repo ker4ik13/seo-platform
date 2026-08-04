@@ -216,6 +216,8 @@ test("rejects cross-project, malformed and contradictory estimates", () => {
 test("renders bounded overflow and unavailable hash honestly", () => {
   assert.equal(rankEstimateCountLabel("1001"), "более 1 000");
   assert.equal(rankEstimateCountLabel("1000"), "1 000");
+  assert.equal(rankEstimateCountLabel("15001"), "более 15 000");
+  assert.equal(rankEstimateCountLabel("15000"), "15 000");
   assert.equal(
     rankEstimateShortHash({ availability: "UNAVAILABLE" }),
     "Недоступен"
@@ -227,6 +229,74 @@ test("renders bounded overflow and unavailable hash honestly", () => {
       value: hash
     }),
     "aaaaaaaaaaaa…aaaaaaaa"
+  );
+});
+
+test("parses one 15,000-keyword Arsenkin positions task", () => {
+  const current = {
+    ...estimate,
+    scope: {
+      ...estimate.scope,
+      keywordCount: "15000",
+      pairCount: "15000"
+    },
+    workload: {
+      ...estimate.workload,
+      taskCount: "1",
+      minimumRequestCount: "3",
+      keywordLimitPerTask: "15000",
+      keywordLimitPerCommand: "15000"
+    }
+  };
+
+  assert.equal(
+    parseRankEstimate(current, {
+      projectId: "project-1",
+      trackingContextId: "context-1"
+    }).scope.keywordCount,
+    "15000"
+  );
+});
+
+test("parses XMLStock Yandex and Google Top-100 workloads", () => {
+  const xmlBase = {
+    ...estimate,
+    provider: "XMLSTOCK",
+    scope: {
+      ...estimate.scope,
+      keywordCount: "15000",
+      pairCount: "15000"
+    },
+    workload: {
+      ...estimate.workload,
+      taskCount: "15000",
+      minimumRequestCount: "30000",
+      requestStages: ["SUBMIT", "POLL"],
+      keywordLimitPerTask: "1",
+      keywordLimitPerCommand: "15000"
+    },
+    policyVersion: "manual-xmlstock-serp@1.0.0"
+  };
+  assert.equal(
+    parseRankEstimate(xmlBase, {
+      projectId: "project-1",
+      trackingContextId: "context-1"
+    }).provider,
+    "XMLSTOCK"
+  );
+  assert.equal(
+    parseRankEstimate({
+      ...xmlBase,
+      workload: {
+        ...xmlBase.workload,
+        minimumRequestCount: "150000",
+        requestStages: ["GET"]
+      }
+    }, {
+      projectId: "project-1",
+      trackingContextId: "context-1"
+    }).workload.minimumRequestCount,
+    "150000"
   );
 });
 
@@ -333,6 +403,14 @@ test("reuses ambiguous estimate retries and rotates explicit recalculations", ()
   assert.equal(ambiguousRetry.key, "estimate-key-1");
   assert.equal(explicitRecalculation.key, "estimate-key-3");
   assert.equal(revisedContext.key, "estimate-key-4");
+  const otherProvider = rankEstimateIdempotencyCommand(
+    first,
+    context,
+    false,
+    () => "estimate-key-xmlstock",
+    "XMLSTOCK"
+  );
+  assert.equal(otherProvider.key, "estimate-key-xmlstock");
 });
 
 test("expiry helpers schedule a bounded transition to expired", () => {

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import {
   domainEventTypes,
+  semanticImportMaxGroupDepth,
   type InternalSemanticImportReceipt,
   type SemanticCapacityEntitlement,
   type SemanticImportMapping,
@@ -186,12 +187,24 @@ export class SemanticImportPublisherService {
         afterHash
       );
       if (batch.length === 0) break;
-      const rows = batch.map(({ canonical_row }) => {
-        const row = canonicalPublishRow(canonical_row);
-        if (!row) throw new Error("Validated semantic row is invalid");
-        return row;
+      const rows = batch.map(({ canonical_row, canonical_rows }) => {
+        const sourceRows = canonical_rows ??
+          (canonical_row === undefined ? [] : [canonical_row]);
+        const parsed = sourceRows.map(canonicalPublishRow);
+        if (parsed.length === 0 || parsed.some((row) => !row)) {
+          throw new Error("Validated semantic row is invalid");
+        }
+        return mergeCanonicalPublishRows(
+          parsed as readonly SemanticImportPublishRow[]
+        );
       });
-      const payloadHash = hashJson(rows);
+      const groupPaths =
+        chunkIndex === 0
+          ? safeKc4GroupPaths(semanticImport.sourceMetadata)
+          : undefined;
+      const payloadHash = hashJson(
+        groupPaths ? { groupPaths, rows } : rows
+      );
       await this.seoData.applyChunk({
         workspaceId: semanticImport.workspaceId,
         projectId: semanticImport.projectId,
@@ -200,6 +213,7 @@ export class SemanticImportPublisherService {
         chunkIndex,
         payloadHash,
         duplicatePolicy: mapping.duplicatePolicy,
+        ...(groupPaths ? { groupPaths } : {}),
         rows
       });
       publishedRows += BigInt(rows.length);
@@ -351,12 +365,12 @@ export class SemanticImportPublisherService {
           aggregateId: semanticImport.id,
           workspaceId: semanticImport.workspaceId,
           projectId: semanticImport.projectId,
-          payload: {
+          payload: json({
             importId: semanticImport.id,
             workspaceId: semanticImport.workspaceId,
             projectId: semanticImport.projectId,
             ...result
-          },
+          }),
           metadata: {
             producer: "jobs-integrations",
             source: "semantic-import-worker"
@@ -401,13 +415,13 @@ export class SemanticImportPublisherService {
           aggregateId: semanticImport.id,
           workspaceId: semanticImport.workspaceId,
           projectId: semanticImport.projectId,
-          payload: {
+          payload: json({
             importId: semanticImport.id,
             workspaceId: semanticImport.workspaceId,
             projectId: semanticImport.projectId,
             partial: Boolean(result),
             ...result
-          },
+          }),
           metadata: {
             producer: "jobs-integrations",
             source: "semantic-import-worker"
@@ -597,33 +611,85 @@ async function validatedBatch(
 ): Promise<
   readonly {
     readonly normalized_hash: string;
-    readonly canonical_row: unknown;
+    readonly canonical_row?: unknown;
+    readonly canonical_rows?: readonly unknown[];
   }[]
 > {
   return afterHash
     ? prisma.$queryRaw`
-        SELECT DISTINCT ON ("normalized_hash")
+        SELECT
           "normalized_hash",
-          "canonical_row"
+          jsonb_agg("canonical_row" ORDER BY "row_number") AS "canonical_rows"
         FROM "semantic_import_validated_rows"
         WHERE
           "import_id" = ${importId}::uuid
           AND "is_valid"
           AND "normalized_hash" > ${afterHash}
-        ORDER BY "normalized_hash", "row_number"
+        GROUP BY "normalized_hash"
+        ORDER BY "normalized_hash"
         LIMIT ${limit}
       `
     : prisma.$queryRaw`
-        SELECT DISTINCT ON ("normalized_hash")
+        SELECT
           "normalized_hash",
-          "canonical_row"
+          jsonb_agg("canonical_row" ORDER BY "row_number") AS "canonical_rows"
         FROM "semantic_import_validated_rows"
         WHERE
           "import_id" = ${importId}::uuid
           AND "is_valid"
-        ORDER BY "normalized_hash", "row_number"
+        GROUP BY "normalized_hash"
+        ORDER BY "normalized_hash"
         LIMIT ${limit}
       `;
+}
+
+export function mergeCanonicalPublishRows(
+  rows: readonly SemanticImportPublishRow[]
+): SemanticImportPublishRow {
+  const first = rows[0]!;
+  const groupPaths = uniquePaths(
+    rows.flatMap((row) =>
+      row.groupPaths ?? (row.groupPath ? [row.groupPath] : [])
+    )
+  );
+  const tags = [...new Set(rows.flatMap((row) => row.tags ?? []))];
+  const customValues = Object.assign(
+    {},
+    ...rows.map(({ customValues }) => customValues)
+  ) as Readonly<Record<string, string>>;
+  const positions = [...new Map(
+    rows.flatMap((row) => row.positions ?? []).map((position) => [
+      position.searchEngine,
+      position
+    ])
+  ).values()];
+
+  // Keep the exact field order used by the receiving input canonicalizer.
+  // The payload hash is deliberately calculated over canonical JSON, so
+  // spreading `first` before appending groupPaths would place groupPaths
+  // after customValues and make the integrity check fail for KC4 duplicates.
+  return {
+    sourceRowNumber: first.sourceRowNumber,
+    textOriginal: first.textOriginal,
+    textNormalized: first.textNormalized,
+    normalizedHash: first.normalizedHash,
+    language: first.language,
+    ...(groupPaths.length > 0 ? { groupPaths } : {}),
+    ...(first.targetUrl ? { targetUrl: first.targetUrl } : {}),
+    ...(first.frequencies ? { frequencies: first.frequencies } : {}),
+    ...(positions.length > 0 ? { positions } : {}),
+    ...(first.observedAt ? { observedAt: first.observedAt } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
+    customValues
+  };
+}
+
+function uniquePaths(
+  paths: readonly (readonly string[])[]
+): readonly (readonly string[])[] {
+  const values = new Map<string, readonly string[]>();
+  for (const path of paths) values.set(JSON.stringify(path), path);
+  return [...values.values()];
 }
 
 export function canonicalPublishRow(
@@ -653,7 +719,21 @@ export function canonicalPublishRow(
       (item) => typeof item !== "string"
     ) ||
     (row.targetUrl !== undefined && typeof row.targetUrl !== "string") ||
-    (row.observedAt !== undefined && typeof row.observedAt !== "string")
+    (row.observedAt !== undefined && typeof row.observedAt !== "string") ||
+    (row.priority !== undefined &&
+      (!Number.isSafeInteger(row.priority) ||
+        Number(row.priority) < 0 ||
+        Number(row.priority) > 100)) ||
+    (row.isFavorite !== undefined && typeof row.isFavorite !== "boolean") ||
+    (row.intent !== undefined &&
+      ![
+        "INFORMATIONAL",
+        "NAVIGATIONAL",
+        "COMMERCIAL",
+        "TRANSACTIONAL",
+        "LOCAL",
+        "MIXED"
+      ].includes(String(row.intent)))
   ) {
     return undefined;
   }
@@ -686,24 +766,75 @@ export function canonicalPublishRow(
   ) {
     return undefined;
   }
+  if (
+    row.positions !== undefined &&
+    (!Array.isArray(row.positions) ||
+      row.positions.length > 2 ||
+      row.positions.some(
+        (item) =>
+          typeof item !== "object" ||
+          item === null ||
+          !("searchEngine" in item) ||
+          !["YANDEX", "GOOGLE"].includes(String(item.searchEngine)) ||
+          !("found" in item) ||
+          typeof item.found !== "boolean" ||
+          (item.position !== undefined &&
+            (!Number.isSafeInteger(item.position) || Number(item.position) < 1)) ||
+          (item.previousPosition !== undefined &&
+            (!Number.isSafeInteger(item.previousPosition) ||
+              Number(item.previousPosition) < 1)) ||
+          (item.rankingUrl !== undefined &&
+            typeof item.rankingUrl !== "string")
+      ))
+  ) {
+    return undefined;
+  }
+  const frequencies = row.frequencies
+    ? (row.frequencies as readonly Readonly<Record<string, unknown>>[]).map(
+        (frequency) => ({
+          type: frequency.type as "BASE" | "EXACT" | "FIXED",
+          value: frequency.value as string
+        })
+      )
+    : undefined;
+  const positions = row.positions
+    ? (row.positions as readonly Readonly<Record<string, unknown>>[]).map(
+        (position) => ({
+          searchEngine: position.searchEngine as "YANDEX" | "GOOGLE",
+          found: position.found as boolean,
+          ...(position.position === undefined
+            ? {}
+            : { position: position.position as number }),
+          ...(position.previousPosition === undefined
+            ? {}
+            : { previousPosition: position.previousPosition as number }),
+          ...(position.rankingUrl === undefined
+            ? {}
+            : { rankingUrl: position.rankingUrl as string })
+        })
+      )
+    : undefined;
   return {
     sourceRowNumber: row.sourceRowNumber as string,
     textOriginal: row.textOriginal as string,
     textNormalized: row.textNormalized as string,
     normalizedHash: row.normalizedHash as string,
     language: row.language as string,
+    ...(row.priority === undefined ? {} : { priority: row.priority as number }),
+    ...(row.isFavorite === undefined
+      ? {}
+      : { isFavorite: row.isFavorite as boolean }),
+    ...(row.intent === undefined
+      ? {}
+      : {
+          intent: row.intent as NonNullable<SemanticImportPublishRow["intent"]>
+        }),
     ...(row.groupPath
       ? { groupPath: row.groupPath as readonly string[] }
       : {}),
     ...(row.targetUrl ? { targetUrl: row.targetUrl as string } : {}),
-    ...(row.frequencies
-      ? {
-          frequencies:
-            row.frequencies as NonNullable<
-              SemanticImportPublishRow["frequencies"]
-            >
-        }
-      : {}),
+    ...(frequencies ? { frequencies } : {}),
+    ...(positions ? { positions } : {}),
     ...(row.observedAt
       ? { observedAt: row.observedAt as string }
       : {}),
@@ -721,6 +852,7 @@ function importEntitlement(
     billingPlanVersion,
     storedKeywordsLimit,
     keywordsPerProjectLimit,
+    foldersPerProjectLimit,
     trackedContextPairsLimit
   } = semanticImport;
   if (
@@ -728,6 +860,7 @@ function importEntitlement(
     billingPlanVersion === null ||
     storedKeywordsLimit === null ||
     keywordsPerProjectLimit === null ||
+    foldersPerProjectLimit === null ||
     trackedContextPairsLimit === null
   ) {
     return undefined;
@@ -739,11 +872,15 @@ function importEntitlement(
   const trackedContextPairs = safePlanLimit(
     trackedContextPairsLimit
   );
+  const foldersPerProject = safeNonNegativePlanLimit(
+    foldersPerProjectLimit
+  );
   if (
     !Number.isSafeInteger(billingPlanVersion) ||
     billingPlanVersion <= 0 ||
     storedKeywords === undefined ||
     keywordsPerProject === undefined ||
+    foldersPerProject === undefined ||
     trackedContextPairs === undefined
   ) {
     return undefined;
@@ -753,8 +890,15 @@ function importEntitlement(
     planVersion: billingPlanVersion,
     storedKeywords,
     keywordsPerProject,
+    foldersPerProject,
     trackedContextPairs
   };
+}
+
+function safeNonNegativePlanLimit(value: bigint): number | undefined {
+  return value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER)
+    ? Number(value)
+    : undefined;
 }
 
 function safePlanLimit(value: bigint): number | undefined {
@@ -767,6 +911,35 @@ function hashJson(value: unknown): string {
   return createHash("sha256")
     .update(JSON.stringify(value))
     .digest("hex");
+}
+
+function safeKc4GroupPaths(
+  value: unknown
+): readonly (readonly string[])[] | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const groupPaths = (value as Readonly<Record<string, unknown>>).groupPaths;
+  if (!Array.isArray(groupPaths) || groupPaths.length > 2_000) {
+    return undefined;
+  }
+  const parsed = groupPaths.map((path) => {
+    if (
+      !Array.isArray(path) ||
+      path.length < 1 ||
+      path.length > semanticImportMaxGroupDepth ||
+      path.some(
+        (segment) =>
+          typeof segment !== "string" ||
+          segment.length < 1 ||
+          segment.length > 255
+      )
+    ) {
+      throw new Error("Stored KC4 group manifest is invalid");
+    }
+    return path as readonly string[];
+  });
+  return parsed.length > 0 ? parsed : undefined;
 }
 
 function json(value: unknown): Prisma.InputJsonValue {

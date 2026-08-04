@@ -30,12 +30,14 @@ import {
   resolveHeaderMode,
   suggestColumnMapping
 } from "./delimited-parser.js";
+import { parseKc4Rows } from "./kc4-parser.js";
 import { parseXlsxRows } from "./xlsx-parser.js";
 
 const TERMINAL_PARSE_CODES = new Set([
   "BINARY_TEXT_FILE",
   "EMPTY_IMPORT",
   "FIELD_TOO_LARGE",
+  "INVALID_KC4",
   "INVALID_XLSX",
   "INVALID_TEXT_ENCODING",
   "INVALID_QUOTE",
@@ -43,6 +45,8 @@ const TERMINAL_PARSE_CODES = new Set([
   "TOO_MANY_COLUMNS",
   "UNSUPPORTED_IMPORT_FORMAT",
   "UNTERMINATED_QUOTE",
+  "KC4_ARCHIVE_TOO_LARGE",
+  "KC4_TOO_LARGE",
   "XLSX_ARCHIVE_TOO_LARGE",
   "XLSX_SHARED_STRINGS_TOO_LARGE",
   "XLSX_TOO_LARGE"
@@ -129,6 +133,7 @@ export class SemanticImportParserService {
         stage: "detecting_format",
         progressBytes: 0,
         failure: Prisma.DbNull,
+        sourceMetadata: Prisma.DbNull,
         parsingStartedAt: claimedAt,
         parsingHeartbeatAt: claimedAt,
         parsingCompletedAt: null,
@@ -168,7 +173,7 @@ export class SemanticImportParserService {
     if (!this.storage.isEnabled()) {
       throw new Error("Object storage is disabled");
     }
-    if (!["CSV", "TSV", "XLSX"].includes(semanticImport.sourceFormat)) {
+    if (!["CSV", "TSV", "XLSX", "KC4"].includes(semanticImport.sourceFormat)) {
       throw new DelimitedParseError("UNSUPPORTED_IMPORT_FORMAT");
     }
     const upload = await this.prisma.upload.findFirst({
@@ -191,11 +196,20 @@ export class SemanticImportParserService {
     const observed = observeBytes(objectSource);
     let detectedEncoding: DetectedImportEncoding | undefined;
     let detectedDelimiter: DetectedImportDelimiter | undefined;
+    let sourceMetadata: ParseResult["sourceMetadata"];
     let rowSource: AsyncIterable<readonly string[]>;
     if (semanticImport.sourceFormat === "XLSX") {
       rowSource = parseXlsxRows(
         observed.stream,
         semanticImport.totalBytes
+      );
+    } else if (semanticImport.sourceFormat === "KC4") {
+      rowSource = parseKc4Rows(
+        observed.stream,
+        semanticImport.totalBytes,
+        (metadata) => {
+          sourceMetadata = { groupPaths: metadata.groupPaths };
+        }
       );
     } else {
       const prepared = await prepareDelimitedText(
@@ -225,10 +239,13 @@ export class SemanticImportParserService {
     if (initialRows.length === 0) {
       throw new DelimitedParseError("EMPTY_IMPORT");
     }
-    const resolvedHeaderMode = resolveHeaderMode(
-      initialRows,
-      requestedHeaderMode(semanticImport.headerMode)
-    );
+    const resolvedHeaderMode =
+      semanticImport.sourceFormat === "KC4"
+        ? "PRESENT"
+        : resolveHeaderMode(
+            initialRows,
+            requestedHeaderMode(semanticImport.headerMode)
+          );
     const headers = [
       ...importHeaders(initialRows[0], resolvedHeaderMode)
     ];
@@ -321,7 +338,8 @@ export class SemanticImportParserService {
         validRows,
         warningRows,
         errorRows,
-        progressBytes: observed.bytes()
+        progressBytes: observed.bytes(),
+        ...(sourceMetadata ? { sourceMetadata } : {})
       }
     );
   }
@@ -361,6 +379,9 @@ export class SemanticImportParserService {
           detectedDelimiter: result.delimiter ?? null,
           headerMode: result.headerMode,
           headers: [...result.headers],
+          sourceMetadata: result.sourceMetadata
+            ? (result.sourceMetadata as Prisma.InputJsonValue)
+            : Prisma.DbNull,
           suggestedMapping: result.suggestedMapping.map((column) => ({
             ...column
           })),
@@ -527,6 +548,9 @@ interface ParseResult {
   readonly warningRows: bigint;
   readonly errorRows: bigint;
   readonly progressBytes: bigint;
+  readonly sourceMetadata?: Readonly<{
+    groupPaths: readonly (readonly string[])[];
+  }>;
 }
 
 function requestedEncoding(value: string): SemanticImportEncoding {

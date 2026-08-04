@@ -10,6 +10,7 @@ import {
 } from "@nestjs/common";
 import type {
   ApiResponse,
+  SemanticVersionDetail,
   SemanticVersionListItem,
   SemanticVersionUndoPreview,
   SemanticVersionUndoResult
@@ -36,6 +37,7 @@ import {
   headerValue
 } from "../identity/session-auth.guard.js";
 import { requiredIdempotencyKey } from "../common/idempotency-key.js";
+import { PrismaService } from "../database/prisma.service.js";
 import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import { semanticVersionUndoInput } from "./semantic-version-input.js";
 
@@ -46,7 +48,8 @@ export class SemanticVersionController {
   public constructor(
     private readonly seoData: SeoDataClient,
     private readonly audit: AuditService,
-    private readonly billingEntitlements: BillingEntitlementService
+    private readonly billingEntitlements: BillingEntitlementService,
+    private readonly prisma: PrismaService
   ) {}
 
   @Get()
@@ -57,12 +60,27 @@ export class SemanticVersionController {
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiResponse<readonly SemanticVersionListItem[]>> {
     const tenant = requiredProjectTenant(request);
-    return apiResponse(
-      request,
-      await this.seoData.listSemanticVersions(
-        internalProjectContext(request, principal, tenant)
-      )
+    const versions = await this.seoData.listSemanticVersions(
+      internalProjectContext(request, principal, tenant)
     );
+    return apiResponse(request, await this.withActorNames(tenant.workspaceId, versions));
+  }
+
+  @Get(":versionId")
+  @RequirePermission("semantic.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async detail(
+    @Param("versionId") versionId: string,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticVersionDetail>> {
+    const tenant = requiredProjectTenant(request);
+    const result = await this.seoData.getSemanticVersionDetail(
+      internalProjectContext(request, principal, tenant),
+      assertUuid(versionId, "versionId")
+    );
+    const [version] = await this.withActorNames(tenant.workspaceId, [result.version]);
+    return apiResponse(request, { ...result, version: version! });
   }
 
   @Get(":versionId/undo-preview")
@@ -128,5 +146,33 @@ export class SemanticVersionController {
       requestId: context.requestId
     });
     return apiResponse(request, result);
+  }
+
+  private async withActorNames(
+    workspaceId: string,
+    versions: readonly SemanticVersionListItem[]
+  ): Promise<readonly SemanticVersionListItem[]> {
+    const actorIds = [...new Set(versions.map(({ actorId }) => actorId))];
+    if (actorIds.length === 0) return versions;
+    const members = await this.prisma.workspaceMember.findMany({
+      where: { workspaceId, userId: { in: actorIds } },
+      select: {
+        userId: true,
+        user: { select: { displayName: true, emailDisplay: true } }
+      }
+    });
+    const names = new Map(
+      members.map(({ userId, user }) => [
+        userId,
+        user.displayName || user.emailDisplay
+      ])
+    );
+    return versions.map((version) => {
+      const actorDisplayName = names.get(version.actorId);
+      return {
+        ...version,
+        ...(actorDisplayName ? { actorDisplayName } : {})
+      };
+    });
   }
 }

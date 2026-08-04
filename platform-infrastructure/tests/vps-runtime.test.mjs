@@ -12,6 +12,9 @@ const vpsDirectory = path.join(infrastructureDirectory, "vps");
 
 const shellScripts = [
   "bootstrap-runtime.sh",
+  "billing-webhook-proxy.sh",
+  "configure-yookassa.sh",
+  "configure-web-push.sh",
   "migrate-runtime.sh",
   "prepare-clamav.sh",
   "provision-object-storage.sh",
@@ -68,9 +71,60 @@ test("VPS runtime uses UTC for PostgreSQL and every Node process", async () => {
   const nodeRuntimeCount = [...source.matchAll(/NODE_ENV=production \\/gu)].length;
   const utcRuntimeCount = [...source.matchAll(/TZ=UTC \\/gu)].length;
 
-  assert.equal(nodeRuntimeCount, 11);
+  assert.equal(nodeRuntimeCount, 12);
   assert.equal(utcRuntimeCount, nodeRuntimeCount);
   assert.match(source, /postgres[\s\S]*-c timezone=UTC/);
+});
+
+test("VPS Web Push keeps sender secrets in the isolated worker", async () => {
+  const componentSource = await readVpsFile("run-component.sh");
+  const startSource = await readVpsFile("start-runtime.sh");
+  const configureSource = await readVpsFile("configure-web-push.sh");
+  const realtimeBlock = componentSource.match(/  realtime\)[\s\S]*?    ;;/u)?.[0] ?? "";
+  const workerBlock = componentSource.match(/  web-push-worker\)[\s\S]*?    ;;/u)?.[0] ?? "";
+
+  assert.match(realtimeBlock, /WEB_PUSH_REGISTRATION_ENABLED/u);
+  assert.match(realtimeBlock, /WEB_PUSH_VAPID_PUBLIC_KEY/u);
+  assert.doesNotMatch(realtimeBlock, /WEB_PUSH_VAPID_PRIVATE_KEY/u);
+  assert.match(workerBlock, /SERVICE_ROLE=WEB_PUSH_WORKER/u);
+  assert.match(workerBlock, /WEB_PUSH_VAPID_PRIVATE_KEY/u);
+  assert.doesNotMatch(workerBlock, /PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN/u);
+  assert.match(startSource, /start_window web-push-worker/u);
+  assert.match(configureSource, /runtime\.env\.tmp\.\$\$/u);
+  assert.doesNotMatch(configureSource, /printf[^\n]*vapid_(?:public|private)_key/u);
+});
+
+test("VPS YooKassa adapter is operator-configurable and disabled by default", async () => {
+  const source = await readVpsFile("run-component.sh");
+  const startSource = await readVpsFile("start-runtime.sh");
+  const configureSource = await readVpsFile("configure-yookassa.sh");
+  const webhookSource = await readVpsFile("billing-webhook-proxy.sh");
+  const platformBlock = source.match(/  platform-api\)[\s\S]*?    ;;/u)?.[0] ?? "";
+
+  assert.match(platformBlock, /YOOKASSA_ENABLED="\$\{YOOKASSA_ENABLED:-false\}"/u);
+  assert.match(platformBlock, /YOOKASSA_SHOP_ID/u);
+  assert.match(platformBlock, /YOOKASSA_SECRET_KEY/u);
+  assert.match(platformBlock, /BILLING_RECONCILIATION_ENABLED/u);
+  assert.match(platformBlock, /BILLING_RECONCILIATION_INTERVAL_MS/u);
+  assert.match(platformBlock, /BILLING_RECONCILIATION_BATCH_SIZE/u);
+  assert.match(startSource, /start_window billing-webhook-proxy/u);
+  assert.match(configureSource, /runtime\.env\.tmp\.\$\$/u);
+  assert.match(configureSource, /read -r -s entered_secret/u);
+  assert.doesNotMatch(configureSource, /printf[^\n]*secret_key/u);
+  assert.match(webhookSource, /\/api\/v1\/billing\/providers\/yookassa\/webhook/u);
+  assert.match(webhookSource, /127\.0\.0\.1:4000/u);
+  assert.match(webhookSource, /webhook_listen=\$public_host:443/u);
+});
+
+test("VPS rank runtime allows five independent jobs to progress concurrently", async () => {
+  const source = await readVpsFile("run-component.sh");
+  const rankBlock = source.match(/  rank-worker\)[\s\S]*?    ;;/u)?.[0] ?? "";
+  const connectorBlock = source.match(/  connector-worker\)[\s\S]*?    ;;/u)?.[0] ?? "";
+
+  assert.match(rankBlock, /RANK_PREPARATION_DISPATCH_SECONDS=5/u);
+  assert.match(rankBlock, /RANK_PREPARATION_CONCURRENCY=5/u);
+  assert.match(connectorBlock, /INTEGRATION_VALIDATION_DISPATCH_SECONDS=5/u);
+  assert.match(connectorBlock, /INTEGRATION_VALIDATION_CONCURRENCY=8/u);
 });
 
 test("public object-storage proxy is exact, TLS-enabled and never receives credentials", async () => {
@@ -100,6 +154,8 @@ test("runtime starts storage inspection before uploads and executes a real seman
     startSource.indexOf("wait_for_clamd") < startSource.indexOf("for worker in"),
   );
   assert.match(smokeSource, /part_url/);
+  assert.match(smokeSource, /SEO_PLATFORM_SMOKE_STORAGE_RELAY/);
+  assert.match(smokeSource, /app\/api\/storage-upload/);
   assert.match(smokeSource, /object-storage CORS/);
   assert.match(smokeSource, /suggestedTarget/);
   assert.match(smokeSource, /validation/);

@@ -1,0 +1,191 @@
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Post,
+  Req,
+  UseGuards
+} from "@nestjs/common";
+import type {
+  ApiResponse,
+  InternalCreateProjectNotificationInput,
+  InternalDeliverJobNotificationInput,
+  InternalDeliverJobNotificationReceipt,
+  ProjectNotificationEventType
+} from "@seo-platform/contracts";
+import type { FastifyRequest } from "fastify";
+import { AuthorizationService } from "../authorization/authorization.service.js";
+import type { AuthorizedProjectTenant } from "../authorization/project-tenant.js";
+import { assertUuid } from "../common/identifier.js";
+import { CrawlAutomationDispatchGuard } from "../crawls/crawl-automation-dispatch.guard.js";
+import { requiredDispatchHeaders } from "../crawls/crawl-automation-dispatch.input.js";
+import { RealtimeClient } from "../realtime/realtime.client.js";
+import { jobNotificationInput } from "./job-notification.input.js";
+
+@Controller(
+  "internal/v1/workspaces/:workspaceId/projects/:projectId/jobs/:jobId"
+)
+@UseGuards(CrawlAutomationDispatchGuard)
+export class JobNotificationController {
+  public constructor(
+    private readonly authorization: AuthorizationService,
+    private readonly realtime: RealtimeClient
+  ) {}
+
+  @Post("notification")
+  @HttpCode(HttpStatus.OK)
+  public async deliver(
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectId") projectId: string,
+    @Param("jobId") jobId: string,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<InternalDeliverJobNotificationReceipt>> {
+    const input = jobNotificationInput(body);
+    const headers = requiredDispatchHeaders(request);
+    if (
+      assertUuid(workspaceId, "workspaceId") !== input.workspaceId ||
+      assertUuid(projectId, "projectId") !== input.projectId ||
+      assertUuid(jobId, "jobId") !== input.jobId ||
+      headers.workspaceId !== input.workspaceId ||
+      headers.projectId !== input.projectId ||
+      headers.actorId !== input.actorId ||
+      headers.idempotencyKey !== input.idempotencyKey ||
+      headers.requestId !== request.id
+    ) {
+      throw new BadRequestException(
+        "Route, trusted headers and job notification do not match"
+      );
+    }
+    const authorization = await this.authorization.forProject(
+      input.actorId,
+      input.projectId,
+      "project.view"
+    );
+    if (
+      authorization.workspaceId !== input.workspaceId ||
+      authorization.projectId !== input.projectId ||
+      authorization.workspaceStatus !== "ACTIVE" ||
+      authorization.projectStatus === "ARCHIVED"
+    ) {
+      throw new BadRequestException(
+        "Job notification scope is no longer active"
+      );
+    }
+    const tenant = authorization as AuthorizedProjectTenant;
+    const content = jobNotificationContent(input);
+    const command: InternalCreateProjectNotificationInput = {
+      userId: input.actorId,
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      membershipId: tenant.membershipId!,
+      membershipVersion: tenant.membershipVersion!,
+      eventType: content.eventType,
+      severity: content.severity,
+      title: content.title,
+      body: content.body,
+      actorId: input.actorId,
+      resource: { type: "job", id: input.jobId },
+      deepLink: content.deepLink,
+      dedupeKey: input.idempotencyKey,
+      ownJob: true
+    };
+    const result = await this.realtime.createProjectNotification(
+      { actorId: input.actorId, requestId: request.id, tenant },
+      command
+    );
+    return {
+      data: { accepted: true, outcome: result.outcome },
+      meta: { requestId: request.id }
+    };
+  }
+}
+
+export function jobNotificationContent(
+  input: InternalDeliverJobNotificationInput
+): {
+  readonly eventType: ProjectNotificationEventType;
+  readonly severity: "INFO" | "WARNING" | "CRITICAL";
+  readonly title: string;
+  readonly body: string;
+  readonly deepLink: string;
+} {
+  const operation = operationDescriptor(input.jobType, input.jobId);
+  const progress = input.progressTotal === null
+    ? `Обработано: ${input.progressCurrent}.`
+    : `Обработано: ${input.progressCurrent} из ${input.progressTotal}.`;
+  if (input.status === "FAILED_FINAL") {
+    return {
+      ...operation,
+      severity: "CRITICAL",
+      title: `${operation.label} завершился ошибкой`,
+      body: `${progress}${input.errorCode ? ` Код: ${input.errorCode}.` : ""}`
+    };
+  }
+  if (input.status === "ACTION_REQUIRED") {
+    return {
+      ...operation,
+      severity: "WARNING",
+      title: `${operation.label} требует внимания`,
+      body: `${progress}${input.errorCode ? ` Код: ${input.errorCode}.` : " Проверьте параметры операции."}`
+    };
+  }
+  if (input.status === "PARTIALLY_COMPLETED") {
+    return {
+      ...operation,
+      severity: "WARNING",
+      title: `${operation.label} завершён частично`,
+      body: progress
+    };
+  }
+  if (input.status === "CANCELLED") {
+    return {
+      ...operation,
+      severity: "INFO",
+      title: `${operation.label} отменён`,
+      body: progress
+    };
+  }
+  return {
+    ...operation,
+    severity: "INFO",
+    title: `${operation.label} завершён`,
+    body: progress
+  };
+}
+
+function operationDescriptor(jobType: string, jobId: string): {
+  readonly eventType: ProjectNotificationEventType;
+  readonly label: string;
+  readonly deepLink: string;
+} {
+  if (jobType === "FREQUENCY_COLLECTION") {
+    return {
+      eventType: "FREQUENCY_COLLECTION",
+      label: "Сбор частотности",
+      deepLink: `/app/tasks/frequency/${jobId}`
+    };
+  }
+  if (jobType === "MANUAL_RANK_CHECK") {
+    return {
+      eventType: "RANK_TRACKING",
+      label: "Проверка позиций",
+      deepLink: `/app/tasks/rank/${jobId}`
+    };
+  }
+  if (jobType === "KEYWORD_RESEARCH") {
+    return {
+      eventType: "MAGNET",
+      label: "Сбор поисковых данных",
+      deepLink: "/app/tasks"
+    };
+  }
+  return {
+    eventType: "JOB",
+    label: "Операция",
+    deepLink: "/app/tasks"
+  };
+}

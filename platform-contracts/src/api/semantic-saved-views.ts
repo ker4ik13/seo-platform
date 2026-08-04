@@ -21,6 +21,17 @@ export type SemanticSavedViewDensity =
 
 export const semanticSystemColumnKeys = [
   "query",
+  "frequency",
+  "frequencyExact",
+  "frequencyFixed",
+  "wordCount",
+  "yandexPosition",
+  "googlePosition",
+  "yandexRelevantUrl",
+  "googleRelevantUrl",
+  "yandexCheckedAt",
+  "googleCheckedAt",
+  "visibility",
   "group",
   "cluster",
   "targetUrl",

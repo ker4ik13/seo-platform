@@ -10,11 +10,14 @@ import type {
   InternalNormalizeSemanticKeywordsResult,
   InternalRankEstimateScope,
   InternalRankEstimateScopeQuery,
+  InternalFrequencyKeywords,
   InternalSemanticImportChunkResult,
   InternalSemanticImportReceipt,
+  InternalPersistFrequencySnapshotBatchInput,
   SemanticImportResultSummary,
   TrackingContextConfigurationInput
   ,InternalResolveFrequencyKeywordInput
+  ,InternalResolveFrequencyKeywordsInput
   ,InternalFrequencyKeyword
   ,InternalPersistFrequencySnapshotsInput
 } from "@seo-platform/contracts";
@@ -159,6 +162,45 @@ export class SeoDataClient {
     return { id: value.id, text: value.text, version: value.version };
   }
 
+  public async resolveFrequencyKeywords(
+    input: InternalResolveFrequencyKeywordsInput
+  ): Promise<InternalFrequencyKeywords> {
+    const payload = await this.requestBounded(
+      `/internal/v1/projects/${encodeURIComponent(input.projectId)}/frequencies/resolve-batch`,
+      input,
+      FREQUENCY_RESOLVE_RESPONSE_MAX_BYTES
+    );
+    const value = exactObject(payload, ["items"]);
+    if (!value || !Array.isArray(value.items) || value.items.length !== input.items.length) {
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+    const expected = new Map(input.items.map((item) => [item.id, item.version]));
+    const seen = new Set<string>();
+    const items = value.items.map((candidate) => {
+      const item = exactObject(candidate, ["id", "text", "version"]);
+      if (
+        !item ||
+        typeof item.id !== "string" ||
+        !uuid(item.id) ||
+        seen.has(item.id) ||
+        typeof item.text !== "string" ||
+        item.text.length < 1 ||
+        item.text.length > 2_000 ||
+        !positiveInteger(item.version) ||
+        expected.get(item.id) !== item.version
+      ) {
+        throw new SeoDataClientError("UNAVAILABLE", true);
+      }
+      seen.add(item.id);
+      return {
+        id: item.id,
+        text: item.text,
+        version: Number(item.version)
+      };
+    });
+    return { items };
+  }
+
   public async persistFrequencySnapshots(
     input: InternalPersistFrequencySnapshotsInput
   ): Promise<void> {
@@ -172,6 +214,29 @@ export class SeoDataClient {
       !Number.isSafeInteger(value.created) ||
       Number(value.created) < 0 ||
       Number(value.created) > input.snapshots.length
+    ) {
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+  }
+
+  public async persistFrequencySnapshotBatch(
+    input: InternalPersistFrequencySnapshotBatchInput
+  ): Promise<void> {
+    const payload = await this.requestBounded(
+      `/internal/v1/projects/${encodeURIComponent(input.projectId)}/frequencies/snapshots-batch`,
+      input,
+      FREQUENCY_PERSIST_RESPONSE_MAX_BYTES
+    );
+    const value = exactObject(payload, ["created"]);
+    const maximum = input.items.reduce(
+      (count, item) => count + item.snapshots.length,
+      0
+    );
+    if (
+      !value ||
+      !Number.isSafeInteger(value.created) ||
+      Number(value.created) < 0 ||
+      Number(value.created) > maximum
     ) {
       throw new SeoDataClientError("UNAVAILABLE", true);
     }
@@ -250,6 +315,56 @@ export class SeoDataClient {
     return payload.data;
   }
 
+  private async requestBounded(
+    path: string,
+    body: {
+      readonly workspaceId: string;
+      readonly projectId: string;
+      readonly actorId: string;
+    },
+    maximumBytes: number
+  ): Promise<unknown> {
+    const response = await this.fetch(path, body);
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw clientError(response.status);
+    }
+    if (
+      response.headers
+        .get("content-type")
+        ?.split(";", 1)[0]
+        ?.trim()
+        .toLowerCase() !== "application/json"
+    ) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+    const contentLength = response.headers.get("content-length");
+    if (
+      contentLength !== null &&
+      (!/^(?:0|[1-9]\d*)$/u.test(contentLength) ||
+        Number(contentLength) > maximumBytes)
+    ) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+    const payload = exactObject(await boundedJson(response, maximumBytes), [
+      "data",
+      "meta"
+    ]);
+    if (!payload) throw new SeoDataClientError("UNAVAILABLE", true);
+    const meta = exactObject(payload.meta, ["requestId"]);
+    if (
+      !meta ||
+      typeof meta.requestId !== "string" ||
+      meta.requestId.length < 1 ||
+      meta.requestId.length > 200
+    ) {
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+    return payload.data;
+  }
+
   private async fetch(
     path: string,
     body: {
@@ -282,6 +397,8 @@ export class SeoDataClient {
 }
 
 const RANK_SCOPE_RESPONSE_MAX_BYTES = 64 * 1_024;
+const FREQUENCY_RESOLVE_RESPONSE_MAX_BYTES = 4 * 1_024 * 1_024;
+const FREQUENCY_PERSIST_RESPONSE_MAX_BYTES = 16 * 1_024;
 
 function clientError(
   status: number,
@@ -371,11 +488,17 @@ function chunkResult(
       "createdPages",
       "createdTags",
       "createdMetricSnapshots"
-    )
+    ) ||
+    (payload.trashedDuplicateCandidates !== undefined &&
+      !trashCandidates(payload.trashedDuplicateCandidates))
   ) {
     return undefined;
   }
-  return payload as unknown as InternalSemanticImportChunkResult;
+  return {
+    ...payload,
+    trashedDuplicateCandidates:
+      payload.trashedDuplicateCandidates ?? []
+  } as unknown as InternalSemanticImportChunkResult;
 }
 
 function importResult(
@@ -396,11 +519,35 @@ function importResult(
       "createdPages",
       "createdTags",
       "createdMetricSnapshots"
-    )
+    ) ||
+    (payload.trashedDuplicateCandidates !== undefined &&
+      !trashCandidates(payload.trashedDuplicateCandidates)) ||
+    (payload.trashedDuplicateCandidatesTruncated !== undefined &&
+      typeof payload.trashedDuplicateCandidatesTruncated !== "boolean")
   ) {
     return undefined;
   }
   return payload as unknown as SemanticImportResultSummary;
+}
+
+function trashCandidates(value: unknown): boolean {
+  return Array.isArray(value) &&
+    value.length <= 2_000 &&
+    value.every((candidate) => {
+      const row = object(candidate);
+      return Boolean(
+        row &&
+          typeof row.keywordId === "string" &&
+          uuid(row.keywordId) &&
+          positiveInteger(row.version) &&
+          typeof row.text === "string" &&
+          row.text.length > 0 &&
+          row.text.length <= 2_000 &&
+          typeof row.language === "string" &&
+          row.language.length > 0 &&
+          row.language.length <= 16
+      );
+    });
 }
 
 function abortImportResult(

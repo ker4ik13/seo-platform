@@ -9,6 +9,7 @@ import {
 } from "../rankings/tracking-context-response.js";
 import {
   semanticKeywordGroups,
+  semanticKeywordBulkCreateResult,
   semanticKeywordBulkResult,
   semanticKeywordCleaningPreview,
   semanticKeywordCleaningResult,
@@ -41,6 +42,49 @@ const validItem = {
   targetUrl: "https://example.com/seo",
   tags: ["Приоритет"],
   tagsTruncated: false,
+  frequency: {
+    value: "12890",
+    regionCode: "213",
+    device: "ALL",
+    provider: "XMLSTOCK",
+    observedAt: "2026-08-01T10:00:00.000Z"
+  },
+  frequencies: [
+    {
+      type: "BASE",
+      value: "12890",
+      regionCode: "213",
+      device: "ALL",
+      provider: "XMLSTOCK",
+      observedAt: "2026-08-01T10:00:00.000Z"
+    },
+    {
+      type: "EXACT",
+      value: "5123",
+      regionCode: "213",
+      device: "ALL",
+      provider: "ARSENKIN",
+      observedAt: "2026-08-01T10:00:00.000Z"
+    },
+    {
+      type: "FIXED",
+      value: "5122",
+      regionCode: "213",
+      device: "ALL",
+      provider: "ARSENKIN",
+      observedAt: "2026-08-01T10:00:00.000Z"
+    }
+  ],
+  positions: [
+    {
+      searchEngine: "YANDEX",
+      found: true,
+      position: 5,
+      previousPosition: 8,
+      rankingUrl: "https://example.com/seo",
+      observedAt: "2026-08-01T10:00:00.000Z"
+    }
+  ],
   sourceMode: "IMPORT",
   createdAt: "2026-07-29T08:00:00.000Z",
   updatedAt: "2026-07-29T08:00:00.000Z",
@@ -88,6 +132,17 @@ test("accepts a strictly shaped semantic keyword page", () => {
   });
 
   assert.equal(result.data[0]?.textOriginal, "SEO аудит");
+  assert.equal(result.data[0]?.frequency?.value, "12890");
+  assert.deepEqual(
+    result.data[0]?.frequencies?.map(({ type, value }) => ({ type, value })),
+    [
+      { type: "BASE", value: "12890" },
+      { type: "EXACT", value: "5123" },
+      { type: "FIXED", value: "5122" }
+    ]
+  );
+  assert.equal(result.data[0]?.positions?.[0]?.position, 5);
+  assert.equal(result.data[0]?.positions?.[0]?.rankingUrl, "https://example.com/seo");
   assert.deepEqual(result.page, { hasNext: false, totalApprox: 1 });
 });
 
@@ -105,6 +160,19 @@ test("rejects malformed SEO data responses", () => {
       semanticKeywordPage({
         data: [validItem],
         page: { hasNext: "false" }
+      }),
+    DomainError
+  );
+  assert.throws(
+    () =>
+      semanticKeywordPage({
+        data: [
+          {
+            ...validItem,
+            frequencies: [validItem.frequencies[0], validItem.frequencies[0]]
+          }
+        ],
+        page: { hasNext: false }
       }),
     DomainError
   );
@@ -428,6 +496,66 @@ test("validates a complete semantic bulk result partition", () => {
           ...result,
           changed: 2,
           updatedItems: [validItem]
+        },
+        input
+      ),
+    DomainError
+  );
+});
+
+test("validates indexed semantic bulk create outcomes", () => {
+  const input = {
+    duplicatePolicy: "SKIP_EXISTING" as const,
+    items: [
+      {
+        text: "SEO аудит",
+        language: "ru",
+        priority: 0,
+        isFavorite: false,
+        tagNames: []
+      },
+      {
+        text: "SEO аудит",
+        language: "ru",
+        priority: 0,
+        isFavorite: false,
+        tagNames: []
+      }
+    ]
+  };
+  const value = {
+    selected: 2,
+    created: 1,
+    restored: 0,
+    skipped: 1,
+    rejected: 0,
+    failed: 0,
+    rows: [
+      {
+        index: 0,
+        outcome: "CREATED",
+        keywordId: validItem.id,
+        version: 1
+      },
+      {
+        index: 1,
+        outcome: "SKIPPED_EXISTING",
+        keywordId: validItem.id,
+        version: 1,
+        trashed: true
+      }
+    ]
+  };
+
+  const parsed = semanticKeywordBulkCreateResult(value, input);
+  assert.equal(parsed.skipped, 1);
+  assert.equal(parsed.rows[1]?.trashed, true);
+  assert.throws(
+    () =>
+      semanticKeywordBulkCreateResult(
+        {
+          ...value,
+          rows: [value.rows[0], { ...value.rows[1], index: 0 }]
         },
         input
       ),
@@ -869,6 +997,7 @@ test("forwards the semantic undo idempotency key inside the trusted command", as
         planVersion: 1,
         storedKeywords: 2_000_000,
         keywordsPerProject: 2_000_000,
+        foldersPerProject: 500,
         trackedContextPairs: 50_000
       }
     );
@@ -884,6 +1013,7 @@ test("forwards the semantic undo idempotency key inside the trusted command", as
         planVersion: 1,
         storedKeywords: 2_000_000,
         keywordsPerProject: 2_000_000,
+        foldersPerProject: 500,
         trackedContextPairs: 50_000
       }
     });

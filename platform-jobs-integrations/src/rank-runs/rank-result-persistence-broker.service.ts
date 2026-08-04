@@ -9,6 +9,11 @@ import {
   type ArsenkinStagedRankResultV1
 } from "./arsenkin-rank.connector.js";
 import {
+  xmlStockStagedRankResult,
+  xmlStockStagedRankResultHash,
+  type XmlStockStagedRankResultV1
+} from "./xmlstock-rank.connector.js";
+import {
   rankProviderRequestIntent,
   type RankProviderRequestIntentV1
 } from "./rank-provider-request-intent.js";
@@ -31,7 +36,7 @@ export interface RankResultPersistenceClaim {
   readonly leaseGeneration: number;
   readonly executionVersion: number;
   readonly request: RankProviderRequestIntentV1;
-  readonly staged: ArsenkinStagedRankResultV1;
+  readonly staged: ArsenkinStagedRankResultV1 | XmlStockStagedRankResultV1;
 }
 
 @Injectable()
@@ -64,9 +69,14 @@ export class RankResultPersistenceBrokerService {
     if (rows.length === 0) return undefined;
     if (rows.length !== 1 || !rows[0]) invalid("claim cardinality");
     const row = rows[0];
-    const staged = arsenkinStagedRankResult(row.normalizedResultSnapshot);
+    const request = rankProviderRequestIntent(row.requestSnapshot);
+    const staged = request.provider === "XMLSTOCK"
+      ? xmlStockStagedRankResult(row.normalizedResultSnapshot)
+      : arsenkinStagedRankResult(row.normalizedResultSnapshot);
     const actual = Buffer.from(
-      arsenkinStagedRankResultHash(staged).value,
+      request.provider === "XMLSTOCK"
+        ? xmlStockStagedRankResultHash(staged).value
+        : arsenkinStagedRankResultHash(staged).value,
       "hex"
     );
     const expected = bytes(row.normalizedResultHash, "staged hash", 32);
@@ -81,7 +91,7 @@ export class RankResultPersistenceBrokerService {
       manifestChunkIndex: boundedInteger(
         row.manifestChunkIndex,
         0,
-        3,
+        14_999,
         "chunk index"
       ),
       manifestChunkHash: {
@@ -101,7 +111,7 @@ export class RankResultPersistenceBrokerService {
         row.executionVersion,
         "execution version"
       ),
-      request: rankProviderRequestIntent(row.requestSnapshot),
+      request,
       staged
     };
   }

@@ -26,7 +26,6 @@ export default async function IntegrationSettingsPage() {
     <AppShell activeSection="settings" context={context}>
       <section className="page-heading">
         <div>
-          <p className="eyebrow">Workspace · Интеграции</p>
           <h1>Подключения SEO API</h1>
           <p>
             {canView

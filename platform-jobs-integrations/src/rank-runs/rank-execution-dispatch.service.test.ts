@@ -16,7 +16,7 @@ const jobId = "01900000-0000-7000-8000-000000000001";
 const itemOne = "01900000-0000-7000-8000-000000000002";
 const itemTwo = "01900000-0000-7000-8000-000000000003";
 
-test("does not scan or dispatch while provider submit is disabled", async () => {
+test("does not scan or dispatch outside the enabled rank worker", async () => {
   const fixture = service(false);
   assert.deepEqual(
     await fixture.service.pendingExecutionJobIds(),
@@ -41,6 +41,17 @@ test("issues every chunk grant with a stable request identity", async () => {
     `grant:${itemOne}:rank-grant-${itemOne}`,
     `grant:${itemTwo}:rank-grant-${itemTwo}`
   ]);
+});
+
+test("waits without failing while the provider dispatch window is full", async () => {
+  const fixture = service(true);
+  fixture.overrideStart([]);
+
+  assert.equal(
+    await fixture.service.process(jobId),
+    "RETRY_PENDING"
+  );
+  assert.deepEqual(fixture.events, []);
 });
 
 test("finalizes an explicit grant denial before provider submit", async () => {
@@ -112,6 +123,7 @@ function service(
     grants,
     {} as RankManifestClient,
     {
+      rankPreparation: { enabled: submitEnabled },
       rankExecution: {
         submitEnabled,
         killSwitchVersion: "arsenkin-positions@1"

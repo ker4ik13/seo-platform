@@ -633,7 +633,7 @@ export function loadAppConfig(
   );
   const rankProviderKillSwitchVersion = boundedVersion(
     env.RANK_PROVIDER_KILL_SWITCH_VERSION,
-    "arsenkin-positions@2",
+    "arsenkin-positions@4",
     "RANK_PROVIDER_KILL_SWITCH_VERSION"
   );
   const malwareScannerHost = optional(env, "MALWARE_SCANNER_HOST");
@@ -813,7 +813,8 @@ export function loadAppConfig(
     nodeEnv === "production" &&
     (processRole === "HTTP" ||
       processRole === "IMPORT_WORKER" ||
-      processRole === "CRAWL_WORKER") &&
+      processRole === "CRAWL_WORKER" ||
+      processRole === "CONNECTOR_WORKER") &&
     (!seoDataApiToken || seoDataApiToken.length < 32)
   ) {
     throw new Error(
@@ -843,10 +844,11 @@ export function loadAppConfig(
     processRole !== "HTTP" &&
     processRole !== "IMPORT_WORKER" &&
     processRole !== "CRAWL_WORKER" &&
+    processRole !== "CONNECTOR_WORKER" &&
     seoDataApiToken
   ) {
     throw new Error(
-      "Only the Jobs HTTP, import-worker and crawl-worker processes may receive JOBS_TO_SEO_DATA_TOKEN"
+      "Only the Jobs HTTP, import-worker, crawl-worker and connector-worker processes may receive JOBS_TO_SEO_DATA_TOKEN"
     );
   }
   if (processRole !== "AUTH_EMAIL_WORKER" && authEmailApiToken) {
@@ -1089,7 +1091,6 @@ export function loadAppConfig(
     (integrationCredentialFingerprintKeys.size > 0 ||
       integrationCredentialApiToken ||
       platformApiToken ||
-      seoDataApiToken ||
       natsUser ||
       natsPassword ||
       s3AccessKeyId ||
@@ -1098,7 +1099,7 @@ export function loadAppConfig(
       smtpPassword)
   ) {
     throw new Error(
-      "Execution-only credential workers must not receive management, internal API, NATS, S3 or SMTP credentials"
+      "Execution-only credential workers must not receive management, Platform API, NATS, S3 or SMTP credentials"
     );
   }
   if (

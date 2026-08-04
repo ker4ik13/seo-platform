@@ -28,16 +28,8 @@ export default async function ProjectSettingsPage({
       activeSection="settings"
       context={{ ...context, project, workspace }}
     >
-      <nav aria-label="Хлебные крошки" className="app-breadcrumbs">
-        <a href="/app">Проекты</a>
-        <span aria-hidden="true">/</span>
-        <span>{project.name}</span>
-        <span aria-hidden="true">/</span>
-        <span aria-current="page">Настройки</span>
-      </nav>
       <section className="page-heading">
         <div>
-          <p className="eyebrow">Проект · {project.name}</p>
           <h1>Основные настройки проекта</h1>
           <p>
             Изменяйте домен и региональные параметры, архивируйте или

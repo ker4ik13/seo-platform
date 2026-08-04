@@ -1,5 +1,7 @@
 "use client";
 
+import { CustomSelect } from "./custom-select";
+
 import type {
   CrawlDuplicateKind,
   CrawlPageChangeField,
@@ -227,7 +229,6 @@ export function ProjectCrawlAudit({
     <section className="panel crawl-audit">
       <header className="crawl-audit-header">
         <div>
-          <p className="eyebrow">Контроль качества</p>
           <h2>Технический аудит</h2>
           <p>Проверки, изменения страниц и автоматический Radar.</p>
         </div>
@@ -300,7 +301,7 @@ export function ProjectCrawlAudit({
         </label>
         <label className="form-field">
           <span>Query-параметры</span>
-          <select
+          <CustomSelect
             onChange={(event) =>
               setQueryPolicy(
                 event.target.value as TechnicalCrawlQueryPolicy
@@ -311,7 +312,7 @@ export function ProjectCrawlAudit({
             <option value="DROP_TRACKING">Убирать tracking</option>
             <option value="DROP_ALL">Убирать все</option>
             <option value="PRESERVE">Сохранять</option>
-          </select>
+          </CustomSelect>
         </label>
         <button
           className="primary-button"
@@ -433,7 +434,7 @@ export function ProjectCrawlAudit({
           </div>
           <label className="form-field crawl-duplicate-filter">
             <span>Тип дубля</span>
-            <select
+            <CustomSelect
               onChange={(event) =>
                 setDuplicateKind(
                   event.target.value as "ALL" | CrawlDuplicateKind
@@ -446,7 +447,7 @@ export function ProjectCrawlAudit({
               <option value="TITLE">Title</option>
               <option value="DESCRIPTION">Description</option>
               <option value="H1">H1</option>
-            </select>
+            </CustomSelect>
           </label>
         </div>
         {visibleDuplicates.length ? (

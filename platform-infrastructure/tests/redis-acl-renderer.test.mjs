@@ -100,6 +100,14 @@ test("renderer is POSIX shell and writes hashed least-privilege Jobs ACLs", asyn
     assert.deepEqual(keyPatterns(userLine(lines, "seo_jobs_connector")), [
       "~seo-platform:jobs:v1:integration-credential-validation:*"
     ]);
+    assert.match(
+      userLine(lines, "seo_jobs_connector"),
+      /\s\+time(?:\s|$)/u
+    );
+    assert.doesNotMatch(
+      userLine(lines, "seo_jobs_api"),
+      /\s\+time(?:\s|$)/u
+    );
   });
 });
 

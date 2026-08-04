@@ -66,12 +66,66 @@ export const integrationCredentialValidationStatuses = [
 export type IntegrationCredentialValidationStatus =
   (typeof integrationCredentialValidationStatuses)[number];
 
+export type IntegrationCredentialQuotaSummary =
+  | {
+      readonly status: "NOT_AVAILABLE";
+    }
+  | {
+      readonly status: "AVAILABLE";
+      readonly unit:
+        | "ARSENKIN_LIMITS"
+        | "API_REQUESTS"
+        | "XMLSTOCK_REQUESTS";
+      readonly limit?: number;
+      readonly used?: number;
+      readonly remaining: number;
+      /** Provider account balance. XMLStock reports monetary values in RUB. */
+      readonly balance?: {
+        readonly amount: string;
+        readonly frozenAmount?: string;
+        readonly currency: "RUB";
+      };
+      readonly usedToday?: number;
+      readonly usedMonth?: number;
+      readonly frozenRemaining?: number;
+      readonly tariffDaysRemaining?: number;
+      readonly observedAt?: string;
+    };
+
 export const projectConnectorRouteSourceKinds = [
   "WORKSPACE_CREDENTIAL"
 ] as const;
 
 export type ProjectConnectorRouteSourceKind =
   (typeof projectConnectorRouteSourceKinds)[number];
+
+export const connectorFallbackModes = [
+  "NONE",
+  "NEXT_AVAILABLE",
+  "NEXT_AVAILABLE_THEN_WORKSPACE"
+] as const;
+
+export type ConnectorFallbackMode =
+  (typeof connectorFallbackModes)[number];
+
+export const connectorFallbackReasons = [
+  "CREDENTIAL_UNAVAILABLE",
+  "LOW_BALANCE",
+  "RATE_LIMITED",
+  "RETRYABLE_PROVIDER_ERROR"
+] as const;
+
+export type ConnectorFallbackReason =
+  (typeof connectorFallbackReasons)[number];
+
+export const connectorRoutingScopes = [
+  "WORKSPACE_DEFAULT",
+  "PROJECT_OVERRIDE",
+  "WORKSPACE_FALLBACK"
+] as const;
+
+export type ConnectorRoutingScope =
+  (typeof connectorRoutingScopes)[number];
 
 export const projectConnectorBindingAvailabilities = [
   "READY",
@@ -85,7 +139,13 @@ export type ProjectConnectorBindingAvailability =
   (typeof projectConnectorBindingAvailabilities)[number];
 
 export interface ProjectConnectorFallbackPolicy {
-  readonly mode: "NONE";
+  readonly mode: ConnectorFallbackMode;
+  /**
+   * Reasons which are allowed to advance to the next route. Older clients
+   * omit the field when fallback is disabled, therefore it stays optional on
+   * the wire and is normalised to an empty array by services.
+   */
+  readonly reasons?: readonly ConnectorFallbackReason[];
 }
 
 export interface ProjectConnectorBudgetPolicy {
@@ -93,7 +153,7 @@ export interface ProjectConnectorBudgetPolicy {
 }
 
 export interface ProjectConnectorRouteInput {
-  readonly position: 0;
+  readonly position: number;
   readonly sourceKind: ProjectConnectorRouteSourceKind;
   readonly credentialId: string;
 }
@@ -103,11 +163,13 @@ export interface ProjectConnectorRoute {
   readonly bindingId: string;
   readonly workspaceId: string;
   readonly projectId: string;
-  readonly position: 0;
+  readonly position: number;
   readonly sourceKind: ProjectConnectorRouteSourceKind;
   readonly credentialId: string;
   readonly provider: IntegrationProvider;
   readonly credentialMode: IntegrationCredentialMode;
+  readonly routingScope?: ConnectorRoutingScope;
+  readonly workspaceRouteId?: string;
   readonly createdAt: string;
   readonly updatedAt: string;
 }
@@ -118,7 +180,11 @@ export interface ProjectConnectorBinding {
   readonly projectId: string;
   readonly capability: IntegrationCapability;
   readonly enabled: boolean;
+  readonly configurationScope?: "PROJECT_OVERRIDE" | "WORKSPACE_INHERITED";
+  readonly workspaceBindingId?: string;
+  /** Primary route retained for backward-compatible consumers. */
   readonly route: ProjectConnectorRoute;
+  readonly routes?: readonly ProjectConnectorRoute[];
   readonly fallbackPolicy: ProjectConnectorFallbackPolicy;
   readonly budgetPolicy: ProjectConnectorBudgetPolicy;
   readonly availability: ProjectConnectorBindingAvailability;
@@ -144,6 +210,11 @@ export interface ProjectConnectorCredentialOption {
    * Пересечение сохранённых capabilities с текущим provider catalog.
    */
   readonly capabilities: readonly IntegrationCapability[];
+  /**
+   * Безопасная квота из последней проверки подключения. Сырые provider
+   * metadata и credential material в настройки маршрута не попадают.
+   */
+  readonly quota?: IntegrationCredentialQuotaSummary;
 }
 
 export interface ProjectConnectorBindingsAggregate {
@@ -183,6 +254,7 @@ export interface CreateProjectConnectorBindingInput {
   readonly capability: IntegrationCapability;
   readonly enabled: boolean;
   readonly route: ProjectConnectorRouteInput;
+  readonly fallbackRoutes?: readonly ProjectConnectorRouteInput[];
   readonly fallbackPolicy: ProjectConnectorFallbackPolicy;
   readonly budgetPolicy: ProjectConnectorBudgetPolicy;
 }
@@ -198,12 +270,88 @@ export interface InternalCreateProjectConnectorBindingInput
 export interface UpdateProjectConnectorBindingInput {
   readonly enabled: boolean;
   readonly route: ProjectConnectorRouteInput;
+  readonly fallbackRoutes?: readonly ProjectConnectorRouteInput[];
   readonly fallbackPolicy: ProjectConnectorFallbackPolicy;
   readonly budgetPolicy: ProjectConnectorBudgetPolicy;
 }
 
+export interface WorkspaceConnectorRoute {
+  readonly id: string;
+  readonly bindingId: string;
+  readonly workspaceId: string;
+  readonly position: number;
+  readonly credentialId: string;
+  readonly provider: IntegrationProvider;
+  readonly credentialMode: IntegrationCredentialMode;
+  readonly availability: ProjectConnectorBindingAvailability;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface WorkspaceConnectorBinding {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly capability: IntegrationCapability;
+  readonly enabled: boolean;
+  readonly routes: readonly WorkspaceConnectorRoute[];
+  readonly fallbackPolicy: ProjectConnectorFallbackPolicy;
+  readonly version: number;
+  readonly createdBy: string;
+  readonly updatedBy: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface WorkspaceConnectorRoutingSettings {
+  readonly bindings: readonly WorkspaceConnectorBinding[];
+  readonly credentialOptions: readonly ProjectConnectorCredentialOption[];
+  readonly credentialOptionsTruncated: boolean;
+  readonly access: {
+    readonly canUpdateBindings: boolean;
+    readonly canManageFallback: boolean;
+  };
+}
+
+export interface UpsertWorkspaceConnectorBindingInput {
+  readonly enabled: boolean;
+  readonly routes: readonly ProjectConnectorRouteInput[];
+  readonly fallbackPolicy: ProjectConnectorFallbackPolicy;
+  readonly version?: number;
+}
+
+export interface InternalUpsertWorkspaceConnectorBindingInput
+  extends UpsertWorkspaceConnectorBindingInput {
+  readonly workspaceId: string;
+  readonly capability: IntegrationCapability;
+  readonly actorId: string;
+}
+
+export interface EffectiveConnectorRoute {
+  readonly capability: IntegrationCapability;
+  readonly provider: IntegrationProvider;
+  readonly credentialMode: IntegrationCredentialMode;
+  readonly routingScope: ConnectorRoutingScope;
+  readonly position: number;
+}
+
+export interface ConnectorOperationAttemptSummary {
+  readonly sequence: number;
+  readonly provider: IntegrationProvider;
+  readonly routingScope: ConnectorRoutingScope;
+  readonly outcome: "SELECTED" | "SUCCEEDED" | "FALLBACK" | "FAILED";
+  readonly reasonCode?: string;
+  readonly occurredAt: string;
+}
+
 export interface InternalUpdateProjectConnectorBindingInput
   extends UpdateProjectConnectorBindingInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly version: number;
+}
+
+export interface InternalInheritProjectConnectorBindingInput {
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;
@@ -231,6 +379,11 @@ export interface IntegrationCredentialSummary {
   readonly status: IntegrationCredentialStatus;
   readonly displayHint: string;
   readonly capabilities: readonly IntegrationCapability[];
+  /**
+   * Безопасная нормализованная квота из последней проверки подключения.
+   * Сырой provider metadata и секретный материал наружу не передаются.
+   */
+  readonly quota: IntegrationCredentialQuotaSummary;
   readonly verifiedAt?: string;
   readonly lastSuccessAt?: string;
   readonly lastErrorAt?: string;

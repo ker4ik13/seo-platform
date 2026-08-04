@@ -79,6 +79,7 @@ export function IntegrationCredentialValidation({
   ) => Promise<void> | void;
   returnTo?: string;
 }>) {
+  const [showReauthentication, setShowReauthentication] = useState(false);
   const validation = useIntegrationCredentialValidation({
     workspaceId,
     credentialId,
@@ -89,6 +90,15 @@ export function IntegrationCredentialValidation({
     onResolveConflict,
     onTerminal
   });
+
+  useEffect(() => {
+    if (!showReauthentication) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setShowReauthentication(false);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [showReauthentication]);
 
   if (!supportsAutomaticCredentialValidation(validationMode)) {
     return (
@@ -128,68 +138,184 @@ export function IntegrationCredentialValidation({
     Boolean(validation.summary)
   );
 
+  const loginHref = `/app/login?returnTo=${encodeURIComponent(returnTo)}`;
+
   return (
-    <div
-      aria-busy={validation.busy}
-      className="integration-validation-control"
-    >
-      <button
-        aria-describedby={disabledReason ? disabledReasonId : undefined}
-        aria-label={`${buttonLabel} «${credentialLabel}»`}
-        className="text-button integration-validation-button"
-        disabled={Boolean(disabledReason) || validation.busy}
-        onClick={() => void validation.start()}
-        title={disabledReason}
-        type="button"
+    <>
+      <div
+        aria-busy={validation.busy}
+        className="integration-validation-control"
       >
-        {validation.busy && (
-          <span aria-hidden="true" className="spinner compact" />
-        )}
-        {buttonLabel}
-      </button>
-
-      {disabledReason && <small id={disabledReasonId}>{disabledReason}</small>}
-
-      {validation.error && (
-        <div
-          className="inline-alert danger compact integration-validation-feedback"
-          role="alert"
+        <button
+          aria-describedby={disabledReason ? disabledReasonId : undefined}
+          aria-label={`${buttonLabel} «${credentialLabel}»`}
+          className="icon-button integration-validation-button"
+          disabled={Boolean(disabledReason) || validation.busy}
+          onClick={() => void validation.start()}
+          title={disabledReason ?? buttonLabel}
+          type="button"
         >
-          <span>{validation.error.message}</span>
-          {validation.error.reauthenticationRequired && (
-            <a
-              className="inline-alert-action"
-              href={`/app/login?returnTo=${encodeURIComponent(returnTo)}`}
-            >
-              Подтвердить вход
-            </a>
+          {validation.busy ? (
+            <span aria-hidden="true" className="spinner compact" />
+          ) : (
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path
+                d="M20 11a8 8 0 1 0-2.34 5.66M20 4v7h-7"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.8"
+              />
+            </svg>
           )}
-        </div>
-      )}
+          <span className="visually-hidden">{buttonLabel}</span>
+        </button>
 
-      {!validation.error && presentation && (
-        <div
-          className={`inline-alert ${presentation.tone} compact integration-validation-feedback`}
-          role={
-            presentation.tone === "info" ||
-            presentation.tone === "success"
-              ? "status"
-              : "alert"
-          }
-        >
-          {presentation.message}
-        </div>
-      )}
+        {disabledReason && (
+          <span className="visually-hidden" id={disabledReasonId}>
+            {disabledReason}
+          </span>
+        )}
 
-      {validation.refreshWarning && (
+        {validation.error && (
+          <span
+            aria-label={validation.error.message}
+            className="integration-validation-feedback danger"
+            role="alert"
+            title={validation.error.message}
+          >
+            <ValidationStateGlyph tone="danger" />
+            <span className="visually-hidden">{validation.error.message}</span>
+          </span>
+        )}
+
+        {!validation.error && presentation && (
+          <span
+            aria-label={presentation.message}
+            className={`integration-validation-feedback ${presentation.tone}`}
+            role={
+              presentation.tone === "info" ||
+              presentation.tone === "success"
+                ? "status"
+                : "alert"
+            }
+            title={presentation.message}
+          >
+            <ValidationStateGlyph tone={presentation.tone} />
+            <span className="visually-hidden">{presentation.message}</span>
+          </span>
+        )}
+
+        {validation.refreshWarning && (
+          <span
+            aria-label={validation.refreshWarning}
+            className="integration-validation-feedback warning"
+            role="alert"
+            title={validation.refreshWarning}
+          >
+            <ValidationStateGlyph tone="warning" />
+            <span className="visually-hidden">{validation.refreshWarning}</span>
+          </span>
+        )}
+
+        {validation.error?.reauthenticationRequired && (
+          <button
+            className="secondary-button integration-validation-login"
+            onClick={() => setShowReauthentication(true)}
+            type="button"
+          >
+            Подтвердить вход
+          </button>
+        )}
+      </div>
+
+      {showReauthentication && (
         <div
-          className="inline-alert warning compact integration-validation-feedback"
-          role="alert"
+          className="integration-dialog-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowReauthentication(false);
+            }
+          }}
         >
-          {validation.refreshWarning}
+          <section
+            aria-labelledby={`integration-login-title-${credentialId}`}
+            aria-modal="true"
+            className="panel integration-reauth-dialog"
+            role="dialog"
+          >
+            <header className="security-card-header">
+              <div>
+                <h2 id={`integration-login-title-${credentialId}`}>
+                  Подтвердить вход
+                </h2>
+                <p>
+                  Сессия истекла. Войдите снова, затем повторите проверку
+                  подключения «{credentialLabel}».
+                </p>
+              </div>
+              <button
+                aria-label="Закрыть окно"
+                className="integration-dialog-close"
+                onClick={() => setShowReauthentication(false)}
+                type="button"
+              >
+                ×
+              </button>
+            </header>
+            <div className="integration-dialog-actions">
+              <button
+                className="secondary-button"
+                onClick={() => setShowReauthentication(false)}
+                type="button"
+              >
+                Отмена
+              </button>
+              <a className="primary-button" href={loginHref}>
+                Перейти ко входу
+              </a>
+            </div>
+          </section>
         </div>
       )}
-    </div>
+    </>
+  );
+}
+
+function ValidationStateGlyph({
+  tone
+}: Readonly<{
+  tone: "danger" | "info" | "success" | "warning";
+}>) {
+  if (tone === "success") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 20 20">
+        <path d="m5 10.2 3.1 3.1L15.4 6" />
+      </svg>
+    );
+  }
+  if (tone === "info") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 20 20">
+        <circle cx="10" cy="10" r="6.6" />
+        <path d="M10 9v4M10 6.6v.1" />
+      </svg>
+    );
+  }
+  if (tone === "warning") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 20 20">
+        <path d="M10 3 2.8 16h14.4L10 3Z" />
+        <path d="M10 7.2v4.4M10 14.1v.1" />
+      </svg>
+    );
+  }
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20">
+      <circle cx="10" cy="10" r="6.6" />
+      <path d="m7.6 7.6 4.8 4.8m0-4.8-4.8 4.8" />
+    </svg>
   );
 }
 

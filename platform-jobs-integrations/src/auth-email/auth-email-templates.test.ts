@@ -77,7 +77,7 @@ test("renders an official localized NPD receipt without treating it as an action
   };
   const message = renderAuthEmail(material, "mail.example.test");
 
-  assert.equal(message.subject, "Ваш чек об оплате SEO Workspace");
+  assert.equal(message.subject, "Ваш чек об оплате SEOньорита");
   assert.match(message.text, /125/u);
   assert.match(message.text, /205ldfqqhc/u);
   assert.match(message.html ?? "", /lknpd\.nalog\.ru/u);

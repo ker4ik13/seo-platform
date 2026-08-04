@@ -53,6 +53,32 @@
 идемпотентную команду. Lease хранится в PostgreSQL и меняется через CAS по
 `status + version + leaseOwner`; Redis/BullMQ не является источником истины.
 
+### 2.1. Маршрутизация интеграций
+
+Секретный credential всегда принадлежит workspace. Для каждой capability
+workspace хранит упорядоченную цепочку credentials, а проект выбирает один из
+режимов:
+
+- наследовать workspace default;
+- использовать project override;
+- использовать project override и затем workspace fallback.
+
+Resolver сохраняет в operation snapshot фактический provider, routing scope и
+последовательность попыток. Каждая попытка содержит только provider, scope,
+outcome и нормализованный reason code; credential/route ID и secret наружу не
+выдаются. Разрешённые причины перехода задаются владельцем маршрута из
+`CREDENTIAL_UNAVAILABLE`, `LOW_BALANCE`, `RATE_LIMITED`,
+`RETRYABLE_PROVIDER_ERROR`. Последняя причина применяется только к уже
+зафиксированному безопасному состоянию `DEGRADED` до нового submit. Неизвестная ошибка или
+неоднозначный результат после внешнего submit не запускают другой provider:
+операция переходит в retry/action-required согласно connector contract, чтобы
+не допустить повторную платную команду.
+
+Настройка основного маршрута требует `integration.update`, использование
+workspace credentials в проекте — `integration.use_system_credentials`, а
+нескольких routes или fallback — `integration.manage_fallback`. Effective
+project permission является пересечением workspace role и project access.
+
 ## 3. Статусы Job
 
 - `DRAFT`;
@@ -479,8 +505,8 @@ Credentials и OAuth connections принадлежат workspace.
 ### 17.1. Реализованные vault и credential validation
 
 Текущий вертикальный срез реализует workspace-scoped BYOK vault для XMLStock,
-Arsenkin Tools и Keys.so и асинхронную read-only проверку ключей Arsenkin и
-Keys.so:
+Arsenkin Tools и Keys.so и асинхронную read-only проверку ключей всех трёх
+провайдеров:
 
 - Platform API повторно проверяет session, CSRF, recent authentication и
   workspace permission;
@@ -504,6 +530,10 @@ Keys.so:
   credential/job IDs и безопасную metadata. Plaintext существует только в
   памяти create/full-replacement request или connector worker и не попадает в
   логи;
+- пользовательский credential DTO содержит только нормализованную безопасную
+  квоту последней успешной проверки: остаток внутренних лимитов Arsenkin либо
+  `limit/used/remaining` API-запросов Keys.so. Сырой `providerMeta`, ответы
+  провайдера и любые неизвестные поля не пересекают сервисную границу;
 - XMLStock хранит `userId + apiKey` внутри одного зашифрованного payload;
 - исходный секрет нельзя прочитать через пользовательский API;
 - rotate заменяет ciphertext, увеличивает `material_version` и возвращает
@@ -541,8 +571,10 @@ Validation flow:
    Worker только затем расшифровывает секрет.
 5. Arsenkin вызывает фиксированный
    `https://arsenkin.ru/api/tools/info`, Keys.so —
-   `https://api.keys.so/limits/all`; пользователь не может изменить origin,
-   URL, method или headers.
+   `https://api.keys.so/limits/all`, XMLStock — read-only
+   `https://xmlstock.com/wordstat/json/` с `pagetype=regionsTree` и
+   обязательными `USER ID + KEY`; пользователь не может изменить origin, URL,
+   method или headers.
 6. Provider request имеет timeout, `redirect: error` и ограничивает фактически
    прочитанный body одним MiB. Успешный `2xx` обязан быть валидным JSON;
    безопасный HTTP status и `Retry-After` неуспешного ответа классифицируются
@@ -578,17 +610,17 @@ Web гидратирует эту job после reload/navigation и продо
 `lastErrorCode`. `sessionStorage` не является источником истины validation.
 
 `PENDING_VERIFICATION` не разрешает SEO jobs использовать credential.
-Arsenkin/Keys.so переходят в `ACTIVE` только после реального provider response.
+XMLStock/Arsenkin/Keys.so переходят в `ACTIVE` только после реального provider
+response.
 Успешная проверка заменяет сохранённый список capabilities текущим allowlist
 provider catalog. Новая документированная возможность поэтому становится
 доступна существующему credential только после повторной внешней проверки, а
 удалённая возможность сразу отсекается пересечением с каталогом.
-XMLStock остаётся `PROVIDER_DOCUMENTATION_REQUIRED`: локальная расшифровка не
-выдаётся пользователю за внешний test до подтверждённого provider contract и
-redacted fixtures.
-До этого provider остаётся только internal metadata для совместимости
-с уже сохранёнными credential и не показывается как новое доступное
-подключение в public operational catalog.
+XMLStock после успешного внешнего `regionsTree` ответа получает только catalog
+allowlist `SERP_RANK_TRACKING`, `SERP_COLLECTION` и `WORDSTAT`. Ошибки
+авторизации, очереди/лимита и временной недоступности нормализуются без
+сохранения provider body. Подключение показывается в public operational
+catalog и требует полной пары `USER ID + KEY` при создании и ротации.
 
 Management API принимает только полную замену secret payload и не вызывает
 провайдера. Public decrypt adapter разрешён только role `EXECUTION`, однако
@@ -646,8 +678,12 @@ dispatcher — `5–300 s`, concurrency — `1–32`. Первый validation д
 не более трёх attempts; exponential delay ограничен 300 секундами, а
 provider `Retry-After` — 3 600 секундами.
 
-Первый worker имеет общий BullMQ limiter и DB-enforced single-active cap на
-credential/material. Перед multi-tenant beta обязательны server-side
+Каждый credential `info` request проходит через общий для всех Arsenkin
+connector workflows и replicas Redis sliding-window limiter на 30 HTTP
+requests за 60 секунд; при недоступности limiter запрос блокируется
+fail-closed. DB-enforced single-active cap на credential/material остаётся
+отдельным ограничением. Перед multi-tenant beta обязательны единый
+cross-workflow cap пяти одновременно исполняемых provider tasks, server-side
 per-workspace/provider quotas и fair scheduling. Terminal validation result
 также должен записывать redacted
 transactional outbox event для durable audit и email/Web Push; audit записей
@@ -710,10 +746,11 @@ Payload использует общий versioned contract из `platform-contra
 allowlisted `changedFields`; смена route между двумя credentials одного
 provider видна consumer без раскрытия идентификаторов ключей.
 
-Platform credentials, fallback и binding budgets пока строго возвращают
-`FEATURE_NOT_AVAILABLE`: они появятся только вместе с commercial agreement,
-price book, estimate/reservation/settlement и hard budget. Сам binding ещё не
-запускает provider operation и не доказывает готовность rank tracking.
+Platform credentials и hard binding budgets пока строго возвращают
+`FEATURE_NOT_AVAILABLE`. BYOK fallback реализован как bounded pre-submit route
+resolution и не заменяет estimate/reservation/settlement. Сам binding не
+запускает provider operation: фактический маршрут повторно проверяется и
+снимком фиксируется при создании операции.
 
 Между проверкой lifecycle проекта в Platform API и commit в отдельной
 jobs database остаётся межсервисное TOCTOU. До первого исполняемого SEO job
@@ -738,8 +775,8 @@ trusted headers и exact body, а также отдельный `Idempotency-Key
   allowlisted credential metadata;
 - считает credential свежим только при `ACTIVE` current material,
   совпадающей текущей connector version и terminal validation proof;
-- делит до 1 000 пар на задачи по 250, но не объявляет неизвестное число
-  polling requests точным;
+- формирует для scope до 15 000 пар один provider task, но не объявляет
+  неизвестное число polling requests точным;
 - сохраняет private version snapshot и отдельный redacted public snapshot;
 - не создаёт очередь, usage, reservation, provider request или outbox event.
 
@@ -764,8 +801,8 @@ validation connector и не доказывает работоспособнос
 SEO Data предоставляет dedicated-auth seal/chunk boundary, который уже
 вызывает Jobs `PREPARING` saga. Он сверяет trusted project snapshot из
 command и повторно проверяет current context, configuration и semantic scope
-evidence из estimate, ограничивает первый Arsenkin slice
-1 000 ключами и chunks по 250 и сохраняет exact keyword snapshots.
+evidence из estimate, ограничивает Arsenkin slice 15 000 ключами и сохраняет
+exact keyword snapshots одного provider task.
 
 State machine `BUILDING → SEALED → CLOSED` защищена DB triggers: committed
 `BUILDING`, direct sealed insert, mutation/deletion/truncate и late child
@@ -858,11 +895,14 @@ permission allowlist выдаёт exact `EXECUTE` только на public claim
 authorize. Authorize повторно проверяет полный current graph, lease fence и
 ожидаемые execution/control versions, затем атомарно переводит execution в
 `SUBMITTING` и фиксирует durable may-have-started marker. Connector-worker
-отправляет documented `check-top`, сохраняет wire hash/task ID, poll-ит и
-stage-ит normalized output; rank-worker ingest-ит chunk и terminal закрывает
-manifest/Job. Runtime activation использует новую immutable kill-switch
-generation `arsenkin-positions@2`. Schedules и live BYOK provider smoke
-остаются отдельными release gates.
+отправляет documented `positions`, сохраняет wire hash/task ID, выполняет
+`check → get` только после `finish/100` и stage-ит normalized `result.table`;
+rank-worker ingest-ит chunk и terminal закрывает manifest/Job. Runtime
+activation использует новую immutable kill-switch generation
+`arsenkin-positions@4`. Live BYOK request/status/result canary зафиксирован
+4 августа 2026 года. В тот же день минимальный XMLStock rank canary прошёл
+submit/result на одном keyword; отдельными release gates остаются provider
+alerting/circuit breaker и эксплуатационный мониторинг расписаний.
 
 ### 17.6. Platform-owned execution grant issuer foundation
 
@@ -1074,14 +1114,29 @@ Connector учитывает provider quotas и не подменяет офиц
 
 ### 21.3. XMLStock
 
-- Яндекс/Google SERP;
-- Wordstat;
-- официальные и live-инструменты провайдера;
-- XML/JSON/HTML response modes;
-- balance, load and tariff metadata, если API разрешает.
-- режимы первого релиза: BYOK и developer/partner integration;
+- Яндекс XML: `/yandex/xml/`, `query`, `lr`, `device`, `domain`,
+  TOP-30/50/100 через `groupby`; production path использует `delayed=1`,
+  сохраняет opaque `req_id`, первый poll через 15 секунд и следующие через
+  25 секунд;
+- Google XML: `/google/xml/`, `query`, `lr`, `device`, `domain`, `hl`; из-за
+  ограничения 10 результатов на страницу глубина TOP-30/50/100 собирается
+  из 3/5/10 `page` запросов, начиная с нулевой страницы;
+- Wordstat JSON: `/wordstat/json/`, `pagetype=words`, регион и устройство;
+  BASE/EXACT/FIXED формируются операторами `query`, `"query"`, `"!query"` и
+  хранятся раздельно. `groupby` не является batch входных keyword;
+- credential validation использует read-only `pagetype=regionsTree` и не
+  выполняет платный SERP/Wordstat запрос;
+- ответы разбираются потоковым bounded XML parser либо bounded JSON parser;
+  raw provider payload не сохраняется, наружу выходят только нормализованные
+  позиции, релевантные URL, частотности и безопасные error codes;
+- режим первого релиза: BYOK. Пользователь вводит XMLStock `USER ID + KEY`,
+  которые хранятся одним зашифрованным credential payload;
 - platform-paid режим включается только после согласования допустимой схемы коммерческого использования;
-- `soft_id`/партнёрская атрибуция поддерживаются как часть connector configuration.
+- `soft_id`/партнёрская атрибуция не передаётся без отдельной коммерческой
+  конфигурации владельца платформы;
+- отдельный продукт сохранения raw SERP, Yandex Live, HTML response и provider
+  balance/tariff metadata не входит в текущий нормализованный rank/Wordstat
+  контур и не должен показываться как выполненная пользовательская операция.
 
 ### 21.4. Keys.so
 
@@ -1108,11 +1163,21 @@ Connector учитывает provider quotas и не подменяет офиц
   регионом и глубиной;
 - clustering;
 - indexation and supported SEO tools;
-- provider task cleanup.
+- provider task cleanup;
+- Wordstat frequency использует один `set` на весь допустимый platform batch
+  до 10 000 query, `check` до статуса `finish` и один `get` на общий task ID;
+  positions использует один `set` на sealed rank task до 15 000 keyword.
+  Per-keyword paid submit запрещён;
 - в первом релизе используется BYOK;
 - пользователь должен иметь тариф Arsenkin Tools с API;
 - platform-paid режим включается только после согласования с провайдером коммерческой схемы и передачи результатов третьим лицам;
-- connector учитывает не более пяти одновременных задач и общий запросный rate limit провайдера.
+- connector получает отдельное разрешение на каждый Arsenkin `set`, `check`,
+  `get` и credential `info` через общий для workflows и replicas Redis
+  sliding-window limiter: не более 30 HTTP requests за 60 секунд, fail-closed
+  при недоступности limiter;
+- fenced DB-bound cap резервирует не более пяти одновременных provider tasks
+  суммарно для Rank и Wordstat; ожидание свободного slot откладывает Job без
+  расходования poll attempt и без повторного `set`.
 
 ### 21.6. Яндекс Вебмастер
 
@@ -1303,3 +1368,21 @@ Platform operations видит:
 - manual replay.
 
 Любой replay идемпотентен и аудитируется.
+
+### 25.1. Проектный журнал пользователя
+
+Private/noindex маршрут `/app/tasks` объединяет доступные пользователю
+операции частотности, позиций, технического аудита и сбора конкурентов. Это
+построчный журнал, а не kanban: строки сортируются по времени создания,
+фильтруются по статусу и типу и открывают один detail inspector. В деталях
+показываются безопасные входные параметры, прогресс, итоговые счётчики,
+время, redacted ID и finite error code; приватные keyword texts, credential
+material и raw provider payload не проецируются. WebSocket не является
+источником истины: экран периодически перечитывает owning read models и умеет
+частично деградировать при недоступности одного из них.
+Экран занимает один dynamic viewport, таблица прокручивается внутри рабочей
+области без внешних карточных отступов и использует ту же compact app-шапку,
+что семантика. Inspector имеет sticky header/footer и собственный scroll.
+Кнопка результата открывает modal именно выбранной операции: status,
+безопасный input snapshot, прогресс, итоговые счётчики и finite error; она не
+перенаправляет пользователя в текущую семантику без контекста запуска.

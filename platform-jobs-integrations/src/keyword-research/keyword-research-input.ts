@@ -9,6 +9,7 @@ import {
   type SemanticCapacityEntitlement,
   type SemanticImportDuplicatePolicy
 } from "@seo-platform/contracts";
+import { jobCapacityInput } from "../jobs/job-capacity-input.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -27,7 +28,8 @@ export function internalCreateKeywordResearchRunInput(
     "correlationId",
     "domain",
     "database",
-    "maxKeywords"
+    "maxKeywords",
+    "jobCapacity"
   ]);
   return {
     workspaceId: uuid(input.workspaceId, "workspaceId"),
@@ -35,6 +37,7 @@ export function internalCreateKeywordResearchRunInput(
     actorId: uuid(input.actorId, "actorId"),
     idempotencyKey: pattern(input.idempotencyKey, "idempotencyKey", KEY_PATTERN),
     correlationId: bounded(input.correlationId, "correlationId", 100),
+    jobCapacity: jobCapacityInput(input.jobCapacity),
     domain: domain(input.domain),
     database: database(input.database),
     maxKeywords: integer(input.maxKeywords, "maxKeywords", 25, 500)
@@ -147,6 +150,7 @@ function entitlement(value: unknown): SemanticCapacityEntitlement {
     "planVersion",
     "storedKeywords",
     "keywordsPerProject",
+    "foldersPerProject",
     "trackedContextPairs"
   ]);
   return {
@@ -166,6 +170,12 @@ function entitlement(value: unknown): SemanticCapacityEntitlement {
     keywordsPerProject: integer(
       input.keywordsPerProject,
       "entitlement.keywordsPerProject",
+      0,
+      Number.MAX_SAFE_INTEGER
+    ),
+    foldersPerProject: integer(
+      input.foldersPerProject,
+      "entitlement.foldersPerProject",
       0,
       Number.MAX_SAFE_INTEGER
     ),
