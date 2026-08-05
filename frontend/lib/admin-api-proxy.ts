@@ -8,7 +8,7 @@ const AUTH_PATHS = new Set([
   "auth/refresh",
   "auth/mfa/challenge/verify"
 ]);
-const ADMIN_ROOTS = new Set(["me", "billing", "staff"]);
+const ADMIN_ROOTS = new Set(["me", "billing", "staff", "workspaces"]);
 const MAX_BODY_BYTES = 64 * 1_024;
 
 export async function proxyAdminApi(
@@ -60,7 +60,9 @@ export async function proxyAdminApi(
     "accept-language",
     "content-type",
     "cookie",
+    "idempotency-key",
     "if-match",
+    "if-none-match",
     "user-agent",
     "x-csrf-token"
   ]) {
@@ -136,7 +138,10 @@ export function adminUpstreamPath(
   if (segments[0] === "me" && segments.length !== 1) return undefined;
   if (
     segments[0] === "billing" &&
-    (segments[1] !== "npd-receipts" || segments.length > 4)
+    !(
+      (segments[1] === "plans" && segments.length === 2) ||
+      (segments[1] === "npd-receipts" && segments.length <= 4)
+    )
   ) {
     return undefined;
   }
@@ -154,6 +159,15 @@ export function adminUpstreamPath(
     (segments[1] !== "roles" ||
       segments.length > 4 ||
       (segments.length === 4 && segments[3] !== "revoke"))
+  ) {
+    return undefined;
+  }
+  if (
+    segments[0] === "workspaces" &&
+    !(
+      segments.length === 1 ||
+      (segments.length === 3 && segments[2] === "subscription-grants")
+    )
   ) {
     return undefined;
   }

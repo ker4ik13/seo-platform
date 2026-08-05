@@ -11,6 +11,7 @@ export interface AuditRecord {
   readonly resourceId?: string;
   readonly outcome?: string;
   readonly reason?: string;
+  readonly redactedChanges?: Prisma.InputJsonValue;
   readonly requestId: string;
 }
 @Injectable()
@@ -33,6 +34,9 @@ export class AuditService {
         ...(input.resourceId ? { resourceId: input.resourceId } : {}),
         outcome: input.outcome ?? "SUCCESS",
         ...(input.reason ? { reason: input.reason } : {}),
+        ...(input.redactedChanges
+          ? { redactedChanges: input.redactedChanges }
+          : {}),
         requestId: input.requestId
       }
     });

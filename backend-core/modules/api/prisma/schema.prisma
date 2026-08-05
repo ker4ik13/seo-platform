@@ -1025,6 +1025,24 @@ model PlatformStaffRoleAssignment {
   @@map("platform_staff_role_assignments")
 }
 
+model PlatformAdminCommandReceipt {
+  id               String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  actorId          String   @map("actor_id") @db.Uuid
+  action           String   @db.VarChar(160)
+  idempotencyKey   String   @map("idempotency_key") @db.VarChar(180)
+  requestHash      Bytes    @map("request_hash")
+  responseSnapshot Json     @map("response_snapshot")
+  workspaceId      String?  @map("workspace_id") @db.Uuid
+  resourceType     String   @map("resource_type") @db.VarChar(100)
+  resourceId       String?  @map("resource_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([actorId, action, idempotencyKey], map: "platform_admin_command_receipts_actor_action_key")
+  @@index([workspaceId, createdAt])
+  @@index([resourceType, resourceId, createdAt])
+  @@map("platform_admin_command_receipts")
+}
+
 model AuditEvent {
   id              String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
   workspaceId     String?  @map("workspace_id") @db.Uuid

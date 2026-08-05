@@ -8,6 +8,11 @@ import {
   PlatformAdminStaffRoleController
 } from "./platform-admin.controller.js";
 import { PlatformAdminService } from "./platform-admin.service.js";
+import {
+  PlatformAdminBillingPlanController,
+  PlatformAdminWorkspaceController
+} from "./platform-admin-workspace.controller.js";
+import { PlatformAdminWorkspaceService } from "./platform-admin-workspace.service.js";
 import { PlatformRoleGuard } from "./platform-role.guard.js";
 
 @Module({
@@ -15,8 +20,14 @@ import { PlatformRoleGuard } from "./platform-role.guard.js";
   controllers: [
     PlatformAdminProfileController,
     PlatformAdminNpdController,
-    PlatformAdminStaffRoleController
+    PlatformAdminStaffRoleController,
+    PlatformAdminWorkspaceController,
+    PlatformAdminBillingPlanController
   ],
-  providers: [PlatformAdminService, PlatformRoleGuard]
+  providers: [
+    PlatformAdminService,
+    PlatformAdminWorkspaceService,
+    PlatformRoleGuard
+  ]
 })
 export class PlatformAdminModule {}

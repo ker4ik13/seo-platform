@@ -1,5 +1,7 @@
 import type {
   BillingBuyerType,
+  BillingPlanSummary,
+  BillingSubscriptionSummary,
   NpdReceiptObligationSummary
 } from "./billing.js";
 
@@ -92,4 +94,65 @@ export interface AssignPlatformStaffRoleInput {
 
 export interface RevokePlatformStaffRoleInput {
   readonly reason: string;
+}
+
+export type AdminWorkspaceStatus =
+  | "ACTIVE"
+  | "READ_ONLY"
+  | "SUSPENDED"
+  | "DELETING"
+  | "DELETED";
+
+export type AdminWorkspaceOwnerStatus =
+  | "PENDING_VERIFICATION"
+  | "ACTIVE"
+  | "SUSPENDED"
+  | "DELETED";
+
+export interface AdminWorkspaceOwnerSummary {
+  readonly userId: string;
+  readonly email: string;
+  readonly displayName: string;
+  readonly status: AdminWorkspaceOwnerStatus;
+}
+
+export interface AdminWorkspaceSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly slug: string;
+  readonly status: AdminWorkspaceStatus;
+  readonly owner: AdminWorkspaceOwnerSummary;
+  readonly memberCount: number;
+  readonly projectCount: number;
+  readonly subscription: BillingSubscriptionSummary | null;
+  readonly createdAt: string;
+  readonly version: number;
+}
+
+export interface AdminWorkspaceSearchResult {
+  readonly data: readonly AdminWorkspaceSummary[];
+  readonly truncated: boolean;
+}
+
+export type AdminBillingPlanSummary = BillingPlanSummary;
+
+export interface GrantAdminWorkspaceSubscriptionInput {
+  readonly planCode: string;
+  readonly planVersion: number;
+  readonly currentPeriodEnd: string;
+  readonly confirmWorkspaceId: string;
+  readonly confirmed: true;
+  readonly reason: string;
+}
+
+export interface AdminWorkspaceSubscriptionGrantSummary {
+  readonly workspaceId: string;
+  readonly subscriptionId: string;
+  readonly planCode: string;
+  readonly planVersion: number;
+  readonly planName: string;
+  readonly status: "ACTIVE";
+  readonly currentPeriodStart: string;
+  readonly currentPeriodEnd: string;
+  readonly version: number;
 }

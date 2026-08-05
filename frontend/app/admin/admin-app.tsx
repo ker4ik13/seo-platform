@@ -17,8 +17,13 @@ import type {
   PlatformRoleCode,
   PlatformStaffRoleAssignmentSummary
 } from "@seo-platform/contracts";
+import {
+  adminApi,
+  adminApiCollection
+} from "../../lib/admin-browser-api";
+import { WorkspaceAdministration } from "./workspace-administration";
 
-type Screen = "receipts" | "staff";
+type Screen = "workspaces" | "receipts" | "staff";
 
 export function AdminApp() {
   const [profile, setProfile] = useState<PlatformAdminProfile>();
@@ -26,14 +31,21 @@ export function AdminApp() {
     "loading" | "login" | "mfa" | "forbidden" | "ready"
   >("loading");
   const [challengeToken, setChallengeToken] = useState("");
-  const [screen, setScreen] = useState<Screen>("receipts");
+  const [screen, setScreen] = useState<Screen>("workspaces");
   const [error, setError] = useState<string>();
 
   const loadProfile = useCallback(async () => {
     setError(undefined);
-    const response = await api<PlatformAdminProfile>("/api/me");
+    const response = await adminApi<PlatformAdminProfile>("/api/me");
     if (response.ok) {
       setProfile(response.data);
+      if (
+        !response.data.roles.some((role) =>
+          ["SUPER_ADMIN", "FINANCE", "SUPPORT", "OPERATIONS"].includes(role)
+        )
+      ) {
+        setScreen("staff");
+      }
       setAuthState("ready");
       return;
     }
@@ -95,6 +107,15 @@ export function AdminApp() {
   if (!profile) return <StatePage text="Профиль администратора недоступен." />;
 
   const canManageStaff = profile.roles.includes("SUPER_ADMIN");
+  const canViewWorkspaces = profile.roles.some((role) =>
+    ["SUPER_ADMIN", "FINANCE", "SUPPORT", "OPERATIONS"].includes(role)
+  );
+  const canManageBilling = profile.roles.some((role) =>
+    ["SUPER_ADMIN", "FINANCE"].includes(role)
+  );
+  const canViewReceipts = canManageBilling;
+  const hasVisibleScreen =
+    canViewWorkspaces || canViewReceipts || canManageStaff;
   return (
     <div className="admin-shell">
       <aside className="sidebar">
@@ -103,20 +124,31 @@ export function AdminApp() {
           <div><strong>SEOньорита</strong><small>Operations</small></div>
         </a>
         <nav aria-label="Разделы администрирования">
-          <button
-            className={screen === "receipts" ? "active" : undefined}
-            onClick={() => setScreen("receipts")}
-            type="button"
-          >
-            <i>01</i> Чеки НПД
-          </button>
+          {canViewWorkspaces && (
+            <button
+              className={screen === "workspaces" ? "active" : undefined}
+              onClick={() => setScreen("workspaces")}
+              type="button"
+            >
+              <i>01</i> Рабочие области
+            </button>
+          )}
+          {canViewReceipts && (
+            <button
+              className={screen === "receipts" ? "active" : undefined}
+              onClick={() => setScreen("receipts")}
+              type="button"
+            >
+              <i>02</i> Чеки НПД
+            </button>
+          )}
           {canManageStaff && (
             <button
               className={screen === "staff" ? "active" : undefined}
               onClick={() => setScreen("staff")}
               type="button"
             >
-              <i>02</i> Platform roles
+              <i>03</i> Platform roles
             </button>
           )}
         </nav>
@@ -133,6 +165,18 @@ export function AdminApp() {
           <div>
             <img alt="" aria-hidden="true" className="mobile-mark" height={28} src="/brand/seonorita-mark.svg" width={28} />
             <strong>Operations</strong>
+            {hasVisibleScreen && (
+              <select
+                aria-label="Раздел администрирования"
+                className="mobile-navigation"
+                onChange={(event) => setScreen(event.target.value as Screen)}
+                value={screen}
+              >
+                {canViewWorkspaces && <option value="workspaces">Рабочие области</option>}
+                {canViewReceipts && <option value="receipts">Чеки НПД</option>}
+                {canManageStaff && <option value="staff">Platform roles</option>}
+              </select>
+            )}
           </div>
           <div className="topbar-actions">
             <span className="system-state"><i /> MFA · recent auth</span>
@@ -141,7 +185,22 @@ export function AdminApp() {
             </button>
           </div>
         </header>
-        {screen === "receipts" ? <Receipts /> : <StaffRoles />}
+        {!hasVisibleScreen ? (
+          <StatePage
+            text="Для этого аккаунта пока нет доступных operations-разделов. Нужна подходящая platform role."
+            title="Нет доступных разделов"
+          />
+        ) : screen === "workspaces" && canViewWorkspaces ? (
+          <WorkspaceAdministration canManageBilling={canManageBilling} />
+        ) : screen === "receipts" && canViewReceipts ? (
+          <Receipts />
+        ) : screen === "staff" && canManageStaff ? (
+          <StaffRoles />
+        ) : canViewWorkspaces ? (
+          <WorkspaceAdministration canManageBilling={canManageBilling} />
+        ) : (
+          <Receipts />
+        )}
       </main>
     </div>
   );
@@ -163,7 +222,7 @@ function Login({
     setBusy(true);
     setMessage(undefined);
     const data = new FormData(event.currentTarget);
-    const response = await api<LoginResult>("/api/auth/login", {
+    const response = await adminApi<LoginResult>("/api/auth/login", {
       method: "POST",
       body: JSON.stringify({
         email: String(data.get("email") ?? "").trim(),
@@ -219,7 +278,7 @@ function Mfa({
     event.preventDefault();
     setBusy(true);
     const data = new FormData(event.currentTarget);
-    const response = await api("/api/auth/mfa/challenge/verify", {
+    const response = await adminApi("/api/auth/mfa/challenge/verify", {
       method: "POST",
       body: JSON.stringify({
         challengeToken,
@@ -264,7 +323,7 @@ function Receipts() {
     setLoading(true);
     setError(undefined);
     const query = status ? `?status=${encodeURIComponent(status)}` : "";
-    const response = await api<AdminNpdReceiptListPage>(
+    const response = await adminApi<AdminNpdReceiptListPage>(
       `/api/billing/npd-receipts${query}`
     );
     setLoading(false);
@@ -296,7 +355,7 @@ function Receipts() {
 
   async function open(receipt: AdminNpdReceiptSummary) {
     setError(undefined);
-    const response = await api<AdminNpdReceiptDetail>(
+    const response = await adminApi<AdminNpdReceiptDetail>(
       `/api/billing/npd-receipts/${receipt.id}`
     );
     if (response.ok) setSelected(response.data);
@@ -423,7 +482,7 @@ function ReceiptDrawer({
         : action === "cancel"
           ? "cancel-manual"
           : "replace-manual";
-    const response = await api(
+    const response = await adminApi(
       `/api/billing/npd-receipts/${receipt.id}/${endpoint}`,
       {
         method: "POST",
@@ -493,7 +552,7 @@ function StaffRoles() {
   const [loading, setLoading] = useState(true);
   const load = useCallback(async () => {
     setLoading(true);
-    const response = await apiCollection<PlatformStaffRoleAssignmentSummary>(
+    const response = await adminApiCollection<PlatformStaffRoleAssignmentSummary>(
       "/api/staff/roles"
     );
     setLoading(false);
@@ -505,7 +564,7 @@ function StaffRoles() {
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
-    const response = await api("/api/staff/roles", {
+    const response = await adminApi("/api/staff/roles", {
       method: "POST",
       body: JSON.stringify({
         userId: String(data.get("userId") ?? "").trim(),
@@ -524,7 +583,7 @@ function StaffRoles() {
       `Причина отзыва роли ${role.roleCode} у ${role.email}:`
     )?.trim();
     if (!reason) return;
-    const response = await api(`/api/staff/roles/${role.id}/revoke`, {
+    const response = await adminApi(`/api/staff/roles/${role.id}/revoke`, {
       method: "POST",
       headers: { "If-Match": `v${role.version}` },
       body: JSON.stringify({ reason })
@@ -571,51 +630,8 @@ function StatePage({ action, text, title = "Operations" }: Readonly<{ action?: R
   return <main className="state-page"><div className="auth-logo">SW</div><h1>{title}</h1><p>{text}</p>{action}</main>;
 }
 
-type ApiResult<T> =
-  | { readonly ok: true; readonly data: T }
-  | { readonly ok: false; readonly status: number; readonly message: string };
-
-async function api<T = unknown>(
-  path: string,
-  init?: RequestInit
-): Promise<ApiResult<T>> {
-  try {
-    const response = await fetch(`/admin${path}`, {
-      ...init,
-      headers: {
-        Accept: "application/json",
-        ...(init?.body ? { "Content-Type": "application/json" } : {}),
-        ...init?.headers
-      },
-      cache: "no-store"
-    });
-    const payload = (await response.json().catch(() => ({}))) as {
-      readonly data?: T;
-      readonly error?: { readonly message?: string };
-    };
-    if (response.ok && payload.data !== undefined) {
-      return { ok: true, data: payload.data };
-    }
-    return {
-      ok: false,
-      status: response.status,
-      message: payload.error?.message ?? `Ошибка HTTP ${response.status}`
-    };
-  } catch {
-    return {
-      ok: false,
-      status: 503,
-      message: "Operations API недоступен"
-    };
-  }
-}
-
-async function apiCollection<T>(path: string): Promise<ApiResult<readonly T[]>> {
-  return api<readonly T[]>(path);
-}
-
 async function logout() {
-  await api("/api/auth/logout", { method: "POST" });
+  await adminApi("/api/auth/logout", { method: "POST" });
   window.location.assign("/");
 }
 

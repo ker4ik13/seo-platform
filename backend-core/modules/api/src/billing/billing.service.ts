@@ -93,7 +93,7 @@ export class BillingService {
           defaultPaymentMethod: { select: { status: true } }
         }
       });
-    return subscription ? subscriptionSummary(subscription) : null;
+    return subscription ? billingSubscriptionSummary(subscription) : null;
   }
 
   public async cancelSubscription(
@@ -111,7 +111,7 @@ export class BillingService {
         }
       });
     if (!existing) throw notFound();
-    if (existing.cancelAtPeriodEnd) return subscriptionSummary(existing);
+    if (existing.cancelAtPeriodEnd) return billingSubscriptionSummary(existing);
     if (existing.version !== version) {
       throw versionConflict(existing.version);
     }
@@ -169,7 +169,7 @@ export class BillingService {
         });
       }
     );
-    return subscriptionSummary(updated);
+    return billingSubscriptionSummary(updated);
   }
 
   public async startTrial(
@@ -186,7 +186,7 @@ export class BillingService {
           defaultPaymentMethod: { select: { status: true } }
         }
       });
-    if (existing) return subscriptionSummary(existing);
+    if (existing) return billingSubscriptionSummary(existing);
 
     const workspace = await this.prisma.workspace.findUnique({
       where: { id: workspaceId },
@@ -265,7 +265,7 @@ export class BillingService {
         return subscription;
       });
       void idempotencyKey;
-      return subscriptionSummary(created);
+      return billingSubscriptionSummary(created);
     } catch (error) {
       if (isUniqueConstraintError(error)) {
         const replay =
@@ -276,7 +276,7 @@ export class BillingService {
               defaultPaymentMethod: { select: { status: true } }
             }
           });
-        if (replay) return subscriptionSummary(replay);
+        if (replay) return billingSubscriptionSummary(replay);
         if (!isPermanentFreePlan) {
           const claim =
             await this.prisma.billingTrialClaim.findUnique({
@@ -2008,7 +2008,7 @@ function planSummary(
   };
 }
 
-function subscriptionSummary(
+export function billingSubscriptionSummary(
   subscription: Prisma.BillingSubscriptionGetPayload<{
     include: {
       planVersion: { include: { plan: true } };

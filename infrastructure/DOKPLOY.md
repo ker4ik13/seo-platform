@@ -110,7 +110,26 @@ pnpm infra:validate
 XMLStock/Arsenkin credentials вводятся в интерфейсе интеграций и не
 добавляются в Compose environment.
 
-## 5. Проверка после deploy
+## 5. Первый SUPER_ADMIN
+
+MFA само по себе не выдаёт platform-доступ. После включения MFA нужно заново
+войти в аккаунт, затем один раз открыть Terminal сервиса `backend-core` и
+выполнить, заменив email на адрес входа владельца:
+
+```bash
+DATABASE_URL="$PLATFORM_DATABASE_URL" \
+ADMIN_BOOTSTRAP_EMAIL='owner@example.com' \
+ADMIN_BOOTSTRAP_REASON='Initial production operations owner' \
+ADMIN_BOOTSTRAP_CONFIRM='CREATE_FIRST_SUPER_ADMIN' \
+node dist/admin/platform-admin-bootstrap.js
+```
+
+Bootstrap работает только пока в системе нет ни одной активной platform role,
+проверяет активный аккаунт, подтверждённый email и настроенный MFA, а затем
+пишет назначение и audit event в одной транзакции. Все последующие роли
+назначаются уже через `/admin` и не требуют повторного bootstrap.
+
+## 6. Проверка после deploy
 
 Проверить readiness:
 
@@ -123,7 +142,7 @@ XMLStock/Arsenkin credentials вводятся в интерфейсе инте�
 Top-100 run, task terminal state, Realtime reconnect. Проверить, что логи не
 содержат service tokens, database URLs, SMTP/provider credentials.
 
-## 6. Обновление и rollback
+## 7. Обновление и rollback
 
 Deploy новой ревизии повторно применяет только ещё не применённые Prisma
 migrations и идемпотентно восстанавливает ACL. Перед migration release нужен
@@ -131,7 +150,7 @@ backup PostgreSQL и review migration SQL. Application rollback выполняе
 предыдущий Git revision; необратимую migration нельзя откатывать заменой
 image — для неё заранее готовится forward fix/restore plan.
 
-## 7. Backup
+## 8. Backup
 
 В production нужно создать четыре Dokploy compose database backup — отдельно
 для `platform_db`, `seo_db`, `realtime_db` и `jobs_db`, service name во всех

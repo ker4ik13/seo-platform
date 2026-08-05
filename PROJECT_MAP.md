@@ -83,6 +83,16 @@ Frontend-представление состояния фоновых опера
 ответа провайдера и ожидание его свободного слота не отображаются как ошибочный
 «повтор».
 
+Защищённый `/admin` входит в тот же Frontend deployable. Раздел рабочих
+областей ищет tenant по названию, slug, UUID, имени или email владельца и
+показывает текущую subscription-проекцию. Роли `FINANCE` и `SUPER_ADMIN`
+могут выдать ручную подписку на опубликованную версию тарифа не более чем на
+пять лет; mutation требует recent MFA-сессию, CSRF, reason, точное
+подтверждение workspace, optimistic precondition и стабильный idempotency key.
+Ручная выдача не создаёт платёж/чек и атомарно очищает provider subscription и
+default payment method, чтобы последующий автоплатёж не конфликтовал с
+операторским решением.
+
 Старые каталоги `platform-*` и отдельный admin deployable удалены. Directus
 удалён как не настроенная и не используемая runtime-зависимость; публичный
 маркетинговый контент сейчас типизирован и хранится в `frontend/lib/content.ts`.
@@ -154,7 +164,7 @@ connector-процессы заполняют всё доступное окно
 
 | Данные | Модуль-владелец | Текущее хранилище |
 |---|---|---|
-| users, sessions, workspaces, projects, project transfer requests, RBAC, billing, audit | Core API | `platform_db` |
+| users, sessions, workspaces, projects, project transfer requests, RBAC, billing, audit, platform admin command receipts | Core API | `platform_db` |
 | semantics, pages, rankings, crawl projections | Core SEO | `seo_db` |
 | realtime subscriptions, deliveries, event inbox | Core Realtime | `realtime_db` + Redis |
 | jobs, schedules, uploads, credential vault, provider execution | Execution | `jobs_db` + Redis + S3 |
@@ -254,6 +264,19 @@ ID обязан совпадать с deep link и dedupe key. Миграции
 исправления route/resource allowlist. Пользовательские Job-заголовки используют
 грамматически нейтральный формат `Операция: статус`; ограниченная Realtime
 миграция исправляет только прежние системные шаблоны.
+
+### Platform admin: ручная подписка
+
+Admin BFF пропускает только явно перечисленные workspace и billing paths.
+Core проверяет platform role независимо от tenant membership; чтение доступно
+операционным/support/finance ролям, изменение подписки — только `FINANCE` или
+`SUPER_ADMIN`. Запись `billing_subscriptions`, redacted `audit_events` и
+`platform_admin_command_receipts` создаются или изменяются в одной транзакции.
+Последняя таблица хранит hash запроса и response snapshot: повтор с тем же
+ключом безопасно возвращает исходный результат, а другой payload завершается
+`IDEMPOTENCY_CONFLICT`. `If-Match`/`If-None-Match` предотвращает потерю
+параллельного изменения. UI не является универсальным редактором БД и не
+позволяет менять ledger history.
 
 ### Передача проекта
 
