@@ -80,6 +80,12 @@ service tokens, DB/Redis passwords, NATS credentials и encryption keys долж
 быть случайными и различаться. `service-token-preflight` проверяет наличие,
 формат, placeholders и повторное использование без вывода значений.
 
+`pnpm dokploy:env:generate` создаёт игнорируемый Git файл
+`.env.dokploy.generated` с уникальными внутренними секретами и согласованными
+NATS password/bcrypt парами. Вручную после этого заполняются только значения,
+выданные владельцем домена, SMTP и S3. `POSTGRES_PASSWORD` повторно вводится
+только в настройках четырёх Dokploy PostgreSQL backup jobs.
+
 Особые boundary:
 
 - management и execution keyrings credential vault;
@@ -119,6 +125,7 @@ pnpm infra:validate
 - `redis` — configs и ACL renderer;
 - `nats` — config renderer и topology provisioner;
 - `security` — deploy credential preflight;
+- `generate-dokploy-env.sh` — fail-safe генератор production environment;
 - `tests` — статические и opt-in live infrastructure proofs;
 - `monitoring` — Prometheus/alert rules;
 - `runbooks` — credential/recovery procedures;

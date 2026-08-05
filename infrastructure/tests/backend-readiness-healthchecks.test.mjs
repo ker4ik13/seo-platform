@@ -21,6 +21,16 @@ test("all application containers use dependency-aware readiness", async () => {
   assert.match(core, /^      - "4003"$/mu);
   assert.match(core, /Promise\.all\(\[4000,4003\]/u);
   assert.match(execution, /^    stop_grace_period: 75s$/mu);
+  assert.match(
+    execution,
+    /^      backend-core:\n(?:        #.*\n)*        condition: service_started/mu,
+    "execution must start before Core can report its execution dependency ready"
+  );
+  assert.doesNotMatch(
+    execution,
+    /^      backend-core:\n(?:        #.*\n)*        condition: service_healthy/mu,
+    "Core and Execution readiness must not form a startup deadlock"
+  );
 
   const frontend = serviceBlock(compose, "frontend");
   const frontendHealthcheck = nestedBlock(frontend, "healthcheck");

@@ -27,10 +27,13 @@ provider capacity и поэтому само по себе не умножает
 
 1. Создать в Dokploy обычный Compose project из этого Git repository.
 2. Указать Compose path `infrastructure/compose.dokploy.yml`.
-3. Скопировать `.env.example` в environment variables проекта и заменить все
-   пустые/`replace-*` значения.
+3. Выполнить `pnpm dokploy:env:generate`, заполнить пустые значения под
+   комментариями `# ВРУЧНУЮ (обязательно)` и вставить полученный
+   `.env.dokploy.generated` в environment variables проекта.
 4. Выполнить deploy. Миграции Prisma и least-privilege DB grants запускаются
-   автоматически перед backend.
+   автоматически перед backend. Core и Execution после этого сходятся по
+   readiness одновременно: Execution ждёт запуска Core, но не его итогового
+   `healthy`, поскольку readiness Core сама проверяет Execution.
 
 Полный перечень значений, правила генерации, настройка application S3 и
 четырёх database backups находятся в
@@ -76,6 +79,10 @@ TLS завершается в Traefik. Для production оставить `AUTH_
 генерировать URL-safe алфавитом. Keyring value — base64url-encoded 32 bytes в
 формате `1:<key>`. Не переносить `.env` в Git, build args или публичные
 Dokploy labels.
+
+Генератор создаёт эти значения автоматически и не перезаписывает уже
+созданный файл. Единственный секрет, который вводится повторно вручную вне
+Compose, — `POSTGRES_PASSWORD` в четырёх настройках PostgreSQL backup.
 
 До первого deploy проверить локально:
 

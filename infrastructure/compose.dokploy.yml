@@ -1,3 +1,14 @@
+# Generate a copy-paste-ready Dokploy environment before the first deploy:
+#   pnpm dokploy:env:generate
+# The command writes `.env.dokploy.generated` with a different value for every
+# internal secret. Compose does not execute `openssl`/`$(...)` expressions and
+# never rotates secrets on deploy. Enter each variable once in Dokploy; the
+# same name is automatically reused by all matching containers.
+# The only manual reuse outside Compose is POSTGRES_PASSWORD in all four
+# Dokploy PostgreSQL backup jobs. NATS *_PASSWORD_HASH values are bcrypt hashes
+# derived from their corresponding plaintext passwords, not identical values;
+# the generator doubles their '$' characters for Dokploy's dotenv round-trip.
+
 name: ${COMPOSE_PROJECT_NAME:-seo-platform}
 
 x-postgres-runtime-build: &postgres-runtime-build
@@ -849,7 +860,10 @@ services:
       nats-topology-provisioner:
         condition: service_completed_successfully
       backend-core:
-        condition: service_healthy
+        # Core readiness checks this service, so waiting for Core readiness here
+        # would deadlock first startup. Core only needs to be running while both
+        # backend services converge to ready.
+        condition: service_started
     stop_grace_period: 75s
     healthcheck:
       test:

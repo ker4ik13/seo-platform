@@ -38,6 +38,22 @@ Backend-компоненты запускают несколько изолир�
 одного artifact. Это сохраняет отдельные event loops и scoped environment,
 но не требует отдельных Dokploy Applications.
 
+После инфраструктурных one-shot шагов оба backend-компонента сходятся по
+readiness совместно. `backend-execution` ждёт запуска контейнера
+`backend-core`, но не его статуса `healthy`, потому что readiness Core сама
+проверяет Execution; ожидание `service_healthy` с обеих сторон создало бы
+startup deadlock. Frontend запускается только после полной readiness Core.
+
+Перед первым Dokploy deploy `pnpm dokploy:env:generate` создаёт локальный
+`.env.dokploy.generated` с уникальными DB/Redis/service secrets,
+base64url-keyrings и согласованными NATS plaintext/bcrypt парами. Генератор не
+перезаписывает файл и не выводит секреты; внешние доменные, SMTP и S3 значения
+остаются явными placeholders. Для NATS hash он заранее удваивает `$`, чтобы
+значение пережило dotenv rewrite Dokploy и попало в контейнер как canonical
+bcrypt. Внутри Compose один variable name автоматически переиспользуется
+нужными контейнерами; вручную `POSTGRES_PASSWORD` повторяется только в
+настройках четырёх PostgreSQL backup jobs.
+
 ## 2. Каталоги
 
 | Каталог | Ответственность |
