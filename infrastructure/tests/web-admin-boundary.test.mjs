@@ -3,12 +3,14 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("frontend is one Next.js deployable with the protected admin route", async () => {
-  const [compose, dockerfile, adminPage, adminProxy] = await Promise.all([
+  const [compose, dockerfile, frontendPackageSource, adminPage, adminProxy] = await Promise.all([
     infrastructureFile("compose.dokploy.yml"),
     infrastructureFile("docker/web.Dockerfile"),
+    workspaceFile("frontend/package.json"),
     workspaceFile("frontend/app/admin/page.tsx"),
     workspaceFile("frontend/app/admin/api/[...path]/route.ts")
   ]);
+  const frontendPackage = JSON.parse(frontendPackageSource);
   const frontend = serviceBlock(compose, "frontend");
   const build = nestedBlock(frontend, "build");
 
@@ -28,6 +30,19 @@ test("frontend is one Next.js deployable with the protected admin route", async 
   assert.match(
     dockerfile,
     /ENV NEXT_PUBLIC_SITE_URL=\$NEXT_PUBLIC_SITE_URL/u
+  );
+  assert.ok(
+    dockerfile.indexOf("pnpm --filter @seo-platform/contracts build") <
+      dockerfile.indexOf('pnpm --filter "$TARGET_PACKAGE" build'),
+    "the clean Docker build must compile contracts before Next.js"
+  );
+  assert.equal(
+    frontendPackage.dependencies?.["@seo-platform/contracts"],
+    "workspace:*"
+  );
+  assert.equal(
+    frontendPackage.devDependencies?.["@seo-platform/contracts"],
+    undefined
   );
 });
 

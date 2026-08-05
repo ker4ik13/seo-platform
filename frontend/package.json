@@ -11,12 +11,12 @@
     "test": "node --experimental-strip-types --test 'lib/**/*.test.ts'"
   },
   "dependencies": {
+    "@seo-platform/contracts": "workspace:*",
     "next": "16.2.12",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@seo-platform/contracts": "workspace:*",
     "@types/node": "24.10.1",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
