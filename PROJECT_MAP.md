@@ -291,12 +291,13 @@ Core проверяет platform role независимо от tenant membershi
 параллельного изменения. UI не является универсальным редактором БД и не
 позволяет менять ledger history.
 
-Первый `SUPER_ADMIN` назначается production bootstrap-скриптом
-`/app/dist/admin/platform-admin-bootstrap.js`: он использует контейнерный
-`PLATFORM_DATABASE_URL`, не зависит от dev-only пакетов и допускает безопасный
-повтор только для уже активного назначения тому же аккаунту. После bootstrap
-оператор заново входит с MFA, чтобы session authentication была новее
-подтверждения MFA.
+Первый `SUPER_ADMIN` назначается production bootstrap-entrypoint
+`/app/dist/platform-admin-bootstrap.js`: корневой runtime делегирует команду
+модулю `@seo-platform/backend-core-api/platform-admin-bootstrap`, использует
+контейнерный `PLATFORM_DATABASE_URL`, не зависит от dev-only пакетов и допускает
+безопасный повтор только для уже активного назначения тому же аккаунту. После
+bootstrap оператор заново входит с MFA, чтобы session authentication была
+новее подтверждения MFA.
 
 ### Передача проекта
 

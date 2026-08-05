@@ -10,6 +10,10 @@
     "./core-composition": {
       "types": "./dist/core-composition.d.ts",
       "import": "./dist/core-composition.js"
+    },
+    "./platform-admin-bootstrap": {
+      "types": "./dist/admin/platform-admin-bootstrap.d.ts",
+      "import": "./dist/admin/platform-admin-bootstrap.js"
     }
   },
   "scripts": {

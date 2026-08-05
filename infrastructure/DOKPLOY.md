@@ -125,7 +125,7 @@ MFA само по себе не выдаёт platform-доступ. После �
 ADMIN_BOOTSTRAP_EMAIL='owner@example.com' \
 ADMIN_BOOTSTRAP_REASON='Initial production operations owner' \
 ADMIN_BOOTSTRAP_CONFIRM='CREATE_FIRST_SUPER_ADMIN' \
-node /app/dist/admin/platform-admin-bootstrap.js
+node /app/dist/platform-admin-bootstrap.js
 ```
 
 Команду нужно вставить целиком одним блоком: присваивания на отдельных строках
@@ -133,6 +133,10 @@ node /app/dist/admin/platform-admin-bootstrap.js
 `PLATFORM_DATABASE_URL` сервиса; абсолютный путь работает независимо от того,
 в каком каталоге Dokploy открыл Terminal. Повтор команды для уже назначенного
 этому аккаунту `SUPER_ADMIN` безопасен и возвращает ID существующего назначения.
+
+В образах, собранных до появления корневого entrypoint, тот же bootstrap
+доступен по пути
+`/app/node_modules/@seo-platform/backend-core-api/dist/admin/platform-admin-bootstrap.js`.
 
 Первичное назначение создаётся только пока в системе нет ни одной активной
 platform role. Bootstrap проверяет активный аккаунт, подтверждённый email и

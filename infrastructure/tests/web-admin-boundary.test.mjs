@@ -84,17 +84,35 @@ test("public frontend URLs come only from the canonical runtime origin", async (
 });
 
 test("production admin bootstrap is self-contained and terminal-safe", async () => {
-  const [source, documentation] = await Promise.all([
-    workspaceFile(
-      "backend-core/modules/api/src/admin/platform-admin-bootstrap.ts"
-    ),
-    infrastructureFile("DOKPLOY.md")
-  ]);
+  const [source, runtimeEntrypoint, apiPackage, documentation] =
+    await Promise.all([
+      workspaceFile(
+        "backend-core/modules/api/src/admin/platform-admin-bootstrap.ts"
+      ),
+      workspaceFile("backend-core/src/platform-admin-bootstrap.ts"),
+      workspaceFile("backend-core/modules/api/package.json"),
+      infrastructureFile("DOKPLOY.md")
+    ]);
   assert.doesNotMatch(source, /dotenv/u);
   assert.match(source, /PLATFORM_DATABASE_URL/u);
   assert.match(
+    runtimeEntrypoint,
+    /@seo-platform\/backend-core-api\/platform-admin-bootstrap/u
+  );
+  assert.match(
+    runtimeEntrypoint,
+    /bootstrapModule\.runPlatformAdminBootstrap\(\)/u
+  );
+  assert.deepEqual(
+    JSON.parse(apiPackage).exports["./platform-admin-bootstrap"],
+    {
+      types: "./dist/admin/platform-admin-bootstrap.d.ts",
+      import: "./dist/admin/platform-admin-bootstrap.js"
+    }
+  );
+  assert.match(
     documentation,
-    /node \/app\/dist\/admin\/platform-admin-bootstrap\.js/u
+    /node \/app\/dist\/platform-admin-bootstrap\.js/u
   );
 });
 
