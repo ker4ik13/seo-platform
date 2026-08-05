@@ -4,6 +4,7 @@ import {
   responseCookies
 } from "../../../../lib/platform-api-proxy";
 import { safeAppReturnTo } from "../../../../lib/app-path";
+import { webPublicOrigin } from "../../../../lib/server-runtime-origin";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   );
 
   if (refreshed.ok) {
-    const response = NextResponse.redirect(new URL(returnTo, request.url));
+    const response = NextResponse.redirect(
+      new URL(returnTo, webPublicOrigin())
+    );
     copySetCookies(refreshed, response);
     return response;
   }
@@ -30,7 +33,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const response = NextResponse.redirect(
     new URL(
       `/app/login?reason=session-expired&returnTo=${encodeURIComponent(returnTo)}`,
-      request.url
+      webPublicOrigin()
     )
   );
   clearSessionCookies(response);

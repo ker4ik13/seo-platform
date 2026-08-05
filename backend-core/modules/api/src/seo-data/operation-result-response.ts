@@ -4,6 +4,7 @@ import {
   semanticFrequencyDevices,
   semanticFrequencyQualityFlags,
   semanticFrequencyTypes,
+  technicalCrawlMaxUrlLimit,
   type CrawlOperationResultRow,
   type InternalCrawlOperationResultPage,
   type InternalFrequencyOperationResult,
@@ -276,7 +277,7 @@ export function scopedInternalCrawlOperationResultPage(
       ],
       ["title", "h1", "canonicalUrl"]
     );
-    const sequence = integer(row.sequence, 0, 999);
+    const sequence = integer(row.sequence, 1, technicalCrawlMaxUrlLimit);
     if (
       sequences.has(sequence) ||
       typeof row.requestedUrl !== "string" ||

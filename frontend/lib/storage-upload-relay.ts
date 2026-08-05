@@ -1,3 +1,5 @@
+import { webPublicOrigin } from "./server-runtime-origin.ts";
+
 const RELAY_PORT = "9443";
 const MAX_RELAY_DURATION_MS = 15 * 60_000;
 
@@ -8,8 +10,7 @@ export async function relayObjectStorageUpload(
     return errorResponse(405, "METHOD_NOT_ALLOWED", "Method not allowed");
   }
 
-  const requestUrl = new URL(request.url);
-  const publicOrigin = configuredPublicOrigin(requestUrl.origin);
+  const publicOrigin = webPublicOrigin();
   const browserOrigin = request.headers.get("origin");
   if (browserOrigin && browserOrigin !== publicOrigin) {
     return errorResponse(
@@ -108,16 +109,6 @@ function parseSignedStorageUrl(
     return undefined;
   }
   return candidate;
-}
-
-function configuredPublicOrigin(fallback: string): string {
-  const value = process.env.NEXT_PUBLIC_SITE_URL;
-  if (!value) return fallback;
-  try {
-    return new URL(value).origin;
-  } catch {
-    return fallback;
-  }
 }
 
 function errorResponse(status: number, code: string, message: string): Response {

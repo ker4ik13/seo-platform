@@ -130,7 +130,7 @@ test("uses only explicit loopback or container bind addresses", () => {
       loadAppConfig({
         NODE_ENV: "test",
         DATABASE_URL: "postgresql://test",
-        BIND_ADDRESS: "localhost"
+        BIND_ADDRESS: "loopback.invalid"
       }),
     /BIND_ADDRESS must be 127\.0\.0\.1 or 0\.0\.0\.0/u
   );

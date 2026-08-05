@@ -4,7 +4,7 @@ import { safeErrorSummary } from "./runtime-safe-error.js";
 
 test("runtime diagnostics redact connection URLs and stay bounded", () => {
   const error = Object.assign(
-    new Error(`failure at redis://user:secret@localhost:6379/${"x".repeat(300)}`),
+    new Error(`failure at redis://user:secret@127.0.0.1:6379/${"x".repeat(300)}`),
     { code: "RUNTIME_FAILURE" }
   );
   const summary = safeErrorSummary(error);

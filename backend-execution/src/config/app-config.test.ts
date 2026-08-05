@@ -50,7 +50,7 @@ test("uses only explicit loopback or container bind addresses", () => {
       loadAppConfig({
         NODE_ENV: "test",
         DATABASE_URL: "postgresql://test",
-        BIND_ADDRESS: "localhost"
+        BIND_ADDRESS: "loopback.invalid"
       }),
     /BIND_ADDRESS must be 127\.0\.0\.1 or 0\.0\.0\.0/u
   );
@@ -85,8 +85,8 @@ test("loads bounded multipart upload defaults", () => {
   assert.equal(config.imports.stagingBatchRows, 1_000);
   assert.equal(config.imports.previewRows, 20);
   assert.equal(config.imports.publishBatchRows, 200);
-  assert.equal(config.services.seoData, "http://localhost:4001");
-  assert.equal(config.services.platformApi, "http://localhost:4000");
+  assert.equal(config.services.seoData, "http://127.0.0.1:4001");
+  assert.equal(config.services.platformApi, "http://127.0.0.1:4000");
   assert.equal(config.platformApiCommandTimeoutMs, 5_000);
   assert.equal(config.rankPreparation.leaseSeconds, 120);
   assert.equal(config.rankPreparation.dispatchSeconds, 15);

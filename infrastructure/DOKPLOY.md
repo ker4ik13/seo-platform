@@ -62,6 +62,11 @@ WEB_PUBLIC_URL=https://example.com
 API_PUBLIC_URL=https://api.example.com
 ```
 
+`WEB_PUBLIC_URL` — единственный canonical origin Frontend без `/` в конце.
+Он передаётся и на build, и в runtime; metadata, robots/sitemap, BFF Origin
+проверки и auth-refresh redirects используют только его. Значение вроде
+внутреннего имени контейнера или loopback-адреса запрещено в production.
+
 TLS завершается в Traefik. Для production оставить `AUTH_COOKIE_SECURE=true`.
 
 ## 3. Обязательные группы secrets
@@ -117,17 +122,24 @@ MFA само по себе не выдаёт platform-доступ. После �
 выполнить, заменив email на адрес входа владельца:
 
 ```bash
-DATABASE_URL="$PLATFORM_DATABASE_URL" \
 ADMIN_BOOTSTRAP_EMAIL='owner@example.com' \
 ADMIN_BOOTSTRAP_REASON='Initial production operations owner' \
 ADMIN_BOOTSTRAP_CONFIRM='CREATE_FIRST_SUPER_ADMIN' \
-node dist/admin/platform-admin-bootstrap.js
+node /app/dist/admin/platform-admin-bootstrap.js
 ```
 
-Bootstrap работает только пока в системе нет ни одной активной platform role,
-проверяет активный аккаунт, подтверждённый email и настроенный MFA, а затем
-пишет назначение и audit event в одной транзакции. Все последующие роли
-назначаются уже через `/admin` и не требуют повторного bootstrap.
+Команду нужно вставить целиком одним блоком: присваивания на отдельных строках
+без `export` не передаются дочернему процессу. Production bootstrap сам читает
+`PLATFORM_DATABASE_URL` сервиса; абсолютный путь работает независимо от того,
+в каком каталоге Dokploy открыл Terminal. Повтор команды для уже назначенного
+этому аккаунту `SUPER_ADMIN` безопасен и возвращает ID существующего назначения.
+
+Первичное назначение создаётся только пока в системе нет ни одной активной
+platform role. Bootstrap проверяет активный аккаунт, подтверждённый email и
+настроенный MFA, а затем пишет назначение и audit event в одной транзакции.
+Исключение — безопасный повтор для уже назначенного этому аккаунту
+`SUPER_ADMIN`. После успешной команды нужно завершить текущую сессию и снова
+войти в `/admin` с MFA. Все последующие роли назначаются уже через `/admin`.
 
 ## 6. Проверка после deploy
 

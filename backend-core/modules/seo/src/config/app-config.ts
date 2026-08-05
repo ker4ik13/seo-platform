@@ -180,7 +180,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       : {}),
     ...(rankHistoryCursorKey ? { rankHistoryCursorKey } : {}),
     nats: {
-      url: env.NATS_URL?.trim() || "nats://localhost:4222",
+      url: env.NATS_URL?.trim() || "nats://127.0.0.1:4222",
       ...(user ? { user } : {}),
       ...(password ? { password } : {})
     }

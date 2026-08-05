@@ -11,6 +11,7 @@ import {
   type ProtectedAppBaseContext,
   resolveExplicitProjectAppContext
 } from "./project-app-context";
+import { platformApiInternalOrigin } from "./server-runtime-origin";
 
 export class PlatformApiError extends Error {
   public constructor(
@@ -161,9 +162,7 @@ async function platformApiJson(path: string): Promise<unknown> {
 }
 
 function platformApiUrl(path: string): URL {
-  const baseUrl =
-    process.env.PLATFORM_API_INTERNAL_URL ?? "http://localhost:4000";
-  return new URL(path, baseUrl);
+  return new URL(path, platformApiInternalOrigin());
 }
 
 function readApiError(payload: unknown): {

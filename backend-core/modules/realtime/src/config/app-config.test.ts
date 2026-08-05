@@ -24,7 +24,7 @@ describe("loadAppConfig", () => {
     });
 
     assert.equal(config.bindAddress, "127.0.0.1");
-    assert.deepEqual(config.webOrigins, ["http://localhost:3000"]);
+    assert.deepEqual(config.webOrigins, ["http://127.0.0.1:3000"]);
   });
 
   it("allows only explicit loopback or all-interface bind addresses", () => {
@@ -41,7 +41,7 @@ describe("loadAppConfig", () => {
         loadAppConfig({
           NODE_ENV: "test",
           DATABASE_URL: "postgresql://test",
-          BIND_ADDRESS: "localhost"
+          BIND_ADDRESS: "loopback.invalid"
         }),
       /BIND_ADDRESS must be 127\.0\.0\.1 or 0\.0\.0\.0/u
     );
@@ -50,7 +50,7 @@ describe("loadAppConfig", () => {
   it("parses allowed browser origins", () => {
     const config = loadAppConfig({
       NODE_ENV: "test",
-      DATABASE_URL: "postgresql://test:test@localhost:5432/test",
+      DATABASE_URL: "postgresql://test:test@127.0.0.1:5432/test",
       WEB_ORIGINS: "https://app.example.test, https://admin.example.test"
     });
 
@@ -69,7 +69,7 @@ describe("loadAppConfig", () => {
       () =>
         loadAppConfig({
           NODE_ENV: "production",
-          DATABASE_URL: "postgresql://test:test@localhost:5432/test",
+          DATABASE_URL: "postgresql://test:test@127.0.0.1:5432/test",
           WEB_ORIGINS: "https://app.example.test"
         }),
       /PLATFORM_API_TO_REALTIME_TOKEN/
@@ -79,7 +79,7 @@ describe("loadAppConfig", () => {
   it("parses a complete dependency-free Web Push registration config", () => {
     const config = loadAppConfig({
       NODE_ENV: "test",
-      DATABASE_URL: "postgresql://test:test@localhost:5432/test",
+      DATABASE_URL: "postgresql://test:test@127.0.0.1:5432/test",
       PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: "p".repeat(32),
       WEB_PUSH_REGISTRATION_ENABLED: "true",
       WEB_PUSH_VAPID_PUBLIC_KEY: vapidPublicKey,
@@ -108,7 +108,7 @@ describe("loadAppConfig", () => {
     const config = loadAppConfig({
       NODE_ENV: "test",
       SERVICE_ROLE: "WEB_PUSH_WORKER",
-      DATABASE_URL: "postgresql://test:test@localhost:5432/test",
+      DATABASE_URL: "postgresql://test:test@127.0.0.1:5432/test",
       WEB_PUSH_DELIVERY_ENABLED: "true",
       PLATFORM_API_INTERNAL_URL: "http://backend-core:4000",
       REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN: "d".repeat(32),

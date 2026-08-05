@@ -422,7 +422,7 @@ function allowedWebOrigins(
   value: string | undefined,
   nodeEnv: AppConfig["nodeEnv"]
 ): readonly string[] {
-  const origins = (value ?? "http://localhost:3000")
+  const origins = (value ?? "http://127.0.0.1:3000")
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean)
@@ -838,11 +838,11 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       20,
       "DATABASE_POOL_MAX"
     ),
-    redisUrl: env.REDIS_URL?.trim() || "redis://localhost:6379",
+    redisUrl: env.REDIS_URL?.trim() || "redis://127.0.0.1:6379",
     ...(platformApiToken ? { platformApiToken } : {}),
     ...(notificationApiToken ? { notificationApiToken } : {}),
     nats: {
-      url: env.NATS_URL?.trim() || "nats://localhost:4222",
+      url: env.NATS_URL?.trim() || "nats://127.0.0.1:4222",
       ...(natsUser ? { user: natsUser } : {}),
       ...(natsPassword ? { password: natsPassword } : {})
     },

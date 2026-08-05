@@ -53,7 +53,7 @@ test("accepts exact frequency and crawl result projections", () => {
       crawlId,
       rows: [
         {
-          sequence: 0,
+          sequence: 1_000,
           requestedUrl: "https://example.com/a",
           finalUrl: "https://example.com/a",
           redirectChain: [],
@@ -78,6 +78,7 @@ test("accepts exact frequency and crawl result projections", () => {
     crawlId,
     100
   );
+  assert.equal(crawl.rows[0]?.sequence, 1_000);
   assert.equal(crawl.rows[0]?.indexability, "BLOCKED_ROBOTS");
 });
 

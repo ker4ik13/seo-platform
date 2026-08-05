@@ -587,7 +587,7 @@ export function loadSystemWorkerConfig(
   }
   return {
     nodeEnv: nodeEnv as SystemWorkerConfig["nodeEnv"],
-    redisUrl: redisUrl ?? "redis://localhost:6379",
+    redisUrl: redisUrl ?? "redis://127.0.0.1:6379",
     concurrency: boundedInteger(
       env.SYSTEM_WORKER_CONCURRENCY,
       2,
@@ -957,7 +957,7 @@ export function loadAppConfig(
   }
   const crawlContactUrl =
     optional(env, "CRAWL_CONTACT_URL") ??
-    (nodeEnv === "production" ? undefined : "https://localhost.invalid/crawler");
+    (nodeEnv === "production" ? undefined : "https://crawler.invalid/crawler");
   if (processRole === "CRAWL_WORKER" && !crawlContactUrl) {
     throw new Error(
       "CRAWL_CONTACT_URL is required by the crawl-worker in production"
@@ -1298,7 +1298,7 @@ export function loadAppConfig(
       20,
       "DATABASE_POOL_MAX"
     ),
-    redisUrl: env.REDIS_URL?.trim() || "redis://localhost:6379",
+    redisUrl: env.REDIS_URL?.trim() || "redis://127.0.0.1:6379",
     ...(platformApiToken ? { platformApiToken } : {}),
     ...(seoDataApiToken ? { seoDataApiToken } : {}),
     ...(integrationCredentialApiToken
@@ -1315,12 +1315,12 @@ export function loadAppConfig(
     platformApiCommandTimeoutMs,
     services: {
       seoData:
-        optional(env, "SEO_DATA_URL") || "http://localhost:4001",
+        optional(env, "SEO_DATA_URL") || "http://127.0.0.1:4001",
       platformApi:
-        optional(env, "PLATFORM_API_URL") || "http://localhost:4000"
+        optional(env, "PLATFORM_API_URL") || "http://127.0.0.1:4000"
     },
     nats: {
-      url: natsUrl || "nats://localhost:4222",
+      url: natsUrl || "nats://127.0.0.1:4222",
       ...(natsUser ? { user: natsUser } : {}),
       ...(natsPassword ? { password: natsPassword } : {})
     },
@@ -1497,7 +1497,7 @@ export function loadAppConfig(
         0,
         10
       ),
-      userAgent: `SeoPlatformCrawler/1.0 (+${crawlContactUrl ?? "https://localhost.invalid/crawler"})`
+      userAgent: `SeoPlatformCrawler/1.0 (+${crawlContactUrl ?? "https://crawler.invalid/crawler"})`
     },
     authEmail: {
       enabled: processRole === "AUTH_EMAIL_WORKER",

@@ -10,7 +10,7 @@ test("uses the SEO service default port", () => {
 
   assert.equal(config.port, 4001);
   assert.equal(config.bindAddress, "127.0.0.1");
-  assert.equal(config.nats.url, "nats://localhost:4222");
+  assert.equal(config.nats.url, "nats://127.0.0.1:4222");
 });
 
 test("uses only explicit loopback or container bind addresses", () => {

@@ -1024,7 +1024,7 @@ function unsupportedReasonMessage(value: WebPushUnsupportedReason): string {
   const messages: Readonly<Record<WebPushUnsupportedReason, string>> = {
     NOT_IN_BROWSER: "Web Push доступен только в браузере.",
     INSECURE_CONTEXT:
-      "Web Push требует HTTPS. На локальной машине используйте безопасный localhost.",
+      "Web Push требует HTTPS. Для локальной разработки используйте доверенный HTTPS-домен.",
     NOTIFICATION_UNSUPPORTED:
       "Этот браузер не поддерживает системные уведомления.",
     SERVICE_WORKER_UNSUPPORTED:

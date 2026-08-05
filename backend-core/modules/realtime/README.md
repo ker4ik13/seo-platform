@@ -47,4 +47,4 @@ Runtime entrypoint: `backend-core/src/realtime.main.ts`, порт по умол�
 `127.0.0.1` или `0.0.0.0`. Контейнерный Compose явно задаёт `0.0.0.0` внутри
 изолированной сети, а host-preview обязан оставаться на loopback. Если
 `WEB_ORIGINS` не задан вне production, разрешён только канонический локальный
-Web origin `http://localhost:3000`.
+Web origin задаётся явно через `WEB_ORIGINS`.

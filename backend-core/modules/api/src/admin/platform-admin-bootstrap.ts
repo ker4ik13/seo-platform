@@ -1,14 +1,26 @@
-import "dotenv/config";
+import { pathToFileURL } from "node:url";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "../generated/prisma/client.js";
 
 const CONFIRMATION = "CREATE_FIRST_SUPER_ADMIN";
 
-async function main(): Promise<void> {
-  const databaseUrl = required("DATABASE_URL");
-  const email = required("ADMIN_BOOTSTRAP_EMAIL").trim().toLowerCase();
-  const reason = required("ADMIN_BOOTSTRAP_REASON").trim();
-  if (required("ADMIN_BOOTSTRAP_CONFIRM") !== CONFIRMATION) {
+interface PlatformAdminBootstrapInput {
+  readonly databaseUrl: string;
+  readonly email: string;
+  readonly reason: string;
+}
+
+export function platformAdminBootstrapInput(
+  env: NodeJS.ProcessEnv
+): PlatformAdminBootstrapInput {
+  const databaseUrl =
+    optional(env, "DATABASE_URL") ??
+    required(env, "PLATFORM_DATABASE_URL");
+  const email = required(env, "ADMIN_BOOTSTRAP_EMAIL")
+    .trim()
+    .toLowerCase();
+  const reason = required(env, "ADMIN_BOOTSTRAP_REASON").trim();
+  if (required(env, "ADMIN_BOOTSTRAP_CONFIRM") !== CONFIRMATION) {
     throw new Error(
       `ADMIN_BOOTSTRAP_CONFIRM must equal ${CONFIRMATION}`
     );
@@ -16,6 +28,13 @@ async function main(): Promise<void> {
   if (reason.length < 8 || reason.length > 500) {
     throw new Error("ADMIN_BOOTSTRAP_REASON must contain 8-500 characters");
   }
+  return { databaseUrl, email, reason };
+}
+
+export async function runPlatformAdminBootstrap(
+  env: NodeJS.ProcessEnv = process.env
+): Promise<void> {
+  const { databaseUrl, email, reason } = platformAdminBootstrapInput(env);
 
   const client = new PrismaClient({
     adapter: new PrismaPg({
@@ -25,21 +44,12 @@ async function main(): Promise<void> {
     })
   });
   try {
-    const assignment = await client.$transaction(async (transaction) => {
+    const result = await client.$transaction(async (transaction) => {
       await transaction.$queryRaw`
         SELECT pg_advisory_xact_lock(
           hashtextextended('platform-staff-role-admin', 0)
         )::text AS lock_result
       `;
-      if (
-        (await transaction.platformStaffRoleAssignment.count({
-          where: { revokedAt: null }
-        })) !== 0
-      ) {
-        throw new Error(
-          "Bootstrap refused: active platform staff assignments already exist"
-        );
-      }
       const user = await transaction.user.findUnique({
         where: { emailNormalized: email },
         select: {
@@ -66,6 +76,28 @@ async function main(): Promise<void> {
           "Bootstrap user must be active, email-verified and have active MFA"
         );
       }
+
+      const existing =
+        await transaction.platformStaffRoleAssignment.findFirst({
+          where: {
+            userId: user.id,
+            roleCode: "SUPER_ADMIN",
+            revokedAt: null
+          },
+          orderBy: { assignedAt: "asc" }
+        });
+      if (existing) {
+        return { assignment: existing, created: false } as const;
+      }
+      if (
+        (await transaction.platformStaffRoleAssignment.count({
+          where: { revokedAt: null }
+        })) !== 0
+      ) {
+        throw new Error(
+          "Bootstrap refused: active platform staff assignments already exist"
+        );
+      }
       const created =
         await transaction.platformStaffRoleAssignment.create({
           data: {
@@ -85,25 +117,41 @@ async function main(): Promise<void> {
           requestId: `admin-bootstrap-${created.id}`
         }
       });
-      return created;
+      return { assignment: created, created: true } as const;
     });
     process.stdout.write(
-      `First SUPER_ADMIN assignment created: ${assignment.id}\n`
+      result.created
+        ? `First SUPER_ADMIN assignment created: ${result.assignment.id}\n`
+        : `SUPER_ADMIN assignment already active: ${result.assignment.id}\n`
     );
   } finally {
     await client.$disconnect();
   }
 }
 
-function required(name: string): string {
-  const value = process.env[name];
+function required(env: NodeJS.ProcessEnv, name: string): string {
+  const value = optional(env, name);
   if (!value) throw new Error(`${name} is required`);
   return value;
 }
 
-main().catch((error: unknown) => {
-  process.stderr.write(
-    `${error instanceof Error ? error.message : "Bootstrap failed"}\n`
+function optional(env: NodeJS.ProcessEnv, name: string): string | undefined {
+  const value = env[name]?.trim();
+  return value ? value : undefined;
+}
+
+function isDirectExecution(): boolean {
+  const entrypoint = process.argv[1];
+  return Boolean(
+    entrypoint && pathToFileURL(entrypoint).href === import.meta.url
   );
-  process.exitCode = 1;
-});
+}
+
+if (isDirectExecution()) {
+  runPlatformAdminBootstrap().catch((error: unknown) => {
+    process.stderr.write(
+      `${error instanceof Error ? error.message : "Bootstrap failed"}\n`
+    );
+    process.exitCode = 1;
+  });
+}

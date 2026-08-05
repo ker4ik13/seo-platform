@@ -3,6 +3,9 @@ import test from "node:test";
 import { NextRequest } from "next/server.js";
 import { proxyPlatformApi } from "./platform-api-proxy.ts";
 
+process.env.WEB_PUBLIC_URL = "https://app.example.test";
+process.env.PLATFORM_API_INTERNAL_URL = "http://backend-core:4000";
+
 test("proxies an assignment PUT through the safe same-origin BFF", async () => {
   const originalFetch = globalThis.fetch;
   let upstreamUrl: string | undefined;
@@ -26,7 +29,7 @@ test("proxies an assignment PUT through the safe same-origin BFF", async () => {
 
   try {
     const request = new NextRequest(
-      "http://localhost/app/api/projects/project-id/tracking-contexts/context-id/keywords/keyword-id",
+      "https://app.example.test/app/api/projects/project-id/tracking-contexts/context-id/keywords/keyword-id",
       {
         method: "PUT",
         headers: {
@@ -47,7 +50,7 @@ test("proxies an assignment PUT through the safe same-origin BFF", async () => {
     assert.equal(response.status, 200);
     assert.equal(
       upstreamUrl,
-      "http://localhost:4000/api/v1/projects/project-id/tracking-contexts/context-id/keywords/keyword-id"
+      "http://backend-core:4000/api/v1/projects/project-id/tracking-contexts/context-id/keywords/keyword-id"
     );
     assert.equal(upstreamInit?.method, "PUT");
     const headers = new Headers(upstreamInit?.headers);
@@ -73,7 +76,7 @@ test("normalizes the legacy browser v1 prefix without duplicating it upstream", 
 
   try {
     const request = new NextRequest(
-      "http://localhost/app/api/v1/billing/plans"
+      "https://app.example.test/app/api/v1/billing/plans"
     );
     const response = await proxyPlatformApi(request, [
       "v1",
@@ -82,7 +85,7 @@ test("normalizes the legacy browser v1 prefix without duplicating it upstream", 
     ]);
 
     assert.equal(response.status, 200);
-    assert.equal(upstreamUrl, "http://localhost:4000/api/v1/billing/plans");
+    assert.equal(upstreamUrl, "http://backend-core:4000/api/v1/billing/plans");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -116,7 +119,7 @@ test("forwards a manual rank create with CSRF and Idempotency-Key", async () => 
       estimateId: "01900000-0000-7000-8000-000000000005"
     });
     const request = new NextRequest(
-      "http://localhost/app/api/projects/01900000-0000-7000-8000-000000000002/rank-runs",
+      "https://app.example.test/app/api/projects/01900000-0000-7000-8000-000000000002/rank-runs",
       {
         method: "POST",
         body,
@@ -137,7 +140,7 @@ test("forwards a manual rank create with CSRF and Idempotency-Key", async () => 
     assert.equal(response.status, 202);
     assert.equal(
       upstreamUrl,
-      "http://localhost:4000/api/v1/projects/01900000-0000-7000-8000-000000000002/rank-runs"
+      "http://backend-core:4000/api/v1/projects/01900000-0000-7000-8000-000000000002/rank-runs"
     );
     const headers = new Headers(upstreamInit?.headers);
     assert.equal(headers.get("idempotency-key"), "rank-run:command-1");
@@ -166,7 +169,7 @@ test("streams semantic export metadata without buffering the download", async ()
 
   try {
     const request = new NextRequest(
-      "http://localhost/app/api/projects/project-id/exports",
+      "https://app.example.test/app/api/projects/project-id/exports",
       {
         method: "POST",
         body: "{}",
@@ -214,7 +217,7 @@ test("forwards an exact empty cooperative rank cancel command", async () => {
 
   try {
     const request = new NextRequest(
-      "http://localhost/app/api/projects/01900000-0000-7000-8000-000000000002/jobs/01900000-0000-7000-8000-000000000004/cancel",
+      "https://app.example.test/app/api/projects/01900000-0000-7000-8000-000000000002/jobs/01900000-0000-7000-8000-000000000004/cancel",
       {
         method: "POST",
         body: "{}",
@@ -236,7 +239,7 @@ test("forwards an exact empty cooperative rank cancel command", async () => {
     assert.equal(response.status, 200);
     assert.equal(
       upstreamUrl,
-      "http://localhost:4000/api/v1/projects/01900000-0000-7000-8000-000000000002/jobs/01900000-0000-7000-8000-000000000004/cancel"
+      "http://backend-core:4000/api/v1/projects/01900000-0000-7000-8000-000000000002/jobs/01900000-0000-7000-8000-000000000004/cancel"
     );
     const headers = new Headers(upstreamInit?.headers);
     assert.equal(headers.get("x-csrf-token"), "csrf");
@@ -260,7 +263,7 @@ test("forwards the original browser user agent to Platform API", async () => {
 
   try {
     const request = new NextRequest(
-      "http://localhost/app/api/me/push-subscriptions",
+      "https://app.example.test/app/api/me/push-subscriptions",
       {
         headers: {
           Cookie: "seo_session=session",
@@ -290,7 +293,7 @@ test("applies a narrow body limit to push subscription secrets", async () => {
 
   try {
     const request = new NextRequest(
-      "http://localhost/app/api/me/push-subscriptions/installation-id",
+      "https://app.example.test/app/api/me/push-subscriptions/installation-id",
       {
         method: "PUT",
         body: new Uint8Array(8 * 1_024 + 1),
@@ -324,7 +327,7 @@ test("rejects a streamed body that exceeds the BFF limit", async () => {
   try {
     const oversized = new Uint8Array(2 * 1_024 * 1_024 + 1);
     const request = new NextRequest(
-      "http://localhost/app/api/projects/project-id/tracking-contexts",
+      "https://app.example.test/app/api/projects/project-id/tracking-contexts",
       {
         method: "POST",
         body: new ReadableStream({
@@ -360,7 +363,7 @@ test("allows the exact keyword bulk route to use its bounded 8 MiB relay limit",
   try {
     const body = new Uint8Array(2 * 1_024 * 1_024 + 1);
     const request = new NextRequest(
-      "http://localhost/app/api/projects/project-id/keywords/bulk",
+      "https://app.example.test/app/api/projects/project-id/keywords/bulk",
       {
         method: "POST",
         body,
@@ -391,7 +394,7 @@ test("forwards a bounded request body after measuring it", async () => {
 
   try {
     const request = new NextRequest(
-      "http://localhost/app/api/projects/project-id/tracking-contexts",
+      "https://app.example.test/app/api/projects/project-id/tracking-contexts",
       {
         method: "POST",
         body: JSON.stringify({ name: "Google US" }),
@@ -438,7 +441,7 @@ test("proxies session revoke with server-only cookies and returns cookie clearin
   try {
     const sessionId = "01900000-0000-7000-8000-000000000001";
     const request = new NextRequest(
-      `http://localhost/app/api/sessions/${sessionId}`,
+      `https://app.example.test/app/api/sessions/${sessionId}`,
       {
         method: "DELETE",
         headers: {
@@ -456,7 +459,7 @@ test("proxies session revoke with server-only cookies and returns cookie clearin
     assert.equal(response.status, 204);
     assert.equal(
       upstreamUrl,
-      `http://localhost:4000/api/v1/sessions/${sessionId}`
+      `http://backend-core:4000/api/v1/sessions/${sessionId}`
     );
     assert.equal(upstreamInit?.method, "DELETE");
     assert.equal(upstreamInit?.redirect, "manual");
@@ -486,7 +489,7 @@ test("forwards only one validated edge client IP to Platform API", async () => {
       ["2001:0DB8:0:0:0:0:0:A", "2001:db8::a"]
     ] as const) {
       const request = new NextRequest(
-        "http://localhost/app/api/sessions?limit=100",
+        "https://app.example.test/app/api/sessions?limit=100",
         {
           headers: {
             Forwarded: "for=198.51.100.8",
@@ -524,7 +527,7 @@ test("rejects chained or malformed forwarded client addresses before upstream", 
       "999.1.1.1"
     ]) {
       const request = new NextRequest(
-        "http://localhost/app/api/sessions",
+        "https://app.example.test/app/api/sessions",
         { headers: { "X-Forwarded-For": value } }
       );
       const response = await proxyPlatformApi(request, ["sessions"]);
@@ -609,18 +612,18 @@ test("forwards only the exact same browser Origin required by realtime tickets",
 
 test("accepts the configured public Origin behind a reverse proxy", async () => {
   const originalFetch = globalThis.fetch;
-  const originalSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  const originalSiteUrl = process.env.WEB_PUBLIC_URL;
   let upstreamHeaders: Headers | undefined;
   globalThis.fetch = async (_input, init) => {
     upstreamHeaders = new Headers(init?.headers);
     return Response.json({ data: { ok: true } });
   };
-  process.env.NEXT_PUBLIC_SITE_URL = "https://app.example.test:8443";
+  process.env.WEB_PUBLIC_URL = "https://app.example.test:8443";
 
   try {
     const response = await proxyPlatformApi(
       new NextRequest(
-        "http://localhost:3100/app/api/auth/login",
+        "http://reverse-proxy.internal.test:3100/app/api/auth/login",
         {
           method: "POST",
           headers: {
@@ -644,9 +647,9 @@ test("accepts the configured public Origin behind a reverse proxy", async () => 
   } finally {
     globalThis.fetch = originalFetch;
     if (originalSiteUrl === undefined) {
-      delete process.env.NEXT_PUBLIC_SITE_URL;
+      delete process.env.WEB_PUBLIC_URL;
     } else {
-      process.env.NEXT_PUBLIC_SITE_URL = originalSiteUrl;
+      process.env.WEB_PUBLIC_URL = originalSiteUrl;
     }
   }
 });

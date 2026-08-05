@@ -55,7 +55,7 @@ export function AdminApp() {
     }
     if (response.status === 403) {
       setAuthState("forbidden");
-      setError(response.message);
+      setError(adminAccessMessage(response.message));
       return;
     }
     setAuthState("login");
@@ -92,8 +92,12 @@ export function AdminApp() {
     return (
       <StatePage
         action={
-          <button className="primary" onClick={() => void logout()} type="button">
-            Завершить сессию
+          <button
+            className="primary"
+            onClick={() => void logout("/admin")}
+            type="button"
+          >
+            Войти заново
           </button>
         }
         text={
@@ -630,9 +634,22 @@ function StatePage({ action, text, title = "Operations" }: Readonly<{ action?: R
   return <main className="state-page"><div className="auth-logo">SW</div><h1>{title}</h1><p>{text}</p>{action}</main>;
 }
 
-async function logout() {
+async function logout(returnTo = "/") {
   await adminApi("/api/auth/logout", { method: "POST" });
-  window.location.assign("/");
+  window.location.assign(returnTo);
+}
+
+function adminAccessMessage(message: string): string {
+  if (message === "The required platform role is not assigned") {
+    return "Для аккаунта не назначена platform role. Выполните первичный bootstrap и войдите заново.";
+  }
+  if (
+    message ===
+    "Platform administration requires an active verified account and MFA-authenticated session"
+  ) {
+    return "Для operations нужен активный подтверждённый аккаунт и новый вход с MFA.";
+  }
+  return message;
 }
 
 const receiptStatuses = [

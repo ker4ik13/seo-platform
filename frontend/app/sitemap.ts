@@ -1,10 +1,9 @@
 import type { MetadataRoute } from "next";
 import { locales } from "../lib/locales";
+import { webPublicOrigin } from "../lib/server-runtime-origin";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const siteUrl =
-    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/u, "") ??
-    "http://localhost:3000";
+  const siteUrl = webPublicOrigin();
   const lastModified = new Date();
 
   return [

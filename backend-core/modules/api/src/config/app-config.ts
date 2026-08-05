@@ -611,7 +611,7 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       .map((origin) => origin.trim())
       .filter(Boolean),
     nats: {
-      url: env.NATS_URL?.trim() || "nats://localhost:4222",
+      url: env.NATS_URL?.trim() || "nats://127.0.0.1:4222",
       ...(natsUser ? { user: natsUser } : {}),
       ...(natsPassword ? { password: natsPassword } : {})
     },
@@ -706,10 +706,10 @@ export function loadAppConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     services: {
       seoData:
-        env.SEO_DATA_INTERNAL_URL?.trim() || "http://localhost:4001",
-      jobs: env.JOBS_INTERNAL_URL?.trim() || "http://localhost:4002",
+        env.SEO_DATA_INTERNAL_URL?.trim() || "http://127.0.0.1:4001",
+      jobs: env.JOBS_INTERNAL_URL?.trim() || "http://127.0.0.1:4002",
       realtime:
-        env.REALTIME_INTERNAL_URL?.trim() || "http://localhost:4003"
+        env.REALTIME_INTERNAL_URL?.trim() || "http://127.0.0.1:4003"
     },
     auth: {
       accessCookieName:

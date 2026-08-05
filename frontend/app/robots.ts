@@ -1,9 +1,8 @@
 import type { MetadataRoute } from "next";
+import { webPublicOrigin } from "../lib/server-runtime-origin";
 
 export default function robots(): MetadataRoute.Robots {
-  const siteUrl =
-    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/u, "") ??
-    "http://localhost:3000";
+  const siteUrl = webPublicOrigin();
 
   return {
     rules: [

@@ -7,8 +7,8 @@ const signedUrl =
   "https://144.31.221.28:9443/uploads/file?partNumber=1&uploadId=upload-1&X-Amz-Signature=signature";
 
 test("streams an upload part only to the same-host storage endpoint", async () => {
-  const previousSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
-  process.env.NEXT_PUBLIC_SITE_URL = publicOrigin;
+  const previousSiteUrl = process.env.WEB_PUBLIC_URL;
+  process.env.WEB_PUBLIC_URL = publicOrigin;
   const previousFetch = globalThis.fetch;
   let forwardedBody = "";
   let forwardedUrl = "";
@@ -42,16 +42,16 @@ test("streams an upload part only to the same-host storage endpoint", async () =
   } finally {
     globalThis.fetch = previousFetch;
     if (previousSiteUrl === undefined) {
-      delete process.env.NEXT_PUBLIC_SITE_URL;
+      delete process.env.WEB_PUBLIC_URL;
     } else {
-      process.env.NEXT_PUBLIC_SITE_URL = previousSiteUrl;
+      process.env.WEB_PUBLIC_URL = previousSiteUrl;
     }
   }
 });
 
 test("rejects cross-origin and arbitrary storage relay targets", async () => {
-  const previousSiteUrl = process.env.NEXT_PUBLIC_SITE_URL;
-  process.env.NEXT_PUBLIC_SITE_URL = publicOrigin;
+  const previousSiteUrl = process.env.WEB_PUBLIC_URL;
+  process.env.WEB_PUBLIC_URL = publicOrigin;
   try {
     const crossOrigin = await relayObjectStorageUpload(
       new Request(`${publicOrigin}/app/api/storage-upload`, {
@@ -79,9 +79,9 @@ test("rejects cross-origin and arbitrary storage relay targets", async () => {
     assert.equal(arbitraryTarget.status, 400);
   } finally {
     if (previousSiteUrl === undefined) {
-      delete process.env.NEXT_PUBLIC_SITE_URL;
+      delete process.env.WEB_PUBLIC_URL;
     } else {
-      process.env.NEXT_PUBLIC_SITE_URL = previousSiteUrl;
+      process.env.WEB_PUBLIC_URL = previousSiteUrl;
     }
   }
 });

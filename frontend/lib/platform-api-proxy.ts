@@ -1,6 +1,10 @@
 import { isIP } from "node:net";
 import type { NextRequest } from "next/server";
 import { isSafeBrowserApiPath } from "./app-path.ts";
+import {
+  platformApiInternalOrigin,
+  webPublicOrigin
+} from "./server-runtime-origin.ts";
 
 const ALLOWED_METHODS = new Set([
   "GET",
@@ -59,7 +63,7 @@ export async function proxyPlatformApi(
     );
   }
   const browserOrigin = request.headers.get("origin");
-  const expectedOrigin = configuredBrowserOrigin(request.nextUrl.origin);
+  const expectedOrigin = webPublicOrigin();
   const sameOrigin =
     browserOrigin === null
       ? undefined
@@ -105,7 +109,7 @@ export async function proxyPlatformApi(
   if (!boundedBody.ok) return boundedBody.response;
   const upstreamUrl = new URL(
     `/api/v1/${upstreamPathSegments.map(encodeURIComponent).join("/")}`,
-    process.env.PLATFORM_API_INTERNAL_URL ?? "http://localhost:4000"
+    platformApiInternalOrigin()
   );
   upstreamUrl.search = request.nextUrl.search;
   const requestOptions: RequestInit = {
@@ -183,32 +187,6 @@ export function canonicalSameOrigin(
       return undefined;
     }
     return value;
-  } catch {
-    return undefined;
-  }
-}
-
-function configuredBrowserOrigin(
-  requestOrigin: string
-): string | undefined {
-  const configured = process.env.NEXT_PUBLIC_SITE_URL;
-  if (configured === undefined || configured.length === 0) {
-    return requestOrigin;
-  }
-  if (configured !== configured.trim()) return undefined;
-  try {
-    const parsed = new URL(configured);
-    if (
-      (parsed.protocol !== "https:" && parsed.protocol !== "http:") ||
-      parsed.username ||
-      parsed.password ||
-      parsed.pathname !== "/" ||
-      parsed.search ||
-      parsed.hash
-    ) {
-      return undefined;
-    }
-    return parsed.origin;
   } catch {
     return undefined;
   }

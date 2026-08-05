@@ -83,6 +83,13 @@ Frontend-представление состояния фоновых опера
 ответа провайдера и ожидание его свободного слота не отображаются как ошибочный
 «повтор».
 
+Frontend имеет один обязательный canonical origin `WEB_PUBLIC_URL`. Он
+передаётся в build и runtime как server-only configuration; metadata,
+robots/sitemap, BFF Origin-проверки и абсолютные auth-refresh redirects не
+выводят origin из внутреннего reverse-proxy request URL и не имеют публичного
+loopback fallback. `PLATFORM_API_INTERNAL_URL` задаётся отдельно и никогда не
+выдаётся браузеру.
+
 Защищённый `/admin` входит в тот же Frontend deployable. Раздел рабочих
 областей ищет tenant по названию, slug, UUID, имени или email владельца и
 показывает текущую subscription-проекцию. Роли `FINANCE` и `SUPER_ADMIN`
@@ -126,6 +133,9 @@ default payment method, чтобы последующий автоплатёж �
   одном процессе.
 - публичный `/tools` является landing без anonymous runners; рабочий каталог
   `/app/tools` содержит только реализованный project workflow проверки HTTP.
+- `lib/server-runtime-origin.ts` валидирует canonical `WEB_PUBLIC_URL` и
+  внутренний Platform API origin; production web origin обязан использовать
+  HTTPS и не может быть локальным именем.
 
 ### `backend-core`
 
@@ -242,6 +252,9 @@ queue или таблица не добавлены. HTTP-режим прини�
 Опциональные `homepageChecks` сервером разворачиваются в bounded probes для
 HTTP, альтернативного `www` и путей с `//`…`/////`; они входят в `maxUrls`,
 checkpoint и operation result, но не расширяют discovery за origin проекта.
+Result boundary принимает сохранённую 1-based нумерацию страниц `1…1000`,
+совпадающую с persist contract и максимальным crawl limit; граничная тысячная
+строка не делает валидный завершённый результат недоступным.
 `TECHNICAL_AUDIT` остаётся backward-compatible purpose для старых записей и
 automation. Оба режима читаются через tenant-scoped operation result, но в UI
 и terminal notification имеют разные названия и ссылки на конкретный crawl.
@@ -277,6 +290,13 @@ Core проверяет platform role независимо от tenant membershi
 `IDEMPOTENCY_CONFLICT`. `If-Match`/`If-None-Match` предотвращает потерю
 параллельного изменения. UI не является универсальным редактором БД и не
 позволяет менять ledger history.
+
+Первый `SUPER_ADMIN` назначается production bootstrap-скриптом
+`/app/dist/admin/platform-admin-bootstrap.js`: он использует контейнерный
+`PLATFORM_DATABASE_URL`, не зависит от dev-only пакетов и допускает безопасный
+повтор только для уже активного назначения тому же аккаунту. После bootstrap
+оператор заново входит с MFA, чтобы session authentication была новее
+подтверждения MFA.
 
 ### Передача проекта
 

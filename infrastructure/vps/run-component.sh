@@ -462,7 +462,7 @@ case "$component" in
       HOME=/home/dev \
       NODE_ENV=production \
       TZ=UTC \
-      NEXT_PUBLIC_SITE_URL="$SEO_PLATFORM_PUBLIC_URL" \
+      WEB_PUBLIC_URL="$SEO_PLATFORM_PUBLIC_URL" \
       PLATFORM_API_INTERNAL_URL=http://127.0.0.1:4000 \
       AUTH_ACCESS_COOKIE_NAME=seo_access \
       AUTH_SESSION_COOKIE_NAME=seo_session \

@@ -1,5 +1,9 @@
 import { isIP } from "node:net";
 import type { NextRequest } from "next/server";
+import {
+  platformApiInternalOrigin,
+  webPublicOrigin
+} from "./server-runtime-origin.ts";
 
 const ALLOWED_METHODS = new Set(["GET", "POST"]);
 const AUTH_PATHS = new Set([
@@ -20,7 +24,7 @@ export async function proxyAdminApi(
     return errorResponse(404, "NOT_FOUND", "API route not found");
   }
   const origin = request.headers.get("origin");
-  const expectedOrigin = configuredOrigin(request.nextUrl.origin);
+  const expectedOrigin = webPublicOrigin();
   if (origin && (!expectedOrigin || origin !== expectedOrigin)) {
     return errorResponse(
       403,
@@ -83,7 +87,7 @@ export async function proxyAdminApi(
     upstream = await fetch(
       new URL(
         `${upstreamPath}${request.nextUrl.search}`,
-        process.env.PLATFORM_API_INTERNAL_URL ?? "http://localhost:4000"
+        platformApiInternalOrigin()
       ),
       {
         method: request.method,
@@ -197,25 +201,6 @@ function canonicalClientIp(value: string): string | undefined {
     return undefined;
   }
   return candidate;
-}
-
-function configuredOrigin(requestOrigin: string): string | undefined {
-  const configured = process.env.NEXT_PUBLIC_SITE_URL;
-  if (!configured) return requestOrigin;
-  try {
-    const parsed = new URL(configured);
-    if (
-      parsed.origin !== configured ||
-      !["https:", "http:"].includes(parsed.protocol) ||
-      parsed.username ||
-      parsed.password
-    ) {
-      return undefined;
-    }
-    return parsed.origin;
-  } catch {
-    return undefined;
-  }
 }
 
 function errorResponse(
