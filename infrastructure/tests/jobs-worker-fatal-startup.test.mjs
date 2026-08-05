@@ -19,7 +19,7 @@ test("Jobs workers exit after a fatal bootstrap failure", async () => {
       ),
       "utf8"
     );
-    const fatalHandler = /void bootstrap\(\)\.catch\(\(\) => \{([\s\S]*?)\n\}\);/u.exec(
+    const fatalHandler = /void bootstrap\(\)\.catch\(\([^)]*\) => \{([\s\S]*?)\n\}\);/u.exec(
       source
     )?.[1];
 

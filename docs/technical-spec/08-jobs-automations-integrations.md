@@ -686,6 +686,11 @@ retired unused unrequested historical version не возвращается. Rep
 Canary table не содержит workspace, provider, credential ID или tenant secret.
 Пустая БД допустима; missing/corrupt/same-version-wrong-key canary
 останавливает startup fail-closed, а ошибка содержит только номера версий.
+При совместном запуске нескольких process roles из одного artifact EXECUTION
+может ограниченно ждать первоначальную регистрацию отсутствующего canary
+MANAGEMENT-процессом. Ожидание выполняется до создания BullMQ worker, не даёт
+EXECUTION права записывать canary и не применяется к corrupt/wrong-key
+результату; по истечении окна startup завершается fail-closed.
 `MANAGEMENT` также сохраняет агрегированную проверку encryption/fingerprint
 coverage.
 Validation worker по-прежнему обрабатывает любой runtime decrypt failure как

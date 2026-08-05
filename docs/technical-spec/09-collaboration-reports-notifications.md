@@ -457,7 +457,10 @@ Device lifecycle следует ADR-2026-035:
   только соответствующее устройство; временные ошибки получают bounded retry.
 - Каждый encryption/HMAC key version защищён persistent canary. Realtime HTTP
   создаёт canary при первом expand, последующие HTTP/sender startups проверяют
-  bytes; sender не имеет права создавать или менять canaries.
+  bytes; sender не имеет права создавать или менять canaries. При совместном
+  старте process roles sender ограниченно ждёт только первоначальное появление
+  отсутствующей строки от Realtime HTTP, после чего проверяет её; timeout,
+  corrupt или wrong-key остаются fail-closed.
 
 ### Telegram
 

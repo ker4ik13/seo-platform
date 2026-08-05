@@ -43,6 +43,11 @@ readiness совместно. `backend-execution` ждёт запуска кон
 `backend-core`, но не его статуса `healthy`, потому что readiness Core сама
 проверяет Execution; ожидание `service_healthy` с обеих сторон создало бы
 startup deadlock. Frontend запускается только после полной readiness Core.
+Внутри backend supervisors creator-роли Realtime HTTP и Jobs HTTP
+регистрируют immutable Web Push/credential canaries. Изолированные sender и
+connector roles при одновременном старте ограниченно ждут только отсутствующую
+строку, не получают права создавать её и по истечении окна остаются
+fail-closed; повреждённый canary или неверный key material не повторяются.
 
 Перед первым Dokploy deploy `pnpm dokploy:env:generate` создаёт локальный
 `.env.dokploy.generated` с уникальными DB/Redis/service secrets,

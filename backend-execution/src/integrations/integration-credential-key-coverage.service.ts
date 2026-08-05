@@ -1,12 +1,27 @@
 import {
   Inject,
   Injectable,
+  Optional,
   type OnModuleInit
 } from "@nestjs/common";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
-import { IntegrationCredentialExecutionBrokerService } from "./integration-credential-execution-broker.service.js";
+import {
+  IntegrationCredentialExecutionBrokerService,
+  type IntegrationCredentialExecutionKekCanaryRecord
+} from "./integration-credential-execution-broker.service.js";
 import { IntegrationCredentialCryptoService } from "./integration-credential-crypto.service.js";
+
+const EXECUTION_CANARY_WAIT_POLICY = Symbol("EXECUTION_CANARY_WAIT_POLICY");
+const DEFAULT_EXECUTION_CANARY_WAIT_POLICY: CanaryWaitPolicy = {
+  attempts: 120,
+  intervalMs: 250
+};
+
+export interface CanaryWaitPolicy {
+  readonly attempts: number;
+  readonly intervalMs: number;
+}
 
 @Injectable()
 export class IntegrationCredentialKeyCoverageService
@@ -15,7 +30,11 @@ export class IntegrationCredentialKeyCoverageService
   public constructor(
     private readonly broker: IntegrationCredentialExecutionBrokerService,
     private readonly crypto: IntegrationCredentialCryptoService,
-    @Inject(APP_CONFIG) private readonly config: AppConfig
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Optional()
+    @Inject(EXECUTION_CANARY_WAIT_POLICY)
+    private readonly canaryWaitPolicy: CanaryWaitPolicy =
+      DEFAULT_EXECUTION_CANARY_WAIT_POLICY
   ) {}
 
   public async onModuleInit(): Promise<void> {
@@ -81,20 +100,17 @@ export class IntegrationCredentialKeyCoverageService
     const configuredVersions = uniqueSortedVersions([
       ...this.config.integrationCredentials.keys.keys()
     ]);
-    const canaries = await this.broker.executionKekCanaries(
-      configuredVersions
-    );
-    const usedVersions = canaries
-      .filter(({ usedByCredential }) => usedByCredential)
-      .map(({ keyVersion }) => keyVersion);
-    const missingEncryptionKeys = missingKeyVersions(
-      usedVersions,
-      this.config.integrationCredentials.keys
-    );
-    if (missingEncryptionKeys.length > 0) {
-      throw new Error(
-        `Integration credential keyrings do not cover database encryption versions: ${missingEncryptionKeys.join(", ")}`
-      );
+    let canaries = await this.broker.executionKekCanaries(configuredVersions);
+    this.throwMissingExecutionKeys(canaries);
+    for (
+      let attempt = 0;
+      hasMissingCanary(canaries) &&
+        attempt < this.canaryWaitPolicy.attempts;
+      attempt += 1
+    ) {
+      await delay(this.canaryWaitPolicy.intervalMs);
+      canaries = await this.broker.executionKekCanaries(configuredVersions);
+      this.throwMissingExecutionKeys(canaries);
     }
 
     const failedVersions: number[] = [];
@@ -107,6 +123,23 @@ export class IntegrationCredentialKeyCoverageService
       }
     }
     this.throwCanaryFailures(failedVersions);
+  }
+
+  private throwMissingExecutionKeys(
+    canaries: readonly IntegrationCredentialExecutionKekCanaryRecord[]
+  ): void {
+    const usedVersions = canaries
+      .filter(({ usedByCredential }) => usedByCredential)
+      .map(({ keyVersion }) => keyVersion);
+    const missingEncryptionKeys = missingKeyVersions(
+      usedVersions,
+      this.config.integrationCredentials.keys
+    );
+    if (missingEncryptionKeys.length > 0) {
+      throw new Error(
+        `Integration credential keyrings do not cover database encryption versions: ${missingEncryptionKeys.join(", ")}`
+      );
+    }
   }
 
   private throwCanaryFailures(failedVersions: readonly number[]): void {
@@ -130,4 +163,14 @@ function uniqueSortedVersions(
   versions: readonly number[]
 ): readonly number[] {
   return [...new Set(versions)].sort((left, right) => left - right);
+}
+
+function hasMissingCanary(
+  canaries: readonly { readonly encrypted?: unknown }[]
+): boolean {
+  return canaries.some(({ encrypted }) => !encrypted);
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

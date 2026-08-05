@@ -277,7 +277,9 @@ function redis(url: string): Redis {
   return connection;
 }
 
-void bootstrap().catch(() => {
-  logger.error("Integration connector worker failed to start");
+void bootstrap().catch((error: unknown) => {
+  logger.error(
+    `Integration connector worker failed to start: ${safeErrorSummary(error)}`
+  );
   process.exit(1);
 });

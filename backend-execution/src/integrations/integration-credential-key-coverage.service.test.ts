@@ -105,10 +105,39 @@ test("execution verifies a configured KEK before any credential uses it", async 
   const service = new IntegrationCredentialKeyCoverageService(
     broker,
     new IntegrationCredentialCryptoService(config),
-    config
+    config,
+    { attempts: 1, intervalMs: 0 }
   );
 
   await service.onModuleInit();
+});
+
+test("execution waits for management to register a missing canary", async () => {
+  const config = executionConfig(keyring(2), 2);
+  const encrypted = new IntegrationCredentialCryptoService(
+    managementConfig(keyring(2), 2)
+  ).createKekCanary(2);
+  let reads = 0;
+  const broker = brokerStub({
+    executionKekCanaries: async () => {
+      reads += 1;
+      return [{
+        keyVersion: 2,
+        usedByCredential: false,
+        ...(reads > 1 ? { encrypted } : {})
+      }];
+    }
+  });
+  const service = new IntegrationCredentialKeyCoverageService(
+    broker,
+    new IntegrationCredentialCryptoService(config),
+    config,
+    { attempts: 1, intervalMs: 0 }
+  );
+
+  await service.onModuleInit();
+
+  assert.equal(reads, 2);
 });
 
 test("execution fails closed when a configured unused version has no canary", async () => {
@@ -121,7 +150,8 @@ test("execution fails closed when a configured unused version has no canary", as
   const service = new IntegrationCredentialKeyCoverageService(
     broker,
     new IntegrationCredentialCryptoService(config),
-    config
+    config,
+    { attempts: 0, intervalMs: 0 }
   );
 
   await assert.rejects(
@@ -140,7 +170,8 @@ test("execution fails closed when a used version has no canary", async () => {
   const service = new IntegrationCredentialKeyCoverageService(
     broker,
     new IntegrationCredentialCryptoService(config),
-    config
+    config,
+    { attempts: 0, intervalMs: 0 }
   );
 
   await assert.rejects(

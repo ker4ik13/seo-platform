@@ -65,6 +65,64 @@ test("persists canaries and rejects same-version key replacement", async () => {
   );
 });
 
+test("sender retries canaries that appear after its initial lookup", async () => {
+  const encryptionKey = Buffer.alloc(32, 1);
+  const fingerprintKey = Buffer.alloc(32, 2);
+  const prisma = canaryPrisma();
+  const httpConfig = loadAppConfig({
+    NODE_ENV: "test",
+    DATABASE_URL: "postgresql://test",
+    WEB_PUSH_SUBSCRIPTION_KEYS: `4:${encryptionKey.toString("base64url")}`,
+    WEB_PUSH_FINGERPRINT_KEYS: `8:${fingerprintKey.toString("base64url")}`
+  });
+  const senderConfig = loadAppConfig({
+    NODE_ENV: "test",
+    SERVICE_ROLE: "WEB_PUSH_WORKER",
+    DATABASE_URL: "postgresql://test",
+    WEB_PUSH_SUBSCRIPTION_KEYS: `4:${encryptionKey.toString("base64url")}`,
+    WEB_PUSH_FINGERPRINT_KEYS: `8:${fingerprintKey.toString("base64url")}`
+  });
+
+  await new WebPushKeyCoverageService(
+    prisma,
+    httpConfig
+  ).onApplicationBootstrap();
+  let encryptionReads = 0;
+  let fingerprintReads = 0;
+  const senderPrisma = {
+    ...prisma,
+    webPushEncryptionKeyCanary: {
+      ...prisma.webPushEncryptionKeyCanary,
+      findUnique: async (...args: Parameters<
+        typeof prisma.webPushEncryptionKeyCanary.findUnique
+      >) => {
+        encryptionReads += 1;
+        if (encryptionReads === 1) return null;
+        return prisma.webPushEncryptionKeyCanary.findUnique(...args);
+      }
+    },
+    webPushFingerprintKeyCanary: {
+      ...prisma.webPushFingerprintKeyCanary,
+      findUnique: async (...args: Parameters<
+        typeof prisma.webPushFingerprintKeyCanary.findUnique
+      >) => {
+        fingerprintReads += 1;
+        if (fingerprintReads === 1) return null;
+        return prisma.webPushFingerprintKeyCanary.findUnique(...args);
+      }
+    }
+  } as unknown as PrismaService;
+
+  await new WebPushKeyCoverageService(
+    senderPrisma,
+    senderConfig,
+    { attempts: 1, intervalMs: 0 }
+  ).onApplicationBootstrap();
+
+  assert.equal(encryptionReads, 2);
+  assert.equal(fingerprintReads, 2);
+});
+
 function canaryPrisma(): PrismaService {
   const encryption = new Map<number, Readonly<Record<string, unknown>>>();
   const fingerprint = new Map<number, Readonly<Record<string, unknown>>>();

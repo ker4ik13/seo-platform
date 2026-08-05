@@ -8,6 +8,7 @@ import {
 import {
   Inject,
   Injectable,
+  Optional,
   type OnApplicationBootstrap
 } from "@nestjs/common";
 import type { AppConfig } from "../config/app-config.js";
@@ -18,6 +19,16 @@ const CANARY_PLAINTEXT = Buffer.from(
   "seo-platform:web-push:key-canary:v1",
   "utf8"
 );
+const SENDER_CANARY_WAIT_POLICY = Symbol("SENDER_CANARY_WAIT_POLICY");
+const DEFAULT_SENDER_CANARY_WAIT_POLICY: CanaryWaitPolicy = {
+  attempts: 120,
+  intervalMs: 250
+};
+
+export interface CanaryWaitPolicy {
+  readonly attempts: number;
+  readonly intervalMs: number;
+}
 
 @Injectable()
 export class WebPushKeyCoverageService
@@ -25,7 +36,11 @@ export class WebPushKeyCoverageService
 {
   public constructor(
     private readonly prisma: PrismaService,
-    @Inject(APP_CONFIG) private readonly config: AppConfig
+    @Inject(APP_CONFIG) private readonly config: AppConfig,
+    @Optional()
+    @Inject(SENDER_CANARY_WAIT_POLICY)
+    private readonly canaryWaitPolicy: CanaryWaitPolicy =
+      DEFAULT_SENDER_CANARY_WAIT_POLICY
   ) {}
 
   public async onApplicationBootstrap(): Promise<void> {
@@ -68,6 +83,15 @@ export class WebPushKeyCoverageService
     let canary = await this.prisma.webPushEncryptionKeyCanary.findUnique({
       where: { keyVersion: version }
     });
+    if (!canary && this.config.serviceRole === "WEB_PUSH_WORKER") {
+      canary = await waitForCanary(
+        () =>
+          this.prisma.webPushEncryptionKeyCanary.findUnique({
+            where: { keyVersion: version }
+          }),
+        this.canaryWaitPolicy
+      );
+    }
     if (!canary) {
       if (this.config.serviceRole === "WEB_PUSH_WORKER") missingCanary();
       const encrypted = encryptCanary(version, key);
@@ -95,6 +119,15 @@ export class WebPushKeyCoverageService
     let canary = await this.prisma.webPushFingerprintKeyCanary.findUnique({
       where: { keyVersion: version }
     });
+    if (!canary && this.config.serviceRole === "WEB_PUSH_WORKER") {
+      canary = await waitForCanary(
+        () =>
+          this.prisma.webPushFingerprintKeyCanary.findUnique({
+            where: { keyVersion: version }
+          }),
+        this.canaryWaitPolicy
+      );
+    }
     if (!canary) {
       if (this.config.serviceRole === "WEB_PUSH_WORKER") missingCanary();
       try {
@@ -182,4 +215,20 @@ function isUniqueConstraint(error: unknown): boolean {
 
 function missingCanary(): never {
   throw new Error("Web Push key canary is missing for the sender role");
+}
+
+async function waitForCanary<T>(
+  findCanary: () => Promise<T | null>,
+  policy: CanaryWaitPolicy
+): Promise<T | null> {
+  for (let attempt = 0; attempt < policy.attempts; attempt += 1) {
+    await delay(policy.intervalMs);
+    const canary = await findCanary();
+    if (canary) return canary;
+  }
+  return null;
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
