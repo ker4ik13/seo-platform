@@ -83,8 +83,9 @@ service tokens, DB/Redis passwords, NATS credentials и encryption keys долж
 `pnpm dokploy:env:generate` создаёт игнорируемый Git файл
 `.env.dokploy.generated` с уникальными внутренними секретами и согласованными
 NATS password/bcrypt парами. Вручную после этого заполняются только значения,
-выданные владельцем домена, SMTP и S3. `POSTGRES_PASSWORD` повторно вводится
-только в настройках четырёх Dokploy PostgreSQL backup jobs.
+выданные владельцем домена, SMTP и S3. Для четырёх Dokploy PostgreSQL backup
+jobs пароль отдельно не вводится: `postgres` передаёт тот же
+`POSTGRES_PASSWORD` как `PGPASSWORD` внутреннему `pg_dump`.
 
 Особые boundary:
 

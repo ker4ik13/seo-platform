@@ -56,8 +56,11 @@ base64url-keyrings и согласованными NATS plaintext/bcrypt пар�
 остаются явными placeholders. Для NATS hash он заранее удваивает `$`, чтобы
 значение пережило dotenv rewrite Dokploy и попало в контейнер как canonical
 bcrypt. Внутри Compose один variable name автоматически переиспользуется
-нужными контейнерами; вручную `POSTGRES_PASSWORD` повторяется только в
-настройках четырёх PostgreSQL backup jobs.
+нужными контейнерами. PostgreSQL service также передаёт тот же
+`POSTGRES_PASSWORD` как libpq-переменную `PGPASSWORD`, потому что Compose
+backup Dokploy запускает `pg_dump` внутри контейнера и не имеет отдельного
+поля пароля; оператор указывает в четырёх backup jobs только пользователя и
+имя базы.
 
 ## 2. Каталоги
 

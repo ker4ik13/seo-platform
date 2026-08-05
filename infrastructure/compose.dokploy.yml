@@ -192,6 +192,10 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      # Dokploy Compose backups execute pg_dump inside this container. Its
+      # PostgreSQL form has no password field, so libpq reads the existing
+      # superuser secret through PGPASSWORD.
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: postgres
       JOBS_CONNECTOR_DATABASE_USER: jobs_connector
       REALTIME_WEB_PUSH_DATABASE_USER: realtime_web_push

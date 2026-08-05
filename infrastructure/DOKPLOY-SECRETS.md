@@ -306,8 +306,9 @@ seo-platform/production/backups/volumes/...
 - Destination: созданный S3 destination;
 - Enabled: `true`;
 - Keep latest: минимум `30` для ежедневных копий;
-- PostgreSQL user/password берутся из env сервиса:
-  `POSTGRES_USER=platform`, `POSTGRES_PASSWORD=<ваше значение>`.
+- Database User: `platform` (значение `POSTGRES_USER`);
+- отдельного поля пароля у PostgreSQL Compose backup нет: сервис уже передаёт
+  существующий `POSTGRES_PASSWORD` клиенту `pg_dump` через `PGPASSWORD`.
 
 Разнести jobs по времени:
 

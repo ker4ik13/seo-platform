@@ -81,8 +81,10 @@ TLS завершается в Traefik. Для production оставить `AUTH_
 Dokploy labels.
 
 Генератор создаёт эти значения автоматически и не перезаписывает уже
-созданный файл. Единственный секрет, который вводится повторно вручную вне
-Compose, — `POSTGRES_PASSWORD` в четырёх настройках PostgreSQL backup.
+созданный файл. В PostgreSQL backup jobs пароль вручную не вводится: форма
+Compose backup Dokploy принимает только пользователя, а сервис `postgres`
+передаёт существующий `POSTGRES_PASSWORD` клиенту `pg_dump` через
+`PGPASSWORD`.
 
 До первого deploy проверить локально:
 
