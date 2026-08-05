@@ -28,7 +28,7 @@
 - повтор платежного webhook;
 - повтор платной команды;
 - вредоносный импорт, formula injection и zip bomb;
-- stored/reflected XSS через ключевые слова, страницы, rich text и Directus;
+- stored/reflected XSS через ключевые слова, страницы и rich text;
 - SQL/NoSQL/command injection;
 - SSRF через crawler, webhook, favicon, URL preview и redirects;
 - DNS rebinding;
@@ -58,7 +58,7 @@
 - Background job содержит подписанный/проверяемый tenant context.
 - Cache key включает tenant и permission-sensitive variation.
 - Search index, object path, WebSocket room и export manifest включают tenant scope.
-- Cross-tenant joins запрещены, кроме специально спроектированной platform-admin аналитики.
+- Cross-tenant joins запрещены, кроме специально спроектированной platform-admin аналитики с отдельным permission/audit boundary.
 
 ### 3.2. Проверка
 
@@ -147,7 +147,7 @@
 
 ### 8.1. Хранение
 
-- Секреты не хранятся в Git, Docker image, frontend bundle, Directus public collection и обычном JSON config.
+- Секреты не хранятся в Git, Docker image, frontend bundle, public content source и обычном JSON config.
 - Deployment secrets задаются через Dokploy/environment secret storage либо внешний secret manager.
 - BYOK credentials шифруются envelope encryption.
 - Data encryption key шифруется master key; master key находится вне базы.
@@ -307,11 +307,6 @@
   object ownership handoff и maintenance login smoke. Удалять данные или
   применять широкий `REASSIGN OWNED` общего bootstrap user без review
   запрещено.
-- `directus_runtime_owner` является временным документированным combined
-  owner/runtime исключением только для `directus_db`, поскольку Directus
-  self-migrates. Оно не даёт cluster privileges/cross-DB access и должно быть
-  разделено после выделения поддерживаемого migration step.
-
 ### 8.4. Межсервисные symmetric credentials
 
 Legacy `INTERNAL_API_TOKEN` удалён из deployment configuration и обязан
@@ -363,12 +358,12 @@ processes и NATS стартуют только после его успешно
 - TLS 1.2+; предпочтительно TLS 1.3.
 - Внутренний traffic не публикуется наружу; sensitive межхостовой traffic шифруется.
 - PostgreSQL, Redis, NATS и object storage требуют authentication.
-- Redis runtimes разделены на Jobs, Realtime и Directus instances с
+- Redis runtimes разделены на Jobs и Realtime instances с
   independent internal-only networks. Default user выключен; health user
   разрешён только `PING`. Jobs identities ограничены exact versioned BullMQ
   key patterns, Realtime identity — exact versioned Socket.IO channels без key
-  access, Directus имеет отдельный cache user. ACL содержит только password
-  hashes и генерируется в tmpfs до старта server.
+  access. ACL содержит только password hashes и генерируется в tmpfs до
+  старта server.
 - NATS использует разные deny-by-default identities для generic runtime,
   Platform API publisher, Realtime consumer, Jobs auth-email consumer и
   topology provisioner. Runtime
@@ -417,8 +412,8 @@ processes и NATS стартуют только после его успешно
   только `SELECT/INSERT/UPDATE` одной delivery table, а worker — dedicated
   NATS/Platform/SMTP capabilities без Redis/general/vault/rank/S3 secrets.
   Deploy передаёт ему только `AUTH_EMAIL_SMTP_*`, маппинг в локальные
-  `SMTP_*` выполняется на process boundary. Directus получает только
-  `DIRECTUS_SMTP_*`; общий SMTP credential set запрещён.
+  `SMTP_*` выполняется на process boundary; общий SMTP credential set с
+  другими process boundaries запрещён.
 - KEK rollout выполняется в порядке expand keyring → startup decrypt-canary
   verify configured ∪ used versions → drain старых replicas → switch active.
   `MANAGEMENT` создаёт отдельный synthetic known-plaintext envelope каждой
@@ -461,7 +456,7 @@ VPS делятся на роли:
 - fail2ban или эквивалент для management plane;
 - Dokploy admin защищён MFA/VPN/IP allowlist по возможности;
 - staging и production разделены credentials, networks и data;
-- Directus admin не индексируется и защищён rate limiting/MFA.
+- `/admin` не индексируется и защищён rate limiting/MFA/recent auth.
 
 ## 11. SSRF-защита
 
@@ -536,7 +531,7 @@ host firewall или egress proxy по provider DNS/hostname allowlist.
   не полагается на robots directive;
 - публичные Toolbox results, preview и tokenized URLs имеют noindex и не
   создают user-generated SEO pages;
-- server-only Directus/application clients не попадают в browser bundle;
+- server-only application clients не попадают в browser bundle;
 - единый основной домен не означает общий cache: public и `/app` имеют
   разные cache keys/policies и automated tenant leak tests.
 - Текущая общая Next.js policy Web устанавливает `nosniff`, `DENY`/
@@ -547,7 +542,7 @@ host firewall или egress proxy по provider DNS/hostname allowlist.
   Service Worker остаётся `no-cache` и ограничен scope `/app/`.
 - Текущий CSP намеренно содержит только безопасный независимый directive
   `frame-ancestors 'none'`: script/style CSP нельзя угадывать без полного
-  inventory Next/Directus assets. Полный nonce/hash CSP без `unsafe-eval`
+  inventory Next.js assets. Полный nonce/hash CSP без `unsafe-eval`
   остаётся отдельным release gate.
 - Admin shell независимо от metadata для всех путей возвращает
   private/no-store/noindex и более строгий `no-referrer`; отсутствие
@@ -852,12 +847,15 @@ gate.
 - конкурентные `claim ↔ cancel ↔ persist/finalize` сценарии с единым lock
   order `Job → RankJobRun`, bounded serialization retry и единственным
   допустимым cancel version drift;
+- автоматический credential refresh не меняет validation proof активного
+  manual rank Job; реальный configuration/credential drift диагностируется
+  как `ESTIMATE_STALE`, а не `INTERNAL_ERROR`;
 - bounded 20-attempt preparation и terminal
   `ACTION_REQUIRED/SUBMIT_OUTCOME_UNKNOWN` без ложного `NOT_SEALED`;
 - credential encryption;
 - webhooks;
 - object upload;
-- Directus client boundaries.
+- frontend BFF/content boundaries.
 
 ### 24.3. Contract
 
@@ -1014,12 +1012,14 @@ Flag содержит:
 
 - PITR/WAL;
 - daily full/base backup;
+- на single-node Dokploy старте `platform_db`, `seo_db`, `realtime_db` и
+  `jobs_db` получают отдельные compose database backup jobs с раздельными S3
+  prefixes и разнесённым cron; это logical dump baseline, а не замена PITR;
 - шифрование;
 - offsite copy;
 - retention tiers;
 - checksum/verification;
 - quarterly restore drill минимум, чаще на раннем этапе;
-- Directus backup отдельно;
 - схема и migration history входят в recovery.
 
 ### 29.2. Redis/NATS/object storage
@@ -1030,8 +1030,8 @@ Flag содержит:
   может приблизиться к двукратному normal memory footprint, поэтому текущие
   defaults ограничивают data `maxmemory=256 MiB` при container cap `768 MiB`;
   representative load и target-host OOM evidence остаются release gate.
-- Realtime Pub/Sub и Directus cache намеренно ephemeral. Их потеря не должна
-  уничтожать authoritative state; recovery должна проверяться
+- Realtime Pub/Sub намеренно ephemeral. Его потеря не должна уничтожать
+  authoritative state; recovery должна проверяться
   degraded/reconnect тестами.
 - Перед переключением legacy `redis_data` обязателен operator-reviewed
   drain/migration plan; автоматическое удаление или silent reuse запрещены.
@@ -1148,15 +1148,24 @@ Radar/crawler capacity:
 - Health checks различают liveness/readiness.
 - Startup не объявляется ready до проверки обязательных dependencies, но не блокируется навсегда из-за необязательного provider.
 - Persistent volumes явно документированы.
+- Repository configs/startup scripts запекаются в versioned images; data
+  хранится в named volumes, пригодных для Dokploy Volume Backup, без bind mount
+  на transient Git checkout.
 - Automated database migration не запускается конкурентно несколькими replicas.
 - Application process стартует только после успешных owner migration и
   post-migration least-privilege grants; owner password application process не
   получает.
-- Worker process types разворачиваются отдельно и масштабируются независимо.
+- Worker roles изолированы отдельными child processes внутри
+  `backend-execution`; process count и role concurrency настраиваются
+  независимо. При подтверждённой метриками необходимости тот же artifact
+  допускается запустить отдельным process profile/replica.
 - Domains/TLS настраиваются через Dokploy reverse proxy.
 - Internal databases не получают public domain.
 - Deployment history и rollback image сохраняются.
 - Dokploy и VPS config экспортируются/документируются так, чтобы восстановление не зависело от единственного UI.
+- Для каждой из четырёх PostgreSQL databases настроен S3 backup, выполнен
+  ручной test и restore drill; Jobs Redis/NATS named-volume backup не считается
+  заменой authoritative PostgreSQL backup.
 
 ### 34.1. Upload inspection contour
 
@@ -1224,7 +1233,7 @@ Radar/crawler capacity:
 останавливает process. Static Compose regression проверяет exact effective env
 keys и recipients, включая отсутствие legacy credential. Эта защита
 закрывает accidental secret fan-out, но не заменяет container/DB/Redis ACL,
-  target-image Redis/Directus startup compatibility, host egress policy,
+  target-image Redis startup compatibility, host egress policy,
   runtime authorization
   и incident controls.
 
@@ -1311,7 +1320,7 @@ Billing read-only не является стадией удаления. Око�
 Для платежей ЮKassa в режиме НПД:
 
 - запрещено хранить credentials/session «Мой налог»;
-- ручная регистрация требует platform-admin MFA и audit;
+- ручная регистрация требует platform-admin role, MFA и audit;
 - официальный receipt URL/ID сверяется с payment amount и buyer snapshot;
 - receipt delivery contact защищается как PII;
 - webhook payload ЮKassa проходит authentication, idempotency и reconciliation;

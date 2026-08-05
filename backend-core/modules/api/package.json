@@ -1,0 +1,51 @@
+{
+  "name": "@seo-platform/backend-core-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    "./core-composition": {
+      "types": "./dist/core-composition.d.ts",
+      "import": "./dist/core-composition.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test 'src/**/*.test.ts'",
+    "prisma:generate": "prisma generate",
+    "prisma:validate": "prisma validate",
+    "prisma:migrate:deploy": "node -e \"if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required for migrations')\" && prisma migrate deploy",
+    "admin:bootstrap": "tsx src/admin/platform-admin-bootstrap.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.1.2",
+    "@nats-io/jetstream": "3.4.0",
+    "@nats-io/transport-node": "3.4.0",
+    "@nestjs/common": "11.1.28",
+    "@nestjs/core": "11.1.28",
+    "@nestjs/platform-fastify": "11.1.28",
+    "@prisma/adapter-pg": "7.9.1",
+    "@prisma/client": "7.9.1",
+    "@seo-platform/contracts": "workspace:*",
+    "argon2": "0.45.1",
+    "fastify": "5.10.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/pg": "8.15.5",
+    "dotenv": "17.2.3",
+    "pg": "8.16.3",
+    "prisma": "7.9.1",
+    "tsx": "4.20.6",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

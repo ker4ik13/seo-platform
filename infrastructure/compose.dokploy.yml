@@ -1,0 +1,928 @@
+name: ${COMPOSE_PROJECT_NAME:-seo-platform}
+
+x-postgres-runtime-build: &postgres-runtime-build
+  context: ..
+  dockerfile: infrastructure/docker/infra.Dockerfile
+  target: postgres-runtime
+
+x-postgres-tooling-build: &postgres-tooling-build
+  context: ..
+  dockerfile: infrastructure/docker/infra.Dockerfile
+  target: postgres-tooling
+
+x-service-token-preflight-build: &service-token-preflight-build
+  context: ..
+  dockerfile: infrastructure/docker/infra.Dockerfile
+  target: service-token-preflight
+
+x-redis-runtime-build: &redis-runtime-build
+  context: ..
+  dockerfile: infrastructure/docker/infra.Dockerfile
+  target: redis-runtime
+
+x-nats-runtime-build: &nats-runtime-build
+  context: ..
+  dockerfile: infrastructure/docker/infra.Dockerfile
+  target: nats-runtime
+
+x-clamav-runtime-build: &clamav-runtime-build
+  context: ..
+  dockerfile: infrastructure/docker/infra.Dockerfile
+  target: clamav-runtime
+
+x-backend-defaults: &backend-defaults
+  restart: unless-stopped
+  init: true
+  networks:
+    - internal
+  depends_on:
+    postgres:
+      condition: service_healthy
+    nats:
+      condition: service_healthy
+
+x-common-backend-env: &common-backend-env
+  NODE_ENV: production
+  TZ: UTC
+  SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+  NATS_URL: nats://nats:4222
+
+x-generic-nats-runtime-env: &generic-nats-runtime-env
+  NATS_USER: ${NATS_RUNTIME_USER:?NATS_RUNTIME_USER is required}
+  NATS_PASSWORD: ${NATS_RUNTIME_PASSWORD:?NATS_RUNTIME_PASSWORD is required}
+
+x-jobs-runtime-env: &jobs-runtime-env
+  NODE_ENV: production
+  TZ: UTC
+  SERVICE_VERSION: ${SERVICE_VERSION:-0.1.0}
+  DATABASE_URL: postgresql://jobs_runtime:${JOBS_DATABASE_PASSWORD:?JOBS_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
+
+x-jobs-s3-env: &jobs-s3-env
+  S3_ENABLED: ${S3_ENABLED:-false}
+  S3_ENDPOINT: ${S3_ENDPOINT:-}
+  S3_REGION: ${S3_REGION:-ru-central1}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+  S3_BUCKET_UPLOADS: ${S3_BUCKET_UPLOADS:-}
+  S3_BUCKET_ARTIFACTS: ${S3_BUCKET_ARTIFACTS:-}
+  S3_KEY_PREFIX: ${S3_KEY_PREFIX:-}
+  S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-false}
+  S3_SIGNED_URL_TTL_SECONDS: ${S3_SIGNED_URL_TTL_SECONDS:-900}
+
+x-jobs-upload-command-env: &jobs-upload-command-env
+  UPLOAD_MAX_SIZE_BYTES: ${UPLOAD_MAX_SIZE_BYTES:-5368709120}
+  UPLOAD_PART_SIZE_BYTES: ${UPLOAD_PART_SIZE_BYTES:-8388608}
+  UPLOAD_EXPIRES_HOURS: ${UPLOAD_EXPIRES_HOURS:-24}
+
+x-jobs-inspection-env: &jobs-inspection-env
+  UPLOAD_INSPECTION_LEASE_MINUTES: ${UPLOAD_INSPECTION_LEASE_MINUTES:-30}
+  UPLOAD_INSPECTION_DISPATCH_SECONDS: ${UPLOAD_INSPECTION_DISPATCH_SECONDS:-30}
+  UPLOAD_INSPECTION_HEARTBEAT_SECONDS: ${UPLOAD_INSPECTION_HEARTBEAT_SECONDS:-60}
+  UPLOAD_INSPECTION_CONCURRENCY: ${UPLOAD_INSPECTION_CONCURRENCY:-2}
+  MALWARE_SCANNER_ENABLED: "true"
+  MALWARE_SCANNER_HOST: clamav
+  MALWARE_SCANNER_PORT: 3310
+  MALWARE_SCANNER_CONNECT_TIMEOUT_MS: ${MALWARE_SCANNER_CONNECT_TIMEOUT_MS:-5000}
+  MALWARE_SCANNER_SCAN_TIMEOUT_MS: ${MALWARE_SCANNER_SCAN_TIMEOUT_MS:-900000}
+
+x-jobs-import-env: &jobs-import-env
+  IMPORT_PARSE_LEASE_MINUTES: ${IMPORT_PARSE_LEASE_MINUTES:-30}
+  IMPORT_PARSE_DISPATCH_SECONDS: ${IMPORT_PARSE_DISPATCH_SECONDS:-30}
+  IMPORT_PARSE_HEARTBEAT_SECONDS: ${IMPORT_PARSE_HEARTBEAT_SECONDS:-30}
+  IMPORT_PARSE_CONCURRENCY: ${IMPORT_PARSE_CONCURRENCY:-2}
+  IMPORT_STAGING_BATCH_ROWS: ${IMPORT_STAGING_BATCH_ROWS:-1000}
+  IMPORT_PREVIEW_ROWS: ${IMPORT_PREVIEW_ROWS:-20}
+  IMPORT_PUBLISH_BATCH_ROWS: ${IMPORT_PUBLISH_BATCH_ROWS:-200}
+
+x-jobs-seo-data-env: &jobs-seo-data-env
+  SEO_DATA_COMMAND_TIMEOUT_MS: ${SEO_DATA_COMMAND_TIMEOUT_MS:-60000}
+  SEO_DATA_URL: http://backend-core:4001
+  JOBS_TO_SEO_DATA_TOKEN: ${JOBS_TO_SEO_DATA_TOKEN:?JOBS_TO_SEO_DATA_TOKEN is required}
+
+x-auth-email-runtime-env: &auth-email-runtime-env
+  EMAIL_ENABLED: "true"
+  EMAIL_FROM: ${AUTH_EMAIL_FROM:?AUTH_EMAIL_FROM is required}
+  EMAIL_MESSAGE_ID_DOMAIN: ${AUTH_EMAIL_MESSAGE_ID_DOMAIN:?AUTH_EMAIL_MESSAGE_ID_DOMAIN is required}
+  SMTP_HOST: ${AUTH_EMAIL_SMTP_HOST:?AUTH_EMAIL_SMTP_HOST is required}
+  SMTP_PORT: ${AUTH_EMAIL_SMTP_PORT:-587}
+  SMTP_SECURE: ${AUTH_EMAIL_SMTP_SECURE:-false}
+  SMTP_USER: ${AUTH_EMAIL_SMTP_USER:?AUTH_EMAIL_SMTP_USER is required}
+  SMTP_PASSWORD: ${AUTH_EMAIL_SMTP_PASSWORD:?AUTH_EMAIL_SMTP_PASSWORD is required}
+  SMTP_CONNECTION_TIMEOUT_MS: ${AUTH_EMAIL_SMTP_CONNECTION_TIMEOUT_MS:-5000}
+  SMTP_SOCKET_TIMEOUT_MS: ${AUTH_EMAIL_SMTP_SOCKET_TIMEOUT_MS:-10000}
+
+x-integration-credential-management-env: &integration-credential-management-env
+  INTEGRATION_CREDENTIAL_ROLE: MANAGEMENT
+  PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: ${PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN:?PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN is required}
+  INTEGRATION_CREDENTIAL_KEYS: ${INTEGRATION_CREDENTIAL_KEYS:?INTEGRATION_CREDENTIAL_KEYS is required}
+  INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: ${INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION:?INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION is required}
+  INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS: ${INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS:?INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS is required}
+  INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION: ${INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION:?INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION is required}
+
+x-integration-credential-execution-env: &integration-credential-execution-env
+  INTEGRATION_CREDENTIAL_ROLE: EXECUTION
+  INTEGRATION_CREDENTIAL_KEYS: ${INTEGRATION_CREDENTIAL_KEYS:?INTEGRATION_CREDENTIAL_KEYS is required}
+  INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: ${INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION:?INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION is required}
+
+x-redis-defaults: &redis-defaults
+  build: *redis-runtime-build
+  restart: unless-stopped
+  init: true
+  read_only: true
+  security_opt: ["no-new-privileges:true"]
+  depends_on:
+    service-token-preflight:
+      condition: service_completed_successfully
+  healthcheck:
+    test:
+      [
+        "CMD",
+        "redis-cli",
+        "-e",
+        "--user",
+        "seo_health",
+        "--pass",
+        "health",
+        "--no-auth-warning",
+        "ping"
+      ]
+    interval: 10s
+    timeout: 5s
+    retries: 10
+    start_period: 10s
+
+x-service-runtime-permission-defaults: &service-runtime-permission-defaults
+  build: *postgres-tooling-build
+  restart: "no"
+  init: true
+  command:
+    [
+      "/bin/sh",
+      "/permissions/provision-service-runtime-role.sh"
+    ]
+  networks:
+    - internal
+
+services:
+  postgres:
+    build: *postgres-runtime-build
+    restart: unless-stopped
+    shm_size: 256mb
+    entrypoint:
+      ["/bin/sh", "/postgres-config/start-postgres.sh"]
+    command:
+      [
+        "postgres",
+        "-c",
+        "hba_file=/tmp/seo-platform-pg_hba.conf",
+        "-c",
+        "timezone=UTC"
+      ]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: postgres
+      JOBS_CONNECTOR_DATABASE_USER: jobs_connector
+      REALTIME_WEB_PUSH_DATABASE_USER: realtime_web_push
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    networks:
+      - internal
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  service-database-roles:
+    build: *postgres-tooling-build
+    restart: "no"
+    init: true
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: postgres
+      PGUSER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      PLATFORM_DATABASE_OWNER_PASSWORD: ${PLATFORM_DATABASE_OWNER_PASSWORD:?PLATFORM_DATABASE_OWNER_PASSWORD is required}
+      PLATFORM_DATABASE_PASSWORD: ${PLATFORM_DATABASE_PASSWORD:?PLATFORM_DATABASE_PASSWORD is required}
+      SEO_DATABASE_OWNER_PASSWORD: ${SEO_DATABASE_OWNER_PASSWORD:?SEO_DATABASE_OWNER_PASSWORD is required}
+      SEO_DATABASE_PASSWORD: ${SEO_DATABASE_PASSWORD:?SEO_DATABASE_PASSWORD is required}
+      JOBS_DATABASE_OWNER_PASSWORD: ${JOBS_DATABASE_OWNER_PASSWORD:?JOBS_DATABASE_OWNER_PASSWORD is required}
+      JOBS_DATABASE_PASSWORD: ${JOBS_DATABASE_PASSWORD:?JOBS_DATABASE_PASSWORD is required}
+      JOBS_RANK_DATABASE_PASSWORD: ${JOBS_RANK_DATABASE_PASSWORD:?JOBS_RANK_DATABASE_PASSWORD is required}
+      JOBS_AUTH_EMAIL_DATABASE_PASSWORD: ${JOBS_AUTH_EMAIL_DATABASE_PASSWORD:?JOBS_AUTH_EMAIL_DATABASE_PASSWORD is required}
+      REALTIME_DATABASE_OWNER_PASSWORD: ${REALTIME_DATABASE_OWNER_PASSWORD:?REALTIME_DATABASE_OWNER_PASSWORD is required}
+      REALTIME_DATABASE_PASSWORD: ${REALTIME_DATABASE_PASSWORD:?REALTIME_DATABASE_PASSWORD is required}
+    command:
+      [
+        "/bin/sh",
+        "/database-roles/provision-service-database-roles.sh"
+      ]
+    networks:
+      - internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  service-token-preflight:
+    build: *service-token-preflight-build
+    restart: "no"
+    init: true
+    user: "65534:65534"
+    network_mode: "none"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    entrypoint: ["/bin/sh", "/security/validate-service-tokens.sh"]
+    environment:
+      PLATFORM_API_TO_SEO_DATA_TOKEN: ${PLATFORM_API_TO_SEO_DATA_TOKEN:?PLATFORM_API_TO_SEO_DATA_TOKEN is required}
+      PLATFORM_API_TO_JOBS_TOKEN: ${PLATFORM_API_TO_JOBS_TOKEN:?PLATFORM_API_TO_JOBS_TOKEN is required}
+      JOBS_TO_SEO_DATA_TOKEN: ${JOBS_TO_SEO_DATA_TOKEN:?JOBS_TO_SEO_DATA_TOKEN is required}
+      PLATFORM_API_TO_REALTIME_TOKEN: ${PLATFORM_API_TO_REALTIME_TOKEN:?PLATFORM_API_TO_REALTIME_TOKEN is required}
+      PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: ${PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN:?PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN is required}
+      PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: ${PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN:?PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN is required}
+      REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN: ${REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN:?REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN is required}
+      JOBS_TO_SEO_RANK_TOKEN: ${JOBS_TO_SEO_RANK_TOKEN:?JOBS_TO_SEO_RANK_TOKEN is required}
+      JOBS_TO_SEO_RANK_RESULT_TOKEN: ${JOBS_TO_SEO_RANK_RESULT_TOKEN:?JOBS_TO_SEO_RANK_RESULT_TOKEN is required}
+      JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: ${JOBS_TO_PLATFORM_RANK_GRANT_TOKEN:?JOBS_TO_PLATFORM_RANK_GRANT_TOKEN is required}
+      JOBS_TO_PLATFORM_AUTOMATION_TOKEN: ${JOBS_TO_PLATFORM_AUTOMATION_TOKEN:?JOBS_TO_PLATFORM_AUTOMATION_TOKEN is required}
+      JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: ${JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN:?JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN is required}
+      RANK_HISTORY_CURSOR_KEY: ${RANK_HISTORY_CURSOR_KEY:?RANK_HISTORY_CURSOR_KEY is required}
+      REDIS_JOBS_API_PASSWORD: ${REDIS_JOBS_API_PASSWORD:?REDIS_JOBS_API_PASSWORD is required}
+      REDIS_JOBS_SYSTEM_PASSWORD: ${REDIS_JOBS_SYSTEM_PASSWORD:?REDIS_JOBS_SYSTEM_PASSWORD is required}
+      REDIS_JOBS_INSPECTION_PASSWORD: ${REDIS_JOBS_INSPECTION_PASSWORD:?REDIS_JOBS_INSPECTION_PASSWORD is required}
+      REDIS_JOBS_IMPORT_PASSWORD: ${REDIS_JOBS_IMPORT_PASSWORD:?REDIS_JOBS_IMPORT_PASSWORD is required}
+      REDIS_JOBS_RANK_PASSWORD: ${REDIS_JOBS_RANK_PASSWORD:?REDIS_JOBS_RANK_PASSWORD is required}
+      REDIS_JOBS_CRAWL_PASSWORD: ${REDIS_JOBS_CRAWL_PASSWORD:?REDIS_JOBS_CRAWL_PASSWORD is required}
+      REDIS_JOBS_CONNECTOR_PASSWORD: ${REDIS_JOBS_CONNECTOR_PASSWORD:?REDIS_JOBS_CONNECTOR_PASSWORD is required}
+      REDIS_REALTIME_PASSWORD: ${REDIS_REALTIME_PASSWORD:?REDIS_REALTIME_PASSWORD is required}
+      NATS_RUNTIME_USER: ${NATS_RUNTIME_USER:?NATS_RUNTIME_USER is required}
+      NATS_RUNTIME_PASSWORD: ${NATS_RUNTIME_PASSWORD:?NATS_RUNTIME_PASSWORD is required}
+      NATS_RUNTIME_PASSWORD_HASH: ${NATS_RUNTIME_PASSWORD_HASH:?NATS_RUNTIME_PASSWORD_HASH is required}
+      NATS_PLATFORM_PUBLISHER_USER: ${NATS_PLATFORM_PUBLISHER_USER:?NATS_PLATFORM_PUBLISHER_USER is required}
+      NATS_PLATFORM_PUBLISHER_PASSWORD: ${NATS_PLATFORM_PUBLISHER_PASSWORD:?NATS_PLATFORM_PUBLISHER_PASSWORD is required}
+      NATS_PLATFORM_PUBLISHER_PASSWORD_HASH: ${NATS_PLATFORM_PUBLISHER_PASSWORD_HASH:?NATS_PLATFORM_PUBLISHER_PASSWORD_HASH is required}
+      NATS_REALTIME_CONSUMER_USER: ${NATS_REALTIME_CONSUMER_USER:?NATS_REALTIME_CONSUMER_USER is required}
+      NATS_REALTIME_CONSUMER_PASSWORD: ${NATS_REALTIME_CONSUMER_PASSWORD:?NATS_REALTIME_CONSUMER_PASSWORD is required}
+      NATS_REALTIME_CONSUMER_PASSWORD_HASH: ${NATS_REALTIME_CONSUMER_PASSWORD_HASH:?NATS_REALTIME_CONSUMER_PASSWORD_HASH is required}
+      NATS_AUTH_EMAIL_CONSUMER_USER: ${NATS_AUTH_EMAIL_CONSUMER_USER:?NATS_AUTH_EMAIL_CONSUMER_USER is required}
+      NATS_AUTH_EMAIL_CONSUMER_PASSWORD: ${NATS_AUTH_EMAIL_CONSUMER_PASSWORD:?NATS_AUTH_EMAIL_CONSUMER_PASSWORD is required}
+      NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH: ${NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH:?NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH is required}
+      AUTH_EMAIL_SMTP_USER: ${AUTH_EMAIL_SMTP_USER:?AUTH_EMAIL_SMTP_USER is required}
+      AUTH_EMAIL_SMTP_PASSWORD: ${AUTH_EMAIL_SMTP_PASSWORD:?AUTH_EMAIL_SMTP_PASSWORD is required}
+      NATS_PROVISIONER_USER: ${NATS_PROVISIONER_USER:?NATS_PROVISIONER_USER is required}
+      NATS_PROVISIONER_PASSWORD: ${NATS_PROVISIONER_PASSWORD:?NATS_PROVISIONER_PASSWORD is required}
+      NATS_PROVISIONER_PASSWORD_HASH: ${NATS_PROVISIONER_PASSWORD_HASH:?NATS_PROVISIONER_PASSWORD_HASH is required}
+  redis-jobs:
+    <<: *redis-defaults
+    command: ["/bin/sh", "/redis/start-redis.sh", "jobs"]
+    environment:
+      REDIS_JOBS_API_PASSWORD: ${REDIS_JOBS_API_PASSWORD:?REDIS_JOBS_API_PASSWORD is required}
+      REDIS_JOBS_SYSTEM_PASSWORD: ${REDIS_JOBS_SYSTEM_PASSWORD:?REDIS_JOBS_SYSTEM_PASSWORD is required}
+      REDIS_JOBS_INSPECTION_PASSWORD: ${REDIS_JOBS_INSPECTION_PASSWORD:?REDIS_JOBS_INSPECTION_PASSWORD is required}
+      REDIS_JOBS_IMPORT_PASSWORD: ${REDIS_JOBS_IMPORT_PASSWORD:?REDIS_JOBS_IMPORT_PASSWORD is required}
+      REDIS_JOBS_RANK_PASSWORD: ${REDIS_JOBS_RANK_PASSWORD:?REDIS_JOBS_RANK_PASSWORD is required}
+      REDIS_JOBS_CRAWL_PASSWORD: ${REDIS_JOBS_CRAWL_PASSWORD:?REDIS_JOBS_CRAWL_PASSWORD is required}
+      REDIS_JOBS_CONNECTOR_PASSWORD: ${REDIS_JOBS_CONNECTOR_PASSWORD:?REDIS_JOBS_CONNECTOR_PASSWORD is required}
+    volumes:
+      - redis_jobs_data:/data
+    tmpfs:
+      - /run/redis-runtime:rw,noexec,nosuid,size=1m,mode=0700
+    networks:
+      - jobs-redis
+    cpus: "1.0"
+    mem_limit: 768M
+    pids_limit: 128
+
+  redis-realtime:
+    <<: *redis-defaults
+    command: ["/bin/sh", "/redis/start-redis.sh", "realtime"]
+    environment:
+      REDIS_REALTIME_PASSWORD: ${REDIS_REALTIME_PASSWORD:?REDIS_REALTIME_PASSWORD is required}
+    tmpfs:
+      - /run/redis-runtime:rw,noexec,nosuid,size=1m,mode=0700
+      - /data:rw,noexec,nosuid,size=16m,mode=0750
+    networks:
+      - realtime-redis
+    cpus: "0.5"
+    mem_limit: 192M
+    pids_limit: 64
+
+  nats:
+    build: *nats-runtime-build
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "/etc/nats/start-nats.sh"]
+    environment:
+      NATS_RUNTIME_USER: ${NATS_RUNTIME_USER:?NATS_RUNTIME_USER is required}
+      NATS_RUNTIME_PASSWORD_HASH: ${NATS_RUNTIME_PASSWORD_HASH:?NATS_RUNTIME_PASSWORD_HASH is required}
+      NATS_PLATFORM_PUBLISHER_USER: ${NATS_PLATFORM_PUBLISHER_USER:?NATS_PLATFORM_PUBLISHER_USER is required}
+      NATS_PLATFORM_PUBLISHER_PASSWORD_HASH: ${NATS_PLATFORM_PUBLISHER_PASSWORD_HASH:?NATS_PLATFORM_PUBLISHER_PASSWORD_HASH is required}
+      NATS_REALTIME_CONSUMER_USER: ${NATS_REALTIME_CONSUMER_USER:?NATS_REALTIME_CONSUMER_USER is required}
+      NATS_REALTIME_CONSUMER_PASSWORD_HASH: ${NATS_REALTIME_CONSUMER_PASSWORD_HASH:?NATS_REALTIME_CONSUMER_PASSWORD_HASH is required}
+      NATS_AUTH_EMAIL_CONSUMER_USER: ${NATS_AUTH_EMAIL_CONSUMER_USER:?NATS_AUTH_EMAIL_CONSUMER_USER is required}
+      NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH: ${NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH:?NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH is required}
+      NATS_PROVISIONER_USER: ${NATS_PROVISIONER_USER:?NATS_PROVISIONER_USER is required}
+      NATS_PROVISIONER_PASSWORD_HASH: ${NATS_PROVISIONER_PASSWORD_HASH:?NATS_PROVISIONER_PASSWORD_HASH is required}
+      NATS_IDENTITY_EVENT_SUBJECT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}.identity.session-family.revoked.v1
+      NATS_IDENTITY_EVENT_DLQ_SUBJECT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}.dlq.realtime.identity.session-family.revoked.v1
+      NATS_EMAIL_VERIFICATION_EVENT_SUBJECT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}.email.identity.email-verification.requested.v1
+      NATS_PASSWORD_RESET_EVENT_SUBJECT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}.email.identity.password-reset.requested.v1
+      NATS_WORKSPACE_INVITE_EVENT_SUBJECT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}.email.workspace.invite.requested.v1
+      NATS_NPD_RECEIPT_EVENT_SUBJECT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}.email.billing.npd-receipt.delivery-requested.v1
+      NATS_AUTH_EMAIL_DLQ_SUBJECT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}.dlq.jobs.transactional-email.v1
+    volumes:
+      - nats_data:/data
+    read_only: true
+    tmpfs:
+      - /run/nats-runtime:rw,noexec,nosuid,size=1m,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - internal
+    depends_on:
+      service-token-preflight:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -qO- http://127.0.0.1:8222/healthz | grep -q ok"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  nats-topology-provisioner:
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/backend.Dockerfile
+      target: nats-provisioner
+      args:
+        PACKAGE_NAME: "@seo-platform/backend-core-api"
+    restart: "no"
+    init: true
+    user: "1000:1000"
+    read_only: true
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
+    environment:
+      NATS_URL: nats://nats:4222
+      NATS_USER: ${NATS_PROVISIONER_USER:?NATS_PROVISIONER_USER is required}
+      NATS_PASSWORD: ${NATS_PROVISIONER_PASSWORD:?NATS_PROVISIONER_PASSWORD is required}
+      NATS_EVENT_ENVIRONMENT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}
+    networks:
+      - internal
+    depends_on:
+      service-token-preflight:
+        condition: service_completed_successfully
+      nats:
+        condition: service_healthy
+
+  clamav:
+    build: *clamav-runtime-build
+    profiles:
+      - inspection
+    restart: unless-stopped
+    init: true
+    volumes:
+      - clamav_data:/var/lib/clamav
+    networks:
+      - internal
+      - outbound
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 5m
+
+  core-api-migrate:
+    <<: *backend-defaults
+    restart: "no"
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/backend.Dockerfile
+      target: migration
+      args:
+        PACKAGE_NAME: "@seo-platform/backend-core-api"
+    environment:
+      DATABASE_URL: postgresql://platform_owner:${PLATFORM_DATABASE_OWNER_PASSWORD:?PLATFORM_DATABASE_OWNER_PASSWORD is required}@postgres:5432/platform_db
+    depends_on:
+      service-database-roles:
+        condition: service_completed_successfully
+
+  core-seo-migrate:
+    <<: *backend-defaults
+    restart: "no"
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/backend.Dockerfile
+      target: migration
+      args:
+        PACKAGE_NAME: "@seo-platform/backend-core-seo"
+    environment:
+      DATABASE_URL: postgresql://seo_owner:${SEO_DATABASE_OWNER_PASSWORD:?SEO_DATABASE_OWNER_PASSWORD is required}@postgres:5432/seo_db
+    depends_on:
+      service-database-roles:
+        condition: service_completed_successfully
+
+  seo-extension-db-permissions:
+    build: *postgres-tooling-build
+    restart: "no"
+    init: true
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: seo_db
+      PGUSER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    command:
+      [
+        "psql",
+        "--no-psqlrc",
+        "--file=/permissions/seo-extension-runtime.sql"
+      ]
+    networks:
+      - internal
+    depends_on:
+      core-seo-migrate:
+        condition: service_completed_successfully
+
+  execution-migrate:
+    <<: *backend-defaults
+    restart: "no"
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/backend.Dockerfile
+      target: migration
+      args:
+        PACKAGE_NAME: "@seo-platform/backend-execution"
+    environment:
+      DATABASE_URL: postgresql://jobs_owner:${JOBS_DATABASE_OWNER_PASSWORD:?JOBS_DATABASE_OWNER_PASSWORD is required}@postgres:5432/jobs_db
+    depends_on:
+      service-database-roles:
+        condition: service_completed_successfully
+
+  platform-runtime-db-permissions:
+    <<: *service-runtime-permission-defaults
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: platform_db
+      PGUSER: platform_owner
+      PGPASSWORD: ${PLATFORM_DATABASE_OWNER_PASSWORD:?PLATFORM_DATABASE_OWNER_PASSWORD is required}
+    depends_on:
+      core-api-migrate:
+        condition: service_completed_successfully
+
+  seo-runtime-db-permissions:
+    <<: *service-runtime-permission-defaults
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: seo_db
+      PGUSER: seo_owner
+      PGPASSWORD: ${SEO_DATABASE_OWNER_PASSWORD:?SEO_DATABASE_OWNER_PASSWORD is required}
+    depends_on:
+      seo-extension-db-permissions:
+        condition: service_completed_successfully
+
+  jobs-runtime-db-permissions:
+    <<: *service-runtime-permission-defaults
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: jobs_db
+      PGUSER: jobs_owner
+      PGPASSWORD: ${JOBS_DATABASE_OWNER_PASSWORD:?JOBS_DATABASE_OWNER_PASSWORD is required}
+    depends_on:
+      execution-migrate:
+        condition: service_completed_successfully
+
+  jobs-connector-db-permissions:
+    build: *postgres-tooling-build
+    restart: "no"
+    init: true
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: jobs_db
+      PGUSER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      JOBS_CONNECTOR_DATABASE_USER: jobs_connector
+      JOBS_CONNECTOR_DATABASE_PASSWORD: ${JOBS_CONNECTOR_DATABASE_PASSWORD:?JOBS_CONNECTOR_DATABASE_PASSWORD is required}
+    command:
+      [
+        "/bin/sh",
+        "/permissions/provision-jobs-connector-role.sh"
+      ]
+    networks:
+      - internal
+    depends_on:
+      jobs-runtime-db-permissions:
+        condition: service_completed_successfully
+
+  core-realtime-migrate:
+    <<: *backend-defaults
+    restart: "no"
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/backend.Dockerfile
+      target: migration
+      args:
+        PACKAGE_NAME: "@seo-platform/backend-core-realtime"
+    environment:
+      DATABASE_URL: postgresql://realtime_owner:${REALTIME_DATABASE_OWNER_PASSWORD:?REALTIME_DATABASE_OWNER_PASSWORD is required}@postgres:5432/realtime_db
+    depends_on:
+      service-database-roles:
+        condition: service_completed_successfully
+
+  realtime-runtime-db-permissions:
+    <<: *service-runtime-permission-defaults
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: realtime_db
+      PGUSER: realtime_owner
+      PGPASSWORD: ${REALTIME_DATABASE_OWNER_PASSWORD:?REALTIME_DATABASE_OWNER_PASSWORD is required}
+    depends_on:
+      core-realtime-migrate:
+        condition: service_completed_successfully
+
+  realtime-web-push-db-permissions:
+    build: *postgres-tooling-build
+    restart: "no"
+    init: true
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: realtime_db
+      PGUSER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      REALTIME_WEB_PUSH_DATABASE_USER: realtime_web_push
+      REALTIME_WEB_PUSH_DATABASE_PASSWORD: ${REALTIME_WEB_PUSH_DATABASE_PASSWORD:-}
+    command:
+      [
+        "/bin/sh",
+        "/permissions/provision-realtime-web-push-role.sh"
+      ]
+    networks:
+      - internal
+    depends_on:
+      realtime-runtime-db-permissions:
+        condition: service_completed_successfully
+
+  backend-core:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/backend-core"
+    environment:
+      <<: *common-backend-env
+      BIND_ADDRESS: 0.0.0.0
+      PLATFORM_NATS_USER: ${NATS_PLATFORM_PUBLISHER_USER:?NATS_PLATFORM_PUBLISHER_USER is required}
+      PLATFORM_NATS_PASSWORD: ${NATS_PLATFORM_PUBLISHER_PASSWORD:?NATS_PLATFORM_PUBLISHER_PASSWORD is required}
+      SEO_NATS_USER: ${NATS_RUNTIME_USER:?NATS_RUNTIME_USER is required}
+      SEO_NATS_PASSWORD: ${NATS_RUNTIME_PASSWORD:?NATS_RUNTIME_PASSWORD is required}
+      OUTBOX_PUBLISHER_ENABLED: "true"
+      NATS_EVENT_ENVIRONMENT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}
+      NATS_EVENT_STREAM: IDENTITY_EVENTS
+      NATS_AUTH_EMAIL_STREAM: AUTH_EMAIL_EVENTS
+      OUTBOX_PUBLISH_INTERVAL_MS: ${OUTBOX_PUBLISH_INTERVAL_MS:-1000}
+      OUTBOX_PUBLISH_BATCH_SIZE: ${OUTBOX_PUBLISH_BATCH_SIZE:-20}
+      OUTBOX_PUBLISH_MAX_ATTEMPTS: ${OUTBOX_PUBLISH_MAX_ATTEMPTS:-10}
+      OUTBOX_PUBLISH_RETRY_BASE_MS: ${OUTBOX_PUBLISH_RETRY_BASE_MS:-1000}
+      OUTBOX_PUBLISH_RETRY_MAX_MS: ${OUTBOX_PUBLISH_RETRY_MAX_MS:-300000}
+      OUTBOX_PUBLISH_ACK_TIMEOUT_MS: ${OUTBOX_PUBLISH_ACK_TIMEOUT_MS:-5000}
+      SESSION_EXPIRY_SWEEPER_ENABLED: "true"
+      SESSION_EXPIRY_SWEEPER_INTERVAL_MS: ${SESSION_EXPIRY_SWEEPER_INTERVAL_MS:-60000}
+      SESSION_EXPIRY_SWEEPER_BATCH_SIZE: ${SESSION_EXPIRY_SWEEPER_BATCH_SIZE:-50}
+      SESSION_EXPIRY_SWEEPER_TRANSACTION_TIMEOUT_MS: ${SESSION_EXPIRY_SWEEPER_TRANSACTION_TIMEOUT_MS:-10000}
+      SESSION_EXPIRY_SWEEPER_LOCK_TIMEOUT_MS: ${SESSION_EXPIRY_SWEEPER_LOCK_TIMEOUT_MS:-500}
+      PLATFORM_PORT: 4000
+      PLATFORM_DATABASE_URL: postgresql://platform_runtime:${PLATFORM_DATABASE_PASSWORD:?PLATFORM_DATABASE_PASSWORD is required}@postgres:5432/platform_db
+      PLATFORM_DATABASE_POOL_MAX: ${PLATFORM_API_DATABASE_POOL_MAX:-20}
+      SEO_PORT: 4001
+      SEO_DATABASE_URL: postgresql://seo_runtime:${SEO_DATABASE_PASSWORD:?SEO_DATABASE_PASSWORD is required}@postgres:5432/seo_db
+      SEO_DATABASE_POOL_MAX: ${SEO_DATA_DATABASE_POOL_MAX:-30}
+      SEO_DATA_INTERNAL_URL: http://127.0.0.1:4001
+      JOBS_INTERNAL_URL: http://backend-execution:4002
+      REALTIME_INTERNAL_URL: http://127.0.0.1:4003
+      INTERNAL_REQUEST_TIMEOUT_MS: ${INTERNAL_REQUEST_TIMEOUT_MS:-1500}
+      INTERNAL_COMMAND_TIMEOUT_MS: ${INTERNAL_COMMAND_TIMEOUT_MS:-15000}
+      PLATFORM_API_TO_SEO_DATA_TOKEN: ${PLATFORM_API_TO_SEO_DATA_TOKEN:?PLATFORM_API_TO_SEO_DATA_TOKEN is required}
+      JOBS_TO_SEO_DATA_TOKEN: ${JOBS_TO_SEO_DATA_TOKEN:?JOBS_TO_SEO_DATA_TOKEN is required}
+      JOBS_TO_SEO_RANK_TOKEN: ${JOBS_TO_SEO_RANK_TOKEN:?JOBS_TO_SEO_RANK_TOKEN is required}
+      JOBS_TO_SEO_RANK_RESULT_TOKEN: ${JOBS_TO_SEO_RANK_RESULT_TOKEN:?JOBS_TO_SEO_RANK_RESULT_TOKEN is required}
+      RANK_HISTORY_CURSOR_KEY: ${RANK_HISTORY_CURSOR_KEY:?RANK_HISTORY_CURSOR_KEY is required}
+      PLATFORM_API_TO_JOBS_TOKEN: ${PLATFORM_API_TO_JOBS_TOKEN:?PLATFORM_API_TO_JOBS_TOKEN is required}
+      PLATFORM_API_TO_REALTIME_TOKEN: ${PLATFORM_API_TO_REALTIME_TOKEN:?PLATFORM_API_TO_REALTIME_TOKEN is required}
+      JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: ${JOBS_TO_PLATFORM_RANK_GRANT_TOKEN:?JOBS_TO_PLATFORM_RANK_GRANT_TOKEN is required}
+      JOBS_TO_PLATFORM_AUTOMATION_TOKEN: ${JOBS_TO_PLATFORM_AUTOMATION_TOKEN:?JOBS_TO_PLATFORM_AUTOMATION_TOKEN is required}
+      JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: ${JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN:?JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN is required}
+      PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: ${PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN:?PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN is required}
+      PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN: ${PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN:?PLATFORM_API_TO_REALTIME_NOTIFICATION_TOKEN is required}
+      REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN: ${REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN:?REALTIME_TO_PLATFORM_NOTIFICATION_TOKEN is required}
+      CORS_ORIGINS: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required}
+      WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required}
+      YOOKASSA_ENABLED: ${YOOKASSA_ENABLED:-false}
+      YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
+      YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
+      YOOKASSA_RETURN_URL: ${YOOKASSA_RETURN_URL:-}
+      YOOKASSA_API_BASE_URL: ${YOOKASSA_API_BASE_URL:-https://api.yookassa.ru/v3}
+      YOOKASSA_REQUEST_TIMEOUT_MS: ${YOOKASSA_REQUEST_TIMEOUT_MS:-10000}
+      YOOKASSA_VALIDATE_WEBHOOK_SOURCE_IP: ${YOOKASSA_VALIDATE_WEBHOOK_SOURCE_IP:-true}
+      BILLING_RECONCILIATION_ENABLED: ${BILLING_RECONCILIATION_ENABLED:-false}
+      BILLING_RECONCILIATION_INTERVAL_MS: ${BILLING_RECONCILIATION_INTERVAL_MS:-60000}
+      BILLING_RECONCILIATION_BATCH_SIZE: ${BILLING_RECONCILIATION_BATCH_SIZE:-25}
+      AUTH_PASSWORD_PEPPER: ${AUTH_PASSWORD_PEPPER:?AUTH_PASSWORD_PEPPER is required}
+      AUTH_DATA_ENCRYPTION_KEY: ${AUTH_DATA_ENCRYPTION_KEY:?AUTH_DATA_ENCRYPTION_KEY is required}
+      AUTH_ACCESS_COOKIE_NAME: ${AUTH_ACCESS_COOKIE_NAME:-seo_access}
+      AUTH_SESSION_COOKIE_NAME: ${AUTH_SESSION_COOKIE_NAME:-seo_session}
+      AUTH_CSRF_COOKIE_NAME: ${AUTH_CSRF_COOKIE_NAME:-seo_csrf}
+      AUTH_ACCESS_TOKEN_TTL_MINUTES: ${AUTH_ACCESS_TOKEN_TTL_MINUTES:-15}
+      AUTH_SESSION_TTL_DAYS: ${AUTH_SESSION_TTL_DAYS:-30}
+      AUTH_EMAIL_VERIFICATION_REQUIRED: ${AUTH_EMAIL_VERIFICATION_REQUIRED:-true}
+      AUTH_EMAIL_VERIFICATION_TTL_MINUTES: ${AUTH_EMAIL_VERIFICATION_TTL_MINUTES:-30}
+      AUTH_PASSWORD_RESET_TTL_MINUTES: ${AUTH_PASSWORD_RESET_TTL_MINUTES:-30}
+      AUTH_MFA_CHALLENGE_TTL_MINUTES: ${AUTH_MFA_CHALLENGE_TTL_MINUTES:-5}
+      AUTH_RECENT_AUTHENTICATION_MINUTES: ${AUTH_RECENT_AUTHENTICATION_MINUTES:-10}
+      AUTH_TOTP_ISSUER: ${AUTH_TOTP_ISSUER:-SEOньорита}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}
+      AUTH_EXPOSE_DEVELOPMENT_TOKENS: "false"
+      REALTIME_PORT: 4003
+      REALTIME_DATABASE_URL: postgresql://realtime_runtime:${REALTIME_DATABASE_PASSWORD:?REALTIME_DATABASE_PASSWORD is required}@postgres:5432/realtime_db
+      REALTIME_DATABASE_POOL_MAX: ${REALTIME_DATABASE_POOL_MAX:-20}
+      REALTIME_REDIS_URL: redis://seo_realtime:${REDIS_REALTIME_PASSWORD:?REDIS_REALTIME_PASSWORD is required}@redis-realtime:6379
+      REALTIME_NATS_USER: ${NATS_REALTIME_CONSUMER_USER:?NATS_REALTIME_CONSUMER_USER is required}
+      REALTIME_NATS_PASSWORD: ${NATS_REALTIME_CONSUMER_PASSWORD:?NATS_REALTIME_CONSUMER_PASSWORD is required}
+      WEB_ORIGINS: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required}
+      NATS_EVENT_CONSUMER_ENABLED: "true"
+      NATS_EVENT_CONSUMER_DURABLE: realtime_session_family_revoked_v1
+      NATS_EVENT_DLQ_STREAM: DOMAIN_EVENTS_DLQ
+      NATS_EVENT_DLQ_SUBJECT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}.dlq.realtime.identity.session-family.revoked.v1
+      NATS_EVENT_FETCH_EXPIRES_MS: ${NATS_EVENT_FETCH_EXPIRES_MS:-30000}
+      NATS_EVENT_MAX_ATTEMPTS: ${NATS_EVENT_MAX_ATTEMPTS:-10}
+      NATS_EVENT_RETRY_BASE_MS: ${NATS_EVENT_RETRY_BASE_MS:-1000}
+      NATS_EVENT_RETRY_MAX_MS: ${NATS_EVENT_RETRY_MAX_MS:-300000}
+      NATS_EVENT_PUBLISH_TIMEOUT_MS: ${NATS_EVENT_PUBLISH_TIMEOUT_MS:-5000}
+      NATS_EVENT_MAX_PAYLOAD_BYTES: ${NATS_EVENT_MAX_PAYLOAD_BYTES:-65536}
+      NATS_EVENT_SHUTDOWN_GRACE_MS: ${NATS_EVENT_SHUTDOWN_GRACE_MS:-10000}
+      WEB_PUSH_REGISTRATION_ENABLED: ${WEB_PUSH_REGISTRATION_ENABLED:-false}
+      WEB_PUSH_DELIVERY_AVAILABLE: ${WEB_PUSH_DELIVERY_AVAILABLE:-false}
+      WEB_PUSH_ENDPOINT_ORIGINS: ${WEB_PUSH_ENDPOINT_ORIGINS:-}
+      WEB_PUSH_VAPID_PUBLIC_KEY: ${WEB_PUSH_VAPID_PUBLIC_KEY:-}
+      WEB_PUSH_VAPID_PRIVATE_KEY: ${WEB_PUSH_VAPID_PRIVATE_KEY:-}
+      WEB_PUSH_VAPID_SUBJECT: ${WEB_PUSH_VAPID_SUBJECT:-}
+      WEB_PUSH_VAPID_KEY_VERSION: ${WEB_PUSH_VAPID_KEY_VERSION:-}
+      WEB_PUSH_SUBSCRIPTION_KEYS: ${WEB_PUSH_SUBSCRIPTION_KEYS:-}
+      WEB_PUSH_ACTIVE_SUBSCRIPTION_KEY_VERSION: ${WEB_PUSH_ACTIVE_SUBSCRIPTION_KEY_VERSION:-}
+      WEB_PUSH_FINGERPRINT_KEYS: ${WEB_PUSH_FINGERPRINT_KEYS:-}
+      WEB_PUSH_ACTIVE_FINGERPRINT_KEY_VERSION: ${WEB_PUSH_ACTIVE_FINGERPRINT_KEY_VERSION:-}
+      WEB_PUSH_MAX_ACTIVE_DEVICES: ${WEB_PUSH_MAX_ACTIVE_DEVICES:-20}
+      WEB_PUSH_DELIVERY_ENABLED: ${WEB_PUSH_DELIVERY_ENABLED:-false}
+      WEB_PUSH_DATABASE_URL: postgresql://realtime_web_push:${REALTIME_WEB_PUSH_DATABASE_PASSWORD:-}@postgres:5432/realtime_db
+      WEB_PUSH_DATABASE_POOL_MAX: ${REALTIME_WEB_PUSH_DATABASE_POOL_MAX:-10}
+      PLATFORM_API_INTERNAL_URL: http://127.0.0.1:4000
+      WEB_PUSH_DELIVERY_AUTHORIZATION_TIMEOUT_MS: ${WEB_PUSH_DELIVERY_AUTHORIZATION_TIMEOUT_MS:-5000}
+      WEB_PUSH_DELIVERY_MAX_ATTEMPTS: ${WEB_PUSH_DELIVERY_MAX_ATTEMPTS:-8}
+      WEB_PUSH_DELIVERY_POLL_INTERVAL_MS: ${WEB_PUSH_DELIVERY_POLL_INTERVAL_MS:-1000}
+      WEB_PUSH_DELIVERY_LEASE_MS: ${WEB_PUSH_DELIVERY_LEASE_MS:-30000}
+      WEB_PUSH_DELIVERY_RETRY_BASE_MS: ${WEB_PUSH_DELIVERY_RETRY_BASE_MS:-1000}
+      WEB_PUSH_DELIVERY_RETRY_MAX_MS: ${WEB_PUSH_DELIVERY_RETRY_MAX_MS:-300000}
+      WEB_PUSH_DELIVERY_SEND_TIMEOUT_MS: ${WEB_PUSH_DELIVERY_SEND_TIMEOUT_MS:-10000}
+      WEB_PUSH_DELIVERY_TTL_SECONDS: ${WEB_PUSH_DELIVERY_TTL_SECONDS:-3600}
+      WEB_PUSH_EXPIRY_SWEEP_INTERVAL_MS: ${WEB_PUSH_EXPIRY_SWEEP_INTERVAL_MS:-60000}
+      WEB_PUSH_EXPIRY_SWEEP_BATCH_SIZE: ${WEB_PUSH_EXPIRY_SWEEP_BATCH_SIZE:-100}
+    expose:
+      - "4000"
+      - "4001"
+      - "4003"
+    networks:
+      - internal
+      - edge
+      - outbound
+      - realtime-redis
+    depends_on:
+      platform-runtime-db-permissions:
+        condition: service_completed_successfully
+      seo-runtime-db-permissions:
+        condition: service_completed_successfully
+      realtime-runtime-db-permissions:
+        condition: service_completed_successfully
+      realtime-web-push-db-permissions:
+        condition: service_completed_successfully
+      service-token-preflight:
+        condition: service_completed_successfully
+      redis-realtime:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      nats-topology-provisioner:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "Promise.all([4000,4003].map(p=>fetch('http://127.0.0.1:'+p+'/health/ready').then(r=>{if(!r.ok)throw Error()}))).catch(()=>process.exit(1))"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  backend-execution:
+    <<: *backend-defaults
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/backend.Dockerfile
+      target: runtime
+      args:
+        PACKAGE_NAME: "@seo-platform/backend-execution"
+    environment:
+      <<: [*common-backend-env, *jobs-s3-env, *jobs-upload-command-env, *jobs-inspection-env, *jobs-import-env, *jobs-seo-data-env, *auth-email-runtime-env]
+      BIND_ADDRESS: 0.0.0.0
+      PORT: 4002
+      NATS_URL: nats://nats:4222
+      EXECUTION_HTTP_DATABASE_URL: postgresql://jobs_runtime:${JOBS_DATABASE_PASSWORD:?JOBS_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
+      EXECUTION_HTTP_DATABASE_POOL_MAX: ${JOBS_DATABASE_POOL_MAX:-30}
+      EXECUTION_HTTP_REDIS_URL: redis://seo_jobs_api:${REDIS_JOBS_API_PASSWORD:?REDIS_JOBS_API_PASSWORD is required}@redis-jobs:6379
+      EXECUTION_HTTP_NATS_USER: ${NATS_RUNTIME_USER:?NATS_RUNTIME_USER is required}
+      EXECUTION_HTTP_NATS_PASSWORD: ${NATS_RUNTIME_PASSWORD:?NATS_RUNTIME_PASSWORD is required}
+      EXECUTION_SYSTEM_REDIS_URL: redis://seo_jobs_system:${REDIS_JOBS_SYSTEM_PASSWORD:?REDIS_JOBS_SYSTEM_PASSWORD is required}@redis-jobs:6379
+      SYSTEM_WORKER_CONCURRENCY: ${SYSTEM_WORKER_CONCURRENCY:-2}
+      EXECUTION_INSPECTION_DATABASE_URL: postgresql://jobs_runtime:${JOBS_DATABASE_PASSWORD:?JOBS_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
+      EXECUTION_INSPECTION_DATABASE_POOL_MAX: ${JOBS_INSPECTION_DATABASE_POOL_MAX:-10}
+      EXECUTION_INSPECTION_REDIS_URL: redis://seo_jobs_inspection:${REDIS_JOBS_INSPECTION_PASSWORD:?REDIS_JOBS_INSPECTION_PASSWORD is required}@redis-jobs:6379
+      INSPECTION_WORKER_ENABLED: ${MALWARE_SCANNER_ENABLED:-false}
+      EXECUTION_IMPORT_DATABASE_URL: postgresql://jobs_runtime:${JOBS_DATABASE_PASSWORD:?JOBS_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
+      EXECUTION_IMPORT_DATABASE_POOL_MAX: ${JOBS_IMPORT_DATABASE_POOL_MAX:-10}
+      EXECUTION_IMPORT_REDIS_URL: redis://seo_jobs_import:${REDIS_JOBS_IMPORT_PASSWORD:?REDIS_JOBS_IMPORT_PASSWORD is required}@redis-jobs:6379
+      EXECUTION_RANK_DATABASE_URL: postgresql://jobs_rank_runtime:${JOBS_RANK_DATABASE_PASSWORD:?JOBS_RANK_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
+      EXECUTION_RANK_DATABASE_POOL_MAX: ${JOBS_RANK_DATABASE_POOL_MAX:-5}
+      EXECUTION_RANK_REDIS_URL: redis://seo_jobs_rank:${REDIS_JOBS_RANK_PASSWORD:?REDIS_JOBS_RANK_PASSWORD is required}@redis-jobs:6379
+      RANK_WORKER_PROCESSES: ${RANK_WORKER_PROCESSES:-2}
+      EXECUTION_CRAWL_DATABASE_URL: postgresql://jobs_runtime:${JOBS_DATABASE_PASSWORD:?JOBS_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
+      EXECUTION_CRAWL_DATABASE_POOL_MAX: ${JOBS_CRAWL_DATABASE_POOL_MAX:-10}
+      EXECUTION_CRAWL_REDIS_URL: redis://seo_jobs_crawl:${REDIS_JOBS_CRAWL_PASSWORD:?REDIS_JOBS_CRAWL_PASSWORD is required}@redis-jobs:6379
+      EXECUTION_CONNECTOR_DATABASE_URL: postgresql://jobs_connector:${JOBS_CONNECTOR_DATABASE_PASSWORD:?JOBS_CONNECTOR_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
+      EXECUTION_CONNECTOR_DATABASE_POOL_MAX: ${JOBS_CONNECTOR_DATABASE_POOL_MAX:-5}
+      EXECUTION_CONNECTOR_REDIS_URL: redis://seo_jobs_connector:${REDIS_JOBS_CONNECTOR_PASSWORD:?REDIS_JOBS_CONNECTOR_PASSWORD is required}@redis-jobs:6379
+      CONNECTOR_WORKER_PROCESSES: ${CONNECTOR_WORKER_PROCESSES:-2}
+      EXECUTION_AUTH_EMAIL_DATABASE_URL: postgresql://jobs_auth_email_runtime:${JOBS_AUTH_EMAIL_DATABASE_PASSWORD:?JOBS_AUTH_EMAIL_DATABASE_PASSWORD is required}@postgres:5432/jobs_db
+      EXECUTION_AUTH_EMAIL_DATABASE_POOL_MAX: ${JOBS_AUTH_EMAIL_DATABASE_POOL_MAX:-5}
+      EXECUTION_AUTH_EMAIL_NATS_USER: ${NATS_AUTH_EMAIL_CONSUMER_USER:?NATS_AUTH_EMAIL_CONSUMER_USER is required}
+      EXECUTION_AUTH_EMAIL_NATS_PASSWORD: ${NATS_AUTH_EMAIL_CONSUMER_PASSWORD:?NATS_AUTH_EMAIL_CONSUMER_PASSWORD is required}
+      PLATFORM_API_TO_JOBS_TOKEN: ${PLATFORM_API_TO_JOBS_TOKEN:?PLATFORM_API_TO_JOBS_TOKEN is required}
+      PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN: ${PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN:?PLATFORM_API_TO_JOBS_CREDENTIAL_TOKEN is required}
+      JOBS_TO_PLATFORM_AUTOMATION_TOKEN: ${JOBS_TO_PLATFORM_AUTOMATION_TOKEN:?JOBS_TO_PLATFORM_AUTOMATION_TOKEN is required}
+      JOBS_TO_PLATFORM_RANK_GRANT_TOKEN: ${JOBS_TO_PLATFORM_RANK_GRANT_TOKEN:?JOBS_TO_PLATFORM_RANK_GRANT_TOKEN is required}
+      JOBS_TO_SEO_RANK_TOKEN: ${JOBS_TO_SEO_RANK_TOKEN:?JOBS_TO_SEO_RANK_TOKEN is required}
+      JOBS_TO_SEO_RANK_RESULT_TOKEN: ${JOBS_TO_SEO_RANK_RESULT_TOKEN:?JOBS_TO_SEO_RANK_RESULT_TOKEN is required}
+      JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN: ${JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN:?JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN is required}
+      INTEGRATION_CREDENTIAL_KEYS: ${INTEGRATION_CREDENTIAL_KEYS:?INTEGRATION_CREDENTIAL_KEYS is required}
+      INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION: ${INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION:?INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION is required}
+      INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS: ${INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS:?INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS is required}
+      INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION: ${INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION:?INTEGRATION_CREDENTIAL_ACTIVE_FINGERPRINT_KEY_VERSION is required}
+      INTEGRATION_VALIDATION_TIMEOUT_MS: ${INTEGRATION_VALIDATION_TIMEOUT_MS:-10000}
+      INTEGRATION_VALIDATION_LEASE_SECONDS: ${INTEGRATION_VALIDATION_LEASE_SECONDS:-120}
+      INTEGRATION_VALIDATION_DISPATCH_SECONDS: ${INTEGRATION_VALIDATION_DISPATCH_SECONDS:-15}
+      INTEGRATION_VALIDATION_CONCURRENCY: ${INTEGRATION_VALIDATION_CONCURRENCY:-2}
+      RANK_CONNECTOR_CONCURRENCY: ${RANK_CONNECTOR_CONCURRENCY:-8}
+      FREQUENCY_COLLECTION_CONCURRENCY: ${FREQUENCY_COLLECTION_CONCURRENCY:-8}
+      KEYWORD_RESEARCH_CONCURRENCY: ${KEYWORD_RESEARCH_CONCURRENCY:-2}
+      RANK_PROVIDER_SUBMIT_ENABLED: ${RANK_PROVIDER_SUBMIT_ENABLED:-true}
+      RANK_PROVIDER_KILL_SWITCH_VERSION: ${RANK_PROVIDER_KILL_SWITCH_VERSION:-arsenkin-positions@4}
+      RANK_PREPARATION_LEASE_SECONDS: ${RANK_PREPARATION_LEASE_SECONDS:-120}
+      RANK_PREPARATION_DISPATCH_SECONDS: ${RANK_PREPARATION_DISPATCH_SECONDS:-15}
+      RANK_PREPARATION_CONCURRENCY: ${RANK_PREPARATION_CONCURRENCY:-2}
+      PLATFORM_API_URL: http://backend-core:4000
+      PLATFORM_API_COMMAND_TIMEOUT_MS: ${PLATFORM_API_COMMAND_TIMEOUT_MS:-5000}
+      SEO_DATA_URL: http://backend-core:4001
+      CRAWL_CONTACT_URL: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required}/crawler
+      CRAWL_CONCURRENCY: ${CRAWL_CONCURRENCY:-2}
+      CRAWL_DISPATCH_SECONDS: ${CRAWL_DISPATCH_SECONDS:-15}
+      CRAWL_LEASE_SECONDS: ${CRAWL_LEASE_SECONDS:-180}
+      CRAWL_REQUEST_TIMEOUT_MS: ${CRAWL_REQUEST_TIMEOUT_MS:-20000}
+      CRAWL_MAX_RESPONSE_BYTES: ${CRAWL_MAX_RESPONSE_BYTES:-2000000}
+      CRAWL_MAX_REDIRECTS: ${CRAWL_MAX_REDIRECTS:-5}
+      AUTH_EMAIL_EVENT_ENVIRONMENT: ${NATS_EVENT_ENVIRONMENT:?NATS_EVENT_ENVIRONMENT is required}
+      AUTH_EMAIL_MAX_ATTEMPTS: ${AUTH_EMAIL_MAX_ATTEMPTS:-10}
+      AUTH_EMAIL_LEASE_SECONDS: ${AUTH_EMAIL_LEASE_SECONDS:-120}
+      AUTH_EMAIL_DISPATCH_MS: ${AUTH_EMAIL_DISPATCH_MS:-1000}
+      AUTH_EMAIL_FETCH_EXPIRES_MS: ${AUTH_EMAIL_FETCH_EXPIRES_MS:-30000}
+      AUTH_EMAIL_PUBLISH_TIMEOUT_MS: ${AUTH_EMAIL_PUBLISH_TIMEOUT_MS:-5000}
+      AUTH_EMAIL_RETRY_BASE_MS: ${AUTH_EMAIL_RETRY_BASE_MS:-1000}
+      AUTH_EMAIL_RETRY_MAX_MS: ${AUTH_EMAIL_RETRY_MAX_MS:-300000}
+      AUTH_EMAIL_MAX_PAYLOAD_BYTES: ${AUTH_EMAIL_MAX_PAYLOAD_BYTES:-65536}
+      AUTH_EMAIL_SHUTDOWN_GRACE_MS: ${AUTH_EMAIL_SHUTDOWN_GRACE_MS:-10000}
+    expose:
+      - "4002"
+    networks:
+      - internal
+      - outbound
+      - jobs-redis
+    depends_on:
+      jobs-runtime-db-permissions:
+        condition: service_completed_successfully
+      jobs-connector-db-permissions:
+        condition: service_completed_successfully
+      service-token-preflight:
+        condition: service_completed_successfully
+      redis-jobs:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      nats-topology-provisioner:
+        condition: service_completed_successfully
+      backend-core:
+        condition: service_healthy
+    stop_grace_period: 75s
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4002/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  frontend:
+    restart: unless-stopped
+    init: true
+    build:
+      context: ..
+      dockerfile: infrastructure/docker/web.Dockerfile
+      args:
+        PACKAGE_NAME: "@seo-platform/frontend"
+        PACKAGE_PATH: frontend
+        NEXT_PUBLIC_SITE_URL: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required}
+        NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME: ${AUTH_CSRF_COOKIE_NAME:-seo_csrf}
+        NEXT_PUBLIC_TERMS_VERSION: ${TERMS_VERSION:?TERMS_VERSION is required}
+        NEXT_PUBLIC_PRIVACY_VERSION: ${PRIVACY_VERSION:?PRIVACY_VERSION is required}
+        NEXT_PUBLIC_MARKETING_VERSION: ${MARKETING_VERSION:?MARKETING_VERSION is required}
+    environment:
+      NODE_ENV: production
+      TZ: UTC
+      PORT: 3000
+      NEXT_PUBLIC_SITE_URL: ${WEB_PUBLIC_URL}
+      NEXT_PUBLIC_PLATFORM_API_URL: ${API_PUBLIC_URL}
+      PLATFORM_API_INTERNAL_URL: http://backend-core:4000
+      AUTH_ACCESS_COOKIE_NAME: ${AUTH_ACCESS_COOKIE_NAME:-seo_access}
+      AUTH_SESSION_COOKIE_NAME: ${AUTH_SESSION_COOKIE_NAME:-seo_session}
+      AUTH_CSRF_COOKIE_NAME: ${AUTH_CSRF_COOKIE_NAME:-seo_csrf}
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-ru}
+    expose:
+      - "3000"
+    networks:
+      - internal
+      - edge
+    depends_on:
+      backend-core:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/ru').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  postgres_data:
+  redis_jobs_data:
+  nats_data:
+  clamav_data:
+
+networks:
+  internal:
+    internal: true
+  jobs-redis:
+    internal: true
+  realtime-redis:
+    internal: true
+  edge:
+  outbound:
+    driver: bridge

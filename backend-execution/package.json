@@ -1,0 +1,69 @@
+{
+  "name": "@seo-platform/backend-execution",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsx watch src/http.main.ts",
+    "dev:worker:system": "tsx watch src/worker.main.ts",
+    "dev:worker:inspection": "tsx watch src/inspection-worker.main.ts",
+    "dev:worker:import": "tsx watch src/import-worker.main.ts",
+    "dev:worker:connector": "tsx watch src/connector-worker.main.ts",
+    "dev:worker:rank": "tsx watch src/rank-worker.main.ts",
+    "dev:worker:crawl": "tsx watch src/crawl-worker.main.ts",
+    "dev:worker:auth-email": "tsx watch src/auth-email-worker.main.ts",
+    "build": "pnpm --filter @seo-platform/process-supervisor build && tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "start:worker:system": "node dist/worker.main.js",
+    "start:worker:inspection": "node dist/inspection-worker.main.js",
+    "start:worker:import": "node dist/import-worker.main.js",
+    "start:worker:connector": "node dist/connector-worker.main.js",
+    "start:worker:rank": "node dist/rank-worker.main.js",
+    "start:worker:crawl": "node dist/crawl-worker.main.js",
+    "start:worker:auth-email": "node dist/auth-email-worker.main.js",
+    "typecheck": "pnpm --filter @seo-platform/process-supervisor build && tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test 'src/**/*.test.ts'",
+    "prisma:generate": "prisma generate",
+    "prisma:validate": "prisma validate",
+    "prisma:migrate:deploy": "node -e \"if (!process.env.DATABASE_URL) throw new Error('DATABASE_URL is required for migrations')\" && prisma migrate deploy"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1096.0",
+    "@aws-sdk/s3-request-presigner": "3.1096.0",
+    "@nats-io/jetstream": "3.4.0",
+    "@nats-io/transport-node": "3.4.0",
+    "@nestjs/common": "11.1.28",
+    "@nestjs/core": "11.1.28",
+    "@nestjs/platform-fastify": "11.1.28",
+    "@prisma/adapter-pg": "7.9.1",
+    "@prisma/client": "7.9.1",
+    "@seo-platform/contracts": "workspace:*",
+    "@seo-platform/process-supervisor": "workspace:*",
+    "bullmq": "5.81.2",
+    "dotenv": "17.2.3",
+    "fastify": "5.10.0",
+    "htmlparser2": "12.0.0",
+    "ioredis": "5.11.1",
+    "nodemailer": "9.0.3",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "saxes": "6.0.0",
+    "unzipper-esm": "0.13.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/nodemailer": "8.0.1",
+    "@types/pg": "8.15.5",
+    "fflate": "0.8.3",
+    "pg": "8.16.3",
+    "prisma": "7.9.1",
+    "tsx": "4.20.6",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

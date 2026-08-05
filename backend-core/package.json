@@ -1,0 +1,37 @@
+{
+  "name": "@seo-platform/backend-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "build": "pnpm --filter @seo-platform/process-supervisor build && pnpm --filter @seo-platform/backend-core-api build && pnpm --filter @seo-platform/backend-core-seo build && pnpm --filter @seo-platform/backend-core-realtime build && tsc -p tsconfig.build.json",
+    "start": "node dist/main.js",
+    "typecheck": "pnpm --filter @seo-platform/process-supervisor build && pnpm --filter @seo-platform/backend-core-api build && pnpm --filter @seo-platform/backend-core-seo build && pnpm --filter @seo-platform/backend-core-realtime build && tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test 'src/**/*.test.ts'",
+    "prisma:generate": "pnpm --filter @seo-platform/backend-core-api prisma:generate && pnpm --filter @seo-platform/backend-core-seo prisma:generate && pnpm --filter @seo-platform/backend-core-realtime prisma:generate",
+    "prisma:validate": "pnpm --filter @seo-platform/backend-core-api prisma:validate && pnpm --filter @seo-platform/backend-core-seo prisma:validate && pnpm --filter @seo-platform/backend-core-realtime prisma:validate",
+    "prisma:migrate:deploy": "pnpm --filter @seo-platform/backend-core-api prisma:migrate:deploy && pnpm --filter @seo-platform/backend-core-seo prisma:migrate:deploy && pnpm --filter @seo-platform/backend-core-realtime prisma:migrate:deploy"
+  },
+  "dependencies": {
+    "@nestjs/common": "11.1.28",
+    "@seo-platform/process-supervisor": "workspace:*",
+    "@seo-platform/backend-core-api": "workspace:*",
+    "@seo-platform/backend-core-realtime": "workspace:*",
+    "@seo-platform/backend-core-seo": "workspace:*",
+    "fastify": "5.10.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "tsx": "4.20.6",
+    "typescript": "7.0.2"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}

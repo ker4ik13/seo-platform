@@ -210,6 +210,9 @@ submit. По ADR-2026-034, если connector уже начал отправку
 - `notifications`;
 - `integration-credential-validation`;
 - `rank-preparation`;
+- `rank-connector-runtime`;
+- `frequency-collection-runtime`;
+- `keyword-research-runtime`;
 - `public-toolbox`;
 - `maintenance`.
 
@@ -222,13 +225,15 @@ Workers разделяются по профилю ресурсов:
 - report-rendering.
 
 Manual rank job дополнительно разделяет process capabilities внутри одного
-`platform-jobs-integrations` image:
+`backend-execution` image:
 
 - выделенный rank worker без KEK управляет текущими preparation/recovery/
   cancellation-finalize стадиями; fairness, normalized persistence и
   provider execution добавляются следующими срезами;
 - connector worker с execution KEK выполняет только allowlisted provider
-  calls и строгую нормализацию.
+  calls и строгую нормализацию. Rank, frequency, keyword research и credential
+  validation используют независимые BullMQ queues и concurrency limits, чтобы
+  длинный workload одного типа не блокировал остальные.
 
 Это не новый сервис. Текущий `rank-worker.main.ts` получает PostgreSQL/Redis
 и только выделенный `JOBS_TO_SEO_RANK_TOKEN`; generic HTTP, connector,
@@ -262,6 +267,21 @@ adapter credential останавливает процесс fail-closed. Эта
 заменяет DB grants, Redis ACL, egress policy и runtime provider gates.
 
 Rate limiting настраивается по provider и credential. Нельзя полагаться только на общий limiter очереди; connector поддерживает распределённые quota buckets.
+
+Rank и connector process roles разрешено горизонтально размножать внутри
+одного `backend-execution` container supervisor. PostgreSQL остаётся source of
+truth, lease/token/version fencing предотвращает двойное выполнение, а
+provider capacity считается глобально между rank и frequency. На один rank
+Job выдаётся ограниченное число новых chunks за dispatcher pass, поэтому один
+workspace не захватывает всё окно. Истёкшая до первого provider byte
+авторизация безопасно заменяется новым execution attempt; после начала submit
+автоматический повтор по-прежнему запрещён. Advisory lock сериализует только
+короткую транзакцию capacity-check/claim: ожидающие connector-процессы за один
+queue burst заполняют свободные provider slots, а provider HTTP выполняется
+параллельно уже вне этой блокировки. Finalization рассматривает только
+последнюю execution attempt каждого manifest chunk; предыдущие безопасно
+прерванные attempts остаются immutable audit history и не меняют cardinality
+Job.
 
 ### 8.1. Transactional auth-email worker
 
@@ -298,8 +318,8 @@ DB login `jobs_auth_email_runtime` имеет только `SELECT/INSERT/UPDATE
 PostgreSQL, а не queue payload.
 
 На deploy boundary worker получает только `AUTH_EMAIL_SMTP_*`, которые
-маппятся в его process-local `SMTP_*`. Directus получает только отдельные
-`DIRECTUS_SMTP_*`; общий SMTP credential set запрещён. Readiness marker
+маппятся в его process-local `SMTP_*`; общий SMTP credential set с другими
+process boundaries запрещён. Readiness marker
 создаётся после bootstrap и удаляется до drain, а container
 `stop_grace_period` обязан быть строго больше worst-case bounded shutdown
 budget, включая `AUTH_EMAIL_SHUTDOWN_GRACE_MS`.
@@ -698,9 +718,11 @@ Jobs/integrations владеет нормализованными
 пользовательском flow отсутствует, выключение выполняется через
 `enabled=false`.
 
-Первый slice поддерживает один route:
+Базовый route использует `position=0`. Для `SERP_RANK_TRACKING` дополнительно
+разрешены bounded routes `position=1..7`: они используются только при явном
+выборе provider/credential и не меняют route проекта по умолчанию. Для каждого
+route обязательны:
 
-- `position=0`;
 - `sourceKind=WORKSPACE_CREDENTIAL`;
 - non-deleted credential того же workspace;
 - mode только `BYOK_API_KEY`;
@@ -713,6 +735,14 @@ capability, GET сохраняет binding и возвращает явный av
 текущего сломанного route разрешено без повторной проверки `ACTIVE`; включение
 или замена credential всегда проверяются заново. Автоматическое переключение
 на системный ключ запрещено.
+
+Отдельное допустимое состояние возникает после cross-workspace transfer:
+Execution сохраняет выключенный project binding, retire-ит все его routes и
+возвращает `routes: []` без legacy-поля `route`. Такая проекция обязана иметь
+`enabled=false`, `availability=DISABLED`, `PROJECT_OVERRIDE`, отсутствие
+workspace binding и fallback. API и frontend трактуют её как ненастроенный
+маршрут и предлагают владельцу выбрать credential текущей workspace; прежняя
+привязка не включается автоматически.
 
 Bindings и credential options читаются в одной interactive transaction с
 `RepeatableRead`, чтобы rotate/revoke не формировал взаимоисключающие
@@ -771,8 +801,9 @@ trusted headers и exact body, а также отдельный `Idempotency-Key
 - при новом key получает bounded atomic scope у SEO Data;
 - не выбирает ciphertext, nonce, auth tag, encrypted DEK или provider
   metadata;
-- читает binding `SERP_RANK_TRACKING`, единственный route position `0` и
-  allowlisted credential metadata;
+- читает binding `SERP_RANK_TRACKING`, route `position=0` по умолчанию либо
+  exact bounded route явно выбранного provider/credential и allowlisted
+  credential metadata;
 - считает credential свежим только при `ACTIVE` current material,
   совпадающей текущей connector version и terminal validation proof;
 - формирует для scope до 15 000 пар один provider task, но не объявляет
@@ -903,6 +934,20 @@ activation использует новую immutable kill-switch generation
 4 августа 2026 года. В тот же день минимальный XMLStock rank canary прошёл
 submit/result на одном keyword; отдельными release gates остаются provider
 alerting/circuit breaker и эксплуатационный мониторинг расписаний.
+
+Автоматическое обновление validation proof не запускается из rank connector
+после каждого submit/poll: такой refresh меняет `credential.verifiedAt`.
+Hourly и
+provider-operation scheduler исключает credential, пока связанный с его
+текущей material version `MANUAL_RANK_CHECK` находится в
+`PREPARING/QUEUED/RUNNING/CANCEL_REQUESTED` и не финализирован. Ручная смена
+credential или routing по-прежнему является осознанным drift и завершает
+исполнение fail-closed как `ESTIMATE_STALE`, а не маскируется под
+`INTERNAL_ERROR`. Для Job, уже пересёкшегося с refresh до установки fence или
+во время rolling upgrade, grant допускает более новую completed validation
+только того же credential, connector и `materialVersion`. Текущие credential
+version/`verifiedAt` и validation input повторно связываются с execution
+evidence PostgreSQL-триггером; смена секретного материала не допускается.
 
 ### 17.6. Platform-owned execution grant issuer foundation
 
@@ -1161,6 +1206,9 @@ Connector учитывает provider quotas и не подменяет офиц
 - запросный rate limit;
 - съём позиций через документированный `positions` tool с поисковой системой,
   регионом и глубиной;
+- Yandex positions через Arsenkin в текущем connector contract поддерживает
+  только `Топ-30`; выбор подключения не скрывается, а ограничение явно
+  отображается до запуска;
 - clustering;
 - indexation and supported SEO tools;
 - provider task cleanup;
@@ -1372,14 +1420,26 @@ Platform operations видит:
 ### 25.1. Проектный журнал пользователя
 
 Private/noindex маршрут `/app/tasks` объединяет доступные пользователю
-операции частотности, позиций, технического аудита и сбора конкурентов. Это
+операции частотности, позиций, технического аудита, проверки HTTP-статусов и
+сбора конкурентов. Это
 построчный журнал, а не kanban: строки сортируются по времени создания,
 фильтруются по статусу и типу и открывают один detail inspector. В деталях
 показываются безопасные входные параметры, прогресс, итоговые счётчики,
 время, redacted ID и finite error code; приватные keyword texts, credential
 material и raw provider payload не проецируются. WebSocket не является
 источником истины: экран периодически перечитывает owning read models и умеет
-частично деградировать при недоступности одного из них.
+частично деградировать при недоступности одного из них. Поэтому отдельные
+индикатор «онлайн» и кнопка ручного обновления не показываются. Для проверки
+позиций строка и detail явно показывают provider, точный источник выдачи
+(`Яндекс XML`, `Яндекс Live` или `Google Live`) и зафиксированную глубину
+`Топ-30/50/100`; эти поля берутся из immutable scope, а не восстанавливаются
+из текущих настроек проекта. Legacy-запускам без однозначной версии маппинга
+источник не приписывается предположением.
+Технический crawl хранит точный `purpose`: старое/отсутствующее значение
+означает `TECHNICAL_AUDIT`, а `HTTP_STATUS_CHECK` получает собственное название,
+факты, фильтры результата и terminal deep link. Purpose не создаёт новую
+очередь: справедливость, per-workspace/global capacity, per-host lease и
+backoff остаются общими.
 Экран занимает один dynamic viewport, таблица прокручивается внутри рабочей
 области без внешних карточных отступов и использует ту же compact app-шапку,
 что семантика. Inspector имеет sticky header/footer и собственный scroll.

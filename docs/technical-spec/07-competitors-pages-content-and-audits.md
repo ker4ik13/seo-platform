@@ -451,7 +451,51 @@ Radar запускает повторный обход собственного 
 - `FAILED`;
 - `READ_ONLY_BILLING`.
 
-### 10.5. Генератор sitemap
+### 10.5. Проектная проверка HTTP-статусов
+
+Private-маршрут
+`/app/projects/{projectId}/tools/http-status-checker` запускает отдельный по
+смыслу тип операции `HTTP_STATUS_CHECK`, но переиспользует существующие
+durable crawl Job, очередь, worker, checkpoint и page snapshot. Добавление
+четвёртого сервиса или отдельной очереди для него запрещено без измеренной
+необходимости.
+
+Пользователь может выбрать доступный ему проект и один из источников:
+
+- весь сайт: корневой URL, sitemap и внутренние ссылки;
+- список URL вручную либо из TXT/CSV, по одному адресу в строке.
+
+Все start/sitemap URL сервером привязываются к каноническому домену проекта;
+одной frontend-проверки недостаточно. За запуск принимается от 1 до 1 000
+страниц, доступны presets 100/250/500/1 000 и ручной лимит. Скорость задаётся
+в страницах в секунду, но hard limit равен 1 странице/с (60 requests/minute)
+на host; `robots.txt`, SSRF/DNS-rebinding protection, timeout, response-size и
+redirect budgets нельзя отключить. Полный site mode по умолчанию использует
+консервативные 0,5 страницы/с; URL-list mode по умолчанию не расширяет scope
+sitemap или ссылками, пока пользователь явно не включит эти опции.
+
+Для `HTTP_STATUS_CHECK` можно независимо включить bounded проверки редиректов
+главной: HTTP-вариант, альтернативный host с/без `www` и пути `//`, `///`,
+`////`, `/////`. Клиент передаёт только enum-набор `homepageChecks`, а точные
+URL строит Execution из проверенного корневого URL проекта. Эти адреса
+резервируют место в `maxUrls`, проходят SSRF/DNS-rebinding protection и не
+расширяют discovery на альтернативный origin. Для `TECHNICAL_AUDIT` параметр
+запрещён.
+
+Результат открывается на отдельной private/noindex странице операции и по
+мере выполнения показывает authoritative `processedUrls` и уже сохранённые
+строки. Обновление идёт не реже шага 10 страниц либо двух секунд. Таблица
+содержит requested/final URL, конечный HTTP-код, redirect chain, response
+time, size и content type; поддерживает поиск, 2xx/3xx/4xx/5xx, only redirects
+и сортировку по коду, URL и времени ответа. Terminal notification ведёт в
+этот exact result, а не в текущую карту страниц.
+
+HTTP-проверка не является SEO-аудитом: она не создаёт issue occurrences,
+duplicate analysis, absence membership и Radar change history и не очищает
+SEO-поля существующей Page. Старые crawl без `purpose` читаются как
+`TECHNICAL_AUDIT`.
+
+### 10.6. Генератор sitemap
 
 Источник URL:
 

@@ -1,0 +1,4 @@
+CREATE DATABASE platform_db;
+CREATE DATABASE seo_db;
+CREATE DATABASE jobs_db;
+CREATE DATABASE realtime_db;

@@ -109,8 +109,8 @@ digest:
 Production SMTP account, sender domain и credentials настраиваются оператором
 в защищённом deployment secret store. Их отсутствие в repository является
 ожидаемым; без полной конфигурации auth-email worker обязан fail-closed не
-стартовать. Он получает только `AUTH_EMAIL_SMTP_*`; отдельные
-`DIRECTUS_SMTP_*` не переиспользуются.
+стартовать. Он получает только выделенные `AUTH_EMAIL_SMTP_*`; SMTP
+credentials других process boundaries не переиспользуются.
 
 ### 2.2. OAuth/OIDC
 
@@ -180,7 +180,7 @@ Production SMTP account, sender domain и credentials настраиваются
 - включение 2FA требует подтверждения;
 - отключение требует пароля/провайдера и второго фактора;
 - рабочая область может требовать 2FA для администраторов;
-- platform-admin аккаунты обязаны использовать 2FA/passkey.
+- аккаунты с platform-admin role обязаны использовать 2FA/passkey.
 
 Реализация TOTP:
 
@@ -488,6 +488,28 @@ access level: project override может только сузить доступ
 - budgets;
 - retention;
 - архив и удаление.
+
+### 13.1. Передача проекта
+
+У проекта есть один `owner_user_id`. Изначально это владелец workspace.
+Передачу может запросить только текущий владелец с effective
+`project.transfer`; адресат должен быть активным участником исходного
+workspace. При принятии адресат выбирает другую свою активную workspace, где
+имеет `project.create` и доступный project capacity.
+Текущий владелец получает `project.transfer` непосредственно из владения,
+даже если его системная роль сама по себе такого permission не содержит.
+Для проекта существует не более одной активной передачи (`PENDING` или
+`PROCESSING`); pending-решение действует 7 дней.
+
+Запрос отображается адресату в account-scoped центре уведомлений и требует
+явного `accept/decline`. До принятия владелец не меняется. Принятие запускает
+возобновляемый перенос по ADR-2026-042. До завершения проект read-only.
+Project-level provider routes исходной workspace отзываются, automations
+останавливаются, Core SEO data меняет tenant scope, после чего Core меняет
+workspace/владельца, удаляет прежние project accesses, увеличивает version и
+гарантирует новому владельцу `MANAGER`. Execution и billing history исходной
+workspace не переносится и не раскрывается. Отказ и отмена допустимы только
+до начала processing и не меняют доступ.
 
 ## 14. Статусы проекта
 

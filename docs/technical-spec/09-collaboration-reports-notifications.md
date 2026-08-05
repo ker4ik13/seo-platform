@@ -639,6 +639,21 @@ Device lifecycle следует ADR-2026-035:
 - Пользователь может включить разные типы работ для разных проектов.
 - Завершение и ошибка job создают не более одного уведомления на получателя
   при повторной доставке одного domain event.
+- Завершение, частичное завершение, отмена, окончательная ошибка и
+  `ACTION_REQUIRED` любой project Job доходят через generic terminal
+  reconciler; отдельный тип операции влияет только на текст и deep link.
+- Realtime принимает только resource `technical_crawl` либо `job`; для `job`
+  resource ID должен буквально совпадать с allowlisted `/app/tasks` deep link
+  и `job-notification:{id}:{terminalStatus}` dedupe key.
+- Terminal notification `technical_crawl` сохраняет purpose. Для
+  `HTTP_STATUS_CHECK` текст называется проверкой HTTP-статусов и exact deep
+  link равен `/app/tasks/crawl/{crawlId}`; legacy-событие без purpose остаётся
+  техническим аудитом и доставляется без потери при rolling upgrade.
+- Pending-передача проекта объединяется с уведомлениями так же, как workspace
+  invitation, учитывается в badge и предлагает выбор другой доступной
+  workspace плюс `accept/decline` без token в browser payload. На
+  `PROCESSING` карточка показывает целевую workspace и нормализованную причину
+  ожидания, но не позволяет повторно выбирать направление или отклонять.
 - Quiet hours откладывают обычную instant-доставку, но не теряют событие.
 - Digest не содержит ресурс, к которому пользователь потерял доступ.
 - Web Push permission не запрашивается без явного клика.

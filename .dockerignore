@@ -6,5 +6,4 @@
 **/.env
 **/.env.*
 !**/.env.example
-semaflow-seo-platform-design
 docs

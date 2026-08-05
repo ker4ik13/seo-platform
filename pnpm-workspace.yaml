@@ -1,11 +1,9 @@
 packages:
-  - "platform-contracts"
-  - "platform-api"
-  - "platform-seo-data"
-  - "platform-jobs-integrations"
-  - "platform-realtime"
-  - "platform-web"
-  - "platform-admin"
+  - "packages/*"
+  - "backend-core"
+  - "backend-core/modules/*"
+  - "backend-execution"
+  - "frontend"
 
 allowBuilds:
   '@prisma/engines': true

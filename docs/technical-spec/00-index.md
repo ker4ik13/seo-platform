@@ -35,9 +35,10 @@
   ветке, приложение — в защищённой ветке `/app`.
 - Все маршруты `/app` закрыты от индексации через metadata, HTTP-заголовки и
   `robots.txt`; одной директивы `Disallow` недостаточно.
-- Machine API, административная панель и status page работают на отдельных
-  технических поддоменах. Документация API публикуется на основном сайте в
-  `/docs/api`, а каноническая OpenAPI-схема доступна также через API gateway.
+- Machine API и status page работают на технических поддоменах.
+  Административная панель является защищённой веткой `/admin` единого Web.
+  Документация API публикуется на основном сайте в `/docs/api`, а
+  каноническая OpenAPI-схема доступна также через API gateway.
 - Конкретное имя домена и бренд в ТЗ не фиксируются.
 - Frontend приложения: Next.js, React, TypeScript.
 - Backend: NestJS.
@@ -48,8 +49,10 @@
 - Очереди: Redis + BullMQ.
 - Межсервисные надёжные события: transactional outbox + NATS JetStream.
 - Real-time: Socket.IO с Redis adapter; совместные документы — Yjs/Hocuspocus.
-- CMS публичного сайта, статей и документации: Directus.
-- Административная панель приложения: собственное Next.js-приложение.
+- Маркетинговый контент текущей версии — типизированный source единого Web;
+  внешний CMS допускается только отдельным ADR при появлении редакционного
+  workflow.
+- Административная панель приложения: защищённый `/admin` того же Next.js.
 - Пользователь может подключать собственные ключи внешних API (BYOK) либо пользоваться системными ключами в рамках тарифа и баланса.
 - Первый платёжный провайдер — ЮKassa; платёжный слой остаётся provider-agnostic для последующего подключения международного эквайринга или Merchant of Record.
 - Первые коммерческие SEO-коннекторы — Keys.so, Arsenkin Tools и XMLStock.
@@ -92,7 +95,7 @@
 8. [`08-jobs-automations-integrations.md`](./08-jobs-automations-integrations.md) — задания, расписания, провайдеры и API.
 9. [`09-collaboration-reports-notifications.md`](./09-collaboration-reports-notifications.md) — real-time, отчёты и уведомления.
 10. [`10-billing-plans-and-ledger.md`](./10-billing-plans-and-ledger.md) — тарифы, баланс и платежи.
-11. [`11-web-directus-and-admin.md`](./11-web-directus-and-admin.md) — единый Web, Toolbox, CMS и администрирование.
+11. [`11-web-content-and-admin.md`](./11-web-content-and-admin.md) — единый Web, Toolbox, контент и `/admin`.
 12. [`12-system-architecture-and-repositories.md`](./12-system-architecture-and-repositories.md) — сервисы, репозитории и Dokploy.
 13. [`13-postgresql-prisma-data-model.md`](./13-postgresql-prisma-data-model.md) — модель данных и Prisma.
 14. [`14-api-events-websockets-and-webhooks.md`](./14-api-events-websockets-and-webhooks.md) — контракты взаимодействия.
@@ -111,7 +114,7 @@
 5. UX-рекомендация;
 6. конкретная библиотека или техническая рекомендация.
 
-Замена указанной библиотеки допустима, если сохраняются контракты, поведение и нефункциональные требования. Замена PostgreSQL, Prisma, Next.js, NestJS, Directus или Dokploy требует отдельного архитектурного решения.
+Замена указанной библиотеки допустима, если сохраняются контракты, поведение и нефункциональные требования. Замена PostgreSQL, Prisma, Next.js, NestJS или Dokploy требует отдельного архитектурного решения.
 
 ## 6. Управление изменениями ТЗ
 

@@ -72,8 +72,8 @@ release gate.
 Отдельный fresh PostgreSQL 18 infrastructure proof применил все четыре Prisma
 migration chains под canonical owners и подтвердил runtime CRUD, UUIDv7,
 constraints, отсутствие runtime DDL/`_prisma_migrations`/membership/ownership,
-cross-database и replication reject, закрытый `PUBLIC` bypass, Directus
-exception и connector exact allowlist. Перед конкретным production deploy
+cross-database и replication reject, закрытый `PUBLIC` bypass и connector
+exact allowlist. Перед конкретным production deploy
 остаются target-environment HBA order/login smoke и reviewed ownership handoff,
 если volume уже содержит объекты старого owner.
 
@@ -133,8 +133,8 @@ Transactional verification/reset/invite email path реализован отде
 vertical slice ADR-2026-038: secret-free Platform outbox →
 `AUTH_EMAIL_EVENTS` → durable Jobs attempt → JIT Platform material → SMTP.
 Это закрывает code path, но не production availability: operator должен
-настроить SMTP account/sender и отдельные `AUTH_EMAIL_SMTP_*`, не смешивая их
-с `DIRECTUS_SMTP_*`, и пройти canary, topology/ACL,
+настроить SMTP account/sender и отдельные `AUTH_EMAIL_SMTP_*` и пройти canary,
+topology/ACL,
 PostgreSQL role/migration, restart/DLQ и crash-after-SMTP reconciliation
 gates. Общий notification email/Web Push sender остаётся в P2.
 
@@ -254,16 +254,16 @@ roles/env allowlists. Эти gates уменьшают secret fan-out и ошиб
 observability, live BYOK smoke, target-environment rollout и load/restore
 evidence.
 
-Redis hardening теперь разделяет Jobs, Realtime и Directus на три
+Redis hardening теперь разделяет Jobs и Realtime на два
 internal-only instance/network. Jobs использует AOF + `noeviction` и шесть
 queue-scoped users с versioned BullMQ keyspaces; Realtime получает только
 versioned Socket.IO Pub/Sub channels namespace `/collaboration` без key access,
-а root namespace остаётся in-memory; Directus имеет отдельный ephemeral cache
-user. Default user выключен, health user ограничен `PING`, ACL
+а root namespace остаётся in-memory. Default user выключен, health user
+ограничен `PING`, ACL
 и runtime config атомарно готовятся в owner-correct tmpfs с password hashes.
-Source-built Redis 8.8.1 live smoke 3/3 подтверждает BullMQ, ACL, Pub/Sub и
-cache command boundary; exit gate всё ещё требует startup pinned
-Redis/Directus images на Docker-host, representative AOF memory/load evidence,
+Source-built Redis 8.8.1 live smoke подтверждает BullMQ, ACL и Pub/Sub
+boundary; exit gate всё ещё требует startup pinned Redis images на
+Docker-host, representative AOF memory/load evidence,
 memory/ACL/latency alerts и reviewed drain/migration старого `redis_data` без
 удаления данных.
 
@@ -445,8 +445,8 @@ validation slice:
 - insufficient balance states;
 - grace/dunning;
 - billing admin/reconciliation;
-- единый `platform-web`: публичный сайт и защищённый `/app`;
-- Directus;
+- единый `frontend`: публичный сайт, защищённые `/app` и `/admin`;
+- типизированный versioned marketing content;
 - pricing/features pages;
 - статьи и индексируемый стартовый Toolbox;
 - `/docs/api` и generated OpenAPI reference;
@@ -610,7 +610,7 @@ Backlog ведётся по потокам:
 5. Rank/frequency data.
 6. Collaboration/reports.
 7. Billing.
-8. Marketing/Directus.
+8. Marketing/content.
 9. Admin/support.
 10. Platform/security/observability.
 
@@ -929,13 +929,14 @@ Owner создаёт workspace, приглашает Admin, SEO Specialist и Cl
 - rate limiting;
 - view audit/analytics в privacy-safe виде.
 
-### AC-12. Directus publication
+### AC-12. Publication контента
 
-Editor создаёт локализованную страницу из разрешённых blocks.
+Разработчик/редактор создаёт локализованную страницу из разрешённых
+типизированных blocks через reviewable source change.
 
 Проверяется:
 
-- draft/preview/publish;
+- preview/review/publish/rollback;
 - `en`/`ru` fallback policy;
 - canonical/hreflang;
 - SEO fields;
@@ -1017,7 +1018,7 @@ Staging game day имитирует потерю основной базы.
 - HTML metadata и `X-Robots-Tag` содержат noindex/nofollow;
 - tenant response имеет private/no-store и не попадает в public cache;
 - public tool landing индексируем, временный user result — нет;
-- Directus outage использует stale public cache и не блокирует `/app`.
+- ошибка public content route не блокирует `/app` и `/admin`.
 
 ### AC-18. Public/project Toolbox и API parity
 
@@ -1155,8 +1156,7 @@ Staging game day имитирует потерю основной базы.
   lease recovery, DLQ PubAck и replay `BOUNCED` completion. Stable
   `Message-ID` не считается exactly-once;
 - production SMTP provider/sender/`AUTH_EMAIL_SMTP_*` и canary evidence
-  предоставлены оператором через защищённый secret store, а не Git; Directus
-  использует только отдельные `DIRECTUS_SMTP_*`;
+  предоставлены оператором через защищённый secret store, а не Git;
 - на PostgreSQL 18 пройдены manual rank races
   `claim ↔ cancel ↔ persist/finalize`, negative trigger tests и recovery
   после потерянного BullMQ notification;
@@ -1268,7 +1268,7 @@ Design QA выполняется на staging, а не только по мак�
 - DNS/email authentication;
 - localized landing/pricing;
 - canonical/hreflang/sitemap/robots;
-- Directus workflow;
+- content review/publication workflow;
 - analytics consent;
 - lead/contact routes.
 
@@ -1322,7 +1322,7 @@ Design QA выполняется на staging, а не только по мак�
 - collaboration не приводит к silent overwrite;
 - billing ledger сходится;
 - BYOK/platform modes прозрачны;
-- сайт, Directus и app-admin разделены по полномочиям;
+- public content, tenant app и `/admin` разделены по permissions/cache policy;
 - API/contracts опубликованы и совместимы;
 - SLO/backup/security gates выполнены;
 - документация и runbooks переданы;

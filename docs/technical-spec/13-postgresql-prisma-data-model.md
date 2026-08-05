@@ -19,8 +19,7 @@
 - `platform_db`;
 - `seo_db`;
 - `jobs_db`;
-- `realtime_db`;
-- `directus_db`.
+- `realtime_db`.
 
 На старте базы могут находиться в одном PostgreSQL cluster, но используют
 отдельных пользователей и databases. Для четырёх application databases
@@ -31,9 +30,7 @@
 `_prisma_migrations`. Обе роли не имеют membership, cluster privileges,
 replication или `BYPASSRLS`. Cluster bootstrap credential сервисам запрещён.
 First-match HBA разрешает каждой family только точную собственную database и
-до общих rules отклоняет соседние databases и replication. Directus использует
-временное combined owner/runtime исключение `directus_runtime_owner` только в
-`directus_db`, пока его schema migrations выполняются самим runtime.
+до общих rules отклоняет соседние databases и replication.
 
 ## 3. PostgreSQL extensions
 
@@ -269,7 +266,8 @@ workspace role; отсутствие записи означает полный 
 - status;
 - tags;
 - template_id;
-- manager_user_id;
+- owner_user_id;
+- created_by;
 - created_at;
 - updated_at;
 - archived_at;
@@ -281,6 +279,33 @@ Indexes:
 - `(workspace_id, status, updated_at desc)`;
 - `(workspace_id, domain_normalized)`;
 - `(workspace_id, slug)` unique.
+
+`owner_user_id` backfill-ится из владельца workspace и обязателен. `created_by`
+остаётся неизменяемой исторической ссылкой на автора и не используется как
+текущее владение.
+
+#### `project_transfer_requests`
+
+- id UUIDv7;
+- workspace_id;
+- project_id;
+- from_user_id;
+- to_user_id;
+- requested_by;
+- destination_workspace_id nullable до принятия;
+- source_project_status для восстановления lifecycle после переноса;
+- status `pending/processing/accepted/declined/cancelled/expired`;
+- attempt_count, next_attempt_at и last_error_code для bounded reconcile;
+- expires_at;
+- processing_started_at / accepted_at / declined_at / cancelled_at;
+- created_at / updated_at.
+
+Partial unique index по `project_id WHERE status IN ('PENDING','PROCESSING')`
+сериализует активную передачу. Check constraints запрещают одинаковых участников,
+неположительный TTL и противоречивые terminal timestamps. Terminal Core
+commit меняет `projects.workspace_id`, `owner_user_id`, project access и
+transfer status одной transaction после подтверждённых Execution reset и
+Core SEO tenant re-scope по ADR-2026-042.
 
 #### `project_domains`
 
@@ -1342,6 +1367,16 @@ fallback различаются явными scope. Composite FK
 а FK `workspace_id + credential_id` запрещает привязать credential другого
 workspace. Оба FK используют `ON DELETE RESTRICT`: revoke credential
 уничтожает secret и soft-deletes запись, но не удаляет историю настройки.
+Использованный route также не удаляется и не переиспользуется при смене
+project override, переходе на workspace inheritance или сокращении fallback:
+он получает `retired_at`, а новая активная проекция создаётся с новым ID.
+Partial unique гарантирует одну активную строку на позицию; обычные routing и
+estimate queries читают только `retired_at IS NULL`, тогда как execution,
+зафиксировавший route ID, сохраняет доступ к immutable historical reference.
+Для `SERP_RANK_TRACKING` позиция `0` является маршрутом по умолчанию, а
+позиции `1..7` могут быть выбраны явным provider/credential параметром.
+Execution повторно проверяет exact route ID, binding, credential и tenant, но
+не требует, чтобы явно выбранный маршрут одновременно был route по умолчанию.
 
 #### `workspace_connector_bindings` и `workspace_connector_routes`
 
@@ -1491,7 +1526,12 @@ Jobs-owned durable history намерения получить execution grant �
 разрешает provider call. Повторная проверка current graph до expiry атомарно
 создаёт единственную `rank_connector_executions` row и переводит attempt в
 `CONSUMED`. После `GRANTED_PENDING_CONSUME` decision/expiry immutable,
-физические delete/truncate запрещены.
+физические delete/truncate запрещены. `credential_verified_at` и подписанные
+execution-контракты канонизированы до миллисекунд, потому что это максимальная
+точность `Date`. Validation Job может хранить `finished_at` с микросекундами
+PostgreSQL; DB guard сравнивает его через
+`date_trunc('milliseconds', finished_at)`, одновременно сохраняя exact
+validation ID/version, connector version, material version и 24-часовое окно.
 
 Tenant-composite FK связывают attempt с `jobs`, `rank_job_runs` и
 `job_items`. Та же migration fail-closed проверяет legacy JobItem scope,
@@ -1807,17 +1847,7 @@ Presence в PostgreSQL не хранится.
 - `share_links`;
 - `share_access_log`.
 
-## 8. Directus DB
-
-Управляется Directus migrations/snapshots. Приложение сайта не пишет напрямую
-в БД и использует Directus API/SDK. Пока Directus изменяет schema при старте,
-его `directus_runtime_owner` является явно ограниченным combined owner/runtime
-исключением: без membership/cluster privileges и с HBA-доступом только к
-`directus_db`. После выделения поддерживаемого migration/snapshot release step
-роль должна быть разделена; это исключение нельзя переносить на backend
-services.
-
-## 9. Prisma schema example
+## 8. Prisma schema example
 
 Пример отражает соглашения, но не заменяет отдельные production schemas:
 
@@ -1920,7 +1950,7 @@ model Job {
 }
 ```
 
-## 10. Optimistic update
+## 9. Optimistic update
 
 Обновление выполняется условно:
 
@@ -1939,7 +1969,7 @@ if (result.count !== 1) {
 }
 ```
 
-## 11. Partition management
+## 10. Partition management
 
 - Partition creation выполняется maintenance job заранее.
 - Default partition допускается только как аварийная защита и мониторится.
@@ -1948,7 +1978,7 @@ if (result.count !== 1) {
 - Query обязательно включает partition key для истории.
 - Partition size и index bloat мониторятся.
 
-## 12. Tenant isolation
+## 11. Tenant isolation
 
 - Repository method требует workspace/project context.
 - Составные indexes начинаются с project/workspace там, где это полезно.
@@ -1957,7 +1987,7 @@ if (result.count !== 1) {
 - Background job получает ограниченный tenant context.
 - Export/delete jobs ведут manifest обработанных сущностей.
 
-## 13. Retention
+## 12. Retention
 
 Настраиваемые классы:
 
@@ -1986,12 +2016,39 @@ Retention не должен нарушать юридические обязат
 - financial, payment и NPD receipt records сохраняются по юридической policy,
   даже если пользовательские данные должны быть минимизированы/анонимизированы.
 
-## 14. Backup и восстановление
+## 13. Backup и восстановление
 
 - ежедневный full backup;
 - WAL/PITR с целевым RPO не более 15 минут;
 - offsite encrypted copy;
 - регулярный restore test;
 - object storage versioning/replication;
-- отдельный backup Directus;
 - документированный порядок восстановления согласованности event projections.
+
+## 14. Граница Prisma и PostgreSQL-specific SQL
+
+Prisma Client является единственным стандартным data-access API production
+TypeScript-кода. CRUD, relations, обычные aggregates, pagination и optimistic
+updates реализуются Prisma model operations. Параллельный handwritten
+repository/query слой для тех же операций не создаётся.
+
+Parameterized `$queryRaw`/`$executeRaw` допускаются только там, где Prisma
+Client не выражает требуемую семантику либо ухудшает correctness/query plan:
+
+- advisory/row locks, `FOR UPDATE`, `FOR SHARE`, `SKIP LOCKED`;
+- один атомарный `ON CONFLICT`, CTE/window query или bounded bulk upsert;
+- database clock и встроенный PostgreSQL UUIDv7;
+- broker-функции с `SECURITY DEFINER` и exact permission boundary;
+- extension, trigger, partial/expression index, partition и data migration.
+
+`$queryRawUnsafe`, `$executeRawUnsafe` и `Prisma.raw` запрещены policy-тестом.
+Значения всегда передаются параметрами; identifiers не собираются из
+request/provider input. Сложный статический read может быть перенесён в Prisma
+TypedSQL только после проверки generated types, `EXPLAIN`, regression tests и
+воспроизводимой container-сборки без доступа к уже мигрированной runtime БД.
+До выполнения последнего условия TypedSQL не является production build gate.
+
+Custom migration SQL остаётся частью Prisma Migrate: ORM не заменяет DDL,
+permissions, triggers и PostgreSQL-specific invariants. Любая попытка удалить
+такой SQL должна доказать эквивалентность блокировок, affected-row semantics,
+идемпотентности, plan и rollback, а не только совпадение happy-path результата.

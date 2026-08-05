@@ -299,7 +299,7 @@ provider/material version. Точный replay после rotate, disable или
 - automation definitions;
 - roles;
 - reports;
-- Directus-independent application content.
+- versioned application content.
 
 Клиент передаёт `If-Match` или `expectedVersion`. При конфликте сервер возвращает:
 
@@ -789,11 +789,32 @@ Platform API передаёт realtime-сервису только провер�
 - cursor связан с `unreadOnly`; смена фильтра делает прежний cursor
   недействительным;
 - item не содержит внутренний JSON `data`, dedupe key и delivery metadata;
-- deep link принимается Platform API только если это локальный путь `/app`.
+- deep link принимается Platform API только если это локальный путь `/app`;
+  Realtime дополнительно связывает allowlisted project Job path и terminal
+  dedupe key с тем же UUID, который указан в `resource.id`.
 
 Внутренние эквиваленты находятся под
 `/internal/v1/users/{userId}/notifications`. `userId` в URL обязан совпасть с
 проверенным `X-Actor-Id`; browser не передаёт его самостоятельно.
+
+Project ownership transfer contract:
+
+- `GET /api/v1/projects/{projectId}/transfer` — текущий pending-запрос или
+  `null`, доступен только текущему владельцу с effective `project.transfer`;
+- `POST /api/v1/projects/{projectId}/transfer` — `{targetMemberId}`, требует
+  CSRF и effective `project.transfer`;
+- `DELETE /api/v1/projects/{projectId}/transfer` — отмена текущим владельцем;
+- `GET /api/v1/me/project-transfers` — bounded account-scoped pending list;
+- `POST /api/v1/project-transfers/{id}/accept` —
+  `{destinationWorkspaceId}`, решение только адресатом с active membership и
+  `project.create` в выбранной workspace; ответ может быть `PROCESSING`;
+- `POST /api/v1/project-transfers/{id}/decline` — отказ только адресатом до
+  начала processing.
+
+События `project.transfer.requested.v1`,
+`project.ownership.transferred.v1`, `project.transfer.declined.v1` и
+`project.transfer.cancelled.v1` содержат только tenant/resource/user IDs,
+decision и expiry; email, имя, token и секреты в outbox не попадают.
 
 Рабочий contract browser Web Push devices:
 

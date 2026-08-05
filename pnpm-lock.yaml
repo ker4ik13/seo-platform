@@ -18,35 +18,44 @@ importers:
         specifier: 1.76.0
         version: 1.76.0
 
-  platform-admin:
+  backend-core:
     dependencies:
-      '@seo-platform/contracts':
+      '@nestjs/common':
+        specifier: 11.1.28
+        version: 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@seo-platform/backend-core-api':
         specifier: workspace:*
-        version: link:../platform-contracts
-      next:
-        specifier: 16.2.12
-        version: 16.2.12(@types/node@24.10.1)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      react:
-        specifier: 19.2.8
-        version: 19.2.8
-      react-dom:
-        specifier: 19.2.8
-        version: 19.2.8(react@19.2.8)
+        version: link:modules/api
+      '@seo-platform/backend-core-realtime':
+        specifier: workspace:*
+        version: link:modules/realtime
+      '@seo-platform/backend-core-seo':
+        specifier: workspace:*
+        version: link:modules/seo
+      '@seo-platform/process-supervisor':
+        specifier: workspace:*
+        version: link:../packages/process-supervisor
+      fastify:
+        specifier: 5.10.0
+        version: 5.10.0
+      reflect-metadata:
+        specifier: 0.2.2
+        version: 0.2.2
+      rxjs:
+        specifier: 7.8.2
+        version: 7.8.2
     devDependencies:
       '@types/node':
         specifier: 24.10.1
         version: 24.10.1
-      '@types/react':
-        specifier: 19.2.14
-        version: 19.2.14
-      '@types/react-dom':
-        specifier: 19.2.3
-        version: 19.2.3(@types/react@19.2.14)
+      tsx:
+        specifier: 4.20.6
+        version: 4.20.6
       typescript:
         specifier: 7.0.2
         version: 7.0.2
 
-  platform-api:
+  backend-core/modules/api:
     dependencies:
       '@fastify/cookie':
         specifier: 11.1.2
@@ -74,19 +83,13 @@ importers:
         version: 7.9.1(prisma@7.9.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2)
       '@seo-platform/contracts':
         specifier: workspace:*
-        version: link:../platform-contracts
+        version: link:../../../packages/contracts
       argon2:
         specifier: 0.45.1
         version: 0.45.1
-      dotenv:
-        specifier: 17.2.3
-        version: 17.2.3
       fastify:
         specifier: 5.10.0
         version: 5.10.0
-      pg:
-        specifier: 8.16.3
-        version: 8.16.3
       reflect-metadata:
         specifier: 0.2.2
         version: 0.2.2
@@ -100,106 +103,12 @@ importers:
       '@types/pg':
         specifier: 8.15.5
         version: 8.15.5
-      prisma:
-        specifier: 7.9.1
-        version: 7.9.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2)
-      tsx:
-        specifier: 4.20.6
-        version: 4.20.6
-      typescript:
-        specifier: 7.0.2
-        version: 7.0.2
-
-  platform-contracts:
-    devDependencies:
-      '@types/node':
-        specifier: 24.10.1
-        version: 24.10.1
-      tsx:
-        specifier: 4.20.6
-        version: 4.20.6
-      typescript:
-        specifier: 7.0.2
-        version: 7.0.2
-
-  platform-jobs-integrations:
-    dependencies:
-      '@aws-sdk/client-s3':
-        specifier: 3.1096.0
-        version: 3.1096.0
-      '@aws-sdk/s3-request-presigner':
-        specifier: 3.1096.0
-        version: 3.1096.0
-      '@nats-io/jetstream':
-        specifier: 3.4.0
-        version: 3.4.0
-      '@nats-io/transport-node':
-        specifier: 3.4.0
-        version: 3.4.0
-      '@nestjs/common':
-        specifier: 11.1.28
-        version: 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
-      '@nestjs/core':
-        specifier: 11.1.28
-        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/websockets@11.1.28)(reflect-metadata@0.2.2)(rxjs@7.8.2)
-      '@nestjs/platform-fastify':
-        specifier: 11.1.28
-        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)
-      '@prisma/adapter-pg':
-        specifier: 7.9.1
-        version: 7.9.1
-      '@prisma/client':
-        specifier: 7.9.1
-        version: 7.9.1(prisma@7.9.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2)
-      '@seo-platform/contracts':
-        specifier: workspace:*
-        version: link:../platform-contracts
-      bullmq:
-        specifier: 5.81.2
-        version: 5.81.2(redis@6.1.0)
       dotenv:
         specifier: 17.2.3
         version: 17.2.3
-      fastify:
-        specifier: 5.10.0
-        version: 5.10.0
-      htmlparser2:
-        specifier: 12.0.0
-        version: 12.0.0
-      ioredis:
-        specifier: 5.11.1
-        version: 5.11.1
-      nodemailer:
-        specifier: 9.0.3
-        version: 9.0.3
       pg:
         specifier: 8.16.3
         version: 8.16.3
-      reflect-metadata:
-        specifier: 0.2.2
-        version: 0.2.2
-      rxjs:
-        specifier: 7.8.2
-        version: 7.8.2
-      saxes:
-        specifier: 6.0.0
-        version: 6.0.0
-      unzipper-esm:
-        specifier: 0.13.3
-        version: 0.13.3
-    devDependencies:
-      '@types/node':
-        specifier: 24.10.1
-        version: 24.10.1
-      '@types/nodemailer':
-        specifier: 8.0.1
-        version: 8.0.1
-      '@types/pg':
-        specifier: 8.15.5
-        version: 8.15.5
-      fflate:
-        specifier: 0.8.3
-        version: 0.8.3
       prisma:
         specifier: 7.9.1
         version: 7.9.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2)
@@ -210,7 +119,7 @@ importers:
         specifier: 7.0.2
         version: 7.0.2
 
-  platform-realtime:
+  backend-core/modules/realtime:
     dependencies:
       '@nats-io/jetstream':
         specifier: 3.4.0
@@ -241,19 +150,13 @@ importers:
         version: 7.9.1(prisma@7.9.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2)
       '@seo-platform/contracts':
         specifier: workspace:*
-        version: link:../platform-contracts
+        version: link:../../../packages/contracts
       '@socket.io/redis-adapter':
         specifier: 8.3.0
         version: 8.3.0(socket.io-adapter@2.5.8)
-      dotenv:
-        specifier: 17.2.3
-        version: 17.2.3
       fastify:
         specifier: 5.10.0
         version: 5.10.0
-      pg:
-        specifier: 8.16.3
-        version: 8.16.3
       redis:
         specifier: 6.1.0
         version: 6.1.0
@@ -273,12 +176,12 @@ importers:
       '@types/node':
         specifier: 24.10.1
         version: 24.10.1
-      '@types/pg':
-        specifier: 8.15.5
-        version: 8.15.5
       '@types/web-push':
         specifier: 3.6.4
         version: 3.6.4
+      dotenv:
+        specifier: 17.2.3
+        version: 17.2.3
       prisma:
         specifier: 7.9.1
         version: 7.9.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2)
@@ -289,7 +192,7 @@ importers:
         specifier: 7.0.2
         version: 7.0.2
 
-  platform-seo-data:
+  backend-core/modules/seo:
     dependencies:
       '@nats-io/transport-node':
         specifier: 3.4.0
@@ -311,16 +214,10 @@ importers:
         version: 7.9.1(prisma@7.9.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2)
       '@seo-platform/contracts':
         specifier: workspace:*
-        version: link:../platform-contracts
-      dotenv:
-        specifier: 17.2.3
-        version: 17.2.3
+        version: link:../../../packages/contracts
       fastify:
         specifier: 5.10.0
         version: 5.10.0
-      pg:
-        specifier: 8.16.3
-        version: 8.16.3
       reflect-metadata:
         specifier: 0.2.2
         version: 0.2.2
@@ -331,9 +228,9 @@ importers:
       '@types/node':
         specifier: 24.10.1
         version: 24.10.1
-      '@types/pg':
-        specifier: 8.15.5
-        version: 8.15.5
+      dotenv:
+        specifier: 17.2.3
+        version: 17.2.3
       prisma:
         specifier: 7.9.1
         version: 7.9.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2)
@@ -344,7 +241,98 @@ importers:
         specifier: 7.0.2
         version: 7.0.2
 
-  platform-web:
+  backend-execution:
+    dependencies:
+      '@aws-sdk/client-s3':
+        specifier: 3.1096.0
+        version: 3.1096.0
+      '@aws-sdk/s3-request-presigner':
+        specifier: 3.1096.0
+        version: 3.1096.0
+      '@nats-io/jetstream':
+        specifier: 3.4.0
+        version: 3.4.0
+      '@nats-io/transport-node':
+        specifier: 3.4.0
+        version: 3.4.0
+      '@nestjs/common':
+        specifier: 11.1.28
+        version: 11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/core':
+        specifier: 11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/websockets@11.1.28)(reflect-metadata@0.2.2)(rxjs@7.8.2)
+      '@nestjs/platform-fastify':
+        specifier: 11.1.28
+        version: 11.1.28(@nestjs/common@11.1.28(reflect-metadata@0.2.2)(rxjs@7.8.2))(@nestjs/core@11.1.28)
+      '@prisma/adapter-pg':
+        specifier: 7.9.1
+        version: 7.9.1
+      '@prisma/client':
+        specifier: 7.9.1
+        version: 7.9.1(prisma@7.9.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2))(typescript@7.0.2)
+      '@seo-platform/contracts':
+        specifier: workspace:*
+        version: link:../packages/contracts
+      '@seo-platform/process-supervisor':
+        specifier: workspace:*
+        version: link:../packages/process-supervisor
+      bullmq:
+        specifier: 5.81.2
+        version: 5.81.2(redis@6.1.0)
+      dotenv:
+        specifier: 17.2.3
+        version: 17.2.3
+      fastify:
+        specifier: 5.10.0
+        version: 5.10.0
+      htmlparser2:
+        specifier: 12.0.0
+        version: 12.0.0
+      ioredis:
+        specifier: 5.11.1
+        version: 5.11.1
+      nodemailer:
+        specifier: 9.0.3
+        version: 9.0.3
+      reflect-metadata:
+        specifier: 0.2.2
+        version: 0.2.2
+      rxjs:
+        specifier: 7.8.2
+        version: 7.8.2
+      saxes:
+        specifier: 6.0.0
+        version: 6.0.0
+      unzipper-esm:
+        specifier: 0.13.3
+        version: 0.13.3
+    devDependencies:
+      '@types/node':
+        specifier: 24.10.1
+        version: 24.10.1
+      '@types/nodemailer':
+        specifier: 8.0.1
+        version: 8.0.1
+      '@types/pg':
+        specifier: 8.15.5
+        version: 8.15.5
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
+      pg:
+        specifier: 8.16.3
+        version: 8.16.3
+      prisma:
+        specifier: 7.9.1
+        version: 7.9.1(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(typescript@7.0.2)
+      tsx:
+        specifier: 4.20.6
+        version: 4.20.6
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+
+  frontend:
     dependencies:
       next:
         specifier: 16.2.12
@@ -358,7 +346,7 @@ importers:
     devDependencies:
       '@seo-platform/contracts':
         specifier: workspace:*
-        version: link:../platform-contracts
+        version: link:../packages/contracts
       '@types/node':
         specifier: 24.10.1
         version: 24.10.1
@@ -368,6 +356,30 @@ importers:
       '@types/react-dom':
         specifier: 19.2.3
         version: 19.2.3(@types/react@19.2.14)
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+
+  packages/contracts:
+    devDependencies:
+      '@types/node':
+        specifier: 24.10.1
+        version: 24.10.1
+      tsx:
+        specifier: 4.20.6
+        version: 4.20.6
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+
+  packages/process-supervisor:
+    devDependencies:
+      '@types/node':
+        specifier: 24.10.1
+        version: 24.10.1
+      tsx:
+        specifier: 4.20.6
+        version: 4.20.6
       typescript:
         specifier: 7.0.2
         version: 7.0.2
@@ -385,6 +397,9 @@ packages:
   '@aws-sdk/core@3.977.1':
     resolution: {integrity: sha512-KVtQRtc00ES/y+Sc3vYXeP6pCIcNlBJCZOwvqSy8ZpVGmbM5+IG+AfhuTKQ2oXmIVqZJewaGMMpzPkywC6xg0w==}
     engines: {node: '>=20.0.0'}
+    deprecated: |-
+      Deprecated due to Document number parsing bug in JSON, see
+        https://github.com/aws/aws-sdk-js-v3/issues/8246. Newer version available.
 
   '@aws-sdk/credential-provider-env@3.972.62':
     resolution: {integrity: sha512-BkDrk2cNjed31IKin/Oksb2ziF+gfuyRskFVuT4EU9Mep7M8Y/d8DJG4+anHme4Vuse7CwaEscwEfGyR6mzBhQ==}

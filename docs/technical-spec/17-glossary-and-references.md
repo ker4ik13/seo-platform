@@ -162,9 +162,10 @@ Optimistic concurrency control: изменение принимается тол
 
 Ситуация, когда несколько страниц конкурируют за один запрос/кластер либо целевая и фактическая URL расходятся.
 
-### Directus
+### Public content source
 
-Headless CMS маркетингового сайта. Не является административной панелью приложения и источником прав/биллинга.
+Типизированный versioned source маркетингового сайта. Не является источником
+прав, billing или runtime-конфигурации приложения.
 
 ### App admin
 
@@ -230,7 +231,7 @@ Backend for frontend. Отдельный BFF не вводится на стар
 
 ### Object storage / S3
 
-Хранилище больших файлов отдельно от диска приложения и PostgreSQL: импортов до 5 GB, экспортов, raw SERP, PDF-отчётов, вложений, аватаров и Directus assets. Приложение обращается к объекту по ключу и выдаёт временную подписанную ссылку. Рекомендуемый первый production provider — Yandex Object Storage.
+Хранилище больших файлов отдельно от диска приложения и PostgreSQL: импортов до 5 GB, экспортов, raw SERP, PDF-отчётов, вложений и аватаров. Приложение обращается к объекту по ключу и выдаёт временную подписанную ссылку. Рекомендуемый первый production provider — Yandex Object Storage.
 
 ### Transactional email
 
@@ -255,8 +256,8 @@ Backend for frontend. Отдельный BFF не вводится на стар
 | ADR-2026-009 | NATS JetStream + outbox/inbox для надёжных событий | рекомендуется ТЗ |
 | ADR-2026-010 | Socket.IO + Redis adapter для presence/UI realtime | принято по рекомендации |
 | ADR-2026-011 | Yjs/Hocuspocus для совместных документов | рекомендуется ТЗ |
-| ADR-2026-012 | Directus только для публичного web-контента и документации, без application data | принято |
-| ADR-2026-013 | Собственная app-admin | принято |
+| ADR-2026-012 | Directus только для публичного web-контента | заменено ADR-2026-041 |
+| ADR-2026-013 | Собственная app-admin | заменено единым frontend по ADR-2026-041 |
 | ADR-2026-014 | Subscription + included limits + balance/add-ons | принято |
 | ADR-2026-015 | BYOK и platform credentials | принято |
 | ADR-2026-016 | Key Collector через exports, с сохранением mapping/values | принято |
@@ -270,25 +271,26 @@ Backend for frontend. Отдельный BFF не вводится на стар
 | ADR-2026-024 | Подписка отделена от prepaid data balance | принято |
 | ADR-2026-025 | Стартовые планы: Trial, Solo, Team, Agency, Business, Enterprise | рекомендуется ТЗ |
 | ADR-2026-026 | Keys.so platform-paid запрещён до отдельного коммерческого соглашения | обязательно по текущим публичным условиям |
-| ADR-2026-027 | Единый `platform-web`: публичный сайт и Toolbox на `/`, защищённое приложение на `/app` | принято |
+| ADR-2026-027 | Единый Web: публичный сайт и Toolbox на `/`, приложение на `/app` | принято |
 | ADR-2026-028 | API docs публикуются на `/docs/api`; machine API остаётся на техническом поддомене | принято |
 | ADR-2026-029 | Базовый API всех SEO-инструментов включён во все платные тарифы | принято |
 | ADR-2026-030 | Billing ограничивает новые операции, но не чтение; проекты не удаляются автоматически | принято |
 | ADR-2026-031 | Агрегированная история долговременная, raw SERP имеет отдельный retention | принято |
 | ADR-2026-032 | Public и project Toolbox используют общий capability registry и jobs | принято |
 | ADR-2026-033 | Tracking context хранит versioned search configuration; provider и schedule принадлежат connector/automation | принято |
+| ADR-2026-040 | Модульный Core и изолированный Execution | принято |
+| ADR-2026-041 | Три application deployables, единый frontend и удаление неиспользуемого CMS | принято |
 
 Новые формальные ADR-файлы хранятся в `docs/adr`; прежние решения из реестра
 переносятся туда при первом существенном изменении соответствующей границы.
 
 ## 4. Почему не создаются десятки микросервисов
 
-Целевая декомпозиция содержит:
+Целевая декомпозиция содержит один frontend и два backend-компонента:
 
-1. platform API;
-2. SEO data service;
-3. jobs/integrations service с отдельными worker entrypoints;
-4. realtime/collaboration service.
+1. `frontend`;
+2. `backend-core` с API/SEO/Realtime modules;
+3. `backend-execution` с worker roles.
 
 Такое разделение:
 
@@ -361,7 +363,7 @@ Keys.so в первом релизе работает только как BYOK: 
 - Не хранить историю позиций как обновляемое поле keyword.
 - Не использовать WebSocket как источник истины.
 - Не применять CRDT ко всей semantic table.
-- Не давать Directus доступ к application databases.
+- Не давать public content tooling доступ к application databases.
 - Не делать AI обязательным для core workflows.
 
 ## 7. Официальные технические источники
@@ -390,9 +392,7 @@ Keys.so в первом релизе работает только как BYOK: 
 - [Hocuspocus overview](https://tiptap.dev/docs/hocuspocus/getting-started/overview)
 - [Tiptap collaborative editing guide](https://tiptap.dev/docs/hocuspocus/guides/collaborative-editing)
 
-### 7.3. CMS и deployment
-
-- [Directus content versioning](https://docs.directus.io/guides/headless-cms/content-versioning)
+### 7.3. Deployment
 - [Dokploy installation на VPS](https://docs.dokploy.com/docs/core/installation)
 - [Dokploy Docker Compose](https://docs.dokploy.com/docs/core/docker-compose/example)
 - [Dokploy domains](https://docs.dokploy.com/docs/core/docker-compose/domains)
