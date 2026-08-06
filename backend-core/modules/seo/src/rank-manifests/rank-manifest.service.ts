@@ -223,14 +223,16 @@ export class RankManifestService {
           }
 
           assertEstimateNotExpired(input, snapshotAt);
-          const { context, configuration, assignments } =
+          const { context, configuration, assignments, retry } =
             await currentManifestScope(transaction, input);
-          assertEstimateStillCurrent(
-            input,
-            context,
-            configuration,
-            assignments
-          );
+          if (!retry) {
+            assertEstimateStillCurrent(
+              input,
+              context,
+              configuration,
+              assignments
+            );
+          }
           const allocation = await allocateManifest(
             transaction,
             assignments.length,
@@ -444,6 +446,7 @@ async function currentManifestScope(
   readonly context: ContextRecord;
   readonly configuration: ContextRecord["configurations"][number];
   readonly assignments: readonly AssignmentRecord[];
+  readonly retry: boolean;
 }> {
   const context = await transaction.trackingContext.findFirst({
     where: {
@@ -459,6 +462,15 @@ async function currentManifestScope(
   const configuration = context.configurations[0];
   if (!configuration) {
     throw new Error("Tracking context has no configuration version");
+  }
+  if (input.retryOfJobId) {
+    const assignments = await currentRetryManifestAssignments(
+      transaction,
+      input,
+      context,
+      configuration
+    );
+    return { context, configuration, assignments, retry: true };
   }
   const bounds = await inspectRankScopeBounds(transaction, {
     workspaceId: input.workspaceId,
@@ -479,7 +491,139 @@ async function currentManifestScope(
       take: MAX_RANK_SCOPE_ENTRIES + 1,
       select: ASSIGNMENT_SELECT
     });
-  return { context, configuration, assignments };
+  return { context, configuration, assignments, retry: false };
+}
+
+async function currentRetryManifestAssignments(
+  transaction: Prisma.TransactionClient,
+  input: InternalSealRankManifestInput,
+  context: ContextRecord,
+  configuration: ContextRecord["configurations"][number]
+): Promise<readonly AssignmentRecord[]> {
+  const parentJobId = input.retryOfJobId;
+  if (!parentJobId) {
+    throw new Error("Rank continuation is missing its parent Job");
+  }
+  const parent = await transaction.rankExecutionManifest.findFirst({
+    where: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      jobId: parentJobId,
+      provider: input.provider,
+      operation: "POSITIONS",
+      status: "CLOSED"
+    },
+    select: {
+      id: true,
+      projectDomain: true,
+      projectStatus: true,
+      projectVersion: true,
+      trackingContextId: true,
+      contextVersion: true,
+      configurationVersion: true,
+      configurationHash: true,
+      semanticScopeHash: true,
+      execution: true,
+      finalizationReceipt: {
+        select: { status: true, missingCount: true }
+      }
+    }
+  });
+  const receipt = parent?.finalizationReceipt;
+  if (
+    !parent ||
+    !receipt ||
+    receipt.status !== "PARTIALLY_COMPLETED" ||
+    receipt.missingCount < 1 ||
+    input.project.status !== "ACTIVE" ||
+    parent.projectDomain !== input.project.domain ||
+    parent.projectStatus !== input.project.status ||
+    parent.projectVersion !== input.project.version ||
+    context.status !== "ACTIVE" ||
+    parent.trackingContextId !== context.id ||
+    parent.contextVersion !== context.version ||
+    parent.configurationVersion !== configuration.configurationVersion ||
+    configuration.configurationHash !==
+      input.estimate.configurationHash.value ||
+    hashFromBytes(parent.configurationHash).value !==
+      input.estimate.configurationHash.value ||
+    hashFromBytes(parent.semanticScopeHash).value !==
+      input.estimate.semanticScopeHash.value ||
+    input.estimate.trackingContextId !== context.id ||
+    input.estimate.contextVersion !== context.version ||
+    input.estimate.configurationVersion !== configuration.configurationVersion ||
+    Number(input.estimate.pairCount) !== receipt.missingCount ||
+    canonicalizeJson(storedExecution(parent.execution)) !==
+      canonicalizeJson(input.execution) ||
+    !executionMatchesConfiguration(input.execution, configuration)
+  ) {
+    manifestConflict(
+      "ESTIMATE_STALE",
+      "The partial rank run can no longer be continued safely"
+    );
+  }
+
+  const missingEntries = await transaction.rankExecutionManifestEntry.findMany({
+    where: {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      manifestId: parent.id,
+      rankSnapshot: { is: null }
+    },
+    orderBy: { sequence: "asc" },
+    take: MAX_RANK_SCOPE_ENTRIES + 1,
+    select: {
+      assignmentId: true,
+      keywordId: true,
+      keywordVersion: true,
+      keywordText: true,
+      keywordTextHash: true,
+      language: true
+    }
+  });
+  if (
+    missingEntries.length !== receipt.missingCount ||
+    missingEntries.length !== Number(input.estimate.pairCount)
+  ) {
+    manifestConflict(
+      "ESTIMATE_STALE",
+      "The partial rank run missing scope has changed"
+    );
+  }
+
+  const assignments =
+    await transaction.trackingContextKeywordAssignment.findMany({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        contextId: context.id,
+        id: { in: missingEntries.map((entry) => entry.assignmentId) },
+        removedAt: null,
+        keyword: { status: "ACTIVE" }
+      },
+      select: ASSIGNMENT_SELECT
+    });
+  const byId = new Map(assignments.map((assignment) => [assignment.id, assignment]));
+  const ordered = missingEntries.map((entry) => {
+    const assignment = byId.get(entry.assignmentId);
+    if (
+      !assignment ||
+      assignment.keywordId !== entry.keywordId ||
+      assignment.keyword.version !== entry.keywordVersion ||
+      assignment.keyword.textOriginal !== entry.keywordText ||
+      assignment.keyword.language !== entry.language ||
+      hashFromBytes(entry.keywordTextHash).value !==
+        sha256Value(entry.keywordText).value
+    ) {
+      manifestConflict(
+        "ESTIMATE_STALE",
+        "A missing keyword changed after the partial rank run"
+      );
+    }
+    return assignment;
+  });
+  assertUniqueAssignments(ordered);
+  return ordered;
 }
 
 function assertManifestScopeBounds(

@@ -545,7 +545,8 @@ Provider/credential/schedule не входят в tracking context по ADR-2026
 
 - `POST /api/v1/projects/{projectId}/rank-runs`;
 - `GET /api/v1/projects/{projectId}/jobs/{jobId}`;
-- `POST /api/v1/projects/{projectId}/jobs/{jobId}/cancel`.
+- `POST /api/v1/projects/{projectId}/jobs/{jobId}/cancel`;
+- `POST /api/v1/projects/{projectId}/jobs/{jobId}/retry-missing`.
 
 DTO и event contracts зафиксированы в `platform-contracts`: public create
 содержит только `estimateId`, public Job не раскрывает provider/credential/
@@ -557,7 +558,8 @@ Durable Jobs preparation уже доступен только по защищё�
 
 - `POST /internal/v1/workspaces/{workspaceId}/projects/{projectId}/rank-runs`;
 - `GET /internal/v1/workspaces/{workspaceId}/projects/{projectId}/jobs/{jobId}`;
-- `POST /internal/v1/workspaces/{workspaceId}/projects/{projectId}/jobs/{jobId}/cancel`.
+- `POST /internal/v1/workspaces/{workspaceId}/projects/{projectId}/jobs/{jobId}/cancel`;
+- `POST /internal/v1/workspaces/{workspaceId}/projects/{projectId}/jobs/{jobId}/retry-missing`.
 
 Create отвечает `202 + internal Location`, требует exact tenant/actor
 context и `Idempotency-Key`, повторно проверяет estimate и mutable execution
@@ -570,6 +572,14 @@ Queue publish — bounded best effort: Redis partition не удерживает
 public-safe Job projection. Cancel разрешает teammate с доверенным audit
 actor, идемпотентно сохраняет terminal replay и не зависит от исходного
 `actorId`.
+
+`retry-missing` принимает пустой public body и обязательный
+`Idempotency-Key`. Platform API формирует trusted tenant/project/access
+command; Jobs разрешает только безопасный `PARTIALLY_COMPLETED` parent без
+неоднозначного submit и создаёт новый immutable child Job. Internal manifest
+command содержит только `retryOfJobId`, а authoritative SEO Data boundary
+сама выбирает entries без `rankSnapshot`; произвольный клиентский subset
+невозможен.
 
 Internal worker recovery использует states
 `PENDING/OUTCOME_UNKNOWN/NOT_SEALED/SEALED/FINALIZED`, PostgreSQL lease и

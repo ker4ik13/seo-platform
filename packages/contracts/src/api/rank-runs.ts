@@ -682,6 +682,16 @@ export interface InternalCreateRankRunInput extends CreateRankRunInput {
 }
 
 /**
+ * Starts a new immutable child run for only the entries that were not
+ * persisted by a partially completed parent run. Jobs resolves the original
+ * estimate and SEO Data re-materializes the missing scope server-side; a
+ * browser can never supply keyword identifiers.
+ */
+export interface InternalRetryRankJobInput
+  extends Omit<InternalCreateRankRunInput, "estimateId">,
+    InternalRankJobQuery {}
+
+/**
  * Trusted, tenant-scoped Jobs query. Public callers never supply workspace,
  * project or actor identity in a body.
  */
@@ -770,6 +780,8 @@ export interface InternalSealRankManifestInput {
   readonly actorId: string;
   readonly jobId: string;
   readonly estimateId: string;
+  /** Parent run whose still-missing immutable entries form this manifest. */
+  readonly retryOfJobId?: string;
   readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly operation: "POSITIONS";
   readonly project: InternalRankRunProjectSnapshot;

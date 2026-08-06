@@ -3,6 +3,7 @@ import type {
   InternalCancelRankJobInput,
   InternalCreateRankRunInput,
   InternalRankJobQuery,
+  InternalRetryRankJobInput,
   RankEstimateQuota
 } from "@seo-platform/contracts";
 
@@ -128,6 +129,36 @@ export function internalCancelRankJobInput(
   value: unknown
 ): InternalCancelRankJobInput {
   return internalRankJobQuery(value);
+}
+
+export function internalRetryRankJobInput(
+  value: unknown
+): InternalRetryRankJobInput {
+  const raw = exactRecord(value, [
+    "workspaceId",
+    "projectId",
+    "actorId",
+    "jobId",
+    "project",
+    "access",
+    "billingCurrency",
+    "jobCapacity"
+  ], "rankRetry");
+  const { jobId, ...createFields } = raw;
+  const created = internalCreateRankRunInput({
+    ...createFields,
+    estimateId: "00000000-0000-7000-8000-000000000000"
+  });
+  return {
+    workspaceId: created.workspaceId,
+    projectId: created.projectId,
+    actorId: created.actorId,
+    jobId: uuid(jobId, "jobId"),
+    project: created.project,
+    access: created.access,
+    billingCurrency: created.billingCurrency,
+    jobCapacity: created.jobCapacity
+  };
 }
 
 export function rankRunIdempotencyKey(value: unknown): string {

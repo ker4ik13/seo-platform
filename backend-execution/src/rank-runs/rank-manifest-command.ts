@@ -34,13 +34,18 @@ export function rankManifestCommand(
   input: InternalCreateRankRunInput,
   estimate: RankEstimate,
   execution: InternalRankExecutionParameters,
-  jobId: string
+  jobId: string,
+  retry?: {
+    readonly parentJobId: string;
+    readonly pairCount: number;
+    readonly expiresAt: Date;
+  }
 ): InternalSealRankManifestInput {
   if (
     estimate.semanticScopeHash === null ||
     estimate.scopeHash === null ||
-    estimate.keywordCount < 1 ||
-    estimate.keywordCount > rankProviderKeywordLimit
+    (retry?.pairCount ?? estimate.keywordCount) < 1 ||
+    (retry?.pairCount ?? estimate.keywordCount) > rankProviderKeywordLimit
   ) {
     invalid();
   }
@@ -50,6 +55,7 @@ export function rankManifestCommand(
     actorId: input.actorId,
     jobId,
     estimateId: estimate.id,
+    ...(retry ? { retryOfJobId: retry.parentJobId } : {}),
     provider: storedProvider(estimate.provider),
     operation: "POSITIONS",
     project: {
@@ -66,8 +72,8 @@ export function rankManifestCommand(
       configurationHash: hashFromBytes(estimate.configurationHash),
       semanticScopeHash: hashFromBytes(estimate.semanticScopeHash),
       scopeHash: hashFromBytes(estimate.scopeHash),
-      pairCount: String(estimate.keywordCount),
-      expiresAt: estimate.expiresAt.toISOString()
+      pairCount: String(retry?.pairCount ?? estimate.keywordCount),
+      expiresAt: (retry?.expiresAt ?? estimate.expiresAt).toISOString()
     },
     execution: copyExecution(execution),
     retention: {
@@ -133,12 +139,18 @@ function assertBinding(
 }
 
 function parseCommand(value: unknown): InternalSealRankManifestInput {
+  const hasRetry =
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.hasOwn(value, "retryOfJobId");
   const input = exactRecord(value, [
     "workspaceId",
     "projectId",
     "actorId",
     "jobId",
     "estimateId",
+    ...(hasRetry ? ["retryOfJobId"] : []),
     "provider",
     "operation",
     "project",
@@ -172,6 +184,9 @@ function parseCommand(value: unknown): InternalSealRankManifestInput {
   const actorId = uuid(input.actorId);
   const jobId = uuid(input.jobId);
   const estimateId = uuid(input.estimateId);
+  const retryOfJobId = input.retryOfJobId === undefined
+    ? undefined
+    : uuid(input.retryOfJobId);
   const trackingContextId = uuid(estimate.trackingContextId);
   const pairCount = decimal(
     estimate.pairCount,
@@ -204,6 +219,7 @@ function parseCommand(value: unknown): InternalSealRankManifestInput {
     actorId,
     jobId,
     estimateId,
+    ...(retryOfJobId ? { retryOfJobId } : {}),
     provider: input.provider,
     operation: "POSITIONS",
     project: {

@@ -26,6 +26,7 @@ import { IntegrationCredentialApiGuard } from "../integrations/integration-crede
 import {
   internalCancelRankJobInput,
   internalCreateRankRunInput,
+  internalRetryRankJobInput,
   internalRankJobQuery,
   rankRunIdempotencyKey
 } from "./rank-run-input.js";
@@ -124,6 +125,39 @@ export class RankRunController {
       data: await this.rankRuns.cancel(input),
       meta: { requestId: request.id }
     };
+  }
+
+  @Post("jobs/:jobId/retry-missing")
+  @HttpCode(HttpStatus.ACCEPTED)
+  public async retryMissing(
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectId") projectId: string,
+    @Param("jobId") jobId: string,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Headers("idempotency-key") idempotencyKey: unknown,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) response: FastifyReply
+  ): Promise<ApiResponse<RankJobSummary>> {
+    const context = internalCommandContext(headers);
+    assertPathContext(workspaceId, projectId, context);
+    const input = internalRetryRankJobInput(body);
+    assertInternalContext(input, context);
+    if (internalUuid(jobId, "jobId") !== input.jobId) {
+      throw new BadRequestException(
+        "Route Job identifier does not match the continuation command"
+      );
+    }
+    const child = await this.rankRuns.retryMissing(
+      input,
+      rankRunIdempotencyKey(idempotencyKey),
+      request.id
+    );
+    response.header(
+      "Location",
+      `/internal/v1/workspaces/${child.workspaceId}/projects/${child.projectId}/jobs/${child.id}`
+    );
+    return { data: child, meta: { requestId: request.id } };
   }
 }
 

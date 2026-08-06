@@ -243,7 +243,7 @@ test("claims enough lease for check plus get and caps rank request timeout", asy
     ),
     "POLL_PENDING"
   );
-  assert.equal(claimedLeaseSeconds, 103);
+  assert.equal(claimedLeaseSeconds, 23);
   assert.equal(providerTimeoutMs, 10_000);
 });
 
@@ -367,6 +367,67 @@ test("backs off XMLStock delayed Yandex polling to the documented cadence", asyn
     outcome: "PENDING",
     retryAfterSeconds: 25
   });
+});
+
+test("persists an XMLStock Live page checkpoint before polling the next page", async () => {
+  const pollClaim: RankConnectorPollClaim = {
+    ...claim(),
+    provider: "XMLSTOCK",
+    providerTaskId: "xml-live-3944",
+    request: {
+      ...xmlStockRequestIntent(),
+      execution: {
+        ...xmlStockRequestIntent().execution,
+        providerMappingVersion: "xmlstock-yandex-live@2"
+      }
+    }
+  };
+  let completed: { readonly outcome: string } | undefined;
+  const broker = {
+    async claimPoll() {
+      return pollClaim;
+    },
+    async completePoll(_claim: unknown, input: { readonly outcome: string }) {
+      completed = input;
+      return {
+        executionId: ids.execution,
+        status: "POLL_WAIT",
+        executionVersion: 6
+      };
+    }
+  } as unknown as RankConnectorRuntimeBrokerService;
+  const progress = {
+    schemaVersion: "xmlstock-rank-page-progress@1" as const,
+    taskId: "xml-live-3944",
+    engine: "YANDEX" as const,
+    depth: 30 as const,
+    nextPage: 1,
+    documents: Array.from({ length: 10 }, (_, index) => ({
+      position: index + 1,
+      url: `https://foreign-${index}.example/`
+    }))
+  };
+  const xmlStockConnector = {
+    async fetchResult() {
+      return {
+        status: "CHECKPOINTED" as const,
+        progress,
+        hash: hash("c")
+      };
+    }
+  } as unknown as XmlStockRankConnector;
+
+  assert.equal(
+    await service(
+      broker,
+      {} as ArsenkinRankConnector,
+      false,
+      1_000,
+      xmlStockConnector
+    ).processOne("connector-worker"),
+    "POLL_CHECKPOINTED"
+  );
+  assert.equal(completed?.outcome, "CHECKPOINTED");
 });
 
 function service(

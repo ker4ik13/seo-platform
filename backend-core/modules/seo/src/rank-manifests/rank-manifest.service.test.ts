@@ -10,6 +10,7 @@ const workspaceId = "01900000-0000-7000-8000-000000000001";
 const projectId = "01900000-0000-7000-8000-000000000002";
 const actorId = "01900000-0000-7000-8000-000000000003";
 const jobId = "01900000-0000-7000-8000-000000000004";
+const retryJobId = "01900000-0000-7000-8000-000000000008";
 const estimateId = "01900000-0000-7000-8000-000000000005";
 const trackingContextId =
   "01900000-0000-7000-8000-000000000006";
@@ -140,6 +141,44 @@ test("exact replay reconstructs the immutable seal after lifecycle close", async
   assert.deepEqual(replay, first);
   assert.equal(replay.status, "SEALED");
   assert.equal(harness.scopeReads, 1);
+});
+
+test("seals a continuation from only the parent entries without snapshots", async () => {
+  const harness = manifestHarness();
+  const service = new RankManifestService(harness.prisma);
+  const parentInput = command(harness.context, harness.assignments);
+  await service.seal(parentInput);
+  harness.partiallyCompleteManifest([1]);
+  harness.allocateNextManifest(
+    "01900000-0000-7000-8000-000000000009"
+  );
+
+  const continuation = await service.seal({
+    ...parentInput,
+    jobId: retryJobId,
+    retryOfJobId: jobId,
+    estimate: {
+      ...parentInput.estimate,
+      pairCount: "1",
+      expiresAt: "2026-07-29T14:00:00.000Z"
+    }
+  });
+
+  assert.equal(continuation.pairCount, "1");
+  assert.equal(continuation.status, "SEALED");
+  const retryEntries = harness.storedEntries.filter(
+    (entry) => entry.manifestId === continuation.id
+  );
+  assert.equal(retryEntries.length, 1);
+  assert.equal(retryEntries[0]?.keywordText, "Keyword 2");
+  assert.deepEqual(harness.assignmentWhere, {
+    workspaceId,
+    projectId,
+    contextId: trackingContextId,
+    id: { in: [harness.assignments[1]?.id] },
+    removedAt: null,
+    keyword: { status: "ACTIVE" }
+  });
 });
 
 test("rejects a different active job with the same semantic scope", async () => {
@@ -572,7 +611,7 @@ function manifestHarness(
         ? 1
         : 0
   );
-  const allocatedManifestId = options.manifestId ?? manifestId;
+  let allocatedManifestId = options.manifestId ?? manifestId;
   let allocatedSealedAt = options.sealedAt ?? sealedAt;
   const entryIdOffset = options.entryIdOffset ?? 20;
   const storedChunks: Array<Record<string, unknown>> = [];
@@ -678,7 +717,10 @@ function manifestHarness(
   };
 
   const transaction = {
-    $queryRaw: async (strings: TemplateStringsArray) => {
+    $queryRaw: async (
+      strings: TemplateStringsArray,
+      ...values: readonly unknown[]
+    ) => {
       const sql = strings.join("");
       if (sql.includes("pg_advisory_xact_lock")) {
         lockCalls += 1;
@@ -711,10 +753,11 @@ function manifestHarness(
       }
       assert.match(sql, /uuidv7\(\)/u);
       assert.doesNotMatch(sql, /timestamp\(\)/u);
+      const entryCount = Number(values[0] ?? assignments.length);
       return [
         {
           manifestId: allocatedManifestId,
-          entryIds: assignments.map((_, index) => {
+          entryIds: Array.from({ length: entryCount }, (_, index) => {
             const suffix = String(entryIdOffset + index).padStart(12, "0");
             return `01900000-0000-7000-8000-${suffix}`;
           })
@@ -762,11 +805,17 @@ function manifestHarness(
         orderBy,
         take
       }: {
-        where: unknown;
-        orderBy: unknown;
-        take: number;
+        where: Readonly<Record<string, unknown>>;
+        orderBy?: unknown;
+        take?: number;
       }) => {
         assignmentWhere = where;
+        if (where.id && typeof where.id === "object") {
+          const ids = (where.id as { readonly in?: readonly string[] }).in;
+          return assignments
+            .filter((value) => ids?.includes(value.id))
+            .reverse();
+        }
         assert.deepEqual(orderBy, { keywordId: "asc" });
         assert.equal(take, 15_001);
         return [...assignments];
@@ -783,6 +832,19 @@ function manifestHarness(
       }
     },
     rankExecutionManifestEntry: {
+      findMany: async ({
+        where
+      }: {
+        where: Readonly<Record<string, unknown>>;
+      }) => storedEntries
+        .filter(
+          (entry) =>
+            entry.manifestId === where.manifestId &&
+            entry.rankSnapshot === null
+        )
+        .sort(
+          (left, right) => Number(left.sequence) - Number(right.sequence)
+        ),
       createMany: async ({
         data
       }: {
@@ -850,6 +912,23 @@ function manifestHarness(
       if (!storedManifest) throw new Error("Manifest is not sealed");
       storedManifest.status = "CLOSED";
       storedManifest.closedAt = closedAt;
+    },
+    partiallyCompleteManifest(missingSequences: readonly number[]) {
+      if (!storedManifest) throw new Error("Manifest is not sealed");
+      storedManifest.status = "CLOSED";
+      storedManifest.closedAt = new Date("2026-07-29T12:10:00.000Z");
+      storedManifest.finalizationReceipt = {
+        status: "PARTIALLY_COMPLETED",
+        missingCount: missingSequences.length
+      };
+      for (const entry of storedEntries) {
+        entry.rankSnapshot = missingSequences.includes(Number(entry.sequence))
+          ? null
+          : {};
+      }
+    },
+    allocateNextManifest(value: string) {
+      allocatedManifestId = value;
     },
     set contextResult(value: ReturnType<typeof trackingContext> | null) {
       contextResult = value;

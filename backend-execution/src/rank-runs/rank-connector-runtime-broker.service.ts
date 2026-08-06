@@ -13,10 +13,13 @@ import type {
   ArsenkinStagedRankResultV1,
   ArsenkinRankWireRequest
 } from "./arsenkin-rank.connector.js";
-import type {
-  XmlStockRankSubmitResult,
-  XmlStockRankWireRequest,
-  XmlStockStagedRankResultV1
+import {
+  xmlStockRankPageProgress,
+  xmlStockRankPageProgressHash,
+  type XmlStockRankPageProgressV1,
+  type XmlStockRankSubmitResult,
+  type XmlStockRankWireRequest,
+  type XmlStockStagedRankResultV1
 } from "./xmlstock-rank.connector.js";
 
 const UUID_PATTERN =
@@ -49,6 +52,7 @@ export interface RankConnectorSubmitClaim extends RankConnectorClaim {}
 export interface RankConnectorPollClaim extends RankConnectorClaim {
   readonly providerTaskId: string;
   readonly request: RankProviderRequestIntentV1;
+  readonly providerProgress?: XmlStockRankPageProgressV1;
 }
 
 export interface RankConnectorSubmitPermit {
@@ -224,10 +228,17 @@ export class RankConnectorRuntimeBrokerService {
     if (rows.length === 0) return undefined;
     if (rows.length !== 1 || !rows[0]) invalid("poll claim cardinality");
     const row = rows[0];
+    const provider = rankProvider(row.provider);
+    const providerProgress = storedProviderProgress(
+      provider,
+      row.providerProgressSnapshot,
+      row.providerProgressHash
+    );
     return {
       ...claim(row, leaseOwner),
       providerTaskId: taskId(row.providerTaskId),
-      request: rankProviderRequestIntent(row.requestSnapshot)
+      request: rankProviderRequestIntent(row.requestSnapshot),
+      ...(providerProgress ? { providerProgress } : {})
     };
   }
 
@@ -235,6 +246,11 @@ export class RankConnectorRuntimeBrokerService {
     claimValue: RankConnectorPollClaim,
     input:
       | { readonly outcome: "PENDING" }
+      | {
+          readonly outcome: "CHECKPOINTED";
+          readonly progress: XmlStockRankPageProgressV1;
+          readonly hash: Buffer;
+        }
       | {
           readonly outcome: "RETRYABLE_FAILURE";
           readonly errorCode: string;
@@ -282,7 +298,17 @@ export class RankConnectorRuntimeBrokerService {
           ${
             input.outcome === "READY" ? fixedHash(input.hash) : null
           }::bytea,
-          ${errorCode ?? null}::text
+          ${errorCode ?? null}::text,
+          ${
+            input.outcome === "CHECKPOINTED"
+              ? JSON.stringify(input.progress)
+              : null
+          }::jsonb,
+          ${
+            input.outcome === "CHECKPOINTED"
+              ? fixedHash(input.hash)
+              : null
+          }::bytea
         )
       `
     );
@@ -348,6 +374,24 @@ interface PollClaimRow extends EncryptedCredentialRow {
   readonly provider: string;
   readonly providerTaskId: string;
   readonly requestSnapshot: unknown;
+  readonly providerProgressSnapshot: unknown | null;
+  readonly providerProgressHash: Uint8Array | null;
+}
+
+function storedProviderProgress(
+  provider: "ARSENKIN" | "XMLSTOCK",
+  snapshot: unknown | null,
+  hashValue: Uint8Array | null
+): XmlStockRankPageProgressV1 | undefined {
+  if (snapshot === null && hashValue === null) return undefined;
+  if (provider !== "XMLSTOCK" || snapshot === null || hashValue === null) {
+    invalid("provider progress");
+  }
+  const progress = xmlStockRankPageProgress(snapshot);
+  const actual = Buffer.from(xmlStockRankPageProgressHash(progress).value, "hex");
+  const expected = buffer(hashValue, "provider progress hash", 32);
+  if (!timingSafeEqual(actual, expected)) invalid("provider progress hash");
+  return progress;
 }
 
 interface SubmitRequestRow {

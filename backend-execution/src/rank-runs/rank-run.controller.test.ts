@@ -46,6 +46,14 @@ test("declares the dedicated internal guard and exact route boundary", () => {
     Reflect.getMetadata(PATH_METADATA, prototype.cancel),
     "jobs/:jobId/cancel"
   );
+  assert.equal(
+    Reflect.getMetadata(PATH_METADATA, prototype.retryMissing),
+    "jobs/:jobId/retry-missing"
+  );
+  assert.equal(
+    Reflect.getMetadata(HTTP_CODE_METADATA, prototype.retryMissing),
+    202
+  );
 });
 
 test("accepts only an exact body matching route and trusted headers", async () => {
@@ -144,6 +152,46 @@ test("requires the cancel route Job identifier to match the exact command", asyn
   assert.equal(cancelCalls, 0);
 });
 
+test("accepts an exact missing-position continuation command", async () => {
+  const calls: unknown[][] = [];
+  const service = {
+    retryMissing: async (...args: unknown[]) => {
+      calls.push(args);
+      return preparingSummary();
+    }
+  } as unknown as RankRunService;
+  const controller = new RankRunController(service);
+  const responseHeaders = new Map<string, string>();
+  const response = {
+    header: (name: string, value: string) => {
+      responseHeaders.set(name, value);
+      return response;
+    }
+  } as unknown as FastifyReply;
+  const request = { id: "request-rank-retry-1" } as FastifyRequest;
+
+  const continued = await controller.retryMissing(
+    workspaceId,
+    projectId,
+    jobId,
+    headers(),
+    "rank-retry-idempotency-0001",
+    retryBody(),
+    request,
+    response
+  );
+
+  assert.equal(continued.data.id, jobId);
+  assert.deepEqual(calls[0]?.slice(1), [
+    "rank-retry-idempotency-0001",
+    request.id
+  ]);
+  assert.equal(
+    responseHeaders.get("Location"),
+    `/internal/v1/workspaces/${workspaceId}/projects/${projectId}/jobs/${jobId}`
+  );
+});
+
 function headers(): Readonly<Record<string, string>> {
   return {
     "x-workspace-id": workspaceId,
@@ -184,6 +232,20 @@ function body(): Readonly<Record<string, unknown>> {
       planVersion: 2,
       concurrentJobs: 10
     }
+  };
+}
+
+function retryBody(): Readonly<Record<string, unknown>> {
+  const value = body();
+  return {
+    workspaceId,
+    projectId,
+    actorId,
+    jobId,
+    project: value.project,
+    access: value.access,
+    billingCurrency: value.billingCurrency,
+    jobCapacity: value.jobCapacity
   };
 }
 

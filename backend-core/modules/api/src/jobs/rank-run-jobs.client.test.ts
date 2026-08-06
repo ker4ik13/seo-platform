@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { InternalCreateRankRunInput } from "@seo-platform/contracts";
+import type {
+  InternalCreateRankRunInput,
+  InternalRetryRankJobInput
+} from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 import { loadAppConfig } from "../config/app-config.js";
 import { JobsClient } from "./jobs.client.js";
@@ -13,7 +16,7 @@ const estimateId = "01900000-0000-7000-8000-000000000005";
 const contextId = "01900000-0000-7000-8000-000000000006";
 const jobId = "01900000-0000-7000-8000-000000000007";
 
-test("uses the dedicated boundary for create, list, scoped get and teammate cancel", async () => {
+test("uses the dedicated boundary for create, list, scoped get, cancel and continuation", async () => {
   const originalFetch = globalThis.fetch;
   const requests: Array<{
     readonly url: URL;
@@ -62,10 +65,15 @@ test("uses the dedicated boundary for create, list, scoped get and teammate canc
     const listed = await jobs.listRankJobs(context());
     await jobs.getRankJob(context(), jobId);
     await jobs.cancelRankJob(context(), jobId);
+    await jobs.retryMissingRankJob(
+      context(),
+      rankRetryCommand(),
+      "rank-retry-0001"
+    );
 
     assert.equal(listed.length, 1);
     assert.equal(listed[0]?.id, jobId);
-    assert.equal(requests.length, 4);
+    assert.equal(requests.length, 5);
     assert.equal(
       requests[0]?.url.pathname,
       `/internal/v1/workspaces/${workspaceId}/projects/${projectId}/rank-runs`
@@ -104,6 +112,17 @@ test("uses the dedicated boundary for create, list, scoped get and teammate canc
       actorId,
       jobId
     });
+
+    assert.equal(
+      requests[4]?.url.pathname,
+      `/internal/v1/workspaces/${workspaceId}/projects/${projectId}/jobs/${jobId}/retry-missing`
+    );
+    assert.equal(requests[4]?.method, "POST");
+    assert.deepEqual(requests[4]?.body, rankRetryCommand());
+    assert.equal(
+      requests[4]?.headers.get("idempotency-key"),
+      "rank-retry-0001"
+    );
 
     for (const request of requests) {
       assert.equal(
@@ -371,6 +390,20 @@ function rankRunCommand(): InternalCreateRankRunInput {
       planVersion: 3,
       concurrentJobs: 10
     }
+  };
+}
+
+function rankRetryCommand(): InternalRetryRankJobInput {
+  const input = rankRunCommand();
+  return {
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    actorId: input.actorId,
+    jobId,
+    project: input.project,
+    access: input.access,
+    billingCurrency: input.billingCurrency,
+    jobCapacity: input.jobCapacity
   };
 }
 

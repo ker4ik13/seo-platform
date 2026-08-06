@@ -4,6 +4,7 @@ import {
   rankSearchSourceFromProviderMappingVersion,
   rankJobFailureCodes,
   type InternalCreateRankRunInput,
+  type InternalRetryRankJobInput,
   type InternalRankExecutionParameters,
   type ConnectorOperationAttemptSummary,
   type ConnectorRoutingScope,
@@ -25,6 +26,7 @@ import type {
 export const MANUAL_RANK_CHECK_JOB_TYPE = "MANUAL_RANK_CHECK";
 export const RANK_JOB_INPUT_SCHEMA = "manual-rank-check@1";
 const REQUEST_HASH_SCHEMA = "rank-run-request@1";
+const RETRY_REQUEST_HASH_SCHEMA = "rank-run-retry-request@1";
 const FAILURE_CODES = new Set<string>(rankJobFailureCodes);
 
 export type StoredRankJob = Job & {
@@ -55,6 +57,24 @@ export function rankRunRequestHash(
       projectId: input.projectId,
       actorId: input.actorId,
       estimateId: input.estimateId
+    }),
+    "hex"
+  );
+}
+
+export function rankRetryIdempotencyScope(parentJobId: string): string {
+  return `rank-run-retry:${parentJobId}`;
+}
+
+export function rankRetryRequestHash(
+  input: InternalRetryRankJobInput
+): Buffer {
+  return Buffer.from(
+    canonicalJsonSha256(RETRY_REQUEST_HASH_SCHEMA, {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      actorId: input.actorId,
+      parentJobId: input.jobId
     }),
     "hex"
   );

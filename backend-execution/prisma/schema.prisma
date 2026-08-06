@@ -684,6 +684,8 @@ model RankConnectorExecution {
   providerSubmittedAt                  DateTime?                    @map("provider_submitted_at") @db.Timestamptz(6)
   pollAttemptCount                     Int                          @default(0) @map("poll_attempt_count")
   nextActionAt                         DateTime?                    @map("next_action_at") @db.Timestamptz(6)
+  providerProgressSnapshot             Json?                        @map("provider_progress_snapshot")
+  providerProgressHash                 Bytes?                       @map("provider_progress_hash")
   observedAt                           DateTime?                    @map("observed_at") @db.Timestamptz(6)
   normalizedResultSnapshot             Json?                        @map("normalized_result_snapshot")
   normalizedResultHash                 Bytes?                       @map("normalized_result_hash")

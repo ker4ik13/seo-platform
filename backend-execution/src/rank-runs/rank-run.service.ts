@@ -9,6 +9,7 @@ import {
   rankRunConflictDetails,
   type InternalCancelRankJobInput,
   type InternalCreateRankRunInput,
+  type InternalRetryRankJobInput,
   type InternalRankRunConflictDetails,
   type InternalRankJobQuery,
   type RankJobSummary,
@@ -27,6 +28,7 @@ import {
   RANK_ESTIMATE_VALIDATION_FRESHNESS_MILLISECONDS,
   credentialSnapshot,
   executionProjection,
+  rankEstimateContinuationScopeHash,
   rankProviderPolicyVersion,
   rankEstimateProjectDomainHash,
   verifiedRankEstimate,
@@ -38,6 +40,7 @@ import {
   rankManifestCommandJson
 } from "./rank-manifest-command.js";
 import { lockTenantRankJobGraph } from "./rank-job-lock.js";
+import { createContinuationEstimate } from "./rank-continuation-estimate.js";
 import {
   MANUAL_RANK_CHECK_JOB_TYPE,
   rankJobInputJson,
@@ -46,6 +49,8 @@ import {
   rankRunIdempotencyScope,
   rankRunRequestHash,
   rankRunRequestMatches,
+  rankRetryIdempotencyScope,
+  rankRetryRequestHash,
   toRankJobSummary,
   type StoredRankJob
 } from "./rank-job-record.js";
@@ -240,6 +245,262 @@ export class RankRunService {
       input.projectId
     );
     if (!stored) throw rankJobNotFound("Manual rank Job not found");
+    return toRankJobSummary(stored);
+  }
+
+  public async retryMissing(
+    input: InternalRetryRankJobInput,
+    idempotencyKey: string,
+    requestId: string
+  ): Promise<RankJobSummary> {
+    const idempotencyScope = rankRetryIdempotencyScope(input.jobId);
+    const requestHash = rankRetryRequestHash(input);
+    const replay = await findIdempotent(
+      this.prisma,
+      input.workspaceId,
+      idempotencyScope,
+      idempotencyKey
+    );
+    if (replay) {
+      assertRetryReplay(replay, input, requestHash);
+      await this.enqueueForRecovery(replay);
+      return toRankJobSummary(replay);
+    }
+
+    let stored: StoredRankJob;
+    try {
+      stored = await this.prisma.$transaction(
+        async (transaction) => {
+          const transactionReplay = await findIdempotent(
+            transaction,
+            input.workspaceId,
+            idempotencyScope,
+            idempotencyKey
+          );
+          if (transactionReplay) {
+            assertRetryReplay(transactionReplay, input, requestHash);
+            return transactionReplay;
+          }
+          const existingChild = await transaction.job.findFirst({
+            where: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              type: MANUAL_RANK_CHECK_JOB_TYPE,
+              parentJobId: input.jobId
+            },
+            include: { rankRun: true },
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }]
+          });
+          if (existingChild) return existingChild;
+
+          const parent = await transaction.job.findFirst({
+            where: {
+              id: input.jobId,
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              type: MANUAL_RANK_CHECK_JOB_TYPE
+            },
+            include: {
+              rankRun: { include: { estimate: true } }
+            }
+          });
+          if (!parent?.rankRun) {
+            throw rankJobNotFound("Partial rank Job not found");
+          }
+          const parentSummary = toRankJobSummary(parent);
+          if (
+            parentSummary.status !== "PARTIALLY_COMPLETED" ||
+            BigInt(parentSummary.result.failedCount) < 1n ||
+            BigInt(parentSummary.result.submitOutcomeUnknownCount) !== 0n
+          ) {
+            throw rankJobConflict(
+              "ESTIMATE_STALE",
+              "Only a safely finalized partial rank run can be continued"
+            );
+          }
+          const missingCount = Number(parentSummary.result.failedCount);
+          if (
+            !Number.isSafeInteger(missingCount) ||
+            missingCount < 1 ||
+            missingCount > Number(parent.progressTotal)
+          ) {
+            throw new Error("Partial rank Job has an invalid missing count");
+          }
+          await assertJobCapacity(
+            transaction,
+            input.workspaceId,
+            input.jobCapacity
+          );
+          const [clock] = await transaction.$queryRaw<
+            readonly {
+              readonly jobId: string;
+              readonly estimateId: string;
+              readonly now: Date;
+            }[]
+          >`
+            SELECT
+              uuidv7()::text AS "jobId",
+              uuidv7()::text AS "estimateId",
+              clock_timestamp() AS "now"
+          `;
+          if (
+            !clock ||
+            !UUID_PATTERN.test(clock.jobId) ||
+            !UUID_PATTERN.test(clock.estimateId) ||
+            !(clock.now instanceof Date) ||
+            Number.isNaN(clock.now.getTime())
+          ) {
+            throw new Error("Unable to allocate rank continuation Job");
+          }
+          const estimate = parent.rankRun.estimate;
+          const verified = verifiedRankEstimate(estimate);
+          assertRetryableEstimate(estimate, verified, input);
+          const currentProjection = await executionProjection(
+            transaction,
+            input.workspaceId,
+            input.projectId,
+            estimate.provider as "ARSENKIN" | "XMLSTOCK",
+            estimate.routeId ?? undefined
+          );
+          const currentCredential = credentialSnapshot(currentProjection);
+          assertExecutionProjectionCurrent(
+            estimate,
+            currentCredential,
+            clock.now,
+            { allowNewerValidation: true }
+          );
+          const execution = verified.execution;
+          if (!execution) {
+            throw rankJobConflict(
+              "ESTIMATE_STALE",
+              "Rank continuation execution snapshot is unavailable"
+            );
+          }
+          const continuationEstimate = await createContinuationEstimate(
+            transaction,
+            estimate,
+            verified.summary,
+            execution,
+            {
+              id: clock.estimateId,
+              actorId: input.actorId,
+              idempotencyScope: `rank-estimate-retry:${parent.id}`,
+              idempotencyKey,
+              requestHash,
+              calculatedAt: clock.now,
+              pairCount: missingCount,
+              credential: currentCredential,
+              scopeHash: rankEstimateContinuationScopeHash(
+                estimate,
+                currentCredential
+              )
+            }
+          );
+          const continuationSummary = verifiedRankEstimate(
+            continuationEstimate
+          ).summary;
+          const createInput: InternalCreateRankRunInput = {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            actorId: input.actorId,
+            estimateId: continuationEstimate.id,
+            project: input.project,
+            access: input.access,
+            billingCurrency: input.billingCurrency,
+            jobCapacity: input.jobCapacity
+          };
+          const command = rankManifestCommand(
+            createInput,
+            continuationEstimate,
+            execution,
+            clock.jobId,
+            {
+              parentJobId: parent.id,
+              pairCount: missingCount,
+              expiresAt: continuationEstimate.expiresAt
+            }
+          );
+          await transaction.job.create({
+            data: {
+              id: clock.jobId,
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              type: MANUAL_RANK_CHECK_JOB_TYPE,
+              status: "PREPARING",
+              stage: "PREPARING_SCOPE",
+              priority: 90,
+              actorId: input.actorId,
+              parentJobId: parent.id,
+              deduplicationKey: `manual-rank-retry:${parent.id}`,
+              idempotencyScope,
+              idempotencyKey,
+              requestHash: databaseBytes(requestHash),
+              inputSnapshot: rankJobInputJson(createInput),
+              scopeSnapshot: rankJobScopeJson(
+                createInput,
+                continuationEstimate.trackingContextId,
+                execution,
+                continuationSummary
+              ),
+              progressCurrent: 0n,
+              progressTotal: BigInt(missingCount),
+              progressUnit: "KEYWORD",
+              estimatedCostMicro: 0n,
+              currency: input.billingCurrency,
+              credentialMode: "BYOK_API_KEY",
+              provider: continuationEstimate.provider,
+              maxAttempts: RANK_PREPARATION_MAX_ATTEMPTS,
+              correlationId: boundedRequestId(requestId)
+            }
+          });
+          await transaction.rankJobRun.create({
+            data: {
+              jobId: clock.jobId,
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              estimateId: continuationEstimate.id,
+              trackingContextId: continuationEstimate.trackingContextId,
+              projectDomain: input.project.domain,
+              projectStatus: "ACTIVE",
+              projectVersion: input.project.version,
+              manifestCommand: rankManifestCommandJson(command),
+              manifestCommandHash: databaseBytes(
+                rankManifestCommandHash(command)
+              )
+            }
+          });
+          return requiredRankJob(
+            transaction,
+            clock.jobId,
+            input.workspaceId,
+            input.projectId
+          );
+        },
+        { isolationLevel: "RepeatableRead" }
+      );
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) throw error;
+      const winner =
+        (await findIdempotent(
+          this.prisma,
+          input.workspaceId,
+          idempotencyScope,
+          idempotencyKey
+        )) ??
+        (await this.prisma.job.findFirst({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            type: MANUAL_RANK_CHECK_JOB_TYPE,
+            parentJobId: input.jobId
+          },
+          include: { rankRun: true }
+        }));
+      if (!winner) throw error;
+      stored = winner;
+    }
+
+    await this.enqueueForRecovery(stored);
     return toRankJobSummary(stored);
   }
 
@@ -502,6 +763,47 @@ function assertExecutableEstimate(
   }
 }
 
+function assertRetryableEstimate(
+  stored: RankEstimate,
+  verified: ReturnType<typeof verifiedRankEstimate>,
+  input: InternalRetryRankJobInput
+): void {
+  if (
+    verified.summary.status !== "READY" ||
+    !verified.summary.executionAllowed ||
+    verified.summary.blockers.length !== 0 ||
+    !verified.execution ||
+    !rankEstimatePolicyMatchesProvider(
+      stored.provider,
+      stored.providerPolicyVersion
+    ) ||
+    input.project.status !== "ACTIVE" ||
+    input.project.version !== stored.projectVersion ||
+    !bytesEqual(
+      stored.projectDomainHash,
+      rankEstimateProjectDomainHash(input.project.domain)
+    ) ||
+    input.billingCurrency !== verified.summary.billingCurrency
+  ) {
+    throw rankJobConflict(
+      "ESTIMATE_STALE",
+      "The partial rank run configuration changed"
+    );
+  }
+  if (
+    input.access.workspaceStatus !== "ACTIVE" ||
+    !input.access.canRunRanking ||
+    input.access.entitlementStatus !== "ALLOWED" ||
+    input.access.quota.status !== "AVAILABLE" ||
+    BigInt(input.access.quota.remaining) < 1n
+  ) {
+    throw rankJobConflict(
+      "EXECUTION_GRANT_DENIED",
+      "Current access does not allow a rank continuation"
+    );
+  }
+}
+
 export function rankEstimatePolicyMatchesProvider(
   provider: string,
   providerPolicyVersion: string
@@ -605,6 +907,25 @@ function assertReplay(
     throw rankJobConflict(
       "IDEMPOTENCY_CONFLICT",
       "Idempotency key was used for another rank run"
+    );
+  }
+}
+
+function assertRetryReplay(
+  stored: StoredRankJob,
+  input: InternalRetryRankJobInput,
+  requestHash: Buffer
+): void {
+  if (
+    !rankRunRequestMatches(stored.requestHash, requestHash) ||
+    stored.workspaceId !== input.workspaceId ||
+    stored.projectId !== input.projectId ||
+    stored.parentJobId !== input.jobId ||
+    stored.actorId !== input.actorId
+  ) {
+    throw rankJobConflict(
+      "IDEMPOTENCY_CONFLICT",
+      "Idempotency key was used for another rank continuation"
     );
   }
 }

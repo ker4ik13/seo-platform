@@ -55,6 +55,7 @@ import type {
   InternalCancelTechnicalCrawlInput,
   InternalRunRankTrackingAutomationInput,
   InternalCancelRankJobInput,
+  InternalRetryRankJobInput,
   InternalAutomationStatusInput,
   InternalCreateRankTrackingAutomationInput,
   InternalDeleteIntegrationCredentialInput,
@@ -1416,6 +1417,30 @@ export class JobsClient {
       context.tenant.workspaceId,
       projectId,
       jobId
+    );
+  }
+
+  public async retryMissingRankJob(
+    context: InternalContext,
+    input: InternalRetryRankJobInput,
+    idempotencyKey: string
+  ): Promise<RankJobSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.requestIntegration<unknown>(
+      "POST",
+      `${rankJobPath(
+        context.tenant.workspaceId,
+        projectId,
+        input.jobId
+      )}/retry-missing`,
+      context,
+      input,
+      idempotencyKey
+    );
+    return scopedRankJobSummary(
+      value,
+      context.tenant.workspaceId,
+      projectId
     );
   }
 

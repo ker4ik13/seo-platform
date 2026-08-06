@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   internalCancelRankJobInput,
   internalCreateRankRunInput,
+  internalRetryRankJobInput,
   rankRunIdempotencyKey
 } from "./rank-run-input.js";
 
@@ -77,6 +78,16 @@ test("parses teammate cancellation as tenant scope, not ownership", () => {
   assert.deepEqual(internalCancelRankJobInput(command), command);
   assert.throws(
     () => internalCancelRankJobInput({ ...command, ownerId: input.actorId }),
+    /Invalid/u
+  );
+});
+
+test("parses a continuation command without accepting browser keyword scope", () => {
+  const { estimateId, ...snapshot } = input;
+  const command = { ...snapshot, jobId: estimateId };
+  assert.deepEqual(internalRetryRankJobInput(command), command);
+  assert.throws(
+    () => internalRetryRankJobInput({ ...command, keywordIds: [estimateId] }),
     /Invalid/u
   );
 });

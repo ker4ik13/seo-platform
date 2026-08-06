@@ -14,6 +14,7 @@ import {
 import type {
   ApiResponse,
   InternalCreateRankRunInput,
+  InternalRetryRankJobInput,
   ProjectSummary,
   RankOperationResult,
   RankJobSummary,
@@ -240,6 +241,88 @@ export class RankRunController {
       requestId: context.requestId
     });
     return apiResponse(request, job);
+  }
+
+  @Post("jobs/:jobId/retry-missing")
+  @HttpCode(HttpStatus.ACCEPTED)
+  @RequirePermission("ranking.run")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async retryMissing(
+    @Param("jobId") jobId: string,
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<RankJobSummary>> {
+    const canonicalJobId = assertUuid(jobId, "jobId");
+    assertEmptyRankJobCancelInput(body);
+    const idempotencyKey = requiredRankRunIdempotencyKey(
+      headerValue(request, "idempotency-key")
+    );
+    const tenant = requiredProjectTenant(request);
+    const membership = requiredMembershipSnapshot(tenant);
+    const [workspace, project, runAccess, jobCapacity] = await Promise.all([
+      this.tenants.getWorkspace(principal.userId, tenant.workspaceId),
+      this.tenants.getProject(tenant.projectId),
+      this.billingEntitlements.rankProviderRunAccess(tenant.workspaceId),
+      this.billingEntitlements.jobCapacity(tenant.workspaceId)
+    ]);
+    assertTenantSnapshot(tenant, workspace, project);
+    assertRankRunAllowed(tenant, workspace, project);
+    const context = requestContext(request);
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "ranking.rank_job.retry_missing_requested",
+      resourceType: "rank_job",
+      resourceId: canonicalJobId,
+      outcome: "REQUESTED",
+      requestId: context.requestId
+    });
+    const command: InternalRetryRankJobInput = {
+      workspaceId: workspace.id,
+      projectId: project.id,
+      actorId: principal.userId,
+      jobId: canonicalJobId,
+      project: {
+        id: project.id,
+        workspaceId: project.workspaceId,
+        domain: project.domain,
+        status: "ACTIVE",
+        version: project.version
+      },
+      access: {
+        workspaceStatus: "ACTIVE",
+        membershipId: membership.id,
+        membershipVersion: membership.version,
+        canRunRanking: true,
+        entitlementStatus: runAccess.entitlementStatus,
+        quota: runAccess.quota
+      },
+      billingCurrency: workspace.billingCurrency,
+      jobCapacity
+    };
+    const child = await this.jobs.retryMissingRankJob(
+      internalProjectContext(request, principal, tenant),
+      command,
+      idempotencyKey
+    );
+    await recordCommittedAudit(this.audit, this.logger, {
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "ranking.rank_job.retry_missing_started",
+      resourceType: "rank_job",
+      resourceId: child.id,
+      outcome: "SUCCESS",
+      requestId: context.requestId
+    });
+    reply.header(
+      "Location",
+      `/api/v1/projects/${encodeURIComponent(tenant.projectId)}/jobs/${encodeURIComponent(child.id)}`
+    );
+    return apiResponse(request, child);
   }
 }
 

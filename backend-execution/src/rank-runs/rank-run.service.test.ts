@@ -3,16 +3,22 @@ import test from "node:test";
 import { HttpException } from "@nestjs/common";
 import type {
   InternalCancelRankJobInput,
-  InternalCreateRankRunInput
+  InternalCreateRankRunInput,
+  InternalRetryRankJobInput
 } from "@seo-platform/contracts";
 import { xmlStockRankProviderPolicyVersion } from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
 import type { PrismaService } from "../database/prisma.service.js";
 import type { RankEstimate } from "../generated/prisma/client.js";
 import type { QueueService } from "../queue/queue.service.js";
-import type { CredentialSnapshot } from "../rank-estimates/rank-estimate.service.js";
+import {
+  rankEstimateContinuationScopeHash,
+  verifiedRankEstimate,
+  type CredentialSnapshot
+} from "../rank-estimates/rank-estimate.service.js";
 import type { RankManifestClient } from "../seo-data/rank-manifest.client.js";
 import {
+  rankRetryRequestHash,
   rankRunRequestHash,
   type StoredRankJob
 } from "./rank-job-record.js";
@@ -22,6 +28,7 @@ import {
   rankEstimatePolicyMatchesProvider,
   RankRunService
 } from "./rank-run.service.js";
+import { createContinuationEstimate } from "./rank-continuation-estimate.js";
 
 const workspaceId = "0190abcd-0000-7000-8000-000000000001";
 const projectId = "0190abcd-0000-7000-8000-000000000002";
@@ -220,6 +227,241 @@ test("returns an exact idempotent replay before mutable execution checks", async
   assert.equal(transactionCalls, 0);
   assert.equal(estimateLookups, 0);
   assert.deepEqual(enqueued, [jobId]);
+});
+
+test("returns an exact missing-position continuation replay without reopening the parent", async () => {
+  const input = rankRetryInput();
+  const childId = "0190abcd-0000-7000-8000-000000000014";
+  const existing = rankJob({
+    id: childId,
+    parentJobId: jobId,
+    idempotencyScope: `rank-run-retry:${jobId}`,
+    idempotencyKey: "rank-retry-idempotency-0001",
+    requestHash: Uint8Array.from(rankRetryRequestHash(input))
+  });
+  let transactionCalls = 0;
+  const enqueued: string[] = [];
+  const prisma = {
+    job: { findUnique: async () => existing },
+    $transaction: async () => {
+      transactionCalls += 1;
+      throw new Error("replay must not reopen the parent run");
+    }
+  } as unknown as PrismaService;
+  const service = new RankRunService(prisma, queue(enqueued));
+
+  const replay = await service.retryMissing(
+    input,
+    "rank-retry-idempotency-0001",
+    "request-rank-retry"
+  );
+
+  assert.equal(replay.id, childId);
+  assert.equal(replay.status, "PREPARING");
+  assert.equal(transactionCalls, 0);
+  assert.deepEqual(enqueued, [childId]);
+});
+
+test("clones a fresh immutable estimate for a missing-position continuation", async () => {
+  const continuationEstimateId =
+    "0190abcd-0000-7000-8000-000000000014";
+  const calculatedAt = new Date("2026-08-06T12:00:00.000Z");
+  const parent = {
+    id: estimateId,
+    workspaceId,
+    projectId,
+    actorId,
+    trackingContextId,
+    idempotencyScope: `rank-estimate:${projectId}`,
+    idempotencyKey: "parent-estimate-idempotency",
+    requestHash: Uint8Array.from({ length: 32 }, () => 1),
+    projectVersion: 4,
+    projectDomainHash: Uint8Array.from({ length: 32 }, () => 2),
+    contextVersion: 5,
+    configurationVersion: 4,
+    configurationHash: Uint8Array.from({ length: 32 }, () => 3),
+    semanticScopeHash: Uint8Array.from({ length: 32 }, () => 4),
+    scopeHash: Uint8Array.from({ length: 32 }, () => 5),
+    bindingId: "0190abcd-0000-7000-8000-000000000009",
+    bindingVersion: 2,
+    routeId: "0190abcd-0000-7000-8000-000000000010",
+    credentialId: "0190abcd-0000-7000-8000-000000000011",
+    credentialStatus: "ACTIVE",
+    credentialVersion: 3,
+    credentialMaterialVersion: 2,
+    credentialDeletedAt: null,
+    credentialValidationId:
+      "0190abcd-0000-7000-8000-000000000012",
+    credentialValidationVersion: 2,
+    credentialValidationConnectorVersion: "xmlstock-rank:v1",
+    credentialValidationFinishedAt: calculatedAt,
+    credentialVerifiedAt: calculatedAt,
+    provider: "XMLSTOCK",
+    credentialMode: "BYOK_API_KEY",
+    providerPolicyVersion: xmlStockRankProviderPolicyVersion,
+    keywordCount: 651,
+    providerTaskCount: 651,
+    minimumSubmitRequestCount: 0,
+    minimumCheckRequestCount: 0,
+    minimumGetRequestCount: 3_255,
+    blockers: [],
+    responseSnapshot: {},
+    executionSnapshot: {},
+    executionSnapshotHash: Uint8Array.from({ length: 32 }, () => 6),
+    calculatedAt: new Date("2026-08-06T11:00:00.000Z"),
+    expiresAt: new Date("2026-08-06T11:05:00.000Z"),
+    createdAt: new Date("2026-08-06T11:00:00.000Z")
+  } as RankEstimate;
+  const parentSummary = {
+    id: parent.id,
+    workspaceId,
+    projectId,
+    trackingContextId,
+    status: "READY",
+    provider: "XMLSTOCK",
+    operation: "POSITIONS",
+    credentialMode: "BYOK_API_KEY",
+    scope: {
+      keywordCount: "651",
+      contextCount: "1",
+      pairCount: "651",
+      scopeHash: {
+        availability: "AVAILABLE",
+        algorithm: "SHA_256",
+        value: Buffer.from(parent.scopeHash ?? []).toString("hex")
+      },
+      contextVersion: 5,
+      configurationVersion: 4
+    },
+    workload: {
+      taskCount: "651",
+      minimumRequestCount: "3255",
+      pollingRequestCount: { status: "NOT_AVAILABLE" },
+      requestStages: ["GET"],
+      keywordLimitPerTask: "1",
+      keywordLimitPerCommand: "15000",
+      format: "SIMPLE",
+      rawSerp: false,
+      fallbackMode: "NONE"
+    },
+    providerLimits: { status: "NOT_AVAILABLE" },
+    expectedDuration: { status: "NOT_AVAILABLE" },
+    platformChargeMicro: "0",
+    billingCurrency: "RUB",
+    quota: {
+      status: "AVAILABLE",
+      limit: "1000",
+      used: "0",
+      remaining: "1000"
+    },
+    blockers: [],
+    credentialFreshness: {
+      status: "FRESH",
+      verifiedAt: parent.credentialVerifiedAt?.toISOString()
+    },
+    retention: {
+      normalizedRankHistory: "LONG_TERM",
+      rawSerp: "NOT_COLLECTED"
+    },
+    executionAllowed: true,
+    policyVersion: xmlStockRankProviderPolicyVersion,
+    calculatedAt: parent.calculatedAt.toISOString(),
+    expiresAt: parent.expiresAt.toISOString()
+  } as unknown as Parameters<typeof createContinuationEstimate>[2];
+  const execution = {
+    searchEngine: "YANDEX",
+    countryCode: "RU",
+    regionCode: "213",
+    language: "ru",
+    device: "DESKTOP",
+    depth: 50,
+    domainMatchRule: { mode: "INCLUDE_WWW" },
+    safeSearch: false,
+    format: "SIMPLE",
+    rawSerp: false,
+    fallbackMode: "NONE",
+    providerMappingVersion: "xmlstock-yandex-live@2"
+  } as const;
+  let createdData: Readonly<Record<string, unknown>> | undefined;
+  const transaction = {
+    rankEstimate: {
+      create: async ({
+        data
+      }: {
+        readonly data: Readonly<Record<string, unknown>>;
+      }) => {
+        createdData = data;
+        return { ...data, createdAt: calculatedAt } as RankEstimate;
+      }
+    }
+  } as unknown as Parameters<typeof createContinuationEstimate>[0];
+  const requestHash = Uint8Array.from({ length: 32 }, () => 7);
+  const continuationCredential = executionCredential({
+    provider: "XMLSTOCK",
+    verifiedAt: calculatedAt,
+    validationFinishedAt: calculatedAt
+  });
+  const continuationScopeHash = rankEstimateContinuationScopeHash(
+    parent,
+    continuationCredential
+  );
+
+  const continuation = await createContinuationEstimate(
+    transaction,
+    parent,
+    parentSummary,
+    execution,
+    {
+      id: continuationEstimateId,
+      actorId: teamActorId,
+      idempotencyScope: `rank-estimate-retry:${jobId}`,
+      idempotencyKey: "retry-estimate-idempotency",
+      requestHash,
+      calculatedAt,
+      pairCount: 455,
+      credential: continuationCredential,
+      scopeHash: continuationScopeHash
+    }
+  );
+
+  assert.equal(continuation.id, continuationEstimateId);
+  assert.notEqual(continuation.id, parent.id);
+  assert.equal(continuation.actorId, teamActorId);
+  assert.equal(continuation.keywordCount, 455);
+  assert.equal(continuation.providerTaskCount, 455);
+  assert.equal(continuation.minimumGetRequestCount, 2_275);
+  assert.equal(continuation.expiresAt.getTime(), calculatedAt.getTime() + 300_000);
+  assert.deepEqual(continuation.requestHash, requestHash);
+  assert.deepEqual(continuation.executionSnapshot, execution);
+  assert.deepEqual(verifiedRankEstimate(continuation).execution, execution);
+  assert.deepEqual(
+    createdData?.responseSnapshot,
+    {
+      ...parentSummary,
+      id: continuationEstimateId,
+      scope: {
+        ...parentSummary.scope,
+        keywordCount: "455",
+        pairCount: "455",
+        scopeHash: {
+          availability: "AVAILABLE",
+          algorithm: "SHA_256",
+          value: Buffer.from(continuationScopeHash).toString("hex")
+        }
+      },
+      workload: {
+        ...parentSummary.workload,
+        taskCount: "455",
+        minimumRequestCount: "2275"
+      },
+      credentialFreshness: {
+        status: "FRESH",
+        verifiedAt: calculatedAt.toISOString()
+      },
+      calculatedAt: calculatedAt.toISOString(),
+      expiresAt: continuation.expiresAt.toISOString()
+    }
+  );
 });
 
 test("returns the attachable equivalent Job after a concurrent create", async () => {
@@ -466,6 +708,20 @@ function rankRunInput(
       concurrentJobs: 10
     },
     ...overrides
+  };
+}
+
+function rankRetryInput(): InternalRetryRankJobInput {
+  const input = rankRunInput();
+  return {
+    workspaceId: input.workspaceId,
+    projectId: input.projectId,
+    actorId: input.actorId,
+    jobId,
+    project: input.project,
+    access: input.access,
+    billingCurrency: input.billingCurrency,
+    jobCapacity: input.jobCapacity
   };
 }
 

@@ -215,12 +215,29 @@ Unsafe Prisma raw APIs запрещены статическим тестом.
 
 XMLStock Google Top-100 собирается десятью последовательными страницами по 10
 результатов; XMLStock Yandex Live использует такой же GET-only page mapping,
-тогда как Yandex Search API остаётся submit/check. Просроченный grant, для
+тогда как Yandex Search API остаётся submit/check. Для Live каждая успешно
+оплаченная страница сохраняется в hash-проверяемом secret-free checkpoint в
+`jobs_db`; следующий poll запрашивает ровно следующую страницу, а временный
+429/5xx повторяет только текущую страницу. Поэтому сбой на второй–десятой
+странице не теряет уже собранный Top и не создаёт повторную оплату за него.
+Poll/recovery остаётся lease-fenced и bounded (до 720 попыток), чтобы
+permanent provider failure не превращался в бесконечный платный цикл.
+Просроченный grant, для
 которого provider submit не начинался, не блокирует Job: rank dispatcher
 создаёт новый execution attempt, сохраняя старую попытку как immutable audit.
 Progress/finalization выбирает последнюю execution attempt для каждого
 manifest chunk, поэтому сохранённая audit history повторов не увеличивает
 ожидаемое число chunks и не блокирует terminal state.
+Если Job всё же завершился `PARTIALLY_COMPLETED`, команда
+`retry-missing` создаёт immutable child Job с `parent_job_id`. Core SEO сам
+выбирает только entries родительского `CLOSED` manifest без `rankSnapshot` и
+повторно проверяет текущий project/context/configuration; браузер не передаёт
+keyword IDs. Child получает отдельный пяти минутный estimate на точное число
+оставшихся entries и актуальное подтверждение неизменившегося credential
+material; построение этого snapshot изолировано в
+`rank-continuation-estimate.ts`. Уникальный partial index разрешает только
+одного прямого child на parent, а exact `Idempotency-Key` возвращает уже
+созданное продолжение.
 Provider capacity также считает только execution текущего `RUNNING` Job graph:
 исторические `CLAIMED`/`POLL_WAIT`/`STAGED` записи отменённых или завершённых
 Jobs остаются audit evidence, но больше не уменьшают параллельное окно.

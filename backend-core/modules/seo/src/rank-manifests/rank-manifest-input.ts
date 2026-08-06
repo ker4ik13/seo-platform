@@ -29,12 +29,27 @@ const URL_DOMAIN_MATCH_MODES = new Set<string>([
 export function internalSealRankManifestInput(
   value: unknown
 ): InternalSealRankManifestInput {
+  const raw = strictRecord(value, [
+    "workspaceId",
+    "projectId",
+    "actorId",
+    "jobId",
+    "estimateId",
+    "retryOfJobId",
+    "provider",
+    "operation",
+    "project",
+    "estimate",
+    "execution",
+    "retention"
+  ]);
   const input = strictRecord(value, [
     "workspaceId",
     "projectId",
     "actorId",
     "jobId",
     "estimateId",
+    ...(Object.hasOwn(raw, "retryOfJobId") ? ["retryOfJobId"] : []),
     "provider",
     "operation",
     "project",
@@ -59,6 +74,9 @@ export function internalSealRankManifestInput(
     actorId: uuid(input.actorId, "actorId"),
     jobId: uuid(input.jobId, "jobId"),
     estimateId: uuid(input.estimateId, "estimateId"),
+    ...(input.retryOfJobId === undefined
+      ? {}
+      : { retryOfJobId: uuid(input.retryOfJobId, "retryOfJobId") }),
     provider: input.provider,
     operation: "POSITIONS",
     project,

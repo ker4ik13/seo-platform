@@ -64,6 +64,13 @@ test("exposes the exact public routes, permissions, guards and codes", () => {
     [CsrfSessionGuard, TenantPermissionGuard],
     200
   );
+  assertRoute(
+    RankRunController.prototype.retryMissing,
+    "jobs/:jobId/retry-missing",
+    "ranking.run",
+    [CsrfSessionGuard, TenantPermissionGuard],
+    202
+  );
 });
 
 test("creates a trusted rank command and returns project-scoped Location", async () => {
@@ -253,6 +260,83 @@ test("reads and cancels teammate Jobs in archived read-only projects", async () 
     [
       "ranking.rank_job.cancel_requested",
       "ranking.rank_job.cancel_resolved"
+    ]
+  );
+});
+
+test("continues only the server-selected missing positions", async () => {
+  let captured: readonly unknown[] | undefined;
+  let location: string | undefined;
+  const auditRecords: AuditRecord[] = [];
+  const controller = new RankRunController(
+    {
+      retryMissingRankJob: async (...args: unknown[]) => {
+        captured = args;
+        return preparingJob();
+      }
+    } as unknown as JobsClient,
+    tenantService(),
+    auditService(auditRecords),
+    billingEntitlements()
+  );
+
+  const response = await controller.retryMissing(
+    jobId.toUpperCase(),
+    {},
+    request({
+      headers: {
+        "idempotency-key": "rank-retry-idempotency-0001"
+      }
+    }),
+    {
+      header: (name: string, value: string) => {
+        if (name === "Location") location = value;
+      }
+    } as never,
+    principal
+  );
+
+  assert.equal(response.data.id, jobId);
+  assert.equal(location, `/api/v1/projects/${projectId}/jobs/${jobId}`);
+  assert.equal(captured?.[2], "rank-retry-idempotency-0001");
+  assert.deepEqual(captured?.[1], {
+    workspaceId,
+    projectId,
+    actorId,
+    jobId,
+    project: {
+      id: projectId,
+      workspaceId,
+      domain: "example.com",
+      status: "ACTIVE",
+      version: 4
+    },
+    access: {
+      workspaceStatus: "ACTIVE",
+      membershipId,
+      membershipVersion: 3,
+      canRunRanking: true,
+      entitlementStatus: "ALLOWED",
+      quota: {
+        status: "AVAILABLE",
+        limit: "200",
+        used: "0",
+        remaining: "200",
+        resetsAt: "2026-07-30T00:00:00.000Z"
+      }
+    },
+    billingCurrency: "RUB",
+    jobCapacity: {
+      planCode: "TRIAL",
+      planVersion: 1,
+      concurrentJobs: 1
+    }
+  });
+  assert.deepEqual(
+    auditRecords.map(({ action }) => action),
+    [
+      "ranking.rank_job.retry_missing_requested",
+      "ranking.rank_job.retry_missing_started"
     ]
   );
 });

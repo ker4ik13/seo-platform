@@ -14,8 +14,8 @@ import {
   type RankConnectorPollClaim,
   type RankConnectorSubmitClaim
 } from "./rank-connector-runtime-broker.service.js";
-import { ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION } from "./rank-execution-evidence.js";
 import {
+  ARSENKIN_RANK_EXECUTION_CONNECTOR_VERSION,
   XMLSTOCK_RANK_EXECUTION_CONNECTOR_VERSION
 } from "./rank-execution-evidence.js";
 import {
@@ -41,6 +41,7 @@ export type RankConnectorRuntimeOutcome =
   | "SUBMITTED"
   | "SUBMIT_TERMINAL"
   | "POLL_PENDING"
+  | "POLL_CHECKPOINTED"
   | "RESULT_STAGED"
   | "POLL_TERMINAL";
 
@@ -146,10 +147,7 @@ export class RankConnectorRuntimeService {
   ): Promise<RankConnectorRuntimeOutcome> {
     this.assertNetworkBudget(
       claim.leaseExpiresAt,
-      claim.provider === "XMLSTOCK" &&
-        claim.request.execution.searchEngine === "GOOGLE"
-        ? Math.ceil(claim.request.execution.depth / 10)
-        : 2
+      claim.provider === "XMLSTOCK" ? 1 : 2
     );
     const secret = this.crypto.decrypt(
       claim.workspaceId,
@@ -162,7 +160,8 @@ export class RankConnectorRuntimeService {
           claim.providerTaskId,
           secret,
           this.providerRequestTimeoutMs(),
-          claim.request
+          claim.request,
+          claim.providerProgress
         )
       : await this.connector.fetchResult(
           claim.providerTaskId,
@@ -170,6 +169,13 @@ export class RankConnectorRuntimeService {
           this.providerRequestTimeoutMs()
         );
     switch (outcome.status) {
+      case "CHECKPOINTED":
+        await this.broker.completePoll(claim, {
+          outcome: "CHECKPOINTED",
+          progress: outcome.progress,
+          hash: Buffer.from(outcome.hash.value, "hex")
+        });
+        return "POLL_CHECKPOINTED";
       case "PENDING":
         await this.broker.completePoll(claim, {
           outcome: "PENDING",
@@ -248,11 +254,11 @@ export class RankConnectorRuntimeService {
   }
 
   private pollLeaseSeconds(): number {
-    // Google XML can require up to ten sequential page requests for Top-100.
-    // Keep one lease long enough for the largest documented request while the
-    // broker still fences stale workers by generation and token.
+    // XMLStock Live persists one paid page per poll. One provider request is
+    // therefore enough for every connector, while Arsenkin may perform a
+    // status request followed by one result request.
     const worstCasePollMs =
-      this.providerRequestTimeoutMs() * 10 +
+      this.providerRequestTimeoutMs() * 2 +
       RANK_CONNECTOR_LEASE_MARGIN_MS;
     return Math.min(
       120,

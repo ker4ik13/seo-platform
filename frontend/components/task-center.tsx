@@ -51,6 +51,7 @@ interface ProjectTask {
   readonly version: number;
   readonly cancellable: boolean;
   readonly retryable: boolean;
+  readonly retryLabel: string;
   readonly inputFacts: readonly TaskFact[];
   readonly resultFacts: readonly TaskFact[];
 }
@@ -169,10 +170,21 @@ export function TaskCenter({ projectId }: Readonly<{ projectId: string }>) {
     const base = `/app/api/projects/${encodeURIComponent(projectId)}`;
     try {
       if (action === "retry") {
-        await browserApiRequest(
-          `${base}/frequency-collections/${encodeURIComponent(task.id)}/retry-failed`,
-          { method: "POST", body: { version: task.version } }
-        );
+        if (task.kind === "RANK") {
+          await browserApiRequest(
+            `${base}/jobs/${encodeURIComponent(task.id)}/retry-missing`,
+            {
+              method: "POST",
+              body: {},
+              idempotencyKey: `rank-retry:${globalThis.crypto.randomUUID()}`
+            }
+          );
+        } else {
+          await browserApiRequest(
+            `${base}/frequency-collections/${encodeURIComponent(task.id)}/retry-failed`,
+            { method: "POST", body: { version: task.version } }
+          );
+        }
       } else if (task.kind === "FREQUENCY") {
         await browserApiRequest(
           `${base}/frequency-collections/${encodeURIComponent(task.id)}/cancel`,
@@ -288,7 +300,7 @@ export function TaskCenter({ projectId }: Readonly<{ projectId: string }>) {
             <>
               {resultTask.retryable && (
                 <button className="secondary-button" disabled={busyId === resultTask.id} onClick={() => void mutate(resultTask, "retry")} type="button">
-                  {busyId === resultTask.id ? "Перезапускаем…" : "Повторить ошибки"}
+                  {busyId === resultTask.id ? "Запускаем…" : resultTask.retryLabel}
                 </button>
               )}
               {resultTask.cancellable && (
@@ -323,6 +335,7 @@ function frequencyTask(value: FrequencyCollectionSummary): ProjectTask {
     version: value.version,
     cancellable: ["QUEUED", "RUNNING", "WAITING_RATE_LIMIT", "RETRY_SCHEDULED", "FAILED_RETRYABLE"].includes(value.status),
     retryable: ["FAILED_FINAL", "PARTIALLY_COMPLETED", "ACTION_REQUIRED"].includes(value.status),
+    retryLabel: "Повторить ошибки",
     inputFacts: [
       { label: "Источник", value: providerLabel(value.provider) },
       { label: "Виды частотности", value: value.types.map(frequencyTypeLabel).join(" · ") },
@@ -354,7 +367,12 @@ function rankTask(value: RankJobSummary): ProjectTask {
     createdAt: value.createdAt, ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
     ...(value.status === "FAILED" || value.status === "ACTION_REQUIRED" ? { errorCode: value.failure.code } : {}),
     version: 1,
-    cancellable: ["PREPARING", "QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(value.status), retryable: false,
+    cancellable: ["PREPARING", "QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(value.status),
+    retryable:
+      value.status === "PARTIALLY_COMPLETED" &&
+      Number(value.result.failedCount) > 0 &&
+      Number(value.result.submitOutcomeUnknownCount) === 0,
+    retryLabel: "Дособрать позиции",
     inputFacts: [
       { label: "Провайдер", value: provider },
       ...(value.searchEngine
@@ -390,6 +408,7 @@ function crawlTask(value: TechnicalCrawlSummary): ProjectTask {
     ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}), ...(value.failureCode ? { errorCode: value.failureCode } : {}),
     version: value.version,
     cancellable: ["QUEUED", "RUNNING"].includes(value.status), retryable: false,
+    retryLabel: "Повторить",
     inputFacts: [
       { label: "Стартовые URL", value: crawlStartLabel(value.config.startUrls) },
       { label: "Лимит страниц", value: formatInteger(value.config.maxUrls) },
@@ -417,6 +436,7 @@ function researchTask(value: KeywordResearchRunSummary): ProjectTask {
     ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}), ...(value.failureCode ? { errorCode: value.failureCode } : {}),
     version: value.version,
     cancellable: ["QUEUED", "RUNNING", "RETRY_SCHEDULED", "READY_TO_IMPORT"].includes(value.status), retryable: false,
+    retryLabel: "Повторить",
     inputFacts: [
       { label: "Домен", value: value.domain },
       { label: "База", value: value.database.toUpperCase() },

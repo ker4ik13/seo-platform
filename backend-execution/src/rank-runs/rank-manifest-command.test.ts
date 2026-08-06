@@ -103,6 +103,23 @@ test("rejects changed commands, hashes and extensible payloads", () => {
   );
 });
 
+test("round-trips a continuation command bound to its missing pair count", () => {
+  const retry = {
+    ...command,
+    retryOfJobId: "01900000-0000-7000-8000-000000000007",
+    estimate: { ...command.estimate, pairCount: "1" }
+  } as const satisfies InternalSealRankManifestInput;
+  const retryBinding = { ...binding, pairCount: 1n };
+  assert.deepEqual(
+    storedRankManifestCommand(
+      rankManifestCommandJson(retry),
+      rankManifestCommandHash(retry),
+      retryBinding
+    ),
+    retry
+  );
+});
+
 test("rejects a self-consistent command bound to another Job graph", () => {
   const digest = rankManifestCommandHash(command);
 

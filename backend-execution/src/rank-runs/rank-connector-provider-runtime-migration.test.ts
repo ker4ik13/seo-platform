@@ -116,7 +116,7 @@ test("connector role can execute only the new broker functions, not direct table
     "read_rank_connector_submit_request( UUID, UUID, TEXT, UUID, INTEGER, INTEGER )",
     "complete_rank_connector_submit( UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, TEXT, JSONB, BYTEA, TEXT )",
     "claim_rank_connector_poll(TEXT, INTEGER, TEXT)",
-    "complete_rank_connector_poll( UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, INTEGER, TIMESTAMPTZ, JSONB, BYTEA, TEXT )"
+    "complete_rank_connector_poll( UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, INTEGER, TIMESTAMPTZ, JSONB, BYTEA, TEXT, JSONB, BYTEA )"
   ]) {
     assert.ok(sql.includes(routine), `Missing connector ACL ${routine}`);
   }

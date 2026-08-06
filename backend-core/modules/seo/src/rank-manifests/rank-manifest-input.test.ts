@@ -63,6 +63,18 @@ test("accepts a Yandex Top-50 execution without weakening the sealed shape", () 
   assert.equal(input.execution.depth, 50);
 });
 
+test("accepts only an explicit tenant-safe parent for a continuation manifest", () => {
+  const input = internalSealRankManifestInput({
+    ...command(),
+    retryOfJobId: manifestId
+  });
+  assert.equal(input.retryOfJobId, manifestId);
+  assert.throws(
+    () => internalSealRankManifestInput({ ...command(), retryOfJobId: "parent" }),
+    BadRequestException
+  );
+});
+
 test("rejects unknown fields, malformed hashes and forged project scope", () => {
   assert.throws(
     () =>

@@ -147,14 +147,24 @@ export function SemanticOperationsDrawer({
   }
 
   async function retry(operation: Operation): Promise<void> {
-    if (operation.kind !== "FREQUENCY") return;
     setRetryingId(operation.id);
     setError(undefined);
     try {
-      await browserApiRequest(
-        `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections/${encodeURIComponent(operation.id)}/retry-failed`,
-        { method: "POST", body: { version: operation.version } }
-      );
+      if (operation.kind === "FREQUENCY") {
+        await browserApiRequest(
+          `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections/${encodeURIComponent(operation.id)}/retry-failed`,
+          { method: "POST", body: { version: operation.version } }
+        );
+      } else {
+        await browserApiRequest(
+          `/app/api/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(operation.id)}/retry-missing`,
+          {
+            method: "POST",
+            body: {},
+            idempotencyKey: `rank-retry:${globalThis.crypto.randomUUID()}`
+          }
+        );
+      }
       setTab("ACTIVE");
       await load();
     } catch (requestError) {
@@ -199,7 +209,9 @@ export function SemanticOperationsDrawer({
               <div>
                 {operation.retryable && (
                   <button className="semantic-operation-retry" disabled={retryingId === operation.id} onClick={() => void retry(operation)} type="button">
-                    {retryingId === operation.id ? "Перезапускаем…" : "Повторить ошибки"}
+                    {retryingId === operation.id
+                      ? "Запускаем…"
+                      : operation.retryLabel}
                   </button>
                 )}
                 {operation.cancellable && (
@@ -248,6 +260,7 @@ interface Operation {
   readonly tab: OperationTab;
   readonly cancellable: boolean;
   readonly retryable: boolean;
+  readonly retryLabel: string;
   readonly version: number;
   readonly errorCode?: string;
   readonly routeLabel?: string;
@@ -268,6 +281,7 @@ function frequencyOperation(value: FrequencyCollectionSummary): Operation {
     tab: operationTab(value.status),
     cancellable: ["QUEUED", "RUNNING", "WAITING_RATE_LIMIT", "RETRY_SCHEDULED", "FAILED_RETRYABLE"].includes(value.status),
     retryable: ["FAILED_FINAL", "PARTIALLY_COMPLETED", "ACTION_REQUIRED"].includes(value.status),
+    retryLabel: "Повторить ошибки",
     version: value.version,
     ...(value.routingScope
       ? {
@@ -302,7 +316,11 @@ function rankOperation(value: RankJobSummary): Operation {
     percent: total > 0 ? Math.round(current / total * 100) : 0,
     tab: operationTab(value.status),
     cancellable: ["PREPARING", "QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(value.status),
-    retryable: false,
+    retryable:
+      value.status === "PARTIALLY_COMPLETED" &&
+      Number(value.result.failedCount) > 0 &&
+      Number(value.result.submitOutcomeUnknownCount) === 0,
+    retryLabel: "Дособрать позиции",
     version: 1,
     ...(value.routingScope
       ? {

@@ -460,6 +460,49 @@ export function rankEstimateProjectDomainHash(domain: string): Buffer {
   return hash(PROJECT_DOMAIN_HASH_DOMAIN, domain);
 }
 
+export function rankEstimateContinuationScopeHash(
+  stored: StoredRankEstimate,
+  snapshot: CredentialSnapshot
+): Buffer {
+  if (
+    stored.semanticScopeHash === null ||
+    stored.scopeHash === null ||
+    stored.provider !== "ARSENKIN" && stored.provider !== "XMLSTOCK"
+  ) {
+    throw new Error("Rank continuation scope hash is unavailable");
+  }
+  const result = availableScopeHash({
+    workspaceId: stored.workspaceId,
+    projectId: stored.projectId,
+    trackingContextId: stored.trackingContextId,
+    projectVersion: stored.projectVersion,
+    projectDomainHash: bytes32(stored.projectDomainHash),
+    semanticScopeHash: bytes32(stored.semanticScopeHash),
+    contextVersion: stored.contextVersion,
+    configurationVersion: stored.configurationVersion,
+    configurationHash: bytes32(stored.configurationHash),
+    bindingId: snapshot.bindingId ?? null,
+    bindingVersion: snapshot.bindingVersion ?? null,
+    routeId: snapshot.routeId ?? null,
+    credentialId: snapshot.credentialId ?? null,
+    credentialStatus: snapshot.credentialStatus ?? null,
+    credentialVersion: snapshot.credentialVersion ?? null,
+    credentialMaterialVersion: snapshot.credentialMaterialVersion ?? null,
+    credentialDeletedAt: snapshot.credentialDeletedAt?.toISOString() ?? null,
+    validationId: snapshot.validationId ?? null,
+    validationVersion: snapshot.validationVersion ?? null,
+    validationConnectorVersion:
+      snapshot.validationConnectorVersion ?? null,
+    validationFinishedAt:
+      snapshot.validationFinishedAt?.toISOString() ?? null,
+    credentialVerifiedAt: snapshot.verifiedAt?.toISOString() ?? null,
+    provider: stored.provider,
+    credentialMode: "BYOK_API_KEY",
+    providerPolicyVersion: stored.providerPolicyVersion
+  });
+  return Buffer.from(result.value, "hex");
+}
+
 function isConnectorNotReady(error: unknown): boolean {
   if (!(error instanceof ConflictException)) return false;
   const response = error.getResponse();
@@ -1250,7 +1293,7 @@ function validationConnectorVersion(provider: string): string | undefined {
   return undefined;
 }
 
-function providerMinimumRequests(
+export function providerMinimumRequests(
   provider: "ARSENKIN" | "XMLSTOCK",
   execution: InternalRankExecutionParameters | undefined,
   taskCount: number

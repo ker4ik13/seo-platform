@@ -283,6 +283,25 @@ queue burst заполняют свободные provider slots, а provider HT
 прерванные attempts остаются immutable audit history и не меняют cardinality
 Job.
 
+XMLStock Live Top-30/50/100 выполняется по одной десятистрочной странице за
+poll. После каждого успешного ответа connector атомарно сохраняет
+нормализованный checkpoint и SHA-256 в `rank_connector_executions`; 429/5xx
+возвращает execution в `POLL_WAIT`, не удаляя checkpoint. Следующий worker
+проверяет hash и продолжает с `nextPage`, поэтому уже оплаченные страницы не
+запрашиваются повторно. Permanent ошибки и исчерпание bounded poll horizon
+по-прежнему финализируются, а не уходят в бесконечный цикл.
+
+Для безопасно финализированного `PARTIALLY_COMPLETED` manual rank Job без
+`SUBMIT_OUTCOME_UNKNOWN` доступен manual `retry-missing`. Jobs создаёт
+immutable child с `parentJobId`, а SEO Data выбирает недостающие entries из
+родительского `CLOSED` manifest по отсутствию `rankSnapshot` и повторно
+сверяет current project/context/configuration и тексты ключей. Для child Jobs
+создаёт новый immutable estimate с `keywordCount`, provider workload и
+request counts, рассчитанными только для остатка, а credential proof обновляет
+только при неизменном binding/route/credential material. Один parent может
+иметь только один прямой child; дальнейший partial outcome продолжается от уже
+нового child.
+
 ### 8.1. Transactional auth-email worker
 
 Отдельный `auth-email-worker.main.ts` обрабатывает только три secret-free

@@ -4,7 +4,10 @@ import { utf8Sha256 } from "@seo-platform/contracts/canonical-json";
 import {
   XmlStockRankConnector,
   buildXmlStockRankWireRequest,
-  stageXmlStockRankResult
+  stageXmlStockRankResult,
+  xmlStockRankPageProgress,
+  type XmlStockRankFetchResult,
+  type XmlStockRankPageProgressV1
 } from "./xmlstock-rank.connector.js";
 import type { RankProviderRequestIntentV1 } from "./rank-provider-request-intent.js";
 
@@ -51,10 +54,10 @@ test("submits one delayed Yandex request and polls only by req_id", async () => 
     await connector.fetchResult(submitted.taskId, secret, 1_000, value),
     { status: "PENDING" }
   );
-  const ready = await connector.fetchResult(
+  const ready = await fetchLiveUntilReady(
+    connector,
     submitted.taskId,
     secret,
-    1_000,
     value
   );
   assert.equal(ready.status, "READY");
@@ -106,10 +109,10 @@ test("loads each documented Google result page once and keeps absolute positions
   const submitted = await connector.submit(value, secret, 1_000);
   assert.equal(submitted.status, "ACCEPTED");
   if (submitted.status !== "ACCEPTED") return;
-  const ready = await connector.fetchResult(
+  const ready = await fetchLiveUntilReady(
+    connector,
     submitted.taskId,
     secret,
-    1_000,
     value
   );
   assert.equal(ready.status, "READY");
@@ -130,7 +133,8 @@ test("classifies provider authentication, queue and rate failures", async () => 
   const cases = [
     [xml(`<response><error code="31">bad key</error></response>`), "REJECTED", "INVALID_CREDENTIAL"],
     [xml(`<response><error code="210">queued</error></response>`), "PENDING", undefined],
-    [xml(`<response><error code="32">limit</error></response>`), "RETRYABLE_FAILURE", "PROVIDER_RATE_LIMITED"]
+    [xml(`<response><error code="32">limit</error></response>`), "RETRYABLE_FAILURE", "PROVIDER_RATE_LIMITED"],
+    [xml("gateway timeout", 504), "RETRYABLE_FAILURE", "PROVIDER_UNAVAILABLE"]
   ] as const;
   const value = intent("YANDEX");
   const secret = { accountIdentifier: "owner-7", apiKey: "private-key" };
@@ -178,10 +182,10 @@ test("loads documented Yandex Live pages with device and language", async () => 
   if (submitted.status !== "ACCEPTED") return;
   assert.equal(submitted.request.source, "LIVE");
   assert.equal(submitted.request.delayed, false);
-  const ready = await connector.fetchResult(
+  const ready = await fetchLiveUntilReady(
+    connector,
     submitted.taskId,
     secret,
-    1_000,
     value
   );
   assert.equal(ready.status, "READY");
@@ -226,10 +230,10 @@ test("loads every Top-100 Live page on mobile for Yandex and Google", async () =
     const submitted = await connector.submit(value, secret, 1_000);
     assert.equal(submitted.status, "ACCEPTED");
     if (submitted.status !== "ACCEPTED") continue;
-    const ready = await connector.fetchResult(
+    const ready = await fetchLiveUntilReady(
+      connector,
       submitted.taskId,
       secret,
-      1_000,
       value
     );
     assert.equal(ready.status, "READY");
@@ -249,6 +253,108 @@ test("loads every Top-100 Live page on mobile for Yandex and Google", async () =
     );
   }
 });
+
+test("retries only the failed Live page and retains every paid checkpoint", async () => {
+  const pages: string[] = [];
+  let failedOnce = false;
+  const connector = new XmlStockRankConnector(async (url) => {
+    const page = new URL(String(url)).searchParams.get("page") ?? "";
+    pages.push(page);
+    if (page === "1" && !failedOnce) {
+      failedOnce = true;
+      return xml("temporarily unavailable", 503);
+    }
+    return xml(googleResult(Number(page)));
+  });
+  const value = intent("YANDEX", "xmlstock-yandex-live@2", { depth: 30 });
+  const secret = { accountIdentifier: "owner-7", apiKey: "private-key" };
+  const submitted = await connector.submit(value, secret, 1_000);
+  assert.equal(submitted.status, "ACCEPTED");
+  if (submitted.status !== "ACCEPTED") return;
+
+  const first = await connector.fetchResult(
+    submitted.taskId,
+    secret,
+    1_000,
+    value
+  );
+  assert.equal(first.status, "CHECKPOINTED");
+  if (first.status !== "CHECKPOINTED") return;
+  const failed = await connector.fetchResult(
+    submitted.taskId,
+    secret,
+    1_000,
+    value,
+    first.progress
+  );
+  assert.equal(failed.status, "RETRYABLE_FAILURE");
+  const ready = await fetchLiveUntilReady(
+    connector,
+    submitted.taskId,
+    secret,
+    value,
+    first.progress
+  );
+  assert.equal(ready.status, "READY");
+  assert.deepEqual(pages, ["0", "1", "1", "2"]);
+});
+
+test("keeps persisted Live checkpoints bounded and URL-safe", () => {
+  const documents = Array.from({ length: 10 }, (_, index) => ({
+    position: index + 1,
+    url: `https://example-${index}.com/`,
+    title: "result"
+  }));
+  assert.equal(
+    xmlStockRankPageProgress({
+      schemaVersion: "xmlstock-rank-page-progress@1",
+      taskId: "xmlstock-live-safe",
+      engine: "YANDEX",
+      depth: 30,
+      nextPage: 1,
+      documents
+    }).documents.length,
+    10
+  );
+  assert.throws(() =>
+    xmlStockRankPageProgress({
+      schemaVersion: "xmlstock-rank-page-progress@1",
+      taskId: "xmlstock-live-oversized",
+      engine: "YANDEX",
+      depth: 30,
+      nextPage: 1,
+      documents: documents.map((document, index) =>
+        index === 0
+          ? { ...document, snippet: "x".repeat(8_193) }
+          : document
+      )
+    })
+  );
+});
+
+async function fetchLiveUntilReady(
+  connector: XmlStockRankConnector,
+  taskId: string,
+  secret: { readonly accountIdentifier: string; readonly apiKey: string },
+  value: RankProviderRequestIntentV1,
+  initialProgress?: XmlStockRankPageProgressV1
+): Promise<Extract<XmlStockRankFetchResult, { readonly status: "READY" }>> {
+  let progress = initialProgress;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const result = await connector.fetchResult(
+      taskId,
+      secret,
+      1_000,
+      value,
+      progress
+    );
+    if (result.status === "READY") return result;
+    assert.equal(result.status, "CHECKPOINTED");
+    if (result.status !== "CHECKPOINTED") break;
+    progress = result.progress;
+  }
+  throw new Error("Live result was not completed within ten pages");
+}
 
 function intent(
   searchEngine: "YANDEX" | "GOOGLE",

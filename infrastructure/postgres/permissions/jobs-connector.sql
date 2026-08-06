@@ -354,7 +354,7 @@ SELECT format(
   'GRANT EXECUTE ON FUNCTION
     public.complete_rank_connector_poll(
       UUID, UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, INTEGER,
-      TIMESTAMPTZ, JSONB, BYTEA, TEXT
+      TIMESTAMPTZ, JSONB, BYTEA, TEXT, JSONB, BYTEA
     )
   TO %I',
   :'connector_user'
@@ -528,7 +528,7 @@ BEGIN
     'public.read_rank_connector_submit_request(uuid,uuid,text,uuid,integer,integer)'::regprocedure::oid,
     'public.complete_rank_connector_submit(uuid,uuid,text,uuid,integer,integer,text,text,jsonb,bytea,text)'::regprocedure::oid,
     'public.claim_rank_connector_poll(text,integer,text)'::regprocedure::oid,
-    'public.complete_rank_connector_poll(uuid,uuid,text,uuid,integer,integer,text,integer,timestamptz,jsonb,bytea,text)'::regprocedure::oid
+    'public.complete_rank_connector_poll(uuid,uuid,text,uuid,integer,integer,text,integer,timestamptz,jsonb,bytea,text,jsonb,bytea)'::regprocedure::oid
     ,
     'public.claim_keyword_research_run(text,integer)'::regprocedure::oid,
     'public.complete_keyword_research_page(uuid,text,uuid,integer,integer,jsonb,bytea,integer,boolean)'::regprocedure::oid,
