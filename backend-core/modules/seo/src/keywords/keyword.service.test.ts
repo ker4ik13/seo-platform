@@ -198,6 +198,72 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
   );
 });
 
+test("projects exact rank collection metadata into keyword history", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000012";
+  const contextId = "01900000-0000-7000-8000-000000000072";
+  const service = new KeywordService(
+    {
+      keyword: {
+        findFirst: async () => ({ id: keywordId, note: null })
+      },
+      frequencySnapshot: { findMany: async () => [] },
+      currentRank: { findMany: async () => [] },
+      rankSnapshot: {
+        findMany: async () => [{
+          id: "01900000-0000-7000-8000-000000000073",
+          trackingContextId: contextId,
+          configurationVersion: 2,
+          provider: "XMLSTOCK",
+          found: false,
+          position: null,
+          observedAt: new Date("2026-08-06T11:45:00.000Z"),
+          manifest: {
+            execution: {
+              providerMappingVersion: "xmlstock-yandex-live@2"
+            }
+          }
+        }]
+      },
+      trackingContext: {
+        findMany: async () => [{ id: contextId, name: "Яндекс · Москва" }]
+      },
+      trackingContextVersion: {
+        findMany: async () => [{
+          contextId,
+          configurationVersion: 2,
+          searchEngine: "YANDEX",
+          device: "DESKTOP",
+          regionCode: "213",
+          regionLabel: "Москва",
+          countryCode: "RU",
+          language: "ru",
+          depth: 50
+        }]
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  const result = await service.insights(workspaceId, projectId, keywordId);
+
+  assert.deepEqual(result.positionHistory, [{
+    snapshotId: "01900000-0000-7000-8000-000000000073",
+    trackingContextId: contextId,
+    contextName: "Яндекс · Москва",
+    searchEngine: "YANDEX",
+    searchSource: "LIVE",
+    device: "DESKTOP",
+    regionCode: "213",
+    regionLabel: "Москва",
+    countryCode: "RU",
+    language: "ru",
+    depth: 50,
+    provider: "XMLSTOCK",
+    found: false,
+    observedAt: "2026-08-06T11:45:00.000Z"
+  }]);
+});
+
 test("orders source sorting on the server before cursor pagination", async () => {
   let observedOrderBy: unknown;
   const service = new KeywordService(
@@ -465,6 +531,7 @@ test("moves a keyword to the system trash before allowing permanent deletion", a
     targetPageId: null,
     isTracked: false,
     customValues: {},
+    note: null,
     sourceMode: "MANUAL",
     sourceId: null,
     createdBy: null,

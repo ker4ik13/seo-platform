@@ -13,6 +13,7 @@ import {
   semanticKeywordBulkResult,
   semanticKeywordCleaningPreview,
   semanticKeywordCleaningResult,
+  semanticKeywordInsights,
   semanticKeywordPage,
   semanticClusterPageBulkPreview,
   semanticClusterPageBulkResult,
@@ -23,6 +24,9 @@ import {
   semanticClusters,
   semanticCustomColumns,
   semanticKeywordCustomValue,
+  semanticNegativeKeywordApplyResult,
+  semanticNegativeKeywordPreset,
+  semanticNegativeKeywordPreview,
   semanticSavedViews,
   SeoDataClient
 } from "./seo-data.client.js";
@@ -143,7 +147,81 @@ test("accepts a strictly shaped semantic keyword page", () => {
   );
   assert.equal(result.data[0]?.positions?.[0]?.position, 5);
   assert.equal(result.data[0]?.positions?.[0]?.rankingUrl, "https://example.com/seo");
+  assert.equal(result.data[0]?.hasNote, false);
   assert.deepEqual(result.page, { hasNext: false, totalApprox: 1 });
+});
+
+test("validates safe interactive rank history metadata", () => {
+  const insights = semanticKeywordInsights({
+    keywordId,
+    frequencies: [],
+    positions: [],
+    positionHistory: [{
+      snapshotId: "01900000-0000-7000-8000-000000000007",
+      trackingContextId: contextId,
+      contextName: "Яндекс · Москва",
+      searchEngine: "YANDEX",
+      searchSource: "LIVE",
+      device: "DESKTOP",
+      regionCode: "213",
+      regionLabel: "Москва",
+      countryCode: "RU",
+      language: "ru",
+      depth: 50,
+      provider: "XMLSTOCK",
+      found: false,
+      observedAt: "2026-08-06T11:45:00.000Z"
+    }]
+  }, keywordId);
+
+  assert.equal(insights.positionHistory[0]?.searchSource, "LIVE");
+  assert.equal(insights.positionHistory[0]?.regionLabel, "Москва");
+  assert.equal(insights.positionHistory[0]?.depth, 50);
+  assert.throws(
+    () => semanticKeywordInsights({
+      ...insights,
+      positionHistory: [{
+        ...insights.positionHistory[0]!,
+        provider: "KEYS_SO"
+      }]
+    }, keywordId),
+    DomainError
+  );
+});
+
+test("validates negative keyword presets, preview and bounded apply results", () => {
+  const preset = semanticNegativeKeywordPreset({
+    id: "01900000-0000-7000-8000-000000000030",
+    name: "Города",
+    rules: { words: ["москва"], matchMode: "WHOLE_WORD", caseSensitive: false },
+    version: 1,
+    createdAt: "2026-08-06T10:00:00.000Z",
+    updatedAt: "2026-08-06T10:00:00.000Z"
+  });
+  assert.equal(preset.rules.words[0], "москва");
+  const preview = semanticNegativeKeywordPreview({
+    scannedCount: 10,
+    matchedCount: 1,
+    batchCount: 1,
+    hasMore: false,
+    previewHash: "a".repeat(64),
+    matchesTruncated: false,
+    matches: [{
+      keywordId,
+      text: "туры москва",
+      version: 2,
+      matchedWords: ["москва"]
+    }]
+  });
+  assert.equal(preview.matches[0]?.keywordId, keywordId);
+  assert.deepEqual(semanticNegativeKeywordApplyResult({ deletedCount: 1, hasMore: false }), {
+    deletedCount: 1,
+    hasMore: false
+  });
+  assert.throws(
+    () => semanticNegativeKeywordApplyResult({ deletedCount: 501, hasMore: false }),
+    DomainError
+  );
 });
 
 test("rejects malformed SEO data responses", () => {

@@ -4,6 +4,10 @@ import type {
   ConnectorOperationAttemptSummary,
   ConnectorRoutingScope
 } from "./integrations.js";
+import type {
+  RankEstimateProvider,
+  RankSearchSource
+} from "./rank-estimates.js";
 
 export const frequencyCollectionProviders = ["XMLSTOCK", "ARSENKIN"] as const;
 export type FrequencyCollectionProvider =
@@ -185,8 +189,10 @@ export interface InternalPersistFrequencySnapshotBatchInput {
 
 export interface SemanticKeywordInsights {
   readonly keywordId: string;
+  readonly note?: string;
   readonly frequencies: readonly FrequencySnapshotSummary[];
   readonly positions: readonly SemanticKeywordPositionSummary[];
+  readonly positionHistory: readonly SemanticKeywordPositionHistoryPoint[];
 }
 
 export interface SemanticKeywordPositionSummary {
@@ -199,5 +205,23 @@ export interface SemanticKeywordPositionSummary {
   readonly position?: number;
   readonly previousPosition?: number;
   readonly rankingUrl?: string;
+  readonly observedAt: string;
+}
+
+export interface SemanticKeywordPositionHistoryPoint {
+  readonly snapshotId: string;
+  readonly trackingContextId: string;
+  readonly contextName: string;
+  readonly searchEngine: "GOOGLE" | "YANDEX";
+  readonly searchSource?: RankSearchSource;
+  readonly device: "DESKTOP" | "MOBILE";
+  readonly regionCode: string;
+  readonly regionLabel?: string;
+  readonly countryCode?: string;
+  readonly language?: string;
+  readonly depth?: number;
+  readonly provider: RankEstimateProvider;
+  readonly found: boolean;
+  readonly position?: number;
   readonly observedAt: string;
 }

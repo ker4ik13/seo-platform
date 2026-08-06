@@ -10,6 +10,7 @@ export const semanticVersionReasons = [
   "CLUSTER_SPLIT",
   "BULK_UPDATE",
   "CLEANING",
+  "NEGATIVE_KEYWORDS",
   "IMPORT",
   "UNDO",
   "LEGACY"

@@ -41,7 +41,6 @@ export function SemanticsWorkspace({
         clusterRefreshVersion={clusterRefreshVersion}
         groupRefreshVersion={groupRefreshVersion}
         onGroupsChanged={() => setGroupRefreshVersion((value) => value + 1)}
-        onOpenClusters={() => setActiveTool("CLUSTERS")}
         onOpenColumns={() => setActiveTool("COLUMNS")}
         onOpenImport={() => setActiveTool("IMPORT")}
         projectId={projectId}

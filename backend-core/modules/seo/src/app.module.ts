@@ -20,6 +20,7 @@ import { ClusterModule } from "./clusters/cluster.module.js";
 import { FrequencyModule } from "./frequencies/frequency.module.js";
 import { OperationResultModule } from "./operation-results/operation-result.module.js";
 import { ProjectWorkspaceTransferModule } from "./project-transfers/project-workspace-transfer.module.js";
+import { NegativeKeywordModule } from "./negative-keywords/negative-keyword.module.js";
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { ProjectWorkspaceTransferModule } from "./project-transfers/project-work
     SystemModule,
     FrequencyModule,
     OperationResultModule,
+    NegativeKeywordModule,
     ProjectWorkspaceTransferModule
   ]
 })

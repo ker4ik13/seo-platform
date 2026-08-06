@@ -159,6 +159,7 @@ model Keyword {
   priority       Int            @default(0)
   isFavorite     Boolean        @default(false) @map("is_favorite")
   intent         String?        @db.VarChar(32)
+  note           String?        @db.Text
   status         EntityStatus   @default(ACTIVE)
   clusterId      String?        @map("cluster_id") @db.Uuid
   targetPageId   String?        @map("target_page_id") @db.Uuid
@@ -274,6 +275,28 @@ model SemanticSavedView {
   @@index([workspaceId, projectId, scope, status, updatedAt(sort: Desc), id(sort: Desc)], map: "semantic_saved_views_project_scope_status_updated_idx")
   @@index([workspaceId, projectId, ownerId, status, updatedAt(sort: Desc), id(sort: Desc)], map: "semantic_saved_views_owner_status_updated_idx")
   @@map("semantic_saved_views")
+}
+
+model SemanticNegativeKeywordPreset {
+  id             String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId    String       @map("workspace_id") @db.Uuid
+  projectId      String       @map("project_id") @db.Uuid
+  name           String       @db.VarChar(160)
+  normalizedName String       @map("normalized_name") @db.VarChar(160)
+  words          String[]
+  matchMode      String       @map("match_mode") @db.VarChar(32)
+  caseSensitive  Boolean      @default(false) @map("case_sensitive")
+  status         EntityStatus @default(ACTIVE)
+  version        Int          @default(1)
+  createdBy      String       @map("created_by") @db.Uuid
+  updatedBy      String       @map("updated_by") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt      DateTime?    @map("deleted_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, projectId, id], map: "semantic_negative_keyword_presets_tenant_project_id_key")
+  @@index([workspaceId, projectId, status, normalizedName, id], map: "semantic_negative_keyword_presets_project_name_idx")
+  @@map("semantic_negative_keyword_presets")
 }
 
 model KeywordGroup {

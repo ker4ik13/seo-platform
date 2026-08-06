@@ -107,6 +107,8 @@ export interface SemanticKeywordListItem {
   readonly targetUrl?: string;
   readonly tags: readonly string[];
   readonly tagsTruncated: boolean;
+  /** The list never exposes the note body, only its presence. */
+  readonly hasNote?: boolean;
   readonly customValues?: readonly import("./semantic-custom-columns.js").SemanticKeywordCustomValue[];
   readonly frequency?: SemanticKeywordListFrequency;
   readonly frequencies?: readonly SemanticKeywordListFrequencyValue[];
@@ -152,6 +154,7 @@ export interface ProjectPositionSummary {
 
 export interface CreateSemanticKeywordInput {
   readonly text: string;
+  readonly note?: string;
   readonly language: string;
   readonly priority: number;
   readonly isFavorite: boolean;
@@ -204,6 +207,7 @@ export interface UpdateSemanticKeywordInput {
   readonly clusterId?: string | null;
   readonly targetUrl?: string | null;
   readonly tagNames?: readonly string[];
+  readonly note?: string | null;
 }
 
 export interface InternalCreateSemanticKeywordInput

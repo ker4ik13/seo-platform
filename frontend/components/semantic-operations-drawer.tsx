@@ -5,6 +5,7 @@ import type {
   FrequencyCollectionSummary,
   RankJobSummary
 } from "@seo-platform/contracts";
+import Link from "next/link";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import {
   connectorRoutingScopeLabel,
@@ -107,21 +108,33 @@ export function SemanticOperationsDrawer({
     };
   }, [load, refreshToken]);
 
-  const operations = useMemo(() => {
+  const allOperations = useMemo(() => {
     const values: Operation[] = [
       ...frequencies.map(frequencyOperation),
       ...ranks.map(rankOperation)
     ];
-    return values
-      .filter((operation) => operation.tab === tab)
-      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-  }, [frequencies, ranks, tab]);
+    return values.sort((left, right) =>
+      right.createdAt.localeCompare(left.createdAt)
+    );
+  }, [frequencies, ranks]);
+
+  const operations = useMemo(
+    () => allOperations.filter((operation) => operation.tab === tab),
+    [allOperations, tab]
+  );
+
+  const recentlyCompleted = useMemo(
+    () => allOperations
+      .filter(({ tab: operationTab }) => operationTab === "COMPLETED")
+      .slice(0, 5),
+    [allOperations]
+  );
 
   const counts = useMemo(() => ({
-    ACTIVE: [...frequencies.map(frequencyOperation), ...ranks.map(rankOperation)].filter(({ tab }) => tab === "ACTIVE").length,
-    COMPLETED: [...frequencies.map(frequencyOperation), ...ranks.map(rankOperation)].filter(({ tab }) => tab === "COMPLETED").length,
-    ERROR: [...frequencies.map(frequencyOperation), ...ranks.map(rankOperation)].filter(({ tab }) => tab === "ERROR").length
-  }), [frequencies, ranks]);
+    ACTIVE: allOperations.filter(({ tab }) => tab === "ACTIVE").length,
+    COMPLETED: allOperations.filter(({ tab }) => tab === "COMPLETED").length,
+    ERROR: allOperations.filter(({ tab }) => tab === "ERROR").length
+  }), [allOperations]);
 
   async function cancel(operation: Operation): Promise<void> {
     setCancellingId(operation.id);
@@ -178,7 +191,7 @@ export function SemanticOperationsDrawer({
     <>
     <aside aria-label="Задачи и операции" className="semantic-operations-drawer">
       <header>
-        <div><span>Фоновые процессы</span><h2>Задачи и операции</h2></div>
+        <div><h2>Задачи и операции</h2><span>Прогресс обновляется автоматически</span></div>
         <button aria-label="Закрыть операции" onClick={onClose} type="button">×</button>
       </header>
       <div className="semantic-operation-tabs" role="tablist">
@@ -193,7 +206,7 @@ export function SemanticOperationsDrawer({
         {loading ? (
           <div className="semantic-dialog-loading" role="status">Загружаем журнал операций…</div>
         ) : operations.length > 0 ? operations.map((operation) => (
-          <article key={`${operation.kind}:${operation.id}`}>
+          <article className={`semantic-operation-card state-${operation.tab.toLocaleLowerCase()}`} key={`${operation.kind}:${operation.id}`}>
             <header>
               <strong className="provider-inline">
                 <ProviderLogo provider={operation.provider} size="compact" />
@@ -201,9 +214,12 @@ export function SemanticOperationsDrawer({
               </strong>
               <span className="semantic-operation-status">{operation.statusLabel}</span>
             </header>
+            <div className="semantic-operation-progress-head">
+              <strong>{operation.percent}%</strong>
+              <span>{operation.progressLabel}</span>
+            </div>
             <div className="semantic-operation-progress"><i style={{ width: `${operation.percent}%` }} /></div>
-            <div className="semantic-operation-meta"><span>{operation.progressLabel}</span><time>{formatDateTime(operation.createdAt)}</time></div>
-            {operation.routeLabel && <small>{operation.routeLabel}</small>}
+            <div className="semantic-operation-meta"><span>{operation.routeLabel ?? "Фоновая операция"}</span><time>{formatDateTime(operation.createdAt)}</time></div>
             {operation.errorCode && <small>Код: {operation.errorCode}</small>}
             <footer>
               <div>
@@ -225,12 +241,36 @@ export function SemanticOperationsDrawer({
                 onClick={() => setSelectedOperation(operation)}
                 type="button"
               >
-                Открыть результат
+                Открыть лог
               </button>
             </footer>
           </article>
         )) : (
-          <div className="semantic-inspector-empty semantic-operation-empty"><strong>В этом разделе задач нет</strong><span>История хранится на сервере и появится после первого запуска.</span></div>
+          <div className="semantic-inspector-empty semantic-operation-empty">
+            <strong>{tab === "ACTIVE" ? "Активных задач нет" : "В этом разделе задач нет"}</strong>
+            <span>История хранится на сервере и обновляется без перезагрузки страницы.</span>
+          </div>
+        )}
+        {tab === "ACTIVE" && !loading && recentlyCompleted.length > 0 && (
+          <section className="semantic-recent-operations">
+            <h3>Недавно завершённые</h3>
+            {recentlyCompleted.map((operation) => (
+              <button
+                key={`recent:${operation.kind}:${operation.id}`}
+                onClick={() => setSelectedOperation(operation)}
+                type="button"
+              >
+                <span aria-hidden="true">✓</span>
+                <strong>{operation.title}</strong>
+                <time>{formatShortTime(operation.createdAt)}</time>
+              </button>
+            ))}
+          </section>
+        )}
+        {!loading && (
+          <Link className="semantic-operation-journal-link" href="/app/operations">
+            Открыть журнал операций
+          </Link>
         )}
       </div>
     </aside>
@@ -361,6 +401,16 @@ function tabLabel(value: OperationTab): string {
 function formatDateTime(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(date);
+}
+
+function formatShortTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "—"
+    : new Intl.DateTimeFormat("ru-RU", {
+        hour: "2-digit",
+        minute: "2-digit"
+      }).format(date);
 }
 
 function operationError(error: unknown): string {

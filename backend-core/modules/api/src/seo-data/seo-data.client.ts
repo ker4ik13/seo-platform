@@ -16,6 +16,7 @@ import {
   semanticCustomColumnTypes,
   semanticSavedViewDensities,
   semanticSavedViewScopes,
+  semanticNegativeKeywordMatchModes,
   semanticSystemColumnKeys,
   type ApiCollectionResponse,
   type CreateSemanticKeywordInput,
@@ -41,6 +42,11 @@ import {
   type InternalUpdateSemanticSavedViewInput,
   type InternalUpdateSemanticCustomColumnInput,
   type InternalUpdateSemanticKeywordInput,
+  type InternalCreateSemanticNegativeKeywordPresetInput,
+  type InternalUpdateSemanticNegativeKeywordPresetInput,
+  type InternalDeleteSemanticNegativeKeywordPresetInput,
+  type InternalSemanticNegativeKeywordCommandInput,
+  type InternalApplySemanticNegativeKeywordsInput,
   type InternalUpdateSemanticClusterInput,
   type InternalUpdateSemanticKeywordGroupInput,
   type CreateTrackingContextInput,
@@ -116,7 +122,14 @@ import {
   type UpdateSemanticClusterInput,
   type UpdateProjectPageInput,
   type UpdateSemanticKeywordGroupInput,
-  type UpdateTrackingContextInput
+  type UpdateTrackingContextInput,
+  type CreateSemanticNegativeKeywordPresetInput,
+  type UpdateSemanticNegativeKeywordPresetInput,
+  type SemanticNegativeKeywordCommandInput,
+  type ApplySemanticNegativeKeywordsInput,
+  type SemanticNegativeKeywordPreset,
+  type SemanticNegativeKeywordPreview,
+  type SemanticNegativeKeywordApplyResult
 } from "@seo-platform/contracts";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
 import { DomainError } from "../common/domain-error.js";
@@ -814,6 +827,120 @@ export class SeoDataClient {
       context
     );
     return semanticSavedViews(responseData(payload));
+  }
+
+  public async listNegativeKeywordPresets(
+    context: InternalContext
+  ): Promise<readonly SemanticNegativeKeywordPreset[]> {
+    const payload = await this.request(
+      "GET",
+      negativeKeywordPresetUrl(context, this.config.services.seoData),
+      context
+    );
+    return semanticNegativeKeywordPresets(responseData(payload));
+  }
+
+  public async createNegativeKeywordPreset(
+    context: InternalContext,
+    input: CreateSemanticNegativeKeywordPresetInput
+  ): Promise<SemanticNegativeKeywordPreset> {
+    const scope = trackingScope(context);
+    const body: InternalCreateSemanticNegativeKeywordPresetInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      negativeKeywordPresetUrl(context, this.config.services.seoData),
+      context,
+      body
+    );
+    return semanticNegativeKeywordPreset(responseData(payload));
+  }
+
+  public async updateNegativeKeywordPreset(
+    context: InternalContext,
+    presetId: string,
+    input: UpdateSemanticNegativeKeywordPresetInput,
+    version: number
+  ): Promise<SemanticNegativeKeywordPreset> {
+    const scope = trackingScope(context);
+    const body: InternalUpdateSemanticNegativeKeywordPresetInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    const payload = await this.request(
+      "PATCH",
+      negativeKeywordPresetUrl(context, this.config.services.seoData, presetId),
+      context,
+      body
+    );
+    return semanticNegativeKeywordPreset(responseData(payload));
+  }
+
+  public async deleteNegativeKeywordPreset(
+    context: InternalContext,
+    presetId: string,
+    version: number
+  ): Promise<void> {
+    const scope = trackingScope(context);
+    const body: InternalDeleteSemanticNegativeKeywordPresetInput = {
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    await this.request(
+      "DELETE",
+      negativeKeywordPresetUrl(context, this.config.services.seoData, presetId),
+      context,
+      body
+    );
+  }
+
+  public async previewNegativeKeywords(
+    context: InternalContext,
+    input: SemanticNegativeKeywordCommandInput
+  ): Promise<SemanticNegativeKeywordPreview> {
+    const scope = trackingScope(context);
+    const body: InternalSemanticNegativeKeywordCommandInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      negativeKeywordCommandUrl(context, this.config.services.seoData, "preview"),
+      context,
+      body
+    );
+    return semanticNegativeKeywordPreview(responseData(payload));
+  }
+
+  public async applyNegativeKeywords(
+    context: InternalContext,
+    input: ApplySemanticNegativeKeywordsInput
+  ): Promise<SemanticNegativeKeywordApplyResult> {
+    const scope = trackingScope(context);
+    const body: InternalApplySemanticNegativeKeywordsInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      negativeKeywordCommandUrl(context, this.config.services.seoData, "apply"),
+      context,
+      body
+    );
+    return semanticNegativeKeywordApplyResult(responseData(payload));
   }
 
   public async listSemanticCustomColumns(
@@ -1629,23 +1756,29 @@ export function semanticKeywordPage(payload: unknown): KeywordPage {
   };
 }
 
-function semanticKeywordInsights(
+export function semanticKeywordInsights(
   value: unknown,
   keywordId: string
 ): SemanticKeywordInsights {
   const input = objectValue(value);
+  const positionHistory = input?.positionHistory ?? [];
   if (
     !input ||
     input.keywordId !== keywordId ||
     !Array.isArray(input.frequencies) ||
     input.frequencies.length > 100 ||
     !Array.isArray(input.positions) ||
-    input.positions.length > 50
+    input.positions.length > 50 ||
+    (input.note !== undefined &&
+      (typeof input.note !== "string" || input.note.length > 4_000)) ||
+    !Array.isArray(positionHistory) ||
+    positionHistory.length > 240
   ) {
     throw invalidResponse();
   }
   return {
     keywordId,
+    ...(typeof input.note === "string" ? { note: input.note } : {}),
     frequencies: input.frequencies.map((value) => {
       const item = objectValue(value);
       if (
@@ -1710,6 +1843,64 @@ function semanticKeywordInsights(
         ...(typeof item.rankingUrl === "string" ? { rankingUrl: item.rankingUrl } : {}),
         observedAt: item.observedAt
       };
+    }),
+    positionHistory: positionHistory.map((value) => {
+      const item = objectValue(value);
+      if (
+        !item ||
+        !requiredString(item.snapshotId) ||
+        !requiredString(item.trackingContextId) ||
+        !requiredString(item.contextName) ||
+        !["GOOGLE", "YANDEX"].includes(String(item.searchEngine)) ||
+        (item.searchSource !== undefined &&
+          !["LIVE", "SEARCH_API"].includes(String(item.searchSource))) ||
+        !["DESKTOP", "MOBILE"].includes(String(item.device)) ||
+        !requiredString(item.regionCode) ||
+        (item.regionLabel !== undefined &&
+          (typeof item.regionLabel !== "string" ||
+            item.regionLabel.length < 1 ||
+            item.regionLabel.length > 160)) ||
+        (item.countryCode !== undefined &&
+          (typeof item.countryCode !== "string" ||
+            !/^[A-Z]{2}$/u.test(item.countryCode))) ||
+        (item.language !== undefined &&
+          (typeof item.language !== "string" ||
+            !/^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/u.test(item.language))) ||
+        (item.depth !== undefined &&
+          (!Number.isSafeInteger(item.depth) ||
+            Number(item.depth) < 1 ||
+            Number(item.depth) > 1_000)) ||
+        !["XMLSTOCK", "ARSENKIN"].includes(String(item.provider)) ||
+        typeof item.found !== "boolean" ||
+        (item.position !== undefined &&
+          (!Number.isSafeInteger(item.position) || Number(item.position) < 1)) ||
+        !validDate(item.observedAt)
+      ) throw invalidResponse();
+      return {
+        snapshotId: item.snapshotId,
+        trackingContextId: item.trackingContextId,
+        contextName: item.contextName,
+        searchEngine: item.searchEngine as "GOOGLE" | "YANDEX",
+        ...(item.searchSource === "LIVE" || item.searchSource === "SEARCH_API"
+          ? { searchSource: item.searchSource }
+          : {}),
+        device: item.device as "DESKTOP" | "MOBILE",
+        regionCode: item.regionCode,
+        ...(typeof item.regionLabel === "string"
+          ? { regionLabel: item.regionLabel }
+          : {}),
+        ...(typeof item.countryCode === "string"
+          ? { countryCode: item.countryCode }
+          : {}),
+        ...(typeof item.language === "string"
+          ? { language: item.language }
+          : {}),
+        ...(typeof item.depth === "number" ? { depth: item.depth } : {}),
+        provider: item.provider as "XMLSTOCK" | "ARSENKIN",
+        found: item.found,
+        ...(typeof item.position === "number" ? { position: item.position } : {}),
+        observedAt: item.observedAt
+      };
     })
   };
 }
@@ -1763,6 +1954,7 @@ export function semanticKeywordItem(
     !Number.isSafeInteger(item.priority) ||
     typeof item.isFavorite !== "boolean" ||
     typeof item.isTracked !== "boolean" ||
+    (item.hasNote !== undefined && typeof item.hasNote !== "boolean") ||
     (item.intent !== undefined &&
       (typeof item.intent !== "string" ||
         !semanticKeywordIntents.some((intent) => intent === item.intent))) ||
@@ -1799,6 +1991,7 @@ export function semanticKeywordItem(
     priority: item.priority as number,
     isFavorite: item.isFavorite,
     isTracked: item.isTracked,
+    hasNote: item.hasNote === true,
     ...(typeof item.intent === "string"
       ? {
           intent: item.intent as SemanticKeywordIntent
@@ -3041,6 +3234,108 @@ export function semanticSavedViews(
   return views;
 }
 
+export function semanticNegativeKeywordPresets(
+  value: unknown
+): readonly SemanticNegativeKeywordPreset[] {
+  if (!Array.isArray(value) || value.length > 500) throw invalidResponse();
+  const presets = value.map(semanticNegativeKeywordPreset);
+  if (new Set(presets.map(({ id }) => id)).size !== presets.length) throw invalidResponse();
+  return presets;
+}
+
+export function semanticNegativeKeywordPreset(
+  value: unknown
+): SemanticNegativeKeywordPreset {
+  const input = objectValue(value);
+  const rules = objectValue(input?.rules);
+  if (
+    !input ||
+    !requiredString(input.id) ||
+    !requiredString(input.name) ||
+    input.name.length > 160 ||
+    !rules ||
+    !Array.isArray(rules.words) ||
+    rules.words.length < 1 ||
+    rules.words.length > 500 ||
+    !rules.words.every((word) => typeof word === "string" && word.length > 0 && word.length <= 160) ||
+    typeof rules.matchMode !== "string" ||
+    !semanticNegativeKeywordMatchModes.some((mode) => mode === rules.matchMode) ||
+    typeof rules.caseSensitive !== "boolean" ||
+    !Number.isSafeInteger(input.version) ||
+    Number(input.version) < 1 ||
+    !validDate(input.createdAt) ||
+    !validDate(input.updatedAt)
+  ) throw invalidResponse();
+  return {
+    id: input.id,
+    name: input.name,
+    rules: {
+      words: rules.words as string[],
+      matchMode: rules.matchMode as SemanticNegativeKeywordPreset["rules"]["matchMode"],
+      caseSensitive: rules.caseSensitive
+    },
+    version: Number(input.version),
+    createdAt: input.createdAt,
+    updatedAt: input.updatedAt
+  };
+}
+
+export function semanticNegativeKeywordPreview(
+  value: unknown
+): SemanticNegativeKeywordPreview {
+  const input = objectValue(value);
+  if (
+    !input ||
+    !Number.isSafeInteger(input.scannedCount) || Number(input.scannedCount) < 0 ||
+    !Number.isSafeInteger(input.matchedCount) || Number(input.matchedCount) < 0 ||
+    !Number.isSafeInteger(input.batchCount) || Number(input.batchCount) < 0 || Number(input.batchCount) > 500 ||
+    typeof input.hasMore !== "boolean" ||
+    typeof input.matchesTruncated !== "boolean" ||
+    typeof input.previewHash !== "string" || !/^[a-f0-9]{64}$/u.test(input.previewHash) ||
+    !Array.isArray(input.matches) || input.matches.length !== Number(input.batchCount)
+  ) throw invalidResponse();
+  const matches = input.matches.map((value) => {
+    const item = objectValue(value);
+    if (
+      !item ||
+      !requiredString(item.keywordId) ||
+      typeof item.text !== "string" ||
+      !Number.isSafeInteger(item.version) || Number(item.version) < 1 ||
+      !Array.isArray(item.matchedWords) ||
+      item.matchedWords.length < 1 ||
+      item.matchedWords.length > 500 ||
+      !item.matchedWords.every((word) => typeof word === "string" && word.length > 0)
+    ) throw invalidResponse();
+    return {
+      keywordId: item.keywordId,
+      text: item.text,
+      version: Number(item.version),
+      matchedWords: item.matchedWords as string[]
+    };
+  });
+  return {
+    scannedCount: Number(input.scannedCount),
+    matchedCount: Number(input.matchedCount),
+    batchCount: Number(input.batchCount),
+    hasMore: input.hasMore,
+    previewHash: input.previewHash,
+    matches,
+    matchesTruncated: input.matchesTruncated
+  };
+}
+
+export function semanticNegativeKeywordApplyResult(
+  value: unknown
+): SemanticNegativeKeywordApplyResult {
+  const input = objectValue(value);
+  if (
+    !input ||
+    !Number.isSafeInteger(input.deletedCount) || Number(input.deletedCount) < 0 || Number(input.deletedCount) > 500 ||
+    typeof input.hasMore !== "boolean"
+  ) throw invalidResponse();
+  return { deletedCount: Number(input.deletedCount), hasMore: input.hasMore };
+}
+
 export function semanticSavedView(value: unknown): SemanticSavedView {
   const view = exactRecord(value, [
     "id",
@@ -3169,6 +3464,28 @@ function semanticSavedViewUrl(
   )}/semantic-saved-views`;
   return new URL(
     viewId ? `${base}/${encodeURIComponent(viewId)}` : base,
+    baseUrl
+  );
+}
+
+function negativeKeywordPresetUrl(
+  context: InternalContext,
+  baseUrl: string,
+  presetId?: string
+): URL {
+  const projectId = requiredProjectId(context.tenant);
+  const base = `/internal/v1/projects/${encodeURIComponent(projectId)}/negative-keyword-presets`;
+  return new URL(presetId ? `${base}/${encodeURIComponent(presetId)}` : base, baseUrl);
+}
+
+function negativeKeywordCommandUrl(
+  context: InternalContext,
+  baseUrl: string,
+  action: "preview" | "apply"
+): URL {
+  const projectId = requiredProjectId(context.tenant);
+  return new URL(
+    `/internal/v1/projects/${encodeURIComponent(projectId)}/negative-keywords/${action}`,
     baseUrl
   );
 }

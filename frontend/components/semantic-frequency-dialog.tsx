@@ -1,7 +1,5 @@
 "use client";
 
-import { CustomSelect } from "./custom-select";
-
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import type {
   FrequencyCollectionSummary,
@@ -24,6 +22,7 @@ import {
 } from "../lib/project-integration-settings";
 import { integrationProviderLabel } from "../lib/integration-presentation";
 import { frequencyProviderUsageEstimate } from "../lib/provider-usage-estimate";
+import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
 import { SearchableRegionSelect } from "./searchable-region-select";
 import { SemanticModal } from "./semantic-modal";
@@ -172,23 +171,17 @@ export function SemanticFrequencyDialog({
 
   return (
     <SemanticModal
-      description="Сбор выполняется в фоне через выбранный проверенный Wordstat API. Секрет не попадает в очередь, браузер или журнал операции."
       onClose={running ? () => undefined : onClose}
       size="large"
       title="Сбор частотности"
     >
-      <form className="semantic-frequency-dialog" onSubmit={(event) => void submit(event)}>
-        <SemanticOperationScope
-          activeGroupId={activeGroupId}
-          groups={groups}
-          initialSelections={initialSelections}
-          maxItems={keywordLimit}
-          onChange={resolveScope}
-          projectId={projectId}
-        />
-        <div className="semantic-frequency-grid">
-          <section>
-            <h3>Источник данных</h3>
+      <form className="semantic-frequency-dialog semantic-workflow-dialog" onSubmit={(event) => void submit(event)}>
+        <div className="semantic-workflow-grid semantic-frequency-workflow-grid">
+          <section className="semantic-workflow-panel semantic-source-panel">
+            <header>
+              <h3>Источник данных</h3>
+              <p>Выберите подключение, через которое будет выполнен сбор.</p>
+            </header>
             {loadingSources ? (
               <div className="semantic-dialog-loading" role="status">Загружаем подключения…</div>
             ) : sources.length ? (
@@ -203,75 +196,92 @@ export function SemanticFrequencyDialog({
                     type="button"
                   >
                     <ProviderLogo provider={source.provider} />
-                    <span>
+                    <span className="semantic-provider-card-copy">
                       <strong>{integrationProviderLabel(source.provider)}</strong>
-                      <small>{source.label} · ваш API</small>
+                      <small>{source.label} · Wordstat API</small>
+                      <b>Подключено</b>
                     </span>
-                    <i>{source.id === credentialId ? "Выбран" : "Выбрать"}</i>
+                    <i aria-hidden="true" className="semantic-provider-radio" />
                   </button>
                 ))}
               </div>
             ) : (
               <div className="inline-alert warning">Нет проверенного подключения с функцией Wordstat.</div>
             )}
-            <a href="/app/settings/integrations">Управление API-ключами</a>
+            <a className="semantic-dialog-link" href="/app/settings/integrations">Управление подключениями</a>
           </section>
-          <section>
-            <h3>Параметры сбора</h3>
-            <fieldset>
+          <section className="semantic-workflow-panel semantic-settings-panel">
+            <header>
+              <h3>Настройки сбора</h3>
+              <p>Укажите охват, регион, устройство и виды частотности.</p>
+            </header>
+            <SemanticOperationScope
+              activeGroupId={activeGroupId}
+              groups={groups}
+              initialSelections={initialSelections}
+              maxItems={keywordLimit}
+              onChange={resolveScope}
+              projectId={projectId}
+            />
+            <div className="semantic-frequency-settings">
+              <fieldset className="semantic-check-list">
               <legend>Виды частотности</legend>
               <label><input checked={types.has("BASE")} onChange={() => toggleType("BASE")} type="checkbox" /> Базовая</label>
               <label><input checked={types.has("EXACT")} onChange={() => toggleType("EXACT")} type="checkbox" /> Фразовая</label>
               <label><input checked={types.has("FIXED")} onChange={() => toggleType("FIXED")} type="checkbox" /> Точная словоформа</label>
-            </fieldset>
-            <label>
-              <span>Регион Wordstat</span>
-              <SearchableRegionSelect
-                allowAll
-                autoFocus
-                kind="WORDSTAT"
-                onChange={({ code }) => setRegionCode(code)}
-                value={regionCode}
-              />
-              <small>Начните вводить название или код региона.</small>
-            </label>
-            <label>
-              <span>Устройство</span>
-              <CustomSelect onChange={(event) => setDevice(event.target.value as SemanticFrequencyDevice)} value={device}>
-                <option value="ALL">Все устройства</option>
-                <option value="DESKTOP">Десктоп</option>
-                <option value="MOBILE">Мобильные</option>
-                <option value="PHONE_ONLY">Только телефоны</option>
-                <option value="TABLET_ONLY">Только планшеты</option>
-              </CustomSelect>
-            </label>
+              </fieldset>
+              <label className="semantic-workflow-field">
+                <span>Регион Wordstat</span>
+                <SearchableRegionSelect
+                  allowAll
+                  autoFocus
+                  kind="WORDSTAT"
+                  onChange={({ code }) => setRegionCode(code)}
+                  value={regionCode}
+                />
+                <small>По умолчанию — Россия, код 225.</small>
+              </label>
+              <fieldset className="semantic-segmented-field">
+                <legend>Устройство</legend>
+                <div className="semantic-segmented-control" role="radiogroup" aria-label="Устройство Wordstat">
+                  {([
+                    ["ALL", "Все"],
+                    ["DESKTOP", "Десктоп"],
+                    ["MOBILE", "Мобильные"],
+                    ["PHONE_ONLY", "Телефоны"],
+                    ["TABLET_ONLY", "Планшеты"]
+                  ] as const).map(([value, label]) => (
+                    <label className={device === value ? "selected" : undefined} key={value}>
+                      <input checked={device === value} onChange={() => setDevice(value)} type="radio" />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            </div>
           </section>
         </div>
         <dl className="semantic-dialog-estimate">
-          <div><dt>Запросов</dt><dd>{selections.length}</dd></div>
+          <div><Icon name="semantic" /><div><dt>К сбору</dt><dd>{selections.length} запросов</dd></div></div>
           <div>
-            <dt>Задач провайдера</dt>
-            <dd>
-              {selectedSource?.provider === "ARSENKIN"
-                ? selections.length > 0
-                  ? 1
-                  : 0
-                : `до ${selections.length * orderedTypes.length}`}
-            </dd>
+            <Icon name="operations" />
+            <div><dt>Операций</dt><dd>{selectedSource?.provider === "ARSENKIN" ? (selections.length > 0 ? 1 : 0) : `до ${selections.length * orderedTypes.length}`}</dd></div>
           </div>
-          <div><dt>Расход провайдера</dt><dd>{providerUsage.usage}</dd></div>
-          <div><dt>Доступно сейчас</dt><dd>{providerUsage.available}</dd></div>
+          <div><Icon name="frequency" /><div><dt>Расход провайдера</dt><dd>{providerUsage.usage}</dd></div></div>
+          <div><Icon name="checkDouble" /><div><dt>Доступно сейчас</dt><dd>{providerUsage.available}</dd></div></div>
         </dl>
-        {error && (
-          <div className="inline-alert danger" role="alert">
-            <span>{error.message}</span>{" "}
-            {error.showRoutingLink && (
-              <a href={`/app/projects/${encodeURIComponent(projectId)}/settings/integrations`}>Настроить маршрут Wordstat</a>
-            )}
-          </div>
-        )}
-        {scopeError && <div className="inline-alert warning" role="alert">{scopeError}</div>}
-        <div className="semantic-modal-actions">
+        {(error || scopeError) && <div className="semantic-workflow-feedback">
+          {error && (
+            <div className="inline-alert danger" role="alert">
+              <span>{error.message}</span>{" "}
+              {error.showRoutingLink && (
+                <a href={`/app/projects/${encodeURIComponent(projectId)}/settings/integrations`}>Настроить маршрут Wordstat</a>
+              )}
+            </div>
+          )}
+          {scopeError && <div className="inline-alert warning" role="alert">{scopeError}</div>}
+        </div>}
+        <div className="semantic-modal-actions semantic-workflow-footer">
           <button className="secondary-button" disabled={running} onClick={onClose} type="button">Отмена</button>
           <button className="primary-button" disabled={loadingSources || resolvingScope || running || !selectedSource || selections.length === 0 || orderedTypes.length === 0} type="submit">
             {resolvingScope ? "Загружаем запросы…" : running ? "Запускаем…" : `Запустить сбор (${selections.length})`}

@@ -14,6 +14,7 @@ import { SemanticVersionController } from "./semantic-version.controller.js";
 import { SemanticClusterController } from "./semantic-cluster.controller.js";
 import { JobsModule } from "../jobs/jobs.module.js";
 import { FrequencyCollectionController } from "./frequency-collection.controller.js";
+import { NegativeKeywordController } from "./negative-keyword.controller.js";
 
 @Module({
   imports: [
@@ -32,7 +33,8 @@ import { FrequencyCollectionController } from "./frequency-collection.controller
     SemanticSavedViewController,
     SemanticExportController,
     SemanticVersionController,
-    FrequencyCollectionController
+    FrequencyCollectionController,
+    NegativeKeywordController
   ],
   providers: [SemanticExportService]
 })

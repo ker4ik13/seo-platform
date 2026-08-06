@@ -36,6 +36,7 @@ export function internalCreateSemanticKeywordInput(
     ...scope(input),
     entitlement: semanticCapacityEntitlement(input.entitlement),
     text: keywordText(input.text),
+    ...optionalNote(input.note, false),
     language: canonicalLanguage(input.language),
     priority: priority(input.priority),
     isFavorite: booleanValue(input.isFavorite, "isFavorite"),
@@ -125,6 +126,7 @@ export function internalUpdateSemanticKeywordInput(
     ...optionalGroupId(input.groupId, true),
     ...optionalClusterId(input.clusterId, true),
     ...optionalTargetUrl(input.targetUrl, true),
+    ...optionalNote(input.note, true),
     ...(input.tagNames === undefined
       ? {}
       : { tagNames: tagNames(input.tagNames) })
@@ -300,6 +302,7 @@ function scopeFields(): readonly string[] {
 function editableFields(): readonly string[] {
   return [
     "text",
+    "note",
     "language",
     "priority",
     "isFavorite",
@@ -309,6 +312,20 @@ function editableFields(): readonly string[] {
     "targetUrl",
     "tagNames"
   ];
+}
+
+function optionalNote(value: unknown, nullable: false): Readonly<{ note?: string }>;
+function optionalNote(value: unknown, nullable: true): Readonly<{ note?: string | null }>;
+function optionalNote(
+  value: unknown,
+  nullable: boolean
+): Readonly<{ note?: string | null }> {
+  if (value === undefined) return {};
+  if (value === null && nullable) return { note: null };
+  if (typeof value !== "string") invalid("note");
+  const note = value.normalize("NFKC").trim();
+  if (note.length > 4_000) invalid("note");
+  return note ? { note } : nullable ? { note: null } : {};
 }
 
 function scope(input: Readonly<Record<string, unknown>>): {

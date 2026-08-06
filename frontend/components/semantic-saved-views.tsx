@@ -15,12 +15,14 @@ import { isInternalSemanticViewName } from "./semantic-view-types";
 
 interface SemanticSavedViewsProps {
   readonly config: SemanticViewConfig;
+  readonly embedded?: boolean;
   readonly projectId: string;
   readonly onApply: (view: SemanticSavedView) => void;
 }
 
 export function SemanticSavedViews({
   config,
+  embedded = false,
   projectId,
   onApply
 }: SemanticSavedViewsProps) {
@@ -118,13 +120,8 @@ export function SemanticSavedViews({
     }
   }
 
-  return (
-    <details className="semantic-saved-views" data-exclusive-dropdown>
-      <summary>
-        Представления
-        <span>{loading ? "…" : visibleViews.length}</span>
-      </summary>
-      <div className="semantic-saved-views-body">
+  const body = (
+    <div className="semantic-saved-views-body">
         {visibleViews.length === 0 && !loading ? (
           <p>Сохранённых представлений пока нет.</p>
         ) : (
@@ -192,7 +189,20 @@ export function SemanticSavedViews({
             {error}
           </div>
         )}
-      </div>
+    </div>
+  );
+  if (embedded) {
+    return (
+      <section className="semantic-saved-views embedded">
+        <header><strong>Сохранённые представления</strong><span>{loading ? "…" : visibleViews.length}</span></header>
+        {body}
+      </section>
+    );
+  }
+  return (
+    <details className="semantic-saved-views" data-exclusive-dropdown>
+      <summary>Представления<span>{loading ? "…" : visibleViews.length}</span></summary>
+      {body}
     </details>
   );
 }

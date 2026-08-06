@@ -239,8 +239,14 @@ base64url cursor. Array/unknown parameters и некогерентный диа�
 Семантическая таблица показывает для Яндекса и Google текущую позицию,
 релевантный URL и дату последнего съёма. `observedAt` заполняется и для
 нормализованного `not-found`: в этом случае позиция и URL отображаются красным
-крестом, а дата остаётся доступной. Колонки дат участвуют в server-side sort,
-поэтому их порядок сохраняется при cursor pagination и infinite scroll.
+крестом, рядом сохраняется последняя найденная позиция, а дата остаётся
+доступной. Найденная позиция сопровождается дельтой относительно предыдущего
+найденного значения, а не дублирует его текстом. Keyword insights проецирует
+для каждой исторической точки только безопасные параметры воспроизводимости:
+search engine/source, provider, region label/code, country, language, device,
+depth, context name и `observedAt`; provider request ID и raw response в
+browser не выдаются. Колонки дат участвуют в server-side sort, поэтому их
+порядок сохраняется при cursor pagination и infinite scroll.
 
 Private/noindex Web route
 `/app/projects/:projectId/rankings` показывает UTC date range,

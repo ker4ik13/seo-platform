@@ -45,8 +45,12 @@ export function SemanticOperationScope({
   ) => void;
   projectId: string;
 }>) {
-  const initialMode = initialSelections.length > 0 ? "QUERIES" : "GROUPS";
-  const [mode, setMode] = useState<"QUERIES" | "GROUPS">(initialMode);
+  const initialMode = initialSelections.length > 0
+    ? "QUERIES"
+    : activeGroupId
+      ? "GROUPS"
+      : "ALL";
+  const [mode, setMode] = useState<"ALL" | "QUERIES" | "GROUPS">(initialMode);
   const [querySearch, setQuerySearch] = useState("");
   const [queryOptions, setQueryOptions] = useState<readonly KeywordListItem[]>([]);
   const [queryLoading, setQueryLoading] = useState(false);
@@ -101,13 +105,16 @@ export function SemanticOperationScope({
       onChange([...querySelections.values()], false);
       return;
     }
-    if (resolvedGroupIds.length === 0) {
+    if (mode === "GROUPS" && resolvedGroupIds.length === 0) {
       onChange([], false);
       return;
     }
     const controller = new AbortController();
     onChange([], true);
-    void loadGroupSelections(projectId, resolvedGroupIds, maxItems, controller.signal)
+    const loader = mode === "ALL"
+      ? loadProjectSelections(projectId, maxItems, controller.signal)
+      : loadGroupSelections(projectId, resolvedGroupIds, maxItems, controller.signal);
+    void loader
       .then((selections) => {
         if (!controller.signal.aborted) onChange(selections, false);
       })
@@ -210,6 +217,16 @@ export function SemanticOperationScope({
       <div className="semantic-operation-scope-tabs" role="radiogroup" aria-label="Охват операции">
         <label>
           <input
+            checked={mode === "ALL"}
+            name="operation-scope"
+            onChange={() => setMode("ALL")}
+            type="radio"
+          />
+          <span>Все запросы проекта</span>
+          <b>Все</b>
+        </label>
+        <label>
+          <input
             checked={mode === "QUERIES"}
             name="operation-scope"
             onChange={() => setMode("QUERIES")}
@@ -229,7 +246,12 @@ export function SemanticOperationScope({
           <b>{selectedGroupIds.size}</b>
         </label>
       </div>
-      {mode === "QUERIES" ? (
+      {mode === "ALL" ? (
+        <div className="semantic-operation-all-scope">
+          <strong>Будут обработаны все активные запросы</strong>
+          <span>Состав загружается с сервера и фиксируется до запуска операции.</span>
+        </div>
+      ) : mode === "QUERIES" ? (
         <div className="semantic-operation-query-picker">
           <div className="semantic-operation-query-search">
             <label>
@@ -369,4 +391,32 @@ async function loadGroupSelections(
     } while (cursor);
   }
   return [...selections.values()];
+}
+
+async function loadProjectSelections(
+  projectId: string,
+  maxItems: number,
+  signal: AbortSignal
+): Promise<readonly SemanticOperationSelection[]> {
+  const selections: SemanticOperationSelection[] = [];
+  let cursor: string | undefined;
+  do {
+    const query = new URLSearchParams({ limit: "500", sort: "CREATED_ASC" });
+    if (cursor) query.set("cursor", cursor);
+    const page = await browserApiCollectionRequest<KeywordListItem>(
+      `/app/api/projects/${encodeURIComponent(projectId)}/keywords?${query.toString()}`,
+      { signal }
+    );
+    for (const keyword of page.data) {
+      if (keyword.trashed) continue;
+      selections.push({ id: keyword.id, version: keyword.version, label: keyword.textOriginal });
+      if (selections.length > maxItems) {
+        throw new Error(
+          `В проекте больше ${maxItems} запросов. Выберите отдельные папки или конкретные запросы.`
+        );
+      }
+    }
+    cursor = page.page.hasNext ? page.page.nextCursor : undefined;
+  } while (cursor);
+  return selections;
 }

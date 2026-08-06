@@ -1,10 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { SemanticKeywordInsights } from "@seo-platform/contracts";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import type {
+  SemanticKeywordInsights,
+  SemanticKeywordListItem
+} from "@seo-platform/contracts";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
+import {
+  primaryRankContextIds,
+  rankChangePresentation,
+  rankEngineLabel
+} from "../lib/semantic-rank-presentation";
 import type { SemanticKeywordIntent } from "./semantic-view-types";
 import { SearchEngineLogo } from "./search-engine-logo";
+import { SemanticRankHistoryChart } from "./semantic-rank-history-chart";
 
 export interface SemanticKeywordInspectorItem {
   readonly id: string;
@@ -14,6 +23,7 @@ export interface SemanticKeywordInspectorItem {
   readonly priority: number;
   readonly isFavorite: boolean;
   readonly isTracked: boolean;
+  readonly hasNote?: boolean;
   readonly intent?: SemanticKeywordIntent;
   readonly groupPath?: string;
   readonly clusterName?: string;
@@ -23,37 +33,52 @@ export interface SemanticKeywordInspectorItem {
   readonly trashed?: boolean;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly version: number;
 }
 
 export function SemanticKeywordInspector({
   item,
   onClose,
   onEdit,
+  onUpdated,
   projectId
 }: Readonly<{
   item: SemanticKeywordInspectorItem;
   onClose: () => void;
   onEdit: () => void;
+  onUpdated: (item: SemanticKeywordListItem) => void;
   projectId: string;
 }>) {
   const [insights, setInsights] = useState<SemanticKeywordInsights>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
+  const [note, setNote] = useState("");
+  const [noteDirty, setNoteDirty] = useState(false);
+  const [savingNote, setSavingNote] = useState(false);
+  const [noteStatus, setNoteStatus] = useState<string>();
+  const noteDirtyRef = useRef(false);
+
+  useEffect(() => {
+    noteDirtyRef.current = noteDirty;
+  }, [noteDirty]);
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setError(undefined);
+    setNote("");
+    setNoteDirty(false);
+    setNoteStatus(undefined);
     const load = () => {
       void browserApiRequest<SemanticKeywordInsights>(
         `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(item.id)}/insights`,
         { signal: controller.signal }
       )
         .then((result) => {
-          if (!controller.signal.aborted) {
-            setInsights(result);
-            setError(undefined);
-          }
+          if (controller.signal.aborted) return;
+          setInsights(result);
+          if (!noteDirtyRef.current) setNote(result.note ?? "");
+          setError(undefined);
         })
         .catch((requestError) => {
           if (!controller.signal.aborted) setError(insightError(requestError));
@@ -63,7 +88,7 @@ export function SemanticKeywordInspector({
         });
     };
     load();
-    const timer = window.setInterval(load, 10_000);
+    const timer = window.setInterval(load, 5_000);
     return () => {
       controller.abort();
       window.clearInterval(timer);
@@ -79,6 +104,47 @@ export function SemanticKeywordInspector({
       return true;
     });
   }, [insights]);
+  const primaryPositions = useMemo(() => {
+    const positions = insights?.positions ?? [];
+    const contextIds = primaryRankContextIds(positions);
+    return new Map(
+      positions
+        .filter(({ searchEngine, trackingContextId }) =>
+          contextIds.get(searchEngine) === trackingContextId
+        )
+        .map((position) => [position.searchEngine, position] as const)
+    );
+  }, [insights]);
+
+  async function saveNote(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (savingNote || item.trashed) return;
+    setSavingNote(true);
+    setNoteStatus(undefined);
+    try {
+      const normalized = note.trim();
+      const updated = await browserApiRequest<SemanticKeywordListItem>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(item.id)}`,
+        {
+          method: "PATCH",
+          body: { note: normalized || null },
+          ifMatch: item.version
+        }
+      );
+      setInsights((current) => current ? {
+        ...withoutNote(current),
+        ...(normalized ? { note: normalized } : {})
+      } : current);
+      setNote(normalized);
+      setNoteDirty(false);
+      onUpdated(updated);
+      setNoteStatus(normalized ? "Заметка сохранена" : "Заметка удалена");
+    } catch (requestError) {
+      setNoteStatus(noteError(requestError));
+    } finally {
+      setSavingNote(false);
+    }
+  }
 
   return (
     <aside aria-label={`Детали запроса ${item.textOriginal}`} className="semantic-keyword-inspector">
@@ -97,19 +163,22 @@ export function SemanticKeywordInspector({
           <button aria-label="Закрыть детали" onClick={onClose} type="button">×</button>
         </div>
       </header>
-      <section>
-        <h3>Классификация</h3>
+
+      <section className="semantic-inspector-overview">
+        <h3>Обзор</h3>
         <dl>
           <div><dt>Интент</dt><dd><span className="semantic-intent-chip">{intentLabel(item.intent)}</span></dd></div>
-          <div><dt>Группа</dt><dd>{item.groupPath ?? "Без группы"}</dd></div>
+          <div><dt>Группа</dt><dd>{visibleGroupPath(item.groupPath)}</dd></div>
           <div><dt>Кластер</dt><dd>{item.clusterName ?? "Не назначен"}</dd></div>
           <div><dt>Язык</dt><dd>{item.language.toUpperCase()}</dd></div>
-          <div><dt>Приоритет</dt><dd>P{item.priority}</dd></div>
         </dl>
       </section>
+
       <section>
         <h3>Частотность</h3>
-        {loading ? <span className="semantic-inspector-muted">Загружаем срезы…</span> : latestFrequencies.length > 0 ? (
+        {loading ? (
+          <span className="semantic-inspector-muted">Загружаем срезы…</span>
+        ) : latestFrequencies.length > 0 ? (
           <div className="semantic-frequency-list">
             {latestFrequencies.map((frequency) => (
               <div className="semantic-frequency-row" key={`${frequency.type}:${frequency.regionCode}:${frequency.device}`}>
@@ -121,44 +190,58 @@ export function SemanticKeywordInspector({
                 <div className="semantic-frequency-value">
                   <strong>{frequency.value ? formatInteger(frequency.value) : "—"}</strong>
                   <small>{frequency.period ? `${frequency.period} · ` : ""}{formatDateTime(frequency.observedAt)}</small>
-                  {frequency.qualityFlags.length > 0 && <small className="negative">{frequency.qualityFlags.map(frequencyQualityLabel).join(", ")}</small>}
                 </div>
               </div>
             ))}
           </div>
         ) : (
-          <div className="semantic-inspector-empty">
-            <strong>Нет актуального среза</strong>
-            <span>Запустите сбор по выбранным запросам или импортируйте сохранённые значения.</span>
-          </div>
+          <InspectorEmpty title="Нет актуального среза" text="Запустите сбор частотности по этому запросу." />
         )}
       </section>
-      <section>
+
+      <section className="semantic-inspector-ranks">
         <h3>Позиции</h3>
-        {!loading && insights?.positions.length ? (
-          <dl>
-            {insights.positions.map((position) => (
-              <div key={position.trackingContextId}>
-                <dt className="semantic-position-context"><SearchEngineLogo engine={position.searchEngine} size="compact" /> <span>{position.contextName}</span></dt>
-                <dd>
-                  <strong>{position.found ? position.position ?? "—" : "Не найден"}</strong>
-                  {position.position !== undefined && position.previousPosition !== undefined && (
-                    <small className={position.position < position.previousPosition ? "positive" : position.position > position.previousPosition ? "negative" : undefined}>
-                      было {position.previousPosition}
-                    </small>
-                  )}
-                </dd>
-              </div>
-            ))}
-          </dl>
-        ) : (
-          <div className="semantic-inspector-empty">
-            <strong>{item.isTracked ? "Ожидается история съёмов" : "Запрос не отслеживается"}</strong>
-            <span>Позиции появятся после завершения фоновой проверки.</span>
+        {!loading ? (
+          <div className="semantic-current-ranks">
+            {(["YANDEX", "GOOGLE"] as const).map((engine) => {
+              const position = primaryPositions.get(engine);
+              const change = position?.position === undefined
+                ? undefined
+                : rankChangePresentation(
+                    position.position,
+                    position.previousPosition
+                  );
+              const lostDescription = position && !position.found
+                ? position.previousPosition === undefined
+                  ? "Позиция не найдена"
+                  : `Позиция не найдена. Была ${position.previousPosition}`
+                : undefined;
+              return (
+                <div key={engine}>
+                  <span>
+                    <SearchEngineLogo engine={engine} size="compact" />
+                    <span>{rankEngineLabel(engine)}</span>
+                  </span>
+                  <strong aria-label={change?.ariaLabel ?? lostDescription} className={!position?.found && position ? "lost" : undefined} title={change?.title ?? lostDescription}>
+                    {position ? (position.found ? position.position ?? "—" : "×") : "—"}
+                  </strong>
+                  {change ? (
+                    <small className={change.tone} title={change.title}>{change.label}</small>
+                  ) : lostDescription ? (
+                    <small className="declined">{position?.previousPosition === undefined ? "Не найдена" : `Была ${position.previousPosition}`}</small>
+                  ) : <small>Нет данных</small>}
+                </div>
+              );
+            })}
           </div>
+        ) : (
+          <span className="semantic-inspector-muted">Загружаем позиции…</span>
         )}
+        <SemanticRankHistoryChart points={insights?.positionHistory ?? []} />
       </section>
+
       {error && <div className="inline-alert danger" role="alert">{error}</div>}
+
       <section>
         <h3>Целевая страница</h3>
         {item.targetUrl ? (
@@ -167,26 +250,74 @@ export function SemanticKeywordInspector({
           <span className="semantic-inspector-muted">Не назначена</span>
         )}
       </section>
+
       <section>
         <h3>Теги</h3>
         <div className="semantic-inspector-tags">
-          {item.tags.length > 0 ? item.tags.map((tag) => <span key={tag}>{tag}</span>) : <span>Нет тегов</span>}
+          {item.tags.length > 0
+            ? item.tags.map((tag) => <span key={tag}>{tag}</span>)
+            : <span>Нет тегов</span>}
         </div>
       </section>
-      <section>
-        <h3>Источник и даты</h3>
-        <dl>
-          <div><dt>Источник</dt><dd>{sourceLabel(item.sourceMode)}</dd></div>
-          <div><dt>Создан</dt><dd>{formatDateTime(item.createdAt)}</dd></div>
-          <div><dt>Обновлён</dt><dd>{formatDateTime(item.updatedAt)}</dd></div>
-        </dl>
+
+      <section className="semantic-keyword-note">
+        <h3>Заметка</h3>
+        <form onSubmit={(event) => void saveNote(event)}>
+          <textarea
+            disabled={item.trashed || savingNote}
+            maxLength={4_000}
+            onChange={(event) => {
+              setNote(event.target.value);
+              setNoteDirty(true);
+              setNoteStatus(undefined);
+            }}
+            placeholder="Добавьте контекст, гипотезу или задачу по запросу…"
+            rows={5}
+            value={note}
+          />
+          <div>
+            <small>{note.length.toLocaleString("ru-RU")} / 4 000</small>
+            {!item.trashed && (
+              <button className="secondary-button" disabled={!noteDirty || savingNote} type="submit">
+                {savingNote ? "Сохраняем…" : "Сохранить"}
+              </button>
+            )}
+          </div>
+          {noteStatus && <p aria-live="polite">{noteStatus}</p>}
+        </form>
+      </section>
+
+      <section className="semantic-inspector-dates">
+        <small>Создан: {formatDateTime(item.createdAt)}</small>
+        <small>Обновлён: {formatDateTime(item.updatedAt)}</small>
+        <small>Источник: {sourceLabel(item.sourceMode)}</small>
       </section>
     </aside>
   );
 }
 
+function withoutNote(
+  insights: SemanticKeywordInsights
+): Omit<SemanticKeywordInsights, "note"> {
+  return {
+    keywordId: insights.keywordId,
+    frequencies: insights.frequencies,
+    positions: insights.positions,
+    positionHistory: insights.positionHistory
+  };
+}
+
+function InspectorEmpty({ title, text }: Readonly<{ title: string; text: string }>) {
+  return <div className="semantic-inspector-empty"><strong>{title}</strong><span>{text}</span></div>;
+}
+
+function visibleGroupPath(groupPath: string | undefined): string {
+  if (!groupPath || groupPath.startsWith("__system__/")) return "Без группы";
+  return groupPath;
+}
+
 function frequencyTypeLabel(type: string): string {
-  return { BASE: "База", EXACT: '""', FIXED: '"!"' }[type] ?? type;
+  return { BASE: "Базовая", EXACT: "Фразовая", FIXED: "Точная" }[type] ?? type;
 }
 
 function frequencyDeviceLabel(device: string): string {
@@ -199,26 +330,20 @@ function frequencyDeviceLabel(device: string): string {
   }[device] ?? device;
 }
 
-function frequencyQualityLabel(flag: string): string {
-  return {
-    CONTEXT_INCOMPLETE: "неполный контекст",
-    STALE: "устарело",
-    PARTIAL: "частичные данные",
-    ESTIMATED: "оценка"
-  }[flag] ?? flag;
-}
-
 function formatInteger(value: string): string {
   const number = Number(value);
-  return Number.isSafeInteger(number)
-    ? new Intl.NumberFormat("ru-RU").format(number)
-    : value;
+  return Number.isSafeInteger(number) ? new Intl.NumberFormat("ru-RU").format(number) : value;
 }
 
 function insightError(error: unknown): string {
-  return error instanceof BrowserApiError
-    ? error.message
-    : "Не удалось загрузить частотность и позиции.";
+  return error instanceof BrowserApiError ? error.message : "Не удалось загрузить частотность и позиции.";
+}
+
+function noteError(error: unknown): string {
+  if (error instanceof BrowserApiError && error.status === 412) {
+    return "Запрос изменился в другой вкладке. Закройте панель, откройте её снова и повторите сохранение.";
+  }
+  return error instanceof BrowserApiError ? error.message : "Не удалось сохранить заметку.";
 }
 
 function intentLabel(intent: SemanticKeywordIntent | undefined): string {

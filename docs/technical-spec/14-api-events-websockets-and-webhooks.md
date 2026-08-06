@@ -487,6 +487,10 @@ expiry `UNAUTHENTICATED` формируется только после успе
 - `/projects/{projectId}/custom-columns`;
 - `/projects/{projectId}/saved-views`;
 - `/projects/{projectId}/semantic-versions`;
+- `GET|POST /projects/{projectId}/negative-keyword-presets`;
+- `PATCH|DELETE /projects/{projectId}/negative-keyword-presets/{presetId}`;
+- `POST /projects/{projectId}/negative-keywords/preview`;
+- `POST /projects/{projectId}/negative-keywords/apply`;
 - `/projects/{projectId}/pages`;
 - `/projects/{projectId}/page-map`;
 - `/projects/{projectId}/bulk-commands`;
@@ -504,6 +508,13 @@ expiry `UNAUTHENTICATED` формируется только после успе
 - `seo-data` повторно сопоставляет route project с trusted project context;
 - внешний API никогда не раскрывает internal request ID и не доверяет форме
   ответа доменного сервиса без runtime validation.
+
+`PATCH /projects/{projectId}/keywords/{keywordId}` принимает nullable `note`
+до 4 000 символов и требует `If-Match`. Keyword insights возвращает полный
+текст заметки, текущие срезы и bounded историю позиций; list projection
+возвращает только `hasNote`. Negative-keyword apply требует CSRF,
+`semantic.delete`, hash предварительного preview и optimistic selection
+versions; preset mutations требуют `semantic.update` и `If-Match`.
 
 ### 13.4. Сбор данных
 

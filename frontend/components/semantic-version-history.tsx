@@ -325,6 +325,7 @@ function reasonLabel(reason: SemanticVersionListItem["reason"]): string {
     CLUSTER_SPLIT: "Разделение группы",
     BULK_UPDATE: "Массовое изменение запросов",
     CLEANING: "Очистка запросов",
+    NEGATIVE_KEYWORDS: "Применение минус-слов",
     IMPORT: "Импорт запросов",
     UNDO: "Служебное изменение",
     LEGACY: "Системное изменение"

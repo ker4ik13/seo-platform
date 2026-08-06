@@ -1418,6 +1418,7 @@ function versionReason(value: string): SemanticVersionReason {
       "CLUSTER_SPLIT",
       "BULK_UPDATE",
       "CLEANING",
+      "NEGATIVE_KEYWORDS",
       "UNDO"
     ].includes(value)
   ) {

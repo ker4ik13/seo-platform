@@ -583,6 +583,7 @@ import/consume. Production BYOK policy создаёт связанную audit r
 - cluster_id;
 - target_page_id;
 - intent;
+- note nullable, до 4 000 символов;
 - intent_confidence;
 - intent_source;
 - commerciality;
@@ -625,6 +626,18 @@ step отзывает `PUBLIC EXECUTE` у member functions и выдаёт их 
 `project_id` и активному status.
 
 При необходимости строгий dedup заменяется отдельной `keyword_unique_keys`, чтобы поддержать variants.
+
+#### `semantic_negative_keyword_presets`
+
+- `id`, `workspace_id`, `project_id`;
+- `name`, `normalized_name`;
+- `words text[]` cardinality `1..500`;
+- `match_mode = CONTAINS | WHOLE_WORD`;
+- `case_sensitive`;
+- `status`, `version`, actor/timestamps и soft-delete metadata.
+
+Активное имя уникально внутри проекта. Таблица принадлежит semantic core,
+участвует в точном allowlist project transfer и не содержит provider secrets.
 
 #### `keyword_variants`
 

@@ -33,6 +33,7 @@ export function createSemanticKeywordInput(
   const targetUrl = optionalTargetUrl(input.targetUrl, false).targetUrl;
   return {
     text: keywordText(input.text),
+    ...optionalNote(input.note, false),
     language: canonicalLanguage(input.language ?? "und"),
     priority: priority(input.priority ?? 0),
     isFavorite: booleanValue(input.isFavorite ?? false, "isFavorite"),
@@ -93,6 +94,7 @@ export function updateSemanticKeywordInput(
     ...optionalGroupId(input.groupId, true),
     ...optionalClusterId(input.clusterId, true),
     ...optionalTargetUrl(input.targetUrl, true),
+    ...optionalNote(input.note, true),
     ...(input.tagNames === undefined
       ? {}
       : { tagNames: tagNames(input.tagNames) })
@@ -270,6 +272,7 @@ function semanticKeywordBulkPatch(
 function editableFields(): readonly string[] {
   return [
     "text",
+    "note",
     "language",
     "priority",
     "isFavorite",
@@ -279,6 +282,24 @@ function editableFields(): readonly string[] {
     "targetUrl",
     "tagNames"
   ];
+}
+
+function optionalNote(value: unknown, nullable: false): Readonly<{ note?: string }>;
+function optionalNote(value: unknown, nullable: true): Readonly<{ note?: string | null }>;
+function optionalNote(
+  value: unknown,
+  nullable: boolean
+): Readonly<{ note?: string | null }> {
+  if (value === undefined) return {};
+  if (value === null && nullable) return { note: null };
+  if (typeof value !== "string") {
+    invalid("note", "Must be a string or null");
+  }
+  const note = value.normalize("NFKC").trim();
+  if (note.length > 4_000) {
+    invalid("note", "Must contain at most 4000 characters");
+  }
+  return note ? { note } : nullable ? { note: null } : {};
 }
 
 function keywordText(value: unknown): string {

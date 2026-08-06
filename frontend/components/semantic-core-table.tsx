@@ -7,7 +7,9 @@ import {
   semanticKeywordPageSizes,
   type SemanticKeywordPageSize,
   type SemanticKeywordBulkCreateItemInput,
-  type SemanticKeywordBulkCreateResult
+  type SemanticKeywordBulkCreateResult,
+  type FrequencyCollectionSummary,
+  type RankJobSummary
 } from "@seo-platform/contracts";
 
 import {
@@ -29,6 +31,7 @@ import {
   type BrowserCursorPage
 } from "../lib/browser-api";
 import { externalPageUrlPresentation } from "../lib/app-path";
+import { useDebouncedValue } from "../hooks/use-debounced-value";
 import {
   manualKeywordInputStats,
   manualKeywordTexts,
@@ -40,6 +43,7 @@ import {
   semanticHighlightAfterRowClick,
   toggleSemanticHighlightedSelection
 } from "../lib/semantic-row-selection";
+import { rankChangePresentation } from "../lib/semantic-rank-presentation";
 import {
   clampSemanticColumnWidth,
   clampSemanticGroupSidebarWidth,
@@ -71,12 +75,13 @@ import { SemanticKeywordInspector } from "./semantic-keyword-inspector";
 import { SemanticPositionDialog } from "./semantic-position-dialog";
 import { SemanticFrequencyDialog } from "./semantic-frequency-dialog";
 import { SemanticOperationsDrawer } from "./semantic-operations-drawer";
+import { SemanticLayoutDrawer } from "./semantic-layout-drawer";
+import { SemanticNegativeKeywordsDialog } from "./semantic-negative-keywords-dialog";
 import { SemanticModal } from "./semantic-modal";
 import {
   SemanticTrashRecoveryDialog,
   type SemanticTrashRecoveryItem
 } from "./semantic-trash-recovery-dialog";
-import { SemanticSavedViews } from "./semantic-saved-views";
 import { SemanticVersionHistory } from "./semantic-version-history";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { KeywordDataGrid } from "./keyword-data-grid";
@@ -106,6 +111,7 @@ interface SemanticKeyword {
   readonly priority: number;
   readonly isFavorite: boolean;
   readonly isTracked: boolean;
+  readonly hasNote?: boolean;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
   readonly groupPath?: string;
@@ -201,7 +207,6 @@ interface SemanticCoreTableProps {
   readonly refreshVersion: number;
   readonly groupRefreshVersion: number;
   readonly onGroupsChanged: () => void;
-  readonly onOpenClusters: () => void;
   readonly onOpenColumns: () => void;
   readonly onOpenImport: () => void;
   readonly projectName: string;
@@ -229,7 +234,6 @@ export function SemanticCoreTable({
   refreshVersion,
   groupRefreshVersion,
   onGroupsChanged,
-  onOpenClusters,
   onOpenColumns,
   onOpenImport,
   projectName,
@@ -290,7 +294,6 @@ export function SemanticCoreTable({
   >([]);
   const [savingTableLayout, setSavingTableLayout] = useState(false);
   const [savingFolderSort, setSavingFolderSort] = useState(false);
-  const [draggedColumn, setDraggedColumn] = useState<SemanticViewColumn>();
   const [groupSidebarWidth, setGroupSidebarWidth] = useState(
     semanticGroupSidebarDefaultWidth
   );
@@ -311,7 +314,7 @@ export function SemanticCoreTable({
   });
   const [rightSidebar, setRightSidebar] = useState<
     | Readonly<{ type: "KEYWORD"; keywordId: string }>
-    | Readonly<{ type: "HISTORY" | "OPERATIONS" }>
+    | Readonly<{ type: "HISTORY" | "OPERATIONS" | "LAYOUT" }>
   >();
   const [groupDialog, setGroupDialog] = useState<SemanticGroupDialogState>();
   const [moveKeywordDialog, setMoveKeywordDialog] = useState(false);
@@ -321,6 +324,7 @@ export function SemanticCoreTable({
   const [actionIds, setActionIds] = useState<ReadonlySet<string> | null>(null);
   const [positionDialogOpen, setPositionDialogOpen] = useState(false);
   const [frequencyDialogOpen, setFrequencyDialogOpen] = useState(false);
+  const [negativeKeywordsOpen, setNegativeKeywordsOpen] = useState(false);
   const [watchedFrequencyId, setWatchedFrequencyId] = useState<string>();
   const [operationsRefreshVersion, setOperationsRefreshVersion] = useState(0);
   const [rowContextMenu, setRowContextMenu] = useState<Readonly<{
@@ -332,6 +336,9 @@ export function SemanticCoreTable({
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const highlightAnchorIdRef = useRef<string | undefined>(undefined);
+  const liveOperationSignatureRef = useRef("");
+  const liveMetricRefreshInFlightRef = useRef(false);
+  const liveOperationActiveRef = useRef(false);
   const [tableViewport, setTableViewport] = useState({
     height: 520,
     scrollTop: 0
@@ -340,6 +347,14 @@ export function SemanticCoreTable({
     () => ({ filters: viewConfig.filters, sort: viewConfig.sort }),
     [viewConfig.filters, viewConfig.sort]
   );
+  const debouncedSearch = useDebouncedValue(
+    draftConfig.filters.search ?? "",
+    300
+  );
+
+  useEffect(() => {
+    applySearch(debouncedSearch);
+  }, [debouncedSearch]);
 
   useEffect(() => {
     const preferences = readSemanticLayoutPreferences(
@@ -364,7 +379,7 @@ export function SemanticCoreTable({
       if (!(target instanceof Element)) return;
       if (
         target.closest(
-          ".semantic-keyword-inspector, .semantic-operations-drawer, .semantic-history-drawer, .semantic-modal, [data-semantic-sidebar-trigger]"
+          ".semantic-keyword-inspector, .semantic-operations-drawer, .semantic-history-drawer, .semantic-layout-drawer, .semantic-modal, [data-semantic-sidebar-trigger]"
         )
       ) {
         return;
@@ -451,6 +466,108 @@ export function SemanticCoreTable({
       });
     return () => controller.abort();
   }, [keywordQueryConfig, pageSize, projectId, refreshVersion, retryVersion]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let timer: number | undefined;
+    liveOperationSignatureRef.current = "";
+    const reconcile = async (): Promise<boolean> => {
+      const [frequencyResult, rankResult] = await Promise.allSettled([
+        browserApiRequest<{ readonly collections: readonly FrequencyCollectionSummary[] }>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections`,
+          { signal: controller.signal }
+        ),
+        browserApiRequest<{ readonly jobs: readonly RankJobSummary[] }>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/rank-runs`,
+          { signal: controller.signal }
+        )
+      ]);
+      if (controller.signal.aborted) return liveOperationActiveRef.current;
+      const frequencies = frequencyResult.status === "fulfilled"
+        ? frequencyResult.value.collections
+        : [];
+      const ranks = rankResult.status === "fulfilled" ? rankResult.value.jobs : [];
+      const active = frequencies.some(({ status }) => ![
+        "ACTION_REQUIRED",
+        "CANCELLED",
+        "PARTIALLY_COMPLETED",
+        "COMPLETED",
+        "FAILED_FINAL"
+      ].includes(status)) || ranks.some(({ status }) => ![
+        "COMPLETED",
+        "PARTIALLY_COMPLETED",
+        "CANCELLED",
+        "FAILED",
+        "ACTION_REQUIRED"
+      ].includes(status));
+      liveOperationActiveRef.current = active;
+      const signature = JSON.stringify([
+        ...frequencies.map((job) => [
+          "frequency",
+          job.id,
+          job.status,
+          job.completedKeywords,
+          job.failedKeywords,
+          job.updatedAt
+        ]),
+        ...ranks.map((job) => [
+          "rank",
+          job.id,
+          job.status,
+          job.progress.current,
+          job.progress.total,
+          "finishedAt" in job ? job.finishedAt : undefined
+        ])
+      ]);
+      const previous = liveOperationSignatureRef.current;
+      liveOperationSignatureRef.current = signature;
+      if (!previous || previous === signature || liveMetricRefreshInFlightRef.current) return active;
+      liveMetricRefreshInFlightRef.current = true;
+      try {
+        const result = await loadKeywordPage(
+          projectId,
+          keywordQueryConfig,
+          undefined,
+          controller.signal,
+          Math.min(1_000, Math.max(pageSize, items.length))
+        );
+        if (!controller.signal.aborted) {
+          setItems((current) => mergeKeywordMetrics(current, result.data));
+        }
+      } finally {
+        liveMetricRefreshInFlightRef.current = false;
+      }
+      return active;
+    };
+    const poll = async () => {
+      let active = liveOperationActiveRef.current;
+      try {
+        active = await reconcile();
+      } catch {
+        // The table keeps its last authoritative projection while a bounded
+        // reconciliation request is temporarily unavailable.
+      }
+      if (controller.signal.aborted) return;
+      timer = window.setTimeout(
+        () => void poll(),
+        document.visibilityState === "visible" ? (active ? 2_000 : 15_000) : 30_000
+      );
+    };
+    const refreshWhenVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (timer !== undefined) window.clearTimeout(timer);
+      void poll();
+    };
+    void poll();
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("online", refreshWhenVisible);
+    return () => {
+      controller.abort();
+      if (timer !== undefined) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("online", refreshWhenVisible);
+    };
+  }, [items.length, keywordQueryConfig, operationsRefreshVersion, pageSize, projectId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -597,6 +714,31 @@ export function SemanticCoreTable({
         ...(search ? { search } : {})
       }
     });
+  }
+
+  function submitSearch(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    applySearch(draftConfig.filters.search ?? "");
+  }
+
+  function applySearch(value: string): void {
+    const search = value.trim();
+    setViewConfig((current) => {
+      const { search: ignored, ...filters } = current.filters;
+      void ignored;
+      const nextFilters = search ? { ...filters, search } : filters;
+      if ((current.filters.search ?? "") === (search || "")) return current;
+      return { ...current, filters: nextFilters };
+    });
+  }
+
+  function clearSearch(): void {
+    setDraftConfig((current) => {
+      const { search: ignored, ...filters } = current.filters;
+      void ignored;
+      return { ...current, filters };
+    });
+    applySearch("");
   }
 
   function clearFilters(): void {
@@ -787,13 +929,6 @@ export function SemanticCoreTable({
       columns.splice(targetIndex, 0, column);
       return { ...current, columns };
     });
-  }
-
-  function moveColumnBy(column: SemanticViewColumn, offset: -1 | 1): void {
-    const sourceIndex = draftConfig.columns.indexOf(column);
-    const target = draftConfig.columns[sourceIndex + offset];
-    if (sourceIndex < 0 || !target) return;
-    moveColumn(column, target);
   }
 
   function persistLayoutPreferences(
@@ -1581,6 +1716,9 @@ export function SemanticCoreTable({
     ? rightSidebar.keywordId
     : undefined;
   const focusedKeyword = items.find(({ id }) => id === focusedKeywordId);
+  const activeNegativeGroup = groups
+    .filter(({ systemKind }) => !systemKind)
+    .find(({ id }) => id === viewConfig.filters.groupId);
   const mutationIds = actionIds ?? checkedIds;
   const contextKeyword = rowContextMenu?.targetIds.length === 1
     ? items.find(({ id }) => id === rowContextMenu.targetIds[0])
@@ -1679,9 +1817,7 @@ export function SemanticCoreTable({
         <button onClick={onOpenImport} type="button"><Icon name="import" />Импорт</button>
         <button disabled={(rootTotal ?? items.length) === 0} onClick={() => setFrequencyDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Выберите запросы или папки в окне запуска"} type="button"><Icon name="frequency" />Собрать частотность</button>
         <button disabled={(rootTotal ?? items.length) === 0} onClick={() => setPositionDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Выберите запросы или папки в окне запуска"} type="button"><Icon name="rankCheck" />Проверить позиции</button>
-        <button disabled onClick={onOpenClusters} title="Кластеризация временно недоступна" type="button"><Icon name="cluster" />Кластеризовать</button>
-        <button disabled={checkedIds.size === 0} onClick={() => { setActionIds(null); setMoveKeywordDialog(true); }} type="button"><Icon name="move" />Перенести</button>
-        <button disabled={checkedIds.size === 0} onClick={() => { setActionIds(null); setBulkEditorOpen(true); }} type="button"><Icon name="tag" />Теги и интент</button>
+        <button disabled={(rootTotal ?? items.length) === 0} onClick={() => setNegativeKeywordsOpen(true)} title="Найти запросы по минус-словам и переместить их в корзину" type="button"><Icon name="warning" />Минус-слова</button>
         <button className="danger" disabled={checkedIds.size === 0} onClick={() => { setActionIds(null); setDeleteSelectionOpen(true); }} type="button"><Icon name="trash" />Удалить</button>
         <button onClick={() => openExport()} type="button"><Icon name="export" />Экспорт</button>
         <button
@@ -1768,13 +1904,11 @@ export function SemanticCoreTable({
 
       <div
         className="semantic-table-tools"
-        onClickCapture={() => {
-          if (rightSidebar) setRightSidebar(undefined);
-        }}
       >
-        <form className="semantic-search" onSubmit={submitFilters}>
+        <form className="semantic-search" onSubmit={submitSearch}>
           <label>
             <span className="visually-hidden">Поиск по запросам</span>
+            <Icon name="search" />
             <input
               maxLength={200}
               onChange={(event) => updateFilter({ search: event.target.value })}
@@ -1782,17 +1916,26 @@ export function SemanticCoreTable({
               type="search"
               value={draftConfig.filters.search ?? ""}
             />
+            {(draftConfig.filters.search ?? "") && (
+              <button aria-label="Очистить поиск" onClick={clearSearch} title="Очистить" type="button">
+                <Icon name="close" />
+              </button>
+            )}
           </label>
-          <button className="secondary-button" type="submit">Найти</button>
         </form>
         <details className="semantic-filter-disclosure" data-exclusive-dropdown>
           <summary>
             Фильтры
-            {Object.keys(viewConfig.filters).length > 0 && (
-              <span>{Object.keys(viewConfig.filters).length}</span>
+            {activeFilterCount(viewConfig.filters) > 0 && (
+              <span>{activeFilterCount(viewConfig.filters)}</span>
             )}
           </summary>
           <form className="semantic-filter-bar" onSubmit={submitFilters}>
+        <header className="semantic-filter-popover-header">
+          <div><strong>Фильтры запросов</strong><small>Совмещайте условия и применяйте их одним действием.</small></div>
+          {hasActiveFilters(viewConfig) && <button className="text-button" onClick={clearFilters} type="button">Очистить</button>}
+        </header>
+        <div className="semantic-filter-fields">
         <label>
           <span>Интент</span>
           <CustomSelect
@@ -1930,104 +2073,33 @@ export function SemanticCoreTable({
             <option value="GOOGLE_CHECKED_AT_ASC">Google: старый съём</option>
           </CustomSelect>
         </label>
-        <button className="secondary-button" type="submit">
-          Применить фильтры
-        </button>
-        {hasActiveFilters(viewConfig) && (
-          <button
-            className="text-button"
-            onClick={clearFilters}
-            type="button"
-          >
-            Сбросить всё
+        </div>
+        <footer className="semantic-filter-popover-actions">
+          {hasActiveFilters(viewConfig) && (
+            <button
+              className="secondary-button semantic-filter-reset"
+              onClick={clearFilters}
+              type="button"
+            >
+              Сбросить
+            </button>
+          )}
+          <button className="primary-button semantic-filter-apply" type="submit">
+            Применить
           </button>
-        )}
+        </footer>
           </form>
         </details>
         <div className="semantic-table-view-actions">
-          <SemanticSavedViews
-            config={viewConfig}
-            onApply={applySavedView}
-            projectId={projectId}
-          />
-          <details className="semantic-column-picker" data-exclusive-dropdown>
-          <summary>Колонки и плотность</summary>
-          <div className="semantic-column-picker-menu">
-            <p>Перетащите включённые колонки или используйте стрелки.</p>
-            <div className="semantic-column-order" aria-label="Порядок колонок">
-              {draftConfig.columns.map((column, index) => (
-                <div
-                  draggable
-                  key={column}
-                  onDragEnd={() => setDraggedColumn(undefined)}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDragStart={() => setDraggedColumn(column)}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    if (draggedColumn) moveColumn(draggedColumn, column);
-                    setDraggedColumn(undefined);
-                  }}
-                >
-                  <span aria-hidden="true" className="semantic-column-grip">⋮⋮</span>
-                  <label>
-                    <input
-                      checked
-                      disabled={column === "query"}
-                      onChange={() => toggleColumn(column)}
-                      type="checkbox"
-                    />
-                    <span>{columnLabel(column, customColumns)}</span>
-                  </label>
-                  <button aria-label={`Переместить ${columnLabel(column, customColumns)} выше`} disabled={index === 0} onClick={() => moveColumnBy(column, -1)} type="button">↑</button>
-                  <button aria-label={`Переместить ${columnLabel(column, customColumns)} ниже`} disabled={index === draftConfig.columns.length - 1} onClick={() => moveColumnBy(column, 1)} type="button">↓</button>
-                </div>
-              ))}
-            </div>
-            <div className="semantic-column-available">
-              {[
-                ...semanticColumns,
-                ...customColumns.map((column) => ({
-                  key: `custom:${column.id}` as const,
-                  label: column.name
-                }))
-              ]
-                .filter(({ key }) => !draftConfig.columns.includes(key))
-                .map((column) => (
-                  <label key={column.key}>
-                    <input checked={false} onChange={() => toggleColumn(column.key)} type="checkbox" />
-                    <span>{column.label}</span>
-                  </label>
-                ))}
-            </div>
-            <label>
-              <span>Плотность</span>
-              <CustomSelect
-                onChange={(event) =>
-                  setDraftConfig((current) => ({
-                    ...current,
-                    density: event.target
-                      .value as SemanticViewConfig["density"]
-                  }))
-                }
-                value={draftConfig.density}
-              >
-                <option value="COMFORTABLE">Обычная</option>
-                <option value="COMPACT">Компактная</option>
-              </CustomSelect>
-            </label>
-            <button
-              className="secondary-button"
-              disabled={savingTableLayout}
-              onClick={() => void applyTableLayout()}
-              type="button"
-            >
-              {savingTableLayout ? "Сохраняем…" : "Применить для проекта"}
-            </button>
-            <button className="text-button" onClick={onOpenColumns} type="button">
-              Пользовательские колонки
-            </button>
-          </div>
-          </details>
+          <button
+            className={`semantic-compact-button${rightSidebar?.type === "LAYOUT" ? " active" : ""}`}
+            data-semantic-sidebar-trigger
+            onClick={() => setRightSidebar((current) => current?.type === "LAYOUT" ? undefined : { type: "LAYOUT" })}
+            type="button"
+          >
+            <Icon name="settings" />
+            Колонки и представления
+          </button>
           <button className="semantic-compact-button" disabled={items.length === 0 && total === 0} onClick={() => openExport()} type="button">
             Экспорт
           </button>
@@ -2585,6 +2657,18 @@ export function SemanticCoreTable({
           item={focusedKeyword}
           onClose={() => setRightSidebar(undefined)}
           onEdit={() => openEdit(focusedKeyword)}
+          onUpdated={(updated) => {
+            setItems((current) => current.map((keyword) =>
+              keyword.id === updated.id
+                ? {
+                    ...keyword,
+                    hasNote: updated.hasNote ?? false,
+                    updatedAt: updated.updatedAt,
+                    version: updated.version
+                  }
+                : keyword
+            ));
+          }}
           projectId={projectId}
         />
       )}
@@ -2705,11 +2789,28 @@ export function SemanticCoreTable({
             setFrequencyDialogOpen(false);
             setWatchedFrequencyId(job.id);
             setOperationsRefreshVersion((value) => value + 1);
-            setBulkNotice("Сбор частотности запущен в фоне. Результаты появятся в правой панели после завершения.");
+            setBulkNotice("Сбор частотности запущен в фоне. Новые значения будут появляться в таблице по мере обработки.");
             setRightSidebar({ type: "OPERATIONS" });
           }}
           projectId={projectId}
           initialSelections={items
+            .filter(({ id }) => checkedIds.has(id))
+            .map(({ id, version, textOriginal }) => ({ id, version, label: textOriginal }))}
+        />
+      )}
+      {negativeKeywordsOpen && (
+        <SemanticNegativeKeywordsDialog
+          {...(activeNegativeGroup ? { activeGroup: activeNegativeGroup } : {})}
+          onClose={() => setNegativeKeywordsOpen(false)}
+          onCompleted={(message) => {
+            setNegativeKeywordsOpen(false);
+            setCheckedIds(new Set());
+            setBulkNotice(message);
+            onGroupsChanged();
+            setRetryVersion((value) => value + 1);
+          }}
+          projectId={projectId}
+          selections={items
             .filter(({ id }) => checkedIds.has(id))
             .map(({ id, version, textOriginal }) => ({ id, version, label: textOriginal }))}
         />
@@ -2735,6 +2836,32 @@ export function SemanticCoreTable({
           projectId={projectId}
           refreshToken={operationsRefreshVersion}
           {...(watchedFrequencyId ? { watchedFrequencyId } : {})}
+        />
+      )}
+      {rightSidebar?.type === "LAYOUT" && (
+        <SemanticLayoutDrawer
+          config={draftConfig}
+          customColumns={customColumns}
+          onApply={() => void applyTableLayout()}
+          onApplySavedView={(view) => {
+            applySavedView(view);
+            setRightSidebar(undefined);
+          }}
+          onClose={() => setRightSidebar(undefined)}
+          onDensityChange={(density) => setDraftConfig((current) => ({ ...current, density }))}
+          onMoveColumn={moveColumn}
+          onOpenCustomColumns={() => {
+            setRightSidebar(undefined);
+            onOpenColumns();
+          }}
+          onReset={() => setDraftConfig((current) => ({
+            ...current,
+            columns: defaultSemanticViewConfig.columns,
+            density: defaultSemanticViewConfig.density
+          }))}
+          onToggleColumn={toggleColumn}
+          projectId={projectId}
+          saving={savingTableLayout}
         />
       )}
     </section>
@@ -2974,6 +3101,11 @@ function keywordColumn(
           <strong title={item.textOriginal}>
             {item.isFavorite ? "★ " : ""}
             {item.textOriginal}
+            {item.hasNote && (
+              <span aria-label="Есть заметка" className="semantic-keyword-note-indicator" title="У запроса есть заметка">
+                <Icon name="note" />
+              </span>
+            )}
           </strong>
           <small>
             {item.language.toUpperCase()}
@@ -3134,13 +3266,14 @@ function keywordPosition(
     (candidate) => candidate.searchEngine === searchEngine
   );
   if (position && !position.found) {
+    const description = position.previousPosition === undefined
+      ? `${searchEngine === "YANDEX" ? "Яндекс" : "Google"}: позиция не найдена`
+      : `${searchEngine === "YANDEX" ? "Яндекс" : "Google"}: позиция не найдена. Была ${position.previousPosition}`;
     return (
-      <span className="semantic-position-value not-found">
+      <span aria-label={description} className="semantic-position-value not-found" title={description}>
         {keywordNotFoundMark(searchEngine)}
         {position.previousPosition !== undefined && (
-          <small title={`Предыдущая позиция: ${position.previousPosition}`}>
-            было {position.previousPosition}
-          </small>
+          <small aria-hidden="true">Была {position.previousPosition}</small>
         )}
       </span>
     );
@@ -3148,17 +3281,18 @@ function keywordPosition(
   if (!position || position.position === undefined) {
     return <span className="semantic-metric-empty">—</span>;
   }
-  const delta = position.previousPosition === undefined
-    ? undefined
-    : position.previousPosition - position.position;
+  const change = rankChangePresentation(
+    position.position,
+    position.previousPosition
+  );
   return (
-    <span className={`semantic-position-value${delta && delta > 0 ? " improved" : delta && delta < 0 ? " declined" : ""}`}>
-      <strong>{position.position}</strong>
-      {position.previousPosition !== undefined && (
-        <small title={`Предыдущая позиция: ${position.previousPosition}`}>
-          было {position.previousPosition}
-        </small>
-      )}
+    <span
+      aria-label={change.ariaLabel}
+      className={`semantic-position-value ${change.tone}`}
+      title={change.title}
+    >
+      <strong aria-hidden="true">{position.position}</strong>
+      <small aria-hidden="true">{change.label}</small>
     </span>
   );
 }
@@ -3194,6 +3328,12 @@ function booleanFilter(value: boolean | undefined): string {
   return value === undefined ? "" : String(value);
 }
 
+function activeFilterCount(filters: SemanticViewConfig["filters"]): number {
+  return Object.entries(filters).filter(([key, value]) =>
+    key !== "search" && value !== undefined && value !== ""
+  ).length;
+}
+
 function mergeKeywords(
   current: readonly SemanticKeyword[],
   next: readonly SemanticKeyword[]
@@ -3201,6 +3341,17 @@ function mergeKeywords(
   const byId = new Map(current.map((item) => [item.id, item]));
   for (const item of next) byId.set(item.id, item);
   return [...byId.values()];
+}
+
+function mergeKeywordMetrics(
+  current: readonly SemanticKeyword[],
+  next: readonly SemanticKeyword[]
+): readonly SemanticKeyword[] {
+  const nextById = new Map(next.map((item) => [item.id, item]));
+  return current.map((item) => {
+    const updated = nextById.get(item.id);
+    return updated ? { ...item, ...updated } : item;
+  });
 }
 
 function keywordErrorMessage(error: unknown): string {

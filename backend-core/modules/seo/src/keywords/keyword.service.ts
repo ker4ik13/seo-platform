@@ -6,7 +6,9 @@ import {
   HttpStatus,
   Injectable
 } from "@nestjs/common";
+import { rankSearchSourceFromProviderMappingVersion } from "@seo-platform/contracts";
 import type {
+  RankEstimateProvider,
   ApiCollectionResponse,
   InternalCreateSemanticKeywordInput,
   InternalDeleteSemanticKeywordInput,
@@ -502,12 +504,12 @@ export class KeywordService {
         projectId,
         status: { in: ["ACTIVE", "DELETED"] }
       },
-      select: { id: true }
+      select: { id: true, note: true }
     });
     if (!keyword) {
       throw new HttpException("Keyword not found", HttpStatus.NOT_FOUND);
     }
-    const [frequencies, currentRanks] = await Promise.all([
+    const [frequencies, currentRanks, rankSnapshots] = await Promise.all([
       this.prisma.frequencySnapshot.findMany({
         where: { workspaceId, projectId, keywordId },
         orderBy: [{ observedAt: "desc" }, { id: "desc" }],
@@ -517,9 +519,25 @@ export class KeywordService {
         where: { workspaceId, projectId, keywordId },
         orderBy: { observedAt: "desc" },
         take: 50
+      }),
+      this.prisma.rankSnapshot.findMany({
+        where: { workspaceId, projectId, keywordId },
+        orderBy: [{ observedAt: "desc" }, { id: "desc" }],
+        take: 240,
+        select: {
+          id: true,
+          trackingContextId: true,
+          configurationVersion: true,
+          provider: true,
+          found: true,
+          position: true,
+          observedAt: true,
+          manifest: { select: { execution: true } }
+        }
       })
     ]);
-    const contextIds = currentRanks.map(({ trackingContextId }) => trackingContextId);
+    const rankRows = [...currentRanks, ...rankSnapshots];
+    const contextIds = [...new Set(rankRows.map(({ trackingContextId }) => trackingContextId))];
     const [contexts, configurations] = contextIds.length === 0
       ? [[], []] as const
       : await Promise.all([
@@ -531,7 +549,7 @@ export class KeywordService {
             where: {
               workspaceId,
               projectId,
-              OR: currentRanks.map((rank) => ({
+              OR: rankRows.map((rank) => ({
                 contextId: rank.trackingContextId,
                 configurationVersion: rank.configurationVersion
               }))
@@ -542,7 +560,10 @@ export class KeywordService {
               searchEngine: true,
               device: true,
               regionCode: true,
-              countryCode: true
+              regionLabel: true,
+              countryCode: true,
+              language: true,
+              depth: true
             }
           })
         ]);
@@ -555,6 +576,7 @@ export class KeywordService {
     );
     return {
       keywordId,
+      ...(keyword.note ? { note: keyword.note } : {}),
       frequencies: frequencies.map((snapshot) => ({
         type: frequencyType(snapshot.type),
         regionCode: snapshot.regionCode,
@@ -586,6 +608,36 @@ export class KeywordService {
             : { previousPosition: rank.previousPosition }),
           ...(rank.rankingUrl === null || rank.rankingUrl === undefined ? {} : { rankingUrl: rank.rankingUrl }),
           observedAt: rank.observedAt.toISOString()
+        }];
+      }),
+      positionHistory: rankSnapshots.flatMap((snapshot) => {
+        const context = contextById.get(snapshot.trackingContextId);
+        const configuration = configurationById.get(
+          `${snapshot.trackingContextId}:${snapshot.configurationVersion}`
+        );
+        if (!context || !configuration) return [];
+        const searchSource = rankHistorySearchSource(
+          snapshot.manifest.execution,
+          configuration.searchEngine
+        );
+        return [{
+          snapshotId: snapshot.id,
+          trackingContextId: snapshot.trackingContextId,
+          contextName: context.name,
+          searchEngine: configuration.searchEngine,
+          ...(searchSource ? { searchSource } : {}),
+          device: configuration.device,
+          regionCode: configuration.regionCode ?? configuration.countryCode,
+          ...(configuration.regionLabel === null
+            ? {}
+            : { regionLabel: configuration.regionLabel }),
+          countryCode: configuration.countryCode,
+          language: configuration.language,
+          depth: configuration.depth,
+          provider: rankHistoryProvider(snapshot.provider),
+          found: snapshot.found,
+          ...(snapshot.position === null ? {} : { position: snapshot.position }),
+          observedAt: snapshot.observedAt.toISOString()
         }];
       })
     };
@@ -727,6 +779,7 @@ export class KeywordService {
             },
             data: {
               textOriginal: input.text,
+              note: input.note ?? null,
               textNormalized: normalized,
               normalizedHash,
               language: input.language,
@@ -824,6 +877,7 @@ export class KeywordService {
             workspaceId: input.workspaceId,
             projectId: input.projectId,
             textOriginal: input.text,
+            note: input.note ?? null,
             textNormalized: normalized,
             normalizedHash,
             language: input.language,
@@ -1041,6 +1095,7 @@ export class KeywordService {
                   textNormalized: normalized!,
                   normalizedHash: sha256(normalized!)
                 }),
+            ...(input.note === undefined ? {} : { note: input.note }),
             ...(input.language === undefined
               ? {}
               : { language: input.language }),
@@ -1105,32 +1160,35 @@ export class KeywordService {
                 result.targetPageId
               )
             : (input.targetUrl ?? undefined);
-        const change = {
-          entityId: result.id,
-          operation: "UPDATE" as const,
-          beforeState,
-          afterState: keywordVersionState(result),
-          beforeVersion: current.version,
-          afterVersion: result.version
-        };
-        if (semanticVersion) {
-          await this.semanticVersions.appendBulkKeywordChange(
-            transaction,
-            semanticVersion,
-            change
-          );
-        } else {
-          await this.semanticVersions.createWithKeywordChange(
-            transaction,
-            {
-              workspaceId: input.workspaceId,
-              projectId: input.projectId,
-              actorId: input.actorId,
-              reason: "KEYWORD_UPDATE",
-              summary: "Изменён поисковый запрос"
-            },
-            change
-          );
+        const afterState = keywordVersionState(result);
+        if (!sameKeywordVersionState(beforeState, afterState)) {
+          const change = {
+            entityId: result.id,
+            operation: "UPDATE" as const,
+            beforeState,
+            afterState,
+            beforeVersion: current.version,
+            afterVersion: result.version
+          };
+          if (semanticVersion) {
+            await this.semanticVersions.appendBulkKeywordChange(
+              transaction,
+              semanticVersion,
+              change
+            );
+          } else {
+            await this.semanticVersions.createWithKeywordChange(
+              transaction,
+              {
+                workspaceId: input.workspaceId,
+                projectId: input.projectId,
+                actorId: input.actorId,
+                reason: "KEYWORD_UPDATE",
+                summary: "Изменён поисковый запрос"
+              },
+              change
+            );
+          }
         }
         return keywordItem(
           result,
@@ -1241,6 +1299,7 @@ export class KeywordService {
             targetPageId: null,
             isTracked: false,
             customValues: {},
+            note: null,
             sourceMode: "MANUAL",
             sourceId: null,
             createdBy: null,
@@ -1876,6 +1935,7 @@ function keywordItem(
     ...(targetUrl ? { targetUrl } : {}),
     tags,
     tagsTruncated: row.tags.length > 50,
+    hasNote: Boolean(row.note?.trim()),
     customValues: (row.typedCustomValues ?? []).map(keywordCustomValue),
     ...(legacyBaseFrequency ? { frequency: legacyBaseFrequency } : {}),
     ...(frequencies.length > 0 ? { frequencies } : {}),
@@ -1905,6 +1965,13 @@ function keywordVersionState(
     groupId: row.memberships[0]?.group.id ?? null,
     tagIds: row.tags.map(({ tag }) => tag.id)
   };
+}
+
+function sameKeywordVersionState(
+  left: SemanticKeywordVersionState,
+  right: SemanticKeywordVersionState
+): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function keywordCustomValue(
@@ -2386,4 +2453,25 @@ function frequencyQualityFlags(value: unknown): readonly SemanticFrequencyQualit
     throw new Error("Stored frequency quality flags contain duplicates");
   }
   return flags;
+}
+
+function rankHistoryProvider(value: string): RankEstimateProvider {
+  if (value === "ARSENKIN" || value === "XMLSTOCK") return value;
+  throw new Error("Stored rank history provider is unsupported");
+}
+
+function rankHistorySearchSource(
+  value: Prisma.JsonValue,
+  searchEngine: "GOOGLE" | "YANDEX"
+) {
+  if (
+    value === null ||
+    Array.isArray(value) ||
+    typeof value !== "object" ||
+    typeof value.providerMappingVersion !== "string"
+  ) return undefined;
+  return rankSearchSourceFromProviderMappingVersion(
+    searchEngine,
+    value.providerMappingVersion
+  );
 }

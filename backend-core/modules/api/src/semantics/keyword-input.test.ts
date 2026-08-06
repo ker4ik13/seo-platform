@@ -107,6 +107,14 @@ test("requires an explicit non-empty keyword patch", () => {
   );
 });
 
+test("normalizes keyword notes and supports an explicit removal", () => {
+  assert.deepEqual(updateSemanticKeywordInput({ note: "  Гипотеза по кластеру  " }), {
+    note: "Гипотеза по кластеру"
+  });
+  assert.deepEqual(updateSemanticKeywordInput({ note: null }), { note: null });
+  assert.throws(() => updateSemanticKeywordInput({ note: "x".repeat(4_001) }), DomainError);
+});
+
 test("normalizes nested group create and nullable update", () => {
   const parentId = "01900000-0000-7000-8000-000000000010";
   assert.deepEqual(

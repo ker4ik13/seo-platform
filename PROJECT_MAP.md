@@ -83,6 +83,19 @@ Frontend-представление состояния фоновых опера
 ответа провайдера и ожидание его свободного слота не отображаются как ошибочный
 «повтор».
 
+Рабочая область семантики использует единый набор правых панелей: карточка
+запроса показывает по одному последнему активному контексту Яндекса и Google,
+их append-only историю позиций и проектную заметку. История отображает
+текущую позицию и дельту, выделяет `not-found` отдельной осью и интерактивно
+проецирует безопасные параметры замера (search source, provider, регион,
+устройство, depth и время), не раскрывая provider request ID или raw result;
+настройки
+колонок/представлений и журнал операций не
+перезагружают layout. Прогресс rank/frequency остаётся серверным источником
+истины, а браузер по изменению safe progress-проекции перечитывает уже
+загруженные строки таблицы без full-page reload. Поиск применяет 300 ms
+debounce и имеет явную очистку.
+
 Frontend имеет один обязательный canonical origin `WEB_PUBLIC_URL`. Он
 передаётся в build и runtime как server-only configuration; metadata,
 robots/sitemap, BFF Origin-проверки и абсолютные auth-refresh redirects не
@@ -191,7 +204,7 @@ connector-процессы заполняют всё доступное окно
 | Данные | Модуль-владелец | Текущее хранилище |
 |---|---|---|
 | users, sessions, workspaces (включая bounded avatar до 512 KiB), projects, project transfer requests, RBAC, billing, audit, platform admin command receipts | Core API | `platform_db` |
-| semantics, pages, rankings, crawl projections | Core SEO | `seo_db` |
+| semantics (включая заметки и presets минус-слов), pages, rankings, crawl projections | Core SEO | `seo_db` |
 | realtime subscriptions, deliveries, event inbox | Core Realtime | `realtime_db` + Redis |
 | jobs, schedules, uploads, credential vault, provider execution | Execution | `jobs_db` + Redis + S3 |
 
@@ -280,6 +293,21 @@ resolve/persist chunks и общий provider concurrency остаются bound
 снятие прежнего UI/API-предела 200 не создаёт один гигантский provider request.
 Wizard по умолчанию выбирает регион «Россия» (`225`); в списке далее идут
 Москва и Санкт-Петербург.
+
+### Минус-слова и карточка запроса
+
+`Keyword.note` хранит ограниченную 4 000 символами проектную заметку; list
+projection отдаёт только `hasNote`, а полный текст доступен через tenant-scoped
+keyword insights. Те же insights объединяют `current_ranks` с последними 240
+append-only `rank_snapshots`, поэтому график не создаёт отдельную историю и не
+перезаписывает результаты съёма.
+
+Пресеты минус-слов принадлежат Core SEO и хранят до 500 нормализованных слов с
+явным режимом `WHOLE_WORD` либо `CONTAINS`. Применение всегда двухфазное:
+bounded preview фиксирует scope/version/hash, затем команда пакетами до 500
+строк переносит совпадения в системную корзину, создаёт reversible semantic
+version `NEGATIVE_KEYWORDS` и повторно проверяет optimistic versions под
+project write lock. Пресеты включены в allowlist передачи проекта.
 
 ### Импорт и crawl
 

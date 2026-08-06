@@ -8,7 +8,8 @@ import {
   useMemo,
   useRef,
   useState,
-  type FormEvent
+  type FormEvent,
+  type ReactNode
 } from "react";
 import type {
   ProjectConnectorCredentialOption,
@@ -64,6 +65,7 @@ import {
   rankRunsApiPath
 } from "../lib/rank-jobs";
 import { SemanticModal } from "./semantic-modal";
+import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
 import { SearchableRegionSelect } from "./searchable-region-select";
 import { SearchEngineLogo } from "./search-engine-logo";
@@ -130,9 +132,9 @@ export function SemanticPositionDialog({
     [connectorSettings, workspaceRouting]
   );
   const selectedSource = sources.find(({ id }) => id === credentialId);
-  const provider = selectedSource?.provider === "XMLSTOCK"
-    ? "XMLSTOCK"
-    : "ARSENKIN";
+  const provider = selectedSource?.provider === "ARSENKIN"
+    ? "ARSENKIN"
+    : "XMLSTOCK";
   const resolveScope = useCallback((
     next: readonly SemanticOperationSelection[],
     resolving: boolean,
@@ -455,20 +457,11 @@ export function SemanticPositionDialog({
 
   return (
     <SemanticModal
-      description="Настройте поисковик, регион, устройство и глубину. Система проверит доступ и запустит асинхронный съём без сохранения секретов в задаче."
       onClose={running ? () => undefined : onClose}
       size="large"
       title="Проверка позиций"
     >
-      <form className="semantic-position-dialog" onSubmit={(event) => void submit(event)}>
-        <SemanticOperationScope
-          activeGroupId={activeGroupId}
-          groups={groups}
-          initialSelections={initialSelections}
-          maxItems={rankProviderKeywordLimit}
-          onChange={resolveScope}
-          projectId={projectId}
-        />
+      <form className="semantic-position-dialog semantic-workflow-dialog" onSubmit={(event) => void submit(event)}>
         {loading ? (
           <div className="semantic-dialog-loading" role="status">Проверяем доступные подключения…</div>
         ) : (
@@ -501,17 +494,29 @@ export function SemanticPositionDialog({
               runCommand.current = undefined;
             }}
             searchSource={searchSource}
+            scope={
+              <SemanticOperationScope
+                activeGroupId={activeGroupId}
+                groups={groups}
+                initialSelections={initialSelections}
+                maxItems={rankProviderKeywordLimit}
+                onChange={resolveScope}
+                projectId={projectId}
+              />
+            }
           />
         )}
-        {estimate?.status === "BLOCKED" && (
-          <div className="inline-alert warning" role="alert">
-            <strong>Запуск заблокирован</strong>
-            <ul>{estimate.blockers.map(({ code }) => <li key={code}>{rankEstimateBlockerLabel(code)}</li>)}</ul>
-          </div>
-        )}
-        {error && <div className="inline-alert danger" role="alert">{error}</div>}
-        {scopeError && <div className="inline-alert warning" role="alert">{scopeError}</div>}
-        <div className="semantic-modal-actions">
+        {(estimate?.status === "BLOCKED" || error || scopeError) && <div className="semantic-workflow-feedback">
+          {estimate?.status === "BLOCKED" && (
+            <div className="inline-alert warning" role="alert">
+              <strong>Запуск заблокирован</strong>
+              <ul>{estimate.blockers.map(({ code }) => <li key={code}>{rankEstimateBlockerLabel(code)}</li>)}</ul>
+            </div>
+          )}
+          {error && <div className="inline-alert danger" role="alert">{error}</div>}
+          {scopeError && <div className="inline-alert warning" role="alert">{scopeError}</div>}
+        </div>}
+        <div className="semantic-modal-actions semantic-workflow-footer">
           <button className="secondary-button" disabled={running} onClick={onClose} type="button">Отмена</button>
           <button
             className="primary-button"
@@ -547,7 +552,8 @@ function PositionRunParameters({
   sources,
   onCredentialChange,
   searchSource,
-  onSearchSourceChange
+  onSearchSourceChange,
+  scope
 }: Readonly<{
   draft: TrackingContextDraft;
   onChange: (draft: TrackingContextDraft) => void;
@@ -557,11 +563,12 @@ function PositionRunParameters({
   onCredentialChange: (credentialId: string) => void;
   searchSource: "SEARCH_API" | "LIVE";
   onSearchSourceChange: (source: "SEARCH_API" | "LIVE") => void;
+  scope: ReactNode;
 }>) {
   const selectedSource = sources.find(({ id }) => id === credentialId);
-  const provider = selectedSource?.provider === "XMLSTOCK"
-    ? "XMLSTOCK"
-    : "ARSENKIN";
+  const provider = selectedSource?.provider === "ARSENKIN"
+    ? "ARSENKIN"
+    : "XMLSTOCK";
   const providerUsage = rankProviderUsageEstimate(
     selectedSource,
     keywordCount,
@@ -569,11 +576,73 @@ function PositionRunParameters({
     draft.depth,
     searchSource
   );
+  const depthOptions: readonly TrackingContextDraft["depth"][] =
+    draft.searchEngine === "YANDEX" && provider === "ARSENKIN"
+      ? [30]
+      : [30, 50, 100];
+
+  function selectSearchEngine(
+    searchEngine: TrackingContextDraft["searchEngine"]
+  ): void {
+    onChange({
+      ...draft,
+      countryCode: "RU",
+      depth:
+        searchEngine === "YANDEX" && provider === "ARSENKIN"
+          ? 30
+          : draft.depth,
+      language: "ru",
+      searchEngine,
+      regionCode: "",
+      regionLabel: "",
+      name: `${searchEngine === "YANDEX" ? "Яндекс" : "Google"} · ${draft.device === "MOBILE" ? "Мобильное" : "Десктоп"}`
+    });
+    onSearchSourceChange("LIVE");
+  }
+
   return (
     <>
-      <div className="semantic-frequency-grid semantic-position-run-grid">
-        <section>
-          <h3>Источник данных</h3>
+      <div className="semantic-workflow-grid semantic-position-workflow-grid">
+        <section className="semantic-workflow-panel semantic-position-source-panel">
+          <header>
+            <h3>Поисковые системы</h3>
+            <p>Выберите поисковик, тип выдачи и подключение провайдера.</p>
+          </header>
+          <div aria-label="Поисковая система" className="semantic-engine-cards" role="group">
+            {(["YANDEX", "GOOGLE"] as const).map((engine) => (
+              <button
+                aria-pressed={draft.searchEngine === engine}
+                className={draft.searchEngine === engine ? "selected" : undefined}
+                key={engine}
+                onClick={() => selectSearchEngine(engine)}
+                type="button"
+              >
+                <SearchEngineLogo engine={engine} />
+                <span>{engine === "YANDEX" ? "Яндекс" : "Google"}</span>
+                <i aria-hidden="true" />
+              </button>
+            ))}
+          </div>
+          <label className="semantic-workflow-field">
+            <span>Источник выдачи</span>
+            <CustomSelect
+              onChange={(event) =>
+                onSearchSourceChange(
+                  event.target.value as "SEARCH_API" | "LIVE"
+                )
+              }
+              value={searchSource}
+            >
+              {draft.searchEngine === "YANDEX" && (
+                <option value="SEARCH_API">Яндекс XML / Search API</option>
+              )}
+              <option value="LIVE">
+                {draft.searchEngine === "YANDEX" ? "Яндекс Live" : "Google Live"}
+              </option>
+            </CustomSelect>
+          </label>
+          <div className="semantic-provider-field">
+            <h4>Источник данных</h4>
           {sources.length ? (
             <div
               aria-label="Источник съёма позиций"
@@ -590,11 +659,12 @@ function PositionRunParameters({
                   type="button"
                 >
                   <ProviderLogo provider={source.provider} />
-                  <span>
+                  <span className="semantic-provider-card-copy">
                     <strong>{integrationProviderLabel(source.provider)}</strong>
                     <small>{source.label} · ваш API</small>
+                    <b>Подключено</b>
                   </span>
-                  <i>{source.id === credentialId ? "Выбран" : "Выбрать"}</i>
+                  <i aria-hidden="true" className="semantic-provider-radio" />
                 </button>
               ))}
             </div>
@@ -603,83 +673,61 @@ function PositionRunParameters({
               Нет проверенного подключения для съёма позиций.
             </div>
           )}
-          <a href="/app/settings/integrations">Управление API-ключами</a>
+          </div>
+          <a className="semantic-dialog-link" href="/app/settings/integrations">Управление подключениями</a>
+          <fieldset className="semantic-segmented-field semantic-depth-field">
+            <legend>Глубина проверки</legend>
+            <div className="semantic-segmented-control" role="radiogroup" aria-label="Глубина проверки">
+              {depthOptions.map((depth) => (
+                <label className={draft.depth === depth ? "selected" : undefined} key={depth}>
+                  <input
+                    checked={draft.depth === depth}
+                    onChange={() => onChange({ ...draft, depth })}
+                    type="radio"
+                  />
+                  <span>Топ-{depth}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
         </section>
-        <section>
-          <h3>Параметры съёма</h3>
-          <div className="semantic-position-parameter-grid">
-            <label>
-              <span>Источник выдачи</span>
-              <CustomSelect
-                onChange={(event) =>
-                  onSearchSourceChange(
-                    event.target.value as "SEARCH_API" | "LIVE"
-                  )
-                }
-                value={searchSource}
-              >
-                {draft.searchEngine === "YANDEX" && (
-                  <option value="SEARCH_API">Яндекс Search API / XML</option>
-                )}
-                <option value="LIVE">
-                  {draft.searchEngine === "YANDEX"
-                    ? "Яндекс Live"
-                    : "Google Live"}
-                </option>
-              </CustomSelect>
-            </label>
-            <label>
-              <span>Поисковая система</span>
-              <CustomSelect
-                onChange={(event) => {
-                  const searchEngine = event.target.value as TrackingContextDraft["searchEngine"];
-                  onChange({
-                    ...draft,
-                    countryCode: "RU",
-                    depth:
-                      searchEngine === "YANDEX" && provider === "ARSENKIN"
-                        ? 30
-                        : draft.depth,
-                    language: "ru",
-                    searchEngine,
-                    regionCode: "",
-                    regionLabel: "",
-                    name: `${searchEngine === "YANDEX" ? "Яндекс" : "Google"} · ${draft.device === "MOBILE" ? "Мобильное" : "Десктоп"}`
-                  });
-                  onSearchSourceChange(
-                    "LIVE"
-                  );
-                }}
-                value={draft.searchEngine}
-              >
-                <option value="GOOGLE">
-                  <span className="semantic-select-option-content">
-                    <SearchEngineLogo engine="GOOGLE" size="compact" /> Google
-                  </span>
-                </option>
-                <option value="YANDEX">
-                  <span className="semantic-select-option-content">
-                    <SearchEngineLogo engine="YANDEX" size="compact" /> Яндекс
-                  </span>
-                </option>
-              </CustomSelect>
-            </label>
-            <label>
-              <span>Устройство</span>
-              <CustomSelect
-                onChange={(event) =>
-                  onChange({
-                    ...draft,
-                    device: event.target.value as TrackingContextDraft["device"]
-                  })
-                }
-                value={draft.device}
-              >
-                <option value="DESKTOP">Десктоп</option>
-                <option value="MOBILE">Мобильное</option>
-              </CustomSelect>
-            </label>
-            <label>
+        <section className="semantic-workflow-panel semantic-position-geo-panel">
+          <header>
+            <h3>География и устройство</h3>
+            <p>Эти параметры формируют отдельную историю позиций.</p>
+          </header>
+          <label className="semantic-workflow-field">
+            <span>Регион</span>
+            <SearchableRegionSelect
+              kind={draft.searchEngine === "YANDEX" ? "YANDEX_RANK" : "GOOGLE_RANK"}
+              onChange={({ code, label }) => onChange({
+                ...draft,
+                name: `${draft.searchEngine === "YANDEX" ? "Яндекс" : "Google"} · ${label} · ${draft.device === "MOBILE" ? "Мобильное" : "Десктоп"}`,
+                regionCode: code,
+                regionLabel: label
+              })}
+              value={draft.regionCode}
+            />
+          </label>
+          <fieldset className="semantic-device-cards">
+            <legend>Устройство</legend>
+            <div>
+              {(["DESKTOP", "MOBILE"] as const).map((device) => (
+                <label className={draft.device === device ? "selected" : undefined} key={device}>
+                  <input
+                    checked={draft.device === device}
+                    onChange={() => onChange({ ...draft, device })}
+                    type="radio"
+                  />
+                  <Icon name={device === "DESKTOP" ? "dashboard" : "pages"} />
+                  <span>{device === "DESKTOP" ? "Десктоп" : "Мобильное"}</span>
+                  <i aria-hidden="true" />
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          <div className="semantic-position-compact-fields">
+            <label className="semantic-workflow-field">
               <span>Страна</span>
               <CustomSelect
                 onChange={(event) =>
@@ -690,7 +738,7 @@ function PositionRunParameters({
                 <option value="RU">Россия · RU</option>
               </CustomSelect>
             </label>
-            <label>
+            <label className="semantic-workflow-field">
               <span>Язык выдачи</span>
               <CustomSelect
                 disabled={draft.searchEngine === "YANDEX"}
@@ -705,42 +753,6 @@ function PositionRunParameters({
                 )}
               </CustomSelect>
             </label>
-            <label className="wide">
-              <span>Регион и код</span>
-              <SearchableRegionSelect
-                kind={draft.searchEngine === "YANDEX" ? "YANDEX_RANK" : "GOOGLE_RANK"}
-                onChange={({ code, label }) => onChange({
-                  ...draft,
-                  name: `${draft.searchEngine === "YANDEX" ? "Яндекс" : "Google"} · ${label} · ${draft.device === "MOBILE" ? "Мобильное" : "Десктоп"}`,
-                  regionCode: code,
-                  regionLabel: label
-                })}
-                value={draft.regionCode}
-              />
-            </label>
-            <label>
-              <span>Глубина</span>
-              <CustomSelect
-                disabled={
-                  draft.searchEngine === "YANDEX" && provider === "ARSENKIN"
-                }
-                onChange={(event) =>
-                  onChange({
-                    ...draft,
-                    depth: Number(event.target.value) as TrackingContextDraft["depth"]
-                  })
-                }
-                value={draft.depth}
-              >
-                <option value={30}>Топ-30</option>
-                {(draft.searchEngine === "GOOGLE" || provider === "XMLSTOCK") && (
-                  <>
-                    <option value={50}>Топ-50</option>
-                    <option value={100}>Топ-100</option>
-                  </>
-                )}
-              </CustomSelect>
-            </label>
           </div>
           {draft.searchEngine === "YANDEX" && provider === "ARSENKIN" && (
             <div className="inline-alert info" role="status">
@@ -749,25 +761,26 @@ function PositionRunParameters({
             </div>
           )}
         </section>
+        <section className="semantic-workflow-panel semantic-position-scope-panel">
+          <header>
+            <h3>Охват проверки</h3>
+            <p>Выберите все запросы, текущее выделение или папки.</p>
+          </header>
+          {scope}
+        </section>
       </div>
       <dl className="semantic-dialog-estimate">
-        <div><dt>Запросов</dt><dd>{keywordCount}</dd></div>
+        <div><Icon name="semantic" /><div><dt>Запросов</dt><dd>{keywordCount}</dd></div></div>
         <div>
-          <dt>Поисковик</dt>
-          <dd className="semantic-engine-fact">
-            <SearchEngineLogo engine={draft.searchEngine} size="compact" />
-            {draft.searchEngine === "YANDEX" ? "Яндекс" : "Google"}
-          </dd>
+          <SearchEngineLogo engine={draft.searchEngine} size="compact" />
+          <div><dt>Поисковик</dt><dd>{draft.searchEngine === "YANDEX" ? "Яндекс" : "Google"}</dd></div>
         </div>
         <div>
-          <dt>Провайдер</dt>
-          <dd className="semantic-provider-fact">
-            <ProviderLogo provider={provider} size="compact" />
-            {selectedSource?.label ?? integrationProviderLabel(provider)}
-          </dd>
+          <ProviderLogo provider={provider} size="compact" />
+          <div><dt>Провайдер</dt><dd>{selectedSource?.label ?? integrationProviderLabel(provider)}</dd></div>
         </div>
-        <div><dt>Расход провайдера</dt><dd>{providerUsage.usage}</dd></div>
-        <div><dt>Доступно сейчас</dt><dd>{providerUsage.available}</dd></div>
+        <div><Icon name="frequency" /><div><dt>Расход</dt><dd>{providerUsage.usage}</dd></div></div>
+        <div><Icon name="checkDouble" /><div><dt>Доступно</dt><dd>{providerUsage.available}</dd></div></div>
       </dl>
     </>
   );
