@@ -51,13 +51,13 @@ export function SemanticFrequencyDialog({
   const [types, setTypes] = useState<ReadonlySet<SemanticFrequencyType>>(
     new Set(["BASE", "EXACT", "FIXED"])
   );
-  const [regionCode, setRegionCode] = useState("213");
+  const [regionCode, setRegionCode] = useState("225");
   const [device, setDevice] = useState<SemanticFrequencyDevice>("ALL");
   const [settings, setSettings] = useState<ProjectConnectorSettings>();
   const [credentialId, setCredentialId] = useState("");
   const [loadingSources, setLoadingSources] = useState(true);
   const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<FrequencyDialogError>();
   const [scopeError, setScopeError] = useState<string>();
   const [resolvingScope, setResolvingScope] = useState(false);
   const [selections, setSelections] = useState<readonly SemanticOperationSelection[]>(
@@ -264,8 +264,10 @@ export function SemanticFrequencyDialog({
         </dl>
         {error && (
           <div className="inline-alert danger" role="alert">
-            <span>{error}</span>{" "}
-            <a href={`/app/projects/${encodeURIComponent(projectId)}/settings/integrations`}>Настроить маршрут Wordstat</a>
+            <span>{error.message}</span>{" "}
+            {error.showRoutingLink && (
+              <a href={`/app/projects/${encodeURIComponent(projectId)}/settings/integrations`}>Настроить маршрут Wordstat</a>
+            )}
           </div>
         )}
         {scopeError && <div className="inline-alert warning" role="alert">{scopeError}</div>}
@@ -311,14 +313,29 @@ export function SemanticFrequencyDialog({
   }
 }
 
-function frequencyErrorMessage(error: unknown): string {
+interface FrequencyDialogError {
+  readonly message: string;
+  readonly showRoutingLink: boolean;
+}
+
+function frequencyErrorMessage(error: unknown): FrequencyDialogError {
   if (error instanceof BrowserApiError) {
     if (error.code === "CONNECTOR_NOT_READY") {
-      return "Подключите XMLStock или Arsenkin, подтвердите ключ и назначьте проекту маршрут Wordstat.";
+      return {
+        message: "Подключите XMLStock или Arsenkin, подтвердите ключ и назначьте проекту маршрут Wordstat.",
+        showRoutingLink: true
+      };
     }
-    if (error.code === "FORBIDDEN") return "Недостаточно прав для запуска сборщика.";
-    if (error.code === "PAYMENT_REQUIRED") return "Workspace доступен только для чтения.";
-    return error.message;
+    if (error.code === "FORBIDDEN") {
+      return { message: "Недостаточно прав для запуска сборщика.", showRoutingLink: false };
+    }
+    if (error.code === "PAYMENT_REQUIRED") {
+      return { message: "Workspace доступен только для чтения.", showRoutingLink: false };
+    }
+    return { message: error.message, showRoutingLink: false };
   }
-  return error instanceof Error ? error.message : "Не удалось запустить сбор частотности.";
+  return {
+    message: error instanceof Error ? error.message : "Не удалось запустить сбор частотности.",
+    showRoutingLink: false
+  };
 }

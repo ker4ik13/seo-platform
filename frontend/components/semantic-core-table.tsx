@@ -1658,7 +1658,7 @@ export function SemanticCoreTable({
           </div>
           <div>
             <dt>Групп</dt>
-            <dd>{formatInteger(groups.length)}</dd>
+            <dd>{formatInteger(groups.filter(({ systemKind }) => !systemKind).length)}</dd>
           </div>
           <div>
             <dt>Кластеров</dt>

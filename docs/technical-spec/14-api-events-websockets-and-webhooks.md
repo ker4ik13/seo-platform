@@ -466,6 +466,9 @@ expiry `UNAUTHENTICATED` формируется только после успе
 
 - `/workspaces`;
 - `/workspaces/{workspaceId}`;
+- `GET|PUT|DELETE /workspaces/{workspaceId}/avatar` — отдельная binary read и
+  versioned JSON-base64 mutation boundary; чтение требует `workspace.view`,
+  изменение — CSRF, `workspace.update` и `If-Match`;
 - `/workspaces/{workspaceId}/members`;
 - `/workspaces/{workspaceId}/invites`;
 - `/workspace-invites/accept`;

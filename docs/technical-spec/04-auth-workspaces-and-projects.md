@@ -144,6 +144,10 @@ credentials других process boundaries не переиспользуютс�
 - Access token короткоживущий.
 - Refresh session хранится в `HttpOnly`, `Secure`, `SameSite` cookie.
 - Refresh tokens ротируются.
+- Browser API при `401` от истёкшего access token выполняет одну общую
+  refresh rotation для всех параллельных запросов и повторяет каждый исходный
+  same-origin запрос не более одного раза. Повтор использует новый CSRF token;
+  refresh endpoint и terminal `401` не ретраятся циклически.
 - Повторное использование отозванного refresh token отзывает семейство сессий.
 - Rotation внутри одной family не является terminal revoke и не создаёт
   `identity.session-family.revoked.v1`.
@@ -341,7 +345,9 @@ access level: project override может только сузить доступ
 
 ## 10. Настройки рабочей области
 
-- название и логотип;
+- название и аватар PNG/JPEG/WebP до 512 KiB; avatar material остаётся в Core,
+  не включается в списочную проекцию и читается отдельным permission-scoped
+  endpoint;
 - локаль и timezone;
 - финансовые данные;
 - security policy;

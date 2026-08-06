@@ -8,6 +8,12 @@ import { webPublicOrigin } from "../../../../lib/server-runtime-origin";
 
 export const dynamic = "force-dynamic";
 
+export async function POST(request: NextRequest): Promise<Response> {
+  return proxyPlatformApi(request, ["auth", "refresh"], {
+    csrfFromCookie: true
+  });
+}
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const returnTo = safeAppReturnTo(
     request.nextUrl.searchParams.get("returnTo")
@@ -16,11 +22,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     method: "POST",
     headers: request.headers
   });
-  const refreshed = await proxyPlatformApi(
-    refreshRequest,
-    ["auth", "refresh"],
-    { csrfFromCookie: true }
-  );
+  const refreshed = await POST(refreshRequest);
 
   if (refreshed.ok) {
     const response = NextResponse.redirect(

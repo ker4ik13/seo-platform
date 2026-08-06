@@ -8,6 +8,7 @@ export interface SeoRegion {
 // Yandex IDs are shared by Wordstat and Yandex SERP. Google IDs follow the
 // current Arsenkin Google region catalog referenced by its public API docs.
 export const seoRegions: readonly SeoRegion[] = [
+  { name: "Россия", wordstatCode: "225", yandexCode: "225", googleCode: "2643" },
   { name: "Москва", wordstatCode: "213", yandexCode: "213", googleCode: "1011969" },
   { name: "Санкт-Петербург", wordstatCode: "2", yandexCode: "2", googleCode: "1012040" },
   { name: "Новосибирск", wordstatCode: "65", yandexCode: "65", googleCode: "1011984" },

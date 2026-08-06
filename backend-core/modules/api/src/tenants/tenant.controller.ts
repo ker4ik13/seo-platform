@@ -1,10 +1,12 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Patch,
   Post,
+  Put,
   Req,
   Res,
   UseGuards
@@ -36,6 +38,7 @@ import {
   createProjectInput,
   createWorkspaceInput,
   updateProjectInput,
+  updateWorkspaceAvatarInput,
   updateWorkspaceInput
 } from "./tenant-input.js";
 import { TenantService } from "./tenant.service.js";
@@ -104,6 +107,64 @@ export class TenantController {
       requiredWorkspaceId(request),
       requiredVersion(headerValue(request, "if-match")),
       updateWorkspaceInput(body),
+      requestContext(request)
+    );
+    setEntityVersion(reply, workspace.version);
+    return apiResponse(request, workspace, workspace.version);
+  }
+
+  @Get("workspaces/:workspaceId/avatar")
+  @RequirePermission("workspace.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async workspaceAvatar(
+    @Req() request: TenantRequest,
+    @Res() reply: FastifyReply,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<void> {
+    const avatar = await this.tenants.getWorkspaceAvatar(
+      principal.userId,
+      requiredWorkspaceId(request)
+    );
+    reply
+      .header("Cache-Control", "private, max-age=300")
+      .header("Content-Type", avatar.contentType)
+      .header("Last-Modified", avatar.updatedAt.toUTCString())
+      .header("X-Content-Type-Options", "nosniff")
+      .send(avatar.data);
+  }
+
+  @Put("workspaces/:workspaceId/avatar")
+  @RequirePermission("workspace.update")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async updateWorkspaceAvatar(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<WorkspaceSummary>> {
+    const workspace = await this.tenants.updateWorkspaceAvatar(
+      principal.userId,
+      requiredWorkspaceId(request),
+      requiredVersion(headerValue(request, "if-match")),
+      updateWorkspaceAvatarInput(body),
+      requestContext(request)
+    );
+    setEntityVersion(reply, workspace.version);
+    return apiResponse(request, workspace, workspace.version);
+  }
+
+  @Delete("workspaces/:workspaceId/avatar")
+  @RequirePermission("workspace.update")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async deleteWorkspaceAvatar(
+    @Req() request: TenantRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<WorkspaceSummary>> {
+    const workspace = await this.tenants.deleteWorkspaceAvatar(
+      principal.userId,
+      requiredWorkspaceId(request),
+      requiredVersion(headerValue(request, "if-match")),
       requestContext(request)
     );
     setEntityVersion(reply, workspace.version);

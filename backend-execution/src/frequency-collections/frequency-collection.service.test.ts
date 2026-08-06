@@ -152,6 +152,47 @@ test("creates all 10,000 Arsenkin items atomically in bounded SQL batches", asyn
   assert.deepEqual(transactionOptions, { maxWait: 5_000, timeout: 30_000 });
 });
 
+test("accepts 10,000 XMLStock keywords at the collection boundary", async () => {
+  const reachedTransaction = new Error("transaction reached");
+  const xmlStockRoute = {
+    resolve: async () => ({
+      ...(await route.resolve()),
+      provider: "XMLSTOCK" as const
+    })
+  };
+  const service = new FrequencyCollectionService(
+    {
+      job: { findUnique: async () => null },
+      $transaction: async () => {
+        throw reachedTransaction;
+      }
+    } as never,
+    xmlStockRoute as never
+  );
+  await assert.rejects(
+    service.create({
+      workspaceId,
+      projectId,
+      actorId,
+      idempotencyKey: "xmlstock-frequency-create-10000",
+      correlationId: "xmlstock-correlation-10000",
+      jobCapacity: {
+        planCode: "TEAM",
+        planVersion: 3,
+        concurrentJobs: 10
+      },
+      items: Array.from({ length: 10_000 }, (_, index) => ({
+        id: `keyword-${index}`,
+        version: 1
+      })),
+      types: ["BASE"],
+      regionCode: "225",
+      device: "ALL"
+    }),
+    (error) => error === reachedTransaction
+  );
+});
+
 test("returns an exact tenant-scoped result scope without provider payloads", async () => {
   let observedWhere: unknown;
   const prisma = {

@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  NotificationReadAllResult,
   PendingWorkspaceInviteSummary,
   ProjectTransferRequestSummary
 } from "@seo-platform/contracts";
@@ -72,6 +73,7 @@ export function NotificationBell({ projectId }: Readonly<{ projectId?: string }>
   const [toasts, setToasts] = useState<readonly NotificationToast[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [markingAll, setMarkingAll] = useState(false);
   const [error, setError] = useState<string>();
   const [selectedOperation, setSelectedOperation] = useState<NotificationOperation>();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -221,6 +223,29 @@ export function NotificationBell({ projectId }: Readonly<{ projectId?: string }>
     }
   }
 
+  async function markAllRead(): Promise<void> {
+    if (markingAll || (unreadCount ?? 0) === 0) return;
+    setMarkingAll(true);
+    setError(undefined);
+    try {
+      const result = await browserApiRequest<NotificationReadAllResult>(
+        "/app/api/notifications/read-all",
+        { method: "POST" }
+      );
+      setItems((current) =>
+        current.map((item) =>
+          item.readAt ? item : { ...item, readAt: result.readAt }
+        )
+      );
+      setUnreadCount(0);
+      publishUnreadCount(0);
+    } catch (requestError) {
+      setError(notificationError(requestError));
+    } finally {
+      setMarkingAll(false);
+    }
+  }
+
   async function openItem(item: HeaderNotification): Promise<void> {
     if (!item.readAt) await markRead(item);
     if (!item.deepLink) return;
@@ -335,11 +360,25 @@ export function NotificationBell({ projectId }: Readonly<{ projectId?: string }>
             data-exclusive-dropdown-layer
           >
             <header>
-              <div>
-                <span>Центр событий</span>
-                <h2>Уведомления</h2>
+              <h2>Уведомления</h2>
+              <div className="notification-popover-actions">
+                <button
+                  aria-label="Прочитать все"
+                  disabled={markingAll || (unreadCount ?? 0) === 0}
+                  onClick={() => void markAllRead()}
+                  title="Прочитать все"
+                  type="button"
+                >
+                  <Icon name="checkDouble" />
+                </button>
+                <a
+                  aria-label="Настроить уведомления"
+                  href="/app/settings/notifications"
+                  title="Настроить уведомления"
+                >
+                  <Icon name="settings" />
+                </a>
               </div>
-              <a href="/app/settings/notifications">Настроить</a>
             </header>
             {error && <div className="notification-popover-error" role="alert">{error}</div>}
             {loading && items.length === 0 && invites.length === 0 && transfers.length === 0 ? (

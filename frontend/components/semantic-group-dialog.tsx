@@ -2,7 +2,7 @@
 
 import { CustomSelect } from "./custom-select";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import { SemanticModal } from "./semantic-modal";
 import type { SemanticGroupTreeItem } from "./semantic-group-tree";
@@ -45,6 +45,7 @@ export function SemanticGroupDialog({
   const [saving, setSaving] = useState(false);
   const [deleteKeywords, setDeleteKeywords] = useState(false);
   const [error, setError] = useState<string>();
+  const nameRef = useRef<HTMLInputElement>(null);
   const movedGroups = state.mode === "move" ? state.groups : [];
   const parentOptions = groups.filter(
     (candidate) =>
@@ -58,6 +59,15 @@ export function SemanticGroupDialog({
         (candidate.id !== state.group.id &&
           !candidate.path.startsWith(`${state.group.path} / `)))
   );
+
+  useEffect(() => {
+    if (state.mode !== "create" && state.mode !== "rename") return;
+    const frame = requestAnimationFrame(() => {
+      nameRef.current?.focus();
+      if (state.mode === "rename") nameRef.current?.select();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [state.mode]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -163,12 +173,13 @@ export function SemanticGroupDialog({
         {(state.mode === "create" || state.mode === "rename") && (
           <>
             <label>
-              <span>Название</span>
+              <span>{state.mode === "create" ? "Имя папки" : "Название"}</span>
               <input
                 autoFocus
                 maxLength={255}
                 onChange={(event) => setName(event.target.value)}
                 required
+                ref={nameRef}
                 value={name}
               />
             </label>

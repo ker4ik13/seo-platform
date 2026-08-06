@@ -6,6 +6,80 @@ import {
   BrowserApiError
 } from "./browser-api.ts";
 
+test("refreshes an expired session once and retries the API request", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  let apiCalls = 0;
+  let refreshCalls = 0;
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { cookie: "seo_csrf=public-csrf" }
+  });
+  globalThis.fetch = async (input, init) => {
+    if (input === "/app/auth/refresh") {
+      refreshCalls += 1;
+      assert.equal(init?.method, "POST");
+      assert.equal(new Headers(init.headers).get("x-csrf-token"), "public-csrf");
+      return Response.json({ data: { refreshed: true } });
+    }
+    apiCalls += 1;
+    if (apiCalls === 1) {
+      return Response.json(
+        { error: { code: "UNAUTHORIZED", message: "Authentication required" } },
+        { status: 401 }
+      );
+    }
+    return Response.json({ data: { ready: true } });
+  };
+
+  try {
+    assert.deepEqual(
+      await browserApiRequest("/app/api/projects/project-id/integration-settings"),
+      { ready: true }
+    );
+    assert.equal(apiCalls, 2);
+    assert.equal(refreshCalls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreGlobalDocument(originalDocument);
+  }
+});
+
+test("coalesces concurrent 401 responses into one refresh rotation", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  let apiCalls = 0;
+  let refreshCalls = 0;
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { cookie: "seo_csrf=public-csrf" }
+  });
+  globalThis.fetch = async (input) => {
+    if (input === "/app/auth/refresh") {
+      refreshCalls += 1;
+      await Promise.resolve();
+      return Response.json({ data: { refreshed: true } });
+    }
+    apiCalls += 1;
+    if (apiCalls <= 2) {
+      return Response.json({ error: { code: "UNAUTHORIZED" } }, { status: 401 });
+    }
+    return Response.json({ data: { ready: true } });
+  };
+
+  try {
+    await Promise.all([
+      browserApiRequest("/app/api/notifications"),
+      browserApiRequest("/app/api/projects/project-id/integration-settings")
+    ]);
+    assert.equal(apiCalls, 4);
+    assert.equal(refreshCalls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    restoreGlobalDocument(originalDocument);
+  }
+});
+
 test("preserves request metadata from a standard API error", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>
@@ -264,3 +338,13 @@ test("downloads an audited semantic export through the same-origin BFF", async (
     }
   }
 });
+
+function restoreGlobalDocument(
+  descriptor: PropertyDescriptor | undefined
+): void {
+  if (descriptor) {
+    Object.defineProperty(globalThis, "document", descriptor);
+  } else {
+    Reflect.deleteProperty(globalThis, "document");
+  }
+}

@@ -9,11 +9,11 @@ export const frequencyCollectionProviders = ["XMLSTOCK", "ARSENKIN"] as const;
 export type FrequencyCollectionProvider =
   (typeof frequencyCollectionProviders)[number];
 
-/** One remote Wordstat task accepted by Arsenkin. */
+/** Platform command boundary; provider-specific calls may use smaller chunks. */
 export const arsenkinWordstatKeywordLimit = 10_000 as const;
 
-/** Legacy per-command scope; XMLStock is still executed one keyword at a time. */
-export const xmlStockWordstatKeywordLimit = 200 as const;
+/** XMLStock has no 200-keyword command limit; execution stays one keyword per call. */
+export const xmlStockWordstatKeywordLimit = 10_000 as const;
 
 /** Bounded internal transport chunks; these are not provider task limits. */
 export const internalFrequencyResolveBatchLimit = 1_000 as const;

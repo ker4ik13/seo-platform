@@ -11,6 +11,8 @@ import {
 import { canUpdateWorkspace } from "../lib/app-permissions";
 import type { AppWorkspace } from "../lib/app-types";
 import { browserApiRequest, BrowserApiError } from "../lib/browser-api";
+import { CustomSelect } from "./custom-select";
+import { WorkspaceAvatar } from "./workspace-avatar";
 import {
   isVersionConflict,
   tenantApiFieldErrors,
@@ -27,6 +29,35 @@ import {
 } from "../lib/tenant-settings";
 
 const WORKSPACE_FIELDS = ["name", "locale", "timezone"] as const;
+const WORKSPACE_AVATAR_MAX_BYTES = 512 * 1_024;
+const WORKSPACE_AVATAR_SOURCE_MAX_BYTES = 10 * 1_024 * 1_024;
+const WORKSPACE_LOCALES = [
+  { value: "ru", label: "Русский" },
+  { value: "ru-RU", label: "Русский (Россия)" },
+  { value: "en", label: "English" },
+  { value: "en-US", label: "English (United States)" },
+  { value: "de-DE", label: "Deutsch (Deutschland)" }
+] as const;
+const WORKSPACE_TIMEZONES = [
+  "Europe/Moscow",
+  "Europe/Kaliningrad",
+  "Europe/Samara",
+  "Asia/Yekaterinburg",
+  "Asia/Omsk",
+  "Asia/Krasnoyarsk",
+  "Asia/Irkutsk",
+  "Asia/Yakutsk",
+  "Asia/Vladivostok",
+  "Asia/Magadan",
+  "Asia/Kamchatka",
+  "Europe/Berlin",
+  "Europe/London",
+  "Europe/Paris",
+  "Asia/Almaty",
+  "Asia/Tbilisi",
+  "Asia/Dubai",
+  "UTC"
+] as const;
 
 export function WorkspaceSettings({
   workspace
@@ -38,7 +69,9 @@ export function WorkspaceSettings({
   const [failure, setFailure] = useState<TenantOperationFailure>();
   const [success, setSuccess] = useState<string>();
   const [conflict, setConflict] = useState(false);
-  const [busy, setBusy] = useState<"save" | "reload" | "retry">();
+  const [busy, setBusy] = useState<
+    "save" | "reload" | "retry" | "avatar-upload" | "avatar-delete"
+  >();
   const [online, setOnline] = useState(true);
   const [runtimeRestriction, setRuntimeRestriction] = useState<
     "MISSING_PERMISSION" | "WORKSPACE_READ_ONLY"
@@ -235,6 +268,59 @@ export function WorkspaceSettings({
     });
   }
 
+  async function uploadAvatar(file: File | undefined): Promise<void> {
+    if (!file || !canMutate) return;
+    setBusy("avatar-upload");
+    setFailure(undefined);
+    setSuccess(undefined);
+    try {
+      const payload = await workspaceAvatarPayload(file);
+      const updated = await browserApiRequest<AppWorkspace>(
+        `${workspacePath(server.id)}/avatar`,
+        {
+          method: "PUT",
+          ifMatch: server.version,
+          body: payload
+        }
+      );
+      acceptAvatarWorkspace(updated, "Аватар рабочей области обновлён.");
+    } catch (error) {
+      if (error instanceof WorkspaceAvatarError) {
+        setFailure({ message: error.message });
+      } else {
+        handleFailure(error);
+      }
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function deleteAvatar(): Promise<void> {
+    if (!server.avatarUpdatedAt || !canMutate) return;
+    setBusy("avatar-delete");
+    setFailure(undefined);
+    setSuccess(undefined);
+    try {
+      const updated = await browserApiRequest<AppWorkspace>(
+        `${workspacePath(server.id)}/avatar`,
+        { method: "DELETE", ifMatch: server.version }
+      );
+      acceptAvatarWorkspace(updated, "Аватар рабочей области удалён.");
+    } catch (error) {
+      handleFailure(error);
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  function acceptAvatarWorkspace(updated: AppWorkspace, message: string): void {
+    setServer(updated);
+    setConflict(false);
+    setRuntimeRestriction(undefined);
+    setSuccess(message);
+    router.refresh();
+  }
+
   return (
     <div className="settings-stack">
       {!online && (
@@ -288,6 +374,41 @@ export function WorkspaceSettings({
         </div>
       )}
 
+      <section className="panel security-card workspace-avatar-card" aria-busy={busy === "avatar-upload" || busy === "avatar-delete"}>
+        <header className="security-card-header">
+          <div>
+            <h2>Аватар рабочей области</h2>
+            <p>PNG, JPEG или WebP. Большие изображения уменьшаются до 512 × 512 px.</p>
+          </div>
+          <WorkspaceAvatar className="workspace-settings-avatar" size={72} workspace={server} />
+        </header>
+        <div className="workspace-avatar-actions">
+          <label className={`secondary-button${canMutate ? "" : " disabled"}`}>
+            {busy === "avatar-upload" ? "Загружаем…" : server.avatarUpdatedAt ? "Заменить аватар" : "Загрузить аватар"}
+            <input
+              accept="image/png,image/jpeg,image/webp"
+              disabled={!canMutate}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                void uploadAvatar(file);
+              }}
+              type="file"
+            />
+          </label>
+          {server.avatarUpdatedAt && (
+            <button
+              className="secondary-button"
+              disabled={!canMutate}
+              onClick={() => void deleteAvatar()}
+              type="button"
+            >
+              {busy === "avatar-delete" ? "Удаляем…" : "Удалить"}
+            </button>
+          )}
+        </div>
+      </section>
+
       <section className="panel security-card" aria-busy={Boolean(busy)}>
         <header className="security-card-header">
           <div>
@@ -339,21 +460,23 @@ export function WorkspaceSettings({
           <div className="form-row">
             <label className="form-field">
               <span>Локаль</span>
-              <input
+              <CustomSelect
                 aria-describedby={fieldErrors.locale ? "workspace-locale-error" : "workspace-locale-hint"}
                 aria-invalid={Boolean(fieldErrors.locale)}
-                autoCapitalize="none"
-                maxLength={16}
-                onChange={(event) => updateDraft("locale", event.target.value)}
-                readOnly={
+                disabled={
                   !roleAllowsUpdate ||
                   !statusAllowsUpdate ||
                   Boolean(runtimeRestriction) ||
                   Boolean(busy)
                 }
+                onChange={(event) => updateDraft("locale", event.target.value)}
                 required
                 value={draft.locale}
-              />
+              >
+                {selectOptions(WORKSPACE_LOCALES, draft.locale).map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </CustomSelect>
               {fieldErrors.locale ? (
                 <small className="field-error" id="workspace-locale-error">
                   {fieldErrors.locale}
@@ -364,21 +487,25 @@ export function WorkspaceSettings({
             </label>
             <label className="form-field">
               <span>Часовой пояс</span>
-              <input
+              <CustomSelect
                 aria-describedby={fieldErrors.timezone ? "workspace-timezone-error" : "workspace-timezone-hint"}
                 aria-invalid={Boolean(fieldErrors.timezone)}
-                autoCapitalize="none"
-                maxLength={64}
-                onChange={(event) => updateDraft("timezone", event.target.value)}
-                readOnly={
+                disabled={
                   !roleAllowsUpdate ||
                   !statusAllowsUpdate ||
                   Boolean(runtimeRestriction) ||
                   Boolean(busy)
                 }
+                onChange={(event) => updateDraft("timezone", event.target.value)}
                 required
+                searchable
+                searchPlaceholder="Город или IANA-зона"
                 value={draft.timezone}
-              />
+              >
+                {stringSelectOptions(WORKSPACE_TIMEZONES, draft.timezone).map((timezone) => (
+                  <option key={timezone} value={timezone}>{timezone}</option>
+                ))}
+              </CustomSelect>
               {fieldErrors.timezone ? (
                 <small className="field-error" id="workspace-timezone-error">
                   {fieldErrors.timezone}
@@ -442,4 +569,81 @@ function redirectExpiredSession(error: unknown): boolean {
     `/app/auth/refresh?returnTo=${encodeURIComponent(returnTo)}`
   );
   return true;
+}
+
+class WorkspaceAvatarError extends Error {}
+
+async function workspaceAvatarPayload(file: File): Promise<{
+  readonly contentType: "image/png" | "image/jpeg" | "image/webp";
+  readonly data: string;
+}> {
+  if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+    throw new WorkspaceAvatarError("Выберите изображение PNG, JPEG или WebP.");
+  }
+  if (file.size > WORKSPACE_AVATAR_SOURCE_MAX_BYTES) {
+    throw new WorkspaceAvatarError("Исходное изображение должно быть не больше 10 МБ.");
+  }
+  let image: Blob = file;
+  if (image.size > WORKSPACE_AVATAR_MAX_BYTES) {
+    image = await resizeWorkspaceAvatar(file);
+  }
+  if (image.size > WORKSPACE_AVATAR_MAX_BYTES || image.size < 32) {
+    throw new WorkspaceAvatarError("Не удалось уменьшить изображение до 512 КБ.");
+  }
+  const contentType = image.type as "image/png" | "image/jpeg" | "image/webp";
+  return { contentType, data: await blobBase64(image) };
+}
+
+async function resizeWorkspaceAvatar(file: File): Promise<Blob> {
+  if (typeof createImageBitmap !== "function") {
+    throw new WorkspaceAvatarError("Этот браузер не умеет уменьшать большие изображения. Выберите файл до 512 КБ.");
+  }
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, 512 / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  const context = canvas.getContext("2d");
+  if (!context) {
+    bitmap.close();
+    throw new WorkspaceAvatarError("Не удалось обработать изображение в браузере.");
+  }
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  for (const quality of [0.88, 0.76, 0.64, 0.52]) {
+    const result = await canvasBlob(canvas, quality);
+    if (result && result.size <= WORKSPACE_AVATAR_MAX_BYTES) return result;
+  }
+  throw new WorkspaceAvatarError("Не удалось уменьшить изображение до 512 КБ.");
+}
+
+function canvasBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> {
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/webp", quality));
+}
+
+function blobBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new WorkspaceAvatarError("Не удалось прочитать изображение."));
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const separator = result.indexOf(",");
+      if (separator < 0) reject(new WorkspaceAvatarError("Не удалось подготовить изображение."));
+      else resolve(result.slice(separator + 1));
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+function selectOptions(
+  options: readonly { readonly value: string; readonly label: string }[],
+  current: string
+): readonly { readonly value: string; readonly label: string }[] {
+  return options.some(({ value }) => value === current)
+    ? options
+    : [{ value: current, label: current }, ...options];
+}
+
+function stringSelectOptions(options: readonly string[], current: string): readonly string[] {
+  return options.some((option) => option === current) ? options : [current, ...options];
 }

@@ -29,11 +29,18 @@ import {
   toProjectSummary,
   toWorkspaceSummary
 } from "./tenant.mapper.js";
+import type { WorkspaceAvatarInput } from "./tenant-input.js";
 
 interface WorkspaceOwnerRecord {
   readonly id: string;
   readonly emailDisplay: string;
   readonly displayName: string;
+}
+
+export interface WorkspaceAvatar {
+  readonly contentType: string;
+  readonly data: Buffer;
+  readonly updatedAt: Date;
 }
 
 @Injectable()
@@ -237,6 +244,123 @@ export class TenantService {
       return workspace;
     });
 
+    const [membership, owner] = await Promise.all([
+      this.prisma.workspaceMember.findUniqueOrThrow({
+        where: { workspaceId_userId: { workspaceId, userId } }
+      }),
+      this.workspaceOwner(result.ownerUserId)
+    ]);
+    return toWorkspaceSummary(result, membership.roleCode, owner);
+  }
+
+  public async getWorkspaceAvatar(
+    userId: string,
+    workspaceId: string
+  ): Promise<WorkspaceAvatar> {
+    const workspace = await this.prisma.workspace.findFirst({
+      where: {
+        id: workspaceId,
+        members: { some: { userId, status: "ACTIVE" } }
+      },
+      select: {
+        avatarMimeType: true,
+        avatarData: true,
+        avatarUpdatedAt: true
+      }
+    });
+    if (
+      !workspace?.avatarMimeType ||
+      !workspace.avatarData ||
+      !workspace.avatarUpdatedAt
+    ) {
+      throw this.notFound();
+    }
+    return {
+      contentType: workspace.avatarMimeType,
+      data: Buffer.from(workspace.avatarData),
+      updatedAt: workspace.avatarUpdatedAt
+    };
+  }
+
+  public async updateWorkspaceAvatar(
+    userId: string,
+    workspaceId: string,
+    version: number,
+    input: WorkspaceAvatarInput,
+    context: RequestContext
+  ): Promise<WorkspaceSummary> {
+    return this.setWorkspaceAvatar(
+      userId,
+      workspaceId,
+      version,
+      input,
+      context
+    );
+  }
+
+  public async deleteWorkspaceAvatar(
+    userId: string,
+    workspaceId: string,
+    version: number,
+    context: RequestContext
+  ): Promise<WorkspaceSummary> {
+    return this.setWorkspaceAvatar(
+      userId,
+      workspaceId,
+      version,
+      undefined,
+      context
+    );
+  }
+
+  private async setWorkspaceAvatar(
+    userId: string,
+    workspaceId: string,
+    version: number,
+    avatar: WorkspaceAvatarInput | undefined,
+    context: RequestContext
+  ): Promise<WorkspaceSummary> {
+    const avatarUpdatedAt = avatar ? new Date() : null;
+    const result = await this.prisma.$transaction(async (transaction) => {
+      const updated = await transaction.workspace.updateMany({
+        where: {
+          id: workspaceId,
+          version,
+          status: { notIn: ["DELETING", "DELETED"] }
+        },
+        data: {
+          avatarMimeType: avatar?.contentType ?? null,
+          avatarData: avatar ? Uint8Array.from(avatar.data) : null,
+          avatarUpdatedAt,
+          version: { increment: 1 }
+        }
+      });
+      if (updated.count !== 1) throw this.versionConflict();
+      const workspace = await transaction.workspace.findUniqueOrThrow({
+        where: { id: workspaceId }
+      });
+      await this.audit.record(
+        {
+          actorId: userId,
+          workspaceId,
+          action: avatar ? "workspace.avatar.updated" : "workspace.avatar.deleted",
+          resourceType: "workspace",
+          resourceId: workspaceId,
+          requestId: context.requestId
+        },
+        transaction
+      );
+      await this.outbox.event(transaction, {
+        eventType: domainEventTypes.workspaceUpdated,
+        aggregateType: "workspace",
+        aggregateId: workspaceId,
+        aggregateVersion: workspace.version,
+        workspaceId,
+        payload: { workspaceId },
+        requestId: context.requestId
+      });
+      return workspace;
+    });
     const [membership, owner] = await Promise.all([
       this.prisma.workspaceMember.findUniqueOrThrow({
         where: { workspaceId_userId: { workspaceId, userId } }

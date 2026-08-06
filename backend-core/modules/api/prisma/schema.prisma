@@ -439,6 +439,9 @@ model Workspace {
   billingCurrency String          @default("RUB") @map("billing_currency") @db.Char(3)
   status          WorkspaceStatus @default(ACTIVE)
   ownerUserId     String          @map("owner_user_id") @db.Uuid
+  avatarMimeType  String?         @map("avatar_mime_type") @db.VarChar(32)
+  avatarData      Bytes?          @map("avatar_data")
+  avatarUpdatedAt DateTime?       @map("avatar_updated_at") @db.Timestamptz(6)
   version         Int             @default(1)
   createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)

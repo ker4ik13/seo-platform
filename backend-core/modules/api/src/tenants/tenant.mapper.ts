@@ -34,6 +34,9 @@ export function toWorkspaceSummary(
       email: owner.emailDisplay,
       displayName: owner.displayName
     },
+    ...(workspace.avatarUpdatedAt
+      ? { avatarUpdatedAt: workspace.avatarUpdatedAt.toISOString() }
+      : {}),
     version: workspace.version,
     createdAt: workspace.createdAt.toISOString()
   };

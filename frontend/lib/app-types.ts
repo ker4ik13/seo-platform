@@ -22,6 +22,7 @@ export interface AppWorkspace {
     email: string;
     displayName: string;
   }>;
+  readonly avatarUpdatedAt?: string;
   readonly version: number;
 }
 

@@ -225,6 +225,9 @@ function appWorkspace(payload: unknown): AppWorkspace {
       email: stringValue(owner.email),
       displayName: stringValue(owner.displayName)
     },
+    ...(workspace.avatarUpdatedAt === undefined
+      ? {}
+      : { avatarUpdatedAt: stringValue(workspace.avatarUpdatedAt) }),
     version: numberValue(workspace.version)
   };
 }

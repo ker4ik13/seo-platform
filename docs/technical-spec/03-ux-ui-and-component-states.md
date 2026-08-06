@@ -412,6 +412,18 @@ exact `https://{project.domain}/favicon.svg` без referrer. Пока изоб�
 создаёт broken-image/letter placeholder. Небезопасные, IP и reserved hostnames
 не используются.
 
+### 20.4. Tenant navigation и дерево семантики
+
+Основной левый sidebar плавно сворачивается до icon rail и сохраняет это
+presentation-only предпочтение локально, не меняя workspace/project context.
+Выбранные элементы tenant dropdown обозначаются фоном и обводкой без отдельной
+галочки. Workspace показывает загруженный avatar с буквенным fallback.
+
+В дереве семантики корневые пользовательские папки остаются sticky внутри
+собственного scroll container. «Все запросы», «Без группы» и «Корзина» имеют
+семантические иконки; две системные папки не входят в число пользовательских
+групп. Диалог новой папки после открытия переводит фокус в «Имя папки».
+
 ## 21. Настройки источников проекта
 
 Маршрут `/app/projects/{projectId}/settings/integrations` использует точный

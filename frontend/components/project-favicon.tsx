@@ -27,7 +27,7 @@ export function ProjectFavicon({
       className={`${className}${status === "READY" ? " is-ready" : ""}`}
       decoding="async"
       height={size}
-      loading="lazy"
+      loading="eager"
       onError={() => setStatus("FAILED")}
       onLoad={() => setStatus("READY")}
       referrerPolicy="no-referrer"

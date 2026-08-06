@@ -6,6 +6,7 @@ import {
   type SemanticGroupDropPlacement
 } from "../lib/semantic-group-drag";
 import { ContextMenu, type ContextMenuItem } from "./context-menu";
+import { Icon } from "./icon";
 
 export interface SemanticGroupTreeItem {
   readonly id: string;
@@ -186,6 +187,7 @@ export function SemanticGroupTree({
       ? [
           {
             id: "open-system-group",
+            icon: <Icon name={contextMenu.group.systemKind === "TRASH" ? "trash" : "inbox"} />,
             label:
               contextMenu.group.systemKind === "TRASH"
                 ? "Открыть корзину"
@@ -196,17 +198,20 @@ export function SemanticGroupTree({
       : [
         {
           id: "create",
+          icon: <Icon name="folderPlus" />,
           label: "Создать подгруппу",
           onSelect: () => onCreate(contextMenu.group.id)
         },
         {
           id: "rename",
+          icon: <Icon name="edit" />,
           label: "Переименовать",
           disabled: contextGroups.length !== 1,
           onSelect: () => onRename(contextMenu.group)
         },
         {
           id: "move",
+          icon: <Icon name="move" />,
           label:
             contextGroups.length > 1
               ? `Переместить группы (${contextGroups.length})…`
@@ -215,12 +220,14 @@ export function SemanticGroupTree({
         },
         {
           id: "move-up",
+          icon: <Icon name="arrowUp" />,
           label: "Поднять выше",
           disabled: contextGroups.length !== 1 || contextIndex <= 0,
           onSelect: () => onReorder(contextMenu.group, contextIndex - 1)
         },
         {
           id: "move-down",
+          icon: <Icon name="arrowDown" />,
           label: "Опустить ниже",
           disabled:
             contextGroups.length !== 1 ||
@@ -230,12 +237,14 @@ export function SemanticGroupTree({
         },
         {
           id: "export",
+          icon: <Icon name="export" />,
           label: "Экспортировать группу",
           disabled: contextGroups.length !== 1,
           onSelect: () => onExport(contextMenu.group)
         },
         {
           id: "delete",
+          icon: <Icon name="trash" />,
           label:
             contextGroups.length > 1
               ? `Удалить группы (${contextGroups.length})`
@@ -255,7 +264,7 @@ export function SemanticGroupTree({
     const selected = selectedIds.has(group.id);
     return (
       <div
-        className={`semantic-group-tree-row${activeGroupId === group.id ? " active" : ""}${selected ? " selected" : ""}${group.systemKind ? ` system ${group.systemKind.toLowerCase()}` : ""}${dragTarget && "group" in dragTarget && dragTarget.group.id === group.id ? ` drag-${dragTarget.placement}` : ""}`}
+        className={`semantic-group-tree-row${depth === 0 && !group.systemKind ? " top-level" : ""}${activeGroupId === group.id ? " active" : ""}${selected ? " selected" : ""}${group.systemKind ? ` system ${group.systemKind.toLowerCase()}` : ""}${dragTarget && "group" in dragTarget && dragTarget.group.id === group.id ? ` drag-${dragTarget.placement}` : ""}`}
         draggable={!group.systemKind}
         key={group.id}
         onContextMenu={(event) => openContextMenu(event, group)}
@@ -334,7 +343,7 @@ export function SemanticGroupTree({
           <i style={{ background: group.color ?? "#a8a5b8" }} />
           {group.systemKind && (
             <span aria-hidden="true" className="semantic-system-group-icon">
-              {group.systemKind === "TRASH" ? "⌫" : "∅"}
+              <Icon name={group.systemKind === "TRASH" ? "trash" : "inbox"} />
             </span>
           )}
           <span>{group.name}</span>
@@ -407,7 +416,7 @@ export function SemanticGroupTree({
         }}
         type="button"
       >
-        <span aria-hidden="true">▤</span>
+        <Icon aria-hidden="true" name="list" />
         <strong>Все запросы</strong>
         <small>{total === undefined ? "—" : formatInteger(total)}</small>
       </button>

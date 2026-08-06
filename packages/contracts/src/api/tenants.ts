@@ -15,6 +15,7 @@ export interface WorkspaceSummary {
   readonly status: "ACTIVE" | "READ_ONLY" | "SUSPENDED";
   readonly roleCode: string;
   readonly owner: WorkspaceOwnerSummary;
+  readonly avatarUpdatedAt?: string;
   readonly version: number;
   readonly createdAt: string;
 }
@@ -33,6 +34,11 @@ export interface UpdateWorkspaceInput {
   readonly country?: string | null;
   readonly locale?: string;
   readonly timezone?: string;
+}
+
+export interface UpdateWorkspaceAvatarInput {
+  readonly contentType: "image/png" | "image/jpeg" | "image/webp";
+  readonly data: string;
 }
 
 export const assignableWorkspaceRoleCodes = [

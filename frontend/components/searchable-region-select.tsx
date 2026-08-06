@@ -30,11 +30,11 @@ export function SearchableRegionSelect({
         label: region.name
       }));
       return [
-        ...(allowAll ? [{ code: "ALL", label: "Без ограничения" }] : []),
         ...(value && !known.some(({ code }) => code === value)
           ? [{ code: value, label: valueLabel?.trim() || "Другой регион" }]
           : []),
-        ...known
+        ...known,
+        ...(allowAll ? [{ code: "ALL", label: "Без ограничения" }] : [])
       ];
     },
     [allowAll, kind, value, valueLabel]

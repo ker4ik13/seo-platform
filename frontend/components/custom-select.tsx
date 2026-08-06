@@ -58,6 +58,7 @@ export interface CustomSelectProps extends NativeSelectProps {
   readonly onChange?: (event: CustomSelectChangeEvent) => void;
   readonly searchPlaceholder?: string;
   readonly searchable?: boolean;
+  readonly showSelectedCheck?: boolean;
   readonly value?: string | number;
 }
 
@@ -79,6 +80,7 @@ export function CustomSelect({
   required = false,
   searchPlaceholder = "Поиск…",
   searchable = false,
+  showSelectedCheck = true,
   title,
   value
 }: CustomSelectProps) {
@@ -332,7 +334,7 @@ export function CustomSelect({
       </button>
       {open && portalTarget && createPortal(
         <div
-          className={`custom-select-popover${opensUpward ? " opens-upward" : ""}`}
+          className={`custom-select-popover${opensUpward ? " opens-upward" : ""}${showSelectedCheck ? "" : " without-selected-check"}`}
           data-exclusive-dropdown-layer
           ref={popoverRef}
           style={popoverPosition}
@@ -370,9 +372,11 @@ export function CustomSelect({
                   tabIndex={-1}
                   type="button"
                 >
-                  <span className="custom-select-check" aria-hidden="true">
-                    {option.value === selectedValue ? "✓" : ""}
-                  </span>
+                  {showSelectedCheck && (
+                    <span className="custom-select-check" aria-hidden="true">
+                      {option.value === selectedValue ? "✓" : ""}
+                    </span>
+                  )}
                   <span>{option.label}</span>
                 </button>
               ))

@@ -29,6 +29,14 @@ export type IconName =
   | "http"
   | "indexability"
   | "sitemap"
+  | "folderPlus"
+  | "edit"
+  | "arrowUp"
+  | "arrowDown"
+  | "inbox"
+  | "list"
+  | "checkDouble"
+  | "panelLeftClose"
   | "close";
 
 const paths: Record<IconName, string> = {
@@ -60,6 +68,14 @@ const paths: Record<IconName, string> = {
   http: "M4 4h16v16H4V4Zm2 3v2h12V7H6Zm0 4v6h12v-6H6Zm2 2h5v2H8v-2Z",
   indexability: "M12 4C7 4 3.1 8.1 2 12c1.1 3.9 5 8 10 8s8.9-4.1 10-8c-1.1-3.9-5-8-10-8Zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z",
   sitemap: "M11 3h2v4h6v5h-2V9h-4v3h3v7h-3v2h-2v-2H8v-7h3V9H7v3H5V7h6V3Z",
+  folderPlus: "M3 5h7l2 2h9v12H3V5Zm2 4v8h14V9H5Zm6 1h2v2h2v2h-2v2h-2v-2H9v-2h2v-2Z",
+  edit: "m4 16.5-.5 4 4-.5L19 8.5 15.5 5 4 16.5Zm12.9-12.9 1.2-1.2a1.4 1.4 0 0 1 2 0l1.5 1.5a1.4 1.4 0 0 1 0 2l-1.2 1.2-3.5-3.5Z",
+  arrowUp: "m12 4-7 7 1.4 1.4L11 7.8V20h2V7.8l4.6 4.6L19 11l-7-7Z",
+  arrowDown: "m12 20 7-7-1.4-1.4-4.6 4.6V4h-2v13.2l-4.6-4.6L5 13l7 7Z",
+  inbox: "M4 4h16l2 10v6H2v-6L4 4Zm1.6 2-1.4 7H8l1.5 2h5l1.5-2h3.8l-1.4-7H5.6Z",
+  list: "M4 5h3v3H4V5Zm5 0h11v3H9V5Zm-5 6h3v3H4v-3Zm5 0h11v3H9v-3Zm-5 6h3v3H4v-3Zm5 0h11v3H9v-3Z",
+  checkDouble: "m1.8 12.2 1.4-1.4 4.1 4.1 1.4 1.4-1.4 1.4-5.5-5.5Zm5.8 0L9 10.8l4.1 4.1 7.7-7.7 1.4 1.4-9.1 9.1-5.5-5.5Zm4.1-3.6 1.4-1.4 2.1 2.1-1.4 1.4-2.1-2.1Z",
+  panelLeftClose: "M3 3h18v18H3V3Zm2 2v14h5V5H5Zm10.6 3.6L12.2 12l3.4 3.4 1.4-1.4-2-2 2-2-1.4-1.4Z",
   close: "m6.7 5.3 5.3 5.3 5.3-5.3 1.4 1.4-5.3 5.3 5.3 5.3-1.4 1.4-5.3-5.3-5.3 5.3-1.4-1.4 5.3-5.3-5.3-5.3 1.4-1.4Z"
 };
 

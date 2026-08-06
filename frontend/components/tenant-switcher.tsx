@@ -9,6 +9,7 @@ import type {
   AppWorkspace
 } from "../lib/app-types";
 import { ProjectFavicon } from "./project-favicon";
+import { WorkspaceAvatar } from "./workspace-avatar";
 
 export function TenantSwitcher({
   currentUserId,
@@ -59,6 +60,7 @@ export function TenantSwitcher({
           className="tenant-workspace-select"
           disabled={workspaces.length === 0}
           onChange={(event) => selectWorkspace(event.target.value)}
+          showSelectedCheck={false}
           value={workspace?.id ?? ""}
         >
           {workspaces.length === 0 && <option value="">Нет областей</option>}
@@ -79,6 +81,7 @@ export function TenantSwitcher({
           className="tenant-project-select"
           disabled={!workspace || projects.length === 0}
           onChange={(event) => selectProject(event.target.value)}
+          showSelectedCheck={false}
           value={project?.id ?? ""}
         >
           {projects.length === 0 && <option value="">Нет проектов</option>}
@@ -103,14 +106,11 @@ function WorkspaceOption({
   const isPersonal = workspace.owner.userId === currentUserId;
   return (
     <span className="tenant-option tenant-workspace-option">
-      <span
-        aria-label={`Владелец: ${workspace.owner.displayName}`}
+      <WorkspaceAvatar
         className="tenant-owner-avatar"
-        role="img"
-        title={workspace.owner.displayName}
-      >
-        {ownerInitials(workspace.owner.displayName)}
-      </span>
+        size={26}
+        workspace={workspace}
+      />
       <span className="tenant-option-copy">
         <strong>{workspace.name}</strong>
         <small>
@@ -129,17 +129,6 @@ function ProjectOption({ project }: Readonly<{ project: AppProject }>) {
       <ProjectFavicon className="tenant-project-favicon" domain={project.domain} />
       <strong title={project.name}>{project.name}</strong>
     </span>
-  );
-}
-
-function ownerInitials(value: string): string {
-  return (
-    value
-      .split(/\s+/u)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((part) => part[0]?.toUpperCase())
-      .join("") || "?"
   );
 }
 

@@ -27,6 +27,8 @@ const FORWARDED_RESPONSE_HEADERS = [
   "content-disposition",
   "content-type",
   "etag",
+  "last-modified",
+  "x-content-type-options",
   "x-export-row-count",
   "x-api-version",
   "x-request-id",

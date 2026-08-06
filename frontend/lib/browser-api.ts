@@ -64,6 +64,8 @@ interface BrowserApiOptions {
   readonly signal?: AbortSignal;
 }
 
+let sessionRefreshPromise: Promise<boolean> | undefined;
+
 export interface BrowserDownload {
   readonly blob: Blob;
   readonly filename: string;
@@ -151,7 +153,7 @@ export async function browserApiDownload(
     process.env.NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME ?? "seo_csrf"
   );
   if (csrf) headers.set("X-CSRF-Token", csrf);
-  const response = await fetch(path, {
+  const response = await sessionAwareFetch(path, {
     method: "POST",
     headers,
     body: JSON.stringify(options.body),
@@ -213,7 +215,7 @@ async function browserApiPayload(
     if (csrf) headers.set("X-CSRF-Token", csrf);
   }
 
-  const response = await fetch(path, {
+  const response = await sessionAwareFetch(path, {
     method,
     headers,
     ...(options.body !== undefined
@@ -232,6 +234,56 @@ async function browserApiPayload(
     );
   }
   return { response, payload };
+}
+
+async function sessionAwareFetch(
+  path: string,
+  request: RequestInit
+): Promise<Response> {
+  const response = await fetch(path, request);
+  if (
+    response.status !== 401 ||
+    !browserCookie(csrfCookieName()) ||
+    request.signal?.aborted
+  ) {
+    return response;
+  }
+
+  const refreshed = await refreshBrowserSession();
+  if (!refreshed || request.signal?.aborted) return response;
+
+  const headers = new Headers(request.headers);
+  if ((request.method ?? "GET") !== "GET") {
+    const csrf = browserCookie(csrfCookieName());
+    if (csrf) headers.set("X-CSRF-Token", csrf);
+  }
+  return fetch(path, { ...request, headers });
+}
+
+async function refreshBrowserSession(): Promise<boolean> {
+  sessionRefreshPromise ??= performSessionRefresh().finally(() => {
+    sessionRefreshPromise = undefined;
+  });
+  return sessionRefreshPromise;
+}
+
+async function performSessionRefresh(): Promise<boolean> {
+  const csrf = browserCookie(csrfCookieName());
+  if (!csrf) return false;
+  const response = await fetch("/app/auth/refresh", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "X-CSRF-Token": csrf
+    },
+    credentials: "same-origin",
+    cache: "no-store"
+  }).catch(() => undefined);
+  return response?.ok === true;
+}
+
+function csrfCookieName(): string {
+  return process.env.NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME ?? "seo_csrf";
 }
 
 function invalidResponse(): BrowserApiError {
@@ -279,9 +331,11 @@ function browserApiError(
     return new BrowserApiError(
       status,
       typeof error.code === "string" ? error.code : "REQUEST_FAILED",
-      typeof error.message === "string"
-        ? error.message
-        : "Не удалось выполнить запрос",
+      status === 401
+        ? "Сессия завершена. Войдите в аккаунт ещё раз."
+        : typeof error.message === "string"
+          ? error.message
+          : "Не удалось выполнить запрос",
       Array.isArray(error.fieldErrors)
         ? error.fieldErrors.filter(isFieldError)
         : [],

@@ -1,6 +1,6 @@
 # Карта проекта
 
-Актуально на 5 августа 2026 года.
+Актуально на 6 августа 2026 года.
 
 Карта описывает текущее устройство репозитория. Нормативные требования
 находятся в `docs/technical-spec/00-index.md`, архитектурные решения — в
@@ -90,6 +90,17 @@ robots/sitemap, BFF Origin-проверки и абсолютные auth-refresh
 loopback fallback. `PLATFORM_API_INTERNAL_URL` задаётся отдельно и никогда не
 выдаётся браузеру.
 
+Browser BFF-клиент обрабатывает истечение короткого access token централизованно:
+параллельные `401` объединяются в одну rotation через `POST /app/auth/refresh`,
+после чего каждый исходный same-origin запрос повторяется не более одного раза
+с новым CSRF token. Истинно завершённая refresh session остаётся terminal и не
+порождает цикл повторов или ложную ссылку на настройку provider route.
+
+Основной sidebar хранит presentation-only состояние сворачивания в
+`localStorage`; tenant/project cookie и permission context при этом не
+изменяются. Project favicon загружается из точного `/favicon.svg`, а выбранные
+workspace/project обозначаются заливкой строки без дублирующей галочки.
+
 Защищённый `/admin` входит в тот же Frontend deployable. Раздел рабочих
 областей ищет tenant по названию, slug, UUID, имени или email владельца и
 показывает текущую subscription-проекцию. Роли `FINANCE` и `SUPER_ADMIN`
@@ -174,7 +185,7 @@ connector-процессы заполняют всё доступное окно
 
 | Данные | Модуль-владелец | Текущее хранилище |
 |---|---|---|
-| users, sessions, workspaces, projects, project transfer requests, RBAC, billing, audit, platform admin command receipts | Core API | `platform_db` |
+| users, sessions, workspaces (включая bounded avatar до 512 KiB), projects, project transfer requests, RBAC, billing, audit, platform admin command receipts | Core API | `platform_db` |
 | semantics, pages, rankings, crawl projections | Core SEO | `seo_db` |
 | realtime subscriptions, deliveries, event inbox | Core Realtime | `realtime_db` + Redis |
 | jobs, schedules, uploads, credential vault, provider execution | Execution | `jobs_db` + Redis + S3 |
@@ -234,6 +245,17 @@ tenant-scoped audit/configuration row без активного маршрута
 означает «провайдер не настроен», а не сбой Jobs; интерфейс позволяет новому
 владельцу явно выбрать credential его workspace, не восстанавливая прежний
 provider route автоматически.
+
+### Сбор частотности
+
+Публичная command boundary принимает до 10 000 keywords и для Arsenkin, и для
+XMLStock. Это platform safety bound, а не лимит XMLStock: Arsenkin отправляет
+одну provider batch-задачу, XMLStock сохраняет тот же Job, но connector
+выполняет по одному keyword на внешний `/wordstat/json/` request. Внутренние
+resolve/persist chunks и общий provider concurrency остаются bounded, поэтому
+снятие прежнего UI/API-предела 200 не создаёт один гигантский provider request.
+Wizard по умолчанию выбирает регион «Россия» (`225`); в списке далее идут
+Москва и Санкт-Петербург.
 
 ### Импорт и crawl
 

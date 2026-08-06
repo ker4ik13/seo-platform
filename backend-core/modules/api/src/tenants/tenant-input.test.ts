@@ -4,6 +4,7 @@ import { DomainError } from "../common/domain-error.js";
 import {
   createProjectInput,
   createWorkspaceInput,
+  updateWorkspaceAvatarInput,
   updateWorkspaceInput
 } from "./tenant-input.js";
 
@@ -29,6 +30,44 @@ test("rejects an empty workspace update", () => {
     (error) =>
       error instanceof DomainError &&
       error.fieldErrors?.[0]?.code === "EMPTY_UPDATE"
+  );
+});
+
+test("accepts a bounded workspace avatar with a matching signature", () => {
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.alloc(24)
+  ]);
+  const avatar = updateWorkspaceAvatarInput({
+    contentType: "image/png",
+    data: png.toString("base64")
+  });
+  assert.equal(avatar.contentType, "image/png");
+  assert.deepEqual(avatar.data, png);
+});
+
+test("rejects mismatched or oversized workspace avatar payloads", () => {
+  assert.throws(
+    () => updateWorkspaceAvatarInput({
+      contentType: "image/jpeg",
+      data: Buffer.alloc(32).toString("base64")
+    }),
+    (error) =>
+      error instanceof DomainError &&
+      error.fieldErrors?.[0]?.code === "INVALID_IMAGE"
+  );
+  const oversized = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.alloc(512 * 1_024)
+  ]);
+  assert.throws(
+    () => updateWorkspaceAvatarInput({
+      contentType: "image/png",
+      data: oversized.toString("base64")
+    }),
+    (error) =>
+      error instanceof DomainError &&
+      error.fieldErrors?.[0]?.code === "FILE_TOO_LARGE"
   );
 });
 

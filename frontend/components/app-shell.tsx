@@ -6,6 +6,7 @@ import { Icon, type IconName } from "./icon";
 import { NotificationBell } from "./notification-bell";
 import { TenantSwitcher } from "./tenant-switcher";
 import { DropdownCoordinator } from "./dropdown-coordinator";
+import { SidebarCollapseButton } from "./sidebar-collapse-button";
 
 const navigation: readonly {
   readonly label: string;
@@ -103,17 +104,20 @@ export function AppShell({
     <div className="app-shell">
       <DropdownCoordinator />
       <aside className="sidebar">
-        <a className="app-brand" href="/app" aria-label="SEOньорита">
-          <img
-            alt=""
-            aria-hidden="true"
-            className="brand-mark"
-            height={29}
-            src="/brand/seonorita-mark.svg"
-            width={29}
-          />
-          <span>SEOньорита</span>
-        </a>
+        <div className="sidebar-heading">
+          <a className="app-brand" href="/app" aria-label="SEOньорита">
+            <img
+              alt=""
+              aria-hidden="true"
+              className="brand-mark"
+              height={29}
+              src="/brand/seonorita-mark.svg"
+              width={29}
+            />
+            <span>SEOньорита</span>
+          </a>
+          <SidebarCollapseButton />
+        </div>
 
         <TenantSwitcher
           currentUserId={context.user.id}
@@ -137,6 +141,7 @@ export function AppShell({
                 }
                 href={navigationHref(item)}
                 key={item.label}
+                title={item.label}
               >
                 <Icon name={item.icon} />
                 <span>{item.label}</span>
@@ -168,6 +173,7 @@ export function AppShell({
             activeSection === "settings" ? "nav-item active" : "nav-item"
           }
           href="/app/settings/workspace"
+          title="Настройки"
         >
           <Icon name="settings" />
           <span>Настройки</span>

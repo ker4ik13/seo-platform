@@ -467,6 +467,12 @@ query rows отклоняются как invalid provider response. Уже су�
 per-keyword task ID опрашиваются без повторного submit. Неоднозначный transport
 outcome submit не ретраится, чтобы не создать второй платный task. XMLStock
 не объединяется и выполняется по одному keyword, сохраняя все выбранные типы.
+Публичный XMLStock Job использует ту же platform boundary 1–10 000 keywords:
+прежний предел 200 не является provider limit и не применяется. Это не меняет
+wire contract — connector по-прежнему отправляет каждый keyword отдельным
+request, соблюдая общий bounded provider concurrency и lease fencing.
+Начальный регион wizard — Россия (`225`); далее первыми показываются Москва и
+Санкт-Петербург.
 
 XMLStock Wordstat следует provider contract `/wordstat/json/`: один внешний
 request содержит один `query` и один `pagetype=words`. BASE использует запрос
