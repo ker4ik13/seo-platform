@@ -3951,7 +3951,7 @@ svg { display: block; }
 .semantic-group-root[aria-current="true"], .semantic-group-root:hover { background: #eeecff; color: var(--brand); }
 .semantic-group-root small { color: var(--muted); font-size: 9px; }
 .semantic-group-root > svg { color: var(--muted); height: 16px; width: 16px; }
-.semantic-group-tree-list { min-height: 0; overflow: auto; padding: 3px 0 18px; }
+.semantic-group-tree-list { min-height: 0; overflow: auto; padding: 0 0 18px; }
 .semantic-system-groups {
   background: linear-gradient(180deg, rgba(251, 251, 252, 0), #fbfbfc 12px);
   border-top: 1px solid var(--line);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { projectFaviconUrl } from "../lib/app-path";
 
 interface ProjectFaviconLoadState {
@@ -18,9 +18,20 @@ export function ProjectFavicon({
   size?: number;
 }>) {
   const source = projectFaviconUrl(domain);
+  const imageRef = useRef<HTMLImageElement>(null);
   const [loadState, setLoadState] = useState<ProjectFaviconLoadState>();
   const status =
     loadState && loadState.source === source ? loadState.status : "LOADING";
+
+  useEffect(() => {
+    const image = imageRef.current;
+    if (!source || !image?.complete) return;
+
+    setLoadState({
+      source,
+      status: image.naturalWidth > 0 ? "READY" : "FAILED"
+    });
+  }, [source]);
 
   if (!source || status === "FAILED") return null;
 
@@ -34,6 +45,7 @@ export function ProjectFavicon({
       loading="eager"
       onError={() => setLoadState({ source, status: "FAILED" })}
       onLoad={() => setLoadState({ source, status: "READY" })}
+      ref={imageRef}
       referrerPolicy="no-referrer"
       src={source}
       width={size}
