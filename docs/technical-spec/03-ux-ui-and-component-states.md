@@ -415,9 +415,13 @@ exact `https://{project.domain}/favicon.svg` без referrer. Пока изоб�
 ### 20.4. Tenant navigation и дерево семантики
 
 Основной левый sidebar плавно сворачивается до icon rail и сохраняет это
-presentation-only предпочтение локально, не меняя workspace/project context.
-Выбранные элементы tenant dropdown обозначаются фоном и обводкой без отдельной
-галочки. Workspace показывает загруженный avatar с буквенным fallback.
+presentation-only предпочтение в `localStorage` и несекретной cookie, не меняя
+workspace/project context. Общий protected layout сохраняет `AppShell` при
+клиентской навигации; активные пункты определяются по pathname. Выбранные
+элементы tenant dropdown обозначаются фоном и обводкой без отдельной галочки.
+Workspace показывает загруженный avatar с буквенным fallback.
+Project selector в sidebar и заголовке семантики использует одинаковые строки
+с favicon; иконка остаётся видимой и в закрытом выбранном значении.
 
 В дереве семантики корневые пользовательские папки остаются sticky внутри
 собственного scroll container. «Все запросы», «Без группы» и «Корзина» имеют

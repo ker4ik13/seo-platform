@@ -1,14 +1,12 @@
 "use client";
 
-import { CustomSelect } from "./custom-select";
-
 import { useEffect } from "react";
-
 import type {
   AppProject,
   AppWorkspace
 } from "../lib/app-types";
-import { ProjectFavicon } from "./project-favicon";
+import { CustomSelect } from "./custom-select";
+import { ProjectSelectOption } from "./project-select-option";
 import { WorkspaceAvatar } from "./workspace-avatar";
 
 export function TenantSwitcher({
@@ -87,7 +85,7 @@ export function TenantSwitcher({
           {projects.length === 0 && <option value="">Нет проектов</option>}
           {projects.map((item) => (
             <option key={item.id} value={item.id}>
-              <ProjectOption project={item} />
+              <ProjectSelectOption project={item} />
             </option>
           ))}
         </CustomSelect>
@@ -119,15 +117,6 @@ function WorkspaceOption({
             : `${workspace.owner.email} · ${workspace.owner.displayName}`}
         </small>
       </span>
-    </span>
-  );
-}
-
-function ProjectOption({ project }: Readonly<{ project: AppProject }>) {
-  return (
-    <span className="tenant-option tenant-project-option">
-      <ProjectFavicon className="tenant-project-favicon" domain={project.domain} />
-      <strong title={project.name}>{project.name}</strong>
     </span>
   );
 }

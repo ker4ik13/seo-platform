@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { AppShell } from "../../../../components/app-shell";
 import { SettingsOverview } from "../../../../components/settings-overview";
 import { SettingsTabs } from "../../../../components/settings-tabs";
 import { requireProtectedAppContext } from "../../../../lib/protected-app";
@@ -14,7 +13,7 @@ export default async function SettingsOverviewPage() {
   const context = await requireProtectedAppContext();
 
   return (
-    <AppShell activeSection="settings" context={context}>
+    <>
       <section className="page-heading settings-overview-heading">
         <div>
           <h1>Настройки</h1>
@@ -35,6 +34,6 @@ export default async function SettingsOverviewPage() {
         workspaceRoleCode={context.workspace?.roleCode}
       />
       <SettingsOverview context={context} />
-    </AppShell>
+    </>
   );
 }

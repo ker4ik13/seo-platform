@@ -1,5 +1,10 @@
-import type { ReactNode } from "react";
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useState, type ReactNode } from "react";
 import type { ProtectedAppContext } from "../lib/app-types";
+import { appNavigationSection } from "../lib/app-navigation";
 import { projectPagesReturnTo } from "../lib/project-pages";
 import { AccountMenu } from "./account-menu";
 import { Icon, type IconName } from "./icon";
@@ -79,12 +84,14 @@ const mobileNavigationSections = new Set([
 export function AppShell({
   children,
   context,
-  activeSection = "overview"
+  initiallyCollapsed
 }: Readonly<{
   children: ReactNode;
   context: ProtectedAppContext;
-  activeSection?: string;
+  initiallyCollapsed: boolean;
 }>) {
+  const activeSection = appNavigationSection(usePathname());
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(initiallyCollapsed);
   const hasProject = Boolean(context.project);
   const hasWorkspace = Boolean(context.workspace);
   const usesWorkspaceLayout = ["semantics", "tasks"].includes(activeSection);
@@ -101,11 +108,11 @@ export function AppShell({
       ? projectPagesReturnTo(context.project.id)
       : item.href;
   return (
-    <div className="app-shell">
+    <div className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <DropdownCoordinator />
       <aside className="sidebar">
         <div className="sidebar-heading">
-          <a className="app-brand" href="/app" aria-label="SEOньорита">
+          <Link className="app-brand" href="/app" aria-label="SEOньорита">
             <img
               alt=""
               aria-hidden="true"
@@ -115,8 +122,11 @@ export function AppShell({
               width={29}
             />
             <span>SEOньорита</span>
-          </a>
-          <SidebarCollapseButton />
+          </Link>
+          <SidebarCollapseButton
+            collapsed={sidebarCollapsed}
+            onCollapsedChange={setSidebarCollapsed}
+          />
         </div>
 
         <TenantSwitcher
@@ -130,7 +140,7 @@ export function AppShell({
         <nav aria-label="Навигация проекта">
           {navigation.map((item) =>
             isNavigationAvailable(item) ? (
-              <a
+              <Link
                 aria-current={
                   item.section === activeSection ? "page" : undefined
                 }
@@ -145,7 +155,7 @@ export function AppShell({
               >
                 <Icon name={item.icon} />
                 <span>{item.label}</span>
-              </a>
+              </Link>
             ) : (
               <span
                 aria-disabled="true"
@@ -167,7 +177,7 @@ export function AppShell({
         </nav>
 
         <div className="sidebar-spacer" />
-        <a
+        <Link
           aria-current={activeSection === "settings" ? "page" : undefined}
           className={
             activeSection === "settings" ? "nav-item active" : "nav-item"
@@ -177,11 +187,11 @@ export function AppShell({
         >
           <Icon name="settings" />
           <span>Настройки</span>
-        </a>
+        </Link>
         <div className="workspace-usage">
-          <a href="/app/settings/billing">
+          <Link href="/app/settings/billing">
             <strong>Тариф и баланс</strong>
-          </a>
+          </Link>
           <small>Тариф, платежи, чеки и расходы workspace</small>
         </div>
       </aside>
@@ -239,7 +249,7 @@ export function AppShell({
             .filter((item) => mobileNavigationSections.has(item.section))
             .map((item) =>
               isNavigationAvailable(item) ? (
-                <a
+                <Link
                   aria-current={
                     item.section === activeSection ? "page" : undefined
                   }
@@ -251,7 +261,7 @@ export function AppShell({
                 >
                   <Icon name={item.icon} />
                   <span>{item.label}</span>
-                </a>
+                </Link>
               ) : (
                 <span aria-disabled="true" key={item.label}>
                   <Icon name={item.icon} />

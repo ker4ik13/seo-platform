@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   canViewProjectIntegrations,
   canViewWorkspaceBilling,
@@ -32,104 +33,104 @@ export function SettingsTabs({
 }>) {
   return (
     <nav className="settings-tabs" aria-label="Разделы настроек">
-      <a
+      <Link
         aria-current={active === "overview" ? "page" : undefined}
         className={active === "overview" ? "active" : undefined}
         href="/app/settings"
       >
         <Icon name="settings" />
         Общие настройки
-      </a>
+      </Link>
       <span className="settings-tabs-heading">Аккаунт</span>
-      <a
+      <Link
         aria-current={active === "security" ? "page" : undefined}
         className={active === "security" ? "active" : undefined}
         href="/app/settings/security"
       >
         <Icon name="settings" />
         Профиль и безопасность
-      </a>
-      <a
+      </Link>
+      <Link
         aria-current={active === "notifications" ? "page" : undefined}
         className={active === "notifications" ? "active" : undefined}
         href="/app/settings/notifications"
       >
         <Icon name="bell" />
         Уведомления
-      </a>
+      </Link>
       <span className="settings-tabs-heading">Рабочая область</span>
-      <a
+      <Link
         aria-current={active === "workspace" ? "page" : undefined}
         className={active === "workspace" ? "active" : undefined}
         href="/app/settings/workspace"
       >
         <Icon name="dashboard" />
         Рабочая область
-      </a>
-      <a
+      </Link>
+      <Link
         aria-current={active === "projects" ? "page" : undefined}
         className={active === "projects" ? "active" : undefined}
         href="/app/settings/projects"
       >
         <Icon name="projects" />
         Проекты
-      </a>
+      </Link>
       {canViewWorkspaceTeam(workspaceRoleCode) && (
         <>
-          <a
+          <Link
             aria-current={active === "team" ? "page" : undefined}
             className={active === "team" ? "active" : undefined}
             href="/app/settings/team"
           >
             <Icon name="competitors" />
             Команда
-          </a>
-          <a
+          </Link>
+          <Link
             aria-current={active === "roles" ? "page" : undefined}
             className={active === "roles" ? "active" : undefined}
             href="/app/settings/roles"
           >
             <Icon name="settings" />
             Роли и права
-          </a>
+          </Link>
         </>
       )}
       {canViewWorkspaceBilling(workspaceRoleCode) && (
-        <a
+        <Link
           aria-current={active === "billing" ? "page" : undefined}
           className={active === "billing" ? "active" : undefined}
           href="/app/settings/billing"
         >
           <Icon name="tasks" />
           Тариф и оплата
-        </a>
+        </Link>
       )}
       {canViewWorkspaceIntegrations(workspaceRoleCode) && (
-        <a
+        <Link
           aria-current={active === "integrations" ? "page" : undefined}
           className={active === "integrations" ? "active" : undefined}
           href="/app/settings/integrations"
         >
           <Icon name="tools" />
           Интеграции
-        </a>
+        </Link>
       )}
       {projectId && (
         <>
           <span className="settings-tabs-heading">Текущий проект</span>
-          <a
+          <Link
             aria-current={active === "project" ? "page" : undefined}
             className={active === "project" ? "active" : undefined}
             href={`/app/projects/${encodeURIComponent(projectId)}/settings/general`}
           >
             <Icon name="projects" />
             Основные настройки
-          </a>
+          </Link>
           {canViewProjectIntegrations(
             workspaceRoleCode,
             projectAccessLevel
           ) && (
-            <a
+            <Link
               aria-current={
                 active === "project-integrations" ? "page" : undefined
               }
@@ -140,9 +141,9 @@ export function SettingsTabs({
             >
               <Icon name="tools" />
               Интеграции проекта
-            </a>
+            </Link>
           )}
-          <a
+          <Link
             aria-current={
               active === "project-notifications" ? "page" : undefined
             }
@@ -153,7 +154,7 @@ export function SettingsTabs({
           >
             <Icon name="bell" />
             Уведомления проекта
-          </a>
+          </Link>
         </>
       )}
     </nav>

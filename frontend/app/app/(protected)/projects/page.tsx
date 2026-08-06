@@ -1,4 +1,3 @@
-import { AppShell } from "../../../../components/app-shell";
 import { ProjectCatalog } from "../../../../components/project-catalog";
 import { requireProtectedAppContext } from "../../../../lib/protected-app";
 
@@ -8,7 +7,7 @@ export default async function ProjectsPage() {
   const context = await requireProtectedAppContext();
 
   return (
-    <AppShell activeSection="projects" context={context}>
+    <>
       <section className="page-heading project-catalog-heading">
         <div>
           <h1>Проекты</h1>
@@ -28,6 +27,6 @@ export default async function ProjectsPage() {
           workspace={context.workspace}
         />
       )}
-    </AppShell>
+    </>
   );
 }

@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
+import { cache } from "react";
 import type { ProtectedAppContext } from "./app-types";
 import { safeAppReturnTo } from "./app-path";
 import {
@@ -9,17 +10,22 @@ import {
   PlatformApiError
 } from "./platform-api";
 
+const requiredAppContext = cache(() =>
+  requireContext(() => loadProtectedAppContext())
+);
+
+const requiredProjectAppContext = cache((projectId: string) =>
+  requireContext(() => loadProtectedProjectAppContext(projectId), true)
+);
+
 export async function requireProtectedAppContext(): Promise<ProtectedAppContext> {
-  return requireContext(() => loadProtectedAppContext());
+  return requiredAppContext();
 }
 
 export async function requireProtectedProjectAppContext(
   projectId: string
 ): Promise<ProtectedAppContext> {
-  return requireContext(
-    () => loadProtectedProjectAppContext(projectId),
-    true
-  );
+  return requiredProjectAppContext(projectId);
 }
 
 async function requireContext(

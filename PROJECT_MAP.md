@@ -96,10 +96,15 @@ Browser BFF-клиент обрабатывает истечение корот�
 с новым CSRF token. Истинно завершённая refresh session остаётся terminal и не
 порождает цикл повторов или ложную ссылку на настройку provider route.
 
-Основной sidebar хранит presentation-only состояние сворачивания в
-`localStorage`; tenant/project cookie и permission context при этом не
-изменяются. Project favicon загружается из точного `/favicon.svg`, а выбранные
-workspace/project обозначаются заливкой строки без дублирующей галочки.
+Общий `app/(protected)/layout` владеет `AppShell`, поэтому sidebar и шапка
+сохраняются при клиентской навигации, а активный раздел вычисляется из текущего
+pathname. Presentation-only состояние сворачивания синхронизируется между
+`localStorage` и несекретной cookie для корректного SSR; tenant/project cookie и
+permission context при этом не изменяются. Project favicon загружается из
+точного `/favicon.svg`, а выбранные workspace/project обозначаются заливкой
+строки без дублирующей галочки. Один project-option renderer показывает favicon
+как в открытом списке, так и в выбранном значении sidebar и project selector
+семантики.
 
 Защищённый `/admin` входит в тот же Frontend deployable. Раздел рабочих
 областей ищет tenant по названию, slug, UUID, имени или email владельца и

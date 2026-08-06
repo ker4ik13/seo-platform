@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { AppShell } from "../../../../../../components/app-shell";
 import { ProjectPageMap } from "../../../../../../components/project-page-map";
 import { ProjectCrawlAudit } from "../../../../../../components/project-crawl-audit";
 import { requireProtectedProjectAppContext } from "../../../../../../lib/protected-app";
@@ -27,10 +26,7 @@ export default async function ProjectPagesPage({
     throw new Error("Project workspace context is missing");
   }
   return (
-    <AppShell
-      activeSection="pages"
-      context={{ ...context, project, workspace }}
-    >
+    <>
       <nav aria-label="Хлебные крошки" className="app-breadcrumbs">
         <a href="/app/projects">Проекты</a>
         <span aria-hidden="true">/</span>
@@ -52,6 +48,6 @@ export default async function ProjectPagesPage({
         projectDomain={project.domain}
         projectId={project.id}
       />
-    </AppShell>
+    </>
   );
 }

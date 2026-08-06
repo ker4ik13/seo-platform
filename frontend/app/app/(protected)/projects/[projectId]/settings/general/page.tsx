@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { AppShell } from "../../../../../../../components/app-shell";
 import { ProjectSettings } from "../../../../../../../components/project-settings";
 import { ProjectTransferSettings } from "../../../../../../../components/project-transfer-settings";
 import { SettingsTabs } from "../../../../../../../components/settings-tabs";
@@ -25,10 +24,7 @@ export default async function ProjectSettingsPage({
   }
 
   return (
-    <AppShell
-      activeSection="settings"
-      context={{ ...context, project, workspace }}
-    >
+    <>
       <section className="page-heading">
         <div>
           <h1>Основные настройки проекта</h1>
@@ -56,6 +52,6 @@ export default async function ProjectSettingsPage({
         project={project}
         workspace={workspace}
       />
-    </AppShell>
+    </>
   );
 }

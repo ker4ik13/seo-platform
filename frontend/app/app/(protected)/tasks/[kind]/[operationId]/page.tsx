@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { AppShell } from "../../../../../../components/app-shell";
 import { OperationResultWorkspace } from "../../../../../../components/operation-result-workspace";
 import {
   isOperationResultId,
@@ -31,12 +30,10 @@ export default async function OperationResultPage({
   if (!context.project) redirect("/app/tasks");
 
   return (
-    <AppShell activeSection="tasks" context={context}>
-      <OperationResultWorkspace
-        kind={kind}
-        operationId={operationId}
-        projectId={context.project.id}
-      />
-    </AppShell>
+    <OperationResultWorkspace
+      kind={kind}
+      operationId={operationId}
+      projectId={context.project.id}
+    />
   );
 }

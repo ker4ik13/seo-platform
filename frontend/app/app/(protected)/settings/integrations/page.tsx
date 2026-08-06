@@ -1,4 +1,3 @@
-import { AppShell } from "../../../../../components/app-shell";
 import { IntegrationSettings } from "../../../../../components/integration-settings";
 import { SettingsTabs } from "../../../../../components/settings-tabs";
 import {
@@ -23,7 +22,7 @@ export default async function IntegrationSettingsPage() {
     context.workspace?.status === "ACTIVE";
 
   return (
-    <AppShell activeSection="settings" context={context}>
+    <>
       <section className="page-heading">
         <div>
           <h1>Подключения SEO API</h1>
@@ -69,6 +68,6 @@ export default async function IntegrationSettingsPage() {
           workspaceId={context.workspace.id}
         />
       )}
-    </AppShell>
+    </>
   );
 }

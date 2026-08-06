@@ -1,4 +1,3 @@
-import { AppShell } from "../../../../../components/app-shell";
 import { BillingSettings } from "../../../../../components/billing-settings";
 import { SettingsTabs } from "../../../../../components/settings-tabs";
 import {
@@ -17,7 +16,7 @@ export default async function BillingSettingsPage() {
   const canView = canViewWorkspaceBilling(roleCode);
 
   return (
-    <AppShell activeSection="settings" context={context}>
+    <>
       <section className="page-heading">
         <div>
           <h1>Тариф, баланс и оплата</h1>
@@ -67,6 +66,6 @@ export default async function BillingSettingsPage() {
           workspaceId={context.workspace.id}
         />
       )}
-    </AppShell>
+    </>
   );
 }

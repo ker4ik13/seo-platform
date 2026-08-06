@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { AppShell } from "../../../../../components/app-shell";
 import { ProjectCatalog } from "../../../../../components/project-catalog";
 import { SettingsTabs } from "../../../../../components/settings-tabs";
 import { requireProtectedAppContext } from "../../../../../lib/protected-app";
@@ -15,7 +14,7 @@ export default async function SettingsProjectsPage() {
   const workspace = context.workspace;
 
   return (
-    <AppShell activeSection="settings" context={context}>
+    <>
       <section className="page-heading">
         <div>
           <h1>Проекты</h1>
@@ -50,6 +49,6 @@ export default async function SettingsProjectsPage() {
           workspace={workspace}
         />
       )}
-    </AppShell>
+    </>
   );
 }

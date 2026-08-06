@@ -1,4 +1,3 @@
-import { AppShell } from "../../../../../components/app-shell";
 import { MfaSettings } from "../../../../../components/mfa-settings";
 import { SessionSettings } from "../../../../../components/session-settings";
 import { SettingsTabs } from "../../../../../components/settings-tabs";
@@ -9,7 +8,7 @@ export const dynamic = "force-dynamic";
 export default async function SecuritySettingsPage() {
   const context = await requireProtectedAppContext();
   return (
-    <AppShell activeSection="settings" context={context}>
+    <>
       <section className="page-heading">
         <div>
           <h1>Безопасность аккаунта</h1>
@@ -31,6 +30,6 @@ export default async function SecuritySettingsPage() {
         <SessionSettings />
         <MfaSettings />
       </div>
-    </AppShell>
+    </>
   );
 }

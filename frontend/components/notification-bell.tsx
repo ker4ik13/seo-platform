@@ -5,6 +5,7 @@ import type {
   PendingWorkspaceInviteSummary,
   ProjectTransferRequestSummary
 } from "@seo-platform/contracts";
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import {
   browserApiCollectionRequest,
@@ -429,7 +430,9 @@ export function NotificationBell({ projectId }: Readonly<{ projectId?: string }>
               </div>
             )}
             <footer>
-              <a href="/app/notifications">Показать все уведомления</a>
+              <Link href="/app/notifications" onClick={() => setOpen(false)}>
+                Показать все уведомления
+              </Link>
             </footer>
           </section>
         )}

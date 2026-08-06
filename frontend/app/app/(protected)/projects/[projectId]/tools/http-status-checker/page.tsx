@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { AppShell } from "../../../../../../../components/app-shell";
 import { HttpStatusCheckTool } from "../../../../../../../components/http-status-check-tool";
 import { requireProtectedProjectAppContext } from "../../../../../../../lib/protected-app";
 
@@ -19,13 +18,13 @@ export default async function HttpStatusCheckerPage({
   if (!project) throw new Error("Project context is missing");
 
   return (
-    <AppShell activeSection="tools" context={context}>
+    <>
       <nav aria-label="Хлебные крошки" className="app-breadcrumbs">
         <a href="/app/tools">Инструменты</a>
         <span aria-hidden="true">/</span>
         <span aria-current="page">Проверка HTTP-статусов</span>
       </nav>
       <HttpStatusCheckTool project={project} projects={context.projects} />
-    </AppShell>
+    </>
   );
 }

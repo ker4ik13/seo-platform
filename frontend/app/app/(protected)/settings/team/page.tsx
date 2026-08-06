@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { AppShell } from "../../../../../components/app-shell";
 import { SettingsTabs } from "../../../../../components/settings-tabs";
 import { TeamManagement } from "../../../../../components/team-management";
 import { canViewWorkspaceTeam } from "../../../../../lib/app-permissions";
@@ -17,7 +16,7 @@ export default async function TeamSettingsPage() {
   const canView = canViewWorkspaceTeam(workspace?.roleCode);
 
   return (
-    <AppShell activeSection="settings" context={context}>
+    <>
       <section className="page-heading">
         <div>
           <h1>Команда</h1>
@@ -70,6 +69,6 @@ export default async function TeamSettingsPage() {
           workspace={workspace}
         />
       )}
-    </AppShell>
+    </>
   );
 }

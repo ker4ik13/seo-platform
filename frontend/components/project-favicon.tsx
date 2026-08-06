@@ -1,7 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { projectFaviconUrl } from "../lib/app-path";
+
+interface ProjectFaviconLoadState {
+  readonly source: string;
+  readonly status: "READY" | "FAILED";
+}
 
 export function ProjectFavicon({
   className = "project-favicon",
@@ -13,11 +18,10 @@ export function ProjectFavicon({
   size?: number;
 }>) {
   const source = projectFaviconUrl(domain);
-  const [status, setStatus] = useState<"LOADING" | "READY" | "FAILED">(
-    "LOADING"
-  );
+  const [loadState, setLoadState] = useState<ProjectFaviconLoadState>();
+  const status =
+    loadState && loadState.source === source ? loadState.status : "LOADING";
 
-  useEffect(() => setStatus("LOADING"), [source]);
   if (!source || status === "FAILED") return null;
 
   return (
@@ -28,8 +32,8 @@ export function ProjectFavicon({
       decoding="async"
       height={size}
       loading="eager"
-      onError={() => setStatus("FAILED")}
-      onLoad={() => setStatus("READY")}
+      onError={() => setLoadState({ source, status: "FAILED" })}
+      onLoad={() => setLoadState({ source, status: "READY" })}
       referrerPolicy="no-referrer"
       src={source}
       width={size}

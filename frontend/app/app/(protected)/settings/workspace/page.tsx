@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { AppShell } from "../../../../../components/app-shell";
 import { SettingsTabs } from "../../../../../components/settings-tabs";
 import { WorkspaceSettings } from "../../../../../components/workspace-settings";
 import { requireProtectedAppContext } from "../../../../../lib/protected-app";
@@ -14,7 +13,7 @@ export default async function WorkspaceSettingsPage() {
   const context = await requireProtectedAppContext();
 
   return (
-    <AppShell activeSection="settings" context={context}>
+    <>
       <section className="page-heading">
         <div>
           <h1>Рабочая область</h1>
@@ -43,6 +42,6 @@ export default async function WorkspaceSettingsPage() {
           </a>
         </section>
       )}
-    </AppShell>
+    </>
   );
 }

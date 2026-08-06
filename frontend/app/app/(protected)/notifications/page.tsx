@@ -1,4 +1,3 @@
-import { AppShell } from "../../../../components/app-shell";
 import { NotificationCenter } from "../../../../components/notification-center";
 import { requireProtectedAppContext } from "../../../../lib/protected-app";
 
@@ -7,7 +6,7 @@ export const dynamic = "force-dynamic";
 export default async function NotificationsPage() {
   const context = await requireProtectedAppContext();
   return (
-    <AppShell activeSection="notifications" context={context}>
+    <>
       <section className="page-heading">
         <div>
           <h1>Центр уведомлений</h1>
@@ -18,6 +17,6 @@ export default async function NotificationsPage() {
         </div>
       </section>
       <NotificationCenter {...(context.project ? { projectId: context.project.id } : {})} />
-    </AppShell>
+    </>
   );
 }

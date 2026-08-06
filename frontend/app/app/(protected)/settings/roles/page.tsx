@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { AppShell } from "../../../../../components/app-shell";
 import { SettingsTabs } from "../../../../../components/settings-tabs";
 import { WorkspaceRoleCatalog } from "../../../../../components/workspace-role-catalog";
 import { canViewWorkspaceTeam } from "../../../../../lib/app-permissions";
@@ -15,7 +14,7 @@ export default async function WorkspaceRolesPage() {
   const canView = canViewWorkspaceTeam(workspace?.roleCode);
 
   return (
-    <AppShell activeSection="settings" context={context}>
+    <>
       <section className="page-heading">
         <div>
           <h1>Роли и права</h1>
@@ -45,6 +44,6 @@ export default async function WorkspaceRolesPage() {
       ) : (
         <WorkspaceRoleCatalog currentRoleCode={workspace.roleCode} />
       )}
-    </AppShell>
+    </>
   );
 }

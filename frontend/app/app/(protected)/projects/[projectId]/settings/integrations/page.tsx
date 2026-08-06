@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { AppShell } from "../../../../../../../components/app-shell";
 import { ProjectIntegrationRouting } from "../../../../../../../components/project-integration-routing";
 import { SettingsTabs } from "../../../../../../../components/settings-tabs";
 import { requireProtectedProjectAppContext } from "../../../../../../../lib/protected-app";
@@ -24,10 +23,7 @@ export default async function ProjectIntegrationSettingsPage({
   }
 
   return (
-    <AppShell
-      activeSection="settings"
-      context={{ ...context, project, workspace }}
-    >
+    <>
       <section className="page-heading project-integration-heading">
         <div>
           <h1>Источники данных проекта</h1>
@@ -55,6 +51,6 @@ export default async function ProjectIntegrationSettingsPage({
         projectId={project.id}
         workspaceId={workspace.id}
       />
-    </AppShell>
+    </>
   );
 }

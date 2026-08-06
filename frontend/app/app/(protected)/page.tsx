@@ -1,4 +1,3 @@
-import { AppShell } from "../../../components/app-shell";
 import { ProjectDashboard } from "../../../components/project-dashboard";
 import {
   ProjectOnboarding,
@@ -12,7 +11,7 @@ export default async function DashboardPage() {
   const context = await requireProtectedAppContext();
 
   return (
-    <AppShell activeSection="overview" context={context}>
+    <>
       {!context.workspace ? (
         <WorkspaceOnboarding />
       ) : !context.project ? (
@@ -46,6 +45,6 @@ export default async function DashboardPage() {
           <ProjectDashboard projectId={context.project.id} projectName={context.project.name} userName={context.user.displayName} />
         </>
       )}
-    </AppShell>
+    </>
   );
 }

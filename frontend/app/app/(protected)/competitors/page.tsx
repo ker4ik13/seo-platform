@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { AppShell } from "../../../../components/app-shell";
 import { KeywordResearchConnectorSetup } from "../../../../components/keyword-research-connector-setup";
 import { KeywordResearchWorkspace } from "../../../../components/keyword-research-workspace";
 import { ProjectOnboarding } from "../../../../components/tenant-onboarding";
@@ -15,7 +14,7 @@ export const metadata: Metadata = {
 export default async function CompetitorsPage() {
   const context = await requireProtectedAppContext();
   return (
-    <AppShell activeSection="competitors" context={context}>
+    <>
       {!context.project || !context.workspace ? (
         context.workspace ? (
           <ProjectOnboarding workspace={context.workspace} />
@@ -43,6 +42,6 @@ export default async function CompetitorsPage() {
           />
         </>
       )}
-    </AppShell>
+    </>
   );
 }

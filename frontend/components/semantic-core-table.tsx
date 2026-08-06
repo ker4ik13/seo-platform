@@ -81,6 +81,8 @@ import { SemanticVersionHistory } from "./semantic-version-history";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { KeywordDataGrid } from "./keyword-data-grid";
 import { Icon } from "./icon";
+import { ProjectSelectOption } from "./project-select-option";
+import type { AppProject } from "../lib/app-types";
 import {
   defaultSemanticViewConfig,
   semanticFolderSortFor,
@@ -203,7 +205,7 @@ interface SemanticCoreTableProps {
   readonly onOpenColumns: () => void;
   readonly onOpenImport: () => void;
   readonly projectName: string;
-  readonly projects: readonly Readonly<{ id: string; name: string }>[];
+  readonly projects: readonly Pick<AppProject, "domain" | "id" | "name">[];
   readonly workspaceId: string;
 }
 
@@ -1511,7 +1513,7 @@ export function SemanticCoreTable({
   const filteredTotal = page.totalApprox;
   const projectOptions = projects.some(({ id }) => id === projectId)
     ? projects
-    : [{ id: projectId, name: projectName }, ...projects];
+    : [{ id: projectId, name: projectName, domain: "" }, ...projects];
   const manualInputStats = editor?.mode === "create"
     ? manualKeywordInputStats(editor.draft.text)
     : undefined;
@@ -1642,11 +1644,12 @@ export function SemanticCoreTable({
             aria-label="Проект семантического ядра"
             onChange={(event) => selectProject(event.target.value)}
             searchable={projectOptions.length > 8}
+            showSelectedCheck={false}
             value={projectId}
           >
             {projectOptions.map((project) => (
               <option key={project.id} value={project.id}>
-                {project.name}
+                <ProjectSelectOption project={project} />
               </option>
             ))}
           </CustomSelect>

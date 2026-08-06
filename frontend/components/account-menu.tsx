@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { AppUser } from "../lib/app-types";
 import {
@@ -96,16 +97,28 @@ export function AccountMenu({
         <div className="account-popover" data-exclusive-dropdown-layer>
           <strong>{user.displayName}</strong>
           <span>{user.email}</span>
-          <a className="account-menu-link" href="/app/settings/security">
+          <Link
+            className="account-menu-link"
+            href="/app/settings/security"
+            onClick={() => setOpen(false)}
+          >
             Безопасность и профиль
-          </a>
-          <a className="account-menu-link" href="/app/settings/notifications">
+          </Link>
+          <Link
+            className="account-menu-link"
+            href="/app/settings/notifications"
+            onClick={() => setOpen(false)}
+          >
             Настройки уведомлений
-          </a>
+          </Link>
           {canViewWorkspaceIntegrations(roleCode) && (
-            <a className="account-menu-link" href="/app/settings/integrations">
+            <Link
+              className="account-menu-link"
+              href="/app/settings/integrations"
+              onClick={() => setOpen(false)}
+            >
               API-интеграции
-            </a>
+            </Link>
           )}
           <button disabled={busy} onClick={logout} type="button">
             {busy ? "Выходим…" : "Выйти"}

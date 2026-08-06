@@ -1,9 +1,35 @@
 import type { ReactNode } from "react";
-import { requireProtectedAppContext } from "../../../lib/protected-app";
+import { cookies, headers } from "next/headers";
+import { AppShell } from "../../../components/app-shell";
+import { appProjectIdFromPath } from "../../../lib/app-navigation";
+import {
+  requireProtectedAppContext,
+  requireProtectedProjectAppContext
+} from "../../../lib/protected-app";
+import {
+  sidebarCollapsedCookieName,
+  sidebarCollapsedFromCookie
+} from "../../../lib/sidebar-preference";
 
 export default async function ProtectedAppLayout({
   children
 }: Readonly<{ children: ReactNode }>) {
-  await requireProtectedAppContext();
-  return children;
+  const requestHeaders = await headers();
+  const explicitProjectId = appProjectIdFromPath(
+    requestHeaders.get("x-app-path")
+  );
+  const [context, cookieStore] = await Promise.all([
+    explicitProjectId
+      ? requireProtectedProjectAppContext(explicitProjectId)
+      : requireProtectedAppContext(),
+    cookies()
+  ]);
+  const initiallyCollapsed = sidebarCollapsedFromCookie(
+    cookieStore.get(sidebarCollapsedCookieName)?.value
+  );
+  return (
+    <AppShell context={context} initiallyCollapsed={initiallyCollapsed}>
+      {children}
+    </AppShell>
+  );
 }

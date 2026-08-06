@@ -1,4 +1,3 @@
-import { AppShell } from "../../../../../../../components/app-shell";
 import { ProjectNotificationSettings } from "../../../../../../../components/project-notification-settings";
 import { SettingsTabs } from "../../../../../../../components/settings-tabs";
 import { requireProtectedProjectAppContext } from "../../../../../../../lib/protected-app";
@@ -16,10 +15,7 @@ export default async function ProjectNotificationSettingsPage({
   if (!project) throw new Error("Project context is missing");
 
   return (
-    <AppShell
-      activeSection="settings"
-      context={{ ...context, project }}
-    >
+    <>
       <section className="page-heading">
         <div>
           <h1>Уведомления проекта</h1>
@@ -41,6 +37,6 @@ export default async function ProjectNotificationSettingsPage({
         projectId={project.id}
         projectName={project.name}
       />
-    </AppShell>
+    </>
   );
 }

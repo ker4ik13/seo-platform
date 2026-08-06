@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { AppShell } from "../../../../components/app-shell";
 import { Icon, type IconName } from "../../../../components/icon";
 import { requireProtectedAppContext } from "../../../../lib/protected-app";
 import {
@@ -14,7 +13,7 @@ export default async function ProjectToolsPage() {
   const projectTools = projectToolCapabilities();
 
   return (
-    <AppShell activeSection="tools" context={context}>
+    <>
       <section className="page-heading">
         <div>
           <h1>Инструменты</h1>
@@ -51,7 +50,7 @@ export default async function ProjectToolsPage() {
           )}
         </ToolSection>
       </div>
-    </AppShell>
+    </>
   );
 }
 
