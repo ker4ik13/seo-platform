@@ -151,8 +151,8 @@ test("projects current BYOK access for an interactive rank estimate", async () =
   );
 });
 
-test("projects a bounded daily rank quota before the execution grant", async () => {
-  const transaction = onboardingTransaction({ rankTaskCount: 17 });
+test("projects unlimited BYOK rank access before the execution grant", async () => {
+  const transaction = onboardingTransaction();
   const service = new BillingEntitlementService({
     $transaction: async (
       callback: (
@@ -163,38 +163,7 @@ test("projects a bounded daily rank quota before the execution grant", async () 
 
   assert.deepEqual(await service.rankProviderRunAccess(WORKSPACE_ID), {
     entitlementStatus: "ALLOWED",
-    quota: {
-      status: "AVAILABLE",
-      limit: "200",
-      used: "17",
-      remaining: "183",
-      resetsAt: "2026-08-01T00:00:00.000Z"
-    }
-  });
-});
-
-test("projects an active workspace-specific rank quota override", async () => {
-  const transaction = onboardingTransaction({
-    rankTaskCount: 17,
-    rankTaskLimit: 1_000_000
-  });
-  const service = new BillingEntitlementService({
-    $transaction: async (
-      callback: (
-        client: Prisma.TransactionClient
-      ) => Promise<unknown>
-    ) => callback(transaction)
-  } as unknown as PrismaService);
-
-  assert.deepEqual(await service.rankProviderRunAccess(WORKSPACE_ID), {
-    entitlementStatus: "ALLOWED",
-    quota: {
-      status: "AVAILABLE",
-      limit: "1000000",
-      used: "17",
-      remaining: "999983",
-      resetsAt: "2026-08-01T00:00:00.000Z"
-    }
+    quota: { status: "UNLIMITED" }
   });
 });
 
@@ -295,8 +264,6 @@ function onboardingTransaction(
     readonly projectLimit?: number;
     readonly memberCount?: number;
     readonly pendingInviteCount?: number;
-    readonly rankTaskCount?: number;
-    readonly rankTaskLimit?: number;
   } = {}
 ): Prisma.TransactionClient {
   return {
@@ -334,18 +301,6 @@ function onboardingTransaction(
     },
     workspaceInvite: {
       count: async () => options.pendingInviteCount ?? 0
-    },
-    rankExecutionQuotaReservation: {
-      count: async () => options.rankTaskCount ?? 0
-    },
-    rankExecutionQuotaOverride: {
-      findUnique: async () =>
-        options.rankTaskLimit === undefined
-          ? null
-          : {
-              dailyTaskLimit: options.rankTaskLimit,
-              expiresAt: null
-            }
     }
   } as unknown as Prisma.TransactionClient;
 }

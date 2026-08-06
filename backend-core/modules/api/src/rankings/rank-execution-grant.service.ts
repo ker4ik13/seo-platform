@@ -415,7 +415,7 @@ function policyAuthorization(
   }
   if (
     decision.entitlement === "ALLOWED" &&
-    decision.quota === "AVAILABLE" &&
+    (decision.quota === "AVAILABLE" || decision.quota === "UNLIMITED") &&
     typeof decision.quotaReservationId === "string" &&
     UUID_PATTERN.test(decision.quotaReservationId)
   ) {

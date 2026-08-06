@@ -70,8 +70,9 @@ Wizard:
 
 ### 3.1. Manual BYOK slice Arsenkin
 
-По ADR-2026-034 execution slice использует Arsenkin `positions` после
-provider contract, quota, credential freshness и compatibility gates.
+По ADR-2026-034 и ADR-2026-043 execution slice использует Arsenkin `positions`
+после provider contract, entitlement, credential freshness и compatibility
+gates.
 Context, assignment, binding, estimate и compatibility UI не делают сетевой
 запрос; live submit выполняет только isolated connector-worker под новой
 kill-switch generation.
@@ -97,8 +98,8 @@ Country, language, safe search и domain rule запрещено молча от
 непредставимый context получает compatibility blocker ещё в estimate.
 
 `POST /rank-estimates` не вызывает provider и возвращает versioned scope hash,
-configuration versions, credential freshness, provider limits, тарифную quota,
-expiry и `executionAllowed`. `POST /rank-runs` требует актуальный estimate,
+configuration versions, credential freshness, provider limits, BYOK allowance
+`UNLIMITED`, expiry и `executionAllowed`. `POST /rank-runs` требует актуальный estimate,
 `ranking.run`, CSRF и idempotency key; будущий provider submit этого run
 дополнительно требует authoritative execution grant.
 
@@ -137,9 +138,10 @@ binding/credential/validation/policy, но публичный ответ не р
 
 До прохождения ADR-2026-034 каждый receipt содержит
 `PROVIDER_CONTRACT_NOT_READY` и `PROVIDER_EXECUTION_DISABLED`;
-`executionAllowed=false`. Provider limits, ожидаемая длительность,
-entitlement и quota возвращают честный `NOT_AVAILABLE`, пока нет
-авторитетного versioned источника. Для BYOK platform charge равен нулю,
+`executionAllowed=false`. Provider limits и ожидаемая длительность возвращают
+честный `NOT_AVAILABLE`, пока нет авторитетного versioned источника.
+Разрешённый BYOK execution возвращает quota status `UNLIMITED`; для BYOK
+platform charge равен нулю,
 нормализованная история предназначена для долгого хранения, raw SERP не
 собирается.
 
@@ -187,7 +189,9 @@ Premature `get`, неполный/лишний query set и неизвестны
 Platform API issuer принимает exact Jobs request без
 binding/credential IDs, повторно проверяет owned lifecycle/RBAC state и
 сохраняет immutable 30-секундный decision receipt с exact replay. Production
-controlled-beta policy резервирует bounded BYOK task quota. Jobs bounded
+policy не считает и не ограничивает BYOK provider tasks по дням. Существующая
+`rank_execution_quota_reservations` row создаётся как immutable usage/grant
+binding для совместимости и аудита, но не участвует в admission decision. Jobs bounded
 client сохраняет durable `REQUESTED`
 до HTTP, делает exact replay и по часам `jobs_db` фиксирует
 `DENIED`/`EXPIRED`/`GRANTED_PENDING_CONSUME`/`REJECTED_LOCAL`; валидное

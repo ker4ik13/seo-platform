@@ -208,7 +208,9 @@ Unsafe Prisma raw APIs запрещены статическим тестом.
 1. Frontend запрашивает estimate через Core.
 2. Execution фиксирует immutable snapshot binding/route/credential versions.
 3. Rank role создаёт sealed manifest в Core SEO.
-4. Core повторно проверяет lifecycle, RBAC и quota и выдаёт короткий grant.
+4. Core повторно проверяет lifecycle, RBAC и BYOK entitlement и выдаёт
+   короткий grant. Внутренней дневной квоты на BYOK rank нет; статус estimate
+   — `UNLIMITED`.
 5. Connector role выполняет fenced submit/poll/get через DB broker.
 6. Rank role публикует normalized chunks и terminal result; frontend читает
    tenant-scoped projection.

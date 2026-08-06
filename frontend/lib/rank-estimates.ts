@@ -462,6 +462,9 @@ export function rankEstimateShortHash(
 export function rankEstimateQuotaLabel(
   quota: RankEstimateQuota
 ): string {
+  if (quota.status === "UNLIMITED") {
+    return "Без внутреннего лимита";
+  }
   if (quota.status === "NOT_AVAILABLE") {
     return "Тарифная квота пока не подключена";
   }
@@ -680,6 +683,9 @@ function parseScopeHash(
 
 function parseQuota(value: unknown): RankEstimateQuota | undefined {
   const quota = objectValue(value);
+  if (quota.status === "UNLIMITED") {
+    return { status: "UNLIMITED" };
+  }
   if (quota.status === "NOT_AVAILABLE") {
     return { status: "NOT_AVAILABLE" };
   }

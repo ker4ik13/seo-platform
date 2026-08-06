@@ -330,8 +330,9 @@ durable intent/decision history тоже реализованы; atomic
 `CLAIMED → SUBMITTING` boundary, documented Arsenkin request adapter,
 durable submit/poll/stage state, normalized ingest producer и terminal
 Job/manifest finalizer реализованы. Platform API issuer сохраняет immutable
-exact 30-секундные decisions под lifecycle/RBAC locks и controlled-beta quota
-reservation. Неоднозначный submit durable переходит в
+exact 30-секундные decisions под lifecycle/RBAC locks и связанной audit
+reservation. По ADR-2026-043 BYOK rank не имеет внутренней дневной квоты;
+неоднозначный submit durable переходит в
 `SUBMIT_OUTCOME_UNKNOWN` без auto-resubmit. Runtime включается только новой
 kill-switch generation `arsenkin-positions@4`; live BYOK smoke и production
 environment evidence остаются обязательной приёмкой внешнего провайдера.

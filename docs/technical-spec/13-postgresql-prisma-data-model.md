@@ -538,10 +538,14 @@ formats. `BEFORE UPDATE OR DELETE` и `BEFORE TRUNCATE` triggers запреща�
 переписывать receipt. External Jobs IDs остаются opaque и не получают
 cross-database FK.
 
+Историческое имя `quota_reservation_id` сохранено для совместимости схемы.
+В BYOK rank связанная immutable row является usage/grant receipt и не задаёт
+дневной предел; production policy не считает эти строки при admission.
+
 Expiry не изменяет receipt и не создаёт synthetic denial: exact replay
 возвращает исходный snapshot, а Jobs проверяет expiry при будущем атомарном
-import/consume. Production policy пока не создаёт quota reservation и поэтому
-может сохранить только `DENIED`.
+import/consume. Production BYOK policy создаёт связанную audit row и может
+сохранить `GRANTED` без внутренней дневной квоты.
 
 ## 5. `seo_db`
 

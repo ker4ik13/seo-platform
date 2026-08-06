@@ -309,6 +309,10 @@ test("has a user-facing Russian explanation for every blocker", () => {
 
 test("maps quota and credential freshness without inventing data", () => {
   assert.equal(
+    rankEstimateQuotaLabel({ status: "UNLIMITED" }),
+    "Без внутреннего лимита"
+  );
+  assert.equal(
     rankEstimateQuotaLabel({ status: "NOT_AVAILABLE" }),
     "Тарифная квота пока не подключена"
   );

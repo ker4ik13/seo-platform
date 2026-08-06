@@ -753,8 +753,7 @@ function assertExecutableEstimate(
     input.access.workspaceStatus !== "ACTIVE" ||
     !input.access.canRunRanking ||
     input.access.entitlementStatus !== "ALLOWED" ||
-    input.access.quota.status !== "AVAILABLE" ||
-    BigInt(input.access.quota.remaining) < 1n
+    !rankQuotaAllowsExecution(input.access.quota)
   ) {
     throw rankJobConflict(
       "EXECUTION_GRANT_DENIED",
@@ -794,14 +793,22 @@ function assertRetryableEstimate(
     input.access.workspaceStatus !== "ACTIVE" ||
     !input.access.canRunRanking ||
     input.access.entitlementStatus !== "ALLOWED" ||
-    input.access.quota.status !== "AVAILABLE" ||
-    BigInt(input.access.quota.remaining) < 1n
+    !rankQuotaAllowsExecution(input.access.quota)
   ) {
     throw rankJobConflict(
       "EXECUTION_GRANT_DENIED",
       "Current access does not allow a rank continuation"
     );
   }
+}
+
+function rankQuotaAllowsExecution(
+  quota: InternalCreateRankRunInput["access"]["quota"]
+): boolean {
+  return (
+    quota.status === "UNLIMITED" ||
+    (quota.status === "AVAILABLE" && BigInt(quota.remaining) >= 1n)
+  );
 }
 
 export function rankEstimatePolicyMatchesProvider(

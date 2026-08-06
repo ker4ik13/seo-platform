@@ -48,7 +48,7 @@ test(
     const fixture = serviceFixture({
       policyDecision: {
         entitlement: "ALLOWED",
-        quota: "AVAILABLE",
+        quota: "UNLIMITED",
         quotaReservationId: quotaReservationId.toUpperCase()
       }
     });
@@ -718,7 +718,7 @@ function serviceFixture(
     ? options.policyDecision
     : ({
         entitlement: "ALLOWED",
-        quota: "AVAILABLE",
+        quota: "UNLIMITED",
         quotaReservationId
       } satisfies RankExecutionGrantPolicyDecision);
   const policy: RankExecutionGrantPolicy = {

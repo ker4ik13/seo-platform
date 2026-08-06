@@ -149,13 +149,7 @@ test("builds a trusted project/access snapshot without browser authority", async
       entitlementStatus: "ALLOWED"
     },
     billingCurrency: "RUB",
-    quota: {
-      status: "AVAILABLE",
-      limit: "200",
-      used: "0",
-      remaining: "200",
-      resetsAt: "2026-07-30T00:00:00.000Z"
-    }
+    quota: { status: "UNLIMITED" }
   });
 });
 
@@ -286,13 +280,7 @@ function billingEntitlements(
     rankProviderRunAccess: async () => ({
       entitlementStatus: status,
       quota: status === "ALLOWED"
-        ? {
-            status: "AVAILABLE",
-            limit: "200",
-            used: "0",
-            remaining: "200",
-            resetsAt: "2026-07-30T00:00:00.000Z"
-          }
+        ? { status: "UNLIMITED" }
         : { status: "NOT_AVAILABLE" }
     })
   } as unknown as BillingEntitlementService;

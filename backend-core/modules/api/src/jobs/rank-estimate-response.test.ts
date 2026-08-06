@@ -71,6 +71,17 @@ test("strictly maps a Jobs-owned scoped, redacted rank estimate", () => {
   );
 });
 
+test("maps unlimited BYOK rank allowance without invented quota values", () => {
+  const unlimited = {
+    ...blockedEstimate,
+    quota: { status: "UNLIMITED" }
+  } as const;
+  assert.deepEqual(
+    scopedRankEstimate(unlimited, workspaceId, projectId, contextId).quota,
+    { status: "UNLIMITED" }
+  );
+});
+
 test("rejects secret projections and cross-tenant responses", () => {
   for (const value of [
     { ...blockedEstimate, credentialId: contextId },

@@ -985,8 +985,8 @@ Issuer в `Serializable` transaction блокирует workspace, project, user
 membership и project access в canonical parent-before-child порядке,
 повторно проверяет lifecycle/version/domain/RBAC и вызывает policy внутри той
 же транзакции. `GRANTED` невозможен без authoritative
-`quotaReservationId`; production provider policy пока возвращает только
-persisted `DENIED`. Новый receipt отвечает `201`, exact replay — `200`, reuse
+`quotaReservationId`; для BYOK это immutable usage/grant binding без дневного
+admission cap. Новый receipt отвечает `201`, exact replay — `200`, reuse
 key/scope — `409`. Replay всегда возвращает сохранённый decision, даже если
 30-секундный grant уже истёк.
 

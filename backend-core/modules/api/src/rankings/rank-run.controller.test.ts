@@ -140,13 +140,7 @@ test("creates a trusted rank command and returns project-scoped Location", async
       membershipVersion: 3,
       canRunRanking: true,
       entitlementStatus: "ALLOWED",
-      quota: {
-        status: "AVAILABLE",
-        limit: "200",
-        used: "0",
-        remaining: "200",
-        resetsAt: "2026-07-30T00:00:00.000Z"
-      }
+      quota: { status: "UNLIMITED" }
     },
     billingCurrency: "RUB",
     jobCapacity: {
@@ -317,13 +311,7 @@ test("continues only the server-selected missing positions", async () => {
       membershipVersion: 3,
       canRunRanking: true,
       entitlementStatus: "ALLOWED",
-      quota: {
-        status: "AVAILABLE",
-        limit: "200",
-        used: "0",
-        remaining: "200",
-        resetsAt: "2026-07-30T00:00:00.000Z"
-      }
+      quota: { status: "UNLIMITED" }
     },
     billingCurrency: "RUB",
     jobCapacity: {
@@ -485,13 +473,7 @@ function billingEntitlements(): BillingEntitlementService {
     }),
     rankProviderRunAccess: async () => ({
       entitlementStatus: "ALLOWED",
-      quota: {
-        status: "AVAILABLE",
-        limit: "200",
-        used: "0",
-        remaining: "200",
-        resetsAt: "2026-07-30T00:00:00.000Z"
-      }
+      quota: { status: "UNLIMITED" }
     })
   } as unknown as BillingEntitlementService;
 }

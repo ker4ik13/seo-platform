@@ -634,8 +634,9 @@ decision — `201`, exact replay — `200`, conflict — `409`. TTL `GRANTED` р
 30 секунд. Expired replay остаётся exact; Jobs client перепроверяет expiry по
 часам `jobs_db`, сохраняет решение и атомарно связывает неистёкший grant с
 secret-free `CONSUMED/READY_TO_SUBMIT` execution row. Request/response не
-содержат binding/credential IDs или secrets; controlled-beta policy требует
-authoritative quota reservation. SECURITY DEFINER connector
+содержат binding/credential IDs или secrets; BYOK policy требует
+authoritative usage/grant reservation, но не применяет внутренний дневной
+лимит. SECURITY DEFINER connector
 claim/authorize/runtime brokers вызываются isolated connector-worker и не
 выдают ему table DML. Глобальный fail-safe `onSend` сохраняет private/no-store boundary
 также для parser/guard/404 errors до controller.

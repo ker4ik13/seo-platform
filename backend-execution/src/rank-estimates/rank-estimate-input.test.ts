@@ -38,6 +38,24 @@ test("accepts an exact authoritative rank estimate command", () => {
   assert.deepEqual(
     internalCreateRankEstimateInput({
       ...input,
+      access: {
+        ...input.access,
+        entitlementStatus: "ALLOWED"
+      },
+      quota: { status: "UNLIMITED" }
+    }),
+    {
+      ...input,
+      access: {
+        ...input.access,
+        entitlementStatus: "ALLOWED"
+      },
+      quota: { status: "UNLIMITED" }
+    }
+  );
+  assert.deepEqual(
+    internalCreateRankEstimateInput({
+      ...input,
       provider: "XMLSTOCK",
       credentialId
     }),

@@ -694,12 +694,7 @@ function rankRunInput(
       membershipVersion: 3,
       canRunRanking: true,
       entitlementStatus: "ALLOWED",
-      quota: {
-        status: "AVAILABLE",
-        limit: "10",
-        used: "0",
-        remaining: "10"
-      }
+      quota: { status: "UNLIMITED" }
     },
     billingCurrency: "RUB",
     jobCapacity: {

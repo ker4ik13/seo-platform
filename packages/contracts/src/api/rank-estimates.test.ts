@@ -92,6 +92,7 @@ test("rank estimate finite vocabularies pin the provider-free first slice", () =
     "UNAVAILABLE"
   ]);
   assert.deepEqual(rankEstimateQuotaStatuses, [
+    "UNLIMITED",
     "AVAILABLE",
     "EXHAUSTED",
     "NOT_AVAILABLE"

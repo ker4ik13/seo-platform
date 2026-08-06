@@ -6,7 +6,6 @@ import type {
 } from "../billing/billing-entitlement.service.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import {
-  CONTROLLED_BETA_DAILY_PROVIDER_TASK_LIMIT,
   CONTROLLED_BETA_RANK_POLICY_VERSION,
   ControlledBetaRankExecutionGrantPolicy
 } from "./rank-execution-grant.policy.js";
@@ -18,7 +17,7 @@ const jobId = "01900000-0000-7000-8000-000000000004";
 const jobItemId = "01900000-0000-7000-8000-000000000005";
 const reservationId = "01900000-0000-7000-8000-000000000006";
 
-test("reserves one controlled-beta BYOK provider task in the UTC day", async () => {
+test("records one BYOK provider grant without enforcing a daily cap", async () => {
   let created: Readonly<Record<string, unknown>> | undefined;
   const policy = policyWithEntitlement("ALLOWED");
   const result = await policy.evaluate(
@@ -27,7 +26,6 @@ test("reserves one controlled-beta BYOK provider task in the UTC day", async () 
         { now: new Date("2026-07-30T23:59:59.000Z") }
       ],
       rankExecutionQuotaReservation: {
-        count: async () => CONTROLLED_BETA_DAILY_PROVIDER_TASK_LIMIT - 1,
         create: async ({ data }: { data: Record<string, unknown> }) => {
           created = data;
           return { id: reservationId };
@@ -39,7 +37,7 @@ test("reserves one controlled-beta BYOK provider task in the UTC day", async () 
 
   assert.deepEqual(result, {
     entitlement: "ALLOWED",
-    quota: "AVAILABLE",
+    quota: "UNLIMITED",
     quotaReservationId: reservationId
   });
   assert.ok(created);
@@ -53,17 +51,17 @@ test("reserves one controlled-beta BYOK provider task in the UTC day", async () 
   );
 });
 
-test("denies an unknown policy and exhausts the bounded daily quota", async () => {
+test("denies an unknown policy without consulting historical usage", async () => {
   const policy = policyWithEntitlement("ALLOWED");
   const transaction = {
     $queryRaw: async () => [
       { now: new Date("2026-07-30T12:00:00.000Z") }
     ],
     rankExecutionQuotaReservation: {
-      count: async () => CONTROLLED_BETA_DAILY_PROVIDER_TASK_LIMIT,
-      create: async () => {
-        throw new Error("must not create");
-      }
+      count: async () => {
+        throw new Error("historical usage must not be counted");
+      },
+      create: async () => ({ id: reservationId })
     }
   } as unknown as Prisma.TransactionClient;
 
@@ -76,28 +74,7 @@ test("denies an unknown policy and exhausts the bounded daily quota", async () =
   );
   assert.deepEqual(await policy.evaluate(transaction, input()), {
     entitlement: "ALLOWED",
-    quota: "EXHAUSTED"
-  });
-});
-
-test("honors a workspace-specific daily provider-task limit", async () => {
-  const policy = policyWithEntitlement("ALLOWED", 1_000_000);
-  const result = await policy.evaluate(
-    {
-      $queryRaw: async () => [
-        { now: new Date("2026-07-30T12:00:00.000Z") }
-      ],
-      rankExecutionQuotaReservation: {
-        count: async () => CONTROLLED_BETA_DAILY_PROVIDER_TASK_LIMIT,
-        create: async () => ({ id: reservationId })
-      }
-    } as unknown as Prisma.TransactionClient,
-    input()
-  );
-
-  assert.deepEqual(result, {
-    entitlement: "ALLOWED",
-    quota: "AVAILABLE",
+    quota: "UNLIMITED",
     quotaReservationId: reservationId
   });
 });
@@ -131,12 +108,10 @@ test("fails closed before quota reservation when billing entitlement is unavaila
 });
 
 function policyWithEntitlement(
-  result: RankProviderEntitlement,
-  dailyTaskLimit = CONTROLLED_BETA_DAILY_PROVIDER_TASK_LIMIT
+  result: RankProviderEntitlement
 ): ControlledBetaRankExecutionGrantPolicy {
   const entitlements = {
-    rankProviderEntitlement: async () => result,
-    rankProviderDailyTaskLimit: async () => dailyTaskLimit
+    rankProviderEntitlement: async () => result
   } as unknown as BillingEntitlementService;
   return new ControlledBetaRankExecutionGrantPolicy(entitlements);
 }

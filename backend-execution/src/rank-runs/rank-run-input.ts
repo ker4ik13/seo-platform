@@ -176,9 +176,9 @@ export function rankRunIdempotencyKey(value: unknown): string {
 
 function quota(value: unknown): RankEstimateQuota {
   const input = record(value, "access.quota");
-  if (input.status === "NOT_AVAILABLE") {
+  if (input.status === "UNLIMITED" || input.status === "NOT_AVAILABLE") {
     exactFields(input, ["status"], "access.quota");
-    return { status: "NOT_AVAILABLE" };
+    return { status: input.status };
   }
   if (input.status !== "AVAILABLE" && input.status !== "EXHAUSTED") {
     invalid("access.quota");

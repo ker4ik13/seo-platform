@@ -346,10 +346,10 @@ function scopeHash(value: unknown): RankEstimateScopeHash {
 function quota(value: unknown): RankEstimateQuota {
   const item = record(value);
   if (
-    item.status === "NOT_AVAILABLE" &&
+    (item.status === "UNLIMITED" || item.status === "NOT_AVAILABLE") &&
     Object.keys(item).length === 1
   ) {
-    return { status: "NOT_AVAILABLE" };
+    return { status: item.status };
   }
   if (item.status !== "AVAILABLE" && item.status !== "EXHAUSTED") {
     throw invalidResponse();

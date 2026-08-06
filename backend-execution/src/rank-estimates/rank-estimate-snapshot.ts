@@ -340,9 +340,9 @@ function isXmlStockStages(
 
 function quota(value: unknown): RankEstimateQuota {
   const input = record(value);
-  if (input.status === "NOT_AVAILABLE") {
+  if (input.status === "UNLIMITED" || input.status === "NOT_AVAILABLE") {
     exactFields(input, ["status"]);
-    return { status: "NOT_AVAILABLE" };
+    return { status: input.status };
   }
   if (input.status !== "AVAILABLE" && input.status !== "EXHAUSTED") {
     invalid();

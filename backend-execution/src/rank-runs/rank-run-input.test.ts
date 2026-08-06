@@ -25,12 +25,7 @@ const input = {
     membershipVersion: 3,
     canRunRanking: true,
     entitlementStatus: "ALLOWED",
-    quota: {
-      status: "AVAILABLE",
-      limit: "1000",
-      used: "100",
-      remaining: "900"
-    }
+    quota: { status: "UNLIMITED" }
   },
   billingCurrency: "RUB",
   jobCapacity: {
@@ -57,7 +52,9 @@ test("rejects forged scope, unknown fields and inconsistent quota", () => {
       access: {
         ...input.access,
         quota: {
-          ...input.access.quota,
+          status: "AVAILABLE",
+          limit: "1000",
+          used: "100",
           remaining: "901"
         }
       }

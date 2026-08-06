@@ -152,7 +152,7 @@ export function rankEstimateIdempotencyKey(value: unknown): string {
 function quota(value: unknown): RankEstimateQuota {
   const input = record(value, "quota");
   const status = string(input.status, "quota.status");
-  if (status === "NOT_AVAILABLE") {
+  if (status === "UNLIMITED" || status === "NOT_AVAILABLE") {
     exactFields(input, ["status"], "quota");
     return { status };
   }

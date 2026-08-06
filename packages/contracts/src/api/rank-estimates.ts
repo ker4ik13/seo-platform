@@ -117,6 +117,7 @@ export interface RankEstimateBlocker {
 }
 
 export const rankEstimateQuotaStatuses = [
+  "UNLIMITED",
   "AVAILABLE",
   "EXHAUSTED",
   "NOT_AVAILABLE"
@@ -126,6 +127,9 @@ export type RankEstimateQuotaStatus =
   (typeof rankEstimateQuotaStatuses)[number];
 
 export type RankEstimateQuota =
+  | {
+      readonly status: "UNLIMITED";
+    }
   | {
       readonly status: "AVAILABLE";
       readonly limit: string;

@@ -249,8 +249,9 @@
 - Issuer сериализует owned authorization rows в порядке
   workspace → project → user → membership → project access и сохраняет
   immutable decision в той же transaction, где policy создаёт authoritative
-  quota reservation. Production policy не имеет runtime/env bypass и не
-  выдаёт `GRANTED` без reservation ID. Expired exact replay не переписывается;
+  usage/grant reservation. Production BYOK policy не имеет runtime/env bypass,
+  не выдаёт `GRANTED` без reservation ID и не использует эти audit rows как
+  дневную квоту. Expired exact replay не переписывается;
   Jobs client проверяет TTL/hash/scope, сохраняет exact decision и атомарно
   создаёт secret-free scoped execution вместе с `CONSUMED`. Эта row сама не
   выдаёт credential material. SECURITY DEFINER claim возвращает exact

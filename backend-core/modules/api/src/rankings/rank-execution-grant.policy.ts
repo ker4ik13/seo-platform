@@ -5,8 +5,7 @@ import {
 } from "@seo-platform/contracts";
 import type { Prisma } from "../generated/prisma/client.js";
 import {
-  BillingEntitlementService,
-  RANK_PROVIDER_DAILY_TASK_LIMIT
+  BillingEntitlementService
 } from "../billing/billing-entitlement.service.js";
 
 export const RANK_EXECUTION_GRANT_POLICY = Symbol(
@@ -14,8 +13,6 @@ export const RANK_EXECUTION_GRANT_POLICY = Symbol(
 );
 export const CONTROLLED_BETA_RANK_POLICY_VERSION =
   currentRankProviderPolicyVersion;
-export const CONTROLLED_BETA_DAILY_PROVIDER_TASK_LIMIT =
-  RANK_PROVIDER_DAILY_TASK_LIMIT;
 
 export interface RankExecutionGrantPolicyInput {
   readonly workspaceId: string;
@@ -44,7 +41,7 @@ export type RankExecutionGrantPolicyDecision =
     }
   | {
       readonly entitlement: "ALLOWED";
-      readonly quota: "AVAILABLE";
+      readonly quota: "AVAILABLE" | "UNLIMITED";
       readonly quotaReservationId: string;
     };
 
@@ -103,25 +100,6 @@ export class ControlledBetaRankExecutionGrantPolicy
     const windowEndsAt = new Date(
       windowStartedAt.getTime() + 24 * 60 * 60 * 1_000
     );
-    const used = await transaction.rankExecutionQuotaReservation.count({
-      where: {
-        workspaceId: input.workspaceId,
-        meter: "RANK_PROVIDER_TASK",
-        windowStartedAt
-      }
-    });
-    const dailyTaskLimit =
-      await this.entitlements.rankProviderDailyTaskLimit(
-        transaction,
-        input.workspaceId,
-        clock.now
-      );
-    if (used >= dailyTaskLimit) {
-      return {
-        entitlement: "ALLOWED",
-        quota: "EXHAUSTED"
-      };
-    }
     const reservation =
       await transaction.rankExecutionQuotaReservation.create({
         data: {
@@ -142,7 +120,7 @@ export class ControlledBetaRankExecutionGrantPolicy
       });
     return {
       entitlement: "ALLOWED",
-      quota: "AVAILABLE",
+      quota: "UNLIMITED",
       quotaReservationId: reservation.id
     };
   }
