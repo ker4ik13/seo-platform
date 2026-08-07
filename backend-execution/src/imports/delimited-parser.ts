@@ -297,23 +297,49 @@ function suggestedTarget(header: string): {
   readonly confidence: number;
 } {
   const raw = header.normalize("NFKC").toLowerCase().replace(/ё/gu, "е");
-  if (/(яндекс|yandex).*(изменен|change|дельт)/u.test(raw)) {
+  const yandex = /(яндекс|yandex)/u.test(raw);
+  const google = /(google|гугл)/u.test(raw);
+  const positionChange =
+    /(изменен|change|дельт|рел(?:ативн)?\.?\s*позици)/u.test(raw);
+  const positionUrl =
+    /(url|урл|ссылк).*(позици|выдач|serp)|(позици|выдач|serp).*(url|урл|ссылк)/u.test(
+      raw
+    );
+  const relevantUrl =
+    /(релевантн).*(url|урл|ссылк|страниц)/u.test(raw);
+
+  // Key Collector puts the engine suffix after the field name in XLSX
+  // exports (for example, `Рел. позиция [Yandex]`). Engine detection must
+  // therefore be independent from the order of words in the header.
+  if (yandex && positionChange) {
     return { suggestedTarget: "ranking.yandex.change", confidence: 0.99 };
   }
-  if (/(google|гугл).*(изменен|change|дельт)/u.test(raw)) {
+  if (google && positionChange) {
     return { suggestedTarget: "ranking.google.change", confidence: 0.99 };
   }
-  if (/(яндекс|yandex).*(url|урл|ссылк|страниц)/u.test(raw)) {
+  if (relevantUrl) {
+    return { suggestedTarget: "page.target_url", confidence: 0.99 };
+  }
+  if (yandex && positionUrl) {
     return { suggestedTarget: "ranking.yandex.url", confidence: 0.99 };
   }
-  if (/(google|гугл).*(url|урл|ссылк|страниц)/u.test(raw)) {
+  if (google && positionUrl) {
     return { suggestedTarget: "ranking.google.url", confidence: 0.99 };
   }
-  if (/(яндекс|yandex).*(позици|position|rank)/u.test(raw)) {
+  if (yandex && /(позици|position|rank)/u.test(raw)) {
     return { suggestedTarget: "ranking.yandex.position", confidence: 0.99 };
   }
-  if (/(google|гугл).*(позици|position|rank)/u.test(raw)) {
+  if (google && /(позици|position|rank)/u.test(raw)) {
     return { suggestedTarget: "ranking.google.position", confidence: 0.99 };
+  }
+  if (/^["«]\s*!\s*["»]\s*\[(?:yw|wordstat)\]$/u.test(raw)) {
+    return { suggestedTarget: "frequency.fixed", confidence: 0.99 };
+  }
+  if (/^["«]\s*["»]\s*\[(?:yw|wordstat)\]$/u.test(raw)) {
+    return { suggestedTarget: "frequency.exact", confidence: 0.99 };
+  }
+  if (/^база\s*\[(?:yw|wordstat)\]$/u.test(raw)) {
+    return { suggestedTarget: "frequency.base", confidence: 0.99 };
   }
   if (/(?:"|«)\s*!.*(?:частот|wordstat|frequency)/u.test(raw)) {
     return { suggestedTarget: "frequency.fixed", confidence: 0.99 };

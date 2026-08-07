@@ -3,8 +3,15 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import {
   canonicalPublishRow,
-  mergeCanonicalPublishRows
+  mergeCanonicalPublishRows,
+  semanticImportPublishRetryExhausted
 } from "./semantic-import-publisher.service.js";
+
+test("stops scheduling a semantic publish after five claimed attempts", () => {
+  assert.equal(semanticImportPublishRetryExhausted(4), false);
+  assert.equal(semanticImportPublishRetryExhausted(5), true);
+  assert.equal(semanticImportPublishRetryExhausted(6), true);
+});
 
 test("canonicalizes PostgreSQL JSON field order before hashing a publish chunk", () => {
   const storedJson = {
@@ -80,6 +87,9 @@ test("preserves every Key Collector group membership for a duplicate phrase", ()
     textNormalized: "купить слона",
     normalizedHash: "b".repeat(64),
     language: "ru",
+    priority: 70,
+    isFavorite: true,
+    intent: "TRANSACTIONAL",
     tags: ["приоритет"],
     customValues: { source: "Key Collector" }
   } as const;
@@ -99,12 +109,18 @@ test("preserves every Key Collector group membership for a duplicate phrase", ()
     ["Продажи"]
   ]);
   assert.deepEqual(merged.tags, ["приоритет", "горячие"]);
+  assert.equal(merged.priority, 70);
+  assert.equal(merged.isFavorite, true);
+  assert.equal(merged.intent, "TRANSACTIONAL");
   assert.deepEqual(Object.keys(merged), [
     "sourceRowNumber",
     "textOriginal",
     "textNormalized",
     "normalizedHash",
     "language",
+    "priority",
+    "isFavorite",
+    "intent",
     "groupPaths",
     "tags",
     "customValues"

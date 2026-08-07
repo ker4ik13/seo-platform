@@ -115,6 +115,9 @@ test("accepts deep KC4 paths and bounded imported positions", () => {
         textNormalized: "seo",
         normalizedHash: "e".repeat(64),
         language: "ru",
+        priority: 80,
+        isFavorite: true,
+        intent: "COMMERCIAL",
         groupPath,
         positions: [
           {
@@ -132,6 +135,9 @@ test("accepts deep KC4 paths and bounded imported positions", () => {
   });
 
   assert.deepEqual(result.groupPaths, [groupPath]);
+  assert.equal(result.rows[0]?.priority, 80);
+  assert.equal(result.rows[0]?.isFavorite, true);
+  assert.equal(result.rows[0]?.intent, "COMMERCIAL");
   assert.deepEqual(result.rows[0]?.positions, [
     {
       searchEngine: "YANDEX",
@@ -142,4 +148,33 @@ test("accepts deep KC4 paths and bounded imported positions", () => {
     },
     { searchEngine: "GOOGLE", found: false }
   ]);
+});
+
+test("rejects invalid imported keyword attributes", () => {
+  const row = {
+    sourceRowNumber: "1",
+    textOriginal: "SEO",
+    textNormalized: "seo",
+    normalizedHash: "f".repeat(64),
+    language: "ru",
+    customValues: {}
+  };
+  for (const invalidAttributes of [
+    { priority: 101 },
+    { isFavorite: "true" },
+    { intent: "UNKNOWN" }
+  ]) {
+    assert.throws(
+      () =>
+        applySemanticImportChunkInput({
+          ...context,
+          chunkIndex: 0,
+          payloadHash: "a".repeat(64),
+          duplicatePolicy: "MERGE_NON_EMPTY",
+          createMissingKeywords: false,
+          rows: [{ ...row, ...invalidAttributes }]
+        }),
+      BadRequestException
+    );
+  }
 });

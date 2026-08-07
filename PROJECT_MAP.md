@@ -100,7 +100,11 @@ Frontend имеет один обязательный canonical origin `WEB_PUBL
 передаётся в build и runtime как server-only configuration; metadata,
 robots/sitemap, BFF Origin-проверки и абсолютные auth-refresh redirects не
 выводят origin из внутреннего reverse-proxy request URL и не имеют публичного
-loopback fallback. `PLATFORM_API_INTERNAL_URL` задаётся отдельно и никогда не
+loopback fallback. Опциональный exact hostname `WEB_WWW_REDIRECT_HOST`
+также передаётся в web build/runtime, маршрутизируется на тот же frontend и
+получает permanent `308` на
+`WEB_PUBLIC_URL` с сохранением path/query; произвольный `Host` не влияет на
+redirect target. `PLATFORM_API_INTERNAL_URL` задаётся отдельно и никогда не
 выдаётся браузеру.
 
 Browser BFF-клиент обрабатывает истечение короткого access token централизованно:
@@ -317,7 +321,15 @@ role стримит CSV/XLSX/KC4 в staging и публикует bounded idempo
 сопоставленные поля применяются только к существующим запросам, новые фразы
 создаются лишь после явного включения `createMissingKeywords`. Validation
 показывает число пропущенных новых фраз, а Core SEO повторно применяет тот же
-guard внутри транзакции публикации.
+guard внутри транзакции публикации. XLSX mapping распознаёт как канонические
+названия, так и экспортные суффиксы Key Collector (`[Yandex]`, `[YW]`), включая
+текущую/относительную позицию, URL позиции и базовую/фразовую частотность. При
+обновлении существующего запроса Core
+использует возвращённую Prisma запись с уже увеличенной `keyword.version`,
+поэтому импортированная позиция привязывается к актуальной версии в immutable
+rank manifest. Execution хранит `publishing_attempts` и после пяти неудачных
+claims завершает импорт контролируемой terminal-ошибкой вместо бесконечного
+цикла; уже принятые chunks остаются idempotent.
 Crawl role выполняет SSRF/DNS-rebinding-safe обход с robots/sitemap policy,
 checkpoint и lease; нормализованные snapshots принадлежат Core SEO.
 

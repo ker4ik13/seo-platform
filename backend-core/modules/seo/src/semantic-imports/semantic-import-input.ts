@@ -2,6 +2,7 @@ import { BadRequestException } from "@nestjs/common";
 import {
   semanticImportDuplicatePolicies,
   semanticImportMaxGroupDepth,
+  semanticKeywordIntents,
   type InternalApplySemanticImportChunkInput,
   type InternalAbortSemanticImportInput,
   type InternalBeginSemanticImportInput,
@@ -170,6 +171,26 @@ export function abortSemanticImportInput(
 
 function publishRow(value: unknown, path: string): SemanticImportPublishRow {
   const input = record(value);
+  const priority =
+    input.priority === undefined
+      ? undefined
+      : nonNegativeInteger(input.priority, `${path}.priority`);
+  if (priority !== undefined && priority > 100) {
+    invalid(`${path}.priority`);
+  }
+  const isFavorite =
+    input.isFavorite === undefined
+      ? undefined
+      : boolean(input.isFavorite, `${path}.isFavorite`);
+  const intent =
+    input.intent === undefined
+      ? undefined
+      : semanticKeywordIntents.find(
+          (candidate) => candidate === input.intent
+        );
+  if (input.intent !== undefined && intent === undefined) {
+    invalid(`${path}.intent`);
+  }
   const groupPath =
     input.groupPath === undefined
       ? undefined
@@ -268,6 +289,9 @@ function publishRow(value: unknown, path: string): SemanticImportPublishRow {
       `${path}.normalizedHash`
     ),
     language: language(input.language, `${path}.language`),
+    ...(priority === undefined ? {} : { priority }),
+    ...(isFavorite === undefined ? {} : { isFavorite }),
+    ...(intent === undefined ? {} : { intent }),
     ...(groupPath ? { groupPath } : {}),
     ...(groupPaths ? { groupPaths } : {}),
     ...(targetUrl ? { targetUrl } : {}),

@@ -395,10 +395,14 @@ export class SemanticImportService {
               )
             : undefined
         );
-        await transaction.keyword.update({
+        const updatedKeyword = await transaction.keyword.update({
           where: { id: keyword.id },
           data: update
         });
+        // Rank manifests bind every entry to an exact immutable keyword
+        // version. Keep the in-memory snapshot in sync with the update above
+        // so imported positions do not try to seal a stale version.
+        keywordByKey.set(key, updatedKeyword);
         updatedKeywordIds.add(keyword.id);
       }
 

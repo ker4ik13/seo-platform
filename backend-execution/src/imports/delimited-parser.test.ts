@@ -95,9 +95,36 @@ test("recognizes Key Collector headers and preserves unknown columns", () => {
       "frequency.base",
       "frequency.exact",
       "frequency.fixed",
-      "ranking.position",
+      "ranking.yandex.position",
       "page.target_url",
       "custom"
+    ]
+  );
+});
+
+test("recognizes Key Collector XLSX headers with bracketed provider suffixes", () => {
+  const headers = [
+    "Фраза",
+    "Позиция [Yandex]",
+    "Рел. позиция [Yandex]",
+    "URL позиции [Yandex]",
+    '" " [YW]',
+    "Родительская группа",
+    "База [YW]",
+    "Релевантный URL [Yandex]"
+  ];
+
+  assert.deepEqual(
+    suggestColumnMapping(headers).map(({ suggestedTarget }) => suggestedTarget),
+    [
+      "keyword.text",
+      "ranking.yandex.position",
+      "ranking.yandex.change",
+      "ranking.yandex.url",
+      "frequency.exact",
+      "group.path",
+      "frequency.base",
+      "page.target_url"
     ]
   );
 });

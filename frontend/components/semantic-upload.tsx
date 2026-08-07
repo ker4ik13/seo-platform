@@ -351,7 +351,10 @@ export function SemanticUpload({
         );
       } else {
         setStage(
-          semanticImport.failureCode === "SEO_DATA_PUBLISH_REJECTED"
+          [
+            "SEO_DATA_PUBLISH_REJECTED",
+            "IMPORT_PUBLISH_RETRY_EXHAUSTED"
+          ].includes(semanticImport.failureCode ?? "")
             ? "publish-failed"
             : "import-failed"
         );
@@ -1553,7 +1556,9 @@ function importFailureMessage(code: string | undefined): string {
     IMPORT_TOO_MANY_CHUNKS:
       "Импорт превышает безопасный лимит одной операции.",
     SEO_DATA_PUBLISH_REJECTED:
-      "Сервис семантики отклонил публикацию. Данные проекта не изменены — загрузите файл повторно."
+      "Сервис семантики отклонил публикацию. Данные проекта не изменены — загрузите файл повторно.",
+    IMPORT_PUBLISH_RETRY_EXHAUSTED:
+      "Публикацию не удалось завершить после нескольких попыток. Повтор остановлен автоматически; данные проекта не удалены."
   };
   return (
     (code && messages[code]) ||

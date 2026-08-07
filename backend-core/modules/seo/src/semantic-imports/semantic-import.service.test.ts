@@ -152,7 +152,7 @@ test("aborts an empty receipt and releases its remaining capacity", async () => 
     updatedAt: new Date(),
     completedAt: null,
     _count: { chunks: 0 }
-  } as const;
+  };
   const transaction = {
     $executeRaw: async () => 1,
     semanticImportReceipt: {
@@ -306,4 +306,217 @@ test("binds a KC4 group manifest into the idempotent chunk hash", async () => {
   });
 
   assert.equal(result.createdGroups, "2");
+});
+
+test("seals imported positions with the keyword version produced by the same update", async () => {
+  const now = new Date("2026-08-07T12:00:00.000Z");
+  const keywordId = "01900000-0000-7000-8000-000000000010";
+  const contextId = "01900000-0000-7000-8000-000000000011";
+  const assignmentId = "01900000-0000-7000-8000-000000000012";
+  let currentKeyword: {
+    id: string;
+    workspaceId: string;
+    projectId: string;
+    textOriginal: string;
+    textNormalized: string;
+    normalizedHash: string;
+    language: string;
+    priority: number;
+    isFavorite: boolean;
+    intent: string | null;
+    note: string | null;
+    status: string;
+    clusterId: string | null;
+    targetPageId: string | null;
+    isTracked: boolean;
+    customValues: Readonly<Record<string, string>>;
+    sourceMode: string;
+    sourceId: string | null;
+    createdBy: string;
+    updatedBy: string;
+    version: number;
+    createdAt: Date;
+    updatedAt: Date;
+    deletedAt: Date | null;
+  } = {
+    id: keywordId,
+    workspaceId: context.workspaceId,
+    projectId: context.projectId,
+    textOriginal: "SEO",
+    textNormalized: "seo",
+    normalizedHash: "f".repeat(64),
+    language: "ru",
+    priority: 0,
+    isFavorite: false,
+    intent: null,
+    note: null,
+    status: "ACTIVE",
+    clusterId: null,
+    targetPageId: null,
+    isTracked: true,
+    customValues: {},
+    sourceMode: "MANUAL",
+    sourceId: null,
+    createdBy: context.actorId,
+    updatedBy: context.actorId,
+    version: 7,
+    createdAt: now,
+    updatedAt: now,
+    deletedAt: null
+  };
+  let manifestKeywordVersion: number | undefined;
+  const receipt = {
+    ...context,
+    status: "RECEIVING",
+    mappingHash: "b".repeat(64),
+    duplicatePolicy: "MERGE_NON_EMPTY",
+    createMissingKeywords: false,
+    expectedChunks: 1,
+    expectedUniqueRows: 1n,
+    planCode: "TEAM",
+    planVersion: 1,
+    storedKeywordsLimit: 2_000_000n,
+    keywordsPerProjectLimit: 2_000_000n,
+    foldersPerProjectLimit: 500n,
+    reservedKeywords: 0n,
+    semanticVersionId: null,
+    resultSummary: null,
+    createdAt: now,
+    updatedAt: now,
+    completedAt: null
+  } as const;
+  const transaction = {
+    $executeRaw: async () => 1,
+    semanticImportReceipt: {
+      findUnique: async () => receipt,
+      update: async () => receipt
+    },
+    semanticImportChunkReceipt: {
+      findUnique: async () => null,
+      create: async ({ data }: { data: Readonly<Record<string, unknown>> }) => ({
+        ...data,
+        createdKeywords: BigInt(Number(data.createdKeywords ?? 0)),
+        updatedKeywords: BigInt(Number(data.updatedKeywords ?? 0)),
+        skippedKeywords: BigInt(Number(data.skippedKeywords ?? 0)),
+        createdGroups: BigInt(Number(data.createdGroups ?? 0)),
+        createdPages: BigInt(Number(data.createdPages ?? 0)),
+        createdTags: BigInt(Number(data.createdTags ?? 0)),
+        createdMetricSnapshots: BigInt(
+          Number(data.createdMetricSnapshots ?? 0)
+        ),
+        createdAt: now
+      })
+    },
+    keyword: {
+      findMany: async () => [currentKeyword],
+      update: async () => {
+        currentKeyword = {
+          ...currentKeyword,
+          sourceMode: "IMPORT",
+          sourceId: context.importId,
+          version: currentKeyword.version + 1,
+          updatedAt: now
+        };
+        return currentKeyword;
+      },
+      updateMany: async () => ({ count: 0 })
+    },
+    keywordGroupMembership: {
+      findMany: async () => [],
+      createMany: async () => ({ count: 0 }),
+      deleteMany: async () => ({ count: 0 })
+    },
+    keywordGroup: {
+      findFirst: async ({ where }: { where: { systemKind: string } }) => ({
+        id:
+          where.systemKind === "UNGROUPED"
+            ? "01900000-0000-7000-8000-000000000013"
+            : "01900000-0000-7000-8000-000000000014"
+      })
+    },
+    trackingContext: {
+      findFirst: async () => ({ id: contextId, version: 1 })
+    },
+    trackingContextVersion: {
+      findFirst: async () => ({
+        configurationVersion: 1,
+        configurationHash: "a".repeat(64)
+      })
+    },
+    trackingContextKeywordAssignment: {
+      findMany: async () => [{ id: assignmentId, keywordId }],
+      createMany: async () => ({ count: 0 })
+    },
+    rankExecutionManifest: {
+      create: async () => undefined,
+      update: async () => {
+        assert.equal(manifestKeywordVersion, currentKeyword.version);
+        return undefined;
+      }
+    },
+    rankExecutionManifestChunk: {
+      create: async () => undefined
+    },
+    rankExecutionManifestEntry: {
+      createMany: async ({ data }: { data: readonly { keywordVersion: number }[] }) => {
+        manifestKeywordVersion = data[0]?.keywordVersion;
+        return { count: data.length };
+      }
+    },
+    rankSnapshot: {
+      createMany: async ({ data }: { data: readonly unknown[] }) => ({
+        count: data.length
+      })
+    },
+    currentRank: {
+      findMany: async () => [],
+      create: async () => undefined
+    },
+    rankChunkIngestReceipt: {
+      create: async () => undefined
+    }
+  };
+  const prisma = {
+    semanticImportReceipt: transaction.semanticImportReceipt,
+    semanticImportChunkReceipt: {
+      findUnique: async () => null
+    },
+    $transaction: async (
+      callback: (client: typeof transaction) => Promise<unknown>
+    ) => callback(transaction)
+  };
+  const rows = [
+    {
+      sourceRowNumber: "1",
+      textOriginal: "SEO",
+      textNormalized: "seo",
+      normalizedHash: "f".repeat(64),
+      language: "ru",
+      positions: [
+        {
+          searchEngine: "YANDEX" as const,
+          found: true,
+          position: 9
+        }
+      ],
+      customValues: {}
+    }
+  ];
+  const payloadHash = createHash("sha256")
+    .update(JSON.stringify(rows))
+    .digest("hex");
+
+  const result = await new SemanticImportService(
+    prisma as unknown as PrismaService
+  ).applyChunk({
+    ...context,
+    chunkIndex: 0,
+    payloadHash,
+    duplicatePolicy: "MERGE_NON_EMPTY",
+    createMissingKeywords: false,
+    rows
+  });
+
+  assert.equal(result.updatedKeywords, "1");
+  assert.equal(manifestKeywordVersion, 8);
 });

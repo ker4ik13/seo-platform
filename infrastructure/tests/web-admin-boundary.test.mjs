@@ -20,6 +20,14 @@ test("frontend is one Next.js deployable with the protected admin route", async 
     build,
     /WEB_PUBLIC_URL: \$\{WEB_PUBLIC_URL:\?WEB_PUBLIC_URL is required\}/u
   );
+  assert.match(
+    build,
+    /WEB_WWW_REDIRECT_HOST: \$\{WEB_WWW_REDIRECT_HOST:-www\.seonorita\.ru\}/u
+  );
+  assert.match(
+    frontend,
+    /WEB_WWW_REDIRECT_HOST: \$\{WEB_WWW_REDIRECT_HOST:-www\.seonorita\.ru\}/u
+  );
   assert.match(frontend, /^      - internal$/mu);
   assert.match(frontend, /^      - edge$/mu);
   assert.doesNotMatch(frontend, /^    ports:/mu);
@@ -30,6 +38,11 @@ test("frontend is one Next.js deployable with the protected admin route", async 
   assert.match(
     dockerfile,
     /ENV WEB_PUBLIC_URL=\$WEB_PUBLIC_URL/u
+  );
+  assert.match(dockerfile, /ARG WEB_WWW_REDIRECT_HOST/u);
+  assert.match(
+    dockerfile,
+    /ENV WEB_WWW_REDIRECT_HOST=\$WEB_WWW_REDIRECT_HOST/u
   );
   assert.ok(
     dockerfile.indexOf("pnpm --filter @seo-platform/contracts build") <
@@ -81,6 +94,19 @@ test("public frontend URLs come only from the canonical runtime origin", async (
     sources[3],
     /new URL\(returnTo, webPublicOrigin\(\)\)/u
   );
+});
+
+test("the configured www host redirects to the canonical origin", async () => {
+  const [proxy, redirect] = await Promise.all([
+    workspaceFile("frontend/proxy.ts"),
+    workspaceFile("frontend/lib/canonical-host-redirect.ts")
+  ]);
+
+  assert.match(proxy, /canonicalHostRedirectUrl/u);
+  assert.match(proxy, /NextResponse\.redirect\(canonicalRedirect, 308\)/u);
+  assert.match(redirect, /WEB_WWW_REDIRECT_HOST/u);
+  assert.match(redirect, /webPublicOrigin\(env\)/u);
+  assert.doesNotMatch(redirect, /requestUrl\.origin/u);
 });
 
 test("production admin bootstrap is self-contained and terminal-safe", async () => {

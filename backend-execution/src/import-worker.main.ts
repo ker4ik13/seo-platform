@@ -123,8 +123,10 @@ async function bootstrap(): Promise<void> {
   );
   dispatchTimer.unref();
 
-  worker.on("failed", (job) => {
-    logger.warn(`Semantic import failed for job ${job?.id ?? "unknown"}`);
+  worker.on("failed", (job, error) => {
+    logger.warn(
+      `Semantic import failed for job ${job?.id ?? "unknown"} (${safeFailureCode(error)})`
+    );
   });
 
   let shuttingDown = false;
@@ -149,6 +151,19 @@ function redis(url: string): Redis {
     maxRetriesPerRequest: null,
     enableReadyCheck: true
   });
+}
+
+function safeFailureCode(error: Error): string {
+  const code = (error as Error & { readonly code?: unknown }).code;
+  if (
+    typeof code === "string" &&
+    /^[A-Z][A-Z0-9_]{0,63}$/u.test(code)
+  ) {
+    return code;
+  }
+  return /^[A-Za-z][A-Za-z0-9]{0,63}$/u.test(error.name)
+    ? error.name
+    : "UNKNOWN_ERROR";
 }
 
 void bootstrap().catch(() => {

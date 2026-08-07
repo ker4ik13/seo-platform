@@ -1061,6 +1061,7 @@ model SemanticImport {
   publishingStartedAt      DateTime?            @map("publishing_started_at") @db.Timestamptz(6)
   publishingHeartbeatAt    DateTime?            @map("publishing_heartbeat_at") @db.Timestamptz(6)
   publishingCompletedAt    DateTime?            @map("publishing_completed_at") @db.Timestamptz(6)
+  publishingAttempts       Int                  @default(0) @map("publishing_attempts")
   cancelRequestedAt        DateTime?            @map("cancel_requested_at") @db.Timestamptz(6)
   version                  Int                  @default(1)
   createdAt                DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)

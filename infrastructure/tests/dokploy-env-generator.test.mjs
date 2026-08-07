@@ -141,7 +141,7 @@ test(
     const templateEnvironment = parseEnvironment(
       await readFile(join(projectRoot, ".env.example"), "utf8")
     );
-    assert.equal(environment.size, 210);
+    assert.equal(environment.size, templateEnvironment.size);
     assert.deepEqual(
       [...environment.keys()].sort(),
       [...templateEnvironment.keys()].sort(),

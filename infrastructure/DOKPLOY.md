@@ -49,6 +49,7 @@ provider capacity и поэтому само по себе не умножает
 | Публичный адрес | Compose service | Container port |
 |---|---|---:|
 | основной web domain | `frontend` | 3000 |
+| `www` web domain | `frontend` | 3000 |
 | API domain | `backend-core` | 4000 |
 | Realtime domain или path | `backend-core` | 4003 |
 
@@ -59,6 +60,7 @@ provider capacity и поэтому само по себе не умножает
 
 ```dotenv
 WEB_PUBLIC_URL=https://example.com
+WEB_WWW_REDIRECT_HOST=www.example.com
 API_PUBLIC_URL=https://api.example.com
 ```
 
@@ -66,6 +68,10 @@ API_PUBLIC_URL=https://api.example.com
 Он передаётся и на build, и в runtime; metadata, robots/sitemap, BFF Origin
 проверки и auth-refresh redirects используют только его. Значение вроде
 внутреннего имени контейнера или loopback-адреса запрещено в production.
+`WEB_WWW_REDIRECT_HOST` содержит только hostname, без схемы, порта и пути.
+Оба web domain направляются в Dokploy на `frontend:3000`; запрос с точным
+`www` host получает permanent `308` на `WEB_PUBLIC_URL` с сохранением пути и
+query string. Остальные hostnames этим правилом не затрагиваются.
 
 TLS завершается в Traefik. Для production оставить `AUTH_COOKIE_SECURE=true`.
 

@@ -158,6 +158,7 @@ function importRecord(): SemanticImport {
     publishingStartedAt: null,
     publishingHeartbeatAt: null,
     publishingCompletedAt: null,
+    publishingAttempts: 0,
     cancelRequestedAt: null,
     version: 1,
     createdAt: now,

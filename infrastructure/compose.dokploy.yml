@@ -892,6 +892,7 @@ services:
         PACKAGE_NAME: "@seo-platform/frontend"
         PACKAGE_PATH: frontend
         WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required}
+        WEB_WWW_REDIRECT_HOST: ${WEB_WWW_REDIRECT_HOST:-www.seonorita.ru}
         NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME: ${AUTH_CSRF_COOKIE_NAME:-seo_csrf}
         NEXT_PUBLIC_TERMS_VERSION: ${TERMS_VERSION:?TERMS_VERSION is required}
         NEXT_PUBLIC_PRIVACY_VERSION: ${PRIVACY_VERSION:?PRIVACY_VERSION is required}
@@ -901,6 +902,7 @@ services:
       TZ: UTC
       PORT: 3000
       WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:?WEB_PUBLIC_URL is required}
+      WEB_WWW_REDIRECT_HOST: ${WEB_WWW_REDIRECT_HOST:-www.seonorita.ru}
       PLATFORM_API_INTERNAL_URL: http://backend-core:4000
       AUTH_ACCESS_COOKIE_NAME: ${AUTH_ACCESS_COOKIE_NAME:-seo_access}
       AUTH_SESSION_COOKIE_NAME: ${AUTH_SESSION_COOKIE_NAME:-seo_session}

@@ -40,6 +40,8 @@ interface SemanticImportPublishPlan {
   readonly entitlement: SemanticCapacityEntitlement;
 }
 
+const SEMANTIC_IMPORT_MAX_PUBLISH_ATTEMPTS = 5;
+
 @Injectable()
 export class SemanticImportPublisherService {
   public constructor(
@@ -121,6 +123,7 @@ export class SemanticImportPublisherService {
         publishingStartedAt: claimedAt,
         publishingHeartbeatAt: claimedAt,
         publishingCompletedAt: null,
+        publishingAttempts: { increment: 1 },
         failure: Prisma.DbNull,
         version: { increment: 1 }
       }
@@ -150,6 +153,25 @@ export class SemanticImportPublisherService {
               : "SEO_DATA_PUBLISH_REJECTED"
           );
         } catch (finalizationError) {
+          await this.releaseForRetry(semanticImport.id, claimedAt);
+          throw finalizationError;
+        }
+      }
+      if (
+        semanticImportPublishRetryExhausted(
+          semanticImport.publishingAttempts
+        )
+      ) {
+        try {
+          return await this.fail(
+            semanticImport,
+            claimedAt,
+            "IMPORT_PUBLISH_RETRY_EXHAUSTED"
+          );
+        } catch (finalizationError) {
+          // Do not abandon the Core receipt: it owns the capacity
+          // reservation and any already accepted idempotent chunks. A later
+          // claim may safely replay those chunks before retrying finalization.
           await this.releaseForRetry(semanticImport.id, claimedAt);
           throw finalizationError;
         }
@@ -608,6 +630,12 @@ export class SemanticImportPublisherService {
   }
 }
 
+export function semanticImportPublishRetryExhausted(
+  attempts: number
+): boolean {
+  return attempts >= SEMANTIC_IMPORT_MAX_PUBLISH_ATTEMPTS;
+}
+
 async function validatedBatch(
   prisma: PrismaService,
   importId: string,
@@ -682,6 +710,11 @@ export function mergeCanonicalPublishRows(
     textNormalized: first.textNormalized,
     normalizedHash: first.normalizedHash,
     language: first.language,
+    ...(first.priority === undefined ? {} : { priority: first.priority }),
+    ...(first.isFavorite === undefined
+      ? {}
+      : { isFavorite: first.isFavorite }),
+    ...(first.intent === undefined ? {} : { intent: first.intent }),
     ...(groupPaths.length > 0 ? { groupPaths } : {}),
     ...(first.targetUrl ? { targetUrl: first.targetUrl } : {}),
     ...(first.frequencies ? { frequencies: first.frequencies } : {}),

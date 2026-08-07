@@ -54,11 +54,14 @@ Dokploy PostgreSQL backup jobs. Внутри Compose один и тот же var
 
 ```dotenv
 WEB_PUBLIC_URL=https://seo.example.com
+WEB_WWW_REDIRECT_HOST=www.seo.example.com
 API_PUBLIC_URL=https://api.seo.example.com
 ```
 
 `WEB_PUBLIC_URL` — canonical origin без завершающего `/`. В Dokploy ему
-соответствует `frontend:3000`; API domain направляется на
+соответствует `frontend:3000`; туда же нужно направить hostname из
+`WEB_WWW_REDIRECT_HOST`. Frontend перенаправит его permanent `308` на
+canonical origin, сохранив путь и параметры. API domain направляется на
 `backend-core:4000`. Realtime domain либо отдельный path направляется на
 `backend-core:4003`.
 
