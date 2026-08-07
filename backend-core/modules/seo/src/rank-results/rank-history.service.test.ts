@@ -38,6 +38,7 @@ test("returns tenant-scoped history and authenticates its keyset cursor", async 
   assert.equal(harness.calls, 1);
   assert.equal(harness.wheres[0]?.workspaceId, workspaceId);
   assert.equal(harness.wheres[0]?.projectId, projectId);
+  assert.equal(harness.wheres[0]?.sourceMode, "BYOK");
 
   const second = await service.list({
     ...query(),

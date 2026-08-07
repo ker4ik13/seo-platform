@@ -208,6 +208,10 @@ export interface SemanticKeywordPositionSummary {
   readonly observedAt: string;
 }
 
+export type SemanticKeywordPositionHistoryProvider =
+  | RankEstimateProvider
+  | "KEY_COLLECTOR";
+
 export interface SemanticKeywordPositionHistoryPoint {
   readonly snapshotId: string;
   readonly trackingContextId: string;
@@ -220,7 +224,7 @@ export interface SemanticKeywordPositionHistoryPoint {
   readonly countryCode?: string;
   readonly language?: string;
   readonly depth?: number;
-  readonly provider: RankEstimateProvider;
+  readonly provider: SemanticKeywordPositionHistoryProvider;
   readonly found: boolean;
   readonly position?: number;
   readonly observedAt: string;

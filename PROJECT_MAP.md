@@ -327,9 +327,14 @@ guard внутри транзакции публикации. XLSX mapping ра�
 обновлении существующего запроса Core
 использует возвращённую Prisma запись с уже увеличенной `keyword.version`,
 поэтому импортированная позиция привязывается к актуальной версии в immutable
-rank manifest. Execution хранит `publishing_attempts` и после пяти неудачных
-claims завершает импорт контролируемой terminal-ошибкой вместо бесконечного
-цикла; уже принятые chunks остаются idempotent.
+rank manifest. Создаваемые для Key Collector import contexts остаются
+техническими: они участвуют в keyword insights и графике импортированной
+истории, но исключены из пользовательского каталога профилей live-съёма,
+операций над tracking context и квоты отслеживаемых пар. Канонический BYOK
+rank-history endpoint также не смешивает импорт с воспроизводимыми
+провайдерскими замерами. Execution хранит `publishing_attempts` и после пяти
+неудачных claims завершает импорт контролируемой terminal-ошибкой вместо
+бесконечного цикла; уже принятые chunks остаются idempotent.
 Crawl role выполняет SSRF/DNS-rebinding-safe обход с robots/sitemap policy,
 checkpoint и lease; нормализованные snapshots принадлежат Core SEO.
 

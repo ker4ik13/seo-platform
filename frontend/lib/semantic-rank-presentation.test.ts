@@ -4,6 +4,7 @@ import {
   primaryRankContextIds,
   rankChangePresentation,
   rankEngineLabel,
+  rankHistoryProviderLabel,
   rankSearchSystemLabel
 } from "./semantic-rank-presentation.ts";
 
@@ -49,4 +50,9 @@ test("names the exact search result source when history contains it", () => {
   assert.equal(rankSearchSystemLabel("YANDEX", "SEARCH_API"), "Яндекс XML");
   assert.equal(rankSearchSystemLabel("YANDEX", "LIVE"), "Яндекс Live");
   assert.equal(rankSearchSystemLabel("GOOGLE", "LIVE"), "Google Live");
+});
+
+test("labels imported Key Collector history without treating it as a live provider", () => {
+  assert.equal(rankHistoryProviderLabel("KEY_COLLECTOR"), "Key Collector · импорт");
+  assert.equal(rankHistoryProviderLabel("XMLSTOCK"), "XMLStock");
 });

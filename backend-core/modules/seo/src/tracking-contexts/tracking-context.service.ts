@@ -43,6 +43,9 @@ import {
 import { normalizeKeywordText } from "../keywords/keyword-normalization.js";
 
 const CONTEXT_LIMIT = 200;
+const USER_TRACKING_CONTEXT_FILTER = {
+  rankManifests: { none: { provider: "KEY_COLLECTOR" } }
+} as const;
 // Six scalar columns are inserted per assignment. Keeping a batch at 5,000
 // leaves ample headroom below PostgreSQL's 65,535 bind-parameter limit.
 const ASSIGNMENT_CREATE_BATCH_SIZE = 5_000;
@@ -86,7 +89,11 @@ export class TrackingContextService {
     projectId: string
   ): Promise<TrackingContextCollection> {
     const rows = await this.prisma.trackingContext.findMany({
-      where: { workspaceId, projectId },
+      where: {
+        workspaceId,
+        projectId,
+        ...USER_TRACKING_CONTEXT_FILTER
+      },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: CONTEXT_LIMIT + 1,
       include: CONTEXT_INCLUDE
@@ -658,7 +665,8 @@ export class TrackingContextService {
         where: {
           id: input.contextId,
           workspaceId: input.workspaceId,
-          projectId: input.projectId
+          projectId: input.projectId,
+          ...USER_TRACKING_CONTEXT_FILTER
         },
         select: { status: true }
       });
@@ -712,7 +720,10 @@ export class TrackingContextService {
             where: {
               workspaceId: input.workspaceId,
               removedAt: null,
-              context: { status: "ACTIVE" },
+              context: {
+                status: "ACTIVE",
+                ...USER_TRACKING_CONTEXT_FILTER
+              },
               keyword: { status: "ACTIVE" }
             }
           });
@@ -770,7 +781,12 @@ export class TrackingContextService {
     contextId: string
   ): Promise<ContextAggregate> {
     const context = await client.trackingContext.findFirst({
-      where: { id: contextId, workspaceId, projectId },
+      where: {
+        id: contextId,
+        workspaceId,
+        projectId,
+        ...USER_TRACKING_CONTEXT_FILTER
+      },
       include: CONTEXT_INCLUDE
     });
     if (!context) notFound();
@@ -784,7 +800,12 @@ export class TrackingContextService {
     contextId: string
   ): Promise<void> {
     const context = await client.trackingContext.findFirst({
-      where: { id: contextId, workspaceId, projectId },
+      where: {
+        id: contextId,
+        workspaceId,
+        projectId,
+        ...USER_TRACKING_CONTEXT_FILTER
+      },
       select: { id: true }
     });
     if (!context) notFound();

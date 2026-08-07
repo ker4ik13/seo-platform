@@ -10,12 +10,13 @@ import {
   type PointerEvent as ReactPointerEvent
 } from "react";
 import { createPortal } from "react-dom";
-import { integrationProviderLabel } from "../lib/integration-presentation";
 import {
   primaryRankContextIds,
   rankEngineLabel,
+  rankHistoryProviderLabel,
   rankSearchSystemLabel
 } from "../lib/semantic-rank-presentation";
+import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
 import { SearchEngineLogo } from "./search-engine-logo";
 
@@ -325,7 +326,20 @@ function RankPointTooltip({
       <dl>
         <div>
           <dt>Провайдер</dt>
-          <dd><ProviderLogo provider={point.provider} size="compact" /> {integrationProviderLabel(point.provider)}</dd>
+          <dd>
+            {point.provider === "KEY_COLLECTOR" ? (
+              <span
+                aria-label="Key Collector"
+                className="semantic-rank-import-provider-icon"
+                role="img"
+              >
+                <Icon name="import" />
+              </span>
+            ) : (
+              <ProviderLogo provider={point.provider} size="compact" />
+            )}
+            {rankHistoryProviderLabel(point.provider)}
+          </dd>
         </div>
         <div>
           <dt>Дата и время</dt>
@@ -437,7 +451,7 @@ function pointAriaLabel({ point, series }: PlottedRankPoint): string {
   const status = isPositionPoint(point)
     ? `позиция ${point.position}`
     : "позиция не найдена";
-  return `${rankSearchSystemLabel(series.searchEngine, point.searchSource)}, ${status}, ${integrationProviderLabel(point.provider)}, ${formatDateTime(point.observedAt)}`;
+  return `${rankSearchSystemLabel(series.searchEngine, point.searchSource)}, ${status}, ${rankHistoryProviderLabel(point.provider)}, ${formatDateTime(point.observedAt)}`;
 }
 
 function deviceLabel(device: "DESKTOP" | "MOBILE"): string {

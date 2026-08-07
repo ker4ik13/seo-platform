@@ -40,6 +40,28 @@ const configuration: TrackingContextConfigurationInput = {
   safeSearch: false
 };
 
+test("keeps Key Collector import contexts out of runnable settings", async () => {
+  let observedWhere: unknown;
+  const service = new TrackingContextService({
+    trackingContext: {
+      findMany: async ({ where }: { where: unknown }) => {
+        observedWhere = where;
+        return [];
+      }
+    }
+  } as unknown as PrismaService);
+
+  assert.deepEqual(await service.list(workspaceId, projectId), {
+    contexts: [],
+    contextsTruncated: false
+  });
+  assert.deepEqual(observedWhere, {
+    workspaceId,
+    projectId,
+    rankManifests: { none: { provider: "KEY_COLLECTOR" } }
+  });
+});
+
 test("replays the immutable create receipt and rejects key reuse", async () => {
   let receipt: Record<string, unknown> | undefined;
   const outbox: Array<Record<string, unknown>> = [];

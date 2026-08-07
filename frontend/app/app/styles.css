@@ -1286,6 +1286,8 @@ svg { display: block; }
 .semantic-rank-chart-tooltip dt { color: #aeb4c2; font-size: 8px; }
 .semantic-rank-chart-tooltip dd { align-items: center; display: flex; font-size: 9px; font-weight: 650; gap: 4px; margin: 0; min-width: 0; overflow-wrap: anywhere; text-align: right; }
 .semantic-rank-chart-tooltip dd .provider-logo { flex: 0 0 auto; height: 14px; width: 14px; }
+.semantic-rank-import-provider-icon { align-items: center; background: #ece9ff; border-radius: 5px; color: var(--accent); display: inline-flex; flex: 0 0 auto; height: 14px; justify-content: center; width: 14px; }
+.semantic-rank-import-provider-icon svg { height: 9px; width: 9px; }
 .semantic-rank-chart-tooltip > small { border-top: 1px solid rgba(255, 255, 255, .1); color: #c5cad5; font-size: 8px; overflow: hidden; padding-top: 5px; text-overflow: ellipsis; white-space: nowrap; }
 .semantic-rank-chart-empty { background: #fafafd; border: 1px dashed var(--line); border-radius: 9px; display: grid; gap: 5px; padding: 13px; }
 .semantic-rank-chart-empty strong { font-size: 10px; }

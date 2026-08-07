@@ -264,6 +264,73 @@ test("projects exact rank collection metadata into keyword history", async () =>
   }]);
 });
 
+test("projects imported Key Collector positions without poisoning keyword insights", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000082";
+  const contextId = "01900000-0000-7000-8000-000000000083";
+  const service = new KeywordService(
+    {
+      keyword: {
+        findFirst: async () => ({ id: keywordId, note: null })
+      },
+      frequencySnapshot: { findMany: async () => [] },
+      currentRank: { findMany: async () => [] },
+      rankSnapshot: {
+        findMany: async () => [{
+          id: "01900000-0000-7000-8000-000000000084",
+          trackingContextId: contextId,
+          configurationVersion: 1,
+          provider: "KEY_COLLECTOR",
+          found: true,
+          position: 34,
+          observedAt: new Date("2026-08-07T14:00:00.000Z"),
+          manifest: {
+            execution: { source: "KC4", searchEngine: "YANDEX" }
+          }
+        }]
+      },
+      trackingContext: {
+        findMany: async () => [{
+          id: contextId,
+          name: "Импорт Key Collector · Яндекс"
+        }]
+      },
+      trackingContextVersion: {
+        findMany: async () => [{
+          contextId,
+          configurationVersion: 1,
+          searchEngine: "YANDEX",
+          device: "DESKTOP",
+          regionCode: "global",
+          regionLabel: "Импорт Key Collector",
+          countryCode: "RU",
+          language: "ru",
+          depth: 100
+        }]
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  const result = await service.insights(workspaceId, projectId, keywordId);
+
+  assert.deepEqual(result.positionHistory, [{
+    snapshotId: "01900000-0000-7000-8000-000000000084",
+    trackingContextId: contextId,
+    contextName: "Импорт Key Collector · Яндекс",
+    searchEngine: "YANDEX",
+    device: "DESKTOP",
+    regionCode: "global",
+    regionLabel: "Импорт Key Collector",
+    countryCode: "RU",
+    language: "ru",
+    depth: 100,
+    provider: "KEY_COLLECTOR",
+    found: true,
+    position: 34,
+    observedAt: "2026-08-07T14:00:00.000Z"
+  }]);
+});
+
 test("orders source sorting on the server before cursor pagination", async () => {
   let observedOrderBy: unknown;
   const service = new KeywordService(

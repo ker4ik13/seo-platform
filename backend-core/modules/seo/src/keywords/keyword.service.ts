@@ -8,7 +8,6 @@ import {
 } from "@nestjs/common";
 import { rankSearchSourceFromProviderMappingVersion } from "@seo-platform/contracts";
 import type {
-  RankEstimateProvider,
   ApiCollectionResponse,
   InternalCreateSemanticKeywordInput,
   InternalDeleteSemanticKeywordInput,
@@ -25,6 +24,7 @@ import type {
   SemanticKeywordCleaningPreviewChange,
   SemanticKeywordCleaningResult,
   SemanticKeywordIntent,
+  SemanticKeywordPositionHistoryProvider,
   SemanticKeywordListItem,
   SemanticKeywordListFrequencyValue,
   SemanticKeywordListPosition,
@@ -2455,8 +2455,14 @@ function frequencyQualityFlags(value: unknown): readonly SemanticFrequencyQualit
   return flags;
 }
 
-function rankHistoryProvider(value: string): RankEstimateProvider {
-  if (value === "ARSENKIN" || value === "XMLSTOCK") return value;
+function rankHistoryProvider(
+  value: string
+): SemanticKeywordPositionHistoryProvider {
+  if (
+    value === "ARSENKIN" ||
+    value === "XMLSTOCK" ||
+    value === "KEY_COLLECTOR"
+  ) return value;
   throw new Error("Stored rank history provider is unsupported");
 }
 

@@ -177,6 +177,17 @@ test("validates safe interactive rank history metadata", () => {
   assert.equal(insights.positionHistory[0]?.searchSource, "LIVE");
   assert.equal(insights.positionHistory[0]?.regionLabel, "Москва");
   assert.equal(insights.positionHistory[0]?.depth, 50);
+  const { searchSource: _searchSource, ...importedPoint } =
+    insights.positionHistory[0]!;
+  const imported = semanticKeywordInsights({
+    ...insights,
+    positionHistory: [{
+      ...importedPoint,
+      provider: "KEY_COLLECTOR"
+    }]
+  }, keywordId);
+  assert.equal(imported.positionHistory[0]?.provider, "KEY_COLLECTOR");
+  assert.equal(imported.positionHistory[0]?.searchSource, undefined);
   assert.throws(
     () => semanticKeywordInsights({
       ...insights,

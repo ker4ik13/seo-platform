@@ -1870,7 +1870,9 @@ export function semanticKeywordInsights(
           (!Number.isSafeInteger(item.depth) ||
             Number(item.depth) < 1 ||
             Number(item.depth) > 1_000)) ||
-        !["XMLSTOCK", "ARSENKIN"].includes(String(item.provider)) ||
+        !["XMLSTOCK", "ARSENKIN", "KEY_COLLECTOR"].includes(
+          String(item.provider)
+        ) ||
         typeof item.found !== "boolean" ||
         (item.position !== undefined &&
           (!Number.isSafeInteger(item.position) || Number(item.position) < 1)) ||
@@ -1896,7 +1898,10 @@ export function semanticKeywordInsights(
           ? { language: item.language }
           : {}),
         ...(typeof item.depth === "number" ? { depth: item.depth } : {}),
-        provider: item.provider as "XMLSTOCK" | "ARSENKIN",
+        provider: item.provider as
+          | "XMLSTOCK"
+          | "ARSENKIN"
+          | "KEY_COLLECTOR",
         found: item.found,
         ...(typeof item.position === "number" ? { position: item.position } : {}),
         observedAt: item.observedAt

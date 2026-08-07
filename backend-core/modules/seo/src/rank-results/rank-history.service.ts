@@ -90,6 +90,7 @@ export class RankHistoryService {
       where: {
         workspaceId: query.workspaceId,
         projectId: query.projectId,
+        sourceMode: "BYOK",
         observedAt: {
           gte: new Date(query.observedFrom),
           lt: new Date(query.observedBefore)
