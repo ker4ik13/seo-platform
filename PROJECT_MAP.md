@@ -313,6 +313,11 @@ project write lock. Пресеты включены в allowlist передач�
 
 Upload хранится в S3 и при включённой inspection role проходит ClamAV. Import
 role стримит CSV/XLSX/KC4 в staging и публикует bounded idempotent chunks.
+Новый mapping по умолчанию работает в update-only режиме: метрики и другие
+сопоставленные поля применяются только к существующим запросам, новые фразы
+создаются лишь после явного включения `createMissingKeywords`. Validation
+показывает число пропущенных новых фраз, а Core SEO повторно применяет тот же
+guard внутри транзакции публикации.
 Crawl role выполняет SSRF/DNS-rebinding-safe обход с robots/sitemap policy,
 checkpoint и lease; нормализованные snapshots принадлежат Core SEO.
 

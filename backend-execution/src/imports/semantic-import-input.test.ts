@@ -32,7 +32,8 @@ test("parses mapping, confirmation and monotonic cancellation commands", () => {
       ],
       defaultLanguage: "en",
       groupSeparator: ">",
-      duplicatePolicy: "MERGE_NON_EMPTY"
+      duplicatePolicy: "MERGE_NON_EMPTY",
+      createMissingKeywords: true
     }),
     {
       ...context,
@@ -43,8 +44,27 @@ test("parses mapping, confirmation and monotonic cancellation commands", () => {
       ],
       defaultLanguage: "en",
       groupSeparator: ">",
-      duplicatePolicy: "MERGE_NON_EMPTY"
+      duplicatePolicy: "MERGE_NON_EMPTY",
+      createMissingKeywords: true
     }
+  );
+  assert.equal(
+    internalConfigureSemanticImportInput({
+      ...context,
+      version: 4,
+      columns: [{ sourceIndex: 0, target: "keyword.text" }]
+    }).createMissingKeywords,
+    false
+  );
+  assert.throws(
+    () =>
+      internalConfigureSemanticImportInput({
+        ...context,
+        version: 4,
+        columns: [{ sourceIndex: 0, target: "keyword.text" }],
+        createMissingKeywords: "true"
+      }),
+    BadRequestException
   );
   assert.equal(
     internalConfirmSemanticImportInput({

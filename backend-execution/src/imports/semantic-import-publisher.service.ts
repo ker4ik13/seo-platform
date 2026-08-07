@@ -184,7 +184,8 @@ export class SemanticImportPublisherService {
         this.prisma,
         semanticImport.id,
         batchSize,
-        afterHash
+        afterHash,
+        mapping.createMissingKeywords
       );
       if (batch.length === 0) break;
       const rows = batch.map(({ canonical_row, canonical_rows }) => {
@@ -199,7 +200,7 @@ export class SemanticImportPublisherService {
         );
       });
       const groupPaths =
-        chunkIndex === 0
+        chunkIndex === 0 && mapping.createMissingKeywords
           ? safeKc4GroupPaths(semanticImport.sourceMetadata)
           : undefined;
       const payloadHash = hashJson(
@@ -213,6 +214,7 @@ export class SemanticImportPublisherService {
         chunkIndex,
         payloadHash,
         duplicatePolicy: mapping.duplicatePolicy,
+        createMissingKeywords: mapping.createMissingKeywords,
         ...(groupPaths ? { groupPaths } : {}),
         rows
       });
@@ -306,7 +308,9 @@ export class SemanticImportPublisherService {
     return {
       mapping,
       uniqueRows,
-      newKeywords: uniqueRows - existingKeywords,
+      newKeywords: mapping.createMissingKeywords
+        ? uniqueRows - existingKeywords
+        : 0n,
       batchSize,
       expectedChunks: Number(expectedChunksBig),
       entitlement
@@ -324,6 +328,7 @@ export class SemanticImportPublisherService {
       importId: semanticImport.id,
       mappingHash: hashJson(plan.mapping),
       duplicatePolicy: plan.mapping.duplicatePolicy,
+      createMissingKeywords: plan.mapping.createMissingKeywords,
       expectedChunks: plan.expectedChunks,
       expectedUniqueRows: plan.uniqueRows.toString(),
       expectedNewKeywords: plan.newKeywords.toString(),
@@ -607,7 +612,8 @@ async function validatedBatch(
   prisma: PrismaService,
   importId: string,
   limit: number,
-  afterHash: string | undefined
+  afterHash: string | undefined,
+  createMissingKeywords: boolean
 ): Promise<
   readonly {
     readonly normalized_hash: string;
@@ -624,6 +630,7 @@ async function validatedBatch(
         WHERE
           "import_id" = ${importId}::uuid
           AND "is_valid"
+          AND (${createMissingKeywords} OR "project_duplicate")
           AND "normalized_hash" > ${afterHash}
         GROUP BY "normalized_hash"
         ORDER BY "normalized_hash"
@@ -637,6 +644,7 @@ async function validatedBatch(
         WHERE
           "import_id" = ${importId}::uuid
           AND "is_valid"
+          AND (${createMissingKeywords} OR "project_duplicate")
         GROUP BY "normalized_hash"
         ORDER BY "normalized_hash"
         LIMIT ${limit}

@@ -1154,6 +1154,7 @@ model SemanticImportReceipt {
   status                  SemanticImportReceiptStatus @default(RECEIVING)
   mappingHash             String                      @map("mapping_hash") @db.Char(64)
   duplicatePolicy         String                      @map("duplicate_policy") @db.VarChar(32)
+  createMissingKeywords   Boolean                     @default(true) @map("create_missing_keywords")
   expectedChunks          Int                         @map("expected_chunks")
   expectedUniqueRows      BigInt                      @map("expected_unique_rows")
   planCode                String                      @map("plan_code") @db.VarChar(64)

@@ -249,7 +249,11 @@ export class SemanticImportValidatorService {
         lastHeartbeatAt = Date.now();
       }
     }
-    const stats = await validationStats(this.prisma, semanticImport.id);
+    const stats = await validationStats(
+      this.prisma,
+      semanticImport.id,
+      mapping.createMissingKeywords
+    );
     if (stats.totalRows !== semanticImport.totalRows) {
       throw new Error("Semantic import validation row count mismatch");
     }
@@ -260,6 +264,7 @@ export class SemanticImportValidatorService {
       errorRows: stats.errorRows.toString(),
       duplicateRowsInFile: stats.duplicateRowsInFile.toString(),
       existingKeywordsInProject: stats.existingKeywordsInProject.toString(),
+      newKeywordsSkipped: stats.newKeywordsSkipped.toString(),
       uniqueKeywordsToProcess: stats.uniqueKeywordsToProcess.toString(),
       issueCounts: Object.fromEntries(
         [...issueCounts.entries()]
@@ -843,12 +848,14 @@ interface ValidationStats {
   readonly errorRows: bigint;
   readonly duplicateRowsInFile: bigint;
   readonly existingKeywordsInProject: bigint;
+  readonly newKeywordsSkipped: bigint;
   readonly uniqueKeywordsToProcess: bigint;
 }
 
 async function validationStats(
   prisma: PrismaService,
-  importId: string
+  importId: string,
+  createMissingKeywords: boolean
 ): Promise<ValidationStats> {
   const rows = await prisma.$queryRaw<
     readonly {
@@ -858,6 +865,7 @@ async function validationStats(
       error_rows: bigint;
       duplicate_rows_in_file: bigint;
       existing_keywords_in_project: bigint;
+      new_keywords_skipped: bigint;
       unique_keywords_to_process: bigint;
     }[]
   >`
@@ -876,7 +884,15 @@ async function validationStats(
         WHERE "is_valid" AND "project_duplicate"
       )::bigint AS existing_keywords_in_project,
       COUNT(DISTINCT "normalized_hash") FILTER (
-        WHERE "is_valid"
+        WHERE
+          "is_valid"
+          AND NOT "project_duplicate"
+          AND NOT ${createMissingKeywords}
+      )::bigint AS new_keywords_skipped,
+      COUNT(DISTINCT "normalized_hash") FILTER (
+        WHERE
+          "is_valid"
+          AND (${createMissingKeywords} OR "project_duplicate")
       )::bigint AS unique_keywords_to_process
     FROM "semantic_import_validated_rows"
     WHERE "import_id" = ${importId}::uuid
@@ -890,6 +906,7 @@ async function validationStats(
     errorRows: row.error_rows,
     duplicateRowsInFile: row.duplicate_rows_in_file,
     existingKeywordsInProject: row.existing_keywords_in_project,
+    newKeywordsSkipped: row.new_keywords_skipped,
     uniqueKeywordsToProcess: row.unique_keywords_to_process
   };
 }

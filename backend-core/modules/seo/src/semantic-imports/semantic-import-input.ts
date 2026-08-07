@@ -58,6 +58,13 @@ export function beginSemanticImportInput(
     importId: uuid(input.importId, "importId"),
     mappingHash: hash(input.mappingHash, "mappingHash"),
     duplicatePolicy: duplicatePolicy(input.duplicatePolicy),
+    // Default true keeps commands from a pre-deployment execution worker
+    // compatible during a rolling production restart.
+    createMissingKeywords: optionalBoolean(
+      input.createMissingKeywords,
+      true,
+      "createMissingKeywords"
+    ),
     expectedChunks,
     expectedUniqueRows: positiveBigintString(
       input.expectedUniqueRows,
@@ -112,9 +119,23 @@ export function applySemanticImportChunkInput(
     chunkIndex: nonNegativeInteger(input.chunkIndex, "chunkIndex"),
     payloadHash: hash(input.payloadHash, "payloadHash"),
     duplicatePolicy: duplicatePolicy(input.duplicatePolicy),
+    createMissingKeywords: optionalBoolean(
+      input.createMissingKeywords,
+      true,
+      "createMissingKeywords"
+    ),
     ...(groupPaths ? { groupPaths } : {}),
     rows: parsedRows
   };
+}
+
+function optionalBoolean(
+  value: unknown,
+  fallback: boolean,
+  path: string
+): boolean {
+  if (value === undefined) return fallback;
+  return boolean(value, path);
 }
 
 export function completeSemanticImportInput(

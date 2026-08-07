@@ -35,12 +35,28 @@ test("parses bounded keyword normalization and import receipt commands", () => {
       ...context,
       mappingHash: "a".repeat(64),
       duplicatePolicy: "SKIP_EXISTING",
+      createMissingKeywords: false,
       expectedChunks: 2,
       expectedUniqueRows: "500",
-      expectedNewKeywords: "450",
+      expectedNewKeywords: "0",
       entitlement
-    }).expectedChunks,
-    2
+    }).createMissingKeywords,
+    false
+  );
+});
+
+test("keeps pre-deployment internal commands create-enabled", () => {
+  assert.equal(
+    beginSemanticImportInput({
+      ...context,
+      mappingHash: "a".repeat(64),
+      duplicatePolicy: "MERGE_NON_EMPTY",
+      expectedChunks: 1,
+      expectedUniqueRows: "1",
+      expectedNewKeywords: "1",
+      entitlement
+    }).createMissingKeywords,
+    true
   );
 });
 
@@ -60,6 +76,7 @@ test("rejects duplicate chunk keys and values outside PostgreSQL bigint", () => 
         chunkIndex: 0,
         payloadHash: "c".repeat(64),
         duplicatePolicy: "SKIP_EXISTING",
+        createMissingKeywords: false,
         rows: [row, { ...row, sourceRowNumber: "2" }]
       }),
     BadRequestException
@@ -89,6 +106,7 @@ test("accepts deep KC4 paths and bounded imported positions", () => {
     chunkIndex: 0,
     payloadHash: "d".repeat(64),
     duplicatePolicy: "MERGE_NON_EMPTY",
+    createMissingKeywords: true,
     groupPaths: [groupPath],
     rows: [
       {

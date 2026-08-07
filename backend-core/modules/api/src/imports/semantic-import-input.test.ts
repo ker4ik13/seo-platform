@@ -47,7 +47,8 @@ test("requires one keyword column and preserves custom mappings", () => {
         ],
         defaultLanguage: "ru",
         groupSeparator: ">",
-        duplicatePolicy: "MERGE_NON_EMPTY"
+        duplicatePolicy: "MERGE_NON_EMPTY",
+        createMissingKeywords: true
       },
       3
     ),
@@ -63,8 +64,27 @@ test("requires one keyword column and preserves custom mappings", () => {
       ],
       defaultLanguage: "ru",
       groupSeparator: ">",
-      duplicatePolicy: "MERGE_NON_EMPTY"
+      duplicatePolicy: "MERGE_NON_EMPTY",
+      createMissingKeywords: true
     }
+  );
+  assert.equal(
+    configureSemanticImportInput(
+      { columns: [{ sourceIndex: 0, target: "keyword.text" }] },
+      4
+    ).createMissingKeywords,
+    false
+  );
+  assert.throws(
+    () =>
+      configureSemanticImportInput(
+        {
+          columns: [{ sourceIndex: 0, target: "keyword.text" }],
+          createMissingKeywords: "true"
+        },
+        5
+      ),
+    DomainError
   );
   assert.throws(
     () =>

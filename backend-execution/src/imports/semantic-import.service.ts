@@ -173,7 +173,8 @@ export class SemanticImportService {
       columns: input.columns.map((column) => ({ ...column })),
       defaultLanguage: input.defaultLanguage,
       groupSeparator: input.groupSeparator,
-      duplicatePolicy: input.duplicatePolicy
+      duplicatePolicy: input.duplicatePolicy,
+      createMissingKeywords: input.createMissingKeywords
     };
     const updated = await this.prisma.semanticImport.updateMany({
       where: {
@@ -488,6 +489,8 @@ export function safeMapping(
     typeof record.defaultLanguage !== "string" ||
     typeof record.groupSeparator !== "string" ||
     typeof record.duplicatePolicy !== "string" ||
+    (record.createMissingKeywords !== undefined &&
+      typeof record.createMissingKeywords !== "boolean") ||
     !semanticImportDuplicatePolicies.includes(
       record.duplicatePolicy as SemanticImportMapping["duplicatePolicy"]
     )
@@ -524,7 +527,13 @@ export function safeMapping(
     defaultLanguage: record.defaultLanguage,
     groupSeparator: record.groupSeparator,
     duplicatePolicy:
-      record.duplicatePolicy as SemanticImportMapping["duplicatePolicy"]
+      record.duplicatePolicy as SemanticImportMapping["duplicatePolicy"],
+    // Persisted mappings created before this option existed retain the exact
+    // legacy behaviour when an in-flight import resumes after deployment.
+    createMissingKeywords:
+      typeof record.createMissingKeywords === "boolean"
+        ? record.createMissingKeywords
+        : true
   };
 }
 
@@ -546,6 +555,8 @@ export function safeValidation(
   ] as const;
   if (
     fields.some((field) => typeof record[field] !== "string") ||
+    (record.newKeywordsSkipped !== undefined &&
+      typeof record.newKeywordsSkipped !== "string") ||
     typeof record.issueCounts !== "object" ||
     record.issueCounts === null ||
     Array.isArray(record.issueCounts) ||
@@ -553,7 +564,22 @@ export function safeValidation(
   ) {
     return undefined;
   }
-  return value as NonNullable<SemanticImportSummary["validation"]>;
+  return {
+    totalRows: record.totalRows as string,
+    validRows: record.validRows as string,
+    warningRows: record.warningRows as string,
+    errorRows: record.errorRows as string,
+    duplicateRowsInFile: record.duplicateRowsInFile as string,
+    existingKeywordsInProject: record.existingKeywordsInProject as string,
+    // Validation summaries already persisted before this release remain
+    // readable while newly validated imports expose the explicit skip count.
+    newKeywordsSkipped:
+      typeof record.newKeywordsSkipped === "string"
+        ? record.newKeywordsSkipped
+        : "0",
+    uniqueKeywordsToProcess: record.uniqueKeywordsToProcess as string,
+    issueCounts: record.issueCounts as Readonly<Record<string, string>>
+  };
 }
 
 export function safeResult(

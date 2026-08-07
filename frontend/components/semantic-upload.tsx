@@ -71,6 +71,7 @@ interface SemanticImportValidation {
   readonly errorRows: string;
   readonly duplicateRowsInFile: string;
   readonly existingKeywordsInProject: string;
+  readonly newKeywordsSkipped: string;
   readonly uniqueKeywordsToProcess: string;
   readonly issueCounts: Readonly<Record<string, string>>;
 }
@@ -109,6 +110,7 @@ interface SemanticImportSummary {
     readonly defaultLanguage: string;
     readonly groupSeparator: string;
     readonly duplicatePolicy: string;
+    readonly createMissingKeywords: boolean;
   };
   readonly validation?: SemanticImportValidation;
   readonly result?: SemanticImportResult;
@@ -165,8 +167,9 @@ export function SemanticUpload({
     readonly SemanticImportMappingColumn[]
   >([]);
   const [duplicatePolicy, setDuplicatePolicy] =
-    useState("SKIP_EXISTING");
-  const [defaultLanguage, setDefaultLanguage] = useState("und");
+    useState("MERGE_NON_EMPTY");
+  const [createMissingKeywords, setCreateMissingKeywords] = useState(false);
+  const [defaultLanguage, setDefaultLanguage] = useState("ru");
   const [groupSeparator, setGroupSeparator] = useState("/");
   const [validation, setValidation] =
     useState<SemanticImportValidation>();
@@ -234,11 +237,12 @@ export function SemanticUpload({
     setCompletedImportId(undefined);
     setImportPreview(undefined);
     setMappingColumns([]);
-    setDefaultLanguage(nativeKeyCollector ? "ru" : "und");
+    setDefaultLanguage("ru");
     setGroupSeparator("/");
     setDuplicatePolicy(
-      nativeKeyCollector ? "OVERWRITE_MAPPED" : "SKIP_EXISTING"
+      nativeKeyCollector ? "OVERWRITE_MAPPED" : "MERGE_NON_EMPTY"
     );
+    setCreateMissingKeywords(false);
     setValidation(undefined);
     setImportResult(undefined);
     setImportVersion(undefined);
@@ -281,16 +285,19 @@ export function SemanticUpload({
           semanticImport.mapping?.duplicatePolicy ??
           (semanticImport.sourceFormat === "KC4"
             ? "OVERWRITE_MAPPED"
-            : "SKIP_EXISTING");
+            : "MERGE_NON_EMPTY");
+        const resolvedCreateMissingKeywords =
+          semanticImport.mapping?.createMissingKeywords ?? false;
         const resolvedLanguage =
           semanticImport.mapping?.defaultLanguage ??
-          (semanticImport.sourceFormat === "KC4" ? "ru" : "und");
+          "ru";
         const resolvedGroupSeparator =
           semanticImport.mapping?.groupSeparator ?? "/";
         setValidation(undefined);
         setImportResult(undefined);
         setMappingColumns(columns);
         setDuplicatePolicy(resolvedDuplicatePolicy);
+        setCreateMissingKeywords(resolvedCreateMissingKeywords);
         setDefaultLanguage(resolvedLanguage);
         setGroupSeparator(resolvedGroupSeparator);
         setStage("preview");
@@ -305,10 +312,13 @@ export function SemanticUpload({
       ) {
         setMappingColumns(semanticImport.mapping?.columns ?? []);
         setDuplicatePolicy(
-          semanticImport.mapping?.duplicatePolicy ?? "SKIP_EXISTING"
+          semanticImport.mapping?.duplicatePolicy ?? "MERGE_NON_EMPTY"
+        );
+        setCreateMissingKeywords(
+          semanticImport.mapping?.createMissingKeywords ?? false
         );
         setDefaultLanguage(
-          semanticImport.mapping?.defaultLanguage ?? "und"
+          semanticImport.mapping?.defaultLanguage ?? "ru"
         );
         setGroupSeparator(
           semanticImport.mapping?.groupSeparator ?? "/"
@@ -316,7 +326,7 @@ export function SemanticUpload({
         setValidation(semanticImport.validation);
         setStage("validation-ready");
         setMessage(
-          `Проверка завершена: ${formatInteger(semanticImport.validation.uniqueKeywordsToProcess)} уникальных запросов готовы к публикации.`
+          `Проверка завершена: ${formatInteger(semanticImport.validation.uniqueKeywordsToProcess)} уникальных запросов готовы к обработке.`
         );
       } else if (
         semanticImport.status === "COMPLETED" &&
@@ -484,7 +494,8 @@ export function SemanticUpload({
               columns: mappingColumns,
               defaultLanguage,
               groupSeparator,
-              duplicatePolicy
+              duplicatePolicy,
+              createMissingKeywords
             }
           }
         );
@@ -867,6 +878,26 @@ export function SemanticUpload({
               <button className="secondary-button import-keycollector-preset" onClick={applyKeyCollectorPreset} type="button">
                 Применить профиль Key Collector
               </button>
+              <label className="import-create-missing-option">
+                <input
+                  checked={createMissingKeywords}
+                  onChange={(event) => {
+                    const checked = event.target.checked;
+                    setCreateMissingKeywords(checked);
+                    if (!checked && duplicatePolicy === "SKIP_EXISTING") {
+                      setDuplicatePolicy("MERGE_NON_EMPTY");
+                    }
+                  }}
+                  type="checkbox"
+                />
+                <span>
+                  <strong>Добавлять новые запросы</strong>
+                  <small>
+                    Выключено по умолчанию: строки без совпадения будут
+                    пропущены.
+                  </small>
+                </span>
+              </label>
               <label>
                 Язык запросов
                 <input
@@ -878,6 +909,10 @@ export function SemanticUpload({
                   placeholder="ru, en или und"
                   value={defaultLanguage}
                 />
+                <small>
+                  Должен совпадать с языком существующих запросов; по
+                  умолчанию — ru.
+                </small>
               </label>
               <label>
                 Разделитель групп
@@ -891,14 +926,17 @@ export function SemanticUpload({
                 />
               </label>
               <label>
-                Дубли в проекте
+                Обработка существующих запросов
                 <CustomSelect
                   onChange={(event) =>
                     setDuplicatePolicy(event.target.value)
                   }
                   value={duplicatePolicy}
                 >
-                  <option value="SKIP_EXISTING">
+                  <option
+                    disabled={!createMissingKeywords}
+                    value="SKIP_EXISTING"
+                  >
                     Пропустить существующие
                   </option>
                   <option value="MERGE_NON_EMPTY">
@@ -933,6 +971,10 @@ export function SemanticUpload({
                 {formatInteger(validation.existingKeywordsInProject)}
               </strong>
               уже в проекте
+            </span>
+            <span>
+              <strong>{formatInteger(validation.newKeywordsSkipped)}</strong>
+              новых будет пропущено
             </span>
             <span>
               <strong>{formatInteger(validation.errorRows)}</strong>

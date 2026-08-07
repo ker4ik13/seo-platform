@@ -121,6 +121,7 @@ export class KeywordResearchImportService {
         ...context,
         mappingHash: MAPPING_HASH,
         duplicatePolicy: duplicatePolicy(claimed.duplicatePolicy),
+        createMissingKeywords: true,
         expectedChunks: 1,
         expectedUniqueRows: String(publishRows.length),
         expectedNewKeywords: String(newKeywords),
@@ -133,6 +134,7 @@ export class KeywordResearchImportService {
           .update(JSON.stringify(publishRows), "utf8")
           .digest("hex"),
         duplicatePolicy: duplicatePolicy(claimed.duplicatePolicy),
+        createMissingKeywords: true,
         rows: publishRows
       });
       const result = await this.seoData.completeImport(context);

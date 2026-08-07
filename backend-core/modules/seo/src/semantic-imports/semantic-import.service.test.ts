@@ -89,6 +89,7 @@ test("creates an idempotent semantic import receipt", async () => {
     ...context,
     mappingHash: "a".repeat(64),
     duplicatePolicy: "SKIP_EXISTING",
+    createMissingKeywords: true,
     expectedChunks: 2,
     expectedUniqueRows: "10",
     expectedNewKeywords: "8",
@@ -103,6 +104,29 @@ test("creates an idempotent semantic import receipt", async () => {
       .reservedKeywords,
     8n
   );
+  assert.equal(
+    (records[0] as { readonly createMissingKeywords: boolean })
+      .createMissingKeywords,
+    true
+  );
+});
+
+test("rejects a new-keyword reservation for update-only imports", async () => {
+  const service = new SemanticImportService({} as PrismaService);
+  await assert.rejects(
+    () =>
+      service.begin({
+        ...context,
+        mappingHash: "a".repeat(64),
+        duplicatePolicy: "MERGE_NON_EMPTY",
+        createMissingKeywords: false,
+        expectedChunks: 1,
+        expectedUniqueRows: "1",
+        expectedNewKeywords: "1",
+        entitlement
+      }),
+    BadRequestException
+  );
 });
 
 test("aborts an empty receipt and releases its remaining capacity", async () => {
@@ -114,6 +138,7 @@ test("aborts an empty receipt and releases its remaining capacity", async () => 
     status: "RECEIVING",
     mappingHash: "a".repeat(64),
     duplicatePolicy: "SKIP_EXISTING",
+    createMissingKeywords: true,
     expectedChunks: 2,
     expectedUniqueRows: 10n,
     planCode: "TEAM",
@@ -183,6 +208,7 @@ test("returns an applied chunk idempotently and rejects payload substitution", a
         status: "RECEIVING",
         mappingHash: "b".repeat(64),
         duplicatePolicy: "SKIP_EXISTING",
+        createMissingKeywords: true,
         expectedChunks: 1,
         expectedUniqueRows: 1n
       })
@@ -209,6 +235,7 @@ test("returns an applied chunk idempotently and rejects payload substitution", a
     chunkIndex: 0,
     payloadHash,
     duplicatePolicy: "SKIP_EXISTING" as const,
+    createMissingKeywords: true,
     rows
   };
 
@@ -245,6 +272,7 @@ test("binds a KC4 group manifest into the idempotent chunk hash", async () => {
         status: "RECEIVING",
         mappingHash: "b".repeat(64),
         duplicatePolicy: "SKIP_EXISTING",
+        createMissingKeywords: true,
         expectedChunks: 1,
         expectedUniqueRows: 1n
       })
@@ -272,6 +300,7 @@ test("binds a KC4 group manifest into the idempotent chunk hash", async () => {
     chunkIndex: 0,
     payloadHash,
     duplicatePolicy: "SKIP_EXISTING",
+    createMissingKeywords: true,
     groupPaths,
     rows
   });

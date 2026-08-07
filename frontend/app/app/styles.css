@@ -2087,6 +2087,28 @@ svg { display: block; }
 .import-mapping-options label { color: var(--muted); display: grid; font-size: 11px; gap: 6px; min-width: min(100%, 260px); }
 .import-mapping-options select,
 .import-mapping-options input { background: #fff; border: 1px solid var(--line); border-radius: 9px; color: var(--text); font: inherit; min-height: 36px; padding: 7px 9px; width: 100%; }
+.import-mapping-options .import-create-missing-option {
+  align-items: center;
+  background: #f8f7ff;
+  border: 1px solid #ddd8ff;
+  border-radius: 10px;
+  display: flex;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 11px;
+}
+.import-create-missing-option input {
+  accent-color: var(--brand);
+  border-radius: 5px;
+  flex: 0 0 auto;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  width: 18px;
+}
+.import-create-missing-option > span { display: grid; gap: 2px; }
+.import-create-missing-option strong { color: var(--text); font-size: 11px; }
+.import-create-missing-option small { color: var(--muted); font-size: 9px; line-height: 1.35; }
 .import-mapping-target-option { align-items: center; display: inline-flex; gap: 8px; min-width: 0; }
 .import-mapping-target-icon { flex: 0 0 auto; height: 17px; width: 17px; }
 .import-mapping-target-option .search-engine-logo { flex: 0 0 auto; }

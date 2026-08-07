@@ -134,6 +134,13 @@ export interface SemanticImportMapping {
   readonly defaultLanguage: string;
   readonly groupSeparator: string;
   readonly duplicatePolicy: SemanticImportDuplicatePolicy;
+  /**
+   * When false, rows that do not resolve to an existing project keyword are
+   * excluded from publication. Existing persisted mappings without this field
+   * are interpreted by the execution service as the legacy create-enabled
+   * behaviour so an in-flight import can resume safely after deployment.
+   */
+  readonly createMissingKeywords: boolean;
 }
 
 export interface ConfigureSemanticImportInput
@@ -178,6 +185,7 @@ export interface SemanticImportValidationSummary {
   readonly errorRows: string;
   readonly duplicateRowsInFile: string;
   readonly existingKeywordsInProject: string;
+  readonly newKeywordsSkipped: string;
   readonly uniqueKeywordsToProcess: string;
   readonly issueCounts: Readonly<Record<string, string>>;
 }
@@ -291,6 +299,7 @@ export interface InternalBeginSemanticImportInput {
   readonly importId: string;
   readonly mappingHash: string;
   readonly duplicatePolicy: SemanticImportDuplicatePolicy;
+  readonly createMissingKeywords: boolean;
   readonly expectedChunks: number;
   readonly expectedUniqueRows: string;
   readonly expectedNewKeywords: string;
@@ -312,6 +321,7 @@ export interface InternalApplySemanticImportChunkInput {
   readonly chunkIndex: number;
   readonly payloadHash: string;
   readonly duplicatePolicy: SemanticImportDuplicatePolicy;
+  readonly createMissingKeywords: boolean;
   readonly groupPaths?: readonly (readonly string[])[];
   readonly rows: readonly SemanticImportPublishRow[];
 }

@@ -83,6 +83,11 @@ export class SemanticImportService {
         "Expected new keywords cannot exceed expected unique rows"
       );
     }
+    if (!input.createMissingKeywords && expectedNewKeywords !== 0n) {
+      throw new BadRequestException(
+        "Update-only semantic import cannot reserve new keywords"
+      );
+    }
     return this.prisma.$transaction(async (transaction) => {
       await lockStoredKeywordCapacity(
         transaction,
@@ -117,6 +122,7 @@ export class SemanticImportService {
           actorId: input.actorId,
           mappingHash: input.mappingHash,
           duplicatePolicy: input.duplicatePolicy,
+          createMissingKeywords: input.createMissingKeywords,
           expectedChunks: input.expectedChunks,
           expectedUniqueRows: BigInt(input.expectedUniqueRows),
           planCode: input.entitlement.planCode,
@@ -252,12 +258,25 @@ export class SemanticImportService {
             }]
           : [];
       });
-      const newRows = input.rows.filter(
+      const missingRows = input.rows.filter(
         (row) =>
           !existingByKey.has(
             keywordKey(row.language, row.normalizedHash)
           )
       );
+      const newRows = transactionReceipt.createMissingKeywords
+        ? missingRows
+        : [];
+      const eligibleRows = transactionReceipt.createMissingKeywords
+        ? input.rows
+        : input.rows.filter((row) =>
+            existingByKey.has(
+              keywordKey(row.language, row.normalizedHash)
+            )
+          );
+      const skippedMissingKeywords = transactionReceipt.createMissingKeywords
+        ? 0
+        : missingRows.length;
       const missingReservation =
         BigInt(newRows.length) > transactionReceipt.reservedKeywords
           ? BigInt(newRows.length) -
@@ -277,7 +296,7 @@ export class SemanticImportService {
       const rowsToApply =
         input.duplicatePolicy === "SKIP_EXISTING"
           ? newRows
-          : input.rows;
+          : eligibleRows;
       const pages = await ensurePages(transaction, input, rowsToApply);
       const groups = await ensureGroups(
         transaction,
@@ -349,7 +368,7 @@ export class SemanticImportService {
       );
       const updatedKeywordIds = new Set<string>();
       const skippedKeywordIds = new Set<string>();
-      for (const row of input.rows) {
+      for (const row of eligibleRows) {
         const key = keywordKey(row.language, row.normalizedHash);
         const keyword = keywordByKey.get(key);
         if (!keyword) {
@@ -383,7 +402,7 @@ export class SemanticImportService {
         updatedKeywordIds.add(keyword.id);
       }
 
-      const processedRows = input.rows.filter((row) => {
+      const processedRows = eligibleRows.filter((row) => {
         const keyword = keywordByKey.get(
           keywordKey(row.language, row.normalizedHash)
         );
@@ -519,7 +538,7 @@ export class SemanticImportService {
         processedRows,
         keywordByKey
       );
-      const createdKeywordCount = input.rows.filter((row) =>
+      const createdKeywordCount = eligibleRows.filter((row) =>
         createdKeys.has(keywordKey(row.language, row.normalizedHash))
       ).length;
       if (BigInt(createdKeywordCount) > availableReservation) {
@@ -542,7 +561,8 @@ export class SemanticImportService {
           inputRows: input.rows.length,
           createdKeywords: createdKeywordCount,
           updatedKeywords: updatedKeywordIds.size,
-          skippedKeywords: skippedKeywordIds.size,
+          skippedKeywords:
+            skippedKeywordIds.size + skippedMissingKeywords,
           createdGroups: groups.created,
           createdPages: pages.created,
           createdTags: tags.created,
@@ -650,6 +670,7 @@ export class SemanticImportService {
             importId: input.importId,
             mappingHash: receipt.mappingHash,
             duplicatePolicy: receipt.duplicatePolicy,
+            createMissingKeywords: receipt.createMissingKeywords,
             partial: input.partial ?? false,
             receivedChunks: chunks._count._all,
             expectedChunks: receipt.expectedChunks,
@@ -771,6 +792,9 @@ export class SemanticImportService {
     assertReceiptScope(receipt, input);
     if (receipt.duplicatePolicy !== input.duplicatePolicy) {
       throw new ConflictException("Semantic import policy mismatch");
+    }
+    if (receipt.createMissingKeywords !== input.createMissingKeywords) {
+      throw new ConflictException("Semantic import creation policy mismatch");
     }
     return receipt;
   }
@@ -1754,6 +1778,7 @@ function assertReceiptCommand(
   if (
     receipt.mappingHash !== input.mappingHash ||
     receipt.duplicatePolicy !== input.duplicatePolicy ||
+    receipt.createMissingKeywords !== input.createMissingKeywords ||
     receipt.expectedChunks !== input.expectedChunks ||
     receipt.expectedUniqueRows !== BigInt(input.expectedUniqueRows) ||
     receipt.planCode !== input.entitlement.planCode ||

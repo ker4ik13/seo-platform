@@ -15,7 +15,8 @@ const mapping: SemanticImportMapping = {
   ],
   defaultLanguage: "ru",
   groupSeparator: ">",
-  duplicatePolicy: "SKIP_EXISTING"
+  duplicatePolicy: "SKIP_EXISTING",
+  createMissingKeywords: true
 };
 
 test("builds a canonical publish row without losing unsupported values", () => {
@@ -119,7 +120,8 @@ test("preserves native KC4 hierarchy and imports search engine positions", () =>
       // A persisted delimiter from an earlier CSV import must not flatten a
       // native KC4 tree: KC4 paths always use the parser's slash separator.
       groupSeparator: " > ",
-      duplicatePolicy: "MERGE_NON_EMPTY"
+      duplicatePolicy: "MERGE_NON_EMPTY",
+      createMissingKeywords: true
     },
     {
       textOriginal: "SEO",
@@ -189,7 +191,8 @@ test("maps independently selectable keyword fields and both search engines", () 
       ],
       defaultLanguage: "ru",
       groupSeparator: "/",
-      duplicatePolicy: "OVERWRITE_MAPPED"
+      duplicatePolicy: "OVERWRITE_MAPPED",
+      createMissingKeywords: true
     },
     {
       textOriginal: "SEO audit",

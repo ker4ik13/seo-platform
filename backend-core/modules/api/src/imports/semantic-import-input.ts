@@ -103,8 +103,13 @@ export function configureSemanticImportInput(
     duplicatePolicy: enumValue<SemanticImportDuplicatePolicy>(
       input.duplicatePolicy,
       semanticImportDuplicatePolicies,
-      "SKIP_EXISTING",
+      "MERGE_NON_EMPTY",
       "duplicatePolicy"
+    ),
+    createMissingKeywords: booleanValue(
+      input.createMissingKeywords,
+      false,
+      "createMissingKeywords"
     )
   };
 }
@@ -158,6 +163,16 @@ function enumValue<Value extends string>(
     invalid(path);
   }
   return value as Value;
+}
+
+function booleanValue(
+  value: unknown,
+  fallback: boolean,
+  path: string
+): boolean {
+  if (value === undefined) return fallback;
+  if (typeof value !== "boolean") invalid(path);
+  return value;
 }
 
 function invalid(path: string): never {

@@ -6,7 +6,49 @@ import type {
 } from "../generated/prisma/client.js";
 import type { PrismaService } from "../database/prisma.service.js";
 import type { QueueService } from "../queue/queue.service.js";
-import { SemanticImportService } from "./semantic-import.service.js";
+import {
+  safeMapping,
+  safeValidation,
+  SemanticImportService
+} from "./semantic-import.service.js";
+
+test("keeps legacy import mappings resumable and reads new skip counters", () => {
+  const legacy = safeMapping({
+    columns: [{ sourceIndex: 0, target: "keyword.text" }],
+    defaultLanguage: "ru",
+    groupSeparator: "/",
+    duplicatePolicy: "OVERWRITE_MAPPED"
+  });
+  assert.equal(legacy?.createMissingKeywords, true);
+  assert.equal(
+    safeMapping({ ...legacy, createMissingKeywords: false })
+      ?.createMissingKeywords,
+    false
+  );
+  assert.equal(
+    safeMapping({ ...legacy, createMissingKeywords: "false" }),
+    undefined
+  );
+
+  const validation = safeValidation({
+    totalRows: "2",
+    validRows: "2",
+    warningRows: "0",
+    errorRows: "0",
+    duplicateRowsInFile: "0",
+    existingKeywordsInProject: "1",
+    uniqueKeywordsToProcess: "1",
+    issueCounts: {}
+  });
+  assert.equal(validation?.newKeywordsSkipped, "0");
+  assert.equal(
+    safeValidation({
+      ...validation,
+      newKeywordsSkipped: 0
+    }),
+    undefined
+  );
+});
 
 test("creates an idempotent import only from a READY project upload", async () => {
   const events: unknown[] = [];
