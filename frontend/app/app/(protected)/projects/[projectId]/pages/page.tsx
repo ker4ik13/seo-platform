@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { ProjectPageMap } from "../../../../../../components/project-page-map";
-import { ProjectCrawlAudit } from "../../../../../../components/project-crawl-audit";
 import { requireProtectedProjectAppContext } from "../../../../../../lib/protected-app";
 
 export const dynamic = "force-dynamic";
@@ -27,13 +26,6 @@ export default async function ProjectPagesPage({
   }
   return (
     <>
-      <nav aria-label="Хлебные крошки" className="app-breadcrumbs">
-        <a href="/app/projects">Проекты</a>
-        <span aria-hidden="true">/</span>
-        <span>{project.name}</span>
-        <span aria-hidden="true">/</span>
-        <span aria-current="page">Карта страниц</span>
-      </nav>
       <section className="page-heading page-map-heading">
         <div>
           <h1>Карта страниц</h1>
@@ -43,10 +35,11 @@ export default async function ProjectPagesPage({
           </p>
         </div>
       </section>
-      <ProjectPageMap key={project.id} projectId={project.id} />
-      <ProjectCrawlAudit
+      <ProjectPageMap
+        key={project.id}
         projectDomain={project.domain}
         projectId={project.id}
+        projectName={project.name}
       />
     </>
   );

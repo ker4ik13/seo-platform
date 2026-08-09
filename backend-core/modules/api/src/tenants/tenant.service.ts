@@ -3,6 +3,8 @@ import {
   domainEventTypes,
   type CreateProjectInput,
   type CreateWorkspaceInput,
+  type DeleteProjectInput,
+  type ProjectDeletionResult,
   type ProjectSummary,
   type UpdateProjectInput,
   type UpdateWorkspaceInput,
@@ -12,7 +14,8 @@ import { AuditService } from "../audit/audit.service.js";
 import { BillingEntitlementService } from "../billing/billing-entitlement.service.js";
 import {
   DomainError,
-  isUniqueConstraintError
+  isUniqueConstraintError,
+  validationError
 } from "../common/domain-error.js";
 import {
   generatedSlug,
@@ -636,6 +639,97 @@ export class TenantService {
       "project.restored",
       context
     );
+  }
+
+  public async deleteProject(
+    userId: string,
+    projectId: string,
+    version: number,
+    input: DeleteProjectInput,
+    context: RequestContext
+  ): Promise<ProjectDeletionResult> {
+    return this.prisma.$transaction(async (transaction) => {
+      const current = await transaction.project.findUnique({
+        where: { id: projectId },
+        select: {
+          id: true,
+          name: true,
+          workspaceId: true,
+          status: true,
+          version: true
+        }
+      });
+      if (!current || ["DELETING", "DELETED"].includes(current.status)) {
+        throw this.notFound();
+      }
+      if (input.confirmation !== current.name) {
+        throw validationError(
+          "confirmation",
+          "CONFIRMATION_MISMATCH",
+          "Project name confirmation does not match"
+        );
+      }
+      const activeTransfer = await transaction.projectTransferRequest.findFirst({
+        where: {
+          projectId,
+          status: { in: ["PENDING", "PROCESSING"] }
+        },
+        select: { id: true }
+      });
+      if (activeTransfer) {
+        throw new DomainError({
+          statusCode: 409,
+          code: "RESOURCE_STATE_CONFLICT",
+          message: "Project cannot be deleted during an active transfer"
+        });
+      }
+      const deletedAt = new Date();
+      const updated = await transaction.project.updateMany({
+        where: {
+          id: projectId,
+          version,
+          status: { in: ["DRAFT", "ACTIVE", "ARCHIVED"] }
+        },
+        data: {
+          status: "DELETED",
+          archivedAt: deletedAt,
+          deletedAt,
+          version: { increment: 1 }
+        }
+      });
+      if (updated.count !== 1) throw this.versionConflict();
+      await this.audit.record(
+        {
+          actorId: userId,
+          workspaceId: current.workspaceId,
+          projectId,
+          action: "project.deleted",
+          resourceType: "project",
+          resourceId: projectId,
+          requestId: context.requestId
+        },
+        transaction
+      );
+      await this.outbox.event(transaction, {
+        eventType: domainEventTypes.projectDeleted,
+        aggregateType: "project",
+        aggregateId: projectId,
+        aggregateVersion: current.version + 1,
+        workspaceId: current.workspaceId,
+        projectId,
+        payload: {
+          projectId,
+          workspaceId: current.workspaceId,
+          deletedAt: deletedAt.toISOString()
+        },
+        requestId: context.requestId
+      });
+      return {
+        projectId,
+        status: "DELETED",
+        deletedAt: deletedAt.toISOString()
+      };
+    });
   }
 
   private async changeProjectStatus(

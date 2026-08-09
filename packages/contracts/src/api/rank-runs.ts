@@ -1171,6 +1171,20 @@ interface InternalNormalizedRankResultBase {
    * PROVIDER_OBSERVED_AT_UNAVAILABLE.
    */
   readonly dataQualityFlags: readonly NormalizedRankDataQualityFlag[];
+  /**
+   * Normalized organic results captured from the same provider response.
+   * XMLStock supplies at most the first ten rows; providers that do not
+   * expose the SERP omit the field. The array is ordered by position.
+   */
+  readonly serpResults?: readonly InternalNormalizedRankSerpResult[];
+}
+
+export interface InternalNormalizedRankSerpResult {
+  readonly position: number;
+  readonly rankingUrl: string;
+  readonly normalizedRankingUrl: string;
+  readonly title?: string;
+  readonly snippet?: string;
 }
 
 /**

@@ -177,6 +177,24 @@ test("validates safe interactive rank history metadata", () => {
   assert.equal(insights.positionHistory[0]?.searchSource, "LIVE");
   assert.equal(insights.positionHistory[0]?.regionLabel, "Москва");
   assert.equal(insights.positionHistory[0]?.depth, 50);
+  const withCompetitors = semanticKeywordInsights({
+    ...insights,
+    competitorSnapshots: [{
+      snapshotId: "01900000-0000-7000-8000-000000000007",
+      trackingContextId: contextId,
+      contextName: "Яндекс · Москва",
+      searchEngine: "YANDEX",
+      searchSource: "LIVE",
+      provider: "XMLSTOCK",
+      observedAt: "2026-08-06T11:45:00.000Z",
+      results: [{
+        position: 1,
+        url: "https://competitor.example/result",
+        title: "Конкурент"
+      }]
+    }]
+  }, keywordId);
+  assert.equal(withCompetitors.competitorSnapshots?.[0]?.results[0]?.position, 1);
   const { searchSource: _searchSource, ...importedPoint } =
     insights.positionHistory[0]!;
   const imported = semanticKeywordInsights({
@@ -998,6 +1016,36 @@ test("forwards an idempotent create through trusted tenant headers and body", as
       idempotencyKey: "tracking-context-create-001"
     });
     assert.equal(capturedRedirect, "error");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("scopes crawl issue requests to the selected page", async () => {
+  const originalFetch = globalThis.fetch;
+  const pageId = "01900000-0000-7000-8000-000000000020";
+  let capturedUrl: URL | undefined;
+  globalThis.fetch = (async (
+    input: string | URL | Request
+  ): Promise<Response> => {
+    capturedUrl = new URL(
+      input instanceof Request ? input.url : input.toString()
+    );
+    return jsonResponse({ data: { issues: [] } });
+  }) as typeof fetch;
+
+  try {
+    const result = await client().listProjectCrawlIssues(
+      internalContext(),
+      pageId
+    );
+
+    assert.deepEqual(result, { issues: [] });
+    assert.equal(
+      capturedUrl?.pathname,
+      `/internal/v1/projects/${projectId}/crawl-issues`
+    );
+    assert.equal(capturedUrl?.searchParams.get("pageId"), pageId);
   } finally {
     globalThis.fetch = originalFetch;
   }

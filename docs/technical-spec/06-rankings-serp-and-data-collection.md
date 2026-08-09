@@ -245,7 +245,13 @@ base64url cursor. Array/unknown parameters и некогерентный диа�
 для каждой исторической точки только безопасные параметры воспроизводимости:
 search engine/source, provider, region label/code, country, language, device,
 depth, context name и `observedAt`; provider request ID и raw response в
-browser не выдаются. Колонки дат участвуют в server-side sort, поэтому их
+browser не выдаются. Последний XMLStock snapshot каждого поисковика дополнен
+tenant-scoped Top-10 organic projection с позицией, URL и доступными
+title/snippet; в обычной карточке видны первые пять строк. Назначенный target
+URL сравнивается с текущим ranking URL по нормализованным host/path и при
+расхождении остаётся неизменным, а UI показывает отдельное предупреждение.
+Пять последних дат позиции показываются под графиком, полный список — в
+отдельном modal. Колонки дат участвуют в server-side sort, поэтому их
 порядок сохраняется при cursor pagination и infinite scroll.
 
 Private/noindex Web route
@@ -278,6 +284,12 @@ canonical/mirror rules и нечисловой регион блокируютс
 - job ID;
 - provider request ID;
 - data quality flags.
+
+Для XMLStock вместе с каждым snapshot сохраняются до десяти первых
+нормализованных organic результатов того же provider response. Это отдельные
+дочерние immutable строки, связанные составным ключом snapshot; они не
+содержат credential, provider request ID или raw XML и не переписывают
+существующую историю. Провайдеры без доступной SERP-проекции поле не создают.
 
 `not found` отличается от ошибки сбора.
 

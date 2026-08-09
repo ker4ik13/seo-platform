@@ -5,7 +5,7 @@ import { requireProtectedProjectAppContext } from "../../../../../../../lib/prot
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Проверка HTTP-статусов",
+  title: "Обход сайта",
   robots: { index: false, follow: false }
 };
 
@@ -22,7 +22,7 @@ export default async function HttpStatusCheckerPage({
       <nav aria-label="Хлебные крошки" className="app-breadcrumbs">
         <a href="/app/tools">Инструменты</a>
         <span aria-hidden="true">/</span>
-        <span aria-current="page">Проверка HTTP-статусов</span>
+        <span aria-current="page">Обход сайта</span>
       </nav>
       <HttpStatusCheckTool project={project} projects={context.projects} />
     </>

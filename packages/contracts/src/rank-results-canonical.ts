@@ -5,6 +5,7 @@ import {
 import type {
   InternalFinalizeRankCheckInput,
   InternalNormalizedRankResult,
+  InternalNormalizedRankSerpResult,
   InternalRankCheckFinalizationHashPreimage,
   InternalRankChunkIngestCommand,
   InternalRankChunkIngestHashPreimage,
@@ -95,7 +96,8 @@ const FOUND_RESULT_OPTIONAL_KEYS = [
   "absolutePosition",
   "pixelPosition",
   "title",
-  "snippet"
+  "snippet",
+  "serpResults"
 ] as const;
 
 const NOT_FOUND_RESULT_KEYS = [
@@ -105,6 +107,16 @@ const NOT_FOUND_RESULT_KEYS = [
   "found",
   "position"
 ] as const;
+
+const NOT_FOUND_RESULT_OPTIONAL_KEYS = ["serpResults"] as const;
+
+const SERP_RESULT_REQUIRED_KEYS = [
+  "position",
+  "rankingUrl",
+  "normalizedRankingUrl"
+] as const;
+
+const SERP_RESULT_OPTIONAL_KEYS = ["title", "snippet"] as const;
 
 const FINALIZATION_INPUT_KEYS = [
   "schemaVersion",
@@ -399,7 +411,11 @@ function copyNormalizedResult(
   const dataQualityFlags = sortedQualityFlags(input.dataQualityFlags);
 
   if (input.found === false) {
-    assertExactRecord(input, NOT_FOUND_RESULT_KEYS);
+    assertExactRecord(
+      input,
+      NOT_FOUND_RESULT_KEYS,
+      NOT_FOUND_RESULT_OPTIONAL_KEYS
+    );
     if (
       input.position !== null ||
       dataQualityFlags.some(
@@ -408,12 +424,14 @@ function copyNormalizedResult(
     ) {
       return invalidCanonicalRankResult("notFoundResult");
     }
+    const serpResults = copySerpResults(input.serpResults);
     return {
       manifestEntryId: input.manifestEntryId,
       keywordId: input.keywordId,
       dataQualityFlags,
       found: false,
-      position: null
+      position: null,
+      ...(serpResults === undefined ? {} : { serpResults })
     };
   }
 
@@ -462,6 +480,7 @@ function copyNormalizedResult(
     "SNIPPET_UNAVAILABLE",
     input.snippet === undefined
   );
+  const serpResults = copySerpResults(input.serpResults);
 
   return {
     manifestEntryId: input.manifestEntryId,
@@ -480,8 +499,43 @@ function copyNormalizedResult(
     ...(input.title === undefined ? {} : { title: input.title }),
     ...(input.snippet === undefined ? {} : { snippet: input.snippet }),
     resultType: "ORGANIC",
-    serpFeatures: []
+    serpFeatures: [],
+    ...(serpResults === undefined ? {} : { serpResults })
   };
+}
+
+function copySerpResults(
+  value: readonly InternalNormalizedRankSerpResult[] | undefined
+): readonly InternalNormalizedRankSerpResult[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 10) {
+    return invalidCanonicalRankResult("serpResults");
+  }
+  return value.map((entry, index) => {
+    assertExactRecord(
+      entry,
+      SERP_RESULT_REQUIRED_KEYS,
+      SERP_RESULT_OPTIONAL_KEYS
+    );
+    if (!Number.isSafeInteger(entry.position) || entry.position !== index + 1) {
+      return invalidCanonicalRankResult("serpResult.position");
+    }
+    assertUrl(entry.rankingUrl, "serpResult.rankingUrl");
+    assertUrl(entry.normalizedRankingUrl, "serpResult.normalizedRankingUrl");
+    assertOptionalBoundedString(entry.title, MAX_TITLE_LENGTH, "serpResult.title");
+    assertOptionalBoundedString(
+      entry.snippet,
+      MAX_SNIPPET_LENGTH,
+      "serpResult.snippet"
+    );
+    return {
+      position: entry.position,
+      rankingUrl: entry.rankingUrl,
+      normalizedRankingUrl: entry.normalizedRankingUrl,
+      ...(entry.title === undefined ? {} : { title: entry.title }),
+      ...(entry.snippet === undefined ? {} : { snippet: entry.snippet })
+    };
+  });
 }
 
 function sortedQualityFlags(

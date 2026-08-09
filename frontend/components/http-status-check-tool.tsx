@@ -20,7 +20,7 @@ import styles from "./http-status-check-tool.module.css";
 
 type ScopeMode = "FULL_SITE" | "URL_LIST";
 
-const PAGE_LIMIT_PRESETS = [100, 250, 500, 1_000] as const;
+const PAGE_LIMIT_PRESETS = [100, 250, 500, 1_000, 2_500, 5_000] as const;
 const SPEEDS = [
   { value: "0.1", label: "0,1 страницы/с", rpm: 6 },
   { value: "0.25", label: "0,25 страницы/с", rpm: 15 },
@@ -44,6 +44,7 @@ export function HttpStatusCheckTool({
   const [followLinks, setFollowLinks] = useState(true);
   const [maxDepth, setMaxDepth] = useState("5");
   const [useSitemap, setUseSitemap] = useState(true);
+  const [savePageMap, setSavePageMap] = useState(true);
   const [checkHttpRedirect, setCheckHttpRedirect] = useState(true);
   const [checkWwwRedirect, setCheckWwwRedirect] = useState(true);
   const [checkMultipleSlashes, setCheckMultipleSlashes] = useState(true);
@@ -118,7 +119,7 @@ export function HttpStatusCheckTool({
     setUrlList(urls.join("\n"));
     setFileName(file.name);
     if (urls.length > maxUrlNumber) {
-      setMaxUrls(String(Math.min(1_000, Math.max(100, urls.length))));
+      setMaxUrls(String(Math.min(5_000, Math.max(100, urls.length))));
     }
   }
 
@@ -149,10 +150,10 @@ export function HttpStatusCheckTool({
     if (
       !Number.isSafeInteger(maxUrlNumber) ||
       maxUrlNumber < configuredSeedCount ||
-      maxUrlNumber > 1_000
+      maxUrlNumber > 5_000
     ) {
       setError(
-        `Лимит должен быть от ${configuredSeedCount} до 1 000 страниц с учётом проверок главной.`
+        `Лимит должен быть от ${configuredSeedCount} до 5 000 страниц с учётом проверок главной.`
       );
       return;
     }
@@ -181,7 +182,8 @@ export function HttpStatusCheckTool({
             maxDepth: followLinks ? Number(maxDepth) : 0,
             maxRuntimeSeconds: runtimeSeconds,
             requestsPerMinute: selectedSpeed.rpm,
-            obeyRobots: true
+            obeyRobots: true,
+            savePageMap
           }
         }
       );
@@ -198,7 +200,7 @@ export function HttpStatusCheckTool({
         <div className={styles.heroIcon}><Icon name="http" /></div>
         <div>
           <span>Техническое SEO</span>
-          <h1>Проверка HTTP-статусов</h1>
+          <h1>Обход сайта</h1>
           <p>
             Обход страниц из sitemap, стартового списка и внутренних ссылок.
             Цепочки редиректов и ответы сохраняются как отдельная операция.
@@ -271,14 +273,14 @@ export function HttpStatusCheckTool({
             <div className={styles.presetRow}>
               {PAGE_LIMIT_PRESETS.map((value) => (
                 <button aria-pressed={maxUrls === String(value)} key={value} onClick={() => setMaxUrls(String(value))} type="button">
-                  {value === 1_000 ? "1 000" : value}
+                  {value.toLocaleString("ru-RU")}
                 </button>
               ))}
             </div>
             <div className={styles.twoColumns}>
               <label className={styles.field}>
                 <span>Максимум страниц</span>
-                <input max={1000} min={Math.max(1, configuredSeedCount)} onChange={(event) => setMaxUrls(event.target.value)} required type="number" value={maxUrls} />
+                <input max={5000} min={Math.max(1, configuredSeedCount)} onChange={(event) => setMaxUrls(event.target.value)} required type="number" value={maxUrls} />
               </label>
               <label className={styles.field}>
                 <span>Скорость обхода</span>
@@ -339,6 +341,10 @@ export function HttpStatusCheckTool({
                   <textarea onChange={(event) => setSitemapUrls(event.target.value)} rows={3} value={sitemapUrls} />
                 </label>
               )}
+              <label className={styles.checkbox}>
+                <input checked={savePageMap} onChange={(event) => setSavePageMap(event.target.checked)} type="checkbox" />
+                <span><strong>Сохранить карту сайта</strong><small>Добавить найденные страницы, метатеги и показатели загрузки в карту страниц проекта.</small></span>
+              </label>
               <label className={styles.field}>
                 <span>Query-параметры</span>
                 <CustomSelect onChange={(event) => setQueryPolicy(event.target.value as TechnicalCrawlQueryPolicy)} value={queryPolicy}>
@@ -364,6 +370,7 @@ export function HttpStatusCheckTool({
             <div><dt>Скорость</dt><dd>{SPEEDS.find(({ value }) => value === speed)?.label ?? "—"}</dd></div>
             <div><dt>Обнаружение</dt><dd>{followLinks ? `ссылки · глубина ${maxDepth}` : "только список"}</dd></div>
             <div><dt>Главная</dt><dd>{homepageChecks.length > 0 ? `${homepageChecks.length} проверки` : "без доп. проверок"}</dd></div>
+            <div><dt>Карта страниц</dt><dd>{savePageMap ? "обновить" : "не сохранять"}</dd></div>
           </dl>
           {settings && !settings.access.canRun && (
             <p className={styles.restriction}>{restrictionLabel(settings.access.mutationRestriction)}</p>
@@ -372,7 +379,7 @@ export function HttpStatusCheckTool({
             {busy
               ? "Ставим в очередь…"
               : settings
-                ? "Запустить проверку"
+                ? "Запустить обход"
                 : "Проверяем доступ…"}
           </button>
           <small>Прогресс и найденные ответы появятся на отдельной странице операции.</small>
@@ -458,5 +465,5 @@ function errorMessage(error: unknown): string {
     if (error.status === 409) return "Для этого сайта уже выполняется обход. Дождитесь его завершения или остановите в операциях.";
     return error.message;
   }
-  return error instanceof Error ? error.message : "Не удалось запустить проверку HTTP-статусов.";
+  return error instanceof Error ? error.message : "Не удалось запустить обход сайта.";
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type DragEvent, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from "react";
 import {
   semanticGroupDropPlacement,
   type SemanticGroupDropPlacement
@@ -26,6 +26,18 @@ interface FlatGroup {
   readonly hasChildren: boolean;
 }
 
+const EMPTY_GROUP_IDS: readonly string[] = [];
+const GROUP_COLORS = [
+  { value: "#ff0000", label: "Красный" },
+  { value: "#ff8a00", label: "Оранжевый" },
+  { value: "#f2c94c", label: "Жёлтый" },
+  { value: "#22c55e", label: "Зелёный" },
+  { value: "#06b6d4", label: "Бирюзовый" },
+  { value: "#2563eb", label: "Синий" },
+  { value: "#6758ef", label: "Фиолетовый" },
+  { value: "#a8a5b8", label: "Серый" }
+] as const;
+
 export type SemanticGroupTreeDropTarget =
   | Readonly<{ placement: "root" }>
   | Readonly<{
@@ -35,13 +47,16 @@ export type SemanticGroupTreeDropTarget =
 
 export function SemanticGroupTree({
   activeGroupId,
+  activeGroupIds = EMPTY_GROUP_IDS,
   expandedIds,
   groups,
   onCreate,
   onDelete,
   onExport,
+  onColorChange,
   onDropMove,
   onMoveRequest,
+  onOpenSelection,
   onReorder,
   onKeywordDrop,
   onRename,
@@ -50,16 +65,22 @@ export function SemanticGroupTree({
   total
 }: Readonly<{
   activeGroupId?: string;
+  activeGroupIds?: readonly string[];
   expandedIds: ReadonlySet<string> | null;
   groups: readonly SemanticGroupTreeItem[];
   onCreate: (parentId?: string) => void;
   onDelete: (groups: readonly SemanticGroupTreeItem[]) => void;
   onExport: (group: SemanticGroupTreeItem) => void;
+  onColorChange: (
+    groups: readonly SemanticGroupTreeItem[],
+    color: string
+  ) => void;
   onDropMove: (
     groups: readonly SemanticGroupTreeItem[],
     target: SemanticGroupTreeDropTarget
   ) => void;
   onMoveRequest: (groups: readonly SemanticGroupTreeItem[]) => void;
+  onOpenSelection: (groupIds: readonly string[]) => void;
   onReorder: (group: SemanticGroupTreeItem, position: number) => void;
   onKeywordDrop: (keywordIds: readonly string[], targetId?: string) => void;
   onRename: (group: SemanticGroupTreeItem) => void;
@@ -78,6 +99,24 @@ export function SemanticGroupTree({
     y: number;
     group: SemanticGroupTreeItem;
   }>>();
+  const hadActiveMultiGroupRef = useRef(false);
+  const activeGroupIdSet = useMemo(
+    () => new Set(activeGroupIds),
+    [activeGroupIds]
+  );
+  const selectableActiveGroupId = useMemo(
+    () =>
+      activeGroupId &&
+      groups.some(({ id, systemKind }) => id === activeGroupId && !systemKind)
+        ? activeGroupId
+        : undefined,
+    [activeGroupId, groups]
+  );
+  const effectiveSelectedIds = useMemo(() => {
+    const next = new Set(selectedIds);
+    if (selectableActiveGroupId) next.add(selectableActiveGroupId);
+    return next;
+  }, [selectableActiveGroupId, selectedIds]);
   const effectiveExpandedIds = useMemo<ReadonlySet<string>>(
     () =>
       expandedIds ??
@@ -119,21 +158,34 @@ export function SemanticGroupTree({
     document.addEventListener("dragend", clearDragTarget);
     return () => document.removeEventListener("dragend", clearDragTarget);
   }, []);
-  const selectedGroups = groups.filter(({ id }) => selectedIds.has(id));
+  useEffect(() => {
+    if (activeGroupIds.length > 1) {
+      hadActiveMultiGroupRef.current = true;
+      setSelectedIds(new Set(activeGroupIds));
+    } else if (hadActiveMultiGroupRef.current) {
+      hadActiveMultiGroupRef.current = false;
+      setSelectedIds(new Set());
+    }
+  }, [activeGroupIds]);
+  const selectedGroups = groups.filter(
+    ({ id, systemKind }) => !systemKind && effectiveSelectedIds.has(id)
+  );
 
   function chooseGroup(
     event: MouseEvent,
     group: SemanticGroupTreeItem
   ): void {
-    if (event.metaKey || event.ctrlKey) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey) {
       setSelectedIds((current) => {
         const next = new Set(current);
+        if (selectableActiveGroupId) next.add(selectableActiveGroupId);
         if (next.has(group.id)) next.delete(group.id);
         else next.add(group.id);
         return next;
       });
       return;
     }
+    setSelectedIds(new Set());
     onSelect(group.id);
   }
 
@@ -142,7 +194,10 @@ export function SemanticGroupTree({
     group: SemanticGroupTreeItem
   ): void {
     event.preventDefault();
-    if (!selectedIds.has(group.id)) setSelectedIds(new Set([group.id]));
+    if (!effectiveSelectedIds.has(group.id)) {
+      setSelectedIds(new Set());
+      onSelect(group.id);
+    }
     setContextMenu({ x: event.clientX, y: event.clientY, group });
   }
 
@@ -150,8 +205,8 @@ export function SemanticGroupTree({
     event: DragEvent,
     group: SemanticGroupTreeItem
   ): void {
-    const ids = selectedIds.has(group.id)
-      ? [...selectedIds]
+    const ids = effectiveSelectedIds.has(group.id)
+      ? [...effectiveSelectedIds]
       : [group.id];
     setDraggingIds(ids);
     event.dataTransfer.effectAllowed = "move";
@@ -170,7 +225,7 @@ export function SemanticGroupTree({
   }
 
   const contextGroups = contextMenu
-    ? selectedIds.has(contextMenu.group.id) && selectedGroups.length > 0
+    ? effectiveSelectedIds.has(contextMenu.group.id) && selectedGroups.length > 0
       ? selectedGroups
       : [contextMenu.group]
     : [];
@@ -261,10 +316,10 @@ export function SemanticGroupTree({
     group,
     hasChildren
   }: FlatGroup) {
-    const selected = selectedIds.has(group.id);
+    const selected = effectiveSelectedIds.has(group.id);
     return (
       <div
-        className={`semantic-group-tree-row${depth === 0 && !group.systemKind ? " top-level" : ""}${activeGroupId === group.id ? " active" : ""}${selected ? " selected" : ""}${group.systemKind ? ` system ${group.systemKind.toLowerCase()}` : ""}${dragTarget && "group" in dragTarget && dragTarget.group.id === group.id ? ` drag-${dragTarget.placement}` : ""}`}
+        className={`semantic-group-tree-row${depth === 0 && !group.systemKind ? " top-level" : ""}${activeGroupId === group.id || activeGroupIdSet.has(group.id) ? " active" : ""}${selected ? " selected" : ""}${group.systemKind ? ` system ${group.systemKind.toLowerCase()}` : ""}${dragTarget && "group" in dragTarget && dragTarget.group.id === group.id ? ` drag-${dragTarget.placement}` : ""}`}
         draggable={!group.systemKind}
         key={group.id}
         onContextMenu={(event) => openContextMenu(event, group)}
@@ -372,7 +427,23 @@ export function SemanticGroupTree({
       <header>
         <strong>Группы</strong>
         <div>
-          {selectedIds.size > 0 && <span>{selectedIds.size}</span>}
+          {selectedGroups.length > 0 && <span>{selectedGroups.length}</span>}
+          <button
+            aria-label="Открыть выбранные группы вместе"
+            className="semantic-group-multi-open"
+            disabled={selectedGroups.length < 2}
+            onClick={() =>
+              onOpenSelection(selectedGroups.map(({ id }) => id).sort())
+            }
+            title={
+              selectedGroups.length < 2
+                ? "Выберите минимум две группы с Ctrl/Cmd или Shift"
+                : `Открыть вместе: ${selectedGroups.length}`
+            }
+            type="button"
+          >
+            <Icon name="multiGroup" />
+          </button>
           <button
             aria-label="Создать корневую группу"
             onClick={() => onCreate()}
@@ -450,12 +521,42 @@ export function SemanticGroupTree({
       )}
       {contextMenu && (
         <ContextMenu
+          afterItemId="export"
           items={contextItems}
           label={`Действия с группой ${contextMenu.group.name}`}
           onClose={() => setContextMenu(undefined)}
           x={contextMenu.x}
           y={contextMenu.y}
-        />
+        >
+          {!contextMenu.group.systemKind && (
+            <div
+              aria-label={
+                contextGroups.length > 1
+                  ? `Цвет выбранных групп: ${contextGroups.length}`
+                  : "Цвет группы"
+              }
+              className="semantic-group-color-palette"
+              role="group"
+            >
+              {GROUP_COLORS.map(({ value, label }) => (
+                <button
+                  aria-label={label}
+                  aria-pressed={contextGroups.every(
+                    (group) => (group.color ?? "#a8a5b8").toLowerCase() === value
+                  )}
+                  key={value}
+                  onClick={() => {
+                    onColorChange(contextGroups, value);
+                    setContextMenu(undefined);
+                  }}
+                  style={{ backgroundColor: value }}
+                  title={label}
+                  type="button"
+                />
+              ))}
+            </div>
+          )}
+        </ContextMenu>
       )}
     </nav>
   );

@@ -21,23 +21,67 @@ import { PrismaService } from "../database/prisma.service.js";
 import { normalizePageUrl, type NormalizedPageUrl } from "./page-url.js";
 
 const CONTENT_STATUSES = new Set<string>(pageContentStatuses);
-const PAGE_INCLUDE = {
+const CRAWL_SUMMARY_SELECT = {
+  crawlId: true,
+  statusCode: true,
+  responseTimeMs: true,
+  sizeBytes: true,
+  contentType: true,
+  title: true,
+  description: true,
+  h1: true,
+  h1Count: true,
+  canonicalUrl: true,
+  robots: true,
+  language: true,
+  imageCount: true,
+  imagesMissingAlt: true,
+  structuredDataTypes: true,
+  wordCount: true,
+  redirectChain: true,
+  inSitemap: true,
+  depth: true,
+  indexability: true,
+  crawledAt: true
+} as const satisfies Prisma.CrawlPageSnapshotSelect;
+
+const PAGE_LIST_INCLUDE = {
   aliases: {
     orderBy: [{ firstSeenAt: "asc" as const }, { id: "asc" as const }]
   },
   sources: {
     orderBy: { source: "asc" as const }
   },
+  crawlSnapshots: {
+    orderBy: [
+      { crawledAt: "desc" as const },
+      { id: "desc" as const }
+    ],
+    take: 1,
+    select: CRAWL_SUMMARY_SELECT
+  },
   _count: {
     select: {
       targetKeywords: { where: { status: "ACTIVE" as const } },
-      primaryClusters: { where: { status: "ACTIVE" as const } }
+      primaryClusters: { where: { status: "ACTIVE" as const } },
+      crawlIssues: { where: { resolvedAt: null } }
     }
+  }
+} satisfies Prisma.PageInclude;
+
+const PAGE_INCLUDE = {
+  ...PAGE_LIST_INCLUDE,
+  crawlSnapshots: {
+    ...PAGE_LIST_INCLUDE.crawlSnapshots,
+    select: { ...CRAWL_SUMMARY_SELECT, metaTags: true }
   }
 } satisfies Prisma.PageInclude;
 
 type PageAggregate = Prisma.PageGetPayload<{
   include: typeof PAGE_INCLUDE;
+}>;
+type PageListAggregate = Prisma.PageGetPayload<{
+  include: typeof PAGE_LIST_INCLUDE;
 }>;
 
 interface PageCursor {
@@ -60,60 +104,99 @@ export class PageService {
     const cursor = query.cursor
       ? decodeCursor(query.cursor, filterHash)
       : undefined;
-    const rows = await this.prisma.page.findMany({
-      where: {
-        workspaceId,
-        projectId,
-        status: query.lifecycleStatus ?? "ACTIVE",
-        ...(query.pageType ? { pageType: query.pageType } : {}),
-        ...(query.indexability
-          ? { indexability: query.indexability }
-          : {}),
-        ...(query.search
-          ? {
-              OR: [
-                {
-                  normalizedUrl: {
-                    contains: query.search,
-                    mode: "insensitive"
-                  }
-                },
-                {
-                  title: {
-                    contains: query.search,
-                    mode: "insensitive"
-                  }
-                },
-                {
-                  h1: {
-                    contains: query.search,
-                    mode: "insensitive"
-                  }
-                }
-              ]
-            }
-          : {}),
-        ...(cursor
-          ? {
-              OR: [
-                { updatedAt: { lt: new Date(cursor.updatedAt) } },
-                {
-                  updatedAt: new Date(cursor.updatedAt),
-                  id: { lt: cursor.id }
-                }
-              ]
-            }
-          : {})
-      },
-      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
-      take: query.limit + 1,
-      include: PAGE_INCLUDE
-    });
+    const [rows, structure] = await Promise.all([
+      this.prisma.page.findMany({
+        where: {
+          workspaceId,
+          projectId,
+          includedInMap: true,
+          status: query.lifecycleStatus ?? "ACTIVE",
+          ...(query.pageType ? { pageType: query.pageType } : {}),
+          ...(query.indexability
+            ? { indexability: query.indexability }
+            : {}),
+          AND: [
+            ...(query.search
+              ? [{
+                  OR: [
+                    {
+                      normalizedUrl: {
+                        contains: query.search,
+                        mode: "insensitive" as const
+                      }
+                    },
+                    {
+                      title: {
+                        contains: query.search,
+                        mode: "insensitive" as const
+                      }
+                    },
+                    {
+                      h1: {
+                        contains: query.search,
+                        mode: "insensitive" as const
+                      }
+                    }
+                  ]
+                }]
+              : []),
+            ...(query.pathPrefix
+              ? [{
+                  OR: [
+                    {
+                      normalizedUrl: {
+                        contains: query.pathPrefix,
+                        mode: "insensitive" as const
+                      }
+                    },
+                    {
+                      normalizedUrl: {
+                        endsWith: query.pathPrefix.replace(/\/$/u, ""),
+                        mode: "insensitive" as const
+                      }
+                    }
+                  ]
+                }]
+              : []),
+            ...(cursor
+              ? [{
+                  OR: [
+                    { updatedAt: { lt: new Date(cursor.updatedAt) } },
+                    {
+                      updatedAt: new Date(cursor.updatedAt),
+                      id: { lt: cursor.id }
+                    }
+                  ]
+                }]
+              : [])
+          ]
+        },
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        take: query.limit + 1,
+        include: PAGE_LIST_INCLUDE
+      }),
+      cursor
+        ? Promise.resolve(undefined)
+        : this.prisma.page.findMany({
+            where: {
+              workspaceId,
+              projectId,
+              includedInMap: true,
+              status: "ACTIVE"
+            },
+            select: { normalizedUrl: true },
+            orderBy: [{ normalizedUrl: "asc" }, { id: "asc" }],
+            take: 5_000
+          })
+    ]);
     const hasNext = rows.length > query.limit;
     const visible = rows.slice(0, query.limit);
     const last = visible.at(-1);
     return {
       pages: visible.map(pageSummary),
+      ...(structure
+        ? { structureUrls: structure.map(({ normalizedUrl }) => normalizedUrl) }
+        : {}),
       ...(hasNext && last
         ? {
             nextCursor: encodeCursor({
@@ -147,62 +230,113 @@ export class PageService {
 
     try {
       return await this.prisma.$transaction(async (transaction) => {
+        await transaction.$executeRaw`
+          SELECT pg_advisory_xact_lock(
+            hashtextextended(
+              ${`${input.projectId}:${identity.canonical.hash}`},
+              0
+            )
+          )
+        `;
         const concurrent =
           await transaction.pageCreateReceipt.findUnique({
             where: receiptWhere(input)
           });
         if (concurrent) return replayReceipt(concurrent, requestHash);
-        const created = await transaction.page.create({
-          data: {
-            workspaceId: input.workspaceId,
-            projectId: input.projectId,
-            url: identity.canonical.original,
-            normalizedUrl: identity.canonical.normalized,
-            urlHash: identity.canonical.hash,
-            pageType: input.pageType,
-            indexability: input.indexability,
-            ...(input.httpStatus === undefined
-              ? {}
-              : { httpStatus: input.httpStatus }),
-            ...(input.canonicalTarget
-              ? { canonicalTarget: input.canonicalTarget }
-              : {}),
-            ...(input.robots ? { robots: input.robots } : {}),
-            ...(input.title ? { title: input.title } : {}),
-            ...(input.description
-              ? { description: input.description }
-              : {}),
-            ...(input.h1 ? { h1: input.h1 } : {}),
-            ...(input.language ? { language: input.language } : {}),
-            ...(input.template ? { template: input.template } : {}),
-            ...(input.contentStatus
-              ? { contentStatus: input.contentStatus }
-              : {}),
-            ...(input.ownerId ? { ownerId: input.ownerId } : {}),
-            priority: input.priority,
-            ...(input.publishedAt
-              ? { publishedAt: new Date(input.publishedAt) }
-              : {}),
-            ...(input.notes ? { notes: input.notes } : {}),
-            createdBy: input.actorId,
-            updatedBy: input.actorId,
-            aliases: {
-              create: identity.aliases.map((alias) => ({
-                url: alias.original,
-                normalizedUrl: alias.normalized,
-                urlHash: alias.hash,
-                source: "MANUAL"
-              }))
-            },
-            sources: {
-              create: {
-                source: "MANUAL"
-              }
+        const hidden = await transaction.page.findUnique({
+          where: {
+            projectId_urlHash: {
+              projectId: input.projectId,
+              urlHash: identity.canonical.hash
             }
           },
-          include: PAGE_INCLUDE
+          select: { id: true, includedInMap: true, status: true }
         });
-        const summary = pageSummary(created);
+        const manualData = {
+          pageType: input.pageType,
+          indexability: input.indexability,
+          ...(input.httpStatus === undefined
+            ? {}
+            : { httpStatus: input.httpStatus }),
+          ...(input.canonicalTarget
+            ? { canonicalTarget: input.canonicalTarget }
+            : {}),
+          ...(input.robots ? { robots: input.robots } : {}),
+          ...(input.title ? { title: input.title } : {}),
+          ...(input.description ? { description: input.description } : {}),
+          ...(input.h1 ? { h1: input.h1 } : {}),
+          ...(input.language ? { language: input.language } : {}),
+          ...(input.template ? { template: input.template } : {}),
+          ...(input.contentStatus
+            ? { contentStatus: input.contentStatus }
+            : {}),
+          ...(input.ownerId ? { ownerId: input.ownerId } : {}),
+          priority: input.priority,
+          ...(input.publishedAt
+            ? { publishedAt: new Date(input.publishedAt) }
+            : {}),
+          ...(input.notes ? { notes: input.notes } : {}),
+          createdBy: input.actorId,
+          updatedBy: input.actorId,
+          aliases: {
+            create: identity.aliases.map((alias) => ({
+              url: alias.original,
+              normalizedUrl: alias.normalized,
+              urlHash: alias.hash,
+              source: "MANUAL" as const
+            }))
+          }
+        };
+        let pageId: string;
+        if (hidden && !hidden.includedInMap && hidden.status === "ACTIVE") {
+          await transaction.page.update({
+            where: { id: hidden.id },
+            data: {
+              ...manualData,
+              includedInMap: true,
+              version: { increment: 1 }
+            }
+          });
+          await transaction.pageSource.upsert({
+            where: {
+              pageId_source: { pageId: hidden.id, source: "MANUAL" }
+            },
+            create: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              pageId: hidden.id,
+              source: "MANUAL"
+            },
+            update: { lastSeenAt: new Date() }
+          });
+          pageId = hidden.id;
+        } else {
+          const created = await transaction.page.create({
+            data: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              url: identity.canonical.original,
+              normalizedUrl: identity.canonical.normalized,
+              urlHash: identity.canonical.hash,
+              ...manualData,
+              sources: {
+                create: {
+                  source: "MANUAL"
+                }
+              }
+            },
+            select: { id: true }
+          });
+          pageId = created.id;
+        }
+        const summary = pageSummary(
+          await this.requiredPage(
+            transaction,
+            input.workspaceId,
+            input.projectId,
+            pageId
+          )
+        );
         await transaction.pageCreateReceipt.create({
           data: {
             workspaceId: input.workspaceId,
@@ -210,7 +344,7 @@ export class PageService {
             actorId: input.actorId,
             idempotencyKey: input.idempotencyKey,
             requestHash,
-            pageId: created.id,
+            pageId,
             responseSnapshot: json(summary)
           }
         });
@@ -405,6 +539,7 @@ export class PageService {
         workspaceId,
         projectId,
         id: pageId,
+        includedInMap: true,
         status: { not: "DELETED" }
       },
       include: PAGE_INCLUDE
@@ -425,11 +560,14 @@ export class PageService {
   }
 }
 
-function pageSummary(page: PageAggregate): ProjectPageSummary {
+function pageSummary(
+  page: PageAggregate | PageListAggregate
+): ProjectPageSummary {
   const contentStatus =
     page.contentStatus && CONTENT_STATUSES.has(page.contentStatus)
       ? (page.contentStatus as PageContentStatus)
       : undefined;
+  const latestCrawl = page.crawlSnapshots[0];
   return {
     id: page.id,
     workspaceId: page.workspaceId,
@@ -472,6 +610,46 @@ function pageSummary(page: PageAggregate): ProjectPageSummary {
     ...(page.notes ? { notes: page.notes } : {}),
     assignedKeywordCount: page._count.targetKeywords,
     assignedClusterCount: page._count.primaryClusters,
+    openIssueCount: page._count.crawlIssues,
+    ...(latestCrawl
+      ? {
+          latestCrawl: {
+            crawlId: latestCrawl.crawlId,
+            statusCode: latestCrawl.statusCode,
+            responseTimeMs: latestCrawl.responseTimeMs,
+            sizeBytes: latestCrawl.sizeBytes,
+            contentType: latestCrawl.contentType,
+            ...(latestCrawl.title ? { title: latestCrawl.title } : {}),
+            ...(latestCrawl.description
+              ? { description: latestCrawl.description }
+              : {}),
+            ...(latestCrawl.h1 ? { h1: latestCrawl.h1 } : {}),
+            h1Count: latestCrawl.h1Count,
+            ...(latestCrawl.canonicalUrl
+              ? { canonicalUrl: latestCrawl.canonicalUrl }
+              : {}),
+            ...(latestCrawl.robots ? { robots: latestCrawl.robots } : {}),
+            ...(latestCrawl.language
+              ? { language: latestCrawl.language }
+              : {}),
+            metaTags:
+              "metaTags" in latestCrawl
+                ? storedMetaTags(latestCrawl.metaTags)
+                : [],
+            imageCount: latestCrawl.imageCount,
+            imagesMissingAlt: latestCrawl.imagesMissingAlt,
+            structuredDataTypes: storedStringArray(
+              latestCrawl.structuredDataTypes
+            ),
+            wordCount: latestCrawl.wordCount,
+            redirectChain: storedStringArray(latestCrawl.redirectChain),
+            inSitemap: latestCrawl.inSitemap,
+            depth: latestCrawl.depth,
+            indexability: latestCrawl.indexability,
+            crawledAt: latestCrawl.crawledAt.toISOString()
+          }
+        }
+      : {}),
     lifecycleStatus: page.status === "ARCHIVED" ? "ARCHIVED" : "ACTIVE",
     version: page.version,
     ...(page.createdBy ? { createdBy: page.createdBy } : {}),
@@ -483,6 +661,42 @@ function pageSummary(page: PageAggregate): ProjectPageSummary {
       ? { archivedAt: page.archivedAt.toISOString() }
       : {})
   };
+}
+
+function storedStringArray(value: Prisma.JsonValue): readonly string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function storedMetaTags(
+  value: Prisma.JsonValue
+): NonNullable<ProjectPageSummary["latestCrawl"]>["metaTags"] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((candidate) => {
+    if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      Array.isArray(candidate) ||
+      typeof candidate.content !== "string"
+    ) {
+      return [];
+    }
+    const name = typeof candidate.name === "string" ? candidate.name : undefined;
+    const property = typeof candidate.property === "string"
+      ? candidate.property
+      : undefined;
+    const httpEquiv = typeof candidate.httpEquiv === "string"
+      ? candidate.httpEquiv
+      : undefined;
+    if (!name && !property && !httpEquiv) return [];
+    return [{
+      ...(name ? { name } : {}),
+      ...(property ? { property } : {}),
+      ...(httpEquiv ? { httpEquiv } : {}),
+      content: candidate.content
+    }];
+  });
 }
 
 function pageIdentity(
@@ -598,6 +812,7 @@ function pageFilterHash(query: ProjectPageListQuery): string {
     .update(
       JSON.stringify({
         search: query.search ?? "",
+        pathPrefix: query.pathPrefix ?? "",
         pageType: query.pageType ?? "",
         indexability: query.indexability ?? "",
         lifecycleStatus: query.lifecycleStatus ?? "ACTIVE"

@@ -91,6 +91,75 @@ test("lists canonical workspace owners in one bounded query", async () => {
   );
 });
 
+test("soft-deletes a versioned project and emits an auditable event", async () => {
+  const projectId = "01900000-0000-7000-8000-000000000020";
+  const workspaceId = "01900000-0000-7000-8000-000000000021";
+  const updates: unknown[] = [];
+  const auditRecords: unknown[] = [];
+  const outboxEvents: unknown[] = [];
+  const transaction = {
+    project: {
+      findUnique: async () => ({
+        id: projectId,
+        name: "Нейролюб",
+        workspaceId,
+        status: "ACTIVE" as const,
+        version: 4
+      }),
+      updateMany: async (input: unknown) => {
+        updates.push(input);
+        return { count: 1 };
+      }
+    },
+    projectTransferRequest: {
+      findFirst: async () => null
+    }
+  };
+  const service = new TenantService(
+    {
+      $transaction: async (
+        callback: (client: typeof transaction) => Promise<unknown>
+      ) => callback(transaction)
+    } as unknown as PrismaService,
+    {
+      record: async (input: unknown) => {
+        auditRecords.push(input);
+      }
+    } as unknown as AuditService,
+    {
+      event: async (_client: unknown, input: unknown) => {
+        outboxEvents.push(input);
+      }
+    } as unknown as OutboxService,
+    {} as BillingEntitlementService
+  );
+
+  const result = await service.deleteProject(
+    currentUserId,
+    projectId,
+    4,
+    { confirmation: "Нейролюб" },
+    { requestId: "request-project-delete-001" }
+  );
+
+  assert.equal(result.projectId, projectId);
+  assert.equal(result.status, "DELETED");
+  assert.equal(updates.length, 1);
+  assert.deepEqual(
+    (updates[0] as { where: unknown }).where,
+    {
+      id: projectId,
+      version: 4,
+      status: { in: ["DRAFT", "ACTIVE", "ARCHIVED"] }
+    }
+  );
+  assert.equal(auditRecords.length, 1);
+  assert.equal(
+    (outboxEvents[0] as { eventType: string }).eventType,
+    "project.deleted.v1"
+  );
+});
+
 function workspace(id: string, ownerUserId: string, name: string) {
   const createdAt = new Date("2026-08-01T10:00:00.000Z");
   return {

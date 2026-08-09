@@ -169,6 +169,17 @@ export interface ProjectSummary {
   readonly createdAt: string;
 }
 
+export interface DeleteProjectInput {
+  /** Exact project name used as a destructive-action confirmation. */
+  readonly confirmation: string;
+}
+
+export interface ProjectDeletionResult {
+  readonly projectId: string;
+  readonly status: "DELETED";
+  readonly deletedAt: string;
+}
+
 export interface CreateProjectTransferInput {
   readonly targetMemberId: string;
 }

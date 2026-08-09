@@ -135,12 +135,25 @@ set_role_password() {
   role_name=$1
   role_password=$2
 
-  printf '%s\n%s\n' "$role_password" "$role_password" |
-    psql \
-      --no-psqlrc \
-      --set=role_name="$role_name" \
-      --command="SET password_encryption = 'scram-sha-256'" \
-      --command='\password :"role_name"'
+  case $role_name in
+    *[!A-Za-z0-9_]*)
+      echo "service database role names must be SQL identifiers" >&2
+      exit 1
+      ;;
+  esac
+
+  # PostgreSQL 18 reads its interactive password meta-command from the controlling TTY instead of stdin,
+  # which makes unattended deployment hang despite the password pipe. Passwords
+  # are restricted to a quote-free URL-safe alphabet above, and the generated
+  # statement is sent only through stdin so the credential never appears in the
+  # process arguments or logs.
+  {
+    printf '%s\n' "SET password_encryption = 'scram-sha-256';"
+    printf "ALTER ROLE %s PASSWORD '%s';\n" "$role_name" "$role_password"
+  } | psql \
+    --no-psqlrc \
+    --set=ON_ERROR_STOP=1 \
+    --quiet
 }
 
 set_role_password platform_owner "$platform_owner_password"

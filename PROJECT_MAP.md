@@ -1,6 +1,6 @@
 # Карта проекта
 
-Актуально на 6 августа 2026 года.
+Актуально на 9 августа 2026 года.
 
 Карта описывает текущее устройство репозитория. Нормативные требования
 находятся в `docs/technical-spec/00-index.md`, архитектурные решения — в
@@ -69,7 +69,7 @@ backup Dokploy запускает `pg_dump` внутри контейнера и
 | `frontend` | Next.js routes, UI, `/app`, `/admin`, browser/server BFF helpers |
 | `backend-core` | composition root и supervisor Core |
 | `backend-core/modules/api` | identity, workspace/project/RBAC, billing, audit, public API orchestration |
-| `backend-core/modules/seo` | semantics, pages, rank manifests/results/history, crawl snapshots |
+| `backend-core/modules/seo` | semantics, project Markdown notes, pages, rank manifests/results/history, crawl snapshots |
 | `backend-core/modules/realtime` | Socket.IO, session revoke, notifications и Web Push persistence |
 | `backend-execution` | durable jobs, queues, imports, vault, provider/rank/crawl/frequency workers |
 | `packages/contracts` | общие versioned HTTP/event/error contracts без бизнес-логики |
@@ -85,11 +85,25 @@ Frontend-представление состояния фоновых опера
 
 Рабочая область семантики использует единый набор правых панелей: карточка
 запроса показывает по одному последнему активному контексту Яндекса и Google,
-их append-only историю позиций и проектную заметку. История отображает
+их append-only историю позиций и проектную заметку. Для последнего XMLStock
+замера каждого поисковика карточка читает отдельную immutable Top-10 проекцию
+органических результатов: первые пять строк видны сразу, остальные — по
+явному раскрытию. Целевой URL сравнивается с текущим ranking URL после
+безопасной нормализации host/path; несовпадение обозначается отдельно и не
+меняет сами данные замера. История отображает
 текущую позицию и дельту, выделяет `not-found` отдельной осью и интерактивно
 проецирует безопасные параметры замера (search source, provider, регион,
 устройство, depth и время), не раскрывая provider request ID или raw result;
-настройки
+пять последних дат находятся под графиком, полный список открывается в modal.
+Стрелки перемещают фокус по загруженным строкам, а Shift расширяет диапазон
+выделения. Дерево групп поддерживает явный union от двух до пятидесяти обычных
+групп; текущая открытая группа уже входит в выбор, поэтому Ctrl/Cmd+клик по
+следующей сразу даёт две группы. Контекстное меню после экспорта показывает
+однострочную базовую палитру и через versioned PATCH меняет цвет сразу у всей
+выборки; системные группы не участвуют. Правый клик вне текущей мультивыборки
+заменяет её выбранной группой, а правый клик внутри сохраняет batch scope.
+Серверный cursor и filter hash привязаны ко всему набору, а строка
+показывает группу-источник текущего union. Настройки
 колонок/представлений и журнал операций не
 перезагружают layout. Прогресс rank/frequency остаётся серверным источником
 истины, а браузер по изменению safe progress-проекции перечитывает уже
@@ -208,7 +222,7 @@ connector-процессы заполняют всё доступное окно
 | Данные | Модуль-владелец | Текущее хранилище |
 |---|---|---|
 | users, sessions, workspaces (включая bounded avatar до 512 KiB), projects, project transfer requests, RBAC, billing, audit, platform admin command receipts | Core API | `platform_db` |
-| semantics (включая заметки и presets минус-слов), pages, rankings, crawl projections | Core SEO | `seo_db` |
+| semantics (включая keyword notes и presets минус-слов), project Markdown notes, pages, rankings и immutable XMLStock Top-10 SERP results, crawl/page-map projections | Core SEO | `seo_db` |
 | realtime subscriptions, deliveries, event inbox | Core Realtime | `realtime_db` + Redis |
 | jobs, schedules, uploads, credential vault, provider execution | Execution | `jobs_db` + Redis + S3 |
 
@@ -229,8 +243,10 @@ Unsafe Prisma raw APIs запрещены статическим тестом.
    короткий grant. Внутренней дневной квоты на BYOK rank нет; статус estimate
    — `UNLIMITED`.
 5. Connector role выполняет fenced submit/poll/get через DB broker.
-6. Rank role публикует normalized chunks и terminal result; frontend читает
-   tenant-scoped projection.
+6. Rank role публикует normalized chunks и terminal result; для XMLStock тот
+   же hash-bound chunk содержит не более первых десяти нормализованных
+   organic URL без raw response, Core SEO сохраняет их дочерними immutable
+   строками rank snapshot; frontend читает только tenant-scoped projection.
 
 XMLStock Google Top-100 собирается десятью последовательными страницами по 10
 результатов; XMLStock Yandex Live использует такой же GET-only page mapping,
@@ -341,19 +357,37 @@ checkpoint и lease; нормализованные snapshots принадлеж
 Проектный инструмент `/app/projects/{projectId}/tools/http-status-checker`
 переиспользует тот же `technical-crawl` Job/queue/worker и отличается
 зафиксированным `config.purpose=HTTP_STATUS_CHECK`. Поэтому новый deployable,
-queue или таблица не добавлены. HTTP-режим принимает до 1 000 стартовых URL
-только домена проекта, обходит sitemap и внутренние ссылки со скоростью не
+queue или таблица не добавлены. В UI он называется «Обход сайта»: принимает до
+1 000 стартовых URL и обходит до 5 000 страниц только домена проекта, sitemap
+и внутренние ссылки со скоростью не
 более 60 запросов в минуту на host, сохраняет status/redirect chain по мере
 обхода и не создаёт SEO issues, duplicate analysis или Radar page changes.
 Опциональные `homepageChecks` сервером разворачиваются в bounded probes для
 HTTP, альтернативного `www` и путей с `//`…`/////`; они входят в `maxUrls`,
 checkpoint и operation result, но не расширяют discovery за origin проекта.
-Result boundary принимает сохранённую 1-based нумерацию страниц `1…1000`,
-совпадающую с persist contract и максимальным crawl limit; граничная тысячная
+Result boundary принимает сохранённую 1-based нумерацию страниц `1…5000`,
+совпадающую с persist contract и максимальным crawl limit; граничная пятитысячная
 строка не делает валидный завершённый результат недоступным.
 `TECHNICAL_AUDIT` остаётся backward-compatible purpose для старых записей и
 automation. Оба режима читаются через tenant-scoped operation result, но в UI
 и terminal notification имеют разные названия и ссылки на конкретный crawl.
+Каждая строка сохраняет bounded meta tags, Title/Description/H1, canonical,
+robots, structured data, image/alt/word metrics, response time и размер.
+`savePageMap=true` автоматически поднимает эту snapshot-проекцию в карту
+страниц; `false` сохраняет immutable operation result и скрытую FK backing Page,
+но не меняет видимую карту. Page Map показывает дерево до 5 000 URL и компактный
+последний snapshot в таблице, а полный meta-tag payload получает только при
+открытии tenant-scoped инспектора. Core bridge принимает старую и актуальную
+форму crawl config, включая optional `savePageMap`, без ослабления exact-field
+валидации. Page Map и Markdown Notes работают как full-height workspace:
+основные колонки не имеют внешних карточных зазоров и прокручиваются независимо.
+Page Map передаёт выбор дерева отдельным `pathPrefix`, показывает конкретные
+tenant-scoped crawl issue evidence по проверенному `pageId` в инспекторе,
+держит table header сверху и локально запоминает изменяемую ширину дерева,
+инспектора и колонок. Папки структуры раскрываются и сворачиваются независимо;
+явные состояния раскрытия ограниченно сохраняются в project-scoped browser
+layout, а глубокие ветки не создают большой DOM до открытия. Notes не
+растягивает одну карточку на всю высоту списка и не дублирует page heading.
 
 ### Notifications
 
@@ -422,6 +456,23 @@ bindings заново и может использовать только creden
 `PENDING` истекает через 7 дней и допускает отмену/отказ; `PROCESSING`
 повторяется reconciler-ом с bounded backoff и защищён вместе с pending partial
 unique index. Право `project.transfer` следует за новым `owner_user_id`.
+
+### Удаление проекта
+
+Core API выполняет owner-only soft delete с recent-auth, exact-name
+confirmation и `If-Match`. Активная передача блокирует команду. В одной
+транзакции проект получает `DELETED`/`deletedAt`, append-only audit и redacted
+`project.deleted.v1`; физические tenant-owned SEO/Execution данные не
+удаляются, поэтому операция не создаёт риск потери данных или частичной
+межбазовой очистки.
+
+### Проектные заметки
+
+Core SEO владеет versioned Markdown-заметками. Защищённые CRUD routes проходят
+через Core API и проверенный workspace/project context; Markdown рендерится без
+raw HTML. Видимость `PROJECT_MEMBERS` оставляет заметку внутри проекта, а
+`PUBLIC` создаёт opaque random token и public `no-store`/`noindex` route.
+Возврат к закрытой видимости или удаление атомарно отзывает публичный token.
 
 ## 7. Конфигурация и эксплуатация
 

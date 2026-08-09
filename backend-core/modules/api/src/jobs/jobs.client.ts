@@ -1728,7 +1728,7 @@ function technicalCrawlResponse(
               "requestsPerMinute",
               "obeyRobots"
             ])
-          : configKeys === 12
+          : configKeys === 13
             ? exactRecord(configInput, [
                 "purpose",
                 "startUrls",
@@ -1741,21 +1741,52 @@ function technicalCrawlResponse(
                 "maxDepth",
                 "maxRuntimeSeconds",
                 "requestsPerMinute",
-                "obeyRobots"
+                "obeyRobots",
+                "savePageMap"
               ])
-            : exactRecord(configInput, [
-                "purpose",
-                "startUrls",
-                "sitemapUrls",
-                "includePatterns",
-                "excludePatterns",
-                "queryPolicy",
-                "maxUrls",
-                "maxDepth",
-                "maxRuntimeSeconds",
-                "requestsPerMinute",
-                "obeyRobots"
-              ]);
+            : configKeys === 12 && "savePageMap" in configInput
+              ? exactRecord(configInput, [
+                  "purpose",
+                  "startUrls",
+                  "sitemapUrls",
+                  "includePatterns",
+                  "excludePatterns",
+                  "queryPolicy",
+                  "maxUrls",
+                  "maxDepth",
+                  "maxRuntimeSeconds",
+                  "requestsPerMinute",
+                  "obeyRobots",
+                  "savePageMap"
+                ])
+              : configKeys === 12
+                ? exactRecord(configInput, [
+                    "purpose",
+                    "startUrls",
+                    "homepageChecks",
+                    "sitemapUrls",
+                    "includePatterns",
+                    "excludePatterns",
+                    "queryPolicy",
+                    "maxUrls",
+                    "maxDepth",
+                    "maxRuntimeSeconds",
+                    "requestsPerMinute",
+                    "obeyRobots"
+                  ])
+                : exactRecord(configInput, [
+                    "purpose",
+                    "startUrls",
+                    "sitemapUrls",
+                    "includePatterns",
+                    "excludePatterns",
+                    "queryPolicy",
+                    "maxUrls",
+                    "maxDepth",
+                    "maxRuntimeSeconds",
+                    "requestsPerMinute",
+                    "obeyRobots"
+                  ]);
   const startUrls = Array.isArray(config.startUrls)
     ? config.startUrls.map(safeCrawlResponseUrl)
     : [];
@@ -1770,6 +1801,7 @@ function technicalCrawlResponse(
   );
   const queryPolicy = config.queryPolicy ?? "DROP_TRACKING";
   const purpose = config.purpose ?? "TECHNICAL_AUDIT";
+  const savePageMap = config.savePageMap ?? true;
   const homepageChecks = Array.isArray(config.homepageChecks)
     ? config.homepageChecks
     : [];
@@ -1837,7 +1869,8 @@ function technicalCrawlResponse(
         homepageChecks as (typeof technicalCrawlHomepageChecks)[number][]
       )
     ]).size > Number(config.maxUrls) ||
-    config.obeyRobots !== true
+    config.obeyRobots !== true ||
+    typeof savePageMap !== "boolean"
   ) {
     throw invalidJobsResponse();
   }
@@ -1873,7 +1906,8 @@ function technicalCrawlResponse(
         config.requestsPerMinute,
         technicalCrawlMaxRequestsPerMinute
       ),
-      obeyRobots: true
+      obeyRobots: true,
+      savePageMap
     },
     discoveredUrls: boundedNonNegativeInteger(input.discoveredUrls, technicalCrawlMaxUrlLimit),
     processedUrls: boundedNonNegativeInteger(input.processedUrls, technicalCrawlMaxUrlLimit),

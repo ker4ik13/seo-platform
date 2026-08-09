@@ -89,6 +89,44 @@ test("accepts not-found only with provider timestamp provenance", () => {
   assert.equal(parsed.results[0]?.found, false);
 });
 
+test("accepts only ordered bounded Top-10 SERP evidence", () => {
+  const result = {
+    manifestEntryId,
+    keywordId,
+    dataQualityFlags: ["PROVIDER_OBSERVED_AT_UNAVAILABLE"],
+    found: false,
+    position: null,
+    serpResults: [
+      {
+        position: 1,
+        rankingUrl: "https://competitor.example/one",
+        normalizedRankingUrl: "https://competitor.example/one",
+        title: "First"
+      },
+      {
+        position: 2,
+        rankingUrl: "https://competitor.example/two",
+        normalizedRankingUrl: "https://competitor.example/two"
+      }
+    ]
+  } as const;
+
+  assert.equal(
+    internalIngestRankChunkInput(command(result)).results[0]?.serpResults?.length,
+    2
+  );
+  assert.throws(
+    () => internalIngestRankChunkInput(command({
+      ...result,
+      serpResults: result.serpResults.map((row) => ({
+        ...row,
+        position: row.position + 1
+      }))
+    })),
+    BadRequestException
+  );
+});
+
 test("rejects extra raw provider fields and credential-bearing URLs", () => {
   assert.throws(
     () =>

@@ -158,6 +158,11 @@ export class KeywordService {
           select: { systemKind: true }
         })
       : undefined;
+    const selectedGroupIds = query.groupIds?.length
+      ? [...query.groupIds]
+      : query.groupId
+        ? [query.groupId]
+        : [];
     const keywordStatus =
       selectedGroup?.systemKind === "TRASH" ? "DELETED" : "ACTIVE";
     const filterHash = keywordFilterHash(query, search);
@@ -192,10 +197,16 @@ export class KeywordService {
                 : { lte: query.priorityMax })
             }
           }),
-      ...(query.groupId
+      ...(selectedGroupIds.length > 0
         ? {
             memberships: {
-              some: { projectId, groupId: query.groupId }
+              some: {
+                projectId,
+                groupId:
+                  selectedGroupIds.length === 1
+                    ? selectedGroupIds[0]!
+                    : { in: selectedGroupIds }
+              }
             }
           }
         : {}),
@@ -291,7 +302,8 @@ export class KeywordService {
       activeTrackingAssignments,
       clusters,
       frequencySnapshots,
-      currentRanks
+      currentRanks,
+      selectedGroupMemberships
     ] = await Promise.all([
       pageIds.length === 0
         ? Promise.resolve([])
@@ -371,6 +383,21 @@ export class KeywordService {
               rankingUrl: true,
               observedAt: true
             }
+          }),
+      keywordIds.length === 0 || !query.groupIds?.length
+        ? Promise.resolve([])
+        : this.prisma.keywordGroupMembership.findMany({
+            where: {
+              projectId,
+              keywordId: { in: keywordIds },
+              groupId: { in: [...query.groupIds] },
+              group: { workspaceId, projectId, status: "ACTIVE" }
+            },
+            orderBy: [{ createdAt: "asc" }, { groupId: "asc" }],
+            select: {
+              keywordId: true,
+              group: { select: { id: true, path: true, name: true } }
+            }
           })
     ]);
     const rankConfigurations = currentRanks.length === 0
@@ -397,6 +424,15 @@ export class KeywordService {
     const clusterNameById = new Map(
       clusters.map(({ id, name }) => [id, name])
     );
+    const selectedGroupByKeywordId = new Map<
+      string,
+      (typeof selectedGroupMemberships)[number]["group"]
+    >();
+    for (const membership of selectedGroupMemberships) {
+      if (!selectedGroupByKeywordId.has(membership.keywordId)) {
+        selectedGroupByKeywordId.set(membership.keywordId, membership.group);
+      }
+    }
     const frequenciesByKeywordId = new Map<
       string,
       SemanticKeywordListFrequencyValue[]
@@ -469,7 +505,8 @@ export class KeywordService {
           trackedKeywordIds.has(row.id),
           row.clusterId ? clusterNameById.get(row.clusterId) : undefined,
           frequenciesByKeywordId.get(row.id),
-          [...(positionsByKeywordId.get(row.id)?.values() ?? [])]
+          [...(positionsByKeywordId.get(row.id)?.values() ?? [])],
+          selectedGroupByKeywordId.get(row.id)
         )
       ),
       page: {
@@ -574,6 +611,47 @@ export class KeywordService {
         configuration
       ])
     );
+    const latestXmlSnapshotByEngine = new Map<
+      "GOOGLE" | "YANDEX",
+      (typeof rankSnapshots)[number]
+    >();
+    for (const snapshot of rankSnapshots) {
+      if (snapshot.provider !== "XMLSTOCK") continue;
+      const configuration = configurationById.get(
+        `${snapshot.trackingContextId}:${snapshot.configurationVersion}`
+      );
+      if (
+        configuration &&
+        !latestXmlSnapshotByEngine.has(configuration.searchEngine)
+      ) {
+        latestXmlSnapshotByEngine.set(
+          configuration.searchEngine,
+          snapshot
+        );
+      }
+    }
+    const latestXmlSnapshots = [...latestXmlSnapshotByEngine.values()];
+    const rankSerpResults = latestXmlSnapshots.length === 0
+      ? []
+      : await this.prisma.rankSerpResult.findMany({
+          where: {
+            snapshotId: { in: latestXmlSnapshots.map(({ id }) => id) },
+            snapshot: { workspaceId, projectId, keywordId }
+          },
+          orderBy: [
+            { snapshotObservedAt: "desc" },
+            { snapshotId: "desc" },
+            { position: "asc" }
+          ]
+        });
+    const serpResultsBySnapshotId = new Map<
+      string,
+      typeof rankSerpResults
+    >();
+    for (const result of rankSerpResults) {
+      const rows = serpResultsBySnapshotId.get(result.snapshotId) ?? [];
+      serpResultsBySnapshotId.set(result.snapshotId, [...rows, result]);
+    }
     return {
       keywordId,
       ...(keyword.note ? { note: keyword.note } : {}),
@@ -638,6 +716,33 @@ export class KeywordService {
           found: snapshot.found,
           ...(snapshot.position === null ? {} : { position: snapshot.position }),
           observedAt: snapshot.observedAt.toISOString()
+        }];
+      }),
+      competitorSnapshots: latestXmlSnapshots.flatMap((snapshot) => {
+        const context = contextById.get(snapshot.trackingContextId);
+        const configuration = configurationById.get(
+          `${snapshot.trackingContextId}:${snapshot.configurationVersion}`
+        );
+        const results = serpResultsBySnapshotId.get(snapshot.id) ?? [];
+        if (!context || !configuration || results.length === 0) return [];
+        const searchSource = rankHistorySearchSource(
+          snapshot.manifest.execution,
+          configuration.searchEngine
+        );
+        return [{
+          snapshotId: snapshot.id,
+          trackingContextId: snapshot.trackingContextId,
+          contextName: context.name,
+          searchEngine: configuration.searchEngine,
+          ...(searchSource ? { searchSource } : {}),
+          provider: "XMLSTOCK" as const,
+          observedAt: snapshot.observedAt.toISOString(),
+          results: results.map((result) => ({
+            position: result.position,
+            url: result.rankingUrl,
+            ...(result.title === null ? {} : { title: result.title }),
+            ...(result.snippet === null ? {} : { snippet: result.snippet })
+          }))
         }];
       })
     };
@@ -1899,10 +2004,11 @@ function keywordItem(
   isTracked: boolean,
   clusterName?: string,
   frequencies: readonly SemanticKeywordListFrequencyValue[] = [],
-  positions: readonly SemanticKeywordListPosition[] = []
+  positions: readonly SemanticKeywordListPosition[] = [],
+  displayGroup?: Readonly<{ id: string; path: string | null; name: string }>
 ): SemanticKeywordListItem {
   const tags = row.tags.slice(0, 50).map(({ tag }) => tag.name);
-  const group = row.memberships[0]?.group;
+  const group = displayGroup ?? row.memberships[0]?.group;
   const baseFrequency = frequencies.find(({ type }) => type === "BASE");
   const legacyBaseFrequency = baseFrequency
     ? {
@@ -2133,6 +2239,7 @@ function keywordFilterHash(
       search: normalizedSearch,
       intent: query.intent ?? null,
       groupId: query.groupId ?? null,
+      groupIds: query.groupIds ?? null,
       clusterId: query.clusterId ?? null,
       isFavorite: query.isFavorite ?? null,
       isTracked: query.isTracked ?? null,
@@ -2319,12 +2426,19 @@ async function metricSortedKeywordPage(
   if (query.isFavorite !== undefined) filters.push(Prisma.sql`k.is_favorite = ${query.isFavorite}`);
   if (query.priorityMin !== undefined) filters.push(Prisma.sql`k.priority >= ${query.priorityMin}`);
   if (query.priorityMax !== undefined) filters.push(Prisma.sql`k.priority <= ${query.priorityMax}`);
-  if (query.groupId) {
+  const groupIds = query.groupIds?.length
+    ? query.groupIds
+    : query.groupId
+      ? [query.groupId]
+      : [];
+  if (groupIds.length > 0) {
     filters.push(Prisma.sql`EXISTS (
       SELECT 1 FROM keyword_group_memberships kgm
       WHERE kgm.project_id = k.project_id
         AND kgm.keyword_id = k.id
-        AND kgm.group_id = ${query.groupId}::uuid
+        AND kgm.group_id IN (${Prisma.join(
+          groupIds.map((groupId) => Prisma.sql`${groupId}::uuid`)
+        )})
     )`);
   }
   if (query.clusterId) filters.push(Prisma.sql`k.cluster_id = ${query.clusterId}::uuid`);

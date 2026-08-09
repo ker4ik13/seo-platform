@@ -30,6 +30,7 @@ export type IconName =
   | "indexability"
   | "sitemap"
   | "folderPlus"
+  | "multiGroup"
   | "edit"
   | "arrowUp"
   | "arrowDown"
@@ -39,6 +40,7 @@ export type IconName =
   | "eye"
   | "eyeOff"
   | "panelLeftClose"
+  | "chevronRight"
   | "close";
 
 const paths: Record<IconName, string> = {
@@ -71,6 +73,7 @@ const paths: Record<IconName, string> = {
   indexability: "M12 4C7 4 3.1 8.1 2 12c1.1 3.9 5 8 10 8s8.9-4.1 10-8c-1.1-3.9-5-8-10-8Zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z",
   sitemap: "M11 3h2v4h6v5h-2V9h-4v3h3v7h-3v2h-2v-2H8v-7h3V9H7v3H5V7h6V3Z",
   folderPlus: "M3 5h7l2 2h9v12H3V5Zm2 4v8h14V9H5Zm6 1h2v2h2v2h-2v2h-2v-2H9v-2h2v-2Z",
+  multiGroup: "M3 4h6l2 2h8v11H3V4Zm2 4v7h12V8H5Zm3 10h13V9h-2v7H8v2Zm3 3h13V12h-2v7H11v2Z",
   edit: "m4 16.5-.5 4 4-.5L19 8.5 15.5 5 4 16.5Zm12.9-12.9 1.2-1.2a1.4 1.4 0 0 1 2 0l1.5 1.5a1.4 1.4 0 0 1 0 2l-1.2 1.2-3.5-3.5Z",
   arrowUp: "m12 4-7 7 1.4 1.4L11 7.8V20h2V7.8l4.6 4.6L19 11l-7-7Z",
   arrowDown: "m12 20 7-7-1.4-1.4-4.6 4.6V4h-2v13.2l-4.6-4.6L5 13l7 7Z",
@@ -80,6 +83,7 @@ const paths: Record<IconName, string> = {
   eye: "M12 5c5.2 0 8.8 4.2 10 7-1.2 2.8-4.8 7-10 7S3.2 14.8 2 12c1.2-2.8 4.8-7 10-7Zm0 2c-3.7 0-6.5 2.8-7.8 5 1.3 2.2 4.1 5 7.8 5s6.5-2.8 7.8-5C18.5 9.8 15.7 7 12 7Zm0 2.2a2.8 2.8 0 1 1 0 5.6 2.8 2.8 0 0 1 0-5.6Z",
   eyeOff: "m3.3 2 18.7 18.7-1.3 1.3-3.1-3.1A10.3 10.3 0 0 1 12 20C6.8 20 3.2 15.8 2 13c.7-1.6 2.2-3.7 4.3-5.2L2 3.3 3.3 2Zm4.5 7.3A9.3 9.3 0 0 0 4.2 13c1.3 2.2 4.1 5 7.8 5 1.5 0 2.8-.5 4-1.1l-1.7-1.7a4.2 4.2 0 0 1-5.5-5.5l-1-1Zm4.1-4.2h.1c5.2 0 8.8 4.2 10 7a13.4 13.4 0 0 1-2.1 3.4l-1.5-1.5c.6-.7 1.1-1.4 1.4-2-1.3-2.2-4.1-5-7.8-5h-.1V5.1Zm.1 4.1a2.8 2.8 0 0 1 2.8 2.8v.1l-2.9-2.9h.1Z",
   panelLeftClose: "M3 3h18v18H3V3Zm2 2v14h5V5H5Zm10.6 3.6L12.2 12l3.4 3.4 1.4-1.4-2-2 2-2-1.4-1.4Z",
+  chevronRight: "m9 4 8 8-8 8-1.5-1.5L14 12 7.5 5.5 9 4Z",
   close: "m6.7 5.3 5.3 5.3 5.3-5.3 1.4 1.4-5.3 5.3 5.3 5.3-1.4 1.4-5.3-5.3-5.3 5.3-1.4-1.4 5.3-5.3-5.3-5.3 1.4-1.4Z"
 };
 

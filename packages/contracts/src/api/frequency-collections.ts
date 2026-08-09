@@ -193,6 +193,25 @@ export interface SemanticKeywordInsights {
   readonly frequencies: readonly FrequencySnapshotSummary[];
   readonly positions: readonly SemanticKeywordPositionSummary[];
   readonly positionHistory: readonly SemanticKeywordPositionHistoryPoint[];
+  readonly competitorSnapshots?: readonly SemanticKeywordCompetitorSnapshot[];
+}
+
+export interface SemanticKeywordCompetitorSnapshot {
+  readonly snapshotId: string;
+  readonly trackingContextId: string;
+  readonly contextName: string;
+  readonly searchEngine: "GOOGLE" | "YANDEX";
+  readonly searchSource?: RankSearchSource;
+  readonly provider: "XMLSTOCK";
+  readonly observedAt: string;
+  readonly results: readonly SemanticKeywordCompetitorResult[];
+}
+
+export interface SemanticKeywordCompetitorResult {
+  readonly position: number;
+  readonly url: string;
+  readonly title?: string;
+  readonly snippet?: string;
 }
 
 export interface SemanticKeywordPositionSummary {

@@ -25,6 +25,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
     semanticKeywordIntents
   );
   const groupId = optionalUuid(query.groupId, "groupId");
+  const groupIds = optionalUuidList(query.groupIds, "groupIds");
   const clusterId = optionalUuid(query.clusterId, "clusterId");
   const isFavorite = optionalBoolean(query.isFavorite, "isFavorite");
   const isTracked = optionalBoolean(query.isTracked, "isTracked");
@@ -50,6 +51,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   ) {
     invalid("priorityMin");
   }
+  if (groupId && groupIds.length > 0) invalid("groupIds");
   if (
     priorityMax !== undefined &&
     (priorityMax < 0 || priorityMax > 100)
@@ -69,6 +71,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
     ...(search ? { search } : {}),
     ...(intent ? { intent } : {}),
     ...(groupId ? { groupId } : {}),
+    ...(groupIds.length > 0 ? { groupIds } : {}),
     ...(clusterId ? { clusterId } : {}),
     ...(isFavorite === undefined ? {} : { isFavorite }),
     ...(isTracked === undefined ? {} : { isTracked }),
@@ -76,6 +79,18 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
     ...(priorityMax === undefined ? {} : { priorityMax }),
     sort
   };
+}
+
+function optionalUuidList(value: unknown, field: string): readonly string[] {
+  const parsed = optionalSingleString(value, field);
+  if (parsed === undefined) return [];
+  const values = parsed.split(",").map((entry) => entry.trim()).filter(Boolean);
+  if (values.length < 2 || values.length > 50) invalid(field);
+  const ids = values.map((entry) => optionalUuid(entry, field));
+  if (ids.some((id) => id === undefined)) invalid(field);
+  const canonical = ids as string[];
+  if (new Set(canonical).size !== canonical.length) invalid(field);
+  return [...canonical].sort();
 }
 
 function optionalEnum<T extends string>(

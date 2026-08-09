@@ -35,7 +35,7 @@ export default function ToolsPage() {
         <div className="tool-grid">
           <a className="tool-card" href="/app/tools">
             <span>Техническое SEO</span>
-            <h2>Проверка HTTP-статусов</h2>
+            <h2>Обход сайта</h2>
             <p>
               Обход URL, sitemap и внутренних ссылок с цепочками редиректов,
               фильтрами и отдельной страницей результата.

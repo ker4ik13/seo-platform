@@ -26,6 +26,10 @@ const membershipMigrationUrl = new URL(
   "../../prisma/migrations/20260801020000_crawl_membership_absences/migration.sql",
   import.meta.url
 );
+const pageMapMetadataMigrationUrl = new URL(
+  "../../prisma/migrations/20260809200000_crawl_page_map_metadata/migration.sql",
+  import.meta.url
+);
 
 test("crawl evidence is tenant-bound, bounded and immutable", async () => {
   const sql = await readFile(migrationUrl, "utf8");
@@ -110,4 +114,21 @@ test("crawl membership compares only an exact scope and freezes absences", async
   assert.match(sql, /crawl_membership_analyses_immutable_trigger/u);
   assert.match(sql, /crawl_page_absences_immutable_trigger/u);
   assert.doesNotMatch(sql, /raw_html/iu);
+});
+
+test("page-map crawl metadata is additive and keeps existing pages visible", async () => {
+  const sql = await readFile(pageMapMetadataMigrationUrl, "utf8");
+  assert.match(
+    sql,
+    /ADD COLUMN "included_in_map" BOOLEAN NOT NULL DEFAULT true/u
+  );
+  assert.match(
+    sql,
+    /ADD COLUMN "meta_tags" JSONB NOT NULL DEFAULT '\[\]'::jsonb/u
+  );
+  assert.match(sql, /pages_project_map_updated_idx/u);
+  assert.doesNotMatch(
+    sql,
+    /\b(?:UPDATE\s+"|DELETE FROM|TRUNCATE|DROP TABLE)\b/u
+  );
 });

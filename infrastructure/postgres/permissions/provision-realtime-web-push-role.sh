@@ -41,13 +41,24 @@ psql \
   --no-psqlrc \
   --file="$script_dir/realtime-web-push.sql"
 
-printf '%s\n%s\n' \
-  "$worker_password" \
-  "$worker_password" |
-  psql \
-    --no-psqlrc \
-    --set=worker_user="$REALTIME_WEB_PUSH_DATABASE_USER" \
-    --command="SET password_encryption = 'scram-sha-256'" \
-    --command='\password :"worker_user"'
+case $REALTIME_WEB_PUSH_DATABASE_USER in
+  *[!A-Za-z0-9_]*)
+    echo "REALTIME_WEB_PUSH_DATABASE_USER must be a SQL identifier" >&2
+    exit 1
+    ;;
+esac
+
+# PostgreSQL 18 reads the interactive password meta-command from the controlling
+# TTY and hangs unattended deployments. The validated quote-free password is sent only through stdin;
+# it is never present in process arguments, psql history, or application logs.
+{
+  printf '%s\n' "SET password_encryption = 'scram-sha-256';"
+  printf "ALTER ROLE %s PASSWORD '%s';\n" \
+    "$REALTIME_WEB_PUSH_DATABASE_USER" \
+    "$worker_password"
+} | psql \
+  --no-psqlrc \
+  --set=ON_ERROR_STOP=1 \
+  --quiet
 
 unset worker_password

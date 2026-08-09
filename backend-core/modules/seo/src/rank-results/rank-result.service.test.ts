@@ -160,6 +160,42 @@ test("persists 15k rank snapshots in bounded createMany batches", async () => {
   assert.equal(harness.receiptWrites, 1);
 });
 
+test("persists XMLStock Top-10 evidence with its immutable snapshot", async () => {
+  const base = command();
+  const found = base.results[0]!;
+  const value = command({
+    provider: "XMLSTOCK",
+    connectorVersion: "xmlstock-serp@1.0.0",
+    results: [{
+      ...found,
+      serpResults: [{
+        position: 1,
+        rankingUrl: "https://competitor.example/",
+        normalizedRankingUrl: "https://competitor.example/",
+        title: "Competitor"
+      }]
+    }]
+  });
+  const input: InternalIngestRankChunkInput = {
+    ...value,
+    ingestEnvelopeHash: rankChunkIngestHash(value, sealedChunk())
+  };
+  const harness = resultHarness(1, "XMLSTOCK");
+
+  await new RankResultService(harness.prisma).ingest(input);
+
+  assert.equal(harness.serpWrites, 1);
+  assert.deepEqual(harness.persistedSerpResult, {
+    snapshotObservedAt: new Date(observedAt),
+    snapshotId,
+    position: 1,
+    rankingUrl: "https://competitor.example/",
+    normalizedRankingUrl: "https://competitor.example/",
+    title: "Competitor",
+    createdAt: appliedAt
+  });
+});
+
 function validInput(entryCount = 1): InternalIngestRankChunkInput {
   const value = command({}, entryCount);
   return {
@@ -265,13 +301,18 @@ function hash(value: string): RankManifestHash {
   return { algorithm: "SHA_256", value };
 }
 
-function resultHarness(entryCount = 1) {
+function resultHarness(
+  entryCount = 1,
+  manifestProvider: "ARSENKIN" | "XMLSTOCK" = "ARSENKIN"
+) {
   let status: "SEALED" | "CLOSED" = "SEALED";
   let receipt: Record<string, unknown> | null = null;
   let snapshotWrites = 0;
   let currentUpserts = 0;
   let receiptWrites = 0;
+  let serpWrites = 0;
   let persistedSnapshot: unknown;
+  let persistedSerpResult: unknown;
   const snapshotBatchSizes: number[] = [];
   const transactionOptions: unknown[] = [];
 
@@ -299,7 +340,7 @@ function resultHarness(entryCount = 1) {
             jobId,
             trackingContextId,
             configurationVersion: 2,
-            provider: "ARSENKIN",
+            provider: manifestProvider,
             operation: "POSITIONS",
             pairCount: entryCount,
             chunkCount: 1,
@@ -379,6 +420,13 @@ function resultHarness(entryCount = 1) {
         persistedSnapshot ??= data[0];
         return { count: data.length };
       }
+    },
+    rankSerpResult: {
+      createMany: async ({ data }: { data: readonly unknown[] }) => {
+        serpWrites += 1;
+        persistedSerpResult ??= data[0];
+        return { count: data.length };
+      }
     }
   };
   const prisma = {
@@ -407,8 +455,14 @@ function resultHarness(entryCount = 1) {
     get receiptWrites() {
       return receiptWrites;
     },
+    get serpWrites() {
+      return serpWrites;
+    },
     get persistedSnapshot() {
       return persistedSnapshot;
+    },
+    get persistedSerpResult() {
+      return persistedSerpResult;
     }
   };
 }

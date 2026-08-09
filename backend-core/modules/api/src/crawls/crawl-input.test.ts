@@ -25,7 +25,8 @@ test("accepts one same-origin bounded crawl command", () => {
       maxDepth: 3,
       maxRuntimeSeconds: 3_600,
       requestsPerMinute: 30,
-      obeyRobots: true
+      obeyRobots: true,
+      savePageMap: true
     }
   );
 });
@@ -130,7 +131,8 @@ test("normalizes bounded sitemap scope and rejects unsafe patterns", () => {
       maxDepth: 2,
       maxRuntimeSeconds: 3_600,
       requestsPerMinute: 20,
-      obeyRobots: true
+      obeyRobots: true,
+      savePageMap: true
     }
   );
   assert.throws(() =>

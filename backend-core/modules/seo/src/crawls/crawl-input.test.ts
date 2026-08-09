@@ -42,6 +42,7 @@ test("parses exact conditional validator and snapshot reuse commands", () => {
       workspaceId,
       projectId,
       crawlId,
+      purpose: "TECHNICAL_AUDIT",
       sequence: 2,
       sourceSnapshotId,
       requestedUrl: "https://example.com/page",
@@ -49,7 +50,8 @@ test("parses exact conditional validator and snapshot reuse commands", () => {
       redirectChain: [],
       inSitemap: true,
       depth: 1,
-      crawledAt: "2026-07-31T10:00:00.000Z"
+      crawledAt: "2026-07-31T10:00:00.000Z",
+      savePageMap: true
     }
   );
 });
@@ -73,6 +75,27 @@ test("accepts bounded response validators and rejects header injection", () => {
       /Invalid crawl/u
     );
   }
+});
+
+test("accepts bounded meta tags and the expanded crawl sequence", () => {
+  const parsed = internalPersistCrawlPageInput({
+    ...pageInput(),
+    sequence: 5_000,
+    savePageMap: false,
+    metaTags: [
+      { name: "description", content: "Описание" },
+      { property: "og:title", content: "Заголовок" }
+    ]
+  });
+  assert.equal(parsed.sequence, 5_000);
+  assert.equal(parsed.savePageMap, false);
+  assert.deepEqual(parsed.metaTags, [
+    { name: "description", content: "Описание" },
+    { property: "og:title", content: "Заголовок" }
+  ]);
+  assert.throws(() =>
+    internalPersistCrawlPageInput({ ...pageInput(), sequence: 5_001 })
+  );
 });
 
 function pageInput(): Readonly<Record<string, unknown>> {

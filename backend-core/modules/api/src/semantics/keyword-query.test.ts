@@ -16,6 +16,16 @@ test("parses a bounded semantic keyword query", () => {
   assert.equal(keywordListQuery({ limit: "1000" }).limit, 1_000);
   assert.deepEqual(
     keywordListQuery({
+      groupIds:
+        "01900000-0000-7000-8000-000000000012,01900000-0000-7000-8000-000000000011"
+    }).groupIds,
+    [
+      "01900000-0000-7000-8000-000000000011",
+      "01900000-0000-7000-8000-000000000012"
+    ]
+  );
+  assert.deepEqual(
+    keywordListQuery({
       intent: "COMMERCIAL",
       clusterId,
       isFavorite: "false",
@@ -55,4 +65,12 @@ test("rejects ambiguous and unbounded semantic keyword queries", () => {
   assert.throws(() => keywordListQuery({ isTracked: "yes" }), DomainError);
   assert.throws(() => keywordListQuery({ sort: "DROP_TABLE" }), DomainError);
   assert.throws(() => keywordListQuery({ clusterId: "wrong" }), DomainError);
+  assert.throws(
+    () => keywordListQuery({
+      groupId: "01900000-0000-7000-8000-000000000011",
+      groupIds:
+        "01900000-0000-7000-8000-000000000012,01900000-0000-7000-8000-000000000013"
+    }),
+    DomainError
+  );
 });

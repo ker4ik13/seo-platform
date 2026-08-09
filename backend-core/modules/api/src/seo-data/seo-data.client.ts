@@ -129,7 +129,15 @@ import {
   type ApplySemanticNegativeKeywordsInput,
   type SemanticNegativeKeywordPreset,
   type SemanticNegativeKeywordPreview,
-  type SemanticNegativeKeywordApplyResult
+  type SemanticNegativeKeywordApplyResult,
+  type CreateProjectNoteInput,
+  type UpdateProjectNoteInput,
+  type InternalCreateProjectNoteInput,
+  type InternalUpdateProjectNoteInput,
+  type InternalDeleteProjectNoteInput,
+  type ProjectNoteCollection,
+  type ProjectNoteSummary,
+  type PublicProjectNote
 } from "@seo-platform/contracts";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
 import { DomainError } from "../common/domain-error.js";
@@ -166,6 +174,11 @@ import {
   scopedInternalFrequencyOperationResult,
   scopedInternalRankOperationResult
 } from "./operation-result-response.js";
+import {
+  projectNote,
+  projectNoteCollection,
+  publicProjectNote
+} from "../notes/project-note-response.js";
 
 interface InternalContext {
   readonly tenant: TenantAuthorization;
@@ -257,6 +270,9 @@ export class SeoDataClient {
     if (query.search) url.searchParams.set("search", query.search);
     if (query.intent) url.searchParams.set("intent", query.intent);
     if (query.groupId) url.searchParams.set("groupId", query.groupId);
+    if (query.groupIds?.length) {
+      url.searchParams.set("groupIds", query.groupIds.join(","));
+    }
     if (query.clusterId) url.searchParams.set("clusterId", query.clusterId);
     if (query.isFavorite !== undefined) {
       url.searchParams.set("isFavorite", String(query.isFavorite));
@@ -1478,6 +1494,7 @@ export class SeoDataClient {
     url.searchParams.set("limit", String(query.limit));
     if (query.cursor) url.searchParams.set("cursor", query.cursor);
     if (query.search) url.searchParams.set("search", query.search);
+    if (query.pathPrefix) url.searchParams.set("pathPrefix", query.pathPrefix);
     if (query.pageType) url.searchParams.set("pageType", query.pageType);
     if (query.indexability) {
       url.searchParams.set("indexability", query.indexability);
@@ -1494,17 +1511,20 @@ export class SeoDataClient {
   }
 
   public async listProjectCrawlIssues(
-    context: InternalContext
+    context: InternalContext,
+    pageId?: string
   ): Promise<ProjectCrawlIssueCollection> {
     const scope = trackingScope(context);
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(
+        scope.projectId
+      )}/crawl-issues`,
+      this.config.services.seoData
+    );
+    if (pageId) url.searchParams.set("pageId", pageId);
     const payload = await this.request(
       "GET",
-      new URL(
-        `/internal/v1/projects/${encodeURIComponent(
-          scope.projectId
-        )}/crawl-issues`,
-        this.config.services.seoData
-      ),
+      url,
       context
     );
     return crawlIssueCollection(responseData(payload));
@@ -1666,6 +1686,141 @@ export class SeoDataClient {
     );
   }
 
+  public async listProjectNotes(
+    context: InternalContext
+  ): Promise<ProjectNoteCollection> {
+    const scope = trackingScope(context);
+    const payload = await this.request(
+      "GET",
+      projectNoteUrl(context, this.config.services.seoData),
+      context
+    );
+    const collection = projectNoteCollection(responseData(payload));
+    return {
+      notes: collection.notes.map((note) =>
+        projectNote(note, scope)
+      )
+    };
+  }
+
+  public async getProjectNote(
+    context: InternalContext,
+    noteId: string
+  ): Promise<ProjectNoteSummary> {
+    const scope = trackingScope(context);
+    const payload = await this.request(
+      "GET",
+      projectNoteUrl(context, this.config.services.seoData, noteId),
+      context
+    );
+    return projectNote(responseData(payload), { ...scope, noteId });
+  }
+
+  public async createProjectNote(
+    context: InternalContext,
+    input: CreateProjectNoteInput
+  ): Promise<ProjectNoteSummary> {
+    const scope = trackingScope(context);
+    const body: InternalCreateProjectNoteInput = {
+      ...input,
+      ...scope,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      projectNoteUrl(context, this.config.services.seoData),
+      context,
+      body
+    );
+    return projectNote(responseData(payload), scope);
+  }
+
+  public async updateProjectNote(
+    context: InternalContext,
+    noteId: string,
+    input: UpdateProjectNoteInput,
+    version: number
+  ): Promise<ProjectNoteSummary> {
+    const scope = trackingScope(context);
+    const body: InternalUpdateProjectNoteInput = {
+      ...input,
+      ...scope,
+      actorId: context.actorId,
+      version
+    };
+    const payload = await this.request(
+      "PATCH",
+      projectNoteUrl(context, this.config.services.seoData, noteId),
+      context,
+      body
+    );
+    return projectNote(responseData(payload), { ...scope, noteId });
+  }
+
+  public async deleteProjectNote(
+    context: InternalContext,
+    noteId: string,
+    version: number
+  ): Promise<void> {
+    const scope = trackingScope(context);
+    const body: InternalDeleteProjectNoteInput = {
+      ...scope,
+      actorId: context.actorId,
+      version
+    };
+    await this.request(
+      "DELETE",
+      projectNoteUrl(context, this.config.services.seoData, noteId),
+      context,
+      body
+    );
+  }
+
+  public async getPublicProjectNote(
+    token: string,
+    requestId: string
+  ): Promise<PublicProjectNote> {
+    const payload = await this.publicRequest(
+      new URL(
+        `/internal/v1/public/project-notes/${encodeURIComponent(token)}`,
+        this.config.services.seoData
+      ),
+      requestId
+    );
+    return publicProjectNote(responseData(payload));
+  }
+
+  private async publicRequest(url: URL, requestId: string): Promise<unknown> {
+    const token = this.config.seoDataApiToken;
+    if (!token) throw dependencyUnavailable();
+    const headers = new Headers({
+      Accept: "application/json",
+      "X-Internal-Token": token,
+      "X-Request-Id": requestId
+    });
+    let response: SeoDataTransportResponse;
+    try {
+      response = this.transport
+        ? await this.transport.request({
+            method: "GET",
+            url,
+            headers: Object.fromEntries(headers.entries()),
+            timeoutMs: this.config.dependencyTimeoutMs
+          })
+        : await fetch(url, {
+            method: "GET",
+            headers,
+            redirect: "error",
+            signal: AbortSignal.timeout(this.config.dependencyTimeoutMs)
+          });
+    } catch {
+      throw dependencyUnavailable();
+    }
+    const payload = await response.json().catch(() => undefined);
+    if (!response.ok) throw upstreamError(response.status, payload);
+    return payload;
+  }
+
   private async request(
     method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE",
     url: URL,
@@ -1762,6 +1917,7 @@ export function semanticKeywordInsights(
 ): SemanticKeywordInsights {
   const input = objectValue(value);
   const positionHistory = input?.positionHistory ?? [];
+  const competitorSnapshots = input?.competitorSnapshots ?? [];
   if (
     !input ||
     input.keywordId !== keywordId ||
@@ -1772,7 +1928,9 @@ export function semanticKeywordInsights(
     (input.note !== undefined &&
       (typeof input.note !== "string" || input.note.length > 4_000)) ||
     !Array.isArray(positionHistory) ||
-    positionHistory.length > 240
+    positionHistory.length > 240 ||
+    !Array.isArray(competitorSnapshots) ||
+    competitorSnapshots.length > 2
   ) {
     throw invalidResponse();
   }
@@ -1906,8 +2064,72 @@ export function semanticKeywordInsights(
         ...(typeof item.position === "number" ? { position: item.position } : {}),
         observedAt: item.observedAt
       };
+    }),
+    competitorSnapshots: competitorSnapshots.map((value) => {
+      const item = objectValue(value);
+      if (
+        !item ||
+        !requiredString(item.snapshotId) ||
+        !requiredString(item.trackingContextId) ||
+        !requiredString(item.contextName) ||
+        !["GOOGLE", "YANDEX"].includes(String(item.searchEngine)) ||
+        (item.searchSource !== undefined &&
+          !["LIVE", "SEARCH_API"].includes(String(item.searchSource))) ||
+        item.provider !== "XMLSTOCK" ||
+        !validDate(item.observedAt) ||
+        !Array.isArray(item.results) ||
+        item.results.length < 1 ||
+        item.results.length > 10
+      ) throw invalidResponse();
+      const results = item.results.map((value, index) => {
+        const result = objectValue(value);
+        if (
+          !result ||
+          !Number.isSafeInteger(result.position) ||
+          Number(result.position) !== index + 1 ||
+          !validHttpUrl(result.url) ||
+          (result.title !== undefined &&
+            (typeof result.title !== "string" || result.title.length > 2_048)) ||
+          (result.snippet !== undefined &&
+            (typeof result.snippet !== "string" || result.snippet.length > 8_192))
+        ) throw invalidResponse();
+        return {
+          position: Number(result.position),
+          url: result.url,
+          ...(typeof result.title === "string" ? { title: result.title } : {}),
+          ...(typeof result.snippet === "string" ? { snippet: result.snippet } : {})
+        };
+      });
+      return {
+        snapshotId: item.snapshotId,
+        trackingContextId: item.trackingContextId,
+        contextName: item.contextName,
+        searchEngine: item.searchEngine as "GOOGLE" | "YANDEX",
+        ...(item.searchSource === "LIVE" || item.searchSource === "SEARCH_API"
+          ? { searchSource: item.searchSource }
+          : {}),
+        provider: "XMLSTOCK" as const,
+        observedAt: item.observedAt,
+        results
+      };
     })
   };
+}
+
+function validHttpUrl(value: unknown): value is string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 4_096) {
+    return false;
+  }
+  try {
+    const url = new URL(value);
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      !url.username &&
+      !url.password
+    );
+  } catch {
+    return false;
+  }
 }
 
 function projectPositionSummary(value: unknown): ProjectPositionSummary {
@@ -3554,6 +3776,19 @@ function trackingScope(context: InternalContext): {
     workspaceId: context.tenant.workspaceId,
     projectId: requiredProjectId(context.tenant)
   };
+}
+
+function projectNoteUrl(
+  context: InternalContext,
+  baseUrl: string,
+  noteId?: string
+): URL {
+  const projectId = requiredProjectId(context.tenant);
+  const base = `/internal/v1/projects/${encodeURIComponent(projectId)}/notes`;
+  return new URL(
+    noteId ? `${base}/${encodeURIComponent(noteId)}` : base,
+    baseUrl
+  );
 }
 
 function trackingContextUrl(

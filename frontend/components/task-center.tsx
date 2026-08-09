@@ -401,7 +401,7 @@ function rankTask(value: RankJobSummary): ProjectTask {
 function crawlTask(value: TechnicalCrawlSummary): ProjectTask {
   const httpStatusCheck = value.config.purpose === "HTTP_STATUS_CHECK";
   return {
-    id: value.id, kind: "CRAWL", resultKind: "crawl", title: httpStatusCheck ? "Проверка HTTP-статусов" : "Технический аудит",
+    id: value.id, kind: "CRAWL", resultKind: "crawl", title: httpStatusCheck ? "Обход сайта" : "Технический аудит",
     description: `${value.config.startUrls.length} стартовых URL · до ${formatInteger(value.config.maxUrls)} страниц`,
     statusLabel: operationStatusLabel(value.status), column: taskColumn(value.status), progressCurrent: value.processedUrls,
     progressTotal: Math.max(value.discoveredUrls, value.processedUrls), createdAt: value.createdAt,

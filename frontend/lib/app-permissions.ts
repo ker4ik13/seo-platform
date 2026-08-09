@@ -19,6 +19,14 @@ const PROJECT_UPDATE_ROLES = new Set([
 ]);
 const PROJECT_ARCHIVE_ROLES = new Set(["OWNER", "ADMIN", "SEO_LEAD"]);
 const PROJECT_RESTORE_ROLES = new Set(["OWNER", "ADMIN"]);
+const PROJECT_DELETE_ROLES = new Set(["OWNER", "ADMIN"]);
+const PROJECT_NOTE_EDIT_ROLES = new Set([
+  "OWNER",
+  "ADMIN",
+  "SEO_LEAD",
+  "SEO_SPECIALIST",
+  "CONTENT_EDITOR"
+]);
 const PROJECT_TRANSFER_ROLES = new Set(["OWNER", "ADMIN"]);
 const BILLING_VIEW_ROLES = new Set(["OWNER", "ADMIN", "SEO_LEAD"]);
 const BILLING_MANAGE_PLAN_ROLES = new Set(["OWNER", "ADMIN"]);
@@ -132,6 +140,29 @@ export function canRestoreProject(
     roleCode,
     projectAccessLevel,
     "project.restore"
+  );
+}
+
+export function canDeleteProject(
+  roleCode: string | undefined,
+  projectAccessLevel?: ProjectAccessLevel
+): boolean {
+  return Boolean(
+    roleCode &&
+      PROJECT_DELETE_ROLES.has(roleCode) &&
+      projectAccessLevel === undefined
+  );
+}
+
+export function canEditProjectNotes(
+  roleCode: string | undefined,
+  projectAccessLevel?: ProjectAccessLevel
+): boolean {
+  return Boolean(
+    roleCode &&
+      PROJECT_NOTE_EDIT_ROLES.has(roleCode) &&
+      projectAccessLevel !== "NONE" &&
+      projectAccessLevel !== "VIEWER"
   );
 }
 

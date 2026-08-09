@@ -29,6 +29,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   const groupId = groupIdValue
     ? assertUuid(groupIdValue, "groupId")
     : undefined;
+  const groupIds = optionalUuidList(query.groupIds, "groupIds");
   const clusterIdValue = optionalSingleString(query.clusterId, "clusterId");
   const clusterId = clusterIdValue
     ? assertUuid(clusterIdValue, "clusterId")
@@ -52,6 +53,9 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
       "limit",
       `Must be an integer between 1 and ${semanticKeywordMaxPageSize}`
     );
+  }
+  if (groupId && groupIds.length > 0) {
+    invalid("groupIds", "Must not be combined with groupId");
   }
   if (cursor && !CURSOR_PATTERN.test(cursor)) {
     invalid("cursor", "Must be a valid pagination cursor");
@@ -85,6 +89,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
     ...(search ? { search } : {}),
     ...(intent ? { intent } : {}),
     ...(groupId ? { groupId } : {}),
+    ...(groupIds.length > 0 ? { groupIds } : {}),
     ...(clusterId ? { clusterId } : {}),
     ...(isFavorite === undefined ? {} : { isFavorite }),
     ...(isTracked === undefined ? {} : { isTracked }),
@@ -92,6 +97,20 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
     ...(priorityMax === undefined ? {} : { priorityMax }),
     sort
   };
+}
+
+function optionalUuidList(value: unknown, field: string): readonly string[] {
+  const parsed = optionalSingleString(value, field);
+  if (parsed === undefined) return [];
+  const values = parsed.split(",").map((entry) => entry.trim()).filter(Boolean);
+  if (values.length < 2 || values.length > 50) {
+    invalid(field, "Must contain between 2 and 50 comma-separated UUIDs");
+  }
+  const ids = values.map((entry) => assertUuid(entry, field));
+  if (new Set(ids).size !== ids.length) {
+    invalid(field, "Must contain unique UUIDs");
+  }
+  return [...ids].sort();
 }
 
 function optionalEnum<T extends string>(

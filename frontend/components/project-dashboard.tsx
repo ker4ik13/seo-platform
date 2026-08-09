@@ -397,7 +397,7 @@ function dashboardJobs(data: DashboardData): readonly DashboardJob[] {
     })),
     ...data.crawls.crawls.map((job): DashboardJob => ({
       id: job.id,
-      title: job.config.purpose === "HTTP_STATUS_CHECK" ? "Проверка HTTP-статусов" : "Технический аудит",
+      title: job.config.purpose === "HTTP_STATUS_CHECK" ? "Обход сайта" : "Технический аудит",
       status: job.status,
       createdAt: job.createdAt,
       resultKind: "crawl"

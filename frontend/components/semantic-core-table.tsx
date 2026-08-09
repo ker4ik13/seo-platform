@@ -262,6 +262,7 @@ export function SemanticCoreTable({
     readonly SemanticTrashRecoveryItem[]
   >([]);
   const [groups, setGroups] = useState<readonly SemanticKeywordGroup[]>([]);
+  const [multiGroupIds, setMultiGroupIds] = useState<readonly string[]>([]);
   const [clusters, setClusters] = useState<readonly SemanticCluster[]>([]);
   const [customColumns, setCustomColumns] = useState<
     readonly SemanticCustomColumn[]
@@ -344,8 +345,12 @@ export function SemanticCoreTable({
     scrollTop: 0
   });
   const keywordQueryConfig = useMemo(
-    () => ({ filters: viewConfig.filters, sort: viewConfig.sort }),
-    [viewConfig.filters, viewConfig.sort]
+    () => ({
+      filters: viewConfig.filters,
+      sort: viewConfig.sort,
+      ...(multiGroupIds.length > 1 ? { groupIds: multiGroupIds } : {})
+    }),
+    [multiGroupIds, viewConfig.filters, viewConfig.sort]
   );
   const debouncedSearch = useDebouncedValue(
     draftConfig.filters.search ?? "",
@@ -357,6 +362,7 @@ export function SemanticCoreTable({
   }, [debouncedSearch]);
 
   useEffect(() => {
+    setMultiGroupIds([]);
     const preferences = readSemanticLayoutPreferences(
       projectId,
       window.localStorage
@@ -705,6 +711,7 @@ export function SemanticCoreTable({
   function submitFilters(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     const { search: draftSearch, ...otherFilters } = draftConfig.filters;
+    if (otherFilters.groupId) setMultiGroupIds([]);
     const search = draftSearch?.trim();
     setViewConfig({
       ...draftConfig,
@@ -749,6 +756,7 @@ export function SemanticCoreTable({
     });
     setDraftConfig((current) => reset(current));
     setViewConfig((current) => reset(current));
+    setMultiGroupIds([]);
   }
 
   function updateFilter(patch: Partial<SemanticViewFilters>): void {
@@ -804,8 +812,30 @@ export function SemanticCoreTable({
     };
     setDraftConfig((current) => apply(current));
     setViewConfig((current) => apply(current));
+    setMultiGroupIds([]);
     setCheckedIds(new Set());
     setBulkNotice(undefined);
+  }
+
+  function openMultipleGroups(groupIds: readonly string[]): void {
+    const uniqueGroupIds = [...new Set(groupIds)].sort();
+    if (uniqueGroupIds.length < 2) return;
+    const apply = (current: SemanticViewConfig): SemanticViewConfig => {
+      const { groupId: ignored, ...filters } = current.filters;
+      void ignored;
+      return {
+        ...current,
+        sort: folderSortFor(undefined),
+        filters
+      };
+    };
+    setDraftConfig((current) => apply(current));
+    setViewConfig((current) => apply(current));
+    setMultiGroupIds(uniqueGroupIds);
+    setCheckedIds(new Set());
+    setHighlightedIds(new Set());
+    highlightAnchorIdRef.current = undefined;
+    setBulkNotice(`Открыто групп: ${formatInteger(uniqueGroupIds.length)}`);
   }
 
   function folderSortFor(
@@ -1099,6 +1129,7 @@ export function SemanticCoreTable({
   }
 
   function applySavedView(view: SemanticSavedView): void {
+    setMultiGroupIds([]);
     setDraftConfig(view.config);
     setViewConfig(view.config);
   }
@@ -1107,7 +1138,7 @@ export function SemanticCoreTable({
     try {
       const result = await loadKeywordPage(
         projectId,
-        viewConfig,
+        keywordQueryConfig,
         undefined,
         undefined,
         pageSize
@@ -1129,7 +1160,7 @@ export function SemanticCoreTable({
     try {
       const result = await loadKeywordPage(
         projectId,
-        viewConfig,
+        keywordQueryConfig,
         page.nextCursor,
         undefined,
         pageSize
@@ -1371,6 +1402,47 @@ export function SemanticCoreTable({
     highlightAnchorIdRef.current = highlight.anchorId;
     setHighlightedIds(highlight.highlightedIds);
     setRightSidebar({ type: "KEYWORD", keywordId: item.id });
+    tableScrollRef.current?.focus({ preventScroll: true });
+  }
+
+  function navigateKeywordRows(event: ReactKeyboardEvent<HTMLDivElement>): void {
+    if (
+      (event.key !== "ArrowUp" && event.key !== "ArrowDown") ||
+      isEditableCopyTarget(event.target) ||
+      (event.target instanceof HTMLElement &&
+        event.target.closest("button, a, [role='button']"))
+    ) return;
+    const currentId = rightSidebar?.type === "KEYWORD"
+      ? rightSidebar.keywordId
+      : highlightAnchorIdRef.current;
+    const currentIndex = currentId
+      ? items.findIndex(({ id }) => id === currentId)
+      : -1;
+    if (currentIndex < 0 || items.length === 0) return;
+    const direction = event.key === "ArrowDown" ? 1 : -1;
+    const nextIndex = Math.min(
+      items.length - 1,
+      Math.max(0, currentIndex + direction)
+    );
+    if (nextIndex === currentIndex) return;
+    event.preventDefault();
+    const nextItem = items[nextIndex]!;
+    const highlight = semanticHighlightAfterRowClick(
+      items.map(({ id }) => id),
+      event.shiftKey
+        ? highlightAnchorIdRef.current ?? currentId
+        : undefined,
+      nextItem.id,
+      event.shiftKey
+    );
+    highlightAnchorIdRef.current = highlight.anchorId;
+    setHighlightedIds(highlight.highlightedIds);
+    setRightSidebar({ type: "KEYWORD", keywordId: nextItem.id });
+    scrollKeywordIntoView(
+      tableScrollRef.current,
+      nextIndex,
+      viewConfig.density
+    );
   }
 
   function toggleKeywordRow(
@@ -1543,6 +1615,50 @@ export function SemanticCoreTable({
     } catch (requestError) {
       setMutationError(keywordMutationError(requestError));
     }
+  }
+
+  async function changeGroupColors(
+    selectedGroups: readonly SemanticGroupTreeItem[],
+    color: string
+  ): Promise<void> {
+    if (saving || selectedGroups.length === 0) return;
+    setSaving(true);
+    setMutationError(undefined);
+    const basePath = `/app/api/projects/${encodeURIComponent(projectId)}/keyword-groups`;
+    const results = await Promise.allSettled(
+      selectedGroups.map((group) =>
+        browserApiRequest<SemanticKeywordGroup>(
+          `${basePath}/${encodeURIComponent(group.id)}`,
+          {
+            method: "PATCH",
+            ifMatch: group.version,
+            body: {
+              name: group.name,
+              color,
+              parentId: group.parentId ?? null,
+              position: group.position
+            }
+          }
+        )
+      )
+    );
+    const changed = results.filter(({ status }) => status === "fulfilled").length;
+    const firstFailure = results.find(
+      (result): result is PromiseRejectedResult => result.status === "rejected"
+    );
+    if (firstFailure) {
+      setMutationError(
+        `Цвет изменён у ${changed} из ${selectedGroups.length}. ${keywordMutationError(firstFailure.reason)}`
+      );
+    } else {
+      setBulkNotice(
+        changed === 1
+          ? `Цвет группы «${selectedGroups[0]?.name ?? ""}» изменён`
+          : `Цвет изменён у групп: ${changed}`
+      );
+    }
+    setSaving(false);
+    onGroupsChanged();
   }
 
   async function moveGroupsImmediately(
@@ -1856,10 +1972,14 @@ export function SemanticCoreTable({
           ? { activeGroupId: viewConfig.filters.groupId }
           : {})}
         expandedIds={expandedGroupIds}
+        activeGroupIds={multiGroupIds}
         groups={groups as readonly SemanticGroupTreeItem[]}
         onCreate={(parentId) => setGroupDialog({ mode: "create", ...(parentId ? { parentId } : {}) })}
         onDelete={(selectedGroups) => setGroupDialog({ mode: "delete", groups: selectedGroups })}
         onExport={(group) => openExport(group.id)}
+        onColorChange={(selectedGroups, color) =>
+          void changeGroupColors(selectedGroups, color)
+        }
         onDropMove={(selectedGroups, target) =>
           void moveGroupsImmediately(selectedGroups, target)
         }
@@ -1869,6 +1989,7 @@ export function SemanticCoreTable({
             groups: selectedGroups
           })
         }
+        onOpenSelection={openMultipleGroups}
         onKeywordDrop={(keywordIds, targetId) => {
           const availableIds = keywordIds.filter((id) =>
             items.some((item) => item.id === id)
@@ -2536,6 +2657,7 @@ export function SemanticCoreTable({
           <div
             aria-busy={loading}
             className={`semantic-table-wrap${loading ? " refreshing" : ""}`}
+            onKeyDown={navigateKeywordRows}
             onScroll={(event) =>
               setTableViewport({
                 height: event.currentTarget.clientHeight,
@@ -2596,7 +2718,8 @@ export function SemanticCoreTable({
                     item,
                     column,
                     customColumns,
-                    (customColumn) => setCustomValueEditor({ keyword: item, column: customColumn })
+                    (customColumn) => setCustomValueEditor({ keyword: item, column: customColumn }),
+                    multiGroupIds.length > 1
                   )
                 };
               })}
@@ -2904,7 +3027,9 @@ function semanticVirtualRows(
 
 async function loadKeywordPage(
   projectId: string,
-  config: Pick<SemanticViewConfig, "filters" | "sort">,
+  config: Pick<SemanticViewConfig, "filters" | "sort"> & Readonly<{
+    groupIds?: readonly string[];
+  }>,
   cursor?: string,
   signal?: AbortSignal,
   limit = 100
@@ -2914,6 +3039,7 @@ async function loadKeywordPage(
   if (filters.search) query.set("search", filters.search);
   if (filters.intent) query.set("intent", filters.intent);
   if (filters.groupId) query.set("groupId", filters.groupId);
+  if (config.groupIds?.length) query.set("groupIds", config.groupIds.join(","));
   if (filters.clusterId) query.set("clusterId", filters.clusterId);
   if (filters.isFavorite !== undefined) {
     query.set("isFavorite", String(filters.isFavorite));
@@ -3072,7 +3198,8 @@ function keywordColumn(
   item: SemanticKeyword,
   column: SemanticViewColumn,
   customColumns: readonly SemanticCustomColumn[],
-  onEditCustom: (column: SemanticCustomColumn) => void
+  onEditCustom: (column: SemanticCustomColumn) => void,
+  multiGroupMode = false
 ) {
   if (column.startsWith("custom:")) {
     const customColumn = customColumns.find(
@@ -3108,8 +3235,9 @@ function keywordColumn(
             )}
           </strong>
           <small>
-            {item.language.toUpperCase()}
-            {item.isTracked ? " · отслеживается" : ""}
+            {multiGroupMode
+              ? visibleSemanticGroupPath(item.groupPath)
+              : `${item.language.toUpperCase()}${item.isTracked ? " · отслеживается" : ""}`}
           </small>
         </>
       );
@@ -3183,7 +3311,7 @@ function keywordRelevantUrl(
   if (position && !position.found) return keywordNotFoundMark(searchEngine);
   const url = position?.rankingUrl;
   const presentation = url
-    ? externalPageUrlPresentation(url)
+    ? externalPageUrlPresentation(url, Number.MAX_SAFE_INTEGER)
     : undefined;
   return presentation ? (
     <a href={presentation.href} onClick={(event) => event.stopPropagation()} rel="noreferrer noopener" target="_blank" title={presentation.href}>
@@ -3428,6 +3556,32 @@ function isEditableCopyTarget(target: EventTarget | null): boolean {
     target instanceof HTMLSelectElement ||
     (target instanceof HTMLElement && target.isContentEditable)
   );
+}
+
+function scrollKeywordIntoView(
+  viewport: HTMLDivElement | null,
+  itemIndex: number,
+  density: SemanticViewConfig["density"]
+): void {
+  if (!viewport) return;
+  const headerHeight = 35;
+  const rowHeight = density === "COMPACT" ? 34 : 38;
+  const rowTop = headerHeight + itemIndex * rowHeight;
+  const rowBottom = rowTop + rowHeight;
+  const visibleTop = viewport.scrollTop + headerHeight;
+  const visibleBottom = viewport.scrollTop + viewport.clientHeight;
+  if (rowTop < visibleTop) {
+    viewport.scrollTo({ top: Math.max(0, rowTop - headerHeight) });
+  } else if (rowBottom > visibleBottom) {
+    viewport.scrollTo({
+      top: Math.max(0, rowBottom - viewport.clientHeight)
+    });
+  }
+}
+
+function visibleSemanticGroupPath(path: string | undefined): string {
+  if (!path || path.startsWith("__system__/")) return "Без группы";
+  return path;
 }
 
 function formatDate(value: string): string {

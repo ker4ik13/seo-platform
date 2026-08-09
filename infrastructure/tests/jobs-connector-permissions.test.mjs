@@ -200,7 +200,7 @@ test("connector role fails closed on direct ACL outside the exact database allow
   assert.doesNotMatch(normalized, /REVOKE[^;]+ON DATABASE (?!jobs_db)/u);
 });
 
-test("connector role rejects membership edges and never embeds its password in SQL", async () => {
+test("connector role rejects membership edges and streams its password only to psql", async () => {
   const [sql, provisioner] = await Promise.all([
     readFile(permissionUrl, "utf8"),
     readFile(provisionerUrl, "utf8")
@@ -245,17 +245,17 @@ test("connector role rejects membership edges and never embeds its password in S
     /JOBS_CONNECTOR_DATABASE_PASSWORD must not use an example placeholder/u
   );
   const forceScramIndex = provisioner.indexOf(
-    `--command="SET password_encryption = 'scram-sha-256'"`
+    `printf '%s\\n' "SET password_encryption = 'scram-sha-256';"`
   );
   const passwordCommandIndex = provisioner.indexOf(
-    `--command='\\password :"connector_user"'`
+    `printf "ALTER ROLE %s PASSWORD '%s';\\n"`
   );
   assert.ok(forceScramIndex >= 0);
   assert.ok(passwordCommandIndex > forceScramIndex);
-  assert.match(provisioner, /--command='\\password :"connector_user"'/u);
+  assert.doesNotMatch(provisioner, /\\password/u);
   assert.match(
     provisioner,
-    /printf '%s\\n%s\\n'[\s\S]*connector_password[\s\S]*\|[\s\S]*psql/u
+    /printf "ALTER ROLE %s PASSWORD '%s';\\n"[\s\S]*connector_password[\s\S]*\}[\s\S]*\| psql/u
   );
   assert.doesNotMatch(
     provisioner,

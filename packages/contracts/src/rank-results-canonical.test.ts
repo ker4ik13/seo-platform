@@ -246,6 +246,59 @@ test("accepts canonical XMLStock position ingest commands", () => {
   );
 });
 
+test("canonicalizes a bounded ordered XMLStock Top-10 evidence set", () => {
+  const baseChunk = sealedChunk();
+  const firstEntry = baseChunk.entries[0]!;
+  const firstResult = ingestCommand().results[0]!;
+  if (!firstResult.found) throw new Error("Fixture is invalid");
+  const chunk = rehashChunk({ ...baseChunk, entries: [firstEntry] });
+  const command = {
+    ...ingestCommand(),
+    manifestChunkHash: chunk.chunkHash,
+    provider: "XMLSTOCK",
+    providerRequestId: "xmlstock-task-with-serp",
+    connectorVersion: "xmlstock-serp@1",
+    results: [{
+      ...firstResult,
+      serpResults: [
+        {
+          position: 1,
+          rankingUrl: "https://competitor.example/",
+          normalizedRankingUrl: "https://competitor.example/",
+          title: "Competitor"
+        },
+        {
+          position: 2,
+          rankingUrl: "https://project.example/page",
+          normalizedRankingUrl: "https://project.example/page"
+        }
+      ]
+    }]
+  } satisfies InternalRankChunkIngestCommand;
+
+  assert.equal(
+    rankChunkIngestHashPreimage(command, chunk).results[0]?.serpResults?.length,
+    2
+  );
+  const resultWithSerp = command.results[0];
+  if (!resultWithSerp?.found || !resultWithSerp.serpResults) {
+    throw new Error("Fixture is invalid");
+  }
+  assert.throws(
+    () => rankChunkIngestHashPreimage({
+      ...command,
+      results: [{
+        ...resultWithSerp,
+        serpResults: resultWithSerp.serpResults.map((result) => ({
+          ...result,
+          position: result.position + 1
+        }))
+      }]
+    }, chunk),
+    /Invalid canonical rank result field: serpResult\.position/u
+  );
+});
+
 test("accepts XMLStock per-keyword chunks after the first chunk", () => {
   const baseChunk = sealedChunk();
   const firstEntry = baseChunk.entries[0];

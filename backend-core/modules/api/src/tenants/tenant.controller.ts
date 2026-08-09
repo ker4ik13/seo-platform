@@ -14,6 +14,7 @@ import {
 import type {
   ApiCollectionResponse,
   ApiResponse,
+  ProjectDeletionResult,
   ProjectSummary,
   WorkspaceSummary
 } from "@seo-platform/contracts";
@@ -24,6 +25,7 @@ import {
 } from "../common/api-response.js";
 import { requiredVersion } from "../common/version-precondition.js";
 import { CurrentPrincipal } from "../identity/current-principal.js";
+import { RecentAuthenticationService } from "../identity/recent-authentication.service.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
 import { requestContext } from "../identity/request-context.js";
 import {
@@ -37,6 +39,7 @@ import type { TenantRequest } from "../authorization/authorization.types.js";
 import {
   createProjectInput,
   createWorkspaceInput,
+  deleteProjectInput,
   updateProjectInput,
   updateWorkspaceAvatarInput,
   updateWorkspaceInput
@@ -45,7 +48,10 @@ import { TenantService } from "./tenant.service.js";
 
 @Controller("api/v1")
 export class TenantController {
-  public constructor(private readonly tenants: TenantService) {}
+  public constructor(
+    private readonly tenants: TenantService,
+    private readonly recentAuthentication: RecentAuthenticationService
+  ) {}
 
   @Get("workspaces")
   @UseGuards(SessionAuthGuard)
@@ -290,6 +296,25 @@ export class TenantController {
       authorizedProjectSummary(request, project),
       project.version
     );
+  }
+
+  @Delete("projects/:projectId")
+  @RequirePermission("project.delete")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async deleteProject(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<ProjectDeletionResult>> {
+    this.recentAuthentication.assert(principal);
+    const result = await this.tenants.deleteProject(
+      principal.userId,
+      requiredProjectId(request),
+      requiredVersion(headerValue(request, "if-match")),
+      deleteProjectInput(body),
+      requestContext(request)
+    );
+    return apiResponse(request, result);
   }
 }
 function requiredWorkspaceId(request: TenantRequest): string {

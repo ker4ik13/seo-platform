@@ -21,6 +21,7 @@ import { FrequencyModule } from "./frequencies/frequency.module.js";
 import { OperationResultModule } from "./operation-results/operation-result.module.js";
 import { ProjectWorkspaceTransferModule } from "./project-transfers/project-workspace-transfer.module.js";
 import { NegativeKeywordModule } from "./negative-keywords/negative-keyword.module.js";
+import { ProjectNoteModule } from "./notes/project-note.module.js";
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { NegativeKeywordModule } from "./negative-keywords/negative-keyword.modu
     FrequencyModule,
     OperationResultModule,
     NegativeKeywordModule,
+    ProjectNoteModule,
     ProjectWorkspaceTransferModule
   ]
 })

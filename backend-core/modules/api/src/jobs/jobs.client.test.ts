@@ -193,7 +193,8 @@ test("upgrades a rolling legacy crawl response with safe scope defaults", async 
       maxDepth: 3,
       maxRuntimeSeconds: 3_600,
       requestsPerMinute: 30,
-      obeyRobots: true
+      obeyRobots: true,
+      savePageMap: true
     });
   } finally {
     globalThis.fetch = originalFetch;
@@ -220,7 +221,8 @@ test("accepts explicit homepage redirect checks from the execution service", asy
         maxDepth: 0,
         maxRuntimeSeconds: 3_600,
         requestsPerMinute: 30,
-        obeyRobots: true
+        obeyRobots: true,
+        savePageMap: true
       },
       discoveredUrls: 7
     }))) as typeof fetch;
@@ -236,6 +238,27 @@ test("accepts explicit homepage redirect checks from the execution service", asy
       "MULTIPLE_SLASHES"
     ]);
     assert.equal(crawl.discoveredUrls, 7);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("preserves a disabled Page Map projection from the execution service", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (): Promise<Response> =>
+    dataResponse(crawlResponseData({
+      config: {
+        ...crawlResponseData().config as object,
+        savePageMap: false
+      }
+    }))) as typeof fetch;
+
+  try {
+    const crawl = await client().getTechnicalCrawl(
+      projectContext("request-crawl-page-map-disabled-001"),
+      crawlId
+    );
+    assert.equal(crawl.config.savePageMap, false);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -271,6 +294,12 @@ test("rejects secret-bearing or contradictory technical crawl responses", async 
         config: {
           ...crawlResponseData().config as object,
           startUrls: ["https://user:secret@example.com/"]
+        }
+      }),
+      crawlResponseData({
+        config: {
+          ...crawlResponseData().config as object,
+          savePageMap: "yes"
         }
       }),
       crawlResponseData({
@@ -1210,6 +1239,7 @@ function crawlResponseData(
     projectId,
     status: "QUEUED",
     config: {
+      purpose: "TECHNICAL_AUDIT",
       startUrls: ["https://example.com/"],
       sitemapUrls: [],
       includePatterns: [],
@@ -1219,7 +1249,8 @@ function crawlResponseData(
       maxDepth: 3,
       maxRuntimeSeconds: 3_600,
       requestsPerMinute: 30,
-      obeyRobots: true
+      obeyRobots: true,
+      savePageMap: true
     },
     discoveredUrls: 1,
     processedUrls: 0,

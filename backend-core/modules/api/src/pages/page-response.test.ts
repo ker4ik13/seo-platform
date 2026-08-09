@@ -44,12 +44,57 @@ test("accepts exact tenant-scoped page responses", () => {
   );
   assert.deepEqual(
     scopedProjectPageCollection(
-      { pages: [page], nextCursor: "cursor_page_1" },
+      {
+        pages: [page],
+        nextCursor: "cursor_page_1",
+        structureUrls: ["https://example.com/", "https://example.com/catalog"]
+      },
       workspaceId,
       projectId
-    ).pages,
-    [page]
+    ).structureUrls,
+    ["https://example.com/", "https://example.com/catalog"]
   );
+});
+
+test("accepts bounded latest crawl evidence for the page inspector", () => {
+  const result = scopedProjectPage(
+    {
+      ...page,
+      openIssueCount: 2,
+      latestCrawl: {
+        crawlId: "01900000-0000-7000-8000-000000000004",
+        statusCode: 200,
+        responseTimeMs: 125,
+        sizeBytes: 4096,
+        contentType: "text/html",
+        title: "Главная",
+        description: "Описание",
+        h1: "Главная",
+        h1Count: 1,
+        canonicalUrl: "https://example.com/",
+        robots: "index,follow",
+        language: "ru",
+        metaTags: [
+          { property: "og:title", content: "Главная" }
+        ],
+        imageCount: 3,
+        imagesMissingAlt: 1,
+        structuredDataTypes: ["Organization"],
+        wordCount: 500,
+        redirectChain: [],
+        inSitemap: true,
+        depth: 0,
+        indexability: "INDEXABLE",
+        crawledAt: "2026-08-09T10:00:00.000Z"
+      }
+    },
+    workspaceId,
+    projectId,
+    pageId
+  );
+
+  assert.equal(result.openIssueCount, 2);
+  assert.equal(result.latestCrawl?.metaTags[0]?.property, "og:title");
 });
 
 test("rejects cross-tenant and response-shape drift", () => {

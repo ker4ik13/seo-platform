@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import {
   crawlPageChangeFields,
+  technicalCrawlMaxUrlLimit,
   type CrawlPageChangeField,
   type InternalCrawlPageValidator,
   type InternalFinalizeCrawlSnapshotInput,
@@ -87,6 +88,7 @@ export class CrawlSnapshotService {
     input: InternalPersistCrawlPageInput
   ): Promise<InternalPersistCrawlPageReceipt> {
     const httpStatusOnly = input.purpose === "HTTP_STATUS_CHECK";
+    const savePageMap = input.savePageMap ?? true;
     const identity = normalizePageUrl(
       httpStatusOnly ? input.requestedUrl : input.finalUrl
     );
@@ -150,13 +152,16 @@ export class CrawlSnapshotService {
             }
           });
       const page = current
-        ? await transaction.page.update({
-            where: { id: current.id },
-            data: {
-              ...pageProjection(input),
-              version: { increment: 1 }
-            }
-          })
+        ? savePageMap
+          ? await transaction.page.update({
+              where: { id: current.id },
+              data: {
+                ...pageProjection(input),
+                includedInMap: true,
+                version: { increment: 1 }
+              }
+            })
+          : current
         : await transaction.page.create({
             data: {
               workspaceId: input.workspaceId,
@@ -166,26 +171,29 @@ export class CrawlSnapshotService {
               urlHash: identity.hash,
               pageType: "EXISTING",
               priority: 0,
+              includedInMap: savePageMap,
               ...pageProjection(input)
             }
           });
-      await transaction.pageSource.upsert({
-        where: { pageId_source: { pageId: page.id, source: "CRAWL" } },
-        create: {
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          pageId: page.id,
-          source: "CRAWL",
-          metadata: { crawlId: input.crawlId },
-          firstSeenAt: new Date(input.crawledAt),
-          lastSeenAt: new Date(input.crawledAt)
-        },
-        update: {
-          metadata: { crawlId: input.crawlId },
-          lastSeenAt: new Date(input.crawledAt)
-        }
-      });
-      if (input.inSitemap) {
+      if (savePageMap) {
+        await transaction.pageSource.upsert({
+          where: { pageId_source: { pageId: page.id, source: "CRAWL" } },
+          create: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            pageId: page.id,
+            source: "CRAWL",
+            metadata: { crawlId: input.crawlId },
+            firstSeenAt: new Date(input.crawledAt),
+            lastSeenAt: new Date(input.crawledAt)
+          },
+          update: {
+            metadata: { crawlId: input.crawlId },
+            lastSeenAt: new Date(input.crawledAt)
+          }
+        });
+      }
+      if (savePageMap && input.inSitemap) {
         await transaction.pageSource.upsert({
           where: {
             pageId_source: { pageId: page.id, source: "SITEMAP" }
@@ -249,6 +257,7 @@ export class CrawlSnapshotService {
           imagesMissingAlt: input.imagesMissingAlt,
           structuredDataTypes:
             input.structuredDataTypes as Prisma.InputJsonValue,
+          metaTags: (input.metaTags ?? []) as unknown as Prisma.InputJsonValue,
           wordCount: input.wordCount,
           contentHash: input.contentHash,
           ...(input.etag ? { etag: input.etag } : {}),
@@ -335,6 +344,8 @@ export class CrawlSnapshotService {
     input: InternalReuseCrawlPageInput
   ): Promise<InternalPersistCrawlPageReceipt> {
     const identity = normalizePageUrl(input.finalUrl);
+    const httpStatusOnly = input.purpose === "HTTP_STATUS_CHECK";
+    const savePageMap = input.savePageMap ?? true;
     return this.prisma.$transaction(async (transaction) => {
       await transaction.$executeRaw`
         SELECT pg_advisory_xact_lock(
@@ -386,38 +397,43 @@ export class CrawlSnapshotService {
       if (!source || (!source.etag && !source.lastModified)) {
         throw new TypeError("Conditional crawl source is unavailable");
       }
-      const page = await transaction.page.update({
-        where: { id: source.pageId },
-        data: {
-          indexability: source.indexability,
-          httpStatus: source.statusCode,
-          canonicalTarget: source.canonicalUrl,
-          robots: source.robots,
-          title: source.title,
-          description: source.description,
-          h1: source.h1,
-          language: source.language,
-          crawledAt: new Date(input.crawledAt),
-          version: { increment: 1 }
-        }
-      });
-      await transaction.pageSource.upsert({
-        where: { pageId_source: { pageId: page.id, source: "CRAWL" } },
-        create: {
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          pageId: page.id,
-          source: "CRAWL",
-          metadata: { crawlId: input.crawlId },
-          firstSeenAt: new Date(input.crawledAt),
-          lastSeenAt: new Date(input.crawledAt)
-        },
-        update: {
-          metadata: { crawlId: input.crawlId },
-          lastSeenAt: new Date(input.crawledAt)
-        }
-      });
-      if (input.inSitemap) {
+      const page = savePageMap
+        ? await transaction.page.update({
+            where: { id: source.pageId },
+            data: {
+              indexability: source.indexability,
+              httpStatus: source.statusCode,
+              canonicalTarget: source.canonicalUrl,
+              robots: source.robots,
+              title: source.title,
+              description: source.description,
+              h1: source.h1,
+              language: source.language,
+              includedInMap: true,
+              crawledAt: new Date(input.crawledAt),
+              version: { increment: 1 }
+            }
+          })
+        : { id: source.pageId };
+      if (savePageMap) {
+        await transaction.pageSource.upsert({
+          where: { pageId_source: { pageId: page.id, source: "CRAWL" } },
+          create: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            pageId: page.id,
+            source: "CRAWL",
+            metadata: { crawlId: input.crawlId },
+            firstSeenAt: new Date(input.crawledAt),
+            lastSeenAt: new Date(input.crawledAt)
+          },
+          update: {
+            metadata: { crawlId: input.crawlId },
+            lastSeenAt: new Date(input.crawledAt)
+          }
+        });
+      }
+      if (savePageMap && input.inSitemap) {
         await transaction.pageSource.upsert({
           where: {
             pageId_source: { pageId: page.id, source: "SITEMAP" }
@@ -481,6 +497,7 @@ export class CrawlSnapshotService {
           imagesMissingAlt: source.imagesMissingAlt,
           structuredDataTypes:
             source.structuredDataTypes as Prisma.InputJsonValue,
+          metaTags: source.metaTags as Prisma.InputJsonValue,
           wordCount: source.wordCount,
           contentHash: source.contentHash,
           etag: source.etag,
@@ -491,7 +508,7 @@ export class CrawlSnapshotService {
           crawledAt: new Date(input.crawledAt)
         }
       });
-      if (previousSnapshot) {
+      if (previousSnapshot && !httpStatusOnly) {
         const change = detectCrawlPageChange(
           previousSnapshot,
           copiedInput
@@ -515,7 +532,7 @@ export class CrawlSnapshotService {
           });
         }
       }
-      for (const issue of source.issueOccurrences) {
+      for (const issue of httpStatusOnly ? [] : source.issueOccurrences) {
         await transaction.crawlIssueOccurrence.create({
           data: {
             snapshotId: snapshot.id,
@@ -560,7 +577,7 @@ export class CrawlSnapshotService {
       }
       return {
         accepted: true,
-        issueCount: source.issueOccurrences.length,
+        issueCount: httpStatusOnly ? 0 : source.issueOccurrences.length,
         success: source.statusCode < 400
       };
     });
@@ -637,10 +654,10 @@ export class CrawlSnapshotService {
         },
         select: finalizationSnapshotSelect,
         orderBy: { sequence: "asc" },
-        take: 1_001
+        take: technicalCrawlMaxUrlLimit + 1
       });
       if (
-        snapshots.length > 1_000 ||
+        snapshots.length > technicalCrawlMaxUrlLimit ||
         snapshots.length !== input.processedUrls
       ) {
         throw new TypeError(
@@ -870,10 +887,10 @@ export class CrawlSnapshotService {
             crawledAt: true
           },
           orderBy: { sequence: "asc" },
-          take: 1_001
+          take: technicalCrawlMaxUrlLimit + 1
         })
       : [];
-    if (previousSnapshots.length > 1_000) {
+    if (previousSnapshots.length > technicalCrawlMaxUrlLimit) {
       throw new TypeError("Previous crawl membership exceeds limit");
     }
     const currentPageIds = new Set(
@@ -982,10 +999,16 @@ export class CrawlSnapshotService {
 
   public async listIssues(
     workspaceId: string,
-    projectId: string
+    projectId: string,
+    pageId?: string
   ): Promise<ProjectCrawlIssueCollection> {
     const issues = await this.prisma.crawlIssue.findMany({
-      where: { workspaceId, projectId, resolvedAt: null },
+      where: {
+        workspaceId,
+        projectId,
+        ...(pageId ? { pageId } : {}),
+        resolvedAt: null
+      },
       include: { page: { select: { url: true } } },
       orderBy: [
         { severity: "desc" },
@@ -1122,12 +1145,6 @@ export class CrawlSnapshotService {
 function pageProjection(
   input: InternalPersistCrawlPageInput
 ) {
-  if (input.purpose === "HTTP_STATUS_CHECK") {
-    return {
-      httpStatus: input.statusCode,
-      crawledAt: new Date(input.crawledAt)
-    } as const;
-  }
   return {
     indexability: input.indexability,
     httpStatus: input.statusCode,
@@ -1151,6 +1168,7 @@ function reusedPageInput(
     workspaceId: input.workspaceId,
     projectId: input.projectId,
     crawlId: input.crawlId,
+    ...(input.purpose ? { purpose: input.purpose } : {}),
     sequence: input.sequence,
     requestedUrl: input.requestedUrl,
     finalUrl: input.finalUrl,
@@ -1184,6 +1202,10 @@ function reusedPageInput(
     imagesMissingAlt: source.imagesMissingAlt,
     structuredDataTypes:
       source.structuredDataTypes as unknown as InternalPersistCrawlPageInput["structuredDataTypes"],
+    metaTags:
+      source.metaTags as unknown as NonNullable<
+        InternalPersistCrawlPageInput["metaTags"]
+      >,
     wordCount: source.wordCount,
     contentHash: source.contentHash,
     ...(source.etag ? { etag: source.etag } : {}),
@@ -1201,7 +1223,10 @@ function reusedPageInput(
           Record<string, string | number | boolean>
         >
     })),
-    crawledAt: input.crawledAt
+    crawledAt: input.crawledAt,
+    ...(input.savePageMap === undefined
+      ? {}
+      : { savePageMap: input.savePageMap })
   };
 }
 

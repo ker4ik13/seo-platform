@@ -321,6 +321,7 @@ export class CrawlRunnerService {
               workspaceId: crawl.workspaceId,
               projectId: crawl.projectId,
               crawlId: crawl.id,
+              purpose: crawlConfig.purpose,
               sequence,
               sourceSnapshotId: validator.sourceSnapshotId,
               requestedUrl: response.requestedUrl,
@@ -328,7 +329,8 @@ export class CrawlRunnerService {
               redirectChain,
               inSitemap: next.inSitemap,
               depth: next.depth,
-              crawledAt
+              crawledAt,
+              savePageMap: crawlConfig.savePageMap ?? true
             });
             internalLinks = validator.internalLinks;
           } else {
@@ -342,6 +344,7 @@ export class CrawlRunnerService {
               projectId: crawl.projectId,
               crawlId: crawl.id,
               purpose: crawlConfig.purpose,
+              savePageMap: crawlConfig.savePageMap ?? true,
               sequence,
               requestedUrl: response.requestedUrl,
               finalUrl: normalizedFinalUrl,
@@ -640,6 +643,7 @@ function crawlPageAnalysis(
     imageCount: 0,
     imagesMissingAlt: 0,
     structuredDataTypes: [],
+    metaTags: [],
     wordCount: 0,
     contentHash: createHash("sha256").update(response.body).digest("hex"),
     indexability:

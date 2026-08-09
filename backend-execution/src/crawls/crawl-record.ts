@@ -30,6 +30,7 @@ export function storedCrawlConfig(value: Prisma.JsonValue): TechnicalCrawlConfig
   const sitemapUrls = input.sitemapUrls ?? [];
   const includePatterns = input.includePatterns ?? [];
   const excludePatterns = input.excludePatterns ?? [];
+  const savePageMap = input.savePageMap ?? true;
   if (
     !Array.isArray(input.startUrls) ||
     !input.startUrls.every((item) => typeof item === "string") ||
@@ -77,7 +78,8 @@ export function storedCrawlConfig(value: Prisma.JsonValue): TechnicalCrawlConfig
     !Number.isSafeInteger(input.requestsPerMinute) ||
     Number(input.requestsPerMinute) < 1 ||
     Number(input.requestsPerMinute) > technicalCrawlMaxRequestsPerMinute ||
-    input.obeyRobots !== true
+    input.obeyRobots !== true ||
+    typeof savePageMap !== "boolean"
   ) {
     throw new TypeError("Stored crawl config is invalid");
   }
@@ -129,7 +131,8 @@ export function storedCrawlConfig(value: Prisma.JsonValue): TechnicalCrawlConfig
     maxDepth: Number(input.maxDepth),
     maxRuntimeSeconds: Number(input.maxRuntimeSeconds ?? 3_600),
     requestsPerMinute: Number(input.requestsPerMinute),
-    obeyRobots: true
+    obeyRobots: true,
+    savePageMap
   };
 }
 

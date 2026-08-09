@@ -46,6 +46,7 @@ export function internalCreateTechnicalCrawlInput(
     "maxRuntimeSeconds",
     "requestsPerMinute",
     "obeyRobots",
+    "savePageMap",
     "jobCapacity"
   ]);
   return {
@@ -164,8 +165,15 @@ export function crawlConfig(
       1,
       technicalCrawlMaxRequestsPerMinute
     ),
-    obeyRobots: true
+    obeyRobots: true,
+    savePageMap: optionalBoolean(value.savePageMap, true)
   };
+}
+
+function optionalBoolean(value: unknown, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  if (typeof value !== "boolean") invalid("savePageMap");
+  return value;
 }
 
 function homepageCheckValue(value: string): TechnicalCrawlHomepageCheck {

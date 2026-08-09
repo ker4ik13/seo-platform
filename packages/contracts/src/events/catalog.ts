@@ -18,6 +18,7 @@ export const domainEventTypes = {
   projectUpdated: "project.updated.v1",
   projectArchived: "project.archived.v1",
   projectRestored: "project.restored.v1",
+  projectDeleted: "project.deleted.v1",
   projectTransferRequested: "project.transfer.requested.v1",
   projectOwnershipTransferred: "project.ownership.transferred.v1",
   projectTransferDeclined: "project.transfer.declined.v1",

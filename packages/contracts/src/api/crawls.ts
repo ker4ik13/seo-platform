@@ -20,7 +20,7 @@ export type TechnicalCrawlPurpose =
   (typeof technicalCrawlPurposes)[number];
 
 export const technicalCrawlStartUrlLimit = 1_000;
-export const technicalCrawlMaxUrlLimit = 1_000;
+export const technicalCrawlMaxUrlLimit = 5_000;
 export const technicalCrawlMaxRequestsPerMinute = 60;
 
 export const technicalCrawlQueryPolicies = [
@@ -55,6 +55,8 @@ export interface TechnicalCrawlConfig {
   readonly maxRuntimeSeconds: number;
   readonly requestsPerMinute: number;
   readonly obeyRobots: true;
+  /** Whether crawl discoveries and SEO metadata are exposed in Page Map. */
+  readonly savePageMap?: boolean;
 }
 
 export function technicalCrawlHomepageProbeUrls(
@@ -187,6 +189,13 @@ export interface CrawlPageIssueEvidence {
   readonly details: Readonly<Record<string, string | number | boolean>>;
 }
 
+export interface CrawlMetaTag {
+  readonly name?: string;
+  readonly property?: string;
+  readonly httpEquiv?: string;
+  readonly content: string;
+}
+
 export interface InternalPersistCrawlPageInput {
   readonly workspaceId: string;
   readonly projectId: string;
@@ -223,6 +232,8 @@ export interface InternalPersistCrawlPageInput {
   readonly imageCount: number;
   readonly imagesMissingAlt: number;
   readonly structuredDataTypes: readonly string[];
+  /** Empty for snapshots created before meta-tag capture was enabled. */
+  readonly metaTags?: readonly CrawlMetaTag[];
   readonly wordCount: number;
   readonly contentHash: string;
   readonly etag?: string;
@@ -230,6 +241,7 @@ export interface InternalPersistCrawlPageInput {
   readonly indexability: CrawlPageIndexability;
   readonly issues: readonly CrawlPageIssueEvidence[];
   readonly crawledAt: string;
+  readonly savePageMap?: boolean;
 }
 
 export interface InternalPersistCrawlPageReceipt {
@@ -255,6 +267,8 @@ export interface InternalReuseCrawlPageInput {
   readonly workspaceId: string;
   readonly projectId: string;
   readonly crawlId: string;
+  /** Defaults to TECHNICAL_AUDIT for backward-compatible internal callers. */
+  readonly purpose?: TechnicalCrawlPurpose;
   readonly sequence: number;
   readonly sourceSnapshotId: string;
   readonly requestedUrl: string;
@@ -263,6 +277,7 @@ export interface InternalReuseCrawlPageInput {
   readonly inSitemap: boolean;
   readonly depth: number;
   readonly crawledAt: string;
+  readonly savePageMap?: boolean;
 }
 
 export interface InternalFinalizeCrawlSnapshotInput {

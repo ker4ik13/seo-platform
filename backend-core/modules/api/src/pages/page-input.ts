@@ -61,6 +61,7 @@ export function projectPageQuery(value: unknown): ProjectPageListQuery {
     "limit",
     "cursor",
     "search",
+    "pathPrefix",
     "pageType",
     "indexability",
     "lifecycleStatus"
@@ -77,6 +78,18 @@ export function projectPageQuery(value: unknown): ProjectPageListQuery {
   if (cursor && !CURSOR_PATTERN.test(cursor)) invalid("cursor");
   const search = queryString(query.search, "search")?.normalize("NFKC");
   if (search && search.length > 300) invalid("search");
+  const pathPrefix = queryString(query.pathPrefix, "pathPrefix")?.normalize(
+    "NFKC"
+  );
+  if (
+    pathPrefix &&
+    (!pathPrefix.startsWith("/") ||
+      pathPrefix.length > 2_048 ||
+      pathPrefix.includes("?") ||
+      pathPrefix.includes("#"))
+  ) {
+    invalid("pathPrefix");
+  }
   const pageType = optionalEnum(query.pageType, "pageType", PAGE_TYPES) as
     | PageType
     | undefined;
@@ -94,6 +107,7 @@ export function projectPageQuery(value: unknown): ProjectPageListQuery {
     limit,
     ...(cursor ? { cursor } : {}),
     ...(search ? { search } : {}),
+    ...(pathPrefix ? { pathPrefix } : {}),
     ...(pageType ? { pageType } : {}),
     ...(indexability ? { indexability } : {}),
     ...(lifecycleStatus ? { lifecycleStatus } : {})

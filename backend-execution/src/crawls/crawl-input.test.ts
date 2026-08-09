@@ -26,6 +26,18 @@ test("accepts bounded homepage checks for an HTTP status crawl", () => {
     "WWW_CANONICAL",
     "MULTIPLE_SLASHES"
   ]);
+  assert.equal(config.savePageMap, true);
+});
+
+test("accepts a 5000-page crawl and an explicit map opt-out", () => {
+  const config = crawlConfig({
+    ...base,
+    maxUrls: 5_000,
+    savePageMap: false
+  });
+  assert.equal(config.maxUrls, 5_000);
+  assert.equal(config.savePageMap, false);
+  assert.throws(() => crawlConfig({ ...base, maxUrls: 5_001 }));
 });
 
 test("rejects homepage checks for audits and configurations that exceed maxUrls", () => {

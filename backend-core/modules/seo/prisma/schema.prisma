@@ -417,6 +417,7 @@ model Page {
   publishedAt      DateTime?        @map("published_at") @db.Timestamptz(6)
   crawledAt        DateTime?        @map("crawled_at") @db.Timestamptz(6)
   analyticsMetrics Json             @default("{}") @map("analytics_metrics")
+  includedInMap    Boolean          @default(true) @map("included_in_map")
   notes            String?          @db.Text
   status           EntityStatus     @default(ACTIVE)
   version          Int              @default(1)
@@ -441,9 +442,35 @@ model Page {
   @@unique([projectId, urlHash])
   @@unique([workspaceId, projectId, id], map: "pages_tenant_project_id_key")
   @@index([workspaceId, projectId, status, updatedAt(sort: Desc), id(sort: Desc)], map: "pages_project_status_updated_id_idx")
+  @@index([workspaceId, projectId, includedInMap, status, updatedAt(sort: Desc), id(sort: Desc)], map: "pages_project_map_updated_idx")
   @@index([workspaceId, projectId, pageType, status, id], map: "pages_project_type_status_idx")
   @@index([workspaceId, projectId, indexability, status, id], map: "pages_project_indexability_status_idx")
   @@map("pages")
+}
+
+enum ProjectNoteVisibility {
+  PROJECT_MEMBERS
+  PUBLIC
+}
+
+model ProjectNote {
+  id          String                @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId String                @map("workspace_id") @db.Uuid
+  projectId   String                @map("project_id") @db.Uuid
+  title       String                @db.VarChar(160)
+  markdown    String                @db.Text
+  visibility  ProjectNoteVisibility @default(PROJECT_MEMBERS)
+  publicToken String?               @unique(map: "project_notes_public_token_key") @map("public_token") @db.VarChar(64)
+  createdBy   String                @map("created_by") @db.Uuid
+  updatedBy   String                @map("updated_by") @db.Uuid
+  version     Int                   @default(1)
+  createdAt   DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  archivedAt  DateTime?             @map("archived_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, projectId, id], map: "project_notes_tenant_project_id_key")
+  @@index([workspaceId, projectId, archivedAt, updatedAt(sort: Desc), id(sort: Desc)], map: "project_notes_project_updated_idx")
+  @@map("project_notes")
 }
 
 model PageAlias {
@@ -526,6 +553,7 @@ model CrawlPageSnapshot {
   imageCount           Int              @map("image_count")
   imagesMissingAlt     Int              @map("images_missing_alt")
   structuredDataTypes  Json             @map("structured_data_types")
+  metaTags             Json             @default("[]") @map("meta_tags")
   wordCount            Int              @map("word_count")
   contentHash          String           @map("content_hash") @db.Char(64)
   etag                 String?          @db.VarChar(1000)
@@ -732,11 +760,11 @@ model TrackingContext {
   updatedAt   DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
   archivedAt  DateTime?             @map("archived_at") @db.Timestamptz(6)
 
-  configurations     TrackingContextVersion[]
-  keywordAssignments TrackingContextKeywordAssignment[]
-  createReceipts     TrackingContextCreateReceipt[]
+  configurations         TrackingContextVersion[]
+  keywordAssignments     TrackingContextKeywordAssignment[]
+  createReceipts         TrackingContextCreateReceipt[]
   keywordReplaceReceipts TrackingContextKeywordReplaceReceipt[]
-  rankManifests      RankExecutionManifest[]            @relation("RankManifestContext")
+  rankManifests          RankExecutionManifest[]                @relation("RankManifestContext")
 
   @@unique([workspaceId, projectId, id], map: "tracking_contexts_tenant_project_id_key")
   @@index([workspaceId, projectId, status, createdAt, id], map: "tracking_contexts_tenant_project_status_created_idx")
@@ -1019,6 +1047,7 @@ model RankSnapshot {
   chunk         RankExecutionManifestChunk @relation("RankSnapshotChunk", fields: [workspaceId, projectId, manifestId, chunkIndex], references: [workspaceId, projectId, manifestId, chunkIndex], onDelete: Restrict, onUpdate: Restrict, map: "rank_snapshots_chunk_tenant_fkey")
   manifestEntry RankExecutionManifestEntry @relation("RankSnapshotEntry", fields: [workspaceId, projectId, manifestId, chunkIndex, manifestEntryId], references: [workspaceId, projectId, manifestId, chunkIndex, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_snapshots_entry_tenant_fkey")
   keyword       Keyword                    @relation("RankSnapshotKeyword", fields: [workspaceId, projectId, keywordId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_snapshots_keyword_tenant_fkey")
+  serpResults   RankSerpResult[]
 
   @@id([observedAt, id])
   @@unique([manifestId, manifestEntryId], map: "rank_snapshots_manifest_entry_key")
@@ -1027,6 +1056,23 @@ model RankSnapshot {
   @@index([workspaceId, projectId, keywordId, trackingContextId, observedAt(sort: Desc), id(sort: Desc)], map: "rank_snapshots_keyword_history_idx")
   @@index([workspaceId, projectId, jobId, chunkIndex], map: "rank_snapshots_job_chunk_idx")
   @@map("rank_snapshots")
+}
+
+model RankSerpResult {
+  snapshotObservedAt   DateTime @map("snapshot_observed_at") @db.Timestamptz(6)
+  snapshotId           String   @map("snapshot_id") @db.Uuid
+  position             Int
+  rankingUrl           String   @map("ranking_url") @db.Text
+  normalizedRankingUrl String   @map("normalized_ranking_url") @db.Text
+  title                String?  @db.Text
+  snippet              String?  @db.Text
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  snapshot RankSnapshot @relation(fields: [snapshotObservedAt, snapshotId], references: [observedAt, id], onDelete: Restrict, onUpdate: Restrict, map: "rank_serp_results_snapshot_fkey")
+
+  @@id([snapshotObservedAt, snapshotId, position])
+  @@index([snapshotId, position], map: "rank_serp_results_snapshot_position_idx")
+  @@map("rank_serp_results")
 }
 
 model CurrentRank {
@@ -1176,19 +1222,19 @@ model SemanticImportReceipt {
 }
 
 model SemanticImportChunkReceipt {
-  importId               String   @map("import_id") @db.Uuid
-  chunkIndex             Int      @map("chunk_index")
-  payloadHash            String   @map("payload_hash") @db.Char(64)
-  inputRows              Int      @map("input_rows")
-  createdKeywords        BigInt   @default(0) @map("created_keywords")
-  updatedKeywords        BigInt   @default(0) @map("updated_keywords")
-  skippedKeywords        BigInt   @default(0) @map("skipped_keywords")
-  createdGroups          BigInt   @default(0) @map("created_groups")
-  createdPages           BigInt   @default(0) @map("created_pages")
-  createdTags            BigInt   @default(0) @map("created_tags")
-  createdMetricSnapshots BigInt   @default(0) @map("created_metric_snapshots")
-  trashedDuplicateCandidates Json  @default("[]") @map("trashed_duplicate_candidates")
-  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  importId                   String   @map("import_id") @db.Uuid
+  chunkIndex                 Int      @map("chunk_index")
+  payloadHash                String   @map("payload_hash") @db.Char(64)
+  inputRows                  Int      @map("input_rows")
+  createdKeywords            BigInt   @default(0) @map("created_keywords")
+  updatedKeywords            BigInt   @default(0) @map("updated_keywords")
+  skippedKeywords            BigInt   @default(0) @map("skipped_keywords")
+  createdGroups              BigInt   @default(0) @map("created_groups")
+  createdPages               BigInt   @default(0) @map("created_pages")
+  createdTags                BigInt   @default(0) @map("created_tags")
+  createdMetricSnapshots     BigInt   @default(0) @map("created_metric_snapshots")
+  trashedDuplicateCandidates Json     @default("[]") @map("trashed_duplicate_candidates")
+  createdAt                  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   semanticImport SemanticImportReceipt @relation(fields: [importId], references: [importId], onDelete: Cascade)
 

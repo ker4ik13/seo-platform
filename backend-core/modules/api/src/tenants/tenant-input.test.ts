@@ -4,6 +4,7 @@ import { DomainError } from "../common/domain-error.js";
 import {
   createProjectInput,
   createWorkspaceInput,
+  deleteProjectInput,
   updateWorkspaceAvatarInput,
   updateWorkspaceInput
 } from "./tenant-input.js";
@@ -78,4 +79,11 @@ test("preserves duplicate-domain confirmation", () => {
     confirmDuplicateDomain: true
   });
   assert.equal(input.confirmDuplicateDomain, true);
+});
+
+test("requires an exact non-empty project deletion confirmation", () => {
+  assert.deepEqual(deleteProjectInput({ confirmation: "Нейролюб" }), {
+    confirmation: "Нейролюб"
+  });
+  assert.throws(() => deleteProjectInput({ confirmation: "" }), DomainError);
 });

@@ -479,8 +479,12 @@ function notificationOperationTitle(
   kind: OperationResultKind,
   notificationTitle: string
 ): string {
-  if (kind === "crawl" && notificationTitle.includes("HTTP-статусов")) {
-    return "Проверка HTTP-статусов";
+  if (
+    kind === "crawl" &&
+    (notificationTitle.includes("HTTP-статусов") ||
+      notificationTitle.includes("Обход сайта"))
+  ) {
+    return "Обход сайта";
   }
   return ({
     frequency: "Сбор частотности",

@@ -33,6 +33,12 @@ export interface CrawlPageAnalysis {
   readonly imageCount: number;
   readonly imagesMissingAlt: number;
   readonly structuredDataTypes: readonly string[];
+  readonly metaTags: readonly {
+    readonly name?: string;
+    readonly property?: string;
+    readonly httpEquiv?: string;
+    readonly content: string;
+  }[];
   readonly wordCount: number;
   readonly contentHash: string;
   readonly indexability:
@@ -48,6 +54,7 @@ export interface CrawlPageAnalysis {
 const MAX_LINKS = 5_000;
 const MAX_HEADINGS = 500;
 const MAX_HREFLANG = 100;
+const MAX_META_TAGS = 200;
 const MAX_TEXT_FIELD = 4_000;
 
 export function analyzeHtmlPage(input: {
@@ -63,6 +70,12 @@ export function analyzeHtmlPage(input: {
   const headings: CrawlHeading[] = [];
   const hreflang: CrawlHreflang[] = [];
   const structuredDataTypes = new Set<string>();
+  const metaTags: Array<{
+    readonly name?: string;
+    readonly property?: string;
+    readonly httpEquiv?: string;
+    readonly content: string;
+  }> = [];
   const visibleText: string[] = [];
   let hiddenDepth = 0;
   let titleDepth = 0;
@@ -109,6 +122,24 @@ export function analyzeHtmlPage(input: {
             attributes.content
           ) {
             robots = mergeRobots(robots, attributes.content);
+          }
+          const content = boundedText(attributes.content, MAX_TEXT_FIELD);
+          if (content && metaTags.length < MAX_META_TAGS) {
+            const metaName = boundedText(attributes.name, 160);
+            const metaProperty = boundedText(attributes.property, 160);
+            const metaHttpEquiv = boundedText(
+              attributes["http-equiv"],
+              160
+            );
+            const metaTag = {
+              ...(metaName ? { name: metaName } : {}),
+              ...(metaProperty ? { property: metaProperty } : {}),
+              ...(metaHttpEquiv ? { httpEquiv: metaHttpEquiv } : {}),
+              content
+            };
+            if (metaTag.name || metaTag.property || metaTag.httpEquiv) {
+              metaTags.push(metaTag);
+            }
           }
         }
         if (tag === "link") {
@@ -228,6 +259,7 @@ export function analyzeHtmlPage(input: {
     imageCount,
     imagesMissingAlt,
     structuredDataTypes: [...structuredDataTypes].sort(),
+    metaTags,
     wordCount,
     contentHash: createHash("sha256").update(text, "utf8").digest("hex"),
     indexability,

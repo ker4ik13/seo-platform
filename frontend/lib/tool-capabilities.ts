@@ -22,9 +22,9 @@ export const toolCapabilities: readonly ToolCapability[] = [
   {
     code: "url.http_inspection.v1",
     slug: "http-status-checker",
-    title: "Проверка HTTP-статуса",
+    title: "Обход сайта",
     description:
-      "Проверка ответа URL, цепочки редиректов и конечного адреса.",
+      "Обход сайта, проверка ответов и построение карты страниц.",
     category: "technical",
     access: "project",
     asynchronous: true,

@@ -265,7 +265,7 @@ export function ProjectCrawlAudit({
             value={startUrl}
           />
         </label>
-        <NumberField label="Лимит URL" max={1000} min={1} set={setMaxUrls} value={maxUrls} />
+        <NumberField label="Лимит URL" max={5000} min={1} set={setMaxUrls} value={maxUrls} />
         <NumberField label="Глубина" max={10} min={0} set={setMaxDepth} value={maxDepth} />
         <NumberField
           label="Макс. время, мин"

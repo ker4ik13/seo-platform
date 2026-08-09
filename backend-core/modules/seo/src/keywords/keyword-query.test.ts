@@ -40,6 +40,16 @@ test("parses bounded keyword list query", () => {
   );
   assert.equal(keywordListQuery({ sort: "SOURCE_DESC" }).sort, "SOURCE_DESC");
   assert.equal(keywordListQuery({ limit: "1000" }).limit, 1_000);
+  assert.deepEqual(
+    keywordListQuery({
+      groupIds:
+        "01900000-0000-7000-8000-000000000012,01900000-0000-7000-8000-000000000011"
+    }).groupIds,
+    [
+      "01900000-0000-7000-8000-000000000011",
+      "01900000-0000-7000-8000-000000000012"
+    ]
+  );
 });
 
 test("rejects oversized pages and malformed cursors", () => {
@@ -58,6 +68,14 @@ test("rejects oversized pages and malformed cursors", () => {
   );
   assert.throws(
     () => keywordListQuery({ clusterId: "wrong" }),
+    BadRequestException
+  );
+  assert.throws(
+    () => keywordListQuery({
+      groupId: "01900000-0000-7000-8000-000000000011",
+      groupIds:
+        "01900000-0000-7000-8000-000000000012,01900000-0000-7000-8000-000000000013"
+    }),
     BadRequestException
   );
 });

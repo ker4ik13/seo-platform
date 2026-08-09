@@ -17,12 +17,16 @@ export interface ContextMenuItem {
 }
 
 export function ContextMenu({
+  afterItemId,
+  children,
   items,
   label,
   onClose,
   x,
   y
 }: Readonly<{
+  afterItemId?: string;
+  children?: ReactNode;
   items: readonly ContextMenuItem[];
   label: string;
   onClose: () => void;
@@ -32,6 +36,7 @@ export function ContextMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const viewportWidth = typeof window === "undefined" ? 1920 : window.innerWidth;
   const viewportHeight = typeof window === "undefined" ? 1080 : window.innerHeight;
+  const estimatedExtraHeight = children ? 58 : 0;
 
   useEffect(() => {
     const close = (event: MouseEvent) => {
@@ -68,24 +73,32 @@ export function ContextMenu({
       role="menu"
       style={{
         left: Math.min(x, Math.max(8, viewportWidth - 236)),
-        top: Math.min(y, Math.max(8, viewportHeight - items.length * 40 - 20))
+        top: Math.min(
+          y,
+          Math.max(
+            8,
+            viewportHeight - items.length * 40 - estimatedExtraHeight - 20
+          )
+        )
       }}
     >
       {items.map((item) => (
-        <button
-          className={`${item.danger ? "danger" : ""}${item.dividerBefore ? " divided" : ""}`}
-          disabled={item.disabled}
-          key={item.id}
-          onClick={() => {
-            item.onSelect();
-            onClose();
-          }}
-          role="menuitem"
-          type="button"
-        >
-          {item.icon && <span aria-hidden="true">{item.icon}</span>}
-          {item.label}
-        </button>
+        <div className="context-menu-entry" key={item.id}>
+          <button
+            className={`${item.danger ? "danger" : ""}${item.dividerBefore ? " divided" : ""}`}
+            disabled={item.disabled}
+            onClick={() => {
+              item.onSelect();
+              onClose();
+            }}
+            role="menuitem"
+            type="button"
+          >
+            {item.icon && <span aria-hidden="true">{item.icon}</span>}
+            {item.label}
+          </button>
+          {children && item.id === afterItemId ? children : null}
+        </div>
       ))}
     </div>
   );

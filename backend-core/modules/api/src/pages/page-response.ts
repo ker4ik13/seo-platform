@@ -17,6 +17,7 @@ const PAGE_KEYS = [
   "robots", "title", "description", "h1", "language", "template",
   "contentStatus", "ownerId", "priority", "publishedAt", "crawledAt",
   "analyticsMetrics", "notes", "assignedKeywordCount", "assignedClusterCount", "lifecycleStatus",
+  "openIssueCount", "latestCrawl",
   "version", "createdBy", "updatedBy", "archivedBy", "createdAt",
   "updatedAt", "archivedAt"
 ] as const;
@@ -26,12 +27,16 @@ export function scopedProjectPageCollection(
   workspaceId: string,
   projectId: string
 ): ProjectPageCollection {
-  const collection = exactRecord(value, ["pages", "nextCursor"]);
+  const collection = exactRecord(value, ["pages", "nextCursor", "structureUrls"]);
   if (
     !Array.isArray(collection.pages) ||
     collection.pages.length > 100 ||
     (collection.nextCursor !== undefined &&
-      typeof collection.nextCursor !== "string")
+      typeof collection.nextCursor !== "string") ||
+    (collection.structureUrls !== undefined &&
+      (!Array.isArray(collection.structureUrls) ||
+        collection.structureUrls.length > 5_000 ||
+        collection.structureUrls.some((item) => typeof item !== "string")))
   ) {
     invalidResponse();
   }
@@ -43,6 +48,9 @@ export function scopedProjectPageCollection(
   }
   return {
     pages,
+    ...(Array.isArray(collection.structureUrls)
+      ? { structureUrls: collection.structureUrls as readonly string[] }
+      : {}),
     ...(typeof collection.nextCursor === "string"
       ? { nextCursor: collection.nextCursor }
       : {})
@@ -92,6 +100,8 @@ export function scopedProjectPage(
     !optionalString(page.notes) ||
     !integer(page.assignedKeywordCount, 0, Number.MAX_SAFE_INTEGER) ||
     !integer(page.assignedClusterCount, 0, Number.MAX_SAFE_INTEGER) ||
+    !optionalInteger(page.openIssueCount, 0, Number.MAX_SAFE_INTEGER) ||
+    !optionalLatestCrawl(page.latestCrawl) ||
     typeof page.lifecycleStatus !== "string" ||
     !pageLifecycleStatuses.some(
       (value) => value === page.lifecycleStatus
@@ -117,6 +127,84 @@ export function scopedProjectPage(
     invalidResponse();
   }
   return page as unknown as ProjectPageSummary;
+}
+
+function optionalLatestCrawl(value: unknown): boolean {
+  if (value === undefined) return true;
+  let crawl: Readonly<Record<string, unknown>>;
+  try {
+    crawl = exactRecord(value, [
+      "crawlId", "statusCode", "responseTimeMs", "sizeBytes", "contentType",
+      "title", "description", "h1", "h1Count", "canonicalUrl", "robots",
+      "language", "metaTags", "imageCount", "imagesMissingAlt",
+      "structuredDataTypes", "wordCount", "redirectChain", "inSitemap",
+      "depth", "indexability", "crawledAt"
+    ]);
+  } catch {
+    return false;
+  }
+  return (
+    uuid(crawl.crawlId) &&
+    integer(crawl.statusCode, 100, 599) &&
+    integer(crawl.responseTimeMs, 0, 3_600_000) &&
+    integer(crawl.sizeBytes, 0, 10_000_000) &&
+    nonEmptyString(crawl.contentType) &&
+    optionalString(crawl.title) &&
+    optionalString(crawl.description) &&
+    optionalString(crawl.h1) &&
+    integer(crawl.h1Count, 0, 10_000) &&
+    optionalString(crawl.canonicalUrl) &&
+    optionalString(crawl.robots) &&
+    optionalString(crawl.language) &&
+    metaTagArray(crawl.metaTags) &&
+    integer(crawl.imageCount, 0, 100_000) &&
+    integer(crawl.imagesMissingAlt, 0, Number(crawl.imageCount)) &&
+    stringArray(crawl.structuredDataTypes, 100) &&
+    integer(crawl.wordCount, 0, 10_000_000) &&
+    stringArray(crawl.redirectChain, 10) &&
+    typeof crawl.inSitemap === "boolean" &&
+    integer(crawl.depth, 0, 10) &&
+    typeof crawl.indexability === "string" &&
+    pageIndexabilities.includes(
+      crawl.indexability as (typeof pageIndexabilities)[number]
+    ) &&
+    date(crawl.crawledAt)
+  );
+}
+
+function metaTagArray(value: unknown): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length <= 200 &&
+    value.every((candidate) => {
+      if (
+        typeof candidate !== "object" ||
+        candidate === null ||
+        Array.isArray(candidate)
+      ) return false;
+      const tag = candidate as Readonly<Record<string, unknown>>;
+      return (
+        Object.keys(tag).every((key) =>
+          ["name", "property", "httpEquiv", "content"].includes(key)
+        ) &&
+        nonEmptyString(tag.content) &&
+        optionalString(tag.name) &&
+        optionalString(tag.property) &&
+        optionalString(tag.httpEquiv) &&
+        [tag.name, tag.property, tag.httpEquiv].some(
+          (item) => typeof item === "string" && item.length > 0
+        )
+      );
+    })
+  );
+}
+
+function stringArray(value: unknown, max: number): boolean {
+  return (
+    Array.isArray(value) &&
+    value.length <= max &&
+    value.every((item) => typeof item === "string")
+  );
 }
 
 function pageAlias(value: unknown): PageAliasSummary {

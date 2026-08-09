@@ -41,18 +41,24 @@ psql \
   --no-psqlrc \
   --file="$script_dir/jobs-connector.sql"
 
-# \password derives the SCRAM verifier client-side. The cleartext password is
-# supplied only through stdin and therefore never becomes an ALTER ROLE SQL
-# literal, a process argument, or a psql history entry. Force SCRAM in this
-# same psql session so a cluster/user PGOPTIONS default cannot downgrade the
-# verifier to legacy MD5.
-printf '%s\n%s\n' \
-  "$connector_password" \
-  "$connector_password" |
-  psql \
-    --no-psqlrc \
-    --set=connector_user="$JOBS_CONNECTOR_DATABASE_USER" \
-    --command="SET password_encryption = 'scram-sha-256'" \
-    --command='\password :"connector_user"'
+case $JOBS_CONNECTOR_DATABASE_USER in
+  *[!A-Za-z0-9_]*)
+    echo "JOBS_CONNECTOR_DATABASE_USER must be a SQL identifier" >&2
+    exit 1
+    ;;
+esac
+
+# PostgreSQL 18 reads the interactive password meta-command from the controlling
+# TTY and hangs unattended deployments. The validated quote-free password is sent only through stdin;
+# it is never present in process arguments, psql history, or application logs.
+{
+  printf '%s\n' "SET password_encryption = 'scram-sha-256';"
+  printf "ALTER ROLE %s PASSWORD '%s';\n" \
+    "$JOBS_CONNECTOR_DATABASE_USER" \
+    "$connector_password"
+} | psql \
+  --no-psqlrc \
+  --set=ON_ERROR_STOP=1 \
+  --quiet
 
 unset connector_password

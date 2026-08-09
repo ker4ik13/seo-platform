@@ -32,7 +32,8 @@ export function createTechnicalCrawlInput(
     "maxDepth",
     "maxRuntimeSeconds",
     "requestsPerMinute",
-    "obeyRobots"
+    "obeyRobots",
+    "savePageMap"
   ];
   if (
     Object.keys(input).some((key) => !keys.includes(key)) ||
@@ -110,8 +111,15 @@ export function createTechnicalCrawlInput(
       1,
       technicalCrawlMaxRequestsPerMinute
     ),
-    obeyRobots: true
+    obeyRobots: true,
+    savePageMap: optionalBoolean(input.savePageMap, true)
   };
+}
+
+function optionalBoolean(value: unknown, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  if (typeof value !== "boolean") invalid("savePageMap");
+  return value;
 }
 
 function homepageCheckValue(

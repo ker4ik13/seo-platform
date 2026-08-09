@@ -259,6 +259,41 @@ export class RankResultService {
           }
         }
 
+        const serpResults = canonicalCommand.results.flatMap(
+          (result, index) => {
+            const snapshotId = allocation.ids[index];
+            if (!snapshotId) {
+              throw new Error(
+                "Normalized rank SERP result allocation is incomplete"
+              );
+            }
+            return (result.serpResults ?? []).map((serpResult) => ({
+              snapshotObservedAt: observedAt,
+              snapshotId,
+              position: serpResult.position,
+              rankingUrl: serpResult.rankingUrl,
+              normalizedRankingUrl: serpResult.normalizedRankingUrl,
+              ...(serpResult.title === undefined
+                ? {}
+                : { title: serpResult.title }),
+              ...(serpResult.snippet === undefined
+                ? {}
+                : { snippet: serpResult.snippet }),
+              createdAt: manifest.appliedAt
+            })) satisfies Prisma.RankSerpResultCreateManyInput[];
+          }
+        );
+        if (serpResults.length > 0) {
+          const inserted = await transaction.rankSerpResult.createMany({
+            data: serpResults
+          });
+          if (inserted.count !== serpResults.length) {
+            throw new Error(
+              "Rank SERP result batch was not fully persisted"
+            );
+          }
+        }
+
         const currentUpdatedCount = await upsertCurrentRanks(
           transaction,
           snapshots.map((snapshot) => currentProjectionInput(

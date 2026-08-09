@@ -83,6 +83,21 @@ test("submits one delayed Yandex request and polls only by req_id", async () => 
     snippet: "Купить диван",
     resultType: "ORGANIC",
     serpFeatures: [],
+    serpResults: [
+      {
+        position: 1,
+        rankingUrl: "https://foreign.example/",
+        normalizedRankingUrl: "https://foreign.example/",
+        title: "Чужой"
+      },
+      {
+        position: 2,
+        rankingUrl: "HTTPS://WWW.Example.COM:443/catalog#result",
+        normalizedRankingUrl: "https://www.example.com/catalog",
+        title: "Каталог",
+        snippet: "Купить диван"
+      }
+    ],
     dataQualityFlags: [
       "PROVIDER_OBSERVED_AT_UNAVAILABLE",
       "ABSOLUTE_POSITION_UNAVAILABLE",

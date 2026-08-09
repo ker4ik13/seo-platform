@@ -10,6 +10,10 @@ const sitemapScopeMigrationUrl = new URL(
   "../../prisma/migrations/20260731213500_crawl_sitemap_scope/migration.sql",
   import.meta.url
 );
+const crawlLimitMigrationUrl = new URL(
+  "../../prisma/migrations/20260809200500_crawl_page_limit_5000/migration.sql",
+  import.meta.url
+);
 
 test("technical crawl migration binds the tenant Job and one active host", async () => {
   const sql = await readFile(migrationUrl, "utf8");
@@ -47,4 +51,24 @@ test("crawl sitemap scope keeps legacy checkpoints and bounds version 2", async 
     /jsonb_typeof\("checkpoint"->'scopeReady'\) = 'boolean'/u
   );
   assert.match(sql, /\) IS TRUE[\s\n]*\)[\s\n]*\);/u);
+});
+
+test("crawl limit migration expands checkpoint capacity without deleting jobs", async () => {
+  const sql = await readFile(crawlLimitMigrationUrl, "utf8");
+  assert.match(
+    sql,
+    /DROP CONSTRAINT "technical_crawls_checkpoint_check"/u
+  );
+  assert.match(
+    sql,
+    /jsonb_array_length\("checkpoint"->'pending'\) <= 5000/u
+  );
+  assert.match(
+    sql,
+    /jsonb_array_length\("checkpoint"->'seen'\) <= 5000/u
+  );
+  assert.doesNotMatch(
+    sql,
+    /\b(?:UPDATE\s+"|DELETE FROM|TRUNCATE|DROP TABLE)\b/u
+  );
 });

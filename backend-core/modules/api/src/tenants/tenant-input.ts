@@ -1,6 +1,7 @@
 import type {
   CreateProjectInput,
   CreateWorkspaceInput,
+  DeleteProjectInput,
   UpdateProjectInput,
   UpdateWorkspaceInput
 } from "@seo-platform/contracts";
@@ -197,5 +198,12 @@ export function updateProjectInput(value: unknown): UpdateProjectInput {
     ...(confirmDuplicateDomain === undefined
       ? {}
       : { confirmDuplicateDomain })
+  };
+}
+
+export function deleteProjectInput(value: unknown): DeleteProjectInput {
+  const input = inputObject(value);
+  return {
+    confirmation: stringField(input, "confirmation", { min: 1, max: 160 })
   };
 }

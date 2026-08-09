@@ -10,6 +10,7 @@ import {
 } from "react";
 import {
   canArchiveProject,
+  canDeleteProject,
   canRestoreProject,
   canUpdateProject
 } from "../lib/app-permissions";
@@ -35,6 +36,11 @@ import {
 const PROJECT_FIELDS = ["name", "domain", "locale", "timezone"] as const;
 type LifecycleAction = "archive" | "restore";
 type ConflictKind = "save" | LifecycleAction;
+interface ProjectDeletionReceipt {
+  readonly projectId: string;
+  readonly status: "DELETED";
+  readonly deletedAt: string;
+}
 
 export function ProjectSettings({
   project,
@@ -55,13 +61,18 @@ export function ProjectSettings({
   const [duplicateConfirmation, setDuplicateConfirmation] = useState(false);
   const [confirmAction, setConfirmAction] = useState<LifecycleAction>();
   const [confirmationText, setConfirmationText] = useState("");
-  const [busy, setBusy] = useState<"save" | "reload" | "retry" | LifecycleAction>();
+  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
+  const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
+  const [busy, setBusy] = useState<
+    "save" | "reload" | "retry" | "delete" | LifecycleAction
+  >();
   const [online, setOnline] = useState(true);
   const [runtimeRestriction, setRuntimeRestriction] = useState<
     "MISSING_PERMISSION" | "WORKSPACE_READ_ONLY"
   >();
   const feedbackRef = useRef<HTMLDivElement>(null);
   const confirmationRef = useRef<HTMLInputElement>(null);
+  const deleteConfirmationRef = useRef<HTMLInputElement>(null);
 
   const dirty = useMemo(
     () => projectSettingsDirty(server, draft),
@@ -119,6 +130,10 @@ export function ProjectSettings({
   useEffect(() => {
     if (confirmAction) confirmationRef.current?.focus();
   }, [confirmAction]);
+
+  useEffect(() => {
+    if (deleteConfirmationOpen) deleteConfirmationRef.current?.focus();
+  }, [deleteConfirmationOpen]);
 
   function updateDraft(field: ProjectSettingsField, value: string): void {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -347,6 +362,87 @@ export function ProjectSettings({
         setFailure({
           message:
             "Статус проекта изменён другим участником. Подтверждение сохранено — загрузите серверную версию или повторите действие поверх неё.",
+          ...(error.requestId ? { requestId: error.requestId } : {})
+        });
+      } else {
+        handleFailure(error);
+      }
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  function openDeleteConfirmation(): void {
+    if (busy || !online) return;
+    if (dirty) {
+      setFailure({
+        message:
+          "Сначала сохраните или отмените изменения основных данных, затем удалите проект."
+      });
+      return;
+    }
+    if (
+      !workspaceMutable ||
+      !canDeleteProject(workspaceRoleCode, server.projectAccessLevel)
+    ) {
+      setFailure({
+        message:
+          "Удаление проекта недоступно для текущей роли или состояния рабочей области."
+      });
+      return;
+    }
+    setFailure(undefined);
+    setSuccess(undefined);
+    setConflict(undefined);
+    setConfirmAction(undefined);
+    setConfirmationText("");
+    setDeleteConfirmationText("");
+    setDeleteConfirmationOpen(true);
+  }
+
+  async function submitDeleteProject(
+    event: FormEvent<HTMLFormElement>
+  ): Promise<void> {
+    event.preventDefault();
+    if (
+      busy ||
+      dirty ||
+      !online ||
+      deleteConfirmationText !== server.name ||
+      !workspaceMutable ||
+      !canDeleteProject(workspaceRoleCode, server.projectAccessLevel)
+    ) {
+      return;
+    }
+    setBusy("delete");
+    setFailure(undefined);
+    setSuccess(undefined);
+    try {
+      await browserApiRequest<ProjectDeletionReceipt>(projectPath(server.id), {
+        method: "DELETE",
+        ifMatch: server.version,
+        body: { confirmation: deleteConfirmationText }
+      });
+      clearPreference("seo_project");
+      router.replace("/app/settings/projects");
+      router.refresh();
+    } catch (error) {
+      if (redirectExpiredSession(error, server.id)) return;
+      if (isVersionConflict(error)) {
+        setFailure({
+          message:
+            "Проект изменён другим участником. Обновите страницу и подтвердите удаление ещё раз.",
+          ...(error instanceof BrowserApiError && error.requestId
+            ? { requestId: error.requestId }
+            : {})
+        });
+      } else if (
+        error instanceof BrowserApiError &&
+        error.code === "REAUTHENTICATION_REQUIRED"
+      ) {
+        setFailure({
+          message:
+            "Для удаления требуется недавний вход. Войдите повторно и вернитесь к настройкам проекта.",
           ...(error.requestId ? { requestId: error.requestId } : {})
         });
       } else {
@@ -640,7 +736,7 @@ export function ProjectSettings({
             <h2>Жизненный цикл проекта</h2>
             <p>
               Архивирование сохраняет данные и останавливает автоматизации.
-              Удаление проекта из этого раздела недоступно.
+              Восстановить проект можно без потери данных.
             </p>
           </div>
         </header>
@@ -767,6 +863,100 @@ export function ProjectSettings({
           </div>
         )}
       </section>
+
+      <section className="panel security-card danger-zone-card">
+        <header className="security-card-header">
+          <div>
+            <h2>Удаление проекта</h2>
+            <p>
+              Проект сразу исчезнет из рабочей области и станет недоступен
+              участникам. Это действие нельзя отменить в интерфейсе.
+            </p>
+          </div>
+        </header>
+        {!canDeleteProject(workspaceRoleCode, server.projectAccessLevel) ||
+        runtimeRestriction === "MISSING_PERMISSION" ? (
+          <div className="inline-alert info" role="status">
+            Для удаления требуется разрешение <code>project.delete</code> и
+            полный доступ к проекту.
+          </div>
+        ) : !workspaceMutable ? (
+          <div className="inline-alert warning" role="status">
+            Рабочая область доступна только для чтения или приостановлена.
+            Удаление заблокировано.
+          </div>
+        ) : deleteConfirmationOpen ? (
+          <form className="security-flow" onSubmit={submitDeleteProject}>
+            <div className="inline-alert danger">
+              <strong>Подтвердите удаление</strong>
+              <p>
+                Введите точное название проекта: <strong>{server.name}</strong>
+              </p>
+            </div>
+            <label className="form-field">
+              <span>Название проекта для подтверждения</span>
+              <input
+                autoComplete="off"
+                onChange={(event) =>
+                  setDeleteConfirmationText(event.target.value)
+                }
+                readOnly={Boolean(busy)}
+                ref={deleteConfirmationRef}
+                required
+                spellCheck={false}
+                value={deleteConfirmationText}
+              />
+              <small role="status">
+                {deleteConfirmationText &&
+                deleteConfirmationText !== server.name
+                  ? "Название пока не совпадает. Регистр и пробелы учитываются."
+                  : "Перед удалением сервис проверит недавнюю авторизацию."}
+              </small>
+            </label>
+            <div className="security-actions">
+              <button
+                className="danger-button"
+                disabled={
+                  deleteConfirmationText !== server.name ||
+                  !online ||
+                  Boolean(busy)
+                }
+                type="submit"
+              >
+                {busy === "delete" ? "Удаляем…" : "Удалить проект"}
+              </button>
+              <button
+                className="secondary-button"
+                disabled={Boolean(busy)}
+                onClick={() => {
+                  setDeleteConfirmationOpen(false);
+                  setDeleteConfirmationText("");
+                }}
+                type="button"
+              >
+                Отмена
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="security-flow">
+            <p>
+              Сначала остановите важные фоновые операции и экспортируйте
+              данные, которые могут понадобиться вне платформы.
+            </p>
+            <div className="security-actions">
+              <button
+                className="danger-button"
+                disabled={dirty || !online || Boolean(busy)}
+                onClick={openDeleteConfirmation}
+                type="button"
+              >
+                Удалить проект
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
     </div>
   );
 }
@@ -850,6 +1040,11 @@ function writeTenantContext(project: AppProject): void {
 function writePreference(name: string, value: string): void {
   const secure = window.location.protocol === "https:" ? "; Secure" : "";
   document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(value)}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
+}
+
+function clearPreference(name: string): void {
+  const secure = window.location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${encodeURIComponent(name)}=; Path=/; Max-Age=0; SameSite=Lax${secure}`;
 }
 
 function redirectExpiredSession(error: unknown, projectId: string): boolean {

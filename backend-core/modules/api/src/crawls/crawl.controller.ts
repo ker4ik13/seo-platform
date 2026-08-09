@@ -91,13 +91,22 @@ export class CrawlController {
   @UseGuards(SessionAuthGuard, TenantPermissionGuard)
   public async issues(
     @Req() request: TenantRequest,
-    @CurrentPrincipal() principal: AuthenticatedPrincipal
+    @CurrentPrincipal() principal: AuthenticatedPrincipal,
+    @Query("pageId") pageIdValue: unknown
   ): Promise<ApiResponse<ProjectCrawlIssueCollection>> {
     const tenant = requiredProjectTenant(request);
+    const pageId =
+      pageIdValue === undefined
+        ? undefined
+        : assertUuid(
+            typeof pageIdValue === "string" ? pageIdValue : "",
+            "pageId"
+          );
     return apiResponse(
       request,
       await this.seoData.listProjectCrawlIssues(
-        internalProjectContext(request, principal, tenant)
+        internalProjectContext(request, principal, tenant),
+        pageId
       )
     );
   }

@@ -485,6 +485,16 @@ function normalizeXmlStockRankResult(
   if (input.engine !== intent.execution.searchEngine) invalid();
   const keyword = intent.keywords[0];
   if (!keyword) invalid();
+  const serpResults = input.documents.slice(0, 10).map((document, index) => {
+    const rankingUrl = providerUrl(document.url);
+    return {
+      position: index + 1,
+      rankingUrl: rankingUrl.original,
+      normalizedRankingUrl: rankingUrl.normalized,
+      ...(document.title ? { title: document.title } : {}),
+      ...(document.snippet ? { snippet: document.snippet } : {})
+    };
+  });
   const match = input.documents.find((document) => {
     try {
       return matchesProject(
@@ -502,6 +512,7 @@ function normalizeXmlStockRankResult(
       keywordId: keyword.keywordId,
       found: false,
       position: null,
+      serpResults,
       dataQualityFlags: ["PROVIDER_OBSERVED_AT_UNAVAILABLE"]
     }];
   }
@@ -517,6 +528,7 @@ function normalizeXmlStockRankResult(
     ...(match.snippet ? { snippet: match.snippet } : {}),
     resultType: "ORGANIC",
     serpFeatures: [],
+    serpResults,
     dataQualityFlags: [
       "PROVIDER_OBSERVED_AT_UNAVAILABLE",
       "ABSOLUTE_POSITION_UNAVAILABLE",

@@ -8,6 +8,7 @@ import {
   type InternalFinalizeCrawlSnapshotInput,
   type InternalPersistCrawlPageInput,
   type InternalReuseCrawlPageInput,
+  technicalCrawlMaxUrlLimit,
   type TechnicalCrawlPurpose
 } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
@@ -38,7 +39,7 @@ export function internalPersistCrawlPageInput(
   ];
   const optionalKeys = [
     "title", "description", "h1", "canonicalUrl", "robots", "language",
-    "etag", "lastModified", "purpose"
+    "etag", "lastModified", "purpose", "savePageMap", "metaTags"
   ];
   if (
     Object.keys(input).some(
@@ -63,7 +64,7 @@ export function internalPersistCrawlPageInput(
     projectId: internalUuid(string(input.projectId, "projectId", 64), "projectId"),
     crawlId: internalUuid(string(input.crawlId, "crawlId", 64), "crawlId"),
     purpose: crawlPurpose(input.purpose),
-    sequence: integer(input.sequence, "sequence", 1, 1_000),
+    sequence: integer(input.sequence, "sequence", 1, technicalCrawlMaxUrlLimit),
     requestedUrl: normalizePageUrl(string(input.requestedUrl, "requestedUrl", 4_096)).normalized,
     finalUrl: normalizePageUrl(string(input.finalUrl, "finalUrl", 4_096)).normalized,
     redirectChain: urlArray(input.redirectChain, "redirectChain", 10),
@@ -98,6 +99,7 @@ export function internalPersistCrawlPageInput(
       100,
       160
     ),
+    metaTags: input.metaTags === undefined ? [] : metaTagArray(input.metaTags),
     wordCount: integer(input.wordCount, "wordCount", 0, 10_000_000),
     contentHash: pattern(input.contentHash, "contentHash", HASH),
     ...optionalHeader(input, "etag", 1_000),
@@ -109,7 +111,8 @@ export function internalPersistCrawlPageInput(
       title: string(item.title, `issues.${index}.title`, 255),
       details: scalarRecord(item.details, `issues.${index}.details`)
     }), ["code", "severity", "title", "details"]),
-    crawledAt: date(input.crawledAt, "crawledAt")
+    crawledAt: date(input.crawledAt, "crawledAt"),
+    savePageMap: optionalBoolean(input.savePageMap, true)
   };
 }
 
@@ -148,6 +151,7 @@ export function internalReuseCrawlPageInput(
     "workspaceId",
     "projectId",
     "crawlId",
+    "purpose",
     "sequence",
     "sourceSnapshotId",
     "requestedUrl",
@@ -155,11 +159,14 @@ export function internalReuseCrawlPageInput(
     "redirectChain",
     "inSitemap",
     "depth",
-    "crawledAt"
+    "crawledAt",
+    "savePageMap"
   ];
   if (
     Object.keys(input).some((key) => !keys.includes(key)) ||
-    keys.some((key) => !(key in input))
+    keys
+      .filter((key) => !["purpose", "savePageMap"].includes(key))
+      .some((key) => !(key in input))
   ) {
     invalid("body");
   }
@@ -176,7 +183,8 @@ export function internalReuseCrawlPageInput(
       string(input.crawlId, "crawlId", 64),
       "crawlId"
     ),
-    sequence: integer(input.sequence, "sequence", 1, 1_000),
+    purpose: crawlPurpose(input.purpose),
+    sequence: integer(input.sequence, "sequence", 1, technicalCrawlMaxUrlLimit),
     sourceSnapshotId: internalUuid(
       string(input.sourceSnapshotId, "sourceSnapshotId", 64),
       "sourceSnapshotId"
@@ -192,7 +200,8 @@ export function internalReuseCrawlPageInput(
     redirectChain: urlArray(input.redirectChain, "redirectChain", 10),
     inSitemap: boolean(input.inSitemap, "inSitemap"),
     depth: integer(input.depth, "depth", 0, 10),
-    crawledAt: date(input.crawledAt, "crawledAt")
+    crawledAt: date(input.crawledAt, "crawledAt"),
+    savePageMap: optionalBoolean(input.savePageMap, true)
   };
 }
 
@@ -227,7 +236,12 @@ export function internalFinalizeCrawlSnapshotInput(
     crawlId: internalUuid(string(input.crawlId, "crawlId", 64), "crawlId"),
     purpose: crawlPurpose(input.purpose),
     status: input.status as InternalFinalizeCrawlSnapshotInput["status"],
-    processedUrls: integer(input.processedUrls, "processedUrls", 0, 1_000),
+    processedUrls: integer(
+      input.processedUrls,
+      "processedUrls",
+      0,
+      technicalCrawlMaxUrlLimit
+    ),
     scopeHash: pattern(
       input.scopeHash,
       "scopeHash",
@@ -269,6 +283,31 @@ function objectArray<T>(
       keys.some((key) => !(key in item))
     ) invalid(`${field}.${index}`);
     return map(item, index);
+  });
+}
+
+function metaTagArray(
+  value: unknown
+): NonNullable<InternalPersistCrawlPageInput["metaTags"]> {
+  if (!Array.isArray(value) || value.length > 200) invalid("metaTags");
+  return value.map((candidate, index) => {
+    const item = object(candidate);
+    const keys = ["name", "property", "httpEquiv", "content"];
+    if (
+      Object.keys(item).some((key) => !keys.includes(key)) ||
+      !("content" in item) ||
+      !["name", "property", "httpEquiv"].some(
+        (field) => item[field] !== undefined
+      )
+    ) {
+      invalid(`metaTags.${index}`);
+    }
+    return {
+      ...optional(item, "name", 160),
+      ...optional(item, "property", 160),
+      ...optional(item, "httpEquiv", 160),
+      content: string(item.content, `metaTags.${index}.content`, 4_000)
+    };
   });
 }
 
@@ -366,6 +405,11 @@ function integer(
 function boolean(value: unknown, field: string): boolean {
   if (typeof value !== "boolean") invalid(field);
   return value;
+}
+
+function optionalBoolean(value: unknown, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  return boolean(value, "savePageMap");
 }
 
 function pattern(value: unknown, field: string, expression: RegExp): string {

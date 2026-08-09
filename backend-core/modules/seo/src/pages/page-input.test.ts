@@ -74,18 +74,24 @@ test("binds a page cursor to bounded filters", () => {
     projectPageListQuery({
       limit: "100",
       search: " service ",
+      pathPrefix: "/catalog/",
       pageType: "PLANNED",
       lifecycleStatus: "ARCHIVED"
     }),
     {
       limit: 100,
       search: "service",
+      pathPrefix: "/catalog/",
       pageType: "PLANNED",
       lifecycleStatus: "ARCHIVED"
     }
   );
   assert.throws(
     () => projectPageListQuery({ limit: "101" }),
+    BadRequestException
+  );
+  assert.throws(
+    () => projectPageListQuery({ pathPrefix: "catalog/" }),
     BadRequestException
   );
 });

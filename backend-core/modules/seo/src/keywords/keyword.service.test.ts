@@ -224,6 +224,24 @@ test("projects exact rank collection metadata into keyword history", async () =>
           }
         }]
       },
+      rankSerpResult: {
+        findMany: async () => [
+          {
+            snapshotId: "01900000-0000-7000-8000-000000000073",
+            position: 1,
+            rankingUrl: "https://competitor.example/one",
+            title: "Конкурент",
+            snippet: null
+          },
+          {
+            snapshotId: "01900000-0000-7000-8000-000000000073",
+            position: 2,
+            rankingUrl: "https://example.com/result",
+            title: null,
+            snippet: null
+          }
+        ]
+      },
       trackingContext: {
         findMany: async () => [{ id: contextId, name: "Яндекс · Москва" }]
       },
@@ -262,6 +280,57 @@ test("projects exact rank collection metadata into keyword history", async () =>
     found: false,
     observedAt: "2026-08-06T11:45:00.000Z"
   }]);
+  assert.deepEqual(result.competitorSnapshots, [{
+    snapshotId: "01900000-0000-7000-8000-000000000073",
+    trackingContextId: contextId,
+    contextName: "Яндекс · Москва",
+    searchEngine: "YANDEX",
+    searchSource: "LIVE",
+    provider: "XMLSTOCK",
+    observedAt: "2026-08-06T11:45:00.000Z",
+    results: [
+      {
+        position: 1,
+        url: "https://competitor.example/one",
+        title: "Конкурент"
+      },
+      { position: 2, url: "https://example.com/result" }
+    ]
+  }]);
+});
+
+test("filters a keyword page by the union of selected groups", async () => {
+  const firstGroupId = "01900000-0000-7000-8000-000000000091";
+  const secondGroupId = "01900000-0000-7000-8000-000000000092";
+  let observedWhere: unknown;
+  const service = new KeywordService(
+    {
+      keyword: {
+        findMany: async ({ where }: { where: unknown }) => {
+          observedWhere = where;
+          return [];
+        },
+        count: async () => 0
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  const result = await service.list(
+    workspaceId,
+    projectId,
+    { limit: 100, groupIds: [firstGroupId, secondGroupId] },
+    "request-multi-group"
+  );
+
+  assert.deepEqual(
+    (observedWhere as {
+      memberships?: { some?: { groupId?: unknown } };
+    }).memberships?.some?.groupId,
+    { in: [firstGroupId, secondGroupId] }
+  );
+  assert.equal(result.data.length, 0);
+  assert.equal(result.page.totalApprox, 0);
 });
 
 test("projects imported Key Collector positions without poisoning keyword insights", async () => {

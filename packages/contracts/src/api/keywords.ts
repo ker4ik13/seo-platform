@@ -82,6 +82,8 @@ export interface KeywordListQuery {
   readonly search?: string;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
+  /** Union of explicitly selected groups. Mutually exclusive with groupId. */
+  readonly groupIds?: readonly string[];
   readonly clusterId?: string;
   readonly isFavorite?: boolean;
   readonly isTracked?: boolean;

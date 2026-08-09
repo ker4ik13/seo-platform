@@ -4,6 +4,7 @@ import {
   rankProviderKeywordLimit,
   type InternalIngestRankChunkInput,
   type InternalNormalizedRankResult,
+  type InternalNormalizedRankSerpResult,
   type NormalizedRankDataQualityFlag,
   type RankManifestHash
 } from "@seo-platform/contracts";
@@ -119,7 +120,7 @@ function normalizedResult(
       "dataQualityFlags",
       "found",
       "position"
-    ]);
+    ], ["serpResults"]);
     if (input.position !== null) invalid("result.position");
     const dataQualityFlags = qualityFlags(
       input.dataQualityFlags
@@ -131,6 +132,7 @@ function normalizedResult(
     ) {
       invalid("result.dataQualityFlags");
     }
+    const serpResults = normalizedSerpResults(input.serpResults);
     return {
       manifestEntryId: uuidV7(
         input.manifestEntryId,
@@ -139,7 +141,8 @@ function normalizedResult(
       keywordId: uuidV7(input.keywordId, "result.keywordId"),
       dataQualityFlags,
       found: false,
-      position: null
+      position: null,
+      ...(serpResults === undefined ? {} : { serpResults })
     };
   }
 
@@ -156,7 +159,7 @@ function normalizedResult(
       "resultType",
       "serpFeatures"
     ],
-    ["absolutePosition", "pixelPosition", "title", "snippet"]
+    ["absolutePosition", "pixelPosition", "title", "snippet", "serpResults"]
   );
   if (
     input.found !== true ||
@@ -190,6 +193,7 @@ function normalizedResult(
     "SNIPPET_UNAVAILABLE",
     input.snippet === undefined
   );
+  const serpResults = normalizedSerpResults(input.serpResults);
   return {
     manifestEntryId: uuidV7(
       input.manifestEntryId,
@@ -212,8 +216,38 @@ function normalizedResult(
     ...optionalString(input.title, "title", MAX_TITLE_LENGTH),
     ...optionalSnippet(input.snippet),
     resultType: "ORGANIC",
-    serpFeatures: []
+    serpFeatures: [],
+    ...(serpResults === undefined ? {} : { serpResults })
   };
+}
+
+function normalizedSerpResults(
+  value: unknown
+): readonly InternalNormalizedRankSerpResult[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 10) {
+    invalid("result.serpResults");
+  }
+  return value.map((entry, index) => {
+    const input = strictRecord(
+      entry,
+      ["position", "rankingUrl", "normalizedRankingUrl"],
+      ["title", "snippet"]
+    );
+    if (!Number.isSafeInteger(input.position) || Number(input.position) !== index + 1) {
+      invalid("result.serpResults.position");
+    }
+    return {
+      position: Number(input.position),
+      rankingUrl: httpUrl(input.rankingUrl, "result.serpResults.rankingUrl"),
+      normalizedRankingUrl: httpUrl(
+        input.normalizedRankingUrl,
+        "result.serpResults.normalizedRankingUrl"
+      ),
+      ...optionalString(input.title, "title", MAX_TITLE_LENGTH),
+      ...optionalSnippet(input.snippet)
+    };
+  });
 }
 
 function assertAvailabilityFlag(

@@ -627,7 +627,7 @@ function operationSummary(data: OperationResultData): SummaryView {
     const value = data.value.crawl;
     const total = Math.max(value.discoveredUrls, value.processedUrls);
     return {
-      title: value.config.purpose === "HTTP_STATUS_CHECK" ? "Проверка HTTP-статусов" : "Технический аудит",
+      title: value.config.purpose === "HTTP_STATUS_CHECK" ? "Обход сайта" : "Технический аудит",
       description: `${value.config.startUrls.length} стартовых URL · до ${formatInteger(value.config.maxUrls)} страниц`,
       ...summaryStatus(value.status, value.processedUrls, total),
       facts: [

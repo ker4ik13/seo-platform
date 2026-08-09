@@ -6,6 +6,7 @@ import {
   Headers,
   Param,
   Post,
+  Query,
   Req,
   UseGuards
 } from "@nestjs/common";
@@ -161,6 +162,7 @@ export class CrawlIssueController {
   public async list(
     @Param("projectId") projectId: string,
     @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Query("pageId") pageIdValue: unknown,
     @Req() request: FastifyRequest
   ): Promise<ApiResponse<ProjectCrawlIssueCollection>> {
     const context = internalCommandContext(headers);
@@ -173,7 +175,13 @@ export class CrawlIssueController {
       request,
       await this.snapshots.listIssues(
         context.workspaceId,
-        context.projectId
+        context.projectId,
+        pageIdValue === undefined
+          ? undefined
+          : internalUuid(
+              typeof pageIdValue === "string" ? pageIdValue : "",
+              "pageId"
+            )
       )
     );
   }

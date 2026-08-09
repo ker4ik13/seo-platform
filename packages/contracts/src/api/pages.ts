@@ -1,3 +1,5 @@
+import type { CrawlMetaTag } from "./crawls.js";
+
 export const pageTypes = [
   "EXISTING",
   "PLANNED",
@@ -70,6 +72,31 @@ export interface PageSourceSummary {
   readonly lastSeenAt: string;
 }
 
+export interface ProjectPageCrawlSnapshot {
+  readonly crawlId: string;
+  readonly statusCode: number;
+  readonly responseTimeMs: number;
+  readonly sizeBytes: number;
+  readonly contentType: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly h1?: string;
+  readonly h1Count: number;
+  readonly canonicalUrl?: string;
+  readonly robots?: string;
+  readonly language?: string;
+  readonly metaTags: readonly CrawlMetaTag[];
+  readonly imageCount: number;
+  readonly imagesMissingAlt: number;
+  readonly structuredDataTypes: readonly string[];
+  readonly wordCount: number;
+  readonly redirectChain: readonly string[];
+  readonly inSitemap: boolean;
+  readonly depth: number;
+  readonly indexability: PageIndexability;
+  readonly crawledAt: string;
+}
+
 export interface ProjectPageSummary {
   readonly id: string;
   readonly workspaceId: string;
@@ -97,6 +124,8 @@ export interface ProjectPageSummary {
   readonly notes?: string;
   readonly assignedKeywordCount: number;
   readonly assignedClusterCount: number;
+  readonly openIssueCount?: number;
+  readonly latestCrawl?: ProjectPageCrawlSnapshot;
   readonly lifecycleStatus: PageLifecycleStatus;
   readonly version: number;
   readonly createdBy?: string;
@@ -111,6 +140,8 @@ export interface ProjectPageListQuery {
   readonly limit: number;
   readonly cursor?: string;
   readonly search?: string;
+  /** URL pathname prefix selected in the site-structure tree. */
+  readonly pathPrefix?: string;
   readonly pageType?: PageType;
   readonly indexability?: PageIndexability;
   readonly lifecycleStatus?: PageLifecycleStatus;
@@ -119,6 +150,8 @@ export interface ProjectPageListQuery {
 export interface ProjectPageCollection {
   readonly pages: readonly ProjectPageSummary[];
   readonly nextCursor?: string;
+  /** Active page URLs used to build the client-side site structure tree. */
+  readonly structureUrls?: readonly string[];
 }
 
 export const pageMutationRestrictions = [

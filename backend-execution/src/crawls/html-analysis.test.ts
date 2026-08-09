@@ -35,6 +35,10 @@ test("extracts normalized SEO evidence without retaining raw HTML", () => {
   assert.deepEqual(result.internalLinks, ["https://example.com/about"]);
   assert.deepEqual(result.externalLinks, ["https://outside.example/path"]);
   assert.deepEqual(result.structuredDataTypes, ["Service"]);
+  assert.deepEqual(result.metaTags, [
+    { name: "description", content: "Описание страницы" },
+    { name: "robots", content: "index, follow" }
+  ]);
   assert.equal(result.imagesMissingAlt, 1);
   assert.match(result.contentHash, /^[0-9a-f]{64}$/u);
   assert.deepEqual(

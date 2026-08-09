@@ -106,6 +106,7 @@ export function projectPageListQuery(
           "limit",
           "cursor",
           "search",
+          "pathPrefix",
           "pageType",
           "indexability",
           "lifecycleStatus"
@@ -125,6 +126,19 @@ export function projectPageListQuery(
     "NFKC"
   );
   if (search && search.length > 300) invalid("search");
+  const pathPrefix = optionalQueryString(
+    query.pathPrefix,
+    "pathPrefix"
+  )?.normalize("NFKC");
+  if (
+    pathPrefix &&
+    (!pathPrefix.startsWith("/") ||
+      pathPrefix.length > 2_048 ||
+      pathPrefix.includes("?") ||
+      pathPrefix.includes("#"))
+  ) {
+    invalid("pathPrefix");
+  }
   const pageType = optionalEnum(
     query.pageType,
     "pageType",
@@ -144,6 +158,7 @@ export function projectPageListQuery(
     limit,
     ...(cursor ? { cursor } : {}),
     ...(search ? { search } : {}),
+    ...(pathPrefix ? { pathPrefix } : {}),
     ...(pageType ? { pageType } : {}),
     ...(indexability ? { indexability } : {}),
     ...(lifecycleStatus ? { lifecycleStatus } : {})

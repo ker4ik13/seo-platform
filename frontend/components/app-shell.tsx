@@ -55,7 +55,7 @@ const navigation: readonly {
     icon: "pages",
     href: "/app/pages",
     section: "pages",
-    available: false,
+    available: true,
     projectScoped: true
   },
   {
@@ -70,7 +70,8 @@ const navigation: readonly {
     icon: "note",
     href: "/app/notes",
     section: "notes",
-    available: false
+    available: true,
+    projectScoped: true
   }
 ];
 
@@ -94,7 +95,9 @@ export function AppShell({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(initiallyCollapsed);
   const hasProject = Boolean(context.project);
   const hasWorkspace = Boolean(context.workspace);
-  const usesWorkspaceLayout = ["semantics", "tasks"].includes(activeSection);
+  const usesWorkspaceLayout = ["notes", "pages", "semantics", "tasks"].includes(
+    activeSection
+  );
   const isNavigationAvailable = (
     item: (typeof navigation)[number]
   ): boolean =>
@@ -105,7 +108,9 @@ export function AppShell({
     item: (typeof navigation)[number]
   ): string =>
     item.projectScoped && context.project
-      ? projectPagesReturnTo(context.project.id)
+      ? item.section === "pages"
+        ? projectPagesReturnTo(context.project.id)
+        : `/app/projects/${encodeURIComponent(context.project.id)}/${item.section}`
       : item.href;
   return (
     <div className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>

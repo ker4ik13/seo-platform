@@ -160,27 +160,27 @@ function httpStatusNotificationContent(
   if (input.status === "FAILED") {
     return {
       severity: "CRITICAL",
-      title: "Проверка HTTP-статусов завершилась ошибкой",
+      title: "Обход сайта завершился с ошибкой",
       body: `Обработано страниц: ${input.processedUrls}. Проверьте доступность сайта и параметры запуска.`
     };
   }
   if (input.status === "CANCELLED") {
     return {
       severity: "INFO",
-      title: "Проверка HTTP-статусов отменена",
+      title: "Обход сайта отменён",
       body: `До отмены обработано страниц: ${input.processedUrls}.`
     };
   }
   if (input.status === "PARTIALLY_COMPLETED") {
     return {
       severity: "WARNING",
-      title: "Проверка HTTP-статусов завершена частично",
+      title: "Обход сайта завершён частично",
       body: `Обработано страниц: ${input.processedUrls}. Откройте результат, чтобы проверить ответы и редиректы.`
     };
   }
   return {
     severity: "INFO",
-    title: "Проверка HTTP-статусов завершена",
+    title: "Обход сайта завершён",
     body: `Обработано страниц: ${input.processedUrls}. Ответы и цепочки редиректов готовы.`
   };
 }

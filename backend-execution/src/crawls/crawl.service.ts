@@ -699,7 +699,8 @@ function configJson(input: InternalCreateTechnicalCrawlInput): Prisma.InputJsonV
     maxDepth: input.maxDepth,
     maxRuntimeSeconds: input.maxRuntimeSeconds,
     requestsPerMinute: input.requestsPerMinute,
-    obeyRobots: true
+    obeyRobots: true,
+    savePageMap: input.savePageMap
   };
 }
 

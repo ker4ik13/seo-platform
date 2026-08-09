@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
+  SemanticKeywordCompetitorSnapshot,
   SemanticKeywordInsights,
-  SemanticKeywordListItem
+  SemanticKeywordListItem,
+  SemanticKeywordPositionHistoryPoint
 } from "@seo-platform/contracts";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import {
@@ -13,6 +15,8 @@ import {
 } from "../lib/semantic-rank-presentation";
 import type { SemanticKeywordIntent } from "./semantic-view-types";
 import { SearchEngineLogo } from "./search-engine-logo";
+import { ProviderLogo } from "./provider-logo";
+import { SemanticModal } from "./semantic-modal";
 import { SemanticRankHistoryChart } from "./semantic-rank-history-chart";
 
 export interface SemanticKeywordInspectorItem {
@@ -56,6 +60,9 @@ export function SemanticKeywordInspector({
   const [noteDirty, setNoteDirty] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [noteStatus, setNoteStatus] = useState<string>();
+  const [expandedCompetitorSnapshots, setExpandedCompetitorSnapshots] =
+    useState<ReadonlySet<string>>(new Set());
+  const [historyOpen, setHistoryOpen] = useState(false);
   const noteDirtyRef = useRef(false);
 
   useEffect(() => {
@@ -69,6 +76,8 @@ export function SemanticKeywordInspector({
     setNote("");
     setNoteDirty(false);
     setNoteStatus(undefined);
+    setExpandedCompetitorSnapshots(new Set());
+    setHistoryOpen(false);
     const load = () => {
       void browserApiRequest<SemanticKeywordInsights>(
         `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(item.id)}/insights`,
@@ -115,6 +124,33 @@ export function SemanticKeywordInspector({
         .map((position) => [position.searchEngine, position] as const)
     );
   }, [insights]);
+  const primaryHistory = useMemo(() => {
+    const points = insights?.positionHistory ?? [];
+    const contextIds = primaryRankContextIds(points);
+    return points.filter(({ searchEngine, trackingContextId }) =>
+      contextIds.get(searchEngine) === trackingContextId
+    );
+  }, [insights]);
+  const positionChanges = useMemo(
+    () => rankHistoryByDate(primaryHistory),
+    [primaryHistory]
+  );
+  const competitorSnapshots = insights?.competitorSnapshots ?? [];
+  const targetMismatches = useMemo(
+    () => item.targetUrl
+      ? [...primaryPositions.values()].flatMap((position) =>
+          position.found &&
+          position.rankingUrl &&
+          !sameRankingUrl(item.targetUrl!, position.rankingUrl)
+            ? [{
+                engine: position.searchEngine,
+                rankingUrl: position.rankingUrl
+              }]
+            : []
+        )
+      : [],
+    [item.targetUrl, primaryPositions]
+  );
 
   async function saveNote(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -172,6 +208,30 @@ export function SemanticKeywordInspector({
           <div><dt>Кластер</dt><dd>{item.clusterName ?? "Не назначен"}</dd></div>
           <div><dt>Язык</dt><dd>{item.language.toUpperCase()}</dd></div>
         </dl>
+        <div className="semantic-inspector-target-url">
+          <strong>Целевая страница</strong>
+          {item.targetUrl ? (
+            <a href={item.targetUrl} rel="noopener noreferrer" target="_blank">{item.targetUrl}</a>
+          ) : (
+            <span className="semantic-inspector-muted">Не назначена</span>
+          )}
+          {targetMismatches.length > 0 && (
+            <div className="semantic-target-url-warning" role="status">
+              <strong>URL не совпадает с найденной страницей</strong>
+              {targetMismatches.map(({ engine, rankingUrl }) => (
+                <a
+                  href={rankingUrl}
+                  key={`${engine}:${rankingUrl}`}
+                  rel="noopener noreferrer"
+                  target="_blank"
+                >
+                  <SearchEngineLogo engine={engine} size="compact" />
+                  <span>{rankingUrl}</span>
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
       </section>
 
       <section>
@@ -238,18 +298,78 @@ export function SemanticKeywordInspector({
           <span className="semantic-inspector-muted">Загружаем позиции…</span>
         )}
         <SemanticRankHistoryChart points={insights?.positionHistory ?? []} />
+        {positionChanges.length > 0 && (
+          <div className="semantic-rank-change-history">
+            <header>
+              <strong>Изменения позиций</strong>
+              {positionChanges.length > 5 && (
+                <button onClick={() => setHistoryOpen(true)} type="button">
+                  Показать все
+                </button>
+              )}
+            </header>
+            <RankChangeRows rows={positionChanges.slice(0, 5)} />
+          </div>
+        )}
       </section>
 
       {error && <div className="inline-alert danger" role="alert">{error}</div>}
 
-      <section>
-        <h3>Целевая страница</h3>
-        {item.targetUrl ? (
-          <a href={item.targetUrl} rel="noopener noreferrer" target="_blank">{item.targetUrl}</a>
-        ) : (
-          <span className="semantic-inspector-muted">Не назначена</span>
-        )}
-      </section>
+      {competitorSnapshots.map((snapshot) => {
+        const expanded = expandedCompetitorSnapshots.has(snapshot.snapshotId);
+        const visibleResults = expanded
+          ? snapshot.results
+          : snapshot.results.slice(0, 5);
+        return (
+          <section
+            className="semantic-competitor-snapshot"
+            key={snapshot.snapshotId}
+          >
+            <header>
+              <div>
+                <h3>Топ конкурентов ({rankEngineLabel(snapshot.searchEngine)})</h3>
+                <small>
+                  {competitorSourceLabel(snapshot)} · {formatDateTime(snapshot.observedAt)}
+                </small>
+              </div>
+              <ProviderLogo provider={snapshot.provider} size="compact" />
+            </header>
+            <ol>
+              {visibleResults.map((result) => (
+                <li key={`${snapshot.snapshotId}:${result.position}`}>
+                  <span>{result.position}</span>
+                  <div className="semantic-competitor-result">
+                    <strong>{urlHost(result.url)}</strong>
+                    <small>{shortUrl(result.url)}</small>
+                    <a
+                      aria-label={`Открыть результат ${result.position}: ${urlHost(result.url)}`}
+                      href={result.url}
+                      rel="noopener noreferrer"
+                      target="_blank"
+                      title={result.title ?? result.url}
+                    >
+                      <span className="visually-hidden">Открыть результат</span>
+                    </a>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            {snapshot.results.length > 5 && (
+              <button
+                className="semantic-competitor-toggle"
+                onClick={() =>
+                  setExpandedCompetitorSnapshots((current) =>
+                    toggleSetValue(current, snapshot.snapshotId)
+                  )
+                }
+                type="button"
+              >
+                {expanded ? "Скрыть" : "Показать все"}
+              </button>
+            )}
+          </section>
+        );
+      })}
 
       <section>
         <h3>Теги</h3>
@@ -292,6 +412,18 @@ export function SemanticKeywordInspector({
         <small>Обновлён: {formatDateTime(item.updatedAt)}</small>
         <small>Источник: {sourceLabel(item.sourceMode)}</small>
       </section>
+      {historyOpen && (
+        <SemanticModal
+          description="Все сохранённые даты для текущих поисковых контекстов. Крестик означает, что позиция в глубине проверки не найдена."
+          onClose={() => setHistoryOpen(false)}
+          size="medium"
+          title={`История позиций · ${item.textOriginal}`}
+        >
+          <div className="semantic-rank-history-modal">
+            <RankChangeRows rows={positionChanges} />
+          </div>
+        </SemanticModal>
+      )}
     </aside>
   );
 }
@@ -303,8 +435,140 @@ function withoutNote(
     keywordId: insights.keywordId,
     frequencies: insights.frequencies,
     positions: insights.positions,
-    positionHistory: insights.positionHistory
+    positionHistory: insights.positionHistory,
+    ...(insights.competitorSnapshots
+      ? { competitorSnapshots: insights.competitorSnapshots }
+      : {})
   };
+}
+
+interface RankHistoryDateRow {
+  readonly date: string;
+  readonly observedAt: string;
+  readonly positions: ReadonlyMap<
+    "GOOGLE" | "YANDEX",
+    SemanticKeywordPositionHistoryPoint
+  >;
+}
+
+function RankChangeRows({ rows }: Readonly<{ rows: readonly RankHistoryDateRow[] }>) {
+  return (
+    <div className="semantic-rank-change-rows">
+      {rows.map((row) => (
+        <div key={row.date}>
+          <time dateTime={row.observedAt}>{formatDate(row.observedAt)}</time>
+          {(["YANDEX", "GOOGLE"] as const).map((engine) => {
+            const point = row.positions.get(engine);
+            return (
+              <span
+                className={!point ? "empty" : point.found ? undefined : "lost"}
+                key={engine}
+                title={point ? historyPointTitle(point) : "В этот день замера не было"}
+              >
+                <SearchEngineLogo engine={engine} size="compact" />
+                <b>{point ? (point.found ? point.position ?? "—" : "×") : "—"}</b>
+              </span>
+            );
+          })}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function rankHistoryByDate(
+  points: readonly SemanticKeywordPositionHistoryPoint[]
+): readonly RankHistoryDateRow[] {
+  const rows = new Map<string, {
+    observedAt: string;
+    positions: Map<"GOOGLE" | "YANDEX", SemanticKeywordPositionHistoryPoint>;
+  }>();
+  for (const point of [...points].sort((left, right) =>
+    Date.parse(right.observedAt) - Date.parse(left.observedAt)
+  )) {
+    const date = dateKey(point.observedAt);
+    const row = rows.get(date) ?? {
+      observedAt: point.observedAt,
+      positions: new Map()
+    };
+    if (!row.positions.has(point.searchEngine)) {
+      row.positions.set(point.searchEngine, point);
+    }
+    rows.set(date, row);
+  }
+  return [...rows.entries()]
+    .map(([date, row]) => ({ date, ...row }))
+    .sort((left, right) =>
+      Date.parse(right.observedAt) - Date.parse(left.observedAt)
+    );
+}
+
+function dateKey(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function sameRankingUrl(targetUrl: string, rankingUrl: string): boolean {
+  try {
+    const normalize = (value: string) => {
+      const url = new URL(value);
+      const host = url.hostname.toLocaleLowerCase("en").replace(/^www\./u, "");
+      const path = decodeURIComponent(url.pathname)
+        .replace(/\/{2,}/gu, "/")
+        .replace(/\/$/u, "") || "/";
+      return `${host}${path}`.toLocaleLowerCase("en");
+    };
+    return normalize(targetUrl) === normalize(rankingUrl);
+  } catch {
+    return targetUrl.trim() === rankingUrl.trim();
+  }
+}
+
+function competitorSourceLabel(snapshot: SemanticKeywordCompetitorSnapshot): string {
+  const source = snapshot.searchEngine === "YANDEX"
+    ? snapshot.searchSource === "LIVE"
+      ? "Яндекс Live"
+      : snapshot.searchSource === "SEARCH_API"
+        ? "Яндекс XML"
+        : "Яндекс"
+    : snapshot.searchSource === "LIVE" ? "Google Live" : "Google";
+  return `${source} · XMLStock`;
+}
+
+function historyPointTitle(point: SemanticKeywordPositionHistoryPoint): string {
+  const status = point.found && point.position !== undefined
+    ? `Позиция ${point.position}`
+    : "Позиция не найдена";
+  return `${status} · ${point.contextName} · ${formatDateTime(point.observedAt)}`;
+}
+
+function urlHost(value: string): string {
+  try {
+    return new URL(value).hostname.replace(/^www\./u, "");
+  } catch {
+    return value;
+  }
+}
+
+function shortUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    const suffix = `${url.pathname}${url.search}`;
+    return suffix.length > 54 ? `${suffix.slice(0, 51)}…` : suffix || "/";
+  } catch {
+    return value.length > 54 ? `${value.slice(0, 51)}…` : value;
+  }
+}
+
+function toggleSetValue(
+  current: ReadonlySet<string>,
+  value: string
+): ReadonlySet<string> {
+  const next = new Set(current);
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  return next;
 }
 
 function InspectorEmpty({ title, text }: Readonly<{ title: string; text: string }>) {
@@ -367,4 +631,15 @@ function formatDateTime(value: string): string {
   return Number.isNaN(date.getTime())
     ? "—"
     : new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function formatDate(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "—"
+    : new Intl.DateTimeFormat("ru-RU", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric"
+      }).format(date);
 }

@@ -197,7 +197,8 @@ export function CustomSelect({
     if (disabled) return;
     const root = rootRef.current;
     setPortalTarget(
-      root?.closest<HTMLDialogElement>("dialog[open]") ??
+      root?.closest<HTMLElement>("[data-dropdown-portal-root]") ??
+        root?.closest<HTMLDialogElement>("dialog[open]") ??
         root?.ownerDocument.body ??
         null
     );

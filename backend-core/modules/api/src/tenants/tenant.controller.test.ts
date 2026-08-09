@@ -5,6 +5,7 @@ import type { FastifyReply } from "fastify";
 import type { TenantRequest } from "../authorization/authorization.types.js";
 import { TenantController } from "./tenant.controller.js";
 import type { TenantService } from "./tenant.service.js";
+import type { RecentAuthenticationService } from "../identity/recent-authentication.service.js";
 
 const project: ProjectSummary = {
   id: "01900000-0000-7000-8000-000000000101",
@@ -22,12 +23,15 @@ const project: ProjectSummary = {
 
 test("explicit project response carries the authorized project access level", async () => {
   const requestedIds: string[] = [];
-  const controller = new TenantController({
-    getProject: async (projectId: string) => {
-      requestedIds.push(projectId);
-      return project;
-    }
-  } as TenantService);
+  const controller = new TenantController(
+    {
+      getProject: async (projectId: string) => {
+        requestedIds.push(projectId);
+        return project;
+      }
+    } as TenantService,
+    { assert: () => undefined } as unknown as RecentAuthenticationService
+  );
   const responseHeaders = new Map<string, string>();
   const reply = {
     header: (name: string, value: string) => {

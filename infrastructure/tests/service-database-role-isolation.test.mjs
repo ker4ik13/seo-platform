@@ -206,10 +206,14 @@ test("bootstrap and post-migration provisioners are secret-safe and fail closed"
   assert.match(provisioner, /unset JOBS_AUTH_EMAIL_DATABASE_PASSWORD/u);
   assert.match(provisioner, /service database passwords must be URL-safe/u);
   assert.match(provisioner, /service database passwords must be pairwise distinct/u);
-  assert.match(provisioner, /--command='\\password :"role_name"'/u);
+  assert.doesNotMatch(provisioner, /\\password/u);
   assert.match(
     provisioner,
-    /printf '%s\\n%s\\n' "\$role_password" "\$role_password" \|/u
+    /printf '%s\\n' "SET password_encryption = 'scram-sha-256';"/u
+  );
+  assert.match(
+    provisioner,
+    /printf "ALTER ROLE %s PASSWORD '%s';\\n" "\$role_name" "\$role_password"/u
   );
   assert.doesNotMatch(provisioner, /--command=.*DATABASE_.*PASSWORD/u);
 
