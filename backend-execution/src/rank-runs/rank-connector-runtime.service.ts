@@ -3,6 +3,11 @@ import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { IntegrationCredentialCryptoService } from "../integrations/integration-credential-crypto.service.js";
 import {
+  XmlStockHttpQuotaLimiter,
+  type XmlStockHttpQuotaPermit,
+  type XmlStockHttpProduct
+} from "../integrations/xmlstock-http-quota-limiter.js";
+import {
   ArsenkinRankConnector,
   arsenkinRankWireRequestHash,
   buildArsenkinRankWireRequest,
@@ -22,6 +27,7 @@ import {
   XmlStockRankConnector,
   buildXmlStockRankWireRequest,
   stageXmlStockRankResult,
+  xmlStockRankHttpProduct,
   xmlStockRankWireRequestHash
 } from "./xmlstock-rank.connector.js";
 
@@ -38,6 +44,7 @@ export type RankConnectorRuntimeOutcome =
   | "DISABLED"
   | "IDLE"
   | "LEASE_LOST"
+  | "PROVIDER_CAPACITY_DELAYED"
   | "SUBMITTED"
   | "SUBMIT_TERMINAL"
   | "POLL_PENDING"
@@ -56,6 +63,7 @@ export class RankConnectorRuntimeService {
     private readonly connector: ArsenkinRankConnector,
     @Inject(XMLSTOCK_RANK_CONNECTOR)
     private readonly xmlStockConnector: XmlStockRankConnector,
+    private readonly xmlStockQuota: XmlStockHttpQuotaLimiter,
     @Inject(APP_CONFIG) private readonly config: AppConfig
   ) {}
 
@@ -109,37 +117,67 @@ export class RankConnectorRuntimeService {
         })();
     const wireRequestHash = Buffer.from(built.hash, "hex");
     this.assertNetworkBudget(claim.leaseExpiresAt, 1);
-    const secret = this.crypto.decrypt(
-      claim.workspaceId,
-      claim.provider,
-      claim.credentialId,
-      claim.encryptedCredential
-    );
-    const permit = await this.broker.authorizeSubmit(
-      claim,
-      connectorVersion(claim.provider)
-    );
-    const outcome = claim.provider === "XMLSTOCK"
-      ? await this.xmlStockConnector.submit(
-          requestIntent,
-          secret,
-          this.providerRequestTimeoutMs()
-        )
-      : await this.connector.submit(
-          requestIntent,
-          secret,
-          this.providerRequestTimeoutMs()
+    let quotaPermit: Extract<
+      XmlStockHttpQuotaPermit,
+      { readonly allowed: true }
+    > | undefined;
+    let quotaProduct: XmlStockHttpProduct | undefined;
+    if (claim.provider === "XMLSTOCK") {
+      const request = buildXmlStockRankWireRequest(requestIntent);
+      if (request.delayed) {
+        quotaProduct = xmlStockRankHttpProduct(request);
+        const acquired = await this.xmlStockQuota.tryAcquire({
+          credentialId: claim.credentialId,
+          product: quotaProduct,
+          leaseMs:
+            this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS
+        });
+        if (!acquired.allowed) return "PROVIDER_CAPACITY_DELAYED";
+        quotaPermit = acquired;
+      }
+    }
+    try {
+      const secret = this.crypto.decrypt(
+        claim.workspaceId,
+        claim.provider,
+        claim.credentialId,
+        claim.encryptedCredential
+      );
+      const permit = await this.broker.authorizeSubmit(
+        claim,
+        connectorVersion(claim.provider)
+      );
+      const outcome = claim.provider === "XMLSTOCK"
+        ? await this.xmlStockConnector.submit(
+            requestIntent,
+            secret,
+            this.providerRequestTimeoutMs()
+          )
+        : await this.connector.submit(
+            requestIntent,
+            secret,
+            this.providerRequestTimeoutMs()
+          );
+      if (quotaProduct) {
+        await this.observeXmlStockQuota(
+          claim.credentialId,
+          quotaProduct,
+          outcome
         );
-    await this.broker.completeSubmit(
-      claim,
-      permit,
-      outcome,
-      built.request,
-      wireRequestHash
-    );
-    return outcome.status === "ACCEPTED"
-      ? "SUBMITTED"
-      : "SUBMIT_TERMINAL";
+      }
+      await this.broker.completeSubmit(
+        claim,
+        permit,
+        outcome,
+        built.request,
+        wireRequestHash
+      );
+      return outcome.status === "ACCEPTED"
+        ? "SUBMITTED"
+        : "SUBMIT_TERMINAL";
+    } finally {
+      if (quotaPermit) await this.xmlStockQuota.release(quotaPermit);
+    }
   }
 
   private async poll(
@@ -155,19 +193,49 @@ export class RankConnectorRuntimeService {
       claim.credentialId,
       claim.encryptedCredential
     );
-    const outcome = claim.provider === "XMLSTOCK"
-      ? await this.xmlStockConnector.fetchResult(
+    let outcome:
+      | Awaited<ReturnType<XmlStockRankConnector["fetchResult"]>>
+      | Awaited<ReturnType<ArsenkinRankConnector["fetchResult"]>>;
+    if (claim.provider === "XMLSTOCK") {
+      const product = xmlStockRankHttpProduct(
+        buildXmlStockRankWireRequest(claim.request)
+      );
+      const acquired = await this.xmlStockQuota.tryAcquire({
+        credentialId: claim.credentialId,
+        product,
+        leaseMs:
+          this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS
+      });
+      if (!acquired.allowed) {
+        await this.broker.deferPollForProviderCapacity(
+          claim,
+          Math.max(5, acquired.retryAfterSeconds)
+        );
+        return "PROVIDER_CAPACITY_DELAYED";
+      }
+      try {
+        outcome = await this.xmlStockConnector.fetchResult(
           claim.providerTaskId,
           secret,
           this.providerRequestTimeoutMs(),
           claim.request,
           claim.providerProgress
-        )
-      : await this.connector.fetchResult(
-          claim.providerTaskId,
-          secret,
-          this.providerRequestTimeoutMs()
         );
+        await this.observeXmlStockQuota(
+          claim.credentialId,
+          product,
+          outcome
+        );
+      } finally {
+        await this.xmlStockQuota.release(acquired);
+      }
+    } else {
+      outcome = await this.connector.fetchResult(
+        claim.providerTaskId,
+        secret,
+        this.providerRequestTimeoutMs()
+      );
+    }
     switch (outcome.status) {
       case "CHECKPOINTED":
         await this.broker.completePoll(claim, {
@@ -274,6 +342,39 @@ export class RankConnectorRuntimeService {
       this.config.integrationCredentialValidation.timeoutMs,
       RANK_PROVIDER_REQUEST_TIMEOUT_MAX_MS
     );
+  }
+
+  private async observeXmlStockQuota(
+    credentialId: string,
+    product: XmlStockHttpProduct,
+    outcome: {
+      readonly status: string;
+      readonly code?: string;
+      readonly retryAfterSeconds?: number;
+    }
+  ): Promise<void> {
+    if (
+      outcome.status === "RETRYABLE_FAILURE" &&
+      outcome.code === "PROVIDER_RATE_LIMITED"
+    ) {
+      await this.xmlStockQuota.penalize({
+        credentialId,
+        product,
+        ...(outcome.retryAfterSeconds === undefined
+          ? {}
+          : { retryAfterSeconds: outcome.retryAfterSeconds })
+      });
+      return;
+    }
+    if (
+      outcome.status !== "OUTCOME_UNKNOWN" &&
+      !(
+        outcome.status === "RETRYABLE_FAILURE" &&
+        outcome.code === "PROVIDER_UNAVAILABLE"
+      )
+    ) {
+      await this.xmlStockQuota.recordSuccess({ credentialId, product });
+    }
   }
 
   private assertNetworkBudget(

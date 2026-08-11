@@ -154,10 +154,42 @@ async function bootstrap(): Promise<void> {
     }
   );
 
-  let dispatching = false;
-  async function dispatchPending(): Promise<void> {
-    if (dispatching) return;
-    dispatching = true;
+  let runtimeDispatching = false;
+  async function dispatchRuntime(): Promise<void> {
+    if (runtimeDispatching) return;
+    runtimeDispatching = true;
+    try {
+      const dispatchBucket = Math.floor(
+        Date.now() / config.connectorRuntime.dispatchIntervalMs
+      );
+      const rankBurst = config.connectorRuntime.rankConcurrency * 2;
+      for (let slot = 0; slot < rankBurst; slot += 1) {
+        await enqueueRankConnectorRuntime(
+          rankQueue,
+          dispatchBucket * rankBurst + slot
+        );
+      }
+      for (
+        let slot = 0;
+        slot < config.connectorRuntime.frequencyConcurrency;
+        slot += 1
+      ) {
+        await enqueueFrequencyCollectionRuntime(
+          frequencyQueue,
+          dispatchBucket * config.connectorRuntime.frequencyConcurrency + slot
+        );
+      }
+    } catch {
+      logger.error("Unable to dispatch connector runtime work");
+    } finally {
+      runtimeDispatching = false;
+    }
+  }
+
+  let maintenanceDispatching = false;
+  async function dispatchMaintenance(): Promise<void> {
+    if (maintenanceDispatching) return;
+    maintenanceDispatching = true;
     try {
       try {
         await refreshScheduler.scheduleHourlyRefreshes();
@@ -176,13 +208,6 @@ async function bootstrap(): Promise<void> {
         Date.now() /
           (config.integrationCredentialValidation.dispatchSeconds * 1_000)
       );
-      const rankBurst = config.connectorRuntime.rankConcurrency * 2;
-      for (let slot = 0; slot < rankBurst; slot += 1) {
-        await enqueueRankConnectorRuntime(
-          rankQueue,
-          dispatchBucket * rankBurst + slot
-        );
-      }
       for (
         let slot = 0;
         slot < config.connectorRuntime.keywordResearchConcurrency;
@@ -190,32 +215,29 @@ async function bootstrap(): Promise<void> {
       ) {
         await enqueueKeywordResearchRuntime(
           keywordResearchQueue,
-          dispatchBucket * config.connectorRuntime.keywordResearchConcurrency + slot
-        );
-      }
-      for (
-        let slot = 0;
-        slot < config.connectorRuntime.frequencyConcurrency;
-        slot += 1
-      ) {
-        await enqueueFrequencyCollectionRuntime(
-          frequencyQueue,
-          dispatchBucket * config.connectorRuntime.frequencyConcurrency + slot
+          dispatchBucket *
+            config.connectorRuntime.keywordResearchConcurrency +
+            slot
         );
       }
     } catch {
-      logger.error("Unable to dispatch pending credential validations");
+      logger.error("Unable to dispatch connector maintenance work");
     } finally {
-      dispatching = false;
+      maintenanceDispatching = false;
     }
   }
 
-  await dispatchPending();
-  const dispatchTimer = setInterval(
-    () => void dispatchPending(),
+  await Promise.all([dispatchRuntime(), dispatchMaintenance()]);
+  const runtimeDispatchTimer = setInterval(
+    () => void dispatchRuntime(),
+    config.connectorRuntime.dispatchIntervalMs
+  );
+  runtimeDispatchTimer.unref();
+  const maintenanceDispatchTimer = setInterval(
+    () => void dispatchMaintenance(),
     config.integrationCredentialValidation.dispatchSeconds * 1_000
   );
-  dispatchTimer.unref();
+  maintenanceDispatchTimer.unref();
 
   const workers = [
     validationWorker,
@@ -248,7 +270,8 @@ async function bootstrap(): Promise<void> {
   async function shutdown(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
-    clearInterval(dispatchTimer);
+    clearInterval(runtimeDispatchTimer);
+    clearInterval(maintenanceDispatchTimer);
     await Promise.all(workers.map((runtimeWorker) => runtimeWorker.close()));
     await Promise.all([
       validationQueue.close(),

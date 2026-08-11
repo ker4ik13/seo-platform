@@ -72,8 +72,8 @@ function optionalPosition(
   value: unknown
 ): Readonly<{ position?: number }> {
   if (value === undefined) return {};
-  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > 1_999) {
-    invalid("position", "Must be an integer between 0 and 1999");
+  if (!Number.isSafeInteger(value) || Number(value) < 0) {
+    invalid("position", "Must be a non-negative safe integer");
   }
   return { position: Number(value) };
 }

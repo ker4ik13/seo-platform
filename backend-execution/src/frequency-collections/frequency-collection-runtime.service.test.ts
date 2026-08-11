@@ -320,9 +320,45 @@ test("a full shared provider cap releases the claim without consuming an attempt
   assert.equal(releases[0]?.[1], 5);
 });
 
+test("an XMLStock credential quota miss is deferred without calling Wordstat", async () => {
+  let providerCalls = 0;
+  const releases: unknown[][] = [];
+  const runtime = runtimeWith({
+    claims: [{ ...frequencyClaim(1), provider: "XMLSTOCK" }],
+    xmlStock: {
+      collect: async () => {
+        providerCalls += 1;
+        return { ok: true, value: "1" };
+      }
+    },
+    quota: {
+      tryAcquire: async () => ({
+        allowed: false,
+        retryAfterSeconds: 2
+      })
+    },
+    release: async (...args) => {
+      releases.push(args);
+    }
+  });
+
+  assert.equal(await runtime.processOne("connector-123456"), "RETRY_SCHEDULED");
+  assert.equal(providerCalls, 0);
+  assert.equal(releases.length, 1);
+  assert.equal(releases[0]?.[1], 5);
+});
+
 class RuntimeHarness extends FrequencyCollectionRuntimeService {
   public constructor(private readonly results: string[]) {
-    super(undefined as never, undefined as never, undefined as never, undefined as never, undefined as never, undefined as never);
+    super(
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never,
+      undefined as never
+    );
   }
 
   public override async processOne(): Promise<string> {
@@ -367,6 +403,12 @@ function runtimeWith(input: {
   ) => Promise<FrequencyCollectionClaim | undefined>;
   readonly quarantine?: (...args: unknown[]) => Promise<void>;
   readonly release?: (...args: unknown[]) => Promise<void>;
+  readonly quota?: {
+    readonly tryAcquire?: (...args: unknown[]) => Promise<Readonly<Record<string, unknown>>>;
+    readonly release?: (...args: unknown[]) => Promise<void>;
+    readonly penalize?: (...args: unknown[]) => Promise<void>;
+    readonly recordSuccess?: (...args: unknown[]) => Promise<void>;
+  };
 }): FrequencyCollectionRuntimeService {
   return new FrequencyCollectionRuntimeService(
     {
@@ -406,6 +448,18 @@ function runtimeWith(input: {
       submit: async () => ({ status: "ACCEPTED", taskId: "task-batch" }),
       fetchResult: async () => ({ status: "PENDING", retryAfterSeconds: 5 }),
       ...input.arsenkin
+    } as never,
+    {
+      tryAcquire: async () => ({
+        allowed: true,
+        credentialId: "01900000-0000-7000-8000-000000000005",
+        product: "WORDSTAT",
+        member: "01900000-0000-7000-8000-000000000006"
+      }),
+      release: async () => undefined,
+      penalize: async () => undefined,
+      recordSuccess: async () => undefined,
+      ...input.quota
     } as never,
     {
       internalCommandTimeoutMs: 1_000,

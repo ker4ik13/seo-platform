@@ -15,7 +15,6 @@ import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.
 import type { TenantRequest } from "../authorization/authorization.types.js";
 import { DomainError } from "../common/domain-error.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
-import { RecentAuthenticationService } from "../identity/recent-authentication.service.js";
 import {
   CsrfSessionGuard,
   SessionAuthGuard
@@ -91,7 +90,6 @@ test("guards every credential mutation and records successful outcomes", async (
     readonly method: string;
     readonly args: readonly unknown[];
   }> = [];
-  let recentChecks = 0;
   const controller = new IntegrationController(
     {
       createIntegrationCredential: async (...args: unknown[]) => {
@@ -116,13 +114,7 @@ test("guards every credential mutation and records successful outcomes", async (
       record: async (record: AuditRecord) => {
         auditRecords.push(record);
       }
-    } as unknown as AuditService,
-    {
-      assert: (candidate: AuthenticatedPrincipal) => {
-        assert.equal(candidate.userId, principal.userId);
-        recentChecks += 1;
-      }
-    } as unknown as RecentAuthenticationService
+    } as unknown as AuditService
   );
   const request = tenantRequest({
     "idempotency-key": "credential-create-001",
@@ -153,7 +145,6 @@ test("guards every credential mutation and records successful outcomes", async (
   );
   await controller.revoke(credentialId, request, principal);
 
-  assert.equal(recentChecks, 4);
   assert.equal(jobCalls[0]?.method, "create");
   assert.equal(jobCalls[0]?.args[2], "credential-create-001");
   const validationCall = jobCalls.find(
@@ -190,10 +181,7 @@ test("gets one credential validation through trusted workspace context", async (
     } as unknown as JobsClient,
     {
       record: async () => undefined
-    } as unknown as AuditService,
-    {
-      assert: () => undefined
-    } as unknown as RecentAuthenticationService
+    } as unknown as AuditService
   );
   const response = await controller.getValidation(
     credentialId,
@@ -216,7 +204,7 @@ test("gets one credential validation through trusted workspace context", async (
   });
 });
 
-test("does not call dependencies when recent authentication is required", async () => {
+test("accepts an active protected session without interactive reauthentication", async () => {
   let dependencyCalled = false;
   const controller = new IntegrationController(
     {
@@ -229,78 +217,24 @@ test("does not call dependencies when recent authentication is required", async 
       record: async () => {
         dependencyCalled = true;
       }
-    } as unknown as AuditService,
-    {
-      assert: () => {
-        throw new DomainError({
-          statusCode: 401,
-          code: "REAUTHENTICATION_REQUIRED",
-          message: "Recent authentication is required"
-        });
-      }
-    } as unknown as RecentAuthenticationService
+    } as unknown as AuditService
   );
 
-  await assert.rejects(
-    controller.create(
-      {
-        provider: "KEYS_SO",
-        label: "Primary",
-        apiKey: "test-api-key"
-      },
-      tenantRequest({ "idempotency-key": "credential-create-002" }),
-      principal
-    ),
-    (error: unknown) =>
-      error instanceof DomainError &&
-      error.code === "REAUTHENTICATION_REQUIRED"
-  );
-  assert.equal(dependencyCalled, false);
-});
-
-test("requires recent authentication before credential validation", async () => {
-  let dependencyCalled = false;
-  const controller = new IntegrationController(
+  const response = await controller.create(
     {
-      createIntegrationCredentialValidation: async () => {
-        dependencyCalled = true;
-        return validation;
-      }
-    } as unknown as JobsClient,
-    {
-      record: async () => {
-        dependencyCalled = true;
-      }
-    } as unknown as AuditService,
-    {
-      assert: () => {
-        throw new DomainError({
-          statusCode: 401,
-          code: "REAUTHENTICATION_REQUIRED",
-          message: "Recent authentication is required"
-        });
-      }
-    } as unknown as RecentAuthenticationService
+      provider: "KEYS_SO",
+      label: "Primary",
+      apiKey: "test-api-key"
+    },
+    tenantRequest({ "idempotency-key": "credential-create-002" }),
+    principal
   );
-
-  await assert.rejects(
-    controller.createValidation(
-      credentialId,
-      tenantRequest({
-        "idempotency-key": "credential-validation-001"
-      }),
-      principal
-    ),
-    (error: unknown) =>
-      error instanceof DomainError &&
-      error.code === "REAUTHENTICATION_REQUIRED"
-  );
-  assert.equal(dependencyCalled, false);
+  assert.equal(response.data.id, credentialId);
+  assert.equal(dependencyCalled, true);
 });
 
 test("requires idempotency before dispatching credential validation", async () => {
   let dependencyCalled = false;
-  let recentChecks = 0;
   const controller = new IntegrationController(
     {
       createIntegrationCredentialValidation: async () => {
@@ -312,12 +246,7 @@ test("requires idempotency before dispatching credential validation", async () =
       record: async () => {
         dependencyCalled = true;
       }
-    } as unknown as AuditService,
-    {
-      assert: () => {
-        recentChecks += 1;
-      }
-    } as unknown as RecentAuthenticationService
+    } as unknown as AuditService
   );
 
   await assert.rejects(
@@ -331,7 +260,6 @@ test("requires idempotency before dispatching credential validation", async () =
       error.code === "VALIDATION_FAILED" &&
       error.fieldErrors?.[0]?.code === "INVALID_IDEMPOTENCY_KEY"
   );
-  assert.equal(recentChecks, 1);
   assert.equal(dependencyCalled, false);
 });
 

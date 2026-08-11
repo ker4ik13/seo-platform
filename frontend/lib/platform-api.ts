@@ -201,7 +201,10 @@ function accountUser(payload: unknown): AppUser {
     emailVerified: booleanValue(user.emailVerified),
     displayName: stringValue(user.displayName),
     locale: stringValue(user.locale),
-    timezone: stringValue(user.timezone)
+    timezone: stringValue(user.timezone),
+    ...(user.avatarUpdatedAt === undefined
+      ? {}
+      : { avatarUpdatedAt: stringValue(user.avatarUpdatedAt) })
   };
 }
 
@@ -251,9 +254,27 @@ function appProject(payload: unknown): AppProject {
     domain: stringValue(project.domain),
     status: status as AppProject["status"],
     ownerUserId: stringValue(project.ownerUserId),
+    ...(project.logoSource === undefined
+      ? {}
+      : { logoSource: projectLogoSource(project.logoSource) }),
+    ...(project.logoUpdatedAt === undefined
+      ? {}
+      : { logoUpdatedAt: stringValue(project.logoUpdatedAt) }),
+    ...(project.activeOperationCount === undefined
+      ? {}
+      : {
+          activeOperationCount: nonNegativeNumberValue(
+            project.activeOperationCount
+          )
+        }),
     ...(projectAccessLevel ? { projectAccessLevel } : {}),
     version: numberValue(project.version)
   };
+}
+
+function projectLogoSource(value: unknown): "CUSTOM" | "DISCOVERED" {
+  if (value !== "CUSTOM" && value !== "DISCOVERED") throw invalidResponse();
+  return value;
 }
 
 function appProjectAccessLevel(
@@ -284,6 +305,12 @@ function stringValue(value: unknown): string {
 function numberValue(value: unknown): number {
   if (!Number.isInteger(value)) throw invalidResponse();
   return value as number;
+}
+
+function nonNegativeNumberValue(value: unknown): number {
+  const result = numberValue(value);
+  if (result < 0) throw invalidResponse();
+  return result;
 }
 
 function booleanValue(value: unknown): boolean {

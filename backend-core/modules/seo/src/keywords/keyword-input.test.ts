@@ -56,6 +56,17 @@ test("keeps duplicate policy explicit across the trusted create boundary", () =>
   });
   assert.equal(bulk.items.length, 1);
   assert.equal(bulk.duplicatePolicy, "REJECT_EXISTING");
+  assert.equal(
+    internalSemanticKeywordBulkCreateInput({
+      workspaceId,
+      projectId,
+      actorId,
+      entitlement,
+      duplicatePolicy: "ADD_TO_GROUP",
+      items: bulk.items
+    }).duplicatePolicy,
+    "ADD_TO_GROUP"
+  );
 });
 
 test("accepts an explicit permanent delete only as a trusted boolean", () => {

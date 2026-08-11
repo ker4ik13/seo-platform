@@ -146,6 +146,7 @@ export class KeywordService {
     requestId: string
   ): Promise<ApiCollectionResponse<SemanticKeywordListItem>> {
     const search = normalizeKeywordText(query.search);
+    const tag = normalizeTagName(query.tag ?? "");
     const sort = query.sort ?? "CREATED_DESC";
     const selectedGroup = query.groupId
       ? await this.prisma.keywordGroup.findFirst({
@@ -165,7 +166,7 @@ export class KeywordService {
         : [];
     const keywordStatus =
       selectedGroup?.systemKind === "TRASH" ? "DELETED" : "ACTIVE";
-    const filterHash = keywordFilterHash(query, search);
+    const filterHash = keywordFilterHash(query, search, tag);
     const cursor = query.cursor
       ? decodeCursor(query.cursor, sort, filterHash)
       : undefined;
@@ -177,6 +178,21 @@ export class KeywordService {
         ? {
             textNormalized: {
               contains: search
+            }
+          }
+        : {}),
+      ...(tag
+        ? {
+            tags: {
+              some: {
+                projectId,
+                tag: {
+                  workspaceId,
+                  projectId,
+                  status: "ACTIVE",
+                  normalizedName: { contains: tag }
+                }
+              }
             }
           }
         : {}),
@@ -233,37 +249,50 @@ export class KeywordService {
                 }
           })
     };
-    let metricSortValueById = new Map<string, string>();
+    let externalSortValueById = new Map<string, string>();
     let rows: KeywordAggregate[];
     let totalApprox: number | undefined;
-    if (isMetricKeywordSort(sort)) {
-      const [metricPage, count] = await Promise.all([
-        metricSortedKeywordPage(
-          this.prisma,
-          workspaceId,
-          projectId,
-          query,
-          search,
-          sort,
-          cursor,
-          keywordStatus
-        ),
+    if (isExternalKeywordSort(sort)) {
+      const [externalPage, count] = await Promise.all([
+        isMetricKeywordSort(sort)
+          ? metricSortedKeywordPage(
+              this.prisma,
+              workspaceId,
+              projectId,
+              query,
+              search,
+              tag,
+              sort,
+              cursor,
+              keywordStatus
+            )
+          : tagSortedKeywordPage(
+              this.prisma,
+              workspaceId,
+              projectId,
+              query,
+              search,
+              tag,
+              sort,
+              cursor,
+              keywordStatus
+            ),
         cursor
           ? Promise.resolve(undefined)
           : this.prisma.keyword.count({ where: baseWhere })
       ]);
-      const aggregates: KeywordAggregate[] = metricPage.ids.length === 0
+      const aggregates: KeywordAggregate[] = externalPage.ids.length === 0
         ? []
         : await this.prisma.keyword.findMany({
-            where: { ...baseWhere, id: { in: [...metricPage.ids] } },
+            where: { ...baseWhere, id: { in: [...externalPage.ids] } },
             include: KEYWORD_INCLUDE
           });
       const aggregateById = new Map(aggregates.map((row) => [row.id, row]));
-      rows = metricPage.ids.flatMap((id) => {
+      rows = externalPage.ids.flatMap((id) => {
         const row = aggregateById.get(id);
         return row ? [row] : [];
       });
-      metricSortValueById = metricPage.sortValueById;
+      externalSortValueById = externalPage.sortValueById;
       totalApprox = count;
     } else {
       const where: Prisma.KeywordWhereInput = {
@@ -384,13 +413,13 @@ export class KeywordService {
               observedAt: true
             }
           }),
-      keywordIds.length === 0 || !query.groupIds?.length
+      keywordIds.length === 0 || selectedGroupIds.length === 0
         ? Promise.resolve([])
         : this.prisma.keywordGroupMembership.findMany({
             where: {
               projectId,
               keywordId: { in: keywordIds },
-              groupId: { in: [...query.groupIds] },
+              groupId: { in: selectedGroupIds },
               group: { workspaceId, projectId, status: "ACTIVE" }
             },
             orderBy: [{ createdAt: "asc" }, { groupId: "asc" }],
@@ -519,7 +548,7 @@ export class KeywordService {
                 id: last.id,
                 sort,
                 sortValue:
-                  metricSortValueById.get(last.id) ?? cursorValue(last, sort),
+                  externalSortValueById.get(last.id) ?? cursorValue(last, sort),
                 filterHash
               })
             }
@@ -527,6 +556,28 @@ export class KeywordService {
       },
       meta: { requestId }
     };
+  }
+
+  public async tagOptions(
+    workspaceId: string,
+    projectId: string,
+    search?: string
+  ): Promise<readonly string[]> {
+    const normalizedSearch = normalizeTagName(search ?? "");
+    const tags = await this.prisma.tag.findMany({
+      where: {
+        workspaceId,
+        projectId,
+        status: "ACTIVE",
+        ...(normalizedSearch
+          ? { normalizedName: { contains: normalizedSearch } }
+          : {})
+      },
+      orderBy: [{ normalizedName: "asc" }, { id: "asc" }],
+      take: 100,
+      select: { name: true }
+    });
+    return tags.map(({ name }) => name);
   }
 
   public async insights(
@@ -788,6 +839,55 @@ export class KeywordService {
               })
             )
           : false;
+        if (
+          existing &&
+          isActiveDuplicate &&
+          input.duplicatePolicy === "ADD_TO_GROUP" &&
+          input.groupId
+        ) {
+          const linkedGroup = await linkActiveKeywordToGroup(
+            transaction,
+            input.workspaceId,
+            input.projectId,
+            existing.id,
+            input.groupId
+          );
+          if (linkedGroup) {
+            const linked = await requiredKeyword(
+              transaction,
+              input.workspaceId,
+              input.projectId,
+              existing.id
+            );
+            return {
+              ...keywordItem(
+                linked,
+                await targetUrlFor(
+                  transaction,
+                  input.workspaceId,
+                  input.projectId,
+                  linked.targetPageId
+                ),
+                await isKeywordTracked(
+                  transaction,
+                  input.workspaceId,
+                  input.projectId,
+                  linked.id
+                ),
+                await clusterNameFor(
+                  transaction,
+                  input.workspaceId,
+                  input.projectId,
+                  linked.clusterId
+                ),
+                [],
+                [],
+                linkedGroup
+              ),
+              createOutcome: "LINKED_EXISTING"
+            };
+          }
+        }
         if (
           existing &&
           (isActiveDuplicate ||
@@ -1117,6 +1217,7 @@ export class KeywordService {
       selected: rows.length,
       created: count("CREATED"),
       restored: count("RESTORED"),
+      linked: count("LINKED_EXISTING"),
       skipped: count("SKIPPED_EXISTING"),
       rejected: count("REJECTED_EXISTING"),
       failed: count("FAILED"),
@@ -1823,6 +1924,48 @@ async function assertGroup(
   }
 }
 
+async function linkActiveKeywordToGroup(
+  transaction: Prisma.TransactionClient,
+  workspaceId: string,
+  projectId: string,
+  keywordId: string,
+  groupId: string
+): Promise<
+  Readonly<{ id: string; path: string | null; name: string }> | undefined
+> {
+  await lockKeywordGroupTree(transaction, projectId);
+  const group = await transaction.keywordGroup.findFirst({
+    where: { id: groupId, workspaceId, projectId, status: "ACTIVE" },
+    select: { id: true, path: true, name: true, systemKind: true }
+  });
+  if (!group || group.systemKind !== null) {
+    throw new BadRequestException(
+      "An existing keyword can only be added to a regular project group"
+    );
+  }
+  await lockKeyword(transaction, projectId, keywordId);
+  const membership = await transaction.keywordGroupMembership.findFirst({
+    where: { projectId, keywordId, groupId },
+    select: { keywordId: true }
+  });
+  if (membership) return undefined;
+  await transaction.keywordGroupMembership.create({
+    data: { projectId, keywordId, groupId }
+  });
+  await transaction.keywordGroupMembership.deleteMany({
+    where: {
+      projectId,
+      keywordId,
+      group: {
+        workspaceId,
+        projectId,
+        systemKind: "UNGROUPED"
+      }
+    }
+  });
+  return { id: group.id, path: group.path, name: group.name };
+}
+
 async function assertCluster(
   transaction: Prisma.TransactionClient,
   workspaceId: string,
@@ -2232,11 +2375,13 @@ function decodeCursor(
 
 function keywordFilterHash(
   query: KeywordListQuery,
-  normalizedSearch: string
+  normalizedSearch: string,
+  normalizedTag: string
 ): string {
   return sha256(
     JSON.stringify({
       search: normalizedSearch,
+      tag: normalizedTag,
       intent: query.intent ?? null,
       groupId: query.groupId ?? null,
       groupIds: query.groupIds ?? null,
@@ -2271,6 +2416,9 @@ function keywordOrderBy(
       return [{ sourceMode: "asc" }, { id: "asc" }];
     case "SOURCE_DESC":
       return [{ sourceMode: "desc" }, { id: "desc" }];
+    case "TAGS_ASC":
+    case "TAGS_DESC":
+      throw new Error("Tag keyword sorts are resolved by tagSortedKeywordPage");
     case "CREATED_DESC":
       return [{ createdAt: "desc" }, { id: "desc" }];
     case "FREQUENCY_BASE_DESC":
@@ -2311,6 +2459,9 @@ function cursorValue(
     case "SOURCE_ASC":
     case "SOURCE_DESC":
       return row.sourceMode;
+    case "TAGS_ASC":
+    case "TAGS_DESC":
+      throw new Error("Tag cursor value is provided by tagSortedKeywordPage");
     case "FREQUENCY_BASE_DESC":
     case "FREQUENCY_BASE_ASC":
     case "FREQUENCY_EXACT_DESC":
@@ -2330,7 +2481,7 @@ function cursorValue(
 }
 
 function cursorWhere(cursor: KeywordCursor): Prisma.KeywordWhereInput {
-  if (isMetricKeywordSort(cursor.sort)) throw invalidCursor();
+  if (isExternalKeywordSort(cursor.sort)) throw invalidCursor();
   const ascending = isAscendingKeywordSort(cursor.sort);
   const idDirection = ascending ? "gt" : "lt";
   const comparison = ascending ? "gt" : "lt";
@@ -2371,12 +2522,17 @@ function isMetricKeywordSort(sort: SemanticKeywordSort): boolean {
   );
 }
 
+function isExternalKeywordSort(sort: SemanticKeywordSort): boolean {
+  return isMetricKeywordSort(sort) || sort === "TAGS_ASC" || sort === "TAGS_DESC";
+}
+
 async function metricSortedKeywordPage(
   prisma: PrismaService,
   workspaceId: string,
   projectId: string,
   query: KeywordListQuery,
   search: string,
+  tag: string,
   sort: SemanticKeywordSort,
   cursor: KeywordCursor | undefined,
   keywordStatus: "ACTIVE" | "DELETED"
@@ -2385,7 +2541,32 @@ async function metricSortedKeywordPage(
   sortValueById: Map<string, string>;
 }>> {
   const ascending = sort.endsWith("_ASC");
-  const nullSentinel = ascending ? 9_223_372_036_854_775_807n : -1n;
+  const positionSort =
+    sort.startsWith("YANDEX_POSITION_") ||
+    sort.startsWith("GOOGLE_POSITION_");
+  const positionBucket = 1_000_000n;
+  const nullSentinel = positionSort
+    ? ascending
+      ? positionBucket * 2n
+      : 0n
+    : ascending
+      ? 9_223_372_036_854_775_807n
+      : -1n;
+  const rankEngine = sort.startsWith("YANDEX_") ? "YANDEX" : "GOOGLE";
+  const positionMetric = ascending
+    ? Prisma.sql`CASE
+        WHEN latest_rank.found THEN latest_rank.position::bigint
+        WHEN latest_rank.historical_position IS NOT NULL
+          THEN ${positionBucket}::bigint + latest_rank.historical_position::bigint
+        ELSE ${positionBucket * 2n}::bigint
+      END`
+    : Prisma.sql`CASE
+        WHEN latest_rank.found
+          THEN ${positionBucket * 2n}::bigint + latest_rank.position::bigint
+        WHEN latest_rank.historical_position IS NOT NULL
+          THEN ${positionBucket}::bigint + latest_rank.historical_position::bigint
+        ELSE 0::bigint
+      END`;
   const metricJoin = sort.startsWith("FREQUENCY_")
     ? Prisma.sql`
         LEFT JOIN LATERAL (
@@ -2398,11 +2579,51 @@ async function metricSortedKeywordPage(
           ORDER BY fs.observed_at DESC, fs.id DESC
           LIMIT 1
         ) metric_source ON TRUE`
-    : Prisma.sql`
+    : positionSort
+      ? Prisma.sql`
         LEFT JOIN LATERAL (
-          SELECT ${sort.includes("_CHECKED_AT_")
-            ? Prisma.sql`floor(extract(epoch from cr.observed_at) * 1000)::bigint`
-            : Prisma.sql`CASE WHEN cr.found THEN cr.position::bigint END`} AS metric
+          SELECT ${positionMetric} AS metric
+          FROM (
+            SELECT
+              cr.found,
+              cr.position,
+              COALESCE(
+                cr.previous_position,
+                (
+                  SELECT previous.position
+                  FROM current_ranks previous
+                  INNER JOIN tracking_context_versions previous_tcv
+                    ON previous_tcv.workspace_id = previous.workspace_id
+                   AND previous_tcv.project_id = previous.project_id
+                   AND previous_tcv.context_id = previous.tracking_context_id
+                   AND previous_tcv.configuration_version = previous.configuration_version
+                  WHERE previous.workspace_id = cr.workspace_id
+                    AND previous.project_id = cr.project_id
+                    AND previous.keyword_id = cr.keyword_id
+                    AND previous.found = TRUE
+                    AND previous.position IS NOT NULL
+                    AND previous_tcv.search_engine::text = ${rankEngine}
+                  ORDER BY previous.observed_at DESC, previous.tracking_context_id DESC
+                  LIMIT 1
+                )
+              ) AS historical_position
+            FROM current_ranks cr
+            INNER JOIN tracking_context_versions tcv
+              ON tcv.workspace_id = cr.workspace_id
+             AND tcv.project_id = cr.project_id
+             AND tcv.context_id = cr.tracking_context_id
+             AND tcv.configuration_version = cr.configuration_version
+            WHERE cr.workspace_id = k.workspace_id
+              AND cr.project_id = k.project_id
+              AND cr.keyword_id = k.id
+              AND tcv.search_engine::text = ${rankEngine}
+            ORDER BY cr.observed_at DESC, cr.tracking_context_id DESC
+            LIMIT 1
+          ) latest_rank
+        ) metric_source ON TRUE`
+      : Prisma.sql`
+        LEFT JOIN LATERAL (
+          SELECT floor(extract(epoch from cr.observed_at) * 1000)::bigint AS metric
           FROM current_ranks cr
           INNER JOIN tracking_context_versions tcv
             ON tcv.workspace_id = cr.workspace_id
@@ -2412,16 +2633,146 @@ async function metricSortedKeywordPage(
           WHERE cr.workspace_id = k.workspace_id
             AND cr.project_id = k.project_id
             AND cr.keyword_id = k.id
-            AND tcv.search_engine::text = ${sort.startsWith("YANDEX_") ? "YANDEX" : "GOOGLE"}
+            AND tcv.search_engine::text = ${rankEngine}
           ORDER BY cr.observed_at DESC, cr.tracking_context_id DESC
           LIMIT 1
         ) metric_source ON TRUE`;
+  const filters = keywordRawFilters(
+    workspaceId,
+    projectId,
+    query,
+    search,
+    tag,
+    keywordStatus
+  );
+  const cursorValue = cursor
+    ? requiredMetricCursorValue(cursor.sortValue)
+    : undefined;
+  const cursorClause = cursorValue === undefined
+    ? Prisma.empty
+    : ascending
+      ? Prisma.sql`WHERE (ranked.sort_value, ranked.id) > (${cursorValue}::bigint, ${cursor!.id}::uuid)`
+      : Prisma.sql`WHERE (ranked.sort_value, ranked.id) < (${cursorValue}::bigint, ${cursor!.id}::uuid)`;
+  const order = ascending
+    ? Prisma.sql`ranked.sort_value ASC, ranked.id ASC`
+    : Prisma.sql`ranked.sort_value DESC, ranked.id DESC`;
+  const rows = await prisma.$queryRaw<readonly Readonly<{ id: string; sort_value: bigint }>[]>
+    `
+      SELECT ranked.id, ranked.sort_value
+      FROM (
+        SELECT k.id, COALESCE(metric_source.metric, ${nullSentinel}::bigint) AS sort_value
+        FROM keywords k
+        ${metricJoin}
+        WHERE ${Prisma.join(filters, " AND ")}
+      ) ranked
+      ${cursorClause}
+      ORDER BY ${order}
+      LIMIT ${query.limit + 1}
+    `;
+  return {
+    ids: rows.map(({ id }) => id),
+    sortValueById: new Map(rows.map(({ id, sort_value }) => [id, sort_value.toString()]))
+  };
+}
+
+async function tagSortedKeywordPage(
+  prisma: PrismaService,
+  workspaceId: string,
+  projectId: string,
+  query: KeywordListQuery,
+  search: string,
+  tag: string,
+  sort: SemanticKeywordSort,
+  cursor: KeywordCursor | undefined,
+  keywordStatus: "ACTIVE" | "DELETED"
+): Promise<Readonly<{
+  ids: readonly string[];
+  sortValueById: Map<string, string>;
+}>> {
+  const ascending = sort === "TAGS_ASC";
+  const missingValue = ascending ? "\u{10ffff}" : "";
+  const filters = keywordRawFilters(
+    workspaceId,
+    projectId,
+    query,
+    search,
+    tag,
+    keywordStatus
+  );
+  const cursorValue = cursor
+    ? requiredCursorString(cursor.sortValue)
+    : undefined;
+  const cursorClause = cursorValue === undefined
+    ? Prisma.empty
+    : ascending
+      ? Prisma.sql`WHERE (ranked.sort_value, ranked.id) > (${cursorValue}::text, ${cursor!.id}::uuid)`
+      : Prisma.sql`WHERE (ranked.sort_value, ranked.id) < (${cursorValue}::text, ${cursor!.id}::uuid)`;
+  const order = ascending
+    ? Prisma.sql`ranked.sort_value ASC, ranked.id ASC`
+    : Prisma.sql`ranked.sort_value DESC, ranked.id DESC`;
+  const rows = await prisma.$queryRaw<readonly Readonly<{
+    id: string;
+    sort_value: string;
+  }>[]>`
+    SELECT ranked.id, ranked.sort_value
+    FROM (
+      SELECT
+        k.id,
+        COALESCE(tag_source.tag_name, ${missingValue}::text) AS sort_value
+      FROM keywords k
+      LEFT JOIN LATERAL (
+        SELECT MIN(t.normalized_name) AS tag_name
+        FROM keyword_tags kt
+        INNER JOIN tags t
+          ON t.id = kt.tag_id
+         AND t.workspace_id = k.workspace_id
+         AND t.project_id = k.project_id
+         AND t.status::text = 'ACTIVE'
+        WHERE kt.project_id = k.project_id
+          AND kt.keyword_id = k.id
+      ) tag_source ON TRUE
+      WHERE ${Prisma.join(filters, " AND ")}
+    ) ranked
+    ${cursorClause}
+    ORDER BY ${order}
+    LIMIT ${query.limit + 1}
+  `;
+  return {
+    ids: rows.map(({ id }) => id),
+    sortValueById: new Map(
+      rows.map(({ id, sort_value }) => [id, sort_value])
+    )
+  };
+}
+
+function keywordRawFilters(
+  workspaceId: string,
+  projectId: string,
+  query: KeywordListQuery,
+  search: string,
+  tag: string,
+  keywordStatus: "ACTIVE" | "DELETED"
+): Prisma.Sql[] {
   const filters: Prisma.Sql[] = [
     Prisma.sql`k.workspace_id = ${workspaceId}::uuid`,
     Prisma.sql`k.project_id = ${projectId}::uuid`,
     Prisma.sql`k.status::text = ${keywordStatus}`
   ];
   if (search) filters.push(Prisma.sql`strpos(k.text_normalized, ${search}) > 0`);
+  if (tag) {
+    filters.push(Prisma.sql`EXISTS (
+      SELECT 1
+      FROM keyword_tags filter_kt
+      INNER JOIN tags filter_tag
+        ON filter_tag.id = filter_kt.tag_id
+       AND filter_tag.workspace_id = k.workspace_id
+       AND filter_tag.project_id = k.project_id
+       AND filter_tag.status::text = 'ACTIVE'
+      WHERE filter_kt.project_id = k.project_id
+        AND filter_kt.keyword_id = k.id
+        AND strpos(filter_tag.normalized_name, ${tag}) > 0
+    )`);
+  }
   if (query.intent) filters.push(Prisma.sql`k.intent::text = ${query.intent}`);
   if (query.isFavorite !== undefined) filters.push(Prisma.sql`k.is_favorite = ${query.isFavorite}`);
   if (query.priorityMin !== undefined) filters.push(Prisma.sql`k.priority >= ${query.priorityMin}`);
@@ -2458,34 +2809,7 @@ async function metricSortedKeywordPage(
     )`;
     filters.push(query.isTracked ? tracked : Prisma.sql`NOT (${tracked})`);
   }
-  const cursorValue = cursor
-    ? requiredMetricCursorValue(cursor.sortValue)
-    : undefined;
-  const cursorClause = cursorValue === undefined
-    ? Prisma.empty
-    : ascending
-      ? Prisma.sql`WHERE (ranked.sort_value, ranked.id) > (${cursorValue}::bigint, ${cursor!.id}::uuid)`
-      : Prisma.sql`WHERE (ranked.sort_value, ranked.id) < (${cursorValue}::bigint, ${cursor!.id}::uuid)`;
-  const order = ascending
-    ? Prisma.sql`ranked.sort_value ASC, ranked.id ASC`
-    : Prisma.sql`ranked.sort_value DESC, ranked.id DESC`;
-  const rows = await prisma.$queryRaw<readonly Readonly<{ id: string; sort_value: bigint }>[]>
-    `
-      SELECT ranked.id, ranked.sort_value
-      FROM (
-        SELECT k.id, COALESCE(metric_source.metric, ${nullSentinel}::bigint) AS sort_value
-        FROM keywords k
-        ${metricJoin}
-        WHERE ${Prisma.join(filters, " AND ")}
-      ) ranked
-      ${cursorClause}
-      ORDER BY ${order}
-      LIMIT ${query.limit + 1}
-    `;
-  return {
-    ids: rows.map(({ id }) => id),
-    sortValueById: new Map(rows.map(({ id, sort_value }) => [id, sort_value.toString()]))
-  };
+  return filters;
 }
 
 function frequencyTypeForSort(sort: SemanticKeywordSort): "BASE" | "EXACT" | "FIXED" {

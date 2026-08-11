@@ -25,7 +25,9 @@ const FORWARDED_REQUEST_HEADERS = [
 const FORWARDED_RESPONSE_HEADERS = [
   "cache-control",
   "content-disposition",
+  "content-security-policy",
   "content-type",
+  "cross-origin-resource-policy",
   "etag",
   "last-modified",
   "x-content-type-options",

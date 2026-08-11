@@ -15,6 +15,97 @@ const crawlId = "01900000-0000-7000-8000-000000000008";
 const crawlJobId = "01900000-0000-7000-8000-000000000009";
 const destinationWorkspaceId = "01900000-0000-7000-8000-000000000010";
 
+test("loads one bounded active-operation count collection for a workspace", async () => {
+  const originalFetch = globalThis.fetch;
+  let captured: { readonly url: URL; readonly headers: Headers } | undefined;
+  globalThis.fetch = (async (
+    input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> => {
+    captured = {
+      url: new URL(input instanceof Request ? input.url : input.toString()),
+      headers: new Headers(init?.headers)
+    };
+    return dataResponse({
+      projects: [
+        { projectId, activeOperationCount: 3 },
+        { projectId: destinationWorkspaceId, activeOperationCount: 1 }
+      ]
+    });
+  }) as typeof fetch;
+
+  try {
+    const counts = await client().listProjectOperationActivity(
+      context("request-operation-activity-001")
+    );
+    assert.deepEqual([...counts], [
+      [projectId, 3],
+      [destinationWorkspaceId, 1]
+    ]);
+    assert.equal(
+      captured?.url.pathname,
+      `/internal/v1/workspaces/${workspaceId}/operation-activity`
+    );
+    assert.equal(captured?.headers.get("x-project-id"), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("loads a safe global operation page for platform administration", async () => {
+  const originalFetch = globalThis.fetch;
+  let captured: { readonly url: URL; readonly headers: Headers } | undefined;
+  globalThis.fetch = (async (
+    input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> => {
+    captured = {
+      url: new URL(input instanceof Request ? input.url : input.toString()),
+      headers: new Headers(init?.headers)
+    };
+    return dataResponse({
+      data: [{
+        id: crawlJobId,
+        workspaceId,
+        projectId,
+        actorId,
+        type: "MANUAL_RANK_CHECK",
+        status: "RUNNING",
+        stage: "COLLECTING",
+        provider: "XMLSTOCK",
+        progress: { current: "17", total: "50", unit: "KEYWORDS" },
+        result: { found: 12, notFound: 5 },
+        attempt: 1,
+        maxAttempts: 8,
+        createdAt: "2026-08-11T18:00:00.000Z",
+        startedAt: "2026-08-11T18:00:01.000Z",
+        updatedAt: "2026-08-11T18:00:10.000Z"
+      }],
+      totals: { total: 9, active: 2, completed: 6, attention: 1 },
+      types: [{ type: "MANUAL_RANK_CHECK", count: 9 }]
+    });
+  }) as typeof fetch;
+
+  try {
+    const result = await client().listAdminOperations(
+      actorId,
+      "request-admin-operations-001",
+      { statusGroup: "ACTIVE", type: "MANUAL_RANK_CHECK", limit: 50 }
+    );
+    assert.equal(result.data[0]?.result.found, 12);
+    assert.equal(
+      captured?.url.pathname,
+      "/internal/v1/platform-admin/operations"
+    );
+    assert.equal(captured?.url.searchParams.get("status"), "ACTIVE");
+    assert.equal(captured?.url.searchParams.get("type"), "MANUAL_RANK_CHECK");
+    assert.equal(captured?.headers.get("x-actor-id"), actorId);
+    assert.equal(captured?.headers.get("x-internal-token"), "i".repeat(32));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("forwards only the trusted storage entitlement with an upload command", async () => {
   const originalFetch = globalThis.fetch;
   let capturedBody: Readonly<Record<string, unknown>> | undefined;

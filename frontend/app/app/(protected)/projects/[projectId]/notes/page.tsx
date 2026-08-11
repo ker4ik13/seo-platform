@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ProjectNotes } from "../../../../../../components/project-notes";
 import { canEditProjectNotes } from "../../../../../../lib/app-permissions";
 import { requireProtectedProjectAppContext } from "../../../../../../lib/protected-app";
+import { ProjectContextSelect } from "../../../../../../components/project-context-select";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,14 @@ export default async function ProjectNotesPage({
     <>
       <section className="page-heading project-notes-heading">
         <div>
-          <h1>Заметки</h1>
+          <div className="project-page-title-row">
+            <h1>Заметки</h1>
+            <ProjectContextSelect
+              destination="notes"
+              projectId={context.project.id}
+              projects={context.projects}
+            />
+          </div>
           <p>
             Markdown-документы проекта. Оставляйте их участникам или
             открывайте безопасной ссылкой без индексации.

@@ -66,6 +66,13 @@ test("parses a bounded keyword bulk create with an explicit duplicate policy", (
   assert.equal(result.items[0]?.text, "SEO аудит");
   assert.equal(result.items[0]?.language, "ru");
   assert.equal(result.items[0]?.priority, 0);
+  assert.equal(
+    semanticKeywordBulkCreateInput({
+      duplicatePolicy: "ADD_TO_GROUP",
+      items: [{ text: "SEO аудит", groupId: "01900000-0000-7000-8000-000000000010" }]
+    }).duplicatePolicy,
+    "ADD_TO_GROUP"
+  );
   assert.throws(
     () =>
       semanticKeywordBulkCreateInput({

@@ -338,7 +338,7 @@ function duplicatePolicy(
   ) {
     invalid(
       "duplicatePolicy",
-      "Must be SKIP_EXISTING or REJECT_EXISTING"
+      "Must be SKIP_EXISTING, REJECT_EXISTING, ADD_TO_GROUP or RESTORE_TRASHED"
     );
   }
   return value as SemanticKeywordBulkCreateInput["duplicatePolicy"];

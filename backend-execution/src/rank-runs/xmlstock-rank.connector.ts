@@ -9,6 +9,7 @@ import {
   canonicalizeJson
 } from "@seo-platform/contracts/canonical-json";
 import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
+import type { XmlStockHttpProduct } from "../integrations/xmlstock-http-quota-limiter.js";
 import type { ProviderFetch } from "../integrations/integration-credential-validation.connector.js";
 import {
   providerTextRequest,
@@ -417,6 +418,13 @@ export function xmlStockRankWireRequestHash(
   };
 }
 
+export function xmlStockRankHttpProduct(
+  request: XmlStockRankWireRequest
+): Exclude<XmlStockHttpProduct, "WORDSTAT"> {
+  if (request.delayed) return "YANDEX_SEARCH_API";
+  return request.engine === "GOOGLE" ? "GOOGLE_LIVE" : "YANDEX_LIVE";
+}
+
 export function stageXmlStockRankResult(
   value: unknown,
   taskIdValue: string,
@@ -635,14 +643,14 @@ function responseFailure(
   if (["-34", "31", "42"].includes(code)) {
     return { status: "REJECTED", code: "INVALID_CREDENTIAL" };
   }
-  if (["32", "55", "201", "429", "503"].includes(code)) {
+  if (["32", "55", "110", "201", "429", "503"].includes(code)) {
     return {
       status: "RETRYABLE_FAILURE",
       code: "PROVIDER_RATE_LIMITED",
       retryAfterSeconds: 30
     };
   }
-  if (["20", "21", "22", "23", "24", "25", "101", "110"].includes(code)) {
+  if (["20", "21", "22", "23", "24", "25", "101"].includes(code)) {
     return { status: "RETRYABLE_FAILURE", code: "PROVIDER_UNAVAILABLE" };
   }
   if (stage === "POLL" && ["202", "210"].includes(code)) {

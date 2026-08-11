@@ -67,30 +67,58 @@ function command(
 }
 
 function rules(value: unknown): SemanticNegativeKeywordRules {
-  const input = exactRecord(value, ["words", "matchMode", "caseSensitive"]);
+  const input = exactRecord(value, [
+    "words",
+    "matchMode",
+    "caseSensitive",
+    "ignoreWordOrder",
+    "ignorePunctuation"
+  ]);
   if (!Array.isArray(input.words) || input.words.length < 1 || input.words.length > 500) {
     invalid("rules.words", "Use between 1 and 500 words");
   }
+  const caseSensitive = booleanValue(input.caseSensitive, "rules.caseSensitive");
+  const ignoreWordOrder = optionalBooleanValue(
+    input.ignoreWordOrder,
+    "rules.ignoreWordOrder"
+  );
+  const ignorePunctuation = optionalBooleanValue(
+    input.ignorePunctuation,
+    "rules.ignorePunctuation"
+  );
   const words = input.words.map((word, index) => {
     if (typeof word !== "string") invalid(`rules.words.${index}`, "Must be a string");
     const normalized = word.normalize("NFKC").replace(/\s+/gu, " ").trim();
     if (!normalized || normalized.length > 160) invalid(`rules.words.${index}`, "Must contain 1 to 160 characters");
+    if (ignorePunctuation && !/[\p{L}\p{N}]/u.test(normalized)) {
+      invalid(`rules.words.${index}`, "Must contain a letter or number when punctuation is ignored");
+    }
     return normalized;
   });
   if (
     typeof input.matchMode !== "string" ||
     !semanticNegativeKeywordMatchModes.some((mode) => mode === input.matchMode)
   ) invalid("rules.matchMode", "Unsupported match mode");
-  if (typeof input.caseSensitive !== "boolean") invalid("rules.caseSensitive", "Must be a boolean");
-  const canonical = input.caseSensitive
+  const canonical = caseSensitive
     ? words
     : words.map((word) => word.toLocaleLowerCase("ru-RU"));
   if (new Set(canonical).size !== canonical.length) invalid("rules.words", "Duplicate words are not allowed");
   return {
     words,
     matchMode: input.matchMode as SemanticNegativeKeywordRules["matchMode"],
-    caseSensitive: input.caseSensitive
+    caseSensitive,
+    ignoreWordOrder,
+    ignorePunctuation
   };
+}
+
+function booleanValue(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") invalid(field, "Must be a boolean");
+  return value;
+}
+
+function optionalBooleanValue(value: unknown, field: string): boolean {
+  return value === undefined ? false : booleanValue(value, field);
 }
 
 function commandScope(value: unknown): SemanticNegativeKeywordScope {

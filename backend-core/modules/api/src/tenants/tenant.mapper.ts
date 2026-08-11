@@ -44,7 +44,11 @@ export function toWorkspaceSummary(
 
 export function toProjectSummary(
   project: Project,
-  projectAccessLevel?: ProjectAccessLevel
+  projectAccessLevel?: ProjectAccessLevel,
+  logo?: Readonly<{
+    source: string | null;
+    imageUpdatedAt: Date | null;
+  }> | null
 ): ProjectSummary {
   return {
     id: project.id,
@@ -61,6 +65,12 @@ export function toProjectSummary(
           ? "ACTIVE"
           : "DRAFT",
     ownerUserId: project.ownerUserId,
+    ...(logo?.source === "CUSTOM" || logo?.source === "DISCOVERED"
+      ? { logoSource: logo.source }
+      : {}),
+    ...(logo?.imageUpdatedAt
+      ? { logoUpdatedAt: logo.imageUpdatedAt.toISOString() }
+      : {}),
     ...(projectAccessLevel ? { projectAccessLevel } : {}),
     version: project.version,
     createdAt: project.createdAt.toISOString()

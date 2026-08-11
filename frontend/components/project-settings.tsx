@@ -1,5 +1,6 @@
 "use client";
 
+import type { ProjectLogoContentType } from "@seo-platform/contracts";
 import { useRouter } from "next/navigation";
 import {
   useEffect,
@@ -32,6 +33,9 @@ import {
   type TenantOperationFailure,
   type TenantSettingsFieldErrors
 } from "../lib/tenant-settings";
+import { ProjectFavicon } from "./project-favicon";
+
+const PROJECT_LOGO_MAX_BYTES = 512 * 1_024;
 
 const PROJECT_FIELDS = ["name", "domain", "locale", "timezone"] as const;
 type LifecycleAction = "archive" | "restore";
@@ -64,7 +68,13 @@ export function ProjectSettings({
   const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
   const [busy, setBusy] = useState<
-    "save" | "reload" | "retry" | "delete" | LifecycleAction
+    | "save"
+    | "reload"
+    | "retry"
+    | "delete"
+    | "logo-upload"
+    | "logo-delete"
+    | LifecycleAction
   >();
   const [online, setOnline] = useState(true);
   const [runtimeRestriction, setRuntimeRestriction] = useState<
@@ -436,15 +446,6 @@ export function ProjectSettings({
             ? { requestId: error.requestId }
             : {})
         });
-      } else if (
-        error instanceof BrowserApiError &&
-        error.code === "REAUTHENTICATION_REQUIRED"
-      ) {
-        setFailure({
-          message:
-            "Для удаления требуется недавний вход. Войдите повторно и вернитесь к настройкам проекта.",
-          ...(error.requestId ? { requestId: error.requestId } : {})
-        });
       } else {
         handleFailure(error);
       }
@@ -495,6 +496,64 @@ export function ProjectSettings({
       );
       (firstInvalid ?? feedbackRef.current)?.focus();
     });
+  }
+
+  async function uploadLogo(file: File | undefined): Promise<void> {
+    if (!file || !editAllowed || busy || !online) return;
+    setBusy("logo-upload");
+    setFailure(undefined);
+    setSuccess(undefined);
+    try {
+      const payload = await projectLogoPayload(file);
+      const updated = await browserApiRequest<AppProject>(
+        `${projectPath(server.id)}/logo`,
+        {
+          method: "PUT",
+          ifMatch: server.version,
+          body: payload
+        }
+      );
+      acceptLogoProject(updated, "Логотип проекта обновлён.");
+    } catch (error) {
+      if (error instanceof ProjectLogoError) {
+        setFailure({ message: error.message });
+      } else if (!redirectExpiredSession(error, server.id)) {
+        handleFailure(error);
+      }
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function resetLogo(): Promise<void> {
+    if (!server.logoSource || !editAllowed || busy || !online) return;
+    setBusy("logo-delete");
+    setFailure(undefined);
+    setSuccess(undefined);
+    try {
+      const updated = await browserApiRequest<AppProject>(
+        `${projectPath(server.id)}/logo`,
+        { method: "DELETE", ifMatch: server.version }
+      );
+      acceptLogoProject(
+        updated,
+        server.logoSource === "CUSTOM"
+          ? "Пользовательский логотип удалён. Иконка сайта будет найдена автоматически."
+          : "Иконка сайта будет загружена заново."
+      );
+    } catch (error) {
+      if (!redirectExpiredSession(error, server.id)) handleFailure(error);
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  function acceptLogoProject(updated: AppProject, message: string): void {
+    setServer(updated);
+    setRuntimeRestriction(undefined);
+    setSuccess(message);
+    writeTenantContext(updated);
+    router.refresh();
   }
 
   const lifecyclePermission =
@@ -589,6 +648,62 @@ export function ProjectSettings({
           )}
         </div>
       )}
+
+      <section
+        className="panel security-card workspace-avatar-card"
+        aria-busy={busy === "logo-upload" || busy === "logo-delete"}
+      >
+        <header className="security-card-header">
+          <div>
+            <h2>Логотип проекта</h2>
+            <p>
+              SVG, PNG, JPEG, WebP, ICO, GIF или AVIF до 512 КБ.
+              Пользовательский файл имеет приоритет; иначе платформа безопасно
+              находит лучшую иконку на сайте.
+            </p>
+          </div>
+          <span aria-hidden="true" className="project-settings-logo-preview">
+            <ProjectFavicon
+              className="project-settings-logo"
+              project={server}
+              size={64}
+            />
+          </span>
+        </header>
+        <div className="workspace-avatar-actions">
+          <label className={`secondary-button${editAllowed ? "" : " disabled"}`}>
+            {busy === "logo-upload"
+              ? "Загружаем…"
+              : server.logoSource === "CUSTOM"
+                ? "Заменить логотип"
+                : "Загрузить логотип"}
+            <input
+              accept=".svg,.png,.jpg,.jpeg,.webp,.ico,.gif,.avif,image/svg+xml,image/png,image/jpeg,image/webp,image/x-icon,image/vnd.microsoft.icon,image/gif,image/avif"
+              disabled={!editAllowed || Boolean(busy)}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                void uploadLogo(file);
+              }}
+              type="file"
+            />
+          </label>
+          {server.logoSource && (
+            <button
+              className="secondary-button"
+              disabled={!editAllowed || Boolean(busy)}
+              onClick={() => void resetLogo()}
+              type="button"
+            >
+              {busy === "logo-delete"
+                ? "Обновляем…"
+                : server.logoSource === "CUSTOM"
+                  ? "Использовать иконку сайта"
+                  : "Обновить с сайта"}
+            </button>
+          )}
+        </div>
+      </section>
 
       <section className="panel security-card" aria-busy={Boolean(busy)}>
         <header className="security-card-header">
@@ -1048,10 +1163,82 @@ function clearPreference(name: string): void {
 }
 
 function redirectExpiredSession(error: unknown, projectId: string): boolean {
-  if (!(error instanceof BrowserApiError) || error.status !== 401) return false;
+  if (
+    !(error instanceof BrowserApiError) ||
+    error.status !== 401
+  ) {
+    return false;
+  }
   const returnTo = `/app/projects/${encodeURIComponent(projectId)}/settings/general`;
   window.location.assign(
     `/app/auth/refresh?returnTo=${encodeURIComponent(returnTo)}`
   );
   return true;
+}
+
+class ProjectLogoError extends Error {}
+
+async function projectLogoPayload(file: File): Promise<{
+  readonly contentType: ProjectLogoContentType;
+  readonly data: string;
+}> {
+  const contentType = projectLogoContentType(file);
+  if (!contentType) {
+    throw new ProjectLogoError(
+      "Выберите SVG, PNG, JPEG, WebP, ICO, GIF или AVIF."
+    );
+  }
+  if (file.size < 32 || file.size > PROJECT_LOGO_MAX_BYTES) {
+    throw new ProjectLogoError("Размер логотипа должен быть от 32 байт до 512 КБ.");
+  }
+  return { contentType, data: await logoBlobBase64(file) };
+}
+
+function projectLogoContentType(
+  file: File
+): ProjectLogoContentType | undefined {
+  const type = file.type.toLowerCase();
+  if (type === "image/vnd.microsoft.icon" || type === "image/x-icon") {
+    return "image/x-icon";
+  }
+  if (
+    type === "image/svg+xml" ||
+    type === "image/png" ||
+    type === "image/jpeg" ||
+    type === "image/webp" ||
+    type === "image/gif" ||
+    type === "image/avif"
+  ) {
+    return type;
+  }
+  const extension = file.name.toLowerCase().split(".").pop();
+  const byExtension: Readonly<Record<string, ProjectLogoContentType>> = {
+    svg: "image/svg+xml",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    webp: "image/webp",
+    ico: "image/x-icon",
+    gif: "image/gif",
+    avif: "image/avif"
+  };
+  return byExtension[extension ?? ""];
+}
+
+function logoBlobBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () =>
+      reject(new ProjectLogoError("Не удалось прочитать изображение."));
+    reader.onload = () => {
+      const result = typeof reader.result === "string" ? reader.result : "";
+      const separator = result.indexOf(",");
+      if (separator < 0) {
+        reject(new ProjectLogoError("Не удалось подготовить изображение."));
+      } else {
+        resolve(result.slice(separator + 1));
+      }
+    };
+    reader.readAsDataURL(blob);
+  });
 }

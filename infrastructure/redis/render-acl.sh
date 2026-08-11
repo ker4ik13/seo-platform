@@ -107,7 +107,7 @@ case "$instance" in
     append_user seo_jobs_crawl REDIS_JOBS_CRAWL_PASSWORD \
       '~seo-platform:jobs:v1:crawls:* resetchannels' "$jobs_commands"
     append_user seo_jobs_connector REDIS_JOBS_CONNECTOR_PASSWORD \
-      '~seo-platform:jobs:v1:integration-credential-validation:* ~seo-platform:jobs:v1:rank-connector-runtime:* ~seo-platform:jobs:v1:frequency-collection-runtime:* ~seo-platform:jobs:v1:keyword-research-runtime:* resetchannels' \
+      '~seo-platform:jobs:v1:integration-credential-validation:* ~seo-platform:jobs:v1:provider-rate-limit:* ~seo-platform:jobs:v1:rank-connector-runtime:* ~seo-platform:jobs:v1:frequency-collection-runtime:* ~seo-platform:jobs:v1:keyword-research-runtime:* resetchannels' \
       "$jobs_commands +time"
     unset jobs_commands
     ;;

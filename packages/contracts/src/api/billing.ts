@@ -51,11 +51,14 @@ export type BillingBuyerType = (typeof billingBuyerTypes)[number];
 export interface BillingPlanFeatures {
   readonly seats: number;
   readonly projects: number;
+  /** Zero means that the plan does not impose a workspace keyword limit. */
   readonly storedKeywords: number;
+  /** Zero means that the plan does not impose a per-project keyword limit. */
   readonly keywordsPerProject: number;
   /** Zero means that the plan does not impose a folder limit. */
   readonly foldersPerProject: number;
   readonly concurrentJobs: number;
+  /** Zero means that the plan does not impose a tracked-context limit. */
   readonly trackedContextPairs: number;
   readonly storageBytes: number;
   readonly rawSerpRetentionDays: number;
@@ -81,10 +84,13 @@ export interface BillingPlanFeatures {
 export interface SemanticCapacityEntitlement {
   readonly planCode: string;
   readonly planVersion: number;
+  /** Zero means unlimited. */
   readonly storedKeywords: number;
+  /** Zero means unlimited. */
   readonly keywordsPerProject: number;
   /** Zero means that the plan does not impose a folder limit. */
   readonly foldersPerProject: number;
+  /** Zero means unlimited. */
   readonly trackedContextPairs: number;
 }
 

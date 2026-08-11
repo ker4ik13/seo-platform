@@ -42,8 +42,10 @@ export function SemanticNegativeKeywordsDialog({
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [presetName, setPresetName] = useState("");
   const [wordsText, setWordsText] = useState("");
-  const [matchMode, setMatchMode] = useState<SemanticNegativeKeywordMatchMode>("WHOLE_WORD");
+  const [matchMode, setMatchMode] = useState<SemanticNegativeKeywordMatchMode>("WORD_FORM_PRECISE");
   const [caseSensitive, setCaseSensitive] = useState(false);
+  const [ignoreWordOrder, setIgnoreWordOrder] = useState(false);
+  const [ignorePunctuation, setIgnorePunctuation] = useState(false);
   const [scopeKind, setScopeKind] = useState<ScopeKind>(
     selections.length > 0 ? "SELECTION" : activeGroup ? "GROUP" : "PROJECT"
   );
@@ -90,6 +92,8 @@ export function SemanticNegativeKeywordsDialog({
       setWordsText(preset.rules.words.join("\n"));
       setMatchMode(preset.rules.matchMode);
       setCaseSensitive(preset.rules.caseSensitive);
+      setIgnoreWordOrder(preset.rules.ignoreWordOrder);
+      setIgnorePunctuation(preset.rules.ignorePunctuation);
     } else {
       setPresetName("");
     }
@@ -99,7 +103,13 @@ export function SemanticNegativeKeywordsDialog({
   async function savePreset(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (savingPreset || applying) return;
-    const rules = validRules(words, matchMode, caseSensitive);
+    const rules = validRules(
+      words,
+      matchMode,
+      caseSensitive,
+      ignoreWordOrder,
+      ignorePunctuation
+    );
     if (!rules || !presetName.trim()) {
       setError("Укажите название пресета и хотя бы одно минус-слово.");
       return;
@@ -151,9 +161,24 @@ export function SemanticNegativeKeywordsDialog({
   }
 
   async function requestPreview(): Promise<void> {
-    const command = commandInput(words, matchMode, caseSensitive, scopeKind, activeGroup, selections);
+    const command = commandInput(
+      words,
+      matchMode,
+      caseSensitive,
+      ignoreWordOrder,
+      ignorePunctuation,
+      scopeKind,
+      activeGroup,
+      selections
+    );
     if (!command) {
-      setError(commandValidationMessage(words, scopeKind, activeGroup, selections));
+      setError(commandValidationMessage(
+        words,
+        ignorePunctuation,
+        scopeKind,
+        activeGroup,
+        selections
+      ));
       return;
     }
     setPreviewing(true);
@@ -171,7 +196,16 @@ export function SemanticNegativeKeywordsDialog({
   }
 
   async function applyPreview(): Promise<void> {
-    const initialCommand = commandInput(words, matchMode, caseSensitive, scopeKind, activeGroup, selections);
+    const initialCommand = commandInput(
+      words,
+      matchMode,
+      caseSensitive,
+      ignoreWordOrder,
+      ignorePunctuation,
+      scopeKind,
+      activeGroup,
+      selections
+    );
     if (!initialCommand || !preview || applying) return;
     setApplying(true);
     setDeletedProgress(0);
@@ -246,15 +280,15 @@ export function SemanticNegativeKeywordsDialog({
             </label>
             <div className="semantic-negative-options">
               <label>
-                <span>Режим совпадения</span>
+                <span>Тип поиска</span>
                 <CustomSelect disabled={applying} onChange={(event) => { setMatchMode(event.target.value as SemanticNegativeKeywordMatchMode); invalidatePreview(); }} value={matchMode}>
-                  <option value="WHOLE_WORD">Слово или фраза целиком</option>
-                  <option value="CONTAINS">Часть слова или строки</option>
+                  <option value="WORD_FORM_FAST">Независимый от словоформы · быстрый</option>
+                  <option value="WORD_FORM_PRECISE">Независимый от словоформы · улучшенный</option>
+                  <option value="WHOLE_WORD">Зависимый от словоформы · полное слово</option>
+                  <option value="CONTAINS">Зависимый от словоформы · частичное вхождение</option>
+                  <option value="EXACT_PHRASE">Зависимый от словоформы · вся фраза целиком</option>
                 </CustomSelect>
-              </label>
-              <label className="semantic-toggle-line">
-                <input checked={caseSensitive} disabled={applying} onChange={(event) => { setCaseSensitive(event.target.checked); invalidatePreview(); }} type="checkbox" />
-                <span><strong>Учитывать регистр</strong><small>«Москва» и «москва» будут разными.</small></span>
+                <small className="semantic-negative-match-hint">{matchModeHint(matchMode)}</small>
               </label>
             </div>
             <form className="semantic-negative-preset-form" onSubmit={(event) => void savePreset(event)}>
@@ -284,6 +318,24 @@ export function SemanticNegativeKeywordsDialog({
                 <ScopeCard checked={scopeKind === "GROUP"} label={`Папка «${activeGroup.name}»`} onSelect={() => { setScopeKind("GROUP"); invalidatePreview(); }} />
               )}
               <ScopeCard checked={scopeKind === "PROJECT"} label="Весь проект" onSelect={() => { setScopeKind("PROJECT"); invalidatePreview(); }} />
+            </div>
+            <div className="semantic-negative-checkbox-options">
+              <h4>Настройки поиска</h4>
+              <label className="semantic-toggle-line">
+                <input checked={caseSensitive} disabled={applying} onChange={(event) => { setCaseSensitive(event.target.checked); invalidatePreview(); }} type="checkbox" />
+                <span><strong>Учитывать регистр</strong><small>«Москва» и «москва» будут разными.</small></span>
+              </label>
+              <fieldset className="semantic-negative-phrase-options">
+                <legend>Стоп-фразы из двух и более слов</legend>
+                <label className="semantic-toggle-line">
+                  <input checked={ignoreWordOrder} disabled={applying} onChange={(event) => { setIgnoreWordOrder(event.target.checked); invalidatePreview(); }} type="checkbox" />
+                  <span><strong>Игнорировать порядок слов</strong><small>«купить ёлку» найдёт и «ёлку купить».</small></span>
+                </label>
+                <label className="semantic-toggle-line">
+                  <input checked={ignorePunctuation} disabled={applying} onChange={(event) => { setIgnorePunctuation(event.target.checked); invalidatePreview(); }} type="checkbox" />
+                  <span><strong>Игнорировать знаки и спецсимволы</strong><small>Дефисы, запятые и другие символы считаются разделителями.</small></span>
+                </label>
+              </fieldset>
             </div>
             <div className="semantic-negative-scope-note">
               <Icon name="warning" />
@@ -367,11 +419,19 @@ function commandInput(
   words: readonly string[],
   matchMode: SemanticNegativeKeywordMatchMode,
   caseSensitive: boolean,
+  ignoreWordOrder: boolean,
+  ignorePunctuation: boolean,
   scopeKind: ScopeKind,
   activeGroup: Readonly<{ id: string; name: string }> | undefined,
   selections: readonly Readonly<SemanticKeywordBulkSelection & { label: string }>[]
 ): SemanticNegativeKeywordCommandInput | undefined {
-  const rules = validRules(words, matchMode, caseSensitive);
+  const rules = validRules(
+    words,
+    matchMode,
+    caseSensitive,
+    ignoreWordOrder,
+    ignorePunctuation
+  );
   if (!rules) return undefined;
   const scope = commandScope(scopeKind, activeGroup, selections);
   return scope ? { rules, scope } : undefined;
@@ -380,11 +440,28 @@ function commandInput(
 function validRules(
   words: readonly string[],
   matchMode: SemanticNegativeKeywordMatchMode,
-  caseSensitive: boolean
+  caseSensitive: boolean,
+  ignoreWordOrder: boolean,
+  ignorePunctuation: boolean
 ): SemanticNegativeKeywordRules | undefined {
-  return words.length > 0 && words.length <= 500 && words.every((word) => word.length <= 160)
-    ? { words, matchMode, caseSensitive }
+  return words.length > 0 &&
+    words.length <= 500 &&
+    words.every((word) => word.length <= 160) &&
+    (!ignorePunctuation || words.every((word) => /[\p{L}\p{N}]/u.test(word)))
+    ? { words, matchMode, caseSensitive, ignoreWordOrder, ignorePunctuation }
     : undefined;
+}
+
+function matchModeHint(mode: SemanticNegativeKeywordMatchMode): string {
+  if (mode === "WORD_FORM_FAST") {
+    return "Быстро сопоставляет основные русские окончания — подходит для больших ядер.";
+  }
+  if (mode === "WORD_FORM_PRECISE") {
+    return "Использует расширенное морфологическое сопоставление русских слов.";
+  }
+  if (mode === "CONTAINS") return "Ищет совпадение даже внутри другого слова.";
+  if (mode === "EXACT_PHRASE") return "Запрос должен полностью совпасть со стоп-фразой.";
+  return "Ищет целое слово или последовательность слов без изменения словоформы.";
 }
 
 function commandScope(
@@ -427,6 +504,7 @@ function parseWords(value: string, caseSensitive: boolean): readonly string[] {
 
 function commandValidationMessage(
   words: readonly string[],
+  ignorePunctuation: boolean,
   scopeKind: ScopeKind,
   activeGroup: Readonly<{ id: string }> | undefined,
   selections: readonly SemanticKeywordBulkSelection[]
@@ -434,6 +512,9 @@ function commandValidationMessage(
   if (words.length === 0) return "Добавьте хотя бы одно минус-слово.";
   if (words.length > 500) return "В одном наборе может быть не больше 500 минус-слов.";
   if (words.some((word) => word.length > 160)) return "Одно минус-слово не может быть длиннее 160 символов.";
+  if (ignorePunctuation && words.some((word) => !/[\p{L}\p{N}]/u.test(word))) {
+    return "При игнорировании знаков каждая строка должна содержать хотя бы одну букву или цифру.";
+  }
   if (scopeKind === "GROUP" && !activeGroup) return "Выберите папку для проверки.";
   if (scopeKind === "SELECTION" && selections.length === 0) return "Выберите хотя бы один запрос.";
   return "Проверьте параметры минус-слов.";

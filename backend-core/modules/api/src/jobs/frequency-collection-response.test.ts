@@ -47,8 +47,8 @@ test("accepts a public 10,000-keyword frequency summary and rejects overflow", (
   );
 });
 
-test("accepts one ordered 10,000-keyword operation scope and rejects overflow", () => {
-  const items = Array.from({ length: 10_000 }, (_, sequence) => ({
+test("accepts one ordered operation result page and rejects page overflow", () => {
+  const items = Array.from({ length: 200 }, (_, sequence) => ({
     sequence,
     keywordId: keywordIdAt(sequence),
     status: "PENDING"
@@ -56,12 +56,19 @@ test("accepts one ordered 10,000-keyword operation scope and rejects overflow", 
 
   assert.equal(
     scopedFrequencyOperationScope(
-      { workspaceId, projectId, jobId, items },
+      {
+        workspaceId,
+        projectId,
+        jobId,
+        items,
+        page: { hasNext: true, nextCursor: "199" }
+      },
       workspaceId,
       projectId,
-      jobId
+      jobId,
+      200
     ).items.length,
-    10_000
+    200
   );
   assert.throws(
     () =>
@@ -73,18 +80,45 @@ test("accepts one ordered 10,000-keyword operation scope and rejects overflow", 
           items: [
             ...items,
             {
-              sequence: 10_000,
-              keywordId: keywordIdAt(10_000),
+              sequence: 200,
+              keywordId: keywordIdAt(200),
               status: "PENDING"
             }
-          ]
+          ],
+          page: { hasNext: false }
         },
         workspaceId,
         projectId,
-        jobId
+        jobId,
+        200
       ),
     invalidDependencyResponse
   );
+});
+
+test("accepts a frequency result page beyond the first 1,000 items", () => {
+  const result = scopedFrequencyOperationScope(
+    {
+      workspaceId,
+      projectId,
+      jobId,
+      items: [
+        {
+          sequence: 1_000,
+          keywordId: keywordIdAt(1_000),
+          status: "COMPLETED"
+        }
+      ],
+      page: { hasNext: false }
+    },
+    workspaceId,
+    projectId,
+    jobId,
+    200,
+    "999"
+  );
+
+  assert.equal(result.items[0]?.sequence, 1_000);
 });
 
 function keywordIdAt(index: number): string {

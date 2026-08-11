@@ -24,15 +24,9 @@ export function OperationResultModal({
 }>) {
   return (
     <SemanticModal
+      bodyClassName="operation-result-modal-body"
       description={`${description} · ID ${operationId.slice(0, 8)}`}
-      footer={(
-        <>
-          {actions}
-          <button className="secondary-button" onClick={onClose} type="button">
-            Закрыть
-          </button>
-        </>
-      )}
+      headerActions={actions}
       onClose={onClose}
       size="fullscreen"
       title={`Результат: ${title}`}
@@ -44,5 +38,33 @@ export function OperationResultModal({
         projectId={projectId}
       />
     </SemanticModal>
+  );
+}
+
+export function OperationStopIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 24 24">
+      <rect fill="currentColor" height="10" rx="1.5" width="10" x="7" y="7" />
+    </svg>
+  );
+}
+
+export function OperationRetryIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" viewBox="0 0 24 24">
+      <path
+        d="M19 8a7.5 7.5 0 1 0 .35 7"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeWidth="2"
+      />
+      <path
+        d="M19 4v4h-4"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="2"
+      />
+    </svg>
   );
 }

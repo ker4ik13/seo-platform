@@ -152,6 +152,9 @@ reconcile/acknowledge API, admin/public UI и политика безопасн�
   другой terminal status возвращается без перезаписи.
 - Cancel разрешён при billing read-only и для архивного проекта, поскольку
   уменьшает будущую работу; новые submit при этом остаются запрещены.
+- UI не отправляет cancel по первому нажатию: для частотности и проверки
+  позиций карточка операции и header результата открывают warning-modal с
+  явным подтверждением. Default focus стоит на продолжении сбора.
 
 ## 7. Retry
 
@@ -266,19 +269,36 @@ Nest entrypoints передают явную process role в config loader, syst
 adapter credential останавливает процесс fail-closed. Эта env boundary не
 заменяет DB grants, Redis ACL, egress policy и runtime provider gates.
 
-Rate limiting настраивается по provider и credential. Нельзя полагаться только на общий limiter очереди; connector поддерживает распределённые quota buckets.
+Rate limiting настраивается по provider, credential и provider product. Нельзя
+полагаться только на общий limiter очереди; connector поддерживает
+распределённые Redis quota buckets. XMLStock разделяет `YANDEX_LIVE`,
+`GOOGLE_LIVE`, `YANDEX_SEARCH_API` и `WORDSTAT`; разные credentials никогда не
+делят bucket, а один credential делит его между своими проектами и всеми
+replicas. Permit удерживается только вокруг фактического provider HTTP, не во
+время `POLL_WAIT` или внутренних операций. Throttling включает bounded
+adaptive cooldown, успешные ответы постепенно восстанавливают окно, а
+недоступный limiter блокирует внешний вызов fail-closed. Начальные окна на
+один credential: Yandex Live — `8 concurrent / 8 RPS`, Google Live —
+`12 / 12`, Yandex Search API — `30 / 60`, Wordstat — `8 / 8`; provider
+ответы `55`, `110`, `429` и `503` уменьшают только соответствующее окно.
 
 Rank и connector process roles разрешено горизонтально размножать внутри
 одного `backend-execution` container supervisor. PostgreSQL остаётся source of
 truth, lease/token/version fencing предотвращает двойное выполнение, а
-provider capacity считается глобально между rank и frequency. На один rank
-Job выдаётся ограниченное число новых chunks за dispatcher pass, поэтому один
-workspace не захватывает всё окно. Истёкшая до первого provider byte
+Arsenkin provider-task capacity считается глобально между rank и frequency.
+XMLStock HTTP capacity считается независимо для каждого credential/product;
+PostgreSQL claim order предпочитает credential/project pair с меньшим числом
+активных leases и использует oldest-first как tie-breaker. Frequency claim
+после каждого serviced item перемещается за другие due Jobs того же priority.
+Runtime dispatcher запускается раз в секунду, поэтому свободные workers не
+ждут пятнадцатисекундный maintenance tick. Истёкшая до первого provider byte
 авторизация безопасно заменяется новым execution attempt; после начала submit
 автоматический повтор по-прежнему запрещён. Advisory lock сериализует только
-короткую транзакцию capacity-check/claim: ожидающие connector-процессы за один
-queue burst заполняют свободные provider slots, а provider HTTP выполняется
-параллельно уже вне этой блокировки. Finalization рассматривает только
+короткую Arsenkin capacity-check/claim транзакцию: ожидающие
+connector-процессы за один queue burst заполняют свободные provider slots, а
+provider HTTP выполняется параллельно уже вне этой блокировки. XMLStock
+capacity miss возвращает poll/item в ожидание без списания attempt.
+Finalization рассматривает только
 последнюю execution attempt каждого manifest chunk; предыдущие безопасно
 прерванные attempts остаются immutable audit history и не меняют cardinality
 Job.
@@ -547,8 +567,10 @@ Credentials и OAuth connections принадлежат workspace.
 Arsenkin Tools и Keys.so и асинхронную read-only проверку ключей всех трёх
 провайдеров:
 
-- Platform API повторно проверяет session, CSRF, recent authentication и
-  workspace permission;
+- Platform API повторно проверяет active session lifecycle, CSRF и workspace
+  permission. Browser API автоматически делает единственную refresh rotation
+  при истёкшем access token; create/update/validate/revoke credential не
+  требуют отдельного интерактивного повторного входа;
 - vault endpoints принимают отдельный service token, доступный только
   Platform API и management-role jobs HTTP process;
   `PLATFORM_API_TO_JOBS_TOKEN` и остальные general audience credentials эту
@@ -1470,3 +1492,28 @@ backoff остаются общими.
 Кнопка результата открывает modal именно выбранной операции: status,
 безопасный input snapshot, прогресс, итоговые счётчики и finite error; она не
 перенаправляет пользователя в текущую семантику без контекста запуска.
+Строки rank/frequency результата выдаются cursor-страницами только размера
+`200` или `500`: owning service применяет tenant/project/job scope до `take`,
+а каждый следующий boundary проверяет непрерывную immutable `sequence` и
+когерентный `nextCursor`. Modal автоматически запрашивает следующую страницу
+по мере прокрутки и объединяет строки по immutable `sequence`; ручных кнопок
+страниц нет. При активном запуске обновляется хвостовая cursor-страница, поэтому
+новые строки появляются без перезагрузки, а provider-лимит операции не
+становится лимитом размера одного HTTP-ответа. Счётчик загрузки закреплён снизу
+modal; остановка доступна иконкой в header рядом с единственным крестиком
+закрытия и требует отдельного подтверждения. Уже сохранённые строки и прогресс
+после cooperative cancel остаются доступны.
+
+Список проектов получает число активных операций одним tenant-scoped
+агрегированным запросом Core API к Execution. Execution группирует только
+пользовательские типы Jobs и активные состояния по `projectId`; Core сначала
+применяет membership/permission scope и только затем присоединяет счётчики.
+Недоступность этой необязательной проекции не блокирует список проектов.
+Для живого состояния Core публикует отдельный permission-scoped
+`GET /api/v1/workspaces/:workspaceId/operation-activity`. Persistent frontend
+store является единственным источником badge в project selectors и command
+bar, опрашивает этот endpoint чаще при наличии активных операций и повторяет
+чтение после focus/visibility и локальных operation mutations. Успешный ответ
+явно обнуляет доступные проекты без активных операций; dependency failure
+оставляет последнее подтверждённое состояние и не раскрывает недоступные
+project ID.

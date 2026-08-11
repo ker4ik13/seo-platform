@@ -1,24 +1,39 @@
+"use client";
+
 import type { AppProject } from "../lib/app-types";
-import { projectFaviconUrl } from "../lib/app-path";
 import { ProjectFavicon } from "./project-favicon";
+import { useProjectActiveOperationCount } from "./project-operation-activity-provider";
 
 export function ProjectSelectOption({
+  activeOperationCount,
   project
 }: Readonly<{
-  project: Pick<AppProject, "domain" | "name">;
+  activeOperationCount?: number;
+  project: Pick<AppProject, "id" | "name" | "version" | "activeOperationCount">;
 }>) {
-  const hasSafeFaviconSource = Boolean(projectFaviconUrl(project.domain));
+  const operationCount = useProjectActiveOperationCount(
+    project.id,
+    activeOperationCount ?? project.activeOperationCount ?? 0
+  );
   return (
     <span className="project-select-option">
-      {hasSafeFaviconSource && (
-        <span aria-hidden="true" className="project-select-favicon-slot">
-          <ProjectFavicon
-            className="project-select-favicon"
-            domain={project.domain}
-          />
+      <span aria-hidden="true" className="project-select-favicon-slot">
+        <ProjectFavicon
+          className="project-select-favicon"
+          project={project}
+        />
+      </span>
+      <strong title={project.name}>{project.name}</strong>
+      {operationCount > 0 && (
+        <span
+          aria-label={`Активных операций: ${operationCount}`}
+          className="project-active-operation-count"
+          title={`Активных операций: ${operationCount}`}
+        >
+          <span aria-hidden="true" className="project-active-operation-spinner" />
+          {operationCount}
         </span>
       )}
-      <strong title={project.name}>{project.name}</strong>
     </span>
   );
 }

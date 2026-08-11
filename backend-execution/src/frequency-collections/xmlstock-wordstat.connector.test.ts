@@ -135,4 +135,9 @@ test("normalizes XMLStock low balance and rate-limit errors", () => {
     code: "PROVIDER_RATE_LIMITED",
     retryable: true
   });
+  assert.deepEqual(xmlStockWordstatResult(200, { error: 110 }), {
+    ok: false,
+    code: "PROVIDER_RATE_LIMITED",
+    retryable: true
+  });
 });

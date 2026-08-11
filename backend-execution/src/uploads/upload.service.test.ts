@@ -373,6 +373,7 @@ function config(): AppConfig {
       concurrency: 2
     },
     connectorRuntime: {
+      dispatchIntervalMs: 1_000,
       rankConcurrency: 1,
       frequencyConcurrency: 1,
       keywordResearchConcurrency: 1

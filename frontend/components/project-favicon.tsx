@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { projectFaviconUrl } from "../lib/app-path";
+import type { AppProject } from "../lib/app-types";
+import { projectLogoUrl } from "../lib/app-path";
 
 interface ProjectFaviconLoadState {
   readonly source: string;
@@ -10,14 +11,14 @@ interface ProjectFaviconLoadState {
 
 export function ProjectFavicon({
   className = "project-favicon",
-  domain,
+  project,
   size = 18
 }: Readonly<{
   className?: string;
-  domain: string;
+  project: Pick<AppProject, "id" | "version">;
   size?: number;
 }>) {
-  const source = projectFaviconUrl(domain);
+  const source = projectLogoUrl(project.id, project.version);
   const imageRef = useRef<HTMLImageElement>(null);
   const [loadState, setLoadState] = useState<ProjectFaviconLoadState>();
   const status =
@@ -33,7 +34,7 @@ export function ProjectFavicon({
     });
   }, [source]);
 
-  if (!source || status === "FAILED") return null;
+  if (status === "FAILED") return null;
 
   return (
     <img

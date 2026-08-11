@@ -99,6 +99,7 @@ export interface AppConfig {
     readonly concurrency: number;
   };
   readonly connectorRuntime: {
+    readonly dispatchIntervalMs: number;
     readonly rankConcurrency: number;
     readonly frequencyConcurrency: number;
     readonly keywordResearchConcurrency: number;
@@ -250,6 +251,7 @@ const SYSTEM_WORKER_FORBIDDEN_ENVIRONMENT_VARIABLES = [
   "INTEGRATION_VALIDATION_LEASE_SECONDS",
   "INTEGRATION_VALIDATION_DISPATCH_SECONDS",
   "INTEGRATION_VALIDATION_CONCURRENCY",
+  "CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS",
   "RANK_CONNECTOR_CONCURRENCY",
   "FREQUENCY_COLLECTION_CONCURRENCY",
   "KEYWORD_RESEARCH_CONCURRENCY",
@@ -1409,9 +1411,16 @@ export function loadAppConfig(
       )
     },
     connectorRuntime: {
+      dispatchIntervalMs: boundedInteger(
+        env.CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS,
+        1_000,
+        "CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS",
+        250,
+        60_000
+      ),
       rankConcurrency: boundedInteger(
         env.RANK_CONNECTOR_CONCURRENCY,
-        8,
+        16,
         "RANK_CONNECTOR_CONCURRENCY",
         1,
         64

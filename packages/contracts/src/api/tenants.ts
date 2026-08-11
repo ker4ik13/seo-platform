@@ -164,9 +164,39 @@ export interface ProjectSummary {
   readonly timezone: string;
   readonly status: "DRAFT" | "ACTIVE" | "ARCHIVED";
   readonly ownerUserId: string;
+  readonly logoSource?: "CUSTOM" | "DISCOVERED";
+  readonly logoUpdatedAt?: string;
+  readonly activeOperationCount?: number;
   readonly projectAccessLevel?: ProjectAccessLevel;
   readonly version: number;
   readonly createdAt: string;
+}
+
+export interface ProjectOperationActivitySummary {
+  readonly projectId: string;
+  readonly activeOperationCount: number;
+}
+
+export interface ProjectOperationActivityCollection {
+  readonly projects: readonly ProjectOperationActivitySummary[];
+}
+
+export const projectLogoContentTypes = [
+  "image/svg+xml",
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/x-icon",
+  "image/gif",
+  "image/avif"
+] as const;
+
+export type ProjectLogoContentType =
+  (typeof projectLogoContentTypes)[number];
+
+export interface UpdateProjectLogoInput {
+  readonly contentType: ProjectLogoContentType;
+  readonly data: string;
 }
 
 export interface DeleteProjectInput {

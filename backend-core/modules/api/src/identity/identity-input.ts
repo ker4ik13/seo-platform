@@ -19,6 +19,10 @@ import {
 } from "../common/input.js";
 import { validationError } from "../common/domain-error.js";
 import { assertUuid } from "../common/identifier.js";
+import {
+  avatarImageInput,
+  type AvatarImageInput
+} from "../common/avatar-image.js";
 
 const COMMON_PASSWORDS = new Set([
   "123456789012",
@@ -28,6 +32,12 @@ const COMMON_PASSWORDS = new Set([
   "letmeinplease"
 ]);
 const USER_SESSION_CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,512}$/u;
+
+export type AccountAvatarInput = AvatarImageInput;
+
+export function updateAccountAvatarInput(value: unknown): AccountAvatarInput {
+  return avatarImageInput(value);
+}
 
 export function registerInput(value: unknown): RegisterAccountInput {
   const input = inputObject(value);

@@ -38,6 +38,7 @@ export interface ManualKeywordBulkResultRow {
   readonly outcome:
     | "CREATED"
     | "RESTORED"
+    | "LINKED_EXISTING"
     | "SKIPPED_EXISTING"
     | "REJECTED_EXISTING"
       | "FAILED";
@@ -50,6 +51,7 @@ export interface ManualKeywordBulkChunkResult {
   readonly selected: number;
   readonly created: number;
   readonly restored: number;
+  readonly linked: number;
   readonly skipped: number;
   readonly rejected: number;
   readonly failed: number;
@@ -60,6 +62,7 @@ export interface ManualKeywordBulkRunResult {
   readonly selected: number;
   readonly created: number;
   readonly restored: number;
+  readonly linked: number;
   readonly skipped: number;
   readonly rejected: number;
   readonly failed: number;
@@ -106,6 +109,7 @@ export async function runManualKeywordBulkChunks(
     selected: 0,
     created: 0,
     restored: 0,
+    linked: 0,
     skipped: 0,
     rejected: 0,
     failed: 0
@@ -134,6 +138,7 @@ export async function runManualKeywordBulkChunks(
     summary.selected += result.selected;
     summary.created += result.created;
     summary.restored += result.restored;
+    summary.linked += result.linked;
     summary.skipped += result.skipped;
     summary.rejected += result.rejected;
     summary.failed += result.failed;
@@ -176,6 +181,7 @@ function assertManualKeywordChunkResult(
   const counted =
     result.created +
     result.restored +
+    result.linked +
     result.skipped +
     result.rejected +
     result.failed;

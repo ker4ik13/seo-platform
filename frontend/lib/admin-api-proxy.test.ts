@@ -27,6 +27,14 @@ test("admin proxy exposes only explicit authentication and admin routes", () => 
     "/admin-api/v1/workspaces/01900000-0000-7000-8000-000000000001/subscription-grants"
   );
   assert.equal(
+    adminUpstreamPath(["projects"]),
+    "/admin-api/v1/projects"
+  );
+  assert.equal(
+    adminUpstreamPath(["operations"]),
+    "/admin-api/v1/operations"
+  );
+  assert.equal(
     adminUpstreamPath([
       "billing",
       "npd-receipts",
@@ -42,6 +50,7 @@ test("admin proxy exposes only explicit authentication and admin routes", () => 
     adminUpstreamPath(["workspaces", "all", "delete"]),
     undefined
   );
+  assert.equal(adminUpstreamPath(["operations", "retry"]), undefined);
 });
 
 test("preserves every upstream Set-Cookie value", () => {

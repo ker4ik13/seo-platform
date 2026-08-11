@@ -8,6 +8,7 @@ import { IntegrationCredentialKeyCoverageService } from "./integrations/integrat
 import { IntegrationCredentialValidationWorkerService } from "./integrations/integration-credential-validation-worker.service.js";
 import { IntegrationCredentialRefreshSchedulerService } from "./integrations/integration-credential-refresh-scheduler.service.js";
 import { ArsenkinHttpRateLimiter } from "./integrations/arsenkin-http-rate-limiter.js";
+import { XmlStockHttpQuotaLimiter } from "./integrations/xmlstock-http-quota-limiter.js";
 import { ArsenkinRankConnector } from "./rank-runs/arsenkin-rank.connector.js";
 import { XmlStockRankConnector } from "./rank-runs/xmlstock-rank.connector.js";
 import { RankConnectorRuntimeBrokerService } from "./rank-runs/rank-connector-runtime-broker.service.js";
@@ -30,6 +31,7 @@ import { ArsenkinWordstatConnector } from "./frequency-collections/arsenkin-word
   imports: [ConfigModule.forRole("CONNECTOR_WORKER"), DatabaseModule, SeoDataModule],
   providers: [
     ArsenkinHttpRateLimiter,
+    XmlStockHttpQuotaLimiter,
     IntegrationCredentialConnectorRegistry,
     IntegrationCredentialCryptoService,
     IntegrationCredentialExecutionBrokerService,

@@ -24,6 +24,7 @@ import type {
 import { rankProviderKeywordLimit } from "@seo-platform/contracts";
 import {
   BrowserApiError,
+  browserApiCollectionRequest,
   browserApiRequest
 } from "../lib/browser-api";
 import {
@@ -40,6 +41,8 @@ import {
   reconcileTrackingContextCreate,
   trackingContextApiPath,
   trackingContextCreateInput,
+  trackingContextDraft,
+  trackingContextDraftDirty,
   trackingContextMatchesDraft,
   trackingContextPayloadSignature,
   validateTrackingContextDraft,
@@ -64,6 +67,10 @@ import {
   rankRunInput,
   rankRunsApiPath
 } from "../lib/rank-jobs";
+import {
+  readLastRankCredentialId,
+  writeLastRankCredentialId
+} from "../lib/rank-credential-preference";
 import { SemanticModal } from "./semantic-modal";
 import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
@@ -72,7 +79,8 @@ import { SearchEngineLogo } from "./search-engine-logo";
 import {
   SemanticOperationScope,
   type SemanticOperationGroup,
-  type SemanticOperationSelection
+  type SemanticOperationSelection,
+  type SemanticOperationScopeState
 } from "./semantic-operation-scope";
 
 export function SemanticPositionDialog({
@@ -98,12 +106,19 @@ export function SemanticPositionDialog({
   const [workspaceRouting, setWorkspaceRouting] =
     useState<WorkspaceConnectorRoutingSettings>();
   const [credentialId, setCredentialId] = useState("");
-  const [searchSource, setSearchSource] =
-    useState<"SEARCH_API" | "LIVE">("LIVE");
+  const [selectedContextId, setSelectedContextId] = useState("");
+  const [lastUsedCredentialId, setLastUsedCredentialId] = useState<string>();
+  const [assignedKeywordIds, setAssignedKeywordIds] = useState<
+    ReadonlySet<string>
+  >();
+  const [assignedKeywordSelections, setAssignedKeywordSelections] = useState<
+    readonly SemanticOperationSelection[] | undefined
+  >(initialSelections);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string>();
   const [scopeError, setScopeError] = useState<string>();
+  const [contextAssignmentError, setContextAssignmentError] = useState<string>();
   const [resolvingScope, setResolvingScope] = useState(false);
   const [selections, setSelections] = useState<readonly SemanticOperationSelection[]>(
     initialSelections
@@ -117,7 +132,14 @@ export function SemanticPositionDialog({
   const assignmentCommand = useRef<IdempotentCommand | undefined>(undefined);
   const runCommand = useRef<IdempotentCommand | undefined>(undefined);
   const pendingRun = useRef<PendingSemanticRankRun | undefined>(undefined);
+  const initialSelectionsRef = useRef(initialSelections);
   const keywordIds = selections.map(({ id }) => id);
+  const addedSinceLastRun =
+    selectedContextId &&
+    contextDraft.scopeMode === "GROUPS" &&
+    assignedKeywordIds
+      ? keywordIds.filter((keywordId) => !assignedKeywordIds.has(keywordId)).length
+      : 0;
   const sources = useMemo(
     () => connectorSettings && workspaceRouting
       ? effectiveProjectConnectorOptions(
@@ -144,6 +166,56 @@ export function SemanticPositionDialog({
     setResolvingScope(resolving);
     setScopeError(nextError);
   }, []);
+  const resolveScopeState = useCallback(
+    (scope: SemanticOperationScopeState) => {
+      setContextDraft((current) => {
+        const currentGroups = [...current.groupIds].sort().join(":");
+        const nextGroups = [...scope.groupIds].sort().join(":");
+        return current.scopeMode === scope.mode && currentGroups === nextGroups
+          ? current
+          : {
+              ...current,
+              scopeMode: scope.mode,
+              groupIds: scope.groupIds
+            };
+      });
+    },
+    []
+  );
+
+  function selectContext(contextId: string): void {
+    setSelectedContextId(contextId);
+    const context = settings?.contexts.find(({ id }) => id === contextId);
+    if (context) {
+      setSelections([]);
+      setAssignedKeywordIds(undefined);
+      setAssignedKeywordSelections(undefined);
+      setResolvingScope(true);
+      setContextAssignmentError(undefined);
+      setContextDraft(trackingContextDraft(context));
+    } else {
+      setSelections(initialSelectionsRef.current);
+      setAssignedKeywordIds(undefined);
+      setAssignedKeywordSelections(initialSelectionsRef.current);
+      setResolvingScope(false);
+      setScopeError(undefined);
+      setContextAssignmentError(undefined);
+      setContextDraft({
+        ...defaultContextDraft(),
+        scopeMode:
+          initialSelections.length > 0
+            ? "KEYWORDS"
+            : activeGroupId
+              ? "GROUPS"
+              : "ALL",
+        groupIds: activeGroupId ? [activeGroupId] : []
+      });
+    }
+    setEstimate(undefined);
+    pendingRun.current = undefined;
+    estimateCommand.current = undefined;
+    runCommand.current = undefined;
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -160,9 +232,13 @@ export function SemanticPositionDialog({
       browserApiRequest<WorkspaceConnectorRoutingSettings>(
         `/app/api/workspaces/${encodeURIComponent(workspaceId)}/integrations/routing`,
         { signal: controller.signal }
+      ),
+      browserApiRequest<{ readonly jobs: readonly RankJobSummary[] }>(
+        rankRunsApiPath(projectId),
+        { signal: controller.signal }
       )
     ])
-      .then(([trackingResult, integrationResult, workspaceResult]) => {
+      .then(([trackingResult, integrationResult, workspaceResult, rankRuns]) => {
         if (controller.signal.aborted) return;
         const options = effectiveProjectConnectorOptions(
           integrationResult,
@@ -172,13 +248,49 @@ export function SemanticPositionDialog({
           (source) =>
             (source.provider === "ARSENKIN" || source.provider === "XMLSTOCK")
         );
+        const previousJob = rankRuns.jobs[0];
+        const previousProvider =
+          previousJob?.provider === "ARSENKIN" ||
+          previousJob?.provider === "XMLSTOCK"
+            ? previousJob.provider
+            : undefined;
+        const exactCredentialId = readLastRankCredentialId(
+          window.localStorage,
+          projectId,
+          options.map(({ id }) => id)
+        );
         const preferredSource =
+          options.find(({ id }) => id === exactCredentialId) ??
+          options.find(({ provider: value }) => value === previousProvider) ??
           options.find(({ provider: value }) => value === "XMLSTOCK") ??
           options[0];
+        const previousContext =
+          initialSelections.length === 0 && !activeGroupId
+            ? trackingResult.contexts.find(
+                ({ id, status }) =>
+                  id === previousJob?.trackingContextId && status === "ACTIVE"
+              )
+            : undefined;
         setSettings(trackingResult);
         setConnectorSettings(integrationResult);
         setWorkspaceRouting(workspaceResult);
         setCredentialId(preferredSource?.id ?? "");
+        setLastUsedCredentialId(exactCredentialId);
+        if (previousContext) {
+          setSelectedContextId(previousContext.id);
+          setContextDraft(trackingContextDraft(previousContext));
+        } else {
+          setContextDraft((current) => ({
+            ...current,
+            scopeMode:
+              initialSelections.length > 0
+                ? "KEYWORDS"
+                : activeGroupId
+                  ? "GROUPS"
+                  : "ALL",
+            groupIds: activeGroupId ? [activeGroupId] : []
+          }));
+        }
         if (preferredSource?.provider === "ARSENKIN") {
           setContextDraft((current) => ({ ...current, depth: 30 }));
         }
@@ -190,7 +302,46 @@ export function SemanticPositionDialog({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [projectId, workspaceId]);
+  }, [activeGroupId, initialSelections.length, projectId, workspaceId]);
+
+  useEffect(() => {
+    if (!selectedContextId) {
+      setAssignedKeywordIds(undefined);
+      setAssignedKeywordSelections(initialSelectionsRef.current);
+      setContextAssignmentError(undefined);
+      return;
+    }
+    const controller = new AbortController();
+    setSelections([]);
+    setAssignedKeywordIds(undefined);
+    setAssignedKeywordSelections(undefined);
+    setResolvingScope(true);
+    setScopeError(undefined);
+    setContextAssignmentError(undefined);
+    void loadAssignedKeywordSelections(
+      projectId,
+      selectedContextId,
+      controller.signal
+    )
+      .then((assigned) => {
+        if (controller.signal.aborted) return;
+        setAssignedKeywordIds(new Set(assigned.map(({ id }) => id)));
+        setAssignedKeywordSelections(assigned);
+        setContextAssignmentError(undefined);
+      })
+      .catch((loadError: unknown) => {
+        if (controller.signal.aborted) return;
+        setAssignedKeywordIds(new Set());
+        setAssignedKeywordSelections([]);
+        setResolvingScope(false);
+        setContextAssignmentError(
+          loadError instanceof Error
+            ? loadError.message
+            : "Не удалось загрузить запросы сохранённого контекста."
+        );
+      });
+    return () => controller.abort();
+  }, [projectId, selectedContextId]);
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -205,18 +356,41 @@ export function SemanticPositionDialog({
           "Нет активного подключения XMLStock или Arsenkin для съёма позиций."
         );
       }
+      if (!contextDraft.regionCode.trim()) {
+        throw new Error("Выберите регион перед запуском съёма позиций.");
+      }
       const draftErrors = validateTrackingContextDraft(contextDraft);
       const firstError = Object.values(draftErrors)[0];
       if (firstError) throw new Error(firstError);
-      const contextName = technicalContextName(contextDraft);
+      const contextName =
+        contextDraft.name.trim() || technicalContextName(contextDraft);
       const launchDraft = {
         ...contextDraft,
         name: contextName
       };
-      let selectedContext = matchingTechnicalContext(
-        settings,
-        launchDraft
-      );
+      let selectedContext = selectedContextId
+        ? settings?.contexts.find(
+            ({ id, status }) => id === selectedContextId && status === "ACTIVE"
+          )
+        : matchingTechnicalContext(settings, launchDraft);
+      if (selectedContext) {
+        const authoritative = await browserApiRequest<TrackingContextSummary>(
+          trackingContextApiPath(projectId, selectedContext.id)
+        );
+        selectedContext = trackingContextDraftDirty(authoritative, launchDraft)
+          ? await browserApiRequest<TrackingContextSummary>(
+              trackingContextApiPath(projectId, authoritative.id),
+              {
+                method: "PATCH",
+                ifMatch: authoritative.version,
+                body: trackingContextCreateInput(launchDraft)
+              }
+            )
+          : authoritative;
+        setSettings((current) =>
+          current ? withTrackingContext(current, selectedContext!) : current
+        );
+      }
       if (!selectedContext && settings?.access.canConfigure) {
         const signature = trackingContextPayloadSignature(launchDraft);
         createContextCommand.current = stableIdempotencyCommand(
@@ -241,25 +415,19 @@ export function SemanticPositionDialog({
         ).current;
         createContextCommand.current = undefined;
         selectedContext = createdContext;
+        setSelectedContextId(createdContext.id);
         setSettings((current) =>
           current ? withTrackingContext(current, createdContext) : current
         );
       } else if (!selectedContext) {
         throw new Error("Недостаточно прав для подготовки параметров съёма позиций.");
       }
-      const authoritativeContext = await browserApiRequest<TrackingContextSummary>(
-        trackingContextApiPath(projectId, selectedContext.id)
-      );
-      setSettings((current) =>
-        current ? withTrackingContext(current, authoritativeContext) : current
-      );
-      if (!trackingContextMatchesDraft(authoritativeContext, launchDraft)) {
+      if (!trackingContextMatchesDraft(selectedContext, launchDraft)) {
         createContextCommand.current = undefined;
         throw new Error(
           "Параметры профиля изменились параллельно. Съём не запущен; повторите попытку с актуальными настройками."
         );
       }
-      selectedContext = authoritativeContext;
       const assignmentSignature = JSON.stringify({
         contextId: selectedContext.id,
         version: selectedContext.version,
@@ -294,7 +462,7 @@ export function SemanticPositionDialog({
         launchContext,
         provider,
         selectedSource.id,
-        searchSource
+        contextDraft.searchSource
       );
       let reusableRun = pendingRun.current;
       if (
@@ -317,7 +485,7 @@ export function SemanticPositionDialog({
           () => `rank-estimate:${crypto.randomUUID()}`,
           provider,
           selectedSource.id,
-          searchSource
+          contextDraft.searchSource
         );
         const estimatePayload = await browserApiRequest<unknown>(
           rankEstimatesApiPath(projectId),
@@ -327,7 +495,7 @@ export function SemanticPositionDialog({
               selectedContext.id,
               provider,
               selectedSource.id,
-              searchSource
+              contextDraft.searchSource
             ),
             idempotencyKey: estimateCommand.current.key
           }
@@ -395,6 +563,7 @@ export function SemanticPositionDialog({
       });
       pendingRun.current = undefined;
       runCommand.current = undefined;
+      rememberCredential(projectId, selectedSource.id, setLastUsedCredentialId);
       onStarted(job);
     } catch (requestError) {
       if (stage === "ESTIMATE") {
@@ -429,6 +598,13 @@ export function SemanticPositionDialog({
             });
             pendingRun.current = undefined;
             runCommand.current = undefined;
+            if (selectedSource) {
+              rememberCredential(
+                projectId,
+                selectedSource.id,
+                setLastUsedCredentialId
+              );
+            }
             onStarted(job);
             return;
           } catch {
@@ -465,48 +641,86 @@ export function SemanticPositionDialog({
         {loading ? (
           <div className="semantic-dialog-loading" role="status">Проверяем доступные подключения…</div>
         ) : (
-          <PositionRunParameters
-            draft={contextDraft}
-            onChange={setContextDraft}
-            keywordCount={keywordIds.length}
-            credentialId={credentialId}
-            sources={sources}
-            onCredentialChange={(nextCredentialId) => {
-              const next = sources.find(({ id }) => id === nextCredentialId);
-              setCredentialId(nextCredentialId);
-              if (contextDraft.searchEngine === "GOOGLE") setSearchSource("LIVE");
-              if (
-                next?.provider === "ARSENKIN" &&
-                contextDraft.searchEngine === "YANDEX"
-              ) {
-                setContextDraft((current) => ({ ...current, depth: 30 }));
-              }
-              setEstimate(undefined);
-              pendingRun.current = undefined;
-              estimateCommand.current = undefined;
-              runCommand.current = undefined;
-            }}
-            onSearchSourceChange={(source) => {
-              setSearchSource(source);
-              setEstimate(undefined);
-              pendingRun.current = undefined;
-              estimateCommand.current = undefined;
-              runCommand.current = undefined;
-            }}
-            searchSource={searchSource}
-            scope={
-              <SemanticOperationScope
-                activeGroupId={activeGroupId}
-                groups={groups}
-                initialSelections={initialSelections}
-                maxItems={rankProviderKeywordLimit}
-                onChange={resolveScope}
-                projectId={projectId}
-              />
-            }
-          />
+          <>
+            <PositionContextSelector
+              contexts={settings?.contexts ?? []}
+              draft={contextDraft}
+              onDraftChange={setContextDraft}
+              onSelect={selectContext}
+              projectId={projectId}
+              selectedContextId={selectedContextId}
+            />
+            <PositionRunParameters
+              draft={contextDraft}
+              onChange={setContextDraft}
+              keywordCount={keywordIds.length}
+              credentialId={credentialId}
+              lastUsedCredentialId={lastUsedCredentialId}
+              sources={sources}
+              onCredentialChange={(nextCredentialId) => {
+                const next = sources.find(({ id }) => id === nextCredentialId);
+                setCredentialId(nextCredentialId);
+                setContextDraft((current) => ({
+                  ...current,
+                  ...(current.searchEngine === "GOOGLE"
+                    ? { searchSource: "LIVE" as const }
+                    : {}),
+                  ...(next?.provider === "ARSENKIN" &&
+                  current.searchEngine === "YANDEX"
+                    ? { depth: 30 as const }
+                    : {})
+                }));
+                setEstimate(undefined);
+                pendingRun.current = undefined;
+                estimateCommand.current = undefined;
+                runCommand.current = undefined;
+              }}
+              onSearchSourceChange={(source) => {
+                setContextDraft((current) => ({
+                  ...current,
+                  searchSource: source
+                }));
+                setEstimate(undefined);
+                pendingRun.current = undefined;
+                estimateCommand.current = undefined;
+                runCommand.current = undefined;
+              }}
+              searchSource={contextDraft.searchSource}
+              scope={selectedContextId && assignedKeywordSelections === undefined ? (
+                <div className="semantic-dialog-loading" role="status">
+                  Загружаем запросы сохранённого контекста…
+                </div>
+              ) : (
+                <SemanticOperationScope
+                  activeGroupId={activeGroupId}
+                  groups={groups}
+                  initialScope={{
+                    mode: contextDraft.scopeMode,
+                    groupIds: contextDraft.groupIds
+                  }}
+                  initialSelections={
+                    selectedContextId
+                      ? assignedKeywordSelections ?? []
+                      : initialSelections
+                  }
+                  key={`${selectedContextId || "new-context"}:ready`}
+                  maxItems={rankProviderKeywordLimit}
+                  onChange={resolveScope}
+                  onScopeChange={resolveScopeState}
+                  projectId={projectId}
+                />
+              )}
+            />
+          </>
         )}
-        {(estimate?.status === "BLOCKED" || error || scopeError) && <div className="semantic-workflow-feedback">
+        {(estimate?.status === "BLOCKED" || error || scopeError || contextAssignmentError || addedSinceLastRun > 0) && <div className="semantic-workflow-feedback">
+          {addedSinceLastRun > 0 && (
+            <div className="inline-alert warning" role="status">
+              После прошлого запуска в выбранных папках появилось новых
+              запросов: <strong>{addedSinceLastRun}</strong>. Они будут включены
+              в этот съём после подтверждения запуска.
+            </div>
+          )}
           {estimate?.status === "BLOCKED" && (
             <div className="inline-alert warning" role="alert">
               <strong>Запуск заблокирован</strong>
@@ -514,6 +728,7 @@ export function SemanticPositionDialog({
             </div>
           )}
           {error && <div className="inline-alert danger" role="alert">{error}</div>}
+          {contextAssignmentError && <div className="inline-alert danger" role="alert">{contextAssignmentError}</div>}
           {scopeError && <div className="inline-alert warning" role="alert">{scopeError}</div>}
         </div>}
         <div className="semantic-modal-actions semantic-workflow-footer">
@@ -525,6 +740,7 @@ export function SemanticPositionDialog({
               resolvingScope ||
               running ||
               keywordIds.length === 0 ||
+              !contextDraft.regionCode.trim() ||
               !settings ||
               !connectorSettings ||
               !selectedSource
@@ -544,11 +760,77 @@ export function SemanticPositionDialog({
 
 }
 
+function PositionContextSelector({
+  contexts,
+  draft,
+  onDraftChange,
+  onSelect,
+  projectId,
+  selectedContextId
+}: Readonly<{
+  contexts: readonly TrackingContextSummary[];
+  draft: TrackingContextDraft;
+  onDraftChange: (draft: TrackingContextDraft) => void;
+  onSelect: (contextId: string) => void;
+  projectId: string;
+  selectedContextId: string;
+}>) {
+  return (
+    <section className="semantic-position-context-bar">
+      <div>
+        <span className="semantic-position-context-icon">
+          <Icon name="positions" />
+        </span>
+        <div>
+          <strong>Контекст съёма</strong>
+          <small>
+            Хранит папки, поисковик, регион, устройство и глубину проверки.
+          </small>
+        </div>
+      </div>
+      <label>
+        <span>Сохранённый контекст</span>
+        <CustomSelect
+          onChange={(event) => onSelect(event.target.value)}
+          value={selectedContextId}
+        >
+          <option value="">Новый контекст</option>
+          {contexts
+            .filter(({ status }) => status === "ACTIVE")
+            .map((context) => (
+              <option key={context.id} value={context.id}>
+                {context.name} · {context.assignedKeywordCount} запросов
+              </option>
+            ))}
+        </CustomSelect>
+      </label>
+      <label>
+        <span>Название</span>
+        <input
+          maxLength={160}
+          onChange={(event) =>
+            onDraftChange({ ...draft, name: event.target.value })
+          }
+          placeholder="Например, Москва · десктоп"
+          value={draft.name}
+        />
+      </label>
+      <a
+        className="semantic-dialog-link"
+        href={`/app/projects/${encodeURIComponent(projectId)}/rankings/contexts`}
+      >
+        Управлять контекстами
+      </a>
+    </section>
+  );
+}
+
 function PositionRunParameters({
   draft,
   onChange,
   keywordCount,
   credentialId,
+  lastUsedCredentialId,
   sources,
   onCredentialChange,
   searchSource,
@@ -559,6 +841,7 @@ function PositionRunParameters({
   onChange: (draft: TrackingContextDraft) => void;
   keywordCount: number;
   credentialId: string;
+  lastUsedCredentialId: string | undefined;
   sources: readonly ProjectConnectorCredentialOption[];
   onCredentialChange: (credentialId: string) => void;
   searchSource: "SEARCH_API" | "LIVE";
@@ -662,7 +945,12 @@ function PositionRunParameters({
                   <span className="semantic-provider-card-copy">
                     <strong>{integrationProviderLabel(source.provider)}</strong>
                     <small>{source.label} · ваш API</small>
-                    <b>Подключено</b>
+                    <b>
+                      Подключено
+                      {source.id === lastUsedCredentialId
+                        ? " · использовался в прошлый раз"
+                        : ""}
+                    </b>
                   </span>
                   <i aria-hidden="true" className="semantic-provider-radio" />
                 </button>
@@ -675,21 +963,6 @@ function PositionRunParameters({
           )}
           </div>
           <a className="semantic-dialog-link" href="/app/settings/integrations">Управление подключениями</a>
-          <fieldset className="semantic-segmented-field semantic-depth-field">
-            <legend>Глубина проверки</legend>
-            <div className="semantic-segmented-control" role="radiogroup" aria-label="Глубина проверки">
-              {depthOptions.map((depth) => (
-                <label className={draft.depth === depth ? "selected" : undefined} key={depth}>
-                  <input
-                    checked={draft.depth === depth}
-                    onChange={() => onChange({ ...draft, depth })}
-                    type="radio"
-                  />
-                  <span>Топ-{depth}</span>
-                </label>
-              ))}
-            </div>
-          </fieldset>
         </section>
         <section className="semantic-workflow-panel semantic-position-geo-panel">
           <header>
@@ -726,6 +999,21 @@ function PositionRunParameters({
               ))}
             </div>
           </fieldset>
+          <fieldset className="semantic-segmented-field semantic-depth-field">
+            <legend>Глубина проверки</legend>
+            <div className="semantic-segmented-control" role="radiogroup" aria-label="Глубина проверки">
+              {depthOptions.map((depth) => (
+                <label className={draft.depth === depth ? "selected" : undefined} key={depth}>
+                  <input
+                    checked={draft.depth === depth}
+                    onChange={() => onChange({ ...draft, depth })}
+                    type="radio"
+                  />
+                  <span>Топ-{depth}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
           <div className="semantic-position-compact-fields">
             <label className="semantic-workflow-field">
               <span>Страна</span>
@@ -754,6 +1042,11 @@ function PositionRunParameters({
               </CustomSelect>
             </label>
           </div>
+          {!draft.regionCode.trim() && (
+            <div className="inline-alert warning" role="alert">
+              Выберите регион — без него съём позиций запустить нельзя.
+            </div>
+          )}
           {draft.searchEngine === "YANDEX" && provider === "ARSENKIN" && (
             <div className="inline-alert info" role="status">
               Arsenkin для Яндекса выполняет съём с глубиной Топ-30. При
@@ -849,6 +1142,45 @@ async function synchronizeContextAssignments(
     );
   }
   return result;
+}
+
+async function loadAssignedKeywordSelections(
+  projectId: string,
+  contextId: string,
+  signal: AbortSignal
+): Promise<readonly SemanticOperationSelection[]> {
+  const selections = new Map<string, SemanticOperationSelection>();
+  let cursor: string | undefined;
+  do {
+    const query = new URLSearchParams({ limit: "200" });
+    if (cursor) query.set("cursor", cursor);
+    const page = await browserApiCollectionRequest<{
+      readonly keywordId: string;
+      readonly keywordVersion: number;
+      readonly textOriginal: string;
+    }>(
+      `${trackingContextApiPath(projectId, contextId)}/keywords?${query.toString()}`,
+      { signal }
+    );
+    for (const assignment of page.data) {
+      selections.set(assignment.keywordId, {
+        id: assignment.keywordId,
+        version: assignment.keywordVersion,
+        label: assignment.textOriginal
+      });
+    }
+    cursor = page.page.hasNext ? page.page.nextCursor : undefined;
+  } while (cursor);
+  return [...selections.values()];
+}
+
+function rememberCredential(
+  projectId: string,
+  credentialId: string,
+  setLastUsedCredentialId: (credentialId: string) => void
+): void {
+  writeLastRankCredentialId(window.localStorage, projectId, credentialId);
+  setLastUsedCredentialId(credentialId);
 }
 
 async function keywordSetHash(keywordIds: readonly string[]): Promise<string> {

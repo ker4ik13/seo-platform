@@ -13,7 +13,11 @@ import {
 } from "../lib/connector-routing-presentation";
 import { operationStatusLabel } from "../lib/operation-status-presentation";
 import { rankSearchSystemLabel } from "../lib/rank-jobs";
-import { OperationResultModal } from "./operation-result-modal";
+import {
+  OperationResultModal,
+  OperationStopIcon
+} from "./operation-result-modal";
+import { OperationStopConfirmation } from "./operation-stop-confirmation";
 import { ProviderLogo } from "./provider-logo";
 
 type OperationTab = "ACTIVE" | "COMPLETED" | "ERROR";
@@ -39,6 +43,7 @@ export function SemanticOperationsDrawer({
   const [cancellingId, setCancellingId] = useState<string>();
   const [retryingId, setRetryingId] = useState<string>();
   const [selectedOperation, setSelectedOperation] = useState<Operation>();
+  const [stopConfirmation, setStopConfirmation] = useState<Operation>();
   const settledFrequencyNotifications = useRef(new Set<string>());
   const onFrequencySettledRef = useRef(onFrequencySettled);
   const requestInFlight = useRef(false);
@@ -135,6 +140,12 @@ export function SemanticOperationsDrawer({
     COMPLETED: allOperations.filter(({ tab }) => tab === "COMPLETED").length,
     ERROR: allOperations.filter(({ tab }) => tab === "ERROR").length
   }), [allOperations]);
+  const openedOperation = selectedOperation
+    ? allOperations.find((operation) =>
+        operation.id === selectedOperation.id &&
+        operation.kind === selectedOperation.kind
+      ) ?? selectedOperation
+    : undefined;
 
   async function cancel(operation: Operation): Promise<void> {
     setCancellingId(operation.id);
@@ -222,20 +233,18 @@ export function SemanticOperationsDrawer({
             <div className="semantic-operation-meta"><span>{operation.routeLabel ?? "Фоновая операция"}</span><time>{formatDateTime(operation.createdAt)}</time></div>
             {operation.errorCode && <small>Код: {operation.errorCode}</small>}
             <footer>
-              <div>
-                {operation.retryable && (
-                  <button className="semantic-operation-retry" disabled={retryingId === operation.id} onClick={() => void retry(operation)} type="button">
-                    {retryingId === operation.id
-                      ? "Запускаем…"
-                      : operation.retryLabel}
-                  </button>
-                )}
-                {operation.cancellable && (
-                  <button disabled={cancellingId === operation.id} onClick={() => void cancel(operation)} type="button">
-                    {cancellingId === operation.id ? "Останавливаем…" : "Остановить"}
-                  </button>
-                )}
-              </div>
+              {operation.retryable && (
+                <button className="semantic-operation-retry" disabled={retryingId === operation.id} onClick={() => void retry(operation)} type="button">
+                  {retryingId === operation.id
+                    ? "Запускаем…"
+                    : operation.retryLabel}
+                </button>
+              )}
+              {operation.cancellable && (
+                <button disabled={cancellingId === operation.id} onClick={() => setStopConfirmation(operation)} type="button">
+                  {cancellingId === operation.id ? "Останавливаем…" : "Остановить"}
+                </button>
+              )}
               <button
                 className="semantic-operation-open"
                 onClick={() => setSelectedOperation(operation)}
@@ -268,20 +277,43 @@ export function SemanticOperationsDrawer({
           </section>
         )}
         {!loading && (
-          <Link className="semantic-operation-journal-link" href="/app/operations">
+          <Link className="semantic-operation-journal-link" href="/app/tasks">
             Открыть журнал операций
           </Link>
         )}
       </div>
     </aside>
-    {selectedOperation && (
+    {openedOperation && (
       <OperationResultModal
-        description={`${selectedOperation.description} · ${formatDateTime(selectedOperation.createdAt)}`}
-        kind={selectedOperation.kind === "FREQUENCY" ? "frequency" : "rank"}
+        actions={openedOperation.cancellable ? (
+          <button
+            aria-label={cancellingId === openedOperation.id ? "Операция останавливается" : "Остановить операцию"}
+            className="operation-result-header-action is-danger"
+            disabled={cancellingId === openedOperation.id}
+            onClick={() => setStopConfirmation(openedOperation)}
+            title={cancellingId === openedOperation.id ? "Останавливаем…" : "Остановить операцию"}
+            type="button"
+          >
+            <OperationStopIcon />
+          </button>
+        ) : undefined}
+        description={`${openedOperation.description} · ${formatDateTime(openedOperation.createdAt)}`}
+        kind={openedOperation.kind === "FREQUENCY" ? "frequency" : "rank"}
         onClose={() => setSelectedOperation(undefined)}
-        operationId={selectedOperation.id}
+        operationId={openedOperation.id}
         projectId={projectId}
-        title={selectedOperation.kind === "FREQUENCY" ? "Сбор частотности" : "Проверка позиций"}
+        title={openedOperation.kind === "FREQUENCY" ? "Сбор частотности" : "Проверка позиций"}
+      />
+    )}
+    {stopConfirmation && (
+      <OperationStopConfirmation
+        busy={cancellingId === stopConfirmation.id}
+        description={stopConfirmation.description}
+        onCancel={() => setStopConfirmation(undefined)}
+        onConfirm={() => {
+          void cancel(stopConfirmation).then(() => setStopConfirmation(undefined));
+        }}
+        title={stopConfirmation.title}
       />
     )}
     </>

@@ -1,6 +1,6 @@
 # Карта проекта
 
-Актуально на 9 августа 2026 года.
+Актуально на 11 августа 2026 года.
 
 Карта описывает текущее устройство репозитория. Нормативные требования
 находятся в `docs/technical-spec/00-index.md`, архитектурные решения — в
@@ -95,20 +95,74 @@ Frontend-представление состояния фоновых опера
 проецирует безопасные параметры замера (search source, provider, регион,
 устройство, depth и время), не раскрывая provider request ID или raw result;
 пять последних дат находятся под графиком, полный список открывается в modal.
+Удаление сохранённого контекста съёма реализовано как обратимый soft-delete:
+контекст исчезает из новых запусков, но не удаляет immutable execution
+manifests, результаты или историю позиций.
 Стрелки перемещают фокус по загруженным строкам, а Shift расширяет диапазон
-выделения. Дерево групп поддерживает явный union от двух до пятидесяти обычных
-групп; текущая открытая группа уже входит в выбор, поэтому Ctrl/Cmd+клик по
+выделения. Дерево групп поддерживает явный union от двух обычных групп без
+продуктового верхнего лимита; текущая открытая группа уже входит в выбор,
+поэтому Ctrl/Cmd+клик по
 следующей сразу даёт две группы. Контекстное меню после экспорта показывает
 однострочную базовую палитру и через versioned PATCH меняет цвет сразу у всей
-выборки; системные группы не участвуют. Правый клик вне текущей мультивыборки
+выборки; изменение только цвета не переотправляет позицию. Обычные группы
+создаются и переупорядочиваются отдельно от фиксированных позиций системных
+групп, поэтому `Без группы` и `Корзина` не участвуют в вычислении позиции
+обычных siblings; position обычной группы является неотрицательным safe
+integer без продуктовой границы `1999`. Правый клик вне текущей мультивыборки
 заменяет её выбранной группой, а правый клик внутри сохраняет batch scope.
-Серверный cursor и filter hash привязаны ко всему набору, а строка
-показывает группу-источник текущего union. Настройки
+Серверный cursor и filter hash привязаны ко всему набору; union принудительно
+добавляет регулируемую колонку группы, а обычная плотность показывает под
+запросом компактные теги без служебной подписи языка/отслеживания. Компактная
+плотность оставляет одну строку и скрывает inline-теги. Настройки
 колонок/представлений и журнал операций не
 перезагружают layout. Прогресс rank/frequency остаётся серверным источником
 истины, а браузер по изменению safe progress-проекции перечитывает уже
 загруженные строки таблицы без full-page reload. Поиск применяет 300 ms
-debounce и имеет явную очистку.
+debounce и имеет одну явную очистку с безопасными внутренними отступами.
+Фильтр тегов предлагает project-scoped активные значения, допускает
+произвольную строку и регистронезависимо ищет по нормализованному имени;
+серверная сортировка тегов выполняется до cursor pagination, оставляя строки
+без тегов внизу. Сброс условий сохраняет текущую папку или union папок.
+Сортировка по позиции также выполняется до cursor pagination и всегда делит
+выборку на три устойчивых уровня: сначала текущие найденные позиции, затем
+`not-found` с известной предыдущей позицией, после них запросы без единого
+найденного замера. Направление сортировки меняет порядок чисел только внутри
+первых двух уровней и не перемешивает их между собой.
+
+Мастер съёма позиций умеет выбирать сохранённый профиль, раскрывать вложенное
+дерево папок и materialize родительский scope вместе с потомками. В
+`tracking_contexts.launch_profile` сохраняются только provider-neutral тип
+выдачи и режим/UUID папок; SEO Data повторно подтверждает tenant ownership
+каждой папки. Выбор сохранённого профиля восстанавливает его полный assignment
+как актуальные `keywordId/text/version`, а «Новый контекст» сохраняет переданное
+из таблицы выделение. Credential не сохраняется в профиле: UI хранит только
+project-scoped локальное предпочтение точного credential ID, повторно проверяет
+его среди актуальных подключений workspace, помечает ровно одно подключение и
+предупреждает, если после прошлого запуска в выбранных папках появились новые
+canonical keywords. Credential ID не попадает в публичный context/job summary.
+
+Каталог подписок v4 публикует лимиты `5/2/5k/1`, `20/10/20k/5`,
+`50/30/50k/15` и `100/100/unlimited/30` для
+users/projects/keywords-per-project/concurrent-jobs. Папки не тарифицируются:
+совместимое значение `foldersPerProject = 0` трактуется как отсутствие лимита.
+Миграция переводит только неотменённые подписки на новую immutable plan
+version, не удаляя периоды, балансы, платежи или ledger history.
+
+Ручное добавление сохраняет checkbox «Не добавлять дубли» отдельно для каждого
+проекта в пользовательском Web storage. Выключенный checkbox использует
+`ADD_TO_GROUP`: существующая каноническая keyword identity получает ещё одно
+обычное group membership вместо второй строки в `keywords`. Ответ различает
+`LINKED_EXISTING` и обычный skip. Поэтому group/view scope дедуплицируется самим
+keyword ID, rank/frequency provider вызывается один раз, а единый snapshot
+виден во всех папках запроса.
+
+Журнал rank/frequency получает immutable строки результата cursor-страницами
+по 200 или 500 элементов через весь tenant-scoped boundary
+`frontend → Platform API → Execution/Core SEO`. Modal подгружает страницы
+автоматически при прокрутке, дедуплицирует их по immutable `sequence`, а active
+refresh перечитывает хвостовой cursor. Поэтому крупный запуск не
+материализуется целиком в одном HTTP-ответе и не упирается в старый
+presentation-limit 1 000 строк.
 
 Frontend имеет один обязательный canonical origin `WEB_PUBLIC_URL`. Он
 передаётся в build и runtime как server-only configuration; metadata,
@@ -131,11 +185,28 @@ Browser BFF-клиент обрабатывает истечение корот�
 сохраняются при клиентской навигации, а активный раздел вычисляется из текущего
 pathname. Presentation-only состояние сворачивания синхронизируется между
 `localStorage` и несекретной cookie для корректного SSR; tenant/project cookie и
-permission context при этом не изменяются. Project favicon загружается из
-точного `/favicon.svg`, а выбранные workspace/project обозначаются заливкой
-строки без дублирующей галочки. Один project-option renderer показывает favicon
-как в открытом списке, так и в выбранном значении sidebar и project selector
-семантики.
+permission context при этом не изменяются. Project logo читается через
+same-origin permission-scoped endpoint Core API: пользовательский upload имеет
+приоритет, иначе bounded discovery выбирает наиболее качественный безопасный
+favicon из HTML, manifest и стандартных путей сайта. Выбранные
+workspace/project обозначаются заливкой строки без дублирующей галочки. Один
+project-option renderer показывает logo как в открытом списке, так и в закрытом
+значении sidebar, семантики и project-scoped экранов. Core API одним
+агрегированным запросом получает из Execution число активных операций по
+доступным проектам; ненулевое число отображается spinner/badge рядом с проектом
+без раскрытия чужих project ID. В семантике кнопка «Операции» использует тот же
+компактный индикатор. Persistent `AppShell` владеет единым tenant-scoped store,
+который читает `GET /api/v1/workspaces/:workspaceId/operation-activity`,
+обнуляет отсутствующие в authoritative projection проекты и обновляется по
+visibility/focus, таймеру и локальному событию изменения операции. Все
+селекторы и command bar читают одну карту; при временной недоступности Jobs
+сохраняется последнее подтверждённое значение без ложного обнуления.
+
+Остановка активной частотности или проверки позиций является двухшаговым
+действием. Кнопки в карточке операции и header результата сначала открывают
+малую warning-modal с безопасным default focus «Продолжить сбор»; cooperative
+cancel отправляется только после явного подтверждения «Остановить». Уже
+сохранённый прогресс при этом не удаляется.
 
 Защищённый `/admin` входит в тот же Frontend deployable. Раздел рабочих
 областей ищет tenant по названию, slug, UUID, имени или email владельца и
@@ -146,6 +217,18 @@ permission context при этом не изменяются. Project favicon з
 Ручная выдача не создаёт платёж/чек и атомарно очищает provider subscription и
 default payment method, чтобы последующий автоплатёж не конфликтовал с
 операторским решением.
+
+Там же находятся read-only каталог проектов и глобальный журнал операций для
+`SUPPORT`, `OPERATIONS` и `SUPER_ADMIN`. Core владеет project/workspace/user
+identity и обогащает каталог авторами и владельцами; количество активных
+ключей и пользовательских папок получает одним bounded internal-запросом из
+SEO Data. При недоступности SEO Data каталог остаётся доступен, а счётчики
+явно переходят в degraded state. Глобальный журнал формируется владельцем Jobs
+в Execution, поддерживает bounded keyset pagination и фильтры по группе
+состояний/типу; Core добавляет только display identity workspace, проекта и
+автора запуска. Internal и browser contracts не содержат input/scope snapshot,
+тексты ключей, provider payload и secrets — наружу выходит только состояние,
+прогресс, allowlisted result metrics и нормализованный error code.
 
 Старые каталоги `platform-*` и отдельный admin deployable удалены. Directus
 удалён как не настроенная и не используемая runtime-зависимость; публичный
@@ -211,17 +294,27 @@ Redis, NATS, SMTP, vault и provider capabilities остаются раздел�
 уровне процессов; container-level secret boundary соответствует одному из
 двух backend deployables. Rank и connector roles запускаются несколькими
 child processes (`RANK_WORKER_PROCESSES`, `CONNECTOR_WORKER_PROCESSES`), но
-не являются отдельными deployable-сервисами. Provider DB broker сохраняет
-общий bounded capacity и lease fencing между всеми процессами. Короткая
-секция резервирования provider-slot сериализована в PostgreSQL: параллельные
-connector-процессы заполняют всё доступное окно за один queue burst, после
-чего provider HTTP выполняется параллельно.
+не являются отдельными deployable-сервисами. Connector runtime dispatch
+работает отдельным быстрым тиком (по умолчанию 1 секунда), а credential
+maintenance сохраняет собственный медленный интервал. Одноузловой VPS runtime
+запускает три connector child process, совпадая с production default Compose.
+Arsenkin DB broker
+сохраняет общий bounded task capacity и lease fencing между всеми процессами.
+XMLStock HTTP ограничивается распределёнными Redis buckets по
+`credentialId + product` (`YANDEX_LIVE`, `GOOGLE_LIVE`,
+`YANDEX_SEARCH_API`, `WORDSTAT`): разные API-ключи не блокируют друг друга,
+один ключ делит лимит между своими проектами. Permit удерживает только внешний
+HTTP, не `POLL_WAIT`; throttling адаптивно уменьшает окно. Состояние limiter
+хранится только в connector ACL namespace
+`seo-platform:jobs:v1:provider-rate-limit:*`. PostgreSQL fair claim
+предпочитает менее занятую пару credential/project, оставаясь source of truth
+для Job, lease и progress.
 
 ## 5. Владение данными
 
 | Данные | Модуль-владелец | Текущее хранилище |
 |---|---|---|
-| users, sessions, workspaces (включая bounded avatar до 512 KiB), projects, project transfer requests, RBAC, billing, audit, platform admin command receipts | Core API | `platform_db` |
+| users (включая bounded account avatar до 512 KiB), sessions, workspaces (включая bounded workspace avatar до 512 KiB), projects и bounded project logos до 512 KiB, project transfer requests, RBAC, billing, audit, platform admin command receipts | Core API | `platform_db` |
 | semantics (включая keyword notes и presets минус-слов), project Markdown notes, pages, rankings и immutable XMLStock Top-10 SERP results, crawl/page-map projections | Core SEO | `seo_db` |
 | realtime subscriptions, deliveries, event inbox | Core Realtime | `realtime_db` + Redis |
 | jobs, schedules, uploads, credential vault, provider execution | Execution | `jobs_db` + Redis + S3 |
@@ -273,9 +366,11 @@ material; построение этого snapshot изолировано в
 `rank-continuation-estimate.ts`. Уникальный partial index разрешает только
 одного прямого child на parent, а exact `Idempotency-Key` возвращает уже
 созданное продолжение.
-Provider capacity также считает только execution текущего `RUNNING` Job graph:
-исторические `CLAIMED`/`POLL_WAIT`/`STAGED` записи отменённых или завершённых
-Jobs остаются audit evidence, но больше не уменьшают параллельное окно.
+Arsenkin provider-task capacity считает только execution текущего `RUNNING`
+Job graph: исторические `CLAIMED`/`POLL_WAIT`/`STAGED` записи отменённых или
+завершённых Jobs остаются audit evidence, но больше не уменьшают параллельное
+окно. Для XMLStock `POLL_WAIT` вообще не занимает HTTP capacity; Redis permit
+выдаётся выбранному credential/product непосредственно перед запросом.
 Автоматический credential refresh не запускается во время активного manual
 rank Job. Если уже начавшийся Job всё же пересёкся с более новой успешной
 validation (например, при rolling upgrade), grant принимает только proof того
@@ -309,8 +404,9 @@ provider route автоматически.
 XMLStock. Это platform safety bound, а не лимит XMLStock: Arsenkin отправляет
 одну provider batch-задачу, XMLStock сохраняет тот же Job, но connector
 выполняет по одному keyword на внешний `/wordstat/json/` request. Внутренние
-resolve/persist chunks и общий provider concurrency остаются bounded, поэтому
-снятие прежнего UI/API-предела 200 не создаёт один гигантский provider request.
+resolve/persist chunks и per-credential `WORDSTAT` concurrency/RPS остаются
+bounded, поэтому снятие прежнего UI/API-предела 200 не создаёт один гигантский
+provider request и не связывает между собой разные BYOK-ключи.
 Wizard по умолчанию выбирает регион «Россия» (`225`); в списке далее идут
 Москва и Санкт-Петербург.
 
@@ -322,8 +418,12 @@ keyword insights. Те же insights объединяют `current_ranks` с п�
 append-only `rank_snapshots`, поэтому график не создаёт отдельную историю и не
 перезаписывает результаты съёма.
 
-Пресеты минус-слов принадлежат Core SEO и хранят до 500 нормализованных слов с
-явным режимом `WHOLE_WORD` либо `CONTAINS`. Применение всегда двухфазное:
+Пресеты минус-слов принадлежат Core SEO и хранят до 500 нормализованных слов.
+Режимы совместимы с основным workflow Key Collector: быстрое и улучшенное
+русскоязычное сопоставление словоформ, полное слово/фраза, подстрока и точное
+совпадение всей фразы. Для стоп-фраз отдельно сохраняются флаги игнорирования
+порядка слов и пунктуации; прежние пресеты после additive migration получают
+оба значения `false` и не меняют поведение. Применение всегда двухфазное:
 bounded preview фиксирует scope/version/hash, затем команда пакетами до 500
 строк переносит совпадения в системную корзину, создаёт reversible semantic
 version `NEGATIVE_KEYWORDS` и повторно проверяет optimistic versions под
@@ -421,6 +521,17 @@ Core проверяет platform role независимо от tenant membershi
 параллельного изменения. UI не является универсальным редактором БД и не
 позволяет менять ledger history.
 
+### Platform admin: проекты и операции
+
+Admin BFF отдельно allowlist-ит только collection routes `projects` и
+`operations`; вложенные произвольные команды через эти roots запрещены.
+Каталог проектов ограничен 50 строками и ищет по project/workspace identity и
+автору. SEO Data endpoint принимает не более 50 уникальных UUID и считает
+только active/non-deleted keywords и active folders без `system_kind`.
+Execution endpoint отдаёт не более 100 Jobs на страницу по immutable cursor,
+а totals разделяет на active, completed и attention. Эти экраны являются
+read-only и не обходят существующие service/database ownership boundaries.
+
 Первый `SUPER_ADMIN` назначается production bootstrap-entrypoint
 `/app/dist/platform-admin-bootstrap.js`: корневой runtime делегирует команду
 модулю `@seo-platform/backend-core-api/platform-admin-bootstrap`, использует
@@ -459,8 +570,9 @@ unique index. Право `project.transfer` следует за новым `owne
 
 ### Удаление проекта
 
-Core API выполняет owner-only soft delete с recent-auth, exact-name
-confirmation и `If-Match`. Активная передача блокирует команду. В одной
+Core API выполняет owner-only soft delete с автоматически проверяемой active
+session, CSRF, exact-name confirmation и `If-Match`, без интерактивного
+повторного логина. Активная передача блокирует команду. В одной
 транзакции проект получает `DELETED`/`deletedAt`, append-only audit и redacted
 `project.deleted.v1`; физические tenant-owned SEO/Execution данные не
 удаляются, поэтому операция не создаёт риск потери данных или частичной

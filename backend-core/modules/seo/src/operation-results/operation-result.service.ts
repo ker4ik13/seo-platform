@@ -1,6 +1,5 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import {
-  arsenkinWordstatKeywordLimit,
   normalizedRankDataQualityFlags,
   semanticFrequencyTypes,
   semanticFrequencyQualityFlags,
@@ -58,6 +57,25 @@ const crawlSelect = {
   }
 } as const satisfies Prisma.CrawlPageSnapshotSelect;
 
+const rankEntrySelect = {
+  sequence: true,
+  keywordId: true,
+  keyword: { select: { textOriginal: true } },
+  rankSnapshot: {
+    select: {
+      found: true,
+      position: true,
+      absolutePosition: true,
+      pixelPosition: true,
+      rankingUrl: true,
+      title: true,
+      snippet: true,
+      observedAt: true,
+      dataQualityFlags: true
+    }
+  }
+} as const satisfies Prisma.RankExecutionManifestEntrySelect;
+
 @Injectable()
 export class OperationResultService {
   public constructor(private readonly prisma: PrismaService) {}
@@ -87,13 +105,13 @@ export class OperationResultService {
           { id: "desc" }
         ],
         take:
-          arsenkinWordstatKeywordLimit * semanticFrequencyTypes.length + 1,
+          input.keywordIds.length * semanticFrequencyTypes.length + 1,
         select: frequencySelect
       })
     ]);
     if (
       snapshots.length >
-      arsenkinWordstatKeywordLimit * semanticFrequencyTypes.length
+      input.keywordIds.length * semanticFrequencyTypes.length
     ) invalidStored("frequency result is oversized");
     const keywordById = new Map(keywords.map((row) => [row.id, row.textOriginal]));
     const snapshotsById = new Map<string, typeof snapshots>();
@@ -133,7 +151,9 @@ export class OperationResultService {
 
   public async rank(
     context: InternalCommandContext,
-    jobId: string
+    jobId: string,
+    limit: number,
+    cursor?: number
   ): Promise<InternalRankOperationResult> {
     const manifest = await this.prisma.rankExecutionManifest.findFirst({
       where: {
@@ -142,40 +162,27 @@ export class OperationResultService {
         jobId
       },
       select: {
+        id: true,
         trackingContextId: true,
         execution: true,
-        context: { select: { name: true } },
-        chunks: {
-          orderBy: { chunkIndex: "asc" },
-          select: {
-            entries: {
-              orderBy: { sequence: "asc" },
-              select: {
-                sequence: true,
-                keywordId: true,
-                keyword: { select: { textOriginal: true } },
-                rankSnapshot: {
-                  select: {
-                    found: true,
-                    position: true,
-                    absolutePosition: true,
-                    pixelPosition: true,
-                    rankingUrl: true,
-                    title: true,
-                    snippet: true,
-                    observedAt: true,
-                    dataQualityFlags: true
-                  }
-                }
-              }
-            }
-          }
-        }
+        context: { select: { name: true } }
       }
     });
     if (!manifest) throw new NotFoundException("Rank operation result not found");
-    const rows = manifest.chunks.flatMap(({ entries }) => entries);
-    if (rows.length > 1_000) invalidStored("rank result is oversized");
+    const rows = await this.prisma.rankExecutionManifestEntry.findMany({
+      where: {
+        workspaceId: context.workspaceId,
+        projectId: context.projectId,
+        manifestId: manifest.id,
+        ...(cursor === undefined ? {} : { sequence: { gt: cursor } })
+      },
+      orderBy: { sequence: "asc" },
+      take: limit + 1,
+      select: rankEntrySelect
+    });
+    const pageRows = rows.slice(0, limit);
+    const hasNext = rows.length > limit;
+    const last = pageRows.at(-1);
     return {
       workspaceId: context.workspaceId,
       projectId: context.projectId,
@@ -183,7 +190,11 @@ export class OperationResultService {
       trackingContextId: manifest.trackingContextId,
       contextName: manifest.context.name,
       execution: rankExecution(manifest.execution),
-      rows: rows.map(rankRow)
+      rows: pageRows.map(rankRow),
+      page: {
+        hasNext,
+        ...(hasNext && last ? { nextCursor: String(last.sequence) } : {})
+      }
     };
   }
 
@@ -221,21 +232,8 @@ export class OperationResultService {
 }
 
 function rankRow(
-  row: Readonly<{
-    sequence: number;
-    keywordId: string;
-    keyword: { readonly textOriginal: string };
-    rankSnapshot: {
-      readonly found: boolean;
-      readonly position: number | null;
-      readonly absolutePosition: number | null;
-      readonly pixelPosition: number | null;
-      readonly rankingUrl: string | null;
-      readonly title: string | null;
-      readonly snippet: string | null;
-      readonly observedAt: Date;
-      readonly dataQualityFlags: Prisma.JsonValue;
-    } | null;
+  row: Prisma.RankExecutionManifestEntryGetPayload<{
+    select: typeof rankEntrySelect;
   }>
 ): RankOperationResultRow {
   const snapshot = row.rankSnapshot;

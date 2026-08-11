@@ -26,6 +26,7 @@ export function SettingsTabs({
     | "notifications"
     | "integrations"
     | "project-notifications"
+    | "ranking-contexts"
     | "project-integrations";
   projectId?: string;
   projectAccessLevel?: AppProject["projectAccessLevel"];
@@ -154,6 +155,14 @@ export function SettingsTabs({
           >
             <Icon name="bell" />
             Уведомления проекта
+          </Link>
+          <Link
+            aria-current={active === "ranking-contexts" ? "page" : undefined}
+            className={active === "ranking-contexts" ? "active" : undefined}
+            href={`/app/projects/${encodeURIComponent(projectId)}/rankings/contexts`}
+          >
+            <Icon name="positions" />
+            Контексты позиций
           </Link>
         </>
       )}

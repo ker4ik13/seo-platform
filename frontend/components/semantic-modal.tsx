@@ -8,16 +8,20 @@ import {
 } from "react";
 
 export function SemanticModal({
+  bodyClassName,
   children,
   description,
   footer,
+  headerActions,
   onClose,
   size = "medium",
   title
 }: Readonly<{
+  bodyClassName?: string;
   children: ReactNode;
   description?: string;
   footer?: ReactNode;
+  headerActions?: ReactNode;
   onClose: () => void;
   size?: "small" | "medium" | "large" | "fullscreen";
   title: string;
@@ -60,16 +64,21 @@ export function SemanticModal({
           <h2 id={titleId}>{title}</h2>
           {description && <p id={descriptionId}>{description}</p>}
         </div>
-        <button
-          aria-label="Закрыть окно"
-          className="semantic-modal-close"
-          onClick={onClose}
-          type="button"
-        >
-          ×
-        </button>
+        <div className="semantic-modal-header-actions">
+          {headerActions}
+          <button
+            aria-label="Закрыть окно"
+            className="semantic-modal-close"
+            onClick={onClose}
+            type="button"
+          >
+            ×
+          </button>
+        </div>
       </header>
-      <div className="semantic-modal-body">{children}</div>
+      <div className={`semantic-modal-body${bodyClassName ? ` ${bodyClassName}` : ""}`}>
+        {children}
+      </div>
       {footer && <footer className="semantic-modal-footer">{footer}</footer>}
     </dialog>
   );

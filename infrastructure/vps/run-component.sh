@@ -429,7 +429,7 @@ case "$component" in
       MALWARE_SCANNER_ENABLED=false \
       "$node_bin" "$project_root/backend-execution/dist/crawl-worker.main.js"
     ;;
-  connector-worker|connector-worker-2)
+  connector-worker|connector-worker-2|connector-worker-3)
     exec env \
       -i \
       PATH="$node_path" \
@@ -445,7 +445,8 @@ case "$component" in
       INTEGRATION_CREDENTIAL_ACTIVE_KEY_VERSION=1 \
       INTEGRATION_VALIDATION_DISPATCH_SECONDS=5 \
       INTEGRATION_VALIDATION_CONCURRENCY=8 \
-      RANK_CONNECTOR_CONCURRENCY=8 \
+      CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS=1000 \
+      RANK_CONNECTOR_CONCURRENCY=16 \
       FREQUENCY_COLLECTION_CONCURRENCY=8 \
       KEYWORD_RESEARCH_CONCURRENCY=2 \
       RANK_PROVIDER_SUBMIT_ENABLED=true \

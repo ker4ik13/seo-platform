@@ -205,6 +205,9 @@ function keywordComparator(
         return compare(left.sourceMode, right.sourceMode) || compare(left.id, right.id);
       case "SOURCE_DESC":
         return compare(right.sourceMode, left.sourceMode) || compare(right.id, left.id);
+      case "TAGS_ASC":
+      case "TAGS_DESC":
+        return compareTags(left, right, selected);
       case "FREQUENCY_BASE_DESC":
       case "FREQUENCY_BASE_ASC":
       case "FREQUENCY_EXACT_DESC":
@@ -226,6 +229,26 @@ function keywordComparator(
         return compare(right.createdAt, left.createdAt) || compare(right.id, left.id);
     }
   };
+}
+
+function compareTags(
+  left: SemanticKeywordListItem,
+  right: SemanticKeywordListItem,
+  sort: SemanticKeywordSort
+): number {
+  const firstTag = (item: SemanticKeywordListItem) =>
+    item.tags
+      .map((tag) => tag.normalize("NFKC").toLocaleLowerCase())
+      .sort()[0] ?? null;
+  const leftValue = firstTag(left);
+  const rightValue = firstTag(right);
+  if (leftValue === null || rightValue === null) {
+    if (leftValue === rightValue) return compare(left.id, right.id);
+    return leftValue === null ? 1 : -1;
+  }
+  const comparison = compare(leftValue, rightValue);
+  return (sort === "TAGS_ASC" ? comparison : -comparison) ||
+    compare(left.id, right.id);
 }
 
 function compareMetric(

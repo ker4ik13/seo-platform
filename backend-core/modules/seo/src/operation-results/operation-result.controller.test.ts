@@ -61,6 +61,8 @@ test("rejects tenant or route mismatches before querying results", async () => {
       controller.rank(
         "01900000-0000-7000-8000-000000000098",
         jobId,
+        undefined,
+        undefined,
         headers,
         request
       ),

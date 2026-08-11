@@ -515,14 +515,14 @@ export function BillingSettings({
           />
           <BillingUsageMeter
             label="Хранимые запросы"
-            {...(currentPlan
+            {...(currentPlan && currentPlan.features.storedKeywords > 0
               ? { limit: currentPlan.features.storedKeywords }
               : {})}
             unit="запросов"
           />
           <BillingUsageMeter
             label="Поисковые контексты"
-            {...(currentPlan
+            {...(currentPlan && currentPlan.features.trackedContextPairs > 0
               ? { limit: currentPlan.features.trackedContextPairs }
               : {})}
             unit="пар"
@@ -553,7 +553,7 @@ export function BillingSettings({
           Тариф принадлежит рабочей области, а не отдельному пользователю.
           Все приглашённые участники получают возможности тарифа только в
           рамках этой рабочей области. Лимиты применяются сервером атомарно
-          при создании проекта, папки, приглашении участника, импорте
+          при создании проекта, приглашении участника, импорте
           запросов и запуске фоновой задачи. Значение «—» означает, что
           сервис-владелец ещё не отдал агрегированный расход; лимит при этом
           всё равно проверяется.
@@ -570,12 +570,11 @@ export function BillingSettings({
             <span className="billing-server-check">Проверяется сервером</span>
           </div>
           <div className="billing-entitlements-grid">
-            <BillingEntitlement label="Запросов в проекте" value={number(currentPlan.features.keywordsPerProject)} />
             <BillingEntitlement
-              label="Папок в проекте"
-              value={currentPlan.features.foldersPerProject === 0
+              label="Запросов в проекте"
+              value={currentPlan.features.keywordsPerProject === 0
                 ? "Без ограничений"
-                : number(currentPlan.features.foldersPerProject)}
+                : number(currentPlan.features.keywordsPerProject)}
             />
             <BillingEntitlement label="Одновременных задач" value={number(currentPlan.features.concurrentJobs)} />
             <BillingEntitlement label="Участников рабочей области" value={number(currentPlan.features.seats)} />
@@ -981,13 +980,14 @@ function PlanCard({
         <li>{number(plan.features.seats)} пользователей</li>
         <li>{number(plan.features.projects)} проектов</li>
         <li>
-          {plan.features.foldersPerProject === 0
-            ? "Без лимита папок"
-            : `${number(plan.features.foldersPerProject)} папок на проект`}
+          {plan.features.keywordsPerProject === 0
+            ? "Без лимита ключей"
+            : `${number(plan.features.keywordsPerProject)} ключей на проект`}
         </li>
-        <li>{number(plan.features.keywordsPerProject)} ключей на проект</li>
         <li>{number(plan.features.concurrentJobs)} одновременных задач</li>
-        <li>{money(plan.includedDataCreditsMinor)} data credits</li>
+        {plan.includedDataCreditsMinor > 0 && (
+          <li>{money(plan.includedDataCreditsMinor)} data credits</li>
+        )}
       </ul>
       {canManage && price && (
         <button

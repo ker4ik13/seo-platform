@@ -1,6 +1,7 @@
 import {
   normalizedRankDataQualityFlags,
   operationResultItemStatuses,
+  rankProviderKeywordLimit,
   semanticFrequencyDevices,
   semanticFrequencyQualityFlags,
   semanticFrequencyTypes,
@@ -119,7 +120,9 @@ export function scopedInternalRankOperationResult(
   value: unknown,
   workspaceId: string,
   projectId: string,
-  jobId: string
+  jobId: string,
+  limit: number,
+  cursor?: string
 ): InternalRankOperationResult {
   const input = exact(value, [
     "workspaceId",
@@ -128,8 +131,10 @@ export function scopedInternalRankOperationResult(
     "trackingContextId",
     "contextName",
     "execution",
-    "rows"
+    "rows",
+    "page"
   ]);
+  const page = exact(input.page, ["hasNext"], ["nextCursor"]);
   if (
     input.workspaceId !== workspaceId ||
     input.projectId !== projectId ||
@@ -138,7 +143,11 @@ export function scopedInternalRankOperationResult(
     input.contextName.length < 1 ||
     input.contextName.length > 160 ||
     !Array.isArray(input.rows) ||
-    input.rows.length > 1_000
+    input.rows.length > limit ||
+    typeof page.hasNext !== "boolean" ||
+    (page.hasNext &&
+      (typeof page.nextCursor !== "string" || input.rows.length !== limit)) ||
+    (!page.hasNext && page.nextCursor !== undefined)
   ) invalid();
   const keywordIds = new Set<string>();
   const sequences = new Set<number>();
@@ -157,7 +166,11 @@ export function scopedInternalRankOperationResult(
       ]
     );
     const keywordId = uuid(row.keywordId);
-    const sequence = integer(row.sequence, 0, 999);
+    const sequence = integer(
+      row.sequence,
+      0,
+      rankProviderKeywordLimit - 1
+    );
     if (
       keywordIds.has(keywordId) ||
       sequences.has(sequence) ||
@@ -217,6 +230,11 @@ export function scopedInternalRankOperationResult(
       dataQualityFlags
     };
   });
+  const firstSequence = cursor === undefined ? 0 : Number(cursor) + 1;
+  if (
+    rows.some((row, index) => row.sequence !== firstSequence + index) ||
+    (page.hasNext && page.nextCursor !== String(rows.at(-1)?.sequence))
+  ) invalid();
   return {
     workspaceId,
     projectId,
@@ -224,7 +242,13 @@ export function scopedInternalRankOperationResult(
     trackingContextId: uuid(input.trackingContextId),
     contextName: input.contextName,
     execution: rankExecution(input.execution),
-    rows
+    rows,
+    page: {
+      hasNext: page.hasNext,
+      ...(typeof page.nextCursor === "string"
+        ? { nextCursor: page.nextCursor }
+        : {})
+    }
   };
 }
 

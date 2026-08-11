@@ -1,9 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  arsenkinWordstatKeywordLimit,
-  semanticFrequencyTypes
-} from "@seo-platform/contracts";
+import { semanticFrequencyTypes } from "@seo-platform/contracts";
 import type { PrismaService } from "../database/prisma.service.js";
 import { OperationResultService } from "./operation-result.service.js";
 
@@ -16,58 +13,67 @@ const context = { workspaceId, projectId, actorId };
 
 test("returns exact FOUND, NOT_FOUND and PENDING rank rows", async () => {
   let observedWhere: unknown;
+  const entries = [
+    rankEntry(0, null),
+    rankEntry(1, {
+      found: true,
+      position: 7,
+      absolutePosition: 9,
+      pixelPosition: 640,
+      rankingUrl: "https://example.com/found",
+      title: "Found title",
+      snippet: "Found snippet",
+      observedAt: new Date("2026-08-02T10:00:00.000Z"),
+      dataQualityFlags: []
+    }),
+    rankEntry(2, {
+      found: false,
+      position: null,
+      absolutePosition: null,
+      pixelPosition: null,
+      rankingUrl: null,
+      title: null,
+      snippet: null,
+      observedAt: new Date("2026-08-02T10:01:00.000Z"),
+      dataQualityFlags: []
+    })
+  ];
   const service = new OperationResultService({
     rankExecutionManifest: {
       findFirst: async ({ where }: { where: unknown }) => {
         observedWhere = where;
         return {
+          id: "01900000-0000-7000-8000-000000000007",
           trackingContextId: "01900000-0000-7000-8000-000000000006",
           execution: execution(),
-          context: { name: "Google · Москва · Десктоп" },
-          chunks: [
-            {
-              entries: [
-                rankEntry(0, null),
-                rankEntry(1, {
-                  found: true,
-                  position: 7,
-                  absolutePosition: 9,
-                  pixelPosition: 640,
-                  rankingUrl: "https://example.com/found",
-                  title: "Found title",
-                  snippet: "Found snippet",
-                  observedAt: new Date("2026-08-02T10:00:00.000Z"),
-                  dataQualityFlags: []
-                }),
-                rankEntry(2, {
-                  found: false,
-                  position: null,
-                  absolutePosition: null,
-                  pixelPosition: null,
-                  rankingUrl: null,
-                  title: null,
-                  snippet: null,
-                  observedAt: new Date("2026-08-02T10:01:00.000Z"),
-                  dataQualityFlags: []
-                })
-              ]
-            }
-          ]
+          context: { name: "Google · Москва · Десктоп" }
         };
+      }
+    },
+    rankExecutionManifestEntry: {
+      findMany: async ({ where }: { where: { sequence?: { gt: number } } }) => {
+        const sequenceFilter = where.sequence;
+        return sequenceFilter
+          ? entries.filter(({ sequence }) => sequence > sequenceFilter.gt)
+          : entries;
       }
     }
   } as unknown as PrismaService);
 
-  const result = await service.rank(context, jobId);
+  const first = await service.rank(context, jobId, 2);
+  const second = await service.rank(context, jobId, 2, 1);
+  const rows = [...first.rows, ...second.rows];
 
   assert.deepEqual(observedWhere, { workspaceId, projectId, jobId });
   assert.deepEqual(
-    result.rows.map(({ state }) => state),
+    rows.map(({ state }) => state),
     ["PENDING", "FOUND", "NOT_FOUND"]
   );
-  assert.equal(result.rows[1]?.position, 7);
-  assert.equal(result.rows[1]?.rankingUrl, "https://example.com/found");
-  assert.equal(result.rows[2]?.observedAt, "2026-08-02T10:01:00.000Z");
+  assert.deepEqual(first.page, { hasNext: true, nextCursor: "1" });
+  assert.deepEqual(second.page, { hasNext: false });
+  assert.equal(rows[1]?.position, 7);
+  assert.equal(rows[1]?.rankingUrl, "https://example.com/found");
+  assert.equal(rows[2]?.observedAt, "2026-08-02T10:01:00.000Z");
 });
 
 test("paginates crawl rows by immutable sequence and supports an empty page", async () => {
@@ -106,7 +112,7 @@ test("paginates crawl rows by immutable sequence and supports an empty page", as
 test("fails closed when a frequency result exceeds the bounded projection", async () => {
   const keywordId = "01900000-0000-7000-8000-000000000010";
   const snapshots = Array.from({
-    length: arsenkinWordstatKeywordLimit * semanticFrequencyTypes.length + 1
+    length: semanticFrequencyTypes.length + 1
   }, (_, index) => ({
     keywordId,
     type: "BASE",

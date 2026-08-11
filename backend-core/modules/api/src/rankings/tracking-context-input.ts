@@ -3,17 +3,22 @@ import {
   trackingDevices,
   trackingDomainMatchModes,
   trackingContextKeywordReplacementLimit,
+  trackingContextScopeModes,
   trackingSearchEngines,
+  trackingSearchSources,
   type CreateTrackingContextInput,
   type ReplaceTrackingContextKeywordsInput,
   type TrackingContextConfigurationInput,
   type TrackingContextKeywordQuery,
+  type TrackingContextLaunchProfile,
   type TrackingDomainMatchRule,
   type UpdateTrackingContextInput
 } from "@seo-platform/contracts";
 import { validationError } from "../common/domain-error.js";
 
 const SEARCH_ENGINES = new Set<string>(trackingSearchEngines);
+const SEARCH_SOURCES = new Set<string>(trackingSearchSources);
+const SCOPE_MODES = new Set<string>(trackingContextScopeModes);
 const DEVICES = new Set<string>(trackingDevices);
 const DEPTHS = new Set<number>(trackingDepths);
 const DOMAIN_MATCH_MODES = new Set<string>(
@@ -97,11 +102,65 @@ export function replaceTrackingContextKeywordsInput(
 function contextInput(
   value: unknown
 ): CreateTrackingContextInput {
-  const input = exactRecord(value, ["name", "configuration"], "$");
+  const input = exactRecord(
+    value,
+    ["name", "configuration", "launchProfile"],
+    "$"
+  );
   return {
     name: normalizedString(input.name, "name", 1, 160),
-    configuration: configurationInput(input.configuration)
+    configuration: configurationInput(input.configuration),
+    ...(input.launchProfile === undefined
+      ? {}
+      : { launchProfile: launchProfileInput(input.launchProfile) })
   };
+}
+
+function launchProfileInput(value: unknown): TrackingContextLaunchProfile {
+  const input = exactRecord(
+    value,
+    ["searchSource", "scope"],
+    "launchProfile"
+  );
+  const searchSource = enumValue(
+    input.searchSource,
+    SEARCH_SOURCES,
+    "launchProfile.searchSource"
+  ) as TrackingContextLaunchProfile["searchSource"];
+  const scope = exactRecord(
+    input.scope,
+    ["mode", "groupIds"],
+    "launchProfile.scope"
+  );
+  const mode = enumValue(
+    scope.mode,
+    SCOPE_MODES,
+    "launchProfile.scope.mode"
+  ) as TrackingContextLaunchProfile["scope"]["mode"];
+  if (!Array.isArray(scope.groupIds)) {
+    invalid("launchProfile.scope.groupIds", "Must be an array of UUIDs");
+  }
+  const groupIds = scope.groupIds.map((groupId, index) => {
+    if (typeof groupId !== "string" || !UUID_PATTERN.test(groupId)) {
+      invalid(`launchProfile.scope.groupIds.${index}`, "Must be a UUID");
+    }
+    return groupId.toLowerCase();
+  });
+  if (new Set(groupIds).size !== groupIds.length) {
+    invalid("launchProfile.scope.groupIds", "Must not contain duplicates");
+  }
+  if (
+    (mode === "GROUPS" && groupIds.length === 0) ||
+    (mode !== "GROUPS" && groupIds.length > 0)
+  ) {
+    invalid(
+      "launchProfile.scope.groupIds",
+      mode === "GROUPS"
+        ? "Must contain at least one folder for GROUPS scope"
+        : "Must be empty unless scope mode is GROUPS"
+    );
+  }
+  return { searchSource, scope: { mode, groupIds } };
 }
 
 function configurationInput(

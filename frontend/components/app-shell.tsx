@@ -12,6 +12,7 @@ import { NotificationBell } from "./notification-bell";
 import { TenantSwitcher } from "./tenant-switcher";
 import { DropdownCoordinator } from "./dropdown-coordinator";
 import { SidebarCollapseButton } from "./sidebar-collapse-button";
+import { ProjectOperationActivityProvider } from "./project-operation-activity-provider";
 
 const navigation: readonly {
   readonly label: string;
@@ -113,6 +114,10 @@ export function AppShell({
         : `/app/projects/${encodeURIComponent(context.project.id)}/${item.section}`
       : item.href;
   return (
+    <ProjectOperationActivityProvider
+      projects={context.projects}
+      {...(context.workspace ? { workspaceId: context.workspace.id } : {})}
+    >
     <div className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <DropdownCoordinator />
       <aside className="sidebar">
@@ -277,5 +282,6 @@ export function AppShell({
         </nav>
       </div>
     </div>
+    </ProjectOperationActivityProvider>
   );
 }

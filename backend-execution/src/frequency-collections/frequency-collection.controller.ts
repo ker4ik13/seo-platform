@@ -6,6 +6,7 @@ import {
   Headers,
   Param,
   Post,
+  Query,
   Req,
   UseGuards
 } from "@nestjs/common";
@@ -24,7 +25,9 @@ import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import {
   internalCancelFrequencyCollectionInput,
   internalCreateFrequencyCollectionInput,
-  internalRetryFrequencyCollectionInput
+  internalRetryFrequencyCollectionInput,
+  frequencyResultCursor,
+  frequencyResultPageLimit
 } from "./frequency-collection-input.js";
 import { FrequencyCollectionService } from "./frequency-collection.service.js";
 
@@ -86,6 +89,8 @@ export class FrequencyCollectionController {
     @Param("workspaceId") workspaceId: string,
     @Param("projectId") projectId: string,
     @Param("jobId") jobId: string,
+    @Query("limit") limit: unknown,
+    @Query("cursor") cursor: unknown,
     @Headers() headers: HeadersRecord,
     @Req() request: FastifyRequest
   ): Promise<ApiResponse<InternalFrequencyOperationScope>> {
@@ -95,7 +100,9 @@ export class FrequencyCollectionController {
       await this.collections.resultScope(
         context.workspaceId,
         context.projectId,
-        internalUuid(jobId, "jobId")
+        internalUuid(jobId, "jobId"),
+        frequencyResultPageLimit(limit),
+        frequencyResultCursor(cursor)
       )
     );
   }

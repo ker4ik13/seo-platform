@@ -126,7 +126,7 @@ export function ProjectCatalog({
                   <span aria-hidden="true" className="project-card-favicon-slot">
                     <ProjectFavicon
                       className="project-card-favicon"
-                      domain={project.domain}
+                      project={project}
                       size={28}
                     />
                   </span>

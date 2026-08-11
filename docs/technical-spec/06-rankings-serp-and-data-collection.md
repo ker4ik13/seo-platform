@@ -21,6 +21,19 @@
 компактный список профилей, параметры выбранного профиля, оценку запуска и
 назначенные ему ключи без отдельного перехода.
 
+Editable launch profile сохраняет тип выдачи и охват следующего запуска:
+весь проект, точный список либо набор папок. Папки отображаются вложенным
+раскрываемым деревом; выбор родителя включает потомков, а сервер при сохранении
+проверяет каждую папку внутри текущего tenant scope. Перед повторным запуском
+UI сравнивает materialized scope с последним назначенным keyword set и
+предупреждает о новых запросах. Выбор сохранённого профиля сначала полностью
+восстанавливает назначенные `keywordId`, текущий текст и optimistic version;
+новый профиль начинает с явного выделения, переданного из таблицы. Provider не
+становится частью context: браузер хранит project-scoped предпочтение точного
+credential ID последнего успешного запуска, проверяет его среди текущих
+effective подключений и помечает только это подключение. Credential ID не
+публикуется в context или job summary и не переносится между браузерами.
+
 По ADR-2026-033 provider/credential принадлежат project connector binding, а
 schedule/timezone — automation. Экран может показывать их effective projection
 рядом с context, но они не входят в immutable tracking configuration.
@@ -45,6 +58,10 @@ connector policy, а не дублируются в context.
 Изменение контекста не переписывает историю. Любое изменение поисковой
 конфигурации создаёт новую immutable configuration version; rename,
 archive/restore меняют только revision логической сущности.
+Удаление контекста в пользовательском интерфейсе является soft-delete через
+archive: контекст исключается из новых запусков, но immutable manifests,
+результаты и история позиций сохраняют ссылку на него. Восстановление снова
+разрешает выбирать контекст для запуска.
 
 ## 3. Запуск съёма позиций
 
@@ -67,6 +84,12 @@ Wizard:
 - доступный баланс;
 - fallback max cost;
 - данные, которые будут сохранены.
+
+Scope materializer работает с каноническими keyword ID, а не с членствами в
+папках. Если один запрос добавлен в несколько групп, rank/frequency manifest
+содержит его один раз, provider получает один запрос, а сохранённый snapshot
+автоматически виден во всех групповых проекциях этого keyword ID. Это исключает
+двойной расход и не требует fan-out копий результата.
 
 ### 3.1. Manual BYOK slice Arsenkin
 
@@ -210,9 +233,20 @@ BullMQ jobs; worker concurrency остаётся независимой наст
 timeout ограничен 10 секундами независимо от более широкого timeout credential
 validation, а claim lease рассчитывается для двух последовательных request с
 запасом и остаётся в broker-bound диапазоне 5–25 секунд. DB-bound ограничение
-пяти одновременных provider tasks сейчас покрывает rank lifecycle. Единый
-cross-workflow cap для одновременных Rank и Wordstat tasks обязателен до
-multi-tenant beta.
+пяти одновременных provider tasks покрывает общий Arsenkin rank/Wordstat
+lifecycle.
+
+XMLStock использует отдельный distributed limiter по
+`credentialId + product`: Yandex Live, Google Live, Yandex Search API и
+Wordstat имеют независимые bounded concurrency/RPS buckets. Поэтому разные
+BYOK-ключи не блокируют друг друга, а один ключ корректно делит provider
+capacity между всеми своими проектами и connector replicas. Permit занимает
+только реальный внешний HTTP-вызов; `POLL_WAIT`, локальный submit Live и
+внутренние DB/SEO Data операции его не удерживают. Коды provider throttling
+понижают окно и включают cooldown, а серия успешных ответов постепенно
+восстанавливает базовую ёмкость. Redis остаётся только transient capacity
+coordination и работает fail-closed; Job/lease/progress source of truth —
+PostgreSQL.
 
 ### 3.4. Реализованный read slice истории
 
@@ -492,7 +526,8 @@ outcome submit не ретраится, чтобы не создать втор�
 Публичный XMLStock Job использует ту же platform boundary 1–10 000 keywords:
 прежний предел 200 не является provider limit и не применяется. Это не меняет
 wire contract — connector по-прежнему отправляет каждый keyword отдельным
-request, соблюдая общий bounded provider concurrency и lease fencing.
+request, соблюдая bounded quota выбранного XMLStock credential/product и
+lease fencing.
 Начальный регион wizard — Россия (`225`); далее первыми показываются Москва и
 Санкт-Петербург.
 
@@ -531,10 +566,12 @@ attempt.
 Fenced lease frequency connector равен 120 секундам: это покрывает один
 внутренний SEO Data timeout до 60 секунд и обязательный запас на запись;
 между bounded resolve/persist окнами lease продлевается.
-Одновременно пришедшие rank и Wordstat ticks сериализуют короткую секцию
-резервирования provider slot общим transaction-scoped lock; Wordstat ждёт её
-не более двух секунд, поэтому одинаковый scheduler bucket не вызывает
-бесконечное `waiting_provider_capacity`.
+Одновременно пришедшие Arsenkin rank и Wordstat ticks сериализуют короткую
+секцию резервирования provider slot общим transaction-scoped lock; Wordstat
+ждёт её не более двух секунд, поэтому одинаковый scheduler bucket не вызывает
+бесконечное `waiting_provider_capacity`. Для XMLStock эта общая DB-секция не
+используется: rank и Wordstat получают permit из соответствующего bucket того
+же credential, а локальное ожидание capacity не расходует provider attempt.
 
 ## 12. Search suggestions
 

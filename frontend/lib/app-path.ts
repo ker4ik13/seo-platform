@@ -49,44 +49,6 @@ export function externalPageUrlPresentation(
   }
 }
 
-export function projectFaviconUrl(domain: string): string | undefined {
-  const hostname = domain.trim().toLowerCase().replace(/\.$/u, "");
-  if (
-    hostname.length === 0 ||
-    hostname.length > 255 ||
-    !hostname.includes(".") ||
-    isAddressLiteral(hostname) ||
-    isReservedHostname(hostname)
-  ) {
-    return undefined;
-  }
-  try {
-    const url = new URL(`https://${hostname}/favicon.svg`);
-    if (
-      url.protocol !== "https:" ||
-      url.hostname !== hostname ||
-      url.username ||
-      url.password ||
-      url.port
-    ) {
-      return undefined;
-    }
-    return url.href;
-  } catch {
-    return undefined;
-  }
-}
-
-function isAddressLiteral(hostname: string): boolean {
-  return (
-    /^\d{1,3}(?:\.\d{1,3}){3}$/u.test(hostname) ||
-    hostname.startsWith("[") ||
-    hostname.endsWith("]")
-  );
-}
-
-function isReservedHostname(hostname: string): boolean {
-  return [".internal", ".invalid", ".local", ".localhost", ".test"].some(
-    (suffix) => hostname === suffix.slice(1) || hostname.endsWith(suffix)
-  );
+export function projectLogoUrl(projectId: string, version: number): string {
+  return `/app/api/projects/${encodeURIComponent(projectId)}/logo?v=${encodeURIComponent(String(version))}`;
 }

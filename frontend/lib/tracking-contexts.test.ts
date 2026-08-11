@@ -89,6 +89,13 @@ test("normalizes a tracking context draft into the public mutation shape", () =>
         value: "https://example.test/catalog"
       },
       safeSearch: true
+    },
+    launchProfile: {
+      searchSource: "LIVE",
+      scope: {
+        mode: "KEYWORDS",
+        groupIds: []
+      }
     }
   });
 });

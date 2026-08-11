@@ -7,6 +7,7 @@ import {
   loginInput,
   registerInput,
   requestPasswordResetInput,
+  updateAccountAvatarInput,
   resetPasswordInput,
   userSessionListQuery,
   verifyMfaChallengeInput
@@ -78,6 +79,19 @@ test("parses password reset request without normalizing the API contract", () =>
     requestPasswordResetInput({ email: "User@example.com" }),
     { email: "User@example.com" }
   );
+});
+
+test("accepts a bounded account avatar with a matching image signature", () => {
+  const png = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.alloc(24)
+  ]);
+  const avatar = updateAccountAvatarInput({
+    contentType: "image/png",
+    data: png.toString("base64")
+  });
+  assert.equal(avatar.contentType, "image/png");
+  assert.deepEqual(avatar.data, png);
 });
 
 test("applies the strong password policy to password reset", () => {

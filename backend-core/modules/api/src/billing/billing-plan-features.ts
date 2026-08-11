@@ -47,7 +47,7 @@ export function billingPlanFeatures(
     projects: number("projects"),
     storedKeywords: number("storedKeywords"),
     keywordsPerProject: number("keywordsPerProject"),
-    foldersPerProject: compatibleNumber("foldersPerProject", 50),
+    foldersPerProject: compatibleNumber("foldersPerProject", 0),
     concurrentJobs: compatibleNumber("concurrentJobs", 1),
     trackedContextPairs: number("trackedContextPairs"),
     storageBytes: number("storageBytes"),

@@ -8,6 +8,33 @@ export const trackingSearchEngines = ["GOOGLE", "YANDEX"] as const;
 export type TrackingSearchEngine =
   (typeof trackingSearchEngines)[number];
 
+export const trackingSearchSources = ["SEARCH_API", "LIVE"] as const;
+
+export type TrackingSearchSource =
+  (typeof trackingSearchSources)[number];
+
+export const trackingContextScopeModes = [
+  "ALL",
+  "GROUPS",
+  "KEYWORDS"
+] as const;
+
+export type TrackingContextScopeMode =
+  (typeof trackingContextScopeModes)[number];
+
+/**
+ * Editable launch defaults for a logical tracking context. The exact keyword
+ * assignments remain authoritative for an immutable run; folder identifiers
+ * only describe how the next desired set must be materialized.
+ */
+export interface TrackingContextLaunchProfile {
+  readonly searchSource: TrackingSearchSource;
+  readonly scope: {
+    readonly mode: TrackingContextScopeMode;
+    readonly groupIds: readonly string[];
+  };
+}
+
 export const trackingDevices = ["DESKTOP", "MOBILE"] as const;
 
 export type TrackingDevice = (typeof trackingDevices)[number];
@@ -67,6 +94,7 @@ export interface TrackingContextSummary {
   readonly name: string;
   readonly status: TrackingContextStatus;
   readonly configuration: TrackingContextConfigurationSnapshot;
+  readonly launchProfile?: TrackingContextLaunchProfile;
   readonly assignedKeywordCount: number;
   readonly version: number;
   readonly createdBy: string;
@@ -104,6 +132,7 @@ export interface TrackingContextSettings extends TrackingContextCollection {
 export interface CreateTrackingContextInput {
   readonly name: string;
   readonly configuration: TrackingContextConfigurationInput;
+  readonly launchProfile?: TrackingContextLaunchProfile;
 }
 
 export interface InternalCreateTrackingContextInput
@@ -117,6 +146,7 @@ export interface InternalCreateTrackingContextInput
 export interface UpdateTrackingContextInput {
   readonly name: string;
   readonly configuration: TrackingContextConfigurationInput;
+  readonly launchProfile?: TrackingContextLaunchProfile;
 }
 
 export interface InternalUpdateTrackingContextInput
@@ -144,6 +174,7 @@ export interface TrackingContextKeywordAssignmentItem {
   readonly assignmentId: string;
   readonly contextId: string;
   readonly keywordId: string;
+  readonly keywordVersion: number;
   readonly textOriginal: string;
   readonly language: string;
   readonly assignedBy: string;

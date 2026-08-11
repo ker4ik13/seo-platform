@@ -3,6 +3,7 @@ import test from "node:test";
 import { utf8Sha256 } from "@seo-platform/contracts/canonical-json";
 import type { AppConfig } from "../config/app-config.js";
 import type { IntegrationCredentialCryptoService } from "../integrations/integration-credential-crypto.service.js";
+import type { XmlStockHttpQuotaGate } from "../integrations/xmlstock-http-quota-limiter.js";
 import type { ArsenkinRankConnector } from "./arsenkin-rank.connector.js";
 import type { XmlStockRankConnector } from "./xmlstock-rank.connector.js";
 import type {
@@ -430,12 +431,74 @@ test("persists an XMLStock Live page checkpoint before polling the next page", a
   assert.equal(completed?.outcome, "CHECKPOINTED");
 });
 
+test("defers an XMLStock poll without an HTTP request when its credential product is full", async () => {
+  const pollClaim: RankConnectorPollClaim = {
+    ...claim(),
+    provider: "XMLSTOCK",
+    providerTaskId: "xml-live-3944",
+    request: {
+      ...xmlStockRequestIntent(),
+      execution: {
+        ...xmlStockRequestIntent().execution,
+        providerMappingVersion: "xmlstock-yandex-live@2"
+      }
+    }
+  };
+  let providerCalls = 0;
+  let deferredBy: number | undefined;
+  const broker = {
+    async claimPoll() {
+      return pollClaim;
+    },
+    async deferPollForProviderCapacity(
+      _claim: RankConnectorPollClaim,
+      retryAfterSeconds: number
+    ) {
+      deferredBy = retryAfterSeconds;
+      return {
+        executionId: ids.execution,
+        status: "POLL_WAIT",
+        executionVersion: 6
+      };
+    }
+  } as unknown as RankConnectorRuntimeBrokerService;
+  const quota: XmlStockHttpQuotaGate = {
+    async tryAcquire() {
+      return { allowed: false, retryAfterSeconds: 2 };
+    },
+    async release() {},
+    async penalize() {},
+    async recordSuccess() {}
+  };
+  const xmlStockConnector = {
+    async fetchResult() {
+      providerCalls += 1;
+      return { status: "PENDING" as const };
+    }
+  } as unknown as XmlStockRankConnector;
+
+  assert.equal(
+    await service(
+      broker,
+      {} as ArsenkinRankConnector,
+      false,
+      1_000,
+      xmlStockConnector,
+      quota
+    ).processOne("connector-worker"),
+    "PROVIDER_CAPACITY_DELAYED"
+  );
+  assert.equal(providerCalls, 0);
+  assert.equal(deferredBy, 5);
+});
+
 function service(
   broker: RankConnectorRuntimeBrokerService,
   connector: ArsenkinRankConnector,
   submitEnabled: boolean,
   timeoutMs = 1_000,
-  xmlStockConnector = {} as XmlStockRankConnector
+  xmlStockConnector = {} as XmlStockRankConnector,
+  quota: XmlStockHttpQuotaGate = allowXmlStockQuota()
 ): RankConnectorRuntimeService {
   const crypto = {
     decrypt() {
@@ -451,8 +514,25 @@ function service(
     crypto,
     connector,
     xmlStockConnector,
+    quota as never,
     config
   );
+}
+
+function allowXmlStockQuota(): XmlStockHttpQuotaGate {
+  return {
+    async tryAcquire(input) {
+      return {
+        allowed: true,
+        credentialId: input.credentialId,
+        product: input.product,
+        member: ids.lease
+      };
+    },
+    async release() {},
+    async penalize() {},
+    async recordSuccess() {}
+  };
 }
 
 function claim(): RankConnectorSubmitClaim {

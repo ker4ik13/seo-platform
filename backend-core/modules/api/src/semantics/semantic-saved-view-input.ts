@@ -72,6 +72,7 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
     value,
     [
       "search",
+      "tag",
       "intent",
       "groupId",
       "clusterId",
@@ -83,6 +84,8 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
     "config.filters"
   );
   const search = optionalString(input.search, "search", 200);
+  const tag = optionalString(input.tag, "config.filters.tag", 160)
+    ?.toLocaleLowerCase();
   const intent =
     input.intent === undefined
       ? undefined
@@ -121,6 +124,7 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
   }
   return {
     ...(search ? { search } : {}),
+    ...(tag ? { tag } : {}),
     ...(intent ? { intent } : {}),
     ...(groupId ? { groupId } : {}),
     ...(clusterId ? { clusterId } : {}),

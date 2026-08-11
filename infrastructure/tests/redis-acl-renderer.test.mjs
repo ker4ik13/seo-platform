@@ -101,6 +101,7 @@ test("renderer is POSIX shell and writes hashed least-privilege Jobs ACLs", asyn
       "~seo-platform:jobs:v1:frequency-collection-runtime:*",
       "~seo-platform:jobs:v1:integration-credential-validation:*",
       "~seo-platform:jobs:v1:keyword-research-runtime:*",
+      "~seo-platform:jobs:v1:provider-rate-limit:*",
       "~seo-platform:jobs:v1:rank-connector-runtime:*"
     ]);
     assert.match(

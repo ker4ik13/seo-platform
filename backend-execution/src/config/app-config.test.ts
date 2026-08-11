@@ -26,6 +26,8 @@ test("keeps optional adapters disabled by default", () => {
   assert.equal(config.integrationCredentials.role, "DISABLED");
   assert.equal(config.integrationCredentials.keys.size, 0);
   assert.equal(config.integrationCredentials.fingerprintKeys.size, 0);
+  assert.equal(config.connectorRuntime.dispatchIntervalMs, 1_000);
+  assert.equal(config.connectorRuntime.rankConcurrency, 16);
   assert.equal(config.rankPreparation.enabled, false);
   assert.equal(config.rankManifestApiToken, undefined);
   assert.equal(config.rankGrantApiToken, undefined);
@@ -519,6 +521,28 @@ test("bounds credential validation runtime settings", () => {
           ...invalid
         }),
       /must be between/u
+    );
+  }
+});
+
+test("bounds the fast connector runtime dispatch interval", () => {
+  assert.equal(
+    loadAppConfig({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://test",
+      CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS: "750"
+    }).connectorRuntime.dispatchIntervalMs,
+    750
+  );
+  for (const value of ["249", "60001"]) {
+    assert.throws(
+      () =>
+        loadAppConfig({
+          NODE_ENV: "test",
+          DATABASE_URL: "postgresql://test",
+          CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS: value
+        }),
+      /CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS must be between/u
     );
   }
 });

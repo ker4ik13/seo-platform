@@ -7,6 +7,7 @@ import type {
 export const trackingContextChangedFields = [
   "name",
   "configuration",
+  "launchProfile",
   "status"
 ] as const;
 

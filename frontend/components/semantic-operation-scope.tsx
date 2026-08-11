@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import type { TrackingContextScopeMode } from "@seo-platform/contracts";
 import { browserApiCollectionRequest } from "../lib/browser-api";
+import { Icon } from "./icon";
 
 export interface SemanticOperationSelection {
   readonly id: string;
@@ -14,8 +16,14 @@ export interface SemanticOperationGroup {
   readonly parentId?: string;
   readonly name: string;
   readonly path: string;
+  readonly color?: string;
   readonly keywordCount: number;
   readonly systemKind?: "UNGROUPED" | "TRASH";
+}
+
+export interface SemanticOperationScopeState {
+  readonly mode: TrackingContextScopeMode;
+  readonly groupIds: readonly string[];
 }
 
 interface KeywordListItem {
@@ -30,27 +38,33 @@ export function SemanticOperationScope({
   activeGroupId,
   groups,
   initialSelections,
+  initialScope,
   maxItems,
   onChange,
+  onScopeChange,
   projectId
 }: Readonly<{
   activeGroupId?: string | undefined;
   groups: readonly SemanticOperationGroup[];
   initialSelections: readonly SemanticOperationSelection[];
+  initialScope?: SemanticOperationScopeState;
   maxItems: number;
   onChange: (
     selections: readonly SemanticOperationSelection[],
     resolving: boolean,
     error?: string
   ) => void;
+  onScopeChange?: (scope: SemanticOperationScopeState) => void;
   projectId: string;
 }>) {
-  const initialMode = initialSelections.length > 0
-    ? "QUERIES"
-    : activeGroupId
-      ? "GROUPS"
-      : "ALL";
-  const [mode, setMode] = useState<"ALL" | "QUERIES" | "GROUPS">(initialMode);
+  const initialMode: TrackingContextScopeMode = initialScope?.mode ?? (
+    initialSelections.length > 0
+      ? "KEYWORDS"
+      : activeGroupId
+        ? "GROUPS"
+        : "ALL"
+  );
+  const [mode, setMode] = useState<TrackingContextScopeMode>(initialMode);
   const [querySearch, setQuerySearch] = useState("");
   const [queryOptions, setQueryOptions] = useState<readonly KeywordListItem[]>([]);
   const [queryLoading, setQueryLoading] = useState(false);
@@ -61,13 +75,18 @@ export function SemanticOperationScope({
   const [selectedGroupIds, setSelectedGroupIds] = useState<ReadonlySet<string>>(
     () =>
       new Set(
-        activeGroupId &&
+        initialScope?.mode === "GROUPS"
+          ? initialScope.groupIds
+          : activeGroupId &&
           groups.some(
             ({ id, systemKind }) => id === activeGroupId && systemKind !== "TRASH"
           )
           ? [activeGroupId]
           : []
       )
+  );
+  const [expandedGroupIds, setExpandedGroupIds] = useState<ReadonlySet<string>>(
+    () => expandedAncestors(groups, initialScope?.groupIds ?? (activeGroupId ? [activeGroupId] : []))
   );
   const availableGroups = useMemo(
     () => groups.filter(({ systemKind }) => systemKind !== "TRASH"),
@@ -76,6 +95,10 @@ export function SemanticOperationScope({
   const resolvedGroupIds = useMemo(
     () => groupsWithDescendants(availableGroups, selectedGroupIds),
     [availableGroups, selectedGroupIds]
+  );
+  const visibleGroups = useMemo(
+    () => visibleFolderRows(availableGroups, expandedGroupIds),
+    [availableGroups, expandedGroupIds]
   );
   const visibleQueryOptions = useMemo(() => {
     const result = new Map<string, KeywordListItem>();
@@ -93,7 +116,11 @@ export function SemanticOperationScope({
   }, [queryOptions, querySelections]);
 
   useEffect(() => {
-    if (mode === "QUERIES") {
+    onScopeChange?.({
+      mode,
+      groupIds: mode === "GROUPS" ? [...selectedGroupIds] : []
+    });
+    if (mode === "KEYWORDS") {
       if (querySelections.size > maxItems) {
         onChange(
           [],
@@ -127,10 +154,10 @@ export function SemanticOperationScope({
         );
       });
     return () => controller.abort();
-  }, [maxItems, mode, onChange, projectId, querySelections, resolvedGroupIds]);
+  }, [maxItems, mode, onChange, onScopeChange, projectId, querySelections, resolvedGroupIds, selectedGroupIds]);
 
   useEffect(() => {
-    if (mode !== "QUERIES") return;
+    if (mode !== "KEYWORDS") return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setQueryLoading(true);
@@ -159,6 +186,15 @@ export function SemanticOperationScope({
 
   function toggleGroup(groupId: string): void {
     setSelectedGroupIds((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }
+
+  function toggleExpanded(groupId: string): void {
+    setExpandedGroupIds((current) => {
       const next = new Set(current);
       if (next.has(groupId)) next.delete(groupId);
       else next.add(groupId);
@@ -227,9 +263,9 @@ export function SemanticOperationScope({
         </label>
         <label>
           <input
-            checked={mode === "QUERIES"}
+            checked={mode === "KEYWORDS"}
             name="operation-scope"
-            onChange={() => setMode("QUERIES")}
+            onChange={() => setMode("KEYWORDS")}
             type="radio"
           />
           <span>Конкретные запросы</span>
@@ -251,7 +287,7 @@ export function SemanticOperationScope({
           <strong>Будут обработаны все активные запросы</strong>
           <span>Состав загружается с сервера и фиксируется до запуска операции.</span>
         </div>
-      ) : mode === "QUERIES" ? (
+      ) : mode === "KEYWORDS" ? (
         <div className="semantic-operation-query-picker">
           <div className="semantic-operation-query-search">
             <label>
@@ -301,22 +337,105 @@ export function SemanticOperationScope({
         </div>
       ) : (
         <div className="semantic-operation-folder-list" aria-label="Папки запросов">
-          {availableGroups.map((group) => (
-            <label key={group.id} title={group.path}>
-              <input
-                checked={selectedGroupIds.has(group.id)}
-                onChange={() => toggleGroup(group.id)}
-                type="checkbox"
-              />
-              <span>{group.path}</span>
-              <b>{group.keywordCount}</b>
-            </label>
+          {visibleGroups.map(({ group, depth, hasChildren }) => (
+            <div
+              className="semantic-operation-folder-row"
+              key={group.id}
+              style={{ "--folder-depth": depth } as CSSProperties}
+              title={group.path}
+            >
+              {hasChildren ? (
+                <button
+                  aria-label={expandedGroupIds.has(group.id) ? "Свернуть папку" : "Развернуть папку"}
+                  aria-expanded={expandedGroupIds.has(group.id)}
+                  className="semantic-operation-folder-toggle"
+                  onClick={() => toggleExpanded(group.id)}
+                  type="button"
+                >
+                  <Icon name="chevronRight" />
+                </button>
+              ) : (
+                <span className="semantic-operation-folder-toggle-spacer" />
+              )}
+              <label>
+                <input
+                  checked={selectedGroupIds.has(group.id)}
+                  onChange={() => toggleGroup(group.id)}
+                  type="checkbox"
+                />
+                <i
+                  aria-hidden="true"
+                  className="semantic-operation-folder-color"
+                  style={{ background: group.color ?? "#a8a5b8" }}
+                />
+                <span>{group.name}</span>
+                <b>{group.keywordCount}</b>
+              </label>
+            </div>
           ))}
         </div>
       )}
       <small>Текущее выделение таблицы переносится в список конкретных запросов. Родительская папка включает вложенные. Лимит одной операции: {maxItems}.</small>
     </section>
   );
+}
+
+interface VisibleFolderRow {
+  readonly group: SemanticOperationGroup;
+  readonly depth: number;
+  readonly hasChildren: boolean;
+}
+
+function visibleFolderRows(
+  groups: readonly SemanticOperationGroup[],
+  expandedIds: ReadonlySet<string>
+): readonly VisibleFolderRow[] {
+  const byParent = new Map<string | undefined, SemanticOperationGroup[]>();
+  const groupIds = new Set(groups.map(({ id }) => id));
+  for (const group of groups) {
+    const parentId = group.parentId && groupIds.has(group.parentId)
+      ? group.parentId
+      : undefined;
+    const siblings = byParent.get(parentId) ?? [];
+    siblings.push(group);
+    byParent.set(parentId, siblings);
+  }
+  const rows: VisibleFolderRow[] = [];
+  const visited = new Set<string>();
+  const append = (parentId: string | undefined, depth: number): void => {
+    for (const group of byParent.get(parentId) ?? []) {
+      if (visited.has(group.id)) continue;
+      visited.add(group.id);
+      const hasChildren = (byParent.get(group.id)?.length ?? 0) > 0;
+      rows.push({ group, depth, hasChildren });
+      if (hasChildren && expandedIds.has(group.id)) {
+        append(group.id, depth + 1);
+      }
+    }
+  };
+  append(undefined, 0);
+  for (const group of groups) {
+    if (!visited.has(group.id)) rows.push({ group, depth: 0, hasChildren: false });
+  }
+  return rows;
+}
+
+function expandedAncestors(
+  groups: readonly SemanticOperationGroup[],
+  selectedIds: readonly string[]
+): ReadonlySet<string> {
+  const parentById = new Map(groups.map(({ id, parentId }) => [id, parentId]));
+  const expanded = new Set<string>();
+  for (const selectedId of selectedIds) {
+    let current = parentById.get(selectedId);
+    const seen = new Set<string>();
+    while (current && !seen.has(current)) {
+      seen.add(current);
+      expanded.add(current);
+      current = parentById.get(current);
+    }
+  }
+  return expanded;
 }
 
 async function loadQueryOptions(

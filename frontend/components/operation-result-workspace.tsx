@@ -1,24 +1,29 @@
 "use client";
 
-import { rankSearchSourceFromProviderMappingVersion } from "@seo-platform/contracts";
+import {
+  operationResultDefaultPageSize,
+  rankSearchSourceFromProviderMappingVersion
+} from "@seo-platform/contracts";
 import type {
   CrawlOperationResultPage,
   CrawlOperationResultRow,
   FrequencyOperationResult,
   FrequencyOperationResultRow,
   KeywordResearchRunSummary,
+  OperationResultPageInfo,
   RankJobSummary,
   RankOperationResult,
   RankOperationResultRow,
   SemanticFrequencyType
 } from "@seo-platform/contracts";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import {
   connectorRouteTrail,
   connectorRoutingScopeLabel
 } from "../lib/connector-routing-presentation";
 import {
+  mergeOperationResultRows,
   operationResultApiPath,
   type OperationResultKind
 } from "../lib/operation-result-routes";
@@ -54,9 +59,20 @@ export function OperationResultWorkspace({
   const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string>();
-  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [pageError, setPageError] = useState<Readonly<{
+    cursor: string;
+    message: string;
+  }>>();
+  const scopeKey = `${projectId}:${kind}:${operationId}`;
+  const tablePanelRef = useRef<HTMLDivElement>(null);
+  const infiniteSentinelRef = useRef<HTMLDivElement>(null);
+  const activeScopeRef = useRef(scopeKey);
+  const tailCursorRef = useRef<string | undefined>(undefined);
+  const requestedCursorsRef = useRef(new Set<string>());
 
   const load = useCallback(async (signal?: AbortSignal, quiet = false) => {
+    const requestScope = scopeKey;
+    const requestCursor = quiet ? tailCursorRef.current : undefined;
     if (quiet) setRefreshing(true);
     else setLoading(true);
     setError(undefined);
@@ -65,14 +81,25 @@ export function OperationResultWorkspace({
         projectId,
         kind,
         operationId,
+        operationResultPageRequest(
+          kind,
+          requestCursor
+        ),
         signal
       );
-      if (!signal?.aborted) {
-        setData(result);
+      if (
+        !signal?.aborted &&
+        activeScopeRef.current === requestScope &&
+        (!quiet || tailCursorRef.current === requestCursor)
+      ) {
+        setData((current) => quiet
+          ? mergeOperationResultData(current, result)
+          : result
+        );
         setRankJobWithoutResult(undefined);
       }
     } catch (requestError) {
-      if (!signal?.aborted) {
+      if (!signal?.aborted && activeScopeRef.current === requestScope) {
         const rankJob = await loadRankJobWithoutResult(
           projectId,
           kind,
@@ -80,75 +107,124 @@ export function OperationResultWorkspace({
           requestError,
           signal
         );
-        if (!signal?.aborted && rankJob) {
+        if (
+          !signal?.aborted &&
+          activeScopeRef.current === requestScope &&
+          rankJob
+        ) {
           setRankJobWithoutResult(rankJob);
           setError(undefined);
-        } else if (!signal?.aborted) {
+        } else if (
+          !signal?.aborted &&
+          activeScopeRef.current === requestScope
+        ) {
           setRankJobWithoutResult(undefined);
           setError(operationResultError(requestError));
         }
       }
     } finally {
-      if (!signal?.aborted) {
+      if (!signal?.aborted && activeScopeRef.current === requestScope) {
         setLoading(false);
         setRefreshing(false);
       }
     }
-  }, [kind, operationId, projectId]);
+  }, [kind, operationId, projectId, scopeKey]);
 
   useEffect(() => {
     const controller = new AbortController();
+    activeScopeRef.current = scopeKey;
+    tailCursorRef.current = undefined;
+    requestedCursorsRef.current.clear();
+    setData(undefined);
+    setRankJobWithoutResult(undefined);
+    setError(undefined);
+    setPageError(undefined);
+    setLoadingMore(false);
     void load(controller.signal);
     return () => controller.abort();
-  }, [load, refreshVersion]);
+  }, [load, scopeKey]);
 
   useEffect(() => {
     if (
       (!data || !isActiveOperation(data)) &&
       (!rankJobWithoutResult || !isActiveStatus(rankJobWithoutResult.status))
     ) return;
-    const timer = window.setTimeout(
-      () => setRefreshVersion((value) => value + 1),
-      2_000
-    );
-    return () => window.clearTimeout(timer);
-  }, [data, rankJobWithoutResult]);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      void load(controller.signal, true);
+    }, 2_000);
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [data, load, rankJobWithoutResult]);
 
-  async function loadMore(): Promise<void> {
+  const loadMore = useCallback(async (): Promise<void> => {
+    const page = data ? operationResultPage(data) : undefined;
+    const cursor = page?.nextCursor;
     if (
-      data?.kind !== "crawl" ||
-      !data.value.page.hasNext ||
-      !data.value.page.nextCursor ||
-      loadingMore
+      !data ||
+      data.kind === "research" ||
+      !page?.hasNext ||
+      !cursor ||
+      loadingMore ||
+      requestedCursorsRef.current.has(cursor)
     ) {
       return;
     }
+    const requestScope = scopeKey;
+    requestedCursorsRef.current.add(cursor);
     setLoadingMore(true);
     setError(undefined);
+    setPageError(undefined);
     try {
-      const next = await browserApiRequest<CrawlOperationResultPage>(
-        operationResultApiPath(
-          projectId,
-          "crawl",
-          operationId,
-          data.value.page.nextCursor
-        )
+      const next = await loadOperationResult(
+        projectId,
+        data.kind,
+        operationId,
+        operationResultPageRequest(data.kind, cursor)
       );
-      setData((current) => {
-        if (current?.kind !== "crawl") return current;
-        return {
-          kind: "crawl",
-          value: {
-            ...next,
-            rows: mergeCrawlRows(current.value.rows, next.rows)
-          }
-        };
-      });
+      if (activeScopeRef.current !== requestScope) return;
+      tailCursorRef.current = cursor;
+      setPageError(undefined);
+      setData((current) => mergeOperationResultData(current, next));
     } catch (requestError) {
-      setError(operationResultError(requestError));
+      if (activeScopeRef.current === requestScope) {
+        setPageError({ cursor, message: operationResultError(requestError) });
+      }
     } finally {
-      setLoadingMore(false);
+      if (activeScopeRef.current === requestScope) setLoadingMore(false);
     }
+  }, [data, loadingMore, operationId, projectId, scopeKey]);
+
+  const resultPage = data ? operationResultPage(data) : undefined;
+  const nextCursor = resultPage?.hasNext ? resultPage.nextCursor : undefined;
+  const autoLoadCursor = nextCursor && pageError?.cursor !== nextCursor
+    ? nextCursor
+    : undefined;
+
+  useEffect(() => {
+    const root = tablePanelRef.current;
+    const target = infiniteSentinelRef.current;
+    if (!root || !target || !autoLoadCursor) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void loadMore();
+      },
+      { root, rootMargin: "320px 0px", threshold: 0 }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [autoLoadCursor, loadMore]);
+
+  function retryResultLoad(): void {
+    if (pageError) {
+      requestedCursorsRef.current.delete(pageError.cursor);
+      setPageError(undefined);
+      void loadMore();
+      return;
+    }
+    void load(undefined, true);
   }
 
   if (loading && !data) {
@@ -182,7 +258,7 @@ export function OperationResultWorkspace({
                   : `Операция завершена со статусом «${operationStatusLabel(rankJobWithoutResult.status)}».`}
             </p>
             {!active && (
-              <button onClick={() => setRefreshVersion((value) => value + 1)} type="button">
+              <button onClick={() => void load(undefined, true)} type="button">
                 Повторить загрузку
               </button>
             )}
@@ -195,7 +271,7 @@ export function OperationResultWorkspace({
         <div className={`${styles.state} ${styles.error}`} role="alert">
           <strong>Не удалось открыть результат</strong>
           <p>{error ?? "Результат операции временно недоступен."}</p>
-          <button onClick={() => setRefreshVersion((value) => value + 1)} type="button">
+          <button onClick={() => void load(undefined, true)} type="button">
             Повторить
           </button>
         </div>
@@ -204,6 +280,7 @@ export function OperationResultWorkspace({
   }
 
   const summary = operationSummary(data);
+  const visibleError = pageError?.message ?? error;
 
   return (
     <section className={workspaceClass(embedded)}>
@@ -249,23 +326,39 @@ export function OperationResultWorkspace({
         ))}
       </div>
 
-      {error && (
+      {visibleError && (
         <div className={styles.inlineError} role="alert">
-          <span>{error}</span>
-          <button onClick={() => void load(undefined, true)} type="button">Повторить</button>
+          <span>{visibleError}</span>
+          <button onClick={retryResultLoad} type="button">Повторить</button>
         </div>
       )}
 
-      <div className={styles.tablePanel}>
+      <div className={styles.tablePanel} ref={tablePanelRef}>
         <OperationTable data={data} />
-        {data.kind === "crawl" && data.value.page.hasNext && (
-          <div className={styles.loadMore}>
-            <button disabled={loadingMore} onClick={() => void loadMore()} type="button">
-              {loadingMore ? "Загружаем…" : "Показать ещё страницы"}
-            </button>
+        {nextCursor && (
+          <div
+            aria-hidden="true"
+            className={styles.infiniteSentinel}
+            ref={infiniteSentinelRef}
+          >
+            {loadingMore && <span className={styles.inlineSpinner} />}
           </div>
         )}
       </div>
+      {resultPage && (
+        <div className={styles.resultPager} aria-label="Состояние загрузки результата">
+          <span>{operationResultRange(data)}</span>
+          <span aria-live="polite" className={styles.resultLoadState}>
+            {loadingMore
+              ? "Подгружаем следующие строки…"
+              : resultPage.hasNext
+                ? "Прокрутите ниже — строки загрузятся автоматически"
+                : isActiveOperation(data)
+                  ? "Все доступные строки загружены · ждём новые"
+                  : "Все строки загружены"}
+          </span>
+        </div>
+      )}
     </section>
   );
 }
@@ -672,12 +765,95 @@ function summaryStatus(status: string, current: number, total: number, stage?: s
   };
 }
 
-async function loadOperationResult(projectId: string, kind: OperationResultKind, operationId: string, signal?: AbortSignal): Promise<OperationResultData> {
-  const path = operationResultApiPath(projectId, kind, operationId);
+async function loadOperationResult(
+  projectId: string,
+  kind: OperationResultKind,
+  operationId: string,
+  page?: Readonly<{ cursor?: string; limit?: number }>,
+  signal?: AbortSignal
+): Promise<OperationResultData> {
+  const path = operationResultApiPath(projectId, kind, operationId, page);
   if (kind === "frequency") return { kind, value: await browserApiRequest<FrequencyOperationResult>(path, signal ? { signal } : {}) };
   if (kind === "rank") return { kind, value: await browserApiRequest<RankOperationResult>(path, signal ? { signal } : {}) };
   if (kind === "crawl") return { kind, value: await browserApiRequest<CrawlOperationResultPage>(path, signal ? { signal } : {}) };
   return { kind, value: await browserApiRequest<KeywordResearchRunSummary>(path, signal ? { signal } : {}) };
+}
+
+function operationResultRange(
+  data: OperationResultData
+): string {
+  if (data.kind === "research") return "";
+  const loaded = data.value.rows.length;
+  const total = operationResultTotal(data);
+  if (loaded === 0) return "Строк пока нет";
+  return total > 0
+    ? `Загружено ${formatInteger(loaded)} из ${formatInteger(Math.max(loaded, total))}`
+    : `Загружено ${formatInteger(loaded)}`;
+}
+
+function operationResultPageRequest(
+  kind: OperationResultKind,
+  cursor?: string
+): Readonly<{ cursor?: string; limit: number }> | undefined {
+  if (kind === "research") return undefined;
+  return {
+    limit: kind === "crawl" ? 1_000 : operationResultDefaultPageSize,
+    ...(cursor ? { cursor } : {})
+  };
+}
+
+function operationResultPage(
+  data: OperationResultData
+): OperationResultPageInfo | undefined {
+  return data.kind === "research" ? undefined : data.value.page;
+}
+
+function operationResultTotal(data: OperationResultData): number {
+  if (data.kind === "frequency") return data.value.collection.selectedKeywords;
+  if (data.kind === "rank") return Number(data.value.job.progress.total);
+  if (data.kind === "crawl") {
+    return Math.max(
+      data.value.rows.length,
+      data.value.crawl.discoveredUrls,
+      data.value.crawl.processedUrls
+    );
+  }
+  return 0;
+}
+
+function mergeOperationResultData(
+  current: OperationResultData | undefined,
+  incoming: OperationResultData
+): OperationResultData {
+  if (!current || current.kind !== incoming.kind) return incoming;
+  if (incoming.kind === "frequency" && current.kind === "frequency") {
+    return {
+      kind: "frequency",
+      value: {
+        ...incoming.value,
+        rows: mergeOperationResultRows(current.value.rows, incoming.value.rows)
+      }
+    };
+  }
+  if (incoming.kind === "rank" && current.kind === "rank") {
+    return {
+      kind: "rank",
+      value: {
+        ...incoming.value,
+        rows: mergeOperationResultRows(current.value.rows, incoming.value.rows)
+      }
+    };
+  }
+  if (incoming.kind === "crawl" && current.kind === "crawl") {
+    return {
+      kind: "crawl",
+      value: {
+        ...incoming.value,
+        rows: mergeOperationResultRows(current.value.rows, incoming.value.rows)
+      }
+    };
+  }
+  return incoming;
 }
 
 async function loadRankJobWithoutResult(
@@ -714,11 +890,6 @@ function isActiveOperation(data: OperationResultData): boolean {
 
 function isActiveStatus(status: string): boolean {
   return ["PREPARING", "QUEUED", "RUNNING", "WAITING_RATE_LIMIT", "RETRY_SCHEDULED", "FAILED_RETRYABLE", "CANCEL_REQUESTED", "IMPORT_QUEUED", "IMPORTING"].includes(status);
-}
-
-function mergeCrawlRows(current: readonly CrawlOperationResultRow[], next: readonly CrawlOperationResultRow[]): readonly CrawlOperationResultRow[] {
-  const seen = new Set(current.map(({ sequence }) => sequence));
-  return [...current, ...next.filter(({ sequence }) => !seen.has(sequence))];
 }
 
 function frequencyProvider(row: FrequencyOperationResultRow): string { return row.snapshots[0]?.provider ?? "—"; }

@@ -4,7 +4,9 @@ import {
   trackingDevices,
   trackingDomainMatchModes,
   trackingContextKeywordReplacementLimit,
+  trackingContextScopeModes,
   trackingSearchEngines,
+  trackingSearchSources,
   type InternalChangeTrackingContextKeywordInput,
   type InternalChangeTrackingContextStatusInput,
   type InternalCreateTrackingContextInput,
@@ -12,12 +14,15 @@ import {
   type InternalUpdateTrackingContextInput,
   type TrackingContextConfigurationInput,
   type TrackingContextKeywordQuery,
+  type TrackingContextLaunchProfile,
   type TrackingDomainMatchRule
 } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
 import { semanticCapacityEntitlement } from "../internal/semantic-capacity.js";
 
 const SEARCH_ENGINES = new Set<string>(trackingSearchEngines);
+const SEARCH_SOURCES = new Set<string>(trackingSearchSources);
+const SCOPE_MODES = new Set<string>(trackingContextScopeModes);
 const DEVICES = new Set<string>(trackingDevices);
 const DEPTHS = new Set<number>(trackingDepths);
 const DOMAIN_MATCH_MODES = new Set<string>(trackingDomainMatchModes);
@@ -40,13 +45,17 @@ export function internalCreateTrackingContextInput(
     "actorId",
     "idempotencyKey",
     "name",
-    "configuration"
+    "configuration",
+    "launchProfile"
   ]);
   return {
     ...scope(input),
     idempotencyKey: idempotencyKey(input.idempotencyKey),
     name: contextName(input.name),
-    configuration: configurationInput(input.configuration)
+    configuration: configurationInput(input.configuration),
+    ...(input.launchProfile === undefined
+      ? {}
+      : { launchProfile: launchProfileInput(input.launchProfile) })
   };
 }
 
@@ -59,13 +68,59 @@ export function internalUpdateTrackingContextInput(
     "actorId",
     "version",
     "name",
-    "configuration"
+    "configuration",
+    "launchProfile"
   ]);
   return {
     ...scope(input),
     version: positiveInteger(input.version, "version"),
     name: contextName(input.name),
-    configuration: configurationInput(input.configuration)
+    configuration: configurationInput(input.configuration),
+    ...(input.launchProfile === undefined
+      ? {}
+      : { launchProfile: launchProfileInput(input.launchProfile) })
+  };
+}
+
+export function launchProfileInput(
+  value: unknown
+): TrackingContextLaunchProfile {
+  const input = strictRecord(value, ["searchSource", "scope"]);
+  if (
+    typeof input.searchSource !== "string" ||
+    !SEARCH_SOURCES.has(input.searchSource)
+  ) {
+    invalid("launchProfile.searchSource");
+  }
+  const scope = strictRecord(input.scope, ["mode", "groupIds"]);
+  if (typeof scope.mode !== "string" || !SCOPE_MODES.has(scope.mode)) {
+    invalid("launchProfile.scope.mode");
+  }
+  if (!Array.isArray(scope.groupIds)) {
+    invalid("launchProfile.scope.groupIds");
+  }
+  const groupIds = scope.groupIds.map((groupId, index) =>
+    internalUuid(
+      requiredString(groupId, `launchProfile.scope.groupIds.${index}`),
+      `launchProfile.scope.groupIds.${index}`
+    )
+  );
+  if (new Set(groupIds).size !== groupIds.length) {
+    invalid("launchProfile.scope.groupIds");
+  }
+  if (
+    (scope.mode === "GROUPS" && groupIds.length === 0) ||
+    (scope.mode !== "GROUPS" && groupIds.length > 0)
+  ) {
+    invalid("launchProfile.scope.groupIds");
+  }
+  return {
+    searchSource:
+      input.searchSource as TrackingContextLaunchProfile["searchSource"],
+    scope: {
+      mode: scope.mode as TrackingContextLaunchProfile["scope"]["mode"],
+      groupIds
+    }
   };
 }
 

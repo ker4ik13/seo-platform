@@ -6,6 +6,7 @@ test("tracking context events expose only explicit change classes", () => {
   assert.deepEqual(trackingContextChangedFields, [
     "name",
     "configuration",
+    "launchProfile",
     "status"
   ]);
 });

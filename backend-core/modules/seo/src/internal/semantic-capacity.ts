@@ -28,11 +28,11 @@ export function semanticCapacityEntitlement(
       input.planVersion,
       `${path}.planVersion`
     ),
-    storedKeywords: positiveSafeInteger(
+    storedKeywords: nonNegativeSafeInteger(
       input.storedKeywords,
       `${path}.storedKeywords`
     ),
-    keywordsPerProject: positiveSafeInteger(
+    keywordsPerProject: nonNegativeSafeInteger(
       input.keywordsPerProject,
       `${path}.keywordsPerProject`
     ),
@@ -40,7 +40,7 @@ export function semanticCapacityEntitlement(
       input.foldersPerProject,
       `${path}.foldersPerProject`
     ),
-    trackedContextPairs: positiveSafeInteger(
+    trackedContextPairs: nonNegativeSafeInteger(
       input.trackedContextPairs,
       `${path}.trackedContextPairs`
     )
@@ -122,6 +122,7 @@ export function assertSemanticCapacity(
   limit: number,
   entitlement: SemanticCapacityEntitlement
 ): void {
+  if (limit === 0) return;
   const bigintLimit = BigInt(limit);
   if (current + additional <= bigintLimit) return;
   throw new HttpException(

@@ -1,11 +1,14 @@
 import { BadRequestException } from "@nestjs/common";
 import {
   arsenkinWordstatKeywordLimit,
+  operationResultDefaultPageSize,
+  operationResultPageSizes,
   semanticFrequencyDevices,
   semanticFrequencyTypes,
   type InternalCancelFrequencyCollectionInput,
   type InternalCreateFrequencyCollectionInput,
   type InternalRetryFrequencyCollectionInput,
+  type OperationResultPageSize,
   type SemanticFrequencyDevice,
   type SemanticFrequencyType
 } from "@seo-platform/contracts";
@@ -14,6 +17,31 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const KEY_PATTERN = /^[A-Za-z0-9._:-]{8,180}$/u;
 const REGION_PATTERN = /^[A-Za-z0-9._:-]{1,100}$/u;
+
+export function frequencyResultPageLimit(
+  value: unknown
+): OperationResultPageSize {
+  if (value === undefined) return operationResultDefaultPageSize;
+  const parsed = Number(value);
+  if (
+    typeof value !== "string" ||
+    !Number.isSafeInteger(parsed) ||
+    !operationResultPageSizes.some((size) => size === parsed)
+  ) {
+    invalid("result limit");
+  }
+  return parsed as OperationResultPageSize;
+}
+
+export function frequencyResultCursor(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,3})$/u.test(value)) {
+    invalid("result cursor");
+  }
+  const parsed = Number(value);
+  if (parsed >= arsenkinWordstatKeywordLimit) invalid("result cursor");
+  return parsed;
+}
 
 export function internalCreateFrequencyCollectionInput(
   value: unknown

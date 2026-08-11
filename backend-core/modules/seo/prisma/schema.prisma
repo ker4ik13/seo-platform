@@ -278,21 +278,23 @@ model SemanticSavedView {
 }
 
 model SemanticNegativeKeywordPreset {
-  id             String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId    String       @map("workspace_id") @db.Uuid
-  projectId      String       @map("project_id") @db.Uuid
-  name           String       @db.VarChar(160)
-  normalizedName String       @map("normalized_name") @db.VarChar(160)
-  words          String[]
-  matchMode      String       @map("match_mode") @db.VarChar(32)
-  caseSensitive  Boolean      @default(false) @map("case_sensitive")
-  status         EntityStatus @default(ACTIVE)
-  version        Int          @default(1)
-  createdBy      String       @map("created_by") @db.Uuid
-  updatedBy      String       @map("updated_by") @db.Uuid
-  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
-  deletedAt      DateTime?    @map("deleted_at") @db.Timestamptz(6)
+  id                String       @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId       String       @map("workspace_id") @db.Uuid
+  projectId         String       @map("project_id") @db.Uuid
+  name              String       @db.VarChar(160)
+  normalizedName    String       @map("normalized_name") @db.VarChar(160)
+  words             String[]
+  matchMode         String       @map("match_mode") @db.VarChar(32)
+  caseSensitive     Boolean      @default(false) @map("case_sensitive")
+  ignoreWordOrder   Boolean      @default(false) @map("ignore_word_order")
+  ignorePunctuation Boolean      @default(false) @map("ignore_punctuation")
+  status            EntityStatus @default(ACTIVE)
+  version           Int          @default(1)
+  createdBy         String       @map("created_by") @db.Uuid
+  updatedBy         String       @map("updated_by") @db.Uuid
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  deletedAt         DateTime?    @map("deleted_at") @db.Timestamptz(6)
 
   @@unique([workspaceId, projectId, id], map: "semantic_negative_keyword_presets_tenant_project_id_key")
   @@index([workspaceId, projectId, status, normalizedName, id], map: "semantic_negative_keyword_presets_project_name_idx")
@@ -747,18 +749,19 @@ model CrawlPageAbsence {
 }
 
 model TrackingContext {
-  id          String                @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId String                @map("workspace_id") @db.Uuid
-  projectId   String                @map("project_id") @db.Uuid
-  name        String                @db.VarChar(160)
-  status      TrackingContextStatus @default(ACTIVE)
-  createdBy   String                @map("created_by") @db.Uuid
-  updatedBy   String                @map("updated_by") @db.Uuid
-  archivedBy  String?               @map("archived_by") @db.Uuid
-  version     Int                   @default(1)
-  createdAt   DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
-  archivedAt  DateTime?             @map("archived_at") @db.Timestamptz(6)
+  id            String                @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId   String                @map("workspace_id") @db.Uuid
+  projectId     String                @map("project_id") @db.Uuid
+  name          String                @db.VarChar(160)
+  launchProfile Json?                 @map("launch_profile")
+  status        TrackingContextStatus @default(ACTIVE)
+  createdBy     String                @map("created_by") @db.Uuid
+  updatedBy     String                @map("updated_by") @db.Uuid
+  archivedBy    String?               @map("archived_by") @db.Uuid
+  version       Int                   @default(1)
+  createdAt     DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  archivedAt    DateTime?             @map("archived_at") @db.Timestamptz(6)
 
   configurations         TrackingContextVersion[]
   keywordAssignments     TrackingContextKeywordAssignment[]

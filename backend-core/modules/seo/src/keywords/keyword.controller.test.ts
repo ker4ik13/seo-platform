@@ -30,6 +30,7 @@ test("forwards an exact tenant-scoped keyword bulk create", async () => {
     selected: 1,
     created: 1,
     restored: 0,
+    linked: 0,
     skipped: 0,
     rejected: 0,
     failed: 0,
@@ -66,6 +67,35 @@ test("forwards an exact tenant-scoped keyword bulk create", async () => {
       ),
     BadRequestException
   );
+});
+
+test("forwards normalized tag suggestions inside the trusted project scope", async () => {
+  let observed: unknown;
+  const controller = new KeywordController({
+    tagOptions: async (
+      observedWorkspaceId: string,
+      observedProjectId: string,
+      search?: string
+    ) => {
+      observed = { observedWorkspaceId, observedProjectId, search };
+      return ["Бренд"];
+    }
+  } as unknown as KeywordService);
+
+  assert.deepEqual(
+    await controller.tagOptions(
+      projectId,
+      { search: "  БРЕНД  " },
+      headers,
+      request
+    ),
+    { data: ["Бренд"], meta: { requestId: request.id } }
+  );
+  assert.deepEqual(observed, {
+    observedWorkspaceId: workspaceId,
+    observedProjectId: projectId,
+    search: "бренд"
+  });
 });
 
 function command() {

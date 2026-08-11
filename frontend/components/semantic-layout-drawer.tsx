@@ -140,10 +140,10 @@ export function SemanticLayoutDrawer({
             </header>
             <div className="semantic-density-options">
               <button className={config.density === "COMFORTABLE" ? "selected" : undefined} onClick={() => onDensityChange("COMFORTABLE")} type="button">
-                <Icon name="list" /><span><strong>Обычная</strong><small>Больше воздуха для чтения.</small></span>
+                <Icon name="list" /><span><strong>Обычная</strong><small>Компактные строки с тегами под запросом.</small></span>
               </button>
               <button className={config.density === "COMPACT" ? "selected" : undefined} onClick={() => onDensityChange("COMPACT")} type="button">
-                <Icon name="semantic" /><span><strong>Компактная</strong><small>Больше строк на экране.</small></span>
+                <Icon name="semantic" /><span><strong>Компактная</strong><small>Минимальная высота, одна строка без тегов.</small></span>
               </button>
             </div>
           </section>

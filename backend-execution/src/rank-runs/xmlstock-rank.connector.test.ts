@@ -149,6 +149,7 @@ test("classifies provider authentication, queue and rate failures", async () => 
     [xml(`<response><error code="31">bad key</error></response>`), "REJECTED", "INVALID_CREDENTIAL"],
     [xml(`<response><error code="210">queued</error></response>`), "PENDING", undefined],
     [xml(`<response><error code="32">limit</error></response>`), "RETRYABLE_FAILURE", "PROVIDER_RATE_LIMITED"],
+    [xml(`<response><error code="110">parallel limit</error></response>`), "RETRYABLE_FAILURE", "PROVIDER_RATE_LIMITED"],
     [xml("gateway timeout", 504), "RETRYABLE_FAILURE", "PROVIDER_UNAVAILABLE"]
   ] as const;
   const value = intent("YANDEX");

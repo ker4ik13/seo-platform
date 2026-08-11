@@ -12,6 +12,7 @@ import {
   announceWorkspaceDropdownOpen,
   workspaceDropdownOpenEvent
 } from "../lib/dropdown-events";
+import { UserAvatar } from "./user-avatar";
 
 export function AccountMenu({
   user,
@@ -87,7 +88,7 @@ export function AccountMenu({
         }}
         type="button"
       >
-        <span>{initials(user.displayName)}</span>
+        <UserAvatar className="account-menu-avatar" size={34} user={user} />
         <span className="avatar-copy">
           <strong>{user.displayName}</strong>
           <small>{roleLabel(roleCode)}</small>
@@ -128,15 +129,6 @@ export function AccountMenu({
       )}
     </div>
   );
-}
-
-function initials(value: string): string {
-  return value
-    .split(/\s+/u)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("");
 }
 
 function roleLabel(roleCode: string | undefined): string {

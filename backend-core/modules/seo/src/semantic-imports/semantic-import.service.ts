@@ -302,8 +302,7 @@ export class SemanticImportService {
         transaction,
         input,
         rowsToApply,
-        input.groupPaths ?? [],
-        receiptEntitlement(transactionReceipt).foldersPerProject
+        input.groupPaths ?? []
       );
       const tags = await ensureTags(transaction, input, rowsToApply);
       const customColumns = await ensureCustomColumns(
@@ -1007,8 +1006,7 @@ async function ensureGroups(
   transaction: Prisma.TransactionClient,
   input: InternalApplySemanticImportChunkInput,
   rows: readonly SemanticImportPublishRow[],
-  sourceGroupPaths: readonly (readonly string[])[],
-  foldersPerProjectLimit: number
+  sourceGroupPaths: readonly (readonly string[])[]
 ): Promise<EnsuredEntities> {
   const paths = new Map<
     string,
@@ -1039,44 +1037,6 @@ async function ensureGroups(
   const ordered = [...paths.values()].sort(
     (left, right) => left.segments.length - right.segments.length
   );
-  if (foldersPerProjectLimit > 0 && ordered.length > 0) {
-    const [activeGroups, existingPaths] = await Promise.all([
-      transaction.keywordGroup.count({
-        where: {
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          status: "ACTIVE",
-          systemKind: null
-        }
-      }),
-      transaction.keywordGroup.findMany({
-        where: {
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          status: "ACTIVE",
-          systemKind: null,
-          pathHash: { in: ordered.map(({ hash }) => hash) }
-        },
-        select: { pathHash: true }
-      })
-    ]);
-    const existingHashes = new Set(
-      existingPaths.map(({ pathHash }) => pathHash)
-    );
-    const newGroupCount = ordered.filter(
-      ({ hash }) => !existingHashes.has(hash)
-    ).length;
-    if (activeGroups + newGroupCount > foldersPerProjectLimit) {
-      throw new ConflictException({
-        code: "QUOTA_EXCEEDED",
-        message: "Project folder limit exceeded",
-        resource: "semantic_folders",
-        current: activeGroups,
-        requested: newGroupCount,
-        limit: foldersPerProjectLimit
-      });
-    }
-  }
   const ids = new Map<string, string>();
   let created = 0;
   for (const path of ordered) {
@@ -1833,7 +1793,7 @@ function safeNonNegativeCapacityNumber(value: bigint, field: string): number {
 }
 
 function safeCapacityNumber(value: bigint, field: string): number {
-  if (value <= 0n) {
+  if (value < 0n) {
     throw new Error(`Stored ${field} is invalid`);
   }
   return value > BigInt(Number.MAX_SAFE_INTEGER)

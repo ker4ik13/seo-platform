@@ -156,3 +156,164 @@ export interface AdminWorkspaceSubscriptionGrantSummary {
   readonly currentPeriodEnd: string;
   readonly version: number;
 }
+
+export type AdminProjectStatus =
+  | "DRAFT"
+  | "ACTIVE"
+  | "ARCHIVED"
+  | "DELETING"
+  | "DELETED";
+
+export interface AdminProjectIdentitySummary {
+  readonly id: string;
+  readonly name: string;
+  readonly slug: string;
+  readonly status: AdminWorkspaceStatus;
+}
+
+export interface AdminProjectSemanticCounts {
+  readonly projectId: string;
+  readonly keywordCount: number;
+  readonly folderCount: number;
+}
+
+export interface AdminProjectSummary {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly name: string;
+  readonly slug: string;
+  readonly domain: string;
+  readonly status: AdminProjectStatus;
+  readonly workspace: AdminProjectIdentitySummary;
+  readonly owner: AdminWorkspaceOwnerSummary;
+  readonly author: AdminWorkspaceOwnerSummary;
+  readonly keywordCount: number | null;
+  readonly folderCount: number | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface AdminProjectSearchResult {
+  readonly data: readonly AdminProjectSummary[];
+  readonly truncated: boolean;
+  readonly semanticCountsAvailable: boolean;
+}
+
+export const adminOperationStatuses = [
+  "DRAFT",
+  "ESTIMATING",
+  "AWAITING_APPROVAL",
+  "RESERVING_BALANCE",
+  "PREPARING",
+  "QUEUED",
+  "WAITING_RATE_LIMIT",
+  "RUNNING",
+  "PAUSE_REQUESTED",
+  "PAUSED",
+  "CANCEL_REQUESTED",
+  "CANCELLED",
+  "RETRY_SCHEDULED",
+  "PARTIALLY_COMPLETED",
+  "COMPLETED",
+  "FAILED_RETRYABLE",
+  "FAILED_FINAL",
+  "ACTION_REQUIRED",
+  "EXPIRED"
+] as const;
+
+export type AdminOperationStatus =
+  (typeof adminOperationStatuses)[number];
+
+export type AdminOperationStatusGroup =
+  | "ALL"
+  | "ACTIVE"
+  | "COMPLETED"
+  | "ATTENTION";
+
+export interface AdminOperationProgress {
+  readonly current: string;
+  readonly total?: string;
+  readonly unit?: string;
+}
+
+export interface AdminOperationResultMetrics {
+  readonly processed?: number;
+  readonly succeeded?: number;
+  readonly failed?: number;
+  readonly found?: number;
+  readonly notFound?: number;
+  readonly issues?: number;
+}
+
+export interface InternalAdminOperationSummary {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly projectId?: string;
+  readonly actorId?: string;
+  readonly type: string;
+  readonly status: AdminOperationStatus;
+  readonly stage?: string;
+  readonly provider?: string;
+  readonly progress: AdminOperationProgress;
+  readonly result: AdminOperationResultMetrics;
+  readonly errorCode?: string;
+  readonly actualCostMicro?: string;
+  readonly currency?: string;
+  readonly attempt: number;
+  readonly maxAttempts: number;
+  readonly createdAt: string;
+  readonly queuedAt?: string;
+  readonly startedAt?: string;
+  readonly finishedAt?: string;
+  readonly updatedAt: string;
+}
+
+export interface AdminOperationTypeCount {
+  readonly type: string;
+  readonly count: number;
+}
+
+export interface AdminOperationTotals {
+  readonly total: number;
+  readonly active: number;
+  readonly completed: number;
+  readonly attention: number;
+}
+
+export interface InternalAdminOperationSearchResult {
+  readonly data: readonly InternalAdminOperationSummary[];
+  readonly nextCursor?: string;
+  readonly totals: AdminOperationTotals;
+  readonly types: readonly AdminOperationTypeCount[];
+}
+
+export interface AdminOperationProjectSummary {
+  readonly id: string;
+  readonly name: string;
+  readonly domain: string;
+}
+
+export interface AdminOperationWorkspaceSummary {
+  readonly id: string;
+  readonly name: string;
+}
+
+export interface AdminOperationActorSummary {
+  readonly id: string;
+  readonly displayName: string;
+  readonly email: string;
+}
+
+export interface AdminOperationSummary
+  extends InternalAdminOperationSummary {
+  readonly workspace: AdminOperationWorkspaceSummary | null;
+  readonly project: AdminOperationProjectSummary | null;
+  readonly actor: AdminOperationActorSummary | null;
+}
+
+export interface AdminOperationSearchResult {
+  readonly data: readonly AdminOperationSummary[];
+  readonly nextCursor?: string;
+  readonly totals: AdminOperationTotals;
+  readonly types: readonly AdminOperationTypeCount[];
+}

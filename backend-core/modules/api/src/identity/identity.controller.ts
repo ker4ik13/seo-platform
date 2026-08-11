@@ -6,6 +6,7 @@ import {
   HttpCode,
   Param,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -19,6 +20,7 @@ import type {
   CurrentAccount,
   LoginResult,
   PasswordResetAccepted,
+  UserSummary,
   UserSessionSummary
 } from "@seo-platform/contracts";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -32,6 +34,7 @@ import {
   requestPasswordResetInput,
   resetPasswordInput,
   resendVerificationInput,
+  updateAccountAvatarInput,
   userSessionListQuery,
   verifyEmailInput
 } from "./identity-input.js";
@@ -182,6 +185,53 @@ export class IdentityController {
     return apiResponse(
       request,
       await this.sessionsService.currentAccount(principal)
+    );
+  }
+
+  @Get("me/avatar")
+  @UseGuards(SessionAuthGuard)
+  public async accountAvatar(
+    @Res() reply: FastifyReply,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<void> {
+    const avatar = await this.identity.getAccountAvatar(principal);
+    reply
+      .header("Cache-Control", "private, max-age=300")
+      .header("Content-Type", avatar.contentType)
+      .header("Last-Modified", avatar.updatedAt.toUTCString())
+      .header("X-Content-Type-Options", "nosniff")
+      .send(avatar.data);
+  }
+
+  @Put("me/avatar")
+  @UseGuards(CsrfSessionGuard)
+  public async updateAccountAvatar(
+    @Body() body: unknown,
+    @Req() request: FastifyRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<UserSummary>> {
+    return apiResponse(
+      request,
+      await this.identity.updateAccountAvatar(
+        principal,
+        updateAccountAvatarInput(body),
+        requestContext(request)
+      )
+    );
+  }
+
+  @Delete("me/avatar")
+  @UseGuards(CsrfSessionGuard)
+  public async deleteAccountAvatar(
+    @Req() request: FastifyRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<UserSummary>> {
+    return apiResponse(
+      request,
+      await this.identity.deleteAccountAvatar(
+        principal,
+        requestContext(request)
+      )
     );
   }
 

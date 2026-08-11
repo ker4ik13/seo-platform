@@ -125,16 +125,18 @@ test("VPS rank and connector runtimes run multiple bounded processes", async () 
     readVpsFile("start-runtime.sh")
   ]);
   const rankBlock = source.match(/  rank-worker\|rank-worker-2\)[\s\S]*?    ;;/u)?.[0] ?? "";
-  const connectorBlock = source.match(/  connector-worker\|connector-worker-2\)[\s\S]*?    ;;/u)?.[0] ?? "";
+  const connectorBlock = source.match(/  connector-worker\|connector-worker-2\|connector-worker-3\)[\s\S]*?    ;;/u)?.[0] ?? "";
 
   assert.match(rankBlock, /RANK_PREPARATION_DISPATCH_SECONDS=5/u);
   assert.match(rankBlock, /RANK_PREPARATION_CONCURRENCY=5/u);
   assert.match(connectorBlock, /INTEGRATION_VALIDATION_DISPATCH_SECONDS=5/u);
   assert.match(connectorBlock, /INTEGRATION_VALIDATION_CONCURRENCY=8/u);
-  assert.match(connectorBlock, /RANK_CONNECTOR_CONCURRENCY=8/u);
+  assert.match(connectorBlock, /CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS=1000/u);
+  assert.match(connectorBlock, /RANK_CONNECTOR_CONCURRENCY=16/u);
   assert.match(connectorBlock, /FREQUENCY_COLLECTION_CONCURRENCY=8/u);
   assert.match(startSource, /rank-worker-2/u);
   assert.match(startSource, /connector-worker-2/u);
+  assert.match(startSource, /connector-worker-3/u);
 });
 
 test("public object-storage proxy is exact, TLS-enabled and never receives credentials", async () => {

@@ -97,6 +97,45 @@ const validItem = {
 const workspaceId = "01900000-0000-7000-8000-000000000001";
 const projectId = "01900000-0000-7000-8000-000000000002";
 const actorId = "01900000-0000-7000-8000-000000000003";
+
+test("loads complete semantic counters for platform project administration", async () => {
+  const originalFetch = globalThis.fetch;
+  let captured: { readonly url: URL; readonly headers: Headers; readonly body: unknown } | undefined;
+  globalThis.fetch = (async (
+    input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> => {
+    captured = {
+      url: new URL(input instanceof Request ? input.url : input.toString()),
+      headers: new Headers(init?.headers),
+      body: JSON.parse(String(init?.body)) as unknown
+    };
+    return jsonResponse({
+      data: {
+        projects: [{ projectId, keywordCount: 1640, folderCount: 84 }]
+      }
+    });
+  }) as typeof fetch;
+
+  try {
+    assert.deepEqual(
+      await client().adminProjectCounts(
+        [projectId],
+        actorId,
+        "request-admin-project-statistics-001"
+      ),
+      [{ projectId, keywordCount: 1640, folderCount: 84 }]
+    );
+    assert.equal(
+      captured?.url.pathname,
+      "/internal/v1/platform-admin/project-statistics"
+    );
+    assert.equal(captured?.headers.get("x-actor-id"), actorId);
+    assert.deepEqual(captured?.body, { projectIds: [projectId] });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 const contextId = "01900000-0000-7000-8000-000000000004";
 const keywordId = "01900000-0000-7000-8000-000000000005";
 const assignmentId = "01900000-0000-7000-8000-000000000006";
@@ -228,6 +267,8 @@ test("validates negative keyword presets, preview and bounded apply results", ()
     updatedAt: "2026-08-06T10:00:00.000Z"
   });
   assert.equal(preset.rules.words[0], "москва");
+  assert.equal(preset.rules.ignoreWordOrder, false);
+  assert.equal(preset.rules.ignorePunctuation, false);
   const preview = semanticNegativeKeywordPreview({
     scannedCount: 10,
     matchedCount: 1,
@@ -634,6 +675,7 @@ test("validates indexed semantic bulk create outcomes", () => {
     selected: 2,
     created: 1,
     restored: 0,
+    linked: 0,
     skipped: 1,
     rejected: 0,
     failed: 0,
@@ -668,6 +710,45 @@ test("validates indexed semantic bulk create outcomes", () => {
       ),
     DomainError
   );
+});
+
+test("accepts a canonical keyword linked into another group", () => {
+  const input = {
+    duplicatePolicy: "ADD_TO_GROUP" as const,
+    items: [
+      {
+        text: "SEO аудит",
+        language: "ru",
+        priority: 0,
+        isFavorite: false,
+        groupId: "01900000-0000-7000-8000-000000000010",
+        tagNames: []
+      }
+    ]
+  };
+  const result = semanticKeywordBulkCreateResult(
+    {
+      selected: 1,
+      created: 0,
+      restored: 0,
+      linked: 1,
+      skipped: 0,
+      rejected: 0,
+      failed: 0,
+      rows: [
+        {
+          index: 0,
+          outcome: "LINKED_EXISTING",
+          keywordId: validItem.id,
+          version: 1
+        }
+      ]
+    },
+    input
+  );
+
+  assert.equal(result.linked, 1);
+  assert.equal(result.rows[0]?.outcome, "LINKED_EXISTING");
 });
 
 test("validates keyword cleaning preview and result partitions", () => {
@@ -906,6 +987,7 @@ test("validates assigned keyword pages and point mutation states", () => {
           assignmentId,
           contextId,
           keywordId,
+          keywordVersion: 7,
           textOriginal: "SEO аудит",
           language: "ru",
           assignedBy: actorId,
@@ -934,6 +1016,7 @@ test("validates assigned keyword pages and point mutation states", () => {
   );
 
   assert.equal(page.data[0]?.keywordId, keywordId);
+  assert.equal(page.data[0]?.keywordVersion, 7);
   assert.equal(assigned.assignmentId, assignmentId);
   assert.throws(
     () =>
@@ -1016,6 +1099,38 @@ test("forwards an idempotent create through trusted tenant headers and body", as
       idempotencyKey: "tracking-context-create-001"
     });
     assert.equal(capturedRedirect, "error");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("forwards normalized tag suggestions through the trusted project route", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedUrl: URL | undefined;
+  let capturedHeaders: Headers | undefined;
+  globalThis.fetch = (async (
+    input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> => {
+    capturedUrl = new URL(
+      input instanceof Request ? input.url : input.toString()
+    );
+    capturedHeaders = new Headers(init?.headers);
+    return jsonResponse({ data: ["Бренд", "брендовый"] });
+  }) as typeof fetch;
+
+  try {
+    assert.deepEqual(
+      await client().listKeywordTagOptions(internalContext(), "бренд"),
+      ["Бренд", "брендовый"]
+    );
+    assert.equal(
+      capturedUrl?.pathname,
+      `/internal/v1/projects/${projectId}/keywords/tag-options`
+    );
+    assert.equal(capturedUrl?.searchParams.get("search"), "бренд");
+    assert.equal(capturedHeaders?.get("x-workspace-id"), workspaceId);
+    assert.equal(capturedHeaders?.get("x-project-id"), projectId);
   } finally {
     globalThis.fetch = originalFetch;
   }

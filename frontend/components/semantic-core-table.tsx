@@ -57,6 +57,10 @@ import {
   semanticGroupSidebarMinWidth,
   writeSemanticLayoutPreferences
 } from "../lib/semantic-layout-preferences";
+import {
+  readSemanticManualAddPreferences,
+  writeSemanticManualAddPreferences
+} from "../lib/semantic-manual-add-preferences";
 import { SemanticBulkEditor } from "./semantic-bulk-editor";
 import { ContextMenu, type ContextMenuItem } from "./context-menu";
 import type { SemanticCustomColumn } from "./semantic-custom-column-types";
@@ -87,6 +91,10 @@ import { SearchEngineLogo } from "./search-engine-logo";
 import { KeywordDataGrid } from "./keyword-data-grid";
 import { Icon } from "./icon";
 import { ProjectSelectOption } from "./project-select-option";
+import {
+  requestProjectOperationActivityRefresh,
+  useProjectActiveOperationCount
+} from "./project-operation-activity-provider";
 import type { AppProject } from "../lib/app-types";
 import {
   defaultSemanticViewConfig,
@@ -210,7 +218,10 @@ interface SemanticCoreTableProps {
   readonly onOpenColumns: () => void;
   readonly onOpenImport: () => void;
   readonly projectName: string;
-  readonly projects: readonly Pick<AppProject, "domain" | "id" | "name">[];
+  readonly projects: readonly Pick<
+    AppProject,
+    "id" | "name" | "version" | "activeOperationCount"
+  >[];
   readonly workspaceId: string;
 }
 
@@ -264,6 +275,7 @@ export function SemanticCoreTable({
   const [groups, setGroups] = useState<readonly SemanticKeywordGroup[]>([]);
   const [multiGroupIds, setMultiGroupIds] = useState<readonly string[]>([]);
   const [clusters, setClusters] = useState<readonly SemanticCluster[]>([]);
+  const [tagOptions, setTagOptions] = useState<readonly string[]>([]);
   const [customColumns, setCustomColumns] = useState<
     readonly SemanticCustomColumn[]
   >([]);
@@ -313,6 +325,7 @@ export function SemanticCoreTable({
     pageSize: semanticKeywordDefaultPageSize as SemanticKeywordPageSize,
     expandedGroupIds: null as readonly string[] | null
   });
+  const manualAddPreferencesRef = useRef({ skipDuplicates: true });
   const [rightSidebar, setRightSidebar] = useState<
     | Readonly<{ type: "KEYWORD"; keywordId: string }>
     | Readonly<{ type: "HISTORY" | "OPERATIONS" | "LAYOUT" }>
@@ -328,6 +341,10 @@ export function SemanticCoreTable({
   const [negativeKeywordsOpen, setNegativeKeywordsOpen] = useState(false);
   const [watchedFrequencyId, setWatchedFrequencyId] = useState<string>();
   const [operationsRefreshVersion, setOperationsRefreshVersion] = useState(0);
+  const activeOperationCount = useProjectActiveOperationCount(
+    projectId,
+    projects.find(({ id }) => id === projectId)?.activeOperationCount ?? 0
+  );
   const [rowContextMenu, setRowContextMenu] = useState<Readonly<{
     item: SemanticKeyword;
     targetIds: readonly string[];
@@ -356,14 +373,43 @@ export function SemanticCoreTable({
     draftConfig.filters.search ?? "",
     300
   );
+  const debouncedTagSearch = useDebouncedValue(
+    draftConfig.filters.tag ?? "",
+    250
+  );
 
   useEffect(() => {
     applySearch(debouncedSearch);
   }, [debouncedSearch]);
 
   useEffect(() => {
+    const controller = new AbortController();
+    const query = new URLSearchParams();
+    if (debouncedTagSearch.trim()) {
+      query.set("search", debouncedTagSearch.trim());
+    }
+    const serializedQuery = query.toString();
+    const suffix = serializedQuery ? `?${serializedQuery}` : "";
+    void browserApiRequest<readonly string[]>(
+      `/app/api/projects/${encodeURIComponent(projectId)}/keywords/tag-options${suffix}`,
+      { signal: controller.signal }
+    )
+      .then((result) => {
+        if (!controller.signal.aborted) setTagOptions(result);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setTagOptions([]);
+      });
+    return () => controller.abort();
+  }, [debouncedTagSearch, projectId]);
+
+  useEffect(() => {
     setMultiGroupIds([]);
     const preferences = readSemanticLayoutPreferences(
+      projectId,
+      window.localStorage
+    );
+    manualAddPreferencesRef.current = readSemanticManualAddPreferences(
       projectId,
       window.localStorage
     );
@@ -493,19 +539,22 @@ export function SemanticCoreTable({
         ? frequencyResult.value.collections
         : [];
       const ranks = rankResult.status === "fulfilled" ? rankResult.value.jobs : [];
-      const active = frequencies.some(({ status }) => ![
+      const activeFrequencyCount = frequencies.filter(({ status }) => ![
         "ACTION_REQUIRED",
         "CANCELLED",
         "PARTIALLY_COMPLETED",
         "COMPLETED",
         "FAILED_FINAL"
-      ].includes(status)) || ranks.some(({ status }) => ![
+      ].includes(status)).length;
+      const activeRankCount = ranks.filter(({ status }) => ![
         "COMPLETED",
         "PARTIALLY_COMPLETED",
         "CANCELLED",
         "FAILED",
         "ACTION_REQUIRED"
-      ].includes(status));
+      ].includes(status)).length;
+      const nextActiveOperationCount = activeFrequencyCount + activeRankCount;
+      const active = nextActiveOperationCount > 0;
       liveOperationActiveRef.current = active;
       const signature = JSON.stringify([
         ...frequencies.map((job) => [
@@ -574,6 +623,10 @@ export function SemanticCoreTable({
       window.removeEventListener("online", refreshWhenVisible);
     };
   }, [items.length, keywordQueryConfig, operationsRefreshVersion, pageSize, projectId]);
+
+  useEffect(() => {
+    requestProjectOperationActivityRefresh();
+  }, [operationsRefreshVersion]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -749,14 +802,16 @@ export function SemanticCoreTable({
   }
 
   function clearFilters(): void {
-    const reset = (current: SemanticViewConfig): SemanticViewConfig => ({
-      ...current,
-      filters: {},
-      sort: folderSortFor(undefined)
-    });
+    const currentGroupId = viewConfig.filters.groupId;
+    const reset = (current: SemanticViewConfig): SemanticViewConfig => {
+      return {
+        ...current,
+        filters: currentGroupId ? { groupId: currentGroupId } : {},
+        sort: folderSortFor(currentGroupId)
+      };
+    };
     setDraftConfig((current) => reset(current));
     setViewConfig((current) => reset(current));
-    setMultiGroupIds([]);
   }
 
   function updateFilter(patch: Partial<SemanticViewFilters>): void {
@@ -784,7 +839,7 @@ export function SemanticCoreTable({
   }
 
   function updateOptionalFilter(
-    field: "intent" | "groupId" | "clusterId",
+    field: "intent" | "groupId" | "clusterId" | "tag",
     value: string
   ): void {
     setDraftConfig((current) => {
@@ -1219,7 +1274,7 @@ export function SemanticCoreTable({
         language: "ru",
         priority: "0",
         isFavorite: false,
-        skipDuplicates: true,
+        skipDuplicates: manualAddPreferencesRef.current.skipDuplicates,
         intent: "",
         groupId: initialSemanticCreateGroupId(
           viewConfig.filters.groupId,
@@ -1319,7 +1374,7 @@ export function SemanticCoreTable({
                 body: {
                   duplicatePolicy: draft.skipDuplicates
                     ? "SKIP_EXISTING"
-                    : "REJECT_EXISTING",
+                    : "ADD_TO_GROUP",
                   items: chunk.map((text) => ({ ...commonBody, text }))
                 }
               }
@@ -1328,7 +1383,8 @@ export function SemanticCoreTable({
         const locallySkipped = draft.skipDuplicates ? inputStats.duplicates : 0;
         setRetryVersion((value) => value + 1);
         setBulkNotice(
-          `Добавлено: ${result.created} · восстановлено: ${result.restored} · ` +
+          `Добавлено: ${result.created} · в другие папки: ${result.linked} · ` +
+            `восстановлено: ${result.restored} · ` +
             `пропущено: ${result.skipped + locallySkipped}`
         );
         if (result.retryRows.length > 0) {
@@ -1635,8 +1691,7 @@ export function SemanticCoreTable({
             body: {
               name: group.name,
               color,
-              parentId: group.parentId ?? null,
-              position: group.position
+              parentId: group.parentId ?? null
             }
           }
         )
@@ -1764,7 +1819,7 @@ export function SemanticCoreTable({
   const filteredTotal = page.totalApprox;
   const projectOptions = projects.some(({ id }) => id === projectId)
     ? projects
-    : [{ id: projectId, name: projectName, domain: "" }, ...projects];
+    : [{ id: projectId, name: projectName, version: 0 }, ...projects];
   const manualInputStats = editor?.mode === "create"
     ? manualKeywordInputStats(editor.draft.text)
     : undefined;
@@ -1827,6 +1882,10 @@ export function SemanticCoreTable({
     items,
     tableViewport,
     viewConfig.density
+  );
+  const tableColumns = semanticTableColumns(
+    viewConfig.columns,
+    multiGroupIds.length > 1
   );
   const focusedKeywordId = rightSidebar?.type === "KEYWORD"
     ? rightSidebar.keywordId
@@ -1937,6 +1996,10 @@ export function SemanticCoreTable({
         <button className="danger" disabled={checkedIds.size === 0} onClick={() => { setActionIds(null); setDeleteSelectionOpen(true); }} type="button"><Icon name="trash" />Удалить</button>
         <button onClick={() => openExport()} type="button"><Icon name="export" />Экспорт</button>
         <button
+          aria-label={activeOperationCount > 0
+            ? `Операции, активных: ${activeOperationCount}`
+            : "Операции"}
+          className={activeOperationCount > 0 ? "has-active-operations" : undefined}
           data-semantic-sidebar-trigger
           onClick={() =>
             setRightSidebar((current) =>
@@ -1953,7 +2016,19 @@ export function SemanticCoreTable({
             )
           }
           type="button"
-        ><Icon name="operations" />Операции</button>
+        >
+          <Icon name="operations" />Операции
+          {activeOperationCount > 0 && (
+            <strong
+              aria-hidden="true"
+              className="semantic-operation-toolbar-badge"
+              title={`Активных операций: ${activeOperationCount}`}
+            >
+              <i />
+              {activeOperationCount}
+            </strong>
+          )}
+        </button>
         {checkedIds.size > 0 && (
           <div className="semantic-selection-chip" role="status">
             <strong>Выбрано: {checkedIds.size}</strong>
@@ -2034,7 +2109,7 @@ export function SemanticCoreTable({
               maxLength={200}
               onChange={(event) => updateFilter({ search: event.target.value })}
               placeholder="Поиск по запросам"
-              type="search"
+              type="text"
               value={draftConfig.filters.search ?? ""}
             />
             {(draftConfig.filters.search ?? "") && (
@@ -2108,6 +2183,24 @@ export function SemanticCoreTable({
           </CustomSelect>
         </label>
         <label>
+          <span>Тег</span>
+          <input
+            list={`semantic-tag-filter-options-${projectId}`}
+            maxLength={160}
+            onChange={(event) =>
+              updateOptionalFilter("tag", event.target.value)
+            }
+            placeholder="Выберите или введите тег"
+            type="text"
+            value={draftConfig.filters.tag ?? ""}
+          />
+          <datalist id={`semantic-tag-filter-options-${projectId}`}>
+            {tagOptions.map((tag) => (
+              <option key={tag} value={tag} />
+            ))}
+          </datalist>
+        </label>
+        <label>
           <span>Избранное</span>
           <CustomSelect
             onChange={(event) =>
@@ -2178,6 +2271,8 @@ export function SemanticCoreTable({
             <option value="PRIORITY_ASC">Приоритет: низкий → высокий</option>
             <option value="SOURCE_ASC">Источник: А → Я</option>
             <option value="SOURCE_DESC">Источник: Я → А</option>
+            <option value="TAGS_ASC">Теги: А → Я</option>
+            <option value="TAGS_DESC">Теги: Я → А</option>
             <option value="FREQUENCY_BASE_DESC">База: больше → меньше</option>
             <option value="FREQUENCY_BASE_ASC">База: меньше → больше</option>
             <option value="FREQUENCY_EXACT_DESC">&quot;&quot;: больше → меньше</option>
@@ -2366,7 +2461,7 @@ export function SemanticCoreTable({
                     {manualInputStats?.duplicates
                       ? editor.draft.skipDuplicates
                         ? ` · будет пропущено дублей: ${manualInputStats.duplicates}`
-                        : ` · дублей для проверки: ${manualInputStats.duplicates}`
+                        : ` · повторов в списке: ${manualInputStats.duplicates}`
                       : ""}
                     {` · лимит за один запуск: ${formatInteger(MANUAL_KEYWORD_LIMIT)}`}
                   </small>
@@ -2492,16 +2587,23 @@ export function SemanticCoreTable({
               <label className="semantic-editor-check semantic-editor-deduplicate">
                 <input
                   checked={editor.draft.skipDuplicates}
-                  onChange={(event) =>
-                    updateDraft({ skipDuplicates: event.target.checked })
-                  }
+                  onChange={(event) => {
+                    const skipDuplicates = event.target.checked;
+                    manualAddPreferencesRef.current = { skipDuplicates };
+                    writeSemanticManualAddPreferences(
+                      projectId,
+                      { skipDuplicates },
+                      window.localStorage
+                    );
+                    updateDraft({ skipDuplicates });
+                  }}
                   type="checkbox"
                 />
                 <span>
                   <strong>Не добавлять дубли</strong>
                   <small>
-                    Повторы в списке и существующие активные запросы будут
-                    пропущены.
+                    Если выключить, существующий запрос будет добавлен в
+                    выбранную папку без повторного сбора данных.
                   </small>
                 </span>
               </label>
@@ -2683,7 +2785,7 @@ export function SemanticCoreTable({
                 </button>
               )}
               ariaLabel="Таблица семантического ядра"
-              columns={viewConfig.columns.map((column) => {
+              columns={tableColumns.map((column) => {
                 const nextSort = nextSemanticColumnSort(column, viewConfig.sort);
                 const direction = semanticColumnSortDirection(column, viewConfig.sort);
                 return {
@@ -2719,7 +2821,7 @@ export function SemanticCoreTable({
                     column,
                     customColumns,
                     (customColumn) => setCustomValueEditor({ keyword: item, column: customColumn }),
-                    multiGroupIds.length > 1
+                    viewConfig.density
                   )
                 };
               })}
@@ -3012,7 +3114,7 @@ function semanticVirtualRows(
   paddingTop: number;
   paddingBottom: number;
 }> {
-  const rowHeight = density === "COMPACT" ? 34 : 38;
+  const rowHeight = semanticRowHeight(density);
   const overscan = 14;
   const bodyScrollTop = Math.max(0, viewport.scrollTop - 35);
   const start = Math.max(0, Math.floor(bodyScrollTop / rowHeight) - overscan);
@@ -3037,6 +3139,7 @@ async function loadKeywordPage(
   const query = new URLSearchParams({ limit: String(limit) });
   const filters = config.filters;
   if (filters.search) query.set("search", filters.search);
+  if (filters.tag) query.set("tag", filters.tag);
   if (filters.intent) query.set("intent", filters.intent);
   if (filters.groupId) query.set("groupId", filters.groupId);
   if (config.groupIds?.length) query.set("groupIds", config.groupIds.join(","));
@@ -3098,6 +3201,8 @@ function nextSemanticColumnSort(
       return current === "PRIORITY_DESC" ? "PRIORITY_ASC" : "PRIORITY_DESC";
     case "source":
       return current === "SOURCE_ASC" ? "SOURCE_DESC" : "SOURCE_ASC";
+    case "tags":
+      return current === "TAGS_ASC" ? "TAGS_DESC" : "TAGS_ASC";
     case "updatedAt":
       return current === "UPDATED_DESC" ? "UPDATED_ASC" : "UPDATED_DESC";
     case "frequency":
@@ -3127,6 +3232,7 @@ function semanticColumnSortDirection(
     (column === "query" && current.startsWith("TEXT_")) ||
     (column === "priority" && current.startsWith("PRIORITY_")) ||
     (column === "source" && current.startsWith("SOURCE_")) ||
+    (column === "tags" && current.startsWith("TAGS_")) ||
     (column === "updatedAt" && current.startsWith("UPDATED_")) ||
     (column === "frequency" && current.startsWith("FREQUENCY_BASE_")) ||
     (column === "frequencyExact" && current.startsWith("FREQUENCY_EXACT_")) ||
@@ -3199,7 +3305,7 @@ function keywordColumn(
   column: SemanticViewColumn,
   customColumns: readonly SemanticCustomColumn[],
   onEditCustom: (column: SemanticCustomColumn) => void,
-  multiGroupMode = false
+  density: SemanticViewConfig["density"]
 ) {
   if (column.startsWith("custom:")) {
     const customColumn = customColumns.find(
@@ -3234,11 +3340,20 @@ function keywordColumn(
               </span>
             )}
           </strong>
-          <small>
-            {multiGroupMode
-              ? visibleSemanticGroupPath(item.groupPath)
-              : `${item.language.toUpperCase()}${item.isTracked ? " · отслеживается" : ""}`}
-          </small>
+          {density !== "COMPACT" && item.tags.length > 0 && (
+            <span
+              aria-label={`Теги: ${item.tags.join(", ")}`}
+              className="semantic-query-tags"
+              title={item.tags.join(", ")}
+            >
+              {item.tags.slice(0, 3).map((tag) => (
+                <span key={tag}>{tag}</span>
+              ))}
+              {(item.tags.length > 3 || item.tagsTruncated) && (
+                <span>+{Math.max(1, item.tags.length - 3)}</span>
+              )}
+            </span>
+          )}
         </>
       );
     case "frequency":
@@ -3448,8 +3563,9 @@ function formatCustomValue(
 }
 
 function hasActiveFilters(config: SemanticViewConfig): boolean {
-  return Object.keys(config.filters).length > 0 ||
-    config.sort !== defaultSemanticViewConfig.sort;
+  return Object.entries(config.filters).some(
+    ([key, value]) => key !== "groupId" && value !== undefined && value !== ""
+  );
 }
 
 function booleanFilter(value: boolean | undefined): string {
@@ -3458,7 +3574,7 @@ function booleanFilter(value: boolean | undefined): string {
 
 function activeFilterCount(filters: SemanticViewConfig["filters"]): number {
   return Object.entries(filters).filter(([key, value]) =>
-    key !== "search" && value !== undefined && value !== ""
+    key !== "search" && key !== "groupId" && value !== undefined && value !== ""
   ).length;
 }
 
@@ -3565,7 +3681,7 @@ function scrollKeywordIntoView(
 ): void {
   if (!viewport) return;
   const headerHeight = 35;
-  const rowHeight = density === "COMPACT" ? 34 : 38;
+  const rowHeight = semanticRowHeight(density);
   const rowTop = headerHeight + itemIndex * rowHeight;
   const rowBottom = rowTop + rowHeight;
   const visibleTop = viewport.scrollTop + headerHeight;
@@ -3579,9 +3695,22 @@ function scrollKeywordIntoView(
   }
 }
 
-function visibleSemanticGroupPath(path: string | undefined): string {
-  if (!path || path.startsWith("__system__/")) return "Без группы";
-  return path;
+function semanticRowHeight(density: SemanticViewConfig["density"]): number {
+  return density === "COMPACT" ? 28 : 34;
+}
+
+function semanticTableColumns(
+  columns: readonly SemanticViewColumn[],
+  multiGroupMode: boolean
+): readonly SemanticViewColumn[] {
+  if (!multiGroupMode || columns.includes("group")) return columns;
+  const queryIndex = columns.indexOf("query");
+  const insertAt = queryIndex < 0 ? 0 : queryIndex + 1;
+  return [
+    ...columns.slice(0, insertAt),
+    "group",
+    ...columns.slice(insertAt)
+  ];
 }
 
 function formatDate(value: string): string {

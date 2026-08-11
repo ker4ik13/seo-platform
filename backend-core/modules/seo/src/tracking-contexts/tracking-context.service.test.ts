@@ -148,6 +148,61 @@ test("replays the immutable create receipt and rejects key reuse", async () => {
   );
 });
 
+test("rejects launch-profile groups outside the current project", async () => {
+  let observedWhere: unknown;
+  const transaction = {
+    trackingContextCreateReceipt: {
+      findUnique: async () => undefined
+    },
+    keywordGroup: {
+      findMany: async ({ where }: { where: unknown }) => {
+        observedWhere = where;
+        return [];
+      }
+    },
+    trackingContext: {
+      create: async () => {
+        throw new Error("Context creation must not be reached");
+      }
+    }
+  };
+  const service = new TrackingContextService({
+    trackingContextCreateReceipt: {
+      findUnique: async () => undefined
+    },
+    $transaction: async (work: (value: unknown) => unknown) =>
+      work(transaction)
+  } as unknown as PrismaService);
+
+  await assert.rejects(
+    () =>
+      service.create({
+        workspaceId,
+        projectId,
+        actorId,
+        idempotencyKey: "create-group-scope-1",
+        name: "Folder-scoped context",
+        configuration,
+        launchProfile: {
+          searchSource: "LIVE",
+          scope: {
+            mode: "GROUPS",
+            groupIds: ["01900000-0000-7000-8000-000000000099"]
+          }
+        }
+      }),
+    (error: unknown) =>
+      error instanceof HttpException && error.getStatus() === 400
+  );
+  assert.deepEqual(observedWhere, {
+    workspaceId,
+    projectId,
+    id: { in: ["01900000-0000-7000-8000-000000000099"] },
+    status: "ACTIVE",
+    OR: [{ systemKind: null }, { systemKind: "UNGROUPED" }]
+  });
+});
+
 test("rename keeps configuration immutable and config change appends a version", async () => {
   const state: any = aggregate();
   const versionCreates: Array<Record<string, any>> = [];

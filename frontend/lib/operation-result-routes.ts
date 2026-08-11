@@ -1,3 +1,5 @@
+import { operationResultDefaultPageSize } from "@seo-platform/contracts";
+
 export const operationResultKinds = [
   "frequency",
   "rank",
@@ -46,21 +48,40 @@ export function operationResultApiPath(
   projectId: string,
   kind: OperationResultKind,
   operationId: string,
-  cursor?: string
+  page?: Readonly<{ cursor?: string; limit?: number }>
 ): string {
   if (!isOperationResultId(projectId) || !isOperationResultId(operationId)) {
     throw new TypeError("Invalid operation result scope");
   }
   const base = `/app/api/projects/${encodeURIComponent(projectId)}`;
   const id = encodeURIComponent(operationId);
-  if (kind === "frequency") {
-    return `${base}/frequency-collections/${id}/result`;
-  }
-  if (kind === "rank") return `${base}/jobs/${id}/result`;
   if (kind === "research") {
     return `${base}/keyword-research-runs/${id}`;
   }
-  const query = new URLSearchParams({ limit: "1000" });
-  if (cursor) query.set("cursor", cursor);
-  return `${base}/crawls/${id}/result?${query.toString()}`;
+  const query = new URLSearchParams({
+    limit: String(
+      page?.limit ??
+        (kind === "crawl" ? 1_000 : operationResultDefaultPageSize)
+    )
+  });
+  if (page?.cursor) query.set("cursor", page.cursor);
+  const suffix = `?${query.toString()}`;
+  if (kind === "frequency") {
+    return `${base}/frequency-collections/${id}/result${suffix}`;
+  }
+  if (kind === "rank") return `${base}/jobs/${id}/result${suffix}`;
+  return `${base}/crawls/${id}/result${suffix}`;
+}
+
+export function mergeOperationResultRows<
+  Row extends Readonly<{ sequence: number }>
+>(
+  current: readonly Row[],
+  incoming: readonly Row[]
+): readonly Row[] {
+  const rows = new Map<number, Row>(
+    current.map((row) => [row.sequence, row])
+  );
+  for (const row of incoming) rows.set(row.sequence, row);
+  return [...rows.values()].sort((left, right) => left.sequence - right.sequence);
 }

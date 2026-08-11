@@ -2,7 +2,6 @@
 
 import type {
   SemanticHistoryEntityState,
-  SemanticHistoryField,
   SemanticVersionChangeDetail,
   SemanticVersionDetail,
   SemanticVersionListItem
@@ -179,16 +178,10 @@ function SemanticHistoryDetail({
   onClose: () => void;
 }>) {
   const changes = detail.details.flatMap((item) => item.changes);
-  const parameters = uniqueParameters(detail.details.flatMap((item) => item.parameters));
   const versions = detail.group.versions;
   return (
     <SemanticModal
       description={`${formatDate(detail.group.createdAt)} · ${actorLabel(detail.group)} · ${formatAffected(detail.group.affectedCount)}`}
-      footer={
-        <button className="primary-button" onClick={onClose} type="button">
-          Закрыть
-        </button>
-      }
       onClose={onClose}
       size="large"
       title={reasonLabel(detail.group.reason)}
@@ -199,16 +192,6 @@ function SemanticHistoryDetail({
           <div><span>Операций в пачке</span><strong>{versions.length}</strong></div>
           <div><span>Затронуто</span><strong>{detail.group.affectedCount}</strong></div>
         </section>
-        {parameters.length > 0 && (
-          <section>
-            <h3>Параметры действия</h3>
-            <dl className="semantic-history-parameters">
-              {parameters.map((field) => (
-                <div key={`${field.key}:${field.value}`}><dt>{field.label}</dt><dd>{field.value}</dd></div>
-              ))}
-            </dl>
-          </section>
-        )}
         <section>
           <h3>Запросы и изменения</h3>
           {changes.length === 0 ? (
@@ -227,7 +210,6 @@ function SemanticHistoryDetail({
                   </span>
                   <div>
                     <strong>{change.after.title}</strong>
-                    <small>{change.entityType === "KEYWORD" ? "Запрос" : "Группа"} · {shortId(change.entityId)}</small>
                   </div>
                   <span className="semantic-history-group-cell">{historyGroup(change)}</span>
                   <span className="semantic-history-fields-cell">{changedFieldsLabel(change)}</span>
@@ -281,12 +263,6 @@ function belongsToGroup(group: SemanticHistoryGroup, version: SemanticVersionLis
   if (!sameOperation) return false;
   if (latest.sourceJobId) return true;
   return Math.abs(new Date(latest.createdAt).getTime() - new Date(version.createdAt).getTime()) <= HISTORY_BATCH_GAP_MS;
-}
-
-function uniqueParameters(fields: readonly SemanticHistoryField[]): readonly SemanticHistoryField[] {
-  const values = new Map<string, SemanticHistoryField>();
-  for (const field of fields) values.set(`${field.key}:${field.value}`, field);
-  return [...values.values()];
 }
 
 function historyGroup(change: SemanticVersionChangeDetail): string {
@@ -350,10 +326,6 @@ function formatAffected(value: number): string {
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
-}
-
-function shortId(value: string): string {
-  return value.slice(0, 8);
 }
 
 function versionError(error: unknown): string {

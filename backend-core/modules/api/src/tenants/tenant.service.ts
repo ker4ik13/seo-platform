@@ -425,6 +425,9 @@ export class TenantService {
             })
       },
       include: {
+        logo: {
+          select: { source: true, imageUpdatedAt: true }
+        },
         memberAccesses: {
           where: { memberId: membership.id },
           select: { level: true },
@@ -434,8 +437,8 @@ export class TenantService {
       orderBy: { createdAt: "asc" },
       take: 1_000
     });
-    return projects.map(({ memberAccesses, ...project }) =>
-      toProjectSummary(project, memberAccesses[0]?.level)
+    return projects.map(({ logo, memberAccesses, ...project }) =>
+      toProjectSummary(project, memberAccesses[0]?.level, logo)
     );
   }
 
@@ -531,12 +534,15 @@ export class TenantService {
 
   public async getProject(projectId: string): Promise<ProjectSummary> {
     const project = await this.prisma.project.findUnique({
-      where: { id: projectId }
+      where: { id: projectId },
+      include: {
+        logo: { select: { source: true, imageUpdatedAt: true } }
+      }
     });
     if (!project || ["DELETING", "DELETED"].includes(project.status)) {
       throw this.notFound();
     }
-    return toProjectSummary(project);
+    return toProjectSummary(project, undefined, project.logo);
   }
 
   public async updateProject(
@@ -547,7 +553,8 @@ export class TenantService {
     context: RequestContext
   ): Promise<ProjectSummary> {
     const current = await this.prisma.project.findUnique({
-      where: { id: projectId }
+      where: { id: projectId },
+      select: { id: true, domain: true, workspaceId: true }
     });
     if (!current) throw this.notFound();
     const domain = input.domain ? normalizeDomain(input.domain) : undefined;
@@ -578,8 +585,19 @@ export class TenantService {
         }
       });
       if (updated.count !== 1) throw this.versionConflict();
+      if (domain && domain !== current.domain) {
+        await transaction.projectLogo.deleteMany({
+          where: {
+            projectId,
+            OR: [{ source: null }, { source: "DISCOVERED" }]
+          }
+        });
+      }
       const project = await transaction.project.findUniqueOrThrow({
-        where: { id: projectId }
+        where: { id: projectId },
+        include: {
+          logo: { select: { source: true, imageUpdatedAt: true } }
+        }
       });
       await this.audit.record(
         {
@@ -603,7 +621,7 @@ export class TenantService {
         payload: { projectId, workspaceId: project.workspaceId },
         requestId: context.requestId
       });
-      return toProjectSummary(project);
+      return toProjectSummary(project, undefined, project.logo);
     });
   }
 
@@ -759,7 +777,10 @@ export class TenantService {
       });
       if (updated.count !== 1) throw this.versionConflict();
       const project = await transaction.project.findUniqueOrThrow({
-        where: { id: projectId }
+        where: { id: projectId },
+        include: {
+          logo: { select: { source: true, imageUpdatedAt: true } }
+        }
       });
       await this.audit.record(
         {
@@ -787,7 +808,7 @@ export class TenantService {
         },
         requestId: context.requestId
       });
-      return toProjectSummary(project);
+      return toProjectSummary(project, undefined, project.logo);
     });
   }
 

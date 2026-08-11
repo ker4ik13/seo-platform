@@ -31,7 +31,8 @@ test("execution roles receive only their scoped database and secrets", () => {
     "rank-worker-2",
     "crawl-worker",
     "connector-worker",
-    "connector-worker-2"
+    "connector-worker-2",
+    "connector-worker-3"
   ]);
   const system = definitions.find(({ name }) => name === "system-worker")?.environment;
   assert.equal(system?.DATABASE_URL, undefined);
@@ -46,6 +47,7 @@ test("execution roles receive only their scoped database and secrets", () => {
   const connector = definitions.find(({ name }) => name === "connector-worker")?.environment;
   assert.equal(connector?.DATABASE_URL, "postgresql://connector");
   assert.equal(connector?.INTEGRATION_CREDENTIAL_KEYS, "secret-keyring");
+  assert.equal(connector?.CONNECTOR_RUNTIME_DISPATCH_INTERVAL_MS, undefined);
   assert.equal(
     connector?.INTEGRATION_CREDENTIAL_FINGERPRINT_KEYS,
     undefined

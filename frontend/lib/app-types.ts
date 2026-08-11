@@ -7,6 +7,7 @@ export interface AppUser {
   readonly displayName: string;
   readonly locale: string;
   readonly timezone: string;
+  readonly avatarUpdatedAt?: string;
 }
 
 export interface AppWorkspace {
@@ -36,6 +37,9 @@ export interface AppProject {
   readonly timezone: string;
   readonly status: "DRAFT" | "ACTIVE" | "ARCHIVED";
   readonly ownerUserId: string;
+  readonly logoSource?: "CUSTOM" | "DISCOVERED";
+  readonly logoUpdatedAt?: string;
+  readonly activeOperationCount?: number;
   readonly projectAccessLevel?: ProjectAccessLevel;
   readonly version: number;
 }

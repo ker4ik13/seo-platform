@@ -1,3 +1,4 @@
+import { AccountSecurityProfile } from "../../../../../components/account-security-profile";
 import { MfaSettings } from "../../../../../components/mfa-settings";
 import { SessionSettings } from "../../../../../components/session-settings";
 import { SettingsTabs } from "../../../../../components/settings-tabs";
@@ -13,8 +14,8 @@ export default async function SecuritySettingsPage() {
         <div>
           <h1>Безопасность аккаунта</h1>
           <p>
-            Управляйте двухфакторной защитой и активными входами на всех
-            устройствах.
+            Управляйте профилем, паролем, двухфакторной защитой и активными
+            входами на всех устройствах.
           </p>
         </div>
       </section>
@@ -27,8 +28,9 @@ export default async function SecuritySettingsPage() {
         workspaceRoleCode={context.workspace?.roleCode}
       />
       <div className="settings-stack">
-        <SessionSettings />
+        <AccountSecurityProfile user={context.user} />
         <MfaSettings />
+        <SessionSettings />
       </div>
     </>
   );

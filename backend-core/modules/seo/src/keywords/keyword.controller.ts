@@ -40,7 +40,10 @@ import {
   internalSemanticKeywordCleaningInput,
   internalUpdateSemanticKeywordInput
 } from "./keyword-input.js";
-import { keywordListQuery } from "./keyword-query.js";
+import {
+  keywordListQuery,
+  keywordTagOptionsQuery
+} from "./keyword-query.js";
 import { KeywordService } from "./keyword.service.js";
 
 @Controller("internal/v1/projects/:projectId/keywords")
@@ -67,6 +70,30 @@ export class KeywordController {
       keywordListQuery(query),
       request.id
     );
+  }
+
+  @Get("tag-options")
+  public async tagOptions(
+    @Param("projectId") projectId: string,
+    @Query() query: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<readonly string[]>> {
+    const context = internalCommandContext(headers);
+    if (internalUuid(projectId, "projectId") !== context.projectId) {
+      throw new BadRequestException(
+        "Route project identifier does not match trusted context"
+      );
+    }
+    const { search } = keywordTagOptionsQuery(query);
+    return {
+      data: await this.keywords.tagOptions(
+        context.workspaceId,
+        context.projectId,
+        search
+      ),
+      meta: { requestId: request.id }
+    };
   }
 
   @Get("position-summary")

@@ -54,6 +54,19 @@ test("accepts exact tenant-scoped semantic group commands", () => {
       position: 4
     }
   );
+  assert.equal(
+    internalUpdateSemanticKeywordGroupInput({
+      workspaceId,
+      projectId,
+      actorId,
+      version: 2,
+      name: "Продвижение",
+      parentId: null,
+      color: null,
+      position: 20_000
+    }).position,
+    20_000
+  );
   assert.deepEqual(
     internalDeleteSemanticKeywordGroupInput({
       workspaceId,
@@ -106,7 +119,7 @@ test("rejects authority fields and malformed group data", () => {
         actorId,
         version: 1,
         name: "SEO",
-        position: 2_000
+        position: -1
       }),
     BadRequestException
   );

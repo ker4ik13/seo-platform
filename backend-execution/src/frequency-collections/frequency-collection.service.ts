@@ -179,7 +179,9 @@ export class FrequencyCollectionService {
   public async resultScope(
     workspaceId: string,
     projectId: string,
-    jobId: string
+    jobId: string,
+    limit: number,
+    cursor?: number
   ): Promise<InternalFrequencyOperationScope> {
     const job = await this.prisma.job.findFirst({
       where: {
@@ -190,8 +192,11 @@ export class FrequencyCollectionService {
       },
       select: {
         items: {
+          ...(cursor === undefined
+            ? {}
+            : { where: { sequence: { gt: cursor } } }),
           orderBy: { sequence: "asc" },
-          take: arsenkinWordstatKeywordLimit + 1,
+          take: limit + 1,
           select: {
             sequence: true,
             status: true,
@@ -202,14 +207,18 @@ export class FrequencyCollectionService {
       }
     });
     if (!job) throw new NotFoundException("Frequency collection not found");
-    if (job.items.length > arsenkinWordstatKeywordLimit) {
-      throw new Error("Frequency collection scope exceeds its contract");
-    }
+    const items = job.items.slice(0, limit);
+    const hasNext = job.items.length > limit;
+    const last = items.at(-1);
     return {
       workspaceId,
       projectId,
       jobId,
-      items: job.items.map(frequencyResultScopeItem)
+      items: items.map(frequencyResultScopeItem),
+      page: {
+        hasNext,
+        ...(hasNext && last ? { nextCursor: String(last.sequence) } : {})
+      }
     };
   }
 

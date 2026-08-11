@@ -89,6 +89,7 @@ function exportFilters(value: unknown): SemanticExportFilters {
     value,
     [
       "search",
+      "tag",
       "intent",
       "groupId",
       "clusterId",
@@ -100,6 +101,8 @@ function exportFilters(value: unknown): SemanticExportFilters {
     "filters"
   );
   const search = optionalString(input.search, "filters.search", 200);
+  const tag = optionalString(input.tag, "filters.tag", 160)
+    ?.toLocaleLowerCase();
   const intent =
     input.intent === undefined
       ? undefined
@@ -131,6 +134,7 @@ function exportFilters(value: unknown): SemanticExportFilters {
   }
   return {
     ...(search ? { search } : {}),
+    ...(tag ? { tag } : {}),
     ...(intent ? { intent } : {}),
     ...(groupId ? { groupId } : {}),
     ...(clusterId ? { clusterId } : {}),

@@ -8,6 +8,7 @@ import {
   Logger,
   Param,
   Post,
+  Query,
   Req,
   UseGuards
 } from "@nestjs/common";
@@ -16,6 +17,7 @@ import type {
   FrequencyCollectionSummary,
   FrequencyOperationResult
 } from "@seo-platform/contracts";
+import { arsenkinWordstatKeywordLimit } from "@seo-platform/contracts";
 import { AuditService } from "../audit/audit.service.js";
 import { RequirePermission } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
@@ -37,6 +39,7 @@ import {
   SessionAuthGuard
 } from "../identity/session-auth.guard.js";
 import { JobsClient } from "../jobs/jobs.client.js";
+import { operationResultPageQuery } from "../operation-results/operation-result-query.js";
 import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import {
   createFrequencyCollectionInput,
@@ -75,15 +78,27 @@ export class FrequencyCollectionController {
   @UseGuards(SessionAuthGuard, TenantPermissionGuard)
   public async result(
     @Param("jobId") jobId: string,
+    @Query("limit") limitValue: unknown,
+    @Query("cursor") cursorValue: unknown,
     @Req() request: TenantRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiResponse<FrequencyOperationResult>> {
     const tenant = requiredProjectTenant(request);
     const context = internalProjectContext(request, principal, tenant);
     const canonicalJobId = assertUuid(jobId, "jobId");
+    const page = operationResultPageQuery(
+      limitValue,
+      cursorValue,
+      arsenkinWordstatKeywordLimit - 1
+    );
     const [collection, scope] = await Promise.all([
       this.jobs.getFrequencyCollection(context, canonicalJobId),
-      this.jobs.getFrequencyOperationScope(context, canonicalJobId)
+      this.jobs.getFrequencyOperationScope(
+        context,
+        canonicalJobId,
+        page.limit,
+        page.cursor
+      )
     ]);
     if (!this.seoData) throw new Error("SEO data client is not available");
     const result = await this.seoData.frequencyOperationResult(
@@ -96,6 +111,7 @@ export class FrequencyCollectionController {
     );
     return apiResponse(request, {
       collection,
+      page: scope.page,
       rows: scope.items.map((item) => {
         const row = byKeywordId.get(item.keywordId);
         if (!row) {

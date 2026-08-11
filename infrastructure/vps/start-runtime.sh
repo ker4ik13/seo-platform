@@ -141,7 +141,8 @@ for worker in \
   rank-worker-2 \
   crawl-worker \
   connector-worker \
-  connector-worker-2
+  connector-worker-2 \
+  connector-worker-3
 do
   start_window "$worker"
 done

@@ -8,6 +8,7 @@ import { TeamController } from "./team.controller.js";
 import { TeamService } from "./team.service.js";
 import { ProjectTransferController } from "./project-transfer.controller.js";
 import { ProjectTransferService } from "./project-transfer.service.js";
+import { ProjectLogoService } from "./project-logo.service.js";
 import { TenantController } from "./tenant.controller.js";
 import { TenantService } from "./tenant.service.js";
 
@@ -20,7 +21,12 @@ import { TenantService } from "./tenant.service.js";
     SeoDataModule
   ],
   controllers: [TenantController, TeamController, ProjectTransferController],
-  providers: [TenantService, TeamService, ProjectTransferService],
+  providers: [
+    TenantService,
+    TeamService,
+    ProjectTransferService,
+    ProjectLogoService
+  ],
   exports: [TenantService, TeamService, ProjectTransferService]
 })
 export class TenantModule {}

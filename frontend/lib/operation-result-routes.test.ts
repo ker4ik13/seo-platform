@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   isOperationResultId,
+  mergeOperationResultRows,
   operationResultApiPath,
   operationResultHref,
   operationResultKind,
@@ -41,22 +42,42 @@ test("recognizes only exact same-app operation result links", () => {
 test("builds exact same-origin result API routes for every operation", () => {
   assert.equal(
     operationResultApiPath(id, "frequency", id),
-    `/app/api/projects/${id}/frequency-collections/${id}/result`
+    `/app/api/projects/${id}/frequency-collections/${id}/result?limit=200`
   );
   assert.equal(
     operationResultApiPath(id, "rank", id),
-    `/app/api/projects/${id}/jobs/${id}/result`
+    `/app/api/projects/${id}/jobs/${id}/result?limit=200`
   );
   assert.equal(
     operationResultApiPath(id, "research", id),
     `/app/api/projects/${id}/keyword-research-runs/${id}`
   );
   assert.equal(
-    operationResultApiPath(id, "crawl", id, "100"),
+    operationResultApiPath(id, "crawl", id, { cursor: "100" }),
     `/app/api/projects/${id}/crawls/${id}/result?limit=1000&cursor=100`
   );
   assert.throws(
     () => operationResultApiPath("foreign", "rank", id),
     TypeError
+  );
+});
+
+test("merges infinite-scroll pages by immutable sequence", () => {
+  assert.deepEqual(
+    mergeOperationResultRows(
+      [
+        { sequence: 0, value: "готово" },
+        { sequence: 1, value: "ожидает" }
+      ],
+      [
+        { sequence: 1, value: "готово" },
+        { sequence: 2, value: "новая строка" }
+      ]
+    ),
+    [
+      { sequence: 0, value: "готово" },
+      { sequence: 1, value: "готово" },
+      { sequence: 2, value: "новая строка" }
+    ]
   );
 });

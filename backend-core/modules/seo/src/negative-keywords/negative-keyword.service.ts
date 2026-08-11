@@ -76,6 +76,8 @@ export class NegativeKeywordService {
           words: [...input.rules.words],
           matchMode: input.rules.matchMode,
           caseSensitive: input.rules.caseSensitive,
+          ignoreWordOrder: input.rules.ignoreWordOrder,
+          ignorePunctuation: input.rules.ignorePunctuation,
           createdBy: input.actorId,
           updatedBy: input.actorId
         }
@@ -112,7 +114,9 @@ export class NegativeKeywordService {
             : {
                 words: [...input.rules.words],
                 matchMode: input.rules.matchMode,
-                caseSensitive: input.rules.caseSensitive
+                caseSensitive: input.rules.caseSensitive,
+                ignoreWordOrder: input.rules.ignoreWordOrder,
+                ignorePunctuation: input.rules.ignorePunctuation
               }),
           updatedBy: input.actorId,
           version: { increment: 1 }
@@ -302,8 +306,9 @@ export class NegativeKeywordService {
         );
       }
     }
+    const matchKeyword = compileNegativeKeywordMatcher(resolvedRules);
     const matches = rows.flatMap((row) => {
-      const matchedWords = negativeKeywordMatchingWords(row.textOriginal, resolvedRules);
+      const matchedWords = matchKeyword(row.textOriginal);
       return matchedWords.length === 0
         ? []
         : [{
@@ -338,7 +343,9 @@ export class NegativeKeywordService {
       rules: {
         words: row.words,
         matchMode: matchMode(row.matchMode),
-        caseSensitive: row.caseSensitive
+        caseSensitive: row.caseSensitive,
+        ignoreWordOrder: row.ignoreWordOrder,
+        ignorePunctuation: row.ignorePunctuation
       }
     });
   }
@@ -381,13 +388,314 @@ export function negativeKeywordMatchingWords(
   text: string,
   rules: SemanticNegativeKeywordRules
 ): readonly string[] {
-  const subject = rules.caseSensitive ? text : text.toLocaleLowerCase("ru-RU");
-  return rules.words.filter((word) => {
-    const candidate = rules.caseSensitive ? word : word.toLocaleLowerCase("ru-RU");
-    if (rules.matchMode === "CONTAINS") return subject.includes(candidate);
-    const escaped = candidate.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
-    return new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?:$|[^\\p{L}\\p{N}])`, "u").test(subject);
+  return compileNegativeKeywordMatcher(rules)(text);
+}
+
+type NegativeKeywordMatcher = (text: string) => readonly string[];
+
+interface ComparableToken {
+  readonly value: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+interface CompiledNegativeKeyword {
+  readonly original: string;
+  readonly comparable: string;
+  readonly tokens: readonly ComparableToken[];
+  readonly tokenKeys: readonly string[];
+  readonly boundaryPattern: RegExp;
+}
+
+function compileNegativeKeywordMatcher(
+  rules: SemanticNegativeKeywordRules
+): NegativeKeywordMatcher {
+  const candidates = rules.words.map((word) => {
+    const comparable = comparableText(word, rules);
+    const tokens = comparableTokens(comparable);
+    return {
+      original: word,
+      comparable,
+      tokens,
+      tokenKeys: tokens.map(({ value }) => tokenKey(value, rules)),
+      boundaryPattern: wholeValuePattern(comparable)
+    } satisfies CompiledNegativeKeyword;
   });
+
+  return (text) => {
+    const comparable = comparableText(text, rules);
+    const subjectTokens = comparableTokens(comparable);
+    const subjectKeys = subjectTokens.map(({ value }) => tokenKey(value, rules));
+    return candidates
+      .filter((candidate) => matchesCandidate(
+        comparable,
+        subjectTokens,
+        subjectKeys,
+        candidate,
+        rules
+      ))
+      .map(({ original }) => original);
+  };
+}
+
+function matchesCandidate(
+  subject: string,
+  subjectTokens: readonly ComparableToken[],
+  subjectKeys: readonly string[],
+  candidate: CompiledNegativeKeyword,
+  rules: SemanticNegativeKeywordRules
+): boolean {
+  if (!candidate.comparable || candidate.tokens.length === 0) return false;
+  if (rules.ignoreWordOrder && candidate.tokens.length > 1) {
+    if (
+      !rules.ignorePunctuation &&
+      punctuationSignature(subject) !== punctuationSignature(candidate.comparable)
+    ) return false;
+    if (rules.matchMode === "CONTAINS") {
+      return containsUnorderedFragments(
+        subjectTokens.map(({ value }) => value),
+        candidate.tokens.map(({ value }) => value)
+      );
+    }
+    const exactSize = rules.matchMode === "EXACT_PHRASE";
+    return containsTokenMultiset(subjectKeys, candidate.tokenKeys, exactSize);
+  }
+  if (rules.matchMode === "CONTAINS") {
+    return subject.includes(candidate.comparable);
+  }
+  if (rules.matchMode === "EXACT_PHRASE") {
+    return subject === candidate.comparable;
+  }
+  if (rules.matchMode === "WHOLE_WORD") {
+    return candidate.boundaryPattern.test(subject);
+  }
+  return containsTokenSequence(
+    subject,
+    subjectTokens,
+    subjectKeys,
+    candidate,
+    rules.ignorePunctuation
+  );
+}
+
+function punctuationSignature(value: string): string {
+  return [...value.matchAll(/[\p{P}\p{S}]/gu)].map((match) => match[0]).sort().join("");
+}
+
+function comparableText(value: string, rules: SemanticNegativeKeywordRules): string {
+  let comparable = value.normalize("NFKC");
+  if (
+    rules.matchMode === "WORD_FORM_FAST" ||
+    rules.matchMode === "WORD_FORM_PRECISE"
+  ) {
+    comparable = comparable.replace(/Ё/gu, "Е").replace(/ё/gu, "е");
+  }
+  if (!rules.caseSensitive) comparable = comparable.toLocaleLowerCase("ru-RU");
+  if (rules.ignorePunctuation) {
+    comparable = comparable.replace(/[\p{P}\p{S}]+/gu, " ");
+  }
+  return comparable.replace(/\s+/gu, " ").trim();
+}
+
+function comparableTokens(value: string): readonly ComparableToken[] {
+  const tokens: ComparableToken[] = [];
+  const matcher = /[\p{L}\p{N}]+/gu;
+  for (const match of value.matchAll(matcher)) {
+    const start = match.index;
+    tokens.push({ value: match[0], start, end: start + match[0].length });
+  }
+  return tokens;
+}
+
+function wholeValuePattern(value: string): RegExp {
+  const escaped = value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return new RegExp(`(?:^|[^\\p{L}\\p{N}])${escaped}(?:$|[^\\p{L}\\p{N}])`, "u");
+}
+
+function tokenKey(value: string, rules: SemanticNegativeKeywordRules): string {
+  if (rules.matchMode !== "WORD_FORM_FAST" && rules.matchMode !== "WORD_FORM_PRECISE") {
+    return value;
+  }
+  const casePrefix = rules.caseSensitive ? `${wordCase(value)}:` : "";
+  const normalized = value.toLocaleLowerCase("ru-RU");
+  return casePrefix + (
+    rules.matchMode === "WORD_FORM_FAST"
+      ? fastRussianStem(normalized)
+      : preciseRussianStem(normalized)
+  );
+}
+
+function wordCase(value: string): "LOWER" | "UPPER" | "TITLE" | "MIXED" {
+  if (value === value.toLocaleLowerCase("ru-RU")) return "LOWER";
+  if (value === value.toLocaleUpperCase("ru-RU")) return "UPPER";
+  const [first = "", ...rest] = [...value];
+  if (
+    first === first.toLocaleUpperCase("ru-RU") &&
+    rest.join("") === rest.join("").toLocaleLowerCase("ru-RU")
+  ) return "TITLE";
+  return "MIXED";
+}
+
+function containsTokenSequence(
+  subject: string,
+  subjectTokens: readonly ComparableToken[],
+  subjectKeys: readonly string[],
+  candidate: CompiledNegativeKeyword,
+  ignorePunctuation: boolean
+): boolean {
+  if (candidate.tokenKeys.length > subjectKeys.length) return false;
+  for (let start = 0; start <= subjectKeys.length - candidate.tokenKeys.length; start += 1) {
+    let matches = true;
+    for (let offset = 0; offset < candidate.tokenKeys.length; offset += 1) {
+      if (subjectKeys[start + offset] !== candidate.tokenKeys[offset]) {
+        matches = false;
+        break;
+      }
+      if (ignorePunctuation || offset === 0) continue;
+      const subjectGap = subject.slice(
+        subjectTokens[start + offset - 1]!.end,
+        subjectTokens[start + offset]!.start
+      );
+      const candidateGap = candidate.comparable.slice(
+        candidate.tokens[offset - 1]!.end,
+        candidate.tokens[offset]!.start
+      );
+      if (subjectGap !== candidateGap) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) return true;
+  }
+  return false;
+}
+
+function containsTokenMultiset(
+  subject: readonly string[],
+  candidate: readonly string[],
+  exactSize: boolean
+): boolean {
+  if (candidate.length > subject.length || (exactSize && candidate.length !== subject.length)) {
+    return false;
+  }
+  const available = new Map<string, number>();
+  for (const key of subject) available.set(key, (available.get(key) ?? 0) + 1);
+  for (const key of candidate) {
+    const count = available.get(key) ?? 0;
+    if (count === 0) return false;
+    available.set(key, count - 1);
+  }
+  return true;
+}
+
+function containsUnorderedFragments(
+  subject: readonly string[],
+  candidate: readonly string[]
+): boolean {
+  if (candidate.length > subject.length) return false;
+  const orderedCandidates = [...candidate].sort((left, right) => right.length - left.length);
+  const used = new Set<number>();
+  const findMatch = (candidateIndex: number): boolean => {
+    if (candidateIndex === orderedCandidates.length) return true;
+    const fragment = orderedCandidates[candidateIndex]!;
+    for (let index = 0; index < subject.length; index += 1) {
+      if (used.has(index) || !subject[index]!.includes(fragment)) continue;
+      used.add(index);
+      if (findMatch(candidateIndex + 1)) return true;
+      used.delete(index);
+    }
+    return false;
+  };
+  return findMatch(0);
+}
+
+const FAST_RUSSIAN_SUFFIXES = [
+  "остью", "ениями", "аниями", "иями", "ение", "ания", "ого", "его", "ому",
+  "ему", "ыми", "ими", "ями", "ами", "иться", "ыться", "аться", "яться",
+  "еться", "ить", "ыть", "ать", "ять", "еть", "ия", "ья", "ию", "ью",
+  "иях", "ах", "ях", "ов", "ев", "ей", "ам", "ям", "ом", "ем", "ой",
+  "ий", "ый", "ая", "яя", "ое", "ее", "ые", "ие", "их", "ых", "ок",
+  "ся", "сь", "у", "ю", "а", "я", "ы", "и", "е", "ь"
+] as const;
+
+function fastRussianStem(value: string): string {
+  if (!/^[а-яе]+$/u.test(value) || value.length <= 3) return value;
+  if (value.endsWith("ок") && value.length > 3) {
+    return `${value.slice(0, -2)}к`;
+  }
+  for (const suffix of FAST_RUSSIAN_SUFFIXES) {
+    if (value.endsWith(suffix) && value.length - suffix.length >= 3) {
+      return value.slice(0, -suffix.length);
+    }
+  }
+  return value;
+}
+
+function preciseRussianStem(value: string): string {
+  if (!/^[а-яе]+$/u.test(value) || value.length <= 3) return value;
+  const firstVowel = value.search(/[аеиоуыэюя]/u);
+  if (firstVowel < 0 || firstVowel === value.length - 1) return value;
+  const prefix = value.slice(0, firstVowel + 1);
+  let rv = value.slice(firstVowel + 1);
+
+  const perfective = removeRussianSuffix(
+    rv,
+    /(?:ив|ивши|ившись|ыв|ывши|ывшись)$/u,
+    /([ая])(?:в|вши|вшись)$/u
+  );
+  if (perfective === rv) {
+    rv = rv.replace(/(?:ся|сь)$/u, "");
+    const adjective = removeRussianSuffix(
+      rv,
+      /(?:ее|ие|ые|ое|ими|ыми|ей|ий|ый|ой|ем|им|ым|ом|его|ого|ему|ому|их|ых|ую|юю|ая|яя|ою|ею)$/u
+    );
+    if (adjective !== rv) {
+      rv = removeRussianSuffix(
+        adjective,
+        /(?:ивш|ывш|ующ)$/u,
+        /([ая])(?:ем|нн|вш|ющ|щ)$/u
+      );
+    } else {
+      const verb = removeRussianSuffix(
+        rv,
+        /(?:ила|ыла|ена|ейте|уйте|ите|или|ыли|ей|уй|ил|ыл|им|ым|ен|ило|ыло|ено|ят|ует|уют|ит|ыт|ены|ить|ыть|ишь|ую|ю)$/u,
+        /([ая])(?:ла|на|ете|йте|ли|й|л|ем|н|ло|но|ет|ны|ть|ешь|нно)$/u
+      );
+      rv = verb === rv
+        ? rv.replace(/(?:а|ев|ов|ие|ье|е|иями|ями|ами|еи|ии|и|ией|ей|ой|ий|й|иям|ям|ием|ем|ам|ом|о|у|ах|иях|ях|ы|ь|ию|ью|ю|ия|ья|я)$/u, "")
+        : verb;
+    }
+  } else {
+    rv = perfective;
+  }
+
+  rv = rv.replace(/и$/u, "");
+  let stem = prefix + rv;
+  const r2Start = russianRegionStart(stem, russianRegionStart(stem, 0));
+  const derivational = /(ость|ост)$/u.exec(stem);
+  if (derivational?.index !== undefined && derivational.index >= r2Start) {
+    stem = stem.slice(0, derivational.index);
+  }
+  stem = stem.replace(/ейше$/u, "").replace(/нн$/u, "н").replace(/ь$/u, "");
+  return stem.length >= 3 ? stem : value;
+}
+
+function removeRussianSuffix(
+  value: string,
+  unconditional: RegExp,
+  conditional?: RegExp
+): string {
+  const removed = value.replace(unconditional, "");
+  return removed !== value || !conditional ? removed : value.replace(conditional, "$1");
+}
+
+function russianRegionStart(value: string, from: number): number {
+  for (let index = Math.max(0, from); index < value.length - 1; index += 1) {
+    if (/[аеиоуыэюя]/u.test(value[index]!) && !/[аеиоуыэюя]/u.test(value[index + 1]!)) {
+      return index + 2;
+    }
+  }
+  return value.length;
 }
 
 function previewHash(
@@ -426,7 +734,9 @@ function preset(row: PresetRow): SemanticNegativeKeywordPreset {
     rules: {
       words: row.words,
       matchMode: matchMode(row.matchMode),
-      caseSensitive: row.caseSensitive
+      caseSensitive: row.caseSensitive,
+      ignoreWordOrder: row.ignoreWordOrder,
+      ignorePunctuation: row.ignorePunctuation
     },
     version: row.version,
     createdAt: row.createdAt.toISOString(),
@@ -435,7 +745,13 @@ function preset(row: PresetRow): SemanticNegativeKeywordPreset {
 }
 
 function matchMode(value: string): SemanticNegativeKeywordRules["matchMode"] {
-  if (value === "CONTAINS" || value === "WHOLE_WORD") return value;
+  if (
+    value === "CONTAINS" ||
+    value === "WHOLE_WORD" ||
+    value === "EXACT_PHRASE" ||
+    value === "WORD_FORM_FAST" ||
+    value === "WORD_FORM_PRECISE"
+  ) return value;
   throw new Error("Stored negative keyword match mode is invalid");
 }
 

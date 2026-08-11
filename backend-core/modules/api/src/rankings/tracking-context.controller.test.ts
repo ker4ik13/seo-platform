@@ -315,6 +315,7 @@ test("lists and changes point keyword assignments without bulk ambiguity", async
               assignmentId,
               contextId,
               keywordId,
+              keywordVersion: 7,
               textOriginal: "SEO аудит",
               language: "ru",
               assignedBy: actorId,

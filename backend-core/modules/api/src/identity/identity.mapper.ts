@@ -14,6 +14,9 @@ export function toUserSummary(user: User): UserSummary {
     locale: user.locale,
     timezone: user.timezone,
     ...(user.country ? { country: user.country } : {}),
+    ...(user.avatarUpdatedAt
+      ? { avatarUpdatedAt: user.avatarUpdatedAt.toISOString() }
+      : {}),
     status:
       user.status === "PENDING_VERIFICATION"
         ? "PENDING_VERIFICATION"

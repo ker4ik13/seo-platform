@@ -94,6 +94,7 @@ function savedViewConfig(value: unknown): SemanticSavedViewConfig {
 function savedViewFilters(value: unknown): SemanticSavedViewFilters {
   const input = exactRecord(value, [
     "search",
+    "tag",
     "intent",
     "groupId",
     "clusterId",
@@ -103,6 +104,8 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
     "priorityMax"
   ]);
   const search = optionalString(input.search, "config.filters.search", 200);
+  const tag = optionalString(input.tag, "config.filters.tag", 160)
+    ?.toLocaleLowerCase();
   const intent =
     input.intent === undefined
       ? undefined
@@ -144,6 +147,7 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
   }
   return {
     ...(search ? { search } : {}),
+    ...(tag ? { tag } : {}),
     ...(intent ? { intent } : {}),
     ...(groupId ? { groupId } : {}),
     ...(clusterId ? { clusterId } : {}),

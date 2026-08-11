@@ -42,7 +42,6 @@ import { assertUuid } from "../common/identifier.js";
 import { requiredVersion } from "../common/version-precondition.js";
 import { CurrentPrincipal } from "../identity/current-principal.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
-import { RecentAuthenticationService } from "../identity/recent-authentication.service.js";
 import { requestContext } from "../identity/request-context.js";
 import {
   CsrfSessionGuard,
@@ -62,8 +61,7 @@ const INTEGRATION_CAPABILITIES = new Set<string>(integrationCapabilities);
 export class IntegrationController {
   public constructor(
     private readonly jobs: JobsClient,
-    private readonly audit: AuditService,
-    private readonly recentAuthentication: RecentAuthenticationService
+    private readonly audit: AuditService
   ) {}
 
   @Get("catalog")
@@ -174,7 +172,6 @@ export class IntegrationController {
     @Req() request: TenantRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiResponse<IntegrationCredentialSummary>> {
-    this.recentAuthentication.assert(principal);
     const context = requestContext(request);
     const tenant = requiredTenant(request);
     const idempotencyKey = requiredIdempotencyKey(
@@ -219,7 +216,6 @@ export class IntegrationController {
     @Req() request: TenantRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiResponse<IntegrationCredentialSummary>> {
-    this.recentAuthentication.assert(principal);
     const canonicalCredentialId = assertUuid(
       credentialId,
       "credentialId"
@@ -268,7 +264,6 @@ export class IntegrationController {
     @Req() request: TenantRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiResponse<IntegrationCredentialValidationSummary>> {
-    this.recentAuthentication.assert(principal);
     const canonicalCredentialId = assertUuid(
       credentialId,
       "credentialId"
@@ -335,7 +330,6 @@ export class IntegrationController {
     @Req() request: TenantRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiResponse<{ readonly revoked: true }>> {
-    this.recentAuthentication.assert(principal);
     const canonicalCredentialId = assertUuid(
       credentialId,
       "credentialId"

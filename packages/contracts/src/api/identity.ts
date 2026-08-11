@@ -6,6 +6,7 @@ export interface UserSummary {
   readonly locale: string;
   readonly timezone: string;
   readonly country?: string;
+  readonly avatarUpdatedAt?: string;
   readonly status: "PENDING_VERIFICATION" | "ACTIVE" | "SUSPENDED";
   readonly createdAt: string;
 }

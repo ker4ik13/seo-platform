@@ -55,7 +55,10 @@ import {
   semanticKeywordBulkCreateInput,
   updateSemanticKeywordInput
 } from "./keyword-input.js";
-import { keywordListQuery } from "./keyword-query.js";
+import {
+  keywordListQuery,
+  keywordTagOptionsQuery
+} from "./keyword-query.js";
 
 @Controller("api/v1/projects/:projectId/keywords")
 export class KeywordController {
@@ -86,6 +89,25 @@ export class KeywordController {
       page: result.page,
       meta: { requestId: context.requestId }
     };
+  }
+
+  @Get("tag-options")
+  @RequirePermission("semantic.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async tagOptions(
+    @Query() query: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<readonly string[]>> {
+    const tenant = requiredProjectTenant(request);
+    const { search } = keywordTagOptionsQuery(query);
+    return apiResponse(
+      request,
+      await this.seoData.listKeywordTagOptions(
+        internalProjectContext(request, principal, tenant),
+        search
+      )
+    );
   }
 
   @Get("position-summary")
@@ -140,6 +162,8 @@ export class KeywordController {
       action:
         result.createOutcome === "RESTORED"
           ? "semantic.keyword.restored"
+          : result.createOutcome === "LINKED_EXISTING"
+            ? "semantic.keyword.group_linked"
           : result.createOutcome === "SKIPPED_EXISTING"
             ? "semantic.keyword.create_skipped"
             : "semantic.keyword.created",

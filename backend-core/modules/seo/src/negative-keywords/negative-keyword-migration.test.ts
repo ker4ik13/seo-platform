@@ -6,6 +6,10 @@ const migrationUrl = new URL(
   "../../prisma/migrations/20260806143000_semantic_keyword_notes_and_negative_presets/migration.sql",
   import.meta.url
 );
+const matchingMigrationUrl = new URL(
+  "../../prisma/migrations/20260811173000_negative_keyword_matching_v2/migration.sql",
+  import.meta.url
+);
 
 test("negative keyword migration keeps notes bounded and presets tenant-scoped", async () => {
   const sql = await readFile(migrationUrl, "utf8");
@@ -23,4 +27,14 @@ test("negative keyword presets follow an accepted project transfer", async () =>
   assert.match(sql, /transferable_relations CONSTANT TEXT\[\][\s\S]*'semantic_negative_keyword_presets'/u);
   assert.match(sql, /SECURITY DEFINER/u);
   assert.match(sql, /REVOKE ALL ON FUNCTION[\s\S]*FROM PUBLIC/u);
+});
+
+test("negative keyword matching upgrade preserves presets and defaults new flags safely", async () => {
+  const sql = await readFile(matchingMigrationUrl, "utf8");
+
+  assert.match(sql, /ADD COLUMN "ignore_word_order" BOOLEAN NOT NULL DEFAULT FALSE/u);
+  assert.match(sql, /ADD COLUMN "ignore_punctuation" BOOLEAN NOT NULL DEFAULT FALSE/u);
+  assert.match(sql, /'WORD_FORM_FAST'/u);
+  assert.match(sql, /'WORD_FORM_PRECISE'/u);
+  assert.doesNotMatch(sql, /DELETE|DROP TABLE|TRUNCATE/u);
 });

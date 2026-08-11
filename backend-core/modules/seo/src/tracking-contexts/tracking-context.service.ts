@@ -8,10 +8,12 @@ import {
 import {
   domainEventTypes,
   trackingContextStatuses,
+  trackingContextScopeModes,
   trackingDepths,
   trackingDevices,
   trackingDomainMatchModes,
   trackingSearchEngines,
+  trackingSearchSources,
   type ApiCollectionResponse,
   type InternalChangeTrackingContextKeywordInput,
   type InternalChangeTrackingContextStatusInput,
@@ -28,6 +30,7 @@ import {
   type TrackingContextKeywordAssignmentState,
   type TrackingContextKeywordReplacementResult,
   type TrackingContextKeywordQuery,
+  type TrackingContextLaunchProfile,
   type TrackingContextSummary,
   type TrackingDomainMatchRule
 } from "@seo-platform/contracts";
@@ -134,6 +137,7 @@ export class TrackingContextService {
         if (concurrent) {
           return receiptReplay(concurrent, requestHash, input);
         }
+        await assertLaunchProfileGroupScope(transaction, input, input.launchProfile);
         const configurationHash = hashConfiguration(input.configuration);
         const configuration = configurationCreateData(
           input,
@@ -146,6 +150,9 @@ export class TrackingContextService {
             workspaceId: input.workspaceId,
             projectId: input.projectId,
             name: input.name,
+            ...(input.launchProfile
+              ? { launchProfile: json(input.launchProfile) }
+              : {}),
             createdBy: input.actorId,
             updatedBy: input.actorId,
             configurations: {
@@ -173,7 +180,12 @@ export class TrackingContextService {
           domainEventTypes.trackingContextCreated,
           summary,
           input.actorId,
-          ["name", "configuration", "status"]
+          [
+            "name",
+            "configuration",
+            ...(input.launchProfile ? (["launchProfile"] as const) : []),
+            "status"
+          ]
         );
         return summary;
       });
@@ -205,7 +217,18 @@ export class TrackingContextService {
       const nameChanged = current.name !== input.name;
       const configurationChanged =
         currentConfiguration.configurationHash !== configurationHash;
-      if (!nameChanged && !configurationChanged) {
+      const currentLaunchProfile = launchProfileSnapshot(current.launchProfile);
+      const launchProfileChanged =
+        input.launchProfile !== undefined &&
+        canonicalJson(currentLaunchProfile) !== canonicalJson(input.launchProfile);
+      if (launchProfileChanged) {
+        await assertLaunchProfileGroupScope(
+          transaction,
+          input,
+          input.launchProfile
+        );
+      }
+      if (!nameChanged && !configurationChanged && !launchProfileChanged) {
         return contextSummary(current);
       }
       if (configurationChanged) {
@@ -229,6 +252,9 @@ export class TrackingContextService {
         },
         data: {
           ...(nameChanged ? { name: input.name } : {}),
+          ...(launchProfileChanged
+            ? { launchProfile: json(input.launchProfile) }
+            : {}),
           updatedBy: input.actorId,
           version: { increment: 1 }
         }
@@ -247,7 +273,8 @@ export class TrackingContextService {
         input.actorId,
         [
           ...(nameChanged ? (["name"] as const) : []),
-          ...(configurationChanged ? (["configuration"] as const) : [])
+          ...(configurationChanged ? (["configuration"] as const) : []),
+          ...(launchProfileChanged ? (["launchProfile"] as const) : [])
         ]
       );
       return summary;
@@ -318,6 +345,7 @@ export class TrackingContextService {
         keyword: {
           select: {
             id: true,
+            version: true,
             textOriginal: true,
             language: true
           }
@@ -337,6 +365,7 @@ export class TrackingContextService {
         assignmentId: row.id,
         contextId: row.contextId,
         keywordId: row.keyword.id,
+        keywordVersion: row.keyword.version,
         textOriginal: row.keyword.textOriginal,
         language: row.keyword.language,
         assignedBy: row.assignedBy,
@@ -835,6 +864,9 @@ function contextSummary(context: ContextAggregate): TrackingContextSummary {
     name: context.name,
     status: context.status,
     configuration: configurationSnapshot(configuration),
+    ...(launchProfileSnapshot(context.launchProfile)
+      ? { launchProfile: launchProfileSnapshot(context.launchProfile)! }
+      : {}),
     assignedKeywordCount: context._count.keywordAssignments,
     version: context.version,
     createdBy: context.createdBy,
@@ -963,7 +995,10 @@ function createRequestHash(
           projectId: input.projectId,
           actorId: input.actorId,
           name: input.name,
-          configuration: input.configuration
+          configuration: input.configuration,
+          ...(input.launchProfile
+            ? { launchProfile: input.launchProfile }
+            : {})
         })
       )
       .digest()
@@ -1202,6 +1237,9 @@ function parseSummarySnapshot(value: unknown): TrackingContextSummary {
       createdBy: stringValue(configuration.createdBy, "createdBy"),
       createdAt: isoDate(configuration.createdAt, "configuration.createdAt")
     },
+    ...(launchProfileSnapshot(input.launchProfile)
+      ? { launchProfile: launchProfileSnapshot(input.launchProfile)! }
+      : {}),
     assignedKeywordCount: integerValue(
       input.assignedKeywordCount,
       "assignedKeywordCount",
@@ -1219,6 +1257,74 @@ function parseSummarySnapshot(value: unknown): TrackingContextSummary {
       ? { archivedAt: isoDate(input.archivedAt, "archivedAt") }
       : {})
   };
+}
+
+function launchProfileSnapshot(
+  value: unknown
+): TrackingContextLaunchProfile | undefined {
+  if (value === undefined || value === null) return undefined;
+  const input = record(value, "tracking context launch profile");
+  if (
+    Object.keys(input).some(
+      (key) => !["searchSource", "scope"].includes(key)
+    )
+  ) {
+    throw new Error("Stored tracking context launch profile is invalid");
+  }
+  const searchSource = enumValue(
+    input.searchSource,
+    trackingSearchSources,
+    "launchProfile.searchSource"
+  );
+  const scope = record(input.scope, "tracking context launch scope");
+  if (
+    Object.keys(scope).some((key) => !["mode", "groupIds"].includes(key)) ||
+    !Array.isArray(scope.groupIds)
+  ) {
+    throw new Error("Stored tracking context launch scope is invalid");
+  }
+  const mode = enumValue(
+    scope.mode,
+    trackingContextScopeModes,
+    "launchProfile.scope.mode"
+  );
+  const groupIds = scope.groupIds.map((groupId) =>
+    stringValue(groupId, "launchProfile.scope.groupIds")
+  );
+  if (
+    new Set(groupIds).size !== groupIds.length ||
+    groupIds.some((groupId) => !UUID_PATTERN.test(groupId)) ||
+    (mode === "GROUPS" && groupIds.length === 0) ||
+    (mode !== "GROUPS" && groupIds.length > 0)
+  ) {
+    throw new Error("Stored tracking context launch scope is invalid");
+  }
+  return { searchSource, scope: { mode, groupIds } };
+}
+
+async function assertLaunchProfileGroupScope(
+  transaction: Prisma.TransactionClient,
+  tenant: { readonly workspaceId: string; readonly projectId: string },
+  launchProfile: TrackingContextLaunchProfile | undefined
+): Promise<void> {
+  if (!launchProfile || launchProfile.scope.mode !== "GROUPS") return;
+  const groupIds = [...launchProfile.scope.groupIds];
+  const groups = await transaction.keywordGroup.findMany({
+    where: {
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      id: { in: groupIds },
+      status: "ACTIVE",
+      OR: [{ systemKind: null }, { systemKind: "UNGROUPED" }]
+    },
+    select: { id: true }
+  });
+  if (groups.length === groupIds.length) return;
+  internalError(
+    HttpStatus.BAD_REQUEST,
+    "INVALID_TRACKING_CONTEXT_GROUP_SCOPE",
+    "Tracking context contains unavailable keyword groups"
+  );
 }
 
 async function lockContext(

@@ -23,6 +23,7 @@ export type SemanticKeywordIntent =
 export const semanticKeywordDuplicatePolicies = [
   "SKIP_EXISTING",
   "REJECT_EXISTING",
+  "ADD_TO_GROUP",
   "RESTORE_TRASHED"
 ] as const;
 
@@ -32,6 +33,7 @@ export type SemanticKeywordDuplicatePolicy =
 export const semanticKeywordCreateOutcomes = [
   "CREATED",
   "RESTORED",
+  "LINKED_EXISTING",
   "SKIPPED_EXISTING",
   "REJECTED_EXISTING",
   "FAILED"
@@ -51,6 +53,8 @@ export const semanticKeywordSorts = [
   "PRIORITY_ASC",
   "SOURCE_ASC",
   "SOURCE_DESC",
+  "TAGS_ASC",
+  "TAGS_DESC",
   "FREQUENCY_BASE_DESC",
   "FREQUENCY_BASE_ASC",
   "FREQUENCY_EXACT_DESC",
@@ -80,6 +84,8 @@ export interface KeywordListQuery {
   readonly limit: number;
   readonly cursor?: string;
   readonly search?: string;
+  /** Case-insensitive substring matched against normalized active tag names. */
+  readonly tag?: string;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
   /** Union of explicitly selected groups. Mutually exclusive with groupId. */
@@ -193,6 +199,7 @@ export interface SemanticKeywordBulkCreateResult {
   readonly selected: number;
   readonly created: number;
   readonly restored: number;
+  readonly linked: number;
   readonly skipped: number;
   readonly rejected: number;
   readonly failed: number;

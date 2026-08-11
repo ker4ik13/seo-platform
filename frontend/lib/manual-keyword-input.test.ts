@@ -18,7 +18,7 @@ test("normalizes pasted rows and detects duplicates like keyword storage", () =>
   assert.deepEqual(stats.uniqueRows, ["Нейросети онлайн", "ёлка"]);
 });
 
-test("skip policy deduplicates textarea while reject policy preserves every row", () => {
+test("skip policy deduplicates textarea while reuse policy preserves every row", () => {
   const value = "one\none\ntwo";
   assert.deepEqual(manualKeywordTexts(value, true), ["one", "two"]);
   assert.deepEqual(manualKeywordTexts(value, false), ["one", "one", "two"]);
@@ -65,6 +65,7 @@ test("bulk runner sends more than one chunk sequentially and aggregates outcomes
       selected: chunk.length,
       created: chunk.length - failed - rejected,
       restored: 0,
+      linked: 0,
       skipped: 0,
       rejected,
       failed,
@@ -94,6 +95,7 @@ test("network failure retains prior retry rows, current chunk and untouched tail
       selected: chunk.length,
       created: chunk.length - 1,
       restored: 0,
+      linked: 0,
       skipped: 0,
       rejected: 1,
       failed: 0,
@@ -117,6 +119,7 @@ test("bulk runner returns trashed duplicates with their original text", async ()
       selected: 2,
       created: 0,
       restored: 0,
+      linked: 0,
       skipped: 2,
       rejected: 0,
       failed: 0,
@@ -146,4 +149,27 @@ test("bulk runner returns trashed duplicates with their original text", async ()
       version: 3
     }
   ]);
+});
+
+test("bulk runner counts canonical keywords linked to another folder", async () => {
+  const result = await runManualKeywordBulkChunks(["seo аудит"], async () => ({
+    selected: 1,
+    created: 0,
+    restored: 0,
+    linked: 1,
+    skipped: 0,
+    rejected: 0,
+    failed: 0,
+    rows: [
+      {
+        index: 0,
+        outcome: "LINKED_EXISTING",
+        keywordId: "01900000-0000-7000-8000-000000000090",
+        version: 2
+      }
+    ]
+  }));
+
+  assert.equal(result.linked, 1);
+  assert.deepEqual(result.retryRows, []);
 });

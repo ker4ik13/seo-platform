@@ -26,6 +26,16 @@ export const operationResultItemStatuses = [
 export type OperationResultItemStatus =
   (typeof operationResultItemStatuses)[number];
 
+export const operationResultPageSizes = [200, 500] as const;
+export type OperationResultPageSize =
+  (typeof operationResultPageSizes)[number];
+export const operationResultDefaultPageSize: OperationResultPageSize = 200;
+
+export interface OperationResultPageInfo {
+  readonly hasNext: boolean;
+  readonly nextCursor?: string;
+}
+
 /** Jobs-owned exact scope of one frequency collection. */
 export interface InternalFrequencyOperationScopeItem {
   readonly sequence: number;
@@ -39,6 +49,7 @@ export interface InternalFrequencyOperationScope {
   readonly projectId: string;
   readonly jobId: string;
   readonly items: readonly InternalFrequencyOperationScopeItem[];
+  readonly page: OperationResultPageInfo;
 }
 
 /** Trusted Platform API -> SEO Data request; browser identities are headers. */
@@ -73,6 +84,7 @@ export interface FrequencyOperationResultRow
 export interface FrequencyOperationResult {
   readonly collection: FrequencyCollectionSummary;
   readonly rows: readonly FrequencyOperationResultRow[];
+  readonly page: OperationResultPageInfo;
 }
 
 export interface RankOperationResultRow {
@@ -99,6 +111,7 @@ export interface InternalRankOperationResult {
   readonly contextName: string;
   readonly execution: InternalRankExecutionParameters;
   readonly rows: readonly RankOperationResultRow[];
+  readonly page: OperationResultPageInfo;
 }
 
 export interface RankOperationResult
@@ -139,10 +152,7 @@ export interface InternalCrawlOperationResultPage {
   readonly projectId: string;
   readonly crawlId: string;
   readonly rows: readonly CrawlOperationResultRow[];
-  readonly page: {
-    readonly hasNext: boolean;
-    readonly nextCursor?: string;
-  };
+  readonly page: OperationResultPageInfo;
 }
 
 export interface CrawlOperationResultPage

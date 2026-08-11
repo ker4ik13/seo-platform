@@ -207,6 +207,16 @@ export function SemanticKeywordInspector({
           <div><dt>Группа</dt><dd>{visibleGroupPath(item.groupPath)}</dd></div>
           <div><dt>Кластер</dt><dd>{item.clusterName ?? "Не назначен"}</dd></div>
           <div><dt>Язык</dt><dd>{item.language.toUpperCase()}</dd></div>
+          <div className="semantic-inspector-overview-tags">
+            <dt>Теги</dt>
+            <dd>
+              <span className="semantic-inspector-tags">
+                {item.tags.length > 0
+                  ? item.tags.map((tag) => <span key={tag}>{tag}</span>)
+                  : <span>Нет тегов</span>}
+              </span>
+            </dd>
+          </div>
         </dl>
         <div className="semantic-inspector-target-url">
           <strong>Целевая страница</strong>
@@ -370,15 +380,6 @@ export function SemanticKeywordInspector({
           </section>
         );
       })}
-
-      <section>
-        <h3>Теги</h3>
-        <div className="semantic-inspector-tags">
-          {item.tags.length > 0
-            ? item.tags.map((tag) => <span key={tag}>{tag}</span>)
-            : <span>Нет тегов</span>}
-        </div>
-      </section>
 
       <section className="semantic-keyword-note">
         <h3>Заметка</h3>

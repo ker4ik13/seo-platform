@@ -34,6 +34,7 @@ export type SemanticExportLocale =
 
 export interface SemanticExportFilters {
   readonly search?: string;
+  readonly tag?: string;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
   readonly isFavorite?: boolean;

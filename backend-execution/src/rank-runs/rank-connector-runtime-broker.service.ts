@@ -242,6 +242,30 @@ export class RankConnectorRuntimeBrokerService {
     };
   }
 
+  public deferPollForProviderCapacity(
+    claimValue: RankConnectorPollClaim,
+    retryAfterSeconds: number
+  ): Promise<RankConnectorCompletion> {
+    const retryAfter = boundedRetryAfter(retryAfterSeconds);
+    if (retryAfter === undefined || retryAfter < 5) {
+      throw new TypeError("Invalid rank connector capacity retry delay");
+    }
+    return this.complete(
+      Prisma.sql`
+        SELECT *
+        FROM public.defer_rank_connector_poll_capacity(
+          ${claimValue.workspaceId}::uuid,
+          ${claimValue.executionId}::uuid,
+          ${claimValue.leaseOwner}::text,
+          ${claimValue.leaseToken}::uuid,
+          ${claimValue.leaseGeneration}::integer,
+          ${claimValue.executionVersion}::integer,
+          ${retryAfter}::integer
+        )
+      `
+    );
+  }
+
   public completePoll(
     claimValue: RankConnectorPollClaim,
     input:

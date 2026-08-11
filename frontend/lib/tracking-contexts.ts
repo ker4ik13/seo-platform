@@ -3,10 +3,12 @@ import type {
   TrackingContextMutationRestriction,
   TrackingContextSettings,
   TrackingContextSummary,
+  TrackingContextScopeMode,
   TrackingDepth,
   TrackingDevice,
   TrackingDomainMatchMode,
-  TrackingSearchEngine
+  TrackingSearchEngine,
+  TrackingSearchSource
 } from "@seo-platform/contracts";
 
 export interface TrackingContextDraft {
@@ -21,6 +23,9 @@ export interface TrackingContextDraft {
   readonly domainMatchMode: TrackingDomainMatchMode;
   readonly domainMatchValue: string;
   readonly safeSearch: boolean;
+  readonly searchSource: TrackingSearchSource;
+  readonly scopeMode: TrackingContextScopeMode;
+  readonly groupIds: readonly string[];
 }
 
 export type TrackingContextDraftField =
@@ -29,7 +34,8 @@ export type TrackingContextDraftField =
   | "regionCode"
   | "regionLabel"
   | "language"
-  | "domainMatchValue";
+  | "domainMatchValue"
+  | "scopeMode";
 
 export type TrackingContextDraftErrors = Readonly<
   Partial<Record<TrackingContextDraftField, string>>
@@ -57,7 +63,26 @@ export function emptyTrackingContextDraft(): TrackingContextDraft {
     depth: 100,
     domainMatchMode: "EXACT_HOST",
     domainMatchValue: "",
-    safeSearch: false
+    safeSearch: false,
+    searchSource: "LIVE",
+    scopeMode: "KEYWORDS",
+    groupIds: []
+  };
+}
+
+export function defaultTrackingContextSettingsDraft(): TrackingContextDraft {
+  return {
+    ...emptyTrackingContextDraft(),
+    name: "Яндекс · Москва · Десктоп",
+    searchEngine: "YANDEX",
+    countryCode: "RU",
+    regionCode: "213",
+    regionLabel: "Москва",
+    language: "ru",
+    device: "DESKTOP",
+    depth: 50,
+    scopeMode: "GROUPS",
+    groupIds: []
   };
 }
 
@@ -79,7 +104,10 @@ export function trackingContextDraft(
       rule.mode === "SPECIFIC_URL" || rule.mode === "URL_PREFIX"
         ? rule.value
         : "",
-    safeSearch: context.configuration.safeSearch
+    safeSearch: context.configuration.safeSearch,
+    searchSource: context.launchProfile?.searchSource ?? "LIVE",
+    scopeMode: context.launchProfile?.scope.mode ?? "ALL",
+    groupIds: context.launchProfile?.scope.groupIds ?? []
   };
 }
 
@@ -162,6 +190,9 @@ export function validateTrackingContextDraft(
       errors.domainMatchValue =
         "Укажите полный http(s) URL без логина, пароля и #fragment, длиной до 2048 символов.";
     }
+  }
+  if (draft.scopeMode === "GROUPS" && draft.groupIds.length === 0) {
+    errors.scopeMode = "Выберите хотя бы одну папку для этого контекста.";
   }
   return errors;
 }
@@ -293,6 +324,16 @@ function trackingContextMutationInput(
         draft.domainMatchValue
       ),
       safeSearch: draft.safeSearch
+    },
+    launchProfile: {
+      searchSource: draft.searchSource,
+      scope: {
+        mode: draft.scopeMode,
+        groupIds:
+          draft.scopeMode === "GROUPS"
+            ? [...new Set(draft.groupIds)].sort()
+            : []
+      }
     }
   };
 }

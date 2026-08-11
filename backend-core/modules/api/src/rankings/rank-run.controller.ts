@@ -7,6 +7,7 @@ import {
   Logger,
   Param,
   Post,
+  Query,
   Req,
   Res,
   UseGuards
@@ -20,6 +21,7 @@ import type {
   RankJobSummary,
   WorkspaceSummary
 } from "@seo-platform/contracts";
+import { rankProviderKeywordLimit } from "@seo-platform/contracts";
 import type { FastifyReply } from "fastify";
 import { AuditService } from "../audit/audit.service.js";
 import type { TenantRequest } from "../authorization/authorization.types.js";
@@ -45,6 +47,7 @@ import {
   SessionAuthGuard
 } from "../identity/session-auth.guard.js";
 import { JobsClient } from "../jobs/jobs.client.js";
+import { operationResultPageQuery } from "../operation-results/operation-result-query.js";
 import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import { TenantService } from "../tenants/tenant.service.js";
 import {
@@ -85,16 +88,28 @@ export class RankRunController {
   @UseGuards(SessionAuthGuard, TenantPermissionGuard)
   public async result(
     @Param("jobId") jobId: string,
+    @Query("limit") limitValue: unknown,
+    @Query("cursor") cursorValue: unknown,
     @Req() request: TenantRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiResponse<RankOperationResult>> {
     const tenant = requiredProjectTenant(request);
     const context = internalProjectContext(request, principal, tenant);
     const canonicalJobId = assertUuid(jobId, "jobId");
+    const page = operationResultPageQuery(
+      limitValue,
+      cursorValue,
+      rankProviderKeywordLimit - 1
+    );
     if (!this.seoData) throw new Error("SEO data client is not available");
     const [job, result] = await Promise.all([
       this.jobs.getRankJob(context, canonicalJobId),
-      this.seoData.rankOperationResult(context, canonicalJobId)
+      this.seoData.rankOperationResult(
+        context,
+        canonicalJobId,
+        page.limit,
+        page.cursor
+      )
     ]);
     const { workspaceId: _workspaceId, projectId: _projectId, ...safe } = result;
     return apiResponse(request, { ...safe, job });

@@ -1,7 +1,9 @@
 import type {
   TrackingContextConfigurationInput,
-  TrackingContextStatus
+  TrackingContextStatus,
+  TrackingSearchSource
 } from "./tracking-contexts.js";
+import { trackingSearchSources } from "./tracking-contexts.js";
 import type {
   ConnectorOperationAttemptSummary,
   ConnectorRoutingScope
@@ -15,9 +17,9 @@ export const rankEstimateProviders = ["ARSENKIN", "XMLSTOCK"] as const;
 
 export type RankEstimateProvider = (typeof rankEstimateProviders)[number];
 
-export const rankSearchSources = ["SEARCH_API", "LIVE"] as const;
+export const rankSearchSources = trackingSearchSources;
 
-export type RankSearchSource = (typeof rankSearchSources)[number];
+export type RankSearchSource = TrackingSearchSource;
 
 export const rankEstimateOperations = ["POSITIONS"] as const;
 

@@ -1,6 +1,13 @@
 import { BadRequestException } from "@nestjs/common";
-import type { InternalFrequencyOperationResultInput } from "@seo-platform/contracts";
-import { arsenkinWordstatKeywordLimit } from "@seo-platform/contracts";
+import type {
+  InternalFrequencyOperationResultInput,
+  OperationResultPageSize
+} from "@seo-platform/contracts";
+import {
+  arsenkinWordstatKeywordLimit,
+  operationResultDefaultPageSize,
+  operationResultPageSizes
+} from "@seo-platform/contracts";
 import {
   assertInternalContext,
   internalUuid,
@@ -40,13 +47,30 @@ export function operationResultLimit(value: unknown): number {
   return parsed;
 }
 
-export function operationResultCursor(value: unknown): number | undefined {
+export function operationResultPageLimit(
+  value: unknown
+): OperationResultPageSize {
+  if (value === undefined) return operationResultDefaultPageSize;
+  const parsed = Number(value);
+  if (
+    !Number.isSafeInteger(parsed) ||
+    !operationResultPageSizes.some((size) => size === parsed)
+  ) {
+    invalid("Invalid operation result page size");
+  }
+  return parsed as OperationResultPageSize;
+}
+
+export function operationResultCursor(
+  value: unknown,
+  maximum: number
+): number | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,3})$/u.test(value)) {
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,4})$/u.test(value)) {
     invalid("Invalid operation result cursor");
   }
   const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > 999) {
+  if (!Number.isSafeInteger(parsed) || parsed < 0 || parsed > maximum) {
     invalid("Invalid operation result cursor");
   }
   return parsed;

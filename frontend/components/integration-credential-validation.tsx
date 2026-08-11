@@ -35,7 +35,6 @@ type ValidationPhase =
 
 interface ValidationRequestError {
   readonly message: string;
-  readonly reauthenticationRequired: boolean;
 }
 
 export function IntegrationCredentialValidation({
@@ -55,7 +54,6 @@ export function IntegrationCredentialValidation({
   onReleaseOperation,
   onResolveConflict,
   onTerminal,
-  returnTo = "/app/settings/integrations"
 }: Readonly<{
   workspaceId: string;
   credentialId: string;
@@ -77,9 +75,7 @@ export function IntegrationCredentialValidation({
   onTerminal: (
     validation: IntegrationCredentialValidationSummary
   ) => Promise<void> | void;
-  returnTo?: string;
 }>) {
-  const [showReauthentication, setShowReauthentication] = useState(false);
   const validation = useIntegrationCredentialValidation({
     workspaceId,
     credentialId,
@@ -90,15 +86,6 @@ export function IntegrationCredentialValidation({
     onResolveConflict,
     onTerminal
   });
-
-  useEffect(() => {
-    if (!showReauthentication) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setShowReauthentication(false);
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [showReauthentication]);
 
   if (!supportsAutomaticCredentialValidation(validationMode)) {
     return (
@@ -138,14 +125,11 @@ export function IntegrationCredentialValidation({
     Boolean(validation.summary)
   );
 
-  const loginHref = `/app/login?returnTo=${encodeURIComponent(returnTo)}`;
-
   return (
-    <>
-      <div
-        aria-busy={validation.busy}
-        className="integration-validation-control"
-      >
+    <div
+      aria-busy={validation.busy}
+      className="integration-validation-control"
+    >
         <button
           aria-describedby={disabledReason ? disabledReasonId : undefined}
           aria-label={`${buttonLabel} «${credentialLabel}»`}
@@ -218,68 +202,7 @@ export function IntegrationCredentialValidation({
             <span className="visually-hidden">{validation.refreshWarning}</span>
           </span>
         )}
-
-        {validation.error?.reauthenticationRequired && (
-          <button
-            className="secondary-button integration-validation-login"
-            onClick={() => setShowReauthentication(true)}
-            type="button"
-          >
-            Подтвердить вход
-          </button>
-        )}
-      </div>
-
-      {showReauthentication && (
-        <div
-          className="integration-dialog-backdrop"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setShowReauthentication(false);
-            }
-          }}
-        >
-          <section
-            aria-labelledby={`integration-login-title-${credentialId}`}
-            aria-modal="true"
-            className="panel integration-reauth-dialog"
-            role="dialog"
-          >
-            <header className="security-card-header">
-              <div>
-                <h2 id={`integration-login-title-${credentialId}`}>
-                  Подтвердить вход
-                </h2>
-                <p>
-                  Сессия истекла. Войдите снова, затем повторите проверку
-                  подключения «{credentialLabel}».
-                </p>
-              </div>
-              <button
-                aria-label="Закрыть окно"
-                className="integration-dialog-close"
-                onClick={() => setShowReauthentication(false)}
-                type="button"
-              >
-                ×
-              </button>
-            </header>
-            <div className="integration-dialog-actions">
-              <button
-                className="secondary-button"
-                onClick={() => setShowReauthentication(false)}
-                type="button"
-              >
-                Отмена
-              </button>
-              <a className="primary-button" href={loginHref}>
-                Перейти ко входу
-              </a>
-            </div>
-          </section>
-        </div>
-      )}
-    </>
+    </div>
   );
 }
 
@@ -531,35 +454,25 @@ function validationRequestError(error: unknown): ValidationRequestError {
   if (error instanceof CredentialValidationPollingTimeout) {
     return {
       message:
-        "Проверка выполняется дольше обычного и продолжится в фоне. Повторите позже, чтобы получить актуальный статус.",
-      reauthenticationRequired: false
+        "Проверка выполняется дольше обычного и продолжится в фоне. Повторите позже, чтобы получить актуальный статус."
     };
   }
   if (error instanceof BrowserApiError) {
-    if (error.code === "REAUTHENTICATION_REQUIRED") {
-      return {
-        message: "Для проверки подключения нужно повторно подтвердить вход.",
-        reauthenticationRequired: true
-      };
-    }
     if (error.status === 402) {
       return {
         message:
-          "Workspace работает только для чтения. Новые проверки временно заблокированы.",
-        reauthenticationRequired: false
+          "Workspace работает только для чтения. Новые проверки временно заблокированы."
       };
     }
     if (error.status === 403) {
       return {
-        message: "Недостаточно прав для проверки этого подключения.",
-        reauthenticationRequired: false
+        message: "Недостаточно прав для проверки этого подключения."
       };
     }
     if (error.status === 429) {
       return {
         message:
-          "Сервис временно ограничил частоту проверок. Повторите позже.",
-        reauthenticationRequired: false
+          "Сервис временно ограничил частоту проверок. Повторите позже."
       };
     }
     if (
@@ -568,22 +481,19 @@ function validationRequestError(error: unknown): ValidationRequestError {
     ) {
       return {
         message:
-          "Безопасная автоматическая проверка для этого провайдера недоступна.",
-        reauthenticationRequired: false
+          "Безопасная автоматическая проверка для этого провайдера недоступна."
       };
     }
     if (error.code === "IDEMPOTENCY_CONFLICT") {
       return {
         message:
-          "Запрос проверки конфликтует с предыдущим. Обновите страницу и повторите.",
-        reauthenticationRequired: false
+          "Запрос проверки конфликтует с предыдущим. Обновите страницу и повторите."
       };
     }
     if (error.status === 409) {
       return {
         message:
-          "Проверка этого подключения уже выполняется. Дождитесь завершения и обновите список.",
-        reauthenticationRequired: false
+          "Проверка этого подключения уже выполняется. Дождитесь завершения и обновите список."
       };
     }
     if (
@@ -591,18 +501,15 @@ function validationRequestError(error: unknown): ValidationRequestError {
       error.code === "PROVIDER_UNAVAILABLE"
     ) {
       return {
-        message: "Сервис проверки временно недоступен. Повторите позже.",
-        reauthenticationRequired: false
+        message: "Сервис проверки временно недоступен. Повторите позже."
       };
     }
     return {
-      message: error.message,
-      reauthenticationRequired: false
+      message: error.message
     };
   }
   return {
-    message: "Не удалось запустить проверку подключения.",
-    reauthenticationRequired: false
+    message: "Не удалось запустить проверку подключения."
   };
 }
 

@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
-import { redirect } from "next/navigation";
+import { SettingsTabs } from "../../../../../../../components/settings-tabs";
+import { TrackingContextSettingsPanel } from "../../../../../../../components/tracking-context-settings";
 import { requireProtectedProjectAppContext } from "../../../../../../../lib/protected-app";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Позиции",
+  title: "Контексты позиций",
   robots: {
     index: false,
     follow: false
@@ -21,5 +22,26 @@ export default async function TrackingContextsPage({
   const context = await requireProtectedProjectAppContext(projectId);
   const project = context.project;
   if (!project) throw new Error("Project context is missing");
-  redirect("/app/semantics");
+  return (
+    <>
+      <section className="page-heading">
+        <div>
+          <h1>Контексты позиций</h1>
+          <p>
+            Сохраняйте папки, поисковик, регион, устройство и глубину для
+            повторных проверок без ручной настройки.
+          </p>
+        </div>
+      </section>
+      <SettingsTabs
+        active="ranking-contexts"
+        {...(project.projectAccessLevel
+          ? { projectAccessLevel: project.projectAccessLevel }
+          : {})}
+        projectId={project.id}
+        workspaceRoleCode={context.workspace?.roleCode}
+      />
+      <TrackingContextSettingsPanel projectId={project.id} />
+    </>
+  );
 }

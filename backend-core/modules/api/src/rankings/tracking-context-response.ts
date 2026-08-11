@@ -1,16 +1,19 @@
 import {
   trackingContextStatuses,
+  trackingContextScopeModes,
   trackingContextKeywordReplacementLimit,
   trackingDepths,
   trackingDevices,
   trackingDomainMatchModes,
   trackingSearchEngines,
+  trackingSearchSources,
   type ApiCollectionResponse,
   type TrackingContextCollection,
   type TrackingContextConfigurationSnapshot,
   type TrackingContextKeywordAssignmentItem,
   type TrackingContextKeywordAssignmentState,
   type TrackingContextKeywordReplacementResult,
+  type TrackingContextLaunchProfile,
   type TrackingContextSummary,
   type TrackingDomainMatchRule
 } from "@seo-platform/contracts";
@@ -26,6 +29,8 @@ const UUID_PATTERN =
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,1000}$/u;
 const CONTEXT_STATUSES = new Set<string>(trackingContextStatuses);
 const SEARCH_ENGINES = new Set<string>(trackingSearchEngines);
+const SEARCH_SOURCES = new Set<string>(trackingSearchSources);
+const SCOPE_MODES = new Set<string>(trackingContextScopeModes);
 const DEVICES = new Set<string>(trackingDevices);
 const DEPTHS = new Set<number>(trackingDepths);
 const DOMAIN_MATCH_MODES = new Set<string>(
@@ -76,6 +81,7 @@ export function scopedTrackingContext(
     "name",
     "status",
     "configuration",
+    "launchProfile",
     "assignedKeywordCount",
     "version",
     "createdBy",
@@ -104,6 +110,7 @@ export function scopedTrackingContext(
   const updatedAt = isoDateValue(input.updatedAt);
   const version = positiveInteger(input.version);
   const configuration = trackingConfiguration(input.configuration);
+  const launchProfile = trackingLaunchProfile(input.launchProfile);
   if (
     responseWorkspaceId !== workspaceId ||
     responseProjectId !== projectId ||
@@ -134,6 +141,7 @@ export function scopedTrackingContext(
     name: input.name,
     status,
     configuration,
+    ...(launchProfile ? { launchProfile } : {}),
     assignedKeywordCount: Number(input.assignedKeywordCount),
     version,
     createdBy: uuidValue(input.createdBy),
@@ -143,6 +151,32 @@ export function scopedTrackingContext(
     updatedAt,
     ...(archivedAt ? { archivedAt } : {})
   };
+}
+
+function trackingLaunchProfile(
+  value: unknown
+): TrackingContextLaunchProfile | undefined {
+  if (value === undefined) return undefined;
+  const input = exactRecord(value, ["searchSource", "scope"]);
+  const scope = exactRecord(input.scope, ["mode", "groupIds"]);
+  const searchSource = enumValue(
+    input.searchSource,
+    SEARCH_SOURCES
+  ) as TrackingContextLaunchProfile["searchSource"];
+  const mode = enumValue(
+    scope.mode,
+    SCOPE_MODES
+  ) as TrackingContextLaunchProfile["scope"]["mode"];
+  if (!Array.isArray(scope.groupIds)) throw invalidResponse();
+  const groupIds = scope.groupIds.map(uuidValue);
+  if (
+    new Set(groupIds).size !== groupIds.length ||
+    (mode === "GROUPS" && groupIds.length === 0) ||
+    (mode !== "GROUPS" && groupIds.length > 0)
+  ) {
+    throw invalidResponse();
+  }
+  return { searchSource, scope: { mode, groupIds } };
 }
 
 export function trackingContextKeywordPage(
@@ -389,6 +423,7 @@ function trackingContextKeywordItem(
     "assignmentId",
     "contextId",
     "keywordId",
+    "keywordVersion",
     "textOriginal",
     "language",
     "assignedBy",
@@ -402,6 +437,7 @@ function trackingContextKeywordItem(
     assignmentId: uuidValue(input.assignmentId),
     contextId: responseContextId,
     keywordId: uuidValue(input.keywordId),
+    keywordVersion: positiveInteger(input.keywordVersion),
     textOriginal: requiredString(input.textOriginal, 1, 10_000),
     language: requiredString(input.language, 2, 16),
     assignedBy: uuidValue(input.assignedBy),

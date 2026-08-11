@@ -108,15 +108,26 @@ export function scopedFrequencyOperationScope(
   value: unknown,
   workspaceId: string,
   projectId: string,
-  jobId: string
+  jobId: string,
+  limit: number,
+  cursor?: string
 ): InternalFrequencyOperationScope {
   const input = record(value);
+  const page = record(input.page);
   if (
     input.workspaceId !== workspaceId ||
     input.projectId !== projectId ||
     uuid(input.jobId) !== jobId ||
     !Array.isArray(input.items) ||
-    input.items.length > arsenkinWordstatKeywordLimit
+    input.items.length > limit ||
+    typeof page.hasNext !== "boolean" ||
+    (page.hasNext &&
+      (typeof page.nextCursor !== "string" ||
+        input.items.length !== limit)) ||
+    (!page.hasNext && page.nextCursor !== undefined) ||
+    Object.keys(page).some(
+      (key) => key !== "hasNext" && key !== "nextCursor"
+    )
   ) {
     invalid();
   }
@@ -160,8 +171,24 @@ export function scopedFrequencyOperationScope(
         : {})
     };
   });
-  if (items.some((item, index) => item.sequence !== index)) invalid();
-  return { workspaceId, projectId, jobId, items };
+  const firstSequence = cursor === undefined ? 0 : Number(cursor) + 1;
+  if (
+    items.some((item, index) => item.sequence !== firstSequence + index) ||
+    (page.hasNext &&
+      page.nextCursor !== String(items.at(-1)?.sequence))
+  ) invalid();
+  return {
+    workspaceId,
+    projectId,
+    jobId,
+    items,
+    page: {
+      hasNext: page.hasNext,
+      ...(typeof page.nextCursor === "string"
+        ? { nextCursor: page.nextCursor }
+        : {})
+    }
+  };
 }
 
 function record(value: unknown): Readonly<Record<string, unknown>> {

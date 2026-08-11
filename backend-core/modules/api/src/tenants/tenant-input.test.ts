@@ -5,6 +5,7 @@ import {
   createProjectInput,
   createWorkspaceInput,
   deleteProjectInput,
+  updateProjectLogoInput,
   updateWorkspaceAvatarInput,
   updateWorkspaceInput
 } from "./tenant-input.js";
@@ -69,6 +70,32 @@ test("rejects mismatched or oversized workspace avatar payloads", () => {
     (error) =>
       error instanceof DomainError &&
       error.fieldErrors?.[0]?.code === "FILE_TOO_LARGE"
+  );
+});
+
+test("accepts safe SVG project logos and rejects executable SVG", () => {
+  const safe = Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M0 0h16v16H0z"/></svg>'
+  );
+  assert.deepEqual(
+    updateProjectLogoInput({
+      contentType: "image/svg+xml",
+      data: safe.toString("base64")
+    }),
+    { contentType: "image/svg+xml", data: safe }
+  );
+  const unsafe = Buffer.from(
+    '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+  );
+  assert.throws(
+    () =>
+      updateProjectLogoInput({
+        contentType: "image/svg+xml",
+        data: unsafe.toString("base64")
+      }),
+    (error) =>
+      error instanceof DomainError &&
+      error.fieldErrors?.[0]?.code === "INVALID_IMAGE"
   );
 });
 

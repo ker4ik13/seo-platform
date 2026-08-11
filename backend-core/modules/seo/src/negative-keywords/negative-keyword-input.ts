@@ -108,12 +108,33 @@ function commandFields(input: Readonly<Record<string, unknown>>) {
 }
 
 function rules(value: unknown): SemanticNegativeKeywordRules {
-  const input = exactRecord(value, ["words", "matchMode", "caseSensitive"]);
+  const input = exactRecord(value, [
+    "words",
+    "matchMode",
+    "caseSensitive",
+    "ignoreWordOrder",
+    "ignorePunctuation"
+  ]);
   if (!Array.isArray(input.words) || input.words.length < 1 || input.words.length > 500) {
     invalid("rules.words");
   }
-  const words = input.words.map((word, index) => normalizedWord(word, index));
-  const comparison = input.caseSensitive === true
+  const caseSensitive = booleanValue(input.caseSensitive, "rules.caseSensitive");
+  const ignoreWordOrder = optionalBooleanValue(
+    input.ignoreWordOrder,
+    "rules.ignoreWordOrder"
+  );
+  const ignorePunctuation = optionalBooleanValue(
+    input.ignorePunctuation,
+    "rules.ignorePunctuation"
+  );
+  const words = input.words.map((word, index) => {
+    const normalized = normalizedWord(word, index);
+    if (ignorePunctuation && !/[\p{L}\p{N}]/u.test(normalized)) {
+      invalid(`rules.words.${index}`);
+    }
+    return normalized;
+  });
+  const comparison = caseSensitive
     ? (word: string) => word
     : (word: string) => word.toLocaleLowerCase("ru-RU");
   if (new Set(words.map(comparison)).size !== words.length) invalid("rules.words");
@@ -121,12 +142,22 @@ function rules(value: unknown): SemanticNegativeKeywordRules {
     typeof input.matchMode !== "string" ||
     !semanticNegativeKeywordMatchModes.some((value) => value === input.matchMode)
   ) invalid("rules.matchMode");
-  if (typeof input.caseSensitive !== "boolean") invalid("rules.caseSensitive");
   return {
     words,
     matchMode: input.matchMode as SemanticNegativeKeywordRules["matchMode"],
-    caseSensitive: input.caseSensitive
+    caseSensitive,
+    ignoreWordOrder,
+    ignorePunctuation
   };
+}
+
+function booleanValue(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") invalid(field);
+  return value;
+}
+
+function optionalBooleanValue(value: unknown, field: string): boolean {
+  return value === undefined ? false : booleanValue(value, field);
 }
 
 function commandScope(value: unknown): SemanticNegativeKeywordScope {

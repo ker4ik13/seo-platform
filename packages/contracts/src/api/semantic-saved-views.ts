@@ -51,6 +51,7 @@ export type SemanticSavedViewColumnKey =
 
 export interface SemanticSavedViewFilters {
   readonly search?: string;
+  readonly tag?: string;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
   readonly clusterId?: string;

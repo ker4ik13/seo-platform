@@ -10,6 +10,11 @@ const context = {
   actorId: "01900000-0000-7000-8000-000000000003"
 };
 
+const defaultRuleFlags = {
+  ignoreWordOrder: false,
+  ignorePunctuation: false
+} as const;
+
 test("trusted negative keyword input remains tenant and selection scoped", () => {
   const keywordId = "01900000-0000-7000-8000-000000000004";
   assert.deepEqual(
@@ -35,7 +40,8 @@ test("whole-word matching respects boundaries while contains mode remains explic
     negativeKeywordMatchingWords("туры Москва недорого", {
       words: ["москва", "тур"],
       matchMode: "WHOLE_WORD",
-      caseSensitive: false
+      caseSensitive: false,
+      ...defaultRuleFlags
     }),
     ["москва"]
   );
@@ -43,8 +49,100 @@ test("whole-word matching respects boundaries while contains mode remains explic
     negativeKeywordMatchingWords("туры Москва недорого", {
       words: ["москва", "тур"],
       matchMode: "CONTAINS",
-      caseSensitive: false
+      caseSensitive: false,
+      ...defaultRuleFlags
     }),
     ["москва", "тур"]
+  );
+});
+
+test("word-form modes distinguish inflections from literal matching", () => {
+  const text = "доставка живых ёлок по Москве";
+  assert.deepEqual(
+    negativeKeywordMatchingWords(text, {
+      words: ["живая ёлка", "москва"],
+      matchMode: "WORD_FORM_FAST",
+      caseSensitive: false,
+      ...defaultRuleFlags
+    }),
+    ["живая ёлка", "москва"]
+  );
+  assert.deepEqual(
+    negativeKeywordMatchingWords(text, {
+      words: ["живая ёлка", "москва"],
+      matchMode: "WHOLE_WORD",
+      caseSensitive: false,
+      ...defaultRuleFlags
+    }),
+    []
+  );
+});
+
+test("stop phrases can ignore word order and punctuation independently", () => {
+  const base = {
+    words: ["купить ёлку"],
+    matchMode: "WORD_FORM_PRECISE" as const,
+    caseSensitive: false
+  };
+  assert.deepEqual(
+    negativeKeywordMatchingWords("ёлку недорого купить", {
+      ...base,
+      ignoreWordOrder: true,
+      ignorePunctuation: false
+    }),
+    ["купить ёлку"]
+  );
+  assert.deepEqual(
+    negativeKeywordMatchingWords("ёлку, недорого купить", {
+      ...base,
+      ignoreWordOrder: true,
+      ignorePunctuation: false
+    }),
+    []
+  );
+  assert.deepEqual(
+    negativeKeywordMatchingWords("ёлку, недорого купить", {
+      ...base,
+      ignoreWordOrder: true,
+      ignorePunctuation: true
+    }),
+    ["купить ёлку"]
+  );
+  assert.deepEqual(
+    negativeKeywordMatchingWords("купить, ёлку", {
+      ...base,
+      ignoreWordOrder: false,
+      ignorePunctuation: false
+    }),
+    []
+  );
+  assert.deepEqual(
+    negativeKeywordMatchingWords("купить, ёлку", {
+      ...base,
+      ignoreWordOrder: false,
+      ignorePunctuation: true
+    }),
+    ["купить ёлку"]
+  );
+});
+
+test("exact phrase mode requires the whole query while respecting unordered matching", () => {
+  const base = {
+    words: ["купить ёлку"],
+    matchMode: "EXACT_PHRASE" as const,
+    caseSensitive: false,
+    ignorePunctuation: true
+  };
+  assert.deepEqual(
+    negativeKeywordMatchingWords("купить ёлку", { ...base, ignoreWordOrder: false }),
+    ["купить ёлку"]
+  );
+  assert.deepEqual(
+    negativeKeywordMatchingWords("срочно купить ёлку", { ...base, ignoreWordOrder: false }),
+    []
+  );
+  assert.deepEqual(
+    negativeKeywordMatchingWords("ёлку купить", { ...base, ignoreWordOrder: true }),
+    ["купить ёлку"]
   );
 });

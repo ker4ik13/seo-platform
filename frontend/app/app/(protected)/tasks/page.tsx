@@ -11,6 +11,6 @@ export default async function TasksPage() {
   ) : !context.project ? (
     <ProjectOnboarding workspace={context.workspace} />
   ) : (
-    <TaskCenter projectId={context.project.id} />
+    <TaskCenter projectId={context.project.id} projects={context.projects} />
   );
 }

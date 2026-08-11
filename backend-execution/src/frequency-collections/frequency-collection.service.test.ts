@@ -224,7 +224,7 @@ test("returns an exact tenant-scoped result scope without provider payloads", as
   const result = await new FrequencyCollectionService(
     prisma as never,
     route as never
-  ).resultScope(workspaceId, projectId, jobId);
+  ).resultScope(workspaceId, projectId, jobId, 200);
 
   assert.deepEqual(observedWhere, {
     id: jobId,
@@ -241,6 +241,7 @@ test("returns an exact tenant-scoped result scope without provider payloads", as
       errorCode: "PROVIDER_REJECTED"
     }
   ]);
+  assert.deepEqual(result.page, { hasNext: false });
   assert.doesNotMatch(JSON.stringify(result), /must-not-leak/u);
 });
 

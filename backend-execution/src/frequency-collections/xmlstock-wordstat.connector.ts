@@ -126,6 +126,7 @@ export function xmlStockWordstatResult(
     if (
       error === "32" ||
       error === "55" ||
+      error === "110" ||
       error === "429" ||
       error === "503"
     ) {

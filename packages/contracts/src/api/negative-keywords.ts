@@ -2,7 +2,10 @@ import type { SemanticKeywordBulkSelection } from "./keywords.js";
 
 export const semanticNegativeKeywordMatchModes = [
   "CONTAINS",
-  "WHOLE_WORD"
+  "WHOLE_WORD",
+  "EXACT_PHRASE",
+  "WORD_FORM_FAST",
+  "WORD_FORM_PRECISE"
 ] as const;
 
 export type SemanticNegativeKeywordMatchMode =
@@ -21,6 +24,8 @@ export interface SemanticNegativeKeywordRules {
   readonly words: readonly string[];
   readonly matchMode: SemanticNegativeKeywordMatchMode;
   readonly caseSensitive: boolean;
+  readonly ignoreWordOrder: boolean;
+  readonly ignorePunctuation: boolean;
 }
 
 export interface SemanticNegativeKeywordPreset {

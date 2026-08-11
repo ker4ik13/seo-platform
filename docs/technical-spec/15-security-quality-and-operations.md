@@ -45,6 +45,18 @@
 
 Для угроз фиксируются likelihood, impact, controls, owner и остаточный риск.
 
+### 2.1. Безопасное обнаружение project favicon
+
+Server-side favicon discovery принимает только нормализованный публичный
+hostname проекта и canonical HTTP/HTTPS ports, запрещает credentials и
+IP-literals. Каждый DNS result и фактический remote address проверяются на
+private, loopback, link-local, multicast и reserved ranges; запрос выполняется
+с DNS pinning, bounded timeout/body/redirect count и повторной проверкой remote
+address против DNS rebinding. Redirect снова проходит тот же validator.
+Полученный файл допускается в Core storage только после content-based image
+validation; SVG с script, event handlers, external references или active
+embedded content отклоняется.
+
 ## 3. Tenant isolation
 
 ### 3.1. Обязательные правила
@@ -85,8 +97,13 @@
 - 2FA: TOTP и recovery codes; WebAuthn/passkeys предусматриваются следующим этапом.
 - Recovery codes хранятся только в hash form и показываются один раз.
 - Workspace может требовать 2FA для всех участников.
-- Reauthentication требуется для изменения email, пароля, MFA, credentials, billing и удаления.
-- Все активные сессии видны пользователю и могут быть отозваны.
+- Интерактивная recent reauthentication требуется для MFA, platform-admin,
+  billing, удаления workspace и других явно перечисленных high-risk boundary.
+  Provider credentials и soft delete проекта используют автоматически
+  обновляемую active session, CSRF, permissions, audit и typed/CAS guards без
+  повторного экрана логина.
+- Все активные сессии видны пользователю, выводятся компактно по 10 и могут
+  быть отозваны.
 - Изменение пароля/компрометация отзывает token family.
 - Подозрительный вход создаёт security event и уведомление.
 - Удалённый, suspended или deactivated account не может обновить access token.
@@ -1332,6 +1349,10 @@ Billing read-only не является стадией удаления. Око�
 
 Администратор видит:
 
+- каталог проектов с workspace, автором, владельцем и количеством активных
+  ключей/пользовательских папок;
+- глобальный журнал операций с фильтрами active/completed/attention, типом,
+  прогрессом, безопасными итоговыми счётчиками и нормализованным error code;
 - health сервисов;
 - queue lag;
 - failed jobs/DLQ;
@@ -1344,6 +1365,16 @@ Billing read-only не является стадией удаления. Око�
 - active incidents;
 - feature flags;
 - backup status.
+
+Каталог и журнал доступны только через отдельный platform-role/recent-MFA
+boundary и являются read-only. Core не читает чужие service databases: SEO
+Data считает семантику внутри `seo_db`, Execution строит bounded keyset page
+внутри `jobs_db`, а Core добавляет только display identity из `platform_db`.
+Частичный отказ SEO Data не скрывает проекты и обозначается degraded state.
+Операционный ответ никогда не содержит job input/scope snapshot, keyword
+texts, provider raw response, credential material или произвольный error
+payload. Разрешены только status/stage/provider, прогресс, allowlisted числовые
+результаты, стоимость и нормализованный error code.
 
 Админ может безопасно:
 

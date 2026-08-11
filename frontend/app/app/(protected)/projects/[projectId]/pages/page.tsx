@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { ProjectPageMap } from "../../../../../../components/project-page-map";
 import { requireProtectedProjectAppContext } from "../../../../../../lib/protected-app";
+import { ProjectContextSelect } from "../../../../../../components/project-context-select";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,14 @@ export default async function ProjectPagesPage({
     <>
       <section className="page-heading page-map-heading">
         <div>
-          <h1>Карта страниц</h1>
+          <div className="project-page-title-row">
+            <h1>Карта страниц</h1>
+            <ProjectContextSelect
+              destination="pages"
+              projectId={project.id}
+              projects={context.projects}
+            />
+          </div>
           <p>
             URL проекта, их состояние, семантика и результаты технических
             проверок — в одном рабочем экране.

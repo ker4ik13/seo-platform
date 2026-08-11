@@ -17,6 +17,8 @@ export type SemanticKeywordSort =
   | "PRIORITY_ASC"
   | "SOURCE_ASC"
   | "SOURCE_DESC"
+  | "TAGS_ASC"
+  | "TAGS_DESC"
   | "FREQUENCY_BASE_DESC"
   | "FREQUENCY_BASE_ASC"
   | "FREQUENCY_EXACT_DESC"
@@ -60,6 +62,7 @@ export type SemanticViewColumn =
 
 export interface SemanticViewFilters {
   readonly search?: string;
+  readonly tag?: string;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
   readonly clusterId?: string;

@@ -39,7 +39,6 @@ interface CredentialDraft {
 
 interface IntegrationOperationError {
   readonly message: string;
-  readonly reauthenticationRequired: boolean;
 }
 
 type CredentialOperationKind =
@@ -197,8 +196,7 @@ export function IntegrationSettings({
     if (hasFieldErrors(validationErrors)) {
       setCreateFieldErrors(validationErrors);
       setCreateError({
-        message: "Проверьте обязательные поля подключения.",
-        reauthenticationRequired: false
+        message: "Проверьте обязательные поля подключения."
       });
       setSuccess(undefined);
       return;
@@ -239,8 +237,7 @@ export function IntegrationSettings({
       setCreateError(
         hasFieldErrors(fieldErrors)
           ? {
-              message: "Проверьте значения в отмеченных полях.",
-              reauthenticationRequired: false
+              message: "Проверьте значения в отмеченных полях."
             }
           : integrationOperationError(requestError)
       );
@@ -280,8 +277,7 @@ export function IntegrationSettings({
     if (hasFieldErrors(validationErrors)) {
       setEditFieldErrors(validationErrors);
       setEditError({
-        message: "Проверьте значения в отмеченных полях.",
-        reauthenticationRequired: false
+        message: "Проверьте значения в отмеченных полях."
       });
       setSuccess(undefined);
       return;
@@ -317,8 +313,7 @@ export function IntegrationSettings({
       setEditError(
         hasFieldErrors(fieldErrors)
           ? {
-              message: "Проверьте значения в отмеченных полях.",
-              reauthenticationRequired: false
+              message: "Проверьте значения в отмеченных полях."
             }
           : integrationOperationError(requestError)
       );
@@ -1126,14 +1121,6 @@ function IntegrationErrorAlert({
   return (
     <div className="inline-alert danger integration-operation-error" role="alert">
       <span>{error.message}</span>
-      {error.reauthenticationRequired && (
-        <a
-          className="inline-alert-action"
-          href="/app/login?returnTo=%2Fapp%2Fsettings%2Fintegrations"
-        >
-          Подтвердить вход
-        </a>
-      )}
     </div>
   );
 }
@@ -1266,9 +1253,6 @@ function providerNotice(provider: Provider): string {
 
 function integrationErrorMessage(error: unknown): string {
   if (error instanceof BrowserApiError) {
-    if (error.code === "REAUTHENTICATION_REQUIRED") {
-      return "Для изменения API-ключей нужно повторно подтвердить вход.";
-    }
     if (error.status === 402) {
       return "Workspace перешёл в режим только для чтения. Просмотр сохранён, новые операции заблокированы.";
     }
@@ -1287,10 +1271,7 @@ function integrationOperationError(
   error: unknown
 ): IntegrationOperationError {
   return {
-    message: integrationErrorMessage(error),
-    reauthenticationRequired:
-      error instanceof BrowserApiError &&
-      error.code === "REAUTHENTICATION_REQUIRED"
+    message: integrationErrorMessage(error)
   };
 }
 

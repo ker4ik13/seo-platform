@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
-import { keywordListQuery } from "./keyword-query.js";
+import {
+  keywordListQuery,
+  keywordTagOptionsQuery
+} from "./keyword-query.js";
 
 test("parses bounded keyword list query", () => {
   const clusterId = "01900000-0000-7000-8000-000000000002";
@@ -16,6 +19,7 @@ test("parses bounded keyword list query", () => {
   assert.deepEqual(
     keywordListQuery({
       intent: "LOCAL",
+      tag: "  СезОн  ",
       groupId: "01900000-0000-7000-8000-000000000001",
       clusterId,
       isFavorite: "true",
@@ -25,6 +29,7 @@ test("parses bounded keyword list query", () => {
     {
       limit: 100,
       intent: "LOCAL",
+      tag: "сезон",
       groupId: "01900000-0000-7000-8000-000000000001",
       clusterId,
       isFavorite: true,
@@ -39,6 +44,10 @@ test("parses bounded keyword list query", () => {
     "PRIORITY_ASC"
   );
   assert.equal(keywordListQuery({ sort: "SOURCE_DESC" }).sort, "SOURCE_DESC");
+  assert.equal(keywordListQuery({ sort: "TAGS_ASC" }).sort, "TAGS_ASC");
+  assert.deepEqual(keywordTagOptionsQuery({ search: "  БРЕНД  " }), {
+    search: "бренд"
+  });
   assert.equal(keywordListQuery({ limit: "1000" }).limit, 1_000);
   assert.deepEqual(
     keywordListQuery({
@@ -52,10 +61,27 @@ test("parses bounded keyword list query", () => {
   );
 });
 
+test("accepts a multigroup union with more than fifty folders", () => {
+  const groupIds = Array.from(
+    { length: 70 },
+    (_, index) =>
+      `01900000-0000-7000-8000-${String(index + 1).padStart(12, "0")}`
+  );
+
+  assert.deepEqual(
+    keywordListQuery({ groupIds: groupIds.join(",") }).groupIds,
+    groupIds
+  );
+});
+
 test("rejects oversized pages and malformed cursors", () => {
   assert.throws(() => keywordListQuery({ limit: "1001" }), BadRequestException);
   assert.throws(
     () => keywordListQuery({ cursor: "not a cursor" }),
+    BadRequestException
+  );
+  assert.throws(
+    () => keywordListQuery({ tag: "x".repeat(161) }),
     BadRequestException
   );
   assert.throws(

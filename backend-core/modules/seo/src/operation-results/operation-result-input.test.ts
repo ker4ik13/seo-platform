@@ -4,7 +4,8 @@ import { BadRequestException } from "@nestjs/common";
 import {
   internalFrequencyOperationResultInput,
   operationResultCursor,
-  operationResultLimit
+  operationResultLimit,
+  operationResultPageLimit
 } from "./operation-result-input.js";
 
 const workspaceId = "01900000-0000-7000-8000-000000000001";
@@ -84,9 +85,12 @@ test("enforces bounded unique keyword scope and crawl paging", () => {
   );
   assert.equal(operationResultLimit(undefined), 1_000);
   assert.equal(operationResultLimit("25"), 25);
-  assert.equal(operationResultCursor("0"), 0);
-  assert.equal(operationResultCursor("999"), 999);
+  assert.equal(operationResultPageLimit(undefined), 200);
+  assert.equal(operationResultPageLimit("500"), 500);
+  assert.equal(operationResultCursor("0", 999), 0);
+  assert.equal(operationResultCursor("999", 999), 999);
   assert.equal(operationResultLimit("1000"), 1_000);
   assert.throws(() => operationResultLimit("1001"), BadRequestException);
-  assert.throws(() => operationResultCursor("1000"), BadRequestException);
+  assert.throws(() => operationResultPageLimit("1000"), BadRequestException);
+  assert.throws(() => operationResultCursor("1000", 999), BadRequestException);
 });

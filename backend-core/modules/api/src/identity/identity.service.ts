@@ -10,6 +10,7 @@ import {
   type RequestPasswordResetInput,
   type ResendEmailVerificationInput,
   type ResetPasswordInput,
+  type UserSummary,
   type VerifyEmailInput
 } from "@seo-platform/contracts";
 import type { Prisma, User } from "../generated/prisma/client.js";
@@ -29,7 +30,9 @@ import { unauthenticatedError } from "./auth-errors.js";
 import { AuthCryptoService } from "./auth-crypto.service.js";
 import { AuthRateLimitService } from "./auth-rate-limit.service.js";
 import { toSessionSummary, toUserSummary } from "./identity.mapper.js";
+import type { AccountAvatarInput } from "./identity-input.js";
 import type {
+  AuthenticatedPrincipal,
   RequestContext,
   SessionCredentials
 } from "./identity.types.js";
@@ -51,6 +54,12 @@ export interface PasswordResetRequestCommandResult {
 export interface LoginCommandResult {
   readonly response: LoginResult;
   readonly credentials?: SessionCredentials;
+}
+
+export interface AccountAvatar {
+  readonly contentType: string;
+  readonly data: Buffer;
+  readonly updatedAt: Date;
 }
 
 @Injectable()
@@ -594,6 +603,82 @@ export class IdentityService {
       },
       credentials: result.session.credentials
     };
+  }
+
+  public async getAccountAvatar(
+    principal: AuthenticatedPrincipal
+  ): Promise<AccountAvatar> {
+    const user = await this.prisma.user.findFirst({
+      where: { id: principal.userId, status: "ACTIVE" },
+      select: {
+        avatarMimeType: true,
+        avatarData: true,
+        avatarUpdatedAt: true
+      }
+    });
+    if (!user?.avatarMimeType || !user.avatarData || !user.avatarUpdatedAt) {
+      throw new DomainError({
+        statusCode: 404,
+        code: "NOT_FOUND",
+        message: "Account avatar not found"
+      });
+    }
+    return {
+      contentType: user.avatarMimeType,
+      data: Buffer.from(user.avatarData),
+      updatedAt: user.avatarUpdatedAt
+    };
+  }
+
+  public async updateAccountAvatar(
+    principal: AuthenticatedPrincipal,
+    input: AccountAvatarInput,
+    context: RequestContext
+  ): Promise<UserSummary> {
+    return this.setAccountAvatar(principal, input, context);
+  }
+
+  public async deleteAccountAvatar(
+    principal: AuthenticatedPrincipal,
+    context: RequestContext
+  ): Promise<UserSummary> {
+    return this.setAccountAvatar(principal, undefined, context);
+  }
+
+  private async setAccountAvatar(
+    principal: AuthenticatedPrincipal,
+    avatar: AccountAvatarInput | undefined,
+    context: RequestContext
+  ): Promise<UserSummary> {
+    const user = await this.prisma.$transaction(async (transaction) => {
+      await this.sessions.assertSessionLifecyclePrincipal(
+        transaction,
+        principal
+      );
+      const updated = await transaction.user.update({
+        where: { id: principal.userId },
+        data: {
+          avatarMimeType: avatar?.contentType ?? null,
+          avatarData: avatar ? Uint8Array.from(avatar.data) : null,
+          avatarUpdatedAt: avatar ? new Date() : null,
+          version: { increment: 1 }
+        }
+      });
+      await this.audit.record(
+        {
+          actorId: principal.userId,
+          action: avatar
+            ? "identity.user.avatar_updated"
+            : "identity.user.avatar_deleted",
+          resourceType: "user",
+          resourceId: principal.userId,
+          requestId: context.requestId
+        },
+        transaction
+      );
+      return updated;
+    });
+    return toUserSummary(user);
   }
 
   private async createVerificationToken(

@@ -943,7 +943,7 @@ function safeNonNegativePlanLimit(value: bigint): number | undefined {
 }
 
 function safePlanLimit(value: bigint): number | undefined {
-  return value > 0n && value <= BigInt(Number.MAX_SAFE_INTEGER)
+  return value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER)
     ? Number(value)
     : undefined;
 }

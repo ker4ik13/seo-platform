@@ -2,9 +2,11 @@ import type {
   CreateProjectInput,
   CreateWorkspaceInput,
   DeleteProjectInput,
+  ProjectLogoContentType,
   UpdateProjectInput,
   UpdateWorkspaceInput
 } from "@seo-platform/contracts";
+import { projectLogoContentTypes } from "@seo-platform/contracts";
 import {
   inputObject,
   optionalBooleanField,
@@ -12,17 +14,19 @@ import {
   stringField
 } from "../common/input.js";
 import { validationError } from "../common/domain-error.js";
+import {
+  avatarImageInput,
+  type AvatarImageInput
+} from "../common/avatar-image.js";
+import {
+  detectedProjectLogoContentType,
+  PROJECT_LOGO_MAX_BYTES
+} from "./project-logo-image.js";
 
-const WORKSPACE_AVATAR_MAX_BYTES = 512 * 1_024;
-const WORKSPACE_AVATAR_CONTENT_TYPES = [
-  "image/png",
-  "image/jpeg",
-  "image/webp"
-] as const;
-type WorkspaceAvatarContentType = (typeof WORKSPACE_AVATAR_CONTENT_TYPES)[number];
+export type WorkspaceAvatarInput = AvatarImageInput;
 
-export interface WorkspaceAvatarInput {
-  readonly contentType: WorkspaceAvatarContentType;
+export interface ProjectLogoInput {
+  readonly contentType: ProjectLogoContentType;
   readonly data: Buffer;
 }
 
@@ -93,36 +97,52 @@ export function updateWorkspaceInput(value: unknown): UpdateWorkspaceInput {
 }
 
 export function updateWorkspaceAvatarInput(value: unknown): WorkspaceAvatarInput {
+  return avatarImageInput(value);
+}
+
+export function updateProjectLogoInput(value: unknown): ProjectLogoInput {
   const input = inputObject(value);
   const contentType = stringField(input, "contentType", { min: 9, max: 32 });
-  if (!isWorkspaceAvatarContentType(contentType)) {
+  if (!isProjectLogoContentType(contentType)) {
     throw validationError(
       "contentType",
       "UNSUPPORTED_IMAGE_TYPE",
-      "Use a PNG, JPEG or WebP image"
+      "Use an SVG, PNG, JPEG, WebP, ICO, GIF or AVIF image"
     );
   }
   const encoded = stringField(input, "data", { min: 4, max: 700_000 });
   if (!canonicalBase64(encoded)) {
-    throw validationError("data", "INVALID_BASE64", "Use canonical base64 image data");
+    throw validationError(
+      "data",
+      "INVALID_BASE64",
+      "Use canonical base64 image data"
+    );
   }
   const data = Buffer.from(encoded, "base64");
-  if (data.byteLength > WORKSPACE_AVATAR_MAX_BYTES) {
-    throw validationError("data", "FILE_TOO_LARGE", "Avatar must not exceed 512 KiB");
+  if (data.byteLength > PROJECT_LOGO_MAX_BYTES) {
+    throw validationError(
+      "data",
+      "FILE_TOO_LARGE",
+      "Project logo must not exceed 512 KiB"
+    );
   }
-  if (data.byteLength < 32 || !matchesImageSignature(contentType, data)) {
-    throw validationError("data", "INVALID_IMAGE", "Image contents do not match its content type");
+  if (
+    data.byteLength < 32 ||
+    detectedProjectLogoContentType(data) !== contentType
+  ) {
+    throw validationError(
+      "data",
+      "INVALID_IMAGE",
+      "Image contents do not match its content type or are unsafe"
+    );
   }
-  return {
-    contentType,
-    data
-  };
+  return { contentType, data };
 }
 
-function isWorkspaceAvatarContentType(
+function isProjectLogoContentType(
   value: string
-): value is WorkspaceAvatarContentType {
-  return WORKSPACE_AVATAR_CONTENT_TYPES.some((contentType) => contentType === value);
+): value is ProjectLogoContentType {
+  return projectLogoContentTypes.some((contentType) => contentType === value);
 }
 
 function canonicalBase64(value: string): boolean {
@@ -131,17 +151,6 @@ function canonicalBase64(value: string): boolean {
     /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u.test(value) &&
     Buffer.from(value, "base64").toString("base64") === value
   );
-}
-
-function matchesImageSignature(contentType: string, data: Buffer): boolean {
-  if (contentType === "image/png") {
-    return data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  }
-  if (contentType === "image/jpeg") {
-    return data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
-  }
-  return data.subarray(0, 4).toString("ascii") === "RIFF" &&
-    data.subarray(8, 12).toString("ascii") === "WEBP";
 }
 
 export function createProjectInput(value: unknown): CreateProjectInput {

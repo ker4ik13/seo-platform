@@ -4,9 +4,12 @@ import {
   Delete,
   Get,
   HttpCode,
+  Logger,
+  Optional,
   Patch,
   Post,
   Put,
+  ServiceUnavailableException,
   Req,
   Res,
   UseGuards
@@ -15,6 +18,7 @@ import type {
   ApiCollectionResponse,
   ApiResponse,
   ProjectDeletionResult,
+  ProjectOperationActivityCollection,
   ProjectSummary,
   WorkspaceSummary
 } from "@seo-platform/contracts";
@@ -25,7 +29,6 @@ import {
 } from "../common/api-response.js";
 import { requiredVersion } from "../common/version-precondition.js";
 import { CurrentPrincipal } from "../identity/current-principal.js";
-import { RecentAuthenticationService } from "../identity/recent-authentication.service.js";
 import type { AuthenticatedPrincipal } from "../identity/identity.types.js";
 import { requestContext } from "../identity/request-context.js";
 import {
@@ -41,16 +44,22 @@ import {
   createWorkspaceInput,
   deleteProjectInput,
   updateProjectInput,
+  updateProjectLogoInput,
   updateWorkspaceAvatarInput,
   updateWorkspaceInput
 } from "./tenant-input.js";
 import { TenantService } from "./tenant.service.js";
+import { ProjectLogoService } from "./project-logo.service.js";
+import { JobsClient } from "../jobs/jobs.client.js";
 
 @Controller("api/v1")
 export class TenantController {
+  private readonly logger = new Logger(TenantController.name);
+
   public constructor(
     private readonly tenants: TenantService,
-    private readonly recentAuthentication: RecentAuthenticationService
+    private readonly projectLogos: ProjectLogoService,
+    @Optional() private readonly jobs?: JobsClient
   ) {}
 
   @Get("workspaces")
@@ -184,13 +193,79 @@ export class TenantController {
     @Req() request: TenantRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiCollectionResponse<ProjectSummary>> {
+    const workspaceId = requiredWorkspaceId(request);
+    const projects = await this.tenants.listProjects(
+      principal.userId,
+      workspaceId
+    );
+    let activity = new Map<string, number>();
+    if (this.jobs && request.tenantAuthorization) {
+      try {
+        activity = new Map(
+          await this.jobs.listProjectOperationActivity({
+            tenant: request.tenantAuthorization,
+            actorId: principal.userId,
+            requestId: requestContext(request).requestId
+          })
+        );
+      } catch {
+        this.logger.warn(
+          `Project operation activity is unavailable for request ${requestContext(request).requestId}`
+        );
+      }
+    }
     return collectionResponse(
       request,
-      await this.tenants.listProjects(
-        principal.userId,
-        requiredWorkspaceId(request)
-      )
+      projects.map((project) => {
+        const activeOperationCount = activity.get(project.id);
+        return activeOperationCount
+          ? { ...project, activeOperationCount }
+          : project;
+      })
     );
+  }
+
+  @Get("workspaces/:workspaceId/operation-activity")
+  @RequirePermission("project.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async projectOperationActivity(
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<ProjectOperationActivityCollection>> {
+    const workspaceId = requiredWorkspaceId(request);
+    if (!this.jobs || !request.tenantAuthorization) {
+      throw new ServiceUnavailableException(
+        "Operation activity is temporarily unavailable"
+      );
+    }
+    const visibleProjects = await this.tenants.listProjects(
+      principal.userId,
+      workspaceId
+    );
+    const visibleProjectIds = new Set(visibleProjects.map(({ id }) => id));
+    let activity: ReadonlyMap<string, number>;
+    try {
+      activity = await this.jobs.listProjectOperationActivity({
+        tenant: request.tenantAuthorization,
+        actorId: principal.userId,
+        requestId: requestContext(request).requestId
+      });
+    } catch {
+      this.logger.warn(
+        `Authoritative operation activity is unavailable for request ${requestContext(request).requestId}`
+      );
+      throw new ServiceUnavailableException(
+        "Operation activity is temporarily unavailable"
+      );
+    }
+    return apiResponse(request, {
+      projects: [...activity]
+        .filter(([projectId]) => visibleProjectIds.has(projectId))
+        .map(([projectId, activeOperationCount]) => ({
+          projectId,
+          activeOperationCount
+        }))
+    });
   }
 
   @Post("workspaces/:workspaceId/projects")
@@ -242,6 +317,71 @@ export class TenantController {
       requiredProjectId(request),
       requiredVersion(headerValue(request, "if-match")),
       updateProjectInput(body),
+      requestContext(request)
+    );
+    setEntityVersion(reply, project.version);
+    return apiResponse(
+      request,
+      authorizedProjectSummary(request, project),
+      project.version
+    );
+  }
+
+  @Get("projects/:projectId/logo")
+  @RequirePermission("project.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async projectLogo(
+    @Req() request: TenantRequest,
+    @Res() reply: FastifyReply
+  ): Promise<void> {
+    const logo = await this.projectLogos.get(requiredProjectId(request));
+    reply
+      .header("Cache-Control", "private, max-age=3600")
+      .header("Content-Type", logo.contentType)
+      .header("Content-Disposition", `inline; filename="project-logo${logoExtension(logo.contentType)}"`)
+      .header("Content-Security-Policy", "default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox")
+      .header("Cross-Origin-Resource-Policy", "same-origin")
+      .header("Last-Modified", logo.updatedAt.toUTCString())
+      .header("X-Content-Type-Options", "nosniff")
+      .send(logo.data);
+  }
+
+  @Put("projects/:projectId/logo")
+  @RequirePermission("project.update")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async updateProjectLogo(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<ProjectSummary>> {
+    const project = await this.projectLogos.update(
+      principal.userId,
+      requiredProjectId(request),
+      requiredVersion(headerValue(request, "if-match")),
+      updateProjectLogoInput(body),
+      requestContext(request)
+    );
+    setEntityVersion(reply, project.version);
+    return apiResponse(
+      request,
+      authorizedProjectSummary(request, project),
+      project.version
+    );
+  }
+
+  @Delete("projects/:projectId/logo")
+  @RequirePermission("project.update")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async deleteProjectLogo(
+    @Req() request: TenantRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<ProjectSummary>> {
+    const project = await this.projectLogos.delete(
+      principal.userId,
+      requiredProjectId(request),
+      requiredVersion(headerValue(request, "if-match")),
       requestContext(request)
     );
     setEntityVersion(reply, project.version);
@@ -306,7 +446,6 @@ export class TenantController {
     @Req() request: TenantRequest,
     @CurrentPrincipal() principal: AuthenticatedPrincipal
   ): Promise<ApiResponse<ProjectDeletionResult>> {
-    this.recentAuthentication.assert(principal);
     const result = await this.tenants.deleteProject(
       principal.userId,
       requiredProjectId(request),
@@ -342,4 +481,16 @@ function authorizedProjectSummary(
 
 function setEntityVersion(reply: FastifyReply, version: number): void {
   reply.header("ETag", `"v${version}"`);
+}
+
+function logoExtension(contentType: string): string {
+  return {
+    "image/svg+xml": ".svg",
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/x-icon": ".ico",
+    "image/gif": ".gif",
+    "image/avif": ".avif"
+  }[contentType] ?? "";
 }

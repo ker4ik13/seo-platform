@@ -9,6 +9,21 @@ import {
 
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,5000}$/u;
 
+export function keywordTagOptionsQuery(
+  value: unknown
+): Readonly<{ search?: string }> {
+  const query =
+    typeof value === "object" && value !== null && !Array.isArray(value)
+      ? (value as Readonly<Record<string, unknown>>)
+      : {};
+  const search = optionalSingleString(query.search, "search")
+    ?.normalize("NFKC")
+    .toLocaleLowerCase()
+    .trim();
+  if (search && search.length > 160) invalid("search");
+  return search ? { search } : {};
+}
+
 export function keywordListQuery(value: unknown): KeywordListQuery {
   const query =
     typeof value === "object" && value !== null && !Array.isArray(value)
@@ -19,6 +34,10 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   const search = optionalSingleString(query.search, "search")?.normalize(
     "NFKC"
   );
+  const tag = optionalSingleString(query.tag, "tag")
+    ?.normalize("NFKC")
+    .toLocaleLowerCase()
+    .trim();
   const intent = optionalEnum(
     query.intent,
     "intent",
@@ -45,6 +64,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
   }
   if (cursor && !CURSOR_PATTERN.test(cursor)) invalid("cursor");
   if (search && search.length > 200) invalid("search");
+  if (tag && tag.length > 160) invalid("tag");
   if (
     priorityMin !== undefined &&
     (priorityMin < 0 || priorityMin > 100)
@@ -69,6 +89,7 @@ export function keywordListQuery(value: unknown): KeywordListQuery {
     limit: parsedLimit,
     ...(cursor ? { cursor } : {}),
     ...(search ? { search } : {}),
+    ...(tag ? { tag } : {}),
     ...(intent ? { intent } : {}),
     ...(groupId ? { groupId } : {}),
     ...(groupIds.length > 0 ? { groupIds } : {}),
@@ -85,7 +106,7 @@ function optionalUuidList(value: unknown, field: string): readonly string[] {
   const parsed = optionalSingleString(value, field);
   if (parsed === undefined) return [];
   const values = parsed.split(",").map((entry) => entry.trim()).filter(Boolean);
-  if (values.length < 2 || values.length > 50) invalid(field);
+  if (values.length < 2) invalid(field);
   const ids = values.map((entry) => optionalUuid(entry, field));
   if (ids.some((id) => id === undefined)) invalid(field);
   const canonical = ids as string[];

@@ -20,7 +20,8 @@ import {
   technicalCrawlMaxUrlLimit,
   technicalCrawlPurposes,
   technicalCrawlQueryPolicies,
-  technicalCrawlStartUrlLimit
+  technicalCrawlStartUrlLimit,
+  adminOperationStatuses
 } from "@seo-platform/contracts";
 import type {
   AutomationRunCollection,
@@ -107,7 +108,12 @@ import type {
   UpsertWorkspaceConnectorBindingInput,
   WorkspaceConnectorBinding,
   WorkspaceConnectorRoute,
-  WorkspaceConnectorRoutingSettings
+  WorkspaceConnectorRoutingSettings,
+  AdminOperationStatus,
+  AdminOperationStatusGroup,
+  AdminOperationResultMetrics,
+  InternalAdminOperationSearchResult,
+  InternalAdminOperationSummary
 } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
@@ -173,6 +179,7 @@ const MAX_PROJECT_CREDENTIAL_OPTIONS = 500;
  * misconfigured dependency from making Platform API buffer unbounded JSON.
  */
 const MAX_JOBS_RESPONSE_BYTES = 2 * 1024 * 1024;
+const ADMIN_OPERATION_STATUSES = new Set<string>(adminOperationStatuses);
 
 @Injectable()
 export class JobsClient {
@@ -289,6 +296,61 @@ export class JobsClient {
     );
   }
 
+  public async listProjectOperationActivity(
+    context: InternalContext
+  ): Promise<ReadonlyMap<string, number>> {
+    const value = await this.request<unknown>(
+      "GET",
+      workspaceOperationActivityPath(context.tenant.workspaceId),
+      context
+    );
+    const input = exactRecord(value, ["projects"]);
+    if (!Array.isArray(input.projects) || input.projects.length > 1_000) {
+      throw invalidJobsResponse();
+    }
+    const counts = new Map<string, number>();
+    for (const value of input.projects) {
+      const activity = exactRecord(value, ["projectId", "activeOperationCount"]);
+      const projectId = uuidValue(activity.projectId);
+      if (
+        counts.has(projectId) ||
+        !Number.isSafeInteger(activity.activeOperationCount) ||
+        Number(activity.activeOperationCount) < 1 ||
+        Number(activity.activeOperationCount) > 100_000
+      ) {
+        throw invalidJobsResponse();
+      }
+      counts.set(projectId, Number(activity.activeOperationCount));
+    }
+    return counts;
+  }
+
+  public async listAdminOperations(
+    actorId: string,
+    requestId: string,
+    query: {
+      readonly statusGroup: AdminOperationStatusGroup;
+      readonly type?: string;
+      readonly cursor?: string;
+      readonly limit: number;
+    }
+  ): Promise<InternalAdminOperationSearchResult> {
+    const url = new URL(
+      "/internal/v1/platform-admin/operations",
+      this.config.services.jobs
+    );
+    url.searchParams.set("status", query.statusGroup);
+    url.searchParams.set("limit", String(query.limit));
+    if (query.type) url.searchParams.set("type", query.type);
+    if (query.cursor) url.searchParams.set("cursor", query.cursor);
+    const value = await this.requestAdmin<unknown>(
+      url.toString(),
+      actorId,
+      requestId
+    );
+    return adminOperationSearchResult(value, query.limit);
+  }
+
   public async createFrequencyCollection(
     context: InternalContext,
     input: CreateFrequencyCollectionInput,
@@ -340,22 +402,32 @@ export class JobsClient {
 
   public async getFrequencyOperationScope(
     context: InternalContext,
-    jobId: string
+    jobId: string,
+    limit: number,
+    cursor?: string
   ): Promise<InternalFrequencyOperationScope> {
     const projectId = requiredProjectId(context.tenant);
-    const value = await this.request<unknown>(
-      "GET",
+    const url = new URL(
       `${frequencyCollectionPath(
         context.tenant.workspaceId,
         projectId
       )}/${encodeURIComponent(jobId)}/result-scope`,
+      this.config.services.jobs
+    );
+    url.searchParams.set("limit", String(limit));
+    if (cursor !== undefined) url.searchParams.set("cursor", cursor);
+    const value = await this.request<unknown>(
+      "GET",
+      url.toString(),
       context
     );
     return scopedFrequencyOperationScope(
       value,
       context.tenant.workspaceId,
       projectId,
-      jobId
+      jobId,
+      limit,
+      cursor
     );
   }
 
@@ -1461,6 +1533,37 @@ export class JobsClient {
     );
   }
 
+  private async requestAdmin<Data>(
+    path: string,
+    actorId: string,
+    requestId: string
+  ): Promise<Data> {
+    const token = this.config.jobsApiToken;
+    if (!token) throw dependencyUnavailable();
+    const headers = new Headers({
+      Accept: "application/json",
+      "X-Internal-Token": token,
+      "X-Request-Id": requestId,
+      "X-Actor-Id": actorId
+    });
+    let response: Response;
+    try {
+      response = await fetch(new URL(path, this.config.services.jobs), {
+        method: "GET",
+        headers,
+        redirect: "error",
+        signal: AbortSignal.timeout(this.config.dependencyTimeoutMs)
+      });
+    } catch {
+      throw dependencyUnavailable();
+    }
+    const payload = await boundedJobsJson(response);
+    if (!response.ok) throw upstreamError(response.status, payload);
+    const envelope = allowlistedRecord(payload, ["data", "meta"]);
+    if (!Object.hasOwn(envelope, "data")) throw invalidJobsResponse();
+    return envelope.data as Data;
+  }
+
   private async request<Data>(
     method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
     path: string,
@@ -1570,6 +1673,195 @@ async function cancelResponseBody(response: Response): Promise<void> {
   await response.body?.cancel().catch(() => undefined);
 }
 
+function adminOperationSearchResult(
+  value: unknown,
+  limit: number
+): InternalAdminOperationSearchResult {
+  const input = allowlistedRecord(value, ["data", "nextCursor", "totals", "types"]);
+  if (
+    !Array.isArray(input.data) ||
+    input.data.length > limit ||
+    !Array.isArray(input.types) ||
+    input.types.length > 50 ||
+    (input.nextCursor !== undefined &&
+      (typeof input.nextCursor !== "string" || !UUID_PATTERN.test(input.nextCursor)))
+  ) {
+    throw invalidJobsResponse();
+  }
+  const totals = exactRecord(input.totals, [
+    "total",
+    "active",
+    "completed",
+    "attention"
+  ]);
+  const parsedTotals = {
+    total: nonNegativeInteger(totals.total, 1_000_000_000),
+    active: nonNegativeInteger(totals.active, 1_000_000_000),
+    completed: nonNegativeInteger(totals.completed, 1_000_000_000),
+    attention: nonNegativeInteger(totals.attention, 1_000_000_000)
+  };
+  const seenTypes = new Set<string>();
+  const types = input.types.map((value) => {
+    const item = exactRecord(value, ["type", "count"]);
+    if (
+      typeof item.type !== "string" ||
+      !/^[A-Z][A-Z0-9_]{1,99}$/u.test(item.type) ||
+      seenTypes.has(item.type)
+    ) {
+      throw invalidJobsResponse();
+    }
+    seenTypes.add(item.type);
+    return {
+      type: item.type,
+      count: nonNegativeInteger(item.count, 1_000_000_000)
+    };
+  });
+  return {
+    data: input.data.map(adminOperationSummary),
+    ...(typeof input.nextCursor === "string"
+      ? { nextCursor: input.nextCursor.toLowerCase() }
+      : {}),
+    totals: parsedTotals,
+    types
+  };
+}
+
+function adminOperationSummary(value: unknown): InternalAdminOperationSummary {
+  const input = allowlistedRecord(value, [
+    "id",
+    "workspaceId",
+    "projectId",
+    "actorId",
+    "type",
+    "status",
+    "stage",
+    "provider",
+    "progress",
+    "result",
+    "errorCode",
+    "actualCostMicro",
+    "currency",
+    "attempt",
+    "maxAttempts",
+    "createdAt",
+    "queuedAt",
+    "startedAt",
+    "finishedAt",
+    "updatedAt"
+  ]);
+  if (
+    typeof input.type !== "string" ||
+    !/^[A-Z][A-Z0-9_]{1,99}$/u.test(input.type) ||
+    typeof input.status !== "string" ||
+    !ADMIN_OPERATION_STATUSES.has(input.status) ||
+    (input.stage !== undefined && !shortSafeString(input.stage, 64)) ||
+    (input.provider !== undefined && !shortSafeString(input.provider, 64)) ||
+    (input.errorCode !== undefined &&
+      (typeof input.errorCode !== "string" ||
+        !/^[A-Z][A-Z0-9_]{0,99}$/u.test(input.errorCode))) ||
+    (input.actualCostMicro !== undefined &&
+      !decimalString(input.actualCostMicro)) ||
+    (input.currency !== undefined &&
+      (typeof input.currency !== "string" || !/^[A-Z]{3}$/u.test(input.currency)))
+  ) {
+    throw invalidJobsResponse();
+  }
+  const progress = allowlistedRecord(input.progress, ["current", "total", "unit"]);
+  if (
+    !decimalString(progress.current) ||
+    (progress.total !== undefined && !decimalString(progress.total)) ||
+    (progress.unit !== undefined && !shortSafeString(progress.unit, 32))
+  ) {
+    throw invalidJobsResponse();
+  }
+  const resultInput = allowlistedRecord(input.result, [
+    "processed",
+    "succeeded",
+    "failed",
+    "found",
+    "notFound",
+    "issues"
+  ]);
+  const result = Object.fromEntries(
+    Object.entries(resultInput).map(([key, count]) => [
+      key,
+      nonNegativeInteger(count, Number.MAX_SAFE_INTEGER)
+    ])
+  ) as AdminOperationResultMetrics;
+  const projectId = optionalUuid(input.projectId);
+  const actorId = optionalUuid(input.actorId);
+  const queuedAt = optionalIsoDate(input.queuedAt);
+  const startedAt = optionalIsoDate(input.startedAt);
+  const finishedAt = optionalIsoDate(input.finishedAt);
+  return {
+    id: uuidValue(input.id),
+    workspaceId: uuidValue(input.workspaceId),
+    ...(projectId ? { projectId } : {}),
+    ...(actorId ? { actorId } : {}),
+    type: input.type,
+    status: input.status as AdminOperationStatus,
+    ...(typeof input.stage === "string" ? { stage: input.stage } : {}),
+    ...(typeof input.provider === "string" ? { provider: input.provider } : {}),
+    progress: {
+      current: String(progress.current),
+      ...(typeof progress.total === "string" ? { total: progress.total } : {}),
+      ...(typeof progress.unit === "string" ? { unit: progress.unit } : {})
+    },
+    result,
+    ...(typeof input.errorCode === "string" ? { errorCode: input.errorCode } : {}),
+    ...(typeof input.actualCostMicro === "string"
+      ? { actualCostMicro: input.actualCostMicro }
+      : {}),
+    ...(typeof input.currency === "string" ? { currency: input.currency } : {}),
+    attempt: nonNegativeInteger(input.attempt, 1_000_000),
+    maxAttempts: nonNegativeInteger(input.maxAttempts, 1_000_000),
+    createdAt: isoDateValue(input.createdAt),
+    ...(queuedAt ? { queuedAt } : {}),
+    ...(startedAt ? { startedAt } : {}),
+    ...(finishedAt ? { finishedAt } : {}),
+    updatedAt: isoDateValue(input.updatedAt)
+  };
+}
+
+function allowlistedRecord(
+  value: unknown,
+  fields: readonly string[]
+): Readonly<Record<string, unknown>> {
+  const input = record(value);
+  const allowed = new Set(fields);
+  if (Object.keys(input).some((field) => !allowed.has(field))) {
+    throw invalidJobsResponse();
+  }
+  return input;
+}
+
+function nonNegativeInteger(value: unknown, maximum: number): number {
+  if (
+    !Number.isSafeInteger(value) ||
+    Number(value) < 0 ||
+    Number(value) > maximum
+  ) {
+    throw invalidJobsResponse();
+  }
+  return Number(value);
+}
+
+function decimalString(value: unknown): value is string {
+  return typeof value === "string" && /^(?:0|[1-9]\d{0,30})$/u.test(value);
+}
+
+function shortSafeString(value: unknown, maximum: number): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= maximum;
+}
+
+function optionalUuid(value: unknown): string | undefined {
+  return value === undefined ? undefined : uuidValue(value);
+}
+
+function optionalIsoDate(value: unknown): string | undefined {
+  return value === undefined ? undefined : isoDateValue(value);
+}
+
 function integrationPath(
   context: InternalContext,
   suffix: string
@@ -1603,6 +1895,12 @@ function projectTransferResetPath(
   return `/internal/v1/workspaces/${encodeURIComponent(
     workspaceId
   )}/projects/${encodeURIComponent(projectId)}/transfer-reset`;
+}
+
+function workspaceOperationActivityPath(workspaceId: string): string {
+  return `/internal/v1/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/operation-activity`;
 }
 
 function rankRunCollectionPath(

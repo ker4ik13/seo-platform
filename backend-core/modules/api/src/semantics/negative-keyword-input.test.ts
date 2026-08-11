@@ -24,7 +24,9 @@ test("normalizes a negative keyword preset and rejects duplicate words", () => {
       rules: {
         words: ["Москва", "Санкт- Петербург"],
         matchMode: "WHOLE_WORD",
-        caseSensitive: false
+        caseSensitive: false,
+        ignoreWordOrder: false,
+        ignorePunctuation: false
       }
     }
   );
@@ -55,4 +57,21 @@ test("requires an exact scope and preview hash before applying", () => {
     applyNegativeKeywordsInput({ ...command, previewHash: "a".repeat(64) }).previewHash,
     "a".repeat(64)
   );
+});
+
+test("accepts Key Collector compatible phrase settings", () => {
+  const input = createNegativeKeywordPresetInput({
+    name: "Города",
+    rules: {
+      words: ["санкт-петербург"],
+      matchMode: "WORD_FORM_PRECISE",
+      caseSensitive: false,
+      ignoreWordOrder: true,
+      ignorePunctuation: true
+    }
+  });
+
+  assert.equal(input.rules.matchMode, "WORD_FORM_PRECISE");
+  assert.equal(input.rules.ignoreWordOrder, true);
+  assert.equal(input.rules.ignorePunctuation, true);
 });

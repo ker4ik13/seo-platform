@@ -3,7 +3,7 @@ import test from "node:test";
 import {
   externalPageUrlPresentation,
   isSafeBrowserApiPath,
-  projectFaviconUrl,
+  projectLogoUrl,
   safeAppReturnTo
 } from "./app-path.ts";
 
@@ -49,24 +49,9 @@ test("presents an external ranking URL as a clickable path without its domain", 
   assert.equal(externalPageUrlPresentation("not a URL"), undefined);
 });
 
-test("builds only a safe HTTPS root favicon URL", () => {
+test("builds a same-origin versioned project logo URL", () => {
   assert.equal(
-    projectFaviconUrl("Example.COM."),
-    "https://example.com/favicon.svg"
+    projectLogoUrl("01900000-0000-7000-8000-000000000101", 12),
+    "/app/api/projects/01900000-0000-7000-8000-000000000101/logo?v=12"
   );
-  assert.equal(
-    projectFaviconUrl("xn--e1afmkfd.xn--p1ai"),
-    "https://xn--e1afmkfd.xn--p1ai/favicon.svg"
-  );
-  for (const domain of [
-    "localhost",
-    "admin.internal",
-    "127.0.0.1",
-    "example.test",
-    "example.com/path",
-    "example.com:8443",
-    "user@example.com"
-  ]) {
-    assert.equal(projectFaviconUrl(domain), undefined);
-  }
 });

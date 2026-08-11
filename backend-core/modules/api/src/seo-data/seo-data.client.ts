@@ -137,7 +137,8 @@ import {
   type InternalDeleteProjectNoteInput,
   type ProjectNoteCollection,
   type ProjectNoteSummary,
-  type PublicProjectNote
+  type PublicProjectNote,
+  type AdminProjectSemanticCounts
 } from "@seo-platform/contracts";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
 import { DomainError } from "../common/domain-error.js";
@@ -190,6 +191,10 @@ interface KeywordPage {
   readonly data: readonly SemanticKeywordListItem[];
   readonly page: ApiCollectionResponse<SemanticKeywordListItem>["page"];
 }
+
+const ADMIN_PROJECT_LIMIT = 50;
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export const SEO_DATA_REQUEST_TRANSPORT = Symbol(
   "SEO_DATA_REQUEST_TRANSPORT"
@@ -268,6 +273,7 @@ export class SeoDataClient {
     url.searchParams.set("limit", String(query.limit));
     if (query.cursor) url.searchParams.set("cursor", query.cursor);
     if (query.search) url.searchParams.set("search", query.search);
+    if (query.tag) url.searchParams.set("tag", query.tag);
     if (query.intent) url.searchParams.set("intent", query.intent);
     if (query.groupId) url.searchParams.set("groupId", query.groupId);
     if (query.groupIds?.length) {
@@ -290,6 +296,30 @@ export class SeoDataClient {
 
     const payload = await this.request("GET", url, context);
     return semanticKeywordPage(payload);
+  }
+
+  public async listKeywordTagOptions(
+    context: InternalContext,
+    search?: string
+  ): Promise<readonly string[]> {
+    const projectId = requiredProjectId(context.tenant);
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords/tag-options`,
+      this.config.services.seoData
+    );
+    if (search) url.searchParams.set("search", search);
+    const payload = await this.request("GET", url, context);
+    const data = responseData(payload);
+    if (
+      !Array.isArray(data) ||
+      data.length > 100 ||
+      !data.every(
+        (tag) => typeof tag === "string" && tag.length > 0 && tag.length <= 160
+      )
+    ) {
+      throw invalidResponse();
+    }
+    return data as readonly string[];
   }
 
   public async projectPositionSummary(
@@ -358,24 +388,31 @@ export class SeoDataClient {
 
   public async rankOperationResult(
     context: InternalContext,
-    jobId: string
+    jobId: string,
+    limit: number,
+    cursor?: string
   ): Promise<InternalRankOperationResult> {
     const scope = trackingScope(context);
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(
+        scope.projectId
+      )}/operation-results/rank/${encodeURIComponent(jobId)}`,
+      this.config.services.seoData
+    );
+    url.searchParams.set("limit", String(limit));
+    if (cursor !== undefined) url.searchParams.set("cursor", cursor);
     const payload = await this.request(
       "GET",
-      new URL(
-        `/internal/v1/projects/${encodeURIComponent(
-          scope.projectId
-        )}/operation-results/rank/${encodeURIComponent(jobId)}`,
-        this.config.services.seoData
-      ),
+      url,
       context
     );
     return scopedInternalRankOperationResult(
       responseData(payload),
       scope.workspaceId,
       scope.projectId,
-      jobId
+      jobId,
+      limit,
+      cursor
     );
   }
 
@@ -1790,6 +1827,97 @@ export class SeoDataClient {
     return publicProjectNote(responseData(payload));
   }
 
+  public async adminProjectCounts(
+    projectIds: readonly string[],
+    actorId: string,
+    requestId: string
+  ): Promise<readonly AdminProjectSemanticCounts[]> {
+    if (
+      projectIds.length === 0 ||
+      projectIds.length > ADMIN_PROJECT_LIMIT ||
+      new Set(projectIds).size !== projectIds.length ||
+      projectIds.some((projectId) => !UUID_PATTERN.test(projectId)) ||
+      !UUID_PATTERN.test(actorId)
+    ) {
+      throw new Error("Invalid platform admin project statistics request");
+    }
+    const payload = await this.platformAdminRequest(
+      new URL(
+        "/internal/v1/platform-admin/project-statistics",
+        this.config.services.seoData
+      ),
+      actorId,
+      requestId,
+      { projectIds }
+    );
+    const data = objectValue(responseData(payload));
+    if (!data || !Array.isArray(data.projects)) throw invalidResponse();
+    if (data.projects.length !== projectIds.length) throw invalidResponse();
+    const expected = new Set(projectIds.map((projectId) => projectId.toLowerCase()));
+    const seen = new Set<string>();
+    return data.projects.map((value) => {
+      const item = objectValue(value);
+      if (
+        !item ||
+        typeof item.projectId !== "string" ||
+        !UUID_PATTERN.test(item.projectId) ||
+        !expected.has(item.projectId.toLowerCase()) ||
+        seen.has(item.projectId.toLowerCase()) ||
+        !boundedInteger(item.keywordCount, 10_000_000) ||
+        !boundedInteger(item.folderCount, 1_000_000)
+      ) {
+        throw invalidResponse();
+      }
+      seen.add(item.projectId.toLowerCase());
+      return {
+        projectId: item.projectId.toLowerCase(),
+        keywordCount: Number(item.keywordCount),
+        folderCount: Number(item.folderCount)
+      };
+    });
+  }
+
+  private async platformAdminRequest(
+    url: URL,
+    actorId: string,
+    requestId: string,
+    body: unknown
+  ): Promise<unknown> {
+    const token = this.config.seoDataApiToken;
+    if (!token) throw dependencyUnavailable();
+    const headers = new Headers({
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "X-Internal-Token": token,
+      "X-Request-Id": requestId,
+      "X-Actor-Id": actorId
+    });
+    const serializedBody = JSON.stringify(body);
+    let response: SeoDataTransportResponse;
+    try {
+      response = this.transport
+        ? await this.transport.request({
+            method: "POST",
+            url,
+            headers: Object.fromEntries(headers.entries()),
+            body: serializedBody,
+            timeoutMs: this.config.dependencyTimeoutMs
+          })
+        : await fetch(url, {
+            method: "POST",
+            headers,
+            body: serializedBody,
+            redirect: "error",
+            signal: AbortSignal.timeout(this.config.dependencyTimeoutMs)
+          });
+    } catch {
+      throw dependencyUnavailable();
+    }
+    const payload = await response.json().catch(() => undefined);
+    if (!response.ok) throw upstreamError(response.status, payload);
+    return payload;
+  }
+
   private async publicRequest(url: URL, requestId: string): Promise<unknown> {
     const token = this.config.seoDataApiToken;
     if (!token) throw dependencyUnavailable();
@@ -2197,7 +2325,12 @@ export function semanticKeywordItem(
     typeof item.tagsTruncated !== "boolean" ||
     (item.trashed !== undefined && typeof item.trashed !== "boolean") ||
     (item.createOutcome !== undefined &&
-      !["CREATED", "RESTORED", "SKIPPED_EXISTING"].includes(
+      ![
+        "CREATED",
+        "RESTORED",
+        "LINKED_EXISTING",
+        "SKIPPED_EXISTING"
+      ].includes(
         String(item.createOutcome)
       )) ||
     typeof sourceMode !== "string" ||
@@ -2518,6 +2651,7 @@ export function semanticKeywordBulkCreateResult(
     "selected",
     "created",
     "restored",
+    "linked",
     "skipped",
     "rejected",
     "failed",
@@ -2547,6 +2681,7 @@ export function semanticKeywordBulkCreateResult(
     const successful = [
       "CREATED",
       "RESTORED",
+      "LINKED_EXISTING",
       "SKIPPED_EXISTING"
     ].includes(row.outcome);
     if (
@@ -2585,6 +2720,7 @@ export function semanticKeywordBulkCreateResult(
     selected: result.selected,
     created: result.created,
     restored: result.restored,
+    linked: result.linked,
     skipped: result.skipped,
     rejected: result.rejected,
     failed: result.failed
@@ -2600,6 +2736,7 @@ export function semanticKeywordBulkCreateResult(
     new Set(rows.map(({ index }) => index)).size !== rows.length ||
     Number(counts.created) !== count("CREATED") ||
     Number(counts.restored) !== count("RESTORED") ||
+    Number(counts.linked) !== count("LINKED_EXISTING") ||
     Number(counts.skipped) !== count("SKIPPED_EXISTING") ||
     Number(counts.rejected) !== count("REJECTED_EXISTING") ||
     Number(counts.failed) !== count("FAILED")
@@ -2610,6 +2747,7 @@ export function semanticKeywordBulkCreateResult(
     selected: Number(counts.selected),
     created: Number(counts.created),
     restored: Number(counts.restored),
+    linked: Number(counts.linked),
     skipped: Number(counts.skipped),
     rejected: Number(counts.rejected),
     failed: Number(counts.failed),
@@ -3488,6 +3626,8 @@ export function semanticNegativeKeywordPreset(
     typeof rules.matchMode !== "string" ||
     !semanticNegativeKeywordMatchModes.some((mode) => mode === rules.matchMode) ||
     typeof rules.caseSensitive !== "boolean" ||
+    (rules.ignoreWordOrder !== undefined && typeof rules.ignoreWordOrder !== "boolean") ||
+    (rules.ignorePunctuation !== undefined && typeof rules.ignorePunctuation !== "boolean") ||
     !Number.isSafeInteger(input.version) ||
     Number(input.version) < 1 ||
     !validDate(input.createdAt) ||
@@ -3499,7 +3639,9 @@ export function semanticNegativeKeywordPreset(
     rules: {
       words: rules.words as string[],
       matchMode: rules.matchMode as SemanticNegativeKeywordPreset["rules"]["matchMode"],
-      caseSensitive: rules.caseSensitive
+      caseSensitive: rules.caseSensitive,
+      ignoreWordOrder: rules.ignoreWordOrder === true,
+      ignorePunctuation: rules.ignorePunctuation === true
     },
     version: Number(input.version),
     createdAt: input.createdAt,
@@ -3609,6 +3751,7 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
   ]);
   const filters = exactRecord(config.filters, [
     "search",
+    "tag",
     "intent",
     "groupId",
     "clusterId",
@@ -3642,6 +3785,8 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     (filters.search !== undefined &&
       (typeof filters.search !== "string" ||
         filters.search.length > 200)) ||
+    (filters.tag !== undefined &&
+      (typeof filters.tag !== "string" || filters.tag.length > 160)) ||
     (filters.intent !== undefined &&
       (typeof filters.intent !== "string" ||
         !semanticKeywordIntents.some(
@@ -3660,7 +3805,7 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     (typeof filters.priorityMin === "number" &&
       typeof filters.priorityMax === "number" &&
       filters.priorityMin > filters.priorityMax) ||
-    filterKeys.length > 8
+    filterKeys.length > 9
   ) {
     throw invalidResponse();
   }

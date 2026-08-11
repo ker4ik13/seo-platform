@@ -333,6 +333,66 @@ test("filters a keyword page by the union of selected groups", async () => {
   assert.equal(result.page.totalApprox, 0);
 });
 
+test("projects a shared canonical keyword through the currently opened group", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000093";
+  const sourceGroupId = "01900000-0000-7000-8000-000000000094";
+  const openedGroupId = "01900000-0000-7000-8000-000000000095";
+  const row = {
+    ...keyword(keywordId, "2026-08-08T10:00:00Z"),
+    targetPageId: null,
+    typedCustomValues: [],
+    memberships: [
+      {
+        group: {
+          id: sourceGroupId,
+          path: "Первая папка",
+          name: "Первая папка",
+          systemKind: null
+        }
+      }
+    ]
+  };
+  const service = new KeywordService(
+    {
+      keywordGroup: {
+        findFirst: async () => ({ systemKind: null })
+      },
+      keyword: {
+        findMany: async () => [row],
+        count: async () => 1
+      },
+      trackingContextKeywordAssignment: { findMany: async () => [] },
+      frequencySnapshot: { findMany: async () => [] },
+      currentRank: { findMany: async () => [] },
+      keywordGroupMembership: {
+        findMany: async () => [
+          {
+            keywordId,
+            group: {
+              id: openedGroupId,
+              path: "Вторая папка",
+              name: "Вторая папка"
+            }
+          }
+        ]
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  const result = await service.list(
+    workspaceId,
+    projectId,
+    { limit: 100, groupId: openedGroupId },
+    "request-shared-keyword"
+  );
+
+  assert.equal(result.data.length, 1);
+  assert.equal(result.data[0]?.id, keywordId);
+  assert.equal(result.data[0]?.groupId, openedGroupId);
+  assert.equal(result.data[0]?.groupPath, "Вторая папка");
+});
+
 test("projects imported Key Collector positions without poisoning keyword insights", async () => {
   const keywordId = "01900000-0000-7000-8000-000000000082";
   const contextId = "01900000-0000-7000-8000-000000000083";
@@ -430,6 +490,109 @@ test("orders source sorting on the server before cursor pagination", async () =>
   assert.equal(result.page.totalApprox, 0);
 });
 
+test("filters tags case-insensitively through their normalized names", async () => {
+  let observedWhere: unknown;
+  const service = new KeywordService(
+    {
+      keyword: {
+        findMany: async ({ where }: { where: unknown }) => {
+          observedWhere = where;
+          return [];
+        },
+        count: async () => 0
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  await service.list(
+    workspaceId,
+    projectId,
+    { limit: 100, tag: "  ПРОМО  " },
+    "request-tag-filter"
+  );
+
+  assert.deepEqual(
+    (observedWhere as {
+      tags?: {
+        some?: { tag?: { normalizedName?: unknown } };
+      };
+    }).tags?.some?.tag?.normalizedName,
+    { contains: "промо" }
+  );
+});
+
+test("returns project tag options using a normalized substring", async () => {
+  let observedWhere: unknown;
+  const service = new KeywordService(
+    {
+      tag: {
+        findMany: async ({ where }: { where: unknown }) => {
+          observedWhere = where;
+          return [{ name: "Бренд" }, { name: "брендовый" }];
+        }
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  assert.deepEqual(
+    await service.tagOptions(workspaceId, projectId, "  БРЕНД  "),
+    ["Бренд", "брендовый"]
+  );
+  assert.deepEqual(
+    (observedWhere as { normalizedName?: unknown }).normalizedName,
+    { contains: "бренд" }
+  );
+});
+
+test("sorts tags by the first normalized active tag on the server", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000013";
+  const rawQueries: Prisma.Sql[] = [];
+  const service = new KeywordService(
+    {
+      $queryRaw: async (
+        strings: TemplateStringsArray,
+        ...values: unknown[]
+      ) => {
+        rawQueries.push(Prisma.sql(strings, ...values));
+        return [{ id: keywordId, sort_value: "бренд" }];
+      },
+      keyword: {
+        findMany: async () => [{
+          ...keyword(keywordId, "2026-08-01T09:00:00.000Z"),
+          targetPageId: null,
+          typedCustomValues: []
+        }],
+        count: async () => 1
+      },
+      trackingContextKeywordAssignment: { findMany: async () => [] },
+      frequencySnapshot: { findMany: async () => [] },
+      currentRank: { findMany: async () => [] }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  const result = await service.list(
+    workspaceId,
+    projectId,
+    { limit: 100, sort: "TAGS_ASC", tag: "БРЕНД" },
+    "request-tag-sort"
+  );
+
+  assert.equal(result.data[0]?.id, keywordId);
+  assert.match(rawQueries[0]?.sql ?? "", /MIN\(t\.normalized_name\)/u);
+  assert.match(
+    rawQueries[0]?.sql ?? "",
+    /strpos\(filter_tag\.normalized_name,/u
+  );
+  assert.match(
+    rawQueries[0]?.sql ?? "",
+    /ORDER BY ranked\.sort_value ASC, ranked\.id ASC/u
+  );
+  assert.ok(rawQueries[0]?.values.includes("бренд"));
+});
+
 test("sorts by the latest engine result and keeps missing positions last", async () => {
   const keywordId = "01900000-0000-7000-8000-000000000012";
   const latestContextId = "01900000-0000-7000-8000-000000000072";
@@ -517,14 +680,12 @@ test("sorts by the latest engine result and keeps missing positions last", async
 
   assert.equal(rawQueries.length, 2);
   for (const query of rawQueries) {
-    assert.match(
-      query.sql,
-      /CASE WHEN cr\.found THEN cr\.position::bigint END AS metric/u
-    );
-    assert.doesNotMatch(query.sql, /AND cr\.found = TRUE/u);
+    assert.match(query.sql, /latest_rank\.found/u);
+    assert.match(query.sql, /historical_position/u);
+    assert.match(query.sql, /previous\.found = TRUE/u);
   }
-  assert.ok(rawQueries[0]?.values.includes(9_223_372_036_854_775_807n));
-  assert.ok(rawQueries[1]?.values.includes(-1n));
+  assert.ok(rawQueries[0]?.values.includes(2_000_000n));
+  assert.ok(rawQueries[1]?.values.includes(0n));
   assert.match(
     rawQueries[0]?.sql ?? "",
     /ORDER BY ranked\.sort_value ASC, ranked\.id ASC/u
@@ -768,6 +929,97 @@ test("skips active and trashed duplicates without capacity or restore writes", a
       );
     }
   }
+});
+
+test("links an active canonical keyword to another regular group", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000086";
+  const targetGroupId = "01900000-0000-7000-8000-000000000087";
+  const existing = {
+    ...keyword(keywordId, "2026-08-01T10:00:00Z"),
+    typedCustomValues: [],
+    memberships: [
+      {
+        group: {
+          id: "01900000-0000-7000-8000-000000000030",
+          path: "Услуги / SEO",
+          name: "SEO",
+          systemKind: null
+        }
+      }
+    ]
+  };
+  let createdMembership: unknown;
+  let removedUngrouped: unknown;
+  const transaction = {
+    $executeRaw: async () => 1,
+    $queryRaw: async () => [{ id: keywordId }],
+    keyword: {
+      findFirst: async () => existing,
+      findUnique: async () => existing,
+      count: async () => {
+        throw new Error("Linking an existing keyword must not consume capacity");
+      },
+      create: async () => {
+        throw new Error("Linking must not create another keyword identity");
+      }
+    },
+    keywordGroup: {
+      findFirst: async () => ({
+        id: targetGroupId,
+        path: "Услуги / Продвижение",
+        name: "Продвижение",
+        systemKind: null
+      })
+    },
+    keywordGroupMembership: {
+      findFirst: async () => null,
+      create: async ({ data }: { data: unknown }) => {
+        createdMembership = data;
+        return data;
+      },
+      deleteMany: async ({ where }: { where: unknown }) => {
+        removedUngrouped = where;
+        return { count: 0 };
+      }
+    },
+    page: {
+      findFirst: async () => ({ url: "https://example.com/seo" })
+    },
+    trackingContextKeywordAssignment: {
+      findFirst: async () => null
+    }
+  };
+  const service = new KeywordService(
+    {
+      $transaction: async (
+        callback: (client: typeof transaction) => unknown
+      ) => callback(transaction)
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  const result = await service.create({
+    ...createInput("ADD_TO_GROUP"),
+    groupId: targetGroupId
+  });
+
+  assert.equal(result.id, keywordId);
+  assert.equal(result.groupId, targetGroupId);
+  assert.equal(result.createOutcome, "LINKED_EXISTING");
+  assert.deepEqual(createdMembership, {
+    projectId,
+    keywordId,
+    groupId: targetGroupId
+  });
+  assert.deepEqual(removedUngrouped, {
+    projectId,
+    keywordId,
+    group: {
+      workspaceId,
+      projectId,
+      systemKind: "UNGROUPED"
+    }
+  });
 });
 
 test("restores a trashed duplicate only with the explicit recovery policy", async () => {

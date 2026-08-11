@@ -82,6 +82,37 @@ test("accepts exact frequency and crawl result projections", () => {
   assert.equal(crawl.rows[0]?.indexability, "BLOCKED_ROBOTS");
 });
 
+test("accepts a rank result page beyond the former 1,000-row boundary", () => {
+  const result = scopedInternalRankOperationResult(
+    {
+      workspaceId,
+      projectId,
+      jobId,
+      trackingContextId: "01900000-0000-7000-8000-000000000006",
+      contextName: "Google · Москва",
+      execution: execution(),
+      rows: [
+        {
+          sequence: 1_000,
+          keywordId,
+          keyword: "seo аудит",
+          state: "PENDING",
+          dataQualityFlags: []
+        }
+      ],
+      page: { hasNext: false }
+    },
+    workspaceId,
+    projectId,
+    jobId,
+    200,
+    "999"
+  );
+
+  assert.equal(result.rows[0]?.sequence, 1_000);
+  assert.deepEqual(result.page, { hasNext: false });
+});
+
 test("rejects forged tenant scope and oversized projections", () => {
   assert.throws(
     () =>
@@ -109,11 +140,13 @@ test("rejects forged tenant scope and oversized projections", () => {
           trackingContextId: "01900000-0000-7000-8000-000000000006",
           contextName: "Google · Москва",
           execution: execution(),
-          rows: Array.from({ length: 1_001 }, () => ({}))
+          rows: Array.from({ length: 201 }, () => ({})),
+          page: { hasNext: false }
         },
         workspaceId,
         projectId,
-        jobId
+        jobId,
+        200
       ),
     DomainError
   );

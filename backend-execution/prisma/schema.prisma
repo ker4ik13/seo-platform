@@ -709,6 +709,7 @@ model RankConnectorExecution {
   @@index([workspaceId, projectId, jobId, createdAt], map: "rank_connector_executions_job_created_idx")
   @@index([status, authorizationExpiresAt, leaseExpiresAt, createdAt, id], map: "rank_connector_executions_claim_due_idx")
   @@index([status, nextActionAt, leaseExpiresAt, createdAt, id], map: "rank_connector_executions_poll_due_idx")
+  @@index([credentialId, projectId, provider, status, leaseExpiresAt], map: "rank_connector_executions_credential_project_active_idx")
   @@map("rank_connector_executions")
 }
 

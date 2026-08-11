@@ -1,9 +1,5 @@
 import { createHash } from "node:crypto";
-import {
-  HttpException,
-  HttpStatus,
-  Injectable
-} from "@nestjs/common";
+import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import type {
   InternalCreateSemanticKeywordGroupInput,
   InternalDeleteSemanticKeywordGroupInput,
@@ -38,7 +34,6 @@ export class KeywordGroupService {
       const rows = await transaction.keywordGroup.findMany({
         where: { workspaceId, projectId, status: "ACTIVE" },
         orderBy: [{ position: "asc" }, { id: "asc" }],
-        take: 2_000,
         include: GROUP_INCLUDE
       });
       return rows.map(groupItem);
@@ -56,7 +51,6 @@ export class KeywordGroupService {
           input.workspaceId,
           input.projectId
         );
-        await assertGroupCapacity(transaction, input);
         const parent = input.parentId
           ? await requiredGroup(
               transaction,
@@ -72,7 +66,8 @@ export class KeywordGroupService {
             workspaceId: input.workspaceId,
             projectId: input.projectId,
             parentId: input.parentId ?? null,
-            status: "ACTIVE"
+            status: "ACTIVE",
+            systemKind: null
           },
           orderBy: { position: "desc" },
           select: { position: true }
@@ -158,6 +153,7 @@ export class KeywordGroupService {
             projectId: input.projectId,
             parentId: targetParentId,
             status: "ACTIVE",
+            systemKind: null,
             id: { not: groupId }
           },
           orderBy: [{ position: "asc" }, { id: "asc" }],
@@ -301,45 +297,6 @@ export class KeywordGroupService {
       });
     });
   }
-}
-
-async function assertGroupCapacity(
-  transaction: Prisma.TransactionClient,
-  input: InternalCreateSemanticKeywordGroupInput
-): Promise<void> {
-  const limit = input.entitlement.foldersPerProject;
-  if (limit === 0) return;
-  await transaction.$executeRaw`
-    SELECT pg_advisory_xact_lock(
-      hashtextextended(${`billing-capacity:semantic-groups:${input.projectId}`}, 0)
-    )
-  `;
-  const current = await transaction.keywordGroup.count({
-    where: {
-      workspaceId: input.workspaceId,
-      projectId: input.projectId,
-      kind: "REGULAR",
-      status: "ACTIVE"
-    }
-  });
-  if (current < limit) return;
-  throw new HttpException(
-    {
-      error: {
-        code: "QUOTA_EXCEEDED",
-        message: "The foldersPerProject limit for the current plan would be exceeded",
-        details: {
-          resource: "foldersPerProject",
-          current: String(current),
-          additional: "1",
-          limit: String(limit),
-          planCode: input.entitlement.planCode,
-          planVersion: input.entitlement.planVersion
-        }
-      }
-    },
-    HttpStatus.CONFLICT
-  );
 }
 
 async function requiredGroup(

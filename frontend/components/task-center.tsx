@@ -22,8 +22,15 @@ import {
 } from "../lib/operation-status-presentation";
 import { rankSearchSystemLabel } from "../lib/rank-jobs";
 import { CustomSelect } from "./custom-select";
-import { OperationResultModal } from "./operation-result-modal";
+import {
+  OperationResultModal,
+  OperationRetryIcon,
+  OperationStopIcon
+} from "./operation-result-modal";
+import { OperationStopConfirmation } from "./operation-stop-confirmation";
 import { ProviderLogo } from "./provider-logo";
+import { ProjectContextSelect } from "./project-context-select";
+import type { AppProject } from "../lib/app-types";
 
 type TaskKind = "FREQUENCY" | "RANK" | "CRAWL" | "RESEARCH";
 type TaskColumn = "QUEUED" | "RUNNING" | "ATTENTION" | "COMPLETED";
@@ -56,7 +63,13 @@ interface ProjectTask {
   readonly resultFacts: readonly TaskFact[];
 }
 
-export function TaskCenter({ projectId }: Readonly<{ projectId: string }>) {
+export function TaskCenter({
+  projectId,
+  projects
+}: Readonly<{
+  projectId: string;
+  projects: readonly AppProject[];
+}>) {
   const [frequencies, setFrequencies] = useState<readonly FrequencyCollectionSummary[]>([]);
   const [ranks, setRanks] = useState<readonly RankJobSummary[]>([]);
   const [crawls, setCrawls] = useState<readonly TechnicalCrawlSummary[]>([]);
@@ -68,6 +81,7 @@ export function TaskCenter({ projectId }: Readonly<{ projectId: string }>) {
   const [errors, setErrors] = useState<readonly string[]>([]);
   const [resultId, setResultId] = useState<string>();
   const [busyId, setBusyId] = useState<string>();
+  const [stopConfirmation, setStopConfirmation] = useState<ProjectTask>();
   const requestInFlight = useRef(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
@@ -218,7 +232,14 @@ export function TaskCenter({ projectId }: Readonly<{ projectId: string }>) {
     <section className="task-center">
       <header className="task-center-header">
         <div>
-          <h1>История операций</h1>
+          <div className="project-page-title-row">
+            <h1>История операций</h1>
+            <ProjectContextSelect
+              destination="tasks"
+              projectId={projectId}
+              projects={projects}
+            />
+          </div>
           <p>Построчный журнал запусков с входными параметрами, прогрессом и результатом.</p>
         </div>
         <div className="task-center-header-actions">
@@ -299,13 +320,27 @@ export function TaskCenter({ projectId }: Readonly<{ projectId: string }>) {
           actions={(
             <>
               {resultTask.retryable && (
-                <button className="secondary-button" disabled={busyId === resultTask.id} onClick={() => void mutate(resultTask, "retry")} type="button">
-                  {busyId === resultTask.id ? "Запускаем…" : resultTask.retryLabel}
+                <button
+                  aria-label={busyId === resultTask.id ? "Повтор запускается" : resultTask.retryLabel}
+                  className="operation-result-header-action"
+                  disabled={busyId === resultTask.id}
+                  onClick={() => void mutate(resultTask, "retry")}
+                  title={busyId === resultTask.id ? "Повтор запускается…" : resultTask.retryLabel}
+                  type="button"
+                >
+                  <OperationRetryIcon />
                 </button>
               )}
               {resultTask.cancellable && (
-                <button className="task-cancel-button" disabled={busyId === resultTask.id} onClick={() => void mutate(resultTask, "cancel")} type="button">
-                  {busyId === resultTask.id ? "Останавливаем…" : "Остановить"}
+                <button
+                  aria-label={busyId === resultTask.id ? "Операция останавливается" : "Остановить операцию"}
+                  className="operation-result-header-action is-danger"
+                  disabled={busyId === resultTask.id}
+                  onClick={() => setStopConfirmation(resultTask)}
+                  title={busyId === resultTask.id ? "Останавливаем…" : "Остановить операцию"}
+                  type="button"
+                >
+                  <OperationStopIcon />
                 </button>
               )}
             </>
@@ -316,6 +351,19 @@ export function TaskCenter({ projectId }: Readonly<{ projectId: string }>) {
           operationId={resultTask.id}
           projectId={projectId}
           title={resultTask.title}
+        />
+      )}
+      {stopConfirmation && (
+        <OperationStopConfirmation
+          busy={busyId === stopConfirmation.id}
+          description={stopConfirmation.description}
+          onCancel={() => setStopConfirmation(undefined)}
+          onConfirm={() => {
+            void mutate(stopConfirmation, "cancel").then(() =>
+              setStopConfirmation(undefined)
+            );
+          }}
+          title={stopConfirmation.title}
         />
       )}
     </section>

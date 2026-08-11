@@ -17,18 +17,24 @@ const entitlement = {
   trackedContextPairs: 5
 } as const;
 
-test("parses only an exact positive semantic capacity snapshot", () => {
+test("parses an exact semantic capacity snapshot including unlimited zeroes", () => {
   assert.deepEqual(
     semanticCapacityEntitlement(entitlement),
     entitlement
   );
-  assert.throws(
-    () =>
-      semanticCapacityEntitlement({
-        ...entitlement,
-        storedKeywords: 0
-      }),
-    BadRequestException
+  assert.deepEqual(
+    semanticCapacityEntitlement({
+      ...entitlement,
+      storedKeywords: 0,
+      keywordsPerProject: 0,
+      trackedContextPairs: 0
+    }),
+    {
+      ...entitlement,
+      storedKeywords: 0,
+      keywordsPerProject: 0,
+      trackedContextPairs: 0
+    }
   );
   assert.throws(
     () =>
@@ -94,6 +100,18 @@ test("tracked pairs reject the first row beyond the plan limit", () => {
         entitlement
       ),
     quotaExceeded("trackedContextPairs")
+  );
+});
+
+test("zero capacity means unlimited instead of rejecting every write", () => {
+  assert.doesNotThrow(() =>
+    assertSemanticCapacity(
+      "storedKeywords",
+      9_000_000n,
+      2_000_000n,
+      0,
+      { ...entitlement, storedKeywords: 0 }
+    )
   );
 });
 

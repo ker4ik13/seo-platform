@@ -57,8 +57,16 @@ test("joins frequency rows only against the exact Jobs-owned item scope", async 
       contexts.push(context);
       return { id: jobId, workspaceId, projectId };
     },
-    getFrequencyOperationScope: async (context: unknown) => {
+    getFrequencyOperationScope: async (
+      context: unknown,
+      requestedJobId: string,
+      limit: number,
+      cursor?: string
+    ) => {
       contexts.push(context);
+      assert.equal(requestedJobId, jobId);
+      assert.equal(limit, 200);
+      assert.equal(cursor, undefined);
       return {
         workspaceId,
         projectId,
@@ -75,7 +83,8 @@ test("joins frequency rows only against the exact Jobs-owned item scope", async 
             status: "FAILED_FINAL",
             errorCode: "PROVIDER_REJECTED"
           }
-        ]
+        ],
+        page: { hasNext: false }
       };
     }
   };
@@ -106,7 +115,13 @@ test("joins frequency rows only against the exact Jobs-owned item scope", async 
     seoData as unknown as SeoDataClient
   );
 
-  const response = await controller.result(jobId, request(), principal);
+  const response = await controller.result(
+    jobId,
+    undefined,
+    undefined,
+    request(),
+    principal
+  );
 
   assert.deepEqual(requestedKeywordIds, [firstKeywordId, secondKeywordId]);
   assert.deepEqual(
@@ -135,8 +150,16 @@ test("returns rank and crawl results without internal tenant envelope fields", a
     {} as AuditService,
     {} as BillingEntitlementService,
     {
-      rankOperationResult: async (context: unknown) => {
+      rankOperationResult: async (
+        context: unknown,
+        requestedJobId: string,
+        limit: number,
+        cursor?: string
+      ) => {
         assert.deepEqual(context, internalContext());
+        assert.equal(requestedJobId, jobId);
+        assert.equal(limit, 200);
+        assert.equal(cursor, undefined);
         return {
           workspaceId,
           projectId,
@@ -144,12 +167,19 @@ test("returns rank and crawl results without internal tenant envelope fields", a
           trackingContextId: firstKeywordId,
           contextName: "Google · Москва",
           execution: {},
-          rows: []
+          rows: [],
+          page: { hasNext: false }
         };
       }
     } as unknown as SeoDataClient
   );
-  const rank = await rankController.result(jobId, request(), principal);
+  const rank = await rankController.result(
+    jobId,
+    undefined,
+    undefined,
+    request(),
+    principal
+  );
   assert.equal("workspaceId" in rank.data, false);
   assert.equal("projectId" in rank.data, false);
   assert.equal(rank.data.jobId, jobId);

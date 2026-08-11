@@ -10,6 +10,7 @@ import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { IntegrationCredentialCryptoService } from "../integrations/integration-credential-crypto.service.js";
 import { IntegrationCredentialRefreshSchedulerService } from "../integrations/integration-credential-refresh-scheduler.service.js";
+import { XmlStockHttpQuotaLimiter } from "../integrations/xmlstock-http-quota-limiter.js";
 import { SeoDataClient, SeoDataClientError } from "../seo-data/seo-data.client.js";
 import {
   ArsenkinWordstatConnector,
@@ -40,6 +41,7 @@ export class FrequencyCollectionRuntimeService {
     private readonly seoData: SeoDataClient,
     private readonly xmlStock: XmlStockWordstatConnector,
     private readonly arsenkin: ArsenkinWordstatConnector,
+    private readonly xmlStockQuota: XmlStockHttpQuotaLimiter,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Optional()
     private readonly refreshScheduler?: IntegrationCredentialRefreshSchedulerService
@@ -204,38 +206,67 @@ export class FrequencyCollectionRuntimeService {
         if (!item || !keyword || activeClaim.items.length !== 1) {
           throw new TypeError("Invalid XMLStock frequency claim");
         }
-        const snapshots: Snapshot[] = [];
-        for (const type of activeClaim.types) {
-          this.assertLease(
+        const acquired = await this.xmlStockQuota.tryAcquire({
+          credentialId: activeClaim.credentialId,
+          product: "WORDSTAT",
+          requestCost: activeClaim.types.length,
+          leaseMs:
+            timeoutMs * activeClaim.types.length +
+            FREQUENCY_PERSISTENCE_MARGIN_MS
+        });
+        if (!acquired.allowed) {
+          await this.broker.releaseForProviderCapacity(
             activeClaim,
-            timeoutMs + FREQUENCY_PERSISTENCE_MARGIN_MS
+            Math.max(5, acquired.retryAfterSeconds)
           );
-          const result = await this.xmlStock.collect(
-            {
-              keyword: keyword.text,
+          return "RETRY_SCHEDULED";
+        }
+        try {
+          const snapshots: Snapshot[] = [];
+          for (const type of activeClaim.types) {
+            this.assertLease(
+              activeClaim,
+              timeoutMs + FREQUENCY_PERSISTENCE_MARGIN_MS
+            );
+            const result = await this.xmlStock.collect(
+              {
+                keyword: keyword.text,
+                type,
+                regionCode: activeClaim.regionCode,
+                device: activeClaim.device
+              },
+              secret,
+              timeoutMs
+            );
+            if (!result.ok) {
+              if (result.code === "PROVIDER_RATE_LIMITED") {
+                await this.xmlStockQuota.penalize({
+                  credentialId: activeClaim.credentialId,
+                  product: "WORDSTAT"
+                });
+              }
+              await this.broker.fail(activeClaim, result);
+              return result.retryable ? "RETRY_SCHEDULED" : "FAILED_ITEM";
+            }
+            snapshots.push({
               type,
               regionCode: activeClaim.regionCode,
-              device: activeClaim.device
-            },
-            secret,
-            timeoutMs
-          );
-          if (!result.ok) {
-            await this.broker.fail(activeClaim, result);
-            return result.retryable ? "RETRY_SCHEDULED" : "FAILED_ITEM";
+              device: activeClaim.device,
+              period: "LAST_30_DAYS",
+              value: result.value,
+              provider: "XMLSTOCK",
+              sourceMode: "BYOK",
+              qualityFlags: []
+            });
           }
-          snapshots.push({
-            type,
-            regionCode: activeClaim.regionCode,
-            device: activeClaim.device,
-            period: "LAST_30_DAYS",
-            value: result.value,
-            provider: "XMLSTOCK",
-            sourceMode: "BYOK",
-            qualityFlags: []
+          await this.xmlStockQuota.recordSuccess({
+            credentialId: activeClaim.credentialId,
+            product: "WORDSTAT"
           });
+          snapshotsByItem.set(item.jobItemId, snapshots);
+        } finally {
+          await this.xmlStockQuota.release(acquired);
         }
-        snapshotsByItem.set(item.jobItemId, snapshots);
       }
       const observedAt = new Date().toISOString();
       activeClaim = await this.persistSnapshots(

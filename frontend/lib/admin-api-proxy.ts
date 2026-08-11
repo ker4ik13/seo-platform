@@ -12,7 +12,14 @@ const AUTH_PATHS = new Set([
   "auth/refresh",
   "auth/mfa/challenge/verify"
 ]);
-const ADMIN_ROOTS = new Set(["me", "billing", "staff", "workspaces"]);
+const ADMIN_ROOTS = new Set([
+  "me",
+  "billing",
+  "staff",
+  "workspaces",
+  "projects",
+  "operations"
+]);
 const MAX_BODY_BYTES = 64 * 1_024;
 
 export async function proxyAdminApi(
@@ -172,6 +179,12 @@ export function adminUpstreamPath(
       segments.length === 1 ||
       (segments.length === 3 && segments[2] === "subscription-grants")
     )
+  ) {
+    return undefined;
+  }
+  if (
+    (segments[0] === "projects" || segments[0] === "operations") &&
+    segments.length !== 1
   ) {
     return undefined;
   }

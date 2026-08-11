@@ -41,6 +41,8 @@ type RevokeIntent =
       readonly count: number;
     };
 
+const SESSION_PAGE_SIZE = 10;
+
 export function SessionSettings() {
   const [sessions, setSessions] =
     useState<readonly UserSessionSummary[]>();
@@ -56,6 +58,7 @@ export function SessionSettings() {
   const operationRef = useRef<string | undefined>(undefined);
   const [confirmation, setConfirmation] = useState<RevokeIntent>();
   const [reloadVersion, setReloadVersion] = useState(0);
+  const [page, setPage] = useState(1);
   const lastFocusedElement = useRef<HTMLElement | null>(null);
   const wasOffline = useRef(false);
 
@@ -126,10 +129,24 @@ export function SessionSettings() {
   const otherSessionCount =
     sessions?.filter(({ current }) => !current).length ?? 0;
   const degraded = viewState === "DEGRADED";
+  const pageCount = Math.max(
+    1,
+    Math.ceil((sessions?.length ?? 0) / SESSION_PAGE_SIZE)
+  );
+  const visibleSessions = sessions?.slice(
+    (page - 1) * SESSION_PAGE_SIZE,
+    page * SESSION_PAGE_SIZE
+  );
 
   function updateSessions(next: readonly UserSessionSummary[]): void {
     sessionsRef.current = next;
     setSessions(next);
+    setPage((current) =>
+      Math.min(
+        current,
+        Math.max(1, Math.ceil(next.length / SESSION_PAGE_SIZE))
+      )
+    );
   }
 
   function retry(): void {
@@ -401,7 +418,7 @@ export function SessionSettings() {
         </div>
       ) : (
         <ul className="session-list">
-          {sessions.map((session) => (
+          {visibleSessions?.map((session) => (
             <SessionRow
               busy={operation === session.id}
               disabled={Boolean(operation)}
@@ -414,6 +431,38 @@ export function SessionSettings() {
             />
           ))}
         </ul>
+      )}
+
+      {sessions && sessions.length > 0 && (
+        <nav className="session-pagination" aria-label="Страницы сессий">
+          <span>
+            {Math.min((page - 1) * SESSION_PAGE_SIZE + 1, sessions.length)}–
+            {Math.min(page * SESSION_PAGE_SIZE, sessions.length)} из {sessions.length}
+          </span>
+          <div>
+            <button
+              aria-label="Предыдущая страница сессий"
+              className="secondary-button"
+              disabled={page <= 1}
+              onClick={() => setPage((value) => Math.max(1, value - 1))}
+              type="button"
+            >
+              ←
+            </button>
+            <strong>{page} / {pageCount}</strong>
+            <button
+              aria-label="Следующая страница сессий"
+              className="secondary-button"
+              disabled={page >= pageCount}
+              onClick={() =>
+                setPage((value) => Math.min(pageCount, value + 1))
+              }
+              type="button"
+            >
+              →
+            </button>
+          </div>
+        </nav>
       )}
 
       <footer className="session-privacy-note">

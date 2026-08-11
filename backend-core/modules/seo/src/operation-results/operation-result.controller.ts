@@ -15,6 +15,10 @@ import type {
   InternalFrequencyOperationResult,
   InternalRankOperationResult
 } from "@seo-platform/contracts";
+import {
+  rankProviderKeywordLimit,
+  technicalCrawlMaxUrlLimit
+} from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
 import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import { internalUuid } from "../internal/internal-command-context.js";
@@ -25,7 +29,8 @@ import {
 import {
   internalFrequencyOperationResultInput,
   operationResultCursor,
-  operationResultLimit
+  operationResultLimit,
+  operationResultPageLimit
 } from "./operation-result-input.js";
 import { OperationResultService } from "./operation-result.service.js";
 
@@ -60,13 +65,20 @@ export class OperationResultController {
   public async rank(
     @Param("projectId") projectId: string,
     @Param("jobId") jobId: string,
+    @Query("limit") limit: unknown,
+    @Query("cursor") cursor: unknown,
     @Headers() headers: RankManifestInternalHeaders,
     @Req() request: FastifyRequest
   ): Promise<ApiResponse<InternalRankOperationResult>> {
     const context = rankManifestRouteContext(projectId, headers);
     return response(
       request,
-      await this.results.rank(context, internalUuid(jobId, "jobId"))
+      await this.results.rank(
+        context,
+        internalUuid(jobId, "jobId"),
+        operationResultPageLimit(limit),
+        operationResultCursor(cursor, rankProviderKeywordLimit - 1)
+      )
     );
   }
 
@@ -86,7 +98,7 @@ export class OperationResultController {
         context,
         internalUuid(crawlId, "crawlId"),
         operationResultLimit(limit),
-        operationResultCursor(cursor)
+        operationResultCursor(cursor, technicalCrawlMaxUrlLimit - 1)
       )
     );
   }

@@ -190,10 +190,10 @@ function semanticCapacityEntitlement(
   return {
     planCode: input.planCode,
     planVersion: positiveVersion(input.planVersion),
-    storedKeywords: positiveVersion(input.storedKeywords),
-    keywordsPerProject: positiveVersion(input.keywordsPerProject),
+    storedKeywords: nonNegativeVersion(input.storedKeywords),
+    keywordsPerProject: nonNegativeVersion(input.keywordsPerProject),
     foldersPerProject: nonNegativeVersion(input.foldersPerProject),
-    trackedContextPairs: positiveVersion(input.trackedContextPairs)
+    trackedContextPairs: nonNegativeVersion(input.trackedContextPairs)
   };
 }
 

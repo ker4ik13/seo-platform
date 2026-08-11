@@ -22,6 +22,7 @@ import { OperationResultModule } from "./operation-results/operation-result.modu
 import { ProjectWorkspaceTransferModule } from "./project-transfers/project-workspace-transfer.module.js";
 import { NegativeKeywordModule } from "./negative-keywords/negative-keyword.module.js";
 import { ProjectNoteModule } from "./notes/project-note.module.js";
+import { PlatformAdminReadModule } from "./admin/platform-admin-read.module.js";
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { ProjectNoteModule } from "./notes/project-note.module.js";
     OperationResultModule,
     NegativeKeywordModule,
     ProjectNoteModule,
+    PlatformAdminReadModule,
     ProjectWorkspaceTransferModule
   ]
 })

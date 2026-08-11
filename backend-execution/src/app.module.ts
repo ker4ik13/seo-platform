@@ -20,6 +20,7 @@ import { KeywordResearchModule } from "./keyword-research/keyword-research.modul
 import { CrawlNotificationModule } from "./crawl-notifications/crawl-notification.module.js";
 import { FrequencyCollectionModule } from "./frequency-collections/frequency-collection.module.js";
 import { JobNotificationModule } from "./job-notifications/job-notification.module.js";
+import { OperationActivityModule } from "./operation-activity/operation-activity.module.js";
 
 @Module({
   imports: [
@@ -43,7 +44,8 @@ import { JobNotificationModule } from "./job-notifications/job-notification.modu
     CrawlNotificationModule,
     KeywordResearchModule,
     FrequencyCollectionModule,
-    JobNotificationModule
+    JobNotificationModule,
+    OperationActivityModule
   ]
 })
 export class AppModule {}

@@ -21,9 +21,11 @@ import {
   adminApi,
   adminApiCollection
 } from "../../lib/admin-browser-api";
+import { OperationAdministration } from "./operation-administration";
+import { ProjectAdministration } from "./project-administration";
 import { WorkspaceAdministration } from "./workspace-administration";
 
-type Screen = "workspaces" | "receipts" | "staff";
+type Screen = "workspaces" | "projects" | "operations" | "receipts" | "staff";
 
 export function AdminApp() {
   const [profile, setProfile] = useState<PlatformAdminProfile>();
@@ -114,12 +116,15 @@ export function AdminApp() {
   const canViewWorkspaces = profile.roles.some((role) =>
     ["SUPER_ADMIN", "FINANCE", "SUPPORT", "OPERATIONS"].includes(role)
   );
+  const canViewPlatformDirectory = profile.roles.some((role) =>
+    ["SUPER_ADMIN", "SUPPORT", "OPERATIONS"].includes(role)
+  );
   const canManageBilling = profile.roles.some((role) =>
     ["SUPER_ADMIN", "FINANCE"].includes(role)
   );
   const canViewReceipts = canManageBilling;
   const hasVisibleScreen =
-    canViewWorkspaces || canViewReceipts || canManageStaff;
+    canViewWorkspaces || canViewPlatformDirectory || canViewReceipts || canManageStaff;
   return (
     <div className="admin-shell">
       <aside className="sidebar">
@@ -137,13 +142,31 @@ export function AdminApp() {
               <i>01</i> Рабочие области
             </button>
           )}
+          {canViewPlatformDirectory && (
+            <button
+              className={screen === "projects" ? "active" : undefined}
+              onClick={() => setScreen("projects")}
+              type="button"
+            >
+              <i>02</i> Проекты
+            </button>
+          )}
+          {canViewPlatformDirectory && (
+            <button
+              className={screen === "operations" ? "active" : undefined}
+              onClick={() => setScreen("operations")}
+              type="button"
+            >
+              <i>03</i> Операции
+            </button>
+          )}
           {canViewReceipts && (
             <button
               className={screen === "receipts" ? "active" : undefined}
               onClick={() => setScreen("receipts")}
               type="button"
             >
-              <i>02</i> Чеки НПД
+              <i>04</i> Чеки НПД
             </button>
           )}
           {canManageStaff && (
@@ -152,7 +175,7 @@ export function AdminApp() {
               onClick={() => setScreen("staff")}
               type="button"
             >
-              <i>03</i> Platform roles
+              <i>05</i> Platform roles
             </button>
           )}
         </nav>
@@ -177,6 +200,8 @@ export function AdminApp() {
                 value={screen}
               >
                 {canViewWorkspaces && <option value="workspaces">Рабочие области</option>}
+                {canViewPlatformDirectory && <option value="projects">Проекты</option>}
+                {canViewPlatformDirectory && <option value="operations">Операции</option>}
                 {canViewReceipts && <option value="receipts">Чеки НПД</option>}
                 {canManageStaff && <option value="staff">Platform roles</option>}
               </select>
@@ -196,6 +221,10 @@ export function AdminApp() {
           />
         ) : screen === "workspaces" && canViewWorkspaces ? (
           <WorkspaceAdministration canManageBilling={canManageBilling} />
+        ) : screen === "projects" && canViewPlatformDirectory ? (
+          <ProjectAdministration />
+        ) : screen === "operations" && canViewPlatformDirectory ? (
+          <OperationAdministration />
         ) : screen === "receipts" && canViewReceipts ? (
           <Receipts />
         ) : screen === "staff" && canManageStaff ? (
