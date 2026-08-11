@@ -1,4 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { rankProviderOverflowCount } from "@seo-platform/contracts";
 import type {
   InternalAbortSemanticImportInput,
   InternalAbortSemanticImportResult,
@@ -596,7 +597,7 @@ function rankEstimateScope(
     Number(payload.configurationVersion) > Number(payload.contextVersion) ||
     !sha256(payload.configurationHash) ||
     payload.contextCount !== "1" ||
-    !boundedDecimal(payload.keywordCount, 1_001) ||
+    !boundedDecimal(payload.keywordCount, rankProviderOverflowCount) ||
     payload.pairCount !== payload.keywordCount ||
     !isoTimestamp(payload.calculatedAt)
   ) {
@@ -609,7 +610,7 @@ function rankEstimateScope(
     !semanticScopeHash ||
     (payload.keywordCount === "0" &&
       semanticScopeHash.availability === "UNAVAILABLE") ||
-    (payload.keywordCount === "1001" &&
+    (payload.keywordCount === String(rankProviderOverflowCount) &&
       semanticScopeHash.availability === "AVAILABLE")
   ) {
     return undefined;

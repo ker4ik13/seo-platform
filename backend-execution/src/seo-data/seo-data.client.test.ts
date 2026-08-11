@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {
+  rankProviderKeywordLimit,
+  rankProviderOverflowCount
+} from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
 import {
   SeoDataClient,
@@ -150,6 +154,40 @@ test("accepts an unavailable hash for a bounded provider-incompatible scope", as
   }
 });
 
+test("accepts rank scopes through the current provider limit and its overflow sentinel", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const [keywordCount, semanticScopeHash] of [
+      ["1640", rankScope().semanticScopeHash],
+      [String(rankProviderKeywordLimit), rankScope().semanticScopeHash],
+      [String(rankProviderOverflowCount), { availability: "UNAVAILABLE" }]
+    ] as const) {
+      globalThis.fetch = (async () =>
+        Response.json({
+          data: {
+            ...rankScope(),
+            keywordCount,
+            pairCount: keywordCount,
+            semanticScopeHash
+          },
+          meta: { requestId: "seo-request-current-rank-limit" }
+        })) as typeof fetch;
+
+      const result = await new SeoDataClient(config).rankEstimateScope({
+        workspaceId: context.workspaceId,
+        projectId: context.projectId,
+        actorId: context.actorId,
+        trackingContextId: context.importId
+      });
+
+      assert.equal(result.keywordCount, keywordCount);
+      assert.deepEqual(result.semanticScopeHash, semanticScopeHash);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("rejects secret-bearing, unhashable-empty or scope-inconsistent rank scope responses", async () => {
   const originalFetch = globalThis.fetch;
   try {
@@ -164,8 +202,8 @@ test("rejects secret-bearing, unhashable-empty or scope-inconsistent rank scope 
       },
       {
         ...rankScope(),
-        keywordCount: "1001",
-        pairCount: "1001"
+        keywordCount: String(rankProviderOverflowCount),
+        pairCount: String(rankProviderOverflowCount)
       }
     ]) {
       globalThis.fetch = (async () =>
