@@ -58,7 +58,7 @@ const activeStages = new Set<RankJobStage>([
 const cancellableStages = new Set<RankJobStage>([
   "PREPARING_SCOPE",
   "WAITING_FOR_QUEUE",
-  ...activeStages
+  ...[...activeStages].filter((stage) => stage !== "FINALIZING")
 ]);
 
 export interface RankJobExpectedScope {
@@ -563,7 +563,8 @@ export function isActiveRankJob(job: RankJobSummary): boolean {
 }
 
 export function isCancellableRankJob(job: RankJobSummary): boolean {
-  return ["PREPARING", "QUEUED", "RUNNING"].includes(job.status);
+  return ["PREPARING", "QUEUED", "RUNNING"].includes(job.status) &&
+    job.stage !== "FINALIZING";
 }
 
 export function isTerminalRankJob(job: RankJobSummary): boolean {

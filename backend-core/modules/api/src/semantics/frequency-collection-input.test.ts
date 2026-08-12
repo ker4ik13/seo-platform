@@ -3,7 +3,8 @@ import test from "node:test";
 import {
   createFrequencyCollectionInput,
   frequencyCancelInput,
-  frequencyIdempotencyKey
+  frequencyIdempotencyKey,
+  frequencyRetryInput
 } from "./frequency-collection-input.js";
 
 const keywordId = "01900000-0000-7000-8000-000000000001";
@@ -24,7 +25,8 @@ test("accepts an exact bounded frequency collection command", () => {
     }
   );
   assert.equal(frequencyIdempotencyKey("frequency-command-123"), "frequency-command-123");
-  assert.deepEqual(frequencyCancelInput({ version: 7 }), { version: 7 });
+  assert.deepEqual(frequencyCancelInput({}), {});
+  assert.deepEqual(frequencyRetryInput({ version: 7 }), { version: 7 });
 });
 
 test("rejects duplicate keywords, unknown fields and blind retries", () => {
@@ -36,8 +38,9 @@ test("rejects duplicate keywords, unknown fields and blind retries", () => {
       device: "ALL"
     })
   );
-  assert.throws(() => frequencyCancelInput({ version: 0 }));
-  assert.throws(() => frequencyCancelInput({ version: 1, force: true }));
+  assert.throws(() => frequencyCancelInput({ version: 1 }));
+  assert.throws(() => frequencyRetryInput({ version: 0 }));
+  assert.throws(() => frequencyRetryInput({ version: 1, force: true }));
 });
 
 test("accepts one 10,000-keyword Arsenkin batch and rejects overflow", () => {

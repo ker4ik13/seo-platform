@@ -245,6 +245,78 @@ test("returns an exact tenant-scoped result scope without provider payloads", as
   assert.doesNotMatch(JSON.stringify(result), /must-not-leak/u);
 });
 
+test("cancellation uses authoritative active state instead of a stale browser version", async () => {
+  let jobUpdate: unknown;
+  let itemUpdate: unknown;
+  const transaction = {
+    job: {
+      findFirst: async () => ({ version: 41, status: "RUNNING" }),
+      updateMany: async (input: unknown) => {
+        jobUpdate = input;
+        return { count: 1 };
+      }
+    },
+    jobItem: {
+      updateMany: async (input: unknown) => {
+        itemUpdate = input;
+        return { count: 4 };
+      }
+    }
+  };
+  const prisma = {
+    $transaction: async (callback: (value: typeof transaction) => Promise<void>) =>
+      callback(transaction)
+  };
+  const result = await new CancelHarness(
+    prisma as never,
+    route as never
+  ).cancel(jobId, { workspaceId, projectId, actorId });
+
+  assert.equal(result.status, "CANCELLED");
+  const where = (jobUpdate as { readonly where: Record<string, unknown> }).where;
+  assert.equal("version" in where, false);
+  assert.deepEqual(where.status, {
+    in: [
+      "QUEUED",
+      "RUNNING",
+      "WAITING_RATE_LIMIT",
+      "RETRY_SCHEDULED",
+      "FAILED_RETRYABLE"
+    ]
+  });
+  assert.deepEqual(
+    (itemUpdate as { readonly data: unknown }).data,
+    { status: "CANCELLED", retryAt: null }
+  );
+});
+
+test("frequency cancellation replays an already terminal state without writes", async () => {
+  const transaction = {
+    job: {
+      findFirst: async () => ({ version: 42, status: "CANCELLED" }),
+      updateMany: async () => {
+        throw new Error("terminal cancellation must not update the Job");
+      }
+    },
+    jobItem: {
+      updateMany: async () => {
+        throw new Error("terminal cancellation must not update Job items");
+      }
+    }
+  };
+  const prisma = {
+    $transaction: async (callback: (value: typeof transaction) => Promise<void>) =>
+      callback(transaction)
+  };
+
+  const result = await new CancelHarness(
+    prisma as never,
+    route as never
+  ).cancel(jobId, { workspaceId, projectId, actorId });
+
+  assert.equal(result.status, "CANCELLED");
+});
+
 test("manual retry resets only failed items and preserves completed progress", async () => {
   let itemUpdate: unknown;
   let jobUpdate: unknown;
@@ -339,6 +411,28 @@ class RetryHarness extends FrequencyCollectionService {
       version: 8,
       createdAt: "2026-08-01T00:00:00.000Z",
       updatedAt: "2026-08-01T00:00:01.000Z"
+    };
+  }
+}
+
+class CancelHarness extends FrequencyCollectionService {
+  public override async get(): Promise<FrequencyCollectionSummary> {
+    return {
+      id: jobId,
+      workspaceId,
+      projectId,
+      provider: "XMLSTOCK",
+      status: "CANCELLED",
+      selectedKeywords: 5,
+      completedKeywords: 1,
+      failedKeywords: 0,
+      types: ["BASE"],
+      regionCode: "213",
+      device: "ALL",
+      version: 42,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:01.000Z",
+      finishedAt: "2026-08-01T00:00:01.000Z"
     };
   }
 }

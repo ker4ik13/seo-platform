@@ -46,6 +46,16 @@ export interface SemanticDuplicateCommandInput {
   readonly keeperStrategy: SemanticDuplicateKeeperStrategy;
 }
 
+export const semanticDuplicatePreviewPageSizes = [100] as const;
+export type SemanticDuplicatePreviewPageSize =
+  (typeof semanticDuplicatePreviewPageSizes)[number];
+
+export interface SemanticDuplicatePreviewInput
+  extends SemanticDuplicateCommandInput {
+  readonly page: number;
+  readonly pageSize: SemanticDuplicatePreviewPageSize;
+}
+
 export interface SemanticDuplicatePreviewItem {
   readonly keywordId: string;
   readonly text: string;
@@ -53,6 +63,8 @@ export interface SemanticDuplicatePreviewItem {
   readonly groupPaths: readonly string[];
   readonly priority: number;
   readonly baseFrequency?: string;
+  readonly exactFrequency?: string;
+  readonly fixedFrequency?: string;
   readonly keep: boolean;
 }
 
@@ -71,12 +83,15 @@ export interface SemanticDuplicatePreview {
   readonly duplicateKeywordCount: number;
   /** Phrases recommended for the trash across the complete scope. */
   readonly deletionCount: number;
-  /** Phrases committed by the preview hash and removed by the next apply call. */
+  /** Bounded deletion candidates displayed on this page. */
   readonly batchItems: readonly SemanticKeywordBulkSelection[];
   readonly hasMore: boolean;
   readonly previewHash: string;
   readonly groups: readonly SemanticDuplicatePreviewGroup[];
   readonly groupsTruncated: boolean;
+  readonly page: number;
+  readonly pageSize: SemanticDuplicatePreviewPageSize;
+  readonly pageCount: number;
 }
 
 export interface SemanticDuplicateGroupDecision {
@@ -102,6 +117,13 @@ export interface SemanticDuplicateApplyResult {
 
 export interface InternalSemanticDuplicateCommandInput
   extends SemanticDuplicateCommandInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+}
+
+export interface InternalSemanticDuplicatePreviewInput
+  extends SemanticDuplicatePreviewInput {
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;

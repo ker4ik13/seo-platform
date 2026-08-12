@@ -17,6 +17,7 @@ import {
   semanticSavedViewDensities,
   semanticSavedViewScopes,
   semanticNegativeKeywordMatchModes,
+  semanticDuplicatePreviewPageSizes,
   semanticSystemColumnKeys,
   type ApiCollectionResponse,
   type CreateSemanticKeywordInput,
@@ -130,9 +131,9 @@ import {
   type SemanticNegativeKeywordPreset,
   type SemanticNegativeKeywordPreview,
   type SemanticNegativeKeywordApplyResult,
-  type SemanticDuplicateCommandInput,
+  type SemanticDuplicatePreviewInput,
   type ApplySemanticDuplicatesInput,
-  type InternalSemanticDuplicateCommandInput,
+  type InternalSemanticDuplicatePreviewInput,
   type InternalApplySemanticDuplicatesInput,
   type SemanticDuplicatePreview,
   type SemanticDuplicateApplyResult,
@@ -1006,10 +1007,10 @@ export class SeoDataClient {
 
   public async previewSemanticDuplicates(
     context: InternalContext,
-    input: SemanticDuplicateCommandInput
+    input: SemanticDuplicatePreviewInput
   ): Promise<SemanticDuplicatePreview> {
     const scope = trackingScope(context);
-    const body: InternalSemanticDuplicateCommandInput = {
+    const body: InternalSemanticDuplicatePreviewInput = {
       ...input,
       workspaceId: scope.workspaceId,
       projectId: scope.projectId,
@@ -3833,12 +3834,22 @@ export function semanticDuplicatePreview(
     !boundedInteger(input.deletionCount, 50_000) ||
     typeof input.hasMore !== "boolean" ||
     typeof input.groupsTruncated !== "boolean" ||
+    !positiveInteger(input.page) ||
+    !positiveInteger(input.pageCount) ||
+    Number(input.page) > Number(input.pageCount) ||
+    !semanticDuplicatePreviewPageSizes.some(
+      (pageSize) => pageSize === input.pageSize
+    ) ||
+    Number(input.pageCount) !== Math.max(
+      1,
+      Math.ceil(Number(input.duplicateGroupCount) / Number(input.pageSize))
+    ) ||
     typeof input.previewHash !== "string" ||
     !/^[a-f0-9]{64}$/u.test(input.previewHash) ||
     !Array.isArray(input.batchItems) ||
     input.batchItems.length > 500 ||
     !Array.isArray(input.groups) ||
-    input.groups.length > 100
+    input.groups.length > Number(input.pageSize)
   ) {
     throw invalidResponse();
   }
@@ -3864,7 +3875,14 @@ export function semanticDuplicatePreview(
   const groups = input.groups.map(semanticDuplicatePreviewGroup);
   if (
     new Set(groups.map(({ id }) => id)).size !== groups.length ||
-    groups.length > Number(input.duplicateGroupCount)
+    groups.length > Number(input.duplicateGroupCount) ||
+    groups.length !== expectedDuplicatePageLength(
+      Number(input.duplicateGroupCount),
+      Number(input.page),
+      Number(input.pageSize)
+    ) ||
+    input.groupsTruncated !==
+      Number(input.duplicateGroupCount) > groups.length
   ) {
     throw invalidResponse();
   }
@@ -3877,8 +3895,20 @@ export function semanticDuplicatePreview(
     hasMore: input.hasMore,
     previewHash: input.previewHash,
     groups,
-    groupsTruncated: input.groupsTruncated
+    groupsTruncated: input.groupsTruncated,
+    page: Number(input.page),
+    pageSize: input.pageSize as SemanticDuplicatePreview["pageSize"],
+    pageCount: Number(input.pageCount)
   };
+}
+
+function expectedDuplicatePageLength(
+  total: number,
+  page: number,
+  pageSize: number
+): number {
+  if (total === 0) return 0;
+  return Math.min(pageSize, total - (page - 1) * pageSize);
 }
 
 function semanticDuplicatePreviewGroup(
@@ -3936,9 +3966,9 @@ function semanticDuplicatePreviewItem(
     !input.groupPaths.every(
       (path) => typeof path === "string" && path.length > 0 && path.length <= 2_000
     ) ||
-    (input.baseFrequency !== undefined &&
-      (typeof input.baseFrequency !== "string" ||
-        !/^\d+$/u.test(input.baseFrequency)))
+    !validOptionalFrequency(input.baseFrequency) ||
+    !validOptionalFrequency(input.exactFrequency) ||
+    !validOptionalFrequency(input.fixedFrequency)
   ) {
     throw invalidResponse();
   }
@@ -3951,8 +3981,19 @@ function semanticDuplicatePreviewItem(
     ...(typeof input.baseFrequency === "string"
       ? { baseFrequency: input.baseFrequency }
       : {}),
+    ...(typeof input.exactFrequency === "string"
+      ? { exactFrequency: input.exactFrequency }
+      : {}),
+    ...(typeof input.fixedFrequency === "string"
+      ? { fixedFrequency: input.fixedFrequency }
+      : {}),
     keep: input.keep
   };
+}
+
+function validOptionalFrequency(value: unknown): boolean {
+  return value === undefined ||
+    (typeof value === "string" && /^\d+$/u.test(value));
 }
 
 export function semanticDuplicateApplyResult(

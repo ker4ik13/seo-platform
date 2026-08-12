@@ -444,15 +444,13 @@ export class JobsClient {
 
   public async cancelFrequencyCollection(
     context: InternalContext,
-    jobId: string,
-    version: number
+    jobId: string
   ): Promise<FrequencyCollectionSummary> {
     const projectId = requiredProjectId(context.tenant);
     const body: InternalCancelFrequencyCollectionInput = {
       workspaceId: context.tenant.workspaceId,
       projectId,
-      actorId: context.actorId,
-      version
+      actorId: context.actorId
     };
     const value = await this.request<unknown>(
       "POST",

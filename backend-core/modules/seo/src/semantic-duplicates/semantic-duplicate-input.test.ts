@@ -21,10 +21,13 @@ test("accepts a trusted tenant-scoped implicit-duplicate command", () => {
       ignoredWords: []
     },
     scope: { kind: "PROJECT" },
-    keeperStrategy: "HIGHEST_PRIORITY"
+    keeperStrategy: "HIGHEST_PRIORITY",
+    page: 3,
+    pageSize: 100
   });
   assert.equal(result.projectId, ids.projectId);
   assert.equal(result.keeperStrategy, "HIGHEST_PRIORITY");
+  assert.equal(result.page, 3);
 });
 
 test("rejects duplicate selections and malformed preview hashes", () => {
@@ -46,6 +49,12 @@ test("rejects duplicate selections and malformed preview hashes", () => {
     keeperStrategy: "OLDEST"
   };
   assert.throws(() => internalSemanticDuplicateCommandInput(selection));
+  assert.throws(() => internalSemanticDuplicateCommandInput({
+    ...selection,
+    scope: { kind: "PROJECT" },
+    page: 1,
+    pageSize: "100"
+  }));
   assert.throws(() => internalApplySemanticDuplicatesInput({
     ...selection,
     scope: { kind: "PROJECT" },

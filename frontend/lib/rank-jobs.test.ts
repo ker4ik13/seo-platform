@@ -388,6 +388,13 @@ test("rejects contradictory lifecycle fields and non-monotonic dates", () => {
     {
       ...base,
       status: "CANCEL_REQUESTED",
+      stage: "FINALIZING",
+      queuedAt: "2026-07-29T12:00:01.000Z",
+      startedAt: "2026-07-29T12:00:02.000Z"
+    },
+    {
+      ...base,
+      status: "CANCEL_REQUESTED",
       stage: "WAITING_FOR_QUEUE"
     },
     {
@@ -536,6 +543,16 @@ test("classifies active, cancellable and terminal states", () => {
     },
     expected
   );
+  const finalizing = parseRankJobSummary(
+    {
+      ...base,
+      status: "RUNNING",
+      stage: "FINALIZING",
+      queuedAt: "2026-07-29T12:00:01.000Z",
+      startedAt: "2026-07-29T12:00:02.000Z"
+    },
+    expected
+  );
   const cancelled = parseRankJobSummary(
     {
       ...base,
@@ -550,6 +567,7 @@ test("classifies active, cancellable and terminal states", () => {
   assert.equal(isCancellableRankJob(preparing), true);
   assert.equal(isActiveRankJob(cancelling), true);
   assert.equal(isCancellableRankJob(cancelling), false);
+  assert.equal(isCancellableRankJob(finalizing), false);
   assert.equal(isTerminalRankJob(cancelled), true);
 });
 

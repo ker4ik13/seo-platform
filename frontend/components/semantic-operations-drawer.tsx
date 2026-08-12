@@ -16,7 +16,10 @@ import {
   hasConnectorFallback
 } from "../lib/connector-routing-presentation";
 import { operationStatusLabel } from "../lib/operation-status-presentation";
-import { rankSearchSystemLabel } from "../lib/rank-jobs";
+import {
+  isCancellableRankJob,
+  rankSearchSystemLabel
+} from "../lib/rank-jobs";
 import {
   OperationResultModal,
   OperationStopIcon
@@ -161,23 +164,30 @@ export function SemanticOperationsDrawer({
     : undefined;
 
   async function cancel(operation: Operation): Promise<void> {
-    setCancellingId(operation.id);
+    const current = allOperations.find(({ id, kind }) =>
+      id === operation.id && kind === operation.kind
+    ) ?? operation;
+    if (!current.cancellable) {
+      await load();
+      return;
+    }
+    setCancellingId(current.id);
     setError(undefined);
     try {
-      if (operation.kind === "FREQUENCY") {
+      if (current.kind === "FREQUENCY") {
         await browserApiRequest(
-          `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections/${encodeURIComponent(operation.id)}/cancel`,
-          { method: "POST", body: { version: operation.version } }
+          `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections/${encodeURIComponent(current.id)}/cancel`,
+          { method: "POST", body: {} }
         );
-      } else if (operation.kind === "RANK") {
+      } else if (current.kind === "RANK") {
         await browserApiRequest(
-          `/app/api/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(operation.id)}/cancel`,
+          `/app/api/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(current.id)}/cancel`,
           { method: "POST", body: {} }
         );
       } else {
         await browserApiRequest(
-          `/app/api/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(operation.id)}/cancel`,
-          { method: "POST", body: {}, ifMatch: operation.version }
+          `/app/api/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(current.id)}/cancel`,
+          { method: "POST", body: {}, ifMatch: current.version }
         );
       }
       await load();
@@ -431,7 +441,7 @@ function rankOperation(value: RankJobSummary): Operation {
     progressLabel: `${current} из ${total}`,
     percent: total > 0 ? Math.round(current / total * 100) : 0,
     tab: operationTab(value.status),
-    cancellable: ["PREPARING", "QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(value.status),
+    cancellable: isCancellableRankJob(value),
     retryable:
       value.status === "PARTIALLY_COMPLETED" &&
       Number(value.result.failedCount) > 0 &&

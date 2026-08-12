@@ -107,6 +107,21 @@ export function internalCancelFrequencyCollectionInput(
   const input = record(value, [
     "workspaceId",
     "projectId",
+    "actorId"
+  ]);
+  return {
+    workspaceId: uuid(input.workspaceId, "workspaceId"),
+    projectId: uuid(input.projectId, "projectId"),
+    actorId: uuid(input.actorId, "actorId")
+  };
+}
+
+export function internalRetryFrequencyCollectionInput(
+  value: unknown
+): InternalRetryFrequencyCollectionInput {
+  const input = record(value, [
+    "workspaceId",
+    "projectId",
     "actorId",
     "version"
   ]);
@@ -116,12 +131,6 @@ export function internalCancelFrequencyCollectionInput(
     actorId: uuid(input.actorId, "actorId"),
     version: integer(input.version, "version", 1)
   };
-}
-
-export function internalRetryFrequencyCollectionInput(
-  value: unknown
-): InternalRetryFrequencyCollectionInput {
-  return internalCancelFrequencyCollectionInput(value);
 }
 
 function frequencyType(value: unknown): SemanticFrequencyType {

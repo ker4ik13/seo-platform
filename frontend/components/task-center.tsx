@@ -20,7 +20,10 @@ import {
   operationStageLabel,
   operationStatusLabel
 } from "../lib/operation-status-presentation";
-import { rankSearchSystemLabel } from "../lib/rank-jobs";
+import {
+  isCancellableRankJob,
+  rankSearchSystemLabel
+} from "../lib/rank-jobs";
 import { CustomSelect } from "./custom-select";
 import {
   OperationResultModal,
@@ -179,14 +182,21 @@ export function TaskCenter({
   const resultTask = tasks.find(({ id }) => id === resultId);
 
   async function mutate(task: ProjectTask, action: "cancel" | "retry"): Promise<void> {
-    setBusyId(task.id);
+    const current = tasks.find(({ id, kind }) =>
+      id === task.id && kind === task.kind
+    ) ?? task;
+    if (action === "cancel" && !current.cancellable) {
+      await load();
+      return;
+    }
+    setBusyId(current.id);
     setErrors([]);
     const base = `/app/api/projects/${encodeURIComponent(projectId)}`;
     try {
       if (action === "retry") {
-        if (task.kind === "RANK") {
+        if (current.kind === "RANK") {
           await browserApiRequest(
-            `${base}/jobs/${encodeURIComponent(task.id)}/retry-missing`,
+            `${base}/jobs/${encodeURIComponent(current.id)}/retry-missing`,
             {
               method: "POST",
               body: {},
@@ -195,29 +205,29 @@ export function TaskCenter({
           );
         } else {
           await browserApiRequest(
-            `${base}/frequency-collections/${encodeURIComponent(task.id)}/retry-failed`,
-            { method: "POST", body: { version: task.version } }
+            `${base}/frequency-collections/${encodeURIComponent(current.id)}/retry-failed`,
+            { method: "POST", body: { version: current.version } }
           );
         }
-      } else if (task.kind === "FREQUENCY") {
+      } else if (current.kind === "FREQUENCY") {
         await browserApiRequest(
-          `${base}/frequency-collections/${encodeURIComponent(task.id)}/cancel`,
-          { method: "POST", body: { version: task.version } }
-        );
-      } else if (task.kind === "RANK") {
-        await browserApiRequest(
-          `${base}/jobs/${encodeURIComponent(task.id)}/cancel`,
+          `${base}/frequency-collections/${encodeURIComponent(current.id)}/cancel`,
           { method: "POST", body: {} }
         );
-      } else if (task.kind === "CRAWL") {
+      } else if (current.kind === "RANK") {
         await browserApiRequest(
-          `${base}/crawls/${encodeURIComponent(task.id)}/cancel`,
-          { method: "POST", body: {}, ifMatch: task.version }
+          `${base}/jobs/${encodeURIComponent(current.id)}/cancel`,
+          { method: "POST", body: {} }
+        );
+      } else if (current.kind === "CRAWL") {
+        await browserApiRequest(
+          `${base}/crawls/${encodeURIComponent(current.id)}/cancel`,
+          { method: "POST", body: {}, ifMatch: current.version }
         );
       } else {
         await browserApiRequest(
-          `${base}/keyword-research-runs/${encodeURIComponent(task.id)}/cancel`,
-          { method: "POST", body: {}, ifMatch: task.version }
+          `${base}/keyword-research-runs/${encodeURIComponent(current.id)}/cancel`,
+          { method: "POST", body: {}, ifMatch: current.version }
         );
       }
       await load();
@@ -415,7 +425,7 @@ function rankTask(value: RankJobSummary): ProjectTask {
     createdAt: value.createdAt, ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
     ...(value.status === "FAILED" || value.status === "ACTION_REQUIRED" ? { errorCode: value.failure.code } : {}),
     version: 1,
-    cancellable: ["PREPARING", "QUEUED", "RUNNING", "CANCEL_REQUESTED"].includes(value.status),
+    cancellable: isCancellableRankJob(value),
     retryable:
       value.status === "PARTIALLY_COMPLETED" &&
       Number(value.result.failedCount) > 0 &&

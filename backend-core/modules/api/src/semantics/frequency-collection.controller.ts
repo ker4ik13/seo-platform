@@ -44,7 +44,8 @@ import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import {
   createFrequencyCollectionInput,
   frequencyCancelInput,
-  frequencyIdempotencyKey
+  frequencyIdempotencyKey,
+  frequencyRetryInput
 } from "./frequency-collection-input.js";
 
 @Controller("api/v1/projects/:projectId/frequency-collections")
@@ -197,7 +198,7 @@ export class FrequencyCollectionController {
     const tenant = requiredProjectTenant(request);
     const context = requestContext(request);
     const canonicalJobId = assertUuid(jobId, "jobId");
-    const version = frequencyCancelInput(body).version;
+    frequencyCancelInput(body);
     await this.audit.record({
       actorId: principal.userId,
       workspaceId: tenant.workspaceId,
@@ -210,8 +211,7 @@ export class FrequencyCollectionController {
     });
     const result = await this.jobs.cancelFrequencyCollection(
       internalProjectContext(request, principal, tenant),
-      canonicalJobId,
-      version
+      canonicalJobId
     );
     await committed(
       this.audit,
@@ -238,7 +238,7 @@ export class FrequencyCollectionController {
     const tenant = requiredMutableProjectTenant(request);
     const context = requestContext(request);
     const canonicalJobId = assertUuid(jobId, "jobId");
-    const version = frequencyCancelInput(body).version;
+    const version = frequencyRetryInput(body).version;
     await this.billing.semanticCapacity(tenant.workspaceId);
     await this.audit.record({
       actorId: principal.userId,

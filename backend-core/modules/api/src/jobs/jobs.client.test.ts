@@ -52,6 +52,53 @@ test("loads one bounded active-operation count collection for a workspace", asyn
   }
 });
 
+test("cancels a frequency collection without forwarding a stale UI version", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedBody: Readonly<Record<string, unknown>> | undefined;
+  globalThis.fetch = (async (
+    _input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> => {
+    capturedBody = JSON.parse(String(init?.body)) as Readonly<
+      Record<string, unknown>
+    >;
+    return dataResponse({
+      id: crawlJobId,
+      workspaceId,
+      projectId,
+      provider: "ARSENKIN",
+      status: "CANCELLED",
+      selectedKeywords: 2_002,
+      completedKeywords: 137,
+      failedKeywords: 0,
+      types: ["BASE", "EXACT", "FIXED"],
+      regionCode: "213",
+      device: "ALL",
+      version: 42,
+      createdAt: "2026-08-12T10:00:00.000Z",
+      updatedAt: "2026-08-12T10:01:00.000Z",
+      finishedAt: "2026-08-12T10:01:00.000Z"
+    });
+  }) as typeof fetch;
+
+  try {
+    const result = await client().cancelFrequencyCollection(
+      projectContext("request-frequency-cancel-001"),
+      crawlJobId
+    );
+
+    assert.equal(result.status, "CANCELLED");
+    assert.deepEqual(capturedBody, {
+      workspaceId,
+      projectId,
+      actorId
+    });
+    assert.equal("version" in (capturedBody ?? {}), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("loads a safe global operation page for platform administration", async () => {
   const originalFetch = globalThis.fetch;
   let captured: { readonly url: URL; readonly headers: Headers } | undefined;

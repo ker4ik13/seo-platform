@@ -17,6 +17,9 @@ test("accepts a bounded implicit-duplicate preview and apply result", () => {
     batchItems: [{ id: duplicateId, version: 3 }],
     hasMore: false,
     previewHash: "a".repeat(64),
+    page: 1,
+    pageSize: 100,
+    pageCount: 1,
     groups: [{
       id: "b".repeat(64),
       keeperKeywordId: keeperId,
@@ -28,6 +31,8 @@ test("accepts a bounded implicit-duplicate preview and apply result", () => {
           groupPaths: ["Каталог / Овощи"],
           priority: 10,
           baseFrequency: "2500",
+          exactFrequency: "800",
+          fixedFrequency: "120",
           keep: true
         },
         {
@@ -45,6 +50,7 @@ test("accepts a bounded implicit-duplicate preview and apply result", () => {
   });
   assert.equal(preview.scannedCount, 2_002);
   assert.equal(preview.groups[0]?.keeperKeywordId, keeperId);
+  assert.equal(preview.groups[0]?.items[0]?.exactFrequency, "800");
 
   assert.deepEqual(semanticDuplicateApplyResult({
     deletedCount: 1,
@@ -66,6 +72,9 @@ test("rejects contradictory and duplicate internal projections", () => {
     batchItems: [{ id: duplicateId, version: 1 }],
     hasMore: true,
     previewHash: "a".repeat(64),
+    page: 1,
+    pageSize: 100,
+    pageCount: 1,
     groups: [],
     groupsTruncated: false
   }));

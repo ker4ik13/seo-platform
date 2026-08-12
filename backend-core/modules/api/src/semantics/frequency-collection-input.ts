@@ -72,7 +72,12 @@ export function frequencyIdempotencyKey(value: unknown): string {
   return value;
 }
 
-export function frequencyCancelInput(value: unknown): { readonly version: number } {
+export function frequencyCancelInput(value: unknown): Record<string, never> {
+  record(value, []);
+  return {};
+}
+
+export function frequencyRetryInput(value: unknown): { readonly version: number } {
   const input = record(value, ["version"]);
   if (!Number.isSafeInteger(input.version) || Number(input.version) < 1) {
     invalid("version");

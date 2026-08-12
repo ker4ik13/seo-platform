@@ -82,11 +82,12 @@ export interface InternalCancelFrequencyCollectionInput {
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;
-  readonly version: number;
 }
 
 export interface InternalRetryFrequencyCollectionInput
-  extends InternalCancelFrequencyCollectionInput {}
+  extends InternalCancelFrequencyCollectionInput {
+  readonly version: number;
+}
 
 export interface FrequencyCollectionSummary {
   readonly id: string;

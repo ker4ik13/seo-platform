@@ -18,7 +18,9 @@ test("normalizes a precise implicit-duplicate preview command", () => {
         ignoredWords: ["  в  ", "В", "на"]
       },
       scope: { kind: "SELECTION", items: [{ id: keywordId, version: 2 }] },
-      keeperStrategy: "HIGHEST_FREQUENCY"
+      keeperStrategy: "HIGHEST_FREQUENCY",
+      page: 2,
+      pageSize: 100
     }),
     {
       rules: {
@@ -28,7 +30,9 @@ test("normalizes a precise implicit-duplicate preview command", () => {
         ignoredWords: ["в", "на"]
       },
       scope: { kind: "SELECTION", items: [{ id: keywordId, version: 2 }] },
-      keeperStrategy: "HIGHEST_FREQUENCY"
+      keeperStrategy: "HIGHEST_FREQUENCY",
+      page: 2,
+      pageSize: 100
     }
   );
 });
@@ -44,6 +48,30 @@ test("rejects unsupported fields and an invalid apply hash", () => {
     scope: { kind: "PROJECT" },
     keeperStrategy: "OLDEST",
     removeImmediately: true
+  }));
+  assert.throws(() => semanticDuplicateCommandInput({
+    rules: {
+      analysisMode: "EXACT",
+      caseSensitive: false,
+      ignorePunctuation: true,
+      ignoredWords: []
+    },
+    scope: { kind: "PROJECT" },
+    keeperStrategy: "OLDEST",
+    page: 1,
+    pageSize: 200
+  }));
+  assert.throws(() => semanticDuplicateCommandInput({
+    rules: {
+      analysisMode: "EXACT",
+      caseSensitive: false,
+      ignorePunctuation: true,
+      ignoredWords: []
+    },
+    scope: { kind: "PROJECT" },
+    keeperStrategy: "OLDEST",
+    page: "1",
+    pageSize: 100
   }));
   assert.throws(() => applySemanticDuplicatesInput({
     rules: {

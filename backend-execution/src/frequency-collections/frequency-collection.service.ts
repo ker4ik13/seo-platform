@@ -33,13 +33,14 @@ const ARSENKIN_WORDSTAT_MAX_ATTEMPTS = 720;
 const FREQUENCY_JOB_ITEM_CREATE_BATCH_LIMIT = 2_000;
 const FREQUENCY_CREATE_TRANSACTION_MAX_WAIT_MS = 5_000;
 const FREQUENCY_CREATE_TRANSACTION_TIMEOUT_MS = 30_000;
-const CANCELLABLE = new Set([
+const CANCELLABLE_STATUSES = [
   "QUEUED",
   "RUNNING",
   "WAITING_RATE_LIMIT",
   "RETRY_SCHEDULED",
   "FAILED_RETRYABLE"
-]);
+] as const;
+const CANCELLABLE = new Set<string>(CANCELLABLE_STATUSES);
 
 @Injectable()
 export class FrequencyCollectionService {
@@ -236,10 +237,15 @@ export class FrequencyCollectionService {
         }
       });
       if (!current) throw new NotFoundException("Frequency collection not found");
-      if (current.version !== input.version) versionConflict();
       if (!CANCELLABLE.has(current.status)) return;
       const updated = await transaction.job.updateMany({
-        where: { id: jobId, status: current.status, version: input.version },
+        where: {
+          id: jobId,
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          type: "FREQUENCY_COLLECTION",
+          status: { in: [...CANCELLABLE_STATUSES] }
+        },
         data: {
           status: "CANCELLED",
           cancelRequestedAt: new Date(),
@@ -250,7 +256,7 @@ export class FrequencyCollectionService {
           version: { increment: 1 }
         }
       });
-      if (updated.count !== 1) versionConflict();
+      if (updated.count === 0) return;
       await transaction.jobItem.updateMany({
         where: {
           jobId,

@@ -1,6 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import {
+  useMemo,
+  useRef,
+  useState,
+  type UIEvent
+} from "react";
 import type {
   SemanticDuplicateAnalysisMode,
   SemanticDuplicateApplyResult,
@@ -17,9 +22,12 @@ import {
 } from "../lib/browser-api";
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
+import { SearchEngineLogo } from "./search-engine-logo";
 import { SemanticModal } from "./semantic-modal";
 
 type ScopeKind = SemanticDuplicateScope["kind"];
+const DUPLICATE_PREVIEW_PAGE_SIZE = 100;
+const DUPLICATE_APPLY_BATCH_SIZE = 500;
 type DuplicateChoices = Readonly<
   Record<string, Readonly<{ enabled: boolean; keeperKeywordId: string }>>
 >;
@@ -52,9 +60,12 @@ export function SemanticDuplicatesDialog({
   const [preview, setPreview] = useState<SemanticDuplicatePreview>();
   const [choices, setChoices] = useState<DuplicateChoices>({});
   const [previewing, setPreviewing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [applying, setApplying] = useState(false);
   const [deletedProgress, setDeletedProgress] = useState(0);
   const [error, setError] = useState<string>();
+  const previewRequestInFlight = useRef(false);
+  const previewGeneration = useRef(0);
   const ignoredWords = useMemo(
     () => parseIgnoredWords(ignoredWordsText, caseSensitive),
     [caseSensitive, ignoredWordsText]
@@ -66,13 +77,15 @@ export function SemanticDuplicatesDialog({
   );
 
   function invalidatePreview(): void {
+    previewGeneration.current += 1;
     setPreview(undefined);
     setChoices({});
     setDeletedProgress(0);
     setError(undefined);
   }
 
-  async function requestPreview(): Promise<void> {
+  async function requestPreview(page = 1, append = false): Promise<void> {
+    if (previewRequestInFlight.current || applying) return;
     const command = duplicateCommand(
       analysisMode,
       caseSensitive,
@@ -92,19 +105,67 @@ export function SemanticDuplicatesDialog({
       ));
       return;
     }
-    setPreviewing(true);
+    const generation = previewGeneration.current;
+    previewRequestInFlight.current = true;
+    if (append) setLoadingMore(true);
+    else setPreviewing(true);
     setError(undefined);
     try {
       const result = await browserApiRequest<SemanticDuplicatePreview>(
         `${endpoint}/preview`,
-        { method: "POST", body: command }
+        {
+          method: "POST",
+          body: {
+            ...command,
+            page,
+            pageSize: DUPLICATE_PREVIEW_PAGE_SIZE
+          }
+        }
       );
-      setPreview(result);
-      setChoices(defaultDuplicateChoices(result));
+      if (generation !== previewGeneration.current) return;
+      if (append && preview && result.previewHash !== preview.previewHash) {
+        setPreview(undefined);
+        setChoices({});
+        setError(
+          "Запросы изменились во время просмотра. Пересчитайте дубли."
+        );
+        return;
+      }
+      setPreview((current) =>
+        append && current
+          ? appendDuplicatePreviewGroups(current, result)
+          : result
+      );
+      setChoices((current) =>
+        append
+          ? appendDuplicateChoices(current, result.groups)
+          : defaultDuplicateChoices(result)
+      );
     } catch (requestError) {
       setError(duplicateError(requestError));
     } finally {
-      setPreviewing(false);
+      previewRequestInFlight.current = false;
+      if (append) setLoadingMore(false);
+      else setPreviewing(false);
+    }
+  }
+
+  function loadNextPreviewPage(
+    event: UIEvent<HTMLDivElement>
+  ): void {
+    if (
+      !preview ||
+      preview.page >= preview.pageCount ||
+      previewing ||
+      loadingMore ||
+      applying
+    ) {
+      return;
+    }
+    const list = event.currentTarget;
+    const remaining = list.scrollHeight - list.scrollTop - list.clientHeight;
+    if (remaining <= 180) {
+      void requestPreview(preview.page + 1, true);
     }
   }
 
@@ -123,34 +184,64 @@ export function SemanticDuplicatesDialog({
       !initialCommand ||
       !preview ||
       decisionSummary.decisions.length === 0 ||
-      applying
+      applying ||
+      loadingMore
     ) {
       return;
     }
+    const batches = duplicateDecisionBatches(decisionSummary.decisions);
     setApplying(true);
     setDeletedProgress(0);
     setError(undefined);
+    let deleted = 0;
     try {
-      const result = await browserApiRequest<SemanticDuplicateApplyResult>(
-        `${endpoint}/apply`,
-        {
-          method: "POST",
-          body: {
-            ...initialCommand,
-            previewHash: preview.previewHash,
-            decisions: decisionSummary.decisions
+      let command = initialCommand;
+      let previewHash = preview.previewHash;
+      let hasMore = false;
+      for (const [batchIndex, decisions] of batches.entries()) {
+        const result = await browserApiRequest<SemanticDuplicateApplyResult>(
+          `${endpoint}/apply`,
+          {
+            method: "POST",
+            body: {
+              ...command,
+              previewHash,
+              decisions
+            }
           }
-        }
-      );
-      const deleted = result.deletedCount;
-      setDeletedProgress(deleted);
+        );
+        deleted += result.deletedCount;
+        hasMore = result.hasMore;
+        setDeletedProgress(deleted);
+        if (batchIndex === batches.length - 1) break;
+        command = commandWithoutDeletedSelection(
+          command,
+          result.deletedKeywordIds
+        );
+        const refreshed = await browserApiRequest<SemanticDuplicatePreview>(
+          `${endpoint}/preview`,
+          {
+            method: "POST",
+            body: {
+              ...command,
+              page: 1,
+              pageSize: DUPLICATE_PREVIEW_PAGE_SIZE
+            }
+          }
+        );
+        previewHash = refreshed.previewHash;
+      }
       onCompleted(
         deleted > 0
-          ? `${formatInteger(deleted)} неявных дублей перемещено в корзину. Действие можно отменить в истории.${result.hasMore ? " В проекте остались непросмотренные или пропущенные группы." : ""}`
+          ? `${formatInteger(deleted)} неявных дублей перемещено в корзину. Действие можно отменить в истории.${hasMore ? " В проекте остались непросмотренные или пропущенные группы." : ""}`
           : "Неявных дублей для удаления больше нет."
       );
     } catch (requestError) {
-      setError(duplicateError(requestError));
+      setError(
+        deleted > 0
+          ? `${formatInteger(deleted)} дублей уже перемещено. Остальной пакет не обработан: ${duplicateError(requestError)}`
+          : duplicateError(requestError)
+      );
       setPreview(undefined);
       setChoices({});
     } finally {
@@ -329,7 +420,7 @@ export function SemanticDuplicatesDialog({
 
             <button
               className="primary-button semantic-duplicate-preview-button"
-              disabled={previewing || applying}
+              disabled={previewing || loadingMore || applying}
               onClick={() => void requestPreview()}
               type="button"
             >
@@ -402,7 +493,7 @@ export function SemanticDuplicatesDialog({
               <div className="semantic-duplicate-review-toolbar">
                 <span>
                   Выбрано {formatInteger(decisionSummary.groupCount)} из{" "}
-                  {formatInteger(preview.groups.length)} показанных групп
+                  {formatInteger(preview.groups.length)} загруженных групп
                 </span>
                 <div>
                   <button
@@ -425,7 +516,11 @@ export function SemanticDuplicatesDialog({
                   </button>
                 </div>
               </div>
-              <div className="semantic-duplicate-group-list">
+              <div
+                aria-busy={loadingMore}
+                className="semantic-duplicate-group-list"
+                onScroll={loadNextPreviewPage}
+              >
                 {preview.groups.map((group, groupIndex) => {
                   const choice = choices[group.id] ?? {
                     enabled: true,
@@ -497,12 +592,26 @@ export function SemanticDuplicatesDialog({
                               </span>
                               <span className="semantic-duplicate-query">
                                 <strong>{item.text}</strong>
-                                <small>
-                                  {item.baseFrequency !== undefined
-                                    ? `Частотность ${formatFrequency(item.baseFrequency)}`
-                                    : "Частотность не собрана"}
-                                  {` · Приоритет ${item.priority}`}
-                                </small>
+                                <span className="semantic-duplicate-metrics">
+                                  <DuplicateFrequency
+                                    label="База"
+                                    title="Яндекс · базовая частотность"
+                                    value={item.baseFrequency}
+                                  />
+                                  <DuplicateFrequency
+                                    label={'""'}
+                                    title="Яндекс · фразовая частотность"
+                                    value={item.exactFrequency}
+                                  />
+                                  <DuplicateFrequency
+                                    label={'"!"'}
+                                    title="Яндекс · точная частотность"
+                                    value={item.fixedFrequency}
+                                  />
+                                  <span className="semantic-duplicate-priority">
+                                    Приоритет {item.priority}
+                                  </span>
+                                </span>
                                 <span className="semantic-duplicate-folders">
                                   <b>
                                     {item.groupPaths.length > 1
@@ -531,12 +640,24 @@ export function SemanticDuplicatesDialog({
                   );
                 })}
               </div>
-              {preview.groupsTruncated && (
-                <p className="semantic-duplicate-truncated-note">
-                  Показаны первые {formatInteger(preview.groups.length)} групп
-                  из {formatInteger(preview.duplicateGroupCount)}. Скрытые
-                  группы не будут изменены и появятся при следующем анализе.
-                </p>
+              {preview.duplicateGroupCount > 0 && (
+                <div
+                  aria-live="polite"
+                  className="semantic-duplicate-scroll-status"
+                >
+                  <span>
+                    Загружено {formatInteger(preview.groups.length)} из{" "}
+                    {formatInteger(preview.duplicateGroupCount)} групп
+                  </span>
+                  {preview.page < preview.pageCount && (
+                    <span>
+                      {loadingMore && <span className="spinner" />}
+                      {loadingMore
+                        ? "Загружаем ещё…"
+                        : "Прокрутите вниз — следующие 100 групп загрузятся автоматически"}
+                    </span>
+                  )}
+                </div>
               )}
             </div>
           )}
@@ -569,7 +690,8 @@ export function SemanticDuplicatesDialog({
                 !preview ||
                 decisionSummary.deletionCount === 0 ||
                 applying ||
-                previewing
+                previewing ||
+                loadingMore
               }
               onClick={() => void applyPreview()}
               type="button"
@@ -604,6 +726,24 @@ function ScopeCard({
         {count !== undefined && <small>{formatInteger(count)} шт.</small>}
       </span>
     </label>
+  );
+}
+
+function DuplicateFrequency({
+  label,
+  title,
+  value
+}: Readonly<{
+  label: string;
+  title: string;
+  value: string | undefined;
+}>) {
+  return (
+    <span className="semantic-duplicate-frequency" title={title}>
+      <SearchEngineLogo engine="YANDEX" size="compact" />
+      <b>{label}</b>
+      <strong>{value === undefined ? "—" : formatFrequency(value)}</strong>
+    </span>
   );
 }
 
@@ -662,6 +802,36 @@ function defaultDuplicateChoices(
   ]));
 }
 
+function appendDuplicateChoices(
+  current: DuplicateChoices,
+  groups: SemanticDuplicatePreview["groups"]
+): DuplicateChoices {
+  return {
+    ...current,
+    ...Object.fromEntries(groups.map((group) => [
+      group.id,
+      current[group.id] ?? {
+        enabled: true,
+        keeperKeywordId: group.keeperKeywordId
+      }
+    ]))
+  };
+}
+
+function appendDuplicatePreviewGroups(
+  current: SemanticDuplicatePreview,
+  next: SemanticDuplicatePreview
+): SemanticDuplicatePreview {
+  const knownIds = new Set(current.groups.map(({ id }) => id));
+  return {
+    ...next,
+    groups: [
+      ...current.groups,
+      ...next.groups.filter(({ id }) => !knownIds.has(id))
+    ]
+  };
+}
+
 function setAllDuplicateGroups(
   preview: SemanticDuplicatePreview,
   current: DuplicateChoices,
@@ -711,6 +881,43 @@ function duplicateDecisionSummary(
       0
     ),
     groupCount: decisions.length
+  };
+}
+
+function duplicateDecisionBatches(
+  decisions: readonly SemanticDuplicateGroupDecision[]
+): readonly (readonly SemanticDuplicateGroupDecision[])[] {
+  const batches: SemanticDuplicateGroupDecision[][] = [];
+  let batch: SemanticDuplicateGroupDecision[] = [];
+  let deletionCount = 0;
+  for (const decision of decisions) {
+    if (
+      batch.length >= DUPLICATE_APPLY_BATCH_SIZE ||
+      deletionCount + decision.deletions.length > DUPLICATE_APPLY_BATCH_SIZE
+    ) {
+      batches.push(batch);
+      batch = [];
+      deletionCount = 0;
+    }
+    batch.push(decision);
+    deletionCount += decision.deletions.length;
+  }
+  if (batch.length > 0) batches.push(batch);
+  return batches;
+}
+
+function commandWithoutDeletedSelection(
+  command: SemanticDuplicateCommandInput,
+  deletedKeywordIds: readonly string[]
+): SemanticDuplicateCommandInput {
+  if (command.scope.kind !== "SELECTION") return command;
+  const deletedIds = new Set(deletedKeywordIds);
+  return {
+    ...command,
+    scope: {
+      kind: "SELECTION",
+      items: (command.scope.items ?? []).filter(({ id }) => !deletedIds.has(id))
+    }
   };
 }
 

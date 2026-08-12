@@ -3,6 +3,7 @@ import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import type {
   InternalApplySemanticDuplicatesInput,
   InternalSemanticDuplicateCommandInput,
+  InternalSemanticDuplicatePreviewInput,
   SemanticDuplicateApplyResult,
   SemanticDuplicateKeeperStrategy,
   SemanticDuplicatePreview,
@@ -24,7 +25,6 @@ import { preciseRussianWordStem } from "../text-analysis/russian-word-form.js";
 
 const APPLY_BATCH_SIZE = 500;
 const MAX_SCANNED_KEYWORDS = 50_000;
-const PREVIEW_GROUP_LIMIT = 100;
 
 const PREVIEW_INCLUDE = {
   memberships: {
@@ -62,7 +62,13 @@ interface DuplicateCandidate {
 interface DuplicatePlan {
   readonly preview: SemanticDuplicatePreview;
   readonly candidates: readonly DuplicateCandidate[];
-  readonly groups: readonly VisibleDuplicateGroup[];
+  readonly groups: readonly PlannedDuplicateGroup[];
+}
+
+interface PlannedDuplicateGroup {
+  readonly signature: string;
+  readonly keeper: PreviewRow;
+  readonly candidates: readonly PreviewRow[];
 }
 
 interface VisibleDuplicateGroup {
@@ -70,6 +76,12 @@ interface VisibleDuplicateGroup {
   readonly keeper: PreviewRow;
   readonly candidates: readonly PreviewRow[];
   readonly itemsTruncated: boolean;
+}
+
+interface DuplicateFrequencies {
+  readonly base?: bigint;
+  readonly exact?: bigint;
+  readonly fixed?: bigint;
 }
 
 @Injectable()
@@ -80,7 +92,7 @@ export class SemanticDuplicateService {
   ) {}
 
   public async preview(
-    input: InternalSemanticDuplicateCommandInput
+    input: InternalSemanticDuplicatePreviewInput
   ): Promise<SemanticDuplicatePreview> {
     return (await this.buildPlan(input)).preview;
   }
@@ -211,7 +223,8 @@ export class SemanticDuplicateService {
   }
 
   private async buildPlan(
-    input: InternalSemanticDuplicateCommandInput
+    input: InternalSemanticDuplicateCommandInput &
+      Partial<Pick<InternalSemanticDuplicatePreviewInput, "page" | "pageSize">>
   ): Promise<DuplicatePlan> {
     const rows = await this.prisma.keyword.findMany({
       where: keywordScopeWhere(
@@ -234,7 +247,7 @@ export class SemanticDuplicateService {
     }
     assertSelectionVersions(rows, input.scope);
 
-    const baseFrequencyByKeywordId = await this.baseFrequencies(
+    const frequenciesByKeywordId = await this.latestFrequencies(
       input.workspaceId,
       input.projectId,
       rows.map(({ id }) => id)
@@ -261,7 +274,7 @@ export class SemanticDuplicateService {
         left,
         right,
         input.keeperStrategy,
-        baseFrequencyByKeywordId
+        frequenciesByKeywordId
       ));
       return { signature, keeper: sorted[0]!, candidates: sorted.slice(1) };
     });
@@ -269,31 +282,21 @@ export class SemanticDuplicateService {
       ({ signature, keeper, candidates }) =>
         candidates.map((row) => ({ row, keeper, signature }))
     );
-    const visibleGroups: VisibleDuplicateGroup[] = [];
-    let remainingCandidates = APPLY_BATCH_SIZE;
-    for (const group of plannedGroups) {
-      if (
-        visibleGroups.length >= PREVIEW_GROUP_LIMIT ||
-        remainingCandidates === 0
-      ) {
-        break;
-      }
-      const candidates = group.candidates.slice(0, remainingCandidates);
-      visibleGroups.push({
-        signature: group.signature,
-        keeper: group.keeper,
-        candidates,
-        itemsTruncated: candidates.length < group.candidates.length
-      });
-      remainingCandidates -= candidates.length;
-    }
+    const pageSize = input.pageSize ?? 100;
+    const pageCount = Math.max(1, Math.ceil(plannedGroups.length / pageSize));
+    const page = Math.min(input.page ?? 1, pageCount);
+    const pageGroups = plannedGroups.slice(
+      (page - 1) * pageSize,
+      page * pageSize
+    );
+    const visibleGroups = boundedPageGroups(pageGroups);
     const candidates = visibleGroups.flatMap(
       ({ signature, keeper, candidates }) =>
         candidates.map((row) => ({ row, keeper, signature }))
     );
     const previewGroups = visibleGroups.map((group) => previewGroup(
       group,
-      baseFrequencyByKeywordId
+      frequenciesByKeywordId
     ));
     const preview: SemanticDuplicatePreview = {
       scannedCount: rows.length,
@@ -308,42 +311,75 @@ export class SemanticDuplicateService {
         version: row.version
       })),
       hasMore: allCandidates.length > candidates.length,
-      previewHash: planHash(input, candidates),
+      previewHash: planHash(input, allCandidates),
       groups: previewGroups,
-      groupsTruncated: plannedGroups.length > previewGroups.length
+      groupsTruncated: plannedGroups.length > previewGroups.length,
+      page,
+      pageSize,
+      pageCount
     };
-    return { preview, candidates, groups: visibleGroups };
+    return { preview, candidates: allCandidates, groups: plannedGroups };
   }
 
-  private async baseFrequencies(
+  private async latestFrequencies(
     workspaceId: string,
     projectId: string,
     keywordIds: readonly string[]
-  ): Promise<ReadonlyMap<string, bigint>> {
+  ): Promise<ReadonlyMap<string, DuplicateFrequencies>> {
     if (keywordIds.length === 0) return new Map();
-    const frequencies = new Map<string, bigint>();
+    const frequencies = new Map<string, DuplicateFrequencies>();
     for (let offset = 0; offset < keywordIds.length; offset += 1_000) {
       const snapshots = await this.prisma.frequencySnapshot.findMany({
         where: {
           workspaceId,
           projectId,
           keywordId: { in: keywordIds.slice(offset, offset + 1_000) },
-          type: "BASE"
+          type: { in: ["BASE", "EXACT", "FIXED"] }
         },
         orderBy: [
           { keywordId: "asc" },
+          { type: "asc" },
           { observedAt: "desc" },
           { id: "desc" }
         ],
-        distinct: ["keywordId"],
-        select: { keywordId: true, value: true }
+        distinct: ["keywordId", "type"],
+        select: { keywordId: true, type: true, value: true }
       });
-      for (const { keywordId, value } of snapshots) {
-        if (value !== null) frequencies.set(keywordId, value);
+      for (const { keywordId, type, value } of snapshots) {
+        if (value === null) continue;
+        const current = frequencies.get(keywordId) ?? {};
+        if (type === "BASE") {
+          frequencies.set(keywordId, { ...current, base: value });
+        } else if (type === "EXACT") {
+          frequencies.set(keywordId, { ...current, exact: value });
+        } else if (type === "FIXED") {
+          frequencies.set(keywordId, { ...current, fixed: value });
+        }
       }
     }
     return frequencies;
   }
+}
+
+function boundedPageGroups(
+  groups: readonly PlannedDuplicateGroup[]
+): readonly VisibleDuplicateGroup[] {
+  let remainingCandidates = APPLY_BATCH_SIZE;
+  return groups.map((group, index) => {
+    const groupsAfterCurrent = groups.length - index - 1;
+    const candidateLimit = Math.max(
+      1,
+      remainingCandidates - groupsAfterCurrent
+    );
+    const candidates = group.candidates.slice(0, candidateLimit);
+    remainingCandidates -= candidates.length;
+    return {
+      signature: group.signature,
+      keeper: group.keeper,
+      candidates,
+      itemsTruncated: candidates.length < group.candidates.length
+    };
+  });
 }
 
 function keywordScopeWhere(
@@ -454,23 +490,23 @@ function compareKeepers(
   left: PreviewRow,
   right: PreviewRow,
   strategy: SemanticDuplicateKeeperStrategy,
-  frequencies: ReadonlyMap<string, bigint>
+  frequencies: ReadonlyMap<string, DuplicateFrequencies>
 ): number {
   if (strategy === "HIGHEST_FREQUENCY") {
     return compareBigIntDesc(
-      frequencies.get(left.id),
-      frequencies.get(right.id)
+      frequencies.get(left.id)?.base,
+      frequencies.get(right.id)?.base
     ) || compareNumberDesc(left.priority, right.priority) || oldestFirst(left, right);
   }
   if (strategy === "HIGHEST_PRIORITY") {
     return compareNumberDesc(left.priority, right.priority) || compareBigIntDesc(
-      frequencies.get(left.id),
-      frequencies.get(right.id)
+      frequencies.get(left.id)?.base,
+      frequencies.get(right.id)?.base
     ) || oldestFirst(left, right);
   }
   return oldestFirst(left, right) || compareBigIntDesc(
-    frequencies.get(left.id),
-    frequencies.get(right.id)
+    frequencies.get(left.id)?.base,
+    frequencies.get(right.id)?.base
   ) || compareNumberDesc(left.priority, right.priority);
 }
 
@@ -492,7 +528,7 @@ function oldestFirst(left: PreviewRow, right: PreviewRow): number {
 
 function previewGroup(
   group: VisibleDuplicateGroup,
-  frequencies: ReadonlyMap<string, bigint>
+  frequencies: ReadonlyMap<string, DuplicateFrequencies>
 ): SemanticDuplicatePreviewGroup {
   const items = [group.keeper, ...group.candidates];
   return {
@@ -529,8 +565,7 @@ function decisionCandidates(
     if (
       !keeper ||
       keeper.version !== decision.keeper.version ||
-      decisionIds.length !== rows.length ||
-      new Set(decisionIds).size !== rows.length ||
+      new Set(decisionIds).size !== decisionIds.length ||
       decisionIds.some((id) => !rowsById.has(id))
     ) {
       throw stateConflict("Duplicate decisions do not match the preview");
@@ -552,7 +587,7 @@ function duplicateGroupId(signature: string): string {
 function previewItem(
   row: PreviewRow,
   keep: boolean,
-  baseFrequency: bigint | undefined
+  frequencies: DuplicateFrequencies | undefined
 ): SemanticDuplicatePreviewItem {
   return {
     keywordId: row.id,
@@ -564,9 +599,15 @@ function previewItem(
       )
     )].sort((left, right) => left.localeCompare(right, "ru")),
     priority: row.priority,
-    ...(baseFrequency === undefined
+    ...(frequencies?.base === undefined
       ? {}
-      : { baseFrequency: baseFrequency.toString() }),
+      : { baseFrequency: frequencies.base.toString() }),
+    ...(frequencies?.exact === undefined
+      ? {}
+      : { exactFrequency: frequencies.exact.toString() }),
+    ...(frequencies?.fixed === undefined
+      ? {}
+      : { fixedFrequency: frequencies.fixed.toString() }),
     keep
   };
 }

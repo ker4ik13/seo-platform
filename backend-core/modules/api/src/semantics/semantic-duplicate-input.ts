@@ -1,10 +1,12 @@
 import {
   semanticDuplicateAnalysisModes,
   semanticDuplicateKeeperStrategies,
+  semanticDuplicatePreviewPageSizes,
   semanticDuplicateScopeKinds,
   type ApplySemanticDuplicatesInput,
   type SemanticDuplicateCommandInput,
   type SemanticDuplicateGroupDecision,
+  type SemanticDuplicatePreviewInput,
   type SemanticDuplicateRules,
   type SemanticDuplicateScope
 } from "@seo-platform/contracts";
@@ -13,8 +15,8 @@ import { assertUuid } from "../common/identifier.js";
 
 export function semanticDuplicateCommandInput(
   value: unknown
-): SemanticDuplicateCommandInput {
-  return command(value, false) as SemanticDuplicateCommandInput;
+): SemanticDuplicatePreviewInput {
+  return command(value, false) as SemanticDuplicatePreviewInput;
 }
 
 export function applySemanticDuplicatesInput(
@@ -26,7 +28,7 @@ export function applySemanticDuplicatesInput(
 function command(
   value: unknown,
   applying: boolean
-): SemanticDuplicateCommandInput | ApplySemanticDuplicatesInput {
+): SemanticDuplicatePreviewInput | ApplySemanticDuplicatesInput {
   const input = exactRecord(
     value,
     applying
@@ -37,7 +39,7 @@ function command(
           "previewHash",
           "decisions"
         ]
-      : ["rules", "scope", "keeperStrategy"]
+      : ["rules", "scope", "keeperStrategy", "page", "pageSize"]
   );
   if (
     typeof input.keeperStrategy !== "string" ||
@@ -52,7 +54,13 @@ function command(
     scope: duplicateScope(input.scope),
     keeperStrategy: input.keeperStrategy as SemanticDuplicateCommandInput["keeperStrategy"]
   };
-  if (!applying) return result;
+  if (!applying) {
+    return {
+      ...result,
+      page: previewPage(input.page),
+      pageSize: previewPageSize(input.pageSize)
+    };
+  }
   if (
     typeof input.previewHash !== "string" ||
     !/^[a-f0-9]{64}$/u.test(input.previewHash)
@@ -66,11 +74,39 @@ function command(
   };
 }
 
+function previewPage(value: unknown): number {
+  const page = value === undefined ? 1 : value;
+  if (
+    typeof page !== "number" ||
+    !Number.isSafeInteger(page) ||
+    page < 1 ||
+    page > 500
+  ) {
+    invalid("page", "Must be an integer between 1 and 500");
+  }
+  return page;
+}
+
+function previewPageSize(
+  value: unknown
+): SemanticDuplicatePreviewInput["pageSize"] {
+  const pageSize = value === undefined ? 100 : value;
+  if (
+    typeof pageSize !== "number" ||
+    !semanticDuplicatePreviewPageSizes.some(
+      (supported) => supported === pageSize
+    )
+  ) {
+    invalid("pageSize", "Must be 100");
+  }
+  return pageSize as SemanticDuplicatePreviewInput["pageSize"];
+}
+
 function duplicateDecisions(
   value: unknown
 ): readonly SemanticDuplicateGroupDecision[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 100) {
-    invalid("decisions", "Select between 1 and 100 duplicate groups");
+  if (!Array.isArray(value) || value.length < 1 || value.length > 500) {
+    invalid("decisions", "Select between 1 and 500 duplicate groups");
   }
   const groupIds = new Set<string>();
   const keywordIds = new Set<string>();

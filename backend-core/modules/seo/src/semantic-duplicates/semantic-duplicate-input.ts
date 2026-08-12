@@ -2,9 +2,11 @@ import { BadRequestException } from "@nestjs/common";
 import {
   semanticDuplicateAnalysisModes,
   semanticDuplicateKeeperStrategies,
+  semanticDuplicatePreviewPageSizes,
   semanticDuplicateScopeKinds,
   type InternalApplySemanticDuplicatesInput,
   type InternalSemanticDuplicateCommandInput,
+  type InternalSemanticDuplicatePreviewInput,
   type SemanticDuplicateGroupDecision,
   type SemanticDuplicateRules,
   type SemanticDuplicateScope
@@ -13,8 +15,8 @@ import { internalUuid } from "../internal/internal-command-context.js";
 
 export function internalSemanticDuplicateCommandInput(
   value: unknown
-): InternalSemanticDuplicateCommandInput {
-  return command(value, false) as InternalSemanticDuplicateCommandInput;
+): InternalSemanticDuplicatePreviewInput {
+  return command(value, false) as InternalSemanticDuplicatePreviewInput;
 }
 
 export function internalApplySemanticDuplicatesInput(
@@ -26,7 +28,7 @@ export function internalApplySemanticDuplicatesInput(
 function command(
   value: unknown,
   applying: boolean
-): InternalSemanticDuplicateCommandInput | InternalApplySemanticDuplicatesInput {
+): InternalSemanticDuplicatePreviewInput | InternalApplySemanticDuplicatesInput {
   const input = exactRecord(
     value,
     applying
@@ -46,7 +48,9 @@ function command(
           "actorId",
           "rules",
           "scope",
-          "keeperStrategy"
+          "keeperStrategy",
+          "page",
+          "pageSize"
         ]
   );
   if (
@@ -66,7 +70,13 @@ function command(
     keeperStrategy:
       input.keeperStrategy as InternalSemanticDuplicateCommandInput["keeperStrategy"]
   };
-  if (!applying) return result;
+  if (!applying) {
+    return {
+      ...result,
+      page: previewPage(input.page),
+      pageSize: previewPageSize(input.pageSize)
+    };
+  }
   if (
     typeof input.previewHash !== "string" ||
     !/^[a-f0-9]{64}$/u.test(input.previewHash)
@@ -80,10 +90,38 @@ function command(
   };
 }
 
+function previewPage(value: unknown): number {
+  const page = value === undefined ? 1 : value;
+  if (
+    typeof page !== "number" ||
+    !Number.isSafeInteger(page) ||
+    page < 1 ||
+    page > 500
+  ) {
+    invalid("page");
+  }
+  return page;
+}
+
+function previewPageSize(
+  value: unknown
+): InternalSemanticDuplicatePreviewInput["pageSize"] {
+  const pageSize = value === undefined ? 100 : value;
+  if (
+    typeof pageSize !== "number" ||
+    !semanticDuplicatePreviewPageSizes.some(
+      (supported) => supported === pageSize
+    )
+  ) {
+    invalid("pageSize");
+  }
+  return pageSize as InternalSemanticDuplicatePreviewInput["pageSize"];
+}
+
 function duplicateDecisions(
   value: unknown
 ): readonly SemanticDuplicateGroupDecision[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 100) {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 500) {
     invalid("decisions");
   }
   const groupIds = new Set<string>();
