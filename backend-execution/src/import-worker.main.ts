@@ -24,6 +24,13 @@ import {
   SEMANTIC_IMPORT_VALIDATE_JOB,
   type ImportWorkerJobData
 } from "./queue/semantic-import.queue.js";
+import {
+  enqueueSemanticExport,
+  SEMANTIC_EXPORT_JOB,
+  SEMANTIC_EXPORT_QUEUE,
+  type SemanticExportJobData
+} from "./queue/semantic-export.queue.js";
+import { SemanticExportWorkerService } from "./semantic-exports/semantic-export-worker.service.js";
 
 const logger = new Logger("SemanticImportWorker");
 const UUID_PATTERN =
@@ -39,9 +46,13 @@ async function bootstrap(): Promise<void> {
   const validator = app.get(SemanticImportValidatorService);
   const publisher = app.get(SemanticImportPublisherService);
   const keywordResearch = app.get(KeywordResearchImportService);
+  const semanticExports = app.get(SemanticExportWorkerService);
   const leaseOwner = `keyword-import-${randomUUID()}`;
+  const exportLeaseOwner = semanticExports.workerId();
   const workerConnection = redis(config.redisUrl);
   const queueConnection = redis(config.redisUrl);
+  const exportWorkerConnection = redis(config.redisUrl);
+  const exportQueueConnection = redis(config.redisUrl);
   const queue = new Queue<ImportWorkerJobData>(
     SEMANTIC_IMPORT_QUEUE,
     bullMqConnectionOptions(queueConnection)
@@ -77,17 +88,38 @@ async function bootstrap(): Promise<void> {
       concurrency: config.imports.parseConcurrency
     }
   );
+  const exportQueue = new Queue<SemanticExportJobData>(
+    SEMANTIC_EXPORT_QUEUE,
+    bullMqConnectionOptions(exportQueueConnection)
+  );
+  const exportWorker = new Worker<SemanticExportJobData>(
+    SEMANTIC_EXPORT_QUEUE,
+    async (job) => {
+      if (
+        job.name !== SEMANTIC_EXPORT_JOB ||
+        !UUID_PATTERN.test(job.data.exportId)
+      ) {
+        throw new Error("Invalid semantic export job");
+      }
+      return semanticExports.process(job.data.exportId, exportLeaseOwner);
+    },
+    {
+      ...bullMqConnectionOptions(exportWorkerConnection),
+      concurrency: Math.max(1, Math.min(config.imports.parseConcurrency, 2))
+    }
+  );
 
   let dispatching = false;
   async function dispatchPending(): Promise<void> {
     if (dispatching) return;
     dispatching = true;
     try {
-      const [importIds, validations, publications, researchRunIds] = await Promise.all([
+      const [importIds, validations, publications, researchRunIds, exportIds] = await Promise.all([
         parser.pendingImportIds(),
         validator.pendingImports(),
         publisher.pendingImports(),
-        keywordResearch.pendingIds()
+        keywordResearch.pendingIds(),
+        semanticExports.pendingIds()
       ]);
       for (const importId of importIds) {
         await enqueueSemanticImport(queue, importId);
@@ -109,8 +141,11 @@ async function bootstrap(): Promise<void> {
       for (const runId of researchRunIds) {
         await enqueueKeywordResearchImport(queue, runId);
       }
+      for (const exportId of exportIds) {
+        await enqueueSemanticExport(exportQueue, exportId);
+      }
     } catch {
-      logger.error("Unable to dispatch pending semantic imports");
+      logger.error("Unable to dispatch pending semantic import/export jobs");
     } finally {
       dispatching = false;
     }
@@ -128,6 +163,11 @@ async function bootstrap(): Promise<void> {
       `Semantic import failed for job ${job?.id ?? "unknown"} (${safeFailureCode(error)})`
     );
   });
+  exportWorker.on("failed", (job, error) => {
+    logger.warn(
+      `Semantic export failed for job ${job?.id ?? "unknown"} (${safeFailureCode(error)})`
+    );
+  });
 
   let shuttingDown = false;
   async function shutdown(): Promise<void> {
@@ -135,15 +175,19 @@ async function bootstrap(): Promise<void> {
     shuttingDown = true;
     clearInterval(dispatchTimer);
     await worker.close();
+    await exportWorker.close();
     await queue.close();
+    await exportQueue.close();
     await workerConnection.quit();
     await queueConnection.quit();
+    await exportWorkerConnection.quit();
+    await exportQueueConnection.quit();
     await app.close();
   }
 
   process.once("SIGTERM", () => void shutdown());
   process.once("SIGINT", () => void shutdown());
-  logger.log("Semantic import worker started");
+  logger.log("Semantic import/export worker started");
 }
 
 function redis(url: string): Redis {
@@ -167,6 +211,6 @@ function safeFailureCode(error: Error): string {
 }
 
 void bootstrap().catch(() => {
-  logger.error("Semantic import worker failed to start");
+  logger.error("Semantic import/export worker failed to start");
   process.exit(1);
 });

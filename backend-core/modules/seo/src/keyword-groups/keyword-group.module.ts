@@ -6,6 +6,7 @@ import { KeywordGroupService } from "./keyword-group.service.js";
 @Module({
   imports: [InternalModule],
   controllers: [KeywordGroupController],
-  providers: [KeywordGroupService]
+  providers: [KeywordGroupService],
+  exports: [KeywordGroupService]
 })
 export class KeywordGroupModule {}

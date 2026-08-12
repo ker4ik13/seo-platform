@@ -9,12 +9,12 @@ import { SemanticBulkController } from "./semantic-bulk.controller.js";
 import { SemanticSavedViewController } from "./semantic-saved-view.controller.js";
 import { SemanticCustomColumnController } from "./semantic-custom-column.controller.js";
 import { SemanticExportController } from "./semantic-export.controller.js";
-import { SemanticExportService } from "./semantic-export.service.js";
 import { SemanticVersionController } from "./semantic-version.controller.js";
 import { SemanticClusterController } from "./semantic-cluster.controller.js";
 import { JobsModule } from "../jobs/jobs.module.js";
 import { FrequencyCollectionController } from "./frequency-collection.controller.js";
 import { NegativeKeywordController } from "./negative-keyword.controller.js";
+import { SemanticDuplicateController } from "./semantic-duplicate.controller.js";
 
 @Module({
   imports: [
@@ -34,8 +34,8 @@ import { NegativeKeywordController } from "./negative-keyword.controller.js";
     SemanticExportController,
     SemanticVersionController,
     FrequencyCollectionController,
-    NegativeKeywordController
-  ],
-  providers: [SemanticExportService]
+    NegativeKeywordController,
+    SemanticDuplicateController
+  ]
 })
 export class SemanticModule {}

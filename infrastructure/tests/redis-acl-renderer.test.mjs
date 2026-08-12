@@ -74,6 +74,7 @@ test("renderer is POSIX shell and writes hashed least-privilege Jobs ACLs", asyn
       [
         "~seo-platform:jobs:v1:crawl-automation:*",
         "~seo-platform:jobs:v1:crawls:*",
+        "~seo-platform:jobs:v1:exports:*",
         "~seo-platform:jobs:v1:integration-credential-validation:*",
         "~seo-platform:jobs:v1:rank-automation:*",
         "~seo-platform:jobs:v1:rank-preparation:*",
@@ -89,6 +90,7 @@ test("renderer is POSIX shell and writes hashed least-privilege Jobs ACLs", asyn
       "~seo-platform:jobs:v1:upload-inspection:*"
     ]);
     assert.deepEqual(keyPatterns(userLine(lines, "seo_jobs_import")), [
+      "~seo-platform:jobs:v1:exports:*",
       "~seo-platform:jobs:v1:semantic-import:*"
     ]);
     assert.deepEqual(keyPatterns(userLine(lines, "seo_jobs_rank")), [

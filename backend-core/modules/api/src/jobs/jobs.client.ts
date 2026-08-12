@@ -113,7 +113,13 @@ import type {
   AdminOperationStatusGroup,
   AdminOperationResultMetrics,
   InternalAdminOperationSearchResult,
-  InternalAdminOperationSummary
+  InternalAdminOperationSummary,
+  CreateSemanticExportInput,
+  InternalCreateSemanticExportInput,
+  InternalCancelSemanticExportInput,
+  SemanticExportCollection,
+  SemanticExportDownload,
+  SemanticExportJobSummary
 } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
@@ -138,6 +144,11 @@ import {
   scopedFrequencyCollection,
   scopedFrequencyOperationScope
 } from "./frequency-collection-response.js";
+import {
+  scopedSemanticExportCollection,
+  scopedSemanticExportSummary,
+  semanticExportDownload
+} from "./semantic-export-response.js";
 
 interface InternalContext {
   readonly tenant: TenantAuthorization;
@@ -1092,6 +1103,108 @@ export class JobsClient {
     );
   }
 
+  public async createSemanticExport(
+    context: InternalContext,
+    input: CreateSemanticExportInput,
+    idempotencyKey: string,
+    jobCapacity: InternalCreateSemanticExportInput["jobCapacity"]
+  ): Promise<SemanticExportJobSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalCreateSemanticExportInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId,
+      idempotencyKey,
+      correlationId: context.requestId,
+      jobCapacity
+    };
+    const value = await this.request<unknown>(
+      "POST",
+      "/internal/v1/semantic-exports",
+      context,
+      body
+    );
+    return scopedSemanticExportSummary(
+      value,
+      context.tenant.workspaceId,
+      projectId
+    );
+  }
+
+  public async listSemanticExports(
+    context: InternalContext
+  ): Promise<SemanticExportCollection> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      "/internal/v1/semantic-exports",
+      context
+    );
+    return scopedSemanticExportCollection(
+      value,
+      context.tenant.workspaceId,
+      projectId
+    );
+  }
+
+  public async getSemanticExport(
+    context: InternalContext,
+    exportId: string
+  ): Promise<SemanticExportJobSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      semanticExportPath(exportId),
+      context
+    );
+    return scopedSemanticExportSummary(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      exportId
+    );
+  }
+
+  public async cancelSemanticExport(
+    context: InternalContext,
+    exportId: string,
+    version: number
+  ): Promise<SemanticExportJobSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalCancelSemanticExportInput = {
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId,
+      version
+    };
+    const value = await this.request<unknown>(
+      "POST",
+      `${semanticExportPath(exportId)}/cancel`,
+      context,
+      body
+    );
+    return scopedSemanticExportSummary(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      exportId
+    );
+  }
+
+  public async downloadSemanticExport(
+    context: InternalContext,
+    exportId: string
+  ): Promise<SemanticExportDownload> {
+    return semanticExportDownload(
+      await this.request<unknown>(
+        "GET",
+        `${semanticExportPath(exportId)}/download`,
+        context
+      )
+    );
+  }
+
   public async integrationCatalog(
     context: InternalContext
   ): Promise<readonly IntegrationProviderCatalogItem[]> {
@@ -1622,6 +1735,10 @@ export class JobsClient {
     }
     return payload.data as Data;
   }
+}
+
+function semanticExportPath(exportId: string): string {
+  return `/internal/v1/semantic-exports/${encodeURIComponent(exportId)}`;
 }
 
 async function boundedJobsJson(response: Response): Promise<unknown> {

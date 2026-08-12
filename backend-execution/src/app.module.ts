@@ -21,6 +21,7 @@ import { CrawlNotificationModule } from "./crawl-notifications/crawl-notificatio
 import { FrequencyCollectionModule } from "./frequency-collections/frequency-collection.module.js";
 import { JobNotificationModule } from "./job-notifications/job-notification.module.js";
 import { OperationActivityModule } from "./operation-activity/operation-activity.module.js";
+import { SemanticExportModule } from "./semantic-exports/semantic-export.module.js";
 
 @Module({
   imports: [
@@ -45,7 +46,8 @@ import { OperationActivityModule } from "./operation-activity/operation-activity
     KeywordResearchModule,
     FrequencyCollectionModule,
     JobNotificationModule,
-    OperationActivityModule
+    OperationActivityModule,
+    SemanticExportModule
   ]
 })
 export class AppModule {}

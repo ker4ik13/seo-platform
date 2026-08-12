@@ -11,6 +11,7 @@ export const semanticVersionReasons = [
   "BULK_UPDATE",
   "CLEANING",
   "NEGATIVE_KEYWORDS",
+  "IMPLICIT_DUPLICATES",
   "IMPORT",
   "UNDO",
   "LEGACY"

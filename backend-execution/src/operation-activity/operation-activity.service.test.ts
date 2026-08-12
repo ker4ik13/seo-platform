@@ -36,7 +36,8 @@ test("counts only active user-visible operations by project", async () => {
           "FREQUENCY_COLLECTION",
           "MANUAL_RANK_CHECK",
           "TECHNICAL_CRAWL",
-          "KEYWORD_RESEARCH"
+          "KEYWORD_RESEARCH",
+          "SEMANTIC_EXPORT"
         ]
       },
       status: {

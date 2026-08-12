@@ -155,17 +155,13 @@ test("forwards a manual rank create with CSRF and Idempotency-Key", async () => 
   }
 });
 
-test("streams semantic export metadata without buffering the download", async () => {
+test("forwards a background semantic export response", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () =>
-    new Response("Query\r\nseo\r\n", {
-      headers: {
-        "Content-Disposition":
-          'attachment; filename="semantic-core-2026-07-30.csv"',
-        "Content-Type": "text/csv; charset=utf-8",
-        "X-Export-Row-Count": "1"
-      }
-    });
+    Response.json(
+      { data: { id: "export-id", status: "QUEUED" } },
+      { status: 202 }
+    );
 
   try {
     const request = new NextRequest(
@@ -184,12 +180,55 @@ test("streams semantic export metadata without buffering the download", async ()
       "project-id",
       "exports"
     ]);
+    assert.equal(response.status, 202);
+    assert.deepEqual(await response.json(), {
+      data: { id: "export-id", status: "QUEUED" }
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("streams a same-origin semantic export download with attachment headers", async () => {
+  const originalFetch = globalThis.fetch;
+  const file = Uint8Array.from([80, 75, 3, 4]);
+  globalThis.fetch = async () =>
+    new Response(file, {
+      status: 200,
+      headers: {
+        "Cache-Control": "private, no-store",
+        "Content-Disposition":
+          "attachment; filename*=UTF-8''semantic-core.xlsx",
+        "Content-Length": String(file.byteLength),
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      }
+    });
+
+  try {
+    const request = new NextRequest(
+      "https://app.example.test/app/api/projects/project-id/exports/export-id/file",
+      { headers: { Cookie: "seo_session=session" } }
+    );
+    const response = await proxyPlatformApi(request, [
+      "projects",
+      "project-id",
+      "exports",
+      "export-id",
+      "file"
+    ]);
+
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    assert.equal(response.headers.get("content-length"), "4");
     assert.equal(
       response.headers.get("content-disposition"),
-      'attachment; filename="semantic-core-2026-07-30.csv"'
+      "attachment; filename*=UTF-8''semantic-core.xlsx"
     );
-    assert.equal(response.headers.get("x-export-row-count"), "1");
-    assert.equal(await response.text(), "Query\r\nseo\r\n");
+    assert.deepEqual(
+      new Uint8Array(await response.arrayBuffer()),
+      file
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }

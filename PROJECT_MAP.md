@@ -1,6 +1,6 @@
 # Карта проекта
 
-Актуально на 11 августа 2026 года.
+Актуально на 12 августа 2026 года.
 
 Карта описывает текущее устройство репозитория. Нормативные требования
 находятся в `docs/technical-spec/00-index.md`, архитектурные решения — в
@@ -279,7 +279,9 @@ SEO Data. При недоступности SEO Data каталог остаёт
 - `src/main.ts` — supervisor;
 - `src/http.main.ts` — Jobs/internal HTTP, порт 4002;
 - `src/worker.main.ts` — Redis-only system dispatcher;
-- `src/import-worker.main.ts` — semantic import;
+- `src/import-worker.main.ts` — semantic import, keyword-research import и
+  streaming semantic export через отдельные очереди `semantic-import` и
+  `exports`;
 - `src/rank-worker.main.ts` — параллельные rank preparation/grant/result;
 - `src/crawl-worker.main.ts` — technical crawl;
 - `src/connector-worker.main.ts` — provider I/O и credential broker с
@@ -410,7 +412,7 @@ provider request и не связывает между собой разные B
 Wizard по умолчанию выбирает регион «Россия» (`225`); в списке далее идут
 Москва и Санкт-Петербург.
 
-### Минус-слова и карточка запроса
+### Минус-слова, неявные дубли и карточка запроса
 
 `Keyword.note` хранит ограниченную 4 000 символами проектную заметку; list
 projection отдаёт только `hasNote`, а полный текст доступен через tenant-scoped
@@ -424,10 +426,29 @@ append-only `rank_snapshots`, поэтому график не создаёт о
 совпадение всей фразы. Для стоп-фраз отдельно сохраняются флаги игнорирования
 порядка слов и пунктуации; прежние пресеты после additive migration получают
 оба значения `false` и не меняют поведение. Применение всегда двухфазное:
-bounded preview фиксирует scope/version/hash, затем команда пакетами до 500
-строк переносит совпадения в системную корзину, создаёт reversible semantic
-version `NEGATIVE_KEYWORDS` и повторно проверяет optimistic versions под
-project write lock. Пресеты включены в allowlist передачи проекта.
+preview фиксирует scope/version/hash и отдаёт все совпадения страницами по 100
+строк вместе с UTF-16 диапазонами для inline-подсветки. Web накапливает страницы
+при прокрутке списка без селектора размера и ручных кнопок навигации. Затем команда
+пакетами до 500 строк переносит совпадения в системную корзину, возвращает
+точные удалённые keyword ID, создаёт reversible semantic version
+`NEGATIVE_KEYWORDS` и повторно проверяет optimistic versions под project write
+lock. Пресеты включены в allowlist передачи проекта.
+
+Модуль `backend-core/modules/seo/src/semantic-duplicates` реализует
+двухфазный поиск неявных дублей по order-independent мультимножеству слов:
+точный либо улучшенный русскоязычный формонезависимый режим, опциональный
+учёт регистра/пунктуации и до 100 слов-исключений. Scope ограничен всем
+проектом, одной папкой или optimistic selection; синхронный анализ не
+сканирует больше 50 000 активных строк. Preview показывает bounded группы и
+фиксирует hash для видимого пакета до 100 групп и 500 кандидатов на удаление;
+каждая строка содержит полный запрос и все пути её папок. Умная отметка
+оставляет фразу с максимальной базовой частотностью, приоритетом либо самой
+ранней датой с детерминированными fallback, но Web позволяет пропустить группу
+или явно выбрать другой keeper. Apply принимает только просмотренные решения,
+повторно проверяет tenant, scope, версии удаляемых фраз и выбранных keepers под
+project write lock, не затрагивает скрытые/пропущенные группы, переносит только
+проверенные варианты в системную корзину и создаёт reversible semantic version
+`IMPLICIT_DUPLICATES`; постоянного удаления этот инструмент не выполняет.
 
 ### Импорт и crawl
 
@@ -457,6 +478,28 @@ rank-history endpoint также не смешивает импорт с вос�
 бесконечного цикла; уже принятые chunks остаются idempotent.
 Crawl role выполняет SSRF/DNS-rebinding-safe обход с robots/sitemap policy,
 checkpoint и lease; нормализованные snapshots принадлежат Core SEO.
+
+Экспорт семантики всегда создаёт tenant-scoped `SEMANTIC_EXPORT` Job в
+`jobs_db`: Core повторно проверяет `semantic.export`, фиксирует immutable
+filter/sort/column/format snapshot и передаёт только Job ID в BullMQ-очередь
+`exports`. Import-worker постранично читает Core SEO через отдельную read-only
+границу `/internal/v1/projects/:projectId/semantic-exports/*`, защищённую
+`JOBS_TO_SEO_DATA_TOKEN` и доверенным workspace/project/actor context, потоково
+формирует CSV/TSV/JSON/NDJSON/XLSX
+без материализации полного ядра в HTTP или памяти и multipart-записью сохраняет
+артефакт в S3. XLSX автоматически делится по ограничению строк листа, а все
+spreadsheet-форматы защищены от formula injection. Состояние и row progress
+остаются PostgreSQL-owned; истёкший lease восстанавливается dispatcher-ом.
+Скачивание выдаётся только после повторной browser permission-проверки в Core:
+обычный пользовательский переход на `GET /api/v1/projects/:projectId/exports/:exportId/file`
+получает поток с attachment disposition через Core и same-origin BFF. Core
+одноразово получает короткоживущую signed URL у Execution и читает по ней
+артефакт сервер-сервер, поэтому браузеру не раскрывается и не требуется
+отдельный публичный S3-порт. Авторизация скачивания журналируется, а прямой
+пользовательский клик не зависит от browser user-activation после async polling.
+Drawer «Задачи и операции» продолжает polling после закрытия export modal,
+показывает прогресс и позволяет остановить активный экспорт либо повторно скачать
+завершённый файл прямой пользовательской ссылкой.
 
 Проектный инструмент `/app/projects/{projectId}/tools/http-status-checker`
 переиспользует тот же `technical-crawl` Job/queue/worker и отличается

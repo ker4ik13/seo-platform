@@ -647,7 +647,8 @@ mapping_body=$(
       columns: $columns,
       defaultLanguage: "ru",
       groupSeparator: "/",
-      duplicatePolicy: "SKIP_EXISTING"
+      duplicatePolicy: "SKIP_EXISTING",
+      createMissingKeywords: true
     }'
 )
 api_call POST \
@@ -712,7 +713,150 @@ jq -e '
   runtime_fail "published semantic keywords are missing from the project"
 fi
 
-printf 'smoke result=passed workspace=%s project=%s keyword=%s crawl=%s crawl_status=%s processed_urls=%s upload=%s import=%s import_status=%s\n' \
+api_call POST "projects/$project_id/keywords" \
+  '{"text":"купить слона быстро","language":"ru","priority":80,"isFavorite":false,"tagNames":["smoke-duplicate"]}'
+expect_status 201 create-duplicate-keeper
+
+api_call POST "projects/$project_id/keywords" \
+  '{"text":"быстро купить слона","language":"ru","priority":20,"isFavorite":false,"tagNames":["smoke-duplicate"]}'
+expect_status 201 create-implicit-duplicate
+
+duplicate_command='{
+  "rules": {
+    "analysisMode": "EXACT",
+    "caseSensitive": false,
+    "ignorePunctuation": true,
+    "ignoredWords": []
+  },
+  "scope": {"kind": "PROJECT"},
+  "keeperStrategy": "HIGHEST_PRIORITY"
+}'
+api_call POST "projects/$project_id/semantic-duplicates/preview" \
+  "$duplicate_command"
+expect_status 201 preview-implicit-duplicates
+duplicate_preview_hash=$(jq -er '.data.previewHash' "$response_body")
+[ "$(jq -er '.data.deletionCount' "$response_body")" -ge 1 ] ||
+  runtime_fail "implicit duplicate preview did not find the smoke pair"
+duplicate_decisions=$(jq -cer '
+  [.data.groups[] | {
+    groupId: .id,
+    keeper: ([.items[] | select(.keep == true) | {
+      id: .keywordId,
+      version: .version
+    }] | first),
+    deletions: [.items[] | select(.keep == false) | {
+      id: .keywordId,
+      version: .version
+    }]
+  } | select(.keeper != null and (.deletions | length) > 0)]
+' "$response_body")
+[ "$(jq -er 'length' <<<"$duplicate_decisions")" -ge 1 ] ||
+  runtime_fail "implicit duplicate preview did not expose review decisions"
+
+duplicate_apply_body=$(
+  jq -cn \
+    --argjson command "$duplicate_command" \
+    --arg previewHash "$duplicate_preview_hash" \
+    --argjson decisions "$duplicate_decisions" \
+    '$command + {previewHash: $previewHash, decisions: $decisions}'
+)
+api_call POST "projects/$project_id/semantic-duplicates/apply" \
+  "$duplicate_apply_body"
+expect_status 201 apply-implicit-duplicates
+[ "$(jq -er '.data.deletedCount' "$response_body")" -ge 1 ] ||
+  runtime_fail "implicit duplicate apply did not move the candidate to trash"
+
+negative_preview_body='{
+  "rules": {
+    "words": ["слон"],
+    "matchMode": "WORD_FORM_PRECISE",
+    "caseSensitive": false,
+    "ignoreWordOrder": false,
+    "ignorePunctuation": false
+  },
+  "scope": {"kind": "PROJECT"},
+  "page": 1,
+  "pageSize": 100
+}'
+api_call POST "projects/$project_id/negative-keywords/preview" \
+  "$negative_preview_body"
+expect_status 201 preview-negative-keyword-pagination
+jq -e '
+  .data.page == 1 and
+  .data.pageSize == 100 and
+  .data.pageCount >= 1 and
+  .data.matchedCount >= 1 and
+  (.data.matches | any(
+    (.text | contains("слона")) and
+    (.highlightRanges | length) >= 1
+  ))
+' "$response_body" >/dev/null ||
+  runtime_fail "negative keyword preview did not expose paged inline highlights"
+
+semantic_export_body='{
+  "format": "XLSX",
+  "scope": "CURRENT_FILTER",
+  "locale": "ru",
+  "columns": ["query", "frequency", "priority", "group"],
+  "filters": {},
+  "sort": "CREATED_DESC",
+  "includeBom": false
+}'
+api_call POST "projects/$project_id/exports" \
+  "$semantic_export_body" \
+  "smoke-export-$(openssl rand -hex 16)"
+expect_status 202 create-semantic-export
+semantic_export_id=$(jq -er '.data.id' "$response_body")
+
+semantic_export_status=QUEUED
+for ((attempt = 1; attempt <= 60; attempt += 1)); do
+  api_call GET "projects/$project_id/exports/$semantic_export_id"
+  expect_status 200 read-semantic-export
+  semantic_export_status=$(jq -er '.data.status' "$response_body")
+  case "$semantic_export_status" in
+    COMPLETED) break ;;
+    CANCELLED|FAILED_FINAL)
+      runtime_fail "semantic export finished with status $semantic_export_status"
+      ;;
+  esac
+  sleep 1
+done
+[ "$semantic_export_status" = COMPLETED ] ||
+  runtime_fail "semantic export did not complete before the smoke timeout"
+[ "$(jq -er '.data.rowCount' "$response_body")" -ge "$semantic_expected_min" ] ||
+  runtime_fail "semantic export omitted fixture keywords"
+
+semantic_export_file=$smoke_root/semantic-export.xlsx
+curl \
+  --silent \
+  --show-error \
+  --fail \
+  --max-time 30 \
+  --cookie "$cookie_jar" \
+  --output "$semantic_export_file" \
+  "$SEO_PLATFORM_PUBLIC_URL/app/api/projects/$project_id/exports/$semantic_export_id/file"
+SEMANTIC_EXPORT_FILE="$semantic_export_file" \
+FFLATE_MODULE="$project_root/backend-execution/node_modules/fflate" \
+  /home/dev/.nvm/versions/node/v24.18.1/bin/node <<'NODE'
+const { readFileSync } = require("node:fs");
+const { unzipSync } = require(process.env.FFLATE_MODULE);
+const archive = unzipSync(new Uint8Array(readFileSync(process.env.SEMANTIC_EXPORT_FILE)));
+const sheetFile = archive["xl/worksheets/sheet1.xml"];
+if (
+  !archive["[Content_Types].xml"] ||
+  !archive["xl/workbook.xml"] ||
+  !sheetFile
+) {
+  process.exit(1);
+}
+const sheet = new TextDecoder().decode(sheetFile);
+if (!/<c r="B[2-9][0-9]*"><v>(?:120|70)<\/v><\/c>/u.test(sheet)) {
+  process.exit(1);
+}
+NODE
+printf 'smoke operation=verify-semantic-export-xlsx status=passed\n'
+
+printf 'smoke result=passed workspace=%s project=%s keyword=%s crawl=%s crawl_status=%s processed_urls=%s upload=%s import=%s import_status=%s export=%s export_status=%s\n' \
   "$workspace_id" \
   "$project_id" \
   "$keyword_id" \
@@ -721,4 +865,6 @@ printf 'smoke result=passed workspace=%s project=%s keyword=%s crawl=%s crawl_st
   "$processed_urls" \
   "$upload_id" \
   "$semantic_import_id" \
-  "$import_status"
+  "$import_status" \
+  "$semantic_export_id" \
+  "$semantic_export_status"

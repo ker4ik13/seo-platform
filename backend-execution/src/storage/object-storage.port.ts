@@ -15,6 +15,11 @@ export interface StoredObjectMetadata {
   readonly etag?: string;
 }
 
+export interface DownloadObjectOptions {
+  readonly filename?: string;
+  readonly contentType?: string;
+}
+
 export interface ObjectStoragePort {
   isEnabled(): boolean;
   healthCheck(): Promise<void>;
@@ -42,7 +47,8 @@ export interface ObjectStoragePort {
   ): Promise<void>;
   createDownloadUrl(
     bucket: StorageBucket,
-    objectKey: string
+    objectKey: string,
+    options?: DownloadObjectOptions
   ): Promise<string>;
   headObject(
     bucket: StorageBucket,

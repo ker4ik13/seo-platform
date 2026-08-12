@@ -1,11 +1,12 @@
 import { BadRequestException } from "@nestjs/common";
 import {
   semanticNegativeKeywordMatchModes,
+  semanticNegativeKeywordPreviewPageSizes,
   semanticNegativeKeywordScopeKinds,
   type InternalApplySemanticNegativeKeywordsInput,
   type InternalCreateSemanticNegativeKeywordPresetInput,
   type InternalDeleteSemanticNegativeKeywordPresetInput,
-  type InternalSemanticNegativeKeywordCommandInput,
+  type InternalSemanticNegativeKeywordPreviewInput,
   type InternalUpdateSemanticNegativeKeywordPresetInput,
   type SemanticNegativeKeywordRules,
   type SemanticNegativeKeywordScope
@@ -59,17 +60,46 @@ export function internalDeleteNegativeKeywordPresetInput(
 
 export function internalNegativeKeywordCommandInput(
   value: unknown
-): InternalSemanticNegativeKeywordCommandInput {
+): InternalSemanticNegativeKeywordPreviewInput {
   const input = exactRecord(value, [
     "workspaceId",
     "projectId",
     "actorId",
     "presetId",
     "rules",
-    "scope"
+    "scope",
+    "page",
+    "pageSize"
   ]);
   const command = commandFields(input);
-  return { ...scope(input), ...command };
+  return {
+    ...scope(input),
+    ...command,
+    page: previewPage(input.page),
+    pageSize: previewPageSize(input.pageSize)
+  };
+}
+
+function previewPage(value: unknown): number {
+  const page = value === undefined ? 1 : Number(value);
+  if (!Number.isSafeInteger(page) || page < 1 || page > 500) {
+    invalid("page");
+  }
+  return page;
+}
+
+function previewPageSize(
+  value: unknown
+): InternalSemanticNegativeKeywordPreviewInput["pageSize"] {
+  const pageSize = value === undefined ? 100 : Number(value);
+  if (
+    !semanticNegativeKeywordPreviewPageSizes.some(
+      (supported) => supported === pageSize
+    )
+  ) {
+    invalid("pageSize");
+  }
+  return pageSize as InternalSemanticNegativeKeywordPreviewInput["pageSize"];
 }
 
 export function internalApplyNegativeKeywordsInput(

@@ -68,6 +68,56 @@ test("accepts a complete normalized batch and forwards trusted context", async (
   }
 });
 
+test("uses the Jobs-only semantic export read boundary", async () => {
+  const originalFetch = globalThis.fetch;
+  const observed: Array<{ readonly url: string; readonly headers: Headers }> = [];
+  globalThis.fetch = (async (input, init) => {
+    observed.push({
+      url: String(input),
+      headers: new Headers(init?.headers)
+    });
+    const url = String(input);
+    if (url.endsWith("/semantic-exports/keyword-groups")) {
+      return Response.json({ data: [], meta: { requestId: "groups" } });
+    }
+    if (url.endsWith("/semantic-exports/custom-columns")) {
+      return Response.json({ data: [], meta: { requestId: "columns" } });
+    }
+    return Response.json({
+      data: [],
+      page: { hasNext: false, totalApprox: 0 },
+      meta: { requestId: "keywords" }
+    });
+  }) as typeof fetch;
+  try {
+    const client = new SeoDataClient(config);
+    await client.listExportKeywords(context, {
+      limit: 500,
+      search: "seo",
+      sort: "CREATED_ASC"
+    });
+    await client.listExportKeywordGroups(context);
+    await client.listExportCustomColumns(context);
+
+    assert.deepEqual(
+      observed.map(({ url }) => url),
+      [
+        `http://seo-data:4001/internal/v1/projects/${context.projectId}/semantic-exports/keywords?limit=500&search=seo&sort=CREATED_ASC`,
+        `http://seo-data:4001/internal/v1/projects/${context.projectId}/semantic-exports/keyword-groups`,
+        `http://seo-data:4001/internal/v1/projects/${context.projectId}/semantic-exports/custom-columns`
+      ]
+    );
+    for (const { headers: requestHeaders } of observed) {
+      assert.equal(requestHeaders.get("X-Internal-Token"), seoDataApiToken);
+      assert.equal(requestHeaders.get("X-Workspace-Id"), context.workspaceId);
+      assert.equal(requestHeaders.get("X-Project-Id"), context.projectId);
+      assert.equal(requestHeaders.get("X-Actor-Id"), context.actorId);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("treats an incomplete normalization response as retryable", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () =>

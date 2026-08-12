@@ -92,6 +92,7 @@ function exportFilters(value: unknown): SemanticExportFilters {
       "tag",
       "intent",
       "groupId",
+      "groupIds",
       "clusterId",
       "isFavorite",
       "isTracked",
@@ -108,6 +109,10 @@ function exportFilters(value: unknown): SemanticExportFilters {
       ? undefined
       : requiredEnum(input.intent, semanticKeywordIntents, "filters.intent");
   const groupId = optionalUuid(input.groupId, "filters.groupId");
+  const groupIds = optionalUuidList(input.groupIds, "filters.groupIds", 200);
+  if (groupId && groupIds) {
+    invalid("filters.groupIds", "Cannot be combined with groupId");
+  }
   const clusterId = optionalUuid(input.clusterId, "filters.clusterId");
   const isFavorite = optionalBoolean(
     input.isFavorite,
@@ -137,12 +142,34 @@ function exportFilters(value: unknown): SemanticExportFilters {
     ...(tag ? { tag } : {}),
     ...(intent ? { intent } : {}),
     ...(groupId ? { groupId } : {}),
+    ...(groupIds ? { groupIds } : {}),
     ...(clusterId ? { clusterId } : {}),
     ...(isFavorite === undefined ? {} : { isFavorite }),
     ...(isTracked === undefined ? {} : { isTracked }),
     ...(priorityMin === undefined ? {} : { priorityMin }),
     ...(priorityMax === undefined ? {} : { priorityMax })
   };
+}
+
+function optionalUuidList(
+  value: unknown,
+  field: string,
+  maximum: number
+): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length < 2 || value.length > maximum) {
+    invalid(field, `Must contain 2 to ${maximum} UUIDs`);
+  }
+  const values = value.map((item, index) => {
+    if (typeof item !== "string" || !UUID_PATTERN.test(item)) {
+      invalid(`${field}[${index}]`, "Must be a UUID");
+    }
+    return item.toLowerCase();
+  });
+  if (new Set(values).size !== values.length) {
+    invalid(field, "Must contain unique UUIDs");
+  }
+  return [...values].sort();
 }
 
 function exportColumns(
@@ -161,7 +188,9 @@ function exportColumns(
     ) {
       invalid(`columns[${index}]`, "Must be a known column key");
     }
-    return column as SemanticSavedViewColumnKey;
+    return (column.startsWith("custom:")
+      ? `custom:${column.slice("custom:".length).toLowerCase()}`
+      : column) as SemanticSavedViewColumnKey;
   });
   if (new Set(columns).size !== columns.length) {
     invalid("columns", "Columns must be unique");
@@ -170,8 +199,8 @@ function exportColumns(
 }
 
 function exportKeywordIds(value: unknown): readonly string[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 200) {
-    invalid("keywordIds", "Must contain 1 to 200 keyword IDs");
+  if (!Array.isArray(value) || value.length < 1 || value.length > 15_000) {
+    invalid("keywordIds", "Must contain 1 to 15000 keyword IDs");
   }
   const ids = value.map((item, index) => {
     if (typeof item !== "string" || !UUID_PATTERN.test(item)) {

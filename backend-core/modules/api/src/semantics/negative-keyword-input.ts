@@ -1,9 +1,10 @@
 import {
   semanticNegativeKeywordMatchModes,
+  semanticNegativeKeywordPreviewPageSizes,
   semanticNegativeKeywordScopeKinds,
   type ApplySemanticNegativeKeywordsInput,
   type CreateSemanticNegativeKeywordPresetInput,
-  type SemanticNegativeKeywordCommandInput,
+  type SemanticNegativeKeywordPreviewInput,
   type SemanticNegativeKeywordRules,
   type SemanticNegativeKeywordScope,
   type UpdateSemanticNegativeKeywordPresetInput
@@ -31,8 +32,8 @@ export function updateNegativeKeywordPresetInput(
 
 export function negativeKeywordCommandInput(
   value: unknown
-): SemanticNegativeKeywordCommandInput {
-  return command(value, false) as SemanticNegativeKeywordCommandInput;
+): SemanticNegativeKeywordPreviewInput {
+  return command(value, false) as SemanticNegativeKeywordPreviewInput;
 }
 
 export function applyNegativeKeywordsInput(
@@ -44,10 +45,12 @@ export function applyNegativeKeywordsInput(
 function command(
   value: unknown,
   applying: boolean
-): SemanticNegativeKeywordCommandInput | ApplySemanticNegativeKeywordsInput {
+): SemanticNegativeKeywordPreviewInput | ApplySemanticNegativeKeywordsInput {
   const input = exactRecord(
     value,
-    applying ? ["presetId", "rules", "scope", "previewHash"] : ["presetId", "rules", "scope"]
+    applying
+      ? ["presetId", "rules", "scope", "previewHash"]
+      : ["presetId", "rules", "scope", "page", "pageSize"]
   );
   const presetId = input.presetId === undefined ? undefined : uuidValue(input.presetId, "presetId");
   const inlineRules = input.rules === undefined ? undefined : rules(input.rules);
@@ -59,11 +62,39 @@ function command(
     ...(inlineRules ? { rules: inlineRules } : {}),
     scope: commandScope(input.scope)
   };
-  if (!applying) return base;
+  if (!applying) {
+    return {
+      ...base,
+      page: previewPage(input.page),
+      pageSize: previewPageSize(input.pageSize)
+    };
+  }
   if (typeof input.previewHash !== "string" || !/^[a-f0-9]{64}$/u.test(input.previewHash)) {
     invalid("previewHash", "Preview hash is invalid");
   }
   return { ...base, previewHash: input.previewHash };
+}
+
+function previewPage(value: unknown): number {
+  const page = value === undefined ? 1 : Number(value);
+  if (!Number.isSafeInteger(page) || page < 1 || page > 500) {
+    invalid("page", "Must be an integer between 1 and 500");
+  }
+  return page;
+}
+
+function previewPageSize(
+  value: unknown
+): SemanticNegativeKeywordPreviewInput["pageSize"] {
+  const pageSize = value === undefined ? 100 : Number(value);
+  if (
+    !semanticNegativeKeywordPreviewPageSizes.some(
+      (supported) => supported === pageSize
+    )
+  ) {
+    invalid("pageSize", "Must be 100 or 200");
+  }
+  return pageSize as SemanticNegativeKeywordPreviewInput["pageSize"];
 }
 
 function rules(value: unknown): SemanticNegativeKeywordRules {

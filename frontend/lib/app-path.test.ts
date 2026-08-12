@@ -4,7 +4,8 @@ import {
   externalPageUrlPresentation,
   isSafeBrowserApiPath,
   projectLogoUrl,
-  safeAppReturnTo
+  safeAppReturnTo,
+  semanticExportFileUrl
 } from "./app-path.ts";
 
 test("accepts only local app return paths", () => {
@@ -53,5 +54,15 @@ test("builds a same-origin versioned project logo URL", () => {
   assert.equal(
     projectLogoUrl("01900000-0000-7000-8000-000000000101", 12),
     "/app/api/projects/01900000-0000-7000-8000-000000000101/logo?v=12"
+  );
+});
+
+test("builds a same-origin semantic export download URL", () => {
+  assert.equal(
+    semanticExportFileUrl(
+      "01900000-0000-7000-8000-000000000101",
+      "01900000-0000-7000-8000-000000000102"
+    ),
+    "/app/api/projects/01900000-0000-7000-8000-000000000101/exports/01900000-0000-7000-8000-000000000102/file"
   );
 });

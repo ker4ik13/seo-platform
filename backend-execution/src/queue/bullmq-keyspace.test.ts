@@ -16,9 +16,9 @@ const expectedConstructionSites = new Map([
   ["connector-worker.main.ts", 8],
   ["crawl-automations/crawl-automation-runtime.service.ts", 1],
   ["crawl-worker.main.ts", 2],
-  ["import-worker.main.ts", 2],
+  ["import-worker.main.ts", 4],
   ["inspection-worker.main.ts", 2],
-  ["queue/queue.service.ts", 8],
+  ["queue/queue.service.ts", 9],
   ["rank-worker.main.ts", 2],
   ["worker.main.ts", 1]
 ]);

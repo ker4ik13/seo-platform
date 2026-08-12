@@ -13,6 +13,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { S3Config } from "../config/app-config.js";
 import type {
   CompletedPart,
+  DownloadObjectOptions,
   MultipartUpload,
   ObjectStoragePort,
   StoredObjectMetadata,
@@ -148,13 +149,23 @@ export class S3ObjectStorageAdapter implements ObjectStoragePort {
 
   public createDownloadUrl(
     bucket: StorageBucket,
-    objectKey: string
+    objectKey: string,
+    options?: DownloadObjectOptions
   ): Promise<string> {
     return getSignedUrl(
       this.client,
       new GetObjectCommand({
         Bucket: this.bucketName(bucket),
-        Key: this.storageObjectKey(bucket, objectKey)
+        Key: this.storageObjectKey(bucket, objectKey),
+        ...(options?.filename
+          ? {
+              ResponseContentDisposition:
+                `attachment; filename*=UTF-8''${encodeURIComponent(options.filename)}`
+            }
+          : {}),
+        ...(options?.contentType
+          ? { ResponseContentType: options.contentType }
+          : {})
       }),
       { expiresIn: this.config.signedUrlTtlSeconds }
     );

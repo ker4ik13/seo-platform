@@ -44,11 +44,18 @@ test("normalizes a negative keyword preset and rejects duplicate words", () => {
 });
 
 test("requires an exact scope and preview hash before applying", () => {
-  const command = negativeKeywordCommandInput({
+  const command = {
     rules: { words: ["москва"], matchMode: "WHOLE_WORD", caseSensitive: false },
     scope: { kind: "GROUP", groupId }
-  });
-  assert.deepEqual(command.scope, { kind: "GROUP", groupId });
+  } as const;
+  const preview = negativeKeywordCommandInput(command);
+  assert.deepEqual(preview.scope, { kind: "GROUP", groupId });
+  assert.equal(preview.page, 1);
+  assert.equal(preview.pageSize, 100);
+  assert.deepEqual(
+    negativeKeywordCommandInput({ ...command, page: 2, pageSize: 200 }),
+    { ...preview, page: 2, pageSize: 200 }
+  );
   assert.throws(
     () => applyNegativeKeywordsInput({ ...command, previewHash: "stale" }),
     DomainError
@@ -56,6 +63,10 @@ test("requires an exact scope and preview hash before applying", () => {
   assert.equal(
     applyNegativeKeywordsInput({ ...command, previewHash: "a".repeat(64) }).previewHash,
     "a".repeat(64)
+  );
+  assert.throws(
+    () => negativeKeywordCommandInput({ ...command, page: 1, pageSize: 50 }),
+    DomainError
   );
 });
 

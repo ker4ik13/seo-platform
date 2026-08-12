@@ -45,7 +45,7 @@ import {
   type InternalCreateSemanticNegativeKeywordPresetInput,
   type InternalUpdateSemanticNegativeKeywordPresetInput,
   type InternalDeleteSemanticNegativeKeywordPresetInput,
-  type InternalSemanticNegativeKeywordCommandInput,
+  type InternalSemanticNegativeKeywordPreviewInput,
   type InternalApplySemanticNegativeKeywordsInput,
   type InternalUpdateSemanticClusterInput,
   type InternalUpdateSemanticKeywordGroupInput,
@@ -125,11 +125,19 @@ import {
   type UpdateTrackingContextInput,
   type CreateSemanticNegativeKeywordPresetInput,
   type UpdateSemanticNegativeKeywordPresetInput,
-  type SemanticNegativeKeywordCommandInput,
+  type SemanticNegativeKeywordPreviewInput,
   type ApplySemanticNegativeKeywordsInput,
   type SemanticNegativeKeywordPreset,
   type SemanticNegativeKeywordPreview,
   type SemanticNegativeKeywordApplyResult,
+  type SemanticDuplicateCommandInput,
+  type ApplySemanticDuplicatesInput,
+  type InternalSemanticDuplicateCommandInput,
+  type InternalApplySemanticDuplicatesInput,
+  type SemanticDuplicatePreview,
+  type SemanticDuplicateApplyResult,
+  type SemanticDuplicatePreviewGroup,
+  type SemanticDuplicatePreviewItem,
   type CreateProjectNoteInput,
   type UpdateProjectNoteInput,
   type InternalCreateProjectNoteInput,
@@ -958,10 +966,10 @@ export class SeoDataClient {
 
   public async previewNegativeKeywords(
     context: InternalContext,
-    input: SemanticNegativeKeywordCommandInput
+    input: SemanticNegativeKeywordPreviewInput
   ): Promise<SemanticNegativeKeywordPreview> {
     const scope = trackingScope(context);
-    const body: InternalSemanticNegativeKeywordCommandInput = {
+    const body: InternalSemanticNegativeKeywordPreviewInput = {
       ...input,
       workspaceId: scope.workspaceId,
       projectId: scope.projectId,
@@ -994,6 +1002,54 @@ export class SeoDataClient {
       body
     );
     return semanticNegativeKeywordApplyResult(responseData(payload));
+  }
+
+  public async previewSemanticDuplicates(
+    context: InternalContext,
+    input: SemanticDuplicateCommandInput
+  ): Promise<SemanticDuplicatePreview> {
+    const scope = trackingScope(context);
+    const body: InternalSemanticDuplicateCommandInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      semanticDuplicateCommandUrl(
+        context,
+        this.config.services.seoData,
+        "preview"
+      ),
+      context,
+      body
+    );
+    return semanticDuplicatePreview(responseData(payload));
+  }
+
+  public async applySemanticDuplicates(
+    context: InternalContext,
+    input: ApplySemanticDuplicatesInput
+  ): Promise<SemanticDuplicateApplyResult> {
+    const scope = trackingScope(context);
+    const body: InternalApplySemanticDuplicatesInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      semanticDuplicateCommandUrl(
+        context,
+        this.config.services.seoData,
+        "apply"
+      ),
+      context,
+      body
+    );
+    return semanticDuplicateApplyResult(responseData(payload));
   }
 
   public async listSemanticCustomColumns(
@@ -3661,35 +3717,85 @@ export function semanticNegativeKeywordPreview(
     typeof input.hasMore !== "boolean" ||
     typeof input.matchesTruncated !== "boolean" ||
     typeof input.previewHash !== "string" || !/^[a-f0-9]{64}$/u.test(input.previewHash) ||
-    !Array.isArray(input.matches) || input.matches.length !== Number(input.batchCount)
+    !Number.isSafeInteger(input.page) || Number(input.page) < 1 ||
+    ![100, 200].includes(Number(input.pageSize)) ||
+    !Number.isSafeInteger(input.pageCount) || Number(input.pageCount) < 1 ||
+    !Array.isArray(input.matches)
   ) throw invalidResponse();
+  const matchedCount = Number(input.matchedCount);
+  const batchCount = Number(input.batchCount);
+  const page = Number(input.page);
+  const pageSize = Number(input.pageSize) as 100 | 200;
+  const pageCount = Number(input.pageCount);
+  const expectedPageCount = Math.max(1, Math.ceil(matchedCount / pageSize));
+  const expectedPageItems = matchedCount === 0
+    ? 0
+    : Math.min(pageSize, matchedCount - (page - 1) * pageSize);
+  if (
+    batchCount > matchedCount ||
+    input.hasMore !== (matchedCount > batchCount) ||
+    pageCount !== expectedPageCount ||
+    page > pageCount ||
+    input.matches.length !== expectedPageItems ||
+    input.matchesTruncated !== (matchedCount > input.matches.length)
+  ) {
+    throw invalidResponse();
+  }
   const matches = input.matches.map((value) => {
     const item = objectValue(value);
+    const keywordText = item?.text;
     if (
       !item ||
       !requiredString(item.keywordId) ||
-      typeof item.text !== "string" ||
+      typeof keywordText !== "string" ||
       !Number.isSafeInteger(item.version) || Number(item.version) < 1 ||
       !Array.isArray(item.matchedWords) ||
       item.matchedWords.length < 1 ||
       item.matchedWords.length > 500 ||
-      !item.matchedWords.every((word) => typeof word === "string" && word.length > 0)
+      !item.matchedWords.every((word) => typeof word === "string" && word.length > 0) ||
+      !Array.isArray(item.highlightRanges) ||
+      item.highlightRanges.length < 1 ||
+      item.highlightRanges.length > 500
     ) throw invalidResponse();
+    let previousEnd = -1;
+    const highlightRanges = item.highlightRanges.map((value) => {
+      const range = objectValue(value);
+      if (
+        !range ||
+        !Number.isSafeInteger(range.start) ||
+        !Number.isSafeInteger(range.end) ||
+        Number(range.start) < 0 ||
+        Number(range.end) <= Number(range.start) ||
+        Number(range.end) > keywordText.length ||
+        Number(range.start) < previousEnd
+      ) {
+        throw invalidResponse();
+      }
+      previousEnd = Number(range.end);
+      return { start: Number(range.start), end: Number(range.end) };
+    });
     return {
       keywordId: item.keywordId,
-      text: item.text,
+      text: keywordText,
       version: Number(item.version),
-      matchedWords: item.matchedWords as string[]
+      matchedWords: item.matchedWords as string[],
+      highlightRanges
     };
   });
+  if (new Set(matches.map(({ keywordId }) => keywordId)).size !== matches.length) {
+    throw invalidResponse();
+  }
   return {
     scannedCount: Number(input.scannedCount),
-    matchedCount: Number(input.matchedCount),
-    batchCount: Number(input.batchCount),
+    matchedCount,
+    batchCount,
     hasMore: input.hasMore,
     previewHash: input.previewHash,
     matches,
-    matchesTruncated: input.matchesTruncated
+    matchesTruncated: input.matchesTruncated,
+    page,
+    pageSize,
+    pageCount
   };
 }
 
@@ -3700,9 +3806,177 @@ export function semanticNegativeKeywordApplyResult(
   if (
     !input ||
     !Number.isSafeInteger(input.deletedCount) || Number(input.deletedCount) < 0 || Number(input.deletedCount) > 500 ||
-    typeof input.hasMore !== "boolean"
+    typeof input.hasMore !== "boolean" ||
+    !Array.isArray(input.deletedKeywordIds) ||
+    input.deletedKeywordIds.length !== Number(input.deletedCount) ||
+    input.deletedKeywordIds.some(
+      (id) => typeof id !== "string" || !UUID_PATTERN.test(id)
+    ) ||
+    new Set(input.deletedKeywordIds).size !== input.deletedKeywordIds.length
   ) throw invalidResponse();
-  return { deletedCount: Number(input.deletedCount), hasMore: input.hasMore };
+  return {
+    deletedCount: Number(input.deletedCount),
+    deletedKeywordIds: input.deletedKeywordIds as string[],
+    hasMore: input.hasMore
+  };
+}
+
+export function semanticDuplicatePreview(
+  value: unknown
+): SemanticDuplicatePreview {
+  const input = objectValue(value);
+  if (
+    !input ||
+    !boundedInteger(input.scannedCount, 50_000) ||
+    !boundedInteger(input.duplicateGroupCount, 50_000) ||
+    !boundedInteger(input.duplicateKeywordCount, 50_000) ||
+    !boundedInteger(input.deletionCount, 50_000) ||
+    typeof input.hasMore !== "boolean" ||
+    typeof input.groupsTruncated !== "boolean" ||
+    typeof input.previewHash !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(input.previewHash) ||
+    !Array.isArray(input.batchItems) ||
+    input.batchItems.length > 500 ||
+    !Array.isArray(input.groups) ||
+    input.groups.length > 100
+  ) {
+    throw invalidResponse();
+  }
+  const batchItems = input.batchItems.map((value) => {
+    const item = objectValue(value);
+    if (
+      !item ||
+      typeof item.id !== "string" ||
+      !UUID_PATTERN.test(item.id) ||
+      !positiveInteger(item.version)
+    ) {
+      throw invalidResponse();
+    }
+    return { id: item.id, version: Number(item.version) };
+  });
+  if (
+    new Set(batchItems.map(({ id }) => id)).size !== batchItems.length ||
+    batchItems.length > Number(input.deletionCount) ||
+    input.hasMore !== Number(input.deletionCount) > batchItems.length
+  ) {
+    throw invalidResponse();
+  }
+  const groups = input.groups.map(semanticDuplicatePreviewGroup);
+  if (
+    new Set(groups.map(({ id }) => id)).size !== groups.length ||
+    groups.length > Number(input.duplicateGroupCount)
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    scannedCount: Number(input.scannedCount),
+    duplicateGroupCount: Number(input.duplicateGroupCount),
+    duplicateKeywordCount: Number(input.duplicateKeywordCount),
+    deletionCount: Number(input.deletionCount),
+    batchItems,
+    hasMore: input.hasMore,
+    previewHash: input.previewHash,
+    groups,
+    groupsTruncated: input.groupsTruncated
+  };
+}
+
+function semanticDuplicatePreviewGroup(
+  value: unknown
+): SemanticDuplicatePreviewGroup {
+  const input = objectValue(value);
+  if (
+    !input ||
+    typeof input.id !== "string" ||
+    !/^[a-f0-9]{64}$/u.test(input.id) ||
+    typeof input.keeperKeywordId !== "string" ||
+    !UUID_PATTERN.test(input.keeperKeywordId) ||
+    typeof input.itemsTruncated !== "boolean" ||
+    !Array.isArray(input.items) ||
+    input.items.length < 2 ||
+    input.items.length > 501
+  ) {
+    throw invalidResponse();
+  }
+  const items = input.items.map(semanticDuplicatePreviewItem);
+  if (
+    new Set(items.map(({ keywordId }) => keywordId)).size !== items.length ||
+    items.filter(({ keep }) => keep).length !== 1 ||
+    !items.some(
+      ({ keywordId, keep }) => keep && keywordId === input.keeperKeywordId
+    )
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    id: input.id,
+    keeperKeywordId: input.keeperKeywordId,
+    items,
+    itemsTruncated: input.itemsTruncated
+  };
+}
+
+function semanticDuplicatePreviewItem(
+  value: unknown
+): SemanticDuplicatePreviewItem {
+  const input = objectValue(value);
+  if (
+    !input ||
+    typeof input.keywordId !== "string" ||
+    !UUID_PATTERN.test(input.keywordId) ||
+    typeof input.text !== "string" ||
+    input.text.length > 10_000 ||
+    !positiveInteger(input.version) ||
+    !Number.isSafeInteger(input.priority) ||
+    Number(input.priority) < 0 ||
+    Number(input.priority) > 100 ||
+    typeof input.keep !== "boolean" ||
+    !Array.isArray(input.groupPaths) ||
+    input.groupPaths.length > 100 ||
+    !input.groupPaths.every(
+      (path) => typeof path === "string" && path.length > 0 && path.length <= 2_000
+    ) ||
+    (input.baseFrequency !== undefined &&
+      (typeof input.baseFrequency !== "string" ||
+        !/^\d+$/u.test(input.baseFrequency)))
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    keywordId: input.keywordId,
+    text: input.text,
+    version: Number(input.version),
+    groupPaths: input.groupPaths as string[],
+    priority: Number(input.priority),
+    ...(typeof input.baseFrequency === "string"
+      ? { baseFrequency: input.baseFrequency }
+      : {}),
+    keep: input.keep
+  };
+}
+
+export function semanticDuplicateApplyResult(
+  value: unknown
+): SemanticDuplicateApplyResult {
+  const input = objectValue(value);
+  if (
+    !input ||
+    !boundedInteger(input.deletedCount, 500) ||
+    typeof input.hasMore !== "boolean" ||
+    !Array.isArray(input.deletedKeywordIds) ||
+    input.deletedKeywordIds.length !== Number(input.deletedCount) ||
+    input.deletedKeywordIds.some(
+      (id) => typeof id !== "string" || !UUID_PATTERN.test(id)
+    ) ||
+    new Set(input.deletedKeywordIds).size !== input.deletedKeywordIds.length
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    deletedCount: Number(input.deletedCount),
+    deletedKeywordIds: input.deletedKeywordIds as string[],
+    hasMore: input.hasMore
+  };
 }
 
 export function semanticSavedView(value: unknown): SemanticSavedView {
@@ -3858,6 +4132,18 @@ function negativeKeywordCommandUrl(
   const projectId = requiredProjectId(context.tenant);
   return new URL(
     `/internal/v1/projects/${encodeURIComponent(projectId)}/negative-keywords/${action}`,
+    baseUrl
+  );
+}
+
+function semanticDuplicateCommandUrl(
+  context: InternalContext,
+  baseUrl: string,
+  action: "preview" | "apply"
+): URL {
+  const projectId = requiredProjectId(context.tenant);
+  return new URL(
+    `/internal/v1/projects/${encodeURIComponent(projectId)}/semantic-duplicates/${action}`,
     baseUrl
   );
 }

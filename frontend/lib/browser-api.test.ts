@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  browserApiDownload,
   browserApiRequest,
   BrowserApiError
 } from "./browser-api.ts";
@@ -288,7 +287,7 @@ test("sends session revoke through same-origin BFF with only the public CSRF val
   }
 });
 
-test("downloads an audited semantic export through the same-origin BFF", async () => {
+test("queues an audited semantic export through the same-origin BFF", async () => {
   const originalFetch = globalThis.fetch;
   const originalDocument = Object.getOwnPropertyDescriptor(
     globalThis,
@@ -301,20 +300,20 @@ test("downloads an audited semantic export through the same-origin BFF", async (
   });
   globalThis.fetch = async (_input, init) => {
     request = init;
-    return new Response("Query\r\nseo\r\n", {
-      headers: {
-        "Content-Disposition":
-          'attachment; filename="semantic-core-2026-07-30.csv"',
-        "Content-Type": "text/csv",
-        "X-Export-Row-Count": "1"
-      }
+    return Response.json({ data: { id: "export-id", status: "QUEUED" } }, {
+      status: 202
     });
   };
 
   try {
-    const result = await browserApiDownload(
+    const result = await browserApiRequest<{
+      readonly id: string;
+      readonly status: string;
+    }>(
       "/app/api/projects/project-id/exports",
       {
+        method: "POST",
+        idempotencyKey: "semantic-export:test-key",
         body: {
           format: "CSV",
           scope: "FULL_CORE",
@@ -323,12 +322,11 @@ test("downloads an audited semantic export through the same-origin BFF", async (
         }
       }
     );
-    assert.equal(result.filename, "semantic-core-2026-07-30.csv");
-    assert.equal(result.rowCount, 1);
-    assert.equal(await result.blob.text(), "Query\r\nseo\r\n");
+    assert.deepEqual(result, { id: "export-id", status: "QUEUED" });
     assert.equal(request?.method, "POST");
     const headers = new Headers(request?.headers);
     assert.equal(headers.get("x-csrf-token"), "public-csrf");
+    assert.equal(headers.get("idempotency-key"), "semantic-export:test-key");
   } finally {
     globalThis.fetch = originalFetch;
     if (originalDocument) {

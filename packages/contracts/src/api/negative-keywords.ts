@@ -59,11 +59,28 @@ export interface SemanticNegativeKeywordCommandInput {
   readonly scope: SemanticNegativeKeywordScope;
 }
 
+export const semanticNegativeKeywordPreviewPageSizes = [100, 200] as const;
+export type SemanticNegativeKeywordPreviewPageSize =
+  (typeof semanticNegativeKeywordPreviewPageSizes)[number];
+
+export interface SemanticNegativeKeywordPreviewInput
+  extends SemanticNegativeKeywordCommandInput {
+  readonly page: number;
+  readonly pageSize: SemanticNegativeKeywordPreviewPageSize;
+}
+
+export interface SemanticNegativeKeywordHighlightRange {
+  /** UTF-16 offsets used directly by JavaScript String.slice. */
+  readonly start: number;
+  readonly end: number;
+}
+
 export interface SemanticNegativeKeywordMatch {
   readonly keywordId: string;
   readonly text: string;
   readonly version: number;
   readonly matchedWords: readonly string[];
+  readonly highlightRanges: readonly SemanticNegativeKeywordHighlightRange[];
 }
 
 export interface SemanticNegativeKeywordPreview {
@@ -74,6 +91,9 @@ export interface SemanticNegativeKeywordPreview {
   readonly previewHash: string;
   readonly matches: readonly SemanticNegativeKeywordMatch[];
   readonly matchesTruncated: boolean;
+  readonly page: number;
+  readonly pageSize: SemanticNegativeKeywordPreviewPageSize;
+  readonly pageCount: number;
 }
 
 export interface ApplySemanticNegativeKeywordsInput
@@ -83,6 +103,7 @@ export interface ApplySemanticNegativeKeywordsInput
 
 export interface SemanticNegativeKeywordApplyResult {
   readonly deletedCount: number;
+  readonly deletedKeywordIds: readonly string[];
   readonly hasMore: boolean;
 }
 
@@ -110,6 +131,13 @@ export interface InternalDeleteSemanticNegativeKeywordPresetInput {
 
 export interface InternalSemanticNegativeKeywordCommandInput
   extends SemanticNegativeKeywordCommandInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+}
+
+export interface InternalSemanticNegativeKeywordPreviewInput
+  extends SemanticNegativeKeywordPreviewInput {
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;

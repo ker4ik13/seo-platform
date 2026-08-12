@@ -1,5 +1,12 @@
 import { Inject, Injectable } from "@nestjs/common";
-import { rankProviderOverflowCount } from "@seo-platform/contracts";
+import {
+  rankProviderOverflowCount,
+  type ApiCollectionResponse,
+  type SemanticCustomColumn,
+  type SemanticKeywordGroup,
+  type SemanticKeywordListItem,
+  type KeywordListQuery
+} from "@seo-platform/contracts";
 import type {
   InternalAbortSemanticImportInput,
   InternalAbortSemanticImportResult,
@@ -243,6 +250,83 @@ export class SeoDataClient {
     }
   }
 
+  public async listExportKeywords(
+    context: { readonly workspaceId: string; readonly projectId: string; readonly actorId: string },
+    query: KeywordListQuery
+  ): Promise<ApiCollectionResponse<SemanticKeywordListItem>> {
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(context.projectId)}/semantic-exports/keywords`,
+      this.config.services.seoData
+    );
+    url.searchParams.set("limit", String(query.limit));
+    if (query.cursor) url.searchParams.set("cursor", query.cursor);
+    if (query.search) url.searchParams.set("search", query.search);
+    if (query.tag) url.searchParams.set("tag", query.tag);
+    if (query.intent) url.searchParams.set("intent", query.intent);
+    if (query.groupId) url.searchParams.set("groupId", query.groupId);
+    if (query.groupIds?.length) url.searchParams.set("groupIds", query.groupIds.join(","));
+    if (query.clusterId) url.searchParams.set("clusterId", query.clusterId);
+    if (query.isFavorite !== undefined) url.searchParams.set("isFavorite", String(query.isFavorite));
+    if (query.isTracked !== undefined) url.searchParams.set("isTracked", String(query.isTracked));
+    if (query.priorityMin !== undefined) url.searchParams.set("priorityMin", String(query.priorityMin));
+    if (query.priorityMax !== undefined) url.searchParams.set("priorityMax", String(query.priorityMax));
+    if (query.sort) url.searchParams.set("sort", query.sort);
+    const payload = await this.requestGetBounded(url, context, EXPORT_PAGE_RESPONSE_MAX_BYTES);
+    const envelope = object(payload);
+    if (!envelope || !Array.isArray(envelope.data) || !object(envelope.page)) {
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+    const page = envelope.page as Readonly<Record<string, unknown>>;
+    if (
+      typeof page.hasNext !== "boolean" ||
+      (page.nextCursor !== undefined && typeof page.nextCursor !== "string") ||
+      envelope.data.length > query.limit
+    ) {
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+    return {
+      data: envelope.data as readonly SemanticKeywordListItem[],
+      page: {
+        hasNext: page.hasNext,
+        ...(typeof page.nextCursor === "string" ? { nextCursor: page.nextCursor } : {}),
+        ...(Number.isSafeInteger(page.totalApprox) && Number(page.totalApprox) >= 0
+          ? { totalApprox: Number(page.totalApprox) }
+          : {})
+      },
+      meta: { requestId: "internal-semantic-export" }
+    };
+  }
+
+  public async listExportKeywordGroups(
+    context: { readonly workspaceId: string; readonly projectId: string; readonly actorId: string }
+  ): Promise<readonly SemanticKeywordGroup[]> {
+    const payload = await this.requestGetBounded(
+      new URL(`/internal/v1/projects/${encodeURIComponent(context.projectId)}/semantic-exports/keyword-groups`, this.config.services.seoData),
+      context,
+      EXPORT_METADATA_RESPONSE_MAX_BYTES
+    );
+    const envelope = object(payload);
+    if (!envelope || !Array.isArray(envelope.data)) {
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+    return envelope.data as readonly SemanticKeywordGroup[];
+  }
+
+  public async listExportCustomColumns(
+    context: { readonly workspaceId: string; readonly projectId: string; readonly actorId: string }
+  ): Promise<readonly SemanticCustomColumn[]> {
+    const payload = await this.requestGetBounded(
+      new URL(`/internal/v1/projects/${encodeURIComponent(context.projectId)}/semantic-exports/custom-columns`, this.config.services.seoData),
+      context,
+      EXPORT_METADATA_RESPONSE_MAX_BYTES
+    );
+    const envelope = object(payload);
+    if (!envelope || !Array.isArray(envelope.data)) {
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+    return envelope.data as readonly SemanticCustomColumn[];
+  }
+
   private async request(
     path: string,
     body: {
@@ -395,11 +479,44 @@ export class SeoDataClient {
       throw new SeoDataClientError("UNAVAILABLE", true);
     }
   }
+
+  private async requestGetBounded(
+    url: URL,
+    context: { readonly workspaceId: string; readonly projectId: string; readonly actorId: string },
+    maximumBytes: number
+  ): Promise<unknown> {
+    const token = this.config.seoDataApiToken;
+    if (!token) throw new SeoDataClientError("UNAVAILABLE", true);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method: "GET",
+        redirect: "error",
+        headers: {
+          Accept: "application/json",
+          "X-Internal-Token": token,
+          "X-Workspace-Id": context.workspaceId,
+          "X-Project-Id": context.projectId,
+          "X-Actor-Id": context.actorId
+        },
+        signal: AbortSignal.timeout(this.config.internalCommandTimeoutMs)
+      });
+    } catch {
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw clientError(response.status);
+    }
+    return boundedJson(response, maximumBytes);
+  }
 }
 
 const RANK_SCOPE_RESPONSE_MAX_BYTES = 64 * 1_024;
 const FREQUENCY_RESOLVE_RESPONSE_MAX_BYTES = 4 * 1_024 * 1_024;
 const FREQUENCY_PERSIST_RESPONSE_MAX_BYTES = 16 * 1_024;
+const EXPORT_PAGE_RESPONSE_MAX_BYTES = 16 * 1_024 * 1_024;
+const EXPORT_METADATA_RESPONSE_MAX_BYTES = 4 * 1_024 * 1_024;
 
 function clientError(
   status: number,

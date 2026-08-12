@@ -51,6 +51,11 @@ import {
   removeCrawlAutomationScheduler,
   upsertCrawlAutomationScheduler
 } from "./crawl-automation.queue.js";
+import {
+  enqueueSemanticExport,
+  SEMANTIC_EXPORT_QUEUE,
+  type SemanticExportJobData
+} from "./semantic-export.queue.js";
 
 export const SYSTEM_QUEUE = "system";
 
@@ -68,6 +73,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
   private rankAutomationQueue?: Queue<RankAutomationJobData>;
   private crawlQueue?: Queue<CrawlJobData>;
   private crawlAutomationQueue?: Queue<CrawlAutomationJobData>;
+  private semanticExportQueue?: Queue<SemanticExportJobData>;
 
   public constructor(@Inject(APP_CONFIG) private readonly config: AppConfig) {}
 
@@ -113,6 +119,10 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       CRAWL_AUTOMATION_QUEUE,
       bullMqConnectionOptions(this.connection)
     );
+    this.semanticExportQueue = new Queue(
+      SEMANTIC_EXPORT_QUEUE,
+      bullMqConnectionOptions(this.connection)
+    );
   }
 
   public async onModuleDestroy(): Promise<void> {
@@ -124,6 +134,7 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     await this.rankAutomationQueue?.close();
     await this.crawlQueue?.close();
     await this.crawlAutomationQueue?.close();
+    await this.semanticExportQueue?.close();
     await this.connection?.quit();
   }
 
@@ -145,7 +156,8 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
       this.rankPreparationQueue,
       this.rankAutomationQueue,
       this.crawlQueue,
-      this.crawlAutomationQueue
+      this.crawlAutomationQueue,
+      this.semanticExportQueue
     ];
     if (queues.some((queue) => !queue)) {
       throw new Error("One or more Redis queues are not connected");
@@ -155,6 +167,13 @@ export class QueueService implements OnModuleInit, OnModuleDestroy {
     await Promise.all(
       queues.map((queue) => queue!.getJobCounts("waiting"))
     );
+  }
+
+  public async enqueueSemanticExport(exportId: string): Promise<void> {
+    if (!this.semanticExportQueue) {
+      throw new Error("Semantic export queue is not connected");
+    }
+    await enqueueSemanticExport(this.semanticExportQueue, exportId);
   }
 
   public async enqueueUploadInspection(uploadId: string): Promise<void> {

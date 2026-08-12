@@ -5,6 +5,7 @@ import { createSemanticExportInput } from "./semantic-export-input.js";
 
 const keywordId = "01900000-0000-7000-8000-000000000010";
 const groupId = "01900000-0000-7000-8000-000000000020";
+const secondGroupId = "01900000-0000-7000-8000-000000000021";
 
 test("accepts a bounded filtered semantic export", () => {
   assert.deepEqual(
@@ -39,6 +40,20 @@ test("accepts a bounded filtered semantic export", () => {
   );
 });
 
+test("accepts XLSX and a multi-group current filter", () => {
+  const input = createSemanticExportInput({
+    format: "XLSX",
+    scope: "CURRENT_FILTER",
+    locale: "ru",
+    columns: ["query", "group"],
+    filters: { groupIds: [secondGroupId, groupId] },
+    sort: "TEXT_ASC"
+  });
+
+  assert.equal(input.format, "XLSX");
+  assert.deepEqual(input.filters?.groupIds, [groupId, secondGroupId]);
+});
+
 test("requires scope-specific IDs and rejects ambiguous full exports", () => {
   assert.throws(
     () =>
@@ -69,6 +84,17 @@ test("requires scope-specific IDs and rejects ambiguous full exports", () => {
         locale: "en",
         columns: ["query"],
         keywordIds: [keywordId, keywordId]
+      }),
+    DomainError
+  );
+  assert.throws(
+    () =>
+      createSemanticExportInput({
+        format: "XLSX",
+        scope: "CURRENT_FILTER",
+        locale: "ru",
+        columns: ["query"],
+        filters: { groupId, groupIds: [groupId, secondGroupId] }
       }),
     DomainError
   );

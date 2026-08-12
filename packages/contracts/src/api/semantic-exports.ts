@@ -1,8 +1,8 @@
 import type {
   SemanticKeywordIntent,
-  SemanticKeywordListItem,
   SemanticKeywordSort
 } from "./keywords.js";
+import type { JobCapacityEntitlement } from "./billing.js";
 import type { SemanticSavedViewColumnKey } from "./semantic-saved-views.js";
 
 export const semanticExportFormats = [
@@ -10,7 +10,8 @@ export const semanticExportFormats = [
   "TSV",
   "JSON",
   "NDJSON",
-  "GOOGLE_CSV"
+  "GOOGLE_CSV",
+  "XLSX"
 ] as const;
 
 export type SemanticExportFormat =
@@ -37,10 +38,77 @@ export interface SemanticExportFilters {
   readonly tag?: string;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
+  readonly groupIds?: readonly string[];
+  readonly clusterId?: string;
   readonly isFavorite?: boolean;
   readonly isTracked?: boolean;
   readonly priorityMin?: number;
   readonly priorityMax?: number;
+}
+
+export interface InternalCreateSemanticExportInput
+  extends CreateSemanticExportInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly idempotencyKey: string;
+  readonly correlationId: string;
+  readonly jobCapacity: JobCapacityEntitlement;
+}
+
+export interface InternalCancelSemanticExportInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly version: number;
+}
+
+export const semanticExportJobStatuses = [
+  "QUEUED",
+  "RUNNING",
+  "CANCEL_REQUESTED",
+  "CANCELLED",
+  "RETRY_SCHEDULED",
+  "COMPLETED",
+  "FAILED_RETRYABLE",
+  "FAILED_FINAL"
+] as const;
+
+export type SemanticExportJobStatus =
+  (typeof semanticExportJobStatuses)[number];
+
+export interface SemanticExportJobSummary {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly format: SemanticExportFormat;
+  readonly scope: SemanticExportScope;
+  readonly status: SemanticExportJobStatus;
+  readonly stage?: string;
+  readonly processedRows: number;
+  readonly totalRows?: number;
+  readonly rowCount?: number;
+  readonly filename?: string;
+  readonly contentType?: string;
+  readonly sizeBytes?: string;
+  readonly failureCode?: string;
+  readonly version: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly startedAt?: string;
+  readonly finishedAt?: string;
+}
+
+export interface SemanticExportCollection {
+  readonly exports: readonly SemanticExportJobSummary[];
+}
+
+export interface SemanticExportDownload {
+  readonly url: string;
+  readonly filename: string;
+  readonly contentType: string;
+  readonly rowCount: number;
+  readonly sizeBytes: string;
 }
 
 export interface CreateSemanticExportInput {
@@ -52,17 +120,4 @@ export interface CreateSemanticExportInput {
   readonly sort?: SemanticKeywordSort;
   readonly keywordIds?: readonly string[];
   readonly includeBom?: boolean;
-}
-
-export interface SemanticExportDocument {
-  readonly format: SemanticExportFormat;
-  readonly filename: string;
-  readonly contentType: string;
-  readonly bytes: Uint8Array;
-  readonly rowCount: number;
-}
-
-export interface SemanticExportDataset {
-  readonly items: readonly SemanticKeywordListItem[];
-  readonly customColumnNames: Readonly<Record<string, string>>;
 }

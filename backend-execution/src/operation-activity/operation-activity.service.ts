@@ -18,7 +18,8 @@ const visibleOperationTypes = [
   "FREQUENCY_COLLECTION",
   "MANUAL_RANK_CHECK",
   "TECHNICAL_CRAWL",
-  "KEYWORD_RESEARCH"
+  "KEYWORD_RESEARCH",
+  "SEMANTIC_EXPORT"
 ] as const;
 
 const activeOperationStatuses = [

@@ -276,20 +276,33 @@ test("validates negative keyword presets, preview and bounded apply results", ()
     hasMore: false,
     previewHash: "a".repeat(64),
     matchesTruncated: false,
+    page: 1,
+    pageSize: 100,
+    pageCount: 1,
     matches: [{
       keywordId,
       text: "туры москва",
       version: 2,
-      matchedWords: ["москва"]
+      matchedWords: ["москва"],
+      highlightRanges: [{ start: 5, end: 11 }]
     }]
   });
   assert.equal(preview.matches[0]?.keywordId, keywordId);
-  assert.deepEqual(semanticNegativeKeywordApplyResult({ deletedCount: 1, hasMore: false }), {
+  assert.deepEqual(semanticNegativeKeywordApplyResult({
     deletedCount: 1,
+    deletedKeywordIds: [keywordId],
+    hasMore: false
+  }), {
+    deletedCount: 1,
+    deletedKeywordIds: [keywordId],
     hasMore: false
   });
   assert.throws(
-    () => semanticNegativeKeywordApplyResult({ deletedCount: 501, hasMore: false }),
+    () => semanticNegativeKeywordApplyResult({
+      deletedCount: 501,
+      deletedKeywordIds: [],
+      hasMore: false
+    }),
     DomainError
   );
 });

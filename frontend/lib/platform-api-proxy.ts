@@ -24,14 +24,15 @@ const FORWARDED_REQUEST_HEADERS = [
 ] as const;
 const FORWARDED_RESPONSE_HEADERS = [
   "cache-control",
+  "content-length",
   "content-disposition",
   "content-security-policy",
   "content-type",
   "cross-origin-resource-policy",
   "etag",
   "last-modified",
+  "location",
   "x-content-type-options",
-  "x-export-row-count",
   "x-api-version",
   "x-request-id",
   "x-trace-id"
@@ -40,6 +41,8 @@ const MAX_BROWSER_API_BODY_BYTES = 2 * 1_024 * 1_024;
 const MAX_SEMANTIC_KEYWORD_BULK_BODY_BYTES = 8 * 1_024 * 1_024;
 const MAX_PUSH_SUBSCRIPTION_BODY_BYTES = 8 * 1_024;
 const MAX_BROWSER_API_BODY_READ_MS = 10_000;
+const DEFAULT_PLATFORM_API_TIMEOUT_MS = 10_000;
+const SEMANTIC_EXPORT_FILE_TIMEOUT_MS = 15 * 60_000;
 
 export async function proxyPlatformApi(
   request: NextRequest,
@@ -124,7 +127,14 @@ export async function proxyPlatformApi(
       : {}),
     cache: "no-store",
     redirect: "manual",
-    signal: AbortSignal.timeout(10_000)
+    signal: AbortSignal.any([
+      request.signal,
+      AbortSignal.timeout(
+        isSemanticExportFilePath(upstreamPathSegments)
+          ? SEMANTIC_EXPORT_FILE_TIMEOUT_MS
+          : DEFAULT_PLATFORM_API_TIMEOUT_MS
+      )
+    ])
   };
 
   let upstream: Response;
@@ -153,6 +163,17 @@ export async function proxyPlatformApi(
     status: upstream.status,
     headers: responseHeaders
   });
+}
+
+function isSemanticExportFilePath(
+  pathSegments: readonly string[]
+): boolean {
+  return (
+    pathSegments.length === 5 &&
+    pathSegments[0] === "projects" &&
+    pathSegments[2] === "exports" &&
+    pathSegments[4] === "file"
+  );
 }
 
 export function canonicalForwardedClientIp(

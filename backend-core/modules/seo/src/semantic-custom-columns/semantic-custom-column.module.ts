@@ -6,6 +6,7 @@ import { SemanticCustomColumnService } from "./semantic-custom-column.service.js
 @Module({
   imports: [InternalModule],
   controllers: [SemanticCustomColumnController],
-  providers: [SemanticCustomColumnService]
+  providers: [SemanticCustomColumnService],
+  exports: [SemanticCustomColumnService]
 })
 export class SemanticCustomColumnModule {}

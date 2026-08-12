@@ -5,8 +5,10 @@ import type {
   InternalCreateSemanticNegativeKeywordPresetInput,
   InternalDeleteSemanticNegativeKeywordPresetInput,
   InternalSemanticNegativeKeywordCommandInput,
+  InternalSemanticNegativeKeywordPreviewInput,
   InternalUpdateSemanticNegativeKeywordPresetInput,
   SemanticNegativeKeywordApplyResult,
+  SemanticNegativeKeywordHighlightRange,
   SemanticNegativeKeywordMatch,
   SemanticNegativeKeywordPreset,
   SemanticNegativeKeywordPreview,
@@ -22,6 +24,7 @@ import {
   type SemanticKeywordChange,
   type SemanticKeywordVersionState
 } from "../semantic-versions/semantic-version.service.js";
+import { preciseRussianWordStem } from "../text-analysis/russian-word-form.js";
 
 const APPLY_BATCH_SIZE = 500;
 const MAX_SCANNED_KEYWORDS = 50_000;
@@ -43,6 +46,11 @@ const VERSION_INCLUDE = {
 type VersionKeywordRow = Prisma.KeywordGetPayload<{
   include: typeof VERSION_INCLUDE;
 }>;
+
+interface NegativeKeywordPreviewPlan {
+  readonly preview: SemanticNegativeKeywordPreview;
+  readonly batch: readonly SemanticNegativeKeywordMatch[];
+}
 
 @Injectable()
 export class NegativeKeywordService {
@@ -163,15 +171,16 @@ export class NegativeKeywordService {
   }
 
   public async preview(
-    input: InternalSemanticNegativeKeywordCommandInput
+    input: InternalSemanticNegativeKeywordPreviewInput
   ): Promise<SemanticNegativeKeywordPreview> {
-    return this.buildPreview(input);
+    return (await this.buildPreview(input)).preview;
   }
 
   public async apply(
     input: InternalApplySemanticNegativeKeywordsInput
   ): Promise<SemanticNegativeKeywordApplyResult> {
-    const preview = await this.buildPreview(input);
+    const plan = await this.buildPreview(input);
+    const preview = plan.preview;
     if (preview.previewHash !== input.previewHash) {
       throw new HttpException(
         {
@@ -181,8 +190,10 @@ export class NegativeKeywordService {
         HttpStatus.CONFLICT
       );
     }
-    if (preview.batchCount === 0) return { deletedCount: 0, hasMore: false };
-    const batchIds = preview.matches.slice(0, preview.batchCount).map(({ keywordId }) => keywordId);
+    if (preview.batchCount === 0) {
+      return { deletedCount: 0, deletedKeywordIds: [], hasMore: false };
+    }
+    const batchIds = plan.batch.map(({ keywordId }) => keywordId);
     const deletedCount = await this.prisma.$transaction(async (transaction) => {
       await lockSemanticKeywordWrites(transaction, input.projectId);
       await transaction.$executeRaw`
@@ -201,7 +212,7 @@ export class NegativeKeywordService {
         orderBy: { id: "asc" }
       });
       const expectedById = new Map(
-        preview.matches.slice(0, preview.batchCount).map((match) => [match.keywordId, match.version])
+        plan.batch.map((match) => [match.keywordId, match.version])
       );
       if (
         rows.length !== batchIds.length ||
@@ -276,12 +287,13 @@ export class NegativeKeywordService {
       );
       return updated.count;
     });
-    return { deletedCount, hasMore: preview.hasMore };
+    return { deletedCount, deletedKeywordIds: batchIds, hasMore: preview.hasMore };
   }
 
   private async buildPreview(
-    input: InternalSemanticNegativeKeywordCommandInput
-  ): Promise<SemanticNegativeKeywordPreview> {
+    input: InternalSemanticNegativeKeywordCommandInput &
+      Partial<Pick<InternalSemanticNegativeKeywordPreviewInput, "page" | "pageSize">>
+  ): Promise<NegativeKeywordPreviewPlan> {
     const resolvedRules = input.rules ?? (
       await this.requiredPreset(input.workspaceId, input.projectId, input.presetId!)
     ).rules;
@@ -308,26 +320,38 @@ export class NegativeKeywordService {
     }
     const matchKeyword = compileNegativeKeywordMatcher(resolvedRules);
     const matches = rows.flatMap((row) => {
-      const matchedWords = matchKeyword(row.textOriginal);
-      return matchedWords.length === 0
+      const match = matchKeyword(row.textOriginal);
+      return match.matchedWords.length === 0
         ? []
         : [{
             keywordId: row.id,
             text: row.textOriginal,
             version: row.version,
-            matchedWords
+            matchedWords: match.matchedWords,
+            highlightRanges: match.highlightRanges
           } satisfies SemanticNegativeKeywordMatch];
     });
     const batch = matches.slice(0, APPLY_BATCH_SIZE);
-    return {
+    const pageSize = input.pageSize ?? 100;
+    const pageCount = Math.max(1, Math.ceil(matches.length / pageSize));
+    const page = Math.min(input.page ?? 1, pageCount);
+    const pageMatches = matches.slice(
+      (page - 1) * pageSize,
+      page * pageSize
+    );
+    const preview = {
       scannedCount: rows.length,
       matchedCount: matches.length,
       batchCount: batch.length,
       hasMore: matches.length > batch.length,
       previewHash: previewHash(resolvedRules, input.scope, batch),
-      matches: batch,
-      matchesTruncated: matches.length > batch.length
-    };
+      matches: pageMatches,
+      matchesTruncated: matches.length > pageMatches.length,
+      page,
+      pageSize,
+      pageCount
+    } satisfies SemanticNegativeKeywordPreview;
+    return { preview, batch };
   }
 
   private async requiredPreset(
@@ -388,10 +412,22 @@ export function negativeKeywordMatchingWords(
   text: string,
   rules: SemanticNegativeKeywordRules
 ): readonly string[] {
-  return compileNegativeKeywordMatcher(rules)(text);
+  return compileNegativeKeywordMatcher(rules)(text).matchedWords;
 }
 
-type NegativeKeywordMatcher = (text: string) => readonly string[];
+export function negativeKeywordHighlightRanges(
+  text: string,
+  rules: SemanticNegativeKeywordRules
+): readonly SemanticNegativeKeywordHighlightRange[] {
+  return compileNegativeKeywordMatcher(rules)(text).highlightRanges;
+}
+
+interface NegativeKeywordMatchResult {
+  readonly matchedWords: readonly string[];
+  readonly highlightRanges: readonly SemanticNegativeKeywordHighlightRange[];
+}
+
+type NegativeKeywordMatcher = (text: string) => NegativeKeywordMatchResult;
 
 interface ComparableToken {
   readonly value: string;
@@ -426,16 +462,142 @@ function compileNegativeKeywordMatcher(
     const comparable = comparableText(text, rules);
     const subjectTokens = comparableTokens(comparable);
     const subjectKeys = subjectTokens.map(({ value }) => tokenKey(value, rules));
-    return candidates
-      .filter((candidate) => matchesCandidate(
+    const matched = candidates.filter((candidate) => matchesCandidate(
         comparable,
         subjectTokens,
         subjectKeys,
         candidate,
         rules
-      ))
-      .map(({ original }) => original);
+      ));
+    return {
+      matchedWords: matched.map(({ original }) => original),
+      highlightRanges: matchedHighlightRanges(text, matched, rules)
+    };
   };
+}
+
+interface SourceToken {
+  readonly value: string;
+  readonly comparable: string;
+  readonly key: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+function matchedHighlightRanges(
+  text: string,
+  candidates: readonly CompiledNegativeKeyword[],
+  rules: SemanticNegativeKeywordRules
+): readonly SemanticNegativeKeywordHighlightRange[] {
+  if (text.length === 0 || candidates.length === 0) return [];
+  const sourceTokens = sourceComparableTokens(text, rules);
+  const ranges = candidates.flatMap((candidate) => {
+    if (rules.matchMode === "EXACT_PHRASE") {
+      return [{ start: 0, end: text.length }];
+    }
+    const tokenIndexes = matchingSourceTokenIndexes(
+      sourceTokens,
+      candidate,
+      rules
+    );
+    return tokenIndexes.map((index) => {
+      const token = sourceTokens[index]!;
+      if (
+        rules.matchMode === "CONTAINS" &&
+        candidate.tokens.length === 1
+      ) {
+        const fragment = candidate.tokens[0]!.value;
+        const offset = token.comparable.indexOf(fragment);
+        if (
+          offset >= 0 &&
+          token.comparable.length === token.end - token.start
+        ) {
+          return {
+            start: token.start + offset,
+            end: token.start + offset + fragment.length
+          };
+        }
+      }
+      return { start: token.start, end: token.end };
+    });
+  });
+  return mergeHighlightRanges(ranges, text.length);
+}
+
+function sourceComparableTokens(
+  text: string,
+  rules: SemanticNegativeKeywordRules
+): readonly SourceToken[] {
+  return [...text.matchAll(/[\p{L}\p{N}]+/gu)].map((match) => {
+    const start = match.index;
+    const value = match[0];
+    const comparable = comparableText(value, rules);
+    return {
+      value,
+      comparable,
+      key: tokenKey(comparable, rules),
+      start,
+      end: start + value.length
+    };
+  });
+}
+
+function matchingSourceTokenIndexes(
+  subject: readonly SourceToken[],
+  candidate: CompiledNegativeKeyword,
+  rules: SemanticNegativeKeywordRules
+): readonly number[] {
+  const tokenMatches = (token: SourceToken, candidateIndex: number) =>
+    rules.matchMode === "CONTAINS"
+      ? token.comparable.includes(candidate.tokens[candidateIndex]!.value)
+      : token.key === candidate.tokenKeys[candidateIndex];
+  if (rules.ignoreWordOrder && candidate.tokens.length > 1) {
+    const used = new Set<number>();
+    for (let candidateIndex = 0; candidateIndex < candidate.tokens.length; candidateIndex += 1) {
+      const subjectIndex = subject.findIndex(
+        (token, index) => !used.has(index) && tokenMatches(token, candidateIndex)
+      );
+      if (subjectIndex < 0) return [];
+      used.add(subjectIndex);
+    }
+    return [...used].sort((left, right) => left - right);
+  }
+  for (
+    let start = 0;
+    start <= subject.length - candidate.tokens.length;
+    start += 1
+  ) {
+    if (
+      candidate.tokens.every((_, offset) =>
+        tokenMatches(subject[start + offset]!, offset)
+      )
+    ) {
+      return candidate.tokens.map((_, offset) => start + offset);
+    }
+  }
+  return [];
+}
+
+function mergeHighlightRanges(
+  values: readonly SemanticNegativeKeywordHighlightRange[],
+  textLength: number
+): readonly SemanticNegativeKeywordHighlightRange[] {
+  const sorted = values
+    .filter(({ start, end }) => start >= 0 && end > start && end <= textLength)
+    .sort((left, right) => left.start - right.start || left.end - right.end);
+  const ranges: SemanticNegativeKeywordHighlightRange[] = [];
+  for (const range of sorted) {
+    const previous = ranges.at(-1);
+    if (previous && range.start <= previous.end) {
+      ranges[ranges.length - 1] = {
+        start: previous.start,
+        end: Math.max(previous.end, range.end)
+      };
+    } else {
+      ranges.push(range);
+    }
+  }
+  return ranges;
 }
 
 function matchesCandidate(
@@ -521,7 +683,7 @@ function tokenKey(value: string, rules: SemanticNegativeKeywordRules): string {
   return casePrefix + (
     rules.matchMode === "WORD_FORM_FAST"
       ? fastRussianStem(normalized)
-      : preciseRussianStem(normalized)
+      : preciseRussianWordStem(normalized)
   );
 }
 
@@ -629,73 +791,6 @@ function fastRussianStem(value: string): string {
     }
   }
   return value;
-}
-
-function preciseRussianStem(value: string): string {
-  if (!/^[а-яе]+$/u.test(value) || value.length <= 3) return value;
-  const firstVowel = value.search(/[аеиоуыэюя]/u);
-  if (firstVowel < 0 || firstVowel === value.length - 1) return value;
-  const prefix = value.slice(0, firstVowel + 1);
-  let rv = value.slice(firstVowel + 1);
-
-  const perfective = removeRussianSuffix(
-    rv,
-    /(?:ив|ивши|ившись|ыв|ывши|ывшись)$/u,
-    /([ая])(?:в|вши|вшись)$/u
-  );
-  if (perfective === rv) {
-    rv = rv.replace(/(?:ся|сь)$/u, "");
-    const adjective = removeRussianSuffix(
-      rv,
-      /(?:ее|ие|ые|ое|ими|ыми|ей|ий|ый|ой|ем|им|ым|ом|его|ого|ему|ому|их|ых|ую|юю|ая|яя|ою|ею)$/u
-    );
-    if (adjective !== rv) {
-      rv = removeRussianSuffix(
-        adjective,
-        /(?:ивш|ывш|ующ)$/u,
-        /([ая])(?:ем|нн|вш|ющ|щ)$/u
-      );
-    } else {
-      const verb = removeRussianSuffix(
-        rv,
-        /(?:ила|ыла|ена|ейте|уйте|ите|или|ыли|ей|уй|ил|ыл|им|ым|ен|ило|ыло|ено|ят|ует|уют|ит|ыт|ены|ить|ыть|ишь|ую|ю)$/u,
-        /([ая])(?:ла|на|ете|йте|ли|й|л|ем|н|ло|но|ет|ны|ть|ешь|нно)$/u
-      );
-      rv = verb === rv
-        ? rv.replace(/(?:а|ев|ов|ие|ье|е|иями|ями|ами|еи|ии|и|ией|ей|ой|ий|й|иям|ям|ием|ем|ам|ом|о|у|ах|иях|ях|ы|ь|ию|ью|ю|ия|ья|я)$/u, "")
-        : verb;
-    }
-  } else {
-    rv = perfective;
-  }
-
-  rv = rv.replace(/и$/u, "");
-  let stem = prefix + rv;
-  const r2Start = russianRegionStart(stem, russianRegionStart(stem, 0));
-  const derivational = /(ость|ост)$/u.exec(stem);
-  if (derivational?.index !== undefined && derivational.index >= r2Start) {
-    stem = stem.slice(0, derivational.index);
-  }
-  stem = stem.replace(/ейше$/u, "").replace(/нн$/u, "н").replace(/ь$/u, "");
-  return stem.length >= 3 ? stem : value;
-}
-
-function removeRussianSuffix(
-  value: string,
-  unconditional: RegExp,
-  conditional?: RegExp
-): string {
-  const removed = value.replace(unconditional, "");
-  return removed !== value || !conditional ? removed : value.replace(conditional, "$1");
-}
-
-function russianRegionStart(value: string, from: number): number {
-  for (let index = Math.max(0, from); index < value.length - 1; index += 1) {
-    if (/[аеиоуыэюя]/u.test(value[index]!) && !/[аеиоуыэюя]/u.test(value[index + 1]!)) {
-      return index + 2;
-    }
-  }
-  return value.length;
 }
 
 function previewHash(

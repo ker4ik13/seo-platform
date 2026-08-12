@@ -56,7 +56,7 @@ const jobsUsers = [
     "REDIS_JOBS_INSPECTION_PASSWORD",
     "upload-inspection"
   ],
-  ["seo_jobs_import", "REDIS_JOBS_IMPORT_PASSWORD", "semantic-import"],
+  ["seo_jobs_import", "REDIS_JOBS_IMPORT_PASSWORD", "exports"],
   ["seo_jobs_rank", "REDIS_JOBS_RANK_PASSWORD", "rank-preparation"],
   ["seo_jobs_crawl", "REDIS_JOBS_CRAWL_PASSWORD", "crawls"],
   [

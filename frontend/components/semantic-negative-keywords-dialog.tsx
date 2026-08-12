@@ -3,12 +3,17 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
-  type FormEvent
+  type FormEvent,
+  type ReactNode,
+  type UIEvent
 } from "react";
 import type {
   SemanticKeywordBulkSelection,
+  SemanticNegativeKeywordApplyResult,
   SemanticNegativeKeywordCommandInput,
+  SemanticNegativeKeywordMatch,
   SemanticNegativeKeywordMatchMode,
   SemanticNegativeKeywordPreset,
   SemanticNegativeKeywordPreview,
@@ -24,6 +29,7 @@ import { Icon } from "./icon";
 import { SemanticModal } from "./semantic-modal";
 
 type ScopeKind = SemanticNegativeKeywordScope["kind"];
+const NEGATIVE_PREVIEW_PAGE_SIZE = 100;
 
 export function SemanticNegativeKeywordsDialog({
   activeGroup,
@@ -50,12 +56,17 @@ export function SemanticNegativeKeywordsDialog({
     selections.length > 0 ? "SELECTION" : activeGroup ? "GROUP" : "PROJECT"
   );
   const [preview, setPreview] = useState<SemanticNegativeKeywordPreview>();
+  const [previewMatches, setPreviewMatches] = useState<
+    readonly SemanticNegativeKeywordMatch[]
+  >([]);
   const [loadingPresets, setLoadingPresets] = useState(true);
   const [savingPreset, setSavingPreset] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [applying, setApplying] = useState(false);
   const [deletedProgress, setDeletedProgress] = useState(0);
   const [error, setError] = useState<string>();
+  const previewRequestInFlight = useRef(false);
   const words = useMemo(() => parseWords(wordsText, caseSensitive), [caseSensitive, wordsText]);
   const endpoint = `/app/api/projects/${encodeURIComponent(projectId)}`;
 
@@ -80,6 +91,7 @@ export function SemanticNegativeKeywordsDialog({
 
   function invalidatePreview(): void {
     setPreview(undefined);
+    setPreviewMatches([]);
     setDeletedProgress(0);
     setError(undefined);
   }
@@ -160,7 +172,8 @@ export function SemanticNegativeKeywordsDialog({
     }
   }
 
-  async function requestPreview(): Promise<void> {
+  async function requestPreview(page = 1, append = false): Promise<void> {
+    if (previewRequestInFlight.current || applying) return;
     const command = commandInput(
       words,
       matchMode,
@@ -181,17 +194,57 @@ export function SemanticNegativeKeywordsDialog({
       ));
       return;
     }
-    setPreviewing(true);
+    previewRequestInFlight.current = true;
+    if (append) setLoadingMore(true);
+    else setPreviewing(true);
     setError(undefined);
     try {
-      setPreview(await browserApiRequest<SemanticNegativeKeywordPreview>(
+      const result = await browserApiRequest<SemanticNegativeKeywordPreview>(
         `${endpoint}/negative-keywords/preview`,
-        { method: "POST", body: command }
-      ));
+        {
+          method: "POST",
+          body: { ...command, page, pageSize: NEGATIVE_PREVIEW_PAGE_SIZE }
+        }
+      );
+      if (append && preview && result.previewHash !== preview.previewHash) {
+        setPreview(undefined);
+        setPreviewMatches([]);
+        setError(
+          "Запросы изменились во время просмотра. Пересчитайте совпадения."
+        );
+        return;
+      }
+      setPreview(result);
+      setPreviewMatches((current) =>
+        append
+          ? appendUniqueNegativeMatches(current, result.matches)
+          : result.matches
+      );
     } catch (requestError) {
       setError(negativeKeywordError(requestError));
     } finally {
-      setPreviewing(false);
+      previewRequestInFlight.current = false;
+      if (append) setLoadingMore(false);
+      else setPreviewing(false);
+    }
+  }
+
+  function loadNextPreviewPage(
+    event: UIEvent<HTMLUListElement>
+  ): void {
+    if (
+      !preview ||
+      preview.page >= preview.pageCount ||
+      previewing ||
+      loadingMore ||
+      applying
+    ) {
+      return;
+    }
+    const list = event.currentTarget;
+    const remaining = list.scrollHeight - list.scrollTop - list.clientHeight;
+    if (remaining <= 160) {
+      void requestPreview(preview.page + 1, true);
     }
   }
 
@@ -215,7 +268,7 @@ export function SemanticNegativeKeywordsDialog({
       let currentPreview = preview;
       let deleted = 0;
       for (let batch = 0; batch < 100 && currentPreview.batchCount > 0; batch += 1) {
-        const result = await browserApiRequest<{ readonly deletedCount: number; readonly hasMore: boolean }>(
+        const result = await browserApiRequest<SemanticNegativeKeywordApplyResult>(
           `${endpoint}/negative-keywords/apply`,
           {
             method: "POST",
@@ -225,10 +278,20 @@ export function SemanticNegativeKeywordsDialog({
         deleted += result.deletedCount;
         setDeletedProgress(deleted);
         if (!result.hasMore) break;
-        command = commandWithoutDeletedSelection(command, currentPreview);
+        command = commandWithoutDeletedSelection(
+          command,
+          result.deletedKeywordIds
+        );
         currentPreview = await browserApiRequest<SemanticNegativeKeywordPreview>(
           `${endpoint}/negative-keywords/preview`,
-          { method: "POST", body: command }
+          {
+            method: "POST",
+            body: {
+              ...command,
+              page: 1,
+              pageSize: NEGATIVE_PREVIEW_PAGE_SIZE
+            }
+          }
         );
       }
       onCompleted(
@@ -239,6 +302,7 @@ export function SemanticNegativeKeywordsDialog({
     } catch (requestError) {
       setError(negativeKeywordError(requestError));
       setPreview(undefined);
+      setPreviewMatches([]);
     } finally {
       setApplying(false);
     }
@@ -349,7 +413,7 @@ export function SemanticNegativeKeywordsDialog({
               <p>Проверьте найденные фразы перед перемещением.</p>
             </header>
             <div className="semantic-negative-preview">
-              <button className="secondary-button semantic-negative-preview-button" disabled={previewing || applying} onClick={() => void requestPreview()} type="button">
+              <button className="secondary-button semantic-negative-preview-button" disabled={previewing || loadingMore || applying} onClick={() => void requestPreview()} type="button">
                 <Icon name="search" />
                 {previewing ? "Проверяем…" : preview ? "Пересчитать совпадения" : "Найти совпадения"}
               </button>
@@ -359,21 +423,41 @@ export function SemanticNegativeKeywordsDialog({
                   <dl>
                     <div><dt>Проверено</dt><dd>{formatInteger(preview.scannedCount)}</dd></div>
                     <div><dt>Найдено</dt><dd>{formatInteger(preview.matchedCount)}</dd></div>
-                    <div><dt>В пакете</dt><dd>{formatInteger(preview.batchCount)}</dd></div>
+                    <div><dt>Показано</dt><dd>{formatInteger(previewMatches.length)}</dd></div>
                   </dl>
-                  {preview.matches.length === 0 ? (
+                  {previewMatches.length === 0 ? (
                     <div className="inline-alert success">Совпадений нет — перемещать нечего.</div>
                   ) : (
-                    <ul>
-                      {preview.matches.slice(0, 12).map((match) => (
+                    <ul
+                      aria-busy={loadingMore}
+                      onScroll={loadNextPreviewPage}
+                    >
+                      {previewMatches.map((match) => (
                         <li key={match.keywordId}>
-                          <span>{match.text}</span>
-                          <small>{match.matchedWords.join(", ")}</small>
+                          <HighlightedNegativeKeyword match={match} />
                         </li>
                       ))}
                     </ul>
                   )}
-                  {preview.matchedCount > 12 && <p>И ещё {formatInteger(preview.matchedCount - 12)} совпадений.</p>}
+                  {preview.matchedCount > 0 && (
+                    <div
+                      aria-live="polite"
+                      className="semantic-negative-scroll-status"
+                    >
+                      <span>
+                        Показано {formatInteger(previewMatches.length)} из{" "}
+                        {formatInteger(preview.matchedCount)}
+                      </span>
+                      {preview.page < preview.pageCount && (
+                        <span>
+                          {loadingMore && <span className="spinner" />}
+                          {loadingMore
+                            ? "Загружаем ещё…"
+                            : "Прокрутите список вниз — следующие 100 загрузятся автоматически"}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </>
               )}
             </div>
@@ -476,12 +560,43 @@ function commandScope(
     : undefined;
 }
 
+function HighlightedNegativeKeyword({
+  match
+}: Readonly<{ match: SemanticNegativeKeywordMatch }>) {
+  const parts: ReactNode[] = [];
+  let offset = 0;
+  for (const [index, range] of match.highlightRanges.entries()) {
+    if (range.start > offset) {
+      parts.push(match.text.slice(offset, range.start));
+    }
+    parts.push(
+      <mark key={`${range.start}:${range.end}:${index}`}>
+        {match.text.slice(range.start, range.end)}
+      </mark>
+    );
+    offset = range.end;
+  }
+  if (offset < match.text.length) parts.push(match.text.slice(offset));
+  return <span className="semantic-negative-keyword-text">{parts}</span>;
+}
+
+function appendUniqueNegativeMatches(
+  current: readonly SemanticNegativeKeywordMatch[],
+  next: readonly SemanticNegativeKeywordMatch[]
+): readonly SemanticNegativeKeywordMatch[] {
+  const knownIds = new Set(current.map(({ keywordId }) => keywordId));
+  return [
+    ...current,
+    ...next.filter(({ keywordId }) => !knownIds.has(keywordId))
+  ];
+}
+
 function commandWithoutDeletedSelection(
   command: SemanticNegativeKeywordCommandInput,
-  preview: SemanticNegativeKeywordPreview
+  deletedKeywordIds: readonly string[]
 ): SemanticNegativeKeywordCommandInput {
   if (command.scope.kind !== "SELECTION") return command;
-  const deletedIds = new Set(preview.matches.slice(0, preview.batchCount).map(({ keywordId }) => keywordId));
+  const deletedIds = new Set(deletedKeywordIds);
   return {
     ...command,
     scope: {

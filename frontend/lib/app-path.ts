@@ -52,3 +52,10 @@ export function externalPageUrlPresentation(
 export function projectLogoUrl(projectId: string, version: number): string {
   return `/app/api/projects/${encodeURIComponent(projectId)}/logo?v=${encodeURIComponent(String(version))}`;
 }
+
+export function semanticExportFileUrl(
+  projectId: string,
+  exportId: string
+): string {
+  return `/app/api/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(exportId)}/file`;
+}

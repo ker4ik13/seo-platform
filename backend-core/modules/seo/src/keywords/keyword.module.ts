@@ -7,6 +7,7 @@ import { KeywordService } from "./keyword.service.js";
 @Module({
   imports: [InternalModule, SemanticVersionModule],
   controllers: [KeywordController],
-  providers: [KeywordService]
+  providers: [KeywordService],
+  exports: [KeywordService]
 })
 export class KeywordModule {}

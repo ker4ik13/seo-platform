@@ -3,10 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   FrequencyCollectionSummary,
-  RankJobSummary
+  RankJobSummary,
+  SemanticExportCollection,
+  SemanticExportJobSummary
 } from "@seo-platform/contracts";
 import Link from "next/link";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
+import { semanticExportFileUrl } from "../lib/app-path";
+import { Icon } from "./icon";
 import {
   connectorRoutingScopeLabel,
   hasConnectorFallback
@@ -37,6 +41,7 @@ export function SemanticOperationsDrawer({
 }>) {
   const [frequencies, setFrequencies] = useState<readonly FrequencyCollectionSummary[]>([]);
   const [ranks, setRanks] = useState<readonly RankJobSummary[]>([]);
+  const [semanticExports, setSemanticExports] = useState<readonly SemanticExportJobSummary[]>([]);
   const [tab, setTab] = useState<OperationTab>("ACTIVE");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
@@ -56,13 +61,17 @@ export function SemanticOperationsDrawer({
     if (requestInFlight.current) return;
     requestInFlight.current = true;
     try {
-      const [frequencyResult, rankResult] = await Promise.allSettled([
+      const [frequencyResult, rankResult, exportResult] = await Promise.allSettled([
         browserApiRequest<{ readonly collections: readonly FrequencyCollectionSummary[] }>(
           `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections`,
           signal ? { signal } : {}
         ),
         browserApiRequest<{ readonly jobs: readonly RankJobSummary[] }>(
           `/app/api/projects/${encodeURIComponent(projectId)}/rank-runs`,
+          signal ? { signal } : {}
+        ),
+        browserApiRequest<SemanticExportCollection>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/exports`,
           signal ? { signal } : {}
         )
       ]);
@@ -84,7 +93,10 @@ export function SemanticOperationsDrawer({
       if (rankResult.status === "fulfilled") {
         setRanks(rankResult.value.jobs);
       }
-      const failures = [frequencyResult, rankResult]
+      if (exportResult.status === "fulfilled") {
+        setSemanticExports(exportResult.value.exports);
+      }
+      const failures = [frequencyResult, rankResult, exportResult]
         .filter((result): result is PromiseRejectedResult => result.status === "rejected")
         .map((result) => operationError(result.reason));
       setError(failures.length > 0 ? [...new Set(failures)].join(" · ") : undefined);
@@ -116,12 +128,13 @@ export function SemanticOperationsDrawer({
   const allOperations = useMemo(() => {
     const values: Operation[] = [
       ...frequencies.map(frequencyOperation),
-      ...ranks.map(rankOperation)
+      ...ranks.map(rankOperation),
+      ...semanticExports.map(exportOperation)
     ];
     return values.sort((left, right) =>
       right.createdAt.localeCompare(left.createdAt)
     );
-  }, [frequencies, ranks]);
+  }, [frequencies, ranks, semanticExports]);
 
   const operations = useMemo(
     () => allOperations.filter((operation) => operation.tab === tab),
@@ -156,10 +169,15 @@ export function SemanticOperationsDrawer({
           `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections/${encodeURIComponent(operation.id)}/cancel`,
           { method: "POST", body: { version: operation.version } }
         );
-      } else {
+      } else if (operation.kind === "RANK") {
         await browserApiRequest(
           `/app/api/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(operation.id)}/cancel`,
           { method: "POST", body: {} }
+        );
+      } else {
+        await browserApiRequest(
+          `/app/api/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(operation.id)}/cancel`,
+          { method: "POST", body: {}, ifMatch: operation.version }
         );
       }
       await load();
@@ -171,6 +189,7 @@ export function SemanticOperationsDrawer({
   }
 
   async function retry(operation: Operation): Promise<void> {
+    if (operation.kind === "EXPORT") return;
     setRetryingId(operation.id);
     setError(undefined);
     try {
@@ -220,7 +239,11 @@ export function SemanticOperationsDrawer({
           <article className={`semantic-operation-card state-${operation.tab.toLocaleLowerCase()}`} key={`${operation.kind}:${operation.id}`}>
             <header>
               <strong className="provider-inline">
-                <ProviderLogo provider={operation.provider} size="compact" />
+                {operation.provider ? (
+                  <ProviderLogo provider={operation.provider} size="compact" />
+                ) : (
+                  <span aria-hidden="true" className="semantic-operation-export-mark"><Icon name="export" /></span>
+                )}
                 <span>{operation.title}</span>
               </strong>
               <span className="semantic-operation-status">{operation.statusLabel}</span>
@@ -240,18 +263,28 @@ export function SemanticOperationsDrawer({
                     : operation.retryLabel}
                 </button>
               )}
+              {operation.downloadable && (
+                <a
+                  className="semantic-operation-download"
+                  href={semanticExportFileUrl(projectId, operation.id)}
+                >
+                  Скачать файл
+                </a>
+              )}
               {operation.cancellable && (
                 <button disabled={cancellingId === operation.id} onClick={() => setStopConfirmation(operation)} type="button">
                   {cancellingId === operation.id ? "Останавливаем…" : "Остановить"}
                 </button>
               )}
-              <button
-                className="semantic-operation-open"
-                onClick={() => setSelectedOperation(operation)}
-                type="button"
-              >
-                Открыть лог
-              </button>
+              {operation.kind !== "EXPORT" && (
+                <button
+                  className="semantic-operation-open"
+                  onClick={() => setSelectedOperation(operation)}
+                  type="button"
+                >
+                  Открыть лог
+                </button>
+              )}
             </footer>
           </article>
         )) : (
@@ -263,7 +296,16 @@ export function SemanticOperationsDrawer({
         {tab === "ACTIVE" && !loading && recentlyCompleted.length > 0 && (
           <section className="semantic-recent-operations">
             <h3>Недавно завершённые</h3>
-            {recentlyCompleted.map((operation) => (
+            {recentlyCompleted.map((operation) => operation.kind === "EXPORT" ? (
+              <a
+                href={semanticExportFileUrl(projectId, operation.id)}
+                key={`recent:${operation.kind}:${operation.id}`}
+              >
+                <span aria-hidden="true">↓</span>
+                <strong>{operation.title}</strong>
+                <time>{formatShortTime(operation.createdAt)}</time>
+              </a>
+            ) : (
               <button
                 key={`recent:${operation.kind}:${operation.id}`}
                 onClick={() => setSelectedOperation(operation)}
@@ -283,7 +325,7 @@ export function SemanticOperationsDrawer({
         )}
       </div>
     </aside>
-    {openedOperation && (
+    {openedOperation && openedOperation.kind !== "EXPORT" && (
       <OperationResultModal
         actions={openedOperation.cancellable ? (
           <button
@@ -322,8 +364,8 @@ export function SemanticOperationsDrawer({
 
 interface Operation {
   readonly id: string;
-  readonly kind: "FREQUENCY" | "RANK";
-  readonly provider: "XMLSTOCK" | "ARSENKIN";
+  readonly kind: "FREQUENCY" | "RANK" | "EXPORT";
+  readonly provider?: "XMLSTOCK" | "ARSENKIN";
   readonly title: string;
   readonly description: string;
   readonly statusLabel: string;
@@ -333,6 +375,7 @@ interface Operation {
   readonly cancellable: boolean;
   readonly retryable: boolean;
   readonly retryLabel: string;
+  readonly downloadable: boolean;
   readonly version: number;
   readonly errorCode?: string;
   readonly routeLabel?: string;
@@ -354,6 +397,7 @@ function frequencyOperation(value: FrequencyCollectionSummary): Operation {
     cancellable: ["QUEUED", "RUNNING", "WAITING_RATE_LIMIT", "RETRY_SCHEDULED", "FAILED_RETRYABLE"].includes(value.status),
     retryable: ["FAILED_FINAL", "PARTIALLY_COMPLETED", "ACTION_REQUIRED"].includes(value.status),
     retryLabel: "Повторить ошибки",
+    downloadable: false,
     version: value.version,
     ...(value.routingScope
       ? {
@@ -393,6 +437,7 @@ function rankOperation(value: RankJobSummary): Operation {
       Number(value.result.failedCount) > 0 &&
       Number(value.result.submitOutcomeUnknownCount) === 0,
     retryLabel: "Дособрать позиции",
+    downloadable: false,
     version: 1,
     ...(value.routingScope
       ? {
@@ -404,6 +449,69 @@ function rankOperation(value: RankJobSummary): Operation {
       : {}),
     createdAt: value.createdAt
   };
+}
+
+function exportOperation(value: SemanticExportJobSummary): Operation {
+  const total = value.totalRows ?? value.rowCount ?? value.processedRows;
+  const complete = value.status === "COMPLETED";
+  return {
+    id: value.id,
+    kind: "EXPORT",
+    title: `Экспорт семантики · ${exportFormatLabel(value.format)}`,
+    description: `${exportFormatLabel(value.format)} · ${exportScopeLabel(value.scope)}`,
+    statusLabel: exportStatusLabel(value.status),
+    progressLabel: complete
+      ? `${value.rowCount ?? value.processedRows} строк`
+      : total > 0
+        ? `${value.processedRows} из ${total}`
+        : `${value.processedRows} строк`,
+    percent: complete
+      ? 100
+      : total > 0
+        ? Math.min(100, Math.round(value.processedRows / total * 100))
+        : 0,
+    tab: operationTab(value.status),
+    cancellable: [
+      "QUEUED",
+      "RUNNING",
+      "RETRY_SCHEDULED",
+      "FAILED_RETRYABLE"
+    ].includes(value.status),
+    retryable: false,
+    retryLabel: "",
+    downloadable: complete,
+    version: value.version,
+    ...(value.failureCode ? { errorCode: value.failureCode } : {}),
+    routeLabel: exportScopeLabel(value.scope),
+    createdAt: value.createdAt
+  };
+}
+
+function exportFormatLabel(format: SemanticExportJobSummary["format"]): string {
+  return format === "GOOGLE_CSV" ? "Google CSV" : format;
+}
+
+function exportScopeLabel(scope: SemanticExportJobSummary["scope"]): string {
+  return {
+    SELECTED: "выбранные строки",
+    CURRENT_PAGE: "текущая страница",
+    CURRENT_FILTER: "текущий фильтр",
+    GROUP_SUBTREE: "группа и подгруппы",
+    FULL_CORE: "весь проект"
+  }[scope];
+}
+
+function exportStatusLabel(status: SemanticExportJobSummary["status"]): string {
+  return {
+    QUEUED: "В очереди",
+    RUNNING: "Формируется",
+    CANCEL_REQUESTED: "Останавливается",
+    CANCELLED: "Остановлен",
+    RETRY_SCHEDULED: "Повтор запланирован",
+    COMPLETED: "Файл готов",
+    FAILED_RETRYABLE: "Временная ошибка",
+    FAILED_FINAL: "Ошибка"
+  }[status];
 }
 
 function operationTab(status: string): OperationTab {

@@ -66,12 +66,6 @@ interface BrowserApiOptions {
 
 let sessionRefreshPromise: Promise<boolean> | undefined;
 
-export interface BrowserDownload {
-  readonly blob: Blob;
-  readonly filename: string;
-  readonly rowCount?: number;
-}
-
 export async function browserApiRequest<Data>(
   path: string,
   options: BrowserApiOptions = {}
@@ -132,58 +126,6 @@ export async function browserApiCollectionRequest<Data>(
         ? { unreadCount: page.unreadCount }
         : {})
     }
-  };
-}
-
-export async function browserApiDownload(
-  path: string,
-  options: Readonly<{
-    body: unknown;
-    signal?: AbortSignal;
-  }>
-): Promise<BrowserDownload> {
-  if (!path.startsWith("/app/api/")) {
-    throw new Error("Browser API path must use the same-origin BFF");
-  }
-  const headers = new Headers({
-    Accept: "text/csv, text/tab-separated-values, application/json, application/x-ndjson",
-    "Content-Type": "application/json"
-  });
-  const csrf = browserCookie(
-    process.env.NEXT_PUBLIC_AUTH_CSRF_COOKIE_NAME ?? "seo_csrf"
-  );
-  if (csrf) headers.set("X-CSRF-Token", csrf);
-  const response = await sessionAwareFetch(path, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(options.body),
-    credentials: "same-origin",
-    cache: "no-store",
-    ...(options.signal ? { signal: options.signal } : {})
-  });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => undefined);
-    throw browserApiError(
-      response.status,
-      payload,
-      response.headers.get("x-request-id") ?? undefined
-    );
-  }
-  const rowCountHeader = response.headers.get("x-export-row-count");
-  const rowCount =
-    rowCountHeader === null ? undefined : Number(rowCountHeader);
-  if (
-    rowCount !== undefined &&
-    (!Number.isSafeInteger(rowCount) || rowCount < 0)
-  ) {
-    throw invalidResponse();
-  }
-  return {
-    blob: await response.blob(),
-    filename: downloadFilename(
-      response.headers.get("content-disposition")
-    ),
-    ...(rowCount === undefined ? {} : { rowCount })
   };
 }
 
@@ -302,13 +244,6 @@ function browserCookie(name: string): string | undefined {
     .map((part) => part.trim())
     .find((part) => part.startsWith(prefix));
   return item ? decodeURIComponent(item.slice(prefix.length)) : undefined;
-}
-
-function downloadFilename(contentDisposition: string | null): string {
-  const match = contentDisposition?.match(
-    /^attachment; filename="([A-Za-z0-9._-]{1,160})"$/u
-  );
-  return match?.[1] ?? "semantic-export";
 }
 
 function browserApiError(

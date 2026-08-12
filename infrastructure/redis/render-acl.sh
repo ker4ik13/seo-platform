@@ -94,14 +94,14 @@ case "$instance" in
   jobs)
     jobs_commands='-@all +ping +quit +info +client|setname +client|setinfo +eval +evalsha +script|load +bzpopmin +del +exists +get +hdel +hexists +hget +hgetall +hincrby +hlen +hmget +hmset +hset +incr +lindex +llen +lpop +lpos +lpush +lrange +lrem +lset +ltrim +persist +pexpire +pttl +rename +rpop +rpoplpush +rpush +sadd +scard +set +sismember +smembers +srem +type +xadd +xtrim +zadd +zcard +zcount +zpopmin +zrange +zrangebyscore +zrem +zremrangebyrank +zremrangebyscore +zrevrange +zrevrangebyscore +zscore'
     append_user seo_jobs_api REDIS_JOBS_API_PASSWORD \
-      '~seo-platform:jobs:v1:system:* ~seo-platform:jobs:v1:upload-inspection:* ~seo-platform:jobs:v1:semantic-import:* ~seo-platform:jobs:v1:integration-credential-validation:* ~seo-platform:jobs:v1:rank-preparation:* ~seo-platform:jobs:v1:rank-automation:* ~seo-platform:jobs:v1:crawls:* ~seo-platform:jobs:v1:crawl-automation:* resetchannels' \
+      '~seo-platform:jobs:v1:system:* ~seo-platform:jobs:v1:upload-inspection:* ~seo-platform:jobs:v1:semantic-import:* ~seo-platform:jobs:v1:exports:* ~seo-platform:jobs:v1:integration-credential-validation:* ~seo-platform:jobs:v1:rank-preparation:* ~seo-platform:jobs:v1:rank-automation:* ~seo-platform:jobs:v1:crawls:* ~seo-platform:jobs:v1:crawl-automation:* resetchannels' \
       "$jobs_commands"
     append_user seo_jobs_system REDIS_JOBS_SYSTEM_PASSWORD \
       '~seo-platform:jobs:v1:system:* resetchannels' "$jobs_commands"
     append_user seo_jobs_inspection REDIS_JOBS_INSPECTION_PASSWORD \
       '~seo-platform:jobs:v1:upload-inspection:* resetchannels' "$jobs_commands"
     append_user seo_jobs_import REDIS_JOBS_IMPORT_PASSWORD \
-      '~seo-platform:jobs:v1:semantic-import:* resetchannels' "$jobs_commands"
+      '~seo-platform:jobs:v1:semantic-import:* ~seo-platform:jobs:v1:exports:* resetchannels' "$jobs_commands"
     append_user seo_jobs_rank REDIS_JOBS_RANK_PASSWORD \
       '~seo-platform:jobs:v1:rank-preparation:* resetchannels' "$jobs_commands"
     append_user seo_jobs_crawl REDIS_JOBS_CRAWL_PASSWORD \

@@ -2,7 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
 import { internalNegativeKeywordCommandInput } from "./negative-keyword-input.js";
-import { negativeKeywordMatchingWords } from "./negative-keyword.service.js";
+import {
+  negativeKeywordHighlightRanges,
+  negativeKeywordMatchingWords
+} from "./negative-keyword.service.js";
 
 const context = {
   workspaceId: "01900000-0000-7000-8000-000000000001",
@@ -17,14 +20,24 @@ const defaultRuleFlags = {
 
 test("trusted negative keyword input remains tenant and selection scoped", () => {
   const keywordId = "01900000-0000-7000-8000-000000000004";
+  const input = internalNegativeKeywordCommandInput({
+    ...context,
+    rules: { words: ["Москва"], matchMode: "WHOLE_WORD", caseSensitive: false },
+    scope: { kind: "SELECTION", items: [{ id: keywordId, version: 3 }] }
+  });
   assert.deepEqual(
-    internalNegativeKeywordCommandInput({
-      ...context,
-      rules: { words: ["Москва"], matchMode: "WHOLE_WORD", caseSensitive: false },
-      scope: { kind: "SELECTION", items: [{ id: keywordId, version: 3 }] }
-    }).scope,
+    input.scope,
     { kind: "SELECTION", items: [{ id: keywordId, version: 3 }] }
   );
+  assert.equal(input.page, 1);
+  assert.equal(input.pageSize, 100);
+  assert.equal(internalNegativeKeywordCommandInput({
+    ...context,
+    rules: { words: ["Москва"], matchMode: "WHOLE_WORD", caseSensitive: false },
+    scope: { kind: "PROJECT" },
+    page: 2,
+    pageSize: 200
+  }).pageSize, 200);
   assert.throws(
     () => internalNegativeKeywordCommandInput({
       ...context,
@@ -32,6 +45,27 @@ test("trusted negative keyword input remains tenant and selection scoped", () =>
       scope: { kind: "PROJECT", groupId: keywordId }
     }),
     BadRequestException
+  );
+});
+
+test("highlight ranges point to the matched text inside the query", () => {
+  assert.deepEqual(
+    negativeKeywordHighlightRanges("туры Москва недорого", {
+      words: ["москва"],
+      matchMode: "WHOLE_WORD",
+      caseSensitive: false,
+      ...defaultRuleFlags
+    }),
+    [{ start: 5, end: 11 }]
+  );
+  assert.deepEqual(
+    negativeKeywordHighlightRanges("туры Москва недорого", {
+      words: ["тур"],
+      matchMode: "CONTAINS",
+      caseSensitive: false,
+      ...defaultRuleFlags
+    }),
+    [{ start: 0, end: 3 }]
   );
 });
 

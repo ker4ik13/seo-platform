@@ -1,5 +1,6 @@
 import type {
   CompletedPart,
+  DownloadObjectOptions,
   MultipartUpload,
   ObjectStoragePort,
   StoredObjectMetadata,
@@ -49,7 +50,8 @@ export class DisabledObjectStorageAdapter implements ObjectStoragePort {
 
   public createDownloadUrl(
     _bucket: StorageBucket,
-    _objectKey: string
+    _objectKey: string,
+    _options?: DownloadObjectOptions
   ): Promise<string> {
     return Promise.reject(this.disabled());
   }

@@ -9,7 +9,8 @@ import {
   type SemanticKeywordBulkCreateItemInput,
   type SemanticKeywordBulkCreateResult,
   type FrequencyCollectionSummary,
-  type RankJobSummary
+  type RankJobSummary,
+  type SemanticExportJobSummary
 } from "@seo-platform/contracts";
 
 import {
@@ -25,12 +26,14 @@ import {
 } from "react";
 import {
   browserApiCollectionRequest,
-  browserApiDownload,
   BrowserApiError,
   browserApiRequest,
   type BrowserCursorPage
 } from "../lib/browser-api";
-import { externalPageUrlPresentation } from "../lib/app-path";
+import {
+  externalPageUrlPresentation,
+  semanticExportFileUrl
+} from "../lib/app-path";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
 import {
   manualKeywordInputStats,
@@ -81,6 +84,7 @@ import { SemanticFrequencyDialog } from "./semantic-frequency-dialog";
 import { SemanticOperationsDrawer } from "./semantic-operations-drawer";
 import { SemanticLayoutDrawer } from "./semantic-layout-drawer";
 import { SemanticNegativeKeywordsDialog } from "./semantic-negative-keywords-dialog";
+import { SemanticDuplicatesDialog } from "./semantic-duplicates-dialog";
 import { SemanticModal } from "./semantic-modal";
 import {
   SemanticTrashRecoveryDialog,
@@ -230,7 +234,8 @@ type SemanticExportFormat =
   | "TSV"
   | "JSON"
   | "NDJSON"
-  | "GOOGLE_CSV";
+  | "GOOGLE_CSV"
+  | "XLSX";
 
 type SemanticExportScope = "CURRENT_FILTER" | "SELECTED" | "GROUP_SUBTREE";
 
@@ -293,6 +298,8 @@ export function SemanticCoreTable({
   const [exportFormat, setExportFormat] =
     useState<SemanticExportFormat>("CSV");
   const [exporting, setExporting] = useState(false);
+  const [exportCancelling, setExportCancelling] = useState(false);
+  const [exportJob, setExportJob] = useState<SemanticExportJobSummary>();
   const [exportNotice, setExportNotice] = useState<string>();
   const [exportDialog, setExportDialog] = useState<SemanticExportDialogState>();
   const [exportScope, setExportScope] =
@@ -339,6 +346,7 @@ export function SemanticCoreTable({
   const [positionDialogOpen, setPositionDialogOpen] = useState(false);
   const [frequencyDialogOpen, setFrequencyDialogOpen] = useState(false);
   const [negativeKeywordsOpen, setNegativeKeywordsOpen] = useState(false);
+  const [duplicatesOpen, setDuplicatesOpen] = useState(false);
   const [watchedFrequencyId, setWatchedFrequencyId] = useState<string>();
   const [operationsRefreshVersion, setOperationsRefreshVersion] = useState(0);
   const activeOperationCount = useProjectActiveOperationCount(
@@ -1542,6 +1550,7 @@ export function SemanticCoreTable({
     );
     setExportColumns(viewConfig.columns);
     setExportBom(exportFormat === "CSV" || exportFormat === "TSV");
+    setExportJob(undefined);
   }
 
   async function downloadExport(): Promise<void> {
@@ -1549,6 +1558,7 @@ export function SemanticCoreTable({
     setExporting(true);
     setExportNotice(undefined);
     setMutationError(undefined);
+    setExportJob(undefined);
     const groupId = exportDialog?.groupId;
     const selected = exportScope === "SELECTED"
       ? items
@@ -1556,9 +1566,11 @@ export function SemanticCoreTable({
           .map(({ id }) => id)
       : [];
     try {
-      const download = await browserApiDownload(
+      let current = await browserApiRequest<SemanticExportJobSummary>(
         `/app/api/projects/${encodeURIComponent(projectId)}/exports`,
         {
+          method: "POST",
+          idempotencyKey: `semantic-export:${globalThis.crypto.randomUUID()}`,
           body: {
             format: exportFormat,
             scope: exportScope,
@@ -1568,21 +1580,59 @@ export function SemanticCoreTable({
               ? { filters: { groupId } }
               : selected.length > 0
               ? { keywordIds: selected }
-              : { filters: viewConfig.filters }),
+              : {
+                  filters: {
+                    ...viewConfig.filters,
+                    ...(multiGroupIds.length > 1
+                      ? { groupIds: multiGroupIds }
+                      : {})
+                  }
+                }),
             sort: viewConfig.sort,
             includeBom: exportBom
           }
         }
       );
-      saveBrowserDownload(download.blob, download.filename);
+      setExportJob(current);
+      setOperationsRefreshVersion((value) => value + 1);
+      while (semanticExportActive(current.status)) {
+        await wait(1_000);
+        current = await browserApiRequest<SemanticExportJobSummary>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(current.id)}`
+        );
+        setExportJob(current);
+      }
+      if (current.status !== "COMPLETED") {
+        throw new SemanticExportTerminalError(current);
+      }
       setExportNotice(
-        `Экспорт готов: ${formatInteger(download.rowCount ?? 0)} строк`
+        `Экспорт готов: ${formatInteger(current.rowCount ?? current.processedRows)} строк. Нажмите «Скачать файл».`
       );
-      setExportDialog(undefined);
     } catch (requestError) {
-      setMutationError(keywordErrorMessage(requestError));
+      setMutationError(semanticExportErrorMessage(requestError));
     } finally {
       setExporting(false);
+      setExportCancelling(false);
+      setOperationsRefreshVersion((value) => value + 1);
+    }
+  }
+
+  async function cancelExport(): Promise<void> {
+    if (!exportJob || !semanticExportActive(exportJob.status) || exportCancelling) {
+      return;
+    }
+    setExportCancelling(true);
+    setMutationError(undefined);
+    try {
+      const cancelled = await browserApiRequest<SemanticExportJobSummary>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(exportJob.id)}/cancel`,
+        { method: "POST", body: {}, ifMatch: exportJob.version }
+      );
+      setExportJob(cancelled);
+    } catch (requestError) {
+      setMutationError(semanticExportErrorMessage(requestError));
+    } finally {
+      setExportCancelling(false);
     }
   }
 
@@ -1993,6 +2043,7 @@ export function SemanticCoreTable({
         <button disabled={(rootTotal ?? items.length) === 0} onClick={() => setFrequencyDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Выберите запросы или папки в окне запуска"} type="button"><Icon name="frequency" />Собрать частотность</button>
         <button disabled={(rootTotal ?? items.length) === 0} onClick={() => setPositionDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Выберите запросы или папки в окне запуска"} type="button"><Icon name="rankCheck" />Проверить позиции</button>
         <button disabled={(rootTotal ?? items.length) === 0} onClick={() => setNegativeKeywordsOpen(true)} title="Найти запросы по минус-словам и переместить их в корзину" type="button"><Icon name="warning" />Минус-слова</button>
+        <button disabled={(rootTotal ?? items.length) < 2} onClick={() => setDuplicatesOpen(true)} title="Найти фразы с одинаковым набором слов и удалить лишние варианты" type="button"><Icon name="checkDouble" />Дубли</button>
         <button className="danger" disabled={checkedIds.size === 0} onClick={() => { setActionIds(null); setDeleteSelectionOpen(true); }} type="button"><Icon name="trash" />Удалить</button>
         <button onClick={() => openExport()} type="button"><Icon name="export" />Экспорт</button>
         <button
@@ -2316,16 +2367,13 @@ export function SemanticCoreTable({
             <Icon name="settings" />
             Колонки и представления
           </button>
-          <button className="semantic-compact-button" disabled={items.length === 0 && total === 0} onClick={() => openExport()} type="button">
-            Экспорт
-          </button>
         </div>
       </div>
 
       {exportDialog && (
         <SemanticModal
-          description="Выберите область, формат и набор колонок. Экспорт формируется сервером с учётом текущих фильтров."
-          onClose={exporting ? () => undefined : () => setExportDialog(undefined)}
+          description="Выберите область, формат и набор колонок. Файл формируется в фоне с учётом текущих фильтров."
+          onClose={() => setExportDialog(undefined)}
           size="medium"
           title="Экспорт семантики"
         >
@@ -2340,7 +2388,7 @@ export function SemanticCoreTable({
               <label>
                 <span>Область экспорта</span>
                 <CustomSelect
-                  disabled={Boolean(exportDialog.groupId)}
+                  disabled={exporting || Boolean(exportDialog.groupId)}
                   onChange={(event) => setExportScope(event.target.value as SemanticExportScope)}
                   value={exportScope}
                 >
@@ -2352,7 +2400,7 @@ export function SemanticCoreTable({
               <label>
                 <span>Формат</span>
                 <CustomSelect
-                  disabled={exporting}
+                  disabled={exporting || exportJob?.status === "COMPLETED"}
                   onChange={(event) => {
                     const format = event.target.value as SemanticExportFormat;
                     setExportFormat(format);
@@ -2365,6 +2413,7 @@ export function SemanticCoreTable({
                   <option value="JSON">JSON</option>
                   <option value="NDJSON">NDJSON</option>
                   <option value="GOOGLE_CSV">CSV для Google Sheets</option>
+                  <option value="XLSX">Excel (XLSX)</option>
                 </CustomSelect>
               </label>
             </div>
@@ -2380,6 +2429,7 @@ export function SemanticCoreTable({
                 <label key={column.key}>
                   <input
                     checked={exportColumns.includes(column.key)}
+                    disabled={exporting || exportJob?.status === "COMPLETED"}
                     onChange={() => setExportColumns((current) =>
                       current.includes(column.key)
                         ? current.filter((item) => item !== column.key)
@@ -2394,26 +2444,77 @@ export function SemanticCoreTable({
             <label className="semantic-control-check">
               <input
                 checked={exportBom}
-                disabled={exportFormat !== "CSV" && exportFormat !== "TSV"}
+                disabled={
+                  exporting ||
+                  exportJob?.status === "COMPLETED" ||
+                  (exportFormat !== "CSV" && exportFormat !== "TSV")
+                }
                 onChange={(event) => setExportBom(event.target.checked)}
                 type="checkbox"
               />
               <span>Добавить UTF-8 BOM для корректного открытия в Excel</span>
             </label>
+            {exportJob && (
+              <div className="semantic-export-progress" role="status">
+                <div>
+                  <strong>{semanticExportStatusLabel(exportJob)}</strong>
+                  <span>
+                    {formatInteger(exportJob.processedRows)}
+                    {exportJob.totalRows !== undefined
+                      ? ` из ${formatInteger(exportJob.totalRows)}`
+                      : ""} строк
+                  </span>
+                </div>
+                <progress
+                  max={Math.max(1, exportJob.totalRows ?? exportJob.processedRows ?? 1)}
+                  value={exportJob.processedRows}
+                />
+              </div>
+            )}
             {mutationError && <div className="inline-alert danger" role="alert">{mutationError}</div>}
+            {exportJob?.status === "COMPLETED" && (
+              <div className="inline-alert success" role="status">
+                Файл готов: {formatInteger(exportJob.rowCount ?? exportJob.processedRows)} строк. Скачивание начинается только по кнопке ниже.
+              </div>
+            )}
             <div className="semantic-modal-actions">
-              <button className="secondary-button" disabled={exporting} onClick={() => setExportDialog(undefined)} type="button">Отмена</button>
-              <button
-                className="primary-button"
-                disabled={
-                  exporting ||
-                  exportColumns.length === 0 ||
-                  (exportScope === "SELECTED" && checkedIds.size === 0)
-                }
-                type="submit"
-              >
-                {exporting ? "Готовим файл…" : "Экспортировать"}
-              </button>
+              {exporting && exportJob && semanticExportActive(exportJob.status) ? (
+                <button
+                  className="secondary-button"
+                  disabled={exportCancelling}
+                  onClick={() => void cancelExport()}
+                  type="button"
+                >
+                  {exportCancelling ? "Останавливаем…" : "Остановить экспорт"}
+                </button>
+              ) : (
+                <button className="secondary-button" onClick={() => setExportDialog(undefined)} type="button">
+                  {exportJob?.status === "COMPLETED" ? "Закрыть" : "Отмена"}
+                </button>
+              )}
+              {exportJob?.status === "COMPLETED" ? (
+                <a
+                  className="primary-button"
+                  href={semanticExportFileUrl(projectId, exportJob.id)}
+                  onClick={() => setExportNotice(
+                    `Скачивание ${exportFormat} началось. Если браузер запросит разрешение, подтвердите его.`
+                  )}
+                >
+                  Скачать файл
+                </a>
+              ) : (
+                <button
+                  className="primary-button"
+                  disabled={
+                    exporting ||
+                    exportColumns.length === 0 ||
+                    (exportScope === "SELECTED" && checkedIds.size === 0)
+                  }
+                  type="submit"
+                >
+                  {exporting ? "Формируем файл…" : "Экспортировать"}
+                </button>
+              )}
             </div>
           </form>
         </SemanticModal>
@@ -3040,6 +3141,27 @@ export function SemanticCoreTable({
             .map(({ id, version, textOriginal }) => ({ id, version, label: textOriginal }))}
         />
       )}
+      {duplicatesOpen && (
+        <SemanticDuplicatesDialog
+          {...(activeNegativeGroup ? { activeGroup: activeNegativeGroup } : {})}
+          onClose={() => setDuplicatesOpen(false)}
+          onCompleted={(message) => {
+            setDuplicatesOpen(false);
+            setCheckedIds(new Set());
+            setBulkNotice(message);
+            onGroupsChanged();
+            setRetryVersion((value) => value + 1);
+          }}
+          projectId={projectId}
+          selections={items
+            .filter(({ id }) => checkedIds.has(id))
+            .map(({ id, version, textOriginal }) => ({
+              id,
+              version,
+              label: textOriginal
+            }))}
+        />
+      )}
       {rowContextMenu && (
         <ContextMenu
           items={rowMenuItems}
@@ -3093,16 +3215,69 @@ export function SemanticCoreTable({
   );
 }
 
-function saveBrowserDownload(blob: Blob, filename: string): void {
-  const objectUrl = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = objectUrl;
-  link.download = filename;
-  link.rel = "noopener";
-  document.body.append(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(objectUrl);
+function semanticExportActive(
+  status: SemanticExportJobSummary["status"]
+): boolean {
+  return [
+    "QUEUED",
+    "RUNNING",
+    "CANCEL_REQUESTED",
+    "RETRY_SCHEDULED",
+    "FAILED_RETRYABLE"
+  ].includes(status);
+}
+
+function semanticExportStatusLabel(job: SemanticExportJobSummary): string {
+  switch (job.status) {
+    case "QUEUED":
+      return "Экспорт поставлен в очередь";
+    case "RUNNING":
+      return "Формируем файл";
+    case "CANCEL_REQUESTED":
+      return "Останавливаем экспорт";
+    case "RETRY_SCHEDULED":
+    case "FAILED_RETRYABLE":
+      return "Временно недоступно — повторяем";
+    case "COMPLETED":
+      return "Файл готов";
+    case "CANCELLED":
+      return "Экспорт отменён";
+    case "FAILED_FINAL":
+      return "Не удалось сформировать файл";
+  }
+}
+
+function semanticExportErrorMessage(error: unknown): string {
+  if (error instanceof SemanticExportTerminalError) {
+    if (error.job.status === "CANCELLED") return "Экспорт отменён.";
+    return error.job.failureCode
+      ? `Не удалось сформировать файл. Код: ${error.job.failureCode}.`
+      : "Не удалось сформировать файл.";
+  }
+  if (error instanceof BrowserApiError) {
+    if (error.code === "VERSION_CONFLICT") {
+      return "Состояние экспорта уже изменилось. Дождитесь обновления и повторите.";
+    }
+    if (error.code === "STORAGE_UNAVAILABLE") {
+      return "Хранилище экспортов временно недоступно.";
+    }
+    if (error.code === "FORBIDDEN") {
+      return "У вас нет права экспортировать семантику этого проекта.";
+    }
+    return error.message;
+  }
+  return "Не удалось сформировать экспорт.";
+}
+
+class SemanticExportTerminalError extends Error {
+  public constructor(public readonly job: SemanticExportJobSummary) {
+    super(job.failureCode ?? job.status);
+    this.name = "SemanticExportTerminalError";
+  }
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
 function semanticVirtualRows(

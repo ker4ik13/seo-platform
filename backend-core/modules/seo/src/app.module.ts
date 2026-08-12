@@ -21,8 +21,10 @@ import { FrequencyModule } from "./frequencies/frequency.module.js";
 import { OperationResultModule } from "./operation-results/operation-result.module.js";
 import { ProjectWorkspaceTransferModule } from "./project-transfers/project-workspace-transfer.module.js";
 import { NegativeKeywordModule } from "./negative-keywords/negative-keyword.module.js";
+import { SemanticDuplicateModule } from "./semantic-duplicates/semantic-duplicate.module.js";
 import { ProjectNoteModule } from "./notes/project-note.module.js";
 import { PlatformAdminReadModule } from "./admin/platform-admin-read.module.js";
+import { SemanticExportReadModule } from "./semantic-exports/semantic-export-read.module.js";
 
 @Module({
   imports: [
@@ -47,6 +49,8 @@ import { PlatformAdminReadModule } from "./admin/platform-admin-read.module.js";
     FrequencyModule,
     OperationResultModule,
     NegativeKeywordModule,
+    SemanticDuplicateModule,
+    SemanticExportReadModule,
     ProjectNoteModule,
     PlatformAdminReadModule,
     ProjectWorkspaceTransferModule
