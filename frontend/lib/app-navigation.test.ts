@@ -17,6 +17,10 @@ test("derives the persistent shell section from protected routes", () => {
     "settings"
   );
   assert.equal(
+    appNavigationSection(`/app/projects/${projectId}/rankings/contexts`),
+    "settings"
+  );
+  assert.equal(
     appNavigationSection(`/app/projects/${projectId}/tools/http-status-checker`),
     "tools"
   );

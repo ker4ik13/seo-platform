@@ -357,6 +357,7 @@ export function TrackingContextSettingsPanel({
     </section>
     {deleteConfirmationOpen && selected?.status === "ACTIVE" && (
       <SemanticModal
+        className="tracking-context-delete-modal"
         description={`Контекст «${selected.name}» больше нельзя будет выбрать для нового съёма.`}
         footer={
           <>
@@ -382,6 +383,14 @@ export function TrackingContextSettingsPanel({
           if (!saving) setDeleteConfirmationOpen(false);
         }}
         size="small"
+        style={{
+          height: "fit-content",
+          margin: "auto",
+          maxHeight: "calc(100dvh - 32px)",
+          maxWidth: "calc(100vw - 32px)",
+          minHeight: 0,
+          width: 420
+        }}
         title="Удалить контекст?"
       >
         <div className="tracking-context-delete-copy">

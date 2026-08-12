@@ -6272,6 +6272,18 @@ svg { display: block; }
   box-shadow: none;
   position: static;
 }
+.content-settings > .project-settings-heading {
+  position: static;
+  top: auto;
+}
+.content-settings:has(> .project-settings-stack) {
+  grid-auto-rows: max-content;
+  grid-template-rows: auto auto;
+}
+.content-settings > .project-settings-stack {
+  align-self: start;
+  padding-bottom: 2px;
+}
 
 .semantic-position-context-bar {
   align-items: end;
@@ -6379,6 +6391,60 @@ svg { display: block; }
 .tracking-context-editor > .inline-alert { margin-top: 12px; }
 .tracking-context-editor > footer { align-items: center; border-top: 1px solid var(--line); display: flex; gap: 9px; justify-content: flex-end; margin-top: 16px; padding-top: 14px; }
 .tracking-context-delete-copy { display: grid; gap: 10px; }
+.semantic-modal.semantic-modal-small.tracking-context-delete-modal,
+.semantic-modal.semantic-modal-small.tracking-context-delete-modal[open] {
+  align-self: center;
+  height: fit-content;
+  margin: auto;
+  max-height: calc(100dvh - 32px);
+  max-width: calc(100vw - 32px);
+  min-height: 0;
+  width: min(420px, calc(100vw - 32px));
+}
+.tracking-context-delete-modal .semantic-modal-header { padding: 15px 18px 13px; }
+.tracking-context-delete-modal .semantic-modal-header p { font-size: 11px; }
+.tracking-context-delete-modal .semantic-modal-body {
+  flex: 0 1 auto;
+  max-height: none;
+  overflow: visible;
+  padding: 14px 18px;
+}
+.tracking-context-delete-modal .tracking-context-delete-copy .inline-alert {
+  line-height: 1.45;
+  margin: 0;
+  padding: 11px 12px;
+}
+.tracking-context-delete-modal .semantic-modal-footer {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 12px 18px 16px;
+}
+.tracking-context-delete-modal .semantic-modal-footer > button {
+  min-height: 36px;
+  padding: 0 14px;
+  width: auto;
+}
+
+@media (max-width: 620px) {
+  .semantic-modal.semantic-modal-small.tracking-context-delete-modal,
+  .semantic-modal.semantic-modal-small.tracking-context-delete-modal[open] {
+    border-radius: 14px;
+    margin: auto;
+    max-width: calc(100vw - 20px);
+    width: calc(100vw - 20px);
+  }
+  .tracking-context-delete-modal .semantic-modal-footer {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .tracking-context-delete-modal .semantic-modal-footer > button {
+    width: 100%;
+  }
+}
 
 @media (max-width: 1100px) {
   .semantic-position-context-bar { grid-template-columns: repeat(2, minmax(0, 1fr)); }

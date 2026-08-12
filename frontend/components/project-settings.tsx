@@ -7,7 +7,8 @@ import {
   useMemo,
   useRef,
   useState,
-  type FormEvent
+  type FormEvent,
+  type ReactNode
 } from "react";
 import {
   canArchiveProject,
@@ -47,10 +48,12 @@ interface ProjectDeletionReceipt {
 }
 
 export function ProjectSettings({
+  children,
   project,
   workspaceRoleCode,
   workspaceStatus
 }: Readonly<{
+  children?: ReactNode;
   project: AppProject;
   workspaceRoleCode: string;
   workspaceStatus: AppWorkspace["status"];
@@ -562,7 +565,7 @@ export function ProjectSettings({
       : canArchiveProject(workspaceRoleCode, server.projectAccessLevel);
 
   return (
-    <div className="settings-stack">
+    <div className="settings-stack project-settings-stack">
       {!online && (
         <aside className="inline-alert warning" role="status">
           Нет подключения к сети. Черновик сохранён в форме; сохранение и
@@ -844,6 +847,8 @@ export function ProjectSettings({
           </div>
         </form>
       </section>
+
+      {children}
 
       <section className="panel security-card">
         <header className="security-card-header">

@@ -32,6 +32,9 @@ export function appNavigationSection(
   if (segments[3] === "tools") return "tools";
   if (segments[3] === "pages") return "pages";
   if (segments[3] === "notes") return "notes";
+  if (segments[3] === "rankings" && segments[4] === "contexts") {
+    return "settings";
+  }
   if (segments[3] === "rankings") return "semantics";
   return "projects";
 }

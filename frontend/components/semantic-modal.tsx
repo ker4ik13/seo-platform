@@ -4,26 +4,31 @@ import {
   useEffect,
   useId,
   useRef,
+  type CSSProperties,
   type ReactNode
 } from "react";
 
 export function SemanticModal({
   bodyClassName,
   children,
+  className,
   description,
   footer,
   headerActions,
   onClose,
   size = "medium",
+  style,
   title
 }: Readonly<{
   bodyClassName?: string;
   children: ReactNode;
+  className?: string;
   description?: string;
   footer?: ReactNode;
   headerActions?: ReactNode;
   onClose: () => void;
   size?: "small" | "medium" | "large" | "fullscreen";
+  style?: CSSProperties;
   title: string;
 }>) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -43,7 +48,7 @@ export function SemanticModal({
     <dialog
       aria-describedby={description ? descriptionId : undefined}
       aria-labelledby={titleId}
-      className={`semantic-modal semantic-modal-${size}`}
+      className={`semantic-modal semantic-modal-${size}${className ? ` ${className}` : ""}`}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -58,6 +63,7 @@ export function SemanticModal({
         if (outside) onClose();
       }}
       ref={dialogRef}
+      style={style}
     >
       <header className="semantic-modal-header">
         <div>

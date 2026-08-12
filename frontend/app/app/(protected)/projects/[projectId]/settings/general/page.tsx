@@ -25,7 +25,7 @@ export default async function ProjectSettingsPage({
 
   return (
     <>
-      <section className="page-heading">
+      <section className="page-heading project-settings-heading">
         <div>
           <h1>Основные настройки проекта</h1>
           <p>
@@ -46,12 +46,13 @@ export default async function ProjectSettingsPage({
         project={project}
         workspaceRoleCode={workspace.roleCode}
         workspaceStatus={workspace.status}
-      />
-      <ProjectTransferSettings
-        currentUserId={context.user.id}
-        project={project}
-        workspace={workspace}
-      />
+      >
+        <ProjectTransferSettings
+          currentUserId={context.user.id}
+          project={project}
+          workspace={workspace}
+        />
+      </ProjectSettings>
     </>
   );
 }
