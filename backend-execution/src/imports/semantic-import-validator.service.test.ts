@@ -148,6 +148,40 @@ test("preserves native KC4 hierarchy and imports search engine positions", () =>
   assert.deepEqual([...issues], []);
 });
 
+test("preserves a deeply nested XLSX path from one group column", () => {
+  const issues = new Set<string>();
+  const groupPath = Array.from(
+    { length: 10 },
+    (_, index) => `Уровень ${index + 1}`
+  );
+  const result = canonicalImportRow(
+    5n,
+    ["SEO", groupPath.join("/")],
+    ["Фраза", "Группа"],
+    {
+      columns: [
+        { sourceIndex: 0, target: "keyword.text" },
+        { sourceIndex: 1, target: "group.path" }
+      ],
+      defaultLanguage: "ru",
+      groupSeparator: "/",
+      duplicatePolicy: "MERGE_NON_EMPTY",
+      createMissingKeywords: true
+    },
+    {
+      textOriginal: "SEO",
+      textNormalized: "seo",
+      normalizedHash: "c".repeat(64),
+      language: "ru"
+    },
+    issues,
+    { sourceFormat: "XLSX" }
+  );
+
+  assert.deepEqual(result.groupPath, groupPath);
+  assert.deepEqual([...issues], []);
+});
+
 test("maps independently selectable keyword fields and both search engines", () => {
   const issues = new Set<string>();
   const result = canonicalImportRow(

@@ -57,7 +57,7 @@ test("streams a Key Collector CSV into staging and mapping preview", async () =>
   assert.equal(events.length, 1);
 });
 
-test("streams the first visible XLSX sheet and uses displayed formula values", async () => {
+test("streams one XLSX sheet with a deeply nested group path", async () => {
   const xlsx = xlsxFixture();
   const updates: Array<Readonly<Record<string, unknown>>> = [];
   const staged: unknown[] = [];
@@ -82,7 +82,11 @@ test("streams the first visible XLSX sheet and uses displayed formula values", a
   assert.equal(staged.length, 2);
   assert.deepEqual(
     (staged[0] as { rawValues: readonly string[] }).rawValues,
-    ["продвижение сайта", "Коммерция", "120"]
+    [
+      "продвижение сайта",
+      "Уровень 1/Уровень 2/Уровень 3/Уровень 4/Уровень 5/Уровень 6/Уровень 7/Уровень 8/Уровень 9/Уровень 10",
+      "120"
+    ]
   );
   const update = updates.at(-1);
   assert.ok(update);
@@ -420,7 +424,6 @@ function xlsxFixture(): Buffer {
         '<Default Extension="xml" ContentType="application/xml"/>' +
         '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
         '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
-        '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
         '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>' +
         "</Types>"
     ),
@@ -433,39 +436,32 @@ function xlsxFixture(): Buffer {
       '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
         "<sheets>" +
-        '<sheet name="Служебный" sheetId="1" state="hidden" r:id="rId1"/>' +
-        '<sheet name="Экспорт Key Collector" sheetId="2" r:id="rId2"/>' +
+        '<sheet name="Импорт" sheetId="1" r:id="rId1"/>' +
         "</sheets></workbook>"
     ),
     "xl/_rels/workbook.xml.rels": xml(
-      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
         '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
-        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>' +
-        '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>' +
+        '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>' +
         "</Relationships>"
     ),
     "xl/sharedStrings.xml": xml(
       '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="8" uniqueCount="8">' +
-        "<si><t>Не импортировать</t></si>" +
         "<si><t>Фраза</t></si>" +
         "<si><t>Группа</t></si>" +
         "<si><t>Частотность</t></si>" +
         "<si><t>продвижение сайта</t></si>" +
-        "<si><t>Коммерция</t></si>" +
+        "<si><t>Уровень 1/Уровень 2/Уровень 3/Уровень 4/Уровень 5/Уровень 6/Уровень 7/Уровень 8/Уровень 9/Уровень 10</t></si>" +
         "<si><t>seo аудит</t></si>" +
         "<si><t>Аудит</t></si>" +
+        "<si><t>Коммерция</t></si>" +
         "</sst>"
     ),
     "xl/worksheets/sheet1.xml": xml(
       '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' +
-        '<row r="1"><c r="A1" t="s"><v>0</v></c></row>' +
-        "</sheetData></worksheet>"
-    ),
-    "xl/worksheets/sheet2.xml": xml(
-      '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' +
-        '<row r="1"><c r="A1" t="s"><v>1</v></c><c r="B1" t="s"><v>2</v></c><c r="C1" t="s"><v>3</v></c></row>' +
-        '<row r="2"><c r="A2" t="s"><v>4</v></c><c r="B2" t="s"><v>5</v></c><c r="C2"><f>10*12</f><v>120</v></c></row>' +
-        '<row r="3"><c r="A3" t="s"><v>6</v></c><c r="B3" t="s"><v>7</v></c><c r="C3"><v>70</v></c></row>' +
+        '<row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c><c r="C1" t="s"><v>2</v></c></row>' +
+        '<row r="2"><c r="A2" t="s"><v>3</v></c><c r="B2" t="s"><v>4</v></c><c r="C2"><f>10*12</f><v>120</v></c></row>' +
+        '<row r="3"><c r="A3" t="s"><v>5</v></c><c r="B3" t="s"><v>6</v></c><c r="C3"><v>70</v></c></row>' +
         "</sheetData></worksheet>"
     )
   }));

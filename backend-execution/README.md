@@ -266,7 +266,9 @@ XLSX сначала
 `unzipper-esm` читает central directory и только allowlisted OpenXML entries,
 а `saxes` потоково разбирает XML. Это позволяет обработать shared strings,
 cached formula values, даты и первый видимый worksheet без загрузки workbook
-целиком в память. Encrypted archive, duplicate/missing metadata, DTD,
+целиком в память. Полный путь группы передаётся одной колонкой `Группа` с
+настраиваемым разделителем; каждый префикс пути создаётся как родительская
+папка. Encrypted archive, duplicate/missing metadata, DTD,
 небезопасный relationship, более 10 000 entries, excessive compression ratio,
 uncompressed size, columns/field/row и shared-string budget отклоняются
 terminal-кодом.
