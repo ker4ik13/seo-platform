@@ -91,6 +91,18 @@ test("preflight accepts generated URL-safe credentials containing hyphens", asyn
   assertDoesNotExposeCredentials(result.stdout, environment);
 });
 
+test("preflight canonicalizes Dokploy double-dollar bcrypt transport values", async () => {
+  const environment = validEnvironment();
+  for (const hashName of natsPasswordHashNames) {
+    environment[hashName] = environment[hashName].split("$").join("$$");
+  }
+
+  const result = await runPreflight(environment);
+
+  assert.equal(result.stderr, "");
+  assertDoesNotExposeCredentials(result.stdout, environment);
+});
+
 test("preflight fails closed when a deploy credential is absent", async () => {
   const environment = validEnvironment();
   delete environment.PLATFORM_API_TO_JOBS_TOKEN;
@@ -241,7 +253,8 @@ test("preflight rejects missing malformed or reused NATS bcrypt verifiers", asyn
   );
 
   const reused = validEnvironment();
-  reused.NATS_PROVISIONER_PASSWORD_HASH = reused.NATS_RUNTIME_PASSWORD_HASH;
+  reused.NATS_PROVISIONER_PASSWORD_HASH =
+    reused.NATS_RUNTIME_PASSWORD_HASH.split("$").join("$$");
   const reusedFailure = await captureFailure(reused);
   assert.match(
     reusedFailure.stderr,

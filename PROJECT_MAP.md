@@ -54,9 +54,12 @@ fail-closed; повреждённый canary или неверный key materia
 base64url-keyrings и согласованными NATS plaintext/bcrypt парами. Генератор не
 перезаписывает файл и не выводит секреты; внешние доменные, SMTP и S3 значения
 остаются явными placeholders. Для NATS hash он заранее удваивает `$`, чтобы
-значение пережило dotenv rewrite Dokploy и попало в контейнер как canonical
-bcrypt. Внутри Compose один variable name автоматически переиспользуется
-нужными контейнерами. PostgreSQL service также передаёт тот же
+значение пережило dotenv rewrite Dokploy. Старые и новые версии Dokploy
+по-разному экранируют такой transport value, поэтому preflight и NATS renderer
+принимают как canonical `$2a$11$…`, так и точную transport-форму
+`$$2a$$11$$…`, но перед проверкой и записью broker config всегда приводят её к
+canonical bcrypt. Внутри Compose один variable name автоматически
+переиспользуется нужными контейнерами. PostgreSQL service также передаёт тот же
 `POSTGRES_PASSWORD` как libpq-переменную `PGPASSWORD`, потому что Compose
 backup Dokploy запускает `pg_dump` внутри контейнера и не имеет отдельного
 поля пароля; оператор указывает в четырёх backup jobs только пользователя и

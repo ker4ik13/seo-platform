@@ -134,13 +134,31 @@ for hash_name in $nats_password_hash_names; do
   hash_value=${hash_value%x}
   hash_value=${hash_value%?}
 
+  # Older Dokploy releases consumed doubled dollars while writing their
+  # unquoted Compose .env file. Newer releases quote and escape every dollar,
+  # so the exact same stored value can reach the container still doubled.
+  # Accept only that exact transport representation and canonicalize it before
+  # applying the security checks below.
+  case "$hash_value" in
+    '$$2a$$11$$'*)
+      hash_value='$2a$11$'"${hash_value#'$$2a$$11$$'}"
+      ;;
+  esac
+
   if ! printf '%s' "$hash_value" | grep -Eq '^\$2a\$11\$[./A-Za-z0-9]{53}$'; then
     echo "service-token-preflight: $hash_name must be a canonical NATS bcrypt 2a cost-11 verifier" >&2
     exit 1
   fi
 
   for previous_hash_name in $validated_nats_hashes; do
-    previous_hash_value="$(printenv "$previous_hash_name")"
+    previous_hash_value="$(printenv "$previous_hash_name"; printf 'x')"
+    previous_hash_value=${previous_hash_value%x}
+    previous_hash_value=${previous_hash_value%?}
+    case "$previous_hash_value" in
+      '$$2a$$11$$'*)
+        previous_hash_value='$2a$11$'"${previous_hash_value#'$$2a$$11$$'}"
+        ;;
+    esac
     if [ "$hash_value" = "$previous_hash_value" ]; then
       echo "service-token-preflight: $hash_name must differ from $previous_hash_name" >&2
       exit 1

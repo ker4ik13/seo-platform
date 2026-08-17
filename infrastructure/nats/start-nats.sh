@@ -114,9 +114,34 @@ done
 validated_hashes=''
 for hash_name in $hash_names; do
   hash_value=$(printenv "$hash_name")
+  # Dokploy versions differ in how they round-trip dollars through the
+  # generated Compose .env file. Normalize the generator's exact escaped
+  # transport form, but keep rejecting mixed or otherwise malformed values.
+  case "$hash_value" in
+    '$$2a$$11$$'*)
+      hash_value='$2a$11$'"${hash_value#'$$2a$$11$$'}"
+      ;;
+  esac
   if ! printf '%s' "$hash_value" | grep -Eq '^\$2a\$11\$[./A-Za-z0-9]{53}$'; then
     fail "$hash_name must be a canonical NATS bcrypt 2a cost-11 verifier"
   fi
+  case "$hash_name" in
+    NATS_RUNTIME_PASSWORD_HASH)
+      NATS_RUNTIME_PASSWORD_HASH=$hash_value
+      ;;
+    NATS_PLATFORM_PUBLISHER_PASSWORD_HASH)
+      NATS_PLATFORM_PUBLISHER_PASSWORD_HASH=$hash_value
+      ;;
+    NATS_REALTIME_CONSUMER_PASSWORD_HASH)
+      NATS_REALTIME_CONSUMER_PASSWORD_HASH=$hash_value
+      ;;
+    NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH)
+      NATS_AUTH_EMAIL_CONSUMER_PASSWORD_HASH=$hash_value
+      ;;
+    NATS_PROVISIONER_PASSWORD_HASH)
+      NATS_PROVISIONER_PASSWORD_HASH=$hash_value
+      ;;
+  esac
   for previous_name in $validated_hashes; do
     if [ "$hash_value" = "$(printenv "$previous_name")" ]; then
       fail "$hash_name must differ from $previous_name"

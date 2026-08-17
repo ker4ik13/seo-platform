@@ -362,6 +362,10 @@ placeholders.
 Для каждого NATS client password deploy также обязан предоставить canonical
 bcrypt verifier с canonical `$2a$` prefix и cost `11`; пять verifier
 записи должны быть разными, а broker не должен получать plaintext passwords.
+На Dokploy transport boundary допускается также точная escaped-форма
+`$$2a$$11$$…`: preflight и renderer нормализуют её до canonical verifier до
+валидации, сравнения и записи runtime config. Смешанное либо иное malformed
+экранирование остаётся fail-closed.
 Пять NATS usernames отдельно
 проверяются на unique ASCII identifier и несовпадение с любым credential. В
 отличие от runtime-контракта secrets

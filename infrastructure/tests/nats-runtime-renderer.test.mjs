@@ -71,6 +71,35 @@ test("renderer writes a marker-free mode-600 config and scrubs exec env", async 
   );
 });
 
+test("renderer canonicalizes Dokploy double-dollar bcrypt transport values", async (t) => {
+  const environment = validEnvironment();
+  const canonicalHashes = Object.fromEntries(
+    passwordHashNames().map((hashName) => [hashName, environment[hashName]])
+  );
+  for (const hashName of passwordHashNames()) {
+    environment[hashName] = environment[hashName].split("$").join("$$");
+  }
+
+  const fixture = await runRenderer(t, { environment });
+
+  assert.equal(fixture.result.code, 0, fixture.result.stderr);
+  const rendered = await readFile(fixture.runtimeConfig, "utf8");
+  for (const [hashName, canonicalHash] of Object.entries(canonicalHashes)) {
+    assert.match(
+      rendered,
+      new RegExp(
+        `password:\\s*"${escapeRegularExpression(canonicalHash)}"`,
+        "u"
+      ),
+      hashName
+    );
+    assert.doesNotMatch(
+      rendered,
+      new RegExp(escapeRegularExpression(environment[hashName]), "u")
+    );
+  }
+});
+
 test("renderer rejects missing malformed duplicate or cross-environment input without leakage", async (t) => {
   const cases = [
     {
