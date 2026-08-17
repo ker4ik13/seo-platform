@@ -11,10 +11,10 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import {
-  primaryRankContextIds,
   rankEngineLabel,
   rankHistoryProviderLabel,
-  rankSearchSystemLabel
+  rankSearchSystemLabel,
+  semanticRankHistoryByEngine
 } from "../lib/semantic-rank-presentation";
 import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
@@ -400,33 +400,12 @@ function missingTransitions(
 function rankSeries(
   points: readonly SemanticKeywordPositionHistoryPoint[]
 ): readonly RankSeries[] {
-  const primaryContexts = primaryRankContextIds(points);
-  const byContext = new Map<string, {
-    key: string;
-    label: string;
-    searchEngine: "GOOGLE" | "YANDEX";
-    points: SemanticKeywordPositionHistoryPoint[];
-  }>();
-  for (const point of [...points].reverse()) {
-    if (primaryContexts.get(point.searchEngine) !== point.trackingContextId) {
-      continue;
-    }
-    const current = byContext.get(point.trackingContextId) ?? {
-      key: point.trackingContextId,
-      label: rankEngineLabel(point.searchEngine),
-      searchEngine: point.searchEngine,
-      points: []
-    };
-    current.points.push(point);
-    byContext.set(point.trackingContextId, current);
-  }
-  return [...byContext.values()].sort((left, right) =>
-    engineOrder(left.searchEngine) - engineOrder(right.searchEngine)
-  );
-}
-
-function engineOrder(engine: "GOOGLE" | "YANDEX"): number {
-  return engine === "YANDEX" ? 0 : 1;
+  return semanticRankHistoryByEngine(points).map((series) => ({
+    key: series.searchEngine,
+    label: rankEngineLabel(series.searchEngine),
+    searchEngine: series.searchEngine,
+    points: series.points
+  }));
 }
 
 function isPositionPoint(

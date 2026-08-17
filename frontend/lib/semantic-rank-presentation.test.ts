@@ -1,12 +1,56 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  latestSemanticRankHistory,
   primaryRankContextIds,
   rankChangePresentation,
   rankEngineLabel,
   rankHistoryProviderLabel,
-  rankSearchSystemLabel
+  rankSearchSystemLabel,
+  semanticRankHistoryByEngine
 } from "./semantic-rank-presentation.ts";
+
+test("keeps the latest 14 keyword snapshots across every technical context", () => {
+  const points = Array.from({ length: 17 }, (_, index) => ({
+    snapshotId: `snapshot-${String(index).padStart(2, "0")}`,
+    trackingContextId: `context-${index % 4}`,
+    searchEngine: "YANDEX" as const,
+    observedAt: new Date(Date.UTC(2026, 7, index + 1)).toISOString()
+  }));
+
+  const result = latestSemanticRankHistory(points);
+
+  assert.equal(result.length, 14);
+  assert.equal(result[0]?.snapshotId, "snapshot-16");
+  assert.equal(result.at(-1)?.snapshotId, "snapshot-03");
+  assert.deepEqual(
+    new Set(result.map(({ trackingContextId }) => trackingContextId)),
+    new Set(["context-0", "context-1", "context-2", "context-3"])
+  );
+});
+
+test("builds one engine history from snapshots of every technical context", () => {
+  const result = semanticRankHistoryByEngine([
+    {
+      snapshotId: "new",
+      trackingContextId: "context-new",
+      searchEngine: "YANDEX",
+      observedAt: "2026-08-17T10:00:00.000Z"
+    },
+    {
+      snapshotId: "old",
+      trackingContextId: "context-old",
+      searchEngine: "YANDEX",
+      observedAt: "2026-08-10T10:00:00.000Z"
+    }
+  ]);
+
+  assert.equal(result.length, 1);
+  assert.deepEqual(
+    result[0]?.points.map(({ snapshotId }) => snapshotId),
+    ["old", "new"]
+  );
+});
 
 test("selects one most recently updated context for each search engine", () => {
   const selected = primaryRankContextIds([

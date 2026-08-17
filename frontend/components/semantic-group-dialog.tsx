@@ -4,6 +4,10 @@ import { CustomSelect } from "./custom-select";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
+import {
+  semanticGroupColors,
+  semanticGroupDefaultColor
+} from "../lib/semantic-group-colors";
 import { SemanticModal } from "./semantic-modal";
 import type { SemanticGroupTreeItem } from "./semantic-group-tree";
 
@@ -41,7 +45,9 @@ export function SemanticGroupDialog({
           ? state.suggestedTargetId ?? ""
           : ""
   );
-  const [color, setColor] = useState(initialGroup?.color ?? "#6758ef");
+  const [color, setColor] = useState(
+    initialGroup?.color ?? semanticGroupDefaultColor
+  );
   const [saving, setSaving] = useState(false);
   const [deleteKeywords, setDeleteKeywords] = useState(false);
   const [error, setError] = useState<string>();
@@ -193,12 +199,12 @@ export function SemanticGroupDialog({
             </label>
             <fieldset className="semantic-dialog-color">
               <legend>Цвет</legend>
-              <div>
+              <div className="semantic-dialog-color-custom">
                 <input
                   aria-label="Выбрать цвет"
                   onChange={(event) => setColor(event.target.value.toUpperCase())}
                   type="color"
-                  value={/^#[0-9a-f]{6}$/iu.test(color) ? color : "#6758EF"}
+                  value={/^#[0-9a-f]{6}$/iu.test(color) ? color : semanticGroupDefaultColor}
                 />
                 <label>
                   <span className="visually-hidden">HEX-код цвета</span>
@@ -213,6 +219,23 @@ export function SemanticGroupDialog({
                     value={color}
                   />
                 </label>
+              </div>
+              <div
+                aria-label="Предложенные цвета группы"
+                className="semantic-dialog-color-palette"
+                role="group"
+              >
+                {semanticGroupColors.map(({ value, label }) => (
+                  <button
+                    aria-label={label}
+                    aria-pressed={color.toLowerCase() === value}
+                    key={value}
+                    onClick={() => setColor(value.toUpperCase())}
+                    style={{ backgroundColor: value }}
+                    title={label}
+                    type="button"
+                  />
+                ))}
               </div>
             </fieldset>
           </>

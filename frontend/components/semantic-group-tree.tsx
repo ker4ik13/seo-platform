@@ -5,6 +5,7 @@ import {
   semanticGroupDropPlacement,
   type SemanticGroupDropPlacement
 } from "../lib/semantic-group-drag";
+import { semanticGroupColors } from "../lib/semantic-group-colors";
 import { ContextMenu, type ContextMenuItem } from "./context-menu";
 import { Icon } from "./icon";
 
@@ -27,17 +28,6 @@ interface FlatGroup {
 }
 
 const EMPTY_GROUP_IDS: readonly string[] = [];
-const GROUP_COLORS = [
-  { value: "#ff0000", label: "Красный" },
-  { value: "#ff8a00", label: "Оранжевый" },
-  { value: "#f2c94c", label: "Жёлтый" },
-  { value: "#22c55e", label: "Зелёный" },
-  { value: "#06b6d4", label: "Бирюзовый" },
-  { value: "#2563eb", label: "Синий" },
-  { value: "#6758ef", label: "Фиолетовый" },
-  { value: "#a8a5b8", label: "Серый" }
-] as const;
-
 export type SemanticGroupTreeDropTarget =
   | Readonly<{ placement: "root" }>
   | Readonly<{
@@ -538,7 +528,7 @@ export function SemanticGroupTree({
               className="semantic-group-color-palette"
               role="group"
             >
-              {GROUP_COLORS.map(({ value, label }) => (
+              {semanticGroupColors.map(({ value, label }) => (
                 <button
                   aria-label={label}
                   aria-pressed={contextGroups.every(

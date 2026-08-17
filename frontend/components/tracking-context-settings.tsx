@@ -285,6 +285,7 @@ export function TrackingContextSettingsPanel({
                 setDraft({ ...draft, regionCode: code, regionLabel: label })
               }
               value={draft.regionCode}
+              valueLabel={draft.regionLabel}
             />
           </label>
           <fieldset>

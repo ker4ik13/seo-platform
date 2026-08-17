@@ -23,6 +23,53 @@ export interface SemanticRankContextPoint {
   readonly observedAt: string;
 }
 
+export interface SemanticRankHistoryPoint extends SemanticRankContextPoint {
+  readonly snapshotId: string;
+}
+
+export const semanticRankHistoryPointLimit = 14 as const;
+
+export interface SemanticRankEngineHistorySeries<
+  T extends SemanticRankHistoryPoint
+> {
+  readonly searchEngine: SemanticRankEngine;
+  readonly points: readonly T[];
+}
+
+/**
+ * Keyword history belongs to the canonical keyword, not to one technical
+ * tracking context. A manual run may create a new context, so the inspector
+ * must take the latest immutable snapshots before it groups them for display.
+ */
+export function latestSemanticRankHistory<
+  T extends SemanticRankHistoryPoint
+>(values: readonly T[]): readonly T[] {
+  return [...values]
+    .sort((left, right) =>
+      timestamp(right.observedAt) - timestamp(left.observedAt) ||
+      right.snapshotId.localeCompare(left.snapshotId)
+    )
+    .slice(0, semanticRankHistoryPointLimit);
+}
+
+export function semanticRankHistoryByEngine<
+  T extends SemanticRankHistoryPoint
+>(values: readonly T[]): readonly SemanticRankEngineHistorySeries<T>[] {
+  const byEngine = new Map<SemanticRankEngine, T[]>();
+  for (const point of [...values].sort((left, right) =>
+    timestamp(left.observedAt) - timestamp(right.observedAt) ||
+    left.snapshotId.localeCompare(right.snapshotId)
+  )) {
+    const points = byEngine.get(point.searchEngine) ?? [];
+    points.push(point);
+    byEngine.set(point.searchEngine, points);
+  }
+  return (["YANDEX", "GOOGLE"] as const).flatMap((searchEngine) => {
+    const points = byEngine.get(searchEngine);
+    return points ? [{ searchEngine, points }] : [];
+  });
+}
+
 /**
  * The inspector is an engine-level summary. When several technical tracking
  * contexts exist for one engine, use the context updated most recently and
@@ -132,4 +179,9 @@ export function rankSearchSystemLabel(
   if (searchSource === "LIVE") return "Яндекс Live";
   if (searchSource === "SEARCH_API") return "Яндекс XML";
   return "Яндекс";
+}
+
+function timestamp(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : Number.NEGATIVE_INFINITY;
 }

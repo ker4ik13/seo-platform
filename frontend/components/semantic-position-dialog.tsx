@@ -980,6 +980,7 @@ function PositionRunParameters({
                 regionLabel: label
               })}
               value={draft.regionCode}
+              valueLabel={draft.regionLabel}
             />
           </label>
           <fieldset className="semantic-device-cards">

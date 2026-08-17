@@ -9,6 +9,7 @@ import type {
 } from "@seo-platform/contracts";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import {
+  latestSemanticRankHistory,
   primaryRankContextIds,
   rankChangePresentation,
   rankEngineLabel
@@ -124,16 +125,13 @@ export function SemanticKeywordInspector({
         .map((position) => [position.searchEngine, position] as const)
     );
   }, [insights]);
-  const primaryHistory = useMemo(() => {
-    const points = insights?.positionHistory ?? [];
-    const contextIds = primaryRankContextIds(points);
-    return points.filter(({ searchEngine, trackingContextId }) =>
-      contextIds.get(searchEngine) === trackingContextId
-    );
-  }, [insights]);
+  const visibleHistory = useMemo(
+    () => latestSemanticRankHistory(insights?.positionHistory ?? []),
+    [insights]
+  );
   const positionChanges = useMemo(
-    () => rankHistoryByDate(primaryHistory),
-    [primaryHistory]
+    () => rankHistoryByDate(visibleHistory),
+    [visibleHistory]
   );
   const competitorSnapshots = insights?.competitorSnapshots ?? [];
   const targetMismatches = useMemo(
@@ -307,7 +305,7 @@ export function SemanticKeywordInspector({
         ) : (
           <span className="semantic-inspector-muted">Загружаем позиции…</span>
         )}
-        <SemanticRankHistoryChart points={insights?.positionHistory ?? []} />
+        <SemanticRankHistoryChart points={visibleHistory} />
         {positionChanges.length > 0 && (
           <div className="semantic-rank-change-history">
             <header>
@@ -415,7 +413,7 @@ export function SemanticKeywordInspector({
       </section>
       {historyOpen && (
         <SemanticModal
-          description="Все сохранённые даты для текущих поисковых контекстов. Крестик означает, что позиция в глубине проверки не найдена."
+          description="Последние 14 сохранённых съёмов запроса во всех поисковых контекстах. Крестик означает, что позиция в глубине проверки не найдена."
           onClose={() => setHistoryOpen(false)}
           size="medium"
           title={`История позиций · ${item.textOriginal}`}
