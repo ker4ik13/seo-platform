@@ -1057,6 +1057,7 @@ model RankSnapshot {
   @@unique([workspaceId, projectId, manifestId, chunkIndex, manifestEntryId], map: "rank_snapshots_tenant_manifest_entry_key")
   @@index([workspaceId, projectId, trackingContextId, observedAt(sort: Desc), id(sort: Desc)], map: "rank_snapshots_context_history_idx")
   @@index([workspaceId, projectId, keywordId, trackingContextId, observedAt(sort: Desc), id(sort: Desc)], map: "rank_snapshots_keyword_history_idx")
+  @@index([workspaceId, projectId, keywordId, observedAt(sort: Desc), id(sort: Desc)], map: "rank_snapshots_keyword_global_history_idx")
   @@index([workspaceId, projectId, jobId, chunkIndex], map: "rank_snapshots_job_chunk_idx")
   @@map("rank_snapshots")
 }

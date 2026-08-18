@@ -91,6 +91,23 @@ type KeywordAggregate = Prisma.KeywordGetPayload<{
   include: typeof KEYWORD_INCLUDE;
 }>;
 
+type RankSearchEngine = SemanticKeywordListPosition["searchEngine"];
+
+interface PreviousFoundPositionAnchor {
+  readonly keywordId: string;
+  readonly searchEngine: RankSearchEngine;
+  readonly observedAt: Date;
+  readonly snapshotId: string;
+}
+
+interface PreviousFoundPositionRow {
+  readonly keywordId: string;
+  readonly searchEngine: RankSearchEngine;
+  readonly observedAt: Date;
+  readonly snapshotId: string;
+  readonly previousPosition: number;
+}
+
 @Injectable()
 export class KeywordService {
   public constructor(
@@ -399,6 +416,7 @@ export class KeywordService {
             where: { workspaceId, projectId, keywordId: { in: keywordIds } },
             orderBy: [
               { observedAt: "desc" },
+              { snapshotId: "desc" },
               { keywordId: "asc" },
               { trackingContextId: "desc" }
             ],
@@ -410,7 +428,8 @@ export class KeywordService {
               position: true,
               previousPosition: true,
               rankingUrl: true,
-              observedAt: true
+              observedAt: true,
+              snapshotId: true
             }
           }),
       keywordIds.length === 0 || selectedGroupIds.length === 0
@@ -486,41 +505,59 @@ export class KeywordService {
         configuration
       ])
     );
-    const positionsByKeywordId = new Map<
+    const latestRankByKeywordEngine = new Map<
       string,
-      Map<SemanticKeywordListPosition["searchEngine"], SemanticKeywordListPosition>
+      Readonly<{
+        rank: (typeof currentRanks)[number];
+        searchEngine: RankSearchEngine;
+      }>
     >();
     for (const rank of currentRanks) {
       const configuration = configurationById.get(
         `${rank.trackingContextId}:${rank.configurationVersion}`
       );
       if (!configuration) continue;
-      const searchEngine = configuration.searchEngine as
-        SemanticKeywordListPosition["searchEngine"];
-      const positions = positionsByKeywordId.get(rank.keywordId) ?? new Map();
-      const currentPosition = positions.get(searchEngine);
-      if (!currentPosition) {
-        positions.set(searchEngine, {
-          searchEngine,
-          found: rank.found,
-          ...(rank.position === null ? {} : { position: rank.position }),
-          ...(rank.previousPosition === null
-            ? {}
-            : { previousPosition: rank.previousPosition }),
-          ...(rank.rankingUrl === null || rank.rankingUrl === undefined ? {} : { rankingUrl: rank.rankingUrl }),
-          observedAt: rank.observedAt.toISOString()
-        });
-      } else if (
-        !currentPosition.found &&
-        currentPosition.previousPosition === undefined &&
-        rank.found &&
-        rank.position !== null
-      ) {
-        positions.set(searchEngine, {
-          ...currentPosition,
-          previousPosition: rank.position
-        });
+      const searchEngine = configuration.searchEngine as RankSearchEngine;
+      const key = `${rank.keywordId}:${searchEngine}`;
+      if (!latestRankByKeywordEngine.has(key)) {
+        latestRankByKeywordEngine.set(key, { rank, searchEngine });
       }
+    }
+    const previousPositions = await previousFoundPositions(
+      this.prisma,
+      workspaceId,
+      projectId,
+      [...latestRankByKeywordEngine.values()].map(({ rank, searchEngine }) => ({
+        keywordId: rank.keywordId,
+        searchEngine,
+        observedAt: rank.observedAt,
+        snapshotId: rank.snapshotId
+      }))
+    );
+    const positionsByKeywordId = new Map<
+      string,
+      Map<SemanticKeywordListPosition["searchEngine"], SemanticKeywordListPosition>
+    >();
+    for (const { rank, searchEngine } of latestRankByKeywordEngine.values()) {
+      const positions = positionsByKeywordId.get(rank.keywordId) ?? new Map();
+      const previousPosition = previousPositions.get(
+        previousFoundPositionKey(
+          rank.keywordId,
+          searchEngine,
+          rank.observedAt,
+          rank.snapshotId
+        )
+      ) ?? rank.previousPosition ?? undefined;
+      positions.set(searchEngine, {
+        searchEngine,
+        found: rank.found,
+        ...(rank.position === null ? {} : { position: rank.position }),
+        ...(previousPosition === undefined ? {} : { previousPosition }),
+        ...(rank.rankingUrl === null || rank.rankingUrl === undefined
+          ? {}
+          : { rankingUrl: rank.rankingUrl }),
+        observedAt: rank.observedAt.toISOString()
+      });
       positionsByKeywordId.set(rank.keywordId, positions);
     }
     const last = pageRows.at(-1);
@@ -605,7 +642,7 @@ export class KeywordService {
       }),
       this.prisma.currentRank.findMany({
         where: { workspaceId, projectId, keywordId },
-        orderBy: { observedAt: "desc" },
+        orderBy: [{ observedAt: "desc" }, { snapshotId: "desc" }],
         take: 50
       }),
       this.prisma.rankSnapshot.findMany({
@@ -661,6 +698,24 @@ export class KeywordService {
         `${configuration.contextId}:${configuration.configurationVersion}`,
         configuration
       ])
+    );
+    const currentRankAnchors = currentRanks.flatMap((rank) => {
+      const configuration = configurationById.get(
+        `${rank.trackingContextId}:${rank.configurationVersion}`
+      );
+      if (!configuration) return [];
+      return [{
+        keywordId,
+        searchEngine: configuration.searchEngine as RankSearchEngine,
+        observedAt: rank.observedAt,
+        snapshotId: rank.snapshotId
+      }];
+    });
+    const previousPositions = await previousFoundPositions(
+      this.prisma,
+      workspaceId,
+      projectId,
+      currentRankAnchors
     );
     const latestXmlSnapshotByEngine = new Map<
       "GOOGLE" | "YANDEX",
@@ -724,17 +779,24 @@ export class KeywordService {
           `${rank.trackingContextId}:${rank.configurationVersion}`
         );
         if (!context || !configuration) return [];
+        const searchEngine = configuration.searchEngine as RankSearchEngine;
+        const previousPosition = previousPositions.get(
+          previousFoundPositionKey(
+            keywordId,
+            searchEngine,
+            rank.observedAt,
+            rank.snapshotId
+          )
+        ) ?? rank.previousPosition ?? undefined;
         return [{
           trackingContextId: rank.trackingContextId,
           contextName: context.name,
-          searchEngine: configuration.searchEngine,
+          searchEngine,
           device: configuration.device,
           regionCode: configuration.regionCode ?? configuration.countryCode,
           found: rank.found,
           ...(rank.position === null ? {} : { position: rank.position }),
-          ...(rank.previousPosition === null
-            ? {}
-            : { previousPosition: rank.previousPosition }),
+          ...(previousPosition === undefined ? {} : { previousPosition }),
           ...(rank.rankingUrl === null || rank.rankingUrl === undefined ? {} : { rankingUrl: rank.rankingUrl }),
           observedAt: rank.observedAt.toISOString()
         }];
@@ -2526,6 +2588,103 @@ function isExternalKeywordSort(sort: SemanticKeywordSort): boolean {
   return isMetricKeywordSort(sort) || sort === "TAGS_ASC" || sort === "TAGS_DESC";
 }
 
+function previousFoundPositionKey(
+  keywordId: string,
+  searchEngine: RankSearchEngine,
+  observedAt: Date,
+  snapshotId: string
+): string {
+  return `${keywordId}:${searchEngine}:${observedAt.toISOString()}:${snapshotId}`;
+}
+
+async function previousFoundPositions(
+  prisma: PrismaService,
+  workspaceId: string,
+  projectId: string,
+  anchors: readonly PreviousFoundPositionAnchor[]
+): Promise<ReadonlyMap<string, number>> {
+  if (anchors.length === 0) return new Map();
+  const serializedAnchors = anchors.map((anchor) => ({
+    keyword_id: anchor.keywordId,
+    search_engine: anchor.searchEngine,
+    observed_at: anchor.observedAt.toISOString(),
+    snapshot_id: anchor.snapshotId
+  }));
+  const rows = await prisma.$queryRaw<readonly PreviousFoundPositionRow[]>`
+    WITH anchors AS (
+      SELECT
+        anchor.keyword_id,
+        anchor.search_engine,
+        anchor.observed_at,
+        anchor.snapshot_id
+      FROM jsonb_to_recordset(${JSON.stringify(serializedAnchors)}::jsonb) AS anchor(
+        keyword_id uuid,
+        search_engine text,
+        observed_at timestamptz,
+        snapshot_id uuid
+      )
+    )
+    SELECT
+      anchors.keyword_id::text AS "keywordId",
+      anchors.search_engine AS "searchEngine",
+      anchors.observed_at AS "observedAt",
+      anchors.snapshot_id::text AS "snapshotId",
+      previous.position AS "previousPosition"
+    FROM anchors
+    INNER JOIN LATERAL (
+      SELECT snapshot.position
+      FROM rank_snapshots snapshot
+      INNER JOIN tracking_context_versions configuration
+        ON configuration.workspace_id = snapshot.workspace_id
+       AND configuration.project_id = snapshot.project_id
+       AND configuration.context_id = snapshot.tracking_context_id
+       AND configuration.configuration_version = snapshot.configuration_version
+      WHERE snapshot.workspace_id = ${workspaceId}::uuid
+        AND snapshot.project_id = ${projectId}::uuid
+        AND snapshot.keyword_id = anchors.keyword_id
+        AND configuration.search_engine::text = anchors.search_engine
+        AND snapshot.found = TRUE
+        AND snapshot.position IS NOT NULL
+        AND (snapshot.observed_at, snapshot.id) <
+            (anchors.observed_at, anchors.snapshot_id)
+      ORDER BY snapshot.observed_at DESC, snapshot.id DESC
+      LIMIT 1
+    ) previous ON TRUE
+  `;
+  const expectedKeys = new Set(
+    anchors.map((anchor) =>
+      previousFoundPositionKey(
+        anchor.keywordId,
+        anchor.searchEngine,
+        anchor.observedAt,
+        anchor.snapshotId
+      )
+    )
+  );
+  const result = new Map<string, number>();
+  for (const row of rows) {
+    const key = previousFoundPositionKey(
+      row.keywordId,
+      row.searchEngine,
+      row.observedAt,
+      row.snapshotId
+    );
+    if (
+      !expectedKeys.has(key) ||
+      !Number.isSafeInteger(row.previousPosition) ||
+      row.previousPosition <= 0 ||
+      result.has(key)
+    ) {
+      throw new HttpException(
+        "Invalid previous rank projection",
+        HttpStatus.BAD_GATEWAY
+      );
+    }
+    result.set(key, row.previousPosition);
+  }
+  return result;
+}
+
 async function metricSortedKeywordPage(
   prisma: PrismaService,
   workspaceId: string,
@@ -2588,10 +2747,9 @@ async function metricSortedKeywordPage(
               cr.found,
               cr.position,
               COALESCE(
-                cr.previous_position,
                 (
                   SELECT previous.position
-                  FROM current_ranks previous
+                  FROM rank_snapshots previous
                   INNER JOIN tracking_context_versions previous_tcv
                     ON previous_tcv.workspace_id = previous.workspace_id
                    AND previous_tcv.project_id = previous.project_id
@@ -2603,9 +2761,12 @@ async function metricSortedKeywordPage(
                     AND previous.found = TRUE
                     AND previous.position IS NOT NULL
                     AND previous_tcv.search_engine::text = ${rankEngine}
-                  ORDER BY previous.observed_at DESC, previous.tracking_context_id DESC
+                    AND (previous.observed_at, previous.id) <
+                        (cr.observed_at, cr.snapshot_id)
+                  ORDER BY previous.observed_at DESC, previous.id DESC
                   LIMIT 1
-                )
+                ),
+                cr.previous_position
               ) AS historical_position
             FROM current_ranks cr
             INNER JOIN tracking_context_versions tcv
@@ -2617,7 +2778,8 @@ async function metricSortedKeywordPage(
               AND cr.project_id = k.project_id
               AND cr.keyword_id = k.id
               AND tcv.search_engine::text = ${rankEngine}
-            ORDER BY cr.observed_at DESC, cr.tracking_context_id DESC
+            ORDER BY cr.observed_at DESC, cr.snapshot_id DESC,
+                     cr.tracking_context_id DESC
             LIMIT 1
           ) latest_rank
         ) metric_source ON TRUE`
@@ -2634,7 +2796,8 @@ async function metricSortedKeywordPage(
             AND cr.project_id = k.project_id
             AND cr.keyword_id = k.id
             AND tcv.search_engine::text = ${rankEngine}
-          ORDER BY cr.observed_at DESC, cr.tracking_context_id DESC
+          ORDER BY cr.observed_at DESC, cr.snapshot_id DESC,
+                   cr.tracking_context_id DESC
           LIMIT 1
         ) metric_source ON TRUE`;
   const filters = keywordRawFilters(

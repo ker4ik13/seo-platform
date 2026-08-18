@@ -55,12 +55,20 @@ test("averages the latest found position once per active keyword", async () => {
 });
 
 test("returns a scoped cursor page with groups, tags and target URLs", async () => {
+  const snapshotId = "01900000-0000-7000-8000-000000000074";
   let observedWhere: unknown;
   const rows = [
     keyword("01900000-0000-7000-8000-000000000010", "2026-07-29T08:00:00Z"),
     keyword("01900000-0000-7000-8000-000000000011", "2026-07-29T07:00:00Z")
   ];
   const service = new KeywordService({
+    $queryRaw: async () => [{
+      keywordId: "01900000-0000-7000-8000-000000000010",
+      searchEngine: "YANDEX",
+      observedAt: new Date("2026-08-01T10:00:00.000Z"),
+      snapshotId,
+      previousPosition: 8
+    }],
     keyword: {
       findMany: async ({ where }: { where: unknown }) => {
         observedWhere = where;
@@ -124,7 +132,8 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
           position: 5,
           previousPosition: 8,
           rankingUrl: "https://example.com/seo",
-          observedAt: new Date("2026-08-01T10:00:00.000Z")
+          observedAt: new Date("2026-08-01T10:00:00.000Z"),
+          snapshotId
         }
       ]
     },
@@ -195,6 +204,110 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
         "request-2"
       ),
     BadRequestException
+  );
+});
+
+test("keeps position deltas across tracking contexts", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000014";
+  const latestContextId = "01900000-0000-7000-8000-000000000075";
+  const previousContextId = "01900000-0000-7000-8000-000000000076";
+  const latestSnapshotId = "01900000-0000-7000-8000-000000000077";
+  const previousSnapshotId = "01900000-0000-7000-8000-000000000078";
+  const rawQueries: Prisma.Sql[] = [];
+  const service = new KeywordService(
+    {
+      $queryRaw: async (
+        strings: TemplateStringsArray,
+        ...values: unknown[]
+      ) => {
+        const query = Prisma.sql(strings, ...values);
+        rawQueries.push(query);
+        return [{
+          keywordId,
+          searchEngine: "YANDEX",
+          observedAt: new Date("2026-08-18T10:00:00.000Z"),
+          snapshotId: latestSnapshotId,
+          previousPosition: 6
+        }];
+      },
+      keyword: {
+        findMany: async () => [{
+          ...keyword(keywordId, "2026-08-18T10:00:00.000Z"),
+          targetPageId: null,
+          typedCustomValues: []
+        }],
+        count: async () => 1
+      },
+      trackingContextKeywordAssignment: { findMany: async () => [] },
+      frequencySnapshot: { findMany: async () => [] },
+      currentRank: {
+        findMany: async () => [
+          {
+            keywordId,
+            trackingContextId: latestContextId,
+            configurationVersion: 1,
+            found: true,
+            position: 2,
+            previousPosition: null,
+            rankingUrl: "https://example.com/latest",
+            observedAt: new Date("2026-08-18T10:00:00.000Z"),
+            snapshotId: latestSnapshotId
+          },
+          {
+            keywordId,
+            trackingContextId: previousContextId,
+            configurationVersion: 1,
+            found: true,
+            position: 6,
+            previousPosition: null,
+            rankingUrl: "https://example.com/previous",
+            observedAt: new Date("2026-08-17T10:00:00.000Z"),
+            snapshotId: previousSnapshotId
+          }
+        ]
+      },
+      trackingContextVersion: {
+        findMany: async () => [
+          {
+            contextId: latestContextId,
+            configurationVersion: 1,
+            searchEngine: "YANDEX"
+          },
+          {
+            contextId: previousContextId,
+            configurationVersion: 1,
+            searchEngine: "YANDEX"
+          }
+        ]
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  const result = await service.list(
+    workspaceId,
+    projectId,
+    { limit: 100 },
+    "request-cross-context-delta"
+  );
+
+  assert.deepEqual(result.data[0]?.positions, [{
+    searchEngine: "YANDEX",
+    found: true,
+    position: 2,
+    previousPosition: 6,
+    rankingUrl: "https://example.com/latest",
+    observedAt: "2026-08-18T10:00:00.000Z"
+  }]);
+  assert.equal(rawQueries.length, 1);
+  assert.match(rawQueries[0]?.sql ?? "", /FROM rank_snapshots snapshot/u);
+  assert.match(
+    rawQueries[0]?.sql ?? "",
+    /configuration\.search_engine::text = anchors\.search_engine/u
+  );
+  assert.match(
+    rawQueries[0]?.sql ?? "",
+    /\(snapshot\.observed_at, snapshot\.id\) </u
   );
 });
 
@@ -296,6 +409,75 @@ test("projects exact rank collection metadata into keyword history", async () =>
       },
       { position: 2, url: "https://example.com/result" }
     ]
+  }]);
+});
+
+test("projects context-independent previous positions into keyword insights", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000015";
+  const contextId = "01900000-0000-7000-8000-000000000079";
+  const snapshotId = "01900000-0000-7000-8000-000000000080";
+  const service = new KeywordService(
+    {
+      $queryRaw: async () => [{
+        keywordId,
+        searchEngine: "YANDEX",
+        observedAt: new Date("2026-08-18T12:00:00.000Z"),
+        snapshotId,
+        previousPosition: 11
+      }],
+      keyword: {
+        findFirst: async () => ({ id: keywordId, note: null })
+      },
+      frequencySnapshot: { findMany: async () => [] },
+      currentRank: {
+        findMany: async () => [{
+          workspaceId,
+          projectId,
+          keywordId,
+          trackingContextId: contextId,
+          configurationVersion: 1,
+          found: true,
+          position: 7,
+          previousPosition: null,
+          rankingUrl: "https://example.com/current",
+          observedAt: new Date("2026-08-18T12:00:00.000Z"),
+          snapshotId
+        }]
+      },
+      rankSnapshot: { findMany: async () => [] },
+      trackingContext: {
+        findMany: async () => [{ id: contextId, name: "Новый профиль" }]
+      },
+      trackingContextVersion: {
+        findMany: async () => [{
+          contextId,
+          configurationVersion: 1,
+          searchEngine: "YANDEX",
+          device: "DESKTOP",
+          regionCode: "213",
+          regionLabel: "Москва",
+          countryCode: "RU",
+          language: "ru",
+          depth: 50
+        }]
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  const result = await service.insights(workspaceId, projectId, keywordId);
+
+  assert.deepEqual(result.positions, [{
+    trackingContextId: contextId,
+    contextName: "Новый профиль",
+    searchEngine: "YANDEX",
+    device: "DESKTOP",
+    regionCode: "213",
+    found: true,
+    position: 7,
+    previousPosition: 11,
+    rankingUrl: "https://example.com/current",
+    observedAt: "2026-08-18T12:00:00.000Z"
   }]);
 });
 
@@ -597,6 +779,8 @@ test("sorts by the latest engine result and keeps missing positions last", async
   const keywordId = "01900000-0000-7000-8000-000000000012";
   const latestContextId = "01900000-0000-7000-8000-000000000072";
   const previousContextId = "01900000-0000-7000-8000-000000000071";
+  const latestSnapshotId = "01900000-0000-7000-8000-000000000074";
+  const previousSnapshotId = "01900000-0000-7000-8000-000000000073";
   const rawQueries: Prisma.Sql[] = [];
   let observedRankOrderBy: unknown;
   const service = new KeywordService(
@@ -605,7 +789,17 @@ test("sorts by the latest engine result and keeps missing positions last", async
         strings: TemplateStringsArray,
         ...values: unknown[]
       ) => {
-        rawQueries.push(Prisma.sql(strings, ...values));
+        const query = Prisma.sql(strings, ...values);
+        rawQueries.push(query);
+        if (query.sql.includes("jsonb_to_recordset")) {
+          return [{
+            keywordId,
+            searchEngine: "YANDEX",
+            observedAt: new Date("2026-08-05T10:00:00.000Z"),
+            snapshotId: latestSnapshotId,
+            previousPosition: 13
+          }];
+        }
         return [{ id: keywordId, sort_value: 9_223_372_036_854_775_807n }];
       },
       keyword: {
@@ -632,7 +826,8 @@ test("sorts by the latest engine result and keeps missing positions last", async
               position: null,
               previousPosition: null,
               rankingUrl: null,
-              observedAt: new Date("2026-08-05T10:00:00.000Z")
+              observedAt: new Date("2026-08-05T10:00:00.000Z"),
+              snapshotId: latestSnapshotId
             },
             {
               keywordId,
@@ -642,7 +837,8 @@ test("sorts by the latest engine result and keeps missing positions last", async
               position: 13,
               previousPosition: null,
               rankingUrl: "https://example.com/previous",
-              observedAt: new Date("2026-08-04T10:00:00.000Z")
+              observedAt: new Date("2026-08-04T10:00:00.000Z"),
+              snapshotId: previousSnapshotId
             }
           ];
         }
@@ -678,24 +874,37 @@ test("sorts by the latest engine result and keeps missing positions last", async
     "request-position-sort-desc"
   );
 
-  assert.equal(rawQueries.length, 2);
-  for (const query of rawQueries) {
+  const metricQueries = rawQueries.filter(
+    (query) => !query.sql.includes("jsonb_to_recordset")
+  );
+  const historyQueries = rawQueries.filter(
+    (query) => query.sql.includes("jsonb_to_recordset")
+  );
+  assert.equal(metricQueries.length, 2);
+  assert.equal(historyQueries.length, 2);
+  for (const query of metricQueries) {
     assert.match(query.sql, /latest_rank\.found/u);
     assert.match(query.sql, /historical_position/u);
     assert.match(query.sql, /previous\.found = TRUE/u);
+    assert.match(query.sql, /FROM rank_snapshots previous/u);
+    assert.match(
+      query.sql,
+      /\(previous\.observed_at, previous\.id\) </u
+    );
   }
-  assert.ok(rawQueries[0]?.values.includes(2_000_000n));
-  assert.ok(rawQueries[1]?.values.includes(0n));
+  assert.ok(metricQueries[0]?.values.includes(2_000_000n));
+  assert.ok(metricQueries[1]?.values.includes(0n));
   assert.match(
-    rawQueries[0]?.sql ?? "",
+    metricQueries[0]?.sql ?? "",
     /ORDER BY ranked\.sort_value ASC, ranked\.id ASC/u
   );
   assert.match(
-    rawQueries[1]?.sql ?? "",
+    metricQueries[1]?.sql ?? "",
     /ORDER BY ranked\.sort_value DESC, ranked\.id DESC/u
   );
   assert.deepEqual(observedRankOrderBy, [
     { observedAt: "desc" },
+    { snapshotId: "desc" },
     { keywordId: "asc" },
     { trackingContextId: "desc" }
   ]);
