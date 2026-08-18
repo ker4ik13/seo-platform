@@ -137,6 +137,34 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
         }
       ]
     },
+    rankSnapshot: {
+      findMany: async () => [{
+        id: snapshotId,
+        manifest: { projectDomain: "example.com" },
+        serpResults: [
+          {
+            position: 1,
+            rankingUrl: "https://example.com/seo",
+            normalizedRankingUrl: "https://example.com/seo",
+            faviconUrl: "https://search-assets.example/project.png",
+            title: "SEO аудит",
+            snippet: "Главная страница услуги"
+          },
+          {
+            position: 2,
+            rankingUrl: "https://www.example.com/seo/second",
+            normalizedRankingUrl: "https://www.example.com/seo/second",
+            title: "Дополнительная страница",
+            snippet: null
+          },
+          {
+            position: 3,
+            rankingUrl: "https://competitor.example/result",
+            normalizedRankingUrl: "https://competitor.example/result"
+          }
+        ]
+      }]
+    },
     trackingContextVersion: {
       findMany: async () => [
         {
@@ -183,6 +211,20 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
       position: 5,
       previousPosition: 8,
       rankingUrl: "https://example.com/seo",
+      siteResults: [
+        {
+          position: 1,
+          rankingUrl: "https://example.com/seo",
+          faviconUrl: "https://search-assets.example/project.png",
+          title: "SEO аудит",
+          snippet: "Главная страница услуги"
+        },
+        {
+          position: 2,
+          rankingUrl: "https://www.example.com/seo/second",
+          title: "Дополнительная страница"
+        }
+      ],
       observedAt: "2026-08-01T10:00:00.000Z"
     }
   ]);
@@ -266,6 +308,7 @@ test("keeps position deltas across tracking contexts", async () => {
           }
         ]
       },
+      rankSnapshot: { findMany: async () => [] },
       trackingContextVersion: {
         findMany: async () => [
           {
@@ -331,6 +374,7 @@ test("projects exact rank collection metadata into keyword history", async () =>
           position: null,
           observedAt: new Date("2026-08-06T11:45:00.000Z"),
           manifest: {
+            projectDomain: "example.com",
             execution: {
               providerMappingVersion: "xmlstock-yandex-live@2"
             }
@@ -343,6 +387,7 @@ test("projects exact rank collection metadata into keyword history", async () =>
             snapshotId: "01900000-0000-7000-8000-000000000073",
             position: 1,
             rankingUrl: "https://competitor.example/one",
+            faviconUrl: "https://search-assets.example/competitor.png",
             title: "Конкурент",
             snippet: null
           },
@@ -405,11 +450,79 @@ test("projects exact rank collection metadata into keyword history", async () =>
       {
         position: 1,
         url: "https://competitor.example/one",
+        faviconUrl: "https://search-assets.example/competitor.png",
         title: "Конкурент"
       },
       { position: 2, url: "https://example.com/result" }
     ]
   }]);
+});
+
+test("deletes only one tenant-scoped keyword frequency context", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000089";
+  let deletedWhere: unknown;
+  const service = new KeywordService(
+    {
+      keyword: {
+        findFirst: async () => ({ id: keywordId })
+      },
+      frequencySnapshot: {
+        deleteMany: async ({ where }: { where: unknown }) => {
+          deletedWhere = where;
+          return { count: 3 };
+        }
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  await service.deleteFrequencyContext(
+    workspaceId,
+    projectId,
+    keywordId,
+    "EXACT",
+    "213",
+    "MOBILE"
+  );
+
+  assert.deepEqual(deletedWhere, {
+    workspaceId,
+    projectId,
+    keywordId,
+    type: "EXACT",
+    regionCode: "213",
+    device: "MOBILE"
+  });
+});
+
+test("does not delete frequency contexts for an unavailable keyword", async () => {
+  let deleteCalls = 0;
+  const service = new KeywordService(
+    {
+      keyword: { findFirst: async () => null },
+      frequencySnapshot: {
+        deleteMany: async () => {
+          deleteCalls += 1;
+          return { count: 0 };
+        }
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  await assert.rejects(
+    () => service.deleteFrequencyContext(
+      workspaceId,
+      projectId,
+      "01900000-0000-7000-8000-000000000089",
+      "BASE",
+      "213",
+      "ALL"
+    ),
+    (error: unknown) =>
+      error instanceof HttpException && error.getStatus() === HttpStatus.NOT_FOUND
+  );
+  assert.equal(deleteCalls, 0);
 });
 
 test("projects context-independent previous positions into keyword insights", async () => {
@@ -843,6 +956,7 @@ test("sorts by the latest engine result and keeps missing positions last", async
           ];
         }
       },
+      rankSnapshot: { findMany: async () => [] },
       trackingContextVersion: {
         findMany: async () => [
           {

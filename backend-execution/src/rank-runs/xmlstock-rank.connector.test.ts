@@ -88,12 +88,14 @@ test("submits one delayed Yandex request and polls only by req_id", async () => 
         position: 1,
         rankingUrl: "https://foreign.example/",
         normalizedRankingUrl: "https://foreign.example/",
+        faviconUrl: "https://search-assets.example/foreign.png",
         title: "Чужой"
       },
       {
         position: 2,
         rankingUrl: "HTTPS://WWW.Example.COM:443/catalog#result",
         normalizedRankingUrl: "https://www.example.com/catalog",
+        faviconUrl: "https://search-assets.example/project.png",
         title: "Каталог",
         snippet: "Купить диван"
       }
@@ -133,15 +135,14 @@ test("loads each documented Google result page once and keeps absolute positions
   assert.equal(ready.status, "READY");
   assert.deepEqual(pages, ["0", "1", "2"]);
   if (ready.status !== "READY") return;
-  assert.equal(
-    stageXmlStockRankResult(
-      ready.value,
-      submitted.taskId,
-      value,
-      "2026-08-02T12:00:00.000Z"
-    ).snapshot.results[0]?.position,
-    11
-  );
+  const result = stageXmlStockRankResult(
+    ready.value,
+    submitted.taskId,
+    value,
+    "2026-08-02T12:00:00.000Z"
+  ).snapshot.results[0];
+  assert.equal(result?.position, 11);
+  assert.equal(result?.serpResults?.length, 30);
 });
 
 test("classifies provider authentication, queue and rate failures", async () => {
@@ -434,7 +435,7 @@ function intent(
 }
 
 function yandexResult(): string {
-  return `<?xml version="1.0"?><yandexsearch><response><results><grouping><group><doc><url>https://foreign.example/</url><title>Чужой</title></doc></group><group><doc><url>HTTPS://WWW.Example.COM:443/catalog#result</url><title>Каталог</title><passages><passage>Купить диван</passage></passages></doc></group></grouping></results></response></yandexsearch>`;
+  return `<?xml version="1.0"?><yandexsearch><response><results><grouping><group><doc><url>https://foreign.example/</url><favicon>https://search-assets.example/foreign.png</favicon><title>Чужой</title></doc></group><group><doc><url>HTTPS://WWW.Example.COM:443/catalog#result</url><icon src="https://search-assets.example/project.png"/><title>Каталог</title><passages><passage>Купить диван</passage></passages></doc></group></grouping></results></response></yandexsearch>`;
 }
 
 function googleResult(page: number, projectUrl?: string): string {

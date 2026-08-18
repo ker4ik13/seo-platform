@@ -14,7 +14,10 @@ import type {
   RankCheckFinalStatus,
   RankManifestHash
 } from "./api/rank-runs.js";
-import { rankManifestChunkHashPreimage } from "./api/rank-runs.js";
+import {
+  rankManifestChunkHashPreimage,
+  rankSerpResultMaxCount
+} from "./api/rank-runs.js";
 import {
   legacyRankManifestChunkSize,
   rankManifestSingleTaskChunkSize
@@ -116,7 +119,11 @@ const SERP_RESULT_REQUIRED_KEYS = [
   "normalizedRankingUrl"
 ] as const;
 
-const SERP_RESULT_OPTIONAL_KEYS = ["title", "snippet"] as const;
+const SERP_RESULT_OPTIONAL_KEYS = [
+  "faviconUrl",
+  "title",
+  "snippet"
+] as const;
 
 const FINALIZATION_INPUT_KEYS = [
   "schemaVersion",
@@ -508,20 +515,30 @@ function copySerpResults(
   value: readonly InternalNormalizedRankSerpResult[] | undefined
 ): readonly InternalNormalizedRankSerpResult[] | undefined {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value) || value.length > 10) {
+  if (!Array.isArray(value) || value.length > rankSerpResultMaxCount) {
     return invalidCanonicalRankResult("serpResults");
   }
-  return value.map((entry, index) => {
+  let previousPosition = 0;
+  return value.map((entry) => {
     assertExactRecord(
       entry,
       SERP_RESULT_REQUIRED_KEYS,
       SERP_RESULT_OPTIONAL_KEYS
     );
-    if (!Number.isSafeInteger(entry.position) || entry.position !== index + 1) {
+    if (
+      !Number.isSafeInteger(entry.position) ||
+      entry.position < 1 ||
+      entry.position > rankSerpResultMaxCount ||
+      entry.position <= previousPosition
+    ) {
       return invalidCanonicalRankResult("serpResult.position");
     }
+    previousPosition = entry.position;
     assertUrl(entry.rankingUrl, "serpResult.rankingUrl");
     assertUrl(entry.normalizedRankingUrl, "serpResult.normalizedRankingUrl");
+    if (entry.faviconUrl !== undefined) {
+      assertUrl(entry.faviconUrl, "serpResult.faviconUrl");
+    }
     assertOptionalBoundedString(entry.title, MAX_TITLE_LENGTH, "serpResult.title");
     assertOptionalBoundedString(
       entry.snippet,
@@ -532,6 +549,9 @@ function copySerpResults(
       position: entry.position,
       rankingUrl: entry.rankingUrl,
       normalizedRankingUrl: entry.normalizedRankingUrl,
+      ...(entry.faviconUrl === undefined
+        ? {}
+        : { faviconUrl: entry.faviconUrl }),
       ...(entry.title === undefined ? {} : { title: entry.title }),
       ...(entry.snippet === undefined ? {} : { snippet: entry.snippet })
     };

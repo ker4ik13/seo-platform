@@ -246,7 +246,7 @@ test("accepts canonical XMLStock position ingest commands", () => {
   );
 });
 
-test("canonicalizes a bounded ordered XMLStock Top-10 evidence set", () => {
+test("canonicalizes a bounded ordered SERP evidence set", () => {
   const baseChunk = sealedChunk();
   const firstEntry = baseChunk.entries[0]!;
   const firstResult = ingestCommand().results[0]!;
@@ -265,6 +265,7 @@ test("canonicalizes a bounded ordered XMLStock Top-10 evidence set", () => {
           position: 1,
           rankingUrl: "https://competitor.example/",
           normalizedRankingUrl: "https://competitor.example/",
+          faviconUrl: "https://search-assets.example/competitor.png",
           title: "Competitor"
         },
         {
@@ -280,6 +281,11 @@ test("canonicalizes a bounded ordered XMLStock Top-10 evidence set", () => {
     rankChunkIngestHashPreimage(command, chunk).results[0]?.serpResults?.length,
     2
   );
+  assert.equal(
+    rankChunkIngestHashPreimage(command, chunk).results[0]?.serpResults?.[0]
+      ?.faviconUrl,
+    "https://search-assets.example/competitor.png"
+  );
   const resultWithSerp = command.results[0];
   if (!resultWithSerp?.found || !resultWithSerp.serpResults) {
     throw new Error("Fixture is invalid");
@@ -291,7 +297,7 @@ test("canonicalizes a bounded ordered XMLStock Top-10 evidence set", () => {
         ...resultWithSerp,
         serpResults: resultWithSerp.serpResults.map((result) => ({
           ...result,
-          position: result.position + 1
+          position: 2
         }))
       }]
     }, chunk),

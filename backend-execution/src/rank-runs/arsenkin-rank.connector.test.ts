@@ -353,6 +353,11 @@ test("derives one found and one not-found result from a sealed positions fixture
         normalizedRankingUrl: "https://www.example.com/catalog",
         resultType: "ORGANIC",
         serpFeatures: [],
+        serpResults: [{
+          position: 2,
+          rankingUrl: "HTTPS://WWW.Example.COM:443/catalog#result",
+          normalizedRankingUrl: "https://www.example.com/catalog"
+        }],
         dataQualityFlags: [
           "ABSOLUTE_POSITION_UNAVAILABLE",
           "PIXEL_POSITION_UNAVAILABLE",
@@ -384,6 +389,58 @@ test("derives one found and one not-found result from a sealed positions fixture
       .algorithm,
     "SHA_256"
   );
+});
+
+test("projects Arsenkin top20 rows into normalized SERP evidence", () => {
+  const value = resultBody();
+  value.result.table["купить диван"]!.top20 = JSON.stringify([
+    {
+      position: 1,
+      url: "https://competitor.example/one",
+      title: " Первый конкурент ",
+      description: "Описание первого результата",
+      favicon: "https://search-assets.example/icons/competitor.png"
+    },
+    {
+      position: 2,
+      url: "HTTPS://WWW.Example.COM:443/catalog#result",
+      title: "Каталог",
+      snippet: "Купить диван"
+    },
+    "https://competitor.example/three"
+  ]);
+
+  const result = normalizeArsenkinRankResult(value, "3944", intent())[0];
+  assert.ok(result?.found);
+  if (!result?.found) return;
+  assert.equal(result.title, "Каталог");
+  assert.equal(result.snippet, "Купить диван");
+  assert.deepEqual(result.serpResults, [
+    {
+      position: 1,
+      rankingUrl: "https://competitor.example/one",
+      normalizedRankingUrl: "https://competitor.example/one",
+      faviconUrl: "https://search-assets.example/icons/competitor.png",
+      title: "Первый конкурент",
+      snippet: "Описание первого результата"
+    },
+    {
+      position: 2,
+      rankingUrl: "HTTPS://WWW.Example.COM:443/catalog#result",
+      normalizedRankingUrl: "https://www.example.com/catalog",
+      title: "Каталог",
+      snippet: "Купить диван"
+    },
+    {
+      position: 3,
+      rankingUrl: "https://competitor.example/three",
+      normalizedRankingUrl: "https://competitor.example/three"
+    }
+  ]);
+  assert.deepEqual(result.dataQualityFlags, [
+    "ABSOLUTE_POSITION_UNAVAILABLE",
+    "PIXEL_POSITION_UNAVAILABLE"
+  ]);
 });
 
 test("accepts a provider-supported TOP-100 position at the sealed depth", () => {

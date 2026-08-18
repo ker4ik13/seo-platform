@@ -203,7 +203,7 @@ export interface SemanticKeywordCompetitorSnapshot {
   readonly contextName: string;
   readonly searchEngine: "GOOGLE" | "YANDEX";
   readonly searchSource?: RankSearchSource;
-  readonly provider: "XMLSTOCK";
+  readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly observedAt: string;
   readonly results: readonly SemanticKeywordCompetitorResult[];
 }
@@ -211,6 +211,7 @@ export interface SemanticKeywordCompetitorSnapshot {
 export interface SemanticKeywordCompetitorResult {
   readonly position: number;
   readonly url: string;
+  readonly faviconUrl?: string;
   readonly title?: string;
   readonly snippet?: string;
 }

@@ -14,7 +14,13 @@ import {
   Req,
   UseGuards
 } from "@nestjs/common";
+import {
+  semanticFrequencyDevices,
+  semanticFrequencyTypes
+} from "@seo-platform/contracts";
 import type {
+  SemanticFrequencyDevice,
+  SemanticFrequencyType,
   ApiCollectionResponse,
   ApiResponse,
   SemanticKeywordBulkCreateResult,
@@ -213,6 +219,32 @@ export class KeywordController {
     };
   }
 
+  @Delete(":keywordId/frequencies/:type/:device")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  public async deleteFrequencyContext(
+    @Param("projectId") projectId: string,
+    @Param("keywordId") keywordId: string,
+    @Param("type") type: string,
+    @Param("device") device: string,
+    @Query("regionCode") regionCode: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>
+  ): Promise<void> {
+    const context = internalCommandContext(headers);
+    if (internalUuid(projectId, "projectId") !== context.projectId) {
+      throw new BadRequestException(
+        "Route project identifier does not match trusted context"
+      );
+    }
+    await this.keywords.deleteFrequencyContext(
+      context.workspaceId,
+      context.projectId,
+      internalUuid(keywordId, "keywordId"),
+      internalFrequencyType(type),
+      internalFrequencyRegion(regionCode),
+      internalFrequencyDevice(device)
+    );
+  }
+
   @Patch(":keywordId")
   public async update(
     @Param("projectId") projectId: string,
@@ -242,6 +274,29 @@ export class KeywordController {
     assertMutationContext(projectId, headers, input);
     await this.keywords.delete(internalUuid(keywordId, "keywordId"), input);
   }
+}
+
+const FREQUENCY_REGION_PATTERN = /^[A-Za-z0-9._:-]{1,100}$/u;
+
+function internalFrequencyType(value: string): SemanticFrequencyType {
+  if (!semanticFrequencyTypes.includes(value as SemanticFrequencyType)) {
+    throw new BadRequestException("Frequency type is invalid");
+  }
+  return value as SemanticFrequencyType;
+}
+
+function internalFrequencyRegion(value: unknown): string {
+  if (typeof value !== "string" || !FREQUENCY_REGION_PATTERN.test(value)) {
+    throw new BadRequestException("Frequency region is invalid");
+  }
+  return value;
+}
+
+function internalFrequencyDevice(value: string): SemanticFrequencyDevice {
+  if (!semanticFrequencyDevices.includes(value as SemanticFrequencyDevice)) {
+    throw new BadRequestException("Frequency device is invalid");
+  }
+  return value as SemanticFrequencyDevice;
 }
 
 function assertMutationContext(

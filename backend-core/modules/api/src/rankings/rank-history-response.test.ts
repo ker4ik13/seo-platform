@@ -26,6 +26,8 @@ test("validates scope and redacts private rank-history provenance", () => {
 
   assert.deepEqual(result.page, { hasNext: false });
   assert.equal(result.data[0]?.snapshotId, firstSnapshotId);
+  assert.equal(result.data[0]?.siteResults?.length, 2);
+  assert.equal(result.data[0]?.siteResults?.[0]?.title, "Other page");
   const serialized = JSON.stringify(result.data[0]);
   for (const privateField of [
     "workspaceId",
@@ -196,6 +198,15 @@ function foundItem() {
     normalizedRankingUrl: "https://example.com/rank",
     title: "Ranked page",
     snippet: "Result snippet",
+    siteResults: [
+      {
+        position: 4,
+        rankingUrl: "https://example.com/other",
+        title: "Other page",
+        snippet: "Other snippet"
+      },
+      { position: 9, rankingUrl: "https://example.com/rank" }
+    ],
     resultType: "ORGANIC",
     serpFeatures: [],
     workspaceId,

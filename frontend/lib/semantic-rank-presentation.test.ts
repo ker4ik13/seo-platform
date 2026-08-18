@@ -7,6 +7,10 @@ import {
   rankEngineLabel,
   rankHistoryProviderLabel,
   rankSearchSystemLabel,
+  sameSemanticRankingUrl,
+  semanticDisplayUrl,
+  semanticSiteFaviconSources,
+  semanticUrlBelongsToProject,
   semanticRankHistoryByEngine
 } from "./semantic-rank-presentation.ts";
 
@@ -99,4 +103,70 @@ test("names the exact search result source when history contains it", () => {
 test("labels imported Key Collector history without treating it as a live provider", () => {
   assert.equal(rankHistoryProviderLabel("KEY_COLLECTOR"), "Key Collector · импорт");
   assert.equal(rankHistoryProviderLabel("XMLSTOCK"), "XMLStock");
+});
+
+test("compares target pages and project hosts without www noise", () => {
+  assert.equal(
+    sameSemanticRankingUrl(
+      "https://example.com/catalog/",
+      "HTTPS://WWW.EXAMPLE.COM/catalog#result"
+    ),
+    true
+  );
+  assert.equal(
+    sameSemanticRankingUrl(
+      "https://example.com/catalog",
+      "https://example.com/other"
+    ),
+    false
+  );
+  assert.equal(
+    semanticUrlBelongsToProject(
+      "https://shop.example.com/catalog",
+      "www.example.com"
+    ),
+    true
+  );
+  assert.equal(
+    semanticUrlBelongsToProject(
+      "https://notexample.com/catalog",
+      "example.com"
+    ),
+    false
+  );
+});
+
+test("hides only the transport protocol in displayed SERP URLs", () => {
+  assert.equal(
+    semanticDisplayUrl("https://www.example.com/catalog?q=1#item"),
+    "www.example.com/catalog?q=1#item"
+  );
+  assert.equal(
+    semanticDisplayUrl("http://example.com/"),
+    "example.com/"
+  );
+  assert.equal(
+    semanticDisplayUrl("https://broken url"),
+    "broken url"
+  );
+});
+
+test("loads a SERP favicon from the result site before provider fallback", () => {
+  assert.deepEqual(
+    semanticSiteFaviconSources(
+      "https://www.example.com/catalog/item?q=1",
+      "https://search-assets.example/example.png"
+    ),
+    [
+      "https://www.example.com/favicon.ico",
+      "https://search-assets.example/example.png"
+    ]
+  );
+  assert.deepEqual(
+    semanticSiteFaviconSources(
+      "http://example.com/page",
+      "data:image/png;base64,unsafe"
+    ),
+    ["http://example.com/favicon.ico"]
+  );
 });

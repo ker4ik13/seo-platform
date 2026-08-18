@@ -17,6 +17,7 @@ import {
 } from "../integrations/provider-json-request.js";
 import {
   matchesProject,
+  providerSerpFaviconUrl,
   providerUrl
 } from "./arsenkin-rank.connector.js";
 import {
@@ -97,6 +98,7 @@ export type XmlStockRankFetchResult =
 export interface XmlStockDocument {
   readonly position: number;
   readonly url: string;
+  readonly faviconUrl?: string;
   readonly title?: string;
   readonly snippet?: string;
 }
@@ -341,7 +343,13 @@ export function xmlStockRankPageProgress(
   }
   const documents = input.documents.map((document, index) => {
     const parsed = record(document);
-    const allowed = new Set(["position", "url", "title", "snippet"]);
+    const allowed = new Set([
+      "position",
+      "url",
+      "faviconUrl",
+      "title",
+      "snippet"
+    ]);
     if (
       Object.keys(parsed).some((field) => !allowed.has(field)) ||
       !Number.isSafeInteger(parsed.position) ||
@@ -351,6 +359,8 @@ export function xmlStockRankPageProgress(
       (parsed.title !== undefined &&
         (typeof parsed.title !== "string" ||
           parsed.title.length > MAX_TITLE_LENGTH)) ||
+      (parsed.faviconUrl !== undefined &&
+        providerSerpFaviconUrl(parsed.faviconUrl) === undefined) ||
       (parsed.snippet !== undefined &&
         (typeof parsed.snippet !== "string" ||
           parsed.snippet.length > MAX_SNIPPET_LENGTH))
@@ -360,6 +370,9 @@ export function xmlStockRankPageProgress(
     return {
       position: Number(parsed.position),
       url: providerUrl(parsed.url).original,
+      ...(parsed.faviconUrl === undefined
+        ? {}
+        : { faviconUrl: providerSerpFaviconUrl(parsed.faviconUrl)! }),
       ...(parsed.title === undefined ? {} : { title: parsed.title }),
       ...(parsed.snippet === undefined ? {} : { snippet: parsed.snippet })
     };
@@ -493,12 +506,15 @@ function normalizeXmlStockRankResult(
   if (input.engine !== intent.execution.searchEngine) invalid();
   const keyword = intent.keywords[0];
   if (!keyword) invalid();
-  const serpResults = input.documents.slice(0, 10).map((document, index) => {
+  const serpResults = input.documents.map((document) => {
     const rankingUrl = providerUrl(document.url);
     return {
-      position: index + 1,
+      position: document.position,
       rankingUrl: rankingUrl.original,
       normalizedRankingUrl: rankingUrl.normalized,
+      ...(document.faviconUrl
+        ? { faviconUrl: document.faviconUrl }
+        : {}),
       ...(document.title ? { title: document.title } : {}),
       ...(document.snippet ? { snippet: document.snippet } : {})
     };
@@ -669,13 +685,26 @@ function parseXmlStockXml(xml: string): {
   const documents: Array<Omit<XmlStockDocument, "position">> = [];
   const names: string[] = [];
   const texts: string[] = [];
-  let current: { url?: string; title?: string; snippets: string[] } | undefined;
+  let current: {
+    url?: string;
+    faviconUrl?: string;
+    title?: string;
+    snippets: string[];
+  } | undefined;
   const parser = new SaxesParser({ xmlns: false });
   parser.on("opentag", (tag) => {
     const name = String(tag.name).toLowerCase();
     names.push(name);
     texts.push("");
     if (name === "doc") current = { snippets: [] };
+    if (current && faviconElementName(name)) {
+      const attribute =
+        tag.attributes.href ?? tag.attributes.src ?? tag.attributes.url;
+      const faviconUrl = providerSerpFaviconUrl(
+        attribute === undefined ? undefined : String(attribute)
+      );
+      if (faviconUrl) current.faviconUrl = faviconUrl;
+    }
     if (name === "error") {
       const attribute = tag.attributes.code;
       if (attribute !== undefined) errorCode = String(attribute);
@@ -697,10 +726,17 @@ function parseXmlStockXml(xml: string): {
       if (name === "url" && text) current.url = text;
       if (name === "title" && text) current.title = text;
       if (name === "passage" && text) current.snippets.push(text);
+      if (faviconElementName(name) && text) {
+        const faviconUrl = providerSerpFaviconUrl(text);
+        if (faviconUrl) current.faviconUrl = faviconUrl;
+      }
       if (name === "doc") {
         if (!current.url) invalid();
         documents.push({
           url: current.url,
+          ...(current.faviconUrl
+            ? { faviconUrl: current.faviconUrl }
+            : {}),
           ...(current.title ? { title: current.title } : {}),
           ...(current.snippets.length > 0
             ? { snippet: current.snippets.join(" ") }
@@ -716,6 +752,17 @@ function parseXmlStockXml(xml: string): {
     ...(errorCode ? { errorCode } : {}),
     documents
   };
+}
+
+function faviconElementName(value: string): boolean {
+  return [
+    "favicon",
+    "faviconurl",
+    "favicon_url",
+    "icon",
+    "iconurl",
+    "icon_url"
+  ].includes(value);
 }
 
 function wireResult(
@@ -745,19 +792,26 @@ function wireResultValue(value: unknown): XmlStockWireResultV1 {
   ) {
     invalid();
   }
+  if (input.documents.length > 100) invalid();
+  let previousPosition = 0;
   const documents = input.documents.map((value) => {
     const document = record(value);
+    const position = Number(document.position);
     if (
       !Number.isSafeInteger(document.position) ||
-      Number(document.position) < 1 ||
-      Number(document.position) > 100 ||
+      position < 1 ||
+      position > 100 ||
+      position <= previousPosition ||
       typeof document.url !== "string"
     ) {
       invalid();
     }
+    previousPosition = position;
+    const faviconUrl = providerSerpFaviconUrl(document.faviconUrl);
     return {
-      position: Number(document.position),
+      position,
       url: providerUrl(document.url).original,
+      ...(faviconUrl === undefined ? {} : { faviconUrl }),
       ...(typeof document.title === "string" && document.title
         ? { title: document.title }
         : {}),

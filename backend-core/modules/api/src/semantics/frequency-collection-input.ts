@@ -13,6 +13,12 @@ const UUID_PATTERN =
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,180}$/u;
 const REGION_PATTERN = /^[A-Za-z0-9._:-]{1,100}$/u;
 
+export interface SemanticFrequencyContextRoute {
+  readonly type: SemanticFrequencyType;
+  readonly regionCode: string;
+  readonly device: SemanticFrequencyDevice;
+}
+
 export function createFrequencyCollectionInput(
   value: unknown
 ): CreateFrequencyCollectionInput {
@@ -83,6 +89,33 @@ export function frequencyRetryInput(value: unknown): { readonly version: number 
     invalid("version");
   }
   return { version: Number(input.version) };
+}
+
+export function semanticFrequencyContextRoute(
+  type: unknown,
+  regionCode: unknown,
+  device: unknown
+): SemanticFrequencyContextRoute {
+  if (
+    typeof type !== "string" ||
+    !semanticFrequencyTypes.includes(type as SemanticFrequencyType)
+  ) {
+    invalid("type");
+  }
+  if (typeof regionCode !== "string" || !REGION_PATTERN.test(regionCode)) {
+    invalid("regionCode");
+  }
+  if (
+    typeof device !== "string" ||
+    !semanticFrequencyDevices.includes(device as SemanticFrequencyDevice)
+  ) {
+    invalid("device");
+  }
+  return {
+    type: type as SemanticFrequencyType,
+    regionCode,
+    device: device as SemanticFrequencyDevice
+  };
 }
 
 function record(value: unknown, fields: readonly string[]): Readonly<Record<string, unknown>> {

@@ -1159,6 +1159,7 @@ export type NormalizedRankDataQualityFlag =
 
 export const rankResultChunkMaxCount = rankProviderKeywordLimit;
 export const rankResultPairMaxCount = rankProviderKeywordLimit;
+export const rankSerpResultMaxCount = 100 as const;
 
 interface InternalNormalizedRankResultBase {
   readonly manifestEntryId: string;
@@ -1173,8 +1174,9 @@ interface InternalNormalizedRankResultBase {
   readonly dataQualityFlags: readonly NormalizedRankDataQualityFlag[];
   /**
    * Normalized organic results captured from the same provider response.
-   * XMLStock supplies at most the first ten rows; providers that do not
-   * expose the SERP omit the field. The array is ordered by position.
+   * The projection contains at most the sealed collection depth (TOP-100),
+   * never raw provider payload. The array is strictly ordered by unique
+   * organic position; providers that do not expose the SERP omit the field.
    */
   readonly serpResults?: readonly InternalNormalizedRankSerpResult[];
 }
@@ -1183,6 +1185,8 @@ export interface InternalNormalizedRankSerpResult {
   readonly position: number;
   readonly rankingUrl: string;
   readonly normalizedRankingUrl: string;
+  /** Safe absolute favicon URL returned as part of the provider SERP row. */
+  readonly faviconUrl?: string;
   readonly title?: string;
   readonly snippet?: string;
 }

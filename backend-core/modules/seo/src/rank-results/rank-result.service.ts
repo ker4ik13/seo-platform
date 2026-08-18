@@ -34,6 +34,7 @@ const CHUNK_SCHEMA = "rank-manifest-chunk@1";
 const RESULT_TRANSACTION_MAX_WAIT_MS = 5_000;
 const RESULT_TRANSACTION_TIMEOUT_MS = 120_000;
 const RANK_SNAPSHOT_INSERT_BATCH_SIZE = 1_000;
+const RANK_SERP_RESULT_INSERT_BATCH_SIZE = 5_000;
 const UUID_V7_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const HASH_PATTERN = /^[0-9a-f]{64}$/u;
@@ -273,6 +274,9 @@ export class RankResultService {
               position: serpResult.position,
               rankingUrl: serpResult.rankingUrl,
               normalizedRankingUrl: serpResult.normalizedRankingUrl,
+              ...(serpResult.faviconUrl === undefined
+                ? {}
+                : { faviconUrl: serpResult.faviconUrl }),
               ...(serpResult.title === undefined
                 ? {}
                 : { title: serpResult.title }),
@@ -284,13 +288,23 @@ export class RankResultService {
           }
         );
         if (serpResults.length > 0) {
-          const inserted = await transaction.rankSerpResult.createMany({
-            data: serpResults
-          });
-          if (inserted.count !== serpResults.length) {
-            throw new Error(
-              "Rank SERP result batch was not fully persisted"
+          for (
+            let offset = 0;
+            offset < serpResults.length;
+            offset += RANK_SERP_RESULT_INSERT_BATCH_SIZE
+          ) {
+            const batch = serpResults.slice(
+              offset,
+              offset + RANK_SERP_RESULT_INSERT_BATCH_SIZE
             );
+            const inserted = await transaction.rankSerpResult.createMany({
+              data: batch
+            });
+            if (inserted.count !== batch.length) {
+              throw new Error(
+                "Rank SERP result batch was not fully persisted"
+              );
+            }
           }
         }
 

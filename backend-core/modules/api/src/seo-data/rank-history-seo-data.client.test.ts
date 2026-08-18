@@ -65,6 +65,8 @@ test("forwards a tenant-scoped rank-history query and redacts its response", asy
     assert.equal(capturedHeaders?.get("x-project-id"), projectId);
     assert.equal(capturedHeaders?.get("x-actor-id"), actorId);
     assert.equal(result.data[0]?.snapshotId, snapshotId);
+    assert.equal(result.data[0]?.siteResults?.length, 2);
+    assert.equal(result.data[0]?.siteResults?.[0]?.title, "Other page");
     assert.equal(
       JSON.stringify(result.data[0]).includes("private-credential"),
       false
@@ -150,6 +152,15 @@ function historyPayload(responseWorkspaceId: string) {
           normalizedRankingUrl: "https://example.com/rank",
           title: "Ranked page",
           snippet: "Result snippet",
+          siteResults: [
+            {
+              position: 4,
+              rankingUrl: "https://example.com/other",
+              title: "Other page",
+              snippet: "Other snippet"
+            },
+            { position: 9, rankingUrl: "https://example.com/rank" }
+          ],
           resultType: "ORGANIC",
           serpFeatures: [],
           credentialId: "private-credential"

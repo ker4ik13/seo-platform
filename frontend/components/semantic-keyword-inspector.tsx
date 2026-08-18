@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
-  SemanticKeywordCompetitorSnapshot,
+  FrequencySnapshotSummary,
   SemanticKeywordInsights,
   SemanticKeywordListItem,
   SemanticKeywordPositionHistoryPoint
@@ -12,11 +12,14 @@ import {
   latestSemanticRankHistory,
   primaryRankContextIds,
   rankChangePresentation,
-  rankEngineLabel
+  rankEngineLabel,
+  sameSemanticRankingUrl
 } from "../lib/semantic-rank-presentation";
 import type { SemanticKeywordIntent } from "./semantic-view-types";
+import { Icon } from "./icon";
 import { SearchEngineLogo } from "./search-engine-logo";
-import { ProviderLogo } from "./provider-logo";
+import { SemanticCompetitorSnapshots } from "./semantic-competitor-snapshots";
+import { SemanticKeywordPositionHistoryModal } from "./semantic-keyword-position-history-modal";
 import { SemanticModal } from "./semantic-modal";
 import { SemanticRankHistoryChart } from "./semantic-rank-history-chart";
 
@@ -45,13 +48,17 @@ export function SemanticKeywordInspector({
   item,
   onClose,
   onEdit,
+  onFrequencyDeleted,
   onUpdated,
+  projectDomain,
   projectId
 }: Readonly<{
   item: SemanticKeywordInspectorItem;
   onClose: () => void;
   onEdit: () => void;
+  onFrequencyDeleted: () => void;
   onUpdated: (item: SemanticKeywordListItem) => void;
+  projectDomain: string;
   projectId: string;
 }>) {
   const [insights, setInsights] = useState<SemanticKeywordInsights>();
@@ -61,9 +68,11 @@ export function SemanticKeywordInspector({
   const [noteDirty, setNoteDirty] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [noteStatus, setNoteStatus] = useState<string>();
-  const [expandedCompetitorSnapshots, setExpandedCompetitorSnapshots] =
-    useState<ReadonlySet<string>>(new Set());
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [frequencyToDelete, setFrequencyToDelete] =
+    useState<FrequencySnapshotSummary>();
+  const [deletingFrequency, setDeletingFrequency] = useState(false);
+  const [frequencyDeleteError, setFrequencyDeleteError] = useState<string>();
   const noteDirtyRef = useRef(false);
 
   useEffect(() => {
@@ -77,8 +86,10 @@ export function SemanticKeywordInspector({
     setNote("");
     setNoteDirty(false);
     setNoteStatus(undefined);
-    setExpandedCompetitorSnapshots(new Set());
     setHistoryOpen(false);
+    setFrequencyToDelete(undefined);
+    setDeletingFrequency(false);
+    setFrequencyDeleteError(undefined);
     const load = () => {
       void browserApiRequest<SemanticKeywordInsights>(
         `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(item.id)}/insights`,
@@ -139,7 +150,7 @@ export function SemanticKeywordInspector({
       ? [...primaryPositions.values()].flatMap((position) =>
           position.found &&
           position.rankingUrl &&
-          !sameRankingUrl(item.targetUrl!, position.rankingUrl)
+          !sameSemanticRankingUrl(item.targetUrl!, position.rankingUrl)
             ? [{
                 engine: position.searchEngine,
                 rankingUrl: position.rankingUrl
@@ -177,6 +188,30 @@ export function SemanticKeywordInspector({
       setNoteStatus(noteError(requestError));
     } finally {
       setSavingNote(false);
+    }
+  }
+
+  async function deleteFrequencyContext(): Promise<void> {
+    if (!frequencyToDelete || deletingFrequency || item.trashed) return;
+    setDeletingFrequency(true);
+    setFrequencyDeleteError(undefined);
+    try {
+      await browserApiRequest<void>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(item.id)}/frequencies/${encodeURIComponent(frequencyToDelete.type)}/${encodeURIComponent(frequencyToDelete.device)}?regionCode=${encodeURIComponent(frequencyToDelete.regionCode)}`,
+        { method: "DELETE" }
+      );
+      setInsights((current) => current ? {
+        ...current,
+        frequencies: current.frequencies.filter(
+          (frequency) => !sameFrequencyContext(frequency, frequencyToDelete)
+        )
+      } : current);
+      setFrequencyToDelete(undefined);
+      onFrequencyDeleted();
+    } catch (requestError) {
+      setFrequencyDeleteError(frequencyDeletionError(requestError));
+    } finally {
+      setDeletingFrequency(false);
     }
   }
 
@@ -242,33 +277,14 @@ export function SemanticKeywordInspector({
         </div>
       </section>
 
-      <section>
-        <h3>Частотность</h3>
-        {loading ? (
-          <span className="semantic-inspector-muted">Загружаем срезы…</span>
-        ) : latestFrequencies.length > 0 ? (
-          <div className="semantic-frequency-list">
-            {latestFrequencies.map((frequency) => (
-              <div className="semantic-frequency-row" key={`${frequency.type}:${frequency.regionCode}:${frequency.device}`}>
-                <div className="semantic-frequency-context">
-                  <SearchEngineLogo engine="YANDEX" size="compact" />
-                  <span>{frequencyTypeLabel(frequency.type)}</span>
-                  <small>{frequency.regionCode} · {frequencyDeviceLabel(frequency.device)}</small>
-                </div>
-                <div className="semantic-frequency-value">
-                  <strong>{frequency.value ? formatInteger(frequency.value) : "—"}</strong>
-                  <small>{frequency.period ? `${frequency.period} · ` : ""}{formatDateTime(frequency.observedAt)}</small>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <InspectorEmpty title="Нет актуального среза" text="Запустите сбор частотности по этому запросу." />
-        )}
-      </section>
-
       <section className="semantic-inspector-ranks">
-        <h3>Позиции</h3>
+        <header className="semantic-inspector-section-heading">
+          <h3>Позиции</h3>
+          <button onClick={() => setHistoryOpen(true)} type="button">
+            <Icon name="history" />
+            История
+          </button>
+        </header>
         {!loading ? (
           <div className="semantic-current-ranks">
             {(["YANDEX", "GOOGLE"] as const).map((engine) => {
@@ -310,11 +326,6 @@ export function SemanticKeywordInspector({
           <div className="semantic-rank-change-history">
             <header>
               <strong>Изменения позиций</strong>
-              {positionChanges.length > 5 && (
-                <button onClick={() => setHistoryOpen(true)} type="button">
-                  Показать все
-                </button>
-              )}
             </header>
             <RankChangeRows rows={positionChanges.slice(0, 5)} />
           </div>
@@ -323,61 +334,51 @@ export function SemanticKeywordInspector({
 
       {error && <div className="inline-alert danger" role="alert">{error}</div>}
 
-      {competitorSnapshots.map((snapshot) => {
-        const expanded = expandedCompetitorSnapshots.has(snapshot.snapshotId);
-        const visibleResults = expanded
-          ? snapshot.results
-          : snapshot.results.slice(0, 5);
-        return (
-          <section
-            className="semantic-competitor-snapshot"
-            key={snapshot.snapshotId}
-          >
-            <header>
-              <div>
-                <h3>Топ конкурентов ({rankEngineLabel(snapshot.searchEngine)})</h3>
-                <small>
-                  {competitorSourceLabel(snapshot)} · {formatDateTime(snapshot.observedAt)}
-                </small>
+      <SemanticCompetitorSnapshots
+        projectDomain={projectDomain}
+        showEmpty={!loading}
+        snapshots={competitorSnapshots}
+      />
+
+      <section>
+        <h3>Частотность</h3>
+        {loading ? (
+          <span className="semantic-inspector-muted">Загружаем срезы…</span>
+        ) : latestFrequencies.length > 0 ? (
+          <div className="semantic-frequency-list">
+            {latestFrequencies.map((frequency) => (
+              <div className="semantic-frequency-row" key={`${frequency.type}:${frequency.regionCode}:${frequency.device}`}>
+                <div className="semantic-frequency-context">
+                  <SearchEngineLogo engine="YANDEX" size="compact" />
+                  <span>{frequencyTypeLabel(frequency.type)}</span>
+                  <small>{frequency.regionCode} · {frequencyDeviceLabel(frequency.device)}</small>
+                </div>
+                <div className="semantic-frequency-value">
+                  <strong>{frequency.value ? formatInteger(frequency.value) : "—"}</strong>
+                  <small>{frequency.period ? `${frequency.period} · ` : ""}{formatDateTime(frequency.observedAt)}</small>
+                </div>
+                {!item.trashed && (
+                  <button
+                    aria-label={`Удалить частотность «${frequencyTypeLabel(frequency.type)}»`}
+                    className="semantic-frequency-delete"
+                    disabled={deletingFrequency}
+                    onClick={() => {
+                      setFrequencyDeleteError(undefined);
+                      setFrequencyToDelete(frequency);
+                    }}
+                    title="Удалить частотность"
+                    type="button"
+                  >
+                    <Icon name="trash" />
+                  </button>
+                )}
               </div>
-              <ProviderLogo provider={snapshot.provider} size="compact" />
-            </header>
-            <ol>
-              {visibleResults.map((result) => (
-                <li key={`${snapshot.snapshotId}:${result.position}`}>
-                  <span>{result.position}</span>
-                  <div className="semantic-competitor-result">
-                    <strong>{urlHost(result.url)}</strong>
-                    <small>{shortUrl(result.url)}</small>
-                    <a
-                      aria-label={`Открыть результат ${result.position}: ${urlHost(result.url)}`}
-                      href={result.url}
-                      rel="noopener noreferrer"
-                      target="_blank"
-                      title={result.title ?? result.url}
-                    >
-                      <span className="visually-hidden">Открыть результат</span>
-                    </a>
-                  </div>
-                </li>
-              ))}
-            </ol>
-            {snapshot.results.length > 5 && (
-              <button
-                className="semantic-competitor-toggle"
-                onClick={() =>
-                  setExpandedCompetitorSnapshots((current) =>
-                    toggleSetValue(current, snapshot.snapshotId)
-                  )
-                }
-                type="button"
-              >
-                {expanded ? "Скрыть" : "Показать все"}
-              </button>
-            )}
-          </section>
-        );
-      })}
+            ))}
+          </div>
+        ) : (
+          <InspectorEmpty title="Нет актуального среза" text="Запустите сбор частотности по этому запросу." />
+        )}
+      </section>
 
       <section className="semantic-keyword-note">
         <h3>Заметка</h3>
@@ -412,14 +413,65 @@ export function SemanticKeywordInspector({
         <small>Источник: {sourceLabel(item.sourceMode)}</small>
       </section>
       {historyOpen && (
-        <SemanticModal
-          description="Последние 14 сохранённых съёмов запроса во всех поисковых контекстах. Крестик означает, что позиция в глубине проверки не найдена."
+        <SemanticKeywordPositionHistoryModal
+          contextPoints={insights?.positionHistory ?? []}
+          createdAt={item.createdAt}
+          keywordId={item.id}
+          keywordText={item.textOriginal}
           onClose={() => setHistoryOpen(false)}
-          size="medium"
-          title={`История позиций · ${item.textOriginal}`}
+          projectId={projectId}
+          {...(item.targetUrl ? { targetUrl: item.targetUrl } : {})}
+        />
+      )}
+      {frequencyToDelete && (
+        <SemanticModal
+          description="Удаление применяется только к выбранному запросу."
+          onClose={deletingFrequency
+            ? () => undefined
+            : () => {
+                setFrequencyToDelete(undefined);
+                setFrequencyDeleteError(undefined);
+              }}
+          size="small"
+          title="Удалить частотность?"
         >
-          <div className="semantic-rank-history-modal">
-            <RankChangeRows rows={positionChanges} />
+          <div className="semantic-confirm-dialog semantic-frequency-delete-dialog">
+            <div className="inline-alert danger" role="alert">
+              Все сохранённые срезы «{frequencyTypeLabel(frequencyToDelete.type)}»
+              для региона {frequencyToDelete.regionCode} и устройства «{frequencyDeviceLabel(frequencyToDelete.device)}»
+              будут удалены без возможности восстановления.
+            </div>
+            <div className="semantic-frequency-delete-summary">
+              <span>{frequencyTypeLabel(frequencyToDelete.type)}</span>
+              <strong>{frequencyToDelete.value ? formatInteger(frequencyToDelete.value) : "—"}</strong>
+              <small>{formatDateTime(frequencyToDelete.observedAt)}</small>
+            </div>
+            {frequencyDeleteError && (
+              <div className="inline-alert danger" role="alert">
+                {frequencyDeleteError}
+              </div>
+            )}
+            <div className="semantic-modal-actions">
+              <button
+                className="secondary-button"
+                disabled={deletingFrequency}
+                onClick={() => {
+                  setFrequencyToDelete(undefined);
+                  setFrequencyDeleteError(undefined);
+                }}
+                type="button"
+              >
+                Отмена
+              </button>
+              <button
+                className="danger-button"
+                disabled={deletingFrequency}
+                onClick={() => void deleteFrequencyContext()}
+                type="button"
+              >
+                {deletingFrequency ? "Удаляем…" : "Удалить"}
+              </button>
+            </div>
           </div>
         </SemanticModal>
       )}
@@ -508,66 +560,11 @@ function dateKey(value: string): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
-function sameRankingUrl(targetUrl: string, rankingUrl: string): boolean {
-  try {
-    const normalize = (value: string) => {
-      const url = new URL(value);
-      const host = url.hostname.toLocaleLowerCase("en").replace(/^www\./u, "");
-      const path = decodeURIComponent(url.pathname)
-        .replace(/\/{2,}/gu, "/")
-        .replace(/\/$/u, "") || "/";
-      return `${host}${path}`.toLocaleLowerCase("en");
-    };
-    return normalize(targetUrl) === normalize(rankingUrl);
-  } catch {
-    return targetUrl.trim() === rankingUrl.trim();
-  }
-}
-
-function competitorSourceLabel(snapshot: SemanticKeywordCompetitorSnapshot): string {
-  const source = snapshot.searchEngine === "YANDEX"
-    ? snapshot.searchSource === "LIVE"
-      ? "Яндекс Live"
-      : snapshot.searchSource === "SEARCH_API"
-        ? "Яндекс XML"
-        : "Яндекс"
-    : snapshot.searchSource === "LIVE" ? "Google Live" : "Google";
-  return `${source} · XMLStock`;
-}
-
 function historyPointTitle(point: SemanticKeywordPositionHistoryPoint): string {
   const status = point.found && point.position !== undefined
     ? `Позиция ${point.position}`
     : "Позиция не найдена";
   return `${status} · ${point.contextName} · ${formatDateTime(point.observedAt)}`;
-}
-
-function urlHost(value: string): string {
-  try {
-    return new URL(value).hostname.replace(/^www\./u, "");
-  } catch {
-    return value;
-  }
-}
-
-function shortUrl(value: string): string {
-  try {
-    const url = new URL(value);
-    const suffix = `${url.pathname}${url.search}`;
-    return suffix.length > 54 ? `${suffix.slice(0, 51)}…` : suffix || "/";
-  } catch {
-    return value.length > 54 ? `${value.slice(0, 51)}…` : value;
-  }
-}
-
-function toggleSetValue(
-  current: ReadonlySet<string>,
-  value: string
-): ReadonlySet<string> {
-  const next = new Set(current);
-  if (next.has(value)) next.delete(value);
-  else next.add(value);
-  return next;
 }
 
 function InspectorEmpty({ title, text }: Readonly<{ title: string; text: string }>) {
@@ -593,6 +590,15 @@ function frequencyDeviceLabel(device: string): string {
   }[device] ?? device;
 }
 
+function sameFrequencyContext(
+  left: Pick<FrequencySnapshotSummary, "type" | "regionCode" | "device">,
+  right: Pick<FrequencySnapshotSummary, "type" | "regionCode" | "device">
+): boolean {
+  return left.type === right.type &&
+    left.regionCode === right.regionCode &&
+    left.device === right.device;
+}
+
 function formatInteger(value: string): string {
   const number = Number(value);
   return Number.isSafeInteger(number) ? new Intl.NumberFormat("ru-RU").format(number) : value;
@@ -607,6 +613,12 @@ function noteError(error: unknown): string {
     return "Запрос изменился в другой вкладке. Закройте панель, откройте её снова и повторите сохранение.";
   }
   return error instanceof BrowserApiError ? error.message : "Не удалось сохранить заметку.";
+}
+
+function frequencyDeletionError(error: unknown): string {
+  return error instanceof BrowserApiError
+    ? error.message
+    : "Не удалось удалить частотность. Повторите попытку.";
 }
 
 function intentLabel(intent: SemanticKeywordIntent | undefined): string {

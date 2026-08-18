@@ -2,6 +2,7 @@ import { BadRequestException } from "@nestjs/common";
 import {
   normalizedRankDataQualityFlags,
   rankProviderKeywordLimit,
+  rankSerpResultMaxCount,
   type InternalIngestRankChunkInput,
   type InternalNormalizedRankResult,
   type InternalNormalizedRankSerpResult,
@@ -225,25 +226,41 @@ function normalizedSerpResults(
   value: unknown
 ): readonly InternalNormalizedRankSerpResult[] | undefined {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value) || value.length > 10) {
+  if (!Array.isArray(value) || value.length > rankSerpResultMaxCount) {
     invalid("result.serpResults");
   }
-  return value.map((entry, index) => {
+  let previousPosition = 0;
+  return value.map((entry) => {
     const input = strictRecord(
       entry,
       ["position", "rankingUrl", "normalizedRankingUrl"],
-      ["title", "snippet"]
+      ["faviconUrl", "title", "snippet"]
     );
-    if (!Number.isSafeInteger(input.position) || Number(input.position) !== index + 1) {
+    const position = Number(input.position);
+    if (
+      !Number.isSafeInteger(input.position) ||
+      position < 1 ||
+      position > rankSerpResultMaxCount ||
+      position <= previousPosition
+    ) {
       invalid("result.serpResults.position");
     }
+    previousPosition = position;
     return {
-      position: Number(input.position),
+      position,
       rankingUrl: httpUrl(input.rankingUrl, "result.serpResults.rankingUrl"),
       normalizedRankingUrl: httpUrl(
         input.normalizedRankingUrl,
         "result.serpResults.normalizedRankingUrl"
       ),
+      ...(input.faviconUrl === undefined
+        ? {}
+        : {
+            faviconUrl: httpUrl(
+              input.faviconUrl,
+              "result.serpResults.faviconUrl"
+            )
+          }),
       ...optionalString(input.title, "title", MAX_TITLE_LENGTH),
       ...optionalSnippet(input.snippet)
     };

@@ -152,7 +152,17 @@ export interface SemanticKeywordListPosition {
   readonly position?: number;
   readonly previousPosition?: number;
   readonly rankingUrl?: string;
+  /** Pages of the tracked project present in the latest stored SERP. */
+  readonly siteResults?: readonly SemanticKeywordListSiteResult[];
   readonly observedAt: string;
+}
+
+export interface SemanticKeywordListSiteResult {
+  readonly position: number;
+  readonly rankingUrl: string;
+  readonly faviconUrl?: string;
+  readonly title?: string;
+  readonly snippet?: string;
 }
 
 export interface ProjectPositionSummary {

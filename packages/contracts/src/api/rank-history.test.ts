@@ -99,6 +99,20 @@ test("history item redaction keeps project data but drops internal provenance", 
     rankingUrl: "https://project.example/page",
     normalizedRankingUrl: "https://project.example/page",
     title: "Result title",
+    siteResults: [
+      {
+        position: 7,
+        rankingUrl: "https://project.example/page",
+        faviconUrl: "https://search-assets.example/project.png",
+        title: "Result title"
+      },
+      {
+        position: 12,
+        rankingUrl: "https://project.example/other",
+        title: "Other page",
+        snippet: "Stored snippet"
+      }
+    ],
     resultType: "ORGANIC",
     serpFeatures: [],
     workspaceId: ids.workspaceId,
@@ -132,6 +146,20 @@ test("history item redaction keeps project data but drops internal provenance", 
     rankingUrl: "https://project.example/page",
     normalizedRankingUrl: "https://project.example/page",
     title: "Result title",
+    siteResults: [
+      {
+        position: 7,
+        rankingUrl: "https://project.example/page",
+        faviconUrl: "https://search-assets.example/project.png",
+        title: "Result title"
+      },
+      {
+        position: 12,
+        rankingUrl: "https://project.example/other",
+        title: "Other page",
+        snippet: "Stored snippet"
+      }
+    ],
     resultType: "ORGANIC",
     serpFeatures: []
   });
@@ -157,6 +185,28 @@ test("history item redaction keeps project data but drops internal provenance", 
       redactRankHistoryItem({
         ...unsafe,
         absolutePosition: 7
+      }),
+    /Invalid rank history item/u
+  );
+  assert.throws(
+    () =>
+      redactRankHistoryItem({
+        ...unsafe,
+        siteResults: [
+          { position: 12, rankingUrl: "https://project.example/other" },
+          { position: 7, rankingUrl: "https://project.example/page" }
+        ]
+      }),
+    /Invalid rank history item/u
+  );
+  assert.throws(
+    () =>
+      redactRankHistoryItem({
+        ...unsafe,
+        siteResults: [{
+          position: 1,
+          rankingUrl: "https://user:secret@project.example/"
+        }]
       }),
     /Invalid rank history item/u
   );

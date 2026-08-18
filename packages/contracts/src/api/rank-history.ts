@@ -2,6 +2,7 @@ import type {
   NormalizedRankDataQualityFlag,
   RankManifestHash
 } from "./rank-runs.js";
+import type { SemanticKeywordListSiteResult } from "./keywords.js";
 
 export const rankHistoryMaxPageSize = 200 as const;
 
@@ -41,10 +42,16 @@ interface RankHistoryItemBase {
   readonly configurationVersion: number;
   readonly provider: "ARSENKIN" | "XMLSTOCK";
   readonly connectorVersion: string;
+  readonly contextName?: string;
+  readonly searchEngine?: "GOOGLE" | "YANDEX";
+  readonly searchSource?: "LIVE" | "SEARCH_API";
+  readonly regionLabel?: string;
   readonly observedAt: string;
   readonly storedAt: string;
   readonly jobId: string;
   readonly dataQualityFlags: readonly NormalizedRankDataQualityFlag[];
+  /** All pages of the tracked project found in this immutable SERP, with safe SERP metadata. */
+  readonly siteResults?: readonly SemanticKeywordListSiteResult[];
 }
 
 export interface RankHistoryFoundItem extends RankHistoryItemBase {
@@ -185,6 +192,22 @@ export function redactRankHistoryItem(
   }
 
   const dataQualityFlags = copyQualityFlags(input.dataQualityFlags);
+  assertOptionalBoundedString(input.contextName, 160);
+  assertOptionalBoundedString(input.regionLabel, 160);
+  if (
+    (input.contextName === undefined) !== (input.searchEngine === undefined) ||
+    (input.searchEngine !== undefined &&
+      input.searchEngine !== "GOOGLE" &&
+      input.searchEngine !== "YANDEX") ||
+    (input.searchSource !== undefined &&
+      (input.searchEngine === undefined ||
+        (input.searchSource !== "LIVE" &&
+          input.searchSource !== "SEARCH_API"))) ||
+    (input.regionLabel !== undefined && input.searchEngine === undefined)
+  ) {
+    return invalidRankHistoryItem();
+  }
+  const siteResults = copySiteResults(input.siteResults);
   const base: RankHistoryItemBase = {
     snapshotId: input.snapshotId,
     keywordId: input.keywordId,
@@ -192,10 +215,23 @@ export function redactRankHistoryItem(
     configurationVersion: input.configurationVersion,
     provider: input.provider,
     connectorVersion: input.connectorVersion,
+    ...(input.contextName === undefined
+      ? {}
+      : { contextName: input.contextName }),
+    ...(input.searchEngine === undefined
+      ? {}
+      : { searchEngine: input.searchEngine }),
+    ...(input.searchSource === undefined
+      ? {}
+      : { searchSource: input.searchSource }),
+    ...(input.regionLabel === undefined
+      ? {}
+      : { regionLabel: input.regionLabel }),
     observedAt: input.observedAt,
     storedAt: input.storedAt,
     jobId: input.jobId,
-    dataQualityFlags
+    dataQualityFlags,
+    ...(siteResults === undefined ? {} : { siteResults })
   };
 
   if (input.found === false) {
@@ -270,6 +306,45 @@ export function redactRankHistoryItem(
     resultType: input.resultType,
     serpFeatures: []
   };
+}
+
+function copySiteResults(
+  values: readonly SemanticKeywordListSiteResult[] | undefined
+): readonly SemanticKeywordListSiteResult[] | undefined {
+  if (values === undefined) return undefined;
+  if (!Array.isArray(values) || values.length < 1 || values.length > 100) {
+    return invalidRankHistoryItem();
+  }
+  let previousPosition = 0;
+  const urls = new Set<string>();
+  return values.map((value) => {
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      !Number.isSafeInteger(value.position) ||
+      value.position < 1 ||
+      value.position > 100 ||
+      value.position <= previousPosition ||
+      urls.has(value.rankingUrl)
+    ) {
+      return invalidRankHistoryItem();
+    }
+    assertUrl(value.rankingUrl);
+    if (value.faviconUrl !== undefined) assertUrl(value.faviconUrl);
+    assertOptionalBoundedString(value.title, MAX_TITLE_LENGTH);
+    assertOptionalBoundedString(value.snippet, MAX_SNIPPET_LENGTH);
+    previousPosition = value.position;
+    urls.add(value.rankingUrl);
+    return {
+      position: value.position,
+      rankingUrl: value.rankingUrl,
+      ...(value.faviconUrl === undefined
+        ? {}
+        : { faviconUrl: value.faviconUrl }),
+      ...(value.title === undefined ? {} : { title: value.title }),
+      ...(value.snippet === undefined ? {} : { snippet: value.snippet })
+    };
+  });
 }
 
 function copyQualityFlags(

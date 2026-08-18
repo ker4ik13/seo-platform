@@ -24,6 +24,10 @@ import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import {
+  projectSiteResults,
+  rankHistorySearchSource
+} from "./rank-serp-projection.js";
 
 const CURSOR_DOMAIN = "seo-platform.rank-history-cursor@1\0";
 const UUID_V7_PATTERN =
@@ -56,7 +60,31 @@ const HISTORY_SELECT = {
   provider: true,
   sourceMode: true,
   connectorVersion: true,
-  createdAt: true
+  createdAt: true,
+  manifest: {
+    select: {
+      projectDomain: true,
+      execution: true,
+      context: { select: { name: true } },
+      configuration: {
+        select: {
+          searchEngine: true,
+          regionLabel: true
+        }
+      }
+    }
+  },
+  serpResults: {
+    orderBy: { position: "asc" },
+    select: {
+      position: true,
+      rankingUrl: true,
+      normalizedRankingUrl: true,
+      faviconUrl: true,
+      title: true,
+      snippet: true
+    }
+  }
 } satisfies Prisma.RankSnapshotSelect;
 
 type RankHistoryRecord = Prisma.RankSnapshotGetPayload<{
@@ -246,6 +274,15 @@ function storedHistoryItem(
   ) {
     throw new Error("Stored rank history row is invalid");
   }
+  const siteResults = projectSiteResults(
+    record.serpResults,
+    record.manifest.projectDomain
+  );
+  const searchEngine = record.manifest.configuration.searchEngine;
+  const searchSource = rankHistorySearchSource(
+    record.manifest.execution,
+    searchEngine
+  );
   const common = {
     snapshotId: record.id,
     keywordId: record.keywordId,
@@ -253,10 +290,17 @@ function storedHistoryItem(
     configurationVersion: record.configurationVersion,
     provider: record.provider as "ARSENKIN" | "XMLSTOCK",
     connectorVersion: record.connectorVersion,
+    contextName: record.manifest.context.name,
+    searchEngine,
+    ...(searchSource ? { searchSource } : {}),
+    ...(record.manifest.configuration.regionLabel === null
+      ? {}
+      : { regionLabel: record.manifest.configuration.regionLabel }),
     observedAt: record.observedAt.toISOString(),
     storedAt: record.createdAt.toISOString(),
     jobId: record.jobId,
-    dataQualityFlags: storedQualityFlags(record.dataQualityFlags)
+    dataQualityFlags: storedQualityFlags(record.dataQualityFlags),
+    ...(siteResults.length === 0 ? {} : { siteResults })
   };
   if (!record.found) {
     if (

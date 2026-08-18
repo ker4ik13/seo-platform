@@ -90,17 +90,39 @@ Frontend-представление состояния фоновых опера
 запроса показывает по одному последнему состоянию Яндекса и Google,
 append-only историю самого keyword ID независимо от технического контекста и
 проектную заметку. График ограничен 14 последними снимками по времени, поэтому
-новый контекст не скрывает более ранние замеры. Для последнего XMLStock
-замера каждого поисковика карточка читает отдельную immutable Top-10 проекцию
-органических результатов: первые пять строк видны сразу, остальные — по
-явному раскрытию. Целевой URL сравнивается с текущим ranking URL после
-безопасной нормализации host/path; несовпадение обозначается отдельно и не
-меняет сами данные замера. История отображает
+новый контекст не скрывает более ранние замеры. Кнопка `История` открывает
+cursor-paginated журнал всех сохранённых BYOK snapshots самого keyword ID по
+200 строк с датой, контекстом, provider, позицией, URL и доступными
+title/snippet. Каждая строка получает из своего immutable snapshot bounded
+набор страниц проекта с позициями и доступными title/snippet; при нескольких
+страницах квадратный групповой индикатор открывает поверх журнала modal только
+с этими страницами в SERP-представлении. Для последнего XMLStock или
+Arsenkin замера каждого поисковика
+карточка читает отдельную immutable Top-10 проекцию нормализованных organic
+результатов: первые пять строк видны сразу, остальные — по явному раскрытию;
+строки домена проекта выделяются без дублирующего бейджа. Компактная строка
+ставит favicon под номером позиции и отдаёт основную ширину title/snippet/URL;
+URL допускает не более двух строк. Favicon сначала загружается из корневого
+`/favicon.ico` сайта результата; сохранённый favicon из нормализованного
+ответа провайдера служит запасным источником, после чего показывается локальная
+заглушка. Визуальная подпись SERP-ссылки
+не содержит `http://`/`https://`, не изменяя полный кликабельный `href`, а
+исходный `http://` обозначается небольшим оранжевым открытым замком. Целевой URL сравнивается с текущим ranking URL после безопасной
+нормализации host/path; несовпадение обозначается отдельно и не меняет сами
+данные замера. Если в последнем сохранённом SERP присутствуют несколько URL
+проекта, таблица показывает отдельный индикатор и modal только с этими
+страницами: позиция, favicon, title, description и URL без визуального
+транспортного префикса; конкурентская выдача в этот modal не подмешивается.
+История отображает
 текущую позицию и дельту, выделяет `not-found` отдельной осью и интерактивно
 проецирует безопасные параметры замера (search source, provider, регион,
 устройство, depth и время), не раскрывая provider request ID или raw result;
-пять последних сгруппированных дат находятся под графиком, выбранные 14
-снимков открываются в modal.
+пять последних сгруппированных дат находятся под графиком, а полный журнал
+открывается отдельной кнопкой. Блок последних частотностей расположен после
+SERP-конкурентов и непосредственно перед проектной заметкой. Каждая строка
+имеет компактное удаление с обязательным modal-подтверждением; команда
+tenant-scoped и идемпотентно удаляет все snapshots того же keyword,
+type, region и device, чтобы более старое значение не появлялось снова.
 Таблица и карточка вычисляют изменение позиции относительно последнего
 найденного `rank_snapshot` того же keyword ID и поисковика по всем техническим
 контекстам. Для bounded lookup используется
@@ -335,7 +357,7 @@ HTTP, не `POLL_WAIT`; throttling адаптивно уменьшает окн�
 | Данные | Модуль-владелец | Текущее хранилище |
 |---|---|---|
 | users (включая bounded account avatar до 512 KiB), sessions, workspaces (включая bounded workspace avatar до 512 KiB), projects и bounded project logos до 512 KiB, project transfer requests, RBAC, billing, audit, platform admin command receipts | Core API | `platform_db` |
-| semantics (включая keyword notes и presets минус-слов), project Markdown notes, pages, rankings и immutable XMLStock Top-10 SERP results, crawl/page-map projections | Core SEO | `seo_db` |
+| semantics (включая keyword notes и presets минус-слов), project Markdown notes, pages, rankings и immutable normalized XMLStock/Arsenkin SERP results, crawl/page-map projections | Core SEO | `seo_db` |
 | realtime subscriptions, deliveries, event inbox | Core Realtime | `realtime_db` + Redis |
 | jobs, schedules, uploads, credential vault, provider execution | Execution | `jobs_db` + Redis + S3 |
 
@@ -356,10 +378,20 @@ Unsafe Prisma raw APIs запрещены статическим тестом.
    короткий grant. Внутренней дневной квоты на BYOK rank нет; статус estimate
    — `UNLIMITED`.
 5. Connector role выполняет fenced submit/poll/get через DB broker.
-6. Rank role публикует normalized chunks и terminal result; для XMLStock тот
-   же hash-bound chunk содержит не более первых десяти нормализованных
-   organic URL без raw response, Core SEO сохраняет их дочерними immutable
-   строками rank snapshot; frontend читает только tenant-scoped projection.
+6. Rank role публикует normalized chunks и terminal result. Для XMLStock тот
+   же hash-bound chunk содержит упорядоченную выдачу до выбранной глубины
+   Top-100, для Arsenkin — доступную в ответе `top20` проекцию и найденный URL.
+   Raw provider response не сохраняется: Core SEO пакетно создаёт дочерние
+   immutable строки rank snapshot, а frontend читает только tenant-scoped
+   проекцию.
+
+Миграция `20260818150000_rank_serp_results_top100` расширяет только DB-check
+immutable `rank_serp_results.position` с Top-10 до Top-100; существующие
+строки не переписываются, PK/FK и запрет UPDATE/DELETE сохраняются.
+Миграция `20260818173000_rank_serp_result_favicons` добавляет в эти же
+immutable строки nullable `favicon_url`: сохраняется только безопасный
+абсолютный `http/https` URL, присутствующий в provider SERP, без отдельного
+запроса к сайту результата.
 
 XMLStock Google Top-100 собирается десятью последовательными страницами по 10
 результатов; XMLStock Yandex Live использует такой же GET-only page mapping,

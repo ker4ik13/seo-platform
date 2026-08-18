@@ -26,6 +26,8 @@ export type IconName =
   | "history"
   | "operations"
   | "warning"
+  | "link"
+  | "lockOpen"
   | "http"
   | "indexability"
   | "sitemap"
@@ -70,6 +72,8 @@ const paths: Record<IconName, string> = {
   history: "M12 4a8 8 0 1 1-7.4 5H2l3.5-4L9 9H6.7A6 6 0 1 0 12 6v4h-2v2h4V6.3A6 6 0 0 0 12 6V4Z",
   operations: "M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Zm1 5v5.6l3.8 2.2-1 1.7L11 13.7V7h2Z",
   warning: "M12 2 1 21h22L12 2Zm0 5.4 6.6 11.6H5.4L12 7.4ZM11 10v5h2v-5h-2Zm0 6.5v2h2v-2h-2Z",
+  link: "M3.9 12A3.1 3.1 0 0 1 7 8.9h4V7H7a5 5 0 0 0 0 10h4v-1.9H7A3.1 3.1 0 0 1 3.9 12ZM8 13h8v-2H8v2Zm9-6h-4v1.9h4a3.1 3.1 0 0 1 0 6.2h-4V17h4a5 5 0 0 0 0-10Z",
+  lockOpen: "M17 8h-1V6a4 4 0 0 0-7.8-1.3l1.9.7A2 2 0 0 1 14 6v2H7a2 2 0 0 0-2 2v10h14V10a2 2 0 0 0-2-2Zm0 10H7v-8h10v8Zm-5-6a2 2 0 0 0-1 3.7V17h2v-1.3A2 2 0 0 0 12 12Z",
   http: "M4 4h16v16H4V4Zm2 3v2h12V7H6Zm0 4v6h12v-6H6Zm2 2h5v2H8v-2Z",
   indexability: "M12 4C7 4 3.1 8.1 2 12c1.1 3.9 5 8 10 8s8.9-4.1 10-8c-1.1-3.9-5-8-10-8Zm0 3a5 5 0 1 1 0 10 5 5 0 0 1 0-10Zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z",
   sitemap: "M11 3h2v4h6v5h-2V9h-4v3h3v7h-3v2h-2v-2H8v-7h3V9H7v3H5V7h6V3Z",

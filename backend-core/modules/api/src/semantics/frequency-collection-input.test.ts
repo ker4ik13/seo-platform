@@ -4,7 +4,8 @@ import {
   createFrequencyCollectionInput,
   frequencyCancelInput,
   frequencyIdempotencyKey,
-  frequencyRetryInput
+  frequencyRetryInput,
+  semanticFrequencyContextRoute
 } from "./frequency-collection-input.js";
 
 const keywordId = "01900000-0000-7000-8000-000000000001";
@@ -27,6 +28,10 @@ test("accepts an exact bounded frequency collection command", () => {
   assert.equal(frequencyIdempotencyKey("frequency-command-123"), "frequency-command-123");
   assert.deepEqual(frequencyCancelInput({}), {});
   assert.deepEqual(frequencyRetryInput({ version: 7 }), { version: 7 });
+  assert.deepEqual(
+    semanticFrequencyContextRoute("EXACT", "213", "MOBILE"),
+    { type: "EXACT", regionCode: "213", device: "MOBILE" }
+  );
 });
 
 test("rejects duplicate keywords, unknown fields and blind retries", () => {
@@ -41,6 +46,9 @@ test("rejects duplicate keywords, unknown fields and blind retries", () => {
   assert.throws(() => frequencyCancelInput({ version: 1 }));
   assert.throws(() => frequencyRetryInput({ version: 0 }));
   assert.throws(() => frequencyRetryInput({ version: 1, force: true }));
+  assert.throws(() => semanticFrequencyContextRoute("UNKNOWN", "213", "ALL"));
+  assert.throws(() => semanticFrequencyContextRoute("BASE", "../213", "ALL"));
+  assert.throws(() => semanticFrequencyContextRoute("BASE", "213", "TV"));
 });
 
 test("accepts one 10,000-keyword Arsenkin batch and rejects overflow", () => {

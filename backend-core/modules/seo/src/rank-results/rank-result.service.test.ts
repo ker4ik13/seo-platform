@@ -160,7 +160,7 @@ test("persists 15k rank snapshots in bounded createMany batches", async () => {
   assert.equal(harness.receiptWrites, 1);
 });
 
-test("persists XMLStock Top-10 evidence with its immutable snapshot", async () => {
+test("persists normalized SERP evidence with its immutable snapshot", async () => {
   const base = command();
   const found = base.results[0]!;
   const value = command({
@@ -172,6 +172,7 @@ test("persists XMLStock Top-10 evidence with its immutable snapshot", async () =
         position: 1,
         rankingUrl: "https://competitor.example/",
         normalizedRankingUrl: "https://competitor.example/",
+        faviconUrl: "https://search-assets.example/competitor.png",
         title: "Competitor"
       }]
     }]
@@ -191,6 +192,7 @@ test("persists XMLStock Top-10 evidence with its immutable snapshot", async () =
     position: 1,
     rankingUrl: "https://competitor.example/",
     normalizedRankingUrl: "https://competitor.example/",
+    faviconUrl: "https://search-assets.example/competitor.png",
     title: "Competitor",
     createdAt: appliedAt
   });

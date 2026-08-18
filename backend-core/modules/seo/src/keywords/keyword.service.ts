@@ -6,7 +6,6 @@ import {
   HttpStatus,
   Injectable
 } from "@nestjs/common";
-import { rankSearchSourceFromProviderMappingVersion } from "@seo-platform/contracts";
 import type {
   ApiCollectionResponse,
   InternalCreateSemanticKeywordInput,
@@ -31,7 +30,8 @@ import type {
   SemanticKeywordInsights,
   SemanticKeywordSort,
   SemanticFrequencyDevice,
-  SemanticFrequencyQualityFlag
+  SemanticFrequencyQualityFlag,
+  SemanticFrequencyType
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -49,6 +49,10 @@ import { normalizeKeywordText } from "./keyword-normalization.js";
 import { cleanKeywordText } from "./keyword-cleaning.js";
 import { normalizePageUrl } from "../pages/page-url.js";
 import { ensureKeywordSystemGroupIds } from "../keyword-groups/semantic-system-groups.js";
+import {
+  projectSiteResults,
+  rankHistorySearchSource
+} from "../rank-results/rank-serp-projection.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -534,6 +538,42 @@ export class KeywordService {
         snapshotId: rank.snapshotId
       }))
     );
+    const latestRankSnapshotIds = [...latestRankByKeywordEngine.values()].map(
+      ({ rank }) => rank.snapshotId
+    );
+    const currentSerpSnapshots = latestRankSnapshotIds.length === 0
+      ? []
+      : await this.prisma.rankSnapshot.findMany({
+          where: {
+            workspaceId,
+            projectId,
+            id: { in: latestRankSnapshotIds }
+          },
+          select: {
+            id: true,
+            manifest: { select: { projectDomain: true } },
+            serpResults: {
+              orderBy: { position: "asc" },
+              select: {
+                position: true,
+                rankingUrl: true,
+                normalizedRankingUrl: true,
+                faviconUrl: true,
+                title: true,
+                snippet: true
+              }
+            }
+          }
+        });
+    const siteResultsBySnapshotId = new Map(
+      currentSerpSnapshots.map((snapshot) => [
+        snapshot.id,
+        projectSiteResults(
+          snapshot.serpResults,
+          snapshot.manifest.projectDomain
+        )
+      ])
+    );
     const positionsByKeywordId = new Map<
       string,
       Map<SemanticKeywordListPosition["searchEngine"], SemanticKeywordListPosition>
@@ -548,6 +588,7 @@ export class KeywordService {
           rank.snapshotId
         )
       ) ?? rank.previousPosition ?? undefined;
+      const siteResults = siteResultsBySnapshotId.get(rank.snapshotId) ?? [];
       positions.set(searchEngine, {
         searchEngine,
         found: rank.found,
@@ -556,6 +597,7 @@ export class KeywordService {
         ...(rank.rankingUrl === null || rank.rankingUrl === undefined
           ? {}
           : { rankingUrl: rank.rankingUrl }),
+        ...(siteResults.length === 0 ? {} : { siteResults }),
         observedAt: rank.observedAt.toISOString()
       });
       positionsByKeywordId.set(rank.keywordId, positions);
@@ -657,7 +699,9 @@ export class KeywordService {
           found: true,
           position: true,
           observedAt: true,
-          manifest: { select: { execution: true } }
+          manifest: {
+            select: { execution: true, projectDomain: true }
+          }
         }
       })
     ]);
@@ -717,31 +761,17 @@ export class KeywordService {
       projectId,
       currentRankAnchors
     );
-    const latestXmlSnapshotByEngine = new Map<
-      "GOOGLE" | "YANDEX",
-      (typeof rankSnapshots)[number]
-    >();
-    for (const snapshot of rankSnapshots) {
-      if (snapshot.provider !== "XMLSTOCK") continue;
-      const configuration = configurationById.get(
-        `${snapshot.trackingContextId}:${snapshot.configurationVersion}`
-      );
-      if (
-        configuration &&
-        !latestXmlSnapshotByEngine.has(configuration.searchEngine)
-      ) {
-        latestXmlSnapshotByEngine.set(
-          configuration.searchEngine,
-          snapshot
-        );
-      }
-    }
-    const latestXmlSnapshots = [...latestXmlSnapshotByEngine.values()];
-    const rankSerpResults = latestXmlSnapshots.length === 0
+    const serpCandidateSnapshots = rankSnapshots.filter(
+      ({ provider }) => provider === "ARSENKIN" || provider === "XMLSTOCK"
+    );
+    const rankSerpResults = serpCandidateSnapshots.length === 0
       ? []
       : await this.prisma.rankSerpResult.findMany({
           where: {
-            snapshotId: { in: latestXmlSnapshots.map(({ id }) => id) },
+            snapshotId: {
+              in: serpCandidateSnapshots.map(({ id }) => id)
+            },
+            position: { lte: 10 },
             snapshot: { workspaceId, projectId, keywordId }
           },
           orderBy: [
@@ -758,6 +788,28 @@ export class KeywordService {
       const rows = serpResultsBySnapshotId.get(result.snapshotId) ?? [];
       serpResultsBySnapshotId.set(result.snapshotId, [...rows, result]);
     }
+    const latestSerpSnapshotByEngine = new Map<
+      "GOOGLE" | "YANDEX",
+      (typeof rankSnapshots)[number]
+    >();
+    for (const snapshot of serpCandidateSnapshots) {
+      if ((serpResultsBySnapshotId.get(snapshot.id)?.length ?? 0) === 0) {
+        continue;
+      }
+      const configuration = configurationById.get(
+        `${snapshot.trackingContextId}:${snapshot.configurationVersion}`
+      );
+      if (
+        configuration &&
+        !latestSerpSnapshotByEngine.has(configuration.searchEngine)
+      ) {
+        latestSerpSnapshotByEngine.set(
+          configuration.searchEngine,
+          snapshot
+        );
+      }
+    }
+    const latestSerpSnapshots = [...latestSerpSnapshotByEngine.values()];
     return {
       keywordId,
       ...(keyword.note ? { note: keyword.note } : {}),
@@ -831,7 +883,7 @@ export class KeywordService {
           observedAt: snapshot.observedAt.toISOString()
         }];
       }),
-      competitorSnapshots: latestXmlSnapshots.flatMap((snapshot) => {
+      competitorSnapshots: latestSerpSnapshots.flatMap((snapshot) => {
         const context = contextById.get(snapshot.trackingContextId);
         const configuration = configurationById.get(
           `${snapshot.trackingContextId}:${snapshot.configurationVersion}`
@@ -848,17 +900,52 @@ export class KeywordService {
           contextName: context.name,
           searchEngine: configuration.searchEngine,
           ...(searchSource ? { searchSource } : {}),
-          provider: "XMLSTOCK" as const,
+          provider: competitorSnapshotProvider(snapshot.provider),
           observedAt: snapshot.observedAt.toISOString(),
           results: results.map((result) => ({
             position: result.position,
             url: result.rankingUrl,
+            ...(result.faviconUrl === null || result.faviconUrl === undefined
+              ? {}
+              : { faviconUrl: result.faviconUrl }),
             ...(result.title === null ? {} : { title: result.title }),
             ...(result.snippet === null ? {} : { snippet: result.snippet })
           }))
         }];
       })
     };
+  }
+
+  public async deleteFrequencyContext(
+    workspaceId: string,
+    projectId: string,
+    keywordId: string,
+    type: SemanticFrequencyType,
+    regionCode: string,
+    device: SemanticFrequencyDevice
+  ): Promise<void> {
+    const keyword = await this.prisma.keyword.findFirst({
+      where: {
+        id: keywordId,
+        workspaceId,
+        projectId,
+        status: "ACTIVE"
+      },
+      select: { id: true }
+    });
+    if (!keyword) {
+      throw new HttpException("Keyword not found", HttpStatus.NOT_FOUND);
+    }
+    await this.prisma.frequencySnapshot.deleteMany({
+      where: {
+        workspaceId,
+        projectId,
+        keywordId,
+        type,
+        regionCode,
+        device
+      }
+    });
   }
 
   public async create(
@@ -3067,18 +3154,9 @@ function rankHistoryProvider(
   throw new Error("Stored rank history provider is unsupported");
 }
 
-function rankHistorySearchSource(
-  value: Prisma.JsonValue,
-  searchEngine: "GOOGLE" | "YANDEX"
-) {
-  if (
-    value === null ||
-    Array.isArray(value) ||
-    typeof value !== "object" ||
-    typeof value.providerMappingVersion !== "string"
-  ) return undefined;
-  return rankSearchSourceFromProviderMappingVersion(
-    searchEngine,
-    value.providerMappingVersion
-  );
+function competitorSnapshotProvider(
+  value: string
+): "ARSENKIN" | "XMLSTOCK" {
+  if (value === "ARSENKIN" || value === "XMLSTOCK") return value;
+  throw new Error("Stored SERP snapshot provider is unsupported");
 }

@@ -149,6 +149,11 @@ test("polls an accepted task and stages only normalized output", async () => {
     normalizedRankingUrl: "https://example.com/page",
     resultType: "ORGANIC",
     serpFeatures: [],
+    serpResults: [{
+      position: 2,
+      rankingUrl: "https://example.com/page",
+      normalizedRankingUrl: "https://example.com/page"
+    }],
     dataQualityFlags: [
       "ABSOLUTE_POSITION_UNAVAILABLE",
       "PIXEL_POSITION_UNAVAILABLE",

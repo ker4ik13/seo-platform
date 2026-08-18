@@ -71,6 +71,25 @@ test("accepts TOP-100 and rejects positions outside the database contract", () =
       ),
     BadRequestException
   );
+  assert.throws(
+    () =>
+      internalIngestRankChunkInput(
+        command({
+          manifestEntryId,
+          keywordId,
+          dataQualityFlags: ["PROVIDER_OBSERVED_AT_UNAVAILABLE"],
+          found: false,
+          position: null,
+          serpResults: [{
+            position: 1,
+            rankingUrl: "https://example.com/",
+            normalizedRankingUrl: "https://example.com/",
+            faviconUrl: "data:image/png;base64,unsafe"
+          }]
+        })
+      ),
+    BadRequestException
+  );
 });
 
 test("accepts not-found only with provider timestamp provenance", () => {
@@ -89,7 +108,7 @@ test("accepts not-found only with provider timestamp provenance", () => {
   assert.equal(parsed.results[0]?.found, false);
 });
 
-test("accepts only ordered bounded Top-10 SERP evidence", () => {
+test("accepts only ordered bounded SERP evidence", () => {
   const result = {
     manifestEntryId,
     keywordId,
@@ -101,6 +120,7 @@ test("accepts only ordered bounded Top-10 SERP evidence", () => {
         position: 1,
         rankingUrl: "https://competitor.example/one",
         normalizedRankingUrl: "https://competitor.example/one",
+        faviconUrl: "https://search-assets.example/competitor.png",
         title: "First"
       },
       {
@@ -115,12 +135,17 @@ test("accepts only ordered bounded Top-10 SERP evidence", () => {
     internalIngestRankChunkInput(command(result)).results[0]?.serpResults?.length,
     2
   );
+  assert.equal(
+    internalIngestRankChunkInput(command(result)).results[0]?.serpResults?.[0]
+      ?.faviconUrl,
+    "https://search-assets.example/competitor.png"
+  );
   assert.throws(
     () => internalIngestRankChunkInput(command({
       ...result,
       serpResults: result.serpResults.map((row) => ({
         ...row,
-        position: row.position + 1
+        position: 2
       }))
     })),
     BadRequestException

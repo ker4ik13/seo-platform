@@ -1068,6 +1068,7 @@ model RankSerpResult {
   position             Int
   rankingUrl           String   @map("ranking_url") @db.Text
   normalizedRankingUrl String   @map("normalized_ranking_url") @db.Text
+  faviconUrl           String?  @map("favicon_url") @db.Text
   title                String?  @db.Text
   snippet              String?  @db.Text
   createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)

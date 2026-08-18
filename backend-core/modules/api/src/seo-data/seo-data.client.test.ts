@@ -86,6 +86,20 @@ const validItem = {
       position: 5,
       previousPosition: 8,
       rankingUrl: "https://example.com/seo",
+      siteResults: [
+        {
+          position: 5,
+          rankingUrl: "https://example.com/seo",
+          faviconUrl: "https://search-assets.example/project.png",
+          title: "SEO аудит",
+          snippet: "Главная страница услуги"
+        },
+        {
+          position: 9,
+          rankingUrl: "https://example.com/seo-alt",
+          title: "SEO аудит — дополнительная страница"
+        }
+      ],
       observedAt: "2026-08-01T10:00:00.000Z"
     }
   ],
@@ -186,6 +200,11 @@ test("accepts a strictly shaped semantic keyword page", () => {
   );
   assert.equal(result.data[0]?.positions?.[0]?.position, 5);
   assert.equal(result.data[0]?.positions?.[0]?.rankingUrl, "https://example.com/seo");
+  assert.equal(result.data[0]?.positions?.[0]?.siteResults?.[1]?.position, 9);
+  assert.equal(
+    result.data[0]?.positions?.[0]?.siteResults?.[0]?.snippet,
+    "Главная страница услуги"
+  );
   assert.equal(result.data[0]?.hasNote, false);
   assert.deepEqual(result.page, { hasNext: false, totalApprox: 1 });
 });
@@ -207,7 +226,7 @@ test("validates safe interactive rank history metadata", () => {
       countryCode: "RU",
       language: "ru",
       depth: 50,
-      provider: "XMLSTOCK",
+      provider: "ARSENKIN",
       found: false,
       observedAt: "2026-08-06T11:45:00.000Z"
     }]
@@ -224,16 +243,22 @@ test("validates safe interactive rank history metadata", () => {
       contextName: "Яндекс · Москва",
       searchEngine: "YANDEX",
       searchSource: "LIVE",
-      provider: "XMLSTOCK",
+      provider: "ARSENKIN",
       observedAt: "2026-08-06T11:45:00.000Z",
       results: [{
-        position: 1,
+        position: 3,
         url: "https://competitor.example/result",
+        faviconUrl: "https://search-assets.example/competitor.png",
         title: "Конкурент"
       }]
     }]
   }, keywordId);
-  assert.equal(withCompetitors.competitorSnapshots?.[0]?.results[0]?.position, 1);
+  assert.equal(withCompetitors.competitorSnapshots?.[0]?.provider, "ARSENKIN");
+  assert.equal(withCompetitors.competitorSnapshots?.[0]?.results[0]?.position, 3);
+  assert.equal(
+    withCompetitors.competitorSnapshots?.[0]?.results[0]?.faviconUrl,
+    "https://search-assets.example/competitor.png"
+  );
   const { searchSource: _searchSource, ...importedPoint } =
     insights.positionHistory[0]!;
   const imported = semanticKeywordInsights({
@@ -255,6 +280,45 @@ test("validates safe interactive rank history metadata", () => {
     }, keywordId),
     DomainError
   );
+});
+
+test("deletes one exact keyword frequency context through SEO Data", async () => {
+  const originalFetch = globalThis.fetch;
+  let captured: Readonly<{
+    method: string | undefined;
+    url: URL;
+    body: unknown;
+  }> | undefined;
+  globalThis.fetch = (async (
+    input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> => {
+    captured = {
+      method: init?.method,
+      url: new URL(input instanceof Request ? input.url : input.toString()),
+      body: init?.body
+    };
+    return new Response(null, { status: 204 });
+  }) as typeof fetch;
+
+  try {
+    await client().deleteKeywordFrequencyContext(
+      internalContext(),
+      keywordId,
+      "FIXED",
+      "ru-mow",
+      "DESKTOP"
+    );
+    assert.equal(captured?.method, "DELETE");
+    assert.equal(
+      captured?.url.pathname,
+      `/internal/v1/projects/${projectId}/keywords/${keywordId}/frequencies/FIXED/DESKTOP`
+    );
+    assert.equal(captured?.url.searchParams.get("regionCode"), "ru-mow");
+    assert.equal(captured?.body, undefined);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("validates negative keyword presets, preview and bounded apply results", () => {

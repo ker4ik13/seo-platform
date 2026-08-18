@@ -1,6 +1,7 @@
 import {
   rankProviderKeywordLimit,
   type InternalNormalizedRankResult,
+  type InternalNormalizedRankSerpResult,
   type RankManifestHash,
   type TrackingDomainMatchRule
 } from "@seo-platform/contracts";
@@ -33,6 +34,9 @@ const TASK_ID_PATTERN = /^[a-z0-9_-]{1,100}$/iu;
 const REGION_ID_PATTERN = /^[1-9]\d{0,9}$/u;
 const STAGED_RESULT_SCHEMA = "arsenkin-rank-result@1" as const;
 const ARSENKIN_RANK_RESULT_MAX_BYTES = 128 * 1_048_576;
+const MAX_SERP_TITLE_LENGTH = 2_048;
+const MAX_SERP_SNIPPET_LENGTH = 8_192;
+const MAX_SERP_FAVICON_URL_LENGTH = 4_096;
 const TIMESTAMP_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 
@@ -561,7 +565,7 @@ function normalizeArsenkinPositionRow(
 ): InternalNormalizedRankResult {
   const row = record(value);
   const positions = array(row.position);
-  parseArsenkinTop20(row.top20);
+  const topResults = parseArsenkinTop20(row.top20);
   if (
     positions.length !== 1 ||
     !Number.isSafeInteger(positions[0])
@@ -576,6 +580,7 @@ function normalizeArsenkinPositionRow(
       keywordId: keyword.keywordId,
       found: false,
       position: null,
+      ...(topResults.length === 0 ? {} : { serpResults: topResults }),
       dataQualityFlags: []
     };
   }
@@ -600,6 +605,14 @@ function normalizeArsenkinPositionRow(
   ) {
     invalidResponse();
   }
+  const serpResults = withPrimaryArsenkinResult(
+    topResults,
+    position,
+    rankingUrl
+  );
+  const primarySerpResult = serpResults.find(
+    (result) => result.position === position
+  );
   return {
     manifestEntryId: keyword.manifestEntryId,
     keywordId: keyword.keywordId,
@@ -607,18 +620,31 @@ function normalizeArsenkinPositionRow(
     position,
     rankingUrl: rankingUrl.original,
     normalizedRankingUrl: rankingUrl.normalized,
+    ...(primarySerpResult?.title === undefined
+      ? {}
+      : { title: primarySerpResult.title }),
+    ...(primarySerpResult?.snippet === undefined
+      ? {}
+      : { snippet: primarySerpResult.snippet }),
     resultType: "ORGANIC",
     serpFeatures: [],
+    serpResults,
     dataQualityFlags: [
       "ABSOLUTE_POSITION_UNAVAILABLE",
       "PIXEL_POSITION_UNAVAILABLE",
-      "TITLE_UNAVAILABLE",
-      "SNIPPET_UNAVAILABLE"
+      ...(primarySerpResult?.title === undefined
+        ? ["TITLE_UNAVAILABLE"] as const
+        : []),
+      ...(primarySerpResult?.snippet === undefined
+        ? ["SNIPPET_UNAVAILABLE"] as const
+        : [])
     ]
   };
 }
 
-function parseArsenkinTop20(value: unknown): readonly unknown[] {
+function parseArsenkinTop20(
+  value: unknown
+): readonly InternalNormalizedRankSerpResult[] {
   if (typeof value !== "string" || value.length > 1_000_000) {
     invalidResponse();
   }
@@ -630,7 +656,127 @@ function parseArsenkinTop20(value: unknown): readonly unknown[] {
   }
   const result = array(parsed);
   if (result.length > 20) invalidResponse();
-  return result;
+  const rows = result.flatMap((entry, index) => {
+    const projected = arsenkinTopResult(entry, index + 1);
+    return projected ? [projected] : [];
+  }).sort((left, right) => left.position - right.position);
+  const positions = new Set<number>();
+  return rows.filter(({ position }) => {
+    if (positions.has(position)) return false;
+    positions.add(position);
+    return true;
+  });
+}
+
+function arsenkinTopResult(
+  value: unknown,
+  fallbackPosition: number
+): InternalNormalizedRankSerpResult | undefined {
+  let rawUrl: unknown;
+  let rawPosition: unknown;
+  let rawTitle: unknown;
+  let rawSnippet: unknown;
+  let rawFaviconUrl: unknown;
+  if (typeof value === "string") {
+    rawUrl = value;
+  } else if (Array.isArray(value)) {
+    [rawUrl, rawTitle, rawSnippet, rawFaviconUrl] = value;
+  } else {
+    const input = optionalRecord(value);
+    if (!input) return undefined;
+    rawUrl = input.url ?? input.href ?? input.link;
+    rawPosition = input.position;
+    rawTitle = input.title;
+    rawSnippet = input.snippet ?? input.description;
+    rawFaviconUrl =
+      input.faviconUrl ??
+      input.favicon_url ??
+      input.favicon ??
+      input.iconUrl ??
+      input.icon_url ??
+      input.icon;
+  }
+  const position = Number.isSafeInteger(rawPosition)
+    ? Number(rawPosition)
+    : fallbackPosition;
+  if (position < 1 || position > 100) return undefined;
+  let rankingUrl: ReturnType<typeof providerUrl>;
+  try {
+    rankingUrl = providerUrl(rawUrl);
+  } catch {
+    return undefined;
+  }
+  const title = boundedProviderText(rawTitle, MAX_SERP_TITLE_LENGTH);
+  const snippet = boundedProviderText(rawSnippet, MAX_SERP_SNIPPET_LENGTH);
+  const faviconUrl = providerSerpFaviconUrl(rawFaviconUrl);
+  return {
+    position,
+    rankingUrl: rankingUrl.original,
+    normalizedRankingUrl: rankingUrl.normalized,
+    ...(faviconUrl === undefined ? {} : { faviconUrl }),
+    ...(title === undefined ? {} : { title }),
+    ...(snippet === undefined ? {} : { snippet })
+  };
+}
+
+function withPrimaryArsenkinResult(
+  values: readonly InternalNormalizedRankSerpResult[],
+  position: number,
+  rankingUrl: ReturnType<typeof providerUrl>
+): readonly InternalNormalizedRankSerpResult[] {
+  const byPosition = new Map(values.map((result) => [result.position, result]));
+  const captured = [...byPosition.values()].find(
+    (result) => result.normalizedRankingUrl === rankingUrl.normalized
+  );
+  if (captured && captured.position !== position) {
+    byPosition.delete(captured.position);
+  }
+  byPosition.set(position, {
+    position,
+    rankingUrl: rankingUrl.original,
+    normalizedRankingUrl: rankingUrl.normalized,
+    ...(captured?.faviconUrl === undefined
+      ? {}
+      : { faviconUrl: captured.faviconUrl }),
+    ...(captured?.title === undefined ? {} : { title: captured.title }),
+    ...(captured?.snippet === undefined ? {} : { snippet: captured.snippet })
+  });
+  return [...byPosition.values()].sort(
+    (left, right) => left.position - right.position
+  );
+}
+
+export function providerSerpFaviconUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const source = value.trim();
+  if (source.length < 1 || source.length > MAX_SERP_FAVICON_URL_LENGTH) {
+    return undefined;
+  }
+  const absolute = source.startsWith("//") ? `https:${source}` : source;
+  try {
+    const url = new URL(absolute);
+    if (
+      (url.protocol !== "http:" && url.protocol !== "https:") ||
+      url.username ||
+      url.password
+    ) {
+      return undefined;
+    }
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+}
+
+function boundedProviderText(
+  value: unknown,
+  maxLength: number
+): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.replace(/\s+/gu, " ").trim();
+  return normalized.length > 0 && normalized.length <= maxLength
+    ? normalized
+    : undefined;
 }
 
 function hasExactKeys(

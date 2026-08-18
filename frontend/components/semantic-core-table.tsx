@@ -46,7 +46,10 @@ import {
   semanticHighlightAfterRowClick,
   toggleSemanticHighlightedSelection
 } from "../lib/semantic-row-selection";
-import { rankChangePresentation } from "../lib/semantic-rank-presentation";
+import {
+  rankChangePresentation,
+  sameSemanticRankingUrl
+} from "../lib/semantic-rank-presentation";
 import {
   clampSemanticColumnWidth,
   clampSemanticGroupSidebarWidth,
@@ -79,6 +82,7 @@ import {
 } from "./semantic-group-tree";
 import { SemanticKeywordMoveDialog } from "./semantic-keyword-move-dialog";
 import { SemanticKeywordInspector } from "./semantic-keyword-inspector";
+import { SemanticProjectSerpResults } from "./semantic-project-serp-results";
 import { SemanticPositionDialog } from "./semantic-position-dialog";
 import { SemanticFrequencyDialog } from "./semantic-frequency-dialog";
 import { SemanticOperationsDrawer } from "./semantic-operations-drawer";
@@ -154,6 +158,12 @@ interface SemanticKeyword {
     position?: number;
     previousPosition?: number;
     rankingUrl?: string;
+    siteResults?: readonly Readonly<{
+      position: number;
+      rankingUrl: string;
+      title?: string;
+      snippet?: string;
+    }>[];
     observedAt: string;
   }>[];
   readonly customValues?: readonly Readonly<{
@@ -224,7 +234,7 @@ interface SemanticCoreTableProps {
   readonly projectName: string;
   readonly projects: readonly Pick<
     AppProject,
-    "id" | "name" | "version" | "activeOperationCount"
+    "id" | "name" | "domain" | "version" | "activeOperationCount"
   >[];
   readonly workspaceId: string;
 }
@@ -347,12 +357,14 @@ export function SemanticCoreTable({
   const [frequencyDialogOpen, setFrequencyDialogOpen] = useState(false);
   const [negativeKeywordsOpen, setNegativeKeywordsOpen] = useState(false);
   const [duplicatesOpen, setDuplicatesOpen] = useState(false);
+  const [siteResultsKeyword, setSiteResultsKeyword] = useState<SemanticKeyword>();
   const [watchedFrequencyId, setWatchedFrequencyId] = useState<string>();
   const [operationsRefreshVersion, setOperationsRefreshVersion] = useState(0);
   const activeOperationCount = useProjectActiveOperationCount(
     projectId,
     projects.find(({ id }) => id === projectId)?.activeOperationCount ?? 0
   );
+  const projectDomain = projects.find(({ id }) => id === projectId)?.domain ?? "";
   const [rowContextMenu, setRowContextMenu] = useState<Readonly<{
     item: SemanticKeyword;
     targetIds: readonly string[];
@@ -2793,6 +2805,13 @@ export function SemanticCoreTable({
         />
       )}
 
+      {siteResultsKeyword && (
+        <SemanticSiteResultsModal
+          item={siteResultsKeyword}
+          onClose={() => setSiteResultsKeyword(undefined)}
+        />
+      )}
+
       {!editor && trashRecoveryItems.length > 0 && (
         <SemanticTrashRecoveryDialog
           items={trashRecoveryItems}
@@ -2922,6 +2941,7 @@ export function SemanticCoreTable({
                     column,
                     customColumns,
                     (customColumn) => setCustomValueEditor({ keyword: item, column: customColumn }),
+                    () => setSiteResultsKeyword(item),
                     viewConfig.density
                   )
                 };
@@ -2983,6 +3003,9 @@ export function SemanticCoreTable({
           item={focusedKeyword}
           onClose={() => setRightSidebar(undefined)}
           onEdit={() => openEdit(focusedKeyword)}
+          onFrequencyDeleted={() =>
+            setRetryVersion((value) => value + 1)
+          }
           onUpdated={(updated) => {
             setItems((current) => current.map((keyword) =>
               keyword.id === updated.id
@@ -2995,6 +3018,7 @@ export function SemanticCoreTable({
                 : keyword
             ));
           }}
+          projectDomain={projectDomain}
           projectId={projectId}
         />
       )}
@@ -3475,11 +3499,81 @@ function columnHeader(
   return columnLabel(column, customColumns);
 }
 
+function SemanticSiteResultsModal({
+  item,
+  onClose
+}: Readonly<{
+  item: SemanticKeyword;
+  onClose: () => void;
+}>) {
+  const positions = (item.positions ?? []).filter(
+    ({ siteResults }) => (siteResults?.length ?? 0) > 1
+  );
+
+  return (
+    <SemanticModal
+      description="Страницы проекта, одновременно найденные в последней сохранённой выдаче, с доступными title, description и URL."
+      onClose={onClose}
+      size="large"
+      title={`Страницы сайта в выдаче · ${item.textOriginal}`}
+    >
+      <div className="semantic-site-results-modal">
+        {positions.length === 0 && (
+          <div className="semantic-site-results-empty">
+            Актуальная выдача изменилась. Повторно откройте список из строки запроса.
+          </div>
+        )}
+        {positions.map((position) => (
+          <section key={`${position.searchEngine}:${position.observedAt}`}>
+            <header>
+              <span>
+                <SearchEngineLogo engine={position.searchEngine} size="compact" />
+                <strong>
+                  {position.searchEngine === "YANDEX" ? "Яндекс" : "Google"}
+                </strong>
+              </span>
+              <time
+                dateTime={position.observedAt}
+                title={formatSemanticDateTime(position.observedAt)}
+              >
+                {formatSemanticDateTime(position.observedAt)}
+              </time>
+            </header>
+            <SemanticProjectSerpResults
+              results={position.siteResults ?? []}
+              {...(item.targetUrl ? { targetUrl: item.targetUrl } : {})}
+            />
+          </section>
+        ))}
+      </div>
+    </SemanticModal>
+  );
+}
+
+function keywordHasTargetUrlMismatch(item: SemanticKeyword): boolean {
+  return Boolean(
+    item.targetUrl &&
+    item.positions?.some(
+      ({ found, rankingUrl }) =>
+        found &&
+        rankingUrl !== undefined &&
+        !sameSemanticRankingUrl(item.targetUrl!, rankingUrl)
+    )
+  );
+}
+
+function keywordHasMultipleSiteResults(item: SemanticKeyword): boolean {
+  return Boolean(
+    item.positions?.some(({ siteResults }) => (siteResults?.length ?? 0) > 1)
+  );
+}
+
 function keywordColumn(
   item: SemanticKeyword,
   column: SemanticViewColumn,
   customColumns: readonly SemanticCustomColumn[],
   onEditCustom: (column: SemanticCustomColumn) => void,
+  onOpenSiteResults: () => void,
   density: SemanticViewConfig["density"]
 ) {
   if (column.startsWith("custom:")) {
@@ -3513,6 +3607,30 @@ function keywordColumn(
               <span aria-label="Есть заметка" className="semantic-keyword-note-indicator" title="У запроса есть заметка">
                 <Icon name="note" />
               </span>
+            )}
+            {keywordHasTargetUrlMismatch(item) && (
+              <span
+                aria-label="Найденный URL не совпадает с целевым"
+                className="semantic-keyword-rank-indicator mismatch"
+                role="img"
+                title="Найденный при съёме URL не совпадает с целевым URL запроса"
+              >
+                <Icon name="link" />
+              </span>
+            )}
+            {keywordHasMultipleSiteResults(item) && (
+              <button
+                aria-label="Показать страницы сайта в выдаче"
+                className="semantic-keyword-rank-indicator multiple"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenSiteResults();
+                }}
+                title="В выдаче найдено несколько страниц вашего сайта"
+                type="button"
+              >
+                <Icon name="multiGroup" />
+              </button>
             )}
           </strong>
           {density !== "COMPACT" && item.tags.length > 0 && (
@@ -3897,6 +4015,15 @@ function formatDate(value: string): string {
     year: date.getFullYear() === new Date().getFullYear()
       ? undefined
       : "numeric"
+  }).format(date);
+}
+
+function formatSemanticDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat("ru-RU", {
+    dateStyle: "medium",
+    timeStyle: "short"
   }).format(date);
 }
 

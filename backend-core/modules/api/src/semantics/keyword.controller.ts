@@ -55,6 +55,7 @@ import {
   semanticKeywordBulkCreateInput,
   updateSemanticKeywordInput
 } from "./keyword-input.js";
+import { semanticFrequencyContextRoute } from "./frequency-collection-input.js";
 import {
   keywordListQuery,
   keywordTagOptionsQuery
@@ -232,6 +233,51 @@ export class KeywordController {
         canonicalKeywordId
       )
     );
+  }
+
+  @Delete(":keywordId/frequencies/:type/:device")
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermission("semantic.update")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async deleteFrequencyContext(
+    @Param("keywordId") keywordId: string,
+    @Param("type") type: string,
+    @Param("device") device: string,
+    @Query("regionCode") regionCode: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<void> {
+    const tenant = requiredMutableProjectTenant(request);
+    const canonicalKeywordId = assertUuid(keywordId, "keywordId");
+    const frequency = semanticFrequencyContextRoute(type, regionCode, device);
+    const context = requestContext(request);
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.keyword_frequency.delete_requested",
+      resourceType: "semantic_keyword",
+      resourceId: canonicalKeywordId,
+      outcome: "REQUESTED",
+      requestId: context.requestId
+    });
+    await this.seoData.deleteKeywordFrequencyContext(
+      internalProjectContext(request, principal, tenant),
+      canonicalKeywordId,
+      frequency.type,
+      frequency.regionCode,
+      frequency.device
+    );
+    await recordCommittedAudit(this.audit, this.logger, {
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.keyword_frequency.deleted",
+      resourceType: "semantic_keyword",
+      resourceId: canonicalKeywordId,
+      outcome: "SUCCESS",
+      requestId: context.requestId
+    });
   }
 
   @Patch(":keywordId")

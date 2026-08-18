@@ -1202,6 +1202,47 @@ svg { display: block; }
 
 .semantic-keyword-note-indicator svg { height: 12px; width: 12px; }
 
+.semantic-keyword-rank-indicator {
+  align-items: center;
+  aspect-ratio: 1;
+  border: 0;
+  border-radius: 6px;
+  display: inline-flex;
+  height: 20px;
+  justify-content: center;
+  line-height: 1;
+  margin-left: 5px;
+  min-height: 20px;
+  min-width: 20px;
+  padding: 0;
+  vertical-align: -5px;
+  width: 20px;
+}
+
+.semantic-keyword-rank-indicator svg {
+  height: 12px;
+  pointer-events: none;
+  width: 12px;
+}
+
+.semantic-keyword-rank-indicator.mismatch {
+  background: #fff1dc;
+  color: #d87800;
+}
+
+.semantic-keyword-rank-indicator.multiple {
+  background: #eeeaff;
+  color: var(--brand);
+  cursor: pointer;
+}
+
+.semantic-keyword-rank-indicator.multiple:hover,
+.semantic-keyword-rank-indicator.multiple:focus-visible {
+  background: #dfd9ff;
+  box-shadow: 0 0 0 2px rgba(91, 61, 245, .16);
+  outline: 0;
+}
+
 .semantic-keyword-inspector,
 .semantic-operations-drawer,
 .semantic-layout-drawer {
@@ -4997,11 +5038,11 @@ svg { display: block; }
 .semantic-inspector-overview-tags .semantic-inspector-tags { justify-content: flex-end; }
 .semantic-frequency-list { display: grid; gap: 0; }
 .semantic-frequency-row {
-  align-items: start;
+  align-items: center;
   border-bottom: 1px solid #f0eff5;
   display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr);
+  gap: 8px;
+  grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr) 26px;
   padding: 8px 0;
 }
 .semantic-frequency-row:last-child { border-bottom: 0; }
@@ -5021,6 +5062,35 @@ svg { display: block; }
 .semantic-frequency-value { text-align: right; }
 .semantic-frequency-value strong { font-size: 13px; font-variant-numeric: tabular-nums; }
 .semantic-frequency-value small.negative { color: var(--red); }
+.semantic-frequency-delete {
+  align-items: center;
+  aspect-ratio: 1;
+  background: #fff;
+  border: 1px solid #eadfe2;
+  border-radius: 7px;
+  color: #bd5963;
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+  width: 26px;
+}
+.semantic-frequency-delete:hover { background: #fff2f3; border-color: #e6b8bd; color: #b82f3d; }
+.semantic-frequency-delete:disabled { cursor: wait; opacity: .55; }
+.semantic-frequency-delete svg { height: 12px; width: 12px; }
+.semantic-frequency-delete-summary {
+  align-items: center;
+  background: #f8f7fc;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  display: grid;
+  gap: 6px 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 10px 12px;
+}
+.semantic-frequency-delete-summary > span { font-size: 11px; font-weight: 700; }
+.semantic-frequency-delete-summary > strong { font-size: 15px; font-variant-numeric: tabular-nums; }
+.semantic-frequency-delete-summary > small { color: var(--muted); font-size: 9px; grid-column: 1 / -1; }
 .context-menu {
   background: #fff;
   border: 1px solid var(--line);
@@ -8199,6 +8269,42 @@ svg { display: block; }
   white-space: nowrap;
 }
 
+.semantic-inspector-section-heading {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 9px;
+}
+
+.semantic-keyword-inspector .semantic-inspector-section-heading h3 {
+  margin: 0;
+}
+
+.semantic-inspector-section-heading > button {
+  align-items: center;
+  background: #f4f2ff;
+  border: 1px solid #e0dcff;
+  border-radius: 7px;
+  color: var(--brand-dark);
+  display: inline-flex;
+  font-size: 9px;
+  font-weight: 750;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 9px;
+}
+
+.semantic-inspector-section-heading > button:hover {
+  background: #eae6ff;
+  border-color: #cfc7ff;
+}
+
+.semantic-inspector-section-heading > button svg {
+  height: 13px;
+  width: 13px;
+}
+
 .semantic-competitor-snapshot > header {
   align-items: start;
   display: flex;
@@ -8223,21 +8329,65 @@ svg { display: block; }
 }
 
 .semantic-competitor-snapshot > ol > li {
-  align-items: center;
+  align-items: start;
   border-bottom: 1px solid #f0eff5;
   display: grid;
   gap: 8px;
-  grid-template-columns: 19px minmax(0, 1fr);
-  min-height: 39px;
-  padding: 5px 0;
+  grid-template-columns: 24px minmax(0, 1fr);
+  min-height: 58px;
+  padding: 6px 4px;
 }
 
 .semantic-competitor-snapshot > ol > li:last-child { border-bottom: 0; }
-.semantic-competitor-snapshot > ol > li > span {
+.semantic-competitor-rank {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.semantic-competitor-rank > span {
   color: var(--muted);
   font-size: 9px;
   font-variant-numeric: tabular-nums;
+  line-height: 1;
   text-align: center;
+}
+
+.semantic-competitor-snapshot > ol > li.is-project-site {
+  background: #f1fbf5;
+  border: 1px solid #cfe9da;
+  border-radius: 8px;
+  margin: 2px 0;
+}
+
+.semantic-site-favicon {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e4e4eb;
+  border-radius: 5px;
+  display: inline-flex;
+  height: 20px;
+  justify-content: center;
+  overflow: hidden;
+  width: 20px;
+}
+
+.semantic-site-favicon img {
+  display: block;
+  height: 16px;
+  object-fit: contain;
+  width: 16px;
+}
+
+.semantic-site-favicon.fallback {
+  color: #9298a7;
+}
+
+.semantic-site-favicon.fallback svg {
+  height: 12px;
+  width: 12px;
 }
 
 .semantic-competitor-result {
@@ -8249,32 +8399,73 @@ svg { display: block; }
 }
 
 .semantic-competitor-result > strong,
-.semantic-competitor-result > small {
+.semantic-competitor-result > small,
+.semantic-competitor-result > a {
+  display: block;
+  line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .semantic-competitor-result > strong {
-  color: var(--brand);
-  font-size: 9px;
+  color: var(--text);
+  font-size: 12px;
   font-weight: 700;
 }
 
 .semantic-competitor-result > small {
   color: var(--muted);
-  font-size: 8px;
+  font-size: 9.5px;
 }
 
 .semantic-competitor-result > a {
   border-radius: 5px;
-  inset: -3px;
-  position: absolute;
+  color: #697184;
+  font-size: 10.5px;
+  min-width: 0;
+  text-decoration: none;
 }
 
 .semantic-competitor-result > a:focus-visible {
   outline: 2px solid var(--brand);
   outline-offset: 1px;
+}
+
+.semantic-competitor-url {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.semantic-competitor-result .semantic-competitor-url {
+  display: -webkit-box;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.semantic-competitor-url b {
+  color: var(--brand-dark);
+  font-weight: 800;
+}
+
+.semantic-competitor-snapshot > ol > li.is-project-site .semantic-competitor-url b {
+  color: #16844a;
+}
+
+.semantic-insecure-http {
+  color: #e97816;
+  display: inline-flex;
+  margin-right: 3px;
+  vertical-align: -1px;
+}
+
+.semantic-insecure-http svg {
+  height: 10px;
+  width: 10px;
 }
 
 .semantic-competitor-toggle {
@@ -8347,6 +8538,314 @@ svg { display: block; }
 
 .semantic-rank-history-modal .semantic-rank-change-rows time,
 .semantic-rank-history-modal .semantic-rank-change-rows span { font-size: 11px; }
+
+.semantic-position-history-full {
+  display: grid;
+  gap: 12px;
+}
+
+.semantic-position-history-full > header {
+  align-items: center;
+  background: #f7f6fb;
+  border: 1px solid #eceaf4;
+  border-radius: 9px;
+  color: var(--muted);
+  display: flex;
+  font-size: 10px;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 9px 11px;
+}
+
+.semantic-position-history-full > header strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.semantic-position-history-list {
+  display: grid;
+  gap: 7px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.semantic-position-history-list > li {
+  border: 1px solid #e7e5ee;
+  border-radius: 9px;
+  display: grid;
+  gap: 8px;
+  padding: 10px 11px;
+}
+
+.semantic-position-history-list > li.not-found {
+  background: #fff8f8;
+  border-color: #f2d8dc;
+}
+
+.semantic-position-history-row-head {
+  align-items: center;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 145px minmax(150px, 1fr) auto auto;
+}
+
+.semantic-position-history-row-head time {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.semantic-position-history-row-head > span {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+.semantic-position-history-row-head > span b {
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.semantic-position-history-row-head small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.semantic-position-history-row-actions {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  min-width: max-content;
+}
+
+.semantic-position-history-row-actions > strong {
+  color: #16844a;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.semantic-position-history-row-actions .semantic-keyword-rank-indicator {
+  margin-left: 0;
+  vertical-align: initial;
+}
+
+.semantic-position-history-list > li.not-found .semantic-position-history-row-actions > strong {
+  color: var(--red);
+}
+
+.semantic-position-history-row-body {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding-left: 154px;
+}
+
+.semantic-position-history-row-body > small,
+.semantic-position-history-row-body > span,
+.semantic-position-history-row-body > a {
+  font-size: 9px;
+  line-height: 1.4;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.semantic-position-history-row-body > small,
+.semantic-position-history-row-body > span {
+  color: var(--muted);
+}
+
+.semantic-position-history-row-body > a {
+  color: var(--brand-dark);
+}
+
+.semantic-position-history-state {
+  background: #fafafd;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 11px;
+  padding: 28px 16px;
+  text-align: center;
+}
+
+.semantic-position-history-more {
+  justify-self: center;
+  min-width: 180px;
+}
+
+.semantic-site-results-modal {
+  display: grid;
+  gap: 13px;
+}
+
+.semantic-site-results-empty {
+  background: #fafafd;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 10px;
+  padding: 24px 14px;
+  text-align: center;
+}
+
+.semantic-site-results-modal > section {
+  border: 1px solid #e5e3ed;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.semantic-site-results-modal > section > header {
+  align-items: center;
+  background: #f7f6fb;
+  border-bottom: 1px solid #e5e3ed;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 10px 12px;
+}
+
+.semantic-site-results-modal > section > header > span {
+  align-items: center;
+  display: flex;
+  gap: 7px;
+}
+
+.semantic-site-results-modal > section > header strong {
+  font-size: 11px;
+}
+
+.semantic-site-results-modal > section > header time {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.semantic-project-serp-results {
+  display: grid;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.semantic-project-serp-results > li {
+  align-items: start;
+  border-bottom: 1px solid #efedf4;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 34px 20px minmax(0, 1fr);
+  min-height: 72px;
+  padding: 9px 12px;
+}
+
+.semantic-project-serp-results > li:last-child {
+  border-bottom: 0;
+}
+
+.semantic-project-serp-results > li.is-target {
+  background: #f1fbf5;
+}
+
+.semantic-project-serp-position {
+  color: var(--brand-dark);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  line-height: 20px;
+  text-align: center;
+}
+
+.semantic-project-serp-position::before {
+  content: "#";
+}
+
+.semantic-project-serp-result {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  position: relative;
+}
+
+.semantic-project-serp-result > strong,
+.semantic-project-serp-result > small,
+.semantic-project-serp-result > a {
+  display: block;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.semantic-project-serp-result > strong {
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.semantic-project-serp-results > li.is-target .semantic-project-serp-result > strong {
+  padding-right: 72px;
+}
+
+.semantic-project-serp-result > small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.semantic-project-serp-result > a {
+  border-radius: 5px;
+  color: #697184;
+  font-size: 8.5px;
+  text-decoration: none;
+}
+
+.semantic-project-serp-result > a:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 1px;
+}
+
+.semantic-project-serp-result .semantic-competitor-url b {
+  color: #16844a;
+}
+
+.semantic-project-serp-result > em {
+  background: #dff5e8;
+  border-radius: 999px;
+  color: #167443;
+  font-size: 7px;
+  font-style: normal;
+  font-weight: 800;
+  padding: 2px 5px;
+  position: absolute;
+  right: 0;
+  top: 0;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .semantic-position-history-row-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .semantic-position-history-row-head > span {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .semantic-position-history-row-body {
+    padding-left: 0;
+  }
+
+  .semantic-project-serp-results > li {
+    grid-template-columns: 28px 20px minmax(0, 1fr);
+    padding-inline: 8px;
+  }
+}
 
 .semantic-rank-chart-tooltip > header strong { font-size: 12px; }
 .semantic-rank-chart-tooltip > header > span:last-child { font-size: 10px; }

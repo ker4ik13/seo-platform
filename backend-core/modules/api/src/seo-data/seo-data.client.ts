@@ -98,6 +98,8 @@ import {
   type SemanticKeywordGroup,
   type SemanticKeywordListItem,
   type SemanticKeywordInsights,
+  type SemanticFrequencyDevice,
+  type SemanticFrequencyType,
   type CreateSemanticSavedViewInput,
   type CreateSemanticCustomColumnInput,
   type SemanticCustomColumn,
@@ -360,6 +362,26 @@ export class SeoDataClient {
       context
     );
     return semanticKeywordInsights(responseData(payload), keywordId);
+  }
+
+  public async deleteKeywordFrequencyContext(
+    context: InternalContext,
+    keywordId: string,
+    type: SemanticFrequencyType,
+    regionCode: string,
+    device: SemanticFrequencyDevice
+  ): Promise<void> {
+    const projectId = requiredProjectId(context.tenant);
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(keywordId)}/frequencies/${encodeURIComponent(type)}/${encodeURIComponent(device)}`,
+      this.config.services.seoData
+    );
+    url.searchParams.set("regionCode", regionCode);
+    await this.request(
+      "DELETE",
+      url,
+      context
+    );
   }
 
   public async frequencyOperationResult(
@@ -2260,27 +2282,37 @@ export function semanticKeywordInsights(
         !["GOOGLE", "YANDEX"].includes(String(item.searchEngine)) ||
         (item.searchSource !== undefined &&
           !["LIVE", "SEARCH_API"].includes(String(item.searchSource))) ||
-        item.provider !== "XMLSTOCK" ||
+        !["ARSENKIN", "XMLSTOCK"].includes(String(item.provider)) ||
         !validDate(item.observedAt) ||
         !Array.isArray(item.results) ||
         item.results.length < 1 ||
         item.results.length > 10
       ) throw invalidResponse();
-      const results = item.results.map((value, index) => {
+      let previousPosition = 0;
+      const results = item.results.map((value) => {
         const result = objectValue(value);
+        const position = Number(result?.position);
         if (
           !result ||
           !Number.isSafeInteger(result.position) ||
-          Number(result.position) !== index + 1 ||
+          position < 1 ||
+          position > 100 ||
+          position <= previousPosition ||
           !validHttpUrl(result.url) ||
+          (result.faviconUrl !== undefined &&
+            !validHttpUrl(result.faviconUrl)) ||
           (result.title !== undefined &&
             (typeof result.title !== "string" || result.title.length > 2_048)) ||
           (result.snippet !== undefined &&
             (typeof result.snippet !== "string" || result.snippet.length > 8_192))
         ) throw invalidResponse();
+        previousPosition = position;
         return {
-          position: Number(result.position),
+          position,
           url: result.url,
+          ...(typeof result.faviconUrl === "string"
+            ? { faviconUrl: result.faviconUrl }
+            : {}),
           ...(typeof result.title === "string" ? { title: result.title } : {}),
           ...(typeof result.snippet === "string" ? { snippet: result.snippet } : {})
         };
@@ -2293,7 +2325,7 @@ export function semanticKeywordInsights(
         ...(item.searchSource === "LIVE" || item.searchSource === "SEARCH_API"
           ? { searchSource: item.searchSource }
           : {}),
-        provider: "XMLSTOCK" as const,
+        provider: item.provider as "ARSENKIN" | "XMLSTOCK",
         observedAt: item.observedAt,
         results
       };
@@ -2536,8 +2568,10 @@ function semanticKeywordListPositions(
       "position",
       "previousPosition",
       "rankingUrl",
+      "siteResults",
       "observedAt"
     ]);
+    const siteResults = semanticKeywordListSiteResults(position.siteResults);
     if (
       !["GOOGLE", "YANDEX"].includes(String(position.searchEngine)) ||
       typeof position.found !== "boolean" ||
@@ -2561,6 +2595,7 @@ function semanticKeywordListPositions(
       ...(typeof position.rankingUrl === "string"
         ? { rankingUrl: position.rankingUrl }
         : {}),
+      ...(siteResults.length > 0 ? { siteResults } : {}),
       observedAt: position.observedAt as string
     };
   });
@@ -2568,6 +2603,60 @@ function semanticKeywordListPositions(
     throw invalidResponse();
   }
   return positions;
+}
+
+function semanticKeywordListSiteResults(
+  value: unknown
+): NonNullable<
+  NonNullable<SemanticKeywordListItem["positions"]>[number]["siteResults"]
+> {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 100) throw invalidResponse();
+  let previousPosition = 0;
+  const seenUrls = new Set<string>();
+  return value.map((entry) => {
+    const result = exactRecord(entry, [
+      "position",
+      "rankingUrl",
+      "faviconUrl",
+      "title",
+      "snippet"
+    ]);
+    const position = Number(result.position);
+    if (
+      !Number.isSafeInteger(result.position) ||
+      position < 1 ||
+      position > 100 ||
+      position <= previousPosition ||
+      !validHttpUrl(result.rankingUrl) ||
+      (result.faviconUrl !== undefined &&
+        !validHttpUrl(result.faviconUrl)) ||
+      (result.title !== undefined &&
+        (typeof result.title !== "string" ||
+          result.title.length < 1 ||
+          result.title.length > 2_048)) ||
+      (result.snippet !== undefined &&
+        (typeof result.snippet !== "string" ||
+          result.snippet.length < 1 ||
+          result.snippet.length > 8_192)) ||
+      seenUrls.has(result.rankingUrl)
+    ) {
+      throw invalidResponse();
+    }
+    previousPosition = position;
+    seenUrls.add(result.rankingUrl);
+    return {
+      position,
+      rankingUrl: result.rankingUrl,
+      ...(typeof result.faviconUrl === "string"
+        ? { faviconUrl: result.faviconUrl }
+        : {}),
+      ...(typeof result.title === "string" ? { title: result.title } : {}),
+      ...(typeof result.snippet === "string"
+        ? { snippet: result.snippet }
+        : {})
+    };
+  });
 }
 
 function validOptionalPositivePosition(value: unknown): boolean {
