@@ -283,6 +283,7 @@ function keyword(text: string): SemanticKeywordListItem {
     priority: 50,
     isFavorite: false,
     isTracked: false,
+    showAiAnswerButton: false,
     tags: [],
     tagsTruncated: false,
     sourceMode: "MANUAL",

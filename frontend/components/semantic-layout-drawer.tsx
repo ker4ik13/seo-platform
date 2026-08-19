@@ -9,9 +9,14 @@ import {
 import type { SemanticCustomColumn } from "./semantic-custom-column-types";
 import { SemanticSavedViews } from "./semantic-saved-views";
 import type {
+  SemanticQueryIndicator,
   SemanticSavedView,
   SemanticViewColumn,
   SemanticViewConfig
+} from "./semantic-view-types";
+import {
+  semanticColumnOrderFor,
+  semanticQueryIndicatorsFor
 } from "./semantic-view-types";
 import { Icon } from "./icon";
 
@@ -29,6 +34,7 @@ export function SemanticLayoutDrawer({
   onOpenCustomColumns,
   onReset,
   onToggleColumn,
+  onToggleQueryIndicator,
   projectId,
   saving,
   currentUserId,
@@ -47,6 +53,7 @@ export function SemanticLayoutDrawer({
   onOpenCustomColumns: () => void;
   onReset: () => void;
   onToggleColumn: (column: SemanticViewColumn) => void;
+  onToggleQueryIndicator: (indicator: SemanticQueryIndicator) => void;
   projectId: string;
   saving: boolean;
   currentUserId: string;
@@ -65,16 +72,21 @@ export function SemanticLayoutDrawer({
     }))
   ], [customColumns]);
   const normalizedSearch = search.trim().toLocaleLowerCase("ru-RU");
-  const visible = normalizedSearch
-    ? columns.filter(({ label }) => label.toLocaleLowerCase("ru-RU").includes(normalizedSearch))
-    : columns;
-  const enabled = config.columns.flatMap((key) => {
-    const column = visible.find((item) => item.key === key);
+  const orderedColumns = semanticColumnOrderFor(
+    config,
+    columns.map(({ key }) => key)
+  ).flatMap((key) => {
+    const column = columns.find((item) => item.key === key);
     return column ? [column] : [];
   });
-  const pinned = enabled.filter(({ key }) => key === "query");
-  const inTable = enabled.filter(({ key }) => key !== "query");
-  const available = visible.filter(({ key }) => !config.columns.includes(key));
+  const visible = normalizedSearch
+    ? orderedColumns.filter(({ label }) =>
+        label.toLocaleLowerCase("ru-RU").includes(normalizedSearch)
+      )
+    : orderedColumns;
+  const pinned = visible.filter(({ key }) => key === "query");
+  const tableColumns = visible.filter(({ key }) => key !== "query");
+  const queryIndicators = semanticQueryIndicatorsFor(config);
 
   return (
     <aside aria-label="Колонки и представления" className="semantic-layout-drawer">
@@ -99,18 +111,36 @@ export function SemanticLayoutDrawer({
           </label>
           {pinned.length > 0 && <ColumnGroup title="Закреплённые">
             {pinned.map((column) => (
-              <ColumnRow
-                checked
-                column={column}
-                key={column.key}
-                onToggle={() => onToggleColumn(column.key)}
-              />
+              <div className="semantic-layout-pinned-column" key={column.key}>
+                <ColumnRow
+                  checked
+                  column={column}
+                  onToggle={() => onToggleColumn(column.key)}
+                />
+                <div className="semantic-layout-query-indicators">
+                  {queryIndicatorOptions.map(({ key, label }) => {
+                    const checked = queryIndicators.includes(key);
+                    return (
+                      <label className="semantic-layout-query-indicator" key={key}>
+                        <span aria-hidden="true" className="semantic-layout-query-branch" />
+                        <input
+                          checked={checked}
+                          onChange={() => onToggleQueryIndicator(key)}
+                          type="checkbox"
+                        />
+                        <span>{label}</span>
+                        <Icon name={checked ? "eye" : "eyeOff"} />
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
             ))}
           </ColumnGroup>}
           <ColumnGroup title="В таблице">
-            {inTable.map((column) => (
+            {tableColumns.map((column) => (
               <ColumnRow
-                checked
+                checked={config.columns.includes(column.key)}
                 column={column}
                 draggable={column.key !== "query"}
                 key={column.key}
@@ -126,13 +156,9 @@ export function SemanticLayoutDrawer({
               />
             ))}
           </ColumnGroup>
-          <ColumnGroup title="Доступные">
-            {available.length > 0
-              ? available.map((column) => (
-                  <ColumnRow checked={false} column={column} key={column.key} onToggle={() => onToggleColumn(column.key)} />
-                ))
-              : <p className="semantic-layout-empty">Все найденные колонки уже включены.</p>}
-          </ColumnGroup>
+          {visible.length === 0 && (
+            <p className="semantic-layout-empty">Колонки не найдены.</p>
+          )}
           <button className="text-button semantic-custom-columns-link" onClick={onOpenCustomColumns} type="button">
             <Icon name="plus" /> Пользовательские колонки
           </button>
@@ -234,4 +260,13 @@ const systemColumns: readonly Readonly<{ key: SemanticViewColumn; label: string 
   { key: "tags", label: "Теги" },
   { key: "source", label: "Источник" },
   { key: "updatedAt", label: "Обновлено" }
+];
+
+const queryIndicatorOptions: readonly Readonly<{
+  key: SemanticQueryIndicator;
+  label: string;
+}>[] = [
+  { key: "AI_ANSWER", label: "ИИ выдача" },
+  { key: "MULTIPLE_URLS", label: "Несколько URL" },
+  { key: "TARGET_URL_MISMATCH", label: "Нецелевой URL" }
 ];

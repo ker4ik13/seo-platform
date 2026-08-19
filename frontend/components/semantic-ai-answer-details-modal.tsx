@@ -1,9 +1,6 @@
 "use client";
 
-import type {
-  SemanticAiAnswerDetail,
-  SemanticKeywordListItem
-} from "@seo-platform/contracts";
+import type { SemanticAiAnswerDetail } from "@seo-platform/contracts";
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -21,32 +18,18 @@ import { SemanticModal } from "./semantic-modal";
 export function SemanticAiAnswerDetailsModal({
   keywordId,
   keywordText,
-  keywordVersion,
   onClose,
-  onKeywordUpdated,
-  projectId,
-  showAnswerButton
+  projectId
 }: Readonly<{
   keywordId: string;
   keywordText: string;
-  keywordVersion: number;
   onClose: () => void;
-  onKeywordUpdated: (item: SemanticKeywordListItem) => void;
   projectId: string;
-  showAnswerButton: boolean;
 }>) {
   const [items, setItems] = useState<readonly SemanticAiAnswerDetail[]>([]);
   const [activeEngine, setActiveEngine] = useState<"YANDEX" | "GOOGLE">("YANDEX");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
-  const [shortcutVisible, setShortcutVisible] = useState(showAnswerButton);
-  const [shortcutSaving, setShortcutSaving] = useState(false);
-  const [shortcutError, setShortcutError] = useState<string>();
-
-  useEffect(() => {
-    setShortcutVisible(showAnswerButton);
-  }, [keywordId, showAnswerButton]);
-
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
@@ -81,54 +64,15 @@ export function SemanticAiAnswerDetailsModal({
     [active]
   );
 
-  async function toggleShortcut(): Promise<void> {
-    if (shortcutSaving) return;
-    setShortcutSaving(true);
-    setShortcutError(undefined);
-    try {
-      const updated = await browserApiRequest<SemanticKeywordListItem>(
-        `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(keywordId)}`,
-        {
-          method: "PATCH",
-          body: { showAiAnswerButton: !shortcutVisible },
-          ifMatch: keywordVersion
-        }
-      );
-      setShortcutVisible(updated.showAiAnswerButton);
-      onKeywordUpdated(updated);
-    } catch (requestError) {
-      setShortcutError(shortcutErrorMessage(requestError));
-    } finally {
-      setShortcutSaving(false);
-    }
-  }
-
   return (
     <SemanticModal
       bodyClassName="semantic-ai-answer-modal-body"
       className="semantic-ai-answer-modal"
       description="Последний сохранённый ИИ-ответ, источники и позиция сайта для выбранного поисковика."
-      headerActions={(
-        <button
-          aria-pressed={shortcutVisible}
-          className="semantic-ai-answer-shortcut-toggle"
-          disabled={shortcutSaving}
-          onClick={() => void toggleShortcut()}
-          type="button"
-        >
-          <Icon name={shortcutVisible ? "eye" : "eyeOff"} />
-          {shortcutSaving ? "Сохраняем…" : "Показывать ответ"}
-        </button>
-      )}
       onClose={onClose}
       size="large"
       title={`ИИ-ответ · ${keywordText}`}
     >
-      {shortcutError && (
-        <div className="inline-alert danger semantic-ai-answer-shortcut-error" role="alert">
-          {shortcutError}
-        </div>
-      )}
       {loading ? (
         <div className="semantic-dialog-loading" role="status">Загружаем ИИ-ответ…</div>
       ) : error ? (
@@ -249,11 +193,4 @@ function detailsErrorMessage(error: unknown): string {
   return error instanceof BrowserApiError
     ? `${error.message}${error.requestId ? ` Код запроса: ${error.requestId}.` : ""}`
     : "Не удалось загрузить сохранённый ИИ-ответ.";
-}
-
-function shortcutErrorMessage(error: unknown): string {
-  if (error instanceof BrowserApiError && error.status === 412) {
-    return "Запрос изменился в другой вкладке. Обновите таблицу и повторите.";
-  }
-  return "Не удалось сохранить видимость кнопки ИИ-ответа.";
 }

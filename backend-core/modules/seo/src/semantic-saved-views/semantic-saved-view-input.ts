@@ -6,6 +6,7 @@ import {
   semanticSavedViewDensities,
   semanticSavedViewGroupSidebarWidthMax,
   semanticSavedViewGroupSidebarWidthMin,
+  semanticSavedViewQueryIndicators,
   semanticSavedViewScopes,
   semanticSystemColumnKeys,
   type InternalCreateSemanticSavedViewInput,
@@ -84,7 +85,9 @@ function savedViewConfig(value: unknown): SemanticSavedViewConfig {
     "filters",
     "sort",
     "columns",
+    "columnOrder",
     "density",
+    "queryIndicators",
     "columnWidths",
     "pageSize",
     "groupSidebarWidth",
@@ -94,6 +97,8 @@ function savedViewConfig(value: unknown): SemanticSavedViewConfig {
   ]);
   if (input.schemaVersion !== 1) invalid("config.schemaVersion");
   const columns = requiredColumns(input.columns);
+  const columnOrder = optionalColumnOrder(input.columnOrder, columns);
+  const queryIndicators = optionalQueryIndicators(input.queryIndicators);
   const columnWidths = optionalColumnWidths(input.columnWidths, columns);
   const pageSize = input.pageSize === undefined
     ? undefined
@@ -114,11 +119,13 @@ function savedViewConfig(value: unknown): SemanticSavedViewConfig {
     filters: savedViewFilters(input.filters),
     sort: requiredEnum(input.sort, semanticKeywordSorts, "config.sort"),
     columns,
+    ...(columnOrder === undefined ? {} : { columnOrder }),
     density: requiredEnum(
       input.density,
       semanticSavedViewDensities,
       "config.density"
     ),
+    ...(queryIndicators === undefined ? {} : { queryIndicators }),
     ...(columnWidths ? { columnWidths } : {}),
     ...(pageSize === undefined ? {} : { pageSize }),
     ...(groupSidebarWidth === undefined ? {} : { groupSidebarWidth }),
@@ -126,6 +133,26 @@ function savedViewConfig(value: unknown): SemanticSavedViewConfig {
     ...(selectedGroupIds ? { selectedGroupIds } : {}),
     ...(appliedViewId ? { appliedViewId } : {})
   };
+}
+
+function optionalQueryIndicators(
+  value: unknown
+): SemanticSavedViewConfig["queryIndicators"] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > semanticSavedViewQueryIndicators.length) {
+    invalid("config.queryIndicators");
+  }
+  const indicators = value.map((indicator, index) =>
+    requiredEnum(
+      indicator,
+      semanticSavedViewQueryIndicators,
+      `config.queryIndicators[${index}]`
+    )
+  );
+  if (new Set(indicators).size !== indicators.length) {
+    invalid("config.queryIndicators");
+  }
+  return indicators;
 }
 
 function savedViewFilters(value: unknown): SemanticSavedViewFilters {
@@ -195,13 +222,16 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
   };
 }
 
-function requiredColumns(value: unknown): SemanticSavedViewConfig["columns"] {
+function requiredColumns(
+  value: unknown,
+  field = "config.columns"
+): SemanticSavedViewConfig["columns"] {
   if (
     !Array.isArray(value) ||
     value.length < 1 ||
     value.length > 128
   ) {
-    invalid("config.columns");
+    invalid(field);
   }
   const columns = value.map((column, index) => {
     if (
@@ -213,14 +243,26 @@ function requiredColumns(value: unknown): SemanticSavedViewConfig["columns"] {
           column
         ))
     ) {
-      invalid(`config.columns[${index}]`);
+      invalid(`${field}[${index}]`);
     }
     return column as SemanticSavedViewConfig["columns"][number];
   });
   if (new Set(columns).size !== columns.length || !columns.includes("query")) {
-    invalid("config.columns");
+    invalid(field);
   }
   return columns;
+}
+
+function optionalColumnOrder(
+  value: unknown,
+  columns: SemanticSavedViewConfig["columns"]
+): SemanticSavedViewConfig["columnOrder"] | undefined {
+  if (value === undefined) return undefined;
+  const columnOrder = requiredColumns(value, "config.columnOrder");
+  if (columns.some((column) => !columnOrder.includes(column))) {
+    invalid("config.columnOrder");
+  }
+  return columnOrder;
 }
 
 function optionalColumnWidths(

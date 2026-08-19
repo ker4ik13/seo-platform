@@ -1,3 +1,8 @@
+import {
+  semanticSavedViewQueryIndicators,
+  semanticSystemColumnKeys
+} from "@seo-platform/contracts";
+
 export type SemanticKeywordIntent =
   | "INFORMATIONAL"
   | "NAVIGATIONAL"
@@ -8,6 +13,9 @@ export type SemanticKeywordIntent =
 
 export type SemanticKeywordSort =
   import("@seo-platform/contracts").SemanticKeywordSort;
+
+export type SemanticQueryIndicator =
+  import("@seo-platform/contracts").SemanticSavedViewQueryIndicator;
 
 export type SemanticSystemColumn =
   | "query"
@@ -56,7 +64,9 @@ export interface SemanticViewConfig {
   readonly filters: SemanticViewFilters;
   readonly sort: SemanticKeywordSort;
   readonly columns: readonly SemanticViewColumn[];
+  readonly columnOrder?: readonly SemanticViewColumn[];
   readonly density: "COMFORTABLE" | "COMPACT";
+  readonly queryIndicators?: readonly SemanticQueryIndicator[];
   readonly columnWidths?: Readonly<Record<string, number>>;
   readonly pageSize?: 100 | 200 | 500 | 1_000;
   readonly groupSidebarWidth?: number;
@@ -132,5 +142,37 @@ export const defaultSemanticViewConfig: SemanticViewConfig = {
     "source",
     "updatedAt"
   ],
-  density: "COMFORTABLE"
+  columnOrder: semanticSystemColumnKeys,
+  density: "COMFORTABLE",
+  queryIndicators: semanticSavedViewQueryIndicators
 };
+
+export function semanticQueryIndicatorsFor(
+  config: Pick<SemanticViewConfig, "queryIndicators">
+): readonly SemanticQueryIndicator[] {
+  const enabled = new Set(
+    config.queryIndicators ?? semanticSavedViewQueryIndicators
+  );
+  return semanticSavedViewQueryIndicators.filter((indicator) =>
+    enabled.has(indicator)
+  );
+}
+
+export function semanticColumnOrderFor(
+  config: Pick<SemanticViewConfig, "columns" | "columnOrder">,
+  availableColumns: readonly SemanticViewColumn[]
+): readonly SemanticViewColumn[] {
+  const available = new Set(availableColumns);
+  const seen = new Set<SemanticViewColumn>();
+  const ordered: SemanticViewColumn[] = [];
+  const append = (column: SemanticViewColumn): void => {
+    if (!available.has(column) || seen.has(column)) return;
+    seen.add(column);
+    ordered.push(column);
+  };
+
+  for (const column of config.columnOrder ?? config.columns) append(column);
+  for (const column of config.columns) append(column);
+  for (const column of availableColumns) append(column);
+  return ordered;
+}

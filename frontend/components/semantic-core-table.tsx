@@ -5,6 +5,8 @@ import { CustomSelect } from "./custom-select";
 import {
   semanticKeywordDefaultPageSize,
   semanticKeywordPageSizes,
+  semanticSavedViewQueryIndicators,
+  semanticSystemColumnKeys,
   type SemanticKeywordPageSize,
   type SemanticKeywordBulkCreateItemInput,
   type SemanticKeywordBulkCreateResult,
@@ -115,12 +117,15 @@ import type { AppProject } from "../lib/app-types";
 import {
   defaultSemanticViewConfig,
   isInternalSemanticViewName,
+  semanticColumnOrderFor,
+  semanticQueryIndicatorsFor,
   semanticFolderSortFor,
   semanticFolderSortViewName,
   semanticFolderSortViewPrefix,
   semanticProjectTableViewName,
   type SemanticKeywordIntent,
   type SemanticKeywordSort,
+  type SemanticQueryIndicator,
   type SemanticSavedView,
   type SemanticSystemColumn,
   type SemanticViewColumn,
@@ -136,7 +141,6 @@ interface SemanticKeyword {
   readonly priority: number;
   readonly isFavorite: boolean;
   readonly isTracked: boolean;
-  readonly showAiAnswerButton: boolean;
   readonly hasNote?: boolean;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
@@ -1238,24 +1242,54 @@ export function SemanticCoreTable({
 
   function toggleColumn(column: SemanticViewColumn): void {
     if (column === "query") return;
-    setDraftConfig((current) => ({
-      ...current,
-      columns: current.columns.includes(column)
-        ? current.columns.filter((item) => item !== column)
-        : [...current.columns, column]
-    }));
+    setDraftConfig((current) => {
+      const columnOrder = semanticColumnOrderFor(
+        current,
+        semanticAvailableColumns(customColumns)
+      );
+      const enabled = new Set(current.columns);
+      if (enabled.has(column)) enabled.delete(column);
+      else enabled.add(column);
+      return {
+        ...current,
+        columns: columnOrder.filter((item) => enabled.has(item)),
+        columnOrder
+      };
+    });
+  }
+
+  function toggleQueryIndicator(indicator: SemanticQueryIndicator): void {
+    setDraftConfig((current) => {
+      const enabled = new Set(semanticQueryIndicatorsFor(current));
+      if (enabled.has(indicator)) enabled.delete(indicator);
+      else enabled.add(indicator);
+      return {
+        ...current,
+        queryIndicators: semanticSavedViewQueryIndicators.filter((value) =>
+          enabled.has(value)
+        )
+      };
+    });
   }
 
   function moveColumn(column: SemanticViewColumn, target: SemanticViewColumn): void {
     if (column === target) return;
     setDraftConfig((current) => {
-      const columns = [...current.columns];
-      const sourceIndex = columns.indexOf(column);
-      const targetIndex = columns.indexOf(target);
+      const columnOrder = [...semanticColumnOrderFor(
+        current,
+        semanticAvailableColumns(customColumns)
+      )];
+      const sourceIndex = columnOrder.indexOf(column);
+      const targetIndex = columnOrder.indexOf(target);
       if (sourceIndex < 0 || targetIndex < 0) return current;
-      columns.splice(sourceIndex, 1);
-      columns.splice(targetIndex, 0, column);
-      return { ...current, columns };
+      columnOrder.splice(sourceIndex, 1);
+      columnOrder.splice(targetIndex, 0, column);
+      const enabled = new Set(current.columns);
+      return {
+        ...current,
+        columns: columnOrder.filter((item) => enabled.has(item)),
+        columnOrder
+      };
     });
   }
 
@@ -3364,7 +3398,8 @@ export function SemanticCoreTable({
                     (customColumn) => setCustomValueEditor({ keyword: item, column: customColumn }),
                     () => setSiteResultsKeyword(item),
                     () => setAiAnswerKeyword(item),
-                    viewConfig.density
+                    viewConfig.density,
+                    semanticQueryIndicatorsFor(viewConfig)
                   )
                 };
               })}
@@ -3647,31 +3682,8 @@ export function SemanticCoreTable({
         <SemanticAiAnswerDetailsModal
           keywordId={aiAnswerKeyword.id}
           keywordText={aiAnswerKeyword.textOriginal}
-          keywordVersion={aiAnswerKeyword.version}
           onClose={() => setAiAnswerKeyword(undefined)}
-          onKeywordUpdated={(updated) => {
-            setItems((current) => current.map((keyword) =>
-              keyword.id === updated.id
-                ? {
-                    ...keyword,
-                    showAiAnswerButton: updated.showAiAnswerButton,
-                    updatedAt: updated.updatedAt,
-                    version: updated.version
-                  }
-                : keyword
-            ));
-            setAiAnswerKeyword((current) => current?.id === updated.id
-              ? {
-                  ...current,
-                  showAiAnswerButton: updated.showAiAnswerButton,
-                  updatedAt: updated.updatedAt,
-                  version: updated.version
-                }
-              : current
-            );
-          }}
           projectId={projectId}
-          showAnswerButton={aiAnswerKeyword.showAiAnswerButton}
         />
       )}
       {rightSidebar?.type === "OPERATIONS" && (
@@ -3707,9 +3719,12 @@ export function SemanticCoreTable({
           onReset={() => setDraftConfig((current) => ({
             ...current,
             columns: defaultSemanticViewConfig.columns,
-            density: defaultSemanticViewConfig.density
+            columnOrder: semanticSystemColumnKeys,
+            density: defaultSemanticViewConfig.density,
+            queryIndicators: semanticSavedViewQueryIndicators
           }))}
           onToggleColumn={toggleColumn}
+          onToggleQueryIndicator={toggleQueryIndicator}
           projectId={projectId}
           saving={savingTableLayout}
         />
@@ -4082,7 +4097,8 @@ function keywordColumn(
   onEditCustom: (column: SemanticCustomColumn) => void,
   onOpenSiteResults: () => void,
   onOpenAiAnswer: () => void,
-  density: SemanticViewConfig["density"]
+  density: SemanticViewConfig["density"],
+  queryIndicators: readonly SemanticQueryIndicator[]
 ) {
   if (column.startsWith("custom:")) {
     const customColumn = customColumns.find(
@@ -4119,7 +4135,8 @@ function keywordColumn(
                   <Icon name="note" />
                 </span>
               )}
-              {keywordHasTargetUrlMismatch(item) && (
+              {queryIndicators.includes("TARGET_URL_MISMATCH") &&
+                keywordHasTargetUrlMismatch(item) && (
                 <span
                   aria-label="Найденный URL не совпадает с целевым"
                   className="semantic-keyword-rank-indicator mismatch"
@@ -4129,7 +4146,8 @@ function keywordColumn(
                   <Icon name="link" />
                 </span>
               )}
-              {keywordHasMultipleSiteResults(item) && (
+              {queryIndicators.includes("MULTIPLE_URLS") &&
+                keywordHasMultipleSiteResults(item) && (
                 <button
                   aria-label="Показать страницы сайта в выдаче"
                   className="semantic-keyword-rank-indicator multiple"
@@ -4143,7 +4161,7 @@ function keywordColumn(
                   <Icon name="multiGroup" />
                 </button>
               )}
-              {item.showAiAnswerButton &&
+              {queryIndicators.includes("AI_ANSWER") &&
                 item.aiAnswers?.some(({ answerPresent }) => answerPresent) && (
                 <button
                   aria-label="Открыть сохранённый ИИ-ответ"
@@ -4638,7 +4656,9 @@ function semanticViewConfigSignature(config: SemanticViewConfig): string {
     filters: layout.filters,
     sort: layout.sort,
     columns: layout.columns,
+    columnOrder: layout.columnOrder ?? null,
     density: layout.density,
+    queryIndicators: semanticQueryIndicatorsFor(layout),
     columnWidths: Object.fromEntries(
       Object.entries(layout.columnWidths ?? {}).sort(([left], [right]) =>
         left.localeCompare(right)
@@ -4649,6 +4669,17 @@ function semanticViewConfigSignature(config: SemanticViewConfig): string {
     expandedGroupIds: [...(layout.expandedGroupIds ?? [])].sort(),
     selectedGroupIds: [...(layout.selectedGroupIds ?? [])].sort()
   });
+}
+
+function semanticAvailableColumns(
+  customColumns: readonly SemanticCustomColumn[]
+): readonly SemanticViewColumn[] {
+  return [
+    ...semanticSystemColumnKeys,
+    ...customColumns.map(
+      ({ id }) => `custom:${id}` as SemanticViewColumn
+    )
+  ];
 }
 
 function semanticHistoryDefaultRange(): Readonly<{ from: string; to: string }> {

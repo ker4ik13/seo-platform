@@ -1000,7 +1000,9 @@ test("validates versioned semantic saved views and rejects DSL drift", () => {
       filters: { isTracked: true, priorityMin: 10 },
       sort: "PRIORITY_DESC",
       columns: ["query", "priority"],
+      columnOrder: ["query", "frequency", "priority"],
       density: "COMPACT",
+      queryIndicators: ["AI_ANSWER", "MULTIPLE_URLS"],
       appliedViewId: "01900000-0000-7000-8000-000000000041"
     },
     version: 2,
@@ -1011,6 +1013,14 @@ test("validates versioned semantic saved views and rejects DSL drift", () => {
   assert.equal(
     semanticSavedViews([view])[0]?.config.appliedViewId,
     "01900000-0000-7000-8000-000000000041"
+  );
+  assert.deepEqual(
+    semanticSavedViews([view])[0]?.config.queryIndicators,
+    ["AI_ANSWER", "MULTIPLE_URLS"]
+  );
+  assert.deepEqual(
+    semanticSavedViews([view])[0]?.config.columnOrder,
+    ["query", "frequency", "priority"]
   );
   assert.throws(
     () =>
@@ -1023,7 +1033,30 @@ test("validates versioned semantic saved views and rejects DSL drift", () => {
     DomainError
   );
   assert.throws(
+    () =>
+      semanticSavedViews([
+        {
+          ...view,
+          config: { ...view.config, columnOrder: ["query"] }
+        }
+      ]),
+    DomainError
+  );
+  assert.throws(
     () => semanticSavedViews([view, view]),
+    DomainError
+  );
+  assert.throws(
+    () =>
+      semanticSavedViews([
+        {
+          ...view,
+          config: {
+            ...view.config,
+            queryIndicators: ["AI_ANSWER", "AI_ANSWER"]
+          }
+        }
+      ]),
     DomainError
   );
 });

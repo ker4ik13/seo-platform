@@ -6,6 +6,7 @@ import {
   type SemanticKeywordPageSize
 } from "@seo-platform/contracts";
 import type { SemanticViewConfig } from "../components/semantic-view-types.ts";
+import { semanticQueryIndicatorsFor } from "../components/semantic-view-types.ts";
 
 export const semanticGroupSidebarMinWidth = semanticSavedViewGroupSidebarWidthMin;
 export const semanticGroupSidebarMaxWidth = semanticSavedViewGroupSidebarWidthMax;
@@ -96,13 +97,17 @@ export function semanticVisibleColumnWidths(
 export function semanticSavedViewConfigForPersistence(
   config: SemanticViewConfig
 ): SemanticViewConfig {
-  if (config.columnWidths === undefined) return config;
   return {
     ...config,
-    columnWidths: semanticVisibleColumnWidths(
-      config.columns,
-      config.columnWidths
-    )
+    queryIndicators: semanticQueryIndicatorsFor(config),
+    ...(config.columnWidths === undefined
+      ? {}
+      : {
+          columnWidths: semanticVisibleColumnWidths(
+            config.columns,
+            config.columnWidths
+          )
+        })
   };
 }
 
@@ -118,7 +123,11 @@ export function semanticAppliedTableLayoutConfig(
   return semanticSavedViewConfigForPersistence({
     ...currentWithoutColumnWidths,
     columns: draftConfig.columns,
+    ...(draftConfig.columnOrder === undefined
+      ? {}
+      : { columnOrder: draftConfig.columnOrder }),
     density: draftConfig.density,
+    queryIndicators: semanticQueryIndicatorsFor(draftConfig),
     ...(draftConfig.columnWidths === undefined
       ? {}
       : { columnWidths: draftConfig.columnWidths })

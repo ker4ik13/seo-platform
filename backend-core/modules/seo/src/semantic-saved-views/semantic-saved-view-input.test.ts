@@ -19,7 +19,9 @@ const config = {
   filters: { isTracked: true },
   sort: "UPDATED_DESC",
   columns: ["query", "updatedAt"],
+  columnOrder: ["query", "frequency", "updatedAt"],
   density: "COMFORTABLE",
+  queryIndicators: ["MULTIPLE_URLS"],
   columnWidths: { query: 480, updatedAt: 140 },
   pageSize: 500,
   groupSidebarWidth: 320,
@@ -78,11 +80,44 @@ test("rejects authority drift and malformed versioned config", () => {
   );
   assert.throws(
     () =>
+      internalUpdateSemanticSavedViewInput({
+        ...scope,
+        ...authority,
+        version: 1,
+        config: { ...config, columnOrder: ["query"] }
+      }),
+    BadRequestException
+  );
+  assert.throws(
+    () =>
       internalDeleteSemanticSavedViewInput({
         ...scope,
         ...authority,
         version: 1,
         injectedWorkspaceId: workspaceId
+      }),
+    BadRequestException
+  );
+  assert.throws(
+    () =>
+      internalUpdateSemanticSavedViewInput({
+        ...scope,
+        ...authority,
+        version: 1,
+        config: {
+          ...config,
+          queryIndicators: ["MULTIPLE_URLS", "MULTIPLE_URLS"]
+        }
+      }),
+    BadRequestException
+  );
+  assert.throws(
+    () =>
+      internalUpdateSemanticSavedViewInput({
+        ...scope,
+        ...authority,
+        version: 1,
+        config: { ...config, queryIndicators: ["UNKNOWN"] }
       }),
     BadRequestException
   );

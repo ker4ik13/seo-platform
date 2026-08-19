@@ -1800,6 +1800,7 @@ export class KeywordService {
             language: "und",
             priority: 0,
             isFavorite: false,
+            showAiAnswerButton: false,
             intent: null,
             clusterId: null,
             targetPageId: null,

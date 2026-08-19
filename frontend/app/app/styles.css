@@ -1449,13 +1449,24 @@ svg { display: block; }
   cursor: pointer;
   display: grid;
   gap: 8px;
-  grid-template-columns: 18px 17px minmax(0, 1fr) 17px;
+  grid-template-columns: 18px 18px minmax(0, 1fr) 17px;
   min-height: 38px;
   padding: 6px 9px;
 }
 .semantic-layout-column-row:hover { background: #faf9ff; border-color: #d7d2fa; }
 .semantic-layout-column-row > span:nth-of-type(2) { font-size: 10px; }
 .semantic-layout-column-row > svg { color: var(--brand); height: 14px; width: 14px; }
+.semantic-layout-column-row > input[type="checkbox"] {
+  aspect-ratio: 1 / 1;
+  block-size: 18px;
+  box-sizing: border-box;
+  inline-size: 18px;
+  justify-self: center;
+  max-block-size: 18px;
+  max-inline-size: 18px;
+  min-block-size: 18px;
+  min-inline-size: 18px;
+}
 .semantic-column-grip { color: #a5a9b5; cursor: grab; font-size: 10px; letter-spacing: -2px; }
 .semantic-layout-empty { color: var(--muted); font-size: 9px; margin: 0; padding: 8px; }
 .semantic-custom-columns-link { align-items: center; display: flex; gap: 6px; justify-self: start; }
@@ -6958,6 +6969,72 @@ svg { display: block; }
   color: #b6bac5;
 }
 
+.semantic-layout-pinned-column {
+  display: grid;
+}
+
+.semantic-layout-pinned-column > .semantic-layout-column-row {
+  border-radius: 8px 8px 0 0;
+  margin-top: 0;
+}
+
+.semantic-layout-query-indicators {
+  background: #faf9ff;
+  border: 1px solid var(--line);
+  border-radius: 0 0 8px 8px;
+  border-top: 0;
+  display: grid;
+  padding: 4px 8px 5px 29px;
+}
+
+.semantic-layout-query-indicator {
+  align-items: center;
+  color: #5f6575;
+  cursor: pointer;
+  display: grid;
+  font-size: 9px;
+  gap: 8px;
+  grid-template-columns: 10px 18px minmax(0, 1fr) 14px;
+  min-height: 29px;
+  position: relative;
+}
+
+.semantic-layout-query-indicator:hover {
+  color: var(--brand);
+}
+
+.semantic-layout-query-indicator > input[type="checkbox"] {
+  accent-color: var(--brand);
+  aspect-ratio: 1 / 1;
+  block-size: 18px;
+  box-sizing: border-box;
+  inline-size: 18px;
+  max-block-size: 18px;
+  max-inline-size: 18px;
+  min-block-size: 18px;
+  min-inline-size: 18px;
+  margin: 0;
+}
+
+.semantic-layout-query-indicator > svg {
+  color: #818797;
+  height: 13px;
+  width: 13px;
+}
+
+.semantic-layout-query-indicator:has(input:not(:checked)) > svg {
+  color: #b6bac5;
+}
+
+.semantic-layout-query-branch {
+  border-bottom: 1px solid #d8d4ec;
+  border-left: 1px solid #d8d4ec;
+  border-radius: 0 0 0 4px;
+  height: 15px;
+  margin-top: -8px;
+  width: 9px;
+}
+
 .semantic-operation-progress-head {
   align-items: center;
   display: flex;
@@ -10255,24 +10332,6 @@ svg { display: block; }
 
 .semantic-modal.semantic-ai-answer-modal { border-radius: 18px; overflow: hidden; }
 .semantic-ai-answer-modal-body { background: #f7f7fb; padding: 0 !important; }
-.semantic-ai-answer-shortcut-toggle {
-  align-items: center;
-  background: #fff;
-  border: 1px solid #dcd9ef;
-  border-radius: 9px;
-  color: #6a6578;
-  display: inline-flex;
-  font-size: 9px;
-  font-weight: 750;
-  gap: 6px;
-  min-height: 32px;
-  padding: 0 10px;
-}
-.semantic-ai-answer-shortcut-toggle svg { height: 14px; width: 14px; }
-.semantic-ai-answer-shortcut-toggle[aria-pressed="true"] { background: #f1edff; border-color: #cfc6ff; color: var(--brand); }
-.semantic-ai-answer-shortcut-toggle:hover:not(:disabled),
-.semantic-ai-answer-shortcut-toggle:focus-visible { border-color: #bdb2ff; box-shadow: 0 0 0 3px rgba(91, 61, 245, .1); outline: 0; }
-.semantic-ai-answer-shortcut-error { border-radius: 0; margin: 0; }
 .semantic-ai-answer-details { display: grid; gap: 14px; padding: 18px; }
 .semantic-ai-answer-tabs {
   align-items: center;

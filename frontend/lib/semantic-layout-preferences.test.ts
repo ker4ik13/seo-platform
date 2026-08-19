@@ -11,6 +11,7 @@ import {
   semanticVisibleColumnWidths,
   writeSemanticLayoutPreferences
 } from "./semantic-layout-preferences.ts";
+import { semanticColumnOrderFor } from "../components/semantic-view-types.ts";
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
@@ -93,7 +94,16 @@ test("applies reordered columns and multiple removals as one valid layout", () =
       "priority",
       "source"
     ],
+    columnOrder: [
+      "query",
+      "frequency",
+      "frequencyExact",
+      "tags",
+      "priority",
+      "source"
+    ],
     density: "COMFORTABLE",
+    queryIndicators: ["AI_ANSWER", "MULTIPLE_URLS"],
     columnWidths: {
       query: 388,
       frequency: 92,
@@ -106,7 +116,16 @@ test("applies reordered columns and multiple removals as one valid layout", () =
   const draft = {
     ...current,
     columns: ["query", "source", "tags"],
+    columnOrder: [
+      "query",
+      "source",
+      "frequency",
+      "frequencyExact",
+      "tags",
+      "priority"
+    ],
     density: "COMPACT",
+    queryIndicators: ["TARGET_URL_MISMATCH"],
     columnWidths: {
       query: 388,
       source: 132,
@@ -117,13 +136,43 @@ test("applies reordered columns and multiple removals as one valid layout", () =
   assert.deepEqual(semanticAppliedTableLayoutConfig(current, draft), {
     ...current,
     columns: ["query", "source", "tags"],
+    columnOrder: [
+      "query",
+      "source",
+      "frequency",
+      "frequencyExact",
+      "tags",
+      "priority"
+    ],
     density: "COMPACT",
+    queryIndicators: ["TARGET_URL_MISMATCH"],
     columnWidths: {
       query: 388,
       source: 132,
       tags: 176
     }
   });
+});
+
+test("keeps hidden columns in their drawer positions", () => {
+  const available = ["query", "frequency", "tags", "priority"] as const;
+  assert.deepEqual(
+    semanticColumnOrderFor(
+      {
+        columns: ["query", "frequency", "priority"],
+        columnOrder: ["query", "frequency", "tags", "priority"]
+      },
+      available
+    ),
+    ["query", "frequency", "tags", "priority"]
+  );
+  assert.deepEqual(
+    semanticColumnOrderFor(
+      { columns: ["query", "priority"] },
+      available
+    ),
+    ["query", "priority", "frequency", "tags"]
+  );
 });
 
 test("defensively removes hidden widths at the saved-view request boundary", () => {
@@ -142,7 +191,33 @@ test("defensively removes hidden widths at the saved-view request boundary", () 
       sort: "CREATED_DESC",
       columns: ["query"],
       density: "COMFORTABLE",
+      queryIndicators: [
+        "AI_ANSWER",
+        "MULTIPLE_URLS",
+        "TARGET_URL_MISMATCH"
+      ],
       columnWidths: { query: 320 }
+    }
+  );
+});
+
+test("preserves an explicit empty query-indicator selection", () => {
+  assert.deepEqual(
+    semanticSavedViewConfigForPersistence({
+      schemaVersion: 1,
+      filters: {},
+      sort: "CREATED_DESC",
+      columns: ["query"],
+      density: "COMFORTABLE",
+      queryIndicators: []
+    }),
+    {
+      schemaVersion: 1,
+      filters: {},
+      sort: "CREATED_DESC",
+      columns: ["query"],
+      density: "COMFORTABLE",
+      queryIndicators: []
     }
   );
 });

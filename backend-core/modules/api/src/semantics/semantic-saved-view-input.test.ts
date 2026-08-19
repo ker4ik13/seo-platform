@@ -20,7 +20,9 @@ const config = {
   },
   sort: "PRIORITY_DESC",
   columns: ["query", "priority", "intent"],
+  columnOrder: ["query", "frequency", "priority", "intent"],
   density: "COMPACT",
+  queryIndicators: ["AI_ANSWER", "TARGET_URL_MISMATCH"],
   columnWidths: { query: 420, priority: 90 },
   pageSize: 200,
   groupSidebarWidth: 280,
@@ -48,6 +50,14 @@ test("normalizes an exact versioned semantic saved view", () => {
   assert.deepEqual(updateSemanticSavedViewInput({ name: "Личное" }), {
     name: "Личное"
   });
+  assert.deepEqual(
+    createSemanticSavedViewInput({
+      name: "Без индикаторов",
+      scope: "PRIVATE",
+      config: { ...config, queryIndicators: [] }
+    }).config.queryIndicators,
+    []
+  );
 });
 
 test("rejects unknown DSL fields, invalid ranges and unsafe columns", () => {
@@ -57,6 +67,15 @@ test("rejects unknown DSL fields, invalid ranges and unsafe columns", () => {
         name: "Broken",
         scope: "PRIVATE",
         config: { ...config, sql: "DROP TABLE keywords" }
+      }),
+    DomainError
+  );
+  assert.throws(
+    () =>
+      createSemanticSavedViewInput({
+        name: "Broken",
+        scope: "PRIVATE",
+        config: { ...config, columnOrder: ["query", "priority"] }
       }),
     DomainError
   );
@@ -87,6 +106,27 @@ test("rejects unknown DSL fields, invalid ranges and unsafe columns", () => {
         name: "Broken",
         scope: "PRIVATE",
         config: { ...config, groupSidebarWidth: 900 }
+      }),
+    DomainError
+  );
+  assert.throws(
+    () =>
+      createSemanticSavedViewInput({
+        name: "Broken",
+        scope: "PRIVATE",
+        config: {
+          ...config,
+          queryIndicators: ["AI_ANSWER", "AI_ANSWER"]
+        }
+      }),
+    DomainError
+  );
+  assert.throws(
+    () =>
+      createSemanticSavedViewInput({
+        name: "Broken",
+        scope: "PRIVATE",
+        config: { ...config, queryIndicators: ["UNKNOWN"] }
       }),
     DomainError
   );

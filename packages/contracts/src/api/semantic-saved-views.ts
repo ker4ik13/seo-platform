@@ -23,6 +23,15 @@ export const semanticSavedViewDensities = [
 export type SemanticSavedViewDensity =
   (typeof semanticSavedViewDensities)[number];
 
+export const semanticSavedViewQueryIndicators = [
+  "AI_ANSWER",
+  "MULTIPLE_URLS",
+  "TARGET_URL_MISMATCH"
+] as const;
+
+export type SemanticSavedViewQueryIndicator =
+  (typeof semanticSavedViewQueryIndicators)[number];
+
 export const semanticSystemColumnKeys = [
   "query",
   "frequency",
@@ -73,8 +82,13 @@ export interface SemanticSavedViewConfig {
   readonly schemaVersion: 1;
   readonly filters: SemanticSavedViewFilters;
   readonly sort: SemanticKeywordSort;
+  /** Visible columns in their table order. */
   readonly columns: readonly SemanticSavedViewColumnKey[];
+  /** Full drawer order, including columns currently hidden by the user. */
+  readonly columnOrder?: readonly SemanticSavedViewColumnKey[];
   readonly density: SemanticSavedViewDensity;
+  /** Enabled compact actions and warnings rendered beside the query text. */
+  readonly queryIndicators?: readonly SemanticSavedViewQueryIndicator[];
   /** Widths are keyed only by columns present in this saved view. */
   readonly columnWidths?: Readonly<Partial<Record<SemanticSavedViewColumnKey, number>>>;
   /** Number of rows loaded by each infinite-scroll request. */

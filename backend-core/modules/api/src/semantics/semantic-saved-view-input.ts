@@ -5,6 +5,7 @@ import {
   semanticSavedViewDensities,
   semanticSavedViewGroupSidebarWidthMax,
   semanticSavedViewGroupSidebarWidthMin,
+  semanticSavedViewQueryIndicators,
   semanticSavedViewScopes,
   semanticSystemColumnKeys,
   type CreateSemanticSavedViewInput,
@@ -55,7 +56,9 @@ export function savedViewConfig(value: unknown): SemanticSavedViewConfig {
       "filters",
       "sort",
       "columns",
+      "columnOrder",
       "density",
+      "queryIndicators",
       "columnWidths",
       "pageSize",
       "groupSidebarWidth",
@@ -69,6 +72,8 @@ export function savedViewConfig(value: unknown): SemanticSavedViewConfig {
     invalid("config.schemaVersion", "Only schema version 1 is supported");
   }
   const columns = requiredColumns(input.columns);
+  const columnOrder = optionalColumnOrder(input.columnOrder, columns);
+  const queryIndicators = optionalQueryIndicators(input.queryIndicators);
   const columnWidths = optionalColumnWidths(input.columnWidths, columns);
   const pageSize = input.pageSize === undefined
     ? undefined
@@ -98,11 +103,13 @@ export function savedViewConfig(value: unknown): SemanticSavedViewConfig {
     filters: savedViewFilters(input.filters),
     sort: requiredEnum(input.sort, semanticKeywordSorts, "config.sort"),
     columns,
+    ...(columnOrder === undefined ? {} : { columnOrder }),
     density: requiredEnum(
       input.density,
       semanticSavedViewDensities,
       "config.density"
     ),
+    ...(queryIndicators === undefined ? {} : { queryIndicators }),
     ...(columnWidths ? { columnWidths } : {}),
     ...(pageSize === undefined ? {} : { pageSize }),
     ...(groupSidebarWidth === undefined ? {} : { groupSidebarWidth }),
@@ -110,6 +117,29 @@ export function savedViewConfig(value: unknown): SemanticSavedViewConfig {
     ...(selectedGroupIds ? { selectedGroupIds } : {}),
     ...(appliedViewId ? { appliedViewId } : {})
   };
+}
+
+function optionalQueryIndicators(
+  value: unknown
+): SemanticSavedViewConfig["queryIndicators"] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > semanticSavedViewQueryIndicators.length) {
+    invalid(
+      "config.queryIndicators",
+      `Must contain at most ${semanticSavedViewQueryIndicators.length} indicators`
+    );
+  }
+  const indicators = value.map((indicator, index) =>
+    requiredEnum(
+      indicator,
+      semanticSavedViewQueryIndicators,
+      `config.queryIndicators[${index}]`
+    )
+  );
+  if (new Set(indicators).size !== indicators.length) {
+    invalid("config.queryIndicators", "Must be unique");
+  }
+  return indicators;
 }
 
 function savedViewFilters(value: unknown): SemanticSavedViewFilters {
@@ -181,14 +211,15 @@ function savedViewFilters(value: unknown): SemanticSavedViewFilters {
 }
 
 function requiredColumns(
-  value: unknown
+  value: unknown,
+  field = "config.columns"
 ): SemanticSavedViewConfig["columns"] {
   if (
     !Array.isArray(value) ||
     value.length < 1 ||
     value.length > 128
   ) {
-    invalid("config.columns", "Must contain 1 to 128 columns");
+    invalid(field, "Must contain 1 to 128 columns");
   }
   const columns = value.map((column, index) => {
     if (
@@ -200,17 +231,32 @@ function requiredColumns(
           column
         ))
     ) {
-      invalid(`config.columns[${index}]`, "Must be a known column key");
+      invalid(`${field}[${index}]`, "Must be a known column key");
     }
     return column as SemanticSavedViewConfig["columns"][number];
   });
   if (new Set(columns).size !== columns.length || !columns.includes("query")) {
     invalid(
-      "config.columns",
+      field,
       "Columns must be unique and include the query column"
     );
   }
   return columns;
+}
+
+function optionalColumnOrder(
+  value: unknown,
+  columns: SemanticSavedViewConfig["columns"]
+): SemanticSavedViewConfig["columnOrder"] | undefined {
+  if (value === undefined) return undefined;
+  const columnOrder = requiredColumns(value, "config.columnOrder");
+  if (columns.some((column) => !columnOrder.includes(column))) {
+    invalid(
+      "config.columnOrder",
+      "Must include every visible column"
+    );
+  }
+  return columnOrder;
 }
 
 function optionalColumnWidths(

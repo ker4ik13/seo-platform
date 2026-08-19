@@ -18,6 +18,7 @@ import {
   semanticSavedViewDensities,
   semanticSavedViewGroupSidebarWidthMax,
   semanticSavedViewGroupSidebarWidthMin,
+  semanticSavedViewQueryIndicators,
   semanticSavedViewScopes,
   semanticNegativeKeywordMatchModes,
   semanticDuplicatePreviewPageSizes,
@@ -4594,7 +4595,9 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     "filters",
     "sort",
     "columns",
+    "columnOrder",
     "density",
+    "queryIndicators",
     "columnWidths",
     "pageSize",
     "groupSidebarWidth",
@@ -4635,6 +4638,7 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     ) ||
     new Set(config.columns).size !== config.columns.length ||
     !config.columns.includes("query") ||
+    !validSavedViewColumnOrder(config.columnOrder, config.columns) ||
     (filters.search !== undefined &&
       (typeof filters.search !== "string" ||
         filters.search.length > 200)) ||
@@ -4660,6 +4664,7 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
       filters.priorityMin > filters.priorityMax) ||
     filterKeys.length > 9 ||
     !validSavedViewColumnWidths(config.columnWidths, config.columns) ||
+    !validSavedViewQueryIndicators(config.queryIndicators) ||
     (config.pageSize !== undefined &&
       !semanticKeywordPageSizes.some((size) => size === config.pageSize)) ||
     (config.groupSidebarWidth !== undefined &&
@@ -4679,7 +4684,21 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     filters: filters as SemanticSavedViewConfig["filters"],
     sort: config.sort as SemanticSavedViewConfig["sort"],
     columns: config.columns as SemanticSavedViewConfig["columns"],
+    ...(config.columnOrder === undefined
+      ? {}
+      : {
+          columnOrder: config.columnOrder as NonNullable<
+            SemanticSavedViewConfig["columnOrder"]
+          >
+        }),
     density: config.density as SemanticSavedViewConfig["density"],
+    ...(config.queryIndicators === undefined
+      ? {}
+      : {
+          queryIndicators: config.queryIndicators as NonNullable<
+            SemanticSavedViewConfig["queryIndicators"]
+          >
+        }),
     ...(config.columnWidths === undefined
       ? {}
       : {
@@ -4707,6 +4726,41 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
       ? {}
       : { appliedViewId: config.appliedViewId as string })
   };
+}
+
+function validSavedViewQueryIndicators(value: unknown): boolean {
+  return value === undefined || (
+    Array.isArray(value) &&
+    value.length <= semanticSavedViewQueryIndicators.length &&
+    value.every(
+      (indicator) =>
+        typeof indicator === "string" &&
+        semanticSavedViewQueryIndicators.some((value) => value === indicator)
+    ) &&
+    new Set(value).size === value.length
+  );
+}
+
+function validSavedViewColumnOrder(
+  value: unknown,
+  columns: unknown[]
+): boolean {
+  return value === undefined || (
+    Array.isArray(value) &&
+    value.length >= 1 &&
+    value.length <= 128 &&
+    value.every(
+      (column) =>
+        typeof column === "string" &&
+        (semanticSystemColumnKeys.some((key) => key === column) ||
+          /^custom:[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
+            column
+          ))
+    ) &&
+    new Set(value).size === value.length &&
+    value.includes("query") &&
+    columns.every((column) => value.includes(column))
+  );
 }
 
 function validSavedViewColumnWidths(
