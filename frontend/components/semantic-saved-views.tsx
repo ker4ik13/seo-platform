@@ -8,6 +8,7 @@ import {
   BrowserApiError,
   browserApiRequest
 } from "../lib/browser-api";
+import { semanticSavedViewConfigForPersistence } from "../lib/semantic-layout-preferences";
 import type {
   SemanticSavedView,
   SemanticViewConfig
@@ -83,11 +84,12 @@ export function SemanticSavedViews({
     setSaving(true);
     setError(undefined);
     try {
+      const persistedConfig = semanticSavedViewConfigForPersistence(config);
       const created = await browserApiRequest<SemanticSavedView>(
         savedViewUrl(projectId),
         {
           method: "POST",
-          body: { name, scope, config }
+          body: { name, scope, config: persistedConfig }
         }
       );
       setViews((current) =>
@@ -108,9 +110,14 @@ export function SemanticSavedViews({
     setSaving(true);
     setError(undefined);
     try {
+      const persistedConfig = semanticSavedViewConfigForPersistence(config);
       const updated = await browserApiRequest<SemanticSavedView>(
         savedViewUrl(projectId, view.id),
-        { method: "PATCH", body: { config }, ifMatch: view.version }
+        {
+          method: "PATCH",
+          body: { config: persistedConfig },
+          ifMatch: view.version
+        }
       );
       setViews((current) =>
         current.map((item) => (item.id === updated.id ? updated : item))

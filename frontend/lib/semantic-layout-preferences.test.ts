@@ -5,7 +5,9 @@ import {
   clampSemanticGroupSidebarWidth,
   normalizeSemanticKeywordPageSize,
   readSemanticLayoutPreferences,
+  semanticAppliedTableLayoutConfig,
   semanticColumnDefaultWidth,
+  semanticSavedViewConfigForPersistence,
   semanticVisibleColumnWidths,
   writeSemanticLayoutPreferences
 } from "./semantic-layout-preferences.ts";
@@ -74,6 +76,73 @@ test("persists widths only for columns included in the saved view", () => {
       query: 388,
       tags: 142,
       "custom:01900000-0000-7000-8000-000000000001": 176
+    }
+  );
+});
+
+test("applies reordered columns and multiple removals as one valid layout", () => {
+  const current = {
+    schemaVersion: 1,
+    filters: { search: "подшипник" },
+    sort: "CREATED_DESC",
+    columns: [
+      "query",
+      "frequency",
+      "frequencyExact",
+      "tags",
+      "priority",
+      "source"
+    ],
+    density: "COMFORTABLE",
+    columnWidths: {
+      query: 388,
+      frequency: 92,
+      frequencyExact: 86,
+      tags: 142,
+      priority: 94,
+      source: 108
+    }
+  } as const;
+  const draft = {
+    ...current,
+    columns: ["query", "source", "tags"],
+    density: "COMPACT",
+    columnWidths: {
+      query: 388,
+      source: 132,
+      tags: 176
+    }
+  } as const;
+
+  assert.deepEqual(semanticAppliedTableLayoutConfig(current, draft), {
+    ...current,
+    columns: ["query", "source", "tags"],
+    density: "COMPACT",
+    columnWidths: {
+      query: 388,
+      source: 132,
+      tags: 176
+    }
+  });
+});
+
+test("defensively removes hidden widths at the saved-view request boundary", () => {
+  assert.deepEqual(
+    semanticSavedViewConfigForPersistence({
+      schemaVersion: 1,
+      filters: {},
+      sort: "CREATED_DESC",
+      columns: ["query"],
+      density: "COMFORTABLE",
+      columnWidths: { query: 320, frequency: 92 }
+    }),
+    {
+      schemaVersion: 1,
+      filters: {},
+      sort: "CREATED_DESC",
+      columns: ["query"],
+      density: "COMFORTABLE",
+      columnWidths: { query: 320 }
     }
   );
 });

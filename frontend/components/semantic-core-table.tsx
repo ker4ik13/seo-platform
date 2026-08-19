@@ -57,12 +57,14 @@ import {
   clampSemanticGroupSidebarWidth,
   normalizeSemanticKeywordPageSize,
   readSemanticLayoutPreferences,
+  semanticAppliedTableLayoutConfig,
   semanticColumnDefaultWidth,
   semanticColumnMaxWidth,
   semanticColumnMinWidth,
   semanticGroupSidebarDefaultWidth,
   semanticGroupSidebarMaxWidth,
   semanticGroupSidebarMinWidth,
+  semanticSavedViewConfigForPersistence,
   semanticVisibleColumnWidths,
   writeSemanticLayoutPreferences
 } from "../lib/semantic-layout-preferences";
@@ -1382,11 +1384,10 @@ export function SemanticCoreTable({
 
   async function applyTableLayout(): Promise<void> {
     if (savingTableLayout) return;
-    const layoutConfig: SemanticViewConfig = {
-      ...currentSavedViewConfig,
-      columns: draftSavedViewConfig.columns,
-      density: draftSavedViewConfig.density
-    };
+    const layoutConfig = semanticAppliedTableLayoutConfig(
+      currentSavedViewConfig,
+      draftSavedViewConfig
+    );
     const privateDestination = activeSavedView?.scope === "PRIVATE"
       ? activeSavedView
       : undefined;
@@ -1488,13 +1489,14 @@ export function SemanticCoreTable({
   async function persistProjectTableLayout(
     config: SemanticViewConfig
   ): Promise<SemanticSavedView> {
+    const persistedConfig = semanticSavedViewConfigForPersistence(config);
     const current = projectTableViewRef.current;
     const saved = current
       ? await browserApiRequest<SemanticSavedView>(
           `/app/api/projects/${encodeURIComponent(projectId)}/semantic-saved-views/${encodeURIComponent(current.id)}`,
           {
             method: "PATCH",
-            body: { config },
+            body: { config: persistedConfig },
             ifMatch: current.version
           }
         )
@@ -1505,7 +1507,7 @@ export function SemanticCoreTable({
             body: {
               name: semanticProjectTableViewName,
               scope: "PRIVATE",
-              config
+              config: persistedConfig
             }
           }
         );
