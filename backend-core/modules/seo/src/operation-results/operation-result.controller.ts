@@ -11,6 +11,7 @@ import {
 } from "@nestjs/common";
 import type {
   ApiResponse,
+  InternalAiAnswerOperationResult,
   InternalCrawlOperationResultPage,
   InternalFrequencyOperationResult,
   InternalRankOperationResult
@@ -27,6 +28,7 @@ import {
   type RankManifestInternalHeaders
 } from "../rank-manifests/rank-manifest-route-context.js";
 import {
+  internalAiAnswerOperationResultInput,
   internalFrequencyOperationResultInput,
   operationResultCursor,
   operationResultLimit,
@@ -57,6 +59,24 @@ export class OperationResultController {
           context,
           canonicalJobId
         )
+      )
+    );
+  }
+
+  @Post("ai-answer/:jobId")
+  public async aiAnswer(
+    @Param("projectId") projectId: string,
+    @Param("jobId") jobId: string,
+    @Headers() headers: RankManifestInternalHeaders,
+    @Body() body: unknown,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<InternalAiAnswerOperationResult>> {
+    const context = rankManifestRouteContext(projectId, headers);
+    const canonicalJobId = internalUuid(jobId, "jobId");
+    return response(
+      request,
+      await this.results.aiAnswer(
+        internalAiAnswerOperationResultInput(body, context, canonicalJobId)
       )
     );
   }

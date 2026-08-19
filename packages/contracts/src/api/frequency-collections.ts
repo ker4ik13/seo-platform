@@ -8,6 +8,10 @@ import type {
   RankEstimateProvider,
   RankSearchSource
 } from "./rank-estimates.js";
+import type {
+  SemanticAiAnswerCompetitorSnapshot,
+  SemanticAiAnswerHistoryItem
+} from "./ai-answer-collections.js";
 
 export const frequencyCollectionProviders = ["XMLSTOCK", "ARSENKIN"] as const;
 export type FrequencyCollectionProvider =
@@ -195,6 +199,8 @@ export interface SemanticKeywordInsights {
   readonly positions: readonly SemanticKeywordPositionSummary[];
   readonly positionHistory: readonly SemanticKeywordPositionHistoryPoint[];
   readonly competitorSnapshots?: readonly SemanticKeywordCompetitorSnapshot[];
+  readonly aiPositionHistory?: readonly SemanticAiAnswerHistoryItem[];
+  readonly aiCompetitorSnapshots?: readonly SemanticAiAnswerCompetitorSnapshot[];
 }
 
 export interface SemanticKeywordCompetitorSnapshot {

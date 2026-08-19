@@ -285,7 +285,7 @@ function providerWorkload(
       BigInt(minimumRequestCount) === xmlStockTasks * 2n) ||
       (xmlStockGoogleStages &&
         (xmlStockTasks === 0n ||
-          [3n, 5n, 10n].includes(xmlStockGooglePageCount))));
+          [1n, 2n, 3n, 5n, 10n].includes(xmlStockGooglePageCount))));
   const normalizedRequestStages: RankEstimate["workload"]["requestStages"] =
     arsenkinStages
       ? ["SET", "CHECK", "GET"]

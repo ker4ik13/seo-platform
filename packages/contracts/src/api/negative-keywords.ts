@@ -63,6 +63,8 @@ export const semanticNegativeKeywordPreviewPageSizes = [100, 200] as const;
 export type SemanticNegativeKeywordPreviewPageSize =
   (typeof semanticNegativeKeywordPreviewPageSizes)[number];
 
+export const semanticNegativeKeywordExclusionLimit = 2_000;
+
 export interface SemanticNegativeKeywordPreviewInput
   extends SemanticNegativeKeywordCommandInput {
   readonly page: number;
@@ -99,6 +101,8 @@ export interface SemanticNegativeKeywordPreview {
 export interface ApplySemanticNegativeKeywordsInput
   extends SemanticNegativeKeywordCommandInput {
   readonly previewHash: string;
+  /** Matches explicitly unchecked by the user and therefore left active. */
+  readonly excludedKeywordIds?: readonly string[];
 }
 
 export interface SemanticNegativeKeywordApplyResult {

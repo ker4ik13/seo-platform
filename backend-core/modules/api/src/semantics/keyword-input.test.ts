@@ -114,6 +114,17 @@ test("requires an explicit non-empty keyword patch", () => {
   );
 });
 
+test("accepts only a boolean AI-answer shortcut preference", () => {
+  assert.deepEqual(
+    updateSemanticKeywordInput({ showAiAnswerButton: true }),
+    { showAiAnswerButton: true }
+  );
+  assert.throws(
+    () => updateSemanticKeywordInput({ showAiAnswerButton: "yes" }),
+    DomainError
+  );
+});
+
 test("normalizes keyword notes and supports an explicit removal", () => {
   assert.deepEqual(updateSemanticKeywordInput({ note: "  Гипотеза по кластеру  " }), {
     note: "Гипотеза по кластеру"

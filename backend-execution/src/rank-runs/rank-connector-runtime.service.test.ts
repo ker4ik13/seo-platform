@@ -355,7 +355,7 @@ test("backs off XMLStock delayed Yandex polling to the documented cadence", asyn
   } as unknown as RankConnectorRuntimeBrokerService;
   const xmlStockConnector = {
     async fetchResult() {
-      return { status: "PENDING" as const };
+      return { status: "PENDING" as const, retryAfterSeconds: 25 };
     }
   } as unknown as XmlStockRankConnector;
 
@@ -372,6 +372,69 @@ test("backs off XMLStock delayed Yandex polling to the documented cadence", asyn
   assert.deepEqual(completed, {
     outcome: "PENDING",
     retryAfterSeconds: 25
+  });
+});
+
+test("runs XMLStock Yandex Live Turbo without the standard account quota gate", async () => {
+  const pollClaim: RankConnectorPollClaim = {
+    ...claim(),
+    provider: "XMLSTOCK",
+    providerTaskId: "xml-turbo-3944",
+    request: {
+      ...xmlStockRequestIntent(),
+      execution: {
+        ...xmlStockRequestIntent().execution,
+        providerMappingVersion: "xmlstock-yandex-live@3"
+      }
+    }
+  };
+  let completed:
+    | { readonly outcome: string; readonly retryAfterSeconds?: number }
+    | undefined;
+  const broker = {
+    async claimPoll() {
+      return pollClaim;
+    },
+    async completePoll(_claim: unknown, input: typeof completed) {
+      completed = input;
+      return {
+        executionId: ids.execution,
+        status: "POLL_WAIT",
+        executionVersion: 6
+      };
+    }
+  } as unknown as RankConnectorRuntimeBrokerService;
+  const quota: XmlStockHttpQuotaGate = {
+    async tryAcquire() {
+      throw new Error("Turbo must not acquire the standard XMLStock limiter");
+    },
+    async release() {},
+    async penalize() {},
+    async recordSuccess() {}
+  };
+  let providerCalls = 0;
+  const xmlStockConnector = {
+    async fetchResult() {
+      providerCalls += 1;
+      return { status: "PENDING" as const, retryAfterSeconds: 15 };
+    }
+  } as unknown as XmlStockRankConnector;
+
+  assert.equal(
+    await service(
+      broker,
+      {} as ArsenkinRankConnector,
+      false,
+      1_000,
+      xmlStockConnector,
+      quota
+    ).processOne("connector-worker"),
+    "POLL_PENDING"
+  );
+  assert.equal(providerCalls, 1);
+  assert.deepEqual(completed, {
+    outcome: "PENDING",
+    retryAfterSeconds: 15
   });
 });
 

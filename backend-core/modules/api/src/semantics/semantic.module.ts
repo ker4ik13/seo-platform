@@ -15,6 +15,7 @@ import { JobsModule } from "../jobs/jobs.module.js";
 import { FrequencyCollectionController } from "./frequency-collection.controller.js";
 import { NegativeKeywordController } from "./negative-keyword.controller.js";
 import { SemanticDuplicateController } from "./semantic-duplicate.controller.js";
+import { AiAnswerCollectionController } from "./ai-answer-collection.controller.js";
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { SemanticDuplicateController } from "./semantic-duplicate.controller.js"
     SemanticExportController,
     SemanticVersionController,
     FrequencyCollectionController,
+    AiAnswerCollectionController,
     NegativeKeywordController,
     SemanticDuplicateController
   ]

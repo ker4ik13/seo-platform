@@ -178,8 +178,9 @@ export function SemanticFrequencyDialog({
       <form className="semantic-frequency-dialog semantic-workflow-dialog" onSubmit={(event) => void submit(event)}>
         <div className="semantic-workflow-grid semantic-frequency-workflow-grid">
           <section className="semantic-workflow-panel semantic-source-panel">
-            <header>
+            <header className="semantic-workflow-panel-heading">
               <h3>Источник данных</h3>
+              <a className="semantic-dialog-link" href="/app/settings/integrations">Управлять</a>
               <p>Выберите подключение, через которое будет выполнен сбор.</p>
             </header>
             {loadingSources ? (
@@ -208,7 +209,6 @@ export function SemanticFrequencyDialog({
             ) : (
               <div className="inline-alert warning">Нет проверенного подключения с функцией Wordstat.</div>
             )}
-            <a className="semantic-dialog-link" href="/app/settings/integrations">Управление подключениями</a>
           </section>
           <section className="semantic-workflow-panel semantic-settings-panel">
             <header>

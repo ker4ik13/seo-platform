@@ -30,7 +30,8 @@ const YANDEX_LIVE_URL = new URL("https://xmlstock.com/yandexlive/xml/");
 const GOOGLE_URL = new URL("https://xmlstock.com/google/xml/");
 const STAGED_RESULT_SCHEMA = "xmlstock-rank-result@1" as const;
 const WIRE_RESULT_SCHEMA = "xmlstock-rank-wire-result@1" as const;
-const PAGE_PROGRESS_SCHEMA = "xmlstock-rank-page-progress@1" as const;
+const PAGE_PROGRESS_V1_SCHEMA = "xmlstock-rank-page-progress@1" as const;
+const PAGE_PROGRESS_V2_SCHEMA = "xmlstock-rank-page-progress@2" as const;
 const MAX_RESPONSE_BYTES = 8 * 1_048_576;
 const MAX_TITLE_LENGTH = 2_048;
 const MAX_SNIPPET_LENGTH = 8_192;
@@ -49,6 +50,7 @@ export interface XmlStockRankWireRequest {
   readonly device: "DESKTOP" | "MOBILE";
   readonly depth: 30 | 50 | 100;
   readonly delayed: boolean;
+  readonly turbo: boolean;
 }
 
 export type XmlStockRankSubmitResult =
@@ -78,10 +80,10 @@ export type XmlStockRankFetchResult =
   | { readonly status: "READY"; readonly value: unknown }
   | {
       readonly status: "CHECKPOINTED";
-      readonly progress: XmlStockRankPageProgressV1;
+      readonly progress: XmlStockRankPageProgress;
       readonly hash: RankManifestHash;
     }
-  | { readonly status: "PENDING" }
+  | { readonly status: "PENDING"; readonly retryAfterSeconds: number }
   | {
       readonly status: "RETRYABLE_FAILURE";
       readonly code: "PROVIDER_RATE_LIMITED" | "PROVIDER_UNAVAILABLE";
@@ -117,6 +119,20 @@ export interface XmlStockRankPageProgressV1 {
   readonly nextPage: number;
   readonly documents: readonly XmlStockDocument[];
 }
+
+export interface XmlStockRankPageProgressV2 {
+  readonly schemaVersion: "xmlstock-rank-page-progress@2";
+  readonly taskId: string;
+  readonly engine: "YANDEX";
+  readonly depth: 30 | 50 | 100;
+  readonly resultsPerPage: 10 | 20 | 30 | 40 | 50;
+  readonly nextPage: number;
+  readonly documents: readonly XmlStockDocument[];
+}
+
+export type XmlStockRankPageProgress =
+  | XmlStockRankPageProgressV1
+  | XmlStockRankPageProgressV2;
 
 export interface XmlStockStagedRankResultV1 {
   readonly schemaVersion: "xmlstock-rank-result@1";
@@ -166,7 +182,8 @@ export class XmlStockRankConnector {
         response.status,
         response.value,
         response.retryAfterSeconds,
-        "SUBMIT"
+        "SUBMIT",
+        25
       );
       if (failure) {
         return failure.status === "PENDING"
@@ -239,7 +256,8 @@ export class XmlStockRankConnector {
       response.status,
       response.value,
       response.retryAfterSeconds,
-      "POLL"
+      "POLL",
+      25
     );
     if (failure) return failure;
     const parsed = parseXmlStockXml(response.value);
@@ -263,15 +281,25 @@ export class XmlStockRankConnector {
     if (taskId !== liveTaskId(intent)) {
       return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
     }
-    const pageCount = Math.ceil(request.depth / 10);
     const progress = progressValue === undefined
       ? undefined
       : xmlStockRankPageProgress(progressValue);
+    const resultsPerPage = progress === undefined
+      ? request.turbo ? undefined : 10
+      : progress.schemaVersion === PAGE_PROGRESS_V2_SCHEMA
+        ? progress.resultsPerPage
+        : 10;
+    const pageCount = resultsPerPage === undefined
+      ? undefined
+      : Math.ceil(request.depth / resultsPerPage);
     if (
       progress &&
       (progress.taskId !== taskId ||
         progress.engine !== request.engine ||
         progress.depth !== request.depth ||
+        (request.turbo !==
+          (progress.schemaVersion === PAGE_PROGRESS_V2_SCHEMA)) ||
+        pageCount === undefined ||
         progress.nextPage >= pageCount)
     ) {
       invalid();
@@ -290,23 +318,52 @@ export class XmlStockRankConnector {
       response.status,
       response.value,
       response.retryAfterSeconds,
-      "POLL"
+      "POLL",
+      request.turbo ? 15 : 25
     );
     if (failure) return failure;
     const parsed = parseXmlStockXml(response.value);
+    if (request.turbo && parsed.documents.length > 50) {
+      return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
+    }
+    if (
+      progress?.schemaVersion === PAGE_PROGRESS_V2_SCHEMA &&
+      parsed.documents.length > progress.resultsPerPage
+    ) {
+      return { status: "REJECTED", code: "INVALID_PROVIDER_RESPONSE" };
+    }
     documents.push(
       ...parsed.documents.map((document, index) => ({
         ...document,
-        position: page * 10 + index + 1
+        position: documents.length + index + 1
       }))
     );
     const nextPage = page + 1;
-    if (parsed.documents.length === 10 && nextPage < pageCount) {
+    const detectedResultsPerPage = request.turbo
+      ? progress?.schemaVersion === PAGE_PROGRESS_V2_SCHEMA
+        ? progress.resultsPerPage
+        : turboResultsPerPage(parsed.documents.length)
+      : 10;
+    const detectedPageCount = detectedResultsPerPage === undefined
+      ? undefined
+      : Math.ceil(request.depth / detectedResultsPerPage);
+    if (
+      detectedResultsPerPage !== undefined &&
+      parsed.documents.length === detectedResultsPerPage &&
+      documents.length < request.depth &&
+      detectedPageCount !== undefined &&
+      nextPage < detectedPageCount
+    ) {
       const checkpoint = xmlStockRankPageProgress({
-        schemaVersion: PAGE_PROGRESS_SCHEMA,
+        schemaVersion: request.turbo
+          ? PAGE_PROGRESS_V2_SCHEMA
+          : PAGE_PROGRESS_V1_SCHEMA,
         taskId,
         engine: request.engine,
         depth: request.depth,
+        ...(request.turbo
+          ? { resultsPerPage: detectedResultsPerPage }
+          : {}),
         nextPage,
         documents
       });
@@ -325,19 +382,28 @@ export class XmlStockRankConnector {
 
 export function xmlStockRankPageProgress(
   value: unknown
-): XmlStockRankPageProgressV1 {
+): XmlStockRankPageProgress {
   const input = record(value);
+  const turbo = input.schemaVersion === PAGE_PROGRESS_V2_SCHEMA;
+  const resultsPerPage = turbo
+    ? turboResultsPerPage(input.resultsPerPage)
+    : input.schemaVersion === PAGE_PROGRESS_V1_SCHEMA
+      ? 10
+      : undefined;
+  const fieldCount = turbo ? 7 : 6;
   if (
-    Object.keys(input).length !== 6 ||
-    input.schemaVersion !== PAGE_PROGRESS_SCHEMA ||
+    Object.keys(input).length !== fieldCount ||
+    resultsPerPage === undefined ||
     typeof input.taskId !== "string" ||
     (input.engine !== "YANDEX" && input.engine !== "GOOGLE") ||
+    (turbo && input.engine !== "YANDEX") ||
     (input.depth !== 30 && input.depth !== 50 && input.depth !== 100) ||
     !Number.isSafeInteger(input.nextPage) ||
     Number(input.nextPage) < 1 ||
-    Number(input.nextPage) >= Math.ceil(Number(input.depth) / 10) ||
+    Number(input.nextPage) >=
+      Math.ceil(Number(input.depth) / resultsPerPage) ||
     !Array.isArray(input.documents) ||
-    input.documents.length !== Number(input.nextPage) * 10
+    input.documents.length !== Number(input.nextPage) * resultsPerPage
   ) {
     invalid();
   }
@@ -377,8 +443,16 @@ export function xmlStockRankPageProgress(
       ...(parsed.snippet === undefined ? {} : { snippet: parsed.snippet })
     };
   });
-  const progress: XmlStockRankPageProgressV1 = {
-    schemaVersion: PAGE_PROGRESS_SCHEMA,
+  const progress: XmlStockRankPageProgress = turbo ? {
+    schemaVersion: PAGE_PROGRESS_V2_SCHEMA,
+    taskId: providerTaskId(input.taskId),
+    engine: "YANDEX",
+    depth: input.depth,
+    resultsPerPage,
+    nextPage: Number(input.nextPage),
+    documents
+  } : {
+    schemaVersion: PAGE_PROGRESS_V1_SCHEMA,
     taskId: providerTaskId(input.taskId),
     engine: input.engine,
     depth: input.depth,
@@ -395,7 +469,7 @@ export function xmlStockRankPageProgressHash(
   const progress = xmlStockRankPageProgress(value);
   return {
     algorithm: "SHA_256",
-    value: canonicalJsonSha256(PAGE_PROGRESS_SCHEMA, progress)
+    value: canonicalJsonSha256(progress.schemaVersion, progress)
   };
 }
 
@@ -418,7 +492,10 @@ export function buildXmlStockRankWireRequest(
     delayed:
       intent.execution.searchEngine === "YANDEX" &&
       xmlStockSearchSource(intent.execution.providerMappingVersion) ===
-        "SEARCH_API"
+        "SEARCH_API",
+    turbo:
+      intent.execution.providerMappingVersion ===
+      "xmlstock-yandex-live@3"
   };
 }
 
@@ -436,6 +513,12 @@ export function xmlStockRankHttpProduct(
 ): Exclude<XmlStockHttpProduct, "WORDSTAT"> {
   if (request.delayed) return "YANDEX_SEARCH_API";
   return request.engine === "GOOGLE" ? "GOOGLE_LIVE" : "YANDEX_LIVE";
+}
+
+export function xmlStockRankUsesQuota(
+  request: XmlStockRankWireRequest
+): boolean {
+  return !request.turbo;
 }
 
 export function stageXmlStockRankResult(
@@ -601,6 +684,7 @@ function livePageUrl(
   url.searchParams.set("device", device(request.device));
   url.searchParams.set("domain", request.countryCode.toLowerCase());
   if (request.engine === "YANDEX") {
+    url.searchParams.set("tbm", request.turbo ? "turbo" : "");
     url.searchParams.set(
       "lang",
       request.language.toLowerCase().startsWith("en") ? "en" : "ru"
@@ -633,7 +717,8 @@ function responseFailure(
   status: number,
   xml: string,
   retryAfterSeconds: number | undefined,
-  stage: "SUBMIT" | "POLL"
+  stage: "SUBMIT" | "POLL",
+  pendingRetryAfterSeconds: number
 ): Exclude<
   XmlStockRankFetchResult,
   { readonly status: "READY" | "CHECKPOINTED" }
@@ -670,7 +755,10 @@ function responseFailure(
     return { status: "RETRYABLE_FAILURE", code: "PROVIDER_UNAVAILABLE" };
   }
   if (stage === "POLL" && ["202", "210"].includes(code)) {
-    return { status: "PENDING" };
+    return {
+      status: "PENDING",
+      retryAfterSeconds: pendingRetryAfterSeconds
+    };
   }
   return { status: "REJECTED", code: "PROVIDER_PLAN_OR_REQUEST_REJECTED" };
 }
@@ -835,11 +923,22 @@ function xmlStockSearchSource(
 ): "SEARCH_API" | "LIVE" {
   if (
     providerMappingVersion === "xmlstock-yandex-live@2" ||
+    providerMappingVersion === "xmlstock-yandex-live@3" ||
     providerMappingVersion === "xmlstock-google-live@2"
   ) {
     return "LIVE";
   }
   return "SEARCH_API";
+}
+
+function turboResultsPerPage(value: unknown): 10 | 20 | 30 | 40 | 50 | undefined {
+  return value === 10 ||
+      value === 20 ||
+      value === 30 ||
+      value === 40 ||
+      value === 50
+    ? value
+    : undefined;
 }
 
 function xmlStockIntent(value: unknown): RankProviderRequestIntentV1 {

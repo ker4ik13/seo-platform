@@ -13,8 +13,11 @@ import type {
   ApiResponse,
   SemanticCustomColumn,
   SemanticKeywordGroup,
-  SemanticKeywordListItem
+  SemanticKeywordListItem,
+  SemanticPositionHistoryExportOptions,
+  SemanticPositionHistoryExportRow
 } from "@seo-platform/contracts";
+import { semanticPositionHistorySearchEngines } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
 import {
   internalCommandContext,
@@ -25,6 +28,7 @@ import { KeywordGroupService } from "../keyword-groups/keyword-group.service.js"
 import { keywordListQuery } from "../keywords/keyword-query.js";
 import { KeywordService } from "../keywords/keyword.service.js";
 import { SemanticCustomColumnService } from "../semantic-custom-columns/semantic-custom-column.service.js";
+import { SemanticPositionHistoryExportService } from "./semantic-position-history-export.service.js";
 
 type InternalHeaders = Readonly<
   Record<string, string | string[] | undefined>
@@ -36,7 +40,8 @@ export class SemanticExportReadController {
   public constructor(
     private readonly keywords: KeywordService,
     private readonly groups: KeywordGroupService,
-    private readonly columns: SemanticCustomColumnService
+    private readonly columns: SemanticCustomColumnService,
+    private readonly positionHistory: SemanticPositionHistoryExportService
   ) {}
 
   @Get("keywords")
@@ -51,6 +56,22 @@ export class SemanticExportReadController {
       context.workspaceId,
       context.projectId,
       keywordListQuery(query),
+      request.id
+    );
+  }
+
+  @Get("position-history")
+  public async listPositionHistory(
+    @Param("projectId") projectId: string,
+    @Query() query: unknown,
+    @Headers() headers: InternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiCollectionResponse<SemanticPositionHistoryExportRow>> {
+    const context = routeContext(projectId, headers);
+    return this.positionHistory.list(
+      context,
+      keywordListQuery(query),
+      positionHistoryOptions(query),
       request.id
     );
   }
@@ -80,6 +101,50 @@ export class SemanticExportReadController {
       await this.columns.list(context.workspaceId, context.projectId)
     );
   }
+}
+
+function positionHistoryOptions(
+  value: unknown
+): SemanticPositionHistoryExportOptions {
+  const query = typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : {};
+  const observedFrom = canonicalInstant(query.observedFrom, "observedFrom");
+  const observedBefore = canonicalInstant(query.observedBefore, "observedBefore");
+  const duration = Date.parse(observedBefore) - Date.parse(observedFrom);
+  if (duration <= 0 || duration > 1_100 * 24 * 60 * 60 * 1_000) {
+    throw new BadRequestException("Invalid position-history date interval");
+  }
+  if (typeof query.searchEngines !== "string") {
+    throw new BadRequestException("Invalid position-history search engines");
+  }
+  const searchEngines = query.searchEngines.split(",").map((item) => item.trim());
+  if (
+    searchEngines.length < 1 ||
+    searchEngines.length > semanticPositionHistorySearchEngines.length ||
+    new Set(searchEngines).size !== searchEngines.length ||
+    searchEngines.some((engine) => !semanticPositionHistorySearchEngines.includes(
+      engine as (typeof semanticPositionHistorySearchEngines)[number]
+    ))
+  ) {
+    throw new BadRequestException("Invalid position-history search engines");
+  }
+  return {
+    observedFrom,
+    observedBefore,
+    searchEngines: searchEngines as SemanticPositionHistoryExportOptions["searchEngines"]
+  };
+}
+
+function canonicalInstant(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.length !== 24) {
+    throw new BadRequestException(`Invalid position-history ${field}`);
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== value) {
+    throw new BadRequestException(`Invalid position-history ${field}`);
+  }
+  return value;
 }
 
 function routeContext(projectId: string, headers: InternalHeaders) {

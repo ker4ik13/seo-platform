@@ -5,6 +5,7 @@ import type { PrismaService } from "../database/prisma.service.js";
 import type { RankManifestClient } from "../seo-data/rank-manifest.client.js";
 import {
   rankGrantFailureFinalStatus,
+  rankProviderActiveTaskLimit,
   RankExecutionDispatchService
 } from "./rank-execution-dispatch.service.js";
 import {
@@ -53,6 +54,30 @@ test("waits without failing while the provider dispatch window is full", async (
     "RETRY_PENDING"
   );
   assert.deepEqual(fixture.events, []);
+});
+
+test("keeps only Yandex Live Turbo outside the provider lifecycle window", () => {
+  assert.equal(
+    rankProviderActiveTaskLimit(
+      "XMLSTOCK",
+      "xmlstock-yandex-live@3"
+    ),
+    undefined
+  );
+  assert.equal(
+    rankProviderActiveTaskLimit(
+      "XMLSTOCK",
+      "xmlstock-yandex-live@2"
+    ),
+    5
+  );
+  assert.equal(
+    rankProviderActiveTaskLimit(
+      "ARSENKIN",
+      "arsenkin-yandex-live@2"
+    ),
+    5
+  );
 });
 
 test("finalizes an explicit grant denial before provider submit", async () => {

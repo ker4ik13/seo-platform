@@ -137,6 +137,7 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
         }
       ]
     },
+    aiAnswerSnapshot: { findMany: async () => [] },
     rankSnapshot: {
       findMany: async () => [{
         id: snapshotId,
@@ -308,6 +309,7 @@ test("keeps position deltas across tracking contexts", async () => {
           }
         ]
       },
+      aiAnswerSnapshot: { findMany: async () => [] },
       rankSnapshot: { findMany: async () => [] },
       trackingContextVersion: {
         findMany: async () => [
@@ -354,6 +356,76 @@ test("keeps position deltas across tracking contexts", async () => {
   );
 });
 
+test("projects AI position changes across collection contexts", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000018";
+  const snapshotId = "01900000-0000-7000-8000-000000000019";
+  const rawQueries: Prisma.Sql[] = [];
+  const service = new KeywordService(
+    {
+      $queryRaw: async (
+        strings: TemplateStringsArray,
+        ...values: unknown[]
+      ) => {
+        const query = Prisma.sql(strings, ...values);
+        rawQueries.push(query);
+        return [{
+          keywordId,
+          searchEngine: "YANDEX",
+          observedAt: new Date("2026-08-19T14:00:00.000Z"),
+          snapshotId,
+          previousPosition: 9
+        }];
+      },
+      keyword: {
+        findMany: async () => [{
+          ...keyword(keywordId, "2026-08-19T14:00:00.000Z"),
+          targetPageId: null,
+          typedCustomValues: []
+        }],
+        count: async () => 1
+      },
+      trackingContextKeywordAssignment: { findMany: async () => [] },
+      frequencySnapshot: { findMany: async () => [] },
+      currentRank: { findMany: async () => [] },
+      aiAnswerSnapshot: {
+        findMany: async () => [{
+          id: snapshotId,
+          keywordId,
+          searchEngine: "YANDEX",
+          answerPresent: true,
+          siteFound: true,
+          position: 4,
+          rankingUrl: "https://example.com/ai",
+          brandFound: true,
+          observedAt: new Date("2026-08-19T14:00:00.000Z")
+        }]
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  const result = await service.list(
+    workspaceId,
+    projectId,
+    { limit: 100 },
+    "request-ai-cross-context-delta"
+  );
+
+  assert.deepEqual(result.data[0]?.aiAnswers, [{
+    searchEngine: "YANDEX",
+    answerPresent: true,
+    siteFound: true,
+    position: 4,
+    previousPosition: 9,
+    rankingUrl: "https://example.com/ai",
+    brandFound: true,
+    observedAt: "2026-08-19T14:00:00.000Z"
+  }]);
+  assert.equal(rawQueries.length, 1);
+  assert.match(rawQueries[0]?.sql ?? "", /FROM ai_answer_snapshots snapshot/u);
+  assert.match(rawQueries[0]?.sql ?? "", /snapshot\.site_found = TRUE/u);
+});
+
 test("projects exact rank collection metadata into keyword history", async () => {
   const keywordId = "01900000-0000-7000-8000-000000000012";
   const contextId = "01900000-0000-7000-8000-000000000072";
@@ -364,6 +436,7 @@ test("projects exact rank collection metadata into keyword history", async () =>
       },
       frequencySnapshot: { findMany: async () => [] },
       currentRank: { findMany: async () => [] },
+      aiAnswerSnapshot: { findMany: async () => [] },
       rankSnapshot: {
         findMany: async () => [{
           id: "01900000-0000-7000-8000-000000000073",
@@ -455,6 +528,83 @@ test("projects exact rank collection metadata into keyword history", async () =>
       },
       { position: 2, url: "https://example.com/result" }
     ]
+  }]);
+});
+
+test("projects immutable AI history and latest source competitors into insights", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000021";
+  const snapshotId = "01900000-0000-7000-8000-000000000022";
+  const observedAt = new Date("2026-08-19T15:00:00.000Z");
+  const historyRow = {
+    id: snapshotId,
+    keywordId,
+    searchEngine: "YANDEX",
+    regionCode: "213",
+    device: "DESKTOP",
+    answerPresent: true,
+    siteFound: true,
+    position: 2,
+    rankingUrl: "https://example.com/answer",
+    brandFound: true,
+    observedAt
+  };
+  const service = new KeywordService(
+    {
+      keyword: { findFirst: async () => ({ id: keywordId, note: null }) },
+      frequencySnapshot: { findMany: async () => [] },
+      currentRank: { findMany: async () => [] },
+      rankSnapshot: { findMany: async () => [] },
+      aiAnswerSnapshot: {
+        findMany: async ({ where }: { where: Readonly<Record<string, unknown>> }) =>
+          "sources" in where
+            ? [{
+                id: snapshotId,
+                searchEngine: "YANDEX",
+                regionCode: "213",
+                device: "DESKTOP",
+                observedAt,
+                sources: [{
+                  position: 1,
+                  url: "https://competitor.example/source",
+                  title: "Источник",
+                  description: "Описание"
+                }]
+              }]
+            : [historyRow]
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  const result = await service.insights(workspaceId, projectId, keywordId);
+
+  assert.deepEqual(result.aiPositionHistory, [{
+    snapshotId,
+    keywordId,
+    searchEngine: "YANDEX",
+    regionCode: "213",
+    device: "DESKTOP",
+    answerPresent: true,
+    siteFound: true,
+    position: 2,
+    rankingUrl: "https://example.com/answer",
+    brandFound: true,
+    provider: "ARSENKIN",
+    observedAt: "2026-08-19T15:00:00.000Z"
+  }]);
+  assert.deepEqual(result.aiCompetitorSnapshots, [{
+    snapshotId,
+    searchEngine: "YANDEX",
+    regionCode: "213",
+    device: "DESKTOP",
+    provider: "ARSENKIN",
+    observedAt: "2026-08-19T15:00:00.000Z",
+    results: [{
+      position: 1,
+      url: "https://competitor.example/source",
+      title: "Источник",
+      snippet: "Описание"
+    }]
   }]);
 });
 
@@ -557,6 +707,7 @@ test("projects context-independent previous positions into keyword insights", as
           snapshotId
         }]
       },
+      aiAnswerSnapshot: { findMany: async () => [] },
       rankSnapshot: { findMany: async () => [] },
       trackingContext: {
         findMany: async () => [{ id: contextId, name: "Новый профиль" }]
@@ -659,6 +810,7 @@ test("projects a shared canonical keyword through the currently opened group", a
       trackingContextKeywordAssignment: { findMany: async () => [] },
       frequencySnapshot: { findMany: async () => [] },
       currentRank: { findMany: async () => [] },
+      aiAnswerSnapshot: { findMany: async () => [] },
       keywordGroupMembership: {
         findMany: async () => [
           {
@@ -698,6 +850,7 @@ test("projects imported Key Collector positions without poisoning keyword insigh
       },
       frequencySnapshot: { findMany: async () => [] },
       currentRank: { findMany: async () => [] },
+      aiAnswerSnapshot: { findMany: async () => [] },
       rankSnapshot: {
         findMany: async () => [{
           id: "01900000-0000-7000-8000-000000000084",
@@ -863,7 +1016,8 @@ test("sorts tags by the first normalized active tag on the server", async () => 
       },
       trackingContextKeywordAssignment: { findMany: async () => [] },
       frequencySnapshot: { findMany: async () => [] },
-      currentRank: { findMany: async () => [] }
+      currentRank: { findMany: async () => [] },
+      aiAnswerSnapshot: { findMany: async () => [] }
     } as unknown as PrismaService,
     semanticVersions()
   );
@@ -956,6 +1110,7 @@ test("sorts by the latest engine result and keeps missing positions last", async
           ];
         }
       },
+      aiAnswerSnapshot: { findMany: async () => [] },
       rankSnapshot: { findMany: async () => [] },
       trackingContextVersion: {
         findMany: async () => [
@@ -1030,6 +1185,59 @@ test("sorts by the latest engine result and keeps missing positions last", async
       observedAt: "2026-08-05T10:00:00.000Z"
     }
   ]);
+});
+
+test("sorts AI positions and AI collection dates from the latest engine snapshot", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000014";
+  const rawQueries: Prisma.Sql[] = [];
+  const service = new KeywordService(
+    {
+      $queryRaw: async (
+        strings: TemplateStringsArray,
+        ...values: unknown[]
+      ) => {
+        rawQueries.push(Prisma.sql(strings, ...values));
+        return [{ id: keywordId, sort_value: 7n }];
+      },
+      keyword: {
+        findMany: async () => [{
+          ...keyword(keywordId, "2026-08-01T09:00:00.000Z"),
+          targetPageId: null,
+          typedCustomValues: []
+        }],
+        count: async () => 1
+      },
+      trackingContextKeywordAssignment: { findMany: async () => [] },
+      frequencySnapshot: { findMany: async () => [] },
+      currentRank: { findMany: async () => [] },
+      aiAnswerSnapshot: { findMany: async () => [] }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  await service.list(
+    workspaceId,
+    projectId,
+    { limit: 100, sort: "YANDEX_AI_POSITION_ASC" },
+    "request-ai-position-sort"
+  );
+  await service.list(
+    workspaceId,
+    projectId,
+    { limit: 100, sort: "GOOGLE_AI_CHECKED_AT_DESC" },
+    "request-ai-date-sort"
+  );
+
+  assert.equal(rawQueries.length, 2);
+  assert.match(rawQueries[0]?.sql ?? "", /FROM ai_answer_snapshots latest_ai/u);
+  assert.match(rawQueries[0]?.sql ?? "", /latest_ai\.site_found/u);
+  assert.match(rawQueries[0]?.sql ?? "", /latest_ai\.answer_present/u);
+  assert.match(rawQueries[0]?.sql ?? "", /ORDER BY ranked\.sort_value ASC/u);
+  assert.ok(rawQueries[0]?.values.includes("YANDEX"));
+  assert.ok(rawQueries[0]?.values.includes(2_000_000n));
+  assert.match(rawQueries[1]?.sql ?? "", /extract\(epoch from latest_ai\.observed_at\)/u);
+  assert.match(rawQueries[1]?.sql ?? "", /ORDER BY ranked\.sort_value DESC/u);
+  assert.ok(rawQueries[1]?.values.includes("GOOGLE"));
 });
 
 test("moves a keyword to the system trash before allowing permanent deletion", async () => {
@@ -1146,6 +1354,7 @@ test("moves a keyword to the system trash before allowing permanent deletion", a
     language: "und",
     priority: 0,
     isFavorite: false,
+    showAiAnswerButton: false,
     intent: null,
     clusterId: null,
     targetPageId: null,
@@ -1831,6 +2040,7 @@ function semanticItem(id: string): SemanticKeywordListItem {
     priority: 15,
     isFavorite: false,
     isTracked: false,
+    showAiAnswerButton: false,
     tags: [],
     tagsTruncated: false,
     sourceMode: "MANUAL",

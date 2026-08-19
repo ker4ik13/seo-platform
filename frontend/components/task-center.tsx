@@ -1,15 +1,19 @@
 "use client";
 
 import type {
+  AiAnswerCollectionSummary,
   FrequencyCollectionSummary,
   KeywordResearchCollection,
   KeywordResearchRunSummary,
   RankJobSummary,
   TechnicalCrawlSettings,
-  TechnicalCrawlSummary
+  TechnicalCrawlSummary,
+  SemanticExportCollection,
+  SemanticExportJobSummary
 } from "@seo-platform/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
+import { semanticExportFileUrl } from "../lib/app-path";
 import {
   connectorRouteTrail,
   connectorRoutingScopeLabel,
@@ -35,7 +39,7 @@ import { ProviderLogo } from "./provider-logo";
 import { ProjectContextSelect } from "./project-context-select";
 import type { AppProject } from "../lib/app-types";
 
-type TaskKind = "FREQUENCY" | "RANK" | "CRAWL" | "RESEARCH";
+type TaskKind = "FREQUENCY" | "AI_ANSWER" | "RANK" | "CRAWL" | "RESEARCH" | "EXPORT";
 type TaskColumn = "QUEUED" | "RUNNING" | "ATTENTION" | "COMPLETED";
 type TaskTab = "ALL" | "ACTIVE" | "ERRORS" | "COMPLETED";
 
@@ -47,7 +51,8 @@ interface TaskFact {
 interface ProjectTask {
   readonly id: string;
   readonly kind: TaskKind;
-  readonly resultKind: OperationResultKind;
+  readonly resultKind?: OperationResultKind;
+  readonly downloadUrl?: string;
   readonly title: string;
   readonly description: string;
   readonly provider?: "XMLSTOCK" | "ARSENKIN" | "KEYS_SO";
@@ -74,9 +79,11 @@ export function TaskCenter({
   projects: readonly AppProject[];
 }>) {
   const [frequencies, setFrequencies] = useState<readonly FrequencyCollectionSummary[]>([]);
+  const [aiAnswers, setAiAnswers] = useState<readonly AiAnswerCollectionSummary[]>([]);
   const [ranks, setRanks] = useState<readonly RankJobSummary[]>([]);
   const [crawls, setCrawls] = useState<readonly TechnicalCrawlSummary[]>([]);
   const [research, setResearch] = useState<readonly KeywordResearchRunSummary[]>([]);
+  const [semanticExports, setSemanticExports] = useState<readonly SemanticExportJobSummary[]>([]);
   const [tab, setTab] = useState<TaskTab>("ALL");
   const [kind, setKind] = useState<TaskKind | "ALL">("ALL");
   const [query, setQuery] = useState("");
@@ -108,14 +115,24 @@ export function TaskCenter({
         browserApiRequest<KeywordResearchCollection>(
           `${base}/keyword-research-runs`,
           signal ? { signal } : {}
+        ),
+        browserApiRequest<{ readonly collections: readonly AiAnswerCollectionSummary[] }>(
+          `${base}/ai-answer-collections`,
+          signal ? { signal } : {}
+        ),
+        browserApiRequest<SemanticExportCollection>(
+          `${base}/exports`,
+          signal ? { signal } : {}
         )
       ]);
       if (signal?.aborted) return;
-      const [frequencyResult, rankResult, crawlResult, researchResult] = results;
+      const [frequencyResult, rankResult, crawlResult, researchResult, aiAnswerResult, exportResult] = results;
       if (frequencyResult?.status === "fulfilled") setFrequencies(frequencyResult.value.collections);
       if (rankResult?.status === "fulfilled") setRanks(rankResult.value.jobs);
       if (crawlResult?.status === "fulfilled") setCrawls(crawlResult.value.crawls);
       if (researchResult?.status === "fulfilled") setResearch(researchResult.value.runs);
+      if (aiAnswerResult?.status === "fulfilled") setAiAnswers(aiAnswerResult.value.collections);
+      if (exportResult?.status === "fulfilled") setSemanticExports(exportResult.value.exports);
       setErrors(
         results
           .filter((result): result is PromiseRejectedResult => result.status === "rejected")
@@ -149,14 +166,19 @@ export function TaskCenter({
 
   const tasks = useMemo(() => [
     ...frequencies.map(frequencyTask),
+    ...aiAnswers.map(aiAnswerTask),
     ...ranks.map(rankTask),
     ...crawls.map(crawlTask),
-    ...research.map(researchTask)
+    ...research.map(researchTask),
+    ...semanticExports.map((value) => exportTask(value, projectId))
   ].sort((left, right) => right.createdAt.localeCompare(left.createdAt)), [
+    aiAnswers,
     crawls,
     frequencies,
     ranks,
-    research
+    research,
+    semanticExports,
+    projectId
   ]);
 
   const visibleTasks = useMemo(() => {
@@ -224,6 +246,16 @@ export function TaskCenter({
           `${base}/crawls/${encodeURIComponent(current.id)}/cancel`,
           { method: "POST", body: {}, ifMatch: current.version }
         );
+      } else if (current.kind === "AI_ANSWER") {
+        await browserApiRequest(
+          `${base}/ai-answer-collections/${encodeURIComponent(current.id)}/cancel`,
+          { method: "POST", body: {} }
+        );
+      } else if (current.kind === "EXPORT") {
+        await browserApiRequest(
+          `${base}/exports/${encodeURIComponent(current.id)}/cancel`,
+          { method: "POST", body: {}, ifMatch: current.version }
+        );
       } else {
         await browserApiRequest(
           `${base}/keyword-research-runs/${encodeURIComponent(current.id)}/cancel`,
@@ -272,9 +304,11 @@ export function TaskCenter({
         <CustomSelect aria-label="Тип операции" onChange={(event) => setKind(event.currentTarget.value as TaskKind | "ALL")} value={kind}>
           <option value="ALL">Все операции</option>
           <option value="FREQUENCY">Частотность</option>
+          <option value="AI_ANSWER">ИИ-ответы</option>
           <option value="RANK">Позиции</option>
           <option value="CRAWL">Аудиты</option>
           <option value="RESEARCH">Сбор конкурентов</option>
+          <option value="EXPORT">Экспорт</option>
         </CustomSelect>
       </div>
 
@@ -299,10 +333,18 @@ export function TaskCenter({
             </header>
             {visibleTasks.length > 0 ? visibleTasks.map((task) => (
               <button
-                aria-pressed={resultId === task.id}
+                aria-pressed={task.resultKind ? resultId === task.id : undefined}
                 className="task-ledger-row"
+                disabled={!task.resultKind && !task.downloadUrl}
                 key={`${task.kind}:${task.id}`}
-                onClick={() => setResultId(task.id)}
+                onClick={() => {
+                  if (task.downloadUrl) {
+                    window.location.assign(task.downloadUrl);
+                  } else if (task.resultKind) {
+                    setResultId(task.id);
+                  }
+                }}
+                title={task.downloadUrl ? "Скачать готовый файл" : undefined}
                 type="button"
               >
                 <span className="task-ledger-operation">
@@ -325,7 +367,7 @@ export function TaskCenter({
           </section>
         </div>
       )}
-      {resultTask && (
+      {resultTask?.resultKind && (
         <OperationResultModal
           actions={(
             <>
@@ -407,6 +449,51 @@ function frequencyTask(value: FrequencyCollectionSummary): ProjectTask {
     ],
     resultFacts: [
       { label: "Обработано", value: formatInteger(value.completedKeywords) },
+      { label: "С ошибкой", value: formatInteger(value.failedKeywords) },
+      { label: "Этап", value: operationStageLabel(value.stage, value.status) }
+    ]
+  };
+}
+
+function aiAnswerTask(value: AiAnswerCollectionSummary): ProjectTask {
+  const completed = value.completedKeywords + value.failedKeywords;
+  const routeTrail = connectorRouteTrail(value.connectorAttempts);
+  return {
+    id: value.id,
+    kind: "AI_ANSWER",
+    resultKind: "ai-answer",
+    provider: "ARSENKIN",
+    title: "Сбор ИИ-ответов",
+    description: `Arsenkin Tools · ${value.searchEngine === "YANDEX" ? "Яндекс" : "Google"} · ${frequencyDeviceLabel(value.device)}`,
+    statusLabel: operationStatusLabel(value.status, value.stage),
+    column: taskColumn(value.status),
+    progressCurrent: completed,
+    progressTotal: value.selectedKeywords,
+    createdAt: value.createdAt,
+    ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
+    ...(value.failureCode ? { errorCode: value.failureCode } : {}),
+    version: value.version,
+    cancellable: [
+      "QUEUED",
+      "RUNNING",
+      "WAITING_RATE_LIMIT",
+      "RETRY_SCHEDULED",
+      "FAILED_RETRYABLE"
+    ].includes(value.status),
+    retryable: false,
+    retryLabel: "",
+    inputFacts: [
+      { label: "Поисковая система", value: value.searchEngine === "YANDEX" ? "Яндекс" : "Google" },
+      { label: "Регион", value: value.regionCode },
+      { label: "Устройство", value: frequencyDeviceLabel(value.device) },
+      { label: "Ключей", value: formatInteger(value.selectedKeywords) },
+      ...(value.routingScope
+        ? [{ label: "Маршрут", value: connectorRoutingScopeLabel(value.routingScope) }]
+        : []),
+      ...(routeTrail ? [{ label: "Попытки", value: routeTrail }] : [])
+    ],
+    resultFacts: [
+      { label: "Сохранено", value: formatInteger(value.completedKeywords) },
       { label: "С ошибкой", value: formatInteger(value.failedKeywords) },
       { label: "Этап", value: operationStageLabel(value.stage, value.status) }
     ]
@@ -509,6 +596,45 @@ function researchTask(value: KeywordResearchRunSummary): ProjectTask {
   };
 }
 
+function exportTask(
+  value: SemanticExportJobSummary,
+  projectId: string
+): ProjectTask {
+  const complete = value.status === "COMPLETED";
+  const total = value.totalRows ?? value.rowCount ?? value.processedRows;
+  return {
+    id: value.id,
+    kind: "EXPORT",
+    title: `Экспорт семантики · ${exportFormatLabel(value.format)}`,
+    description: `${exportScopeLabel(value.scope)}${value.filename ? ` · ${value.filename}` : ""}`,
+    statusLabel: operationStatusLabel(value.status, value.stage),
+    column: taskColumn(value.status),
+    progressCurrent: complete ? total : value.processedRows,
+    progressTotal: total,
+    createdAt: value.createdAt,
+    ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
+    ...(value.failureCode ? { errorCode: value.failureCode } : {}),
+    ...(complete ? { downloadUrl: semanticExportFileUrl(projectId, value.id) } : {}),
+    version: value.version,
+    cancellable: [
+      "QUEUED",
+      "RUNNING",
+      "RETRY_SCHEDULED",
+      "FAILED_RETRYABLE"
+    ].includes(value.status),
+    retryable: false,
+    retryLabel: "",
+    inputFacts: [
+      { label: "Формат", value: exportFormatLabel(value.format) },
+      { label: "Охват", value: exportScopeLabel(value.scope) }
+    ],
+    resultFacts: [
+      { label: "Строк", value: formatInteger(value.rowCount ?? value.processedRows) },
+      ...(value.sizeBytes ? [{ label: "Размер", value: formatByteString(value.sizeBytes) }] : [])
+    ]
+  };
+}
+
 function taskColumn(status: string): TaskColumn {
   if (["QUEUED", "PREPARING", "RETRY_SCHEDULED", "WAITING_RATE_LIMIT"].includes(status)) return "QUEUED";
   if (["RUNNING", "IMPORT_QUEUED", "IMPORTING", "CANCEL_REQUESTED", "FAILED_RETRYABLE"].includes(status)) return "RUNNING";
@@ -532,10 +658,13 @@ function frequencyTypeLabel(type: string): string { return ({ BASE: "Запро�
 function frequencyDeviceLabel(device: string): string { return ({ ALL: "Все устройства", DESKTOP: "Десктоп", MOBILE: "Мобильные", PHONE_ONLY: "Телефоны", TABLET_ONLY: "Планшеты" } as Readonly<Record<string, string>>)[device] ?? device; }
 function rankStageLabel(stage: string): string { return ({ PREPARING_SCOPE: "Подготовка ключей", WAITING_FOR_QUEUE: "Ожидает очереди", AUTHORIZING: "Проверка доступа", SUBMITTING: "Отправка провайдеру", POLLING: "Ожидание провайдера", FETCHING_RESULT: "Получение результата", STAGING_RESULT: "Обработка результата", PERSISTING_RESULT: "Сохранение позиций", SUBMIT_OUTCOME_UNKNOWN: "Требует проверки", FINISHED: "Завершено" } as Readonly<Record<string, string>>)[stage] ?? stage; }
 function crawlStartLabel(urls: readonly string[]): string { const first = urls[0] ?? "—"; return urls.length > 1 ? `${first} · ещё ${urls.length - 1}` : first; }
-function progressLabel(task: ProjectTask): string { return task.progressTotal < 1 ? task.column === "COMPLETED" ? "Готово" : "Ожидает данных" : `${formatInteger(task.progressCurrent)} из ${formatInteger(task.progressTotal)}`; }
+function progressLabel(task: ProjectTask): string { return task.downloadUrl ? "Скачать файл" : task.progressTotal < 1 ? task.column === "COMPLETED" ? "Готово" : "Ожидает данных" : `${formatInteger(task.progressCurrent)} из ${formatInteger(task.progressTotal)}`; }
 function taskPercent(task: ProjectTask): number { return task.progressTotal < 1 ? 0 : Math.min(100, Math.round(task.progressCurrent / task.progressTotal * 100)); }
 function shortId(value: string): string { return value.slice(0, 8); }
 function formatInteger(value: number): string { return new Intl.NumberFormat("ru-RU").format(value); }
 function formatDateTime(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat("ru-RU", { dateStyle: "medium", timeStyle: "short" }).format(date); }
 function formatRelativeDate(value: string): string { const date = new Date(value); if (Number.isNaN(date.getTime())) return "—"; const difference = Date.now() - date.getTime(); if (difference < 60_000) return "только что"; if (difference < 3_600_000) return `${Math.floor(difference / 60_000)} мин назад`; if (difference < 86_400_000) return `${Math.floor(difference / 3_600_000)} ч назад`; return new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "short" }).format(date); }
 function taskError(error: unknown): string { return error instanceof BrowserApiError ? error.message : "Не удалось обновить один из источников задач."; }
+function exportFormatLabel(value: SemanticExportJobSummary["format"]): string { return value === "GOOGLE_CSV" ? "Google CSV" : value; }
+function exportScopeLabel(value: SemanticExportJobSummary["scope"]): string { return ({ SELECTED: "Выбранные строки", CURRENT_PAGE: "Текущая страница", CURRENT_FILTER: "Текущий фильтр", GROUP_SUBTREE: "Дерево папки", FULL_CORE: "Весь проект" } as const)[value]; }
+function formatByteString(value: string): string { const bytes = Number(value); if (!Number.isFinite(bytes) || bytes < 0) return value; if (bytes < 1024) return `${bytes} Б`; if (bytes < 1_048_576) return `${(bytes / 1024).toFixed(1)} КБ`; return `${(bytes / 1_048_576).toFixed(1)} МБ`; }

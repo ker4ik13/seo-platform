@@ -4,6 +4,7 @@ import {
   semanticKeywordCreateOutcomes,
   semanticKeywordCleaningStates,
   semanticKeywordSourceModes,
+  semanticKeywordPageSizes,
   semanticKeywordSorts,
   semanticClusterMethods,
   semanticClusterPageSources,
@@ -15,6 +16,8 @@ import {
   pageTypes,
   semanticCustomColumnTypes,
   semanticSavedViewDensities,
+  semanticSavedViewGroupSidebarWidthMax,
+  semanticSavedViewGroupSidebarWidthMin,
   semanticSavedViewScopes,
   semanticNegativeKeywordMatchModes,
   semanticDuplicatePreviewPageSizes,
@@ -60,6 +63,8 @@ import {
   type InternalUpdateProjectPageInput,
   type InternalUpdateTrackingContextInput,
   type InternalCrawlOperationResultPage,
+  type InternalAiAnswerOperationResult,
+  type InternalAiAnswerOperationResultInput,
   type InternalFrequencyOperationResult,
   type InternalFrequencyOperationResultInput,
   type InternalRankOperationResult,
@@ -149,7 +154,12 @@ import {
   type ProjectNoteCollection,
   type ProjectNoteSummary,
   type PublicProjectNote,
-  type AdminProjectSemanticCounts
+  type AdminProjectSemanticCounts,
+  type AiAnswerHistoryCursorPage,
+  type AiAnswerHistoryQuery,
+  type SemanticAiAnswerCompetitorSnapshot,
+  type SemanticAiAnswerDetail,
+  type SemanticAiAnswerHistoryItem
 } from "@seo-platform/contracts";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
 import { DomainError } from "../common/domain-error.js";
@@ -182,6 +192,7 @@ import { crawlPageChangeCollection } from "../crawls/crawl-change-response.js";
 import { crawlDuplicateGroupCollection } from "../crawls/crawl-duplicate-response.js";
 import { crawlAbsentPageCollection } from "../crawls/crawl-absence-response.js";
 import {
+  scopedInternalAiAnswerOperationResult,
   scopedInternalCrawlOperationResultPage,
   scopedInternalFrequencyOperationResult,
   scopedInternalRankOperationResult
@@ -201,6 +212,11 @@ interface InternalContext {
 interface KeywordPage {
   readonly data: readonly SemanticKeywordListItem[];
   readonly page: ApiCollectionResponse<SemanticKeywordListItem>["page"];
+}
+
+interface AiAnswerHistoryPage {
+  readonly data: readonly SemanticAiAnswerHistoryItem[];
+  readonly page: AiAnswerHistoryCursorPage;
 }
 
 const ADMIN_PROJECT_LIMIT = 50;
@@ -364,6 +380,44 @@ export class SeoDataClient {
     return semanticKeywordInsights(responseData(payload), keywordId);
   }
 
+  public async keywordAiAnswers(
+    context: InternalContext,
+    keywordId: string
+  ): Promise<readonly SemanticAiAnswerDetail[]> {
+    const projectId = requiredProjectId(context.tenant);
+    const payload = await this.request(
+      "GET",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(keywordId)}/ai-answers`,
+        this.config.services.seoData
+      ),
+      context
+    );
+    return semanticAiAnswerDetails(responseData(payload), keywordId);
+  }
+
+  public async keywordAiAnswerHistory(
+    context: InternalContext,
+    keywordId: string,
+    query: AiAnswerHistoryQuery
+  ): Promise<AiAnswerHistoryPage> {
+    const projectId = requiredProjectId(context.tenant);
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(keywordId)}/ai-answers/history`,
+      this.config.services.seoData
+    );
+    url.searchParams.set("limit", String(query.limit));
+    if (query.cursor) url.searchParams.set("cursor", query.cursor);
+    const payload = await this.request("GET", url, context);
+    return semanticAiAnswerHistoryCollection(
+      responseData(payload),
+      context.tenant.workspaceId,
+      projectId,
+      keywordId,
+      query
+    );
+  }
+
   public async deleteKeywordFrequencyContext(
     context: InternalContext,
     keywordId: string,
@@ -409,6 +463,39 @@ export class SeoDataClient {
       body
     );
     return scopedInternalFrequencyOperationResult(
+      responseData(payload),
+      scope.workspaceId,
+      scope.projectId,
+      jobId,
+      keywordIds
+    );
+  }
+
+  public async aiAnswerOperationResult(
+    context: InternalContext,
+    jobId: string,
+    keywordIds: readonly string[]
+  ): Promise<InternalAiAnswerOperationResult> {
+    const scope = trackingScope(context);
+    const body: InternalAiAnswerOperationResultInput = {
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      jobId,
+      keywordIds
+    };
+    const payload = await this.request(
+      "POST",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(
+          scope.projectId
+        )}/operation-results/ai-answer/${encodeURIComponent(jobId)}`,
+        this.config.services.seoData
+      ),
+      context,
+      body
+    );
+    return scopedInternalAiAnswerOperationResult(
       responseData(payload),
       scope.workspaceId,
       scope.projectId,
@@ -1288,7 +1375,8 @@ export class SeoDataClient {
       ...input,
       workspaceId: scope.workspaceId,
       projectId: scope.projectId,
-      actorId: context.actorId
+      actorId: context.actorId,
+      canManageShared: canManageSharedViews(context)
     };
     const payload = await this.request(
       "POST",
@@ -1311,7 +1399,8 @@ export class SeoDataClient {
       workspaceId: scope.workspaceId,
       projectId: scope.projectId,
       actorId: context.actorId,
-      version
+      version,
+      canManageShared: canManageSharedViews(context)
     };
     const payload = await this.request(
       "PATCH",
@@ -1336,7 +1425,8 @@ export class SeoDataClient {
       workspaceId: scope.workspaceId,
       projectId: scope.projectId,
       actorId: context.actorId,
-      version
+      version,
+      canManageShared: canManageSharedViews(context)
     };
     await this.request(
       "DELETE",
@@ -2118,6 +2208,216 @@ export function semanticKeywordPage(payload: unknown): KeywordPage {
   };
 }
 
+export function semanticAiAnswerHistoryCollection(
+  value: unknown,
+  workspaceId: string,
+  projectId: string,
+  keywordId: string,
+  query: AiAnswerHistoryQuery
+): AiAnswerHistoryPage {
+  const collection = exactRecord(value, [
+    "workspaceId",
+    "projectId",
+    "keywordId",
+    "items",
+    "page"
+  ]);
+  if (
+    collection.workspaceId !== workspaceId ||
+    collection.projectId !== projectId ||
+    collection.keywordId !== keywordId
+  ) {
+    throw invalidResponse();
+  }
+  const data = semanticAiAnswerHistoryItems(
+    collection.items,
+    keywordId,
+    query.limit
+  );
+  const page = exactRecord(collection.page, ["hasNext", "nextCursor"]);
+  if (typeof page.hasNext !== "boolean") throw invalidResponse();
+  if (page.hasNext) {
+    if (
+      data.length !== query.limit ||
+      typeof page.nextCursor !== "string" ||
+      page.nextCursor.length < 1 ||
+      page.nextCursor.length > 4_096 ||
+      !/^[A-Za-z0-9_-]+$/u.test(page.nextCursor) ||
+      page.nextCursor === query.cursor
+    ) {
+      throw invalidResponse();
+    }
+    return { data, page: { hasNext: true, nextCursor: page.nextCursor } };
+  }
+  if (page.nextCursor !== undefined) throw invalidResponse();
+  return { data, page: { hasNext: false } };
+}
+
+function semanticAiAnswerHistoryItems(
+  value: unknown,
+  keywordId: string,
+  maximum: number
+): readonly SemanticAiAnswerHistoryItem[] {
+  if (!Array.isArray(value) || value.length > maximum) throw invalidResponse();
+  const snapshotIds = new Set<string>();
+  let previous: SemanticAiAnswerHistoryItem | undefined;
+  return value.map((candidate) => {
+    const item = exactRecord(candidate, [
+      "snapshotId",
+      "keywordId",
+      "searchEngine",
+      "regionCode",
+      "device",
+      "answerPresent",
+      "siteFound",
+      "position",
+      "previousPosition",
+      "rankingUrl",
+      "brandFound",
+      "provider",
+      "observedAt"
+    ]);
+    if (
+      typeof item.snapshotId !== "string" ||
+      !UUID_PATTERN.test(item.snapshotId) ||
+      snapshotIds.has(item.snapshotId) ||
+      item.keywordId !== keywordId ||
+      !["YANDEX", "GOOGLE"].includes(String(item.searchEngine)) ||
+      !requiredString(item.regionCode) ||
+      !["DESKTOP", "MOBILE"].includes(String(item.device)) ||
+      typeof item.answerPresent !== "boolean" ||
+      typeof item.siteFound !== "boolean" ||
+      !validOptionalPositivePosition(item.position, 100_000) ||
+      !validOptionalPositivePosition(item.previousPosition, 100_000) ||
+      (item.rankingUrl !== undefined && !validHttpUrl(item.rankingUrl)) ||
+      typeof item.brandFound !== "boolean" ||
+      item.provider !== "ARSENKIN" ||
+      !validDate(item.observedAt) ||
+      (!item.answerPresent && (item.siteFound || item.brandFound)) ||
+      (item.siteFound !==
+        (item.position !== undefined && item.rankingUrl !== undefined))
+    ) {
+      throw invalidResponse();
+    }
+    const result: SemanticAiAnswerHistoryItem = {
+      snapshotId: item.snapshotId,
+      keywordId,
+      searchEngine: item.searchEngine as SemanticAiAnswerHistoryItem["searchEngine"],
+      regionCode: item.regionCode,
+      device: item.device as SemanticAiAnswerHistoryItem["device"],
+      answerPresent: item.answerPresent,
+      siteFound: item.siteFound,
+      ...(typeof item.position === "number" ? { position: item.position } : {}),
+      ...(typeof item.previousPosition === "number"
+        ? { previousPosition: item.previousPosition }
+        : {}),
+      ...(typeof item.rankingUrl === "string" ? { rankingUrl: item.rankingUrl } : {}),
+      brandFound: item.brandFound,
+      provider: "ARSENKIN",
+      observedAt: item.observedAt
+    };
+    if (previous) {
+      const time = Date.parse(result.observedAt);
+      const previousTime = Date.parse(previous.observedAt);
+      if (
+        time > previousTime ||
+        (time === previousTime && result.snapshotId >= previous.snapshotId)
+      ) {
+        throw invalidResponse();
+      }
+    }
+    snapshotIds.add(result.snapshotId);
+    previous = result;
+    return result;
+  });
+}
+
+function semanticAiAnswerDetails(
+  value: unknown,
+  keywordId: string
+): readonly SemanticAiAnswerDetail[] {
+  if (!Array.isArray(value) || value.length > 2) throw invalidResponse();
+  const engines = new Set<string>();
+  return value.map((candidate) => {
+    const item = objectValue(candidate);
+    if (
+      !item ||
+      item.keywordId !== keywordId ||
+      !requiredString(item.snapshotId) ||
+      !["YANDEX", "GOOGLE"].includes(String(item.searchEngine)) ||
+      engines.has(String(item.searchEngine)) ||
+      !requiredString(item.regionCode) ||
+      !["DESKTOP", "MOBILE"].includes(String(item.device)) ||
+      typeof item.answerPresent !== "boolean" ||
+      typeof item.siteFound !== "boolean" ||
+      (item.position !== undefined &&
+        (!Number.isSafeInteger(item.position) || Number(item.position) < 1 || Number(item.position) > 100_000)) ||
+      (item.previousPosition !== undefined &&
+        (!Number.isSafeInteger(item.previousPosition) || Number(item.previousPosition) < 1 || Number(item.previousPosition) > 100_000)) ||
+      (item.rankingUrl !== undefined && !validHttpUrl(item.rankingUrl)) ||
+      typeof item.brandFound !== "boolean" ||
+      (item.answerMarkdown !== undefined &&
+        (typeof item.answerMarkdown !== "string" || item.answerMarkdown.length > 300_000)) ||
+      !Array.isArray(item.sources) ||
+      item.sources.length > 100 ||
+      item.provider !== "ARSENKIN" ||
+      !requiredString(item.host) ||
+      !requiredString(item.jobId) ||
+      !validDate(item.observedAt)
+    ) throw invalidResponse();
+    engines.add(String(item.searchEngine));
+    const positions = new Set<number>();
+    const sources = item.sources.map((candidate) => {
+      const source = objectValue(candidate);
+      if (
+        !source ||
+        !Number.isSafeInteger(source.position) ||
+        Number(source.position) < 1 ||
+        Number(source.position) > 100 ||
+        positions.has(Number(source.position)) ||
+        (source.providerId !== undefined &&
+          (!Number.isSafeInteger(source.providerId) || Number(source.providerId) < 0)) ||
+        !validHttpUrl(source.url) ||
+        (source.title !== undefined &&
+          (typeof source.title !== "string" || source.title.length > 4_000)) ||
+        (source.description !== undefined &&
+          (typeof source.description !== "string" || source.description.length > 12_000)) ||
+        typeof source.belongsToProject !== "boolean"
+      ) throw invalidResponse();
+      positions.add(Number(source.position));
+      return {
+        position: Number(source.position),
+        ...(typeof source.providerId === "number" ? { providerId: source.providerId } : {}),
+        url: source.url as string,
+        ...(typeof source.title === "string" ? { title: source.title } : {}),
+        ...(typeof source.description === "string" ? { description: source.description } : {}),
+        belongsToProject: source.belongsToProject
+      };
+    });
+    return {
+      snapshotId: item.snapshotId as string,
+      keywordId,
+      searchEngine: item.searchEngine as SemanticAiAnswerDetail["searchEngine"],
+      regionCode: item.regionCode as string,
+      device: item.device as SemanticAiAnswerDetail["device"],
+      answerPresent: item.answerPresent,
+      siteFound: item.siteFound,
+      ...(typeof item.position === "number" ? { position: item.position } : {}),
+      ...(typeof item.previousPosition === "number"
+        ? { previousPosition: item.previousPosition }
+        : {}),
+      ...(typeof item.rankingUrl === "string" ? { rankingUrl: item.rankingUrl } : {}),
+      brandFound: item.brandFound,
+      ...(typeof item.answerMarkdown === "string" ? { answerMarkdown: item.answerMarkdown } : {}),
+      sources,
+      provider: "ARSENKIN" as const,
+      host: item.host as string,
+      jobId: item.jobId as string,
+      observedAt: item.observedAt as string
+    };
+  });
+}
+
 export function semanticKeywordInsights(
   value: unknown,
   keywordId: string
@@ -2125,6 +2425,8 @@ export function semanticKeywordInsights(
   const input = objectValue(value);
   const positionHistory = input?.positionHistory ?? [];
   const competitorSnapshots = input?.competitorSnapshots ?? [];
+  const aiPositionHistory = input?.aiPositionHistory ?? [];
+  const aiCompetitorSnapshots = input?.aiCompetitorSnapshots ?? [];
   if (
     !input ||
     input.keywordId !== keywordId ||
@@ -2137,7 +2439,11 @@ export function semanticKeywordInsights(
     !Array.isArray(positionHistory) ||
     positionHistory.length > 240 ||
     !Array.isArray(competitorSnapshots) ||
-    competitorSnapshots.length > 2
+    competitorSnapshots.length > 2 ||
+    !Array.isArray(aiPositionHistory) ||
+    aiPositionHistory.length > 240 ||
+    !Array.isArray(aiCompetitorSnapshots) ||
+    aiCompetitorSnapshots.length > 2
   ) {
     throw invalidResponse();
   }
@@ -2329,8 +2635,87 @@ export function semanticKeywordInsights(
         observedAt: item.observedAt,
         results
       };
-    })
+    }),
+    aiPositionHistory: semanticAiAnswerHistoryItems(
+      aiPositionHistory,
+      keywordId,
+      240
+    ),
+    aiCompetitorSnapshots: semanticAiAnswerCompetitorSnapshots(
+      aiCompetitorSnapshots
+    )
   };
+}
+
+function semanticAiAnswerCompetitorSnapshots(
+  value: unknown
+): readonly SemanticAiAnswerCompetitorSnapshot[] {
+  if (!Array.isArray(value) || value.length > 2) throw invalidResponse();
+  const snapshotIds = new Set<string>();
+  const engines = new Set<string>();
+  return value.map((candidate) => {
+    const item = exactRecord(candidate, [
+      "snapshotId",
+      "searchEngine",
+      "regionCode",
+      "device",
+      "provider",
+      "observedAt",
+      "results"
+    ]);
+    if (
+      typeof item.snapshotId !== "string" ||
+      !UUID_PATTERN.test(item.snapshotId) ||
+      snapshotIds.has(item.snapshotId) ||
+      !["YANDEX", "GOOGLE"].includes(String(item.searchEngine)) ||
+      engines.has(String(item.searchEngine)) ||
+      !requiredString(item.regionCode) ||
+      !["DESKTOP", "MOBILE"].includes(String(item.device)) ||
+      item.provider !== "ARSENKIN" ||
+      !validDate(item.observedAt) ||
+      !Array.isArray(item.results) ||
+      item.results.length < 1 ||
+      item.results.length > 100
+    ) {
+      throw invalidResponse();
+    }
+    let previousPosition = 0;
+    const results = item.results.map((candidate) => {
+      const result = exactRecord(candidate, ["position", "url", "title", "snippet"]);
+      const position = Number(result.position);
+      if (
+        !Number.isSafeInteger(result.position) ||
+        position < 1 ||
+        position > 100 ||
+        position <= previousPosition ||
+        !validHttpUrl(result.url) ||
+        (result.title !== undefined &&
+          (typeof result.title !== "string" || result.title.length > 4_000)) ||
+        (result.snippet !== undefined &&
+          (typeof result.snippet !== "string" || result.snippet.length > 12_000))
+      ) {
+        throw invalidResponse();
+      }
+      previousPosition = position;
+      return {
+        position,
+        url: result.url,
+        ...(typeof result.title === "string" ? { title: result.title } : {}),
+        ...(typeof result.snippet === "string" ? { snippet: result.snippet } : {})
+      };
+    });
+    snapshotIds.add(item.snapshotId);
+    engines.add(String(item.searchEngine));
+    return {
+      snapshotId: item.snapshotId,
+      searchEngine: item.searchEngine as SemanticAiAnswerCompetitorSnapshot["searchEngine"],
+      regionCode: item.regionCode,
+      device: item.device as SemanticAiAnswerCompetitorSnapshot["device"],
+      provider: "ARSENKIN" as const,
+      observedAt: item.observedAt,
+      results
+    };
+  });
 }
 
 function validHttpUrl(value: unknown): value is string {
@@ -2389,6 +2774,7 @@ export function semanticKeywordItem(
   const frequency = optionalSemanticKeywordListFrequency(item.frequency);
   const frequencies = semanticKeywordListFrequencies(item.frequencies);
   const positions = semanticKeywordListPositions(item.positions);
+  const aiAnswers = semanticKeywordListAiAnswers(item.aiAnswers);
   const sourceMode = item.sourceMode;
   if (
     !requiredString(item.id) ||
@@ -2398,6 +2784,7 @@ export function semanticKeywordItem(
     !Number.isSafeInteger(item.priority) ||
     typeof item.isFavorite !== "boolean" ||
     typeof item.isTracked !== "boolean" ||
+    typeof item.showAiAnswerButton !== "boolean" ||
     (item.hasNote !== undefined && typeof item.hasNote !== "boolean") ||
     (item.intent !== undefined &&
       (typeof item.intent !== "string" ||
@@ -2440,6 +2827,7 @@ export function semanticKeywordItem(
     priority: item.priority as number,
     isFavorite: item.isFavorite,
     isTracked: item.isTracked,
+    showAiAnswerButton: item.showAiAnswerButton,
     hasNote: item.hasNote === true,
     ...(typeof item.intent === "string"
       ? {
@@ -2470,6 +2858,7 @@ export function semanticKeywordItem(
     ...(frequency ? { frequency } : {}),
     ...(frequencies.length > 0 ? { frequencies } : {}),
     ...(positions.length > 0 ? { positions } : {}),
+    ...(aiAnswers.length > 0 ? { aiAnswers } : {}),
     sourceMode:
       sourceMode as SemanticKeywordListItem["sourceMode"],
     ...(item.trashed === true ? { trashed: true } : {}),
@@ -2605,6 +2994,60 @@ function semanticKeywordListPositions(
   return positions;
 }
 
+function semanticKeywordListAiAnswers(
+  value: unknown
+): NonNullable<SemanticKeywordListItem["aiAnswers"]> {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 2) throw invalidResponse();
+  const answers = value.map((entry) => {
+    const answer = exactRecord(entry, [
+      "searchEngine",
+      "answerPresent",
+      "siteFound",
+      "position",
+      "previousPosition",
+      "rankingUrl",
+      "brandFound",
+      "observedAt"
+    ]);
+    if (
+      !["GOOGLE", "YANDEX"].includes(String(answer.searchEngine)) ||
+      typeof answer.answerPresent !== "boolean" ||
+      typeof answer.siteFound !== "boolean" ||
+      !validOptionalPositivePosition(answer.position, 100_000) ||
+      !validOptionalPositivePosition(answer.previousPosition, 100_000) ||
+      (answer.rankingUrl !== undefined && !validHttpUrl(answer.rankingUrl)) ||
+      typeof answer.brandFound !== "boolean" ||
+      !validDate(answer.observedAt) ||
+      (!answer.answerPresent && answer.siteFound) ||
+      (!answer.siteFound &&
+        (answer.position !== undefined || answer.rankingUrl !== undefined))
+    ) {
+      throw invalidResponse();
+    }
+    return {
+      searchEngine: answer.searchEngine as "GOOGLE" | "YANDEX",
+      answerPresent: answer.answerPresent,
+      siteFound: answer.siteFound,
+      ...(typeof answer.position === "number"
+        ? { position: answer.position }
+        : {}),
+      ...(typeof answer.previousPosition === "number"
+        ? { previousPosition: answer.previousPosition }
+        : {}),
+      ...(typeof answer.rankingUrl === "string"
+        ? { rankingUrl: answer.rankingUrl }
+        : {}),
+      brandFound: answer.brandFound,
+      observedAt: answer.observedAt as string
+    };
+  });
+  if (new Set(answers.map(({ searchEngine }) => searchEngine)).size !== answers.length) {
+    throw invalidResponse();
+  }
+  return answers;
+}
+
 function semanticKeywordListSiteResults(
   value: unknown
 ): NonNullable<
@@ -2659,10 +3102,10 @@ function semanticKeywordListSiteResults(
   });
 }
 
-function validOptionalPositivePosition(value: unknown): boolean {
+function validOptionalPositivePosition(value: unknown, maximum = 1_000): boolean {
   return (
     value === undefined ||
-    (Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= 1_000)
+    (Number.isSafeInteger(value) && Number(value) >= 1 && Number(value) <= maximum)
   );
 }
 
@@ -4151,7 +4594,13 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     "filters",
     "sort",
     "columns",
-    "density"
+    "density",
+    "columnWidths",
+    "pageSize",
+    "groupSidebarWidth",
+    "expandedGroupIds",
+    "selectedGroupIds",
+    "appliedViewId"
   ]);
   const filters = exactRecord(config.filters, [
     "search",
@@ -4175,7 +4624,7 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     ) ||
     !Array.isArray(config.columns) ||
     config.columns.length < 1 ||
-    config.columns.length > 108 ||
+    config.columns.length > 128 ||
     !config.columns.every(
       (column) =>
         typeof column === "string" &&
@@ -4209,7 +4658,19 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     (typeof filters.priorityMin === "number" &&
       typeof filters.priorityMax === "number" &&
       filters.priorityMin > filters.priorityMax) ||
-    filterKeys.length > 9
+    filterKeys.length > 9 ||
+    !validSavedViewColumnWidths(config.columnWidths, config.columns) ||
+    (config.pageSize !== undefined &&
+      !semanticKeywordPageSizes.some((size) => size === config.pageSize)) ||
+    (config.groupSidebarWidth !== undefined &&
+      (!Number.isSafeInteger(config.groupSidebarWidth) ||
+        Number(config.groupSidebarWidth) < semanticSavedViewGroupSidebarWidthMin ||
+        Number(config.groupSidebarWidth) > semanticSavedViewGroupSidebarWidthMax)) ||
+    !validUuidArray(config.expandedGroupIds, 1_000) ||
+    !validUuidArray(config.selectedGroupIds, 100) ||
+    (config.appliedViewId !== undefined &&
+      (typeof config.appliedViewId !== "string" ||
+        !UUID_PATTERN.test(config.appliedViewId)))
   ) {
     throw invalidResponse();
   }
@@ -4218,8 +4679,64 @@ function semanticSavedViewConfig(value: unknown): SemanticSavedViewConfig {
     filters: filters as SemanticSavedViewConfig["filters"],
     sort: config.sort as SemanticSavedViewConfig["sort"],
     columns: config.columns as SemanticSavedViewConfig["columns"],
-    density: config.density as SemanticSavedViewConfig["density"]
+    density: config.density as SemanticSavedViewConfig["density"],
+    ...(config.columnWidths === undefined
+      ? {}
+      : {
+          columnWidths: config.columnWidths as NonNullable<
+            SemanticSavedViewConfig["columnWidths"]
+          >
+        }),
+    ...(config.pageSize === undefined
+      ? {}
+      : {
+          pageSize: config.pageSize as NonNullable<
+            SemanticSavedViewConfig["pageSize"]
+          >
+        }),
+    ...(config.groupSidebarWidth === undefined
+      ? {}
+      : { groupSidebarWidth: Number(config.groupSidebarWidth) }),
+    ...(config.expandedGroupIds === undefined
+      ? {}
+      : { expandedGroupIds: config.expandedGroupIds as readonly string[] }),
+    ...(config.selectedGroupIds === undefined
+      ? {}
+      : { selectedGroupIds: config.selectedGroupIds as readonly string[] }),
+    ...(config.appliedViewId === undefined
+      ? {}
+      : { appliedViewId: config.appliedViewId as string })
   };
+}
+
+function validSavedViewColumnWidths(
+  value: unknown,
+  columns: unknown[]
+): boolean {
+  if (value === undefined) return true;
+  const widths = objectValue(value);
+  return Boolean(
+    widths &&
+    Object.keys(widths).every((key) =>
+      columns.includes(key) &&
+      Number.isSafeInteger(widths[key]) &&
+      Number(widths[key]) >= 56 &&
+      Number(widths[key]) <= 1_200
+    )
+  );
+}
+
+function validUuidArray(value: unknown, maximum: number): boolean {
+  return value === undefined || (
+    Array.isArray(value) &&
+    value.length <= maximum &&
+    value.every((item) => typeof item === "string" && UUID_PATTERN.test(item)) &&
+    new Set(value).size === value.length
+  );
+}
+
+function canManageSharedViews(context: InternalContext): boolean {
+  return context.tenant.roleCode === "OWNER" || context.tenant.roleCode === "ADMIN";
 }
 
 function validOptionalPriority(value: unknown): boolean {

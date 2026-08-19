@@ -342,6 +342,16 @@ test("uses project-safe paths and context-only request payload", () => {
     rankEstimatePayloadSignature("context-1"),
     '{"trackingContextId":"context-1"}'
   );
+  assert.equal(
+    rankEstimatePayloadSignature(
+      "context-1",
+      "XMLSTOCK",
+      "credential-1",
+      "LIVE",
+      "TURBO"
+    ),
+    '{"trackingContextId":"context-1","provider":"XMLSTOCK","credentialId":"credential-1","searchSource":"LIVE","yandexLiveMode":"TURBO"}'
+  );
 });
 
 test("context signature invalidates estimates after relevant revisions", () => {
@@ -415,6 +425,17 @@ test("reuses ambiguous estimate retries and rotates explicit recalculations", ()
     "XMLSTOCK"
   );
   assert.equal(otherProvider.key, "estimate-key-xmlstock");
+  const turbo = rankEstimateIdempotencyCommand(
+    otherProvider,
+    context,
+    false,
+    () => "estimate-key-turbo",
+    "XMLSTOCK",
+    "credential-1",
+    "LIVE",
+    "TURBO"
+  );
+  assert.equal(turbo.key, "estimate-key-turbo");
 });
 
 test("expiry helpers schedule a bounded transition to expired", () => {

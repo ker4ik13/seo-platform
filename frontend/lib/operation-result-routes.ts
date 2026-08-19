@@ -2,6 +2,7 @@ import { operationResultDefaultPageSize } from "@seo-platform/contracts";
 
 export const operationResultKinds = [
   "frequency",
+  "ai-answer",
   "rank",
   "crawl",
   "research"
@@ -68,6 +69,9 @@ export function operationResultApiPath(
   const suffix = `?${query.toString()}`;
   if (kind === "frequency") {
     return `${base}/frequency-collections/${id}/result${suffix}`;
+  }
+  if (kind === "ai-answer") {
+    return `${base}/ai-answer-collections/${id}/result${suffix}`;
   }
   if (kind === "rank") return `${base}/jobs/${id}/result${suffix}`;
   return `${base}/crawls/${id}/result${suffix}`;

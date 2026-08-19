@@ -74,6 +74,9 @@ export class RankEstimateController {
       ...(input.provider ? { provider: input.provider } : {}),
       ...(input.credentialId ? { credentialId: input.credentialId } : {}),
       ...(input.searchSource ? { searchSource: input.searchSource } : {}),
+      ...(input.yandexLiveMode
+        ? { yandexLiveMode: input.yandexLiveMode }
+        : {}),
       workspaceId: workspace.id,
       projectId: project.id,
       actorId: principal.userId,

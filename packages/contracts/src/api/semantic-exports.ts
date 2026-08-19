@@ -111,6 +111,41 @@ export interface SemanticExportDownload {
   readonly sizeBytes: string;
 }
 
+export const semanticPositionHistorySearchEngines = [
+  "YANDEX",
+  "GOOGLE"
+] as const;
+
+export type SemanticPositionHistorySearchEngine =
+  (typeof semanticPositionHistorySearchEngines)[number];
+
+/**
+ * Optional XLSX report mode. The interval is immutable and half-open:
+ * observedFrom is inclusive, observedBefore is exclusive. History is merged
+ * per keyword and engine independently of the tracking context that produced
+ * a snapshot.
+ */
+export interface SemanticPositionHistoryExportOptions {
+  readonly observedFrom: string;
+  readonly observedBefore: string;
+  readonly searchEngines: readonly SemanticPositionHistorySearchEngine[];
+}
+
+export interface SemanticPositionHistoryExportSnapshot {
+  readonly searchEngine: SemanticPositionHistorySearchEngine;
+  readonly observedDate: string;
+  readonly found: boolean;
+  readonly position?: number;
+}
+
+export interface SemanticPositionHistoryExportRow {
+  readonly keywordId: string;
+  readonly text: string;
+  readonly createdAt: string;
+  readonly groupPath?: string;
+  readonly snapshots: readonly SemanticPositionHistoryExportSnapshot[];
+}
+
 export interface CreateSemanticExportInput {
   readonly format: SemanticExportFormat;
   readonly scope: SemanticExportScope;
@@ -120,4 +155,6 @@ export interface CreateSemanticExportInput {
   readonly sort?: SemanticKeywordSort;
   readonly keywordIds?: readonly string[];
   readonly includeBom?: boolean;
+  /** When present, format must be XLSX and columns are ignored by the workbook layout. */
+  readonly positionHistory?: SemanticPositionHistoryExportOptions;
 }

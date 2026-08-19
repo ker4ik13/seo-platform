@@ -11,35 +11,46 @@ const workspaceId = "01900000-0000-7000-8000-000000000001";
 const projectId = "01900000-0000-7000-8000-000000000002";
 const actorId = "01900000-0000-7000-8000-000000000003";
 const scope = { workspaceId, projectId, actorId };
+const authority = { canManageShared: false };
+const groupId = "01900000-0000-7000-8000-000000000010";
+const appliedViewId = "01900000-0000-7000-8000-000000000011";
 const config = {
   schemaVersion: 1,
   filters: { isTracked: true },
   sort: "UPDATED_DESC",
   columns: ["query", "updatedAt"],
-  density: "COMFORTABLE"
+  density: "COMFORTABLE",
+  columnWidths: { query: 480, updatedAt: 140 },
+  pageSize: 500,
+  groupSidebarWidth: 320,
+  expandedGroupIds: [groupId],
+  selectedGroupIds: [groupId],
+  appliedViewId
 };
 
 test("accepts exact tenant-scoped saved-view commands", () => {
   assert.deepEqual(
     internalCreateSemanticSavedViewInput({
       ...scope,
+      ...authority,
       name: "  В работе  ",
       scope: "PRIVATE",
       config
     }),
-    { ...scope, name: "В работе", scope: "PRIVATE", config }
+    { ...scope, ...authority, name: "В работе", scope: "PRIVATE", config }
   );
   assert.deepEqual(
     internalUpdateSemanticSavedViewInput({
       ...scope,
+      ...authority,
       version: 2,
       config
     }),
-    { ...scope, version: 2, config }
+    { ...scope, ...authority, version: 2, config }
   );
   assert.deepEqual(
-    internalDeleteSemanticSavedViewInput({ ...scope, version: 3 }),
-    { ...scope, version: 3 }
+    internalDeleteSemanticSavedViewInput({ ...scope, ...authority, version: 3 }),
+    { ...scope, ...authority, version: 3 }
   );
 });
 
@@ -48,6 +59,7 @@ test("rejects authority drift and malformed versioned config", () => {
     () =>
       internalCreateSemanticSavedViewInput({
         ...scope,
+        ...authority,
         name: "Broken",
         scope: "WORKSPACE_TEMPLATE",
         config
@@ -58,6 +70,7 @@ test("rejects authority drift and malformed versioned config", () => {
     () =>
       internalUpdateSemanticSavedViewInput({
         ...scope,
+        ...authority,
         version: 0,
         config
       }),
@@ -67,6 +80,7 @@ test("rejects authority drift and malformed versioned config", () => {
     () =>
       internalDeleteSemanticSavedViewInput({
         ...scope,
+        ...authority,
         version: 1,
         injectedWorkspaceId: workspaceId
       }),

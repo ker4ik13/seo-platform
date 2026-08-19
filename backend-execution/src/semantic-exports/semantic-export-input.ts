@@ -5,6 +5,7 @@ import {
   semanticExportScopes,
   semanticKeywordIntents,
   semanticKeywordSorts,
+  semanticPositionHistorySearchEngines,
   semanticSystemColumnKeys,
   type InternalCancelSemanticExportInput,
   type InternalCreateSemanticExportInput,
@@ -30,7 +31,8 @@ const CREATE_FIELDS = new Set([
   "filters",
   "sort",
   "keywordIds",
-  "includeBom"
+  "includeBom",
+  "positionHistory"
 ]);
 const CAPACITY_FIELDS = new Set([
   "planCode",
@@ -71,9 +73,13 @@ export function internalCreateSemanticExportInput(value: unknown): InternalCreat
   if (new Set(columns).size !== columns.length) invalid("columns");
   const filters = input.filters === undefined ? undefined : exportFilters(input.filters);
   const keywordIds = input.keywordIds === undefined ? undefined : uuidList(input.keywordIds, "keywordIds", 15_000);
+  const positionHistory = input.positionHistory === undefined
+    ? undefined
+    : positionHistoryOptions(input.positionHistory);
   if ((scope === "SELECTED" || scope === "CURRENT_PAGE") !== Boolean(keywordIds)) invalid("keywordIds");
   if (scope === "GROUP_SUBTREE" && !filters?.groupId) invalid("filters.groupId");
   if (scope === "FULL_CORE" && filters) invalid("filters");
+  if (positionHistory && format !== "XLSX") invalid("format");
   const capacity = exactRecord(input.jobCapacity, CAPACITY_FIELDS, "jobCapacity");
   return {
     workspaceId: uuid(input.workspaceId, "workspaceId"),
@@ -93,8 +99,39 @@ export function internalCreateSemanticExportInput(value: unknown): InternalCreat
     ...(filters ? { filters } : {}),
     ...(input.sort === undefined ? {} : { sort: enumValue(input.sort, semanticKeywordSorts, "sort") }),
     ...(keywordIds ? { keywordIds } : {}),
-    ...(input.includeBom === undefined ? {} : { includeBom: booleanValue(input.includeBom, "includeBom") })
+    ...(input.includeBom === undefined ? {} : { includeBom: booleanValue(input.includeBom, "includeBom") }),
+    ...(positionHistory ? { positionHistory } : {})
   };
+}
+
+function positionHistoryOptions(
+  value: unknown
+): NonNullable<InternalCreateSemanticExportInput["positionHistory"]> {
+  const input = exactRecord(
+    value,
+    new Set(["observedFrom", "observedBefore", "searchEngines"]),
+    "positionHistory"
+  );
+  const observedFrom = canonicalInstant(input.observedFrom, "positionHistory.observedFrom");
+  const observedBefore = canonicalInstant(input.observedBefore, "positionHistory.observedBefore");
+  const duration = Date.parse(observedBefore) - Date.parse(observedFrom);
+  if (duration <= 0 || duration > 1_100 * 24 * 60 * 60 * 1_000) {
+    invalid("positionHistory.observedBefore");
+  }
+  if (
+    !Array.isArray(input.searchEngines) ||
+    input.searchEngines.length < 1 ||
+    input.searchEngines.length > semanticPositionHistorySearchEngines.length
+  ) {
+    invalid("positionHistory.searchEngines");
+  }
+  const searchEngines = input.searchEngines.map((engine) =>
+    enumValue(engine, semanticPositionHistorySearchEngines, "positionHistory.searchEngines")
+  );
+  if (new Set(searchEngines).size !== searchEngines.length) {
+    invalid("positionHistory.searchEngines");
+  }
+  return { observedFrom, observedBefore, searchEngines };
 }
 
 export function internalCancelSemanticExportInput(value: unknown): InternalCancelSemanticExportInput {
@@ -179,4 +216,5 @@ function integer(value: unknown, min: number, field: string): number { if (!Numb
 function optionalInteger(value: unknown, field: string): number | undefined { if (value === undefined) return undefined; const result = integer(value, 0, field); if (result > 100) invalid(field); return result; }
 function booleanValue(value: unknown, field: string): boolean { if (typeof value !== "boolean") invalid(field); return value; }
 function uuidList(value: unknown, field: string, max: number): readonly string[] { if (!Array.isArray(value) || value.length < 1 || value.length > max) invalid(field); const ids = value.map((item) => uuid(item, field)); if (new Set(ids).size !== ids.length) invalid(field); return ids; }
+function canonicalInstant(value: unknown, field: string): string { if (typeof value !== "string" || value.length !== 24) invalid(field); const parsed = new Date(value); if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== value) invalid(field); return value; }
 function invalid(field: string): never { throw new BadRequestException(`Invalid semantic export ${field}`); }

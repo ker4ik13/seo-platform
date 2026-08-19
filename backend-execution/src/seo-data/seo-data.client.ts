@@ -5,7 +5,12 @@ import {
   type SemanticCustomColumn,
   type SemanticKeywordGroup,
   type SemanticKeywordListItem,
-  type KeywordListQuery
+  type SemanticPositionHistoryExportOptions,
+  type SemanticPositionHistoryExportRow,
+  type KeywordListQuery,
+  type InternalAiAnswerKeywords,
+  type InternalResolveAiAnswerKeywordsInput,
+  type InternalPersistAiAnswerSnapshotBatchInput
 } from "@seo-platform/contracts";
 import type {
   InternalAbortSemanticImportInput,
@@ -250,6 +255,55 @@ export class SeoDataClient {
     }
   }
 
+  public async resolveAiAnswerKeywords(
+    input: InternalResolveAiAnswerKeywordsInput
+  ): Promise<InternalAiAnswerKeywords> {
+    const payload = await this.requestBounded(
+      `/internal/v1/projects/${encodeURIComponent(input.projectId)}/ai-answers/resolve-batch`,
+      input,
+      AI_ANSWER_RESOLVE_RESPONSE_MAX_BYTES
+    );
+    const value = exactObject(payload, ["items"]);
+    if (!value || !Array.isArray(value.items) || value.items.length !== input.items.length) {
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+    const expected = new Map(input.items.map((item) => [item.id, item.version]));
+    const seen = new Set<string>();
+    const items = value.items.map((candidate) => {
+      const item = exactObject(candidate, ["id", "text", "version"]);
+      if (
+        !item ||
+        !uuid(item.id) ||
+        seen.has(item.id as string) ||
+        typeof item.text !== "string" ||
+        item.text.length < 1 ||
+        item.text.length > 2_000 ||
+        !positiveInteger(item.version) ||
+        expected.get(item.id as string) !== item.version
+      ) throw new SeoDataClientError("UNAVAILABLE", true);
+      seen.add(item.id as string);
+      return { id: item.id as string, text: item.text, version: Number(item.version) };
+    });
+    return { items };
+  }
+
+  public async persistAiAnswerSnapshots(
+    input: InternalPersistAiAnswerSnapshotBatchInput
+  ): Promise<void> {
+    const payload = await this.requestBounded(
+      `/internal/v1/projects/${encodeURIComponent(input.projectId)}/ai-answers/snapshots-batch`,
+      input,
+      AI_ANSWER_PERSIST_RESPONSE_MAX_BYTES
+    );
+    const value = exactObject(payload, ["created"]);
+    if (
+      !value ||
+      !Number.isSafeInteger(value.created) ||
+      Number(value.created) < 0 ||
+      Number(value.created) > input.items.length
+    ) throw new SeoDataClientError("UNAVAILABLE", true);
+  }
+
   public async listExportKeywords(
     context: { readonly workspaceId: string; readonly projectId: string; readonly actorId: string },
     query: KeywordListQuery
@@ -295,6 +349,39 @@ export class SeoDataClient {
       },
       meta: { requestId: "internal-semantic-export" }
     };
+  }
+
+  public async listExportPositionHistory(
+    context: { readonly workspaceId: string; readonly projectId: string; readonly actorId: string },
+    query: KeywordListQuery,
+    options: SemanticPositionHistoryExportOptions
+  ): Promise<ApiCollectionResponse<SemanticPositionHistoryExportRow>> {
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(context.projectId)}/semantic-exports/position-history`,
+      this.config.services.seoData
+    );
+    url.searchParams.set("limit", String(query.limit));
+    if (query.cursor) url.searchParams.set("cursor", query.cursor);
+    if (query.search) url.searchParams.set("search", query.search);
+    if (query.tag) url.searchParams.set("tag", query.tag);
+    if (query.intent) url.searchParams.set("intent", query.intent);
+    if (query.groupId) url.searchParams.set("groupId", query.groupId);
+    if (query.groupIds?.length) url.searchParams.set("groupIds", query.groupIds.join(","));
+    if (query.clusterId) url.searchParams.set("clusterId", query.clusterId);
+    if (query.isFavorite !== undefined) url.searchParams.set("isFavorite", String(query.isFavorite));
+    if (query.isTracked !== undefined) url.searchParams.set("isTracked", String(query.isTracked));
+    if (query.priorityMin !== undefined) url.searchParams.set("priorityMin", String(query.priorityMin));
+    if (query.priorityMax !== undefined) url.searchParams.set("priorityMax", String(query.priorityMax));
+    if (query.sort) url.searchParams.set("sort", query.sort);
+    url.searchParams.set("observedFrom", options.observedFrom);
+    url.searchParams.set("observedBefore", options.observedBefore);
+    url.searchParams.set("searchEngines", options.searchEngines.join(","));
+    const payload = await this.requestGetBounded(
+      url,
+      context,
+      EXPORT_PAGE_RESPONSE_MAX_BYTES
+    );
+    return positionHistoryExportPage(payload, query.limit);
   }
 
   public async listExportKeywordGroups(
@@ -515,6 +602,8 @@ export class SeoDataClient {
 const RANK_SCOPE_RESPONSE_MAX_BYTES = 64 * 1_024;
 const FREQUENCY_RESOLVE_RESPONSE_MAX_BYTES = 4 * 1_024 * 1_024;
 const FREQUENCY_PERSIST_RESPONSE_MAX_BYTES = 16 * 1_024;
+const AI_ANSWER_RESOLVE_RESPONSE_MAX_BYTES = 4 * 1_024 * 1_024;
+const AI_ANSWER_PERSIST_RESPONSE_MAX_BYTES = 16 * 1_024;
 const EXPORT_PAGE_RESPONSE_MAX_BYTES = 16 * 1_024 * 1_024;
 const EXPORT_METADATA_RESPONSE_MAX_BYTES = 4 * 1_024 * 1_024;
 
@@ -868,6 +957,78 @@ function scopeHash(
         value: payload.value as string
       }
     : undefined;
+}
+
+function positionHistoryExportPage(
+  value: unknown,
+  limit: number
+): ApiCollectionResponse<SemanticPositionHistoryExportRow> {
+  const envelope = object(value);
+  const page = envelope ? object(envelope.page) : undefined;
+  if (
+    !envelope ||
+    !Array.isArray(envelope.data) ||
+    envelope.data.length > limit ||
+    !page ||
+    typeof page.hasNext !== "boolean" ||
+    (page.nextCursor !== undefined && typeof page.nextCursor !== "string") ||
+    (page.totalApprox !== undefined && !nonNegativeInteger(page.totalApprox))
+  ) {
+    throw new SeoDataClientError("UNAVAILABLE", true);
+  }
+  for (const item of envelope.data) {
+    const row = object(item);
+    if (
+      !row ||
+      Object.keys(row).some((field) => !["keywordId", "text", "createdAt", "groupPath", "snapshots"].includes(field)) ||
+      !uuid(row.keywordId) ||
+      typeof row.text !== "string" ||
+      row.text.length < 1 ||
+      row.text.length > 2_000 ||
+      !isoTimestamp(row.createdAt) ||
+      (row.groupPath !== undefined && (typeof row.groupPath !== "string" || row.groupPath.length > 4_096)) ||
+      !Array.isArray(row.snapshots) ||
+      row.snapshots.length > 2_200
+    ) {
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+    const identities = new Set<string>();
+    for (const itemSnapshot of row.snapshots) {
+      const snapshot = object(itemSnapshot);
+      if (
+        !snapshot ||
+        Object.keys(snapshot).some((field) => !["searchEngine", "observedDate", "found", "position"].includes(field)) ||
+        !["GOOGLE", "YANDEX"].includes(String(snapshot.searchEngine)) ||
+        !canonicalDate(snapshot.observedDate) ||
+        typeof snapshot.found !== "boolean" ||
+        (snapshot.found
+          ? !Number.isSafeInteger(snapshot.position) || Number(snapshot.position) < 1 || Number(snapshot.position) > 100
+          : snapshot.position !== undefined)
+      ) {
+        throw new SeoDataClientError("UNAVAILABLE", true);
+      }
+      const identity = `${snapshot.searchEngine}:${snapshot.observedDate}`;
+      if (identities.has(identity)) {
+        throw new SeoDataClientError("UNAVAILABLE", true);
+      }
+      identities.add(identity);
+    }
+  }
+  return {
+    data: envelope.data as readonly SemanticPositionHistoryExportRow[],
+    page: {
+      hasNext: page.hasNext as boolean,
+      ...(typeof page.nextCursor === "string" ? { nextCursor: page.nextCursor } : {}),
+      ...(page.totalApprox === undefined ? {} : { totalApprox: Number(page.totalApprox) })
+    },
+    meta: { requestId: "internal-semantic-position-history-export" }
+  };
+}
+
+function canonicalDate(value: unknown): value is string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
 function object(

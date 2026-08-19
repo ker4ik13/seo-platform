@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import type {
   FrequencySnapshotSummary,
+  SemanticAiAnswerHistoryItem,
+  SemanticAiAnswerSummary,
   SemanticKeywordInsights,
   SemanticKeywordListItem,
   SemanticKeywordPositionHistoryPoint
@@ -20,6 +22,7 @@ import { Icon } from "./icon";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { SemanticCompetitorSnapshots } from "./semantic-competitor-snapshots";
 import { SemanticKeywordPositionHistoryModal } from "./semantic-keyword-position-history-modal";
+import { SemanticKeywordAiPositionHistoryModal } from "./semantic-keyword-ai-position-history-modal";
 import { SemanticModal } from "./semantic-modal";
 import { SemanticRankHistoryChart } from "./semantic-rank-history-chart";
 
@@ -37,6 +40,7 @@ export interface SemanticKeywordInspectorItem {
   readonly clusterName?: string;
   readonly targetUrl?: string;
   readonly tags: readonly string[];
+  readonly aiAnswers?: SemanticKeywordListItem["aiAnswers"];
   readonly sourceMode: "BYOK" | "PLATFORM" | "IMPORT" | "MANUAL";
   readonly trashed?: boolean;
   readonly createdAt: string;
@@ -49,6 +53,7 @@ export function SemanticKeywordInspector({
   onClose,
   onEdit,
   onFrequencyDeleted,
+  onOpenAiAnswer,
   onUpdated,
   projectDomain,
   projectId
@@ -57,6 +62,7 @@ export function SemanticKeywordInspector({
   onClose: () => void;
   onEdit: () => void;
   onFrequencyDeleted: () => void;
+  onOpenAiAnswer: () => void;
   onUpdated: (item: SemanticKeywordListItem) => void;
   projectDomain: string;
   projectId: string;
@@ -69,10 +75,12 @@ export function SemanticKeywordInspector({
   const [savingNote, setSavingNote] = useState(false);
   const [noteStatus, setNoteStatus] = useState<string>();
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [aiHistoryOpen, setAiHistoryOpen] = useState(false);
   const [frequencyToDelete, setFrequencyToDelete] =
     useState<FrequencySnapshotSummary>();
   const [deletingFrequency, setDeletingFrequency] = useState(false);
   const [frequencyDeleteError, setFrequencyDeleteError] = useState<string>();
+  const [targetUrlCopied, setTargetUrlCopied] = useState(false);
   const noteDirtyRef = useRef(false);
 
   useEffect(() => {
@@ -87,9 +95,11 @@ export function SemanticKeywordInspector({
     setNoteDirty(false);
     setNoteStatus(undefined);
     setHistoryOpen(false);
+    setAiHistoryOpen(false);
     setFrequencyToDelete(undefined);
     setDeletingFrequency(false);
     setFrequencyDeleteError(undefined);
+    setTargetUrlCopied(false);
     const load = () => {
       void browserApiRequest<SemanticKeywordInsights>(
         `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(item.id)}/insights`,
@@ -140,11 +150,25 @@ export function SemanticKeywordInspector({
     () => latestSemanticRankHistory(insights?.positionHistory ?? []),
     [insights]
   );
+  const aiChartHistory = useMemo(
+    () => latestSemanticRankHistory(
+      aiHistoryChartPoints(insights?.aiPositionHistory ?? [])
+    ),
+    [insights]
+  );
+  const currentAiAnswers = useMemo(
+    () => latestAiAnswerSummaries(
+      insights?.aiPositionHistory ?? [],
+      item.aiAnswers ?? []
+    ),
+    [insights, item.aiAnswers]
+  );
   const positionChanges = useMemo(
     () => rankHistoryByDate(visibleHistory),
     [visibleHistory]
   );
   const competitorSnapshots = insights?.competitorSnapshots ?? [];
+  const aiCompetitorSnapshots = insights?.aiCompetitorSnapshots ?? [];
   const targetMismatches = useMemo(
     () => item.targetUrl
       ? [...primaryPositions.values()].flatMap((position) =>
@@ -160,6 +184,7 @@ export function SemanticKeywordInspector({
       : [],
     [item.targetUrl, primaryPositions]
   );
+  const hasSavedAiAnswer = currentAiAnswers.length > 0;
 
   async function saveNote(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -215,6 +240,17 @@ export function SemanticKeywordInspector({
     }
   }
 
+  async function copyTargetUrl(): Promise<void> {
+    if (!item.targetUrl) return;
+    try {
+      await navigator.clipboard.writeText(item.targetUrl);
+      setTargetUrlCopied(true);
+      window.setTimeout(() => setTargetUrlCopied(false), 1_800);
+    } catch {
+      setTargetUrlCopied(false);
+    }
+  }
+
   return (
     <aside aria-label={`Детали запроса ${item.textOriginal}`} className="semantic-keyword-inspector">
       <header>
@@ -252,7 +288,20 @@ export function SemanticKeywordInspector({
           </div>
         </dl>
         <div className="semantic-inspector-target-url">
-          <strong>Целевая страница</strong>
+          <div className="semantic-inspector-target-url-heading">
+            <strong>Целевая страница</strong>
+            {item.targetUrl && (
+              <button
+                aria-label={targetUrlCopied ? "URL скопирован" : "Скопировать целевой URL"}
+                className={targetUrlCopied ? "copied" : undefined}
+                onClick={() => void copyTargetUrl()}
+                title={targetUrlCopied ? "URL скопирован" : "Скопировать URL"}
+                type="button"
+              >
+                <Icon name={targetUrlCopied ? "checkDouble" : "copy"} />
+              </button>
+            )}
+          </div>
           {item.targetUrl ? (
             <a href={item.targetUrl} rel="noopener noreferrer" target="_blank">{item.targetUrl}</a>
           ) : (
@@ -311,9 +360,9 @@ export function SemanticKeywordInspector({
                   </strong>
                   {change ? (
                     <small className={change.tone} title={change.title}>{change.label}</small>
-                  ) : lostDescription ? (
-                    <small className="declined">{position?.previousPosition === undefined ? "Не найдена" : `Была ${position.previousPosition}`}</small>
-                  ) : <small>Нет данных</small>}
+                  ) : position?.previousPosition !== undefined ? (
+                    <small className="declined" title={`Предыдущая позиция: ${position.previousPosition}`}>←{position.previousPosition}</small>
+                  ) : null}
                 </div>
               );
             })}
@@ -321,7 +370,9 @@ export function SemanticKeywordInspector({
         ) : (
           <span className="semantic-inspector-muted">Загружаем позиции…</span>
         )}
-        <SemanticRankHistoryChart points={visibleHistory} />
+        <div className="semantic-normal-rank-chart">
+          <SemanticRankHistoryChart points={visibleHistory} />
+        </div>
         {positionChanges.length > 0 && (
           <div className="semantic-rank-change-history">
             <header>
@@ -330,6 +381,67 @@ export function SemanticKeywordInspector({
             <RankChangeRows rows={positionChanges.slice(0, 5)} />
           </div>
         )}
+        <div className="semantic-inspector-ai-ranks">
+          <header>
+            <span>
+              <Icon name="ai" />
+              ИИ-позиции
+            </span>
+            <div>
+              {hasSavedAiAnswer && (
+                <button onClick={onOpenAiAnswer} type="button">
+                  Открыть ответ
+                </button>
+              )}
+              {(insights?.aiPositionHistory?.length ?? 0) > 0 && (
+                <button onClick={() => setAiHistoryOpen(true)} type="button">
+                  <Icon name="history" />
+                  История
+                </button>
+              )}
+            </div>
+          </header>
+          <div className="semantic-current-ranks semantic-current-ai-ranks">
+            {(["YANDEX", "GOOGLE"] as const).map((engine) => {
+              const answer = currentAiAnswers.find(
+                (candidate) => candidate.searchEngine === engine
+              );
+              const change = answer?.siteFound && answer.position !== undefined
+                ? rankChangePresentation(answer.position, answer.previousPosition)
+                : undefined;
+              const lost = answer && !answer.siteFound && answer.previousPosition !== undefined
+                ? `Была ${answer.previousPosition}`
+                : undefined;
+              return (
+                <div key={engine}>
+                  <span>
+                    <SearchEngineLogo engine={engine} size="compact" />
+                    <span>{rankEngineLabel(engine)}</span>
+                  </span>
+                  <strong
+                    className={aiAnswerValueTone(answer)}
+                    title={aiAnswerDescription(answer)}
+                  >
+                    {aiAnswerValue(answer)}
+                  </strong>
+                  <small
+                    className={change?.tone ?? (lost ? "declined" : undefined)}
+                    title={answer ? `${aiAnswerDescription(answer)} · ${formatDateTime(answer.observedAt)}` : "ИИ-позиции ещё не проверялись"}
+                  >
+                    {change?.label ?? (answer?.previousPosition !== undefined
+                      ? `←${answer.previousPosition}`
+                      : "")}
+                  </small>
+                </div>
+              );
+            })}
+          </div>
+          {aiChartHistory.length > 0 && (
+            <div className="semantic-ai-rank-chart">
+              <SemanticRankHistoryChart points={aiChartHistory} />
+            </div>
+          )}
+        </div>
       </section>
 
       {error && <div className="inline-alert danger" role="alert">{error}</div>}
@@ -338,6 +450,14 @@ export function SemanticKeywordInspector({
         projectDomain={projectDomain}
         showEmpty={!loading}
         snapshots={competitorSnapshots}
+      />
+      <SemanticCompetitorSnapshots
+        emptyText="После первого ИИ-съёма с источниками здесь появятся сайты, на которые ссылается ИИ-ответ."
+        emptyTitle="Источники ИИ-ответов ещё не сохранены"
+        heading="Топ конкурентов ИИ"
+        projectDomain={projectDomain}
+        showEmpty={false}
+        snapshots={aiCompetitorSnapshots}
       />
 
       <section>
@@ -423,6 +543,14 @@ export function SemanticKeywordInspector({
           {...(item.targetUrl ? { targetUrl: item.targetUrl } : {})}
         />
       )}
+      {aiHistoryOpen && (
+        <SemanticKeywordAiPositionHistoryModal
+          keywordId={item.id}
+          keywordText={item.textOriginal}
+          onClose={() => setAiHistoryOpen(false)}
+          projectId={projectId}
+        />
+      )}
       {frequencyToDelete && (
         <SemanticModal
           description="Удаление применяется только к выбранному запросу."
@@ -489,8 +617,75 @@ function withoutNote(
     positionHistory: insights.positionHistory,
     ...(insights.competitorSnapshots
       ? { competitorSnapshots: insights.competitorSnapshots }
+      : {}),
+    ...(insights.aiPositionHistory
+      ? { aiPositionHistory: insights.aiPositionHistory }
+      : {}),
+    ...(insights.aiCompetitorSnapshots
+      ? { aiCompetitorSnapshots: insights.aiCompetitorSnapshots }
       : {})
   };
+}
+
+function latestAiAnswerSummaries(
+  history: readonly SemanticAiAnswerHistoryItem[],
+  fallback: readonly SemanticAiAnswerSummary[]
+): readonly SemanticAiAnswerSummary[] {
+  if (history.length === 0) return fallback;
+  const ordered = [...history].sort((left, right) =>
+    Date.parse(right.observedAt) - Date.parse(left.observedAt) ||
+    right.snapshotId.localeCompare(left.snapshotId)
+  );
+  return (["YANDEX", "GOOGLE"] as const).flatMap((searchEngine) => {
+    const currentIndex = ordered.findIndex(
+      (item) => item.searchEngine === searchEngine
+    );
+    if (currentIndex < 0) {
+      const saved = fallback.find((item) => item.searchEngine === searchEngine);
+      return saved ? [saved] : [];
+    }
+    const current = ordered[currentIndex]!;
+    const saved = fallback.find((item) =>
+      item.searchEngine === searchEngine &&
+      item.observedAt === current.observedAt
+    );
+    const previousPosition = current.previousPosition ??
+      saved?.previousPosition ??
+      ordered
+        .slice(currentIndex + 1)
+        .find((item) =>
+          item.searchEngine === searchEngine &&
+          item.siteFound &&
+          item.position !== undefined
+        )?.position;
+    return [{
+      searchEngine,
+      answerPresent: current.answerPresent,
+      siteFound: current.siteFound,
+      ...(current.position === undefined ? {} : { position: current.position }),
+      ...(previousPosition === undefined ? {} : { previousPosition }),
+      ...(current.rankingUrl === undefined ? {} : { rankingUrl: current.rankingUrl }),
+      brandFound: current.brandFound,
+      observedAt: current.observedAt
+    }];
+  });
+}
+
+function aiHistoryChartPoints(
+  history: readonly SemanticAiAnswerHistoryItem[]
+): readonly SemanticKeywordPositionHistoryPoint[] {
+  return history.map((item) => ({
+    snapshotId: item.snapshotId,
+    trackingContextId: `ai-answer:${item.searchEngine}`,
+    contextName: `ИИ-ответ · ${rankEngineLabel(item.searchEngine)}`,
+    searchEngine: item.searchEngine,
+    device: item.device,
+    regionCode: item.regionCode,
+    provider: "ARSENKIN" as const,
+    found: item.siteFound,
+    ...(item.position === undefined ? {} : { position: item.position }),
+    observedAt: item.observedAt
+  }));
 }
 
 interface RankHistoryDateRow {
@@ -635,6 +830,31 @@ function intentLabel(intent: SemanticKeywordIntent | undefined): string {
 
 function sourceLabel(source: SemanticKeywordInspectorItem["sourceMode"]): string {
   return { BYOK: "Свой API", PLATFORM: "Платформа", IMPORT: "Импорт", MANUAL: "Вручную" }[source];
+}
+
+type AiAnswerSummary = NonNullable<SemanticKeywordInspectorItem["aiAnswers"]>[number];
+
+function aiAnswerValue(answer: AiAnswerSummary | undefined): string | number {
+  if (!answer) return "—";
+  if (!answer.answerPresent) return "—";
+  if (!answer.siteFound || answer.position === undefined) return "×";
+  return answer.position;
+}
+
+function aiAnswerValueTone(answer: AiAnswerSummary | undefined): string | undefined {
+  if (!answer) return undefined;
+  if (!answer.answerPresent) return "absent";
+  if (!answer.siteFound || answer.position === undefined) return "missing";
+  return "found";
+}
+
+function aiAnswerDescription(answer: AiAnswerSummary | undefined): string {
+  if (!answer) return "ИИ-позиции ещё не проверялись";
+  if (!answer.answerPresent) return "Проверка выполнена: ИИ-ответ не найден";
+  if (!answer.siteFound) return "ИИ-ответ найден, но сайт отсутствует в источниках";
+  return answer.rankingUrl
+    ? `Сайт найден в источниках: ${answer.rankingUrl}`
+    : "Сайт найден в источниках ИИ-ответа";
 }
 
 function formatDateTime(value: string): string {

@@ -54,6 +54,40 @@ test("accepts XLSX and a multi-group current filter", () => {
   assert.deepEqual(input.filters?.groupIds, [groupId, secondGroupId]);
 });
 
+test("accepts only a bounded XLSX position-history report", () => {
+  const input = createSemanticExportInput({
+    format: "XLSX",
+    scope: "CURRENT_FILTER",
+    locale: "ru",
+    columns: ["query"],
+    positionHistory: {
+      observedFrom: "2026-08-01T00:00:00.000Z",
+      observedBefore: "2026-08-20T00:00:00.000Z",
+      searchEngines: ["YANDEX", "GOOGLE"]
+    }
+  });
+
+  assert.deepEqual(input.positionHistory, {
+    observedFrom: "2026-08-01T00:00:00.000Z",
+    observedBefore: "2026-08-20T00:00:00.000Z",
+    searchEngines: ["YANDEX", "GOOGLE"]
+  });
+  assert.throws(
+    () => createSemanticExportInput({
+      ...input,
+      format: "CSV"
+    }),
+    DomainError
+  );
+  assert.throws(
+    () => createSemanticExportInput({
+      ...input,
+      positionHistory: { ...input.positionHistory, searchEngines: [] }
+    }),
+    DomainError
+  );
+});
+
 test("requires scope-specific IDs and rejects ambiguous full exports", () => {
   assert.throws(
     () =>

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { TrackingContextScopeMode } from "@seo-platform/contracts";
 import { browserApiCollectionRequest } from "../lib/browser-api";
+import { visibleFolderRows } from "../lib/semantic-operation-tree";
 import { Icon } from "./icon";
 
 export interface SemanticOperationSelection {
@@ -378,46 +379,6 @@ export function SemanticOperationScope({
       <small>Текущее выделение таблицы переносится в список конкретных запросов. Родительская папка включает вложенные. Лимит одной операции: {maxItems}.</small>
     </section>
   );
-}
-
-interface VisibleFolderRow {
-  readonly group: SemanticOperationGroup;
-  readonly depth: number;
-  readonly hasChildren: boolean;
-}
-
-function visibleFolderRows(
-  groups: readonly SemanticOperationGroup[],
-  expandedIds: ReadonlySet<string>
-): readonly VisibleFolderRow[] {
-  const byParent = new Map<string | undefined, SemanticOperationGroup[]>();
-  const groupIds = new Set(groups.map(({ id }) => id));
-  for (const group of groups) {
-    const parentId = group.parentId && groupIds.has(group.parentId)
-      ? group.parentId
-      : undefined;
-    const siblings = byParent.get(parentId) ?? [];
-    siblings.push(group);
-    byParent.set(parentId, siblings);
-  }
-  const rows: VisibleFolderRow[] = [];
-  const visited = new Set<string>();
-  const append = (parentId: string | undefined, depth: number): void => {
-    for (const group of byParent.get(parentId) ?? []) {
-      if (visited.has(group.id)) continue;
-      visited.add(group.id);
-      const hasChildren = (byParent.get(group.id)?.length ?? 0) > 0;
-      rows.push({ group, depth, hasChildren });
-      if (hasChildren && expandedIds.has(group.id)) {
-        append(group.id, depth + 1);
-      }
-    }
-  };
-  append(undefined, 0);
-  for (const group of groups) {
-    if (!visited.has(group.id)) rows.push({ group, depth: 0, hasChildren: false });
-  }
-  return rows;
 }
 
 function expandedAncestors(

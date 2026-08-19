@@ -13,6 +13,7 @@ import { SessionAuthGuard } from "../identity/session-auth.guard.js";
 import type { JobsClient } from "../jobs/jobs.client.js";
 import { RankRunController } from "../rankings/rank-run.controller.js";
 import { FrequencyCollectionController } from "../semantics/frequency-collection.controller.js";
+import { AiAnswerCollectionController } from "../semantics/ai-answer-collection.controller.js";
 import type { SeoDataClient } from "../seo-data/seo-data.client.js";
 import type { TenantService } from "../tenants/tenant.service.js";
 
@@ -34,6 +35,11 @@ const principal: AuthenticatedPrincipal = {
 test("publishes guarded project result routes with read permissions", () => {
   assertRoute(
     FrequencyCollectionController.prototype.result,
+    ":jobId/result",
+    "collector.view"
+  );
+  assertRoute(
+    AiAnswerCollectionController.prototype.result,
     ":jobId/result",
     "collector.view"
   );

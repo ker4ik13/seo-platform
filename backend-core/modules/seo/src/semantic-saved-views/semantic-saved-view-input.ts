@@ -1,8 +1,11 @@
 import { BadRequestException } from "@nestjs/common";
 import {
   semanticKeywordIntents,
+  semanticKeywordPageSizes,
   semanticKeywordSorts,
   semanticSavedViewDensities,
+  semanticSavedViewGroupSidebarWidthMax,
+  semanticSavedViewGroupSidebarWidthMin,
   semanticSavedViewScopes,
   semanticSystemColumnKeys,
   type InternalCreateSemanticSavedViewInput,
@@ -20,12 +23,14 @@ export function internalCreateSemanticSavedViewInput(
     "workspaceId",
     "projectId",
     "actorId",
+    "canManageShared",
     "name",
     "scope",
     "config"
   ]);
   return {
     ...scope(input),
+    canManageShared: boolean(input.canManageShared, "canManageShared"),
     name: viewName(input.name),
     scope: requiredEnum(input.scope, semanticSavedViewScopes, "scope"),
     config: savedViewConfig(input.config)
@@ -39,6 +44,7 @@ export function internalUpdateSemanticSavedViewInput(
     "workspaceId",
     "projectId",
     "actorId",
+    "canManageShared",
     "version",
     "name",
     "config"
@@ -46,6 +52,7 @@ export function internalUpdateSemanticSavedViewInput(
   if (input.name === undefined && input.config === undefined) invalid("$");
   return {
     ...scope(input),
+    canManageShared: boolean(input.canManageShared, "canManageShared"),
     version: positiveInteger(input.version, "version"),
     ...(input.name === undefined ? {} : { name: viewName(input.name) }),
     ...(input.config === undefined
@@ -61,10 +68,12 @@ export function internalDeleteSemanticSavedViewInput(
     "workspaceId",
     "projectId",
     "actorId",
+    "canManageShared",
     "version"
   ]);
   return {
     ...scope(input),
+    canManageShared: boolean(input.canManageShared, "canManageShared"),
     version: positiveInteger(input.version, "version")
   };
 }
@@ -75,19 +84,47 @@ function savedViewConfig(value: unknown): SemanticSavedViewConfig {
     "filters",
     "sort",
     "columns",
-    "density"
+    "density",
+    "columnWidths",
+    "pageSize",
+    "groupSidebarWidth",
+    "expandedGroupIds",
+    "selectedGroupIds",
+    "appliedViewId"
   ]);
   if (input.schemaVersion !== 1) invalid("config.schemaVersion");
+  const columns = requiredColumns(input.columns);
+  const columnWidths = optionalColumnWidths(input.columnWidths, columns);
+  const pageSize = input.pageSize === undefined
+    ? undefined
+    : requiredNumberMember(input.pageSize, semanticKeywordPageSizes, "config.pageSize");
+  const groupSidebarWidth = optionalInteger(
+    input.groupSidebarWidth,
+    "config.groupSidebarWidth",
+    semanticSavedViewGroupSidebarWidthMin,
+    semanticSavedViewGroupSidebarWidthMax
+  );
+  const expandedGroupIds = optionalUuidArray(input.expandedGroupIds, 1_000);
+  const selectedGroupIds = optionalUuidArray(input.selectedGroupIds, 100);
+  const appliedViewId = input.appliedViewId === undefined
+    ? undefined
+    : uuid(input.appliedViewId, "config.appliedViewId");
   return {
     schemaVersion: 1,
     filters: savedViewFilters(input.filters),
     sort: requiredEnum(input.sort, semanticKeywordSorts, "config.sort"),
-    columns: requiredColumns(input.columns),
+    columns,
     density: requiredEnum(
       input.density,
       semanticSavedViewDensities,
       "config.density"
-    )
+    ),
+    ...(columnWidths ? { columnWidths } : {}),
+    ...(pageSize === undefined ? {} : { pageSize }),
+    ...(groupSidebarWidth === undefined ? {} : { groupSidebarWidth }),
+    ...(expandedGroupIds ? { expandedGroupIds } : {}),
+    ...(selectedGroupIds ? { selectedGroupIds } : {}),
+    ...(appliedViewId ? { appliedViewId } : {})
   };
 }
 
@@ -162,7 +199,7 @@ function requiredColumns(value: unknown): SemanticSavedViewConfig["columns"] {
   if (
     !Array.isArray(value) ||
     value.length < 1 ||
-    value.length > 108
+    value.length > 128
   ) {
     invalid("config.columns");
   }
@@ -184,6 +221,38 @@ function requiredColumns(value: unknown): SemanticSavedViewConfig["columns"] {
     invalid("config.columns");
   }
   return columns;
+}
+
+function optionalColumnWidths(
+  value: unknown,
+  columns: SemanticSavedViewConfig["columns"]
+): SemanticSavedViewConfig["columnWidths"] | undefined {
+  if (value === undefined) return undefined;
+  const input = exactRecord(value, columns);
+  const result: Record<string, number> = {};
+  for (const [key, width] of Object.entries(input)) {
+    if (!Number.isSafeInteger(width) || Number(width) < 56 || Number(width) > 1_200) {
+      invalid(`config.columnWidths.${key}`);
+    }
+    result[key] = Number(width);
+  }
+  return result as SemanticSavedViewConfig["columnWidths"];
+}
+
+function optionalUuidArray(
+  value: unknown,
+  maximum: number
+): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > maximum) invalid("config.groups");
+  const values = value.map((item) => uuid(item, "config.groups"));
+  if (new Set(values).size !== values.length) invalid("config.groups");
+  return values;
+}
+
+function boolean(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") invalid(field);
+  return value;
 }
 
 function scope(input: Readonly<Record<string, unknown>>) {
@@ -237,6 +306,19 @@ function optionalPriority(
   return Number(value);
 }
 
+function optionalInteger(
+  value: unknown,
+  field: string,
+  minimum: number,
+  maximum: number
+): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || Number(value) < minimum || Number(value) > maximum) {
+    invalid(field);
+  }
+  return Number(value);
+}
+
 function requiredEnum<T extends string>(
   value: unknown,
   values: readonly T[],
@@ -245,6 +327,15 @@ function requiredEnum<T extends string>(
   if (typeof value !== "string" || !values.includes(value as T)) {
     invalid(field);
   }
+  return value as T;
+}
+
+function requiredNumberMember<T extends number>(
+  value: unknown,
+  values: readonly T[],
+  field: string
+): T {
+  if (typeof value !== "number" || !values.includes(value as T)) invalid(field);
   return value as T;
 }
 

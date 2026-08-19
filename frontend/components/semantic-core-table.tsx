@@ -8,9 +8,11 @@ import {
   type SemanticKeywordPageSize,
   type SemanticKeywordBulkCreateItemInput,
   type SemanticKeywordBulkCreateResult,
+  type AiAnswerCollectionSummary,
   type FrequencyCollectionSummary,
   type RankJobSummary,
-  type SemanticExportJobSummary
+  type SemanticExportJobSummary,
+  type SemanticPositionHistorySearchEngine
 } from "@seo-platform/contracts";
 
 import {
@@ -67,6 +69,7 @@ import {
   readSemanticManualAddPreferences,
   writeSemanticManualAddPreferences
 } from "../lib/semantic-manual-add-preferences";
+import { shouldRefreshSemanticOperationMetrics } from "../lib/semantic-live-operation-metrics";
 import { SemanticBulkEditor } from "./semantic-bulk-editor";
 import { ContextMenu, type ContextMenuItem } from "./context-menu";
 import type { SemanticCustomColumn } from "./semantic-custom-column-types";
@@ -85,6 +88,8 @@ import { SemanticKeywordInspector } from "./semantic-keyword-inspector";
 import { SemanticProjectSerpResults } from "./semantic-project-serp-results";
 import { SemanticPositionDialog } from "./semantic-position-dialog";
 import { SemanticFrequencyDialog } from "./semantic-frequency-dialog";
+import { SemanticAiAnswerDialog } from "./semantic-ai-answer-dialog";
+import { SemanticAiAnswerDetailsModal } from "./semantic-ai-answer-details-modal";
 import { SemanticOperationsDrawer } from "./semantic-operations-drawer";
 import { SemanticLayoutDrawer } from "./semantic-layout-drawer";
 import { SemanticNegativeKeywordsDialog } from "./semantic-negative-keywords-dialog";
@@ -106,6 +111,7 @@ import {
 import type { AppProject } from "../lib/app-types";
 import {
   defaultSemanticViewConfig,
+  isInternalSemanticViewName,
   semanticFolderSortFor,
   semanticFolderSortViewName,
   semanticFolderSortViewPrefix,
@@ -127,6 +133,7 @@ interface SemanticKeyword {
   readonly priority: number;
   readonly isFavorite: boolean;
   readonly isTracked: boolean;
+  readonly showAiAnswerButton: boolean;
   readonly hasNote?: boolean;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
@@ -164,6 +171,16 @@ interface SemanticKeyword {
       title?: string;
       snippet?: string;
     }>[];
+    observedAt: string;
+  }>[];
+  readonly aiAnswers?: readonly Readonly<{
+    searchEngine: "GOOGLE" | "YANDEX";
+    answerPresent: boolean;
+    siteFound: boolean;
+    position?: number;
+    previousPosition?: number;
+    rankingUrl?: string;
+    brandFound: boolean;
     observedAt: string;
   }>[];
   readonly customValues?: readonly Readonly<{
@@ -223,6 +240,7 @@ type KeywordEditor =
 const MANUAL_KEYWORD_LIMIT = 2_000;
 
 interface SemanticCoreTableProps {
+  readonly currentUserId: string;
   readonly columnRefreshVersion: number;
   readonly clusterRefreshVersion: number;
   readonly projectId: string;
@@ -237,6 +255,7 @@ interface SemanticCoreTableProps {
     "id" | "name" | "domain" | "version" | "activeOperationCount"
   >[];
   readonly workspaceId: string;
+  readonly workspaceRoleCode: string;
 }
 
 type SemanticExportFormat =
@@ -248,12 +267,14 @@ type SemanticExportFormat =
   | "XLSX";
 
 type SemanticExportScope = "CURRENT_FILTER" | "SELECTED" | "GROUP_SUBTREE";
+type SemanticExportContent = "SEMANTIC" | "POSITION_HISTORY";
 
 interface SemanticExportDialogState {
   readonly groupId?: string;
 }
 
 export function SemanticCoreTable({
+  currentUserId,
   columnRefreshVersion,
   clusterRefreshVersion,
   projectId,
@@ -264,7 +285,8 @@ export function SemanticCoreTable({
   onOpenImport,
   projectName,
   projects,
-  workspaceId
+  workspaceId,
+  workspaceRoleCode
 }: SemanticCoreTableProps) {
   const [items, setItems] = useState<readonly SemanticKeyword[]>([]);
   const [page, setPage] = useState<BrowserCursorPage>({
@@ -307,6 +329,17 @@ export function SemanticCoreTable({
   const [bulkNotice, setBulkNotice] = useState<string>();
   const [exportFormat, setExportFormat] =
     useState<SemanticExportFormat>("CSV");
+  const [exportContent, setExportContent] =
+    useState<SemanticExportContent>("SEMANTIC");
+  const [exportHistoryEngines, setExportHistoryEngines] = useState<
+    readonly SemanticPositionHistorySearchEngine[]
+  >(["YANDEX"]);
+  const [exportHistoryFrom, setExportHistoryFrom] = useState(
+    () => semanticHistoryDefaultRange().from
+  );
+  const [exportHistoryTo, setExportHistoryTo] = useState(
+    () => semanticHistoryDefaultRange().to
+  );
   const [exporting, setExporting] = useState(false);
   const [exportCancelling, setExportCancelling] = useState(false);
   const [exportJob, setExportJob] = useState<SemanticExportJobSummary>();
@@ -318,7 +351,9 @@ export function SemanticCoreTable({
     defaultSemanticViewConfig.columns
   );
   const [exportBom, setExportBom] = useState(true);
-  const [projectTableView, setProjectTableView] = useState<SemanticSavedView>();
+  const [, setProjectTableView] = useState<SemanticSavedView>();
+  const [activeSavedView, setActiveSavedView] = useState<SemanticSavedView>();
+  const [activeSavedViewBaseline, setActiveSavedViewBaseline] = useState("");
   const [folderSortViews, setFolderSortViews] = useState<
     readonly SemanticSavedView[]
   >([]);
@@ -352,9 +387,13 @@ export function SemanticCoreTable({
   const [moveKeywordTargetId, setMoveKeywordTargetId] = useState("");
   const [deleteSelectionOpen, setDeleteSelectionOpen] = useState(false);
   const [bulkEditorOpen, setBulkEditorOpen] = useState(false);
+  const [bulkEditorInitialFocus, setBulkEditorInitialFocus] =
+    useState<"TAGS">();
   const [actionIds, setActionIds] = useState<ReadonlySet<string> | null>(null);
   const [positionDialogOpen, setPositionDialogOpen] = useState(false);
   const [frequencyDialogOpen, setFrequencyDialogOpen] = useState(false);
+  const [aiAnswerDialogOpen, setAiAnswerDialogOpen] = useState(false);
+  const [aiAnswerKeyword, setAiAnswerKeyword] = useState<SemanticKeyword>();
   const [negativeKeywordsOpen, setNegativeKeywordsOpen] = useState(false);
   const [duplicatesOpen, setDuplicatesOpen] = useState(false);
   const [siteResultsKeyword, setSiteResultsKeyword] = useState<SemanticKeyword>();
@@ -377,6 +416,11 @@ export function SemanticCoreTable({
   const liveOperationSignatureRef = useRef("");
   const liveMetricRefreshInFlightRef = useRef(false);
   const liveOperationActiveRef = useRef(false);
+  const savedViewAutosaveBaselineRef = useRef("");
+  const savedViewAutosaveInFlightRef = useRef<string | undefined>(undefined);
+  const activeSavedViewRef = useRef<SemanticSavedView | undefined>(undefined);
+  const activeSavedViewProjectIdRef = useRef("");
+  const projectTableViewRef = useRef<SemanticSavedView | undefined>(undefined);
   const [tableViewport, setTableViewport] = useState({
     height: 520,
     scrollTop: 0
@@ -388,6 +432,36 @@ export function SemanticCoreTable({
       ...(multiGroupIds.length > 1 ? { groupIds: multiGroupIds } : {})
     }),
     [multiGroupIds, viewConfig.filters, viewConfig.sort]
+  );
+  const currentSavedViewConfig = useMemo<SemanticViewConfig>(
+    () => ({
+      ...viewConfig,
+      columnWidths,
+      pageSize,
+      groupSidebarWidth,
+      expandedGroupIds: expandedGroupIds ? [...expandedGroupIds] : [],
+      selectedGroupIds: multiGroupIds
+    }),
+    [columnWidths, expandedGroupIds, groupSidebarWidth, multiGroupIds, pageSize, viewConfig]
+  );
+  const draftSavedViewConfig = useMemo<SemanticViewConfig>(
+    () => ({
+      ...draftConfig,
+      columnWidths,
+      pageSize,
+      groupSidebarWidth,
+      expandedGroupIds: expandedGroupIds ? [...expandedGroupIds] : [],
+      selectedGroupIds: multiGroupIds
+    }),
+    [columnWidths, draftConfig, expandedGroupIds, groupSidebarWidth, multiGroupIds, pageSize]
+  );
+  const isActiveSavedViewDirty = useMemo(
+    () => Boolean(
+      activeSavedView &&
+      semanticViewConfigSignature(draftSavedViewConfig) !==
+        activeSavedViewBaseline
+    ),
+    [activeSavedView, activeSavedViewBaseline, draftSavedViewConfig]
   );
   const debouncedSearch = useDebouncedValue(
     draftConfig.filters.search ?? "",
@@ -424,6 +498,12 @@ export function SemanticCoreTable({
   }, [debouncedTagSearch, projectId]);
 
   useEffect(() => {
+    activeSavedViewRef.current = undefined;
+    activeSavedViewProjectIdRef.current = "";
+    projectTableViewRef.current = undefined;
+    setActiveSavedView(undefined);
+    setActiveSavedViewBaseline("");
+    savedViewAutosaveBaselineRef.current = "";
     setMultiGroupIds([]);
     const preferences = readSemanticLayoutPreferences(
       projectId,
@@ -445,13 +525,75 @@ export function SemanticCoreTable({
   }, [projectId]);
 
   useEffect(() => {
+    if (
+      !activeSavedView ||
+      activeSavedView.scope !== "PRIVATE" ||
+      activeSavedViewProjectIdRef.current !== projectId
+    ) return;
+    const signature = semanticViewConfigSignature(currentSavedViewConfig);
+    if (signature === savedViewAutosaveBaselineRef.current) return;
+    const view = activeSavedView;
+    const timer = window.setTimeout(() => {
+      const liveView = activeSavedViewRef.current;
+      const requestKey = `${projectId}:${view.id}`;
+      if (
+        !liveView ||
+        liveView.id !== view.id ||
+        liveView.scope !== "PRIVATE" ||
+        activeSavedViewProjectIdRef.current !== projectId ||
+        savedViewAutosaveInFlightRef.current === requestKey
+      ) return;
+      savedViewAutosaveInFlightRef.current = requestKey;
+      void browserApiRequest<SemanticSavedView>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/semantic-saved-views/${encodeURIComponent(liveView.id)}`,
+        {
+          method: "PATCH",
+          body: { config: currentSavedViewConfig },
+          ifMatch: liveView.version
+        }
+      )
+        .then((updated) => {
+          if (activeSavedViewProjectIdRef.current !== projectId) return;
+          savedViewAutosaveBaselineRef.current = signature;
+          setActiveSavedViewBaseline(signature);
+          activeSavedViewRef.current = updated;
+          setActiveSavedView((current) =>
+            current?.id === updated.id ? updated : current
+          );
+          if (updated.name === semanticProjectTableViewName) {
+            setProjectTableView(updated);
+          }
+        })
+        .catch((requestError: unknown) => {
+          if (requestError instanceof BrowserApiError && requestError.status === 412) {
+            activeSavedViewRef.current = undefined;
+            activeSavedViewProjectIdRef.current = "";
+            setActiveSavedView(undefined);
+            setActiveSavedViewBaseline("");
+            setMutationError(
+              "Личное представление изменилось в другой вкладке. Откройте его заново."
+            );
+            return;
+          }
+          setMutationError(keywordErrorMessage(requestError));
+        })
+        .finally(() => {
+          if (savedViewAutosaveInFlightRef.current === requestKey) {
+            savedViewAutosaveInFlightRef.current = undefined;
+          }
+        });
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [activeSavedView, currentSavedViewConfig, projectId]);
+
+  useEffect(() => {
     if (!rightSidebar) return;
     const closeFromOutside = (event: PointerEvent) => {
       const target = event.target;
       if (!(target instanceof Element)) return;
       if (
         target.closest(
-          ".semantic-keyword-inspector, .semantic-operations-drawer, .semantic-history-drawer, .semantic-layout-drawer, .semantic-modal, [data-semantic-sidebar-trigger]"
+          ".semantic-keyword-inspector, .semantic-operations-drawer, .semantic-history-drawer, .semantic-layout-drawer, .semantic-modal, [data-semantic-sidebar-trigger], [data-exclusive-dropdown-layer]"
         )
       ) {
         return;
@@ -544,13 +686,17 @@ export function SemanticCoreTable({
     let timer: number | undefined;
     liveOperationSignatureRef.current = "";
     const reconcile = async (): Promise<boolean> => {
-      const [frequencyResult, rankResult] = await Promise.allSettled([
+      const [frequencyResult, rankResult, aiAnswerResult] = await Promise.allSettled([
         browserApiRequest<{ readonly collections: readonly FrequencyCollectionSummary[] }>(
           `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections`,
           { signal: controller.signal }
         ),
         browserApiRequest<{ readonly jobs: readonly RankJobSummary[] }>(
           `/app/api/projects/${encodeURIComponent(projectId)}/rank-runs`,
+          { signal: controller.signal }
+        ),
+        browserApiRequest<{ readonly collections: readonly AiAnswerCollectionSummary[] }>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/ai-answer-collections`,
           { signal: controller.signal }
         )
       ]);
@@ -559,6 +705,9 @@ export function SemanticCoreTable({
         ? frequencyResult.value.collections
         : [];
       const ranks = rankResult.status === "fulfilled" ? rankResult.value.jobs : [];
+      const aiAnswers = aiAnswerResult.status === "fulfilled"
+        ? aiAnswerResult.value.collections
+        : [];
       const activeFrequencyCount = frequencies.filter(({ status }) => ![
         "ACTION_REQUIRED",
         "CANCELLED",
@@ -573,7 +722,14 @@ export function SemanticCoreTable({
         "FAILED",
         "ACTION_REQUIRED"
       ].includes(status)).length;
-      const nextActiveOperationCount = activeFrequencyCount + activeRankCount;
+      const activeAiAnswerCount = aiAnswers.filter(({ status }) => ![
+        "ACTION_REQUIRED",
+        "CANCELLED",
+        "PARTIALLY_COMPLETED",
+        "COMPLETED",
+        "FAILED_FINAL"
+      ].includes(status)).length;
+      const nextActiveOperationCount = activeFrequencyCount + activeRankCount + activeAiAnswerCount;
       const active = nextActiveOperationCount > 0;
       liveOperationActiveRef.current = active;
       const signature = JSON.stringify([
@@ -592,11 +748,23 @@ export function SemanticCoreTable({
           job.progress.current,
           job.progress.total,
           "finishedAt" in job ? job.finishedAt : undefined
+        ]),
+        ...aiAnswers.map((job) => [
+          "ai-answer",
+          job.id,
+          job.status,
+          job.completedKeywords,
+          job.failedKeywords,
+          job.updatedAt
         ])
       ]);
       const previous = liveOperationSignatureRef.current;
       liveOperationSignatureRef.current = signature;
-      if (!previous || previous === signature || liveMetricRefreshInFlightRef.current) return active;
+      if (!shouldRefreshSemanticOperationMetrics(
+        previous,
+        signature,
+        liveMetricRefreshInFlightRef.current
+      )) return active;
       liveMetricRefreshInFlightRef.current = true;
       try {
         const result = await loadKeywordPage(
@@ -698,6 +866,12 @@ export function SemanticCoreTable({
   useEffect(() => {
     const controller = new AbortController();
     setProjectTableView(undefined);
+    projectTableViewRef.current = undefined;
+    activeSavedViewRef.current = undefined;
+    activeSavedViewProjectIdRef.current = "";
+    setActiveSavedView(undefined);
+    setActiveSavedViewBaseline("");
+    savedViewAutosaveBaselineRef.current = "";
     setFolderSortViews([]);
     void browserApiRequest<readonly SemanticSavedView[]>(
       `/app/api/projects/${encodeURIComponent(projectId)}/semantic-saved-views`,
@@ -706,40 +880,78 @@ export function SemanticCoreTable({
       .then((views) => {
         if (controller.signal.aborted) return;
         const projectView = views.find(
-          ({ name, scope }) =>
-            name === semanticProjectTableViewName && scope === "PROJECT_SHARED"
+          ({ name, scope, ownerId }) =>
+            name === semanticProjectTableViewName &&
+            scope === "PRIVATE" &&
+            ownerId === currentUserId
         );
         const sortViews = views.filter(
-          ({ name, scope }) =>
+          ({ name, scope, ownerId }) =>
             name.startsWith(semanticFolderSortViewPrefix) &&
-            scope === "PROJECT_SHARED"
+            scope === "PRIVATE" &&
+            ownerId === currentUserId
         );
         setProjectTableView(projectView);
+        projectTableViewRef.current = projectView;
         setFolderSortViews(sortViews);
-        setDraftConfig((current) => ({
-          ...current,
-          ...(projectView
-            ? {
-                columns: projectView.config.columns,
-                density: projectView.config.density
-              }
-            : {}),
-          sort: folderSortFor(current.filters.groupId, sortViews)
-        }));
-        setViewConfig((current) => ({
-          ...current,
-          ...(projectView
-            ? {
-                columns: projectView.config.columns,
-                density: projectView.config.density
-              }
-            : {}),
-          sort: folderSortFor(current.filters.groupId, sortViews)
-        }));
+        const visibleViews = views.filter(
+          ({ name }) => !isInternalSemanticViewName(name)
+        );
+        const explicitlyAppliedView = projectView?.config.appliedViewId
+          ? visibleViews.find(({ id }) => id === projectView.config.appliedViewId)
+          : undefined;
+        const defaultSharedView = preferredProjectSharedView(visibleViews);
+        const appliedView = explicitlyAppliedView ?? defaultSharedView;
+        const storedConfig = semanticViewConfigWithoutAppliedView(
+          appliedView?.config ?? projectView?.config ?? defaultSemanticViewConfig
+        );
+        const nextConfig = appliedView || projectView
+          ? storedConfig
+          : {
+              ...storedConfig,
+              sort: folderSortFor(storedConfig.filters.groupId, sortViews)
+            };
+        if (appliedView || projectView) {
+          const nextPageSize = nextConfig.pageSize ?? layoutPreferencesRef.current.pageSize;
+          const nextGroupSidebarWidth = nextConfig.groupSidebarWidth ??
+            layoutPreferencesRef.current.groupSidebarWidth;
+          layoutPreferencesRef.current = {
+            ...layoutPreferencesRef.current,
+            groupSidebarWidth: nextGroupSidebarWidth,
+            columnWidths: nextConfig.columnWidths ?? {},
+            pageSize: nextPageSize,
+            expandedGroupIds: nextConfig.expandedGroupIds ?? []
+          };
+          setDraftConfig(nextConfig);
+          setViewConfig(nextConfig);
+          setGroupSidebarWidth(nextGroupSidebarWidth);
+          setColumnWidths(nextConfig.columnWidths ?? {});
+          setPageSize(nextPageSize);
+          setExpandedGroupIds(new Set(nextConfig.expandedGroupIds ?? []));
+          setMultiGroupIds(nextConfig.selectedGroupIds ?? []);
+          const resolvedConfig: SemanticViewConfig = {
+            ...nextConfig,
+            columnWidths: nextConfig.columnWidths ?? {},
+            pageSize: nextPageSize,
+            groupSidebarWidth: nextGroupSidebarWidth,
+            expandedGroupIds: nextConfig.expandedGroupIds ?? [],
+            selectedGroupIds: nextConfig.selectedGroupIds ?? []
+          };
+          activeSavedViewRef.current = appliedView;
+          activeSavedViewProjectIdRef.current = appliedView ? projectId : "";
+          setActiveSavedView(appliedView);
+          savedViewAutosaveBaselineRef.current = appliedView
+            ? semanticViewConfigSignature(resolvedConfig)
+            : "";
+          setActiveSavedViewBaseline(savedViewAutosaveBaselineRef.current);
+        } else {
+          setDraftConfig(nextConfig);
+          setViewConfig(nextConfig);
+        }
       })
       .catch(() => undefined);
     return () => controller.abort();
-  }, [projectId]);
+  }, [currentUserId, projectId]);
 
   useEffect(() => {
     if (!bulkNotice && !exportNotice) return;
@@ -950,7 +1162,7 @@ export function SemanticCoreTable({
               `/app/api/projects/${encodeURIComponent(projectId)}/semantic-saved-views`,
               {
                 method: "POST",
-                body: { name: viewName, scope: "PROJECT_SHARED", config }
+                body: { name: viewName, scope: "PRIVATE", config }
               }
             );
       } catch (requestError) {
@@ -964,8 +1176,10 @@ export function SemanticCoreTable({
           `/app/api/projects/${encodeURIComponent(projectId)}/semantic-saved-views`
         );
         currentView = latestViews.find(
-          ({ name, scope }) =>
-            name === viewName && scope === "PROJECT_SHARED"
+          ({ name, scope, ownerId }) =>
+            name === viewName &&
+            scope === "PRIVATE" &&
+            ownerId === currentUserId
         );
         if (!currentView) throw requestError;
         saved = await browserApiRequest<SemanticSavedView>(
@@ -1162,51 +1376,135 @@ export function SemanticCoreTable({
   async function applyTableLayout(): Promise<void> {
     if (savingTableLayout) return;
     const layoutConfig: SemanticViewConfig = {
-      ...defaultSemanticViewConfig,
-      columns: draftConfig.columns,
-      density: draftConfig.density
+      ...currentSavedViewConfig,
+      columns: draftSavedViewConfig.columns,
+      density: draftSavedViewConfig.density
     };
-    setViewConfig((current) => ({
-      ...current,
-      columns: layoutConfig.columns,
-      density: layoutConfig.density
-    }));
+    const privateDestination = activeSavedView?.scope === "PRIVATE"
+      ? activeSavedView
+      : undefined;
+    setDraftConfig(layoutConfig);
+    setViewConfig(layoutConfig);
     setSavingTableLayout(true);
     setMutationError(undefined);
+    const previousBaseline = savedViewAutosaveBaselineRef.current;
+    if (privateDestination) {
+      savedViewAutosaveBaselineRef.current = semanticViewConfigSignature(layoutConfig);
+    }
     try {
-      const saved = projectTableView
+      const saved = privateDestination
         ? await browserApiRequest<SemanticSavedView>(
-            `/app/api/projects/${encodeURIComponent(projectId)}/semantic-saved-views/${encodeURIComponent(projectTableView.id)}`,
+            `/app/api/projects/${encodeURIComponent(projectId)}/semantic-saved-views/${encodeURIComponent(privateDestination.id)}`,
             {
               method: "PATCH",
               body: { config: layoutConfig },
-              ifMatch: projectTableView.version
+              ifMatch: privateDestination.version
             }
           )
-        : await browserApiRequest<SemanticSavedView>(
-            `/app/api/projects/${encodeURIComponent(projectId)}/semantic-saved-views`,
-            {
-              method: "POST",
-              body: {
-                name: semanticProjectTableViewName,
-                scope: "PROJECT_SHARED",
-                config: layoutConfig
-              }
-            }
-          );
-      setProjectTableView(saved);
-      setBulkNotice("Порядок колонок и плотность сохранены для всего проекта");
+        : await persistProjectTableLayout({
+            ...layoutConfig,
+            ...(activeSavedView ? { appliedViewId: activeSavedView.id } : {})
+          });
+      if (privateDestination) {
+        activateSavedView(saved);
+        setBulkNotice("Личное представление таблицы сохранено");
+      } else {
+        setBulkNotice("Настройки таблицы применены");
+      }
     } catch (requestError) {
+      savedViewAutosaveBaselineRef.current = previousBaseline;
       setMutationError(keywordErrorMessage(requestError));
     } finally {
       setSavingTableLayout(false);
     }
   }
 
-  function applySavedView(view: SemanticSavedView): void {
-    setMultiGroupIds([]);
-    setDraftConfig(view.config);
-    setViewConfig(view.config);
+  async function applySavedView(view: SemanticSavedView): Promise<void> {
+    const nextConfig = semanticViewConfigWithoutAppliedView(view.config);
+    const nextColumnWidths = nextConfig.columnWidths ?? {};
+    const nextExpandedGroupIds = nextConfig.expandedGroupIds ?? [];
+    const nextPageSize = nextConfig.pageSize ?? layoutPreferencesRef.current.pageSize;
+    const nextGroupSidebarWidth = nextConfig.groupSidebarWidth ??
+      layoutPreferencesRef.current.groupSidebarWidth;
+    layoutPreferencesRef.current = {
+      ...layoutPreferencesRef.current,
+      groupSidebarWidth: nextGroupSidebarWidth,
+      columnWidths: nextColumnWidths,
+      pageSize: nextPageSize,
+      expandedGroupIds: nextExpandedGroupIds
+    };
+    persistLayoutPreferences(
+      nextGroupSidebarWidth,
+      nextColumnWidths,
+      nextPageSize,
+      nextExpandedGroupIds
+    );
+    setMultiGroupIds(nextConfig.selectedGroupIds ?? []);
+    setGroupSidebarWidth(nextGroupSidebarWidth);
+    setColumnWidths(nextColumnWidths);
+    setPageSize(nextPageSize);
+    setExpandedGroupIds(new Set(nextExpandedGroupIds));
+    setDraftConfig(nextConfig);
+    setViewConfig(nextConfig);
+    activateSavedView(view, {
+      ...nextConfig,
+      columnWidths: nextColumnWidths,
+      pageSize: nextPageSize,
+      groupSidebarWidth: nextGroupSidebarWidth,
+      expandedGroupIds: nextExpandedGroupIds,
+      selectedGroupIds: nextConfig.selectedGroupIds ?? []
+    });
+    setMutationError(undefined);
+    try {
+      await persistProjectTableLayout({
+        ...nextConfig,
+        appliedViewId: view.id
+      });
+    } catch (requestError) {
+      setMutationError(keywordErrorMessage(requestError));
+    }
+  }
+
+  function activateSavedView(
+    view?: SemanticSavedView,
+    appliedConfig: SemanticViewConfig = view?.config ?? defaultSemanticViewConfig
+  ): void {
+    activeSavedViewRef.current = view;
+    activeSavedViewProjectIdRef.current = view ? projectId : "";
+    setActiveSavedView(view);
+    savedViewAutosaveBaselineRef.current = view
+      ? semanticViewConfigSignature(appliedConfig)
+      : "";
+    setActiveSavedViewBaseline(savedViewAutosaveBaselineRef.current);
+  }
+
+  async function persistProjectTableLayout(
+    config: SemanticViewConfig
+  ): Promise<SemanticSavedView> {
+    const current = projectTableViewRef.current;
+    const saved = current
+      ? await browserApiRequest<SemanticSavedView>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/semantic-saved-views/${encodeURIComponent(current.id)}`,
+          {
+            method: "PATCH",
+            body: { config },
+            ifMatch: current.version
+          }
+        )
+      : await browserApiRequest<SemanticSavedView>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/semantic-saved-views`,
+          {
+            method: "POST",
+            body: {
+              name: semanticProjectTableViewName,
+              scope: "PRIVATE",
+              config
+            }
+          }
+        );
+    projectTableViewRef.current = saved;
+    setProjectTableView(saved);
+    return saved;
   }
 
   async function refreshFrequencyMetrics(): Promise<void> {
@@ -1311,23 +1609,9 @@ export function SemanticCoreTable({
     setCheckedIds(new Set());
     setBulkNotice(undefined);
     setMutationError(undefined);
-    setEditor({
-      mode: "edit",
-      keywordId: item.id,
-      version: item.version,
-      draft: {
-        text: item.textOriginal,
-        language: item.language,
-        priority: String(item.priority),
-        isFavorite: item.isFavorite,
-        skipDuplicates: true,
-        intent: item.intent ?? "",
-        groupId: item.groupId ?? "",
-        clusterId: item.clusterId ?? "",
-        targetUrl: item.targetUrl ?? "",
-        tagNames: item.tags.join(", ")
-      }
-    });
+    setActionIds(new Set([item.id]));
+    setBulkEditorInitialFocus(undefined);
+    setBulkEditorOpen(true);
   }
 
   function updateDraft(patch: Partial<KeywordDraft>): void {
@@ -1561,7 +1845,11 @@ export function SemanticCoreTable({
           : "CURRENT_FILTER"
     );
     setExportColumns(viewConfig.columns);
-    setExportBom(exportFormat === "CSV" || exportFormat === "TSV");
+    setExportBom(
+      exportContent === "SEMANTIC" &&
+      (exportFormat === "CSV" || exportFormat === "TSV")
+    );
+    if (exportContent === "POSITION_HISTORY") setExportFormat("XLSX");
     setExportJob(undefined);
   }
 
@@ -1584,10 +1872,10 @@ export function SemanticCoreTable({
           method: "POST",
           idempotencyKey: `semantic-export:${globalThis.crypto.randomUUID()}`,
           body: {
-            format: exportFormat,
+            format: exportContent === "POSITION_HISTORY" ? "XLSX" : exportFormat,
             scope: exportScope,
             locale: "ru",
-            columns: exportColumns,
+            columns: exportContent === "POSITION_HISTORY" ? ["query"] : exportColumns,
             ...(groupId
               ? { filters: { groupId } }
               : selected.length > 0
@@ -1601,7 +1889,16 @@ export function SemanticCoreTable({
                   }
                 }),
             sort: viewConfig.sort,
-            includeBom: exportBom
+            ...(exportContent === "SEMANTIC" ? { includeBom: exportBom } : {}),
+            ...(exportContent === "POSITION_HISTORY"
+              ? {
+                  positionHistory: semanticHistoryExportOptions(
+                    exportHistoryFrom,
+                    exportHistoryTo,
+                    exportHistoryEngines
+                  )
+                }
+              : {})
           }
         }
       );
@@ -1957,17 +2254,18 @@ export function SemanticCoreTable({
     .filter(({ systemKind }) => !systemKind)
     .find(({ id }) => id === viewConfig.filters.groupId);
   const mutationIds = actionIds ?? checkedIds;
-  const contextKeyword = rowContextMenu?.targetIds.length === 1
-    ? items.find(({ id }) => id === rowContextMenu.targetIds[0])
-    : undefined;
   const rowMenuItems: readonly ContextMenuItem[] = rowContextMenu
     ? [
         {
           id: "edit",
-          label: "Изменить запрос",
-          disabled: rowContextMenu.targetIds.length !== 1 || !contextKeyword,
+          label:
+            rowContextMenu.targetIds.length > 1
+              ? `Изменить запросы (${rowContextMenu.targetIds.length})…`
+              : "Изменить запрос",
           onSelect: () => {
-            if (contextKeyword) openEdit(contextKeyword);
+            setActionIds(new Set(rowContextMenu.targetIds));
+            setBulkEditorInitialFocus(undefined);
+            setBulkEditorOpen(true);
           }
         },
         {
@@ -1986,6 +2284,7 @@ export function SemanticCoreTable({
           label: "Теги, интент и URL…",
           onSelect: () => {
             setActionIds(new Set(rowContextMenu.targetIds));
+            setBulkEditorInitialFocus("TAGS");
             setBulkEditorOpen(true);
           }
         },
@@ -2047,13 +2346,14 @@ export function SemanticCoreTable({
             <dd>{formatInteger(items.length)}</dd>
           </div>
         </dl>
-        <div className="semantic-header-status"><span>Общий вид проекта</span></div>
+        <div className="semantic-header-status"><span>Личный вид таблицы</span></div>
       </header>
       <nav aria-label="Действия с семантикой" className="semantic-commandbar">
         <button onClick={openCreate} type="button"><Icon name="plus" />Добавить</button>
         <button onClick={onOpenImport} type="button"><Icon name="import" />Импорт</button>
         <button disabled={(rootTotal ?? items.length) === 0} onClick={() => setFrequencyDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Выберите запросы или папки в окне запуска"} type="button"><Icon name="frequency" />Собрать частотность</button>
         <button disabled={(rootTotal ?? items.length) === 0} onClick={() => setPositionDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Выберите запросы или папки в окне запуска"} type="button"><Icon name="rankCheck" />Проверить позиции</button>
+        <button disabled={(rootTotal ?? items.length) === 0} onClick={() => setAiAnswerDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Проверить ИИ-ответы Яндекса или Google через Arsenkin"} type="button"><Icon name="ai" />Проверить ИИ-ответы</button>
         <button disabled={(rootTotal ?? items.length) === 0} onClick={() => setNegativeKeywordsOpen(true)} title="Найти запросы по минус-словам и переместить их в корзину" type="button"><Icon name="warning" />Минус-слова</button>
         <button disabled={(rootTotal ?? items.length) < 2} onClick={() => setDuplicatesOpen(true)} title="Найти фразы с одинаковым набором слов и удалить лишние варианты" type="button"><Icon name="checkDouble" />Дубли</button>
         <button className="danger" disabled={checkedIds.size === 0} onClick={() => { setActionIds(null); setDeleteSelectionOpen(true); }} type="button"><Icon name="trash" />Удалить</button>
@@ -2350,6 +2650,14 @@ export function SemanticCoreTable({
             <option value="YANDEX_CHECKED_AT_ASC">Яндекс: старый съём</option>
             <option value="GOOGLE_CHECKED_AT_DESC">Google: свежий съём</option>
             <option value="GOOGLE_CHECKED_AT_ASC">Google: старый съём</option>
+            <option value="YANDEX_AI_POSITION_ASC">ИИ Яндекс: лучшие позиции</option>
+            <option value="YANDEX_AI_POSITION_DESC">ИИ Яндекс: худшие позиции</option>
+            <option value="GOOGLE_AI_POSITION_ASC">ИИ Google: лучшие позиции</option>
+            <option value="GOOGLE_AI_POSITION_DESC">ИИ Google: худшие позиции</option>
+            <option value="YANDEX_AI_CHECKED_AT_DESC">ИИ Яндекс: свежий съём</option>
+            <option value="YANDEX_AI_CHECKED_AT_ASC">ИИ Яндекс: старый съём</option>
+            <option value="GOOGLE_AI_CHECKED_AT_DESC">ИИ Google: свежий съём</option>
+            <option value="GOOGLE_AI_CHECKED_AT_ASC">ИИ Google: старый съём</option>
           </CustomSelect>
         </label>
         </div>
@@ -2384,7 +2692,7 @@ export function SemanticCoreTable({
 
       {exportDialog && (
         <SemanticModal
-          description="Выберите область, формат и набор колонок. Файл формируется в фоне с учётом текущих фильтров."
+          description="Обычная таблица и отчёт истории позиций формируются в фоне с учётом текущей области и фильтров."
           onClose={() => setExportDialog(undefined)}
           size="medium"
           title="Экспорт семантики"
@@ -2397,6 +2705,24 @@ export function SemanticCoreTable({
             }}
           >
             <div className="semantic-export-grid">
+              <label>
+                <span>Содержимое файла</span>
+                <CustomSelect
+                  disabled={exporting || exportJob?.status === "COMPLETED"}
+                  onChange={(event) => {
+                    const content = event.target.value as SemanticExportContent;
+                    setExportContent(content);
+                    if (content === "POSITION_HISTORY") {
+                      setExportFormat("XLSX");
+                      setExportBom(false);
+                    }
+                  }}
+                  value={exportContent}
+                >
+                  <option value="SEMANTIC">Таблица семантики</option>
+                  <option value="POSITION_HISTORY">История позиций по датам</option>
+                </CustomSelect>
+              </label>
               <label>
                 <span>Область экспорта</span>
                 <CustomSelect
@@ -2412,7 +2738,11 @@ export function SemanticCoreTable({
               <label>
                 <span>Формат</span>
                 <CustomSelect
-                  disabled={exporting || exportJob?.status === "COMPLETED"}
+                  disabled={
+                    exporting ||
+                    exportJob?.status === "COMPLETED" ||
+                    exportContent === "POSITION_HISTORY"
+                  }
                   onChange={(event) => {
                     const format = event.target.value as SemanticExportFormat;
                     setExportFormat(format);
@@ -2429,43 +2759,97 @@ export function SemanticCoreTable({
                 </CustomSelect>
               </label>
             </div>
-            <fieldset className="semantic-export-columns">
-              <legend>Колонки</legend>
-              {[
-                ...semanticColumns,
-                ...customColumns.map((column) => ({
-                  key: `custom:${column.id}` as const,
-                  label: column.name
-                }))
-              ].map((column) => (
-                <label key={column.key}>
+            {exportContent === "SEMANTIC" ? (
+              <>
+                <fieldset className="semantic-export-columns">
+                  <legend>Колонки</legend>
+                  {[
+                    ...semanticColumns,
+                    ...customColumns.map((column) => ({
+                      key: `custom:${column.id}` as const,
+                      label: column.name
+                    }))
+                  ].map((column) => (
+                    <label key={column.key}>
+                      <input
+                        checked={exportColumns.includes(column.key)}
+                        disabled={exporting || exportJob?.status === "COMPLETED"}
+                        onChange={() => setExportColumns((current) =>
+                          current.includes(column.key)
+                            ? current.filter((item) => item !== column.key)
+                            : [...current, column.key]
+                        )}
+                        type="checkbox"
+                      />
+                      <span>{column.label}</span>
+                    </label>
+                  ))}
+                </fieldset>
+                <label className="semantic-control-check">
                   <input
-                    checked={exportColumns.includes(column.key)}
-                    disabled={exporting || exportJob?.status === "COMPLETED"}
-                    onChange={() => setExportColumns((current) =>
-                      current.includes(column.key)
-                        ? current.filter((item) => item !== column.key)
-                        : [...current, column.key]
-                    )}
+                    checked={exportBom}
+                    disabled={
+                      exporting ||
+                      exportJob?.status === "COMPLETED" ||
+                      (exportFormat !== "CSV" && exportFormat !== "TSV")
+                    }
+                    onChange={(event) => setExportBom(event.target.checked)}
                     type="checkbox"
                   />
-                  <span>{column.label}</span>
+                  <span>Добавить UTF-8 BOM для корректного открытия в Excel</span>
                 </label>
-              ))}
-            </fieldset>
-            <label className="semantic-control-check">
-              <input
-                checked={exportBom}
-                disabled={
-                  exporting ||
-                  exportJob?.status === "COMPLETED" ||
-                  (exportFormat !== "CSV" && exportFormat !== "TSV")
-                }
-                onChange={(event) => setExportBom(event.target.checked)}
-                type="checkbox"
-              />
-              <span>Добавить UTF-8 BOM для корректного открытия в Excel</span>
-            </label>
+              </>
+            ) : (
+              <fieldset className="semantic-history-export-settings">
+                <legend>Отчёт истории позиций</legend>
+                <div className="semantic-history-export-engines">
+                  {(["YANDEX", "GOOGLE"] as const).map((engine) => (
+                    <label key={engine}>
+                      <input
+                        checked={exportHistoryEngines.includes(engine)}
+                        disabled={exporting || exportJob?.status === "COMPLETED"}
+                        onChange={() => setExportHistoryEngines((current) =>
+                          current.includes(engine)
+                            ? current.filter((item) => item !== engine)
+                            : [...current, engine]
+                        )}
+                        type="checkbox"
+                      />
+                      <SearchEngineLogo engine={engine} />
+                      <span>{engine === "YANDEX" ? "Яндекс" : "Google"}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="semantic-history-export-dates">
+                  <label>
+                    <span>С даты</span>
+                    <input
+                      disabled={exporting || exportJob?.status === "COMPLETED"}
+                      onChange={(event) => setExportHistoryFrom(event.target.value)}
+                      type="date"
+                      value={exportHistoryFrom}
+                    />
+                  </label>
+                  <label>
+                    <span>По дату включительно</span>
+                    <input
+                      disabled={exporting || exportJob?.status === "COMPLETED"}
+                      onChange={(event) => setExportHistoryTo(event.target.value)}
+                      type="date"
+                      value={exportHistoryTo}
+                    />
+                  </label>
+                </div>
+                <div className="semantic-history-export-legend">
+                  <span><i className="up" /> Рост или новая позиция</span>
+                  <span><i className="down" /> Падение или потеря позиции</span>
+                  <span><i /> Без изменений / нет данных</span>
+                </div>
+                <p>
+                  Один лист на поисковую систему, реальные даты съёмов, числовые позиции и формулы ТОП‑5/10/30.
+                </p>
+              </fieldset>
+            )}
             {exportJob && (
               <div className="semantic-export-progress" role="status">
                 <div>
@@ -2509,7 +2893,7 @@ export function SemanticCoreTable({
                   className="primary-button"
                   href={semanticExportFileUrl(projectId, exportJob.id)}
                   onClick={() => setExportNotice(
-                    `Скачивание ${exportFormat} началось. Если браузер запросит разрешение, подтвердите его.`
+                    `Скачивание ${exportContent === "POSITION_HISTORY" ? "отчёта истории позиций" : exportFormat} началось. Если браузер запросит разрешение, подтвердите его.`
                   )}
                 >
                   Скачать файл
@@ -2519,7 +2903,10 @@ export function SemanticCoreTable({
                   className="primary-button"
                   disabled={
                     exporting ||
-                    exportColumns.length === 0 ||
+                    (exportContent === "SEMANTIC" && exportColumns.length === 0) ||
+                    (exportContent === "POSITION_HISTORY" &&
+                      (exportHistoryEngines.length === 0 ||
+                        !validSemanticHistoryDateRange(exportHistoryFrom, exportHistoryTo))) ||
                     (exportScope === "SELECTED" && checkedIds.size === 0)
                   }
                   type="submit"
@@ -2746,21 +3133,37 @@ export function SemanticCoreTable({
 
       {!editor && mutationIds.size > 0 && bulkEditorOpen && (
         <SemanticModal
-          description="Измените только выбранные поля. Перед очисткой запросов будет показан row-level preview."
-          onClose={() => { setBulkEditorOpen(false); setActionIds(null); }}
-          size="large"
-          title={`Массовые операции · ${mutationIds.size}`}
+          description={mutationIds.size === 1
+            ? "Все основные свойства запроса сохраняются вместе с проверкой версии."
+            : "Изменяйте только нужные поля сразу у всех выбранных запросов. Версии строк проверяются отдельно."
+          }
+          onClose={() => {
+            setBulkEditorOpen(false);
+            setBulkEditorInitialFocus(undefined);
+            setActionIds(null);
+          }}
+          size={mutationIds.size === 1 ? "medium" : "large"}
+          title={mutationIds.size === 1
+            ? "Изменить запрос"
+            : `Изменить запросы · ${mutationIds.size}`
+          }
         >
           <SemanticBulkEditor
           clusters={clusters}
           groups={groups}
-          onCancel={() => { setBulkEditorOpen(false); setActionIds(null); }}
+          {...(bulkEditorInitialFocus ? { initialFocus: bulkEditorInitialFocus } : {})}
+          onCancel={() => {
+            setBulkEditorOpen(false);
+            setBulkEditorInitialFocus(undefined);
+            setActionIds(null);
+          }}
           onCompleted={(result) => {
             setCheckedIds(new Set());
             setActionIds(null);
             setBulkEditorOpen(false);
+            setBulkEditorInitialFocus(undefined);
             setBulkNotice(
-              `Массовое изменение: обновлено ${result.changed} из ${result.selected}` +
+              `${result.selected === 1 ? "Запрос сохранён" : `Обновлено ${result.changed} из ${result.selected}`}` +
                 (result.conflicted > 0
                   ? `, конфликтов ${result.conflicted}`
                   : "")
@@ -2771,6 +3174,7 @@ export function SemanticCoreTable({
             setCheckedIds(new Set());
             setActionIds(null);
             setBulkEditorOpen(false);
+            setBulkEditorInitialFocus(undefined);
             setBulkNotice(
               `Создан кластер «${result.createdCluster.name}»: перенесено ${result.movedKeywordCount} запросов`
             );
@@ -2779,10 +3183,18 @@ export function SemanticCoreTable({
           projectId={projectId}
           selections={items
             .filter(({ id }) => mutationIds.has(id))
-            .map(({ id, version, clusterId }) => ({
+            .map(({ id, version, textOriginal, language, priority, isFavorite, intent, groupId, clusterId, targetUrl, tags }) => ({
               id,
               version,
-              ...(clusterId ? { clusterId } : {})
+              text: textOriginal,
+              language,
+              priority,
+              isFavorite,
+              ...(intent ? { intent } : {}),
+              ...(groupId ? { groupId } : {}),
+              ...(clusterId ? { clusterId } : {}),
+              ...(targetUrl ? { targetUrl } : {}),
+              tags
             }))}
           />
         </SemanticModal>
@@ -2942,6 +3354,7 @@ export function SemanticCoreTable({
                     customColumns,
                     (customColumn) => setCustomValueEditor({ keyword: item, column: customColumn }),
                     () => setSiteResultsKeyword(item),
+                    () => setAiAnswerKeyword(item),
                     viewConfig.density
                   )
                 };
@@ -3006,6 +3419,7 @@ export function SemanticCoreTable({
           onFrequencyDeleted={() =>
             setRetryVersion((value) => value + 1)
           }
+          onOpenAiAnswer={() => setAiAnswerKeyword(focusedKeyword)}
           onUpdated={(updated) => {
             setItems((current) => current.map((keyword) =>
               keyword.id === updated.id
@@ -3067,7 +3481,12 @@ export function SemanticCoreTable({
           projectId={projectId}
           selections={items
             .filter(({ id }) => mutationIds.has(id))
-            .map(({ id, version, textOriginal }) => ({ id, version, text: textOriginal }))}
+            .map(({ id, version, textOriginal, groupPath }) => ({
+              id,
+              version,
+              text: textOriginal,
+              ...(groupPath ? { currentGroupPath: groupPath } : {})
+            }))}
         />
       )}
       {deleteSelectionOpen && mutationIds.size > 0 && (
@@ -3128,6 +3547,24 @@ export function SemanticCoreTable({
           }}
           projectId={projectId}
           workspaceId={workspaceId}
+        />
+      )}
+      {aiAnswerDialogOpen && (
+        <SemanticAiAnswerDialog
+          activeGroupId={viewConfig.filters.groupId}
+          groups={groups}
+          initialSelections={items
+            .filter(({ id }) => checkedIds.has(id))
+            .map(({ id, version, textOriginal }) => ({ id, version, label: textOriginal }))}
+          onClose={() => setAiAnswerDialogOpen(false)}
+          onStarted={() => {
+            setAiAnswerDialogOpen(false);
+            setOperationsRefreshVersion((value) => value + 1);
+            setBulkNotice("Проверка ИИ-ответов запущена в фоне. Результаты появятся в отдельных колонках.");
+            setRightSidebar({ type: "OPERATIONS" });
+          }}
+          projectDomain={projectDomain}
+          projectId={projectId}
         />
       )}
       {frequencyDialogOpen && (
@@ -3197,6 +3634,37 @@ export function SemanticCoreTable({
           y={rowContextMenu.y}
         />
       )}
+      {aiAnswerKeyword && (
+        <SemanticAiAnswerDetailsModal
+          keywordId={aiAnswerKeyword.id}
+          keywordText={aiAnswerKeyword.textOriginal}
+          keywordVersion={aiAnswerKeyword.version}
+          onClose={() => setAiAnswerKeyword(undefined)}
+          onKeywordUpdated={(updated) => {
+            setItems((current) => current.map((keyword) =>
+              keyword.id === updated.id
+                ? {
+                    ...keyword,
+                    showAiAnswerButton: updated.showAiAnswerButton,
+                    updatedAt: updated.updatedAt,
+                    version: updated.version
+                  }
+                : keyword
+            ));
+            setAiAnswerKeyword((current) => current?.id === updated.id
+              ? {
+                  ...current,
+                  showAiAnswerButton: updated.showAiAnswerButton,
+                  updatedAt: updated.updatedAt,
+                  version: updated.version
+                }
+              : current
+            );
+          }}
+          projectId={projectId}
+          showAnswerButton={aiAnswerKeyword.showAiAnswerButton}
+        />
+      )}
       {rightSidebar?.type === "OPERATIONS" && (
         <SemanticOperationsDrawer
           onClose={() => setRightSidebar(undefined)}
@@ -3211,13 +3679,15 @@ export function SemanticCoreTable({
       )}
       {rightSidebar?.type === "LAYOUT" && (
         <SemanticLayoutDrawer
-          config={draftConfig}
+          activeView={activeSavedView}
+          canManageShared={workspaceRoleCode === "OWNER" || workspaceRoleCode === "ADMIN"}
+          config={draftSavedViewConfig}
+          currentUserId={currentUserId}
           customColumns={customColumns}
+          isActiveViewDirty={isActiveSavedViewDirty}
           onApply={() => void applyTableLayout()}
-          onApplySavedView={(view) => {
-            applySavedView(view);
-            setRightSidebar(undefined);
-          }}
+          onApplySavedView={(view) => void applySavedView(view)}
+          onActiveViewChange={activateSavedView}
           onClose={() => setRightSidebar(undefined)}
           onDensityChange={(density) => setDraftConfig((current) => ({ ...current, density }))}
           onMoveColumn={moveColumn}
@@ -3378,6 +3848,10 @@ const semanticColumns: readonly Readonly<{
   { key: "googleRelevantUrl", label: "Релевантный URL Google" },
   { key: "yandexCheckedAt", label: "Дата съёма Яндекс" },
   { key: "googleCheckedAt", label: "Дата съёма Google" },
+  { key: "yandexAiPosition", label: "ИИ позиция Яндекс" },
+  { key: "googleAiPosition", label: "ИИ позиция Google" },
+  { key: "yandexAiCheckedAt", label: "Дата съёма ИИ Яндекс" },
+  { key: "googleAiCheckedAt", label: "Дата съёма ИИ Google" },
   { key: "visibility", label: "Видимость" },
   { key: "group", label: "Группа" },
   { key: "cluster", label: "Кластер" },
@@ -3418,6 +3892,14 @@ function nextSemanticColumnSort(
       return current === "YANDEX_CHECKED_AT_DESC" ? "YANDEX_CHECKED_AT_ASC" : "YANDEX_CHECKED_AT_DESC";
     case "googleCheckedAt":
       return current === "GOOGLE_CHECKED_AT_DESC" ? "GOOGLE_CHECKED_AT_ASC" : "GOOGLE_CHECKED_AT_DESC";
+    case "yandexAiPosition":
+      return current === "YANDEX_AI_POSITION_ASC" ? "YANDEX_AI_POSITION_DESC" : "YANDEX_AI_POSITION_ASC";
+    case "googleAiPosition":
+      return current === "GOOGLE_AI_POSITION_ASC" ? "GOOGLE_AI_POSITION_DESC" : "GOOGLE_AI_POSITION_ASC";
+    case "yandexAiCheckedAt":
+      return current === "YANDEX_AI_CHECKED_AT_DESC" ? "YANDEX_AI_CHECKED_AT_ASC" : "YANDEX_AI_CHECKED_AT_DESC";
+    case "googleAiCheckedAt":
+      return current === "GOOGLE_AI_CHECKED_AT_DESC" ? "GOOGLE_AI_CHECKED_AT_ASC" : "GOOGLE_AI_CHECKED_AT_DESC";
     default:
       return undefined;
   }
@@ -3439,7 +3921,11 @@ function semanticColumnSortDirection(
     (column === "yandexPosition" && current.startsWith("YANDEX_POSITION_")) ||
     (column === "googlePosition" && current.startsWith("GOOGLE_POSITION_")) ||
     (column === "yandexCheckedAt" && current.startsWith("YANDEX_CHECKED_AT_")) ||
-    (column === "googleCheckedAt" && current.startsWith("GOOGLE_CHECKED_AT_"));
+    (column === "googleCheckedAt" && current.startsWith("GOOGLE_CHECKED_AT_")) ||
+    (column === "yandexAiPosition" && current.startsWith("YANDEX_AI_POSITION_")) ||
+    (column === "googleAiPosition" && current.startsWith("GOOGLE_AI_POSITION_")) ||
+    (column === "yandexAiCheckedAt" && current.startsWith("YANDEX_AI_CHECKED_AT_")) ||
+    (column === "googleAiCheckedAt" && current.startsWith("GOOGLE_AI_CHECKED_AT_"));
   if (!activeColumn) return undefined;
   return current.endsWith("_ASC") ? "ascending" : "descending";
 }
@@ -3495,6 +3981,18 @@ function columnHeader(
   }
   if (column === "googleCheckedAt") {
     return <span className="semantic-engine-header"><SearchEngineLogo engine="GOOGLE" size="compact" /> Съём</span>;
+  }
+  if (column === "yandexAiPosition") {
+    return <span className="semantic-engine-header semantic-ai-column-header"><SearchEngineLogo engine="YANDEX" size="compact" /><Icon name="ai" /> ИИ позиция</span>;
+  }
+  if (column === "googleAiPosition") {
+    return <span className="semantic-engine-header semantic-ai-column-header"><SearchEngineLogo engine="GOOGLE" size="compact" /><Icon name="ai" /> ИИ позиция</span>;
+  }
+  if (column === "yandexAiCheckedAt") {
+    return <span className="semantic-engine-header semantic-ai-column-header"><SearchEngineLogo engine="YANDEX" size="compact" /><Icon name="ai" /> ИИ съём</span>;
+  }
+  if (column === "googleAiCheckedAt") {
+    return <span className="semantic-engine-header semantic-ai-column-header"><SearchEngineLogo engine="GOOGLE" size="compact" /><Icon name="ai" /> ИИ съём</span>;
   }
   return columnLabel(column, customColumns);
 }
@@ -3574,6 +4072,7 @@ function keywordColumn(
   customColumns: readonly SemanticCustomColumn[],
   onEditCustom: (column: SemanticCustomColumn) => void,
   onOpenSiteResults: () => void,
+  onOpenAiAnswer: () => void,
   density: SemanticViewConfig["density"]
 ) {
   if (column.startsWith("custom:")) {
@@ -3600,38 +4099,57 @@ function keywordColumn(
     case "query":
       return (
         <>
-          <strong title={item.textOriginal}>
-            {item.isFavorite ? "★ " : ""}
-            {item.textOriginal}
-            {item.hasNote && (
-              <span aria-label="Есть заметка" className="semantic-keyword-note-indicator" title="У запроса есть заметка">
-                <Icon name="note" />
-              </span>
-            )}
-            {keywordHasTargetUrlMismatch(item) && (
-              <span
-                aria-label="Найденный URL не совпадает с целевым"
-                className="semantic-keyword-rank-indicator mismatch"
-                role="img"
-                title="Найденный при съёме URL не совпадает с целевым URL запроса"
-              >
-                <Icon name="link" />
-              </span>
-            )}
-            {keywordHasMultipleSiteResults(item) && (
-              <button
-                aria-label="Показать страницы сайта в выдаче"
-                className="semantic-keyword-rank-indicator multiple"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onOpenSiteResults();
-                }}
-                title="В выдаче найдено несколько страниц вашего сайта"
-                type="button"
-              >
-                <Icon name="multiGroup" />
-              </button>
-            )}
+          <strong className="semantic-query-line">
+            <span className="semantic-query-text" title={item.textOriginal}>
+              {item.isFavorite ? "★ " : ""}
+              {item.textOriginal}
+            </span>
+            <span className="semantic-query-actions">
+              {item.hasNote && (
+                <span aria-label="Есть заметка" className="semantic-keyword-note-indicator" title="У запроса есть заметка">
+                  <Icon name="note" />
+                </span>
+              )}
+              {keywordHasTargetUrlMismatch(item) && (
+                <span
+                  aria-label="Найденный URL не совпадает с целевым"
+                  className="semantic-keyword-rank-indicator mismatch"
+                  role="img"
+                  title="Найденный при съёме URL не совпадает с целевым URL запроса"
+                >
+                  <Icon name="link" />
+                </span>
+              )}
+              {keywordHasMultipleSiteResults(item) && (
+                <button
+                  aria-label="Показать страницы сайта в выдаче"
+                  className="semantic-keyword-rank-indicator multiple"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenSiteResults();
+                  }}
+                  title="В выдаче найдено несколько страниц вашего сайта"
+                  type="button"
+                >
+                  <Icon name="multiGroup" />
+                </button>
+              )}
+              {item.showAiAnswerButton &&
+                item.aiAnswers?.some(({ answerPresent }) => answerPresent) && (
+                <button
+                  aria-label="Открыть сохранённый ИИ-ответ"
+                  className="semantic-keyword-ai-indicator"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenAiAnswer();
+                  }}
+                  title="Открыть полный ИИ-ответ и его источники"
+                  type="button"
+                >
+                  <Icon name="search" />
+                </button>
+              )}
+            </span>
           </strong>
           {density !== "COMPACT" && item.tags.length > 0 && (
             <span
@@ -3669,6 +4187,14 @@ function keywordColumn(
       return keywordCheckedAt(item, "YANDEX");
     case "googleCheckedAt":
       return keywordCheckedAt(item, "GOOGLE");
+    case "yandexAiPosition":
+      return keywordAiPosition(item, "YANDEX");
+    case "googleAiPosition":
+      return keywordAiPosition(item, "GOOGLE");
+    case "yandexAiCheckedAt":
+      return keywordAiCheckedAt(item, "YANDEX");
+    case "googleAiCheckedAt":
+      return keywordAiCheckedAt(item, "GOOGLE");
     case "visibility":
       return `${keywordVisibilityPercent(item)}%`;
     case "group":
@@ -3738,6 +4264,64 @@ function keywordCheckedAt(
   return position ? (
     <time dateTime={position.observedAt} title={new Date(position.observedAt).toLocaleString("ru-RU")}>
       {formatDate(position.observedAt)}
+    </time>
+  ) : <span className="semantic-metric-empty">—</span>;
+}
+
+function keywordAiPosition(
+  item: SemanticKeyword,
+  searchEngine: "GOOGLE" | "YANDEX"
+) {
+  const answer = item.aiAnswers?.find(
+    (candidate) => candidate.searchEngine === searchEngine
+  );
+  if (!answer) return <span className="semantic-metric-empty">—</span>;
+  if (!answer.siteFound || answer.position === undefined) {
+    if (answer.previousPosition !== undefined) {
+      const description = `${searchEngine === "YANDEX" ? "Яндекс" : "Google"}: сайт не найден в ИИ-ответе. Была позиция ${answer.previousPosition}`;
+      return (
+        <span
+          aria-label={description}
+          className="semantic-position-value semantic-ai-position-value not-found"
+          title={description}
+        >
+          <span className="semantic-ai-site-not-found" aria-hidden="true">×</span>
+          <small aria-hidden="true">Была {answer.previousPosition}</small>
+        </span>
+      );
+    }
+    if (!answer.answerPresent) {
+      return <span className="semantic-ai-answer-absent" title="Проверка выполнена: ИИ-ответ не найден">Нет ответа</span>;
+    }
+    return (
+      <span className="semantic-ai-site-not-found" title="ИИ-ответ найден, но домен проекта отсутствует в источниках">
+        ×
+      </span>
+    );
+  }
+  const change = rankChangePresentation(answer.position, answer.previousPosition);
+  return (
+    <span
+      aria-label={change.ariaLabel}
+      className={`semantic-position-value semantic-ai-position-value ${change.tone}`}
+      title={`${change.title}${answer.rankingUrl ? ` · ${answer.rankingUrl}` : ""}`}
+    >
+      <strong aria-hidden="true">{answer.position}</strong>
+      <small aria-hidden="true">{change.label}</small>
+    </span>
+  );
+}
+
+function keywordAiCheckedAt(
+  item: SemanticKeyword,
+  searchEngine: "GOOGLE" | "YANDEX"
+) {
+  const answer = item.aiAnswers?.find(
+    (candidate) => candidate.searchEngine === searchEngine
+  );
+  return answer ? (
+    <time dateTime={answer.observedAt} title={new Date(answer.observedAt).toLocaleString("ru-RU")}>
+      {formatDate(answer.observedAt)}
     </time>
   ) : <span className="semantic-metric-empty">—</span>;
 }
@@ -4004,6 +4588,86 @@ function semanticTableColumns(
     "group",
     ...columns.slice(insertAt)
   ];
+}
+
+function preferredProjectSharedView(
+  views: readonly SemanticSavedView[]
+): SemanticSavedView | undefined {
+  const shared = views.filter(({ scope }) => scope === "PROJECT_SHARED");
+  return shared.find(
+    ({ name }) => name.trim().toLocaleLowerCase("ru-RU") === "общее для проекта"
+  ) ?? shared[0];
+}
+
+function semanticViewConfigWithoutAppliedView(
+  config: SemanticViewConfig
+): SemanticViewConfig {
+  const { appliedViewId: _appliedViewId, ...layout } = config;
+  return layout;
+}
+
+function semanticViewConfigSignature(config: SemanticViewConfig): string {
+  const layout = semanticViewConfigWithoutAppliedView(config);
+  return JSON.stringify({
+    schemaVersion: layout.schemaVersion,
+    filters: layout.filters,
+    sort: layout.sort,
+    columns: layout.columns,
+    density: layout.density,
+    columnWidths: Object.fromEntries(
+      Object.entries(layout.columnWidths ?? {}).sort(([left], [right]) =>
+        left.localeCompare(right)
+      )
+    ),
+    pageSize: layout.pageSize ?? null,
+    groupSidebarWidth: layout.groupSidebarWidth ?? null,
+    expandedGroupIds: [...(layout.expandedGroupIds ?? [])].sort(),
+    selectedGroupIds: [...(layout.selectedGroupIds ?? [])].sort()
+  });
+}
+
+function semanticHistoryDefaultRange(): Readonly<{ from: string; to: string }> {
+  const today = new Date();
+  const to = today.toISOString().slice(0, 10);
+  const from = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - 89)
+  ).toISOString().slice(0, 10);
+  return { from, to };
+}
+
+function validSemanticHistoryDateRange(from: string, to: string): boolean {
+  const fromTime = semanticHistoryDateTimestamp(from);
+  const toTime = semanticHistoryDateTimestamp(to);
+  return fromTime !== undefined &&
+    toTime !== undefined &&
+    toTime >= fromTime &&
+    toTime - fromTime <= 1_099 * 24 * 60 * 60 * 1_000;
+}
+
+function semanticHistoryExportOptions(
+  from: string,
+  to: string,
+  searchEngines: readonly SemanticPositionHistorySearchEngine[]
+) {
+  if (!validSemanticHistoryDateRange(from, to) || searchEngines.length === 0) {
+    throw new Error("INVALID_POSITION_HISTORY_EXPORT_RANGE");
+  }
+  const fromTime = semanticHistoryDateTimestamp(from)!;
+  const toTime = semanticHistoryDateTimestamp(to)!;
+  return {
+    observedFrom: new Date(fromTime).toISOString(),
+    observedBefore: new Date(toTime + 24 * 60 * 60 * 1_000).toISOString(),
+    searchEngines
+  };
+}
+
+function semanticHistoryDateTimestamp(value: string): number | undefined {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  if (!match) return undefined;
+  const timestamp = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return new Date(timestamp).toISOString().slice(0, 10) === value
+    ? timestamp
+    : undefined;
 }
 
 function formatDate(value: string): string {

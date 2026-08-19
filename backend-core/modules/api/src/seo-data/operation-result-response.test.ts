@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
 import {
+  scopedInternalAiAnswerOperationResult,
   scopedInternalCrawlOperationResultPage,
   scopedInternalFrequencyOperationResult,
   scopedInternalRankOperationResult
@@ -12,6 +13,34 @@ const projectId = "01900000-0000-7000-8000-000000000002";
 const jobId = "01900000-0000-7000-8000-000000000003";
 const keywordId = "01900000-0000-7000-8000-000000000004";
 const crawlId = "01900000-0000-7000-8000-000000000005";
+
+test("accepts an AI answer result with optional provider content absent", () => {
+  const result = scopedInternalAiAnswerOperationResult(
+    {
+      workspaceId,
+      projectId,
+      jobId,
+      rows: [{
+        keywordId,
+        keyword: "подбор подшипника",
+        snapshot: {
+          answerPresent: true,
+          siteFound: false,
+          brandFound: false,
+          sourceCount: 0,
+          observedAt: "2026-08-19T12:00:00.000Z"
+        }
+      }]
+    },
+    workspaceId,
+    projectId,
+    jobId,
+    [keywordId]
+  );
+
+  assert.equal(result.rows[0]?.snapshot?.answerPresent, true);
+  assert.equal(result.rows[0]?.snapshot?.sourceCount, 0);
+});
 
 test("accepts exact frequency and crawl result projections", () => {
   const frequency = scopedInternalFrequencyOperationResult(

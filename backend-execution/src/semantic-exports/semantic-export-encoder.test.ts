@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SemanticKeywordListItem } from "@seo-platform/contracts";
+import type {
+  SemanticKeywordListItem,
+  SemanticPositionHistoryExportRow
+} from "@seo-platform/contracts";
 import { unzipSync } from "fflate";
-import { semanticExportFile } from "./semantic-export-encoder.js";
+import {
+  semanticExportFile,
+  semanticPositionHistoryExportFile
+} from "./semantic-export-encoder.js";
 
 test("streams 2,002 rows into a valid XLSX workbook", async () => {
   const file = semanticExportFile(
@@ -108,6 +114,55 @@ test("always adds a BOM for Google Sheets CSV", async () => {
   assert.equal(csv.startsWith("Запрос\r\n"), true);
 });
 
+test("builds a position-history workbook with formulas and comparison colors", async () => {
+  const file = semanticPositionHistoryExportFile(
+    positionHistoryRows(),
+    {
+      format: "XLSX",
+      scope: "FULL_CORE",
+      locale: "ru",
+      columns: ["query"],
+      positionHistory: {
+        observedFrom: "2026-08-01T00:00:00.000Z",
+        observedBefore: "2026-08-20T00:00:00.000Z",
+        searchEngines: ["YANDEX", "GOOGLE"]
+      }
+    },
+    {
+      rowCount: 4,
+      dates: {
+        YANDEX: ["2026-08-18", "2026-08-11", "2026-08-05"],
+        GOOGLE: ["2026-08-18"]
+      }
+    },
+    new Date("2026-08-19T10:00:00.000Z")
+  );
+
+  assert.equal(file.filename, "positions-history-2026-08-19.xlsx");
+  const archive = unzipSync(await collect(file.bytes));
+  const yandex = new TextDecoder().decode(archive["xl/worksheets/sheet1.xml"]);
+  const workbook = new TextDecoder().decode(archive["xl/workbook.xml"]);
+  assert.match(workbook, /<sheet name="Яндекс"/u);
+  assert.match(workbook, /<sheet name="Google"/u);
+  assert.match(yandex, /<pane xSplit="1" ySplit="4"/u);
+  assert.match(
+    yandex,
+    /<f>COUNTIFS\(D\$5:INDEX\(D:D,MAX\(5,COUNTA\(\$A:\$A\)\)\),&quot;&gt;=1&quot;,D\$5:INDEX\(D:D,MAX\(5,COUNTA\(\$A:\$A\)\)\),&quot;&lt;=5&quot;\)<\/f>/u
+  );
+  assert.match(yandex, /<c r="D5" s="7"><v>5<\/v><\/c>/u);
+  assert.match(yandex, /<c r="E5" s="7"><v>7<\/v><\/c>/u);
+  assert.match(yandex, /<c r="D6" s="8"><v>9<\/v><\/c>/u);
+  assert.match(
+    yandex,
+    /<c r="D7" s="8" t="inlineStr"><is><t xml:space="preserve">—<\/t><\/is><\/c>/u
+  );
+  assert.match(
+    yandex,
+    /<c r="D8" s="9" t="inlineStr"><is><t xml:space="preserve">—<\/t><\/is><\/c>/u
+  );
+  assert.doesNotMatch(yandex, /<c r="D5"[^>]*t="inlineStr"/u);
+});
+
 async function* keywords(
   count: number
 ): AsyncGenerator<SemanticKeywordListItem> {
@@ -174,6 +229,47 @@ async function* keywordWithMetrics(): AsyncGenerator<SemanticKeywordListItem> {
         position: 13,
         observedAt: "2026-08-12T10:00:00.000Z"
       }
+    ]
+  };
+}
+
+async function* positionHistoryRows(): AsyncGenerator<SemanticPositionHistoryExportRow> {
+  yield {
+    keywordId: "01900000-0000-7000-8000-000000000011",
+    text: "позиция выросла",
+    createdAt: "2026-07-01T10:00:00.000Z",
+    snapshots: [
+      { searchEngine: "YANDEX", observedDate: "2026-08-18", found: true, position: 5 },
+      { searchEngine: "YANDEX", observedDate: "2026-08-11", found: true, position: 7 },
+      { searchEngine: "YANDEX", observedDate: "2026-08-05", found: false },
+      { searchEngine: "GOOGLE", observedDate: "2026-08-18", found: true, position: 12 }
+    ]
+  };
+  yield {
+    keywordId: "01900000-0000-7000-8000-000000000012",
+    text: "позиция упала",
+    createdAt: "2026-07-01T10:00:00.000Z",
+    snapshots: [
+      { searchEngine: "YANDEX", observedDate: "2026-08-18", found: true, position: 9 },
+      { searchEngine: "YANDEX", observedDate: "2026-08-11", found: true, position: 4 },
+      { searchEngine: "YANDEX", observedDate: "2026-08-05", found: true, position: 6 }
+    ]
+  };
+  yield {
+    keywordId: "01900000-0000-7000-8000-000000000013",
+    text: "позиция потеряна",
+    createdAt: "2026-07-01T10:00:00.000Z",
+    snapshots: [
+      { searchEngine: "YANDEX", observedDate: "2026-08-18", found: false },
+      { searchEngine: "YANDEX", observedDate: "2026-08-11", found: true, position: 3 }
+    ]
+  };
+  yield {
+    keywordId: "01900000-0000-7000-8000-000000000014",
+    text: "в этот день не снимали",
+    createdAt: "2026-07-01T10:00:00.000Z",
+    snapshots: [
+      { searchEngine: "YANDEX", observedDate: "2026-08-11", found: true, position: 2 }
     ]
   };
 }

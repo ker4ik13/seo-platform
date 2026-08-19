@@ -4,7 +4,9 @@ import type {
   InternalCreateSemanticExportInput,
   KeywordListQuery,
   SemanticKeywordGroup,
-  SemanticKeywordListItem
+  SemanticKeywordListItem,
+  SemanticPositionHistoryExportRow,
+  SemanticPositionHistorySearchEngine
 } from "@seo-platform/contracts";
 import {
   Prisma,
@@ -20,10 +22,16 @@ import {
   type ObjectStoragePort
 } from "../storage/object-storage.port.js";
 import { writeArtifact } from "./multipart-object-writer.js";
-import { semanticExportFile } from "./semantic-export-encoder.js";
+import {
+  semanticExportFile,
+  semanticPositionHistoryExportFile,
+  type SemanticExportFile,
+  type SemanticPositionHistoryWorkbookPlan
+} from "./semantic-export-encoder.js";
 import { storedSemanticExportInput } from "./semantic-export-input.js";
 
 const PAGE_SIZE = 1_000;
+const POSITION_HISTORY_PAGE_SIZE = 25;
 const LEASE_MILLISECONDS = 15 * 60 * 1_000;
 const MAX_PENDING_EXPORTS = 200;
 const UUID_PATTERN =
@@ -72,11 +80,28 @@ export class SemanticExportWorkerService {
         throw new ExportFailure("INVALID_EXPORT_MANIFEST", false);
       }
       const context = exportContext(input);
-      const customColumns = await this.seoData.listExportCustomColumns(context);
-      const customColumnNames = customColumnNameMap(customColumns);
-      const rows = this.exportRows(claimed, input, leaseOwner);
       const counter = { value: 0 };
-      const file = semanticExportFile(counted(rows, counter), input, customColumnNames);
+      let file: SemanticExportFile;
+      if (input.positionHistory) {
+        const plan = await this.positionHistoryPlan(claimed, input, leaseOwner);
+        await this.updateProgressTotal(claimed.id, leaseOwner, plan.rowCount);
+        file = semanticPositionHistoryExportFile(
+          counted(
+            this.exportPositionHistoryRows(claimed, input, leaseOwner, true),
+            counter
+          ),
+          input,
+          plan
+        );
+      } else {
+        const customColumns = await this.seoData.listExportCustomColumns(context);
+        const customColumnNames = customColumnNameMap(customColumns);
+        file = semanticExportFile(
+          counted(this.exportRows(claimed, input, leaseOwner), counter),
+          input,
+          customColumnNames
+        );
+      }
       objectKey = artifactObjectKey(claimed, file.filename);
       const sizeBytes = await writeArtifact(
         this.storage,
@@ -261,12 +286,117 @@ export class SemanticExportWorkerService {
     }
   }
 
+  private async positionHistoryPlan(
+    job: Job,
+    input: InternalCreateSemanticExportInput,
+    leaseOwner: string
+  ): Promise<SemanticPositionHistoryWorkbookPlan> {
+    if (!input.positionHistory) {
+      throw new ExportFailure("INVALID_EXPORT_MANIFEST", false);
+    }
+    const dates: Record<
+      SemanticPositionHistorySearchEngine,
+      Set<string>
+    > = {
+      YANDEX: new Set(),
+      GOOGLE: new Set()
+    };
+    let rowCount = 0;
+    for await (const row of this.exportPositionHistoryRows(
+      job,
+      input,
+      leaseOwner,
+      false
+    )) {
+      rowCount += 1;
+      for (const snapshot of row.snapshots) {
+        if (!input.positionHistory.searchEngines.includes(snapshot.searchEngine)) {
+          throw new ExportFailure("INVALID_EXPORT_DATA", false);
+        }
+        dates[snapshot.searchEngine].add(snapshot.observedDate);
+      }
+    }
+    return {
+      rowCount,
+      dates: {
+        YANDEX: [...dates.YANDEX].sort().reverse(),
+        GOOGLE: [...dates.GOOGLE].sort().reverse()
+      }
+    };
+  }
+
+  private async *exportPositionHistoryRows(
+    job: Job,
+    input: InternalCreateSemanticExportInput,
+    leaseOwner: string,
+    reportProgress: boolean
+  ): AsyncGenerator<SemanticPositionHistoryExportRow> {
+    if (!input.positionHistory) {
+      throw new ExportFailure("INVALID_EXPORT_MANIFEST", false);
+    }
+    const context = exportContext(input);
+    const selected = input.keywordIds ? new Set(input.keywordIds) : undefined;
+    const query = await this.exportQuery(
+      input,
+      context,
+      POSITION_HISTORY_PAGE_SIZE
+    );
+    let cursor: string | undefined;
+    let exportedRows = 0;
+    const observedCursors = new Set<string>();
+    do {
+      await this.assertLease(
+        job.id,
+        leaseOwner,
+        reportProgress ? exportedRows : 0
+      );
+      const page = await this.seoData.listExportPositionHistory(
+        context,
+        { ...query, ...(cursor ? { cursor } : {}) },
+        input.positionHistory
+      );
+      if (reportProgress && page.page.totalApprox !== undefined) {
+        await this.updateProgressTotal(
+          job.id,
+          leaseOwner,
+          selected ? selected.size + exportedRows : page.page.totalApprox
+        );
+      }
+      for (const item of page.data) {
+        if (selected && !selected.delete(item.keywordId)) continue;
+        exportedRows += 1;
+        if (!Number.isSafeInteger(exportedRows)) {
+          throw new ExportFailure("EXPORT_ROW_COUNT_TOO_LARGE", false);
+        }
+        yield item;
+      }
+      await this.assertLease(
+        job.id,
+        leaseOwner,
+        reportProgress ? exportedRows : 0
+      );
+      if (selected?.size === 0) break;
+      if (!page.page.hasNext) break;
+      const nextCursor = page.page.nextCursor;
+      if (!nextCursor || observedCursors.has(nextCursor)) {
+        throw new ExportFailure("EXPORT_PAGINATION_STALLED", true);
+      }
+      observedCursors.add(nextCursor);
+      cursor = nextCursor;
+    } while (cursor);
+
+    if (selected && selected.size > 0) {
+      throw new ExportFailure("EXPORT_KEYWORDS_UNAVAILABLE", false);
+    }
+  }
+
   private async exportQuery(
     input: InternalCreateSemanticExportInput,
-    context: ReturnType<typeof exportContext>
+    context: ReturnType<typeof exportContext>,
+    pageSize = PAGE_SIZE
   ): Promise<KeywordListQuery> {
     const base: KeywordListQuery = {
-      limit: PAGE_SIZE,
+      limit: pageSize,
       ...input.filters,
       sort: input.sort ?? "CREATED_DESC"
     };
@@ -280,7 +410,7 @@ export class SemanticExportWorkerService {
     const descendants = descendantGroupIds(groups, rootId);
     const { groupId: _groupId, ...filters } = input.filters;
     return {
-      limit: PAGE_SIZE,
+      limit: pageSize,
       ...filters,
       ...(descendants.length === 1
         ? { groupId: rootId }
@@ -401,10 +531,10 @@ export class SemanticExportWorkerService {
   }
 }
 
-async function* counted(
-  rows: AsyncIterable<SemanticKeywordListItem>,
+async function* counted<Row>(
+  rows: AsyncIterable<Row>,
   counter: { value: number }
-): AsyncGenerator<SemanticKeywordListItem> {
+): AsyncGenerator<Row> {
   for await (const row of rows) {
     counter.value += 1;
     yield row;

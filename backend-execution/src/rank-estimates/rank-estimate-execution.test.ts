@@ -7,6 +7,7 @@ import {
   ARSENKIN_YANDEX_SEARCH_API_MAPPING_VERSION,
   XMLSTOCK_GOOGLE_LIVE_MAPPING_VERSION,
   XMLSTOCK_YANDEX_LIVE_MAPPING_VERSION,
+  XMLSTOCK_YANDEX_LIVE_TURBO_MAPPING_VERSION,
   XMLSTOCK_YANDEX_SEARCH_API_MAPPING_VERSION,
   rankEstimateExecutionHash,
   rankEstimateExecutionParameters,
@@ -143,6 +144,45 @@ test("database request counts distinguish XMLStock Yandex Live from Search API",
     migration,
     /minimum_get_request_count = provider_task_count \*/u
   );
+});
+
+test("seals XMLStock Yandex Live Turbo as a distinct mapping", async () => {
+  const execution = rankEstimateExecutionParameters(
+    {
+      ...configuration,
+      searchEngine: "YANDEX",
+      countryCode: "RU",
+      regionCode: "213",
+      language: "ru",
+      depth: 100
+    },
+    "XMLSTOCK",
+    "LIVE",
+    "TURBO"
+  );
+  assert.ok(execution);
+  assert.equal(
+    execution.providerMappingVersion,
+    XMLSTOCK_YANDEX_LIVE_TURBO_MAPPING_VERSION
+  );
+  assert.equal(
+    rankEstimateExecutionParameters(
+      configuration,
+      "XMLSTOCK",
+      "LIVE",
+      "TURBO"
+    ),
+    undefined
+  );
+  const migration = await readFile(
+    new URL(
+      "../../prisma/migrations/20260819130000_xmlstock_yandex_live_turbo/migration.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  assert.match(migration, /xmlstock-yandex-live@3/u);
+  assert.match(migration, /\+ 49\) \/ 50/u);
 });
 
 test("keeps incompatible estimates viewable without executable data", () => {

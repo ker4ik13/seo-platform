@@ -15,15 +15,19 @@ import type { AppProject } from "../lib/app-types";
 type SemanticTool = "IMPORT" | "CLUSTERS" | "COLUMNS";
 
 export function SemanticsWorkspace({
+  currentUserId,
   projectId,
   projectName,
   projects,
-  workspaceId
+  workspaceId,
+  workspaceRoleCode
 }: Readonly<{
+  currentUserId: string;
   projectId: string;
   projectName: string;
   projects: readonly AppProject[];
   workspaceId: string;
+  workspaceRoleCode: string;
 }>) {
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [groupRefreshVersion, setGroupRefreshVersion] = useState(0);
@@ -37,6 +41,7 @@ export function SemanticsWorkspace({
   return (
     <div className="semantic-workspace">
       <SemanticCoreTable
+        currentUserId={currentUserId}
         columnRefreshVersion={columnRefreshVersion}
         clusterRefreshVersion={clusterRefreshVersion}
         groupRefreshVersion={groupRefreshVersion}
@@ -48,6 +53,7 @@ export function SemanticsWorkspace({
         projects={projects}
         refreshVersion={refreshVersion}
         workspaceId={workspaceId}
+        workspaceRoleCode={workspaceRoleCode}
       />
       {activeTool && (
         <SemanticModal

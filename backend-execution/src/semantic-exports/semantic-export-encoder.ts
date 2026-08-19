@@ -2,6 +2,8 @@ import { Zip, ZipDeflate } from "fflate";
 import type {
   CreateSemanticExportInput,
   SemanticKeywordListItem,
+  SemanticPositionHistoryExportRow,
+  SemanticPositionHistorySearchEngine,
   SemanticSavedViewColumnKey
 } from "@seo-platform/contracts";
 
@@ -14,6 +16,8 @@ const XLSX_NUMERIC_COLUMNS = new Set<SemanticSavedViewColumnKey>([
   "wordCount",
   "yandexPosition",
   "googlePosition",
+  "yandexAiPosition",
+  "googleAiPosition",
   "visibility",
   "priority"
 ]);
@@ -31,10 +35,14 @@ const HEADERS: Readonly<
   wordCount: { en: "Word count", ru: "Слов" },
   yandexPosition: { en: "Yandex position", ru: "Позиция Яндекс" },
   googlePosition: { en: "Google position", ru: "Позиция Google" },
+  yandexAiPosition: { en: "Yandex AI position", ru: "ИИ позиция Яндекс" },
+  googleAiPosition: { en: "Google AI position", ru: "ИИ позиция Google" },
   yandexRelevantUrl: { en: "Yandex relevant URL", ru: "Релевантный URL Яндекс" },
   googleRelevantUrl: { en: "Google relevant URL", ru: "Релевантный URL Google" },
   yandexCheckedAt: { en: "Yandex checked at", ru: "Дата съёма Яндекс" },
   googleCheckedAt: { en: "Google checked at", ru: "Дата съёма Google" },
+  yandexAiCheckedAt: { en: "Yandex AI checked at", ru: "Дата съёма ИИ Яндекс" },
+  googleAiCheckedAt: { en: "Google AI checked at", ru: "Дата съёма ИИ Google" },
   visibility: { en: "Visibility", ru: "Видимость" },
   group: { en: "Group", ru: "Группа" },
   cluster: { en: "Cluster", ru: "Кластер" },
@@ -50,6 +58,13 @@ export interface SemanticExportFile {
   readonly filename: string;
   readonly contentType: string;
   readonly bytes: AsyncIterable<Uint8Array>;
+}
+
+export interface SemanticPositionHistoryWorkbookPlan {
+  readonly rowCount: number;
+  readonly dates: Readonly<
+    Record<SemanticPositionHistorySearchEngine, readonly string[]>
+  >;
 }
 
 export function semanticExportFile(
@@ -68,6 +83,23 @@ export function semanticExportFile(
       input.format === "XLSX"
         ? xlsxDocument(rows, input, customColumnNames)
         : textDocument(rows, input, customColumnNames)
+  };
+}
+
+export function semanticPositionHistoryExportFile(
+  rows: AsyncIterable<SemanticPositionHistoryExportRow>,
+  input: CreateSemanticExportInput,
+  plan: SemanticPositionHistoryWorkbookPlan,
+  now = new Date()
+): SemanticExportFile {
+  if (!input.positionHistory || input.format !== "XLSX") {
+    throw new TypeError("Position history export requires XLSX report options");
+  }
+  const date = now.toISOString().slice(0, 10);
+  return {
+    filename: `positions-history-${date}.xlsx`,
+    contentType: exportContentType("XLSX"),
+    bytes: positionHistoryXlsxDocument(rows, input, plan)
   };
 }
 
@@ -193,6 +225,262 @@ async function* xlsxDocument(
   yield* drain();
 }
 
+async function* positionHistoryXlsxDocument(
+  rows: AsyncIterable<SemanticPositionHistoryExportRow>,
+  input: CreateSemanticExportInput,
+  plan: SemanticPositionHistoryWorkbookPlan
+): AsyncGenerator<Uint8Array> {
+  const options = input.positionHistory;
+  if (!options) throw new TypeError("Position history report options are missing");
+  if (!Number.isSafeInteger(plan.rowCount) || plan.rowCount < 0) {
+    throw new TypeError("Position history report row count is invalid");
+  }
+  const sheets = options.searchEngines.map((searchEngine, index) => ({
+    searchEngine,
+    name: searchEngine === "YANDEX" ? "Яндекс" : "Google",
+    dates: validatedHistoryDates(plan.dates[searchEngine], options),
+    index: index + 1
+  }));
+  const output: Uint8Array[] = [];
+  let zipError: Error | undefined;
+  const zip = new Zip((error, data) => {
+    if (error) zipError = error;
+    if (data.byteLength > 0) output.push(data);
+  });
+  const drain = function* (): Generator<Uint8Array> {
+    if (zipError) throw zipError;
+    while (output.length > 0) yield output.shift()!;
+  };
+  const addText = (name: string, value: string): void => {
+    const file = new ZipDeflate(name, { level: 6 });
+    zip.add(file);
+    file.push(encoder.encode(value), true);
+  };
+  const streams = sheets.map((sheet) => {
+    const stream = new ZipDeflate(
+      `xl/worksheets/sheet${sheet.index}.xml`,
+      { level: 6 }
+    );
+    zip.add(stream);
+    const lastColumn = excelColumn(3 + sheet.dates.length);
+    stream.push(
+      encoder.encode(
+        positionHistoryWorksheetStart(lastColumn) +
+          positionHistoryHeaderRows(sheet)
+      )
+    );
+    return { ...sheet, stream, lastColumn };
+  });
+  yield* drain();
+
+  let rowCount = 0;
+  for await (const row of rows) {
+    rowCount += 1;
+    for (const sheet of streams) {
+      sheet.stream.push(
+        encoder.encode(
+          positionHistoryDataRow(4 + rowCount, row, sheet.searchEngine, sheet.dates)
+        )
+      );
+    }
+    yield* drain();
+  }
+  for (const sheet of streams) {
+    sheet.stream.push(
+      encoder.encode(
+        `</sheetData><autoFilter ref="A1:${sheet.lastColumn}${Math.max(5, 4 + rowCount)}"/><pageMargins left="0.35" right="0.35" top="0.5" bottom="0.5" header="0.2" footer="0.2"/></worksheet>`
+      ),
+      true
+    );
+  }
+  yield* drain();
+
+  addText("xl/workbook.xml", workbookXmlWithNames(sheets.map(({ name }) => name)));
+  addText("xl/_rels/workbook.xml.rels", workbookRelationships(sheets.length));
+  addText("xl/styles.xml", positionHistoryStylesXml());
+  addText("_rels/.rels", rootRelationships());
+  addText("[Content_Types].xml", contentTypes(sheets.length));
+  yield* drain();
+  zip.end();
+  yield* drain();
+}
+
+function validatedHistoryDates(
+  dates: readonly string[],
+  options: NonNullable<CreateSemanticExportInput["positionHistory"]>
+): readonly string[] {
+  if (dates.length > 1_100 || new Set(dates).size !== dates.length) {
+    throw new TypeError("Position history report dates are invalid");
+  }
+  let previous = "9999-99-99";
+  for (const date of dates) {
+    const instant = `${date}T00:00:00.000Z`;
+    const nextDay = new Date(Date.parse(instant) + 24 * 60 * 60 * 1_000).toISOString();
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/u.test(date) ||
+      new Date(instant).toISOString().slice(0, 10) !== date ||
+      nextDay <= options.observedFrom ||
+      instant >= options.observedBefore ||
+      date >= previous
+    ) {
+      throw new TypeError("Position history report dates are invalid");
+    }
+    previous = date;
+  }
+  return dates;
+}
+
+function positionHistoryWorksheetStart(lastColumn: string): string {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"><pane xSplit="1" ySplit="4" topLeftCell="B5" activePane="bottomRight" state="frozen"/><selection pane="bottomRight" activeCell="B5" sqref="B5"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="18"/><cols><col min="1" max="1" width="52" customWidth="1"/><col min="2" max="2" width="13" customWidth="1"/><col min="3" max="3" width="13" customWidth="1"/><col min="4" max="${Math.max(4, excelColumnNumber(lastColumn))}" width="11" customWidth="1"/></cols><sheetData>`;
+}
+
+function positionHistoryHeaderRows(
+  sheet: Readonly<{
+    searchEngine: SemanticPositionHistorySearchEngine;
+    dates: readonly string[];
+  }>
+): string {
+  const header = ["Фраза", "Добавлен", "Поисковик", ...sheet.dates.map(displayDate)];
+  const headerRow = `<row r="1" ht="25" customHeight="1">${header.map((value, index) =>
+    styledInlineCell(1, index + 1, value, 1)
+  ).join("")}</row>`;
+  const summaries = [5, 10, 30].map((threshold, offset) => {
+    const row = offset + 2;
+    const values = [
+      styledInlineCell(row, 1, `ТОП-${threshold}`, 2),
+      emptyStyledCell(row, 2, 2),
+      styledInlineCell(
+        row,
+        3,
+        sheet.searchEngine === "YANDEX" ? "Яндекс" : "Google",
+        2
+      ),
+      ...sheet.dates.map((_, dateIndex) => {
+        const column = excelColumn(dateIndex + 4);
+        return formulaCell(
+          row,
+          dateIndex + 4,
+          `COUNTIFS(${column}$5:INDEX(${column}:${column},MAX(5,COUNTA($A:$A))),">=1",${column}$5:INDEX(${column}:${column},MAX(5,COUNTA($A:$A))),"<=${threshold}")`,
+          3
+        );
+      })
+    ];
+    return `<row r="${row}" ht="20" customHeight="1">${values.join("")}</row>`;
+  }).join("");
+  return headerRow + summaries;
+}
+
+function positionHistoryDataRow(
+  rowIndex: number,
+  row: SemanticPositionHistoryExportRow,
+  searchEngine: SemanticPositionHistorySearchEngine,
+  dates: readonly string[]
+): string {
+  if (
+    !row.text ||
+    row.text.length > 2_000 ||
+    Number.isNaN(Date.parse(row.createdAt)) ||
+    row.snapshots.length > 2_200
+  ) {
+    throw new TypeError("Position history report row is invalid");
+  }
+  const snapshots = new Map(
+    row.snapshots
+      .filter((snapshot) => snapshot.searchEngine === searchEngine)
+      .map((snapshot) => [snapshot.observedDate, snapshot] as const)
+  );
+  const olderByDate = new Map<
+    string,
+    SemanticPositionHistoryExportRow["snapshots"][number] | undefined
+  >();
+  let older: SemanticPositionHistoryExportRow["snapshots"][number] | undefined;
+  for (let index = dates.length - 1; index >= 0; index -= 1) {
+    const date = dates[index]!;
+    olderByDate.set(date, older);
+    const current = snapshots.get(date);
+    if (current) older = current;
+  }
+  const cells = [
+    styledInlineCell(rowIndex, 1, row.text, 4),
+    styledInlineCell(rowIndex, 2, displayDate(row.createdAt.slice(0, 10)), 5),
+    styledInlineCell(rowIndex, 3, searchEngine === "YANDEX" ? "Яндекс" : "Google", 5),
+    ...dates.map((date, index) => {
+      const current = snapshots.get(date);
+      const style = positionHistoryCellStyle(current, olderByDate.get(date));
+      if (!current?.found) {
+        return styledInlineCell(rowIndex, index + 4, "—", style);
+      }
+      if (!Number.isSafeInteger(current.position) || current.position === undefined) {
+        throw new TypeError("Position history report position is invalid");
+      }
+      return styledNumberCell(rowIndex, index + 4, current.position, style);
+    })
+  ];
+  return `<row r="${rowIndex}" ht="21" customHeight="1">${cells.join("")}</row>`;
+}
+
+function positionHistoryCellStyle(
+  current: SemanticPositionHistoryExportRow["snapshots"][number] | undefined,
+  older: SemanticPositionHistoryExportRow["snapshots"][number] | undefined
+): number {
+  if (!current) return 9;
+  if (!older) return current.found ? 6 : 9;
+  if (!current.found) return older.found ? 8 : 9;
+  if (!older.found) return 7;
+  if (current.position === undefined || older.position === undefined) {
+    throw new TypeError("Position history comparison is invalid");
+  }
+  if (current.position < older.position) return 7;
+  if (current.position > older.position) return 8;
+  return 6;
+}
+
+function styledInlineCell(
+  row: number,
+  column: number,
+  value: string,
+  style: number
+): string {
+  const reference = `${excelColumn(column)}${row}`;
+  const text = value.slice(0, 32_767);
+  return `<c r="${reference}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${xml(text)}</t></is></c>`;
+}
+
+function styledNumberCell(
+  row: number,
+  column: number,
+  value: number,
+  style: number
+): string {
+  return `<c r="${excelColumn(column)}${row}" s="${style}"><v>${value}</v></c>`;
+}
+
+function emptyStyledCell(row: number, column: number, style: number): string {
+  return `<c r="${excelColumn(column)}${row}" s="${style}"/>`;
+}
+
+function formulaCell(
+  row: number,
+  column: number,
+  formula: string,
+  style: number
+): string {
+  return `<c r="${excelColumn(column)}${row}" s="${style}"><f>${xml(formula)}</f></c>`;
+}
+
+function displayDate(value: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/u.exec(value);
+  return match ? `${match[3]}.${match[2]}.${match[1]}` : value;
+}
+
+function excelColumnNumber(value: string): number {
+  let result = 0;
+  for (const character of value) {
+    result = result * 26 + character.charCodeAt(0) - 64;
+  }
+  return result;
+}
+
 function exportRecord(
   item: SemanticKeywordListItem,
   columns: readonly SemanticSavedViewColumnKey[]
@@ -223,10 +511,14 @@ function systemColumnValue(
     case "wordCount": return item.textOriginal.trim() ? item.textOriginal.trim().split(/\s+/u).length : 0;
     case "yandexPosition": return searchPosition(item, "YANDEX");
     case "googlePosition": return searchPosition(item, "GOOGLE");
+    case "yandexAiPosition": return aiAnswerPosition(item, "YANDEX");
+    case "googleAiPosition": return aiAnswerPosition(item, "GOOGLE");
     case "yandexRelevantUrl": return searchValue(item, "YANDEX", "rankingUrl");
     case "googleRelevantUrl": return searchValue(item, "GOOGLE", "rankingUrl");
     case "yandexCheckedAt": return searchValue(item, "YANDEX", "observedAt");
     case "googleCheckedAt": return searchValue(item, "GOOGLE", "observedAt");
+    case "yandexAiCheckedAt": return aiAnswerCheckedAt(item, "YANDEX");
+    case "googleAiCheckedAt": return aiAnswerCheckedAt(item, "GOOGLE");
     case "visibility": return searchVisibility(item);
     case "group": return item.groupPath ?? null;
     case "cluster": return item.clusterName ?? null;
@@ -237,6 +529,21 @@ function systemColumnValue(
     case "source": return item.sourceMode;
     case "updatedAt": return item.updatedAt;
   }
+}
+
+function aiAnswerPosition(
+  item: SemanticKeywordListItem,
+  engine: "GOOGLE" | "YANDEX"
+): number | null {
+  const value = item.aiAnswers?.find(({ searchEngine }) => searchEngine === engine);
+  return value?.siteFound === true ? (value.position ?? null) : null;
+}
+
+function aiAnswerCheckedAt(
+  item: SemanticKeywordListItem,
+  engine: "GOOGLE" | "YANDEX"
+): string | null {
+  return item.aiAnswers?.find(({ searchEngine }) => searchEngine === engine)?.observedAt ?? null;
 }
 
 function searchPosition(item: SemanticKeywordListItem, engine: "GOOGLE" | "YANDEX"): number | null {
@@ -378,10 +685,18 @@ function xml(value: string): string {
 }
 
 function workbookXml(sheetCount: number): string {
-  const sheets = Array.from({ length: sheetCount }, (_, index) =>
-    `<sheet name="${sheetCount === 1 ? "Семантика" : `Семантика ${index + 1}`}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`
+  return workbookXmlWithNames(
+    Array.from({ length: sheetCount }, (_, index) =>
+      sheetCount === 1 ? "Семантика" : `Семантика ${index + 1}`
+    )
+  );
+}
+
+function workbookXmlWithNames(names: readonly string[]): string {
+  const sheets = names.map((name, index) =>
+    `<sheet name="${xml(name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`
   ).join("");
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets}</sheets></workbook>`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets}</sheets><calcPr calcMode="auto" fullCalcOnLoad="1" forceFullCalc="1"/></workbook>`;
 }
 
 function workbookRelationships(sheetCount: number): string {
@@ -404,4 +719,37 @@ function contentTypes(sheetCount: number): string {
 
 function stylesXml(): string {
   return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>';
+}
+
+function positionHistoryStylesXml(): string {
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<fonts count="5">' +
+      '<font><sz val="11"/><name val="Calibri"/><family val="2"/></font>' +
+      '<font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>' +
+      '<font><b/><color rgb="FF16803A"/><sz val="11"/><name val="Calibri"/></font>' +
+      '<font><b/><color rgb="FFDC2626"/><sz val="11"/><name val="Calibri"/></font>' +
+      '<font><color rgb="FF6F778A"/><sz val="10"/><name val="Calibri"/></font>' +
+    '</fonts>' +
+    '<fills count="4">' +
+      '<fill><patternFill patternType="none"/></fill>' +
+      '<fill><patternFill patternType="gray125"/></fill>' +
+      '<fill><patternFill patternType="solid"><fgColor rgb="FF5B3DF5"/><bgColor indexed="64"/></patternFill></fill>' +
+      '<fill><patternFill patternType="solid"><fgColor rgb="FFF0EEFF"/><bgColor indexed="64"/></patternFill></fill>' +
+    '</fills>' +
+    '<borders count="2"><border/><border><left style="thin"><color rgb="FFE2E4EC"/></left><right style="thin"><color rgb="FFE2E4EC"/></right><top style="thin"><color rgb="FFE2E4EC"/></top><bottom style="thin"><color rgb="FFE2E4EC"/></bottom><diagonal/></border></borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+    '<cellXfs count="10">' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+      '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>' +
+      '<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>' +
+      '<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="0"/></xf>' +
+      '<xf numFmtId="0" fontId="4" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>' +
+      '<xf numFmtId="0" fontId="2" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>' +
+      '<xf numFmtId="0" fontId="3" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>' +
+      '<xf numFmtId="0" fontId="4" fillId="0" borderId="1" xfId="0" applyFont="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>' +
+    '</cellXfs>' +
+    '</styleSheet>';
 }

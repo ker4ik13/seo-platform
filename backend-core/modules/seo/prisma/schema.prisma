@@ -158,6 +158,7 @@ model Keyword {
   language       String         @default("und") @db.VarChar(16)
   priority       Int            @default(0)
   isFavorite     Boolean        @default(false) @map("is_favorite")
+  showAiAnswerButton Boolean     @default(false) @map("show_ai_answer_button")
   intent         String?        @db.VarChar(32)
   note           String?        @db.Text
   status         EntityStatus   @default(ACTIVE)
@@ -180,6 +181,7 @@ model Keyword {
   trackingAssignments TrackingContextKeywordAssignment[]
   rankManifestEntries RankExecutionManifestEntry[]
   rankSnapshots       RankSnapshot[]                     @relation("RankSnapshotKeyword")
+  aiAnswerSnapshots   AiAnswerSnapshot[]                 @relation("AiAnswerSnapshotKeyword")
   typedCustomValues   SemanticKeywordCustomValue[]
   cluster             Cluster?                           @relation(fields: [workspaceId, projectId, clusterId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
   targetPage          Page?                              @relation(fields: [workspaceId, projectId, targetPageId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict)
@@ -1124,6 +1126,51 @@ model FrequencySnapshot {
   @@unique([workspaceId, projectId, jobId, keywordId, type, regionCode, device], map: "frequency_snapshots_job_keyword_context_key")
   @@index([projectId, keywordId, type, regionCode, device, observedAt], map: "frequency_snapshots_keyword_context_observed_idx")
   @@map("frequency_snapshots")
+}
+
+model AiAnswerSnapshot {
+  id             String         @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId    String         @map("workspace_id") @db.Uuid
+  projectId      String         @map("project_id") @db.Uuid
+  keywordId      String         @map("keyword_id") @db.Uuid
+  searchEngine   String         @map("search_engine") @db.VarChar(16)
+  regionCode     String         @map("region_code") @db.VarChar(100)
+  device         String         @db.VarChar(16)
+  host           String         @db.VarChar(255)
+  answerPresent  Boolean        @map("answer_present")
+  siteFound      Boolean        @map("site_found")
+  position       Int?
+  rankingUrl     String?        @map("ranking_url") @db.Text
+  brandFound     Boolean        @map("brand_found")
+  answerMarkdown String?        @map("answer_markdown") @db.Text
+  provider       String         @db.VarChar(32)
+  sourceMode     DataSourceMode @map("source_mode")
+  jobId          String         @map("job_id") @db.Uuid
+  observedAt     DateTime       @map("observed_at") @db.Timestamptz(6)
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  keyword Keyword          @relation("AiAnswerSnapshotKeyword", fields: [workspaceId, projectId, keywordId], references: [workspaceId, projectId, id], onDelete: Restrict, onUpdate: Restrict, map: "ai_answer_snapshots_keyword_tenant_fkey")
+  sources AiAnswerSource[]
+
+  @@unique([jobId, keywordId, searchEngine], map: "ai_answer_snapshots_job_keyword_engine_key")
+  @@index([workspaceId, projectId, keywordId, searchEngine, observedAt(sort: Desc), id(sort: Desc)], map: "ai_answer_snapshots_keyword_engine_latest_idx")
+  @@index([workspaceId, projectId, jobId], map: "ai_answer_snapshots_job_idx")
+  @@map("ai_answer_snapshots")
+}
+
+model AiAnswerSource {
+  snapshotId  String   @map("snapshot_id") @db.Uuid
+  position    Int
+  providerId  Int?     @map("provider_id")
+  url         String   @db.Text
+  title       String?  @db.Text
+  description String?  @db.Text
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  snapshot AiAnswerSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade, onUpdate: Restrict, map: "ai_answer_sources_snapshot_fkey")
+
+  @@id([snapshotId, position])
+  @@map("ai_answer_sources")
 }
 
 model SemanticVersion {

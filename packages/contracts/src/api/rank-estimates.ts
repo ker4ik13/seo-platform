@@ -21,6 +21,14 @@ export const rankSearchSources = trackingSearchSources;
 
 export type RankSearchSource = TrackingSearchSource;
 
+/**
+ * Optional paid execution mode for XMLStock Yandex Live. Absence always
+ * means the standard Live mode, so old clients keep their exact behaviour.
+ */
+export const rankYandexLiveModes = ["TURBO"] as const;
+
+export type RankYandexLiveMode = (typeof rankYandexLiveModes)[number];
+
 export const rankEstimateOperations = ["POSITIONS"] as const;
 
 export type RankEstimateOperation = (typeof rankEstimateOperations)[number];
@@ -193,6 +201,8 @@ export interface CreateRankEstimateInput {
   readonly credentialId?: string;
   /** Provider SERP family sealed into the immutable estimate. */
   readonly searchSource?: RankSearchSource;
+  /** Paid XMLStock Yandex Live mode selected for this immutable launch. */
+  readonly yandexLiveMode?: RankYandexLiveMode;
 }
 
 /**

@@ -31,7 +31,9 @@ import type {
   SemanticKeywordSort,
   SemanticFrequencyDevice,
   SemanticFrequencyQualityFlag,
-  SemanticFrequencyType
+  SemanticFrequencyType,
+  SemanticAiAnswerSummary,
+  SemanticAiAnswerHistoryItem
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -53,6 +55,10 @@ import {
   projectSiteResults,
   rankHistorySearchSource
 } from "../rank-results/rank-serp-projection.js";
+import {
+  previousAiAnswerPositionKey,
+  previousAiAnswerPositions
+} from "../ai-answers/ai-answer-history-projection.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -353,6 +359,7 @@ export class KeywordService {
       clusters,
       frequencySnapshots,
       currentRanks,
+      aiAnswerSnapshots,
       selectedGroupMemberships
     ] = await Promise.all([
       pageIds.length === 0
@@ -436,6 +443,29 @@ export class KeywordService {
               snapshotId: true
             }
           }),
+      keywordIds.length === 0
+        ? Promise.resolve([])
+        : this.prisma.aiAnswerSnapshot.findMany({
+            where: { workspaceId, projectId, keywordId: { in: keywordIds } },
+            orderBy: [
+              { keywordId: "asc" },
+              { searchEngine: "asc" },
+              { observedAt: "desc" },
+              { id: "desc" }
+            ],
+            distinct: ["keywordId", "searchEngine"],
+            select: {
+              id: true,
+              keywordId: true,
+              searchEngine: true,
+              answerPresent: true,
+              siteFound: true,
+              position: true,
+              rankingUrl: true,
+              brandFound: true,
+              observedAt: true
+            }
+          }),
       keywordIds.length === 0 || selectedGroupIds.length === 0
         ? Promise.resolve([])
         : this.prisma.keywordGroupMembership.findMany({
@@ -502,6 +532,41 @@ export class KeywordService {
         observedAt: snapshot.observedAt.toISOString()
       });
       frequenciesByKeywordId.set(snapshot.keywordId, frequencies);
+    }
+    const previousAiPositions = await previousAiAnswerPositions(
+      this.prisma,
+      workspaceId,
+      projectId,
+      aiAnswerSnapshots.map((snapshot) => ({
+        keywordId: snapshot.keywordId,
+        searchEngine: snapshot.searchEngine as SemanticAiAnswerSummary["searchEngine"],
+        observedAt: snapshot.observedAt,
+        snapshotId: snapshot.id
+      }))
+    );
+    const aiAnswersByKeywordId = new Map<string, SemanticAiAnswerSummary[]>();
+    for (const snapshot of aiAnswerSnapshots) {
+      const answers = aiAnswersByKeywordId.get(snapshot.keywordId) ?? [];
+      const searchEngine = snapshot.searchEngine as SemanticAiAnswerSummary["searchEngine"];
+      const previousPosition = previousAiPositions.get(
+        previousAiAnswerPositionKey(
+          snapshot.keywordId,
+          searchEngine,
+          snapshot.observedAt,
+          snapshot.id
+        )
+      );
+      answers.push({
+        searchEngine,
+        answerPresent: snapshot.answerPresent,
+        siteFound: snapshot.siteFound,
+        ...(snapshot.position === null ? {} : { position: snapshot.position }),
+        ...(previousPosition === undefined ? {} : { previousPosition }),
+        ...(snapshot.rankingUrl === null ? {} : { rankingUrl: snapshot.rankingUrl }),
+        brandFound: snapshot.brandFound,
+        observedAt: snapshot.observedAt.toISOString()
+      });
+      aiAnswersByKeywordId.set(snapshot.keywordId, answers);
     }
     const configurationById = new Map(
       rankConfigurations.map((configuration) => [
@@ -614,7 +679,8 @@ export class KeywordService {
           row.clusterId ? clusterNameById.get(row.clusterId) : undefined,
           frequenciesByKeywordId.get(row.id),
           [...(positionsByKeywordId.get(row.id)?.values() ?? [])],
-          selectedGroupByKeywordId.get(row.id)
+          selectedGroupByKeywordId.get(row.id),
+          aiAnswersByKeywordId.get(row.id)
         )
       ),
       page: {
@@ -676,7 +742,13 @@ export class KeywordService {
     if (!keyword) {
       throw new HttpException("Keyword not found", HttpStatus.NOT_FOUND);
     }
-    const [frequencies, currentRanks, rankSnapshots] = await Promise.all([
+    const [
+      frequencies,
+      currentRanks,
+      rankSnapshots,
+      aiPositionSnapshots,
+      aiSourceSnapshots
+    ] = await Promise.all([
       this.prisma.frequencySnapshot.findMany({
         where: { workspaceId, projectId, keywordId },
         orderBy: [{ observedAt: "desc" }, { id: "desc" }],
@@ -701,6 +773,54 @@ export class KeywordService {
           observedAt: true,
           manifest: {
             select: { execution: true, projectDomain: true }
+          }
+        }
+      }),
+      this.prisma.aiAnswerSnapshot.findMany({
+        where: { workspaceId, projectId, keywordId },
+        orderBy: [{ observedAt: "desc" }, { id: "desc" }],
+        take: 240,
+        select: {
+          id: true,
+          keywordId: true,
+          searchEngine: true,
+          regionCode: true,
+          device: true,
+          answerPresent: true,
+          siteFound: true,
+          position: true,
+          rankingUrl: true,
+          brandFound: true,
+          observedAt: true
+        }
+      }),
+      this.prisma.aiAnswerSnapshot.findMany({
+        where: {
+          workspaceId,
+          projectId,
+          keywordId,
+          sources: { some: {} }
+        },
+        orderBy: [
+          { searchEngine: "asc" },
+          { observedAt: "desc" },
+          { id: "desc" }
+        ],
+        distinct: ["searchEngine"],
+        select: {
+          id: true,
+          searchEngine: true,
+          regionCode: true,
+          device: true,
+          observedAt: true,
+          sources: {
+            orderBy: { position: "asc" },
+            select: {
+              position: true,
+              url: true,
+              title: true,
+              description: true
+            }
           }
         }
       })
@@ -912,7 +1032,35 @@ export class KeywordService {
             ...(result.snippet === null ? {} : { snippet: result.snippet })
           }))
         }];
-      })
+      }),
+      aiPositionHistory: aiPositionSnapshots.map((snapshot) => ({
+        snapshotId: snapshot.id,
+        keywordId: snapshot.keywordId,
+        searchEngine: snapshot.searchEngine as SemanticAiAnswerHistoryItem["searchEngine"],
+        regionCode: snapshot.regionCode,
+        device: snapshot.device as SemanticAiAnswerHistoryItem["device"],
+        answerPresent: snapshot.answerPresent,
+        siteFound: snapshot.siteFound,
+        ...(snapshot.position === null ? {} : { position: snapshot.position }),
+        ...(snapshot.rankingUrl === null ? {} : { rankingUrl: snapshot.rankingUrl }),
+        brandFound: snapshot.brandFound,
+        provider: "ARSENKIN" as const,
+        observedAt: snapshot.observedAt.toISOString()
+      })),
+      aiCompetitorSnapshots: aiSourceSnapshots.map((snapshot) => ({
+        snapshotId: snapshot.id,
+        searchEngine: snapshot.searchEngine as SemanticAiAnswerHistoryItem["searchEngine"],
+        regionCode: snapshot.regionCode,
+        device: snapshot.device as SemanticAiAnswerHistoryItem["device"],
+        provider: "ARSENKIN" as const,
+        observedAt: snapshot.observedAt.toISOString(),
+        results: snapshot.sources.map((source) => ({
+          position: source.position,
+          url: source.url,
+          ...(source.title === null ? {} : { title: source.title }),
+          ...(source.description === null ? {} : { snippet: source.description })
+        }))
+      }))
     };
   }
 
@@ -1460,6 +1608,9 @@ export class KeywordService {
             ...(input.isFavorite === undefined
               ? {}
               : { isFavorite: input.isFavorite }),
+            ...(input.showAiAnswerButton === undefined
+              ? {}
+              : { showAiAnswerButton: input.showAiAnswerButton }),
             ...(input.intent === undefined ? {} : { intent: input.intent }),
             ...(input.clusterId === undefined
               ? {}
@@ -2297,7 +2448,8 @@ function keywordItem(
   clusterName?: string,
   frequencies: readonly SemanticKeywordListFrequencyValue[] = [],
   positions: readonly SemanticKeywordListPosition[] = [],
-  displayGroup?: Readonly<{ id: string; path: string | null; name: string }>
+  displayGroup?: Readonly<{ id: string; path: string | null; name: string }>,
+  aiAnswers: readonly SemanticAiAnswerSummary[] = []
 ): SemanticKeywordListItem {
   const tags = row.tags.slice(0, 50).map(({ tag }) => tag.name);
   const group = displayGroup ?? row.memberships[0]?.group;
@@ -2321,6 +2473,7 @@ function keywordItem(
     priority: row.priority,
     isFavorite: row.isFavorite,
     isTracked,
+    showAiAnswerButton: row.showAiAnswerButton,
     ...(row.intent
       ? {
           intent: row.intent as SemanticKeywordIntent
@@ -2338,6 +2491,7 @@ function keywordItem(
     ...(legacyBaseFrequency ? { frequency: legacyBaseFrequency } : {}),
     ...(frequencies.length > 0 ? { frequencies } : {}),
     ...(positions.length > 0 ? { positions } : {}),
+    ...(aiAnswers.length > 0 ? { aiAnswers } : {}),
     sourceMode: row.sourceMode,
     ...(row.status === "DELETED" ? { trashed: true } : {}),
     createdAt: row.createdAt.toISOString(),
@@ -2584,6 +2738,14 @@ function keywordOrderBy(
     case "YANDEX_CHECKED_AT_DESC":
     case "GOOGLE_CHECKED_AT_ASC":
     case "GOOGLE_CHECKED_AT_DESC":
+    case "YANDEX_AI_POSITION_ASC":
+    case "YANDEX_AI_POSITION_DESC":
+    case "GOOGLE_AI_POSITION_ASC":
+    case "GOOGLE_AI_POSITION_DESC":
+    case "YANDEX_AI_CHECKED_AT_ASC":
+    case "YANDEX_AI_CHECKED_AT_DESC":
+    case "GOOGLE_AI_CHECKED_AT_ASC":
+    case "GOOGLE_AI_CHECKED_AT_DESC":
       throw new Error("Metric keyword sorts are resolved by metricSortedKeywordPage");
   }
 }
@@ -2625,6 +2787,14 @@ function cursorValue(
     case "YANDEX_CHECKED_AT_DESC":
     case "GOOGLE_CHECKED_AT_ASC":
     case "GOOGLE_CHECKED_AT_DESC":
+    case "YANDEX_AI_POSITION_ASC":
+    case "YANDEX_AI_POSITION_DESC":
+    case "GOOGLE_AI_POSITION_ASC":
+    case "GOOGLE_AI_POSITION_DESC":
+    case "YANDEX_AI_CHECKED_AT_ASC":
+    case "YANDEX_AI_CHECKED_AT_DESC":
+    case "GOOGLE_AI_CHECKED_AT_ASC":
+    case "GOOGLE_AI_CHECKED_AT_DESC":
       throw new Error("Metric cursor value is provided by metricSortedKeywordPage");
   }
 }
@@ -2667,7 +2837,11 @@ function isMetricKeywordSort(sort: SemanticKeywordSort): boolean {
     sort.startsWith("YANDEX_POSITION_") ||
     sort.startsWith("GOOGLE_POSITION_") ||
     sort.startsWith("YANDEX_CHECKED_AT_") ||
-    sort.startsWith("GOOGLE_CHECKED_AT_")
+    sort.startsWith("GOOGLE_CHECKED_AT_") ||
+    sort.startsWith("YANDEX_AI_POSITION_") ||
+    sort.startsWith("GOOGLE_AI_POSITION_") ||
+    sort.startsWith("YANDEX_AI_CHECKED_AT_") ||
+    sort.startsWith("GOOGLE_AI_CHECKED_AT_")
   );
 }
 
@@ -2787,9 +2961,16 @@ async function metricSortedKeywordPage(
   sortValueById: Map<string, string>;
 }>> {
   const ascending = sort.endsWith("_ASC");
-  const positionSort =
+  const rankPositionSort =
     sort.startsWith("YANDEX_POSITION_") ||
     sort.startsWith("GOOGLE_POSITION_");
+  const aiPositionSort =
+    sort.startsWith("YANDEX_AI_POSITION_") ||
+    sort.startsWith("GOOGLE_AI_POSITION_");
+  const aiCheckedAtSort =
+    sort.startsWith("YANDEX_AI_CHECKED_AT_") ||
+    sort.startsWith("GOOGLE_AI_CHECKED_AT_");
+  const positionSort = rankPositionSort || aiPositionSort;
   const positionBucket = 1_000_000n;
   const nullSentinel = positionSort
     ? ascending
@@ -2813,6 +2994,18 @@ async function metricSortedKeywordPage(
           THEN ${positionBucket}::bigint + latest_rank.historical_position::bigint
         ELSE 0::bigint
       END`;
+  const aiPositionMetric = ascending
+    ? Prisma.sql`CASE
+        WHEN latest_ai.site_found THEN latest_ai.position::bigint
+        WHEN latest_ai.answer_present THEN ${positionBucket}::bigint
+        ELSE ${positionBucket * 2n}::bigint
+      END`
+    : Prisma.sql`CASE
+        WHEN latest_ai.site_found
+          THEN ${positionBucket * 2n}::bigint + latest_ai.position::bigint
+        WHEN latest_ai.answer_present THEN ${positionBucket}::bigint
+        ELSE 0::bigint
+      END`;
   const metricJoin = sort.startsWith("FREQUENCY_")
     ? Prisma.sql`
         LEFT JOIN LATERAL (
@@ -2825,7 +3018,31 @@ async function metricSortedKeywordPage(
           ORDER BY fs.observed_at DESC, fs.id DESC
           LIMIT 1
         ) metric_source ON TRUE`
-    : positionSort
+    : aiPositionSort
+      ? Prisma.sql`
+        LEFT JOIN LATERAL (
+          SELECT ${aiPositionMetric} AS metric
+          FROM ai_answer_snapshots latest_ai
+          WHERE latest_ai.workspace_id = k.workspace_id
+            AND latest_ai.project_id = k.project_id
+            AND latest_ai.keyword_id = k.id
+            AND latest_ai.search_engine = ${rankEngine}
+          ORDER BY latest_ai.observed_at DESC, latest_ai.id DESC
+          LIMIT 1
+        ) metric_source ON TRUE`
+      : aiCheckedAtSort
+        ? Prisma.sql`
+        LEFT JOIN LATERAL (
+          SELECT floor(extract(epoch from latest_ai.observed_at) * 1000)::bigint AS metric
+          FROM ai_answer_snapshots latest_ai
+          WHERE latest_ai.workspace_id = k.workspace_id
+            AND latest_ai.project_id = k.project_id
+            AND latest_ai.keyword_id = k.id
+            AND latest_ai.search_engine = ${rankEngine}
+          ORDER BY latest_ai.observed_at DESC, latest_ai.id DESC
+          LIMIT 1
+        ) metric_source ON TRUE`
+      : rankPositionSort
       ? Prisma.sql`
         LEFT JOIN LATERAL (
           SELECT ${positionMetric} AS metric

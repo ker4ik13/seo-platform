@@ -1,4 +1,5 @@
 export * from "./api/auth-email-deliveries.js";
+export * from "./api/ai-answer-collections.js";
 export * from "./api/admin.js";
 export * from "./api/billing.js";
 export * from "./api/crawls.js";

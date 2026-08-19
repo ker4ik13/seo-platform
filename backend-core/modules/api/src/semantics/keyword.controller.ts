@@ -20,7 +20,9 @@ import type {
   ProjectPositionSummary,
   SemanticKeywordBulkCreateResult,
   SemanticKeywordListItem,
-  SemanticKeywordInsights
+  SemanticKeywordInsights,
+  SemanticAiAnswerDetail,
+  SemanticAiAnswerHistoryItem
 } from "@seo-platform/contracts";
 import type { FastifyReply } from "fastify";
 import { AuditService } from "../audit/audit.service.js";
@@ -56,6 +58,7 @@ import {
   updateSemanticKeywordInput
 } from "./keyword-input.js";
 import { semanticFrequencyContextRoute } from "./frequency-collection-input.js";
+import { aiAnswerHistoryQuery } from "./ai-answer-history-query.js";
 import {
   keywordListQuery,
   keywordTagOptionsQuery
@@ -233,6 +236,48 @@ export class KeywordController {
         canonicalKeywordId
       )
     );
+  }
+
+  @Get(":keywordId/ai-answers")
+  @RequirePermission("semantic.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async aiAnswers(
+    @Param("keywordId") keywordId: string,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<readonly SemanticAiAnswerDetail[]>> {
+    const tenant = requiredProjectTenant(request);
+    const canonicalKeywordId = assertUuid(keywordId, "keywordId");
+    return apiResponse(
+      request,
+      await this.seoData.keywordAiAnswers(
+        internalProjectContext(request, principal, tenant),
+        canonicalKeywordId
+      )
+    );
+  }
+
+  @Get(":keywordId/ai-answers/history")
+  @RequirePermission("semantic.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async aiAnswerHistory(
+    @Param("keywordId") keywordId: string,
+    @Query() query: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiCollectionResponse<SemanticAiAnswerHistoryItem>> {
+    const tenant = requiredProjectTenant(request);
+    const context = internalProjectContext(request, principal, tenant);
+    const result = await this.seoData.keywordAiAnswerHistory(
+      context,
+      assertUuid(keywordId, "keywordId"),
+      aiAnswerHistoryQuery(query)
+    );
+    return {
+      data: result.data,
+      page: result.page,
+      meta: { requestId: context.requestId }
+    };
   }
 
   @Delete(":keywordId/frequencies/:type/:device")

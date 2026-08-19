@@ -495,6 +495,70 @@ SELECT format(
 )
 \gexec
 
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.claim_ai_answer_collection_batch(TEXT, INTEGER, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.renew_ai_answer_collection_batch_lease(UUID, UUID[], TEXT, INTEGER, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.mark_ai_answer_collection_batch_submitting(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.defer_ai_answer_collection_batch(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.fail_ai_answer_collection_batch(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.defer_ai_answer_collection_batch_capacity(UUID, UUID[], TEXT, INTEGER, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.quarantine_ai_answer_collection_batch_submit(UUID, UUID[], TEXT, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.complete_ai_answer_collection_batch(UUID, UUID[], TEXT, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
 -- A PostgreSQL role is cluster-wide. REVOKE above intentionally touches only
 -- jobs_db/public and must never mutate another service database. Instead,
 -- reject an existing role if any direct ACL dependency remains outside the
@@ -555,7 +619,15 @@ BEGIN
     'public.mark_frequency_collection_batch_submitting(uuid,uuid[],text,integer,text,integer)'::regprocedure::oid,
     'public.renew_frequency_collection_batch_lease(uuid,uuid[],text,integer,integer)'::regprocedure::oid,
     'public.quarantine_frequency_collection_batch_submit(uuid,uuid[],text,integer)'::regprocedure::oid,
-    'public.defer_frequency_collection_batch_capacity(uuid,uuid[],text,integer,integer)'::regprocedure::oid
+    'public.defer_frequency_collection_batch_capacity(uuid,uuid[],text,integer,integer)'::regprocedure::oid,
+    'public.claim_ai_answer_collection_batch(text,integer,integer)'::regprocedure::oid,
+    'public.renew_ai_answer_collection_batch_lease(uuid,uuid[],text,integer,integer)'::regprocedure::oid,
+    'public.mark_ai_answer_collection_batch_submitting(uuid,uuid[],text,integer,text,integer)'::regprocedure::oid,
+    'public.defer_ai_answer_collection_batch(uuid,uuid[],text,integer,text,integer)'::regprocedure::oid,
+    'public.fail_ai_answer_collection_batch(uuid,uuid[],text,integer,text,integer)'::regprocedure::oid,
+    'public.defer_ai_answer_collection_batch_capacity(uuid,uuid[],text,integer,integer)'::regprocedure::oid,
+    'public.quarantine_ai_answer_collection_batch_submit(uuid,uuid[],text,integer)'::regprocedure::oid,
+    'public.complete_ai_answer_collection_batch(uuid,uuid[],text,integer)'::regprocedure::oid
   ];
 
   IF EXISTS (

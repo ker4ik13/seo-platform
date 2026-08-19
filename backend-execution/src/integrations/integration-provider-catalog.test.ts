@@ -19,7 +19,7 @@ test("public catalog only advertises operational provider workflows", () => {
   );
   assert.deepEqual(
     integrationProviderMetadata("ARSENKIN").capabilities,
-    ["SERP_RANK_TRACKING", "WORDSTAT"]
+    ["SERP_RANK_TRACKING", "SERP_COLLECTION", "WORDSTAT"]
   );
   assert.deepEqual(
     integrationProviderMetadata("KEYS_SO").capabilities,

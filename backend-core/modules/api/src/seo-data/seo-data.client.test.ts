@@ -14,6 +14,7 @@ import {
   semanticKeywordCleaningPreview,
   semanticKeywordCleaningResult,
   semanticKeywordInsights,
+  semanticAiAnswerHistoryCollection,
   semanticKeywordPage,
   semanticClusterPageBulkPreview,
   semanticClusterPageBulkResult,
@@ -39,6 +40,7 @@ const validItem = {
   priority: 0,
   isFavorite: true,
   isTracked: false,
+  showAiAnswerButton: true,
   intent: "COMMERCIAL",
   groupId: "01900000-0000-7000-8000-000000000011",
   groupPath: "Услуги / SEO",
@@ -101,6 +103,25 @@ const validItem = {
         }
       ],
       observedAt: "2026-08-01T10:00:00.000Z"
+    }
+  ],
+  aiAnswers: [
+    {
+      searchEngine: "YANDEX",
+      answerPresent: true,
+      siteFound: true,
+      position: 2,
+      previousPosition: 4,
+      rankingUrl: "https://example.com/seo",
+      brandFound: true,
+      observedAt: "2026-08-19T12:49:42.241Z"
+    },
+    {
+      searchEngine: "GOOGLE",
+      answerPresent: false,
+      siteFound: false,
+      brandFound: false,
+      observedAt: "2026-08-19T12:49:42.241Z"
     }
   ],
   sourceMode: "IMPORT",
@@ -205,6 +226,7 @@ test("accepts a strictly shaped semantic keyword page", () => {
     result.data[0]?.positions?.[0]?.siteResults?.[0]?.snippet,
     "Главная страница услуги"
   );
+  assert.deepEqual(result.data[0]?.aiAnswers, validItem.aiAnswers);
   assert.equal(result.data[0]?.hasNote, false);
   assert.deepEqual(result.page, { hasNext: false, totalApprox: 1 });
 });
@@ -259,6 +281,40 @@ test("validates safe interactive rank history metadata", () => {
     withCompetitors.competitorSnapshots?.[0]?.results[0]?.faviconUrl,
     "https://search-assets.example/competitor.png"
   );
+  const withAiHistory = semanticKeywordInsights({
+    ...withCompetitors,
+    aiPositionHistory: [{
+      snapshotId: "01900000-0000-7000-8000-000000000009",
+      keywordId,
+      searchEngine: "YANDEX",
+      regionCode: "213",
+      device: "DESKTOP",
+      answerPresent: true,
+      siteFound: true,
+      position: 2,
+      previousPosition: 5,
+      rankingUrl: "https://example.com/ai-source",
+      brandFound: true,
+      provider: "ARSENKIN",
+      observedAt: "2026-08-19T11:45:00.000Z"
+    }],
+    aiCompetitorSnapshots: [{
+      snapshotId: "01900000-0000-7000-8000-000000000009",
+      searchEngine: "YANDEX",
+      regionCode: "213",
+      device: "DESKTOP",
+      provider: "ARSENKIN",
+      observedAt: "2026-08-19T11:45:00.000Z",
+      results: [{
+        position: 1,
+        url: "https://competitor.example/ai",
+        title: "Источник ИИ",
+        snippet: "Описание источника"
+      }]
+    }]
+  }, keywordId);
+  assert.equal(withAiHistory.aiPositionHistory?.[0]?.previousPosition, 5);
+  assert.equal(withAiHistory.aiCompetitorSnapshots?.[0]?.results[0]?.position, 1);
   const { searchSource: _searchSource, ...importedPoint } =
     insights.positionHistory[0]!;
   const imported = semanticKeywordInsights({
@@ -278,6 +334,41 @@ test("validates safe interactive rank history metadata", () => {
         provider: "KEYS_SO"
       }]
     }, keywordId),
+    DomainError
+  );
+});
+
+test("validates a tenant-bound, ordered AI position history page", () => {
+  const page = semanticAiAnswerHistoryCollection({
+    workspaceId,
+    projectId,
+    keywordId,
+    items: [{
+      snapshotId: "01900000-0000-7000-8000-000000000009",
+      keywordId,
+      searchEngine: "GOOGLE",
+      regionCode: "225",
+      device: "MOBILE",
+      answerPresent: true,
+      siteFound: false,
+      previousPosition: 3,
+      brandFound: false,
+      provider: "ARSENKIN",
+      observedAt: "2026-08-19T11:45:00.000Z"
+    }],
+    page: { hasNext: true, nextCursor: "opaque_cursor-1" }
+  }, workspaceId, projectId, keywordId, { limit: 1 });
+
+  assert.equal(page.data[0]?.previousPosition, 3);
+  assert.equal(page.page.nextCursor, "opaque_cursor-1");
+  assert.throws(
+    () => semanticAiAnswerHistoryCollection({
+      workspaceId: "01900000-0000-7000-8000-000000000099",
+      projectId,
+      keywordId,
+      items: [],
+      page: { hasNext: false }
+    }, workspaceId, projectId, keywordId, { limit: 1 }),
     DomainError
   );
 });
@@ -909,13 +1000,18 @@ test("validates versioned semantic saved views and rejects DSL drift", () => {
       filters: { isTracked: true, priorityMin: 10 },
       sort: "PRIORITY_DESC",
       columns: ["query", "priority"],
-      density: "COMPACT"
+      density: "COMPACT",
+      appliedViewId: "01900000-0000-7000-8000-000000000041"
     },
     version: 2,
     createdAt: "2026-07-30T10:00:00.000Z",
     updatedAt: "2026-07-30T11:00:00.000Z"
   };
   assert.equal(semanticSavedViews([view])[0]?.config.sort, "PRIORITY_DESC");
+  assert.equal(
+    semanticSavedViews([view])[0]?.config.appliedViewId,
+    "01900000-0000-7000-8000-000000000041"
+  );
   assert.throws(
     () =>
       semanticSavedViews([

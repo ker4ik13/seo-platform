@@ -1,11 +1,13 @@
 import {
   semanticKeywordDefaultPageSize,
   semanticKeywordPageSizes,
+  semanticSavedViewGroupSidebarWidthMax,
+  semanticSavedViewGroupSidebarWidthMin,
   type SemanticKeywordPageSize
 } from "@seo-platform/contracts";
 
-export const semanticGroupSidebarMinWidth = 196;
-export const semanticGroupSidebarMaxWidth = 520;
+export const semanticGroupSidebarMinWidth = semanticSavedViewGroupSidebarWidthMin;
+export const semanticGroupSidebarMaxWidth = semanticSavedViewGroupSidebarWidthMax;
 export const semanticGroupSidebarDefaultWidth = 230;
 
 export const semanticColumnMinWidth = 64;
@@ -37,6 +39,10 @@ const defaultColumnWidths: Readonly<Record<string, number>> = {
   googleRelevantUrl: 220,
   yandexCheckedAt: 136,
   googleCheckedAt: 136,
+  yandexAiPosition: 124,
+  googleAiPosition: 124,
+  yandexAiCheckedAt: 136,
+  googleAiCheckedAt: 136,
   visibility: 104,
   group: 170,
   cluster: 132,

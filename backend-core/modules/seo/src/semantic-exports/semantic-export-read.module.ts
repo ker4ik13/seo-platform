@@ -4,6 +4,7 @@ import { KeywordGroupModule } from "../keyword-groups/keyword-group.module.js";
 import { KeywordModule } from "../keywords/keyword.module.js";
 import { SemanticCustomColumnModule } from "../semantic-custom-columns/semantic-custom-column.module.js";
 import { SemanticExportReadController } from "./semantic-export-read.controller.js";
+import { SemanticPositionHistoryExportService } from "./semantic-position-history-export.service.js";
 
 @Module({
   imports: [
@@ -12,6 +13,7 @@ import { SemanticExportReadController } from "./semantic-export-read.controller.
     KeywordGroupModule,
     SemanticCustomColumnModule
   ],
-  controllers: [SemanticExportReadController]
+  controllers: [SemanticExportReadController],
+  providers: [SemanticPositionHistoryExportService]
 })
 export class SemanticExportReadModule {}

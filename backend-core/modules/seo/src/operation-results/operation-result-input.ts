@@ -1,9 +1,11 @@
 import { BadRequestException } from "@nestjs/common";
 import type {
+  InternalAiAnswerOperationResultInput,
   InternalFrequencyOperationResultInput,
   OperationResultPageSize
 } from "@seo-platform/contracts";
 import {
+  arsenkinAiAnswerKeywordLimit,
   arsenkinWordstatKeywordLimit,
   operationResultDefaultPageSize,
   operationResultPageSizes
@@ -31,7 +33,31 @@ export function internalFrequencyOperationResultInput(
     projectId: internalUuid(string(input.projectId), "projectId"),
     actorId: internalUuid(string(input.actorId), "actorId"),
     jobId: internalUuid(string(input.jobId), "jobId"),
-    keywordIds: uuidList(input.keywordIds)
+    keywordIds: uuidList(input.keywordIds, arsenkinWordstatKeywordLimit)
+  };
+  assertInternalContext(parsed, context);
+  if (parsed.jobId !== routeJobId) invalid("Job route does not match command");
+  return parsed;
+}
+
+export function internalAiAnswerOperationResultInput(
+  value: unknown,
+  context: InternalCommandContext,
+  routeJobId: string
+): InternalAiAnswerOperationResultInput {
+  const input = exactRecord(value, [
+    "workspaceId",
+    "projectId",
+    "actorId",
+    "jobId",
+    "keywordIds"
+  ]);
+  const parsed = {
+    workspaceId: internalUuid(string(input.workspaceId), "workspaceId"),
+    projectId: internalUuid(string(input.projectId), "projectId"),
+    actorId: internalUuid(string(input.actorId), "actorId"),
+    jobId: internalUuid(string(input.jobId), "jobId"),
+    keywordIds: uuidList(input.keywordIds, arsenkinAiAnswerKeywordLimit)
   };
   assertInternalContext(parsed, context);
   if (parsed.jobId !== routeJobId) invalid("Job route does not match command");
@@ -76,11 +102,11 @@ export function operationResultCursor(
   return parsed;
 }
 
-function uuidList(value: unknown): readonly string[] {
+function uuidList(value: unknown, maximum: number): readonly string[] {
   if (
     !Array.isArray(value) ||
     value.length < 1 ||
-    value.length > arsenkinWordstatKeywordLimit
+    value.length > maximum
   ) {
     invalid("Invalid operation result keyword scope");
   }

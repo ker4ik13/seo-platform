@@ -11,6 +11,49 @@ const jobId = "01900000-0000-7000-8000-000000000004";
 const crawlId = "01900000-0000-7000-8000-000000000005";
 const context = { workspaceId, projectId, actorId };
 
+test("returns AI answer rows with per-job snapshot state", async () => {
+  const keywordId = "01900000-0000-7000-8000-000000000010";
+  const service = new OperationResultService({
+    keyword: {
+      findMany: async () => [{ id: keywordId, textOriginal: "подбор подшипника" }]
+    },
+    aiAnswerSnapshot: {
+      findMany: async () => [{
+        keywordId,
+        answerPresent: true,
+        siteFound: true,
+        position: 2,
+        rankingUrl: "https://example.com/bearing",
+        brandFound: false,
+        observedAt: new Date("2026-08-19T12:00:00.000Z"),
+        _count: { sources: 4 }
+      }]
+    }
+  } as unknown as PrismaService);
+
+  const result = await service.aiAnswer({
+    workspaceId,
+    projectId,
+    actorId,
+    jobId,
+    keywordIds: [keywordId]
+  });
+
+  assert.deepEqual(result.rows, [{
+    keywordId,
+    keyword: "подбор подшипника",
+    snapshot: {
+      answerPresent: true,
+      siteFound: true,
+      position: 2,
+      rankingUrl: "https://example.com/bearing",
+      brandFound: false,
+      sourceCount: 4,
+      observedAt: "2026-08-19T12:00:00.000Z"
+    }
+  }]);
+});
+
 test("returns exact FOUND, NOT_FOUND and PENDING rank rows", async () => {
   let observedWhere: unknown;
   const entries = [

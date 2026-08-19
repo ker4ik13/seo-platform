@@ -14,6 +14,7 @@ import type {
 import { databaseClock } from "../database/database-clock.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { safeErrorSummary } from "../runtime-safe-error.js";
+import { XMLSTOCK_YANDEX_LIVE_TURBO_MAPPING_VERSION } from "../rank-estimates/rank-estimate-execution.js";
 import {
   RankManifestClient,
   RankManifestClientError
@@ -283,12 +284,24 @@ export class RankExecutionDispatchService {
         if (invalid) {
           return { jobId, itemIds: [], invalid: true };
         }
-        if (provider !== "ARSENKIN" && provider !== "XMLSTOCK") {
+        if (
+          !run ||
+          (provider !== "ARSENKIN" && provider !== "XMLSTOCK")
+        ) {
           return { jobId, itemIds: [], invalid: true };
         }
+        const command = storedRankManifestCommand(
+          run.manifestCommand,
+          run.manifestCommandHash,
+          commandBinding(job)
+        );
         const capacity = await rankExecutionDispatchCapacity(
           transaction,
-          provider
+          provider,
+          rankProviderActiveTaskLimit(
+            provider,
+            command.execution.providerMappingVersion
+          )
         );
         const now = await databaseClock(
           transaction,
@@ -653,7 +666,8 @@ function dispatchFailureCode(error: unknown): RankJobFailureCode {
 
 async function rankExecutionDispatchCapacity(
   transaction: Prisma.TransactionClient,
-  provider: "ARSENKIN" | "XMLSTOCK"
+  provider: "ARSENKIN" | "XMLSTOCK",
+  activeTaskLimit: number | undefined
 ): Promise<number> {
   await transaction.$executeRaw`
     SELECT pg_advisory_xact_lock(
@@ -663,6 +677,9 @@ async function rankExecutionDispatchCapacity(
       )
     )
   `;
+  if (activeTaskLimit === undefined) {
+    return RANK_JOB_ACTIVE_CHUNK_LIMIT;
+  }
   const rows = await transaction.$queryRaw<
     readonly { readonly activeTaskCount: bigint }[]
   >`
@@ -674,7 +691,13 @@ async function rankExecutionDispatchCapacity(
           ON rank_job."workspace_id" = execution."workspace_id"
          AND rank_job."project_id" = execution."project_id"
          AND rank_job."id" = execution."job_id"
+        JOIN "rank_estimates" estimate
+          ON estimate."workspace_id" = execution."workspace_id"
+         AND estimate."project_id" = execution."project_id"
+         AND estimate."id" = execution."estimate_id"
         WHERE execution."provider" = ${provider}
+          AND (estimate."execution_snapshot" ->> 'providerMappingVersion')
+            IS DISTINCT FROM ${XMLSTOCK_YANDEX_LIVE_TURBO_MAPPING_VERSION}
           AND rank_job."status" = 'RUNNING'
           AND rank_job."cancel_requested_at" IS NULL
           AND (
@@ -726,8 +749,24 @@ async function rankExecutionDispatchCapacity(
   }
   return Math.max(
     0,
-    RANK_PROVIDER_ACTIVE_TASK_LIMIT - activeTaskCount
+    activeTaskLimit - activeTaskCount
   );
+}
+
+/**
+ * Standard provider jobs retain the conservative lifecycle window. Turbo is
+ * instead bounded by connector worker concurrency and durable DB leases, as
+ * the XMLStock product explicitly has no standard thread limit.
+ */
+export function rankProviderActiveTaskLimit(
+  provider: "ARSENKIN" | "XMLSTOCK",
+  providerMappingVersion: string
+): number | undefined {
+  return provider === "XMLSTOCK" &&
+    providerMappingVersion ===
+      XMLSTOCK_YANDEX_LIVE_TURBO_MAPPING_VERSION
+    ? undefined
+    : RANK_PROVIDER_ACTIVE_TASK_LIMIT;
 }
 
 function findRankJob(

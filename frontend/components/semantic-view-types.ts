@@ -7,32 +7,7 @@ export type SemanticKeywordIntent =
   | "MIXED";
 
 export type SemanticKeywordSort =
-  | "CREATED_DESC"
-  | "CREATED_ASC"
-  | "UPDATED_DESC"
-  | "UPDATED_ASC"
-  | "TEXT_ASC"
-  | "TEXT_DESC"
-  | "PRIORITY_DESC"
-  | "PRIORITY_ASC"
-  | "SOURCE_ASC"
-  | "SOURCE_DESC"
-  | "TAGS_ASC"
-  | "TAGS_DESC"
-  | "FREQUENCY_BASE_DESC"
-  | "FREQUENCY_BASE_ASC"
-  | "FREQUENCY_EXACT_DESC"
-  | "FREQUENCY_EXACT_ASC"
-  | "FREQUENCY_FIXED_DESC"
-  | "FREQUENCY_FIXED_ASC"
-  | "YANDEX_POSITION_ASC"
-  | "YANDEX_POSITION_DESC"
-  | "GOOGLE_POSITION_ASC"
-  | "GOOGLE_POSITION_DESC"
-  | "YANDEX_CHECKED_AT_ASC"
-  | "YANDEX_CHECKED_AT_DESC"
-  | "GOOGLE_CHECKED_AT_ASC"
-  | "GOOGLE_CHECKED_AT_DESC";
+  import("@seo-platform/contracts").SemanticKeywordSort;
 
 export type SemanticSystemColumn =
   | "query"
@@ -46,6 +21,10 @@ export type SemanticSystemColumn =
   | "googleRelevantUrl"
   | "yandexCheckedAt"
   | "googleCheckedAt"
+  | "yandexAiPosition"
+  | "googleAiPosition"
+  | "yandexAiCheckedAt"
+  | "googleAiCheckedAt"
   | "visibility"
   | "group"
   | "cluster"
@@ -78,6 +57,12 @@ export interface SemanticViewConfig {
   readonly sort: SemanticKeywordSort;
   readonly columns: readonly SemanticViewColumn[];
   readonly density: "COMFORTABLE" | "COMPACT";
+  readonly columnWidths?: Readonly<Record<string, number>>;
+  readonly pageSize?: 100 | 200 | 500 | 1_000;
+  readonly groupSidebarWidth?: number;
+  readonly expandedGroupIds?: readonly string[];
+  readonly selectedGroupIds?: readonly string[];
+  readonly appliedViewId?: string;
 }
 
 export interface SemanticSavedView {
@@ -115,7 +100,7 @@ export function semanticFolderSortFor(
   return (
     views.find(
       ({ name, scope }) =>
-        scope === "PROJECT_SHARED" &&
+        scope === "PRIVATE" &&
         name === semanticFolderSortViewName(groupId)
     )?.config.sort ?? fallback
   );
@@ -133,8 +118,12 @@ export const defaultSemanticViewConfig: SemanticViewConfig = {
     "wordCount",
     "yandexPosition",
     "googlePosition",
+    "yandexAiPosition",
+    "googleAiPosition",
     "yandexCheckedAt",
     "googleCheckedAt",
+    "yandexAiCheckedAt",
+    "googleAiCheckedAt",
     "group",
     "cluster",
     "targetUrl",

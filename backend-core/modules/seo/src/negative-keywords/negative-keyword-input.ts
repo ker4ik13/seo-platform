@@ -1,6 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import {
   semanticNegativeKeywordMatchModes,
+  semanticNegativeKeywordExclusionLimit,
   semanticNegativeKeywordPreviewPageSizes,
   semanticNegativeKeywordScopeKinds,
   type InternalApplySemanticNegativeKeywordsInput,
@@ -112,14 +113,37 @@ export function internalApplyNegativeKeywordsInput(
     "presetId",
     "rules",
     "scope",
-    "previewHash"
+    "previewHash",
+    "excludedKeywordIds"
   ]);
   const command = commandFields(input);
   if (
     typeof input.previewHash !== "string" ||
     !/^[a-f0-9]{64}$/u.test(input.previewHash)
   ) invalid("previewHash");
-  return { ...scope(input), ...command, previewHash: input.previewHash };
+  const excludedKeywordIds = keywordIds(
+    input.excludedKeywordIds,
+    "excludedKeywordIds"
+  );
+  return {
+    ...scope(input),
+    ...command,
+    previewHash: input.previewHash,
+    ...(excludedKeywordIds.length > 0 ? { excludedKeywordIds } : {})
+  };
+}
+
+function keywordIds(value: unknown, field: string): readonly string[] {
+  if (value === undefined) return [];
+  if (
+    !Array.isArray(value) ||
+    value.length > semanticNegativeKeywordExclusionLimit
+  ) {
+    invalid(field);
+  }
+  const values = value.map((id, index) => uuidValue(id, `${field}.${index}`));
+  if (new Set(values).size !== values.length) invalid(field);
+  return values;
 }
 
 function commandFields(input: Readonly<Record<string, unknown>>) {

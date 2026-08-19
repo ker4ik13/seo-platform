@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
-import { internalNegativeKeywordCommandInput } from "./negative-keyword-input.js";
+import {
+  internalApplyNegativeKeywordsInput,
+  internalNegativeKeywordCommandInput
+} from "./negative-keyword-input.js";
 import {
   negativeKeywordHighlightRanges,
   negativeKeywordMatchingWords
@@ -43,6 +46,28 @@ test("trusted negative keyword input remains tenant and selection scoped", () =>
       ...context,
       rules: { words: ["Москва"], matchMode: "WHOLE_WORD", caseSensitive: false },
       scope: { kind: "PROJECT", groupId: keywordId }
+    }),
+    BadRequestException
+  );
+});
+
+test("trusted apply input keeps an exact bounded list of unchecked matches", () => {
+  const keywordId = "01900000-0000-7000-8000-000000000004";
+  const input = internalApplyNegativeKeywordsInput({
+    ...context,
+    rules: { words: ["Москва"], matchMode: "WHOLE_WORD", caseSensitive: false },
+    scope: { kind: "PROJECT" },
+    previewHash: "a".repeat(64),
+    excludedKeywordIds: [keywordId]
+  });
+  assert.deepEqual(input.excludedKeywordIds, [keywordId]);
+  assert.throws(
+    () => internalApplyNegativeKeywordsInput({
+      ...context,
+      rules: { words: ["Москва"], matchMode: "WHOLE_WORD", caseSensitive: false },
+      scope: { kind: "PROJECT" },
+      previewHash: "a".repeat(64),
+      excludedKeywordIds: [keywordId, keywordId]
     }),
     BadRequestException
   );

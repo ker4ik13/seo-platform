@@ -8,6 +8,7 @@ import type { KeywordGroupService } from "../keyword-groups/keyword-group.servic
 import type { KeywordService } from "../keywords/keyword.service.js";
 import type { SemanticCustomColumnService } from "../semantic-custom-columns/semantic-custom-column.service.js";
 import { SemanticExportReadController } from "./semantic-export-read.controller.js";
+import type { SemanticPositionHistoryExportService } from "./semantic-position-history-export.service.js";
 
 const workspaceId = "01900000-0000-7000-8000-000000000001";
 const projectId = "01900000-0000-7000-8000-000000000002";
@@ -50,10 +51,21 @@ test("forwards bounded export reads inside the trusted tenant context", async ()
       return [];
     }
   } as unknown as SemanticCustomColumnService;
+  const positionHistory = {
+    list: async (...input: readonly unknown[]) => {
+      calls.push(["position-history", ...input]);
+      return {
+        data: [],
+        page: { hasNext: false, totalApprox: 0 },
+        meta: { requestId: request.id }
+      };
+    }
+  } as unknown as SemanticPositionHistoryExportService;
   const controller = new SemanticExportReadController(
     keywords,
     groups,
-    columns
+    columns,
+    positionHistory
   );
 
   assert.deepEqual(
@@ -77,6 +89,24 @@ test("forwards bounded export reads inside the trusted tenant context", async ()
     await controller.listCustomColumns(projectId, headers, request),
     { data: [], meta: { requestId: request.id } }
   );
+  assert.deepEqual(
+    await controller.listPositionHistory(
+      projectId,
+      {
+        limit: "25",
+        observedFrom: "2026-01-01T00:00:00.000Z",
+        observedBefore: "2026-08-20T00:00:00.000Z",
+        searchEngines: "YANDEX,GOOGLE"
+      },
+      headers,
+      request
+    ),
+    {
+      data: [],
+      page: { hasNext: false, totalApprox: 0 },
+      meta: { requestId: request.id }
+    }
+  );
   assert.deepEqual(calls, [
     [
       "keywords",
@@ -86,7 +116,18 @@ test("forwards bounded export reads inside the trusted tenant context", async ()
       request.id
     ],
     ["groups", workspaceId, projectId],
-    ["columns", workspaceId, projectId]
+    ["columns", workspaceId, projectId],
+    [
+      "position-history",
+      { workspaceId, projectId, actorId },
+      { limit: 25, sort: "CREATED_DESC" },
+      {
+        observedFrom: "2026-01-01T00:00:00.000Z",
+        observedBefore: "2026-08-20T00:00:00.000Z",
+        searchEngines: ["YANDEX", "GOOGLE"]
+      },
+      request.id
+    ]
   ]);
 });
 
@@ -94,7 +135,8 @@ test("rejects an export route outside the trusted project", async () => {
   const controller = new SemanticExportReadController(
     {} as KeywordService,
     {} as KeywordGroupService,
-    {} as SemanticCustomColumnService
+    {} as SemanticCustomColumnService,
+    {} as SemanticPositionHistoryExportService
   );
 
   await assert.rejects(

@@ -22,6 +22,7 @@ import { FrequencyCollectionModule } from "./frequency-collections/frequency-col
 import { JobNotificationModule } from "./job-notifications/job-notification.module.js";
 import { OperationActivityModule } from "./operation-activity/operation-activity.module.js";
 import { SemanticExportModule } from "./semantic-exports/semantic-export.module.js";
+import { AiAnswerCollectionModule } from "./ai-answer-collections/ai-answer-collection.module.js";
 
 @Module({
   imports: [
@@ -47,7 +48,8 @@ import { SemanticExportModule } from "./semantic-exports/semantic-export.module.
     FrequencyCollectionModule,
     JobNotificationModule,
     OperationActivityModule,
-    SemanticExportModule
+    SemanticExportModule,
+    AiAnswerCollectionModule
   ]
 })
 export class AppModule {}

@@ -119,7 +119,12 @@ import type {
   InternalCancelSemanticExportInput,
   SemanticExportCollection,
   SemanticExportDownload,
-  SemanticExportJobSummary
+  SemanticExportJobSummary,
+  CreateAiAnswerCollectionInput,
+  InternalCreateAiAnswerCollectionInput,
+  InternalCancelAiAnswerCollectionInput,
+  AiAnswerCollectionSummary,
+  InternalAiAnswerOperationScope
 } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
@@ -149,6 +154,10 @@ import {
   scopedSemanticExportSummary,
   semanticExportDownload
 } from "./semantic-export-response.js";
+import {
+  scopedAiAnswerCollection,
+  scopedAiAnswerOperationScope
+} from "./ai-answer-collection-response.js";
 
 interface InternalContext {
   readonly tenant: TenantAuthorization;
@@ -307,6 +316,26 @@ export class JobsClient {
     );
   }
 
+  public async listAiAnswerCollections(
+    context: InternalContext
+  ): Promise<readonly AiAnswerCollectionSummary[]> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      aiAnswerCollectionPath(context.tenant.workspaceId, projectId),
+      context
+    );
+    const input = exactRecord(value, ["collections"]);
+    if (!Array.isArray(input.collections) || input.collections.length > 25) {
+      throw invalidJobsResponse();
+    }
+    return input.collections.map((collection) => scopedAiAnswerCollection(
+      collection,
+      context.tenant.workspaceId,
+      projectId
+    ));
+  }
+
   public async listProjectOperationActivity(
     context: InternalContext
   ): Promise<ReadonlyMap<string, number>> {
@@ -391,6 +420,92 @@ export class JobsClient {
       context.tenant.workspaceId,
       projectId
     );
+  }
+
+  public async createAiAnswerCollection(
+    context: InternalContext,
+    input: CreateAiAnswerCollectionInput,
+    idempotencyKey: string,
+    jobCapacity: InternalCreateAiAnswerCollectionInput["jobCapacity"]
+  ): Promise<AiAnswerCollectionSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalCreateAiAnswerCollectionInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId,
+      idempotencyKey,
+      correlationId: context.requestId,
+      jobCapacity
+    };
+    const value = await this.request<unknown>(
+      "POST",
+      aiAnswerCollectionPath(context.tenant.workspaceId, projectId),
+      context,
+      body,
+      "shared",
+      idempotencyKey
+    );
+    return scopedAiAnswerCollection(value, context.tenant.workspaceId, projectId);
+  }
+
+  public async getAiAnswerCollection(
+    context: InternalContext,
+    jobId: string
+  ): Promise<AiAnswerCollectionSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      `${aiAnswerCollectionPath(context.tenant.workspaceId, projectId)}/${encodeURIComponent(jobId)}`,
+      context
+    );
+    return scopedAiAnswerCollection(value, context.tenant.workspaceId, projectId, jobId);
+  }
+
+  public async getAiAnswerOperationScope(
+    context: InternalContext,
+    jobId: string,
+    limit: number,
+    cursor?: string
+  ): Promise<InternalAiAnswerOperationScope> {
+    const projectId = requiredProjectId(context.tenant);
+    const url = new URL(
+      `${aiAnswerCollectionPath(
+        context.tenant.workspaceId,
+        projectId
+      )}/${encodeURIComponent(jobId)}/result-scope`,
+      this.config.services.jobs
+    );
+    url.searchParams.set("limit", String(limit));
+    if (cursor !== undefined) url.searchParams.set("cursor", cursor);
+    const value = await this.request<unknown>("GET", url.toString(), context);
+    return scopedAiAnswerOperationScope(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      jobId,
+      limit,
+      cursor
+    );
+  }
+
+  public async cancelAiAnswerCollection(
+    context: InternalContext,
+    jobId: string
+  ): Promise<AiAnswerCollectionSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalCancelAiAnswerCollectionInput = {
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId
+    };
+    const value = await this.request<unknown>(
+      "POST",
+      `${aiAnswerCollectionPath(context.tenant.workspaceId, projectId)}/${encodeURIComponent(jobId)}/cancel`,
+      context,
+      body
+    );
+    return scopedAiAnswerCollection(value, context.tenant.workspaceId, projectId, jobId);
   }
 
   public async getFrequencyCollection(
@@ -2082,6 +2197,15 @@ function frequencyCollectionPath(
   return `/internal/v1/workspaces/${encodeURIComponent(
     workspaceId
   )}/projects/${encodeURIComponent(projectId)}/frequency-collections`;
+}
+
+function aiAnswerCollectionPath(
+  workspaceId: string,
+  projectId: string
+): string {
+  return `/internal/v1/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/projects/${encodeURIComponent(projectId)}/ai-answer-collections`;
 }
 
 function technicalCrawlResponse(

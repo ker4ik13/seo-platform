@@ -18,10 +18,12 @@ export default async function SemanticsPage() {
         )
       ) : (
         <SemanticsWorkspace
+          currentUserId={context.user.id}
           projectId={context.project.id}
           projectName={context.project.name}
           projects={context.projects}
           workspaceId={context.workspace.id}
+          workspaceRoleCode={context.workspace.roleCode}
         />
       )}
     </>

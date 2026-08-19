@@ -34,10 +34,26 @@ export function rankProviderUsageEstimate(
   keywordCount: number,
   searchEngine: TrackingSearchEngine,
   depth: 30 | 50 | 100,
-  searchSource: "SEARCH_API" | "LIVE"
+  searchSource: "SEARCH_API" | "LIVE",
+  yandexLiveMode?: "TURBO"
 ): ProviderUsageEstimate {
   if (!source) return unavailableEstimate();
   if (source.provider === "XMLSTOCK") {
+    if (
+      yandexLiveMode === "TURBO" &&
+      searchEngine === "YANDEX" &&
+      searchSource === "LIVE"
+    ) {
+      const minimumRequestCount =
+        keywordCount * Math.ceil(depth / 50);
+      const maximumRequestCount =
+        keywordCount * Math.ceil(depth / 10);
+      return {
+        usage:
+          `${formatInteger(minimumRequestCount)}–${formatInteger(maximumRequestCount)} запросов XMLStock Turbo · повышенный тариф`,
+        available: providerQuotaLabel(source)
+      };
+    }
     const requestsPerKeyword =
       searchEngine === "YANDEX" && searchSource === "SEARCH_API"
         ? 1

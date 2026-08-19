@@ -16,7 +16,7 @@ import type {
 import {
   xmlStockRankPageProgress,
   xmlStockRankPageProgressHash,
-  type XmlStockRankPageProgressV1,
+  type XmlStockRankPageProgress,
   type XmlStockRankSubmitResult,
   type XmlStockRankWireRequest,
   type XmlStockStagedRankResultV1
@@ -52,7 +52,7 @@ export interface RankConnectorSubmitClaim extends RankConnectorClaim {}
 export interface RankConnectorPollClaim extends RankConnectorClaim {
   readonly providerTaskId: string;
   readonly request: RankProviderRequestIntentV1;
-  readonly providerProgress?: XmlStockRankPageProgressV1;
+  readonly providerProgress?: XmlStockRankPageProgress;
 }
 
 export interface RankConnectorSubmitPermit {
@@ -272,7 +272,7 @@ export class RankConnectorRuntimeBrokerService {
       | { readonly outcome: "PENDING" }
       | {
           readonly outcome: "CHECKPOINTED";
-          readonly progress: XmlStockRankPageProgressV1;
+          readonly progress: XmlStockRankPageProgress;
           readonly hash: Buffer;
         }
       | {
@@ -406,7 +406,7 @@ function storedProviderProgress(
   provider: "ARSENKIN" | "XMLSTOCK",
   snapshot: unknown | null,
   hashValue: Uint8Array | null
-): XmlStockRankPageProgressV1 | undefined {
+): XmlStockRankPageProgress | undefined {
   if (snapshot === null && hashValue === null) return undefined;
   if (provider !== "XMLSTOCK" || snapshot === null || hashValue === null) {
     invalid("provider progress");

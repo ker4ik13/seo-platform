@@ -28,6 +28,7 @@ import {
   buildXmlStockRankWireRequest,
   stageXmlStockRankResult,
   xmlStockRankHttpProduct,
+  xmlStockRankUsesQuota,
   xmlStockRankWireRequestHash
 } from "./xmlstock-rank.connector.js";
 
@@ -124,7 +125,7 @@ export class RankConnectorRuntimeService {
     let quotaProduct: XmlStockHttpProduct | undefined;
     if (claim.provider === "XMLSTOCK") {
       const request = buildXmlStockRankWireRequest(requestIntent);
-      if (request.delayed) {
+      if (request.delayed && xmlStockRankUsesQuota(request)) {
         quotaProduct = xmlStockRankHttpProduct(request);
         const acquired = await this.xmlStockQuota.tryAcquire({
           credentialId: claim.credentialId,
@@ -197,23 +198,8 @@ export class RankConnectorRuntimeService {
       | Awaited<ReturnType<XmlStockRankConnector["fetchResult"]>>
       | Awaited<ReturnType<ArsenkinRankConnector["fetchResult"]>>;
     if (claim.provider === "XMLSTOCK") {
-      const product = xmlStockRankHttpProduct(
-        buildXmlStockRankWireRequest(claim.request)
-      );
-      const acquired = await this.xmlStockQuota.tryAcquire({
-        credentialId: claim.credentialId,
-        product,
-        leaseMs:
-          this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS
-      });
-      if (!acquired.allowed) {
-        await this.broker.deferPollForProviderCapacity(
-          claim,
-          Math.max(5, acquired.retryAfterSeconds)
-        );
-        return "PROVIDER_CAPACITY_DELAYED";
-      }
-      try {
+      const request = buildXmlStockRankWireRequest(claim.request);
+      if (!xmlStockRankUsesQuota(request)) {
         outcome = await this.xmlStockConnector.fetchResult(
           claim.providerTaskId,
           secret,
@@ -221,13 +207,37 @@ export class RankConnectorRuntimeService {
           claim.request,
           claim.providerProgress
         );
-        await this.observeXmlStockQuota(
-          claim.credentialId,
+      } else {
+        const product = xmlStockRankHttpProduct(request);
+        const acquired = await this.xmlStockQuota.tryAcquire({
+          credentialId: claim.credentialId,
           product,
-          outcome
-        );
-      } finally {
-        await this.xmlStockQuota.release(acquired);
+          leaseMs:
+            this.providerRequestTimeoutMs() + RANK_CONNECTOR_LEASE_MARGIN_MS
+        });
+        if (!acquired.allowed) {
+          await this.broker.deferPollForProviderCapacity(
+            claim,
+            Math.max(5, acquired.retryAfterSeconds)
+          );
+          return "PROVIDER_CAPACITY_DELAYED";
+        }
+        try {
+          outcome = await this.xmlStockConnector.fetchResult(
+            claim.providerTaskId,
+            secret,
+            this.providerRequestTimeoutMs(),
+            claim.request,
+            claim.providerProgress
+          );
+          await this.observeXmlStockQuota(
+            claim.credentialId,
+            product,
+            outcome
+          );
+        } finally {
+          await this.xmlStockQuota.release(acquired);
+        }
       }
     } else {
       outcome = await this.connector.fetchResult(
@@ -247,8 +257,8 @@ export class RankConnectorRuntimeService {
       case "PENDING":
         await this.broker.completePoll(claim, {
           outcome: "PENDING",
-          ...(claim.provider === "XMLSTOCK"
-            ? { retryAfterSeconds: 25 }
+          ...("retryAfterSeconds" in outcome
+            ? { retryAfterSeconds: outcome.retryAfterSeconds }
             : {})
         });
         return "POLL_PENDING";

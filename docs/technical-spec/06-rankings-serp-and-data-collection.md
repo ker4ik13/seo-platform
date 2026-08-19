@@ -41,6 +41,12 @@ Provider-specific region ID и форма provider request получаются 
 mapping при создании immutable execution manifest и не записываются обратно
 в tracking context.
 
+Turbo для XMLStock Яндекс Live является launch-only execution option, а не
+частью tracking context. Он фиксируется immutable mapping
+`xmlstock-yandex-live@3`; обычный Live остаётся на mapping
+`xmlstock-yandex-live@2`. Такой выбор не меняет сохранённый контекст и не может
+неявно распространиться на последующие ручные или автоматические запуски.
+
 ## 2. Конфигурация отслеживания
 
 Экран позволяет:
@@ -248,6 +254,15 @@ capacity между всеми своими проектами и connector repl
 coordination и работает fail-closed; Job/lease/progress source of truth —
 PostgreSQL.
 
+XMLStock Яндекс Live Turbo не использует standard Yandex Live bucket: запрос
+явно получает `tbm=turbo`, а внешняя пропускная способность остаётся
+ограниченной worker concurrency и DB leases платформы. Turbo не занимает
+консервативное окно пяти активных provider tasks и исключается из подсчёта
+этого окна для стандартных запусков. Обычный Live явно передаёт пустой `tbm`,
+поэтому настройка Turbo в кабинете XMLStock не включает повышенный тариф
+скрытно. Provider pending code `202` в Turbo повторяется через 15 секунд;
+остальные adaptive cooldown правила стандартного Live не меняются.
+
 ### 3.4. Реализованный read slice истории
 
 SEO Data принимает exact normalized result chunks через отдельный
@@ -316,6 +331,70 @@ modal поверх истории только с этими страницам�
 съёма.
 Колонки дат участвуют в server-side sort, поэтому их
 порядок сохраняется при cursor pagination и infinite scroll.
+
+### 3.2. Отдельный съём ИИ-ответов Arsenkin
+
+ИИ-ответ не является обычным rank snapshot и запускается отдельной командой
+`Проверить ИИ-ответы`. Один запуск выбирает Яндекс или Google, numeric region,
+desktop/mobile, домен и до десяти brand-маркеров. Execution использует
+документированный Arsenkin tool `ai-serp` с фазами `set/check/get`; каждый
+keyword выбранной поисковой системы расходует два лимита Arsenkin. Оценка в UI
+показывает этот расход до запуска.
+
+Команда materialize-ит точные `keywordId/version`, выполняется фоновым
+`AI_ANSWER_COLLECTION` и разделяет общий per-credential Arsenkin provider-task
+broker с позициями и Wordstat. Отмена, polling, retry и terminal status остаются
+durable; browser не является источником истины. Provider response нормализуется
+в answer-present, признак/позицию/URL домена, brand-found, текст ответа и
+упорядоченные источники. Provider HTML разбирается внутри connector-а и
+преобразуется в bounded Markdown; raw HTML, credential и служебный provider
+payload в публичный API не выдаются.
+
+Изолированная connector-role не читает и не меняет Jobs-таблицы напрямую.
+Claim, продление lease, фиксация submit, defer/retry, quarantine, failure и
+completion проходят через отдельные `SECURITY DEFINER` broker-функции. Каждый
+переход повторно проверяет тип Job, provider route, credential, version, lease
+owner и точный batch item ID; общий Arsenkin capacity lock берётся до submit.
+
+Core SEO хранит каждый результат append-only в `ai_answer_snapshots` и
+`ai_answer_sources` с job ID, engine, region, device, host и `observedAt`.
+Уникальность `(job, keyword, engine)` делает повторную доставку идемпотентной,
+version fence не позволяет записать результат уже изменённого keyword.
+Semantic list проецирует только последний snapshot отдельно для Яндекса и
+Google: ИИ-позицию, наличие ответа и дату. Для каждого последнего снимка Core
+SEO находит предыдущую найденную позицию того же canonical keyword/engine по
+всей append-only истории независимо от региона и устройства: смена контекста
+не превращает старый запрос в «новый». Таблица показывает «Новая», рост,
+падение, отсутствие изменений или «Была N», если сайт пропал из источников.
+При наличии сохранённого ответа у
+запроса может появиться компактный индикатор-лупа; его видимость хранится в
+`keywords.show_ai_answer_button` и переключается кнопкой «Показывать ответ» в
+tenant-scoped modal. Для существующих запросов с сохранённым положительным
+ИИ-ответом additive migration включает индикатор, а для новых запросов он по
+умолчанию скрыт. Modal по нему загружает tenant-scoped полный
+снимок с форматированным ответом, источниками, позицией сайта, регионом,
+устройством и временем. Цифровые ссылки Arsenkin вида `\[1\]\[6\]` в тексте
+рендерятся как кликабельные favicon/domain chips соответствующих сохранённых
+источников, ведущие на полный URL страницы; неизвестные номера остаются
+обычным текстом. Отсутствие AI-блока является валидным результатом, а не
+ошибкой provider-а. ИИ-позиции и даты последнего ИИ-съёма поддерживают
+server-side сортировку до cursor pagination, отдельно для Яндекса и Google.
+Keyword insights отдают до 240 последних ИИ-снимков; sidebar строит график из
+14 последних снимков canonical keyword по обоим engine внутри отдельного блока
+ИИ-позиций; обычный rank-график остаётся в обычном блоке и не склеивается с
+ИИ-историей. Кнопка `История`
+загружает полный tenant-scoped журнал keyset-страницами по 200 строк через
+аутентифицированный opaque cursor. Последний снимок каждого engine, в котором
+были источники, формирует отдельный `Топ конкурентов ИИ`: позиция источника,
+title, description и URL; домен проекта выделяется тем же безопасным
+presentation-компонентом, что и обычный SERP.
+Положительный provider-признак `answerPresent` также является валидным, когда
+Arsenkin не вернул опциональные Markdown/source details: persistence не должна
+отвергать уже оплаченный ответ только из-за отсутствия этих необязательных
+полей. Проектный operation result постранично соединяет Jobs-owned immutable
+scope/status с tenant-scoped keyword label и точным SEO snapshot этого Job;
+лог доступен во время выполнения и после terminal state, не раскрывает raw
+provider payload и не выполняет повторный submit.
 
 Private/noindex Web route
 `/app/projects/:projectId/rankings` показывает UTC date range,
@@ -582,11 +661,14 @@ snapshot и ключа идемпотентности.
 Для XMLStock rank один manifest chunk содержит один keyword. Яндекс Search API
 работает асинхронно через `delayed=1`: connector сохраняет только `req_id`,
 ждёт 15 секунд до первого poll и 25 секунд между pending ответами; коды
-`202/210` означают ещё не готовый результат. Яндекс Live и Google Live
+`202/210` означают ещё не готовый результат. Обычные Яндекс Live и Google Live
 синхронны и при глубине TOP-30/50/100 выполняют 3/5/10 страниц по 10
-результатов. Все найденные позиции переводятся в абсолютный индекс; matching
-URL сохраняется как ranking/relevant URL, raw XML отбрасывается после строгой
-нормализации.
+результатов. Turbo Яндекс Live определяет фактический размер первой полной
+страницы из поддерживаемых XMLStock значений 10/20/30/40/50 и сохраняет его в
+checkpoint `xmlstock-rank-page@2`; TOP-100 поэтому занимает от 2 до 10 GET в
+зависимости от настройки аккаунта. Все найденные позиции переводятся в
+абсолютный индекс; matching URL сохраняется как ranking/relevant URL, raw XML
+отбрасывается после строгой нормализации.
 
 Источник выдачи является обязательной частью immutable estimate и request
 snapshot. В первом контуре поддерживаются XMLStock Яндекс Search API, Яндекс
@@ -594,8 +676,11 @@ Live и Google Live, а также Arsenkin Яндекс Search API, Яндек�
 Live. Для Arsenkin Яндекс доступен TOP-30; для Google — TOP-30/50/100. Estimate
 показывает расход в единицах провайдера: Arsenkin Google требует соответственно
 2/3/5 лимитов на ключ, Яндекс — 2 лимита; XMLStock Search API выполняет один
-request на ключ, Live — `ceil(depth / 10)` requests на ключ. Запуск передаёт
-ровно выбранный `credentialId` и не мутирует routing binding после estimate.
+request на ключ, standard Live — `ceil(depth / 10)` requests на ключ. Для
+Яндекс Live Turbo нижняя граница estimate равна `ceil(depth / 50)`, а
+фактический расход может достигать `ceil(depth / 10)` и зависит от выбранного
+в кабинете XMLStock размера выдачи. Запуск передаёт ровно выбранный
+`credentialId` и не мутирует routing binding после estimate.
 Перед внешним `set` connector после Redis permit атомарно резервирует один из
 пяти общих для rank/Wordstat Arsenkin slots и записывает durable submit marker.
 Если worker теряет подтверждение submit или перезапускается с marker без task
@@ -803,6 +888,17 @@ Fallback запрещён:
 - year-over-year.
 
 Если snapshots отсутствуют на точных датах, UI показывает фактически использованные даты.
+
+Фоновый XLSX-отчёт истории позиций доступен из экспорта семантики отдельно от
+обычной выгрузки таблицы. Он принимает выбранные Яндекс/Google и ограниченный
+UTC-диапазон, читает append-only BYOK history keyword ID через все tracking
+contexts и размещает фактические даты по убыванию в отдельных листах. Значения
+позиций записываются числами, отсутствующая позиция — прочерком; строки TOP-5,
+TOP-10 и TOP-30 используют Excel-формулы. Первое появление и улучшение
+окрашиваются зелёным, ухудшение и переход из найденной позиции в `not-found` —
+красным, неизменное значение — нейтральным. Нейтральный прочерк означает, что
+позиции нет и в предыдущем фактическом замере; отсутствие snapshot в отдельную
+календарную дату не приравнивается к `not-found`.
 
 ## 22. Состояния модуля
 

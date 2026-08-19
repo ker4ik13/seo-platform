@@ -103,9 +103,9 @@ export function internalUpdateSemanticKeywordInput(
   const input = exactRecord(value, [
     ...scopeFields(),
     "version",
-    ...editableFields()
+    ...updateEditableFields()
   ]);
-  const editableCount = editableFields().filter(
+  const editableCount = updateEditableFields().filter(
     (key) => input[key] !== undefined
   ).length;
   if (editableCount === 0) invalid("$");
@@ -122,6 +122,14 @@ export function internalUpdateSemanticKeywordInput(
     ...(input.isFavorite === undefined
       ? {}
       : { isFavorite: booleanValue(input.isFavorite, "isFavorite") }),
+    ...(input.showAiAnswerButton === undefined
+      ? {}
+      : {
+          showAiAnswerButton: booleanValue(
+            input.showAiAnswerButton,
+            "showAiAnswerButton"
+          )
+        }),
     ...optionalIntent(input.intent, true),
     ...optionalGroupId(input.groupId, true),
     ...optionalClusterId(input.clusterId, true),
@@ -312,6 +320,10 @@ function editableFields(): readonly string[] {
     "targetUrl",
     "tagNames"
   ];
+}
+
+function updateEditableFields(): readonly string[] {
+  return [...editableFields(), "showAiAnswerButton"];
 }
 
 function optionalNote(value: unknown, nullable: false): Readonly<{ note?: string }>;

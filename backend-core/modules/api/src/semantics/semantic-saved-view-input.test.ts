@@ -6,6 +6,9 @@ import {
   updateSemanticSavedViewInput
 } from "./semantic-saved-view-input.js";
 
+const groupId = "01900000-0000-7000-8000-000000000010";
+const appliedViewId = "01900000-0000-7000-8000-000000000011";
+
 const config = {
   schemaVersion: 1,
   filters: {
@@ -17,7 +20,13 @@ const config = {
   },
   sort: "PRIORITY_DESC",
   columns: ["query", "priority", "intent"],
-  density: "COMPACT"
+  density: "COMPACT",
+  columnWidths: { query: 420, priority: 90 },
+  pageSize: 200,
+  groupSidebarWidth: 280,
+  expandedGroupIds: [groupId],
+  selectedGroupIds: [groupId],
+  appliedViewId
 };
 
 test("normalizes an exact versioned semantic saved view", () => {
@@ -69,6 +78,15 @@ test("rejects unknown DSL fields, invalid ranges and unsafe columns", () => {
         name: "Broken",
         scope: "PRIVATE",
         config: { ...config, columns: ["query", "query"] }
+      }),
+    DomainError
+  );
+  assert.throws(
+    () =>
+      createSemanticSavedViewInput({
+        name: "Broken",
+        scope: "PRIVATE",
+        config: { ...config, groupSidebarWidth: 900 }
       }),
     DomainError
   );

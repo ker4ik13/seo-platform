@@ -578,6 +578,8 @@ import/consume. Production BYOK policy создаёт связанную audit r
 - status;
 - priority;
 - is_favorite;
+- show_ai_answer_button, видимость shortcut сохранённого ИИ-ответа рядом с
+  запросом;
 - is_tracked;
 - group_id;
 - cluster_id;

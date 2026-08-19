@@ -17,6 +17,7 @@ import type { PlatformAdminOperationQuery } from "./platform-admin-operation-inp
 const visibleOperationTypes = [
   "FREQUENCY_COLLECTION",
   "MANUAL_RANK_CHECK",
+  "AI_ANSWER_COLLECTION",
   "TECHNICAL_CRAWL",
   "KEYWORD_RESEARCH",
   "SEMANTIC_EXPORT"

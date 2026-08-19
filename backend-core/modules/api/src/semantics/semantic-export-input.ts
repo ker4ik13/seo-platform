@@ -4,9 +4,11 @@ import {
   semanticExportScopes,
   semanticKeywordIntents,
   semanticKeywordSorts,
+  semanticPositionHistorySearchEngines,
   semanticSystemColumnKeys,
   type CreateSemanticExportInput,
   type SemanticExportFilters,
+  type SemanticPositionHistoryExportOptions,
   type SemanticSavedViewColumnKey
 } from "@seo-platform/contracts";
 import { validationError } from "../common/domain-error.js";
@@ -29,11 +31,13 @@ export function createSemanticExportInput(
       "filters",
       "sort",
       "keywordIds",
-      "includeBom"
+      "includeBom",
+      "positionHistory"
     ],
     "$"
   );
   const scope = requiredEnum(input.scope, semanticExportScopes, "scope");
+  const format = requiredEnum(input.format, semanticExportFormats, "format");
   const filters =
     input.filters === undefined
       ? undefined
@@ -42,6 +46,9 @@ export function createSemanticExportInput(
     input.keywordIds === undefined
       ? undefined
       : exportKeywordIds(input.keywordIds);
+  const positionHistory = input.positionHistory === undefined
+    ? undefined
+    : positionHistoryOptions(input.positionHistory);
 
   if (
     (scope === "SELECTED" || scope === "CURRENT_PAGE") &&
@@ -65,9 +72,12 @@ export function createSemanticExportInput(
   if (scope === "FULL_CORE" && filters !== undefined) {
     invalid("filters", "Full-core export does not accept filters");
   }
+  if (positionHistory && format !== "XLSX") {
+    invalid("format", "Position history report is available only as XLSX");
+  }
 
   return {
-    format: requiredEnum(input.format, semanticExportFormats, "format"),
+    format,
     scope,
     locale: requiredEnum(input.locale, semanticExportLocales, "locale"),
     columns: exportColumns(input.columns),
@@ -80,8 +90,52 @@ export function createSemanticExportInput(
     ...(keywordIds ? { keywordIds } : {}),
     ...(input.includeBom === undefined
       ? {}
-      : { includeBom: requiredBoolean(input.includeBom, "includeBom") })
+      : { includeBom: requiredBoolean(input.includeBom, "includeBom") }),
+    ...(positionHistory ? { positionHistory } : {})
   };
+}
+
+function positionHistoryOptions(
+  value: unknown
+): SemanticPositionHistoryExportOptions {
+  const input = exactRecord(
+    value,
+    ["observedFrom", "observedBefore", "searchEngines"],
+    "positionHistory"
+  );
+  const observedFrom = canonicalInstant(
+    input.observedFrom,
+    "positionHistory.observedFrom"
+  );
+  const observedBefore = canonicalInstant(
+    input.observedBefore,
+    "positionHistory.observedBefore"
+  );
+  const duration = Date.parse(observedBefore) - Date.parse(observedFrom);
+  if (duration <= 0 || duration > 1_100 * 24 * 60 * 60 * 1_000) {
+    invalid(
+      "positionHistory.observedBefore",
+      "Date interval must be positive and no longer than 1100 days"
+    );
+  }
+  if (
+    !Array.isArray(input.searchEngines) ||
+    input.searchEngines.length < 1 ||
+    input.searchEngines.length > semanticPositionHistorySearchEngines.length
+  ) {
+    invalid("positionHistory.searchEngines", "Select at least one search engine");
+  }
+  const searchEngines = input.searchEngines.map((engine, index) =>
+    requiredEnum(
+      engine,
+      semanticPositionHistorySearchEngines,
+      `positionHistory.searchEngines[${index}]`
+    )
+  );
+  if (new Set(searchEngines).size !== searchEngines.length) {
+    invalid("positionHistory.searchEngines", "Search engines must be unique");
+  }
+  return { observedFrom, observedBefore, searchEngines };
 }
 
 function exportFilters(value: unknown): SemanticExportFilters {
@@ -226,6 +280,17 @@ function optionalString(
     invalid(field, `Must contain at most ${maxLength} characters`);
   }
   return normalized || undefined;
+}
+
+function canonicalInstant(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.length !== 24) {
+    invalid(field, "Must be a canonical ISO timestamp");
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== value) {
+    invalid(field, "Must be a canonical ISO timestamp");
+  }
+  return value;
 }
 
 function optionalUuid(value: unknown, field: string): string | undefined {

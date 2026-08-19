@@ -5,9 +5,10 @@ import { CustomSelect } from "./custom-select";
 import type {
   SemanticKeywordCleaningCase,
   SemanticKeywordCleaningPreview,
-  SemanticKeywordCleaningResult
+  SemanticKeywordCleaningResult,
+  UpdateSemanticKeywordInput
 } from "@seo-platform/contracts";
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   browserApiRequest,
   BrowserApiError
@@ -16,7 +17,15 @@ import {
 interface BulkSelection {
   readonly id: string;
   readonly version: number;
+  readonly text: string;
+  readonly language: string;
+  readonly priority: number;
+  readonly isFavorite: boolean;
+  readonly intent?: BulkIntent;
+  readonly groupId?: string;
   readonly clusterId?: string;
+  readonly targetUrl?: string;
+  readonly tags: readonly string[];
 }
 
 interface BulkGroup {
@@ -71,6 +80,7 @@ export function SemanticBulkEditor({
   selections,
   groups,
   clusters,
+  initialFocus,
   onCancel,
   onCompleted,
   onSplitCompleted
@@ -79,20 +89,36 @@ export function SemanticBulkEditor({
   selections: readonly BulkSelection[];
   groups: readonly BulkGroup[];
   clusters: readonly BulkCluster[];
+  initialFocus?: "TAGS";
   onCancel: () => void;
   onCompleted: (result: BulkResult) => void;
   onSplitCompleted: (result: SplitResult) => void;
 }>) {
-  const [priority, setPriority] = useState("");
-  const [favorite, setFavorite] = useState<"KEEP" | "YES" | "NO">("KEEP");
-  const [intent, setIntent] = useState<"KEEP" | "CLEAR" | BulkIntent>("KEEP");
-  const [groupId, setGroupId] = useState<"KEEP" | "CLEAR" | string>("KEEP");
-  const [clusterId, setClusterId] = useState<"KEEP" | "CLEAR" | string>("KEEP");
+  const single = selections.length === 1 ? selections[0] : undefined;
+  const [text, setText] = useState(single?.text ?? "");
+  const [language, setLanguage] = useState(single?.language ?? "ru");
+  const [priority, setPriority] = useState(
+    single ? String(single.priority) : ""
+  );
+  const [favorite, setFavorite] = useState<"KEEP" | "YES" | "NO">(
+    single ? (single.isFavorite ? "YES" : "NO") : "KEEP"
+  );
+  const [intent, setIntent] = useState<"KEEP" | "CLEAR" | BulkIntent>(
+    single?.intent ?? (single ? "CLEAR" : "KEEP")
+  );
+  const [groupId, setGroupId] = useState<"KEEP" | "CLEAR" | string>(
+    single?.groupId ?? (single ? "CLEAR" : "KEEP")
+  );
+  const [clusterId, setClusterId] = useState<"KEEP" | "CLEAR" | string>(
+    single?.clusterId ?? (single ? "CLEAR" : "KEEP")
+  );
   const [targetUrlMode, setTargetUrlMode] =
-    useState<"KEEP" | "CLEAR" | "SET">("KEEP");
-  const [targetUrl, setTargetUrl] = useState("");
-  const [replaceTags, setReplaceTags] = useState(false);
-  const [tagNames, setTagNames] = useState("");
+    useState<"KEEP" | "CLEAR" | "SET">(
+      single ? (single.targetUrl ? "SET" : "CLEAR") : "KEEP"
+    );
+  const [targetUrl, setTargetUrl] = useState(single?.targetUrl ?? "");
+  const [replaceTags, setReplaceTags] = useState(Boolean(single));
+  const [tagNames, setTagNames] = useState(single?.tags.join(", ") ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string>();
   const [result, setResult] = useState<BulkResult>();
@@ -113,12 +139,17 @@ export function SemanticBulkEditor({
     useState<SemanticKeywordCleaningPreview>();
   const [cleaningBusy, setCleaningBusy] = useState<"PREVIEW" | "APPLY">();
   const [cleaningError, setCleaningError] = useState<string>();
+  const tagsRef = useRef<HTMLInputElement>(null);
   const sourceClusterId = selections[0]?.clusterId;
   const sourceCluster = sourceClusterId && selections.every(
     ({ clusterId: itemClusterId }) => itemClusterId === sourceClusterId
   )
     ? clusters.find(({ id }) => id === sourceClusterId)
     : undefined;
+
+  useEffect(() => {
+    if (initialFocus === "TAGS") tagsRef.current?.focus();
+  }, [initialFocus]);
 
   const cleaningRules = {
     collapseWhitespace,
@@ -251,47 +282,62 @@ export function SemanticBulkEditor({
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (saving) return;
-    const patch = {
-      ...(priority === "" ? {} : { priority: Number(priority) }),
-      ...(favorite === "KEEP"
-        ? {}
-        : { isFavorite: favorite === "YES" }),
-      ...(intent === "KEEP"
-        ? {}
-        : { intent: intent === "CLEAR" ? null : intent }),
-      ...(groupId === "KEEP"
-        ? {}
-        : { groupId: groupId === "CLEAR" ? null : groupId }),
-      ...(clusterId === "KEEP"
-        ? {}
-        : { clusterId: clusterId === "CLEAR" ? null : clusterId }),
-      ...(targetUrlMode === "KEEP"
-        ? {}
-        : {
-            targetUrl: targetUrlMode === "CLEAR" ? null : targetUrl
-          }),
-      ...(replaceTags ? { tagNames: parseTags(tagNames) } : {})
-    };
+    const nextTags = parseTags(tagNames);
+    const patch = single
+      ? singleKeywordPatch(single, {
+          text,
+          language,
+          priority,
+          favorite,
+          intent,
+          groupId,
+          clusterId,
+          targetUrl,
+          tagNames: nextTags
+        })
+      : {
+          ...(priority === "" ? {} : { priority: Number(priority) }),
+          ...(favorite === "KEEP"
+            ? {}
+            : { isFavorite: favorite === "YES" }),
+          ...(intent === "KEEP"
+            ? {}
+            : { intent: intent === "CLEAR" ? null : intent }),
+          ...(groupId === "KEEP"
+            ? {}
+            : { groupId: groupId === "CLEAR" ? null : groupId }),
+          ...(clusterId === "KEEP"
+            ? {}
+            : { clusterId: clusterId === "CLEAR" ? null : clusterId }),
+          ...(targetUrlMode === "KEEP"
+            ? {}
+            : {
+                targetUrl: targetUrlMode === "CLEAR" ? null : targetUrl
+              }),
+          ...(replaceTags ? { tagNames: nextTags } : {})
+        };
     if (Object.keys(patch).length === 0) {
-      setError("Выберите хотя бы одно изменение.");
+      setError(single ? "Нет изменений для сохранения." : "Выберите хотя бы одно изменение.");
       return;
     }
     setSaving(true);
     setError(undefined);
     setResult(undefined);
     try {
-      const response = await browserApiRequest<BulkResult>(
-        `/app/api/projects/${encodeURIComponent(
-          projectId
-        )}/bulk-commands`,
-        {
-          method: "POST",
-          body: {
-            items: selections.map(({ id, version }) => ({ id, version })),
-            patch
-          }
-        }
-      );
+      const response = single
+        ? await updateSingleKeyword(projectId, single, patch)
+        : await browserApiRequest<BulkResult>(
+            `/app/api/projects/${encodeURIComponent(
+              projectId
+            )}/bulk-commands`,
+            {
+              method: "POST",
+              body: {
+                items: selections.map(({ id, version }) => ({ id, version })),
+                patch
+              }
+            }
+          );
       setResult(response);
       onCompleted(response);
     } catch (requestError) {
@@ -302,34 +348,56 @@ export function SemanticBulkEditor({
   }
 
   return (
-    <form className="semantic-bulk-editor" onSubmit={(event) => void submit(event)}>
+    <form className={`semantic-bulk-editor${single ? " single" : ""}`} onSubmit={(event) => void submit(event)}>
       <div className="semantic-bulk-heading">
         <div>
-          <strong>Массовое изменение · {selections.length}</strong>
-          <span>Версия проверяется отдельно для каждого запроса.</span>
+          <strong>
+            {single ? "Свойства запроса" : `Выбрано запросов: ${selections.length}`}
+          </strong>
+          <span>
+            {single
+              ? "Измените нужные значения в одной форме."
+              : "Поля со значением «Не менять» останутся без изменений."}
+          </span>
         </div>
-        <button
-          className="text-button"
-          disabled={saving}
-          onClick={onCancel}
-          type="button"
-        >
-          Закрыть
-        </button>
       </div>
       <div className="semantic-bulk-grid">
-        <label>
+        {single && (
+          <>
+            <label className="semantic-bulk-query">
+              <span>Запрос</span>
+              <input
+                autoFocus={initialFocus !== "TAGS"}
+                maxLength={2_000}
+                onChange={(event) => setText(event.target.value)}
+                required
+                value={text}
+              />
+            </label>
+            <label className="semantic-bulk-language">
+              <span>Язык</span>
+              <input
+                maxLength={16}
+                onChange={(event) => setLanguage(event.target.value)}
+                required
+                value={language}
+              />
+            </label>
+          </>
+        )}
+        <label className="semantic-bulk-priority">
           <span>Приоритет</span>
           <input
             max={100}
             min={0}
             onChange={(event) => setPriority(event.target.value)}
             placeholder="Не менять"
+            required={Boolean(single)}
             type="number"
             value={priority}
           />
         </label>
-        <label>
+        <label className="semantic-bulk-favorite">
           <span>Избранное</span>
           <CustomSelect
             onChange={(event) =>
@@ -337,12 +405,12 @@ export function SemanticBulkEditor({
             }
             value={favorite}
           >
-            <option value="KEEP">Не менять</option>
-            <option value="YES">Добавить</option>
-            <option value="NO">Убрать</option>
+            {!single && <option value="KEEP">Не менять</option>}
+            <option value="YES">{single ? "Да" : "Добавить"}</option>
+            <option value="NO">{single ? "Нет" : "Убрать"}</option>
           </CustomSelect>
         </label>
-        <label>
+        <label className="semantic-bulk-intent">
           <span>Интент</span>
           <CustomSelect
             onChange={(event) =>
@@ -350,8 +418,8 @@ export function SemanticBulkEditor({
             }
             value={intent}
           >
-            <option value="KEEP">Не менять</option>
-            <option value="CLEAR">Очистить</option>
+            {!single && <option value="KEEP">Не менять</option>}
+            <option value="CLEAR">{single ? "Не задан" : "Очистить"}</option>
             <option value="INFORMATIONAL">Информационный</option>
             <option value="NAVIGATIONAL">Навигационный</option>
             <option value="COMMERCIAL">Коммерческий</option>
@@ -360,13 +428,13 @@ export function SemanticBulkEditor({
             <option value="MIXED">Смешанный</option>
           </CustomSelect>
         </label>
-        <label>
+        <label className="semantic-bulk-group">
           <span>Группа</span>
           <CustomSelect
             onChange={(event) => setGroupId(event.target.value)}
             value={groupId}
           >
-            <option value="KEEP">Не менять</option>
+            {!single && <option value="KEEP">Не менять</option>}
             <option value="CLEAR">Без группы</option>
             {groups.map((group) => (
               <option key={group.id} value={group.id}>
@@ -375,30 +443,47 @@ export function SemanticBulkEditor({
             ))}
           </CustomSelect>
         </label>
-        <label>
+        <label className="semantic-bulk-cluster">
           <span>Кластер</span>
           <CustomSelect onChange={(event) => setClusterId(event.target.value)} value={clusterId}>
-            <option value="KEEP">Не менять</option>
+            {!single && <option value="KEEP">Не менять</option>}
             <option value="CLEAR">Без кластера</option>
             {clusters.map((cluster) => (
               <option key={cluster.id} value={cluster.id}>{cluster.name}</option>
             ))}
           </CustomSelect>
         </label>
-        <label>
-          <span>Целевая URL</span>
-          <CustomSelect
-            onChange={(event) =>
-              setTargetUrlMode(event.target.value as typeof targetUrlMode)
-            }
-            value={targetUrlMode}
-          >
-            <option value="KEEP">Не менять</option>
-            <option value="CLEAR">Очистить</option>
-            <option value="SET">Задать URL</option>
-          </CustomSelect>
-        </label>
-        {targetUrlMode === "SET" && (
+        {single ? (
+          <label className="semantic-bulk-url">
+            <span>Целевая URL</span>
+            <input
+              maxLength={2_048}
+              onChange={(event) => {
+                const value = event.target.value;
+                setTargetUrl(value);
+                setTargetUrlMode(value ? "SET" : "CLEAR");
+              }}
+              placeholder="https://example.com/page"
+              type="url"
+              value={targetUrl}
+            />
+          </label>
+        ) : (
+          <label>
+            <span>Целевая URL</span>
+            <CustomSelect
+              onChange={(event) =>
+                setTargetUrlMode(event.target.value as typeof targetUrlMode)
+              }
+              value={targetUrlMode}
+            >
+              <option value="KEEP">Не менять</option>
+              <option value="CLEAR">Очистить</option>
+              <option value="SET">Задать URL</option>
+            </CustomSelect>
+          </label>
+        )}
+        {!single && targetUrlMode === "SET" && (
           <label className="semantic-bulk-url">
             <span>Новая URL</span>
             <input
@@ -411,21 +496,26 @@ export function SemanticBulkEditor({
         )}
         <label className="semantic-bulk-tags">
           <span>
-            <input
-              checked={replaceTags}
-              onChange={(event) => setReplaceTags(event.target.checked)}
-              type="checkbox"
-            />
-            Заменить теги
+            {!single && (
+              <input
+                checked={replaceTags}
+                onChange={(event) => setReplaceTags(event.target.checked)}
+                type="checkbox"
+              />
+            )}
+            {single ? "Теги через запятую" : "Заменить теги"}
           </span>
           <input
             disabled={!replaceTags}
             onChange={(event) => setTagNames(event.target.value)}
             placeholder="Важно, Услуги (пусто — удалить все)"
+            ref={tagsRef}
             value={tagNames}
           />
         </label>
       </div>
+      {!single && (
+        <>
       <details className="semantic-bulk-split">
         <summary>
           <span>Выделить в новый кластер</span>
@@ -662,6 +752,8 @@ export function SemanticBulkEditor({
           </div>
         </div>
       </details>
+        </>
+      )}
       {error && (
         <div className="inline-alert danger" role="alert">
           {error}
@@ -700,6 +792,79 @@ function parseTags(value: string): readonly string[] {
         .map((tag) => [tag.toLocaleLowerCase(), tag] as const)
     ).values()
   ].slice(0, 50);
+}
+
+function singleKeywordPatch(
+  initial: BulkSelection,
+  values: Readonly<{
+    text: string;
+    language: string;
+    priority: string;
+    favorite: "KEEP" | "YES" | "NO";
+    intent: "KEEP" | "CLEAR" | BulkIntent;
+    groupId: string;
+    clusterId: string;
+    targetUrl: string;
+    tagNames: readonly string[];
+  }>
+): UpdateSemanticKeywordInput {
+  const text = values.text.normalize("NFKC").trim();
+  const language = values.language.normalize("NFKC").trim();
+  const priority = Number(values.priority);
+  const intent = values.intent === "CLEAR"
+    ? null
+    : values.intent === "KEEP"
+      ? (initial.intent ?? null)
+      : values.intent;
+  const groupId = values.groupId === "CLEAR"
+    ? null
+    : values.groupId === "KEEP"
+      ? (initial.groupId ?? null)
+      : values.groupId;
+  const clusterId = values.clusterId === "CLEAR"
+    ? null
+    : values.clusterId === "KEEP"
+      ? (initial.clusterId ?? null)
+      : values.clusterId;
+  const targetUrl = values.targetUrl.normalize("NFKC").trim() || null;
+  const initialTags = parseTags(initial.tags.join(","));
+  return {
+    ...(text === initial.text ? {} : { text }),
+    ...(language === initial.language ? {} : { language }),
+    ...(priority === initial.priority ? {} : { priority }),
+    ...(values.favorite === (initial.isFavorite ? "YES" : "NO")
+      ? {}
+      : { isFavorite: values.favorite === "YES" }),
+    ...(intent === (initial.intent ?? null) ? {} : { intent }),
+    ...(groupId === (initial.groupId ?? null) ? {} : { groupId }),
+    ...(clusterId === (initial.clusterId ?? null) ? {} : { clusterId }),
+    ...(targetUrl === (initial.targetUrl ?? null) ? {} : { targetUrl }),
+    ...(sameTags(values.tagNames, initialTags)
+      ? {}
+      : { tagNames: values.tagNames })
+  };
+}
+
+async function updateSingleKeyword(
+  projectId: string,
+  selection: BulkSelection,
+  patch: UpdateSemanticKeywordInput
+): Promise<BulkResult> {
+  await browserApiRequest<unknown>(
+    `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(selection.id)}`,
+    { method: "PATCH", body: patch, ifMatch: selection.version }
+  );
+  return {
+    selected: 1,
+    changed: 1,
+    skipped: 0,
+    failed: 0,
+    conflicted: 0
+  };
+}
+
+function sameTags(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((tag, index) => tag === right[index]);
 }
 
 function cleaningStateLabel(

@@ -1,7 +1,10 @@
 import {
   semanticKeywordIntents,
+  semanticKeywordPageSizes,
   semanticKeywordSorts,
   semanticSavedViewDensities,
+  semanticSavedViewGroupSidebarWidthMax,
+  semanticSavedViewGroupSidebarWidthMin,
   semanticSavedViewScopes,
   semanticSystemColumnKeys,
   type CreateSemanticSavedViewInput,
@@ -47,13 +50,49 @@ export function updateSemanticSavedViewInput(
 export function savedViewConfig(value: unknown): SemanticSavedViewConfig {
   const input = exactRecord(
     value,
-    ["schemaVersion", "filters", "sort", "columns", "density"],
+    [
+      "schemaVersion",
+      "filters",
+      "sort",
+      "columns",
+      "density",
+      "columnWidths",
+      "pageSize",
+      "groupSidebarWidth",
+      "expandedGroupIds",
+      "selectedGroupIds",
+      "appliedViewId"
+    ],
     "config"
   );
   if (input.schemaVersion !== 1) {
     invalid("config.schemaVersion", "Only schema version 1 is supported");
   }
   const columns = requiredColumns(input.columns);
+  const columnWidths = optionalColumnWidths(input.columnWidths, columns);
+  const pageSize = input.pageSize === undefined
+    ? undefined
+    : requiredNumberMember(input.pageSize, semanticKeywordPageSizes, "config.pageSize");
+  const groupSidebarWidth = optionalInteger(
+    input.groupSidebarWidth,
+    "config.groupSidebarWidth",
+    semanticSavedViewGroupSidebarWidthMin,
+    semanticSavedViewGroupSidebarWidthMax
+  );
+  const expandedGroupIds = optionalUuidArray(
+    input.expandedGroupIds,
+    "config.expandedGroupIds",
+    1_000
+  );
+  const selectedGroupIds = optionalUuidArray(
+    input.selectedGroupIds,
+    "config.selectedGroupIds",
+    100
+  );
+  const appliedViewId = optionalUuid(
+    input.appliedViewId,
+    "config.appliedViewId"
+  );
   return {
     schemaVersion: 1,
     filters: savedViewFilters(input.filters),
@@ -63,7 +102,13 @@ export function savedViewConfig(value: unknown): SemanticSavedViewConfig {
       input.density,
       semanticSavedViewDensities,
       "config.density"
-    )
+    ),
+    ...(columnWidths ? { columnWidths } : {}),
+    ...(pageSize === undefined ? {} : { pageSize }),
+    ...(groupSidebarWidth === undefined ? {} : { groupSidebarWidth }),
+    ...(expandedGroupIds ? { expandedGroupIds } : {}),
+    ...(selectedGroupIds ? { selectedGroupIds } : {}),
+    ...(appliedViewId ? { appliedViewId } : {})
   };
 }
 
@@ -141,9 +186,9 @@ function requiredColumns(
   if (
     !Array.isArray(value) ||
     value.length < 1 ||
-    value.length > 108
+    value.length > 128
   ) {
-    invalid("config.columns", "Must contain 1 to 108 columns");
+    invalid("config.columns", "Must contain 1 to 128 columns");
   }
   const columns = value.map((column, index) => {
     if (
@@ -166,6 +211,43 @@ function requiredColumns(
     );
   }
   return columns;
+}
+
+function optionalColumnWidths(
+  value: unknown,
+  columns: SemanticSavedViewConfig["columns"]
+): SemanticSavedViewConfig["columnWidths"] | undefined {
+  if (value === undefined) return undefined;
+  const input = exactRecord(value, columns, "config.columnWidths");
+  const entries = Object.entries(input);
+  if (entries.length > columns.length) invalid("config.columnWidths", "Too many widths");
+  const result: Record<string, number> = {};
+  for (const [key, width] of entries) {
+    if (!Number.isSafeInteger(width) || Number(width) < 56 || Number(width) > 1_200) {
+      invalid(`config.columnWidths.${key}`, "Must be an integer between 56 and 1200");
+    }
+    result[key] = Number(width);
+  }
+  return result as SemanticSavedViewConfig["columnWidths"];
+}
+
+function optionalUuidArray(
+  value: unknown,
+  field: string,
+  maximum: number
+): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > maximum) {
+    invalid(field, `Must contain at most ${maximum} identifiers`);
+  }
+  const values = value.map((item, index) => {
+    if (typeof item !== "string" || !UUID_PATTERN.test(item)) {
+      invalid(`${field}[${index}]`, "Must be a UUID");
+    }
+    return item.toLowerCase();
+  });
+  if (new Set(values).size !== values.length) invalid(field, "Must be unique");
+  return values;
 }
 
 function viewName(value: unknown): string {
@@ -219,12 +301,36 @@ function optionalPriority(
   return Number(value);
 }
 
+function optionalInteger(
+  value: unknown,
+  field: string,
+  minimum: number,
+  maximum: number
+): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || Number(value) < minimum || Number(value) > maximum) {
+    invalid(field, `Must be an integer between ${minimum} and ${maximum}`);
+  }
+  return Number(value);
+}
+
 function requiredEnum<T extends string>(
   value: unknown,
   values: readonly T[],
   field: string
 ): T {
   if (typeof value !== "string" || !values.includes(value as T)) {
+    invalid(field, `Must be one of: ${values.join(", ")}`);
+  }
+  return value as T;
+}
+
+function requiredNumberMember<T extends number>(
+  value: unknown,
+  values: readonly T[],
+  field: string
+): T {
+  if (typeof value !== "number" || !values.includes(value as T)) {
     invalid(field, `Must be one of: ${values.join(", ")}`);
   }
   return value as T;

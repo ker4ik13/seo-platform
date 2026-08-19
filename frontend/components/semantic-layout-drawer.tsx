@@ -18,6 +18,7 @@ import { Icon } from "./icon";
 type LayoutTab = "COLUMNS" | "PRESENTATION";
 
 export function SemanticLayoutDrawer({
+  activeView,
   config,
   customColumns,
   onApply,
@@ -29,8 +30,13 @@ export function SemanticLayoutDrawer({
   onReset,
   onToggleColumn,
   projectId,
-  saving
+  saving,
+  currentUserId,
+  canManageShared,
+  isActiveViewDirty,
+  onActiveViewChange
 }: Readonly<{
+  activeView: SemanticSavedView | undefined;
   config: SemanticViewConfig;
   customColumns: readonly SemanticCustomColumn[];
   onApply: () => void;
@@ -43,6 +49,10 @@ export function SemanticLayoutDrawer({
   onToggleColumn: (column: SemanticViewColumn) => void;
   projectId: string;
   saving: boolean;
+  currentUserId: string;
+  canManageShared: boolean;
+  isActiveViewDirty: boolean;
+  onActiveViewChange: (view?: SemanticSavedView) => void;
 }>) {
   const [tab, setTab] = useState<LayoutTab>("COLUMNS");
   const [search, setSearch] = useState("");
@@ -148,9 +158,14 @@ export function SemanticLayoutDrawer({
             </div>
           </section>
           <SemanticSavedViews
+            activeView={activeView}
+            canManageShared={canManageShared}
             config={config}
+            currentUserId={currentUserId}
             embedded
+            isActiveViewDirty={isActiveViewDirty}
             onApply={onApplySavedView}
+            onActiveViewChange={onActiveViewChange}
             projectId={projectId}
           />
         </div>
@@ -206,6 +221,10 @@ const systemColumns: readonly Readonly<{ key: SemanticViewColumn; label: string 
   { key: "googleRelevantUrl", label: "URL Google" },
   { key: "yandexCheckedAt", label: "Дата съёма Яндекс" },
   { key: "googleCheckedAt", label: "Дата съёма Google" },
+  { key: "yandexAiPosition", label: "ИИ-позиция Яндекс" },
+  { key: "googleAiPosition", label: "ИИ-позиция Google" },
+  { key: "yandexAiCheckedAt", label: "Дата ИИ-съёма Яндекс" },
+  { key: "googleAiCheckedAt", label: "Дата ИИ-съёма Google" },
   { key: "visibility", label: "Видимость" },
   { key: "group", label: "Группа" },
   { key: "cluster", label: "Кластер" },

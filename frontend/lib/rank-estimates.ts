@@ -10,6 +10,7 @@ import {
   type RankEstimateBlockerCode,
   type RankEstimateCredentialFreshness,
   type RankEstimateQuota,
+  type RankYandexLiveMode,
   type RankSearchSource,
   type RankEstimateScopeHash,
   type TrackingContextSummary
@@ -142,13 +143,15 @@ export function rankEstimateInput(
   trackingContextId: string,
   provider?: "ARSENKIN" | "XMLSTOCK",
   credentialId?: string,
-  searchSource?: RankSearchSource
+  searchSource?: RankSearchSource,
+  yandexLiveMode?: RankYandexLiveMode
 ): CreateRankEstimateInput {
   return {
     trackingContextId,
     ...(provider ? { provider } : {}),
     ...(credentialId ? { credentialId } : {}),
-    ...(searchSource ? { searchSource } : {})
+    ...(searchSource ? { searchSource } : {}),
+    ...(yandexLiveMode ? { yandexLiveMode } : {})
   };
 }
 
@@ -156,10 +159,17 @@ export function rankEstimatePayloadSignature(
   trackingContextId: string,
   provider?: "ARSENKIN" | "XMLSTOCK",
   credentialId?: string,
-  searchSource?: RankSearchSource
+  searchSource?: RankSearchSource,
+  yandexLiveMode?: RankYandexLiveMode
 ): string {
   return JSON.stringify(
-    rankEstimateInput(trackingContextId, provider, credentialId, searchSource)
+    rankEstimateInput(
+      trackingContextId,
+      provider,
+      credentialId,
+      searchSource,
+      yandexLiveMode
+    )
   );
 }
 
@@ -167,13 +177,15 @@ export function rankEstimateCommandSignature(
   context: TrackingContextSummary,
   provider?: "ARSENKIN" | "XMLSTOCK",
   credentialId?: string,
-  searchSource?: RankSearchSource
+  searchSource?: RankSearchSource,
+  yandexLiveMode?: RankYandexLiveMode
 ): string {
   return `${rankEstimatePayloadSignature(
     context.id,
     provider,
     credentialId,
-    searchSource
+    searchSource,
+    yandexLiveMode
   )}:${rankEstimateContextSignature(context)}`;
 }
 
@@ -184,11 +196,18 @@ export function rankEstimateIdempotencyCommand(
   createKey: () => string,
   provider?: "ARSENKIN" | "XMLSTOCK",
   credentialId?: string,
-  searchSource?: RankSearchSource
+  searchSource?: RankSearchSource,
+  yandexLiveMode?: RankYandexLiveMode
 ): IdempotentCommand {
   return stableIdempotencyCommand(
     explicitRecalculation ? undefined : current,
-    rankEstimateCommandSignature(context, provider, credentialId, searchSource),
+    rankEstimateCommandSignature(
+      context,
+      provider,
+      credentialId,
+      searchSource,
+      yandexLiveMode
+    ),
     createKey
   );
 }
@@ -623,7 +642,7 @@ function parseWorkload(
     ((xmlStockYandexStages && minimumRequestCount === xmlStockTasks * 2n) ||
       (xmlStockGoogleStages &&
         (xmlStockTasks === 0n ||
-          [3n, 5n, 10n].includes(xmlStockGooglePageCount))));
+          [1n, 2n, 3n, 5n, 10n].includes(xmlStockGooglePageCount))));
   const normalizedRequestStages: RankEstimate["workload"]["requestStages"] =
     arsenkinStages
       ? ["SET", "CHECK", "GET"]

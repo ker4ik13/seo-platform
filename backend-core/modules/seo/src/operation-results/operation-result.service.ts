@@ -5,6 +5,8 @@ import {
   semanticFrequencyQualityFlags,
   type CrawlOperationIssue,
   type CrawlOperationResultRow,
+  type InternalAiAnswerOperationResult,
+  type InternalAiAnswerOperationResultInput,
   type InternalCrawlOperationResultPage,
   type InternalFrequencyOperationResult,
   type InternalFrequencyOperationResultInput,
@@ -144,6 +146,73 @@ export class OperationResultService {
             qualityFlags: frequencyQualityFlags(snapshot.qualityFlags),
             observedAt: snapshot.observedAt.toISOString()
           }))
+        };
+      })
+    };
+  }
+
+  public async aiAnswer(
+    input: InternalAiAnswerOperationResultInput
+  ): Promise<InternalAiAnswerOperationResult> {
+    const [keywords, snapshots] = await Promise.all([
+      this.prisma.keyword.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          id: { in: [...input.keywordIds] }
+        },
+        select: { id: true, textOriginal: true }
+      }),
+      this.prisma.aiAnswerSnapshot.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          jobId: input.jobId,
+          keywordId: { in: [...input.keywordIds] }
+        },
+        select: {
+          keywordId: true,
+          answerPresent: true,
+          siteFound: true,
+          position: true,
+          rankingUrl: true,
+          brandFound: true,
+          observedAt: true,
+          _count: { select: { sources: true } }
+        }
+      })
+    ]);
+    if (snapshots.length > input.keywordIds.length) {
+      invalidStored("AI answer result is oversized");
+    }
+    const keywordById = new Map(keywords.map((row) => [row.id, row.textOriginal]));
+    const snapshotById = new Map(snapshots.map((row) => [row.keywordId, row]));
+    return {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      jobId: input.jobId,
+      rows: input.keywordIds.map((keywordId) => {
+        const keyword = keywordById.get(keywordId);
+        if (keyword === undefined) {
+          throw new NotFoundException("AI answer result keyword not found");
+        }
+        const snapshot = snapshotById.get(keywordId);
+        return {
+          keywordId,
+          keyword,
+          ...(snapshot
+            ? {
+                snapshot: {
+                  answerPresent: snapshot.answerPresent,
+                  siteFound: snapshot.siteFound,
+                  ...(snapshot.position === null ? {} : { position: snapshot.position }),
+                  ...(snapshot.rankingUrl === null ? {} : { rankingUrl: snapshot.rankingUrl }),
+                  brandFound: snapshot.brandFound,
+                  sourceCount: snapshot._count.sources,
+                  observedAt: snapshot.observedAt.toISOString()
+                }
+              }
+            : {})
         };
       })
     };

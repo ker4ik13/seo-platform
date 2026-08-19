@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SemanticKeywordListItem } from "@seo-platform/contracts";
+import type {
+  SemanticKeywordListItem,
+  SemanticPositionHistoryExportRow
+} from "@seo-platform/contracts";
+import { unzipSync } from "fflate";
 import type { PrismaService } from "../database/prisma.service.js";
 import {
   Prisma,
@@ -82,6 +86,76 @@ test("background worker exports all 2,002 rows and commits one artifact", async 
       new TextDecoder().decode(artifact).trimEnd().split("\r\n").length,
       2_003
     );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("background worker builds the position history report in two bounded passes", async () => {
+  let stored = {
+    ...queuedJob(),
+    inputSnapshot: {
+      format: "XLSX",
+      scope: "FULL_CORE",
+      locale: "ru",
+      columns: ["query"],
+      positionHistory: {
+        observedFrom: "2026-08-01T00:00:00.000Z",
+        observedBefore: "2026-08-20T00:00:00.000Z",
+        searchEngines: ["YANDEX"]
+      }
+    }
+  } as Job;
+  const prisma = memoryPrisma(
+    () => stored,
+    (next) => { stored = next; }
+  );
+  let reads = 0;
+  const historyRows: readonly SemanticPositionHistoryExportRow[] = [
+    {
+      keywordId: "01900000-0000-7000-8000-000000000011",
+      text: "первый запрос",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      snapshots: [
+        { searchEngine: "YANDEX", observedDate: "2026-08-18", found: true, position: 4 }
+      ]
+    },
+    {
+      keywordId: "01900000-0000-7000-8000-000000000012",
+      text: "второй запрос",
+      createdAt: "2026-07-02T00:00:00.000Z",
+      snapshots: [
+        { searchEngine: "YANDEX", observedDate: "2026-08-18", found: false }
+      ]
+    }
+  ];
+  const seoData = {
+    listExportCustomColumns: async () => {
+      throw new Error("Position report must not load custom columns");
+    },
+    listExportPositionHistory: async () => {
+      reads += 1;
+      return {
+        data: historyRows,
+        page: { hasNext: false, totalApprox: historyRows.length },
+        meta: { requestId: "test" }
+      };
+    }
+  } as unknown as SeoDataClient;
+  const storage = memoryStorage();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = storage.fetch;
+  try {
+    const worker = new SemanticExportWorkerService(prisma, seoData, storage.port);
+    const result = await worker.process(stored.id, worker.workerId());
+
+    assert.equal(result.outcome, "COMPLETED");
+    assert.equal(result.rowCount, 2);
+    assert.equal(reads, 2);
+    const archive = unzipSync(storage.artifact());
+    const sheet = new TextDecoder().decode(archive["xl/worksheets/sheet1.xml"]);
+    assert.match(sheet, /<t xml:space="preserve">первый запрос<\/t>/u);
+    assert.match(sheet, /<f>COUNTIFS/u);
   } finally {
     globalThis.fetch = originalFetch;
   }

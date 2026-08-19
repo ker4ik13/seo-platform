@@ -20,6 +20,8 @@ export const XMLSTOCK_YANDEX_SEARCH_API_MAPPING_VERSION =
   "xmlstock-yandex-search-api@2" as const;
 export const XMLSTOCK_YANDEX_LIVE_MAPPING_VERSION =
   "xmlstock-yandex-live@2" as const;
+export const XMLSTOCK_YANDEX_LIVE_TURBO_MAPPING_VERSION =
+  "xmlstock-yandex-live@3" as const;
 export const XMLSTOCK_GOOGLE_LIVE_MAPPING_VERSION =
   "xmlstock-google-live@2" as const;
 const SUPPORTED_MAPPING_VERSIONS = [
@@ -30,6 +32,7 @@ const SUPPORTED_MAPPING_VERSIONS = [
   ARSENKIN_GOOGLE_LIVE_MAPPING_VERSION,
   XMLSTOCK_YANDEX_SEARCH_API_MAPPING_VERSION,
   XMLSTOCK_YANDEX_LIVE_MAPPING_VERSION,
+  XMLSTOCK_YANDEX_LIVE_TURBO_MAPPING_VERSION,
   XMLSTOCK_GOOGLE_LIVE_MAPPING_VERSION
 ] as const;
 const REGION_ID_PATTERN = /^\d{1,10}$/u;
@@ -40,7 +43,8 @@ export function rankEstimateExecutionParameters(
   configuration: TrackingContextConfigurationInput,
   provider: "ARSENKIN" | "XMLSTOCK" = "ARSENKIN",
   searchSource: "SEARCH_API" | "LIVE" =
-    configuration.searchEngine === "GOOGLE" ? "LIVE" : "SEARCH_API"
+    configuration.searchEngine === "GOOGLE" ? "LIVE" : "SEARCH_API",
+  yandexLiveMode?: "TURBO"
 ): InternalRankExecutionParameters | undefined {
   if (
     !SUPPORTED_SEARCH_ENGINES.includes(configuration.searchEngine) ||
@@ -50,6 +54,10 @@ export function rankEstimateExecutionParameters(
       configuration.depth !== 30) ||
     (configuration.searchEngine === "GOOGLE" &&
       searchSource !== "LIVE") ||
+    (yandexLiveMode === "TURBO" &&
+      (provider !== "XMLSTOCK" ||
+        configuration.searchEngine !== "YANDEX" ||
+        searchSource !== "LIVE")) ||
     !configuration.regionCode ||
     !REGION_ID_PATTERN.test(configuration.regionCode) ||
     configuration.safeSearch ||
@@ -75,7 +83,12 @@ export function rankEstimateExecutionParameters(
     rawSerp: false,
     fallbackMode: "NONE",
     providerMappingVersion:
-      providerMappingVersion(provider, configuration.searchEngine, searchSource)
+      providerMappingVersion(
+        provider,
+        configuration.searchEngine,
+        searchSource,
+        yandexLiveMode
+      )
   };
 }
 
@@ -182,7 +195,8 @@ export function parseRankExecutionParameters(
 function providerMappingVersion(
   provider: "ARSENKIN" | "XMLSTOCK",
   searchEngine: "GOOGLE" | "YANDEX",
-  searchSource: "SEARCH_API" | "LIVE"
+  searchSource: "SEARCH_API" | "LIVE",
+  yandexLiveMode?: "TURBO"
 ): (typeof SUPPORTED_MAPPING_VERSIONS)[number] {
   if (provider === "ARSENKIN") {
     if (searchEngine === "GOOGLE") return ARSENKIN_GOOGLE_LIVE_MAPPING_VERSION;
@@ -191,6 +205,9 @@ function providerMappingVersion(
       : ARSENKIN_YANDEX_SEARCH_API_MAPPING_VERSION;
   }
   if (searchEngine === "GOOGLE") return XMLSTOCK_GOOGLE_LIVE_MAPPING_VERSION;
+  if (searchSource === "LIVE" && yandexLiveMode === "TURBO") {
+    return XMLSTOCK_YANDEX_LIVE_TURBO_MAPPING_VERSION;
+  }
   return searchSource === "LIVE"
     ? XMLSTOCK_YANDEX_LIVE_MAPPING_VERSION
     : XMLSTOCK_YANDEX_SEARCH_API_MAPPING_VERSION;

@@ -7,6 +7,7 @@ import type {
   FrequencyCollectionSummary,
   FrequencySnapshotSummary
 } from "./frequency-collections.js";
+import type { AiAnswerCollectionSummary } from "./ai-answer-collections.js";
 import type {
   InternalRankExecutionParameters,
   NormalizedRankDataQualityFlag,
@@ -84,6 +85,67 @@ export interface FrequencyOperationResultRow
 export interface FrequencyOperationResult {
   readonly collection: FrequencyCollectionSummary;
   readonly rows: readonly FrequencyOperationResultRow[];
+  readonly page: OperationResultPageInfo;
+}
+
+/** Jobs-owned exact scope and execution state of one AI answer collection. */
+export interface InternalAiAnswerOperationScopeItem {
+  readonly sequence: number;
+  readonly keywordId: string;
+  readonly status: OperationResultItemStatus;
+  readonly attempt: number;
+  readonly providerSubmitted: boolean;
+  readonly errorCode?: string;
+  readonly updatedAt: string;
+}
+
+export interface InternalAiAnswerOperationScope {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly jobId: string;
+  readonly items: readonly InternalAiAnswerOperationScopeItem[];
+  readonly page: OperationResultPageInfo;
+}
+
+/** Trusted Platform API -> SEO Data request; browser identities are headers. */
+export interface InternalAiAnswerOperationResultInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly jobId: string;
+  readonly keywordIds: readonly string[];
+}
+
+export interface AiAnswerOperationSnapshotSummary {
+  readonly answerPresent: boolean;
+  readonly siteFound: boolean;
+  readonly position?: number;
+  readonly rankingUrl?: string;
+  readonly brandFound: boolean;
+  readonly sourceCount: number;
+  readonly observedAt: string;
+}
+
+export interface InternalAiAnswerOperationResultRow {
+  readonly keywordId: string;
+  readonly keyword: string;
+  readonly snapshot?: AiAnswerOperationSnapshotSummary;
+}
+
+export interface InternalAiAnswerOperationResult {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly jobId: string;
+  readonly rows: readonly InternalAiAnswerOperationResultRow[];
+}
+
+export interface AiAnswerOperationResultRow
+  extends InternalAiAnswerOperationResultRow,
+    InternalAiAnswerOperationScopeItem {}
+
+export interface AiAnswerOperationResult {
+  readonly collection: AiAnswerCollectionSummary;
+  readonly rows: readonly AiAnswerOperationResultRow[];
   readonly page: OperationResultPageInfo;
 }
 

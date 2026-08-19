@@ -5,6 +5,7 @@ import {
   rankSearchSourceFromProviderMappingVersion
 } from "@seo-platform/contracts";
 import type {
+  AiAnswerOperationResult,
   CrawlOperationResultPage,
   CrawlOperationResultRow,
   FrequencyOperationResult,
@@ -38,6 +39,7 @@ import styles from "./operation-result-workspace.module.css";
 
 type OperationResultData =
   | Readonly<{ kind: "frequency"; value: FrequencyOperationResult }>
+  | Readonly<{ kind: "ai-answer"; value: AiAnswerOperationResult }>
   | Readonly<{ kind: "rank"; value: RankOperationResult }>
   | Readonly<{ kind: "crawl"; value: CrawlOperationResultPage }>
   | Readonly<{ kind: "research"; value: KeywordResearchRunSummary }>;
@@ -365,9 +367,48 @@ export function OperationResultWorkspace({
 
 function OperationTable({ data }: Readonly<{ data: OperationResultData }>) {
   if (data.kind === "frequency") return <FrequencyTable result={data.value} />;
+  if (data.kind === "ai-answer") return <AiAnswerTable result={data.value} />;
   if (data.kind === "rank") return <RankTable result={data.value} />;
   if (data.kind === "crawl") return <CrawlTable result={data.value} />;
   return <ResearchTable result={data.value} />;
+}
+
+function AiAnswerTable({ result }: Readonly<{ result: AiAnswerOperationResult }>) {
+  if (result.rows.length === 0) {
+    return <EmptyRows active={isActiveStatus(result.collection.status)} />;
+  }
+  return (
+    <div className={styles.tableScroll}>
+      <table className={styles.table}>
+        <caption>Журнал сбора ИИ-ответов этого запуска</caption>
+        <thead>
+          <tr>
+            <th>#</th><th>Запрос</th><th>Статус</th><th>Провайдер</th>
+            <th>ИИ-ответ</th><th>Сайт найден</th><th>ИИ-позиция</th>
+            <th>Источники</th><th>Обновлено</th>
+          </tr>
+        </thead>
+        <tbody>{result.rows.map((row) => (
+          <tr key={`${row.sequence}:${row.keywordId}`}>
+            <td>{row.sequence + 1}</td>
+            <td className={styles.primaryCell}>
+              <strong>{row.keyword}</strong><small>{shortId(row.keywordId)}</small>
+            </td>
+            <td><ItemStatus status={row.status} {...(row.errorCode ? { errorCode: row.errorCode } : {})} /></td>
+            <td>
+              {row.providerSubmitted ? "Отправлен" : "Ожидает отправки"}
+              <small>Попытка {row.attempt}</small>
+            </td>
+            <td>{row.snapshot ? (row.snapshot.answerPresent ? "Есть" : "Нет") : "—"}</td>
+            <td>{row.snapshot ? (row.snapshot.siteFound ? "Да" : "Нет") : "—"}</td>
+            <td className={styles.numberCell}>{formatOptionalNumber(row.snapshot?.position)}</td>
+            <td className={styles.numberCell}>{row.snapshot ? formatInteger(row.snapshot.sourceCount) : "—"}</td>
+            <td>{formatDateTime(row.snapshot?.observedAt ?? row.updatedAt)}</td>
+          </tr>
+        ))}</tbody>
+      </table>
+    </div>
+  );
 }
 
 function FrequencyTable({ result }: Readonly<{ result: FrequencyOperationResult }>) {
@@ -675,6 +716,28 @@ function operationSummary(data: OperationResultData): SummaryView {
       ]
     };
   }
+  if (data.kind === "ai-answer") {
+    const value = data.value.collection;
+    const current = value.completedKeywords + value.failedKeywords;
+    const routeTrail = connectorRouteTrail(value.connectorAttempts);
+    return {
+      title: "Сбор ИИ-ответов",
+      description: `Arsenkin Tools · ${value.searchEngine === "YANDEX" ? "Яндекс" : "Google"} · ${deviceLabel(value.device)}`,
+      provider: "ARSENKIN",
+      ...summaryStatus(value.status, current, value.selectedKeywords, value.stage),
+      facts: [
+        { label: "Обработано", value: formatInteger(current) },
+        { label: "Успешно", value: formatInteger(value.completedKeywords) },
+        { label: "Ошибок", value: formatInteger(value.failedKeywords) },
+        { label: "Регион", value: value.regionCode },
+        ...(value.routingScope
+          ? [{ label: "Маршрут", value: connectorRoutingScopeLabel(value.routingScope) }]
+          : []),
+        ...(routeTrail ? [{ label: "Провайдеры", value: routeTrail }] : []),
+        ...(value.failureCode ? [{ label: "Код ошибки", value: value.failureCode }] : [])
+      ]
+    };
+  }
   if (data.kind === "rank") {
     const value = data.value;
     const current = Number(value.job.progress.current);
@@ -774,6 +837,7 @@ async function loadOperationResult(
 ): Promise<OperationResultData> {
   const path = operationResultApiPath(projectId, kind, operationId, page);
   if (kind === "frequency") return { kind, value: await browserApiRequest<FrequencyOperationResult>(path, signal ? { signal } : {}) };
+  if (kind === "ai-answer") return { kind, value: await browserApiRequest<AiAnswerOperationResult>(path, signal ? { signal } : {}) };
   if (kind === "rank") return { kind, value: await browserApiRequest<RankOperationResult>(path, signal ? { signal } : {}) };
   if (kind === "crawl") return { kind, value: await browserApiRequest<CrawlOperationResultPage>(path, signal ? { signal } : {}) };
   return { kind, value: await browserApiRequest<KeywordResearchRunSummary>(path, signal ? { signal } : {}) };
@@ -810,6 +874,7 @@ function operationResultPage(
 
 function operationResultTotal(data: OperationResultData): number {
   if (data.kind === "frequency") return data.value.collection.selectedKeywords;
+  if (data.kind === "ai-answer") return data.value.collection.selectedKeywords;
   if (data.kind === "rank") return Number(data.value.job.progress.total);
   if (data.kind === "crawl") {
     return Math.max(
@@ -829,6 +894,15 @@ function mergeOperationResultData(
   if (incoming.kind === "frequency" && current.kind === "frequency") {
     return {
       kind: "frequency",
+      value: {
+        ...incoming.value,
+        rows: mergeOperationResultRows(current.value.rows, incoming.value.rows)
+      }
+    };
+  }
+  if (incoming.kind === "ai-answer" && current.kind === "ai-answer") {
+    return {
+      kind: "ai-answer",
       value: {
         ...incoming.value,
         rows: mergeOperationResultRows(current.value.rows, incoming.value.rows)
@@ -883,6 +957,7 @@ async function loadRankJobWithoutResult(
 
 function isActiveOperation(data: OperationResultData): boolean {
   if (data.kind === "frequency") return isActiveStatus(data.value.collection.status);
+  if (data.kind === "ai-answer") return isActiveStatus(data.value.collection.status);
   if (data.kind === "rank") return isActiveStatus(data.value.job.status);
   if (data.kind === "crawl") return isActiveStatus(data.value.crawl.status);
   return isActiveStatus(data.value.status);

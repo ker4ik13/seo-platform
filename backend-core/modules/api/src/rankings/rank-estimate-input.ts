@@ -51,13 +51,36 @@ export function createRankEstimateInput(
       "Must be SEARCH_API or LIVE"
     );
   }
+  if (
+    input.yandexLiveMode !== undefined &&
+    input.yandexLiveMode !== "TURBO"
+  ) {
+    throw validationError(
+      "yandexLiveMode",
+      "INVALID_ENUM",
+      "Must be TURBO"
+    );
+  }
+  if (
+    input.yandexLiveMode === "TURBO" &&
+    (input.provider !== "XMLSTOCK" || input.searchSource !== "LIVE")
+  ) {
+    throw validationError(
+      "yandexLiveMode",
+      "INVALID_COMBINATION",
+      "Turbo is available only for an explicit XMLSTOCK Yandex Live estimate"
+    );
+  }
   return {
     trackingContextId: input.trackingContextId.toLowerCase(),
     ...(input.provider ? { provider: input.provider } : {}),
     ...(typeof input.credentialId === "string"
       ? { credentialId: input.credentialId.toLowerCase() }
       : {}),
-    ...(input.searchSource ? { searchSource: input.searchSource } : {})
+    ...(input.searchSource ? { searchSource: input.searchSource } : {}),
+    ...(input.yandexLiveMode === "TURBO"
+      ? { yandexLiveMode: "TURBO" as const }
+      : {})
   };
 }
 
@@ -82,14 +105,15 @@ function exactRecord(
         key !== "trackingContextId" &&
         key !== "provider" &&
         key !== "credentialId" &&
-        key !== "searchSource"
+        key !== "searchSource" &&
+        key !== "yandexLiveMode"
     ) ||
     !Object.hasOwn(input, "trackingContextId")
   ) {
     throw validationError(
       "$",
       "UNKNOWN_FIELD",
-      "Only trackingContextId, provider, credentialId and searchSource are allowed"
+      "Only trackingContextId, provider, credentialId, searchSource and yandexLiveMode are allowed"
     );
   }
   return input;

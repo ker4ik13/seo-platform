@@ -98,13 +98,23 @@ test("uses the Jobs-only semantic export read boundary", async () => {
     });
     await client.listExportKeywordGroups(context);
     await client.listExportCustomColumns(context);
+    await client.listExportPositionHistory(
+      context,
+      { limit: 25, sort: "CREATED_DESC" },
+      {
+        observedFrom: "2026-08-01T00:00:00.000Z",
+        observedBefore: "2026-08-20T00:00:00.000Z",
+        searchEngines: ["YANDEX", "GOOGLE"]
+      }
+    );
 
     assert.deepEqual(
       observed.map(({ url }) => url),
       [
         `http://seo-data:4001/internal/v1/projects/${context.projectId}/semantic-exports/keywords?limit=500&search=seo&sort=CREATED_ASC`,
         `http://seo-data:4001/internal/v1/projects/${context.projectId}/semantic-exports/keyword-groups`,
-        `http://seo-data:4001/internal/v1/projects/${context.projectId}/semantic-exports/custom-columns`
+        `http://seo-data:4001/internal/v1/projects/${context.projectId}/semantic-exports/custom-columns`,
+        `http://seo-data:4001/internal/v1/projects/${context.projectId}/semantic-exports/position-history?limit=25&sort=CREATED_DESC&observedFrom=2026-08-01T00%3A00%3A00.000Z&observedBefore=2026-08-20T00%3A00%3A00.000Z&searchEngines=YANDEX%2CGOOGLE`
       ]
     );
     for (const { headers: requestHeaders } of observed) {

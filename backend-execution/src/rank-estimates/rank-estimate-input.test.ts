@@ -57,9 +57,17 @@ test("accepts an exact authoritative rank estimate command", () => {
     internalCreateRankEstimateInput({
       ...input,
       provider: "XMLSTOCK",
-      credentialId
+      credentialId,
+      searchSource: "LIVE",
+      yandexLiveMode: "TURBO"
     }),
-    { ...input, provider: "XMLSTOCK", credentialId }
+    {
+      ...input,
+      provider: "XMLSTOCK",
+      credentialId,
+      searchSource: "LIVE",
+      yandexLiveMode: "TURBO"
+    }
   );
   assert.equal(
     rankEstimateIdempotencyKey("rank-estimate-0001"),
@@ -72,6 +80,12 @@ test("rejects unknown fields, tenant mismatch and inconsistent quota", () => {
     { ...input, browserProjectId: projectId },
     { ...input, provider: "UNKNOWN" },
     { ...input, credentialId: "not-a-uuid" },
+    {
+      ...input,
+      provider: "ARSENKIN",
+      searchSource: "LIVE",
+      yandexLiveMode: "TURBO"
+    },
     {
       ...input,
       project: { ...input.project, workspaceId: actorId }

@@ -47,7 +47,15 @@ const expectedFunctions = [
   "public.mark_frequency_collection_batch_submitting(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)",
   "public.renew_frequency_collection_batch_lease(UUID, UUID[], TEXT, INTEGER, INTEGER)",
   "public.quarantine_frequency_collection_batch_submit(UUID, UUID[], TEXT, INTEGER)",
-  "public.defer_frequency_collection_batch_capacity(UUID, UUID[], TEXT, INTEGER, INTEGER)"
+  "public.defer_frequency_collection_batch_capacity(UUID, UUID[], TEXT, INTEGER, INTEGER)",
+  "public.claim_ai_answer_collection_batch(TEXT, INTEGER, INTEGER)",
+  "public.renew_ai_answer_collection_batch_lease(UUID, UUID[], TEXT, INTEGER, INTEGER)",
+  "public.mark_ai_answer_collection_batch_submitting(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)",
+  "public.defer_ai_answer_collection_batch(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)",
+  "public.fail_ai_answer_collection_batch(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)",
+  "public.defer_ai_answer_collection_batch_capacity(UUID, UUID[], TEXT, INTEGER, INTEGER)",
+  "public.quarantine_ai_answer_collection_batch_submit(UUID, UUID[], TEXT, INTEGER)",
+  "public.complete_ai_answer_collection_batch(UUID, UUID[], TEXT, INTEGER)"
 ];
 
 function compactSql(sql) {

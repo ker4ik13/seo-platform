@@ -38,6 +38,7 @@ import {
   type FrequencyCollectionRuntimeJobData
 } from "./queue/frequency-collection-runtime.queue.js";
 import { safeErrorSummary } from "./runtime-safe-error.js";
+import { AiAnswerRuntimeService } from "./ai-answer-collections/ai-answer-runtime.service.js";
 
 const logger = new Logger("IntegrationConnectorWorker");
 const UUID_PATTERN =
@@ -63,6 +64,7 @@ async function bootstrap(): Promise<void> {
   const rankRuntime = app.get(RankConnectorRuntimeService);
   const keywordResearchRuntime = app.get(KeywordResearchRuntimeService);
   const frequencyRuntime = app.get(FrequencyCollectionRuntimeService);
+  const aiAnswerRuntime = app.get(AiAnswerRuntimeService);
   const workerConnection = redis(config.redisUrl);
   const queueConnection = redis(config.redisUrl);
   const validationQueue = new Queue<IntegrationCredentialValidationJobData>(
@@ -144,9 +146,14 @@ async function bootstrap(): Promise<void> {
       ) {
         throw new Error("Invalid frequency collection runtime job");
       }
-      return frequencyRuntime.processBatch(
-        `connector-frequency-${randomUUID()}`
-      );
+      const aiFirst = job.data.tick % 2 === 0;
+      const first = aiFirst
+        ? await aiAnswerRuntime.processBatch(`connector-ai-answer-${randomUUID()}`)
+        : await frequencyRuntime.processBatch(`connector-frequency-${randomUUID()}`);
+      if (first.processed > 0) return first;
+      return aiFirst
+        ? frequencyRuntime.processBatch(`connector-frequency-${randomUUID()}`)
+        : aiAnswerRuntime.processBatch(`connector-ai-answer-${randomUUID()}`);
     },
     {
       ...bullMqConnectionOptions(workerConnection),

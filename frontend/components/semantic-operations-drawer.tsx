@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  AiAnswerCollectionSummary,
   FrequencyCollectionSummary,
   RankJobSummary,
   SemanticExportCollection,
@@ -44,6 +45,7 @@ export function SemanticOperationsDrawer({
 }>) {
   const [frequencies, setFrequencies] = useState<readonly FrequencyCollectionSummary[]>([]);
   const [ranks, setRanks] = useState<readonly RankJobSummary[]>([]);
+  const [aiAnswers, setAiAnswers] = useState<readonly AiAnswerCollectionSummary[]>([]);
   const [semanticExports, setSemanticExports] = useState<readonly SemanticExportJobSummary[]>([]);
   const [tab, setTab] = useState<OperationTab>("ACTIVE");
   const [loading, setLoading] = useState(true);
@@ -64,13 +66,17 @@ export function SemanticOperationsDrawer({
     if (requestInFlight.current) return;
     requestInFlight.current = true;
     try {
-      const [frequencyResult, rankResult, exportResult] = await Promise.allSettled([
+      const [frequencyResult, rankResult, aiAnswerResult, exportResult] = await Promise.allSettled([
         browserApiRequest<{ readonly collections: readonly FrequencyCollectionSummary[] }>(
           `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections`,
           signal ? { signal } : {}
         ),
         browserApiRequest<{ readonly jobs: readonly RankJobSummary[] }>(
           `/app/api/projects/${encodeURIComponent(projectId)}/rank-runs`,
+          signal ? { signal } : {}
+        ),
+        browserApiRequest<{ readonly collections: readonly AiAnswerCollectionSummary[] }>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/ai-answer-collections`,
           signal ? { signal } : {}
         ),
         browserApiRequest<SemanticExportCollection>(
@@ -96,10 +102,13 @@ export function SemanticOperationsDrawer({
       if (rankResult.status === "fulfilled") {
         setRanks(rankResult.value.jobs);
       }
+      if (aiAnswerResult.status === "fulfilled") {
+        setAiAnswers(aiAnswerResult.value.collections);
+      }
       if (exportResult.status === "fulfilled") {
         setSemanticExports(exportResult.value.exports);
       }
-      const failures = [frequencyResult, rankResult, exportResult]
+      const failures = [frequencyResult, rankResult, aiAnswerResult, exportResult]
         .filter((result): result is PromiseRejectedResult => result.status === "rejected")
         .map((result) => operationError(result.reason));
       setError(failures.length > 0 ? [...new Set(failures)].join(" · ") : undefined);
@@ -132,12 +141,13 @@ export function SemanticOperationsDrawer({
     const values: Operation[] = [
       ...frequencies.map(frequencyOperation),
       ...ranks.map(rankOperation),
+      ...aiAnswers.map(aiAnswerOperation),
       ...semanticExports.map(exportOperation)
     ];
     return values.sort((left, right) =>
       right.createdAt.localeCompare(left.createdAt)
     );
-  }, [frequencies, ranks, semanticExports]);
+  }, [aiAnswers, frequencies, ranks, semanticExports]);
 
   const operations = useMemo(
     () => allOperations.filter((operation) => operation.tab === tab),
@@ -184,6 +194,11 @@ export function SemanticOperationsDrawer({
           `/app/api/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(current.id)}/cancel`,
           { method: "POST", body: {} }
         );
+      } else if (current.kind === "AI_ANSWER") {
+        await browserApiRequest(
+          `/app/api/projects/${encodeURIComponent(projectId)}/ai-answer-collections/${encodeURIComponent(current.id)}/cancel`,
+          { method: "POST", body: {} }
+        );
       } else {
         await browserApiRequest(
           `/app/api/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(current.id)}/cancel`,
@@ -199,7 +214,7 @@ export function SemanticOperationsDrawer({
   }
 
   async function retry(operation: Operation): Promise<void> {
-    if (operation.kind === "EXPORT") return;
+    if (operation.kind === "EXPORT" || operation.kind === "AI_ANSWER") return;
     setRetryingId(operation.id);
     setError(undefined);
     try {
@@ -286,7 +301,7 @@ export function SemanticOperationsDrawer({
                   {cancellingId === operation.id ? "Останавливаем…" : "Остановить"}
                 </button>
               )}
-              {operation.kind !== "EXPORT" && (
+              {(operation.kind === "FREQUENCY" || operation.kind === "RANK" || operation.kind === "AI_ANSWER") && (
                 <button
                   className="semantic-operation-open"
                   onClick={() => setSelectedOperation(operation)}
@@ -335,7 +350,11 @@ export function SemanticOperationsDrawer({
         )}
       </div>
     </aside>
-    {openedOperation && openedOperation.kind !== "EXPORT" && (
+    {openedOperation && (
+      openedOperation.kind === "FREQUENCY" ||
+      openedOperation.kind === "RANK" ||
+      openedOperation.kind === "AI_ANSWER"
+    ) && (
       <OperationResultModal
         actions={openedOperation.cancellable ? (
           <button
@@ -350,11 +369,19 @@ export function SemanticOperationsDrawer({
           </button>
         ) : undefined}
         description={`${openedOperation.description} · ${formatDateTime(openedOperation.createdAt)}`}
-        kind={openedOperation.kind === "FREQUENCY" ? "frequency" : "rank"}
+        kind={openedOperation.kind === "FREQUENCY"
+          ? "frequency"
+          : openedOperation.kind === "AI_ANSWER"
+            ? "ai-answer"
+            : "rank"}
         onClose={() => setSelectedOperation(undefined)}
         operationId={openedOperation.id}
         projectId={projectId}
-        title={openedOperation.kind === "FREQUENCY" ? "Сбор частотности" : "Проверка позиций"}
+        title={openedOperation.kind === "FREQUENCY"
+          ? "Сбор частотности"
+          : openedOperation.kind === "AI_ANSWER"
+            ? "Сбор ИИ-ответов"
+            : "Проверка позиций"}
       />
     )}
     {stopConfirmation && (
@@ -374,7 +401,7 @@ export function SemanticOperationsDrawer({
 
 interface Operation {
   readonly id: string;
-  readonly kind: "FREQUENCY" | "RANK" | "EXPORT";
+  readonly kind: "FREQUENCY" | "RANK" | "AI_ANSWER" | "EXPORT";
   readonly provider?: "XMLSTOCK" | "ARSENKIN";
   readonly title: string;
   readonly description: string;
@@ -457,6 +484,43 @@ function rankOperation(value: RankJobSummary): Operation {
     ...(value.status === "FAILED" || value.status === "ACTION_REQUIRED"
       ? { errorCode: value.failure.code }
       : {}),
+    createdAt: value.createdAt
+  };
+}
+
+function aiAnswerOperation(value: AiAnswerCollectionSummary): Operation {
+  const done = value.completedKeywords + value.failedKeywords;
+  const engine = value.searchEngine === "YANDEX" ? "Яндекс" : "Google";
+  const device = value.device === "DESKTOP" ? "десктоп" : "мобильное";
+  return {
+    id: value.id,
+    kind: "AI_ANSWER",
+    provider: "ARSENKIN",
+    title: `ИИ-ответы · ${engine}`,
+    description: `Arsenkin · ${engine} · регион ${value.regionCode} · ${device}`,
+    statusLabel: operationStatusLabel(value.status, value.stage),
+    progressLabel: `${done} из ${value.selectedKeywords}`,
+    percent: value.selectedKeywords > 0
+      ? Math.round(done / value.selectedKeywords * 100)
+      : 0,
+    tab: operationTab(value.status),
+    cancellable: [
+      "QUEUED",
+      "RUNNING",
+      "WAITING_RATE_LIMIT",
+      "RETRY_SCHEDULED",
+      "FAILED_RETRYABLE"
+    ].includes(value.status),
+    retryable: false,
+    retryLabel: "",
+    downloadable: false,
+    version: value.version,
+    ...(value.routingScope
+      ? {
+          routeLabel: `${connectorRoutingScopeLabel(value.routingScope)}${hasConnectorFallback(value.connectorAttempts) ? " · fallback выполнен" : ""}`
+        }
+      : {}),
+    ...(value.failureCode ? { errorCode: value.failureCode } : {}),
     createdAt: value.createdAt
   };
 }

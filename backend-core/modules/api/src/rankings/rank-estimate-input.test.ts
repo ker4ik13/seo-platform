@@ -21,6 +21,41 @@ test("parses the one-context rank estimate command with an explicit provider", (
   );
 });
 
+test("accepts Turbo only for an explicit XMLStock Yandex Live estimate", () => {
+  assert.deepEqual(
+    createRankEstimateInput({
+      trackingContextId: contextId,
+      provider: "XMLSTOCK",
+      credentialId,
+      searchSource: "LIVE",
+      yandexLiveMode: "TURBO"
+    }),
+    {
+      trackingContextId: contextId,
+      provider: "XMLSTOCK",
+      credentialId,
+      searchSource: "LIVE",
+      yandexLiveMode: "TURBO"
+    }
+  );
+  for (const value of [
+    {
+      trackingContextId: contextId,
+      provider: "ARSENKIN",
+      searchSource: "LIVE",
+      yandexLiveMode: "TURBO"
+    },
+    {
+      trackingContextId: contextId,
+      provider: "XMLSTOCK",
+      searchSource: "SEARCH_API",
+      yandexLiveMode: "TURBO"
+    }
+  ]) {
+    assert.throws(() => createRankEstimateInput(value), DomainError);
+  }
+});
+
 test("rejects unknown, missing and malformed estimate fields", () => {
   for (const value of [
     {},

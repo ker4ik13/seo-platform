@@ -40,7 +40,8 @@ export function internalCreateRankEstimateInput(
       ...INPUT_FIELDS,
       ...(Object.hasOwn(raw, "provider") ? ["provider"] : []),
       ...(Object.hasOwn(raw, "credentialId") ? ["credentialId"] : []),
-      ...(Object.hasOwn(raw, "searchSource") ? ["searchSource"] : [])
+      ...(Object.hasOwn(raw, "searchSource") ? ["searchSource"] : []),
+      ...(Object.hasOwn(raw, "yandexLiveMode") ? ["yandexLiveMode"] : [])
     ],
     "rankEstimate"
   );
@@ -86,6 +87,21 @@ export function internalCreateRankEstimateInput(
   if (!/^[A-Z]{3}$/u.test(billingCurrency)) {
     invalid("billingCurrency");
   }
+  const provider = input.provider === undefined
+    ? undefined
+    : rankProvider(input.provider, "provider");
+  const searchSource = input.searchSource === undefined
+    ? undefined
+    : rankSearchSource(input.searchSource);
+  const yandexLiveMode = input.yandexLiveMode === undefined
+    ? undefined
+    : rankYandexLiveMode(input.yandexLiveMode);
+  if (
+    yandexLiveMode === "TURBO" &&
+    (provider !== "XMLSTOCK" || searchSource !== "LIVE")
+  ) {
+    invalid("yandexLiveMode");
+  }
   return {
     workspaceId,
     projectId,
@@ -94,15 +110,12 @@ export function internalCreateRankEstimateInput(
       input.trackingContextId,
       "trackingContextId"
     ),
-    ...(input.provider === undefined
-      ? {}
-      : { provider: rankProvider(input.provider, "provider") }),
+    ...(provider === undefined ? {} : { provider }),
     ...(input.credentialId === undefined
       ? {}
       : { credentialId: uuid(input.credentialId, "credentialId") }),
-    ...(input.searchSource === undefined
-      ? {}
-      : { searchSource: rankSearchSource(input.searchSource) }),
+    ...(searchSource === undefined ? {} : { searchSource }),
+    ...(yandexLiveMode === undefined ? {} : { yandexLiveMode }),
     project: {
       id: snapshotProjectId,
       workspaceId: projectWorkspaceId,
@@ -127,6 +140,11 @@ function rankSearchSource(value: unknown): "SEARCH_API" | "LIVE" {
   if (value !== "SEARCH_API" && value !== "LIVE") {
     invalid("searchSource");
   }
+  return value;
+}
+
+function rankYandexLiveMode(value: unknown): "TURBO" {
+  if (value !== "TURBO") invalid("yandexLiveMode");
   return value;
 }
 

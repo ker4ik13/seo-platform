@@ -1,5 +1,6 @@
 import {
   semanticNegativeKeywordMatchModes,
+  semanticNegativeKeywordExclusionLimit,
   semanticNegativeKeywordPreviewPageSizes,
   semanticNegativeKeywordScopeKinds,
   type ApplySemanticNegativeKeywordsInput,
@@ -49,7 +50,7 @@ function command(
   const input = exactRecord(
     value,
     applying
-      ? ["presetId", "rules", "scope", "previewHash"]
+      ? ["presetId", "rules", "scope", "previewHash", "excludedKeywordIds"]
       : ["presetId", "rules", "scope", "page", "pageSize"]
   );
   const presetId = input.presetId === undefined ? undefined : uuidValue(input.presetId, "presetId");
@@ -72,7 +73,30 @@ function command(
   if (typeof input.previewHash !== "string" || !/^[a-f0-9]{64}$/u.test(input.previewHash)) {
     invalid("previewHash", "Preview hash is invalid");
   }
-  return { ...base, previewHash: input.previewHash };
+  const excludedKeywordIds = keywordIds(
+    input.excludedKeywordIds,
+    "excludedKeywordIds"
+  );
+  return {
+    ...base,
+    previewHash: input.previewHash,
+    ...(excludedKeywordIds.length > 0 ? { excludedKeywordIds } : {})
+  };
+}
+
+function keywordIds(value: unknown, field: string): readonly string[] {
+  if (value === undefined) return [];
+  if (
+    !Array.isArray(value) ||
+    value.length > semanticNegativeKeywordExclusionLimit
+  ) {
+    invalid(field, `Use no more than ${semanticNegativeKeywordExclusionLimit} exclusions`);
+  }
+  const values = value.map((id, index) => uuidValue(id, `${field}.${index}`));
+  if (new Set(values).size !== values.length) {
+    invalid(field, "Duplicate keywords are not allowed");
+  }
+  return values;
 }
 
 function previewPage(value: unknown): number {

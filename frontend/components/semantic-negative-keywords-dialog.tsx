@@ -59,6 +59,9 @@ export function SemanticNegativeKeywordsDialog({
   const [previewMatches, setPreviewMatches] = useState<
     readonly SemanticNegativeKeywordMatch[]
   >([]);
+  const [excludedKeywordIds, setExcludedKeywordIds] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
   const [loadingPresets, setLoadingPresets] = useState(true);
   const [savingPreset, setSavingPreset] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -92,6 +95,7 @@ export function SemanticNegativeKeywordsDialog({
   function invalidatePreview(): void {
     setPreview(undefined);
     setPreviewMatches([]);
+    setExcludedKeywordIds(new Set());
     setDeletedProgress(0);
     setError(undefined);
   }
@@ -209,12 +213,14 @@ export function SemanticNegativeKeywordsDialog({
       if (append && preview && result.previewHash !== preview.previewHash) {
         setPreview(undefined);
         setPreviewMatches([]);
+        setExcludedKeywordIds(new Set());
         setError(
           "Запросы изменились во время просмотра. Пересчитайте совпадения."
         );
         return;
       }
       setPreview(result);
+      if (!append) setExcludedKeywordIds(new Set());
       setPreviewMatches((current) =>
         append
           ? appendUniqueNegativeMatches(current, result.matches)
@@ -259,7 +265,7 @@ export function SemanticNegativeKeywordsDialog({
       activeGroup,
       selections
     );
-    if (!initialCommand || !preview || applying) return;
+    if (!initialCommand || !preview || applying || loadingMore) return;
     setApplying(true);
     setDeletedProgress(0);
     setError(undefined);
@@ -267,12 +273,19 @@ export function SemanticNegativeKeywordsDialog({
       let command = initialCommand;
       let currentPreview = preview;
       let deleted = 0;
+      const exclusions = [...excludedKeywordIds].sort();
       for (let batch = 0; batch < 100 && currentPreview.batchCount > 0; batch += 1) {
         const result = await browserApiRequest<SemanticNegativeKeywordApplyResult>(
           `${endpoint}/negative-keywords/apply`,
           {
             method: "POST",
-            body: { ...command, previewHash: currentPreview.previewHash }
+            body: {
+              ...command,
+              previewHash: currentPreview.previewHash,
+              ...(exclusions.length > 0
+                ? { excludedKeywordIds: exclusions }
+                : {})
+            }
           }
         );
         deleted += result.deletedCount;
@@ -303,12 +316,25 @@ export function SemanticNegativeKeywordsDialog({
       setError(negativeKeywordError(requestError));
       setPreview(undefined);
       setPreviewMatches([]);
+      setExcludedKeywordIds(new Set());
     } finally {
       setApplying(false);
     }
   }
 
+  function toggleDeletion(keywordId: string, selected: boolean): void {
+    setExcludedKeywordIds((current) => {
+      const next = new Set(current);
+      if (selected) next.delete(keywordId);
+      else next.add(keywordId);
+      return next;
+    });
+  }
+
   const selectedPreset = presets.find(({ id }) => id === selectedPresetId);
+  const selectedMatchCount = preview
+    ? Math.max(0, preview.matchedCount - excludedKeywordIds.size)
+    : 0;
 
   return (
     <SemanticModal
@@ -410,7 +436,7 @@ export function SemanticNegativeKeywordsDialog({
           <section className="semantic-workflow-panel semantic-negative-preview-panel">
             <header>
               <h3>Предпросмотр</h3>
-              <p>Проверьте найденные фразы перед перемещением.</p>
+              <p>Все совпадения отмечены для удаления. Снимите галочку, чтобы оставить запрос.</p>
             </header>
             <div className="semantic-negative-preview">
               <button className="secondary-button semantic-negative-preview-button" disabled={previewing || loadingMore || applying} onClick={() => void requestPreview()} type="button">
@@ -423,7 +449,7 @@ export function SemanticNegativeKeywordsDialog({
                   <dl>
                     <div><dt>Проверено</dt><dd>{formatInteger(preview.scannedCount)}</dd></div>
                     <div><dt>Найдено</dt><dd>{formatInteger(preview.matchedCount)}</dd></div>
-                    <div><dt>Показано</dt><dd>{formatInteger(previewMatches.length)}</dd></div>
+                    <div><dt>К удалению</dt><dd>{formatInteger(selectedMatchCount)}</dd></div>
                   </dl>
                   {previewMatches.length === 0 ? (
                     <div className="inline-alert success">Совпадений нет — перемещать нечего.</div>
@@ -432,11 +458,26 @@ export function SemanticNegativeKeywordsDialog({
                       aria-busy={loadingMore}
                       onScroll={loadNextPreviewPage}
                     >
-                      {previewMatches.map((match) => (
-                        <li key={match.keywordId}>
-                          <HighlightedNegativeKeyword match={match} />
-                        </li>
-                      ))}
+                      {previewMatches.map((match) => {
+                        const selected = !excludedKeywordIds.has(match.keywordId);
+                        return (
+                          <li className={selected ? "selected" : "kept"} key={match.keywordId}>
+                            <label className="semantic-negative-match-row">
+                              <input
+                                aria-label={`Переместить запрос «${match.text}» в корзину`}
+                                checked={selected}
+                                disabled={applying}
+                                onChange={(event) => toggleDeletion(match.keywordId, event.target.checked)}
+                                type="checkbox"
+                              />
+                              <span className="semantic-negative-match-content">
+                                <HighlightedNegativeKeyword match={match} />
+                                <small>{selected ? "В корзину" : "Оставить"}</small>
+                              </span>
+                            </label>
+                          </li>
+                        );
+                      })}
                     </ul>
                   )}
                   {preview.matchedCount > 0 && (
@@ -467,7 +508,7 @@ export function SemanticNegativeKeywordsDialog({
         <dl className="semantic-dialog-estimate semantic-negative-estimate">
           <div><Icon name="semantic" /><div><dt>Минус-слов</dt><dd>{formatInteger(words.length)}</dd></div></div>
           <div><Icon name="projects" /><div><dt>Область</dt><dd>{scopeKind === "SELECTION" ? "Выбранные" : scopeKind === "GROUP" ? activeGroup?.name ?? "Папка" : "Весь проект"}</dd></div></div>
-          <div><Icon name="search" /><div><dt>Совпадений</dt><dd>{preview ? formatInteger(preview.matchedCount) : "Не рассчитано"}</dd></div></div>
+          <div><Icon name="search" /><div><dt>К удалению</dt><dd>{preview ? formatInteger(selectedMatchCount) : "Не рассчитано"}</dd></div></div>
         </dl>
 
         {error && <div className="semantic-workflow-feedback"><div className="inline-alert danger" role="alert">{error}</div></div>}
@@ -475,8 +516,8 @@ export function SemanticNegativeKeywordsDialog({
           <button className="secondary-button" disabled={applying} onClick={onClose} type="button">Отмена</button>
           <div>
             {applying && <span aria-live="polite">Перемещено: {formatInteger(deletedProgress)}</span>}
-            <button className="danger-button" disabled={!preview || preview.matchedCount === 0 || applying || previewing} onClick={() => void applyPreview()} type="button">
-              {applying ? "Перемещаем…" : `Переместить в корзину${preview ? ` (${formatInteger(preview.matchedCount)})` : ""}`}
+            <button className="danger-button" disabled={!preview || selectedMatchCount === 0 || applying || previewing || loadingMore} onClick={() => void applyPreview()} type="button">
+              {applying ? "Перемещаем…" : `Переместить в корзину${preview ? ` (${formatInteger(selectedMatchCount)})` : ""}`}
             </button>
           </div>
         </div>

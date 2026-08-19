@@ -176,6 +176,13 @@ function operationDescriptor(jobType: string, jobId: string): {
       deepLink: `/app/tasks/rank/${jobId}`
     };
   }
+  if (jobType === "AI_ANSWER_COLLECTION") {
+    return {
+      eventType: "SERP_COLLECTION",
+      label: "Проверка ИИ-ответов",
+      deepLink: "/app/tasks"
+    };
+  }
   if (jobType === "KEYWORD_RESEARCH") {
     return {
       eventType: "MAGNET",

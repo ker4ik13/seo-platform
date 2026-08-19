@@ -12,7 +12,7 @@ import {
 const baseView = (
   name: string,
   sort: SemanticKeywordSort,
-  scope: SemanticSavedView["scope"] = "PROJECT_SHARED"
+  scope: SemanticSavedView["scope"] = "PRIVATE"
 ): SemanticSavedView => ({
   id: crypto.randomUUID(),
   ownerId: crypto.randomUUID(),
@@ -24,7 +24,7 @@ const baseView = (
   updatedAt: "2026-08-01T00:00:00.000Z"
 });
 
-test("keeps a different project-shared sort for root and every semantic folder", () => {
+test("keeps a different private sort for root and every semantic folder", () => {
   const firstGroupId = crypto.randomUUID();
   const secondGroupId = crypto.randomUUID();
   const views = [
@@ -34,7 +34,7 @@ test("keeps a different project-shared sort for root and every semantic folder",
     baseView(
       semanticFolderSortViewName(firstGroupId),
       "UPDATED_ASC",
-      "PRIVATE"
+      "PROJECT_SHARED"
     )
   ];
 

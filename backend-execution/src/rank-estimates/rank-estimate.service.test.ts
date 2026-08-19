@@ -136,6 +136,48 @@ test("derives an executable XMLStock Google workload from the bound route", asyn
   assert.equal(harness.createdData?.minimumGetRequestCount, 9);
 });
 
+test("estimates XMLStock Yandex Live Turbo with up to fifty results per GET", async () => {
+  const verifiedAt = new Date(Date.now() - 60_000);
+  const harness = estimateHarness({
+    scope: scope({
+      keywordCount: "3",
+      pairCount: "3",
+      configuration: {
+        searchEngine: "YANDEX",
+        countryCode: "RU",
+        regionCode: "213",
+        language: "ru",
+        device: "DESKTOP",
+        depth: 100,
+        domainMatchRule: { mode: "EXACT_HOST" },
+        safeSearch: false
+      }
+    }),
+    binding: binding({ provider: "XMLSTOCK", verifiedAt }),
+    validation: validation(verifiedAt, { provider: "XMLSTOCK" })
+  });
+  const estimate = await harness.service.create(
+    {
+      ...input,
+      provider: "XMLSTOCK",
+      searchSource: "LIVE",
+      yandexLiveMode: "TURBO",
+      access: { ...input.access, entitlementStatus: "ALLOWED" }
+    },
+    "rank-estimate-xmlstock-yandex-turbo"
+  );
+
+  assert.equal(estimate.status, "READY");
+  assert.equal(estimate.workload.minimumRequestCount, "6");
+  assert.deepEqual(estimate.workload.requestStages, ["GET"]);
+  assert.equal(harness.createdData?.minimumGetRequestCount, 6);
+  assert.equal(
+    (harness.createdData?.executionSnapshot as { providerMappingVersion?: string })
+      ?.providerMappingVersion,
+    "xmlstock-yandex-live@3"
+  );
+});
+
 test("selects the explicitly requested provider from multiple bound routes", async () => {
   const verifiedAt = new Date(Date.now() - 60_000);
   const primary = binding({ verifiedAt });

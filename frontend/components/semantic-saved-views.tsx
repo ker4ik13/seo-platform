@@ -1,6 +1,7 @@
 "use client";
 
 import { CustomSelect } from "./custom-select";
+import { Icon } from "./icon";
 
 import { useEffect, useState, type FormEvent } from "react";
 import {
@@ -14,17 +15,27 @@ import type {
 import { isInternalSemanticViewName } from "./semantic-view-types";
 
 interface SemanticSavedViewsProps {
+  readonly activeView: SemanticSavedView | undefined;
+  readonly canManageShared: boolean;
   readonly config: SemanticViewConfig;
+  readonly currentUserId: string;
   readonly embedded?: boolean;
+  readonly isActiveViewDirty: boolean;
   readonly projectId: string;
   readonly onApply: (view: SemanticSavedView) => void;
+  readonly onActiveViewChange: (view?: SemanticSavedView) => void;
 }
 
 export function SemanticSavedViews({
+  activeView,
+  canManageShared,
   config,
+  currentUserId,
   embedded = false,
+  isActiveViewDirty,
   projectId,
-  onApply
+  onApply,
+  onActiveViewChange
 }: SemanticSavedViewsProps) {
   const [views, setViews] = useState<readonly SemanticSavedView[]>([]);
   const [name, setName] = useState("");
@@ -59,6 +70,13 @@ export function SemanticSavedViews({
     return () => controller.abort();
   }, [projectId]);
 
+  useEffect(() => {
+    if (!activeView) return;
+    setViews((current) => current.map((view) =>
+      view.id === activeView.id ? activeView : view
+    ));
+  }, [activeView]);
+
   async function createView(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (saving) return;
@@ -78,6 +96,7 @@ export function SemanticSavedViews({
         )
       );
       setName("");
+      onApply(created);
     } catch (requestError) {
       setError(savedViewError(requestError));
     } finally {
@@ -96,6 +115,7 @@ export function SemanticSavedViews({
       setViews((current) =>
         current.map((item) => (item.id === updated.id ? updated : item))
       );
+      if (activeView?.id === updated.id) onActiveViewChange(updated);
     } catch (requestError) {
       setError(savedViewError(requestError));
     } finally {
@@ -112,7 +132,16 @@ export function SemanticSavedViews({
         method: "DELETE",
         ifMatch: view.version
       });
-      setViews((current) => current.filter(({ id }) => id !== view.id));
+      const remaining = views.filter(({ id }) => id !== view.id);
+      setViews(remaining);
+      if (activeView?.id === view.id) {
+        const sharedFallback = remaining.find(
+          ({ name, scope: viewScope }) =>
+            !isInternalSemanticViewName(name) && viewScope === "PROJECT_SHARED"
+        );
+        if (sharedFallback) onApply(sharedFallback);
+        else onActiveViewChange(undefined);
+      }
     } catch (requestError) {
       setError(savedViewError(requestError));
     } finally {
@@ -129,7 +158,18 @@ export function SemanticSavedViews({
             {visibleViews.map((view) => (
               <li key={view.id}>
                 <button
-                  className="semantic-view-name"
+                  aria-label={`Применить представление «${view.name}»`}
+                  aria-pressed={activeView?.id === view.id}
+                  className="semantic-view-apply"
+                  disabled={saving}
+                  onClick={() => onApply(view)}
+                  title={activeView?.id === view.id ? "Представление применено" : "Применить представление"}
+                  type="button"
+                >
+                  <Icon name="checkDouble" />
+                </button>
+                <button
+                  className={`semantic-view-name ${activeView?.id === view.id ? "active" : ""}`}
                   onClick={() => onApply(view)}
                   type="button"
                 >
@@ -137,24 +177,32 @@ export function SemanticSavedViews({
                   <small>
                     {view.scope === "PRIVATE" ? "Личное" : "Общее"}
                   </small>
+                  {activeView?.id === view.id && isActiveViewDirty && (
+                    <small className="semantic-view-dirty">Изменения не сохранены</small>
+                  )}
                 </button>
-                <button
-                  className="text-button"
-                  disabled={saving}
-                  onClick={() => void replaceView(view)}
-                  title="Заменить настройки представления текущими"
-                  type="button"
-                >
-                  Обновить
-                </button>
-                <button
-                  className="text-button danger-text"
-                  disabled={saving}
-                  onClick={() => void deleteView(view)}
-                  type="button"
-                >
-                  Удалить
-                </button>
+                {((view.scope === "PRIVATE" && view.ownerId === currentUserId) ||
+                  (view.scope === "PROJECT_SHARED" && canManageShared)) && (
+                  <>
+                    <button
+                      className="text-button"
+                      disabled={saving}
+                      onClick={() => void replaceView(view)}
+                      title="Заменить настройки представления текущими"
+                      type="button"
+                    >
+                      Обновить
+                    </button>
+                    <button
+                      className="text-button danger-text"
+                      disabled={saving}
+                      onClick={() => void deleteView(view)}
+                      type="button"
+                    >
+                      Удалить
+                    </button>
+                  </>
+                )}
               </li>
             ))}
           </ul>
@@ -170,16 +218,20 @@ export function SemanticSavedViews({
               value={name}
             />
           </label>
-          <CustomSelect
-            aria-label="Доступ к представлению"
-            onChange={(event) =>
-              setScope(event.target.value as typeof scope)
-            }
-            value={scope}
-          >
-            <option value="PRIVATE">Личное</option>
-            <option value="PROJECT_SHARED">Общее для проекта</option>
-          </CustomSelect>
+          {canManageShared ? (
+            <CustomSelect
+              aria-label="Доступ к представлению"
+              onChange={(event) =>
+                setScope(event.target.value as typeof scope)
+              }
+              value={scope}
+            >
+              <option value="PRIVATE">Личное</option>
+              <option value="PROJECT_SHARED">Общее для проекта</option>
+            </CustomSelect>
+          ) : (
+            <span className="semantic-view-private-scope">Личное</span>
+          )}
           <button className="secondary-button" disabled={saving} type="submit">
             {saving ? "Сохраняем…" : "Сохранить вид"}
           </button>

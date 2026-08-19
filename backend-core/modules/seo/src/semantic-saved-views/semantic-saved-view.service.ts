@@ -44,6 +44,9 @@ export class SemanticSavedViewService {
   public async create(
     input: InternalCreateSemanticSavedViewInput
   ): Promise<SemanticSavedView> {
+    if (input.scope === "PROJECT_SHARED" && !input.canManageShared) {
+      throw sharedViewForbidden();
+    }
     try {
       return savedView(
         await this.prisma.semanticSavedView.create({
@@ -77,7 +80,7 @@ export class SemanticSavedViewService {
           projectId: input.projectId,
           status: "ACTIVE",
           version: input.version,
-          OR: [{ scope: "PROJECT_SHARED" }, { ownerId: input.actorId }]
+          OR: mutableViewWhere(input)
         },
         data: {
           ...(input.name === undefined
@@ -124,7 +127,7 @@ export class SemanticSavedViewService {
         projectId: input.projectId,
         status: "ACTIVE",
         version: input.version,
-        OR: [{ scope: "PROJECT_SHARED" }, { ownerId: input.actorId }]
+        OR: mutableViewWhere(input)
       },
       data: {
         status: "DELETED",
@@ -144,6 +147,7 @@ export class SemanticSavedViewService {
       readonly workspaceId: string;
       readonly projectId: string;
       readonly actorId: string;
+      readonly canManageShared: boolean;
     }
   ): Promise<SavedViewRow> {
     const row = await this.prisma.semanticSavedView.findFirst({
@@ -152,7 +156,7 @@ export class SemanticSavedViewService {
         workspaceId: input.workspaceId,
         projectId: input.projectId,
         status: "ACTIVE",
-        OR: [{ scope: "PROJECT_SHARED" }, { ownerId: input.actorId }]
+        OR: mutableViewWhere(input)
       }
     });
     if (!row) throw viewNotFound();
@@ -165,6 +169,7 @@ export class SemanticSavedViewService {
       readonly workspaceId: string;
       readonly projectId: string;
       readonly actorId: string;
+      readonly canManageShared: boolean;
       readonly version: number;
     }
   ): Promise<never> {
@@ -215,6 +220,31 @@ function duplicateView(): HttpException {
       message: "A saved view with this name already exists"
     },
     HttpStatus.CONFLICT
+  );
+}
+
+function mutableViewWhere(input: {
+  readonly actorId: string;
+  readonly canManageShared: boolean;
+}): (
+  | { readonly ownerId: string; readonly scope: "PRIVATE" }
+  | { readonly scope: "PROJECT_SHARED" }
+)[] {
+  return input.canManageShared
+    ? [
+        { ownerId: input.actorId, scope: "PRIVATE" },
+        { scope: "PROJECT_SHARED" }
+      ]
+    : [{ ownerId: input.actorId, scope: "PRIVATE" }];
+}
+
+function sharedViewForbidden(): HttpException {
+  return new HttpException(
+    {
+      code: "FORBIDDEN",
+      message: "Only workspace administrators can manage shared views"
+    },
+    HttpStatus.FORBIDDEN
   );
 }
 

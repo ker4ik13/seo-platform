@@ -7,7 +7,7 @@ import {
   stageXmlStockRankResult,
   xmlStockRankPageProgress,
   type XmlStockRankFetchResult,
-  type XmlStockRankPageProgressV1
+  type XmlStockRankPageProgress
 } from "./xmlstock-rank.connector.js";
 import type { RankProviderRequestIntentV1 } from "./rank-provider-request-intent.js";
 
@@ -52,7 +52,7 @@ test("submits one delayed Yandex request and polls only by req_id", async () => 
 
   assert.deepEqual(
     await connector.fetchResult(submitted.taskId, secret, 1_000, value),
-    { status: "PENDING" }
+    { status: "PENDING", retryAfterSeconds: 25 }
   );
   const ready = await fetchLiveUntilReady(
     connector,
@@ -174,7 +174,8 @@ test("builds a secret-free one-key wire request", () => {
     language: "ru",
     device: "DESKTOP",
     depth: 30,
-    delayed: true
+    delayed: true,
+    turbo: false
   });
 });
 
@@ -186,6 +187,7 @@ test("loads documented Yandex Live pages with device and language", async () => 
     assert.equal(parsed.pathname, "/yandexlive/xml/");
     assert.equal(parsed.searchParams.get("device"), "desktop");
     assert.equal(parsed.searchParams.get("lang"), "ru");
+    assert.equal(parsed.searchParams.get("tbm"), "");
     const page = Number(parsed.searchParams.get("page"));
     return xml(
       googleResult(page, page === 2 ? "https://example.com/live" : undefined)
@@ -216,6 +218,85 @@ test("loads documented Yandex Live pages with device and language", async () => 
       "2026-08-02T12:00:00.000Z"
     ).snapshot.results[0]?.position,
     21
+  );
+});
+
+test("uses Turbo explicitly, accepts fifty results per page and keeps Top-100 positions", async () => {
+  const pages: string[] = [];
+  const connector = new XmlStockRankConnector(async (url) => {
+    const parsed = new URL(String(url));
+    const page = Number(parsed.searchParams.get("page"));
+    pages.push(String(page));
+    assert.equal(parsed.pathname, "/yandexlive/xml/");
+    assert.equal(parsed.searchParams.get("tbm"), "turbo");
+    return xml(
+      googleResult(
+        page,
+        page === 1 ? "https://example.com/turbo" : undefined,
+        50
+      )
+    );
+  });
+  const value = intent("YANDEX", "xmlstock-yandex-live@3", { depth: 100 });
+  const secret = { accountIdentifier: "owner-7", apiKey: "private-key" };
+  const submitted = await connector.submit(value, secret, 1_000);
+  assert.equal(submitted.status, "ACCEPTED");
+  if (submitted.status !== "ACCEPTED") return;
+  assert.equal(submitted.request.turbo, true);
+
+  const first = await connector.fetchResult(
+    submitted.taskId,
+    secret,
+    1_000,
+    value
+  );
+  assert.equal(first.status, "CHECKPOINTED");
+  if (first.status !== "CHECKPOINTED") return;
+  assert.equal(first.progress.schemaVersion, "xmlstock-rank-page-progress@2");
+  if (first.progress.schemaVersion !== "xmlstock-rank-page-progress@2") return;
+  assert.equal(first.progress.resultsPerPage, 50);
+  assert.equal(first.progress.documents.length, 50);
+
+  const ready = await connector.fetchResult(
+    submitted.taskId,
+    secret,
+    1_000,
+    value,
+    first.progress
+  );
+  assert.equal(ready.status, "READY");
+  assert.deepEqual(pages, ["0", "1"]);
+  if (ready.status !== "READY") return;
+  const result = stageXmlStockRankResult(
+    ready.value,
+    submitted.taskId,
+    value,
+    "2026-08-19T12:00:00.000Z"
+  ).snapshot.results[0];
+  assert.equal(result?.position, 51);
+  assert.equal(result?.serpResults?.length, 100);
+});
+
+test("retries Turbo code 202 after the documented 10-20 second window", async () => {
+  const connector = new XmlStockRankConnector(async () =>
+    xml(`<response><error code="202">pending</error></response>`)
+  );
+  const value = intent("YANDEX", "xmlstock-yandex-live@3", { depth: 50 });
+  const submitted = await connector.submit(
+    value,
+    { accountIdentifier: "owner-7", apiKey: "private-key" },
+    1_000
+  );
+  assert.equal(submitted.status, "ACCEPTED");
+  if (submitted.status !== "ACCEPTED") return;
+  assert.deepEqual(
+    await connector.fetchResult(
+      submitted.taskId,
+      { accountIdentifier: "owner-7", apiKey: "private-key" },
+      1_000,
+      value
+    ),
+    { status: "PENDING", retryAfterSeconds: 15 }
   );
 });
 
@@ -354,7 +435,7 @@ async function fetchLiveUntilReady(
   taskId: string,
   secret: { readonly accountIdentifier: string; readonly apiKey: string },
   value: RankProviderRequestIntentV1,
-  initialProgress?: XmlStockRankPageProgressV1
+  initialProgress?: XmlStockRankPageProgress
 ): Promise<Extract<XmlStockRankFetchResult, { readonly status: "READY" }>> {
   let progress = initialProgress;
   for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -438,8 +519,8 @@ function yandexResult(): string {
   return `<?xml version="1.0"?><yandexsearch><response><results><grouping><group><doc><url>https://foreign.example/</url><favicon>https://search-assets.example/foreign.png</favicon><title>Чужой</title></doc></group><group><doc><url>HTTPS://WWW.Example.COM:443/catalog#result</url><icon src="https://search-assets.example/project.png"/><title>Каталог</title><passages><passage>Купить диван</passage></passages></doc></group></grouping></results></response></yandexsearch>`;
 }
 
-function googleResult(page: number, projectUrl?: string): string {
-  const docs = Array.from({ length: 10 }, (_, index) => {
+function googleResult(page: number, projectUrl?: string, count = 10): string {
+  const docs = Array.from({ length: count }, (_, index) => {
     const url = index === 0 && projectUrl
       ? projectUrl
       : `https://foreign-${page}-${index}.example/`;

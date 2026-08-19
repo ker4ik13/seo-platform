@@ -488,6 +488,7 @@ function notificationOperationTitle(
   }
   return ({
     frequency: "Сбор частотности",
+    "ai-answer": "Сбор ИИ-ответов",
     rank: "Проверка позиций",
     crawl: "Технический аудит",
     research: "Сбор конкурентов"

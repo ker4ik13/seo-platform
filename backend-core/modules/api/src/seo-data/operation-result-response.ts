@@ -7,6 +7,7 @@ import {
   semanticFrequencyTypes,
   technicalCrawlMaxUrlLimit,
   type CrawlOperationResultRow,
+  type InternalAiAnswerOperationResult,
   type InternalCrawlOperationResultPage,
   type InternalFrequencyOperationResult,
   type InternalRankExecutionParameters,
@@ -17,6 +18,76 @@ import { DomainError } from "../common/domain-error.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+
+export function scopedInternalAiAnswerOperationResult(
+  value: unknown,
+  workspaceId: string,
+  projectId: string,
+  jobId: string,
+  expectedKeywordIds: readonly string[]
+): InternalAiAnswerOperationResult {
+  const input = exact(value, ["workspaceId", "projectId", "jobId", "rows"]);
+  if (
+    input.workspaceId !== workspaceId ||
+    input.projectId !== projectId ||
+    input.jobId !== jobId ||
+    !Array.isArray(input.rows) ||
+    input.rows.length !== expectedKeywordIds.length
+  ) invalid();
+  const seen = new Set<string>();
+  const rows = input.rows.map((value) => {
+    const row = exact(value, ["keywordId", "keyword"], ["snapshot"]);
+    const keywordId = uuid(row.keywordId);
+    if (
+      !expectedKeywordIds.includes(keywordId) ||
+      seen.has(keywordId) ||
+      typeof row.keyword !== "string" ||
+      row.keyword.length < 1 ||
+      row.keyword.length > 2_000
+    ) invalid();
+    seen.add(keywordId);
+    if (row.snapshot === undefined) {
+      return { keywordId, keyword: row.keyword };
+    }
+    const snapshot = exact(
+      row.snapshot,
+      [
+        "answerPresent",
+        "siteFound",
+        "brandFound",
+        "sourceCount",
+        "observedAt"
+      ],
+      ["position", "rankingUrl"]
+    );
+    if (
+      typeof snapshot.answerPresent !== "boolean" ||
+      typeof snapshot.siteFound !== "boolean" ||
+      typeof snapshot.brandFound !== "boolean" ||
+      (snapshot.position !== undefined &&
+        (!Number.isSafeInteger(snapshot.position) || Number(snapshot.position) < 1)) ||
+      (snapshot.rankingUrl !== undefined &&
+        (typeof snapshot.rankingUrl !== "string" ||
+          snapshot.rankingUrl.length > 20_000 ||
+          !URL.canParse(snapshot.rankingUrl)))
+    ) invalid();
+    return {
+      keywordId,
+      keyword: row.keyword,
+      snapshot: {
+        answerPresent: snapshot.answerPresent,
+        siteFound: snapshot.siteFound,
+        ...(snapshot.position === undefined ? {} : { position: Number(snapshot.position) }),
+        ...(snapshot.rankingUrl === undefined ? {} : { rankingUrl: snapshot.rankingUrl }),
+        brandFound: snapshot.brandFound,
+        sourceCount: integer(snapshot.sourceCount, 0, 10_000),
+        observedAt: timestamp(snapshot.observedAt)
+      }
+    };
+  });
+  if (seen.size !== expectedKeywordIds.length) invalid();
+  return { workspaceId, projectId, jobId, rows };
+}
 
 export function scopedInternalFrequencyOperationResult(
   value: unknown,

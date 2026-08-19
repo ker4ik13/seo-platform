@@ -50,6 +50,7 @@ type VersionKeywordRow = Prisma.KeywordGetPayload<{
 interface NegativeKeywordPreviewPlan {
   readonly preview: SemanticNegativeKeywordPreview;
   readonly batch: readonly SemanticNegativeKeywordMatch[];
+  readonly selectedCount: number;
 }
 
 @Injectable()
@@ -190,7 +191,7 @@ export class NegativeKeywordService {
         HttpStatus.CONFLICT
       );
     }
-    if (preview.batchCount === 0) {
+    if (plan.batch.length === 0) {
       return { deletedCount: 0, deletedKeywordIds: [], hasMore: false };
     }
     const batchIds = plan.batch.map(({ keywordId }) => keywordId);
@@ -287,12 +288,17 @@ export class NegativeKeywordService {
       );
       return updated.count;
     });
-    return { deletedCount, deletedKeywordIds: batchIds, hasMore: preview.hasMore };
+    return {
+      deletedCount,
+      deletedKeywordIds: batchIds,
+      hasMore: plan.selectedCount > plan.batch.length
+    };
   }
 
   private async buildPreview(
     input: InternalSemanticNegativeKeywordCommandInput &
-      Partial<Pick<InternalSemanticNegativeKeywordPreviewInput, "page" | "pageSize">>
+      Partial<Pick<InternalSemanticNegativeKeywordPreviewInput, "page" | "pageSize">> &
+      Partial<Pick<InternalApplySemanticNegativeKeywordsInput, "excludedKeywordIds">>
   ): Promise<NegativeKeywordPreviewPlan> {
     const resolvedRules = input.rules ?? (
       await this.requiredPreset(input.workspaceId, input.projectId, input.presetId!)
@@ -331,7 +337,11 @@ export class NegativeKeywordService {
             highlightRanges: match.highlightRanges
           } satisfies SemanticNegativeKeywordMatch];
     });
-    const batch = matches.slice(0, APPLY_BATCH_SIZE);
+    const previewBatch = matches.slice(0, APPLY_BATCH_SIZE);
+    const deletionPlan = negativeKeywordDeletionPlan(
+      matches,
+      input.excludedKeywordIds ?? []
+    );
     const pageSize = input.pageSize ?? 100;
     const pageCount = Math.max(1, Math.ceil(matches.length / pageSize));
     const page = Math.min(input.page ?? 1, pageCount);
@@ -342,16 +352,20 @@ export class NegativeKeywordService {
     const preview = {
       scannedCount: rows.length,
       matchedCount: matches.length,
-      batchCount: batch.length,
-      hasMore: matches.length > batch.length,
-      previewHash: previewHash(resolvedRules, input.scope, batch),
+      batchCount: previewBatch.length,
+      hasMore: matches.length > previewBatch.length,
+      previewHash: previewHash(resolvedRules, input.scope, matches),
       matches: pageMatches,
       matchesTruncated: matches.length > pageMatches.length,
       page,
       pageSize,
       pageCount
     } satisfies SemanticNegativeKeywordPreview;
-    return { preview, batch };
+    return {
+      preview,
+      batch: deletionPlan.batch,
+      selectedCount: deletionPlan.selectedCount
+    };
   }
 
   private async requiredPreset(
@@ -389,6 +403,24 @@ export class NegativeKeywordService {
       HttpStatus.PRECONDITION_FAILED
     );
   }
+}
+
+export function negativeKeywordDeletionPlan(
+  matches: readonly SemanticNegativeKeywordMatch[],
+  excludedKeywordIds: readonly string[]
+): Readonly<{
+  batch: readonly SemanticNegativeKeywordMatch[];
+  selectedCount: number;
+}> {
+  const excludedIds = new Set(excludedKeywordIds);
+  const batch: SemanticNegativeKeywordMatch[] = [];
+  let selectedCount = 0;
+  for (const match of matches) {
+    if (excludedIds.has(match.keywordId)) continue;
+    selectedCount += 1;
+    if (batch.length < APPLY_BATCH_SIZE) batch.push(match);
+  }
+  return { batch, selectedCount };
 }
 
 function keywordScopeWhere(

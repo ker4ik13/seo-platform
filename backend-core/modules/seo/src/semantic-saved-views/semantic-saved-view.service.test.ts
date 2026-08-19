@@ -52,6 +52,7 @@ test("rejects stale saved-view updates with the current version", async () => {
         workspaceId,
         projectId,
         actorId,
+        canManageShared: false,
         version: 1,
         name: "Новое имя"
       }),
@@ -61,6 +62,113 @@ test("rejects stale saved-view updates with the current version", async () => {
       (
         error.getResponse() as Readonly<Record<string, unknown>>
       ).currentVersion === 2
+  );
+});
+
+test("does not let a non-admin mutate a shared view even when they created it", async () => {
+  let observedWhere: unknown;
+  const service = new SemanticSavedViewService({
+    semanticSavedView: {
+      findFirst: async ({ where }: { where: unknown }) => {
+        observedWhere = where;
+        return null;
+      }
+    }
+  } as unknown as PrismaService);
+
+  await assert.rejects(
+    () => service.update(viewId, {
+      workspaceId,
+      projectId,
+      actorId,
+      canManageShared: false,
+      version: 2,
+      config
+    }),
+    (error: unknown) =>
+      error instanceof HttpException && error.getStatus() === HttpStatus.NOT_FOUND
+  );
+  assert.deepEqual(observedWhere, {
+    id: viewId,
+    workspaceId,
+    projectId,
+    status: "ACTIVE",
+    OR: [{ ownerId: actorId, scope: "PRIVATE" }]
+  });
+});
+
+test("does not let a non-admin create a shared view", async () => {
+  let createCalled = false;
+  const service = new SemanticSavedViewService({
+    semanticSavedView: {
+      create: async () => {
+        createCalled = true;
+        return row();
+      }
+    }
+  } as unknown as PrismaService);
+
+  await assert.rejects(
+    () => service.create({
+      workspaceId,
+      projectId,
+      actorId,
+      canManageShared: false,
+      name: "Общее",
+      scope: "PROJECT_SHARED",
+      config
+    }),
+    (error: unknown) =>
+      error instanceof HttpException && error.getStatus() === HttpStatus.FORBIDDEN
+  );
+  assert.equal(createCalled, false);
+});
+
+test("lets an administrator update a shared view", async () => {
+  const sharedRow = {
+    ...row(),
+    scope: "PROJECT_SHARED" as const,
+    name: "Общее",
+    normalizedName: "общее"
+  };
+  let accessibleWhere: unknown;
+  let updateWhere: unknown;
+  const service = new SemanticSavedViewService({
+    semanticSavedView: {
+      findFirst: async ({ where }: { where: unknown }) => {
+        accessibleWhere = where;
+        return sharedRow;
+      },
+      updateMany: async ({ where }: { where: unknown }) => {
+        updateWhere = where;
+        return { count: 1 };
+      },
+      findUniqueOrThrow: async () => ({ ...sharedRow, version: 3 })
+    }
+  } as unknown as PrismaService);
+
+  const updated = await service.update(viewId, {
+    workspaceId,
+    projectId,
+    actorId,
+    canManageShared: true,
+    version: 2,
+    config
+  });
+
+  assert.equal(updated.scope, "PROJECT_SHARED");
+  assert.equal(updated.version, 3);
+  const expectedAuthority = [
+    { ownerId: actorId, scope: "PRIVATE" },
+    { scope: "PROJECT_SHARED" }
+  ];
+  assert.deepEqual(
+    (accessibleWhere as { readonly OR: unknown }).OR,
+    expectedAuthority
+  );
+  assert.deepEqual(
+    (updateWhere as { readonly OR: unknown }).OR,
+    expectedAuthority
   );
 });
 

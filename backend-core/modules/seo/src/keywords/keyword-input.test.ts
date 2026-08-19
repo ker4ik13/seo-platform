@@ -4,6 +4,7 @@ import { BadRequestException } from "@nestjs/common";
 import {
   internalCreateSemanticKeywordInput,
   internalDeleteSemanticKeywordInput,
+  internalUpdateSemanticKeywordInput,
   internalSemanticKeywordBulkCreateInput,
   internalSemanticKeywordBulkInput,
   internalSemanticKeywordCleaningInput
@@ -89,6 +90,35 @@ test("accepts an explicit permanent delete only as a trusted boolean", () => {
         version: 3,
         permanent: "yes"
       }),
+    BadRequestException
+  );
+});
+
+test("keeps the AI-answer shortcut preference inside the trusted update", () => {
+  assert.deepEqual(
+    internalUpdateSemanticKeywordInput({
+      workspaceId,
+      projectId,
+      actorId,
+      version: 4,
+      showAiAnswerButton: false
+    }),
+    {
+      workspaceId,
+      projectId,
+      actorId,
+      version: 4,
+      showAiAnswerButton: false
+    }
+  );
+  assert.throws(
+    () => internalUpdateSemanticKeywordInput({
+      workspaceId,
+      projectId,
+      actorId,
+      version: 4,
+      showAiAnswerButton: "no"
+    }),
     BadRequestException
   );
 });

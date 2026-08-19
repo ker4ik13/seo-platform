@@ -106,3 +106,32 @@ test("normalizes crawl paging before delegating", async () => {
     10
   ]);
 });
+
+test("validates and delegates AI answer result scope", async () => {
+  let observed: unknown;
+  const result = { workspaceId, projectId, jobId, rows: [] };
+  const controller = new OperationResultController({
+    aiAnswer: async (input: unknown) => {
+      observed = input;
+      return result;
+    }
+  } as unknown as OperationResultService);
+
+  assert.deepEqual(
+    await controller.aiAnswer(
+      projectId,
+      jobId,
+      headers,
+      { workspaceId, projectId, actorId, jobId, keywordIds: [keywordId] },
+      request
+    ),
+    { data: result, meta: { requestId: "request-1" } }
+  );
+  assert.deepEqual(observed, {
+    workspaceId,
+    projectId,
+    actorId,
+    jobId,
+    keywordIds: [keywordId]
+  });
+});

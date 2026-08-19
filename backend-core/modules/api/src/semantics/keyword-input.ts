@@ -75,7 +75,7 @@ export function semanticKeywordBulkCreateInput(
 export function updateSemanticKeywordInput(
   value: unknown
 ): UpdateSemanticKeywordInput {
-  const input = exactRecord(value, editableFields(), "$");
+  const input = exactRecord(value, updateEditableFields(), "$");
   if (Object.keys(input).length === 0) {
     invalid("$", "At least one editable field is required");
   }
@@ -90,6 +90,14 @@ export function updateSemanticKeywordInput(
     ...(input.isFavorite === undefined
       ? {}
       : { isFavorite: booleanValue(input.isFavorite, "isFavorite") }),
+    ...(input.showAiAnswerButton === undefined
+      ? {}
+      : {
+          showAiAnswerButton: booleanValue(
+            input.showAiAnswerButton,
+            "showAiAnswerButton"
+          )
+        }),
     ...optionalIntent(input.intent, true),
     ...optionalGroupId(input.groupId, true),
     ...optionalClusterId(input.clusterId, true),
@@ -282,6 +290,10 @@ function editableFields(): readonly string[] {
     "targetUrl",
     "tagNames"
   ];
+}
+
+function updateEditableFields(): readonly string[] {
+  return [...editableFields(), "showAiAnswerButton"];
 }
 
 function optionalNote(value: unknown, nullable: false): Readonly<{ note?: string }>;

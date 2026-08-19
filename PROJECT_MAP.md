@@ -1,6 +1,6 @@
 # Карта проекта
 
-Актуально на 12 августа 2026 года.
+Актуально на 19 августа 2026 года.
 
 Карта описывает текущее устройство репозитория. Нормативные требования
 находятся в `docs/technical-spec/00-index.md`, архитектурные решения — в
@@ -123,6 +123,12 @@ SERP-конкурентов и непосредственно перед про�
 имеет компактное удаление с обязательным modal-подтверждением; команда
 tenant-scoped и идемпотентно удаляет все snapshots того же keyword,
 type, region и device, чтобы более старое значение не появлялось снова.
+Одиночное редактирование из карточки запроса и контекстное действие над тегами
+открывают ту же version-aware форму, что и массовое редактирование. Для одной
+строки форма позволяет менять текст, язык и остальные поля; для нескольких
+строк она отправляет только явно выбранные изменения. Диалог переноса запросов
+показывает searchable дерево папок с раскрытием вложенных уровней и полным
+путём выбранной папки, не превращая иерархию в плоский select.
 Таблица и карточка вычисляют изменение позиции относительно последнего
 найденного `rank_snapshot` того же keyword ID и поисковика по всем техническим
 контекстам. Для bounded lookup используется
@@ -164,6 +170,23 @@ debounce и имеет одну явную очистку с безопасны�
 найденного замера. Направление сортировки меняет порядок чисел только внутри
 первых двух уровней и не перемешивает их между собой.
 
+Представления таблицы семантики хранят versioned конфигурацию на сервере:
+фильтры, сортировку, порядок/видимость и ширину колонок, плотность, размер
+порции infinite scroll, ширину дерева папок, раскрытые папки и выбранный union.
+Любой участник проекта создаёт и автоматически сохраняет собственное private
+представление; optimistic `If-Match` не позволяет тихо перезаписать изменения
+из другой вкладки. Общие project-shared представления видны всем участникам,
+но создавать, обновлять и удалять их могут только `OWNER`/`ADMIN`; применение
+общего вида не включает private autosave и потому не изменяет его для коллег.
+
+Скрытый private layout дополнительно хранит `appliedViewId` конкретного
+пользователя. Видимый view применяется отдельной кнопкой-галочкой и остаётся
+выбранным после нового входа; при отсутствии явного выбора используется
+project-shared «Общее для проекта» (либо первый общий view). Расхождение
+текущего layout с применённой конфигурацией помечается как «Изменения не
+сохранены». Portaled dropdown внутри drawer входит в его outside-click boundary
+и не закрывает панель при выборе scope.
+
 Мастер съёма позиций умеет выбирать сохранённый профиль, раскрывать вложенное
 дерево папок и materialize родительский scope вместе с потомками. В
 `tracking_contexts.launch_profile` сохраняются только provider-neutral тип
@@ -175,6 +198,10 @@ project-scoped локальное предпочтение точного creden
 его среди актуальных подключений workspace, помечает ровно одно подключение и
 предупреждает, если после прошлого запуска в выбранных папках появились новые
 canonical keywords. Credential ID не попадает в публичный context/job summary.
+Для явно выбранной связки XMLStock + Яндекс Live мастер дополнительно предлагает
+платный Turbo только на текущий запуск. Режим не записывается в provider-neutral
+профиль: estimate фиксирует отдельный immutable mapping
+`xmlstock-yandex-live@3`, а отсутствие опции сохраняет стандартный Live.
 
 Каталог подписок v4 публикует лимиты `5/2/5k/1`, `20/10/20k/5`,
 `50/30/50k/15` и `100/100/unlimited/30` для
@@ -327,7 +354,8 @@ SEO Data. При недоступности SEO Data каталог остаёт
 - `src/connector-worker.main.ts` — provider I/O и credential broker с
   независимыми очередями `rank-connector-runtime`,
   `frequency-collection-runtime`, `keyword-research-runtime` и
-  `integration-credential-validation`;
+  `integration-credential-validation`, а также отдельным bounded runtime loop
+  для `AI_ANSWER_COLLECTION`;
 - `src/inspection-worker.main.ts` — опциональная malware inspection;
 - `src/auth-email-worker.main.ts` — опциональная transactional email delivery.
 
@@ -342,6 +370,11 @@ maintenance сохраняет собственный медленный инт�
 запускает три connector child process, совпадая с production default Compose.
 Arsenkin DB broker
 сохраняет общий bounded task capacity и lease fencing между всеми процессами.
+ИИ-съём использует собственный набор `SECURITY DEFINER` broker-функций для
+claim/renew/submit/defer/fail/complete. Роль connector-а имеет `EXECUTE` только
+на эти exact routines и не получает прямой DML к Jobs-таблицам; batch
+проверяется по Job type, project/credential route, version, lease и точному
+набору items при каждом переходе.
 XMLStock HTTP ограничивается распределёнными Redis buckets по
 `credentialId + product` (`YANDEX_LIVE`, `GOOGLE_LIVE`,
 `YANDEX_SEARCH_API`, `WORDSTAT`): разные API-ключи не блокируют друг друга,
@@ -351,13 +384,20 @@ HTTP, не `POLL_WAIT`; throttling адаптивно уменьшает окн�
 `seo-platform:jobs:v1:provider-rate-limit:*`. PostgreSQL fair claim
 предпочитает менее занятую пару credential/project, оставаясь source of truth
 для Job, lease и progress.
+Яндекс Live Turbo является отдельным явно оплаченным mapping: connector
+передаёт `tbm=turbo` и не применяет к нему стандартный Redis bucket XMLStock,
+поскольку provider документирует неограниченное число потоков. Turbo также не
+занимает консервативное окно пяти активных provider tasks, а его записи не
+блокируют стандартный Live в этом окне. Платформенная worker concurrency, lease
+fencing и PostgreSQL claim остаются bounded safety границей; обычный Live явно
+передаёт пустой `tbm`, чтобы настройка кабинета не включала Turbo неявно.
 
 ## 5. Владение данными
 
 | Данные | Модуль-владелец | Текущее хранилище |
 |---|---|---|
 | users (включая bounded account avatar до 512 KiB), sessions, workspaces (включая bounded workspace avatar до 512 KiB), projects и bounded project logos до 512 KiB, project transfer requests, RBAC, billing, audit, platform admin command receipts | Core API | `platform_db` |
-| semantics (включая keyword notes и presets минус-слов), project Markdown notes, pages, rankings и immutable normalized XMLStock/Arsenkin SERP results, crawl/page-map projections | Core SEO | `seo_db` |
+| semantics (включая keyword notes, saved views и presets минус-слов), project Markdown notes, pages, rankings, immutable normalized XMLStock/Arsenkin SERP results и Arsenkin AI-answer snapshots/sources, crawl/page-map projections | Core SEO | `seo_db` |
 | realtime subscriptions, deliveries, event inbox | Core Realtime | `realtime_db` + Redis |
 | jobs, schedules, uploads, credential vault, provider execution | Execution | `jobs_db` + Redis + S3 |
 
@@ -402,6 +442,11 @@ XMLStock Google Top-100 собирается десятью последоват
 странице не теряет уже собранный Top и не создаёт повторную оплату за него.
 Poll/recovery остаётся lease-fenced и bounded (до 720 попыток), чтобы
 permanent provider failure не превращался в бесконечный платный цикл.
+Для Yandex Live Turbo первая страница определяет документированный размер
+`10/20/30/40/50`, который сохраняется в checkpoint v2; Top-100 поэтому требует
+от двух до десяти GET в зависимости от настройки количества результатов в
+кабинете XMLStock. Код `202` сохраняет текущий checkpoint и повторяет только
+эту страницу через 15 секунд.
 Просроченный grant, для
 которого provider submit не начинался, не блокирует Job: rank dispatcher
 создаёт новый execution attempt, сохраняя старую попытку как immutable audit.
@@ -449,6 +494,52 @@ tenant-scoped audit/configuration row без активного маршрута
 означает «провайдер не настроен», а не сбой Jobs; интерфейс позволяет новому
 владельцу явно выбрать credential его workspace, не восстанавливая прежний
 provider route автоматически.
+
+### Проверка ИИ-ответов
+
+Отдельное действие семантики `Проверить ИИ-ответы` создаёт фоновый
+`AI_ANSWER_COLLECTION`, не смешивая результат с обычной позицией. Execution
+вызывает документированный инструмент Arsenkin `ai-serp` для одного выбранного
+поисковика (`YANDEX`/`GOOGLE`), региона, устройства и домена; один keyword
+расходует два лимита Arsenkin. Submit/check/get выполняются lease-fenced через
+общую Arsenkin provider-task capacity вместе с rank/Wordstat, поэтому новый
+тип работы не обходит лимит credential.
+
+Core SEO version-fenced разрешает keyword ID, идемпотентно сохраняет
+append-only `ai_answer_snapshots` и упорядоченные `ai_answer_sources`, а
+передача проекта re-key-ит snapshot в той же allowlisted транзакции. Provider
+HTML не попадает в browser: connector преобразует разрешённую структуру в
+ограниченный Markdown, а frontend рендерит его без raw HTML. Semantic list
+получает только последнюю проекцию Яндекса/Google для отдельных колонок
+ИИ-позиции и даты. `ai-answer-history-projection.ts` находит предыдущую
+найденную позицию canonical keyword/engine по всей append-only истории без
+привязки к region/device, поэтому таблица корректно показывает `Новая`, рост,
+падение, отсутствие изменений и потерю позиции после смены контекста.
+Индикатор-лупа у запроса открывает подробный modal с полным
+ответом, наличием/позицией домена, источниками, регионом, устройством и временем
+конкретного immutable снимка. Цифровые ссылки Arsenkin вида `\[1\]\[6\]`
+преобразуются в кликабельные favicon/domain chips сохранённых источников и
+ведут на полные URL страниц. Sidebar показывает обе последние ИИ-позиции,
+график 14 последних снимков и отдельный последний `Топ конкурентов ИИ` для
+каждого engine, у которого когда-либо были сохранены источники. Полный журнал
+доступен через tenant-scoped keyword route keyset-страницами по 200 строк;
+opaque cursor подписан и привязан к workspace/project/keyword. Live
+reconciliation таблицы обновляет keyword projection
+при каждом новом состоянии операции, включая случай, когда первым увиденным
+состоянием уже является terminal. Drawer семантики и общий проектный журнал
+открывают cursor-paginated лог `AI_ANSWER_COLLECTION` как во время выполнения,
+так и после завершения: для каждого зафиксированного keyword показываются
+execution status/attempt, факт отправки провайдеру, finite error и сохранённая
+проекция ответа. Arsenkin может подтвердить наличие ИИ-ответа без опционального
+текста или списка источников; такой оплаченный результат является валидным и
+не маскируется ошибкой отсутствующего keyword.
+
+Видимость лупы хранит `Keyword.showAiAnswerButton`: существующие keywords с
+положительным AI snapshot мигрируются во включённое состояние, новые получают
+`false`, а кнопка «Показывать ответ» в округлом modal переключает значение
+через version-fenced keyword PATCH. Обычные Яндекс/Google позиции выведены в
+одной компактной строке только цифрой, `×` или `—`; обычный и ИИ-графики
+находятся в соответствующих раздельных блоках sidebar.
 
 ### Сбор частотности
 
@@ -548,6 +639,15 @@ filter/sort/column/format snapshot и передаёт только Job ID в Bu
 артефакт в S3. XLSX автоматически делится по ограничению строк листа, а все
 spreadsheet-форматы защищены от formula injection. Состояние и row progress
 остаются PostgreSQL-owned; истёкший lease восстанавливается dispatcher-ом.
+Режим XLSX «История позиций» использует тот же Job, очередь и storage path, но
+читает через отдельный bounded read service все BYOK-снимки выбранных
+поисковиков независимо от tracking context. Worker делает два постраничных
+прохода: сначала определяет фактические даты, затем потоково формирует отдельные
+листы Яндекс/Google. В книге есть формулы TOP-5/10/30; позиции записываются
+числами, отсутствие — прочерком. Улучшение и первое появление окрашиваются
+зелёным, ухудшение и пропажа — красным, неизменное значение и отсутствие без
+предыдущего замера остаются нейтральными. Новые queue, deployable или таблица
+для этого режима не добавлены.
 Скачивание выдаётся только после повторной browser permission-проверки в Core:
 обычный пользовательский переход на `GET /api/v1/projects/:projectId/exports/:exportId/file`
 получает поток с attachment disposition через Core и same-origin BFF. Core

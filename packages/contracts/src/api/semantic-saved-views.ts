@@ -1,7 +1,11 @@
 import type {
+  SemanticKeywordPageSize,
   SemanticKeywordIntent,
   SemanticKeywordSort
 } from "./keywords.js";
+
+export const semanticSavedViewGroupSidebarWidthMin = 196 as const;
+export const semanticSavedViewGroupSidebarWidthMax = 520 as const;
 
 export const semanticSavedViewScopes = [
   "PRIVATE",
@@ -31,6 +35,10 @@ export const semanticSystemColumnKeys = [
   "googleRelevantUrl",
   "yandexCheckedAt",
   "googleCheckedAt",
+  "yandexAiPosition",
+  "googleAiPosition",
+  "yandexAiCheckedAt",
+  "googleAiCheckedAt",
   "visibility",
   "group",
   "cluster",
@@ -67,6 +75,21 @@ export interface SemanticSavedViewConfig {
   readonly sort: SemanticKeywordSort;
   readonly columns: readonly SemanticSavedViewColumnKey[];
   readonly density: SemanticSavedViewDensity;
+  /** Widths are keyed only by columns present in this saved view. */
+  readonly columnWidths?: Readonly<Partial<Record<SemanticSavedViewColumnKey, number>>>;
+  /** Number of rows loaded by each infinite-scroll request. */
+  readonly pageSize?: SemanticKeywordPageSize;
+  /** Width of the folder tree in CSS pixels. */
+  readonly groupSidebarWidth?: number;
+  /** Expanded folders in the semantic tree. */
+  readonly expandedGroupIds?: readonly string[];
+  /** A multi-folder selection; an empty array means the project root. */
+  readonly selectedGroupIds?: readonly string[];
+  /**
+   * Personal pointer to the visible view applied by the current user.
+   * Stored only in the internal per-user project layout view.
+   */
+  readonly appliedViewId?: string;
 }
 
 export interface SemanticSavedView {
@@ -96,6 +119,7 @@ export interface InternalCreateSemanticSavedViewInput
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;
+  readonly canManageShared: boolean;
 }
 
 export interface InternalUpdateSemanticSavedViewInput
@@ -104,6 +128,7 @@ export interface InternalUpdateSemanticSavedViewInput
   readonly projectId: string;
   readonly actorId: string;
   readonly version: number;
+  readonly canManageShared: boolean;
 }
 
 export interface InternalDeleteSemanticSavedViewInput {
@@ -111,4 +136,5 @@ export interface InternalDeleteSemanticSavedViewInput {
   readonly projectId: string;
   readonly actorId: string;
   readonly version: number;
+  readonly canManageShared: boolean;
 }

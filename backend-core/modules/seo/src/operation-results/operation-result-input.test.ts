@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
 import {
+  internalAiAnswerOperationResultInput,
   internalFrequencyOperationResultInput,
   operationResultCursor,
   operationResultLimit,
@@ -18,6 +19,17 @@ const context = { workspaceId, projectId, actorId };
 test("accepts an exact tenant-scoped frequency result request", () => {
   assert.deepEqual(
     internalFrequencyOperationResultInput(
+      { workspaceId, projectId, actorId, jobId, keywordIds: [keywordId] },
+      context,
+      jobId
+    ),
+    { workspaceId, projectId, actorId, jobId, keywordIds: [keywordId] }
+  );
+});
+
+test("accepts an exact tenant-scoped AI answer result request", () => {
+  assert.deepEqual(
+    internalAiAnswerOperationResultInput(
       { workspaceId, projectId, actorId, jobId, keywordIds: [keywordId] },
       context,
       jobId

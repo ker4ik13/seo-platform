@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import type { SemanticKeywordCompetitorSnapshot } from "@seo-platform/contracts";
+import type {
+  SemanticAiAnswerCompetitorSnapshot,
+  SemanticKeywordCompetitorSnapshot
+} from "@seo-platform/contracts";
 import {
   rankEngineLabel,
   rankSearchSystemLabel,
@@ -15,15 +18,17 @@ import { ProviderLogo } from "./provider-logo";
 export function SemanticCompetitorSnapshots({
   emptyText = "После следующего поддерживаемого съёма здесь появятся позиции, URL и доступные мета-данные результатов.",
   emptyTitle = "SERP для этого запроса ещё не сохранён",
+  heading = "Топ конкурентов",
   projectDomain,
   showEmpty = true,
   snapshots
 }: Readonly<{
   emptyText?: string;
   emptyTitle?: string;
+  heading?: string;
   projectDomain: string;
   showEmpty?: boolean;
-  snapshots: readonly SemanticKeywordCompetitorSnapshot[];
+  snapshots: readonly CompetitorSnapshot[];
 }>) {
   const [expandedSnapshots, setExpandedSnapshots] =
     useState<ReadonlySet<string>>(new Set());
@@ -42,7 +47,7 @@ export function SemanticCompetitorSnapshots({
           >
             <header>
               <div>
-                <h3>Топ конкурентов ({rankEngineLabel(snapshot.searchEngine)})</h3>
+                <h3>{heading} ({rankEngineLabel(snapshot.searchEngine)})</h3>
                 <small>
                   {competitorSourceLabel(snapshot)} · {formatDateTime(snapshot.observedAt)}
                 </small>
@@ -63,7 +68,11 @@ export function SemanticCompetitorSnapshots({
                     <div className="semantic-competitor-rank">
                       <span>{result.position}</span>
                       <SemanticSiteFavicon
-                        faviconUrl={result.faviconUrl}
+                        faviconUrl={
+                          "faviconUrl" in result && typeof result.faviconUrl === "string"
+                            ? result.faviconUrl
+                            : undefined
+                        }
                         pageUrl={result.url}
                       />
                     </div>
@@ -107,7 +116,7 @@ export function SemanticCompetitorSnapshots({
 
       {showEmpty && snapshots.length === 0 && (
         <section className="semantic-competitor-snapshot">
-          <h3>Топ конкурентов</h3>
+          <h3>{heading}</h3>
           <div className="semantic-inspector-empty">
             <strong>{emptyTitle}</strong>
             <span>{emptyText}</span>
@@ -179,12 +188,19 @@ export function SemanticSiteFavicon({
 }
 
 function competitorSourceLabel(
-  snapshot: SemanticKeywordCompetitorSnapshot
+  snapshot: CompetitorSnapshot
 ): string {
-  return `${rankSearchSystemLabel(snapshot.searchEngine, snapshot.searchSource)} · ${
+  const searchSource = "searchSource" in snapshot
+    ? snapshot.searchSource
+    : undefined;
+  return `${rankSearchSystemLabel(snapshot.searchEngine, searchSource)} · ${
     snapshot.provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools"
   }`;
 }
+
+type CompetitorSnapshot =
+  | SemanticKeywordCompetitorSnapshot
+  | SemanticAiAnswerCompetitorSnapshot;
 
 function resultUrlParts(value: string): Readonly<{
   domain: string;

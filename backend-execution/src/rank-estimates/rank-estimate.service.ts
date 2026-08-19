@@ -259,7 +259,8 @@ export class RankEstimateService {
           const execution = rankEstimateExecutionParameters(
             scope.configuration,
             provider,
-            input.searchSource
+            input.searchSource,
+            input.yandexLiveMode
           );
           const blockers = estimateBlockers(
             input,
@@ -451,7 +452,8 @@ export function rankEstimateRequestHash(
       trackingContextId: input.trackingContextId,
       provider: input.provider ?? null,
       credentialId: input.credentialId ?? null,
-      searchSource: input.searchSource ?? null
+      searchSource: input.searchSource ?? null,
+      yandexLiveMode: input.yandexLiveMode ?? null
     })
   );
 }
@@ -760,7 +762,8 @@ function estimateBlockers(
   const execution = rankEstimateExecutionParameters(
     scope.configuration,
     provider,
-    input.searchSource
+    input.searchSource,
+    input.yandexLiveMode
   );
   if (scope.contextStatus === "ARCHIVED") blockers.add("CONTEXT_ARCHIVED");
   if (keywordCount === 0) blockers.add("NO_ASSIGNED_KEYWORDS");
@@ -771,6 +774,12 @@ function estimateBlockers(
     blockers.add("SCOPE_HASH_UNAVAILABLE");
   }
   if (!execution) {
+    if (
+      input.yandexLiveMode === "TURBO" &&
+      scope.configuration.searchEngine !== "YANDEX"
+    ) {
+      blockers.add("UNSUPPORTED_SEARCH_ENGINE");
+    }
     if (
       !["GOOGLE", "YANDEX"].includes(scope.configuration.searchEngine)
     ) {
@@ -1310,7 +1319,15 @@ export function providerMinimumRequests(
   return {
     submit: 0,
     check: 0,
-    get: taskCount * Math.ceil((execution?.depth ?? 100) / 10)
+    get:
+      taskCount *
+      Math.ceil(
+        (execution?.depth ?? 100) /
+          (execution?.providerMappingVersion ===
+          "xmlstock-yandex-live@3"
+            ? 50
+            : 10)
+      )
   };
 }
 

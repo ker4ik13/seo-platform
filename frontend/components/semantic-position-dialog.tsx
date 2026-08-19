@@ -125,6 +125,7 @@ export function SemanticPositionDialog({
   );
   const [estimate, setEstimate] = useState<RankEstimate>();
   const [contextDraft, setContextDraft] = useState(defaultContextDraft);
+  const [yandexLiveTurbo, setYandexLiveTurbo] = useState(false);
   const createContextCommand = useRef<IdempotentCommand | undefined>(
     undefined
   );
@@ -184,6 +185,7 @@ export function SemanticPositionDialog({
   );
 
   function selectContext(contextId: string): void {
+    setYandexLiveTurbo(false);
     setSelectedContextId(contextId);
     const context = settings?.contexts.find(({ id }) => id === contextId);
     if (context) {
@@ -458,11 +460,19 @@ export function SemanticPositionDialog({
         ...selectedContext,
         assignedKeywordCount: replacement.assignedKeywordCount
       };
+      const yandexLiveMode =
+        yandexLiveTurbo &&
+        provider === "XMLSTOCK" &&
+        contextDraft.searchEngine === "YANDEX" &&
+        contextDraft.searchSource === "LIVE"
+          ? "TURBO" as const
+          : undefined;
       const contextSignature = rankEstimateCommandSignature(
         launchContext,
         provider,
         selectedSource.id,
-        contextDraft.searchSource
+        contextDraft.searchSource,
+        yandexLiveMode
       );
       let reusableRun = pendingRun.current;
       if (
@@ -485,7 +495,8 @@ export function SemanticPositionDialog({
           () => `rank-estimate:${crypto.randomUUID()}`,
           provider,
           selectedSource.id,
-          contextDraft.searchSource
+          contextDraft.searchSource,
+          yandexLiveMode
         );
         const estimatePayload = await browserApiRequest<unknown>(
           rankEstimatesApiPath(projectId),
@@ -495,7 +506,8 @@ export function SemanticPositionDialog({
               selectedContext.id,
               provider,
               selectedSource.id,
-              contextDraft.searchSource
+              contextDraft.searchSource,
+              yandexLiveMode
             ),
             idempotencyKey: estimateCommand.current.key
           }
@@ -656,10 +668,12 @@ export function SemanticPositionDialog({
               keywordCount={keywordIds.length}
               credentialId={credentialId}
               lastUsedCredentialId={lastUsedCredentialId}
+              yandexLiveTurbo={yandexLiveTurbo}
               sources={sources}
               onCredentialChange={(nextCredentialId) => {
                 const next = sources.find(({ id }) => id === nextCredentialId);
                 setCredentialId(nextCredentialId);
+                setYandexLiveTurbo(false);
                 setContextDraft((current) => ({
                   ...current,
                   ...(current.searchEngine === "GOOGLE"
@@ -676,6 +690,7 @@ export function SemanticPositionDialog({
                 runCommand.current = undefined;
               }}
               onSearchSourceChange={(source) => {
+                setYandexLiveTurbo(false);
                 setContextDraft((current) => ({
                   ...current,
                   searchSource: source
@@ -686,6 +701,13 @@ export function SemanticPositionDialog({
                 runCommand.current = undefined;
               }}
               searchSource={contextDraft.searchSource}
+              onYandexLiveTurboChange={(enabled) => {
+                setYandexLiveTurbo(enabled);
+                setEstimate(undefined);
+                pendingRun.current = undefined;
+                estimateCommand.current = undefined;
+                runCommand.current = undefined;
+              }}
               scope={selectedContextId && assignedKeywordSelections === undefined ? (
                 <div className="semantic-dialog-loading" role="status">
                   Загружаем запросы сохранённого контекста…
@@ -831,10 +853,12 @@ function PositionRunParameters({
   keywordCount,
   credentialId,
   lastUsedCredentialId,
+  yandexLiveTurbo,
   sources,
   onCredentialChange,
   searchSource,
   onSearchSourceChange,
+  onYandexLiveTurboChange,
   scope
 }: Readonly<{
   draft: TrackingContextDraft;
@@ -842,10 +866,12 @@ function PositionRunParameters({
   keywordCount: number;
   credentialId: string;
   lastUsedCredentialId: string | undefined;
+  yandexLiveTurbo: boolean;
   sources: readonly ProjectConnectorCredentialOption[];
   onCredentialChange: (credentialId: string) => void;
   searchSource: "SEARCH_API" | "LIVE";
   onSearchSourceChange: (source: "SEARCH_API" | "LIVE") => void;
+  onYandexLiveTurboChange: (enabled: boolean) => void;
   scope: ReactNode;
 }>) {
   const selectedSource = sources.find(({ id }) => id === credentialId);
@@ -857,7 +883,8 @@ function PositionRunParameters({
     keywordCount,
     draft.searchEngine,
     draft.depth,
-    searchSource
+    searchSource,
+    yandexLiveTurbo ? "TURBO" : undefined
   );
   const depthOptions: readonly TrackingContextDraft["depth"][] =
     draft.searchEngine === "YANDEX" && provider === "ARSENKIN"
@@ -924,8 +951,33 @@ function PositionRunParameters({
               </option>
             </CustomSelect>
           </label>
+          {draft.searchEngine === "YANDEX" &&
+            searchSource === "LIVE" &&
+            provider === "XMLSTOCK" && (
+              <label className="semantic-toggle-line semantic-position-turbo-toggle">
+                <input
+                  checked={yandexLiveTurbo}
+                  onChange={(event) =>
+                    onYandexLiveTurboChange(event.target.checked)
+                  }
+                  type="checkbox"
+                />
+                <span>
+                  <strong>Turbo режим XMLStock</strong>
+                  <small>
+                    Передаёт tbm=turbo, не применяет обычный лимит потоков
+                    XMLStock и получает до 50 результатов за страницу.
+                    Для максимальной скорости выберите TOP-50 в кабинете
+                    XMLStock. Тарифицируется дороже стандартного Live.
+                  </small>
+                </span>
+              </label>
+            )}
           <div className="semantic-provider-field">
-            <h4>Источник данных</h4>
+            <div className="semantic-provider-field-heading">
+              <h4>Источник данных</h4>
+              <a className="semantic-dialog-link" href="/app/settings/integrations">Управлять</a>
+            </div>
           {sources.length ? (
             <div
               aria-label="Источник съёма позиций"
@@ -962,7 +1014,6 @@ function PositionRunParameters({
             </div>
           )}
           </div>
-          <a className="semantic-dialog-link" href="/app/settings/integrations">Управление подключениями</a>
         </section>
         <section className="semantic-workflow-panel semantic-position-geo-panel">
           <header>
@@ -993,7 +1044,7 @@ function PositionRunParameters({
                     onChange={() => onChange({ ...draft, device })}
                     type="radio"
                   />
-                  <Icon name={device === "DESKTOP" ? "dashboard" : "pages"} />
+                  <Icon name={device === "DESKTOP" ? "desktop" : "mobile"} />
                   <span>{device === "DESKTOP" ? "Десктоп" : "Мобильное"}</span>
                   <i aria-hidden="true" />
                 </label>

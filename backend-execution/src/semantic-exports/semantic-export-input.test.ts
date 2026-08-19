@@ -27,6 +27,22 @@ test("accepts a canonical internal semantic export command", () => {
   assert.deepEqual(internalCreateSemanticExportInput(validCreate), validCreate);
 });
 
+test("accepts a canonical internal position-history export", () => {
+  const input = {
+    ...validCreate,
+    positionHistory: {
+      observedFrom: "2026-08-01T00:00:00.000Z",
+      observedBefore: "2026-08-20T00:00:00.000Z",
+      searchEngines: ["YANDEX", "GOOGLE"]
+    }
+  } as const;
+  assert.deepEqual(internalCreateSemanticExportInput(input), input);
+  assert.throws(
+    () => internalCreateSemanticExportInput({ ...input, format: "CSV" }),
+    /Invalid semantic export format/u
+  );
+});
+
 test("rejects unknown fields at every internal command boundary", () => {
   assert.throws(
     () => internalCreateSemanticExportInput({ ...validCreate, admin: true }),

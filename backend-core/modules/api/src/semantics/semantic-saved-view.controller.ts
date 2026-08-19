@@ -73,7 +73,7 @@ export class SemanticSavedViewController {
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
-  @RequirePermission("semantic.update")
+  @RequirePermission("semantic.view")
   @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
   public async create(
     @Body() body: unknown,
@@ -112,7 +112,7 @@ export class SemanticSavedViewController {
   }
 
   @Patch(":viewId")
-  @RequirePermission("semantic.update")
+  @RequirePermission("semantic.view")
   @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
   public async update(
     @Param("viewId") viewId: string,
@@ -158,7 +158,7 @@ export class SemanticSavedViewController {
 
   @Delete(":viewId")
   @HttpCode(HttpStatus.NO_CONTENT)
-  @RequirePermission("semantic.update")
+  @RequirePermission("semantic.view")
   @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
   public async delete(
     @Param("viewId") viewId: string,

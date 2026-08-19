@@ -230,7 +230,15 @@ function exportInputSnapshot(
     ...(input.filters ? { filters: input.filters as Prisma.InputJsonObject } : {}),
     ...(input.sort ? { sort: input.sort } : {}),
     ...(input.keywordIds ? { keywordIds: [...input.keywordIds] } : {}),
-    ...(input.includeBom === undefined ? {} : { includeBom: input.includeBom })
+    ...(input.includeBom === undefined ? {} : { includeBom: input.includeBom }),
+    ...(input.positionHistory
+      ? {
+          positionHistory: {
+            ...input.positionHistory,
+            searchEngines: [...input.positionHistory.searchEngines]
+          }
+        }
+      : {})
   };
 }
 

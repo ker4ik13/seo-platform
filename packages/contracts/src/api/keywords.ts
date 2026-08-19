@@ -68,7 +68,15 @@ export const semanticKeywordSorts = [
   "YANDEX_CHECKED_AT_ASC",
   "YANDEX_CHECKED_AT_DESC",
   "GOOGLE_CHECKED_AT_ASC",
-  "GOOGLE_CHECKED_AT_DESC"
+  "GOOGLE_CHECKED_AT_DESC",
+  "YANDEX_AI_POSITION_ASC",
+  "YANDEX_AI_POSITION_DESC",
+  "GOOGLE_AI_POSITION_ASC",
+  "GOOGLE_AI_POSITION_DESC",
+  "YANDEX_AI_CHECKED_AT_ASC",
+  "YANDEX_AI_CHECKED_AT_DESC",
+  "GOOGLE_AI_CHECKED_AT_ASC",
+  "GOOGLE_AI_CHECKED_AT_DESC"
 ] as const;
 
 export type SemanticKeywordSort =
@@ -106,6 +114,8 @@ export interface SemanticKeywordListItem {
   readonly priority: number;
   readonly isFavorite: boolean;
   readonly isTracked: boolean;
+  /** Whether the saved AI-answer shortcut is visible beside this keyword. */
+  readonly showAiAnswerButton: boolean;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
   readonly groupPath?: string;
@@ -121,6 +131,7 @@ export interface SemanticKeywordListItem {
   readonly frequency?: SemanticKeywordListFrequency;
   readonly frequencies?: readonly SemanticKeywordListFrequencyValue[];
   readonly positions?: readonly SemanticKeywordListPosition[];
+  readonly aiAnswers?: readonly import("./ai-answer-collections.js").SemanticAiAnswerSummary[];
   readonly sourceMode: SemanticKeywordSourceMode;
   readonly trashed?: boolean;
   readonly createdAt: string;
@@ -221,6 +232,7 @@ export interface UpdateSemanticKeywordInput {
   readonly language?: string;
   readonly priority?: number;
   readonly isFavorite?: boolean;
+  readonly showAiAnswerButton?: boolean;
   readonly intent?: SemanticKeywordIntent | null;
   readonly groupId?: string | null;
   readonly clusterId?: string | null;

@@ -45,3 +45,18 @@ test("estimates XMLStock Google pages by selected depth", () => {
     /^до 12 запросов XMLStock · от 0,29\s₽$/u
   );
 });
+
+test("shows the documented Turbo page range and higher tariff", () => {
+  const estimate = rankProviderUsageEstimate(
+    xmlStock,
+    12,
+    "YANDEX",
+    100,
+    "LIVE",
+    "TURBO"
+  );
+  assert.equal(
+    estimate.usage,
+    "24–120 запросов XMLStock Turbo · повышенный тариф"
+  );
+});
