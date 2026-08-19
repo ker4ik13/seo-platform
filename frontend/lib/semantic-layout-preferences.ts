@@ -80,6 +80,18 @@ export function clampSemanticColumnWidth(
   );
 }
 
+export function semanticVisibleColumnWidths(
+  columns: readonly string[],
+  columnWidths: Readonly<Record<string, number>>
+): Readonly<Record<string, number>> {
+  const visibleColumns = new Set(columns);
+  return Object.fromEntries(
+    Object.entries(columnWidths).filter(([column]) =>
+      visibleColumns.has(column)
+    )
+  );
+}
+
 export function readSemanticLayoutPreferences(
   projectId: string,
   storage: StorageLike

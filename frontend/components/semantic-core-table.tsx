@@ -63,6 +63,7 @@ import {
   semanticGroupSidebarDefaultWidth,
   semanticGroupSidebarMaxWidth,
   semanticGroupSidebarMinWidth,
+  semanticVisibleColumnWidths,
   writeSemanticLayoutPreferences
 } from "../lib/semantic-layout-preferences";
 import {
@@ -436,7 +437,10 @@ export function SemanticCoreTable({
   const currentSavedViewConfig = useMemo<SemanticViewConfig>(
     () => ({
       ...viewConfig,
-      columnWidths,
+      columnWidths: semanticVisibleColumnWidths(
+        viewConfig.columns,
+        columnWidths
+      ),
       pageSize,
       groupSidebarWidth,
       expandedGroupIds: expandedGroupIds ? [...expandedGroupIds] : [],
@@ -447,7 +451,10 @@ export function SemanticCoreTable({
   const draftSavedViewConfig = useMemo<SemanticViewConfig>(
     () => ({
       ...draftConfig,
-      columnWidths,
+      columnWidths: semanticVisibleColumnWidths(
+        draftConfig.columns,
+        columnWidths
+      ),
       pageSize,
       groupSidebarWidth,
       expandedGroupIds: expandedGroupIds ? [...expandedGroupIds] : [],
@@ -575,7 +582,7 @@ export function SemanticCoreTable({
             );
             return;
           }
-          setMutationError(keywordErrorMessage(requestError));
+          setMutationError(savedViewMutationErrorMessage(requestError));
         })
         .finally(() => {
           if (savedViewAutosaveInFlightRef.current === requestKey) {
@@ -1204,7 +1211,7 @@ export function SemanticCoreTable({
       const previousSort = folderSortFor(groupId);
       setDraftConfig((current) => ({ ...current, sort: previousSort }));
       setViewConfig((current) => ({ ...current, sort: previousSort }));
-      setMutationError(keywordErrorMessage(requestError));
+      setMutationError(savedViewMutationErrorMessage(requestError));
     } finally {
       setSavingFolderSort(false);
     }
@@ -1413,7 +1420,7 @@ export function SemanticCoreTable({
       }
     } catch (requestError) {
       savedViewAutosaveBaselineRef.current = previousBaseline;
-      setMutationError(keywordErrorMessage(requestError));
+      setMutationError(savedViewMutationErrorMessage(requestError));
     } finally {
       setSavingTableLayout(false);
     }
@@ -1461,7 +1468,7 @@ export function SemanticCoreTable({
         appliedViewId: view.id
       });
     } catch (requestError) {
-      setMutationError(keywordErrorMessage(requestError));
+      setMutationError(savedViewMutationErrorMessage(requestError));
     }
   }
 
@@ -4486,6 +4493,22 @@ function keywordErrorMessage(error: unknown): string {
     return error.message;
   }
   return "Не удалось загрузить семантическое ядро.";
+}
+
+function savedViewMutationErrorMessage(error: unknown): string {
+  if (error instanceof BrowserApiError) {
+    if (error.status === 412) {
+      return "Представление изменилось в другой вкладке. Откройте его заново.";
+    }
+    if (error.status === 403) {
+      return "Недостаточно прав для изменения представления.";
+    }
+    if (error.code === "VALIDATION_FAILED") {
+      return "Не удалось сохранить настройки представления. Обновите страницу и повторите.";
+    }
+    return error.message;
+  }
+  return "Не удалось сохранить настройки представления.";
 }
 
 function keywordMutationError(error: unknown): string {

@@ -6,6 +6,7 @@ import {
   normalizeSemanticKeywordPageSize,
   readSemanticLayoutPreferences,
   semanticColumnDefaultWidth,
+  semanticVisibleColumnWidths,
   writeSemanticLayoutPreferences
 } from "./semantic-layout-preferences.ts";
 
@@ -56,6 +57,25 @@ test("clamps corrupted or unsafe layout dimensions", () => {
   assert.equal(semanticColumnDefaultWidth("custom:traffic"), 168);
   assert.equal(normalizeSemanticKeywordPageSize(1_000), 1_000);
   assert.equal(normalizeSemanticKeywordPageSize(201), 100);
+});
+
+test("persists widths only for columns included in the saved view", () => {
+  assert.deepEqual(
+    semanticVisibleColumnWidths(
+      ["query", "tags", "custom:01900000-0000-7000-8000-000000000001"],
+      {
+        query: 388,
+        tags: 142,
+        priority: 94,
+        "custom:01900000-0000-7000-8000-000000000001": 176
+      }
+    ),
+    {
+      query: 388,
+      tags: 142,
+      "custom:01900000-0000-7000-8000-000000000001": 176
+    }
+  );
 });
 
 test("falls back when stored layout is malformed", () => {
