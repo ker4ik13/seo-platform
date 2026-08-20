@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   MANUAL_KEYWORD_BULK_CHUNK_SIZE,
+  manualKeywordDuplicatePolicy,
   manualKeywordInputStats,
   manualKeywordRetryRows,
   manualKeywordTexts,
@@ -22,6 +23,84 @@ test("normalizes pasted rows and detects duplicates like keyword storage", () =>
 test("manual add always collapses repeated textarea rows before preview", () => {
   const value = "one\none\ntwo";
   assert.deepEqual(manualKeywordTexts(value), ["one", "two"]);
+});
+
+test("target-group import wins when both duplicate options are enabled", () => {
+  assert.equal(
+    manualKeywordDuplicatePolicy({
+      addDuplicatesToGroup: true,
+      inTargetGroup: false,
+      previewState: "ACTIVE_DUPLICATE",
+      selectedForTargetGroup: true,
+      skipDuplicates: true
+    }),
+    "ADD_TO_GROUP"
+  );
+  assert.equal(
+    manualKeywordDuplicatePolicy({
+      addDuplicatesToGroup: true,
+      inTargetGroup: false,
+      previewState: "ACTIVE_DUPLICATE",
+      selectedForTargetGroup: false,
+      skipDuplicates: true
+    }),
+    "SKIP_EXISTING"
+  );
+});
+
+test("unresolved duplicates are rejected only when silent skipping is disabled", () => {
+  assert.equal(
+    manualKeywordDuplicatePolicy({
+      addDuplicatesToGroup: false,
+      inTargetGroup: false,
+      previewState: "ACTIVE_DUPLICATE",
+      selectedForTargetGroup: false,
+      skipDuplicates: false
+    }),
+    "REJECT_EXISTING"
+  );
+  assert.equal(
+    manualKeywordDuplicatePolicy({
+      addDuplicatesToGroup: true,
+      inTargetGroup: true,
+      previewState: "ACTIVE_DUPLICATE",
+      selectedForTargetGroup: false,
+      skipDuplicates: false
+    }),
+    "SKIP_EXISTING"
+  );
+  assert.equal(
+    manualKeywordDuplicatePolicy({
+      addDuplicatesToGroup: false,
+      inTargetGroup: false,
+      previewState: "TRASHED_DUPLICATE",
+      selectedForTargetGroup: false,
+      skipDuplicates: false
+    }),
+    "SKIP_EXISTING"
+  );
+});
+
+test("new preview rows keep a race-safe duplicate fallback", () => {
+  assert.equal(
+    manualKeywordDuplicatePolicy({
+      addDuplicatesToGroup: true,
+      inTargetGroup: false,
+      previewState: "NEW",
+      selectedForTargetGroup: false,
+      skipDuplicates: true
+    }),
+    "ADD_TO_GROUP"
+  );
+  assert.equal(
+    manualKeywordDuplicatePolicy({
+      addDuplicatesToGroup: false,
+      inTargetGroup: false,
+      selectedForTargetGroup: false,
+      skipDuplicates: false
+    }),
+    "REJECT_EXISTING"
+  );
 });
 
 test("duplicate preview keeps global row indices across bounded chunks", async () => {
@@ -178,6 +257,41 @@ test("bulk runner returns trashed duplicates with their original text", async ()
     })
   );
 
+  assert.deepEqual(result.trashCandidates, [
+    {
+      index: 1,
+      text: "from trash",
+      keywordId: "01900000-0000-7000-8000-000000000091",
+      version: 3
+    }
+  ]);
+});
+
+test("bulk runner preserves trash recovery when another duplicate is rejected", async () => {
+  const result = await runManualKeywordBulkChunks(
+    ["needs choice", "from trash"],
+    async () => ({
+      selected: 2,
+      created: 0,
+      restored: 0,
+      linked: 0,
+      skipped: 1,
+      rejected: 1,
+      failed: 0,
+      rows: [
+        { index: 0, outcome: "REJECTED_EXISTING" },
+        {
+          index: 1,
+          outcome: "SKIPPED_EXISTING",
+          keywordId: "01900000-0000-7000-8000-000000000091",
+          version: 3,
+          trashed: true
+        }
+      ]
+    })
+  );
+
+  assert.deepEqual(result.retryRows, ["needs choice"]);
   assert.deepEqual(result.trashCandidates, [
     {
       index: 1,

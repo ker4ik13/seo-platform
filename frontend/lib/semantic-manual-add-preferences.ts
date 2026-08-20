@@ -1,4 +1,5 @@
 export interface SemanticManualAddPreferences {
+  readonly addDuplicatesToGroup: boolean;
   readonly skipDuplicates: boolean;
 }
 
@@ -8,7 +9,10 @@ interface StorageLike {
 }
 
 const storagePrefix = "seonorita:semantic-manual-add:v1:";
-const defaults: SemanticManualAddPreferences = { skipDuplicates: true };
+const defaults: SemanticManualAddPreferences = {
+  addDuplicatesToGroup: false,
+  skipDuplicates: true
+};
 
 export function readSemanticManualAddPreferences(
   projectId: string,
@@ -17,12 +21,20 @@ export function readSemanticManualAddPreferences(
   try {
     const raw = storage.getItem(`${storagePrefix}${projectId}`);
     if (!raw) return defaults;
-    const value = JSON.parse(raw) as Readonly<{ skipDuplicates?: unknown }>;
+    const value = JSON.parse(raw) as Readonly<{
+      addDuplicatesToGroup?: unknown;
+      skipDuplicates?: unknown;
+    }>;
+    const skipDuplicates =
+      typeof value.skipDuplicates === "boolean"
+        ? value.skipDuplicates
+        : defaults.skipDuplicates;
     return {
-      skipDuplicates:
-        typeof value.skipDuplicates === "boolean"
-          ? value.skipDuplicates
-          : defaults.skipDuplicates
+      addDuplicatesToGroup:
+        typeof value.addDuplicatesToGroup === "boolean"
+          ? value.addDuplicatesToGroup
+          : !skipDuplicates,
+      skipDuplicates
     };
   } catch {
     return defaults;
@@ -37,7 +49,10 @@ export function writeSemanticManualAddPreferences(
   try {
     storage.setItem(
       `${storagePrefix}${projectId}`,
-      JSON.stringify({ skipDuplicates: preferences.skipDuplicates })
+      JSON.stringify({
+        addDuplicatesToGroup: preferences.addDuplicatesToGroup,
+        skipDuplicates: preferences.skipDuplicates
+      })
     );
   } catch {
     // The command still carries an explicit policy when storage is unavailable.

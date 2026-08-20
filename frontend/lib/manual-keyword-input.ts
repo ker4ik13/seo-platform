@@ -1,4 +1,6 @@
 import type {
+  SemanticKeywordBulkCreatePreviewState,
+  SemanticKeywordDuplicatePolicy,
   SemanticKeywordBulkCreatePreviewResult
 } from "@seo-platform/contracts";
 
@@ -33,6 +35,35 @@ export function manualKeywordTexts(
   value: string
 ): readonly string[] {
   return manualKeywordInputStats(value).uniqueRows;
+}
+
+export interface ManualKeywordDuplicatePolicyInput {
+  readonly addDuplicatesToGroup: boolean;
+  readonly inTargetGroup: boolean;
+  readonly previewState?: SemanticKeywordBulkCreatePreviewState;
+  readonly selectedForTargetGroup: boolean;
+  readonly skipDuplicates: boolean;
+}
+
+export function manualKeywordDuplicatePolicy({
+  addDuplicatesToGroup,
+  inTargetGroup,
+  previewState,
+  selectedForTargetGroup,
+  skipDuplicates
+}: ManualKeywordDuplicatePolicyInput): SemanticKeywordDuplicatePolicy {
+  if (previewState === "TRASHED_DUPLICATE") return "SKIP_EXISTING";
+  if (previewState === "ACTIVE_DUPLICATE" && inTargetGroup) {
+    return "SKIP_EXISTING";
+  }
+  if (
+    (previewState === "ACTIVE_DUPLICATE" && selectedForTargetGroup) ||
+    ((previewState === undefined || previewState === "NEW") &&
+      addDuplicatesToGroup)
+  ) {
+    return "ADD_TO_GROUP";
+  }
+  return skipDuplicates ? "SKIP_EXISTING" : "REJECT_EXISTING";
 }
 
 export interface ManualKeywordBulkResultRow {

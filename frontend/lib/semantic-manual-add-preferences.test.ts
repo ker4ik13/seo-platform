@@ -21,22 +21,46 @@ test("keeps the duplicate choice isolated per project", () => {
   const storage = new MemoryStorage();
   writeSemanticManualAddPreferences(
     "project-a",
-    { skipDuplicates: false },
+    { addDuplicatesToGroup: true, skipDuplicates: true },
     storage
   );
 
   assert.deepEqual(readSemanticManualAddPreferences("project-a", storage), {
-    skipDuplicates: false
-  });
-  assert.deepEqual(readSemanticManualAddPreferences("project-b", storage), {
+    addDuplicatesToGroup: true,
     skipDuplicates: true
   });
+  assert.deepEqual(readSemanticManualAddPreferences("project-b", storage), {
+    addDuplicatesToGroup: false,
+    skipDuplicates: true
+  });
+});
+
+test("migrates the legacy inverse duplicate preference", () => {
+  const storage = new MemoryStorage();
+  storage.setItem(
+    "seonorita:semantic-manual-add:v1:legacy-import",
+    JSON.stringify({ skipDuplicates: false })
+  );
+  storage.setItem(
+    "seonorita:semantic-manual-add:v1:legacy-skip",
+    JSON.stringify({ skipDuplicates: true })
+  );
+
+  assert.deepEqual(
+    readSemanticManualAddPreferences("legacy-import", storage),
+    { addDuplicatesToGroup: true, skipDuplicates: false }
+  );
+  assert.deepEqual(
+    readSemanticManualAddPreferences("legacy-skip", storage),
+    { addDuplicatesToGroup: false, skipDuplicates: true }
+  );
 });
 
 test("falls back to safe duplicate skipping for malformed storage", () => {
   const storage = new MemoryStorage();
   storage.setItem("seonorita:semantic-manual-add:v1:broken", "{");
   assert.deepEqual(readSemanticManualAddPreferences("broken", storage), {
+    addDuplicatesToGroup: false,
     skipDuplicates: true
   });
 });
