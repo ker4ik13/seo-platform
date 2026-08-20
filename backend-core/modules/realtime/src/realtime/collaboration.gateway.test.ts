@@ -138,6 +138,11 @@ test("rejects client room scope and joins only the authorized project", async ()
   ]);
   const joinedData = successfulJoin(joined);
   assert.equal(joinedData.participant.userId, authorization.userId);
+  assert.equal(
+    joinedData.participant.status,
+    "AWAY",
+    "a new socket must stay hidden until the browser confirms activity"
+  );
   assert.equal(joinedData.participants.length, 1);
   assert.deepEqual(socket.broadcasts[0], {
     room: `project:${authorization.projectId}`,

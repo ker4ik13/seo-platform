@@ -434,7 +434,10 @@ function initialParticipant(
     userId: authorization.userId,
     clientInstanceId: authorization.clientInstanceId,
     route: "/app",
-    status: "ACTIVE",
+    // A fresh socket has not reported browser activity yet. Starting it as
+    // ACTIVE would briefly resurrect an idle user on every authorization
+    // lease renewal, before the first client presence update arrives.
+    status: "AWAY",
     cursor: null,
     selection: null,
     view: null,
