@@ -465,6 +465,7 @@ case "$component" in
       TZ=UTC \
       WEB_PUBLIC_URL="$SEO_PLATFORM_PUBLIC_URL" \
       PLATFORM_API_INTERNAL_URL=http://127.0.0.1:4000 \
+      REALTIME_INTERNAL_URL=http://127.0.0.1:4003 \
       AUTH_ACCESS_COOKIE_NAME=seo_access \
       AUTH_SESSION_COOKIE_NAME=seo_session \
       AUTH_CSRF_COOKIE_NAME=seo_csrf \
@@ -476,7 +477,7 @@ case "$component" in
       "$pnpm_bin" \
       --dir "$project_root" \
       --filter @seo-platform/frontend \
-      exec next start -p 3000 -H 127.0.0.1
+      start
     ;;
   *)
     runtime_fail "unknown runtime component: $component"

@@ -1247,7 +1247,9 @@ consumer и pending attempts для replay/reconciliation.
 
 ### 19.1. Connection
 
-- Endpoint: `wss://<realtime-subdomain>/socket.io`.
+- Browser endpoint: same-origin `wss://<web-origin>/socket.io`; frontend
+  проксирует WebSocket upgrade на server-only `REALTIME_INTERNAL_URL`. Отдельный
+  realtime-subdomain допустим только как эквивалентная edge-конфигурация.
 - Authentication выполняется session/token при handshake.
 - После соединения сервер повторно проверяет principal.
 - Socket получает `connectionId`, `userId`, `sessionId`, `clientInstanceId`.
@@ -1294,10 +1296,10 @@ Join room — отдельная авторизуемая команда. Кли
 
 Ephemeral payload:
 
-- throttled;
+- cursor throttled минимум до 80 ms между отправками, heartbeat — 15 секунд;
 - ограничен по размеру;
 - не содержит значения скрытых ячеек;
-- истекает по TTL;
+- истекает по Redis TTL 30 секунд;
 - не записывается в основной audit log.
 
 ### 19.5. Durable UI events

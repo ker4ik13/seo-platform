@@ -117,7 +117,7 @@ test("renderer is POSIX shell and writes hashed least-privilege Jobs ACLs", asyn
   });
 });
 
-test("renderer isolates Realtime channels", async () => {
+test("renderer isolates Realtime channels and TTL presence keys", async () => {
   const environment = validRedisEnvironment();
   const realtimeAdapter = await readFile(realtimeAdapterUrl, "utf8");
   assert.match(
@@ -135,10 +135,15 @@ test("renderer isolates Realtime channels", async () => {
       "&seo-platform:realtime:v1-request#/collaboration#",
       "&seo-platform:realtime:v1-response#/collaboration#*"
     ]);
-    assert.deepEqual(keyPatterns(line), []);
+    assert.deepEqual(keyPatterns(line), [
+      "~seo-platform:realtime:v1:presence:*"
+    ]);
     assert.match(line, /\s-@all\s/u);
     assert.match(line, /\s\+psubscribe(?:\s|$)/u);
     assert.match(line, /\s\+publish(?:\s|$)/u);
+    assert.match(line, /\s\+scan(?:\s|$)/u);
+    assert.match(line, /\s\+set(?:\s|$)/u);
+    assert.match(line, /\s\+mget(?:\s|$)/u);
     assert.doesNotMatch(line, /\s\+@all(?:\s|$)/u);
   });
 

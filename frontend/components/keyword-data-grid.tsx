@@ -152,6 +152,7 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
     <table
       aria-label={ariaLabel}
       className={`${tableClassName} density-${density.toLowerCase()}${hasSizedColumns ? " has-sized-columns" : ""}${onToggleHighlighted ? " has-highlight-selector" : ""}${showRowNumbers ? " has-row-numbers" : ""}`}
+      data-presence-key="semantic-keyword-table"
       style={
         tableWidth
           ? { minWidth: tableWidth, width: tableWidth }
@@ -264,6 +265,8 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
                 .filter(Boolean)
                 .join(" ") || undefined}
               draggable={draggable}
+              data-presence-key={`keyword:${row.id}`}
+              data-presence-row-id={row.id}
               key={row.id}
               onClick={(event) => onRowClick?.(row, event)}
               onContextMenu={(event) => onContextMenu?.(event, row)}
@@ -296,6 +299,9 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
                       ? column.cellClassName(row)
                       : column.cellClassName
                   }
+                  data-presence-column-id={column.key}
+                  data-presence-key={`keyword:${row.id}:column:${column.key}`}
+                  data-presence-row-id={row.id}
                   key={column.key}
                 >
                   {column.cell(row)}

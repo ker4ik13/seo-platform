@@ -112,9 +112,9 @@ case "$instance" in
     unset jobs_commands
     ;;
   realtime)
-    realtime_commands='-@all +hello +client|setinfo +ping +quit +publish +subscribe +psubscribe +unsubscribe +punsubscribe +pubsub|numsub'
+    realtime_commands='-@all +hello +client|setinfo +ping +quit +publish +subscribe +psubscribe +unsubscribe +punsubscribe +pubsub|numsub +get +mget +set +del +scan'
     append_user seo_realtime REDIS_REALTIME_PASSWORD \
-      'resetkeys resetchannels &seo-platform:realtime:v1#/collaboration#* &seo-platform:realtime:v1-request#/collaboration# &seo-platform:realtime:v1-response#/collaboration#*' \
+      '~seo-platform:realtime:v1:presence:* resetchannels &seo-platform:realtime:v1#/collaboration#* &seo-platform:realtime:v1-request#/collaboration# &seo-platform:realtime:v1-response#/collaboration#*' \
       "$realtime_commands"
     unset realtime_commands
     ;;

@@ -142,7 +142,7 @@ test("Redis 8 Jobs ACL runs BullMQ and enforces queue keyspaces", liveTestOption
   });
 });
 
-test("Redis 8 Realtime ACL permits only versioned adapter channels", liveTestOptions, async () => {
+test("Redis 8 Realtime ACL permits adapter channels and TTL presence keys", liveTestOptions, async () => {
   const secrets = redisSecrets();
   await withRedis("realtime", realtimeConfigPath, secrets, async ({ port }) => {
     await assertHealthBoundary(port);
@@ -179,8 +179,15 @@ test("Redis 8 Realtime ACL permits only versioned adapter channels", liveTestOpt
         ),
         0
       );
+      const presenceKey =
+        "seo-platform:realtime:v1:presence:0198f258-8cc7-7abc-8def-1234567890af:connection_01";
+      assert.equal(
+        await publisher.set(presenceKey, "state", { PX: 30_000 }),
+        "OK"
+      );
+      assert.equal(await publisher.get(presenceKey), "state");
       await assert.rejects(
-        publisher.set("seo-platform:realtime:v1:presence:blocked", "blocked"),
+        publisher.set("seo-platform:realtime:v1:other:blocked", "blocked"),
         /NOPERM/u
       );
       await assert.rejects(

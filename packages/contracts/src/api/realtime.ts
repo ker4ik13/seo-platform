@@ -2,8 +2,76 @@ export const realtimeTicketRequestSchemaVersion =
   "realtime-project-ticket-request@1" as const;
 export const realtimeCollaborationNamespace =
   "/collaboration" as const;
+export const realtimeCollaborationEvents = {
+  ready: "realtime.ready",
+  presenceJoin: "presence.join",
+  presenceUpdate: "presence.update",
+  presenceJoined: "presence.joined",
+  presenceUpdated: "presence.updated",
+  presenceLeft: "presence.left"
+} as const;
 export const realtimeTicketTtlMilliseconds = 30_000;
 export const realtimeAuthorizationLeaseMilliseconds = 60_000;
+export const projectPresenceCursorIntervalMilliseconds = 80;
+export const projectPresenceHeartbeatMilliseconds = 15_000;
+export const projectPresenceTtlMilliseconds = 30_000;
+export const projectPresenceMaximumSelectionIds = 50;
+export const projectPresenceMaximumMembers = 200;
+export const projectPresenceMaximumConnections = 500;
+
+export type ProjectPresenceStatus = "ACTIVE" | "AWAY";
+export type ProjectPresenceSelectionEntity = "KEYWORD" | "PAGE" | "NOTE";
+
+export interface ProjectPresenceCursor {
+  /** Viewport-relative coordinates in the inclusive 0..1 range. */
+  readonly x: number;
+  readonly y: number;
+  /** Optional stable DOM anchor; never contains visible/user-entered text. */
+  readonly targetKey: string | null;
+  readonly targetX: number | null;
+  readonly targetY: number | null;
+}
+
+export interface ProjectPresenceSelection {
+  readonly entity: ProjectPresenceSelectionEntity;
+  readonly selectedIds: readonly string[];
+  readonly highlightedIds: readonly string[];
+  readonly columnId: string | null;
+}
+
+export interface ProjectPresenceUpdateInput {
+  /** Normalized application pathname without query string or fragment. */
+  readonly route: string;
+  readonly status: ProjectPresenceStatus;
+  readonly cursor: ProjectPresenceCursor | null;
+  readonly selection: ProjectPresenceSelection | null;
+  readonly editing: boolean;
+  readonly sequence: number;
+}
+
+export interface ProjectPresenceParticipant
+  extends ProjectPresenceUpdateInput {
+  readonly connectionId: string;
+  readonly userId: string;
+  readonly clientInstanceId: string;
+  readonly updatedAt: string;
+}
+
+export interface ProjectPresenceMember {
+  readonly userId: string;
+  readonly displayName: string;
+  readonly avatarUpdatedAt?: string;
+}
+
+export interface ProjectPresenceParticipantEvent {
+  readonly participant: ProjectPresenceParticipant;
+}
+
+export interface ProjectPresenceLeftEvent {
+  readonly connectionId: string;
+  readonly userId: string;
+  readonly occurredAt: string;
+}
 
 export interface IssueRealtimeProjectTicketInput {
   readonly clientInstanceId: string;
@@ -54,12 +122,34 @@ export type PresenceJoinResult =
         readonly connectionId: string;
         readonly projectId: string;
         readonly authorizationExpiresAt: string;
+        readonly participant: ProjectPresenceParticipant;
+        readonly participants: readonly ProjectPresenceParticipant[];
       };
     }
   | {
       readonly ok: false;
       readonly error: {
-        readonly code: "UNAUTHENTICATED" | "VALIDATION_FAILED";
+        readonly code:
+          | "UNAUTHENTICATED"
+          | "VALIDATION_FAILED"
+          | "PROVIDER_UNAVAILABLE";
+        readonly message: string;
+      };
+    };
+
+export type PresenceUpdateResult =
+  | {
+      readonly ok: true;
+      readonly data: ProjectPresenceParticipant;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code:
+          | "UNAUTHENTICATED"
+          | "VALIDATION_FAILED"
+          | "RATE_LIMITED"
+          | "PROVIDER_UNAVAILABLE";
         readonly message: string;
       };
     };
@@ -174,6 +264,194 @@ export function isRealtimeOpaqueTicket(value: unknown): value is string {
   );
 }
 
+export function projectPresenceUpdateInput(
+  value: unknown
+): ProjectPresenceUpdateInput {
+  const input = exactRecord(value, [
+    "route",
+    "status",
+    "cursor",
+    "selection",
+    "editing",
+    "sequence"
+  ]);
+  if (
+    typeof input.route !== "string" ||
+    input.route.length > 256 ||
+    !/^\/app(?:\/[A-Za-z0-9_-]{1,80}){0,8}$/u.test(input.route) ||
+    (input.status !== "ACTIVE" && input.status !== "AWAY") ||
+    typeof input.editing !== "boolean" ||
+    !Number.isSafeInteger(input.sequence) ||
+    Number(input.sequence) < 0 ||
+    Number(input.sequence) > 2_147_483_647
+  ) {
+    return invalid();
+  }
+  return {
+    route: input.route,
+    status: input.status,
+    cursor:
+      input.cursor === null
+        ? null
+        : projectPresenceCursor(input.cursor),
+    selection:
+      input.selection === null
+        ? null
+        : projectPresenceSelection(input.selection),
+    editing: input.editing,
+    sequence: Number(input.sequence)
+  };
+}
+
+export function projectPresenceMembers(
+  value: unknown
+): readonly ProjectPresenceMember[] {
+  if (
+    !Array.isArray(value) ||
+    value.length > projectPresenceMaximumMembers
+  ) {
+    return invalid();
+  }
+  return value.map((candidate) => {
+    const member = optionalExactRecord(
+      candidate,
+      ["userId", "displayName"],
+      ["avatarUpdatedAt"]
+    );
+    if (
+      typeof member.displayName !== "string" ||
+      member.displayName.length < 1 ||
+      member.displayName.length > 160 ||
+      member.displayName.trim() !== member.displayName
+    ) {
+      return invalid();
+    }
+    return {
+      userId: uuid(member.userId),
+      displayName: member.displayName,
+      ...(member.avatarUpdatedAt === undefined
+        ? {}
+        : { avatarUpdatedAt: isoTimestamp(member.avatarUpdatedAt) })
+    };
+  });
+}
+
+export function projectPresenceParticipant(
+  value: unknown
+): ProjectPresenceParticipant {
+  const participant = exactRecord(value, [
+    "connectionId",
+    "userId",
+    "clientInstanceId",
+    "route",
+    "status",
+    "cursor",
+    "selection",
+    "editing",
+    "sequence",
+    "updatedAt"
+  ]);
+  if (
+    typeof participant.connectionId !== "string" ||
+    !/^[A-Za-z0-9_-]{1,128}$/u.test(participant.connectionId)
+  ) {
+    return invalid();
+  }
+  const update = projectPresenceUpdateInput({
+    route: participant.route,
+    status: participant.status,
+    cursor: participant.cursor,
+    selection: participant.selection,
+    editing: participant.editing,
+    sequence: participant.sequence
+  });
+  return {
+    connectionId: participant.connectionId,
+    userId: uuid(participant.userId),
+    clientInstanceId: uuid(participant.clientInstanceId),
+    ...update,
+    updatedAt: isoTimestamp(participant.updatedAt)
+  };
+}
+
+function projectPresenceCursor(value: unknown): ProjectPresenceCursor {
+  const cursor = exactRecord(value, [
+    "x",
+    "y",
+    "targetKey",
+    "targetX",
+    "targetY"
+  ]);
+  const targetKey = cursor.targetKey;
+  const targetX = cursor.targetX;
+  const targetY = cursor.targetY;
+  if (
+    !unitCoordinate(cursor.x) ||
+    !unitCoordinate(cursor.y) ||
+    (targetKey !== null &&
+      (typeof targetKey !== "string" ||
+        !/^[A-Za-z0-9:_-]{1,180}$/u.test(targetKey))) ||
+    (targetKey === null && (targetX !== null || targetY !== null)) ||
+    (targetKey !== null &&
+      (!unitCoordinate(targetX) || !unitCoordinate(targetY)))
+  ) {
+    return invalid();
+  }
+  return {
+    x: Number(cursor.x),
+    y: Number(cursor.y),
+    targetKey,
+    targetX: targetX === null ? null : Number(targetX),
+    targetY: targetY === null ? null : Number(targetY)
+  };
+}
+
+function projectPresenceSelection(
+  value: unknown
+): ProjectPresenceSelection {
+  const selection = exactRecord(value, [
+    "entity",
+    "selectedIds",
+    "highlightedIds",
+    "columnId"
+  ]);
+  if (
+    !["KEYWORD", "PAGE", "NOTE"].includes(String(selection.entity)) ||
+    !Array.isArray(selection.selectedIds) ||
+    !Array.isArray(selection.highlightedIds) ||
+    selection.selectedIds.length > projectPresenceMaximumSelectionIds ||
+    selection.highlightedIds.length > projectPresenceMaximumSelectionIds ||
+    (selection.columnId !== null &&
+      (typeof selection.columnId !== "string" ||
+        !/^[A-Za-z0-9:_-]{1,80}$/u.test(selection.columnId)))
+  ) {
+    return invalid();
+  }
+  const selectedIds = uniqueUuids(selection.selectedIds);
+  const highlightedIds = uniqueUuids(selection.highlightedIds);
+  return {
+    entity: selection.entity as ProjectPresenceSelectionEntity,
+    selectedIds,
+    highlightedIds,
+    columnId: selection.columnId as string | null
+  };
+}
+
+function uniqueUuids(values: readonly unknown[]): readonly string[] {
+  const result = values.map(uuid);
+  if (new Set(result).size !== result.length) return invalid();
+  return result;
+}
+
+function unitCoordinate(value: unknown): boolean {
+  return (
+    typeof value === "number" &&
+    Number.isFinite(value) &&
+    value >= 0 &&
+    value <= 1
+  );
+}
+
 function exactRecord(
   value: unknown,
   fields: readonly string[]
@@ -191,6 +469,33 @@ function exactRecord(
   if (
     keys.length !== fields.length ||
     !keys.every((key) => fields.includes(key))
+  ) {
+    return invalid();
+  }
+  return record;
+}
+
+function optionalExactRecord(
+  value: unknown,
+  requiredFields: readonly string[],
+  optionalFields: readonly string[]
+): Readonly<Record<string, unknown>> {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) {
+    return invalid();
+  }
+  const record = value as Readonly<Record<string, unknown>>;
+  const keys = Object.keys(record);
+  if (
+    !requiredFields.every((field) => keys.includes(field)) ||
+    !keys.every(
+      (key) =>
+        requiredFields.includes(key) || optionalFields.includes(key)
+    )
   ) {
     return invalid();
   }

@@ -116,6 +116,7 @@ import {
   requestProjectOperationActivityRefresh,
   useProjectActiveOperationCount
 } from "./project-operation-activity-provider";
+import { useProjectPresence } from "./project-presence-provider";
 import type { AppProject } from "../lib/app-types";
 import {
   defaultSemanticViewConfig,
@@ -305,6 +306,7 @@ export function SemanticCoreTable({
   workspaceId,
   workspaceRoleCode
 }: SemanticCoreTableProps) {
+  const { publishSelection } = useProjectPresence();
   const [items, setItems] = useState<readonly SemanticKeyword[]>([]);
   const [page, setPage] = useState<BrowserCursorPage>({
     hasNext: false
@@ -498,6 +500,26 @@ export function SemanticCoreTable({
   const debouncedTagSearch = useDebouncedValue(
     draftConfig.filters.tag ?? "",
     250
+  );
+
+  useEffect(() => {
+    const selectedIds = [...checkedIds];
+    const highlighted = [...highlightedIds];
+    publishSelection(
+      selectedIds.length > 0 || highlighted.length > 0
+        ? {
+            entity: "KEYWORD",
+            selectedIds,
+            highlightedIds: highlighted,
+            columnId: null
+          }
+        : null
+    );
+  }, [checkedIds, highlightedIds, publishSelection]);
+
+  useEffect(
+    () => () => publishSelection(null),
+    [publishSelection]
   );
 
   useEffect(() => {

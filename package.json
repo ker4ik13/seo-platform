@@ -9,7 +9,7 @@
   "scripts": {
     "build": "pnpm --filter @seo-platform/contracts build && pnpm --filter '!@seo-platform/contracts' --recursive --if-present run build",
     "typecheck": "pnpm --filter @seo-platform/contracts build && pnpm --recursive --if-present run typecheck",
-    "lint": "oxlint packages/contracts/src backend-core/src backend-core/modules/api/src backend-core/modules/seo/src backend-core/modules/realtime/src backend-execution/src frontend/app frontend/components frontend/lib frontend/next.config.ts infrastructure/tests --import-plugin --react-plugin --promise-plugin --node-plugin --deny-warnings",
+    "lint": "oxlint packages/contracts/src backend-core/src backend-core/modules/api/src backend-core/modules/seo/src backend-execution/src backend-core/modules/realtime/src frontend/app frontend/components frontend/lib frontend/next.config.ts frontend/server.mjs infrastructure/tests --import-plugin --react-plugin --promise-plugin --node-plugin --deny-warnings",
     "test": "pnpm --recursive --if-present run test && pnpm infra:test",
     "infra:test": "node --test 'infrastructure/tests/*.test.mjs'",
     "infra:validate": "docker compose -f infrastructure/compose.dokploy.yml config --quiet",

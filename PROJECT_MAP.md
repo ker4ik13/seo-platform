@@ -1,6 +1,6 @@
 # Карта проекта
 
-Актуально на 19 августа 2026 года.
+Актуально на 20 августа 2026 года.
 
 Карта описывает текущее устройство репозитория. Нормативные требования
 находятся в `docs/technical-spec/00-index.md`, архитектурные решения — в
@@ -26,7 +26,8 @@ persistent local data используют named volumes; repository configs з�
 
 ```text
 browser ──> frontend ──> backend-core ──> backend-execution
-               │              │                  │
+               │     │        │                  │
+               │     └── WS ──┤                  │
                │              ├── NATS ──────────┤
                │              ├── PostgreSQL     ├── PostgreSQL
                │              └── Redis Realtime ├── Redis Jobs/BullMQ
@@ -233,6 +234,35 @@ rank/frequency provider вызывается один раз, а единый sn
 offset участвует в нумерации; resize одной колонки не перераспределяет свободное
 место между соседними, а открытие sidebar меняет только доступный viewport.
 
+Project presence реализован в `backend-core/modules/realtime` поверх
+WebSocket-only Socket.IO namespace `/collaboration`. Browser получает
+одноразовый 30-секундный project ticket через защищённый Platform API,
+подключается только к server-authorized `project:{projectId}` и обновляет
+ограниченное состояние `route/status/cursor/selection/editing/sequence`.
+Курсор отправляется не чаще одного раза в 80 ms, heartbeat — раз в 15 секунд,
+authorization повторно проверяется не реже раза в 15 секунд и полностью
+обновляется новым ticket до окончания 60-секундного lease. Сервер дополнительно
+ограничивает burst до 30 событий и устойчивую частоту до 20 событий/секунду на
+connection. Состояние каждого connection хранится только в versioned Redis
+keyspace `seo-platform:realtime:v1:presence:*` с TTL 30 секунд; Redis adapter
+доставляет join/update/leave между нодами, а Redis scan используется только для
+bounded snapshot до 500 connections одного проекта. Presence не является
+источником бизнес-данных и не попадает в audit.
+
+Frontend агрегирует несколько вкладок одного пользователя в одну аватарку в
+шапке, показывает reconnect/degraded state, скрывает просроченное состояние и
+рисует cursor overlay только на совпадающем route. Для устойчивого положения
+курсор использует безопасный `data-presence-key` и относительную позицию внутри
+элемента; fallback — нормализованные координаты viewport. Таблица семантики
+публикует только UUID выбранных/подсвеченных строк и при наличии технический
+column ID:
+текст запроса, значение ячейки, hidden columns и DOM text в WebSocket payload не
+попадают. Profile enrichment и avatar bytes читаются отдельными
+permission-scoped `GET /api/v1/projects/:projectId/presence-members[/…]` из
+Platform API; Realtime не обращается к `platform_db`. `socket.io-client@4.8.3`
+является единственной новой production-зависимостью frontend и совпадает с
+версией server protocol, поэтому Socket.IO framing не реализуется вручную.
+
 Журнал rank/frequency получает immutable строки результата cursor-страницами
 по 200 или 500 элементов через весь tenant-scoped boundary
 `frontend → Platform API → Execution/Core SEO`. Modal подгружает страницы
@@ -250,7 +280,10 @@ loopback fallback. Опциональный exact hostname `WEB_WWW_REDIRECT_HOS
 получает permanent `308` на
 `WEB_PUBLIC_URL` с сохранением path/query; произвольный `Host` не влияет на
 redirect target. `PLATFORM_API_INTERNAL_URL` задаётся отдельно и никогда не
-выдаётся браузеру.
+выдаётся браузеру. WebSocket использует same-origin `/socket.io`; минимальный
+custom Next server принимает только exact Socket.IO upgrade path, удаляет
+Cookie/Authorization перед proxy и направляет соединение на canonical
+`REALTIME_INTERNAL_URL`, не открывая порт 4003 и внутренний hostname браузеру.
 
 Browser BFF-клиент обрабатывает истечение короткого access token централизованно:
 параллельные `401` объединяются в одну rotation через `POST /app/auth/refresh`,
@@ -815,7 +848,9 @@ raw HTML. Видимость `PROJECT_MEMBERS` оставляет заметку
 - Node.js 24+, pnpm 11, TypeScript strict.
 - `.env.example` содержит только имена и безопасные placeholders.
 - Redis разделён на durable Jobs (`AOF`, `noeviction`) и ephemeral Realtime
-  Pub/Sub; named users ограничены versioned key/channel namespaces.
+  Pub/Sub/TTL presence; named users ограничены versioned key/channel
+  namespaces. Realtime runtime имеет key access только к
+  `seo-platform:realtime:v1:presence:*` и не может читать произвольные ключи.
 - Все application processes работают в UTC.
 - Production template включает S3 и inspection. S3 objects физически
   изолируются неизменяемым `S3_KEY_PREFIX`, при этом в Jobs DB хранится

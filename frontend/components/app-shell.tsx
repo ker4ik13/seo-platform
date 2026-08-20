@@ -13,6 +13,9 @@ import { TenantSwitcher } from "./tenant-switcher";
 import { DropdownCoordinator } from "./dropdown-coordinator";
 import { SidebarCollapseButton } from "./sidebar-collapse-button";
 import { ProjectOperationActivityProvider } from "./project-operation-activity-provider";
+import { ProjectPresenceAvatars } from "./project-presence-avatars";
+import { ProjectPresenceOverlay } from "./project-presence-overlay";
+import { ProjectPresenceProvider } from "./project-presence-provider";
 
 const navigation: readonly {
   readonly label: string;
@@ -118,6 +121,10 @@ export function AppShell({
       projects={context.projects}
       {...(context.workspace ? { workspaceId: context.workspace.id } : {})}
     >
+    <ProjectPresenceProvider
+      {...(context.project ? { projectId: context.project.id } : {})}
+      user={context.user}
+    >
     <div className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <DropdownCoordinator />
       <aside className="sidebar">
@@ -159,6 +166,7 @@ export function AppShell({
                     ? "nav-item active"
                     : "nav-item"
                 }
+                data-presence-key={`nav:${item.section}`}
                 href={navigationHref(item)}
                 key={item.label}
                 title={item.label}
@@ -192,6 +200,7 @@ export function AppShell({
           className={
             activeSection === "settings" ? "nav-item active" : "nav-item"
           }
+          data-presence-key="nav:settings"
           href="/app/settings/workspace"
           title="Настройки"
         >
@@ -236,6 +245,7 @@ export function AppShell({
             <kbd>⌘ K</kbd>
           </label>
           <div className="topbar-actions">
+            <ProjectPresenceAvatars />
             <NotificationBell {...(context.project ? { projectId: context.project.id } : {})} />
             <AccountMenu
               roleCode={context.workspace?.roleCode}
@@ -250,6 +260,7 @@ export function AppShell({
               ? `content content-workspace content-${activeSection}`
               : `content content-${activeSection}`
           }
+          data-presence-key={`screen:${activeSection}`}
         >
           {children}
         </main>
@@ -280,8 +291,10 @@ export function AppShell({
               )
             )}
         </nav>
+        <ProjectPresenceOverlay />
       </div>
     </div>
+    </ProjectPresenceProvider>
     </ProjectOperationActivityProvider>
   );
 }

@@ -3,12 +3,13 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("frontend is one Next.js deployable with the protected admin route", async () => {
-  const [compose, dockerfile, frontendPackageSource, adminPage, adminProxy] = await Promise.all([
+  const [compose, dockerfile, frontendPackageSource, adminPage, adminProxy, frontendServer] = await Promise.all([
     infrastructureFile("compose.dokploy.yml"),
     infrastructureFile("docker/web.Dockerfile"),
     workspaceFile("frontend/package.json"),
     workspaceFile("frontend/app/admin/page.tsx"),
-    workspaceFile("frontend/app/admin/api/[...path]/route.ts")
+    workspaceFile("frontend/app/admin/api/[...path]/route.ts"),
+    workspaceFile("frontend/server.mjs")
   ]);
   const frontendPackage = JSON.parse(frontendPackageSource);
   const frontend = serviceBlock(compose, "frontend");
@@ -28,6 +29,8 @@ test("frontend is one Next.js deployable with the protected admin route", async 
     frontend,
     /WEB_WWW_REDIRECT_HOST: \$\{WEB_WWW_REDIRECT_HOST:-www\.seonorita\.ru\}/u
   );
+  assert.match(build, /REALTIME_INTERNAL_URL: http:\/\/backend-core:4003/u);
+  assert.match(frontend, /REALTIME_INTERNAL_URL: http:\/\/backend-core:4003/u);
   assert.match(frontend, /^      - internal$/mu);
   assert.match(frontend, /^      - edge$/mu);
   assert.doesNotMatch(frontend, /^    ports:/mu);
@@ -44,6 +47,11 @@ test("frontend is one Next.js deployable with the protected admin route", async 
     dockerfile,
     /ENV WEB_WWW_REDIRECT_HOST=\$WEB_WWW_REDIRECT_HOST/u
   );
+  assert.match(dockerfile, /ARG REALTIME_INTERNAL_URL/u);
+  assert.match(
+    dockerfile,
+    /ENV REALTIME_INTERNAL_URL=\$REALTIME_INTERNAL_URL/u
+  );
   assert.ok(
     dockerfile.indexOf("pnpm --filter @seo-platform/contracts build") <
       dockerfile.indexOf('pnpm --filter "$TARGET_PACKAGE" build'),
@@ -57,6 +65,16 @@ test("frontend is one Next.js deployable with the protected admin route", async 
     frontendPackage.devDependencies?.["@seo-platform/contracts"],
     undefined
   );
+  assert.equal(frontendPackage.dependencies?.["socket.io-client"], "4.8.3");
+  assert.equal(frontendPackage.scripts?.start, "node server.mjs");
+  assert.match(frontendServer, /app\.getUpgradeHandler\(\)/u);
+  assert.match(frontendServer, /REALTIME_PATH = "\/socket\.io\/"/u);
+  assert.match(frontendServer, /realtimeInternalOrigin\(env\)/u);
+  assert.match(frontendServer, /delete headers\.cookie/u);
+  assert.match(frontendServer, /delete headers\.forwarded/u);
+  assert.match(frontendServer, /upstreamSocket\.setTimeout\(0\)/u);
+  assert.match(frontendServer, /browserSocket\.setTimeout\(0\)/u);
+  assert.doesNotMatch(frontendServer, /http-proxy/u);
 });
 
 test("only three application deployables are present", async () => {
