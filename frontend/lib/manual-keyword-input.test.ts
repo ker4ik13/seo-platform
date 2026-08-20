@@ -5,7 +5,8 @@ import {
   manualKeywordInputStats,
   manualKeywordRetryRows,
   manualKeywordTexts,
-  runManualKeywordBulkChunks
+  runManualKeywordBulkChunks,
+  runManualKeywordBulkPreviewChunks
 } from "./manual-keyword-input.ts";
 
 test("normalizes pasted rows and detects duplicates like keyword storage", () => {
@@ -18,10 +19,46 @@ test("normalizes pasted rows and detects duplicates like keyword storage", () =>
   assert.deepEqual(stats.uniqueRows, ["Нейросети онлайн", "ёлка"]);
 });
 
-test("skip policy deduplicates textarea while reuse policy preserves every row", () => {
+test("manual add always collapses repeated textarea rows before preview", () => {
   const value = "one\none\ntwo";
-  assert.deepEqual(manualKeywordTexts(value, true), ["one", "two"]);
-  assert.deepEqual(manualKeywordTexts(value, false), ["one", "one", "two"]);
+  assert.deepEqual(manualKeywordTexts(value), ["one", "two"]);
+});
+
+test("duplicate preview keeps global row indices across bounded chunks", async () => {
+  const rows = Array.from({ length: 105 }, (_, index) => `query ${index}`);
+  const preview = await runManualKeywordBulkPreviewChunks(
+    rows,
+    async (chunk, offset) => ({
+      selected: chunk.length,
+      newKeywords: chunk.length - (offset === 100 ? 1 : 0),
+      activeDuplicates: offset === 100 ? 1 : 0,
+      trashedDuplicates: 0,
+      restorableDeleted: 0,
+      rows: chunk.map((_, index) =>
+        offset === 100 && index === 0
+          ? {
+              index,
+              state: "ACTIVE_DUPLICATE" as const,
+              keywordId: "01900000-0000-7000-8000-000000000090",
+              version: 2,
+              groups: [],
+              groupsTruncated: false,
+              inTargetGroup: false
+            }
+          : {
+              index,
+              state: "NEW" as const,
+              groups: [],
+              groupsTruncated: false,
+              inTargetGroup: false
+            }
+      )
+    })
+  );
+
+  assert.equal(preview.selected, 105);
+  assert.equal(preview.activeDuplicates, 1);
+  assert.equal(preview.rows[100]?.index, 100);
 });
 
 test("bulk retry preserves rejected and failed rows in server order", () => {

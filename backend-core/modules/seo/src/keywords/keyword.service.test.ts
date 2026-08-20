@@ -22,6 +22,95 @@ const sha256ForTest = (value: string): string =>
 const workspaceId = "01900000-0000-7000-8000-000000000001";
 const projectId = "01900000-0000-7000-8000-000000000002";
 
+test("previews existing keyword memberships without mutating them", async () => {
+  const targetGroupId = "01900000-0000-7000-8000-000000000020";
+  const otherGroupId = "01900000-0000-7000-8000-000000000021";
+  const trashGroupId = "01900000-0000-7000-8000-000000000022";
+  const service = new KeywordService(
+    {
+      keyword: {
+        findMany: async () => [
+          {
+            id: "01900000-0000-7000-8000-000000000030",
+            language: "ru",
+            normalizedHash: sha256ForTest("существующий запрос"),
+            status: "ACTIVE",
+            version: 3,
+            memberships: [
+              {
+                group: {
+                  id: otherGroupId,
+                  name: "Другая",
+                  path: "Каталог / Другая",
+                  systemKind: null
+                }
+              }
+            ]
+          },
+          {
+            id: "01900000-0000-7000-8000-000000000031",
+            language: "ru",
+            normalizedHash: sha256ForTest("запрос в корзине"),
+            status: "DELETED",
+            version: 4,
+            memberships: [
+              {
+                group: {
+                  id: trashGroupId,
+                  name: "Корзина",
+                  path: "Корзина",
+                  systemKind: "TRASH"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      keywordGroupMembership: {
+        findMany: async () => [
+          {
+            keywordId: "01900000-0000-7000-8000-000000000030",
+            group: {
+              id: targetGroupId,
+              name: "Текущая",
+              path: "Текущая",
+              systemKind: null
+            }
+          }
+        ]
+      }
+    } as unknown as PrismaService,
+    semanticVersions()
+  );
+
+  const result = await service.previewBulkCreate({
+    workspaceId,
+    projectId,
+    actorId: "01900000-0000-7000-8000-000000000003",
+    items: [
+      {
+        text: "Существующий запрос",
+        language: "ru",
+        groupId: targetGroupId
+      },
+      { text: "Новый запрос", language: "ru", groupId: targetGroupId },
+      { text: "Запрос в корзине", language: "ru", groupId: targetGroupId }
+    ]
+  });
+
+  assert.equal(result.selected, 3);
+  assert.equal(result.newKeywords, 1);
+  assert.equal(result.activeDuplicates, 1);
+  assert.equal(result.trashedDuplicates, 1);
+  assert.equal(result.rows[0]?.inTargetGroup, true);
+  assert.deepEqual(
+    result.rows[0]?.groups.map(({ path }) => path),
+    ["Каталог / Другая", "Текущая"]
+  );
+  assert.equal(result.rows[1]?.state, "NEW");
+  assert.equal(result.rows[2]?.state, "TRASHED_DUPLICATE");
+});
+
 test("averages the latest found position once per active keyword", async () => {
   const firstKeywordId = "01900000-0000-7000-8000-000000000010";
   const secondKeywordId = "01900000-0000-7000-8000-000000000011";
@@ -1811,6 +1900,26 @@ test("bulk create keeps duplicate outcomes indexed and partial", async () => {
   assert.equal(rejected.skipped, 0);
   assert.equal(rejected.rejected, 1);
   assert.equal(rejected.failed, 1);
+
+  seen = false;
+  const rowOverride = await service.bulkCreate({
+    workspaceId,
+    projectId,
+    actorId: "01900000-0000-7000-8000-000000000003",
+    entitlement,
+    duplicatePolicy: "SKIP_EXISTING",
+    items: [
+      createItem("SEO аудит"),
+      { ...createItem("SEO аудит"), duplicatePolicy: "REJECT_EXISTING" }
+    ]
+  });
+  assert.deepEqual(
+    rowOverride.rows.map(({ index, outcome }) => ({ index, outcome })),
+    [
+      { index: 0, outcome: "CREATED" },
+      { index: 1, outcome: "REJECTED_EXISTING" }
+    ]
+  );
 });
 
 test("bulk update partitions changed, conflicted and skipped rows", async () => {

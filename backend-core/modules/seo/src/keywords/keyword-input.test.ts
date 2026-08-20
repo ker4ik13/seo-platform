@@ -6,6 +6,7 @@ import {
   internalDeleteSemanticKeywordInput,
   internalUpdateSemanticKeywordInput,
   internalSemanticKeywordBulkCreateInput,
+  internalSemanticKeywordBulkCreatePreviewInput,
   internalSemanticKeywordBulkInput,
   internalSemanticKeywordCleaningInput
 } from "./keyword-input.js";
@@ -63,10 +64,55 @@ test("keeps duplicate policy explicit across the trusted create boundary", () =>
       projectId,
       actorId,
       entitlement,
+      duplicatePolicy: "SKIP_EXISTING",
+      items: [
+        {
+          ...bulk.items[0],
+          duplicatePolicy: "ADD_TO_GROUP"
+        }
+      ]
+    }).items[0]?.duplicatePolicy,
+    "ADD_TO_GROUP"
+  );
+  assert.equal(
+    internalSemanticKeywordBulkCreateInput({
+      workspaceId,
+      projectId,
+      actorId,
+      entitlement,
       duplicatePolicy: "ADD_TO_GROUP",
       items: bulk.items
     }).duplicatePolicy,
     "ADD_TO_GROUP"
+  );
+});
+
+test("keeps duplicate preview inside the trusted project scope", () => {
+  assert.deepEqual(
+    internalSemanticKeywordBulkCreatePreviewInput({
+      workspaceId,
+      projectId,
+      actorId,
+      items: [
+        {
+          text: "  SEO   аудит ",
+          language: "RU",
+          groupId: "01900000-0000-7000-8000-000000000010"
+        }
+      ]
+    }),
+    {
+      workspaceId,
+      projectId,
+      actorId,
+      items: [
+        {
+          text: "SEO аудит",
+          language: "ru",
+          groupId: "01900000-0000-7000-8000-000000000010"
+        }
+      ]
+    }
   );
 });
 

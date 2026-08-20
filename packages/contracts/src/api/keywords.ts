@@ -199,7 +199,10 @@ export interface CreateSemanticKeywordInput {
 export type SemanticKeywordBulkCreateItemInput = Omit<
   CreateSemanticKeywordInput,
   "duplicatePolicy"
->;
+> & Readonly<{
+  /** Optional row-level override; the bulk policy remains the fallback. */
+  duplicatePolicy?: SemanticKeywordDuplicatePolicy;
+}>;
 
 export interface SemanticKeywordBulkCreateInput {
   readonly items: readonly SemanticKeywordBulkCreateItemInput[];
@@ -225,6 +228,55 @@ export interface SemanticKeywordBulkCreateResult {
   readonly rejected: number;
   readonly failed: number;
   readonly rows: readonly SemanticKeywordBulkCreateRow[];
+}
+
+export const semanticKeywordBulkCreatePreviewMaxItems = 100;
+export const semanticKeywordBulkCreatePreviewMaxGroups = 50;
+
+export const semanticKeywordBulkCreatePreviewStates = [
+  "NEW",
+  "ACTIVE_DUPLICATE",
+  "TRASHED_DUPLICATE",
+  "RESTORABLE_DELETED"
+] as const;
+
+export type SemanticKeywordBulkCreatePreviewState =
+  (typeof semanticKeywordBulkCreatePreviewStates)[number];
+
+export interface SemanticKeywordBulkCreatePreviewItemInput {
+  readonly text: string;
+  readonly language: string;
+  readonly groupId?: string;
+}
+
+export interface SemanticKeywordBulkCreatePreviewInput {
+  readonly items: readonly SemanticKeywordBulkCreatePreviewItemInput[];
+}
+
+export interface SemanticKeywordBulkCreatePreviewGroup {
+  readonly id: string;
+  readonly name: string;
+  readonly path: string;
+  readonly systemKind?: SemanticKeywordGroupSystemKind;
+}
+
+export interface SemanticKeywordBulkCreatePreviewRow {
+  readonly index: number;
+  readonly state: SemanticKeywordBulkCreatePreviewState;
+  readonly keywordId?: string;
+  readonly version?: number;
+  readonly groups: readonly SemanticKeywordBulkCreatePreviewGroup[];
+  readonly groupsTruncated: boolean;
+  readonly inTargetGroup: boolean;
+}
+
+export interface SemanticKeywordBulkCreatePreviewResult {
+  readonly selected: number;
+  readonly newKeywords: number;
+  readonly activeDuplicates: number;
+  readonly trashedDuplicates: number;
+  readonly restorableDeleted: number;
+  readonly rows: readonly SemanticKeywordBulkCreatePreviewRow[];
 }
 
 export interface UpdateSemanticKeywordInput {
@@ -256,6 +308,13 @@ export interface InternalSemanticKeywordBulkCreateInput
   readonly projectId: string;
   readonly actorId: string;
   readonly entitlement: import("./billing.js").SemanticCapacityEntitlement;
+}
+
+export interface InternalSemanticKeywordBulkCreatePreviewInput
+  extends SemanticKeywordBulkCreatePreviewInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
 }
 
 export interface InternalUpdateSemanticKeywordInput

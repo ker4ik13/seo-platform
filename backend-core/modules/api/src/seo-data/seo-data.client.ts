@@ -1,10 +1,13 @@
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import {
   semanticKeywordIntents,
+  semanticKeywordBulkCreatePreviewMaxGroups,
+  semanticKeywordBulkCreatePreviewStates,
   semanticKeywordCreateOutcomes,
   semanticKeywordCleaningStates,
   semanticKeywordSourceModes,
   semanticKeywordPageSizes,
+  semanticKeywordGroupSystemKinds,
   semanticKeywordSorts,
   semanticClusterMethods,
   semanticClusterPageSources,
@@ -29,6 +32,7 @@ import {
   type CreateSemanticKeywordGroupInput,
   type InternalCreateSemanticKeywordInput,
   type InternalSemanticKeywordBulkCreateInput,
+  type InternalSemanticKeywordBulkCreatePreviewInput,
   type InternalCreateSemanticClusterInput,
   type InternalCreateSemanticKeywordGroupInput,
   type InternalDeleteSemanticKeywordInput,
@@ -96,6 +100,8 @@ import {
   type SemanticClusterPageSource,
   type SemanticKeywordBulkInput,
   type SemanticKeywordBulkCreateInput,
+  type SemanticKeywordBulkCreatePreviewInput,
+  type SemanticKeywordBulkCreatePreviewResult,
   type SemanticKeywordBulkCreateResult,
   type SemanticKeywordBulkResult,
   type SemanticKeywordCleaningInput,
@@ -603,6 +609,30 @@ export class SeoDataClient {
       body
     );
     return semanticKeywordBulkCreateResult(responseData(payload), input);
+  }
+
+  public async previewBulkCreateKeywords(
+    context: InternalContext,
+    input: SemanticKeywordBulkCreatePreviewInput
+  ): Promise<SemanticKeywordBulkCreatePreviewResult> {
+    const scope = trackingScope(context);
+    const body: InternalSemanticKeywordBulkCreatePreviewInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId
+    };
+    const payload = await this.request(
+      "POST",
+      keywordUrl(
+        context,
+        this.config.services.seoData,
+        "bulk-create-preview"
+      ),
+      context,
+      body
+    );
+    return semanticKeywordBulkCreatePreviewResult(responseData(payload), input);
   }
 
   public async updateKeyword(
@@ -3341,6 +3371,142 @@ export function semanticKeywordBulkCreateResult(
     skipped: Number(counts.skipped),
     rejected: Number(counts.rejected),
     failed: Number(counts.failed),
+    rows
+  };
+}
+
+export function semanticKeywordBulkCreatePreviewResult(
+  value: unknown,
+  input: SemanticKeywordBulkCreatePreviewInput
+): SemanticKeywordBulkCreatePreviewResult {
+  const result = exactRecord(value, [
+    "selected",
+    "newKeywords",
+    "activeDuplicates",
+    "trashedDuplicates",
+    "restorableDeleted",
+    "rows"
+  ]);
+  if (!Array.isArray(result.rows)) throw invalidResponse();
+  const rows = result.rows.map((value) => {
+    const row = exactRecord(value, [
+      "index",
+      "state",
+      "keywordId",
+      "version",
+      "groups",
+      "groupsTruncated",
+      "inTargetGroup"
+    ]);
+    if (
+      !Number.isSafeInteger(row.index) ||
+      Number(row.index) < 0 ||
+      Number(row.index) >= input.items.length ||
+      typeof row.state !== "string" ||
+      !semanticKeywordBulkCreatePreviewStates.some(
+        (state) => state === row.state
+      ) ||
+      !Array.isArray(row.groups) ||
+      row.groups.length > semanticKeywordBulkCreatePreviewMaxGroups ||
+      typeof row.groupsTruncated !== "boolean" ||
+      typeof row.inTargetGroup !== "boolean"
+    ) {
+      throw invalidResponse();
+    }
+    const groups = row.groups.map((value) => {
+      const group = exactRecord(value, [
+        "id",
+        "name",
+        "path",
+        "systemKind"
+      ]);
+      if (
+        !requiredString(group.id) ||
+        !requiredString(group.name) ||
+        !requiredString(group.path) ||
+        (group.systemKind !== undefined &&
+          (typeof group.systemKind !== "string" ||
+            !semanticKeywordGroupSystemKinds.some(
+              (kind) => kind === group.systemKind
+            )))
+      ) {
+        throw invalidResponse();
+      }
+      return {
+        id: group.id,
+        name: group.name,
+        path: group.path,
+        ...(typeof group.systemKind === "string"
+          ? {
+              systemKind:
+                group.systemKind as NonNullable<
+                  SemanticKeywordBulkCreatePreviewResult["rows"][number]["groups"][number]["systemKind"]
+                >
+            }
+          : {})
+      };
+    });
+    const state = row.state as SemanticKeywordBulkCreatePreviewResult["rows"][number]["state"];
+    const isNew = state === "NEW";
+    const targetGroupId = input.items[Number(row.index)]?.groupId;
+    if (
+      (isNew &&
+        (row.keywordId !== undefined ||
+          row.version !== undefined ||
+          groups.length > 0 ||
+          row.groupsTruncated ||
+          row.inTargetGroup)) ||
+      (!isNew &&
+        (!requiredString(row.keywordId) ||
+          !Number.isSafeInteger(row.version) ||
+          Number(row.version) < 1)) ||
+      (row.inTargetGroup &&
+        (!targetGroupId || !groups.some(({ id }) => id === targetGroupId)))
+    ) {
+      throw invalidResponse();
+    }
+    return {
+      index: Number(row.index),
+      state,
+      ...(typeof row.keywordId === "string"
+        ? { keywordId: row.keywordId }
+        : {}),
+      ...(typeof row.version === "number" ? { version: row.version } : {}),
+      groups,
+      groupsTruncated: row.groupsTruncated,
+      inTargetGroup: row.inTargetGroup
+    };
+  });
+  const counts = {
+    selected: result.selected,
+    newKeywords: result.newKeywords,
+    activeDuplicates: result.activeDuplicates,
+    trashedDuplicates: result.trashedDuplicates,
+    restorableDeleted: result.restorableDeleted
+  };
+  const count = (
+    state: SemanticKeywordBulkCreatePreviewResult["rows"][number]["state"]
+  ): number => rows.filter((row) => row.state === state).length;
+  if (
+    Object.values(counts).some(
+      (entry) => !Number.isSafeInteger(entry) || Number(entry) < 0
+    ) ||
+    Number(counts.selected) !== input.items.length ||
+    rows.length !== input.items.length ||
+    new Set(rows.map(({ index }) => index)).size !== rows.length ||
+    Number(counts.newKeywords) !== count("NEW") ||
+    Number(counts.activeDuplicates) !== count("ACTIVE_DUPLICATE") ||
+    Number(counts.trashedDuplicates) !== count("TRASHED_DUPLICATE") ||
+    Number(counts.restorableDeleted) !== count("RESTORABLE_DELETED")
+  ) {
+    throw invalidResponse();
+  }
+  return {
+    selected: Number(counts.selected),
+    newKeywords: Number(counts.newKeywords),
+    activeDuplicates: Number(counts.activeDuplicates),
+    trashedDuplicates: Number(counts.trashedDuplicates),
+    restorableDeleted: Number(counts.restorableDeleted),
     rows
   };
 }

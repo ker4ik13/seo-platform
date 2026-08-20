@@ -2523,6 +2523,7 @@ svg { display: block; }
 .semantic-custom-value-editor .semantic-editor-actions { grid-column: 1 / -1; }
 .semantic-custom-value-button { background: transparent; border: 0; color: var(--brand); cursor: pointer; font: inherit; max-width: 100%; overflow: hidden; padding: 2px 0; text-overflow: ellipsis; white-space: nowrap; }
 .semantic-editor { background: #fafafd; border: 1px solid var(--line); border-radius: 12px; display: grid; gap: 14px; padding: 16px; }
+.semantic-editor-fields { border: 0; display: grid; gap: 14px; margin: 0; min-width: 0; padding: 0; }
 .semantic-editor-heading { align-items: flex-start; display: flex; gap: 16px; justify-content: space-between; }
 .semantic-editor-heading strong,
 .semantic-editor-heading span { display: block; }
@@ -2567,6 +2568,31 @@ svg { display: block; }
 .semantic-editor-deduplicate > span { display: grid; gap: 2px; }
 .semantic-editor-deduplicate strong { font-size: 11px; line-height: 1.3; }
 .semantic-editor-deduplicate small { color: var(--muted); font-size: 9px; font-weight: 500; line-height: 1.4; }
+.semantic-manual-duplicate-review {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+.semantic-manual-duplicate-review > header { align-items: start; display: flex; gap: 12px; justify-content: space-between; }
+.semantic-manual-duplicate-review > header > div { display: grid; gap: 4px; min-width: 0; }
+.semantic-manual-duplicate-review > header strong { font-size: 12px; }
+.semantic-manual-duplicate-review > header span { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.semantic-manual-duplicate-review > header small { color: var(--brand); flex: 0 0 auto; font-size: 10px; font-weight: 700; }
+.semantic-manual-duplicate-table-wrap { border: 1px solid var(--line); border-radius: 8px; max-height: 260px; overflow: auto; }
+.semantic-manual-duplicate-table-wrap table { border-collapse: separate; border-spacing: 0; font-size: 10px; table-layout: fixed; width: 100%; }
+.semantic-manual-duplicate-table-wrap th,
+.semantic-manual-duplicate-table-wrap td { border-bottom: 1px solid var(--line); overflow: hidden; padding: 8px 9px; text-align: left; text-overflow: ellipsis; vertical-align: middle; white-space: nowrap; }
+.semantic-manual-duplicate-table-wrap th { background: #f8f8fa; color: var(--muted); font-size: 9px; position: sticky; top: 0; z-index: 1; }
+.semantic-manual-duplicate-table-wrap th:first-child { width: 29%; }
+.semantic-manual-duplicate-table-wrap th:nth-child(2) { width: 29%; }
+.semantic-manual-duplicate-table-wrap tbody tr:last-child td { border-bottom: 0; }
+.semantic-manual-duplicate-choice { align-items: center !important; display: flex !important; gap: 7px !important; }
+.semantic-manual-duplicate-choice > span { color: var(--text) !important; font-size: 10px !important; font-weight: 600 !important; letter-spacing: 0 !important; overflow: hidden; text-overflow: ellipsis; text-transform: none !important; white-space: nowrap; }
+.semantic-manual-duplicate-status { color: var(--muted); font-size: 10px; }
+.semantic-manual-duplicate-status.warning { color: #9a6415; }
 .semantic-editor-actions { display: flex; gap: 8px; justify-content: flex-end; }
 .semantic-row-actions { align-items: center; display: flex; gap: 8px; }
 .semantic-row-actions .text-button { font-size: 10px; white-space: nowrap; }
@@ -2679,7 +2705,7 @@ svg { display: block; }
 .semantic-table th { background: #f8f8fa; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .025em; position: sticky; text-transform: uppercase; top: 0; z-index: 1; }
 .semantic-table tbody tr:last-child td { border-bottom: 0; }
 .semantic-table tbody tr:hover td { background: #fafafd; }
-.semantic-table .semantic-select-cell { max-width: 42px; min-width: 42px; text-align: center; width: 42px; }
+.semantic-table .semantic-select-cell { max-width: 38px; min-width: 38px; text-align: center; width: 38px; }
 .semantic-select-cell input {
   appearance: none;
   background: #fff center / 11px 11px no-repeat;
@@ -5512,6 +5538,25 @@ svg { display: block; }
   max-inline-size: 16px;
   min-block-size: 16px;
   min-inline-size: 16px;
+}
+.semantic-table.has-row-numbers .semantic-row-number-cell {
+  color: #8a909d;
+  font-variant-numeric: tabular-nums;
+  max-width: 42px;
+  min-width: 42px;
+  padding-inline: 7px;
+  text-align: right;
+  user-select: none;
+  width: 42px;
+}
+.semantic-table.has-row-numbers th.semantic-row-number-cell {
+  color: #777e8c;
+  font-size: 9px;
+}
+.semantic-table.has-row-numbers .semantic-select-cell {
+  max-width: 38px;
+  min-width: 38px;
+  width: 38px;
 }
 .semantic-table.has-highlight-selector .semantic-select-cell {
   max-width: 62px;

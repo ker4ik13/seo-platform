@@ -9,6 +9,7 @@ import {
   semanticSystemColumnKeys,
   type SemanticKeywordPageSize,
   type SemanticKeywordBulkCreateItemInput,
+  type SemanticKeywordBulkCreatePreviewResult,
   type SemanticKeywordBulkCreateResult,
   type AiAnswerCollectionSummary,
   type FrequencyCollectionSummary,
@@ -42,7 +43,8 @@ import { useDebouncedValue } from "../hooks/use-debounced-value";
 import {
   manualKeywordInputStats,
   manualKeywordTexts,
-  runManualKeywordBulkChunks
+  runManualKeywordBulkChunks,
+  runManualKeywordBulkPreviewChunks
 } from "../lib/manual-keyword-input";
 import {
   initialSemanticCreateGroupId,
@@ -244,6 +246,12 @@ type KeywordEditor =
       draft: KeywordDraft;
     }>;
 
+interface ManualKeywordDuplicateReview {
+  readonly texts: readonly string[];
+  readonly preview: SemanticKeywordBulkCreatePreviewResult;
+  readonly selectedIndices: ReadonlySet<number>;
+}
+
 const MANUAL_KEYWORD_LIMIT = 2_000;
 
 interface SemanticCoreTableProps {
@@ -311,6 +319,8 @@ export function SemanticCoreTable({
   const [error, setError] = useState<string>();
   const [retryVersion, setRetryVersion] = useState(0);
   const [editor, setEditor] = useState<KeywordEditor>();
+  const [manualDuplicateReview, setManualDuplicateReview] =
+    useState<ManualKeywordDuplicateReview>();
   const [saving, setSaving] = useState(false);
   const [mutationError, setMutationError] = useState<string>();
   const [trashRecoveryItems, setTrashRecoveryItems] = useState<
@@ -1628,6 +1638,7 @@ export function SemanticCoreTable({
     setCheckedIds(new Set());
     setBulkNotice(undefined);
     setMutationError(undefined);
+    setManualDuplicateReview(undefined);
     setEditor({
       mode: "create",
       draft: {
@@ -1658,6 +1669,7 @@ export function SemanticCoreTable({
   }
 
   function updateDraft(patch: Partial<KeywordDraft>): void {
+    setManualDuplicateReview(undefined);
     setEditor((current) =>
       current
         ? { ...current, draft: { ...current.draft, ...patch } }
@@ -1665,12 +1677,56 @@ export function SemanticCoreTable({
     );
   }
 
+  function setManualDuplicateImport(enabled: boolean): void {
+    const skipDuplicates = !enabled;
+    manualAddPreferencesRef.current = { skipDuplicates };
+    writeSemanticManualAddPreferences(
+      projectId,
+      { skipDuplicates },
+      window.localStorage
+    );
+    setEditor((current) =>
+      current?.mode === "create"
+        ? { ...current, draft: { ...current.draft, skipDuplicates } }
+        : current
+    );
+    setManualDuplicateReview((current) => {
+      if (!current) return current;
+      const groupId = editor?.mode === "create" ? editor.draft.groupId : "";
+      return {
+        ...current,
+        selectedIndices: new Set(
+          enabled && groupId
+            ? current.preview.rows.flatMap((row) =>
+                row.state === "ACTIVE_DUPLICATE" && !row.inTargetGroup
+                  ? [row.index]
+                  : []
+              )
+            : []
+        )
+      };
+    });
+  }
+
+  function setManualDuplicateRowImport(
+    index: number,
+    enabled: boolean
+  ): void {
+    setManualDuplicateReview((current) => {
+      if (!current) return current;
+      const selectedIndices = new Set(current.selectedIndices);
+      if (enabled) selectedIndices.add(index);
+      else selectedIndices.delete(index);
+      return { ...current, selectedIndices };
+    });
+  }
+
   async function saveKeyword(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (!editor || saving) return;
     const draft = editor.draft;
     const texts = editor.mode === "create"
-      ? manualKeywordTexts(draft.text, draft.skipDuplicates)
+      ? manualKeywordTexts(draft.text)
       : [draft.text.trim()];
     if (texts.length < 1 || texts.length > MANUAL_KEYWORD_LIMIT) {
       setMutationError(
@@ -1711,30 +1767,89 @@ export function SemanticCoreTable({
     try {
       if (editor.mode === "create") {
         const inputStats = manualKeywordInputStats(draft.text);
+        const importDuplicatesByDefault =
+          !draft.skipDuplicates &&
+          groups.some(
+            ({ id, systemKind }) =>
+              id === draft.groupId && systemKind === undefined
+          );
+        let duplicateReview = manualDuplicateReview;
+        if (!duplicateReview) {
+          const preview = await runManualKeywordBulkPreviewChunks(
+            texts,
+            async (chunk) =>
+              browserApiRequest<SemanticKeywordBulkCreatePreviewResult>(
+                `/app/api/projects/${encodeURIComponent(projectId)}/keywords/bulk-preview`,
+                {
+                  method: "POST",
+                  body: {
+                    items: chunk.map((text) => ({
+                      text,
+                      language: draft.language,
+                      ...(draft.groupId ? { groupId: draft.groupId } : {})
+                    }))
+                  }
+                }
+              )
+          );
+          if (preview.newKeywords !== preview.selected) {
+            duplicateReview = {
+              texts,
+              preview,
+              selectedIndices: new Set(
+                !importDuplicatesByDefault
+                  ? []
+                  : preview.rows.flatMap((row) =>
+                      row.state === "ACTIVE_DUPLICATE" && !row.inTargetGroup
+                        ? [row.index]
+                        : []
+                    )
+              )
+            };
+            setManualDuplicateReview(duplicateReview);
+            return;
+          }
+        }
+        const selectedDuplicateIndices =
+          duplicateReview?.selectedIndices ?? new Set<number>();
+        const previewRowsByIndex = new Map(
+          duplicateReview?.preview.rows.map((row) => [row.index, row] as const)
+        );
         const result = await runManualKeywordBulkChunks(
           texts,
-          async (chunk) =>
+          async (chunk, offset) =>
             browserApiRequest<SemanticKeywordBulkCreateResult>(
               `/app/api/projects/${encodeURIComponent(projectId)}/keywords/bulk`,
               {
                 method: "POST",
                 body: {
-                  duplicatePolicy: draft.skipDuplicates
-                    ? "SKIP_EXISTING"
-                    : "ADD_TO_GROUP",
-                  items: chunk.map((text) => ({ ...commonBody, text }))
+                  duplicatePolicy: "SKIP_EXISTING",
+                  items: chunk.map((text, index) => ({
+                    ...commonBody,
+                    text,
+                    duplicatePolicy:
+                      previewRowsByIndex.get(offset + index)?.state ===
+                      "ACTIVE_DUPLICATE"
+                        ? selectedDuplicateIndices.has(offset + index)
+                          ? "ADD_TO_GROUP"
+                          : "SKIP_EXISTING"
+                        : importDuplicatesByDefault
+                          ? "ADD_TO_GROUP"
+                          : "SKIP_EXISTING"
+                  }))
                 }
               }
             )
         );
-        const locallySkipped = draft.skipDuplicates ? inputStats.duplicates : 0;
+        const locallySkipped = inputStats.duplicates;
         setRetryVersion((value) => value + 1);
         setBulkNotice(
-          `Добавлено: ${result.created} · в другие папки: ${result.linked} · ` +
+          `Добавлено: ${result.created} · в выбранную группу: ${result.linked} · ` +
             `восстановлено: ${result.restored} · ` +
             `пропущено: ${result.skipped + locallySkipped}`
         );
         if (result.retryRows.length > 0) {
+          setManualDuplicateReview(undefined);
           setEditor((current) => current && current.mode === "create"
             ? { ...current, draft: { ...current.draft, text: result.retryRows.join("\n") } }
             : current);
@@ -1773,6 +1888,7 @@ export function SemanticCoreTable({
         );
         setRetryVersion((value) => value + 1);
       }
+      setManualDuplicateReview(undefined);
       setEditor(undefined);
     } catch (requestError) {
       setMutationError(keywordMutationError(requestError));
@@ -2225,6 +2341,23 @@ export function SemanticCoreTable({
   const manualInputStats = editor?.mode === "create"
     ? manualKeywordInputStats(editor.draft.text)
     : undefined;
+  const manualDuplicateRows = manualDuplicateReview?.preview.rows.filter(
+    ({ state }) => state !== "NEW"
+  ) ?? [];
+  const manualDuplicateTargetGroup = editor?.mode === "create"
+    ? groups.find(
+        ({ id, systemKind }) =>
+          id === editor.draft.groupId && systemKind === undefined
+      )
+    : undefined;
+  const manualLinkableDuplicateRows = manualDuplicateRows.filter(
+    (row) => row.state === "ACTIVE_DUPLICATE" && !row.inTargetGroup
+  );
+  const allManualDuplicatesSelected =
+    manualLinkableDuplicateRows.length > 0 &&
+    manualLinkableDuplicateRows.every((row) =>
+      manualDuplicateReview?.selectedIndices.has(row.index)
+    );
   const activeGroup = viewConfig.filters.groupId
     ? groups.find(({ id }) => id === viewConfig.filters.groupId)
     : undefined;
@@ -2965,14 +3098,18 @@ export function SemanticCoreTable({
       {editor && (
         <SemanticModal
           description="Группа, кластер, посадочная страница и теги сохраняются вместе с проверкой версии."
-          onClose={saving ? () => undefined : () => setEditor(undefined)}
-          size="medium"
+          onClose={saving ? () => undefined : () => {
+            setManualDuplicateReview(undefined);
+            setEditor(undefined);
+          }}
+          size={manualDuplicateReview ? "large" : "medium"}
           title={editor.mode === "create" ? "Добавить запросы" : "Изменить запрос"}
         >
           <form
             className="semantic-editor"
             onSubmit={(event) => void saveKeyword(event)}
           >
+          <fieldset className="semantic-editor-fields" disabled={saving}>
           <div className="semantic-editor-grid">
             <label className="semantic-editor-query">
               <span>{editor.mode === "create" ? "Запросы — по одному в строке" : "Запрос"}</span>
@@ -2990,9 +3127,7 @@ export function SemanticCoreTable({
                   <small
                     className={
                       manualInputStats &&
-                      (editor.draft.skipDuplicates
-                        ? manualInputStats.unique
-                        : manualInputStats.total) > MANUAL_KEYWORD_LIMIT
+                      manualInputStats.unique > MANUAL_KEYWORD_LIMIT
                         ? "semantic-editor-query-limit"
                         : undefined
                     }
@@ -3002,9 +3137,7 @@ export function SemanticCoreTable({
                       ? ` · уникальных: ${manualInputStats.unique}`
                       : ""}
                     {manualInputStats?.duplicates
-                      ? editor.draft.skipDuplicates
-                        ? ` · будет пропущено дублей: ${manualInputStats.duplicates}`
-                        : ` · повторов в списке: ${manualInputStats.duplicates}`
+                      ? ` · повторов в списке будет объединено: ${manualInputStats.duplicates}`
                       : ""}
                     {` · лимит за один запуск: ${formatInteger(MANUAL_KEYWORD_LIMIT)}`}
                   </small>
@@ -3129,29 +3262,138 @@ export function SemanticCoreTable({
             {editor.mode === "create" && (
               <label className="semantic-editor-check semantic-editor-deduplicate">
                 <input
-                  checked={editor.draft.skipDuplicates}
-                  onChange={(event) => {
-                    const skipDuplicates = event.target.checked;
-                    manualAddPreferencesRef.current = { skipDuplicates };
-                    writeSemanticManualAddPreferences(
-                      projectId,
-                      { skipDuplicates },
-                      window.localStorage
-                    );
-                    updateDraft({ skipDuplicates });
+                  checked={manualDuplicateReview
+                    ? allManualDuplicatesSelected
+                    : !editor.draft.skipDuplicates &&
+                      manualDuplicateTargetGroup !== undefined}
+                  disabled={
+                    !manualDuplicateTargetGroup ||
+                    (manualDuplicateReview !== undefined &&
+                      manualLinkableDuplicateRows.length === 0)
+                  }
+                  onChange={(event) =>
+                    setManualDuplicateImport(event.target.checked)
+                  }
+                  ref={(input) => {
+                    if (input) {
+                      input.indeterminate = Boolean(
+                        manualDuplicateReview &&
+                        manualDuplicateReview.selectedIndices.size > 0 &&
+                        !allManualDuplicatesSelected
+                      );
+                    }
                   }}
                   type="checkbox"
                 />
                 <span>
-                  <strong>Не добавлять дубли</strong>
+                  <strong>
+                    {manualDuplicateTargetGroup
+                      ? `Добавить найденные дубли в «${manualDuplicateTargetGroup.name}»`
+                      : "Добавить найденные дубли в выбранную группу"}
+                  </strong>
                   <small>
-                    Если выключить, существующий запрос будет добавлен в
-                    выбранную папку без повторного сбора данных.
+                    {manualDuplicateTargetGroup
+                      ? "После проверки можно изменить решение отдельно для каждого запроса. Данные повторно собираться не будут."
+                      : "Сначала выберите обычную группу. Без неё дубли останутся в своих текущих группах."}
                   </small>
                 </span>
               </label>
             )}
           </div>
+          {editor.mode === "create" && manualDuplicateReview && (
+            <section
+              aria-labelledby="manual-duplicate-review-title"
+              className="semantic-manual-duplicate-review"
+            >
+              <header>
+                <div>
+                  <strong id="manual-duplicate-review-title">
+                    Найдены совпадения: {formatInteger(manualDuplicateRows.length)}
+                  </strong>
+                  <span>
+                    Новых запросов: {formatInteger(manualDuplicateReview.preview.newKeywords)}.
+                    Проверьте группы и выберите, какие существующие запросы добавить в текущую.
+                  </span>
+                </div>
+                <small>
+                  Выбрано для добавления: {formatInteger(
+                    manualDuplicateReview.selectedIndices.size
+                  )}
+                </small>
+              </header>
+              <div className="semantic-manual-duplicate-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Запрос</th>
+                      <th>Сейчас находится</th>
+                      <th>Действие</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {manualDuplicateRows.map((row) => {
+                      const text = manualDuplicateReview.texts[row.index] ?? "";
+                      const currentGroups = row.groups.length > 0
+                        ? row.groups.map((group) =>
+                            group.systemKind === "TRASH"
+                              ? "Корзина"
+                              : group.systemKind === "UNGROUPED"
+                                ? "Без группы"
+                                : group.path
+                          ).join(", ") + (row.groupsTruncated ? ", …" : "")
+                        : "Без группы";
+                      const linkable =
+                        row.state === "ACTIVE_DUPLICATE" &&
+                        !row.inTargetGroup &&
+                        manualDuplicateTargetGroup !== undefined;
+                      const selected =
+                        manualDuplicateReview.selectedIndices.has(row.index);
+                      return (
+                        <tr key={`${row.index}:${row.keywordId ?? "new"}`}>
+                          <td title={text}>{text}</td>
+                          <td title={currentGroups}>{currentGroups}</td>
+                          <td>
+                            {linkable ? (
+                              <label className="semantic-manual-duplicate-choice">
+                                <input
+                                  checked={selected}
+                                  onChange={(event) =>
+                                    setManualDuplicateRowImport(
+                                      row.index,
+                                      event.target.checked
+                                    )
+                                  }
+                                  type="checkbox"
+                                />
+                                <span>
+                                  {selected
+                                    ? `Добавить в «${manualDuplicateTargetGroup.name}»`
+                                    : "Оставить в текущих группах"}
+                                </span>
+                              </label>
+                            ) : row.state === "ACTIVE_DUPLICATE" && row.inTargetGroup ? (
+                              <span className="semantic-manual-duplicate-status">
+                                Уже в выбранной группе
+                              </span>
+                            ) : row.state === "TRASHED_DUPLICATE" ? (
+                              <span className="semantic-manual-duplicate-status warning">
+                                В корзине — восстановление будет предложено отдельно
+                              </span>
+                            ) : (
+                              <span className="semantic-manual-duplicate-status">
+                                Будет восстановлен
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+          </fieldset>
           {mutationError && (
             <div className="inline-alert danger" role="alert">
               {mutationError}
@@ -3161,13 +3403,26 @@ export function SemanticCoreTable({
             <button
               className="secondary-button"
               disabled={saving}
-              onClick={() => setEditor(undefined)}
+              onClick={() => {
+                setManualDuplicateReview(undefined);
+                setEditor(undefined);
+              }}
               type="button"
             >
               Отмена
             </button>
             <button className="primary-button" disabled={saving} type="submit">
-              {saving ? "Сохраняем…" : "Сохранить"}
+              {editor.mode === "edit"
+                ? saving
+                  ? "Сохраняем…"
+                  : "Сохранить"
+                : saving
+                  ? manualDuplicateReview
+                    ? "Добавляем…"
+                    : "Проверяем…"
+                  : manualDuplicateReview
+                    ? "Добавить и применить выбор"
+                    : "Проверить и добавить"}
             </button>
           </div>
           </form>
@@ -3421,8 +3676,10 @@ export function SemanticCoreTable({
               onToggleRow={(item, event) => toggleKeywordRow(item, event)}
               paddingBottom={virtualRows.paddingBottom}
               paddingTop={virtualRows.paddingTop}
+              rowNumberOffset={virtualRows.start}
               rows={virtualRows.items}
               selectedIds={checkedIds}
+              showRowNumbers
             />
             <div aria-hidden="true" className="semantic-load-sentinel" ref={loadMoreSentinelRef} />
           </div>
@@ -3806,6 +4063,7 @@ function semanticVirtualRows(
   items: readonly SemanticKeyword[];
   paddingTop: number;
   paddingBottom: number;
+  start: number;
 }> {
   const rowHeight = semanticRowHeight(density);
   const overscan = 14;
@@ -3816,7 +4074,8 @@ function semanticVirtualRows(
   return {
     items: items.slice(start, end),
     paddingTop: start * rowHeight,
-    paddingBottom: Math.max(0, (items.length - end) * rowHeight)
+    paddingBottom: Math.max(0, (items.length - end) * rowHeight),
+    start
   };
 }
 

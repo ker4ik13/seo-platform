@@ -10,6 +10,7 @@ import {
 import {
   semanticKeywordGroups,
   semanticKeywordBulkCreateResult,
+  semanticKeywordBulkCreatePreviewResult,
   semanticKeywordBulkResult,
   semanticKeywordCleaningPreview,
   semanticKeywordCleaningResult,
@@ -917,6 +918,65 @@ test("accepts a canonical keyword linked into another group", () => {
 
   assert.equal(result.linked, 1);
   assert.equal(result.rows[0]?.outcome, "LINKED_EXISTING");
+});
+
+test("validates keyword duplicate preview groups and partitions", () => {
+  const groupId = "01900000-0000-7000-8000-000000000010";
+  const input = {
+    items: [
+      { text: "SEO аудит", language: "ru", groupId },
+      { text: "Новый запрос", language: "ru", groupId }
+    ]
+  };
+  const value = {
+    selected: 2,
+    newKeywords: 1,
+    activeDuplicates: 1,
+    trashedDuplicates: 0,
+    restorableDeleted: 0,
+    rows: [
+      {
+        index: 0,
+        state: "ACTIVE_DUPLICATE",
+        keywordId: validItem.id,
+        version: 1,
+        groups: [
+          {
+            id: groupId,
+            name: "SEO",
+            path: "Услуги / SEO"
+          }
+        ],
+        groupsTruncated: false,
+        inTargetGroup: true
+      },
+      {
+        index: 1,
+        state: "NEW",
+        groups: [],
+        groupsTruncated: false,
+        inTargetGroup: false
+      }
+    ]
+  };
+
+  const result = semanticKeywordBulkCreatePreviewResult(value, input);
+  assert.equal(result.activeDuplicates, 1);
+  assert.equal(result.rows[0]?.groups[0]?.path, "Услуги / SEO");
+  assert.throws(
+    () =>
+      semanticKeywordBulkCreatePreviewResult(
+        {
+          ...value,
+          rows: [
+            { ...value.rows[0], groups: [], inTargetGroup: true },
+            value.rows[1]
+          ]
+        },
+        input
+      ),
+    DomainError
+  );
 });
 
 test("validates keyword cleaning preview and result partitions", () => {

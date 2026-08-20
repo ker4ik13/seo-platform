@@ -69,6 +69,44 @@ test("forwards an exact tenant-scoped keyword bulk create", async () => {
   );
 });
 
+test("forwards a read-only duplicate preview in the trusted scope", async () => {
+  let observed: unknown;
+  const result = {
+    selected: 1,
+    newKeywords: 1,
+    activeDuplicates: 0,
+    trashedDuplicates: 0,
+    restorableDeleted: 0,
+    rows: [
+      {
+        index: 0,
+        state: "NEW" as const,
+        groups: [],
+        groupsTruncated: false,
+        inTargetGroup: false
+      }
+    ]
+  };
+  const controller = new KeywordController({
+    previewBulkCreate: async (input: unknown) => {
+      observed = input;
+      return result;
+    }
+  } as unknown as KeywordService);
+  const body = {
+    workspaceId,
+    projectId,
+    actorId,
+    items: [{ text: "SEO аудит", language: "ru" }]
+  };
+
+  assert.deepEqual(
+    await controller.previewBulkCreate(projectId, body, headers, request),
+    { data: result, meta: { requestId: request.id } }
+  );
+  assert.deepEqual(observed, body);
+});
+
 test("forwards normalized tag suggestions inside the trusted project scope", async () => {
   let observed: unknown;
   const controller = new KeywordController({

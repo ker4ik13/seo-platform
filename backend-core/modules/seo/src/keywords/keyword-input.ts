@@ -2,11 +2,13 @@ import { Buffer } from "node:buffer";
 import { BadRequestException } from "@nestjs/common";
 import {
   semanticKeywordCleaningCases,
+  semanticKeywordBulkCreatePreviewMaxItems,
   semanticKeywordDuplicatePolicies,
   semanticKeywordIntents,
   type InternalCreateSemanticKeywordInput,
   type InternalDeleteSemanticKeywordInput,
   type InternalSemanticKeywordBulkCreateInput,
+  type InternalSemanticKeywordBulkCreatePreviewInput,
   type InternalSemanticKeywordBulkInput,
   type InternalSemanticKeywordCleaningInput,
   type InternalUpdateSemanticKeywordInput,
@@ -77,22 +79,58 @@ export function internalSemanticKeywordBulkCreateInput(
     entitlement,
     duplicatePolicy: policy,
     items: input.items.map((value) => {
-      const item = exactRecord(value, editableFields());
+      const item = exactRecord(value, [
+        ...editableFields(),
+        "duplicatePolicy"
+      ]);
+      const itemPolicy = item.duplicatePolicy === undefined
+        ? policy
+        : duplicatePolicy(item.duplicatePolicy);
       const parsed = internalCreateSemanticKeywordInput({
         ...item,
         ...trustedScope,
         entitlement,
-        duplicatePolicy: policy
+        duplicatePolicy: itemPolicy
       });
       const {
         workspaceId: _workspaceId,
         projectId: _projectId,
         actorId: _actorId,
         entitlement: _entitlement,
-        duplicatePolicy: _duplicatePolicy,
+        duplicatePolicy: parsedPolicy,
         ...keyword
       } = parsed;
-      return keyword;
+      return {
+        ...keyword,
+        ...(item.duplicatePolicy === undefined
+          ? {}
+          : { duplicatePolicy: parsedPolicy })
+      };
+    })
+  };
+}
+
+export function internalSemanticKeywordBulkCreatePreviewInput(
+  value: unknown
+): InternalSemanticKeywordBulkCreatePreviewInput {
+  const input = exactRecord(value, [...scopeFields(), "items"]);
+  if (
+    !Array.isArray(input.items) ||
+    input.items.length < 1 ||
+    input.items.length > semanticKeywordBulkCreatePreviewMaxItems
+  ) {
+    invalid("items");
+  }
+  return {
+    ...scope(input),
+    items: input.items.map((value) => {
+      const item = exactRecord(value, ["text", "language", "groupId"]);
+      const groupId = optionalGroupId(item.groupId, false).groupId;
+      return {
+        text: keywordText(item.text),
+        language: canonicalLanguage(item.language ?? "und"),
+        ...(groupId ? { groupId } : {})
+      };
     })
   };
 }

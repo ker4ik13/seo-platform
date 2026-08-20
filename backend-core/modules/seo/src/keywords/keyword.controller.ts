@@ -23,6 +23,7 @@ import type {
   SemanticFrequencyType,
   ApiCollectionResponse,
   ApiResponse,
+  SemanticKeywordBulkCreatePreviewResult,
   SemanticKeywordBulkCreateResult,
   SemanticKeywordBulkResult,
   SemanticKeywordCleaningPreview,
@@ -42,6 +43,7 @@ import {
   internalCreateSemanticKeywordInput,
   internalDeleteSemanticKeywordInput,
   internalSemanticKeywordBulkCreateInput,
+  internalSemanticKeywordBulkCreatePreviewInput,
   internalSemanticKeywordBulkInput,
   internalSemanticKeywordCleaningInput,
   internalUpdateSemanticKeywordInput
@@ -162,6 +164,21 @@ export class KeywordController {
     assertMutationContext(projectId, headers, input);
     return {
       data: await this.keywords.bulkCreate(input),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Post("bulk-create-preview")
+  public async previewBulkCreate(
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticKeywordBulkCreatePreviewResult>> {
+    const input = internalSemanticKeywordBulkCreatePreviewInput(body);
+    assertMutationContext(projectId, headers, input);
+    return {
+      data: await this.keywords.previewBulkCreate(input),
       meta: { requestId: request.id }
     };
   }

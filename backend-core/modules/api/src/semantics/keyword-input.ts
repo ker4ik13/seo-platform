@@ -1,10 +1,13 @@
 import { Buffer } from "node:buffer";
 import {
   semanticKeywordCleaningCases,
+  semanticKeywordBulkCreatePreviewMaxItems,
   semanticKeywordDuplicatePolicies,
   semanticKeywordIntents,
   type CreateSemanticKeywordInput,
   type SemanticKeywordBulkCreateInput,
+  type SemanticKeywordBulkCreateItemInput,
+  type SemanticKeywordBulkCreatePreviewInput,
   type SemanticKeywordBulkInput,
   type SemanticKeywordBulkPatch,
   type SemanticKeywordCleaningInput,
@@ -64,10 +67,37 @@ export function semanticKeywordBulkCreateInput(
   const policy = duplicatePolicy(input.duplicatePolicy);
   return {
     duplicatePolicy: policy,
-    items: input.items.map((item) => {
-      const parsed = createSemanticKeywordInput(item);
-      const { duplicatePolicy: _ignored, ...keyword } = parsed;
-      return keyword;
+    items: input.items.map(semanticKeywordBulkCreateItemInput)
+  };
+}
+
+export function semanticKeywordBulkCreatePreviewInput(
+  value: unknown
+): SemanticKeywordBulkCreatePreviewInput {
+  const input = exactRecord(value, ["items"], "$");
+  if (
+    !Array.isArray(input.items) ||
+    input.items.length < 1 ||
+    input.items.length > semanticKeywordBulkCreatePreviewMaxItems
+  ) {
+    invalid(
+      "items",
+      `Must contain between 1 and ${semanticKeywordBulkCreatePreviewMaxItems} keywords`
+    );
+  }
+  return {
+    items: input.items.map((value, index) => {
+      const item = exactRecord(
+        value,
+        ["text", "language", "groupId"],
+        `items.${index}`
+      );
+      const groupId = optionalGroupId(item.groupId, false).groupId;
+      return {
+        text: keywordText(item.text),
+        language: canonicalLanguage(item.language ?? "und"),
+        ...(groupId ? { groupId } : {})
+      };
     })
   };
 }
@@ -290,6 +320,22 @@ function editableFields(): readonly string[] {
     "targetUrl",
     "tagNames"
   ];
+}
+
+function semanticKeywordBulkCreateItemInput(
+  value: unknown
+): SemanticKeywordBulkCreateItemInput {
+  const input = exactRecord(
+    value,
+    [...editableFields(), "duplicatePolicy"],
+    "items"
+  );
+  const parsed = createSemanticKeywordInput(input);
+  const { duplicatePolicy: policy, ...keyword } = parsed;
+  return {
+    ...keyword,
+    ...(input.duplicatePolicy === undefined ? {} : { duplicatePolicy: policy })
+  };
 }
 
 function updateEditableFields(): readonly string[] {

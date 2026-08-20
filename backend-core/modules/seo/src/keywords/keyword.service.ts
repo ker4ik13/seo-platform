@@ -6,34 +6,37 @@ import {
   HttpStatus,
   Injectable
 } from "@nestjs/common";
-import type {
-  ApiCollectionResponse,
-  InternalCreateSemanticKeywordInput,
-  InternalDeleteSemanticKeywordInput,
-  InternalSemanticKeywordBulkCreateInput,
-  InternalSemanticKeywordBulkInput,
-  InternalSemanticKeywordCleaningInput,
-  InternalUpdateSemanticKeywordInput,
-  KeywordListQuery,
-  ProjectPositionSummary,
-  SemanticKeywordBulkResult,
-  SemanticKeywordBulkCreateResult,
-  SemanticKeywordCreateOutcome,
-  SemanticKeywordCleaningPreview,
-  SemanticKeywordCleaningPreviewChange,
-  SemanticKeywordCleaningResult,
-  SemanticKeywordIntent,
-  SemanticKeywordPositionHistoryProvider,
-  SemanticKeywordListItem,
-  SemanticKeywordListFrequencyValue,
-  SemanticKeywordListPosition,
-  SemanticKeywordInsights,
-  SemanticKeywordSort,
-  SemanticFrequencyDevice,
-  SemanticFrequencyQualityFlag,
-  SemanticFrequencyType,
-  SemanticAiAnswerSummary,
-  SemanticAiAnswerHistoryItem
+import {
+  semanticKeywordBulkCreatePreviewMaxGroups,
+  type ApiCollectionResponse,
+  type InternalCreateSemanticKeywordInput,
+  type InternalDeleteSemanticKeywordInput,
+  type InternalSemanticKeywordBulkCreateInput,
+  type InternalSemanticKeywordBulkCreatePreviewInput,
+  type InternalSemanticKeywordBulkInput,
+  type InternalSemanticKeywordCleaningInput,
+  type InternalUpdateSemanticKeywordInput,
+  type KeywordListQuery,
+  type ProjectPositionSummary,
+  type SemanticKeywordBulkResult,
+  type SemanticKeywordBulkCreateResult,
+  type SemanticKeywordBulkCreatePreviewResult,
+  type SemanticKeywordCreateOutcome,
+  type SemanticKeywordCleaningPreview,
+  type SemanticKeywordCleaningPreviewChange,
+  type SemanticKeywordCleaningResult,
+  type SemanticKeywordIntent,
+  type SemanticKeywordPositionHistoryProvider,
+  type SemanticKeywordListItem,
+  type SemanticKeywordListFrequencyValue,
+  type SemanticKeywordListPosition,
+  type SemanticKeywordInsights,
+  type SemanticKeywordSort,
+  type SemanticFrequencyDevice,
+  type SemanticFrequencyQualityFlag,
+  type SemanticFrequencyType,
+  type SemanticAiAnswerSummary,
+  type SemanticAiAnswerHistoryItem
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -1485,7 +1488,7 @@ export class KeywordService {
               projectId: input.projectId,
               actorId: input.actorId,
               entitlement: input.entitlement,
-              duplicatePolicy: input.duplicatePolicy
+              duplicatePolicy: item.duplicatePolicy ?? input.duplicatePolicy
             },
             semanticVersion
           );
@@ -1518,6 +1521,196 @@ export class KeywordService {
       skipped: count("SKIPPED_EXISTING"),
       rejected: count("REJECTED_EXISTING"),
       failed: count("FAILED"),
+      rows
+    };
+  }
+
+  public async previewBulkCreate(
+    input: InternalSemanticKeywordBulkCreatePreviewInput
+  ): Promise<SemanticKeywordBulkCreatePreviewResult> {
+    const candidates = input.items.map((item) => {
+      const normalized = normalizeRequiredKeyword(item.text);
+      return {
+        ...item,
+        normalizedHash: sha256(normalized)
+      };
+    });
+    const lookupKeys = [
+      ...new Map(
+        candidates.map((candidate) => [
+          cleaningKey(candidate.language, candidate.normalizedHash),
+          {
+            language: candidate.language,
+            normalizedHash: candidate.normalizedHash
+          }
+        ] as const)
+      ).values()
+    ];
+    const matches = lookupKeys.length === 0
+      ? []
+      : await this.prisma.keyword.findMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            OR: lookupKeys
+          },
+          select: {
+            id: true,
+            language: true,
+            normalizedHash: true,
+            status: true,
+            version: true,
+            memberships: {
+              where: {
+                projectId: input.projectId,
+                group: {
+                  workspaceId: input.workspaceId,
+                  projectId: input.projectId,
+                  status: "ACTIVE"
+                }
+              },
+              orderBy: { createdAt: "asc" },
+              take: semanticKeywordBulkCreatePreviewMaxGroups + 1,
+              select: {
+                group: {
+                  select: {
+                    id: true,
+                    name: true,
+                    path: true,
+                    systemKind: true
+                  }
+                }
+              }
+            }
+          }
+        });
+    const matchByKey = new Map(
+      matches.map((match) => [
+        cleaningKey(match.language, match.normalizedHash),
+        match
+      ] as const)
+    );
+    const targetPairs = [
+      ...new Map(
+        candidates.flatMap((candidate) => {
+          if (!candidate.groupId) return [];
+          const match = matchByKey.get(
+            cleaningKey(candidate.language, candidate.normalizedHash)
+          );
+          return match
+            ? [[
+                cleaningKey(match.id, candidate.groupId),
+                { keywordId: match.id, groupId: candidate.groupId }
+              ] as const]
+            : [];
+        })
+      ).values()
+    ];
+    const targetMemberships = targetPairs.length === 0
+      ? []
+      : await this.prisma.keywordGroupMembership.findMany({
+          where: {
+            projectId: input.projectId,
+            OR: targetPairs,
+            group: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              status: "ACTIVE"
+            }
+          },
+          select: {
+            keywordId: true,
+            group: {
+              select: {
+                id: true,
+                name: true,
+                path: true,
+                systemKind: true
+              }
+            }
+          }
+        });
+    const targetMembershipByKey = new Map(
+      targetMemberships.map(({ keywordId, group }) => [
+        cleaningKey(keywordId, group.id),
+        {
+          id: group.id,
+          name: group.name,
+          path: group.path ?? group.name,
+          ...(group.systemKind === null
+            ? {}
+            : { systemKind: group.systemKind })
+        }
+      ] as const)
+    );
+    const rows: SemanticKeywordBulkCreatePreviewResult["rows"][number][] =
+      candidates.map((candidate, index) => {
+        const match = matchByKey.get(
+          cleaningKey(candidate.language, candidate.normalizedHash)
+        );
+        if (!match) {
+          return {
+            index,
+            state: "NEW",
+            groups: [],
+            groupsTruncated: false,
+            inTargetGroup: false
+          };
+        }
+        const memberships = match.memberships.map(({ group }) => ({
+          id: group.id,
+          name: group.name,
+          path: group.path ?? group.name,
+          ...(group.systemKind === null
+            ? {}
+            : { systemKind: group.systemKind })
+        }));
+        const targetMembership = candidate.groupId
+          ? memberships.find(({ id }) => id === candidate.groupId) ??
+            targetMembershipByKey.get(
+              cleaningKey(match.id, candidate.groupId)
+            )
+          : undefined;
+        let groups = memberships.slice(
+          0,
+          semanticKeywordBulkCreatePreviewMaxGroups
+        );
+        if (
+          targetMembership &&
+          !groups.some(({ id }) => id === targetMembership.id)
+        ) {
+          groups = [
+            ...groups.slice(0, semanticKeywordBulkCreatePreviewMaxGroups - 1),
+            targetMembership
+          ];
+        }
+        const trashed = memberships.some(
+          ({ systemKind }) => systemKind === "TRASH"
+        );
+        return {
+          index,
+          state: match.status === "ACTIVE"
+            ? "ACTIVE_DUPLICATE"
+            : trashed
+              ? "TRASHED_DUPLICATE"
+              : "RESTORABLE_DELETED",
+          keywordId: match.id,
+          version: match.version,
+          groups,
+          groupsTruncated:
+            memberships.length > semanticKeywordBulkCreatePreviewMaxGroups,
+          inTargetGroup: targetMembership !== undefined
+        };
+      });
+    const count = (
+      state: SemanticKeywordBulkCreatePreviewResult["rows"][number]["state"]
+    ): number => rows.filter((row) => row.state === state).length;
+    return {
+      selected: rows.length,
+      newKeywords: count("NEW"),
+      activeDuplicates: count("ACTIVE_DUPLICATE"),
+      trashedDuplicates: count("TRASHED_DUPLICATE"),
+      restorableDeleted: count("RESTORABLE_DELETED"),
       rows
     };
   }

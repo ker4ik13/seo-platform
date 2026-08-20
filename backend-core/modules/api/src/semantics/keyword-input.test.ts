@@ -5,6 +5,7 @@ import {
   createSemanticKeywordInput,
   deleteSemanticKeywordInput,
   semanticKeywordBulkCreateInput,
+  semanticKeywordBulkCreatePreviewInput,
   semanticKeywordBulkInput,
   semanticKeywordCleaningInput,
   updateSemanticKeywordInput
@@ -68,6 +69,18 @@ test("parses a bounded keyword bulk create with an explicit duplicate policy", (
   assert.equal(result.items[0]?.priority, 0);
   assert.equal(
     semanticKeywordBulkCreateInput({
+      duplicatePolicy: "SKIP_EXISTING",
+      items: [
+        {
+          text: "SEO аудит",
+          duplicatePolicy: "ADD_TO_GROUP"
+        }
+      ]
+    }).items[0]?.duplicatePolicy,
+    "ADD_TO_GROUP"
+  );
+  assert.equal(
+    semanticKeywordBulkCreateInput({
       duplicatePolicy: "ADD_TO_GROUP",
       items: [{ text: "SEO аудит", groupId: "01900000-0000-7000-8000-000000000010" }]
     }).duplicatePolicy,
@@ -92,6 +105,36 @@ test("parses a bounded keyword bulk create with an explicit duplicate policy", (
           text: `keyword ${index}`,
           tagNames: largeTags
         }))
+      }),
+    DomainError
+  );
+});
+
+test("parses a bounded read-only duplicate preview", () => {
+  assert.deepEqual(
+    semanticKeywordBulkCreatePreviewInput({
+      items: [
+        {
+          text: "  SEO   аудит  ",
+          language: "RU",
+          groupId: "01900000-0000-7000-8000-000000000010"
+        }
+      ]
+    }),
+    {
+      items: [
+        {
+          text: "SEO аудит",
+          language: "ru",
+          groupId: "01900000-0000-7000-8000-000000000010"
+        }
+      ]
+    }
+  );
+  assert.throws(
+    () =>
+      semanticKeywordBulkCreatePreviewInput({
+        items: Array.from({ length: 101 }, () => ({ text: "SEO" }))
       }),
     DomainError
   );

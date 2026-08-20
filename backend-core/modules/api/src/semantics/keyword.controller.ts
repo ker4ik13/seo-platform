@@ -18,6 +18,7 @@ import type {
   ApiCollectionResponse,
   ApiResponse,
   ProjectPositionSummary,
+  SemanticKeywordBulkCreatePreviewResult,
   SemanticKeywordBulkCreateResult,
   SemanticKeywordListItem,
   SemanticKeywordInsights,
@@ -55,6 +56,7 @@ import {
   createSemanticKeywordInput,
   deleteSemanticKeywordInput,
   semanticKeywordBulkCreateInput,
+  semanticKeywordBulkCreatePreviewInput,
   updateSemanticKeywordInput
 } from "./keyword-input.js";
 import { semanticFrequencyContextRoute } from "./frequency-collection-input.js";
@@ -217,6 +219,26 @@ export class KeywordController {
       requestId: context.requestId
     });
     return apiResponse(request, result);
+  }
+
+  @Post("bulk-preview")
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission("semantic.create")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async previewBulkCreate(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticKeywordBulkCreatePreviewResult>> {
+    const tenant = requiredMutableProjectTenant(request);
+    const input = semanticKeywordBulkCreatePreviewInput(body);
+    return apiResponse(
+      request,
+      await this.seoData.previewBulkCreateKeywords(
+        internalProjectContext(request, principal, tenant),
+        input
+      )
+    );
   }
 
   @Get(":keywordId/insights")

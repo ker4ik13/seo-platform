@@ -41,8 +41,10 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
   onToggleRow,
   paddingBottom = 0,
   paddingTop = 0,
+  rowNumberOffset = 0,
   rows,
   selectedIds,
+  showRowNumbers = false,
   tableClassName = "semantic-table"
 }: Readonly<{
   actions?: (row: Row) => ReactNode;
@@ -61,19 +63,24 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
   onToggleRow: (row: Row, event: MouseEvent<HTMLInputElement>) => void;
   paddingBottom?: number;
   paddingTop?: number;
+  rowNumberOffset?: number;
   rows: readonly Row[];
   selectedIds: ReadonlySet<string>;
+  showRowNumbers?: boolean;
   tableClassName?: string;
 }>) {
   const allSelected = rows.length > 0 && rows.every(({ id }) => selectedIds.has(id));
   const allHighlightedSelected =
     highlightedIds.size > 0 &&
     [...highlightedIds].every((id) => selectedIds.has(id));
+  const rowNumberColumnWidth = 42;
   const selectionColumnWidth = onToggleHighlighted ? 62 : 38;
-  const columnCount = columns.length + 1 + (actions ? 1 : 0);
+  const columnCount =
+    columns.length + 1 + (showRowNumbers ? 1 : 0) + (actions ? 1 : 0);
   const hasSizedColumns = columns.some(({ width }) => width !== undefined);
   const tableWidth = hasSizedColumns
-    ? selectionColumnWidth +
+    ? (showRowNumbers ? rowNumberColumnWidth : 0) +
+      selectionColumnWidth +
       columns.reduce((sum, column) => sum + (column.width ?? 132), 0) +
       (actions ? 40 : 0)
     : undefined;
@@ -144,15 +151,16 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
   return (
     <table
       aria-label={ariaLabel}
-      className={`${tableClassName} density-${density.toLowerCase()}${hasSizedColumns ? " has-sized-columns" : ""}${onToggleHighlighted ? " has-highlight-selector" : ""}`}
+      className={`${tableClassName} density-${density.toLowerCase()}${hasSizedColumns ? " has-sized-columns" : ""}${onToggleHighlighted ? " has-highlight-selector" : ""}${showRowNumbers ? " has-row-numbers" : ""}`}
       style={
         tableWidth
-          ? { minWidth: tableWidth, width: `max(100%, ${tableWidth}px)` }
+          ? { minWidth: tableWidth, width: tableWidth }
           : undefined
       }
     >
       {hasSizedColumns && (
         <colgroup>
+          {showRowNumbers && <col style={{ width: rowNumberColumnWidth }} />}
           <col style={{ width: selectionColumnWidth }} />
           {columns.map((column) => (
             <col key={column.key} style={{ width: column.width ?? 132 }} />
@@ -162,6 +170,15 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
       )}
       <thead>
         <tr>
+          {showRowNumbers && (
+            <th
+              aria-label="Позиция строки"
+              className="semantic-row-number-cell"
+              scope="col"
+            >
+              №
+            </th>
+          )}
           <th className="semantic-select-cell semantic-select-header">
             <span className="semantic-header-selection-controls">
               <input
@@ -252,6 +269,14 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
               onContextMenu={(event) => onContextMenu?.(event, row)}
               onDragStart={(event) => onDragStart?.(event, row)}
             >
+              {showRowNumbers && (
+                <td
+                  aria-label={`Позиция строки ${rowNumberOffset + index + 1}`}
+                  className="semantic-row-number-cell"
+                >
+                  {rowNumberOffset + index + 1}
+                </td>
+              )}
               <td className="semantic-select-cell">
                 <input
                   aria-label={`Выбрать запрос ${row.id}`}

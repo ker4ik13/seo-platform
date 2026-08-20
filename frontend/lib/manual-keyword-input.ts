@@ -1,3 +1,7 @@
+import type {
+  SemanticKeywordBulkCreatePreviewResult
+} from "@seo-platform/contracts";
+
 export interface ManualKeywordInputStats {
   readonly duplicates: number;
   readonly rows: readonly string[];
@@ -26,11 +30,9 @@ export function manualKeywordInputStats(value: string): ManualKeywordInputStats 
 }
 
 export function manualKeywordTexts(
-  value: string,
-  skipDuplicates: boolean
+  value: string
 ): readonly string[] {
-  const stats = manualKeywordInputStats(value);
-  return skipDuplicates ? stats.uniqueRows : stats.rows;
+  return manualKeywordInputStats(value).uniqueRows;
 }
 
 export interface ManualKeywordBulkResultRow {
@@ -41,7 +43,7 @@ export interface ManualKeywordBulkResultRow {
     | "LINKED_EXISTING"
     | "SKIPPED_EXISTING"
     | "REJECTED_EXISTING"
-      | "FAILED";
+    | "FAILED";
   readonly keywordId?: string;
   readonly version?: number;
   readonly trashed?: boolean;
@@ -80,6 +82,39 @@ export interface ManualKeywordTrashCandidate {
 
 export const MANUAL_KEYWORD_BULK_CHUNK_SIZE = 100;
 
+export async function runManualKeywordBulkPreviewChunks(
+  submittedRows: readonly string[],
+  submitChunk: (
+    rows: readonly string[],
+    offset: number
+  ) => Promise<SemanticKeywordBulkCreatePreviewResult>,
+  chunkSize = MANUAL_KEYWORD_BULK_CHUNK_SIZE
+): Promise<SemanticKeywordBulkCreatePreviewResult> {
+  assertManualKeywordChunkSize(chunkSize);
+  const summary = {
+    selected: 0,
+    newKeywords: 0,
+    activeDuplicates: 0,
+    trashedDuplicates: 0,
+    restorableDeleted: 0
+  };
+  const rows: SemanticKeywordBulkCreatePreviewResult["rows"][number][] = [];
+  for (let offset = 0; offset < submittedRows.length; offset += chunkSize) {
+    const chunk = submittedRows.slice(offset, offset + chunkSize);
+    const result = await submitChunk(chunk, offset);
+    assertManualKeywordPreviewChunkResult(result, chunk.length);
+    summary.selected += result.selected;
+    summary.newKeywords += result.newKeywords;
+    summary.activeDuplicates += result.activeDuplicates;
+    summary.trashedDuplicates += result.trashedDuplicates;
+    summary.restorableDeleted += result.restorableDeleted;
+    rows.push(
+      ...result.rows.map((row) => ({ ...row, index: offset + row.index }))
+    );
+  }
+  return { ...summary, rows };
+}
+
 export function manualKeywordRetryRows(
   submittedRows: readonly string[],
   resultRows: readonly ManualKeywordBulkResultRow[]
@@ -101,9 +136,7 @@ export async function runManualKeywordBulkChunks(
   ) => Promise<ManualKeywordBulkChunkResult>,
   chunkSize = MANUAL_KEYWORD_BULK_CHUNK_SIZE
 ): Promise<ManualKeywordBulkRunResult> {
-  if (!Number.isSafeInteger(chunkSize) || chunkSize < 1 || chunkSize > 100) {
-    throw new RangeError("chunkSize must be an integer between 1 and 100");
-  }
+  assertManualKeywordChunkSize(chunkSize);
 
   const summary = {
     selected: 0,
@@ -171,6 +204,38 @@ export async function runManualKeywordBulkChunks(
     retryRows: submittedRows.filter((_, index) => retryIndices.has(index)),
     trashCandidates
   };
+}
+
+function assertManualKeywordChunkSize(chunkSize: number): void {
+  if (!Number.isSafeInteger(chunkSize) || chunkSize < 1 || chunkSize > 100) {
+    throw new RangeError("chunkSize must be an integer between 1 and 100");
+  }
+}
+
+function assertManualKeywordPreviewChunkResult(
+  result: SemanticKeywordBulkCreatePreviewResult,
+  expectedRows: number
+): void {
+  const indices = new Set(result.rows.map(({ index }) => index));
+  const counted =
+    result.newKeywords +
+    result.activeDuplicates +
+    result.trashedDuplicates +
+    result.restorableDeleted;
+  if (
+    result.selected !== expectedRows ||
+    counted !== expectedRows ||
+    result.rows.length !== expectedRows ||
+    indices.size !== expectedRows ||
+    [...indices].some(
+      (index) =>
+        !Number.isSafeInteger(index) || index < 0 || index >= expectedRows
+    )
+  ) {
+    throw new Error(
+      "Bulk keyword preview response does not match the submitted chunk"
+    );
+  }
 }
 
 function assertManualKeywordChunkResult(

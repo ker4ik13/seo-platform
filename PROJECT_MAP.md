@@ -213,13 +213,22 @@ users/projects/keywords-per-project/concurrent-jobs. Папки не тариф�
 Миграция переводит только неотменённые подписки на новую immutable plan
 version, не удаляя периоды, балансы, платежи или ledger history.
 
-Ручное добавление сохраняет checkbox «Не добавлять дубли» отдельно для каждого
-проекта в пользовательском Web storage. Выключенный checkbox использует
-`ADD_TO_GROUP`: существующая каноническая keyword identity получает ещё одно
-обычное group membership вместо второй строки в `keywords`. Ответ различает
-`LINKED_EXISTING` и обычный skip. Поэтому group/view scope дедуплицируется самим
-keyword ID, rank/frequency provider вызывается один раз, а единый snapshot
-виден во всех папках запроса.
+Ручное добавление перед мутацией проверяет до 2 000 уникальных строк через
+chunked `POST /keywords/bulk-preview`: Core SEO возвращает индекс совпадения,
+его текущие группы и состояние active/trash без отражения текста запроса.
+Положительный checkbox «Добавить найденные дубли в выбранную группу» хранит
+начальное per-project предпочтение в Web storage, а review-таблица позволяет
+переопределить действие по каждой активной строке. Подтверждённый row-level
+`ADD_TO_GROUP` создаёт ещё одно обычное group membership у канонической keyword
+identity вместо второй строки в `keywords`; остальные совпадения используют
+`SKIP_EXISTING`. Ответ различает `LINKED_EXISTING` и обычный skip. Поэтому
+group/view scope дедуплицируется самим keyword ID, rank/frequency provider
+вызывается один раз, а единый snapshot виден во всех папках запроса.
+
+Таблица семантического ядра имеет фиксированную служебную область «позиция
+строки → checkbox» и точную pixel-width по сумме видимых колонок. Виртуальный
+offset участвует в нумерации; resize одной колонки не перераспределяет свободное
+место между соседними, а открытие sidebar меняет только доступный viewport.
 
 Журнал rank/frequency получает immutable строки результата cursor-страницами
 по 200 или 500 элементов через весь tenant-scoped boundary
