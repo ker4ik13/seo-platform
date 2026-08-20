@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { semanticNegativeKeywordWordLimit } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 import { loadAppConfig } from "../config/app-config.js";
 import {
@@ -425,6 +426,30 @@ test("validates negative keyword presets, preview and bounded apply results", ()
   assert.equal(preset.rules.words[0], "москва");
   assert.equal(preset.rules.ignoreWordOrder, false);
   assert.equal(preset.rules.ignorePunctuation, false);
+  const boundedPreset = semanticNegativeKeywordPreset({
+    ...preset,
+    rules: {
+      ...preset.rules,
+      words: Array.from(
+        { length: semanticNegativeKeywordWordLimit },
+        (_, index) => `география ${index}`
+      )
+    }
+  });
+  assert.equal(
+    boundedPreset.rules.words.length,
+    semanticNegativeKeywordWordLimit
+  );
+  assert.throws(
+    () => semanticNegativeKeywordPreset({
+      ...boundedPreset,
+      rules: {
+        ...boundedPreset.rules,
+        words: [...boundedPreset.rules.words, "лишняя строка"]
+      }
+    }),
+    DomainError
+  );
   const preview = semanticNegativeKeywordPreview({
     scannedCount: 10,
     matchedCount: 1,

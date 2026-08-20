@@ -19,6 +19,7 @@ import { CrawlSnapshotModule } from "./crawls/crawl-snapshot.module.js";
 import { ClusterModule } from "./clusters/cluster.module.js";
 import { FrequencyModule } from "./frequencies/frequency.module.js";
 import { AiAnswerModule } from "./ai-answers/ai-answer.module.js";
+import { ClusteringProposalModule } from "./clustering-proposals/clustering-proposal.module.js";
 import { OperationResultModule } from "./operation-results/operation-result.module.js";
 import { ProjectWorkspaceTransferModule } from "./project-transfers/project-workspace-transfer.module.js";
 import { NegativeKeywordModule } from "./negative-keywords/negative-keyword.module.js";
@@ -49,6 +50,7 @@ import { SemanticExportReadModule } from "./semantic-exports/semantic-export-rea
     SystemModule,
     FrequencyModule,
     AiAnswerModule,
+    ClusteringProposalModule,
     OperationResultModule,
     NegativeKeywordModule,
     SemanticDuplicateModule,

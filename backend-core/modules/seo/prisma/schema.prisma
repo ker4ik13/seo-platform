@@ -83,6 +83,12 @@ enum KeywordGroupSystemKind {
   TRASH
 }
 
+enum ClusteringProposalStatus {
+  READY
+  APPLIED
+  REJECTED
+}
+
 enum SemanticCustomColumnType {
   TEXT
   LONG_TEXT
@@ -396,6 +402,88 @@ model Cluster {
   @@index([workspaceId, projectId, primaryPageId, status, id], map: "clusters_primary_page_idx")
   @@index([workspaceId, projectId, status, isLocked, excludeFromReclustering, id], map: "clusters_reclustering_eligibility_idx")
   @@map("clusters")
+}
+
+model ClusteringProposal {
+  id                    String                   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId           String                   @map("workspace_id") @db.Uuid
+  projectId             String                   @map("project_id") @db.Uuid
+  jobId                 String                   @unique(map: "clustering_proposals_job_id_key") @map("job_id") @db.Uuid
+  provider              String                   @db.VarChar(32)
+  connectorVersion      String                   @map("connector_version") @db.VarChar(100)
+  parameters            Json
+  status                ClusteringProposalStatus @default(READY)
+  keywordCount          Int                      @map("keyword_count")
+  clusterCount          Int                      @map("cluster_count")
+  unclusteredCount      Int                      @map("unclustered_count")
+  appliedKeywordCount   Int                      @default(0) @map("applied_keyword_count")
+  createdGroupCount     Int                      @default(0) @map("created_group_count")
+  semanticVersionIds    Json                     @default("[]") @map("semantic_version_ids")
+  version               Int                      @default(1)
+  createdBy             String                   @map("created_by") @db.Uuid
+  appliedBy             String?                  @map("applied_by") @db.Uuid
+  rejectedBy            String?                  @map("rejected_by") @db.Uuid
+  createdAt             DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(6)
+  appliedAt             DateTime?                @map("applied_at") @db.Timestamptz(6)
+  rejectedAt            DateTime?                @map("rejected_at") @db.Timestamptz(6)
+
+  clusters ClusteringProposalCluster[]
+  items    ClusteringProposalItem[]
+
+  @@unique([workspaceId, projectId, id], map: "clustering_proposals_tenant_project_id_key")
+  @@index([workspaceId, projectId, status, createdAt(sort: Desc), id(sort: Desc)], map: "clustering_proposals_project_status_created_idx")
+  @@map("clustering_proposals")
+}
+
+model ClusteringProposalCluster {
+  id               String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  proposalId       String   @map("proposal_id") @db.Uuid
+  sequence         Int
+  providerKey      String   @map("provider_key") @db.VarChar(255)
+  name             String   @db.VarChar(255)
+  topUrl           String?  @map("top_url") @db.Text
+  topUrls          Json     @default("[]") @map("top_urls")
+  frequencySum     BigInt?  @map("frequency_sum")
+  mainPageCount    Int?     @map("main_page_count")
+  keywordCount     Int      @map("keyword_count")
+  appliedClusterId String?  @map("applied_cluster_id") @db.Uuid
+  appliedGroupId   String?  @map("applied_group_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  proposal ClusteringProposal       @relation(fields: [proposalId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  items    ClusteringProposalItem[]
+
+  @@unique([proposalId, sequence], map: "clustering_proposal_clusters_sequence_key")
+  @@unique([proposalId, providerKey], map: "clustering_proposal_clusters_provider_key")
+  @@index([proposalId, id], map: "clustering_proposal_clusters_proposal_idx")
+  @@map("clustering_proposal_clusters")
+}
+
+model ClusteringProposalItem {
+  id                  String   @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  proposalId          String   @map("proposal_id") @db.Uuid
+  proposalClusterId   String?  @map("proposal_cluster_id") @db.Uuid
+  sequence            Int
+  keywordId           String   @map("keyword_id") @db.Uuid
+  keywordVersion      Int      @map("keyword_version")
+  keywordText         String   @map("keyword_text") @db.Text
+  frequency           BigInt?
+  exactFrequency      BigInt?  @map("exact_frequency")
+  aggregatorsPercent  Float?   @map("aggregators_percent")
+  toponym             String?  @db.VarChar(255)
+  geoDependent        Boolean? @map("geo_dependent")
+  appliedClusterId    String?  @map("applied_cluster_id") @db.Uuid
+  appliedGroupId      String?  @map("applied_group_id") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  proposal        ClusteringProposal         @relation(fields: [proposalId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+  proposalCluster ClusteringProposalCluster? @relation(fields: [proposalClusterId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([proposalId, sequence], map: "clustering_proposal_items_sequence_key")
+  @@unique([proposalId, keywordId], map: "clustering_proposal_items_keyword_key")
+  @@index([proposalId, proposalClusterId, sequence], map: "clustering_proposal_items_cluster_sequence_idx")
+  @@map("clustering_proposal_items")
 }
 
 model Page {

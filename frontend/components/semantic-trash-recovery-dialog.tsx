@@ -87,6 +87,7 @@ export function SemanticTrashRecoveryDialog({
     <SemanticModal
       description="Эти запросы уже находятся в корзине. Отметьте те, которые нужно восстановить и добавить в проект."
       onClose={saving ? () => undefined : onClose}
+      presenceKey="semantic-modal:trash-recovery"
       size="large"
       title="Найдены запросы в корзине"
     >

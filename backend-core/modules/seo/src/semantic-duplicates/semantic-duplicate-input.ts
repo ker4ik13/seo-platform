@@ -1,6 +1,7 @@
 import { BadRequestException } from "@nestjs/common";
 import {
   semanticDuplicateAnalysisModes,
+  semanticDuplicateGroupScopeLimit,
   semanticDuplicateKeeperStrategies,
   semanticDuplicatePreviewPageSizes,
   semanticDuplicateScopeKinds,
@@ -235,7 +236,7 @@ function rules(value: unknown): SemanticDuplicateRules {
 }
 
 function scope(value: unknown): SemanticDuplicateScope {
-  const input = exactRecord(value, ["kind", "groupId", "items"]);
+  const input = exactRecord(value, ["kind", "groupId", "groupIds", "items"]);
   if (
     typeof input.kind !== "string" ||
     !semanticDuplicateScopeKinds.some((kind) => kind === input.kind)
@@ -243,17 +244,28 @@ function scope(value: unknown): SemanticDuplicateScope {
     invalid("scope.kind");
   }
   if (input.kind === "PROJECT") {
-    if (input.groupId !== undefined || input.items !== undefined) {
+    if (
+      input.groupId !== undefined ||
+      input.groupIds !== undefined ||
+      input.items !== undefined
+    ) {
       invalid("scope");
     }
     return { kind: "PROJECT" };
   }
   if (input.kind === "GROUP") {
     if (input.items !== undefined) invalid("scope.items");
-    return { kind: "GROUP", groupId: uuid(input.groupId, "scope.groupId") };
+    if (input.groupId !== undefined && input.groupIds !== undefined) {
+      invalid("scope");
+    }
+    const groupIds = input.groupId !== undefined
+      ? [uuid(input.groupId, "scope.groupId")]
+      : duplicateGroupIds(input.groupIds);
+    return { kind: "GROUP", groupIds };
   }
   if (
     input.groupId !== undefined ||
+    input.groupIds !== undefined ||
     !Array.isArray(input.items) ||
     input.items.length < 1 ||
     input.items.length > 2_000
@@ -274,6 +286,23 @@ function scope(value: unknown): SemanticDuplicateScope {
     invalid("scope.items");
   }
   return { kind: "SELECTION", items };
+}
+
+function duplicateGroupIds(value: unknown): readonly string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > semanticDuplicateGroupScopeLimit
+  ) {
+    invalid("scope.groupIds");
+  }
+  const groupIds = value.map((groupId, index) =>
+    uuid(groupId, `scope.groupIds.${index}`)
+  );
+  if (new Set(groupIds).size !== groupIds.length) {
+    invalid("scope.groupIds");
+  }
+  return groupIds.sort();
 }
 
 function exactRecord(

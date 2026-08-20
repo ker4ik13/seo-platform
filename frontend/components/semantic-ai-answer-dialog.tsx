@@ -8,7 +8,7 @@ import {
   type ProjectConnectorBinding,
   type ProjectConnectorSettings
 } from "@seo-platform/contracts";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type FormEvent } from "react";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import {
   createProjectConnectorBindingInput,
@@ -17,6 +17,12 @@ import {
   updateProjectConnectorBindingInput,
   withProjectConnectorBinding
 } from "../lib/project-integration-settings";
+import {
+  defaultSemanticSearchRegions,
+  readLastSemanticSearchRegions,
+  searchRegionKind,
+  writeLastSemanticRegion
+} from "../lib/semantic-region-preference";
 import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
 import { SearchableRegionSelect } from "./searchable-region-select";
@@ -45,10 +51,11 @@ export function SemanticAiAnswerDialog({
   projectDomain: string;
   projectId: string;
 }>) {
+  const formId = useId();
   const [settings, setSettings] = useState<ProjectConnectorSettings>();
   const [credentialId, setCredentialId] = useState("");
   const [searchEngine, setSearchEngine] = useState<AiAnswerSearchEngine>("YANDEX");
-  const [regionCodes, setRegionCodes] = useState({ YANDEX: "225", GOOGLE: "2643" });
+  const [regions, setRegions] = useState(defaultSemanticSearchRegions);
   const [device, setDevice] = useState<AiAnswerDevice>("DESKTOP");
   const [host, setHost] = useState(() => projectHost(projectDomain));
   const [excludeSubdomains, setExcludeSubdomains] = useState(false);
@@ -70,7 +77,7 @@ export function SemanticAiAnswerDialog({
   );
   const selectedSource = sources.find(({ id }) => id === credentialId);
   const brands = splitBrands(brandsText);
-  const regionCode = regionCodes[searchEngine];
+  const regionCode = regions[searchEngine].code;
   const resolveScope = useCallback((
     next: readonly SemanticOperationSelection[],
     resolving: boolean,
@@ -84,6 +91,16 @@ export function SemanticAiAnswerDialog({
   useEffect(() => {
     setHost(projectHost(projectDomain));
   }, [projectDomain]);
+
+  useEffect(() => {
+    setRegions(
+      readLastSemanticSearchRegions(
+        window.localStorage,
+        projectId,
+        "AI_ANSWERS"
+      )
+    );
+  }, [projectId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -149,6 +166,13 @@ export function SemanticAiAnswerDialog({
           }
         }
       );
+      writeLastSemanticRegion(
+        window.localStorage,
+        projectId,
+        "AI_ANSWERS",
+        searchRegionKind(searchEngine),
+        regionCode
+      );
       onStarted(collection);
     } catch (requestError) {
       setError(aiAnswerErrorMessage(requestError));
@@ -191,11 +215,28 @@ export function SemanticAiAnswerDialog({
   return (
     <SemanticModal
       description="Проверка ИИ-ответов Яндекса или Google через Arsenkin выполняется в фоне и расходует 2 лимита за каждый запрос."
+      footer={(
+        <div className="semantic-workflow-footer">
+          <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate">
+            <div><Icon name="semantic" /><div><dt>К проверке</dt><dd>{selections.length} запросов</dd></div></div>
+            <div><Icon name="ai" /><div><dt>Поисковик</dt><dd>{searchEngine === "YANDEX" ? "Яндекс" : "Google"}</dd></div></div>
+            <div><Icon name="operations" /><div><dt>Лимитов Arsenkin</dt><dd>{selections.length * 2}</dd></div></div>
+            <div><Icon name="checkDouble" /><div><dt>Брендов</dt><dd>{brands.length} из 10</dd></div></div>
+          </dl>
+          <div className="semantic-modal-actions">
+            <button className="secondary-button" disabled={running} onClick={onClose} type="button">Отмена</button>
+            <button className="primary-button" disabled={loading || resolvingScope || running || !selectedSource || !host || selections.length === 0 || brands.length > 10} form={formId} type="submit">
+              {resolvingScope ? "Загружаем запросы…" : running ? "Запускаем…" : `Проверить ИИ-ответы (${selections.length})`}
+            </button>
+          </div>
+        </div>
+      )}
       onClose={running ? () => undefined : onClose}
+      presenceKey="semantic-modal:ai-answers"
       size="large"
       title="Проверить ИИ-ответы"
     >
-      <form className="semantic-ai-answer-dialog semantic-workflow-dialog" onSubmit={(event) => void submit(event)}>
+      <form className="semantic-ai-answer-dialog semantic-workflow-dialog" id={formId} onSubmit={(event) => void submit(event)}>
         <div className="semantic-workflow-grid semantic-ai-answer-workflow-grid">
           <section className="semantic-workflow-panel semantic-ai-source-panel">
             <header>
@@ -260,9 +301,15 @@ export function SemanticAiAnswerDialog({
                 <span>Регион</span>
                 <SearchableRegionSelect
                   kind={searchEngine === "YANDEX" ? "YANDEX_RANK" : "GOOGLE_RANK"}
-                  onChange={({ code }) => setRegionCodes((current) => ({ ...current, [searchEngine]: code }))}
+                  onChange={(region) => setRegions((current) => ({
+                    ...current,
+                    [searchEngine]: region
+                  }))}
                   value={regionCode}
                 />
+                <small>
+                  Первый запуск — Москва; затем используется регион последней успешной проверки.
+                </small>
               </label>
               <fieldset className="semantic-device-cards">
                 <legend>Устройство</legend>
@@ -307,24 +354,12 @@ export function SemanticAiAnswerDialog({
             />
           </section>
         </div>
-        <dl className="semantic-dialog-estimate">
-          <div><Icon name="semantic" /><div><dt>К проверке</dt><dd>{selections.length} запросов</dd></div></div>
-          <div><Icon name="ai" /><div><dt>Поисковик</dt><dd>{searchEngine === "YANDEX" ? "Яндекс" : "Google"}</dd></div></div>
-          <div><Icon name="operations" /><div><dt>Лимитов Arsenkin</dt><dd>{selections.length * 2}</dd></div></div>
-          <div><Icon name="checkDouble" /><div><dt>Брендов</dt><dd>{brands.length} из 10</dd></div></div>
-        </dl>
         {(error || scopeError) && (
           <div className="semantic-workflow-feedback">
             {error && <div className="inline-alert danger" role="alert">{error}</div>}
             {scopeError && <div className="inline-alert warning" role="alert">{scopeError}</div>}
           </div>
         )}
-        <div className="semantic-modal-actions semantic-workflow-footer">
-          <button className="secondary-button" disabled={running} onClick={onClose} type="button">Отмена</button>
-          <button className="primary-button" disabled={loading || resolvingScope || running || !selectedSource || !host || selections.length === 0 || brands.length > 10} type="submit">
-            {resolvingScope ? "Загружаем запросы…" : running ? "Запускаем…" : `Проверить ИИ-ответы (${selections.length})`}
-          </button>
-        </div>
       </form>
     </SemanticModal>
   );

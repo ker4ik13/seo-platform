@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
+import { semanticNegativeKeywordWordLimit } from "@seo-platform/contracts";
 import {
   internalApplyNegativeKeywordsInput,
+  internalCreateNegativeKeywordPresetInput,
   internalNegativeKeywordCommandInput
 } from "./negative-keyword-input.js";
 import {
@@ -15,6 +17,8 @@ const context = {
   projectId: "01900000-0000-7000-8000-000000000002",
   actorId: "01900000-0000-7000-8000-000000000003"
 };
+const groupId = "01900000-0000-7000-8000-000000000010";
+const secondGroupId = "01900000-0000-7000-8000-000000000012";
 
 const defaultRuleFlags = {
   ignoreWordOrder: false,
@@ -51,6 +55,34 @@ test("trusted negative keyword input remains tenant and selection scoped", () =>
   );
 });
 
+test("trusted input canonicalizes a union of folder scopes", () => {
+  const base = {
+    ...context,
+    rules: { words: ["Москва"], matchMode: "WHOLE_WORD", caseSensitive: false }
+  } as const;
+  assert.deepEqual(
+    internalNegativeKeywordCommandInput({
+      ...base,
+      scope: { kind: "GROUP", groupIds: [secondGroupId, groupId] }
+    }).scope,
+    { kind: "GROUP", groupIds: [groupId, secondGroupId] }
+  );
+  assert.throws(
+    () => internalNegativeKeywordCommandInput({
+      ...base,
+      scope: { kind: "GROUP", groupId, groupIds: [secondGroupId] }
+    }),
+    BadRequestException
+  );
+  assert.throws(
+    () => internalNegativeKeywordCommandInput({
+      ...base,
+      scope: { kind: "GROUP", groupIds: [groupId, groupId] }
+    }),
+    BadRequestException
+  );
+});
+
 test("trusted apply input keeps an exact bounded list of unchecked matches", () => {
   const keywordId = "01900000-0000-7000-8000-000000000004";
   const input = internalApplyNegativeKeywordsInput({
@@ -68,6 +100,34 @@ test("trusted apply input keeps an exact bounded list of unchecked matches", () 
       scope: { kind: "PROJECT" },
       previewHash: "a".repeat(64),
       excludedKeywordIds: [keywordId, keywordId]
+    }),
+    BadRequestException
+  );
+});
+
+test("trusted preset input accepts the shared combined geo limit", () => {
+  const words = Array.from(
+    { length: semanticNegativeKeywordWordLimit },
+    (_, index) => `география ${index}`
+  );
+  const input = internalCreateNegativeKeywordPresetInput({
+    ...context,
+    name: "Города и регионы",
+    rules: {
+      words,
+      matchMode: "WORD_FORM_PRECISE",
+      caseSensitive: false,
+      ignoreWordOrder: false,
+      ignorePunctuation: true
+    }
+  });
+
+  assert.equal(input.rules.words.length, semanticNegativeKeywordWordLimit);
+  assert.throws(
+    () => internalCreateNegativeKeywordPresetInput({
+      ...context,
+      name: "Слишком большой",
+      rules: { ...input.rules, words: [...words, "лишняя строка"] }
     }),
     BadRequestException
   );

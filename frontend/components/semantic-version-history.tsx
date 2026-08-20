@@ -147,7 +147,12 @@ export function SemanticVersionHistory({
   return (
     <>
       {drawer ? (
-        <aside aria-label="История семантического ядра" className="semantic-history-drawer">
+        <aside
+          aria-label="История семантического ядра"
+          className="semantic-history-drawer"
+          data-presence-cursor-anchor="true"
+          data-presence-key="semantic-history-drawer"
+        >
           <header className="semantic-sidebar-header">
             <div>
               <span>Изменения проекта</span>

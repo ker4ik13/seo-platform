@@ -3,6 +3,7 @@ export * from "./api/ai-answer-collections.js";
 export * from "./api/admin.js";
 export * from "./api/billing.js";
 export * from "./api/crawls.js";
+export * from "./api/clustering.js";
 export * from "./api/frequency-collections.js";
 export * from "./api/crawl-automations.js";
 export * from "./api/automations.js";

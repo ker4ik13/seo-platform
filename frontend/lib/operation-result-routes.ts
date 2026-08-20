@@ -3,6 +3,7 @@ import { operationResultDefaultPageSize } from "@seo-platform/contracts";
 export const operationResultKinds = [
   "frequency",
   "ai-answer",
+  "clustering",
   "rank",
   "crawl",
   "research"
@@ -72,6 +73,9 @@ export function operationResultApiPath(
   }
   if (kind === "ai-answer") {
     return `${base}/ai-answer-collections/${id}/result${suffix}`;
+  }
+  if (kind === "clustering") {
+    return `${base}/clustering-runs/${id}/result${suffix}`;
   }
   if (kind === "rank") return `${base}/jobs/${id}/result${suffix}`;
   return `${base}/crawls/${id}/result${suffix}`;

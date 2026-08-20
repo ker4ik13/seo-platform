@@ -5,6 +5,7 @@ import {
   type NestFastifyApplication
 } from "@nestjs/platform-fastify";
 import { AppModule } from "./app.module.js";
+import { installClusteringRunBodyLimit } from "./clustering-runs/clustering-run-body-limit.js";
 import { loadAppConfig } from "./config/app-config.js";
 import { installPrivateHttpResponsePolicy } from "./internal/http-response-policy.js";
 
@@ -14,6 +15,7 @@ async function bootstrap(): Promise<void> {
     logger: config.nodeEnv !== "test",
     requestIdHeader: "x-request-id"
   });
+  installClusteringRunBodyLimit(adapter.getInstance());
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     adapter

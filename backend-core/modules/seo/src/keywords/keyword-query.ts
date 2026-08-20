@@ -3,11 +3,40 @@ import {
   semanticKeywordDefaultPageSize,
   semanticKeywordIntents,
   semanticKeywordMaxPageSize,
+  semanticKeywordMultiSearchMaxTerms,
+  semanticKeywordMultiSearchModes,
   semanticKeywordSorts,
-  type KeywordListQuery
+  type KeywordListQuery,
+  type SemanticKeywordMultiSearchInput
 } from "@seo-platform/contracts";
 
 const CURSOR_PATTERN = /^[A-Za-z0-9_-]{8,5000}$/u;
+const BODY_QUERY_FIELDS = [
+  "limit", "cursor", "search", "tag", "intent", "groupId", "groupIds",
+  "clusterId", "isFavorite", "isTracked", "priorityMin", "priorityMax", "sort"
+] as const;
+
+export function keywordMultiSearchInput(value: unknown): KeywordListQuery {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) invalid("body");
+  const input = value as Readonly<Record<string, unknown>>;
+  if (Object.keys(input).some((key) => key !== "query" && key !== "search")) invalid("body");
+  const parsedQuery = keywordListQuery(bodyQuery(input.query));
+  if (typeof input.search !== "object" || input.search === null || Array.isArray(input.search)) invalid("search");
+  const search = input.search as Readonly<Record<string, unknown>>;
+  if (Object.keys(search).some((key) => key !== "terms" && key !== "mode")) invalid("search");
+  if (!Array.isArray(search.terms) || search.terms.length < 1 || search.terms.length > semanticKeywordMultiSearchMaxTerms) invalid("search.terms");
+  const terms = search.terms.map((candidate, index) => {
+    if (typeof candidate !== "string") invalid(`search.terms.${index}`);
+    const term = candidate.normalize("NFKC").trim().replace(/\s+/gu, " ");
+    if (!term || term.length > 400) invalid(`search.terms.${index}`);
+    return term;
+  });
+  if (new Set(terms.map((term) => term.toLocaleLowerCase("ru"))).size !== terms.length) invalid("search.terms");
+  const mode = typeof search.mode === "string" && semanticKeywordMultiSearchModes.includes(search.mode as never)
+    ? search.mode as SemanticKeywordMultiSearchInput["search"]["mode"]
+    : invalid("search.mode");
+  return { ...parsedQuery, multiSearch: { terms, mode } };
+}
 
 export function keywordTagOptionsQuery(
   value: unknown
@@ -112,6 +141,24 @@ function optionalUuidList(value: unknown, field: string): readonly string[] {
   const canonical = ids as string[];
   if (new Set(canonical).size !== canonical.length) invalid(field);
   return [...canonical].sort();
+}
+
+function bodyQuery(value: unknown): Readonly<Record<string, string>> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) invalid("query");
+  const query = value as Readonly<Record<string, unknown>>;
+  if (Object.keys(query).some((key) => !BODY_QUERY_FIELDS.includes(key as never))) invalid("query");
+  const result: Record<string, string> = {};
+  for (const [key, candidate] of Object.entries(query)) {
+    if (candidate === undefined) continue;
+    if (key === "groupIds") {
+      if (!Array.isArray(candidate) || !candidate.every((item) => typeof item === "string")) invalid("query.groupIds");
+      result[key] = candidate.join(",");
+      continue;
+    }
+    if (typeof candidate !== "string" && typeof candidate !== "number" && typeof candidate !== "boolean") invalid(`query.${key}`);
+    result[key] = String(candidate);
+  }
+  return result;
 }
 
 function optionalEnum<T extends string>(

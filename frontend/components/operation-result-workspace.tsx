@@ -6,6 +6,10 @@ import {
 } from "@seo-platform/contracts";
 import type {
   AiAnswerOperationResult,
+  ClusteringOperationResult,
+  ClusteringProposalApplyResult,
+  ClusteringProposalClusterSummary,
+  ClusteringProposalResultRow,
   CrawlOperationResultPage,
   CrawlOperationResultRow,
   FrequencyOperationResult,
@@ -15,9 +19,20 @@ import type {
   RankJobSummary,
   RankOperationResult,
   RankOperationResultRow,
+  SemanticCluster,
+  SemanticKeywordGroup,
   SemanticFrequencyType
 } from "@seo-platform/contracts";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties
+} from "react";
+import { createPortal } from "react-dom";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import {
   connectorRouteTrail,
@@ -30,16 +45,29 @@ import {
 } from "../lib/operation-result-routes";
 import { operationStatusLabel } from "../lib/operation-status-presentation";
 import {
+  rememberClusterFolderAction,
+  rememberClusterFolderDestination,
+  serializeClusterFolderOverride,
+  type ClusterFolderDecision
+} from "../lib/semantic-clustering-folder-decision";
+import {
+  announceWorkspaceDropdownOpen,
+  workspaceDropdownOpenEvent
+} from "../lib/dropdown-events";
+import {
   rankJobFailureMessage,
   rankSearchSystemLabel
 } from "../lib/rank-jobs";
 import { ProviderLogo } from "./provider-logo";
 import { CustomSelect } from "./custom-select";
+import { Icon } from "./icon";
+import { SemanticGroupPicker } from "./semantic-group-picker";
 import styles from "./operation-result-workspace.module.css";
 
 type OperationResultData =
   | Readonly<{ kind: "frequency"; value: FrequencyOperationResult }>
   | Readonly<{ kind: "ai-answer"; value: AiAnswerOperationResult }>
+  | Readonly<{ kind: "clustering"; value: ClusteringOperationResult }>
   | Readonly<{ kind: "rank"; value: RankOperationResult }>
   | Readonly<{ kind: "crawl"; value: CrawlOperationResultPage }>
   | Readonly<{ kind: "research"; value: KeywordResearchRunSummary }>;
@@ -48,11 +76,15 @@ export function OperationResultWorkspace({
   embedded = false,
   kind,
   operationId,
+  onClusteringApplied,
+  onDirtyChange,
   projectId
 }: Readonly<{
   embedded?: boolean;
   kind: OperationResultKind;
   operationId: string;
+  onClusteringApplied?: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
   projectId: string;
 }>) {
   const [data, setData] = useState<OperationResultData>();
@@ -229,6 +261,14 @@ export function OperationResultWorkspace({
     void load(undefined, true);
   }
 
+  function reloadAfterClusteringMutation(): void {
+    tailCursorRef.current = undefined;
+    requestedCursorsRef.current.clear();
+    setPageError(undefined);
+    onClusteringApplied?.();
+    void load();
+  }
+
   if (loading && !data) {
     return (
       <section className={workspaceClass(embedded)}>
@@ -310,7 +350,7 @@ export function OperationResultWorkspace({
         </header>
       )}
 
-      <div className={styles.summary}>
+      <div className={`${styles.summary}${data.kind === "clustering" ? ` ${styles.summaryClustering}` : ""}`}>
         <div className={styles.statusBlock}>
           <span className={`${styles.status} ${styles[`status${summary.tone}`]}`}>
             {summary.status}
@@ -335,7 +375,20 @@ export function OperationResultWorkspace({
         </div>
       )}
 
-      <div className={styles.tablePanel} ref={tablePanelRef}>
+      {data.kind === "clustering" && (
+        <ClusteringApplyPanel
+          hasNext={Boolean(nextCursor)}
+          loadingMore={loadingMore}
+          onChanged={reloadAfterClusteringMutation}
+          {...(onDirtyChange ? { onDirtyChange } : {})}
+          onLoadMore={() => void loadMore()}
+          operationId={operationId}
+          projectId={projectId}
+          result={data.value}
+        />
+      )}
+
+      {data.kind !== "clustering" && <div className={styles.tablePanel} ref={tablePanelRef}>
         <OperationTable data={data} />
         {nextCursor && (
           <div
@@ -346,8 +399,8 @@ export function OperationResultWorkspace({
             {loadingMore && <span className={styles.inlineSpinner} />}
           </div>
         )}
-      </div>
-      {resultPage && (
+      </div>}
+      {resultPage && data.kind !== "clustering" && (
         <div className={styles.resultPager} aria-label="Состояние загрузки результата">
           <span>{operationResultRange(data)}</span>
           <span aria-live="polite" className={styles.resultLoadState}>
@@ -368,9 +421,814 @@ export function OperationResultWorkspace({
 function OperationTable({ data }: Readonly<{ data: OperationResultData }>) {
   if (data.kind === "frequency") return <FrequencyTable result={data.value} />;
   if (data.kind === "ai-answer") return <AiAnswerTable result={data.value} />;
+  if (data.kind === "clustering") return null;
   if (data.kind === "rank") return <RankTable result={data.value} />;
   if (data.kind === "crawl") return <CrawlTable result={data.value} />;
   return <ResearchTable result={data.value} />;
+}
+
+function ClusteringApplyPanel({
+  hasNext,
+  loadingMore,
+  onChanged,
+  onDirtyChange,
+  onLoadMore,
+  operationId,
+  projectId,
+  result
+}: Readonly<{
+  hasNext: boolean;
+  loadingMore: boolean;
+  onChanged: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  onLoadMore: () => void;
+  operationId: string;
+  projectId: string;
+  result: ClusteringOperationResult;
+}>) {
+  const proposal = result.proposal;
+  const [groups, setGroups] = useState<readonly SemanticKeywordGroup[]>([]);
+  const [semanticClusters, setSemanticClusters] = useState<readonly SemanticCluster[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(false);
+  const folderMode = "CREATE_SUBGROUPS" as const;
+  const [unclusteredFolderAction, setUnclusteredFolderAction] = useState<"KEEP" | "NEW">("KEEP");
+  const [collapsedSectionIds, setCollapsedSectionIds] = useState<ReadonlySet<string>>(new Set());
+  const [nameOverrides, setNameOverrides] = useState<ReadonlyMap<string, string>>(new Map());
+  const [selectedKeywordIds, setSelectedKeywordIds] = useState<ReadonlySet<string>>(new Set());
+  const [assignmentGroupId, setAssignmentGroupId] = useState("");
+  const [keywordGroupOverrides, setKeywordGroupOverrides] = useState<ReadonlyMap<string, string>>(new Map());
+  const [clusterAssignmentOverrides, setClusterAssignmentOverrides] = useState<ReadonlyMap<string, ClusterAssignmentDecision>>(new Map());
+  const [clusterFolderOverrides, setClusterFolderOverrides] = useState<ReadonlyMap<string, ClusterFolderDecision>>(new Map());
+  const [openClusterFolder, setOpenClusterFolder] = useState<OpenClusterFolderPicker>();
+  const [query, setQuery] = useState("");
+  const [busy, setBusy] = useState<"APPLY" | "REJECT">();
+  const [confirmReject, setConfirmReject] = useState(false);
+  const [error, setError] = useState<string>();
+
+  useEffect(() => {
+    setUnclusteredFolderAction("KEEP");
+    setCollapsedSectionIds(new Set());
+    setNameOverrides(new Map());
+    setSelectedKeywordIds(new Set());
+    setAssignmentGroupId("");
+    setKeywordGroupOverrides(new Map());
+    setClusterAssignmentOverrides(new Map());
+    setClusterFolderOverrides(new Map());
+    setOpenClusterFolder(undefined);
+    setConfirmReject(false);
+    setError(undefined);
+  }, [proposal?.id, proposal?.version]);
+
+  const dirty =
+    unclusteredFolderAction !== "KEEP" ||
+    nameOverrides.size > 0 ||
+    selectedKeywordIds.size > 0 ||
+    keywordGroupOverrides.size > 0 ||
+    clusterAssignmentOverrides.size > 0 ||
+    clusterFolderOverrides.size > 0;
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
+
+  useEffect(() => {
+    if (proposal?.status !== "READY") return;
+    const controller = new AbortController();
+    setGroupsLoading(true);
+    setSemanticClusters([]);
+    void Promise.allSettled([
+      browserApiRequest<readonly SemanticKeywordGroup[]>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/keyword-groups`,
+        { signal: controller.signal }
+      ),
+      browserApiRequest<readonly SemanticCluster[]>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/clusters`,
+        { signal: controller.signal }
+      )
+    ])
+      .then(([groupResult, clusterResult]) => {
+        if (controller.signal.aborted) return;
+        if (groupResult.status === "fulfilled") {
+          setGroups(groupResult.value.filter(({ systemKind }) => systemKind === undefined));
+        }
+        if (clusterResult.status === "fulfilled") {
+          setSemanticClusters(clusterResult.value);
+        }
+        const failed = groupResult.status === "rejected"
+          ? groupResult.reason
+          : clusterResult.status === "rejected"
+            ? clusterResult.reason
+            : undefined;
+        if (failed !== undefined) setError(clusteringMutationError(failed));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setGroupsLoading(false);
+      });
+    return () => controller.abort();
+  }, [projectId, proposal?.status]);
+
+  if (!proposal) {
+    if (!isActiveStatus(result.run.status)) return null;
+    return (
+      <section className={styles.clusteringPending}>
+        <span className={styles.inlineSpinner} />
+        <div><strong>Arsenkin формирует группы</strong><small>Черновик раскладки появится здесь после получения и проверки результата.</small></div>
+      </section>
+    );
+  }
+
+  const ready = proposal.status === "READY";
+  const proposalVersion = proposal.version;
+
+  const normalizedQuery = query.trim().toLocaleLowerCase("ru-RU");
+  const clusterSections = clusteringSections(result, normalizedQuery);
+  const renderedSections = clusterSections.slice(0, 500);
+  const invalidExistingFolder = [...clusterFolderOverrides.values()].some(
+    ({ action, groupId }) => action === "EXISTING" && !groupId
+  );
+  const clusterAssignments = result.clusters.map((cluster) =>
+    clusterAssignmentOverrides.get(cluster.id) ?? defaultClusterAssignment(
+      cluster,
+      result.run.replaceExistingClusters
+    )
+  );
+  const semanticClusterAssignmentCount = clusterAssignments.filter(
+    ({ action }) => action !== "KEEP"
+  ).length;
+  const newSemanticClusterCount = clusterAssignments.filter(
+    ({ action }) => action === "NEW"
+  ).length;
+  const invalidRequiredName = result.clusters.some((cluster) => {
+    const assignment = clusterAssignmentOverrides.get(cluster.id) ??
+      defaultClusterAssignment(cluster, result.run.replaceExistingClusters);
+    const folderAction = clusterFolderOverrides.get(cluster.id)?.action ?? "NEW";
+    if (assignment.action !== "NEW" && folderAction !== "NEW") return false;
+    return !(nameOverrides.get(cluster.id) ?? cluster.name).trim();
+  });
+  const newFolderCount = result.clusters.reduce(
+    (count, cluster) => (clusterFolderOverrides.get(cluster.id)?.action ?? "NEW") === "NEW"
+      ? count + 1
+      : count,
+    unclusteredFolderAction === "NEW" && proposal.unclusteredCount > 0 ? 1 : 0
+  );
+  const existingFolderClusterCount = [...clusterFolderOverrides.values()].filter(
+    ({ action, groupId }) => action === "EXISTING" && Boolean(groupId)
+  ).length;
+  const canApply = !invalidExistingFolder && (
+    keywordGroupOverrides.size > 0 ||
+    semanticClusterAssignmentCount > 0 ||
+    newFolderCount > 0 ||
+    existingFolderClusterCount > 0
+  );
+  const renderedSectionIds = renderedSections.map(({ cluster }) => cluster?.id ?? "unclustered");
+  const allSectionsCollapsed = renderedSectionIds.length > 0 && renderedSectionIds.every(
+    (sectionId) => collapsedSectionIds.has(sectionId)
+  );
+  const resultLoadState = loadingMore
+    ? "Подгружаем следующие строки…"
+    : hasNext
+      ? "Есть ещё запросы — загрузите следующую часть"
+      : isActiveStatus(result.run.status)
+        ? "Все доступные строки загружены · ждём новые"
+        : "Все строки загружены";
+
+  function updateName(cluster: ClusteringProposalClusterSummary, value: string): void {
+    setNameOverrides((current) => {
+      const next = new Map(current);
+      if (value === cluster.name) next.delete(cluster.id);
+      else next.set(cluster.id, value);
+      return next;
+    });
+  }
+
+  function toggleSection(sectionId: string): void {
+    setCollapsedSectionIds((current) => {
+      const next = new Set(current);
+      if (next.has(sectionId)) next.delete(sectionId);
+      else next.add(sectionId);
+      return next;
+    });
+  }
+
+  function toggleAllSections(): void {
+    setCollapsedSectionIds((current) => {
+      const next = new Set(current);
+      for (const sectionId of renderedSectionIds) {
+        if (allSectionsCollapsed) next.delete(sectionId);
+        else next.add(sectionId);
+      }
+      return next;
+    });
+  }
+
+  function toggleKeyword(keywordId: string): void {
+    setSelectedKeywordIds((current) => {
+      const next = new Set(current);
+      if (next.has(keywordId)) next.delete(keywordId);
+      else next.add(keywordId);
+      return next;
+    });
+  }
+
+  function assignSelectedKeywords(): void {
+    setKeywordGroupOverrides((current) => {
+      const next = new Map(current);
+      for (const keywordId of selectedKeywordIds) {
+        if (assignmentGroupId) next.set(keywordId, assignmentGroupId);
+        else next.delete(keywordId);
+      }
+      return next;
+    });
+    setSelectedKeywordIds(new Set());
+  }
+
+  function updateClusterFolderDecision(
+    proposalClusterId: string,
+    action: "NEW" | "KEEP" | "EXISTING"
+  ): void {
+    setClusterFolderOverrides((current) => {
+      const next = new Map(current);
+      const previous = current.get(proposalClusterId);
+      next.set(proposalClusterId, rememberClusterFolderAction(previous, action));
+      return next;
+    });
+    setOpenClusterFolder(undefined);
+  }
+
+  function updateClusterAssignment(
+    cluster: ClusteringProposalClusterSummary,
+    value: string
+  ): void {
+    const nextDecision: ClusterAssignmentDecision = value === "NEW"
+      ? { action: "NEW" }
+      : value === "KEEP"
+        ? { action: "KEEP" }
+        : { action: "EXISTING", clusterId: value.slice("EXISTING:".length) };
+    const defaultDecision = defaultClusterAssignment(
+      cluster,
+      result.run.replaceExistingClusters
+    );
+    setClusterAssignmentOverrides((current) => {
+      const next = new Map(current);
+      if (sameClusterAssignment(nextDecision, defaultDecision)) next.delete(cluster.id);
+      else next.set(cluster.id, nextDecision);
+      return next;
+    });
+  }
+
+  function updateClusterDestination(
+    proposalClusterId: string,
+    groupId: string
+  ): void {
+    setClusterFolderOverrides((current) => {
+      const next = new Map(current);
+      const decision = current.get(proposalClusterId) ?? { action: "NEW" as const };
+      next.set(
+        proposalClusterId,
+        rememberClusterFolderDestination(decision, groupId)
+      );
+      return next;
+    });
+    setOpenClusterFolder(undefined);
+  }
+
+  async function apply(): Promise<void> {
+    if (!canApply || busy) return;
+    setBusy("APPLY");
+    setError(undefined);
+    try {
+      const overrides = [...nameOverrides]
+        .map(([proposalClusterId, name]) => ({ proposalClusterId, name: name.trim() }))
+        .filter(({ name }) => name.length > 0);
+      await browserApiRequest<ClusteringProposalApplyResult>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/clustering-runs/${encodeURIComponent(operationId)}/apply`,
+        {
+          method: "POST",
+          body: {
+            proposalVersion,
+            excludedClusterIds: [],
+            clusterNameOverrides: overrides,
+            clusterAssignmentOverrides: result.clusters.map((cluster) => {
+              const decision = clusterAssignmentOverrides.get(cluster.id) ??
+                defaultClusterAssignment(cluster, result.run.replaceExistingClusters);
+              return {
+                proposalClusterId: cluster.id,
+                action: decision.action,
+                ...(decision.action === "EXISTING"
+                  ? { clusterId: decision.clusterId }
+                  : {})
+              };
+            }),
+            keywordGroupOverrides: [...keywordGroupOverrides].map(
+              ([keywordId, groupId]) => ({ keywordId, groupId })
+            ),
+            clusterFolderOverrides: [...clusterFolderOverrides].map(
+              ([proposalClusterId, override]) => serializeClusterFolderOverride(
+                proposalClusterId,
+                override
+              )
+            ),
+            folderMode,
+            createUnclusteredGroup: unclusteredFolderAction === "NEW"
+          }
+        }
+      );
+      onChanged();
+    } catch (requestError) {
+      setError(clusteringMutationError(requestError));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  async function reject(): Promise<void> {
+    if (busy) return;
+    if (!confirmReject) {
+      setConfirmReject(true);
+      return;
+    }
+    setBusy("REJECT");
+    setError(undefined);
+    try {
+      await browserApiRequest(
+        `/app/api/projects/${encodeURIComponent(projectId)}/clustering-runs/${encodeURIComponent(operationId)}/reject`,
+        { method: "POST", body: { proposalVersion } }
+      );
+      onChanged();
+    } catch (requestError) {
+      setError(clusteringMutationError(requestError));
+    } finally {
+      setBusy(undefined);
+    }
+  }
+
+  return (
+    <section className={`${styles.clusteringApply}${ready ? "" : ` ${styles.clusteringReadOnly}`}`}>
+      <header className={styles.clusteringApplyHeader}>
+        <div>
+          <strong>{ready ? "Распределите запросы по SEO-кластерам и папкам" : proposal.status === "APPLIED" ? "Раскладка применена" : "Черновик отклонён"}</strong>
+          <small>{ready
+            ? "Для каждого результата отдельно выберите SEO-кластер и папку. Текущие назначения можно безопасно оставить."
+            : proposal.status === "APPLIED"
+              ? `${formatInteger(proposal.appliedKeywordCount)} запросов обновлено · ${formatInteger(proposal.createdGroupCount)} папок создано.`
+              : "Кластеры и папки проекта не изменялись."}</small>
+        </div>
+        <span>{ready ? `${formatInteger(proposal.readyCount)} можно применить` : proposal.status === "APPLIED" ? "Применено" : "Отклонено"}</span>
+      </header>
+      <div className={styles.clusteringApplyBody}>
+        <div className={styles.clusteringClusterPicker}>
+          <div className={styles.clusteringClusterTools}>
+            <label><Icon name="search" /><input aria-label="Поиск кластера" onChange={(event) => setQuery(event.target.value)} placeholder="Найти запрос, кластер или URL" type="search" value={query} /></label>
+            <button disabled={renderedSectionIds.length === 0} onClick={toggleAllSections} type="button">
+              {allSectionsCollapsed ? "Развернуть все" : "Свернуть все"}
+            </button>
+          </div>
+          <div className={styles.clusteringSectionList}>
+            {renderedSections.map(({ cluster, rows }) => {
+              const sectionId = cluster?.id ?? "unclustered";
+              const topUrls = cluster?.topUrls.length
+                ? cluster.topUrls
+                : cluster?.topUrl
+                  ? [{ url: cluster.topUrl }]
+                  : [];
+              const folderDecision = cluster
+                ? clusterFolderOverrides.get(cluster.id)
+                : undefined;
+              const folderDecisionValue = cluster
+                ? folderDecision?.action ?? "NEW"
+                : unclusteredFolderAction;
+              const clusterAssignment = cluster
+                ? clusterAssignmentOverrides.get(cluster.id) ?? defaultClusterAssignment(
+                    cluster,
+                    result.run.replaceExistingClusters
+                  )
+                : undefined;
+              const clusterAssignmentValue = clusterAssignment?.action === "EXISTING"
+                ? `EXISTING:${clusterAssignment.clusterId}`
+                : clusterAssignment?.action ?? "KEEP";
+              const namePurpose = cluster && clusterAssignment?.action === "NEW" && folderDecisionValue === "NEW"
+                ? "Название нового SEO-кластера и папки"
+                : clusterAssignment?.action === "NEW"
+                  ? "Название нового SEO-кластера"
+                  : "Название новой папки";
+              const canRename = Boolean(
+                cluster && (clusterAssignment?.action === "NEW" || folderDecisionValue === "NEW")
+              );
+              const expanded = Boolean(normalizedQuery) || !collapsedSectionIds.has(sectionId);
+              const destinationLabel = folderDecisionValue === "NEW"
+                ? `Внутри: ${groupPath(groups, folderDecision?.parentGroupId ?? "", "Корень проекта")}`
+                : `В папку: ${groupPath(groups, folderDecision?.groupId ?? "", "Выберите папку")}`;
+              return (
+                <article className={`${styles.clusteringSection} ${styles.clusteringClusterIncluded}${expanded ? "" : ` ${styles.clusteringSectionCollapsed}`}`} key={sectionId}>
+                  <header>
+                    <button
+                      aria-expanded={expanded}
+                      aria-label={`${expanded ? "Свернуть" : "Развернуть"} ${cluster?.name ?? "Некластеризовано"}`}
+                      className={styles.clusteringDisclosure}
+                      onClick={() => toggleSection(sectionId)}
+                      type="button"
+                    >
+                      <Icon name="chevronRight" />
+                    </button>
+                    <Icon name={cluster ? "folderPlus" : "inbox"} />
+                    {cluster && ready && canRename ? (
+                      <label
+                        className={styles.clusteringFolderNameField}
+                        title="Название можно изменить перед применением"
+                      >
+                        <Icon name="edit" />
+                        <span>{namePurpose}</span>
+                        <input
+                          aria-label={`${namePurpose}: ${cluster.name}`}
+                          maxLength={255}
+                          onChange={(event) => updateName(cluster, event.target.value)}
+                          value={nameOverrides.get(cluster.id) ?? cluster.name}
+                        />
+                      </label>
+                    ) : <strong>{cluster?.name ?? "Некластеризовано"}</strong>}
+                    <span>{formatInteger(cluster?.keywordCount ?? rows.length)} запросов</span>
+                    {ready && <div className={`${styles.clusteringClusterControls}${cluster ? "" : ` ${styles.clusteringFolderControlsOnly}`}`}>
+                      {cluster && <CustomSelect
+                        aria-label={`SEO-кластер для результата ${cluster.name}`}
+                        className={styles.clusteringSemanticClusterSelect ?? ""}
+                        disabled={groupsLoading}
+                        emptyMessage="SEO-кластеры не найдены"
+                        onChange={(event) => updateClusterAssignment(cluster, event.target.value)}
+                        searchable={semanticClusters.length > 8}
+                        searchPlaceholder="Найти SEO-кластер"
+                        value={clusterAssignmentValue}
+                      >
+                        <option value="NEW">Создать новый SEO-кластер</option>
+                        <option value="KEEP">
+                          {cluster.currentClusterKeywordCount > 0
+                            ? `Оставить текущие SEO-кластеры · ${formatInteger(cluster.currentClusterKeywordCount)}`
+                            : "Оставить без SEO-кластера"}
+                        </option>
+                        {semanticClusters.map((semanticCluster) => (
+                          <option
+                            disabled={semanticCluster.isLocked || semanticCluster.excludeFromReclustering}
+                            key={semanticCluster.id}
+                            value={`EXISTING:${semanticCluster.id}`}
+                          >
+                            {`В существующий: ${semanticCluster.name} · ${formatInteger(semanticCluster.keywordCount)}`}
+                          </option>
+                        ))}
+                      </CustomSelect>}
+                      <div className={styles.clusteringClusterDestination}>
+                        <CustomSelect
+                          aria-label={`Куда перенести ${cluster ? `результат ${cluster.name}` : "некластеризованные запросы"}`}
+                          className={styles.clusteringDestinationSelect ?? ""}
+                          onChange={(event) => {
+                            const value = event.target.value as "NEW" | "KEEP" | "EXISTING";
+                            if (cluster) updateClusterFolderDecision(cluster.id, value);
+                            else setUnclusteredFolderAction(value === "NEW" ? "NEW" : "KEEP");
+                          }}
+                          value={folderDecisionValue}
+                        >
+                          <option value="NEW">{cluster ? "Создать новую папку" : "Создать папку «Некластеризовано»"}</option>
+                          {cluster && <option value="EXISTING">Перенести в существующую папку</option>}
+                          <option value="KEEP">Оставить в текущих папках</option>
+                        </CustomSelect>
+                        {cluster && folderDecisionValue !== "KEEP" && (
+                          <button
+                            aria-expanded={openClusterFolder?.proposalClusterId === cluster.id}
+                            aria-haspopup="dialog"
+                            onClick={(event) => {
+                              const anchor = event.currentTarget;
+                              setOpenClusterFolder((current) =>
+                                current?.proposalClusterId === cluster.id
+                                  ? undefined
+                                  : { anchor, proposalClusterId: cluster.id }
+                              );
+                            }}
+                            title={destinationLabel}
+                            type="button"
+                          >
+                            <Icon name="inbox" />
+                            <span>{destinationLabel}</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>}
+                  </header>
+                  {ready && cluster && openClusterFolder?.proposalClusterId === cluster.id && folderDecisionValue !== "KEEP" && (
+                    <ClusteringFolderPopover
+                      anchor={openClusterFolder.anchor}
+                      groups={groups}
+                      loading={groupsLoading}
+                      mode={folderDecisionValue}
+                      onChange={(groupId) => updateClusterDestination(cluster.id, groupId)}
+                      onClose={() => setOpenClusterFolder(undefined)}
+                      selectedLabel={groupPath(
+                        groups,
+                        folderDecisionValue === "NEW"
+                          ? folderDecision?.parentGroupId ?? ""
+                          : folderDecision?.groupId ?? "",
+                        folderDecisionValue === "NEW" ? "Корень проекта" : "Папка не выбрана"
+                      )}
+                      value={folderDecisionValue === "NEW" ? folderDecision?.parentGroupId ?? "" : folderDecision?.groupId ?? ""}
+                    />
+                  )}
+                  {expanded && <div className={styles.clusteringSectionBody}>
+                    <div className={styles.clusteringQueries}>
+                      <div className={styles.clusteringColumnTitle}><strong>Запросы</strong><span>Показано {formatInteger(rows.length)}</span></div>
+                      {rows.map((row) => {
+                        const destination = keywordGroupOverrides.get(row.keywordId);
+                        return (
+                          <label className={styles.clusteringQueryRow} key={row.keywordId}>
+                            {ready && <input checked={selectedKeywordIds.has(row.keywordId)} disabled={row.state !== "READY"} onChange={() => toggleKeyword(row.keywordId)} type="checkbox" />}
+                            <span><strong>{row.keyword}</strong><small>{clusteringRowStateLabel(row)}</small></span>
+                            {destination && <b title={groupPath(groups, destination, destination)}><Icon name="inbox" />{groupPath(groups, destination, "Папка")}</b>}
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <aside className={styles.clusteringUrls}>
+                      <div className={styles.clusteringColumnTitle}><strong>URL в выдаче</strong><span>{formatInteger(topUrls.length)}</span></div>
+                      {topUrls.length > 0 ? topUrls.map(({ url, overlapCount }, index) => (
+                        <a href={url} key={`${url}:${index}`} rel="noreferrer" target="_blank" title={url}>
+                          <span>{url}</span>
+                          <b>{overlapCount === undefined ? "—" : formatInteger(overlapCount)}</b>
+                        </a>
+                      )) : <p>Arsenkin не передал URL для этого кластера.</p>}
+                    </aside>
+                  </div>}
+                </article>
+              );
+            })}
+            {clusterSections.length === 0 && <p>Запросы и кластеры по поиску не найдены.</p>}
+            {clusterSections.length > renderedSections.length && (
+              <p>Показаны первые 500 из {formatInteger(clusterSections.length)}. Уточните поиск для остальных.</p>
+            )}
+            {hasNext && (
+              <button
+                className={styles.clusteringLoadMore}
+                disabled={loadingMore}
+                onClick={onLoadMore}
+                type="button"
+              >
+                {loadingMore ? "Загружаем запросы…" : "Загрузить ещё запросы"}
+              </button>
+            )}
+          </div>
+          {ready && selectedKeywordIds.size > 0 && (
+            <div className={styles.clusteringSelectionBar}>
+              <div><strong>Выбрано запросов: {formatInteger(selectedKeywordIds.size)}</strong><small>Назначение ниже имеет приоритет над решением для кластера.</small></div>
+              <details className={styles.clusteringBatchFolderPicker}>
+                <summary>
+                  <span><Icon name="inbox" />{groupPath(groups, assignmentGroupId, "Папка кластера (авто)")}</span>
+                  <Icon name="chevronRight" />
+                </summary>
+                <div className={styles.clusteringSelectionPicker}>
+                  <SemanticGroupPicker
+                    className={styles.clusteringGroupPicker ?? ""}
+                    groups={groups}
+                    onChange={setAssignmentGroupId}
+                    rootIcon="cluster"
+                    rootLabel="Папка кластера (авто)"
+                    searchPlaceholder="Найти целевую папку"
+                    value={assignmentGroupId}
+                  />
+                </div>
+              </details>
+              <button disabled={groupsLoading} onClick={assignSelectedKeywords} type="button">
+                {assignmentGroupId ? "Назначить папку" : "Вернуть автоназначение"}
+              </button>
+              <button className={styles.clusteringSelectionClear} onClick={() => setSelectedKeywordIds(new Set())} type="button">Снять выбор</button>
+            </div>
+          )}
+        </div>
+      </div>
+      {ready && error && <div className={styles.clusteringApplyError} role="alert">{error}</div>}
+      {ready && confirmReject && !busy && (
+        <div className={styles.clusteringRejectConfirm} role="alert">
+          <span>Черновик будет закрыт без изменений в проекте.</span>
+          <button onClick={() => setConfirmReject(false)} type="button">Отмена</button>
+        </div>
+      )}
+      <footer className={styles.clusteringApplyActions}>
+        <div className={styles.clusteringFooterStatus}>
+          <strong>{ready
+            ? `Новых SEO-кластеров: ${formatInteger(newSemanticClusterCount)} · новых папок: ${formatInteger(newFolderCount)}`
+            : operationResultRange({ kind: "clustering", value: result })}</strong>
+          <span aria-live="polite">{resultLoadState}</span>
+        </div>
+        {ready && <div className={styles.clusteringFooterButtons}>
+          <button className={styles.clusteringReject} disabled={Boolean(busy)} onClick={() => void reject()} type="button">
+            {busy === "REJECT" ? "Отклоняем…" : confirmReject ? "Подтвердить отклонение" : "Отклонить результат"}
+          </button>
+          <button className={styles.clusteringApplyButton} disabled={Boolean(busy) || !canApply || invalidRequiredName} onClick={() => void apply()} type="button">
+            {busy === "APPLY"
+              ? "Применяем…"
+              : newSemanticClusterCount > 0 || newFolderCount > 0
+                ? `Создать и применить · ${formatInteger(newSemanticClusterCount)} / ${formatInteger(newFolderCount)}`
+                : "Применить раскладку"}
+          </button>
+        </div>}
+      </footer>
+    </section>
+  );
+}
+
+function clusteringSections(
+  result: ClusteringOperationResult,
+  query: string
+): readonly Readonly<{
+  cluster?: ClusteringProposalClusterSummary;
+  rows: readonly ClusteringProposalResultRow[];
+}>[] {
+  const rowsByClusterId = new Map<string, ClusteringProposalResultRow[]>();
+  const unclustered: ClusteringProposalResultRow[] = [];
+  for (const row of result.rows) {
+    const clusterId = row.proposedCluster?.id;
+    if (!clusterId) {
+      unclustered.push(row);
+      continue;
+    }
+    const rows = rowsByClusterId.get(clusterId) ?? [];
+    rows.push(row);
+    rowsByClusterId.set(clusterId, rows);
+  }
+  const sections: Array<Readonly<{
+    cluster?: ClusteringProposalClusterSummary;
+    rows: readonly ClusteringProposalResultRow[];
+  }>> = result.clusters.map((cluster) => ({
+    cluster,
+    rows: rowsByClusterId.get(cluster.id) ?? []
+  }));
+  if (unclustered.length > 0) sections.push({ rows: unclustered });
+  if (!query) return sections;
+  return sections.flatMap((section) => {
+    const clusterMatches = section.cluster && `${section.cluster.name} ${section.cluster.topUrl ?? ""} ${section.cluster.topUrls.map(({ url }) => url).join(" ")}`.toLocaleLowerCase("ru-RU").includes(query);
+    const matchingRows = section.rows.filter(({ keyword }) => keyword.toLocaleLowerCase("ru-RU").includes(query));
+    return clusterMatches
+      ? [section]
+      : matchingRows.length > 0
+        ? [{ ...section, rows: matchingRows }]
+        : [];
+  });
+}
+
+function groupPath(
+  groups: readonly SemanticKeywordGroup[],
+  groupId: string,
+  fallback: string
+): string {
+  return groups.find(({ id }) => id === groupId)?.path ?? fallback;
+}
+
+type ClusterAssignmentDecision =
+  | Readonly<{ action: "NEW" }>
+  | Readonly<{ action: "KEEP" }>
+  | Readonly<{ action: "EXISTING"; clusterId: string }>;
+
+function defaultClusterAssignment(
+  cluster: ClusteringProposalClusterSummary,
+  replaceExistingClusters: boolean
+): ClusterAssignmentDecision {
+  return !replaceExistingClusters && cluster.currentClusterKeywordCount > 0
+    ? { action: "KEEP" }
+    : { action: "NEW" };
+}
+
+function sameClusterAssignment(
+  left: ClusterAssignmentDecision,
+  right: ClusterAssignmentDecision
+): boolean {
+  return left.action === right.action &&
+    (left.action !== "EXISTING" ||
+      (right.action === "EXISTING" && left.clusterId === right.clusterId));
+}
+
+interface OpenClusterFolderPicker {
+  readonly anchor: HTMLButtonElement;
+  readonly proposalClusterId: string;
+}
+
+function ClusteringFolderPopover({
+  anchor,
+  groups,
+  loading,
+  mode,
+  onChange,
+  onClose,
+  selectedLabel,
+  value
+}: Readonly<{
+  anchor: HTMLButtonElement;
+  groups: readonly SemanticKeywordGroup[];
+  loading: boolean;
+  mode: "NEW" | "EXISTING";
+  onChange: (groupId: string) => void;
+  onClose: () => void;
+  selectedLabel: string;
+  value: string;
+}>) {
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  const [position, setPosition] = useState<CSSProperties>({});
+
+  const updatePosition = useCallback(() => {
+    const rect = anchor.getBoundingClientRect();
+    const viewportPadding = 10;
+    const gap = 6;
+    const width = Math.min(460, window.innerWidth - viewportPadding * 2);
+    const left = Math.min(
+      Math.max(viewportPadding, rect.right - width),
+      window.innerWidth - width - viewportPadding
+    );
+    const spaceBelow = window.innerHeight - rect.bottom - gap - viewportPadding;
+    const spaceAbove = rect.top - gap - viewportPadding;
+    const opensUpward = spaceBelow < 270 && spaceAbove > spaceBelow;
+    const availableHeight = opensUpward ? spaceAbove : spaceBelow;
+    setPosition({
+      bottom: opensUpward ? window.innerHeight - rect.top + gap : undefined,
+      left,
+      maxHeight: Math.max(180, Math.min(380, availableHeight)),
+      top: opensUpward ? undefined : rect.bottom + gap,
+      width
+    });
+  }, [anchor]);
+
+  useLayoutEffect(() => {
+    setPortalTarget(
+      anchor.closest<HTMLElement>("[data-dropdown-portal-root]") ??
+        anchor.closest<HTMLDialogElement>("dialog[open]") ??
+        anchor.ownerDocument.body
+    );
+    updatePosition();
+    announceWorkspaceDropdownOpen(anchor);
+  }, [anchor, updatePosition]);
+
+  useEffect(() => {
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!anchor.contains(target) && !popoverRef.current?.contains(target)) onClose();
+    };
+    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+      requestAnimationFrame(() => anchor.focus());
+    };
+    const closeForAnotherDropdown = (event: Event) => {
+      if ((event as CustomEvent<EventTarget>).detail !== anchor) onClose();
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener(workspaceDropdownOpenEvent, closeForAnotherDropdown);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener(workspaceDropdownOpenEvent, closeForAnotherDropdown);
+    };
+  }, [anchor, onClose, updatePosition]);
+
+  if (!portalTarget) return null;
+  const title = mode === "NEW" ? "Родитель новой папки" : "Папка для кластера";
+  return createPortal(
+    <div
+      aria-label={title}
+      className={styles.clusteringFolderPopover}
+      data-exclusive-dropdown-layer
+      ref={popoverRef}
+      role="dialog"
+      style={position}
+    >
+      <header>
+        <strong>{title}</strong>
+        <span title={selectedLabel}>{selectedLabel}</span>
+        <button aria-label="Закрыть выбор папки" onClick={onClose} type="button">
+          <Icon name="close" />
+        </button>
+      </header>
+      {loading ? (
+        <div className={styles.clusteringFolderPopoverLoading}>Загружаем папки…</div>
+      ) : mode === "EXISTING" && groups.length === 0 ? (
+        <div className={styles.clusteringFolderPopoverLoading}>В проекте пока нет папок.</div>
+      ) : (
+        <div className={styles.clusteringFolderPopoverBody}>
+          <SemanticGroupPicker
+            autoFocus
+            className={styles.clusteringGroupPicker ?? ""}
+            groups={groups}
+            onChange={onChange}
+            rootIcon="projects"
+            rootLabel="Корень проекта"
+            searchPlaceholder="Найти папку"
+            showRootOption={mode === "NEW"}
+            value={value}
+          />
+        </div>
+      )}
+    </div>,
+    portalTarget
+  );
 }
 
 function AiAnswerTable({ result }: Readonly<{ result: AiAnswerOperationResult }>) {
@@ -738,6 +1596,37 @@ function operationSummary(data: OperationResultData): SummaryView {
       ]
     };
   }
+  if (data.kind === "clustering") {
+    const value = data.value.run;
+    const proposal = data.value.proposal;
+    const current = value.completedKeywords + value.failedKeywords;
+    const settledStatus = proposal?.status === "READY"
+      ? { status: "Готово к применению", tone: "Warning" as const }
+      : proposal?.status === "APPLIED"
+        ? { status: "Применено", tone: "Success" as const }
+        : proposal?.status === "REJECTED"
+          ? { status: "Отклонено", tone: "Neutral" as const }
+          : undefined;
+    return {
+      title: "Кластеризация запросов",
+      description: `Arsenkin Tools · ${value.searchEngine === "YANDEX" ? "Яндекс" : "Google"} · ${value.method === "SOFT" ? "мягкая" : "жёсткая"}`,
+      provider: "ARSENKIN",
+      ...summaryStatus(value.status, current, value.selectedKeywords, value.stage),
+      ...settledStatus,
+      facts: [
+        { label: "Кластеров", value: formatInteger(value.clusterCount ?? proposal?.clusterCount ?? 0) },
+        { label: "Без кластера", value: formatInteger(value.unclusteredCount ?? proposal?.unclusteredCount ?? 0) },
+        { label: "Совпадений", value: String(value.overlapCount) },
+        { label: "Глубина", value: `ТОП-${value.depth}` },
+        { label: "Частотность", value: value.frequencyTypes.length > 0
+          ? value.frequencyTypes.map(clusteringFrequencyTypeLabel).join(", ")
+          : "Не собирать" },
+        { label: "Главные страницы", value: value.excludeMainPages ? "Исключаются" : "Учитываются" },
+        { label: "Стоп-домены", value: formatInteger(value.stopDomains.length) },
+        ...(value.failureCode ? [{ label: "Код ошибки", value: value.failureCode }] : [])
+      ]
+    };
+  }
   if (data.kind === "rank") {
     const value = data.value;
     const current = Number(value.job.progress.current);
@@ -838,6 +1727,7 @@ async function loadOperationResult(
   const path = operationResultApiPath(projectId, kind, operationId, page);
   if (kind === "frequency") return { kind, value: await browserApiRequest<FrequencyOperationResult>(path, signal ? { signal } : {}) };
   if (kind === "ai-answer") return { kind, value: await browserApiRequest<AiAnswerOperationResult>(path, signal ? { signal } : {}) };
+  if (kind === "clustering") return { kind, value: await browserApiRequest<ClusteringOperationResult>(path, signal ? { signal } : {}) };
   if (kind === "rank") return { kind, value: await browserApiRequest<RankOperationResult>(path, signal ? { signal } : {}) };
   if (kind === "crawl") return { kind, value: await browserApiRequest<CrawlOperationResultPage>(path, signal ? { signal } : {}) };
   return { kind, value: await browserApiRequest<KeywordResearchRunSummary>(path, signal ? { signal } : {}) };
@@ -875,6 +1765,7 @@ function operationResultPage(
 function operationResultTotal(data: OperationResultData): number {
   if (data.kind === "frequency") return data.value.collection.selectedKeywords;
   if (data.kind === "ai-answer") return data.value.collection.selectedKeywords;
+  if (data.kind === "clustering") return data.value.run.selectedKeywords;
   if (data.kind === "rank") return Number(data.value.job.progress.total);
   if (data.kind === "crawl") {
     return Math.max(
@@ -903,6 +1794,15 @@ function mergeOperationResultData(
   if (incoming.kind === "ai-answer" && current.kind === "ai-answer") {
     return {
       kind: "ai-answer",
+      value: {
+        ...incoming.value,
+        rows: mergeOperationResultRows(current.value.rows, incoming.value.rows)
+      }
+    };
+  }
+  if (incoming.kind === "clustering" && current.kind === "clustering") {
+    return {
+      kind: "clustering",
       value: {
         ...incoming.value,
         rows: mergeOperationResultRows(current.value.rows, incoming.value.rows)
@@ -958,6 +1858,7 @@ async function loadRankJobWithoutResult(
 function isActiveOperation(data: OperationResultData): boolean {
   if (data.kind === "frequency") return isActiveStatus(data.value.collection.status);
   if (data.kind === "ai-answer") return isActiveStatus(data.value.collection.status);
+  if (data.kind === "clustering") return isActiveStatus(data.value.run.status);
   if (data.kind === "rank") return isActiveStatus(data.value.job.status);
   if (data.kind === "crawl") return isActiveStatus(data.value.crawl.status);
   return isActiveStatus(data.value.status);
@@ -979,11 +1880,35 @@ function shortId(value: string): string { return value.slice(0, 8); }
 function safeExternalUrl(value: string): string | undefined { try { const url = new URL(value); return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined; } catch { return undefined; } }
 function providerLabel(provider: "XMLSTOCK" | "ARSENKIN"): string { return provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools"; }
 function frequencyTypeLabel(type: string): string { return ({ BASE: "База", EXACT: '""', FIXED: '"!"' } as Readonly<Record<string, string>>)[type] ?? type; }
+function clusteringFrequencyTypeLabel(type: string): string { return ({ BASE: "базовая", QUOTED: "фразовая", OVERALL: "общая", EXACT: "точная" } as Readonly<Record<string, string>>)[type] ?? type; }
 function deviceLabel(device: string): string { return ({ ALL: "Все устройства", DESKTOP: "Десктоп", MOBILE: "Мобильные", PHONE_ONLY: "Телефоны", TABLET_ONLY: "Планшеты" } as Readonly<Record<string, string>>)[device] ?? device; }
 function indexabilityLabel(value: string): string { return ({ INDEXABLE: "Индексируется", NOINDEX: "Noindex", CANONICALIZED: "Canonical на другой URL", REDIRECTED: "Редирект", ERROR: "Ошибка", UNKNOWN: "Не определено" } as Readonly<Record<string, string>>)[value] ?? value; }
+function clusteringRowStateLabel(row: ClusteringProposalResultRow): string {
+  const currentCluster = row.currentClusterName
+    ? `SEO-кластер «${row.currentClusterName}»`
+    : "текущий SEO-кластер";
+  if (row.state === "READY") {
+    return row.currentClusterName
+      ? `Сейчас: ${currentCluster} · назначение можно изменить или оставить`
+      : "Готов к применению";
+  }
+  if (row.state === "UNCHANGED") {
+    return row.currentClusterName
+      ? `Уже находится в SEO-кластере «${row.currentClusterName}»`
+      : "Изменения не требуются";
+  }
+  if (row.state === "LOCKED") return `${currentCluster} защищён от изменений`;
+  if (row.state === "EXCLUDED") return `${currentCluster} исключён из перекластеризации`;
+  if (row.state === "UNAVAILABLE") return "Запрос удалён или больше недоступен";
+  if (row.conflictReason === "KEYWORD_CHANGED") {
+    return "Запрос изменён после запуска — запустите кластеризацию заново";
+  }
+  return "Состояние запроса изменилось после запуска";
+}
 function itemStatusLabel(value: string): string { return ({ PENDING: "Ожидает", QUEUED: "В очереди", RUNNING: "Выполняется", COMPLETED: "Готово", FAILED_RETRYABLE: "Повтор", FAILED_FINAL: "Ошибка", CANCELLED: "Отменено" } as Readonly<Record<string, string>>)[value] ?? value; }
 function statusTone(value: string): SummaryView["tone"] { if (["COMPLETED"].includes(value)) return "Success"; if (["FAILED", "FAILED_FINAL"].includes(value)) return "Error"; if (["ACTION_REQUIRED", "PARTIALLY_COMPLETED", "READY_TO_IMPORT"].includes(value)) return "Warning"; if (isActiveStatus(value)) return "Active"; return "Neutral"; }
 function operationResultError(error: unknown): string { if (!(error instanceof BrowserApiError)) return "Не удалось получить результат операции."; if (error.status === 403) return "У вас нет доступа к результату этой операции."; if (error.status === 404) return "Операция не найдена в текущем проекте."; return error.message; }
+function clusteringMutationError(error: unknown): string { if (!(error instanceof BrowserApiError)) return "Не удалось применить результат кластеризации."; if (error.code === "QUOTA_EXCEEDED") return "Для новых папок не хватает лимита тарифа. Выберите существующие папки, «Не переносить» для части кластеров или уменьшите число новых папок."; if (error.status === 409) return "Проект изменился после расчёта. Обновите результат и проверьте конфликты."; if (error.status === 403) return "Недостаточно прав для изменения кластеров и папок."; return error.message; }
 function workspaceClass(embedded: boolean): string {
   const workspace = styles.workspace ?? "";
   return embedded ? `${workspace} ${styles.embedded ?? ""}` : workspace;

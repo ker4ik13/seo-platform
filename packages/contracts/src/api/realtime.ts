@@ -46,6 +46,29 @@ export interface ProjectPresenceViewContext {
   readonly groupIds: readonly string[];
 }
 
+export const projectPresenceActivities = [
+  "SEMANTIC_ADD",
+  "SEMANTIC_IMPORT",
+  "SEMANTIC_FREQUENCY",
+  "SEMANTIC_POSITIONS",
+  "SEMANTIC_AI_ANSWERS",
+  "SEMANTIC_CLUSTERING",
+  "SEMANTIC_NEGATIVE_KEYWORDS",
+  "SEMANTIC_DUPLICATES",
+  "SEMANTIC_DELETE",
+  "SEMANTIC_EXPORT",
+  "SEMANTIC_HISTORY",
+  "SEMANTIC_OPERATIONS",
+  "SEMANTIC_LAYOUT",
+  "SEMANTIC_KEYWORD",
+  "SEMANTIC_GROUP",
+  "SEMANTIC_MOVE",
+  "SEMANTIC_EDIT"
+] as const;
+
+export type ProjectPresenceActivity =
+  (typeof projectPresenceActivities)[number];
+
 export interface ProjectPresenceUpdateInput {
   /** Normalized application pathname without query string or fragment. */
   readonly route: string;
@@ -53,6 +76,8 @@ export interface ProjectPresenceUpdateInput {
   readonly cursor: ProjectPresenceCursor | null;
   readonly selection: ProjectPresenceSelection | null;
   readonly view: ProjectPresenceViewContext | null;
+  /** Stable UI activity code. Visible text and modal contents never leave the client. */
+  readonly activity: ProjectPresenceActivity | null;
   readonly editing: boolean;
   readonly sequence: number;
 }
@@ -278,7 +303,7 @@ export function projectPresenceUpdateInput(
   const input = optionalExactRecord(
     value,
     ["route", "status", "cursor", "selection", "editing", "sequence"],
-    ["view"]
+    ["view", "activity"]
   );
   if (
     typeof input.route !== "string" ||
@@ -307,6 +332,10 @@ export function projectPresenceUpdateInput(
       input.view === undefined || input.view === null
         ? null
         : projectPresenceViewContext(input.view),
+    activity:
+      input.activity === undefined || input.activity === null
+        ? null
+        : projectPresenceActivity(input.activity),
     editing: input.editing,
     sequence: Number(input.sequence)
   };
@@ -362,7 +391,7 @@ export function projectPresenceParticipant(
       "sequence",
       "updatedAt"
     ],
-    ["view"]
+    ["view", "activity"]
   );
   if (
     typeof participant.connectionId !== "string" ||
@@ -376,6 +405,7 @@ export function projectPresenceParticipant(
     cursor: participant.cursor,
     selection: participant.selection,
     view: participant.view ?? null,
+    activity: participant.activity ?? null,
     editing: participant.editing,
     sequence: participant.sequence
   });
@@ -386,6 +416,16 @@ export function projectPresenceParticipant(
     ...update,
     updatedAt: isoTimestamp(participant.updatedAt)
   };
+}
+
+function projectPresenceActivity(value: unknown): ProjectPresenceActivity {
+  if (
+    typeof value !== "string" ||
+    !(projectPresenceActivities as readonly string[]).includes(value)
+  ) {
+    return invalid();
+  }
+  return value as ProjectPresenceActivity;
 }
 
 function projectPresenceViewContext(

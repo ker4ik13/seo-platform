@@ -348,6 +348,7 @@ export class CollaborationGateway
       cursor: roundedCursor(input.cursor),
       selection: input.selection,
       view: input.view,
+      activity: input.activity,
       editing: input.editing,
       sequence: input.sequence,
       updatedAt: new Date().toISOString()
@@ -437,6 +438,7 @@ function initialParticipant(
     cursor: null,
     selection: null,
     view: null,
+    activity: null,
     editing: false,
     sequence: 0,
     updatedAt: new Date().toISOString()

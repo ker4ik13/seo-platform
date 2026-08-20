@@ -1,8 +1,10 @@
 import {
+  semanticNegativeKeywordGroupScopeLimit,
   semanticNegativeKeywordMatchModes,
   semanticNegativeKeywordExclusionLimit,
   semanticNegativeKeywordPreviewPageSizes,
   semanticNegativeKeywordScopeKinds,
+  semanticNegativeKeywordWordLimit,
   type ApplySemanticNegativeKeywordsInput,
   type CreateSemanticNegativeKeywordPresetInput,
   type SemanticNegativeKeywordPreviewInput,
@@ -129,8 +131,15 @@ function rules(value: unknown): SemanticNegativeKeywordRules {
     "ignoreWordOrder",
     "ignorePunctuation"
   ]);
-  if (!Array.isArray(input.words) || input.words.length < 1 || input.words.length > 500) {
-    invalid("rules.words", "Use between 1 and 500 words");
+  if (
+    !Array.isArray(input.words) ||
+    input.words.length < 1 ||
+    input.words.length > semanticNegativeKeywordWordLimit
+  ) {
+    invalid(
+      "rules.words",
+      `Use between 1 and ${semanticNegativeKeywordWordLimit} words`
+    );
   }
   const caseSensitive = booleanValue(input.caseSensitive, "rules.caseSensitive");
   const ignoreWordOrder = optionalBooleanValue(
@@ -177,20 +186,36 @@ function optionalBooleanValue(value: unknown, field: string): boolean {
 }
 
 function commandScope(value: unknown): SemanticNegativeKeywordScope {
-  const input = exactRecord(value, ["kind", "groupId", "items"]);
+  const input = exactRecord(value, ["kind", "groupId", "groupIds", "items"]);
   if (
     typeof input.kind !== "string" ||
     !semanticNegativeKeywordScopeKinds.some((kind) => kind === input.kind)
   ) invalid("scope.kind", "Unsupported scope");
   if (input.kind === "PROJECT") {
-    if (input.groupId !== undefined || input.items !== undefined) invalid("scope", "Project scope cannot include group or items");
+    if (
+      input.groupId !== undefined ||
+      input.groupIds !== undefined ||
+      input.items !== undefined
+    ) invalid("scope", "Project scope cannot include group or items");
     return { kind: "PROJECT" };
   }
   if (input.kind === "GROUP") {
     if (input.items !== undefined) invalid("scope.items", "Group scope cannot include items");
-    return { kind: "GROUP", groupId: uuidValue(input.groupId, "scope.groupId") };
+    if (input.groupId !== undefined && input.groupIds !== undefined) {
+      invalid("scope", "Use either groupId or groupIds");
+    }
+    const groupIds = input.groupId !== undefined
+      ? [uuidValue(input.groupId, "scope.groupId")]
+      : negativeKeywordGroupIds(input.groupIds);
+    return { kind: "GROUP", groupIds };
   }
-  if (input.groupId !== undefined || !Array.isArray(input.items) || input.items.length < 1 || input.items.length > 2_000) {
+  if (
+    input.groupId !== undefined ||
+    input.groupIds !== undefined ||
+    !Array.isArray(input.items) ||
+    input.items.length < 1 ||
+    input.items.length > 2_000
+  ) {
     invalid("scope.items", "Select between 1 and 2000 keywords");
   }
   const items = input.items.map((value, index) => {
@@ -205,6 +230,26 @@ function commandScope(value: unknown): SemanticNegativeKeywordScope {
   });
   if (new Set(items.map(({ id }) => id)).size !== items.length) invalid("scope.items", "Duplicate keywords are not allowed");
   return { kind: "SELECTION", items };
+}
+
+function negativeKeywordGroupIds(value: unknown): readonly string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > semanticNegativeKeywordGroupScopeLimit
+  ) {
+    invalid(
+      "scope.groupIds",
+      `Select between 1 and ${semanticNegativeKeywordGroupScopeLimit} groups`
+    );
+  }
+  const groupIds = value.map((groupId, index) =>
+    uuidValue(groupId, `scope.groupIds.${index}`)
+  );
+  if (new Set(groupIds).size !== groupIds.length) {
+    invalid("scope.groupIds", "Duplicate groups are not allowed");
+  }
+  return groupIds.sort();
 }
 
 function presetName(value: unknown): string {

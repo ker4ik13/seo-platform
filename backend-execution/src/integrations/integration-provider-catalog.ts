@@ -25,8 +25,13 @@ export const integrationProviderCatalog = [
     provider: "ARSENKIN",
     displayName: "Arsenkin Tools",
     description:
-      "Rank tracking, AI answer monitoring and Wordstat frequency collection through a user-owned Arsenkin Tools account.",
-    capabilities: ["SERP_RANK_TRACKING", "SERP_COLLECTION", "WORDSTAT"],
+      "Rank tracking, AI answer monitoring, Wordstat frequency collection and keyword clustering through a user-owned Arsenkin Tools account.",
+    capabilities: [
+      "SERP_RANK_TRACKING",
+      "SERP_COLLECTION",
+      "WORDSTAT",
+      "CLUSTERING"
+    ],
     supportedModes: ["BYOK_API_KEY"],
     credentialValidationMode: "ACCOUNT_METADATA",
     requiresAccountIdentifier: false,

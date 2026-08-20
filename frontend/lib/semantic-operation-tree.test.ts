@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { visibleFolderRows } from "./semantic-operation-tree.ts";
+import {
+  expandedAncestorIds,
+  treeIdsWithDescendants,
+  visibleFolderRows
+} from "./semantic-operation-tree.ts";
 
 interface Group {
   readonly id: string;
@@ -37,6 +41,24 @@ test("keeps collapsed descendants hidden instead of duplicating them as roots", 
       ])
     ).map(({ group, depth }) => [group.name, depth]),
     [["Каталог", 0], ["Трубы", 1], ["Бесшовные", 2], ["Статьи", 0]]
+  );
+});
+
+test("resolves selected folders through descendants without duplicate ids", () => {
+  const groups = [
+    { id: "root" },
+    { id: "child", parentId: "root" },
+    { id: "leaf", parentId: "child" },
+    { id: "other" }
+  ];
+
+  assert.deepEqual(
+    treeIdsWithDescendants(groups, new Set(["root", "child"])),
+    ["child", "leaf", "root"]
+  );
+  assert.deepEqual(
+    [...expandedAncestorIds(groups, ["leaf"])].sort(),
+    ["child", "root"]
   );
 });
 

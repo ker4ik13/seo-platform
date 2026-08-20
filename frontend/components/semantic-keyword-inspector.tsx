@@ -82,6 +82,7 @@ export function SemanticKeywordInspector({
   const [frequencyDeleteError, setFrequencyDeleteError] = useState<string>();
   const [targetUrlCopied, setTargetUrlCopied] = useState(false);
   const noteDirtyRef = useRef(false);
+  const presenceKeyPrefix = `semantic-keyword-inspector:${item.id}`;
 
   useEffect(() => {
     noteDirtyRef.current = noteDirty;
@@ -252,8 +253,14 @@ export function SemanticKeywordInspector({
   }
 
   return (
-    <aside aria-label={`Детали запроса ${item.textOriginal}`} className="semantic-keyword-inspector">
-      <header>
+    <aside
+      aria-label={`Детали запроса ${item.textOriginal}`}
+      className="semantic-keyword-inspector"
+    >
+      <header
+        data-presence-cursor-anchor="true"
+        data-presence-key={`${presenceKeyPrefix}:header`}
+      >
         <div>
           <span>Запрос</span>
           <strong>{item.textOriginal}</strong>
@@ -269,7 +276,11 @@ export function SemanticKeywordInspector({
         </div>
       </header>
 
-      <section className="semantic-inspector-overview">
+      <section
+        className="semantic-inspector-overview"
+        data-presence-cursor-anchor="true"
+        data-presence-key={`${presenceKeyPrefix}:overview`}
+      >
         <h3>Обзор</h3>
         <dl>
           <div><dt>Интент</dt><dd><span className="semantic-intent-chip">{intentLabel(item.intent)}</span></dd></div>
@@ -326,7 +337,11 @@ export function SemanticKeywordInspector({
         </div>
       </section>
 
-      <section className="semantic-inspector-ranks">
+      <section
+        className="semantic-inspector-ranks"
+        data-presence-cursor-anchor="true"
+        data-presence-key={`${presenceKeyPrefix}:ranks`}
+      >
         <header className="semantic-inspector-section-heading">
           <h3>Позиции</h3>
           <button onClick={() => setHistoryOpen(true)} type="button">
@@ -447,6 +462,7 @@ export function SemanticKeywordInspector({
       {error && <div className="inline-alert danger" role="alert">{error}</div>}
 
       <SemanticCompetitorSnapshots
+        presenceKeyPrefix={`${presenceKeyPrefix}:competitors`}
         projectDomain={projectDomain}
         showEmpty={!loading}
         snapshots={competitorSnapshots}
@@ -455,12 +471,16 @@ export function SemanticKeywordInspector({
         emptyText="После первого ИИ-съёма с источниками здесь появятся сайты, на которые ссылается ИИ-ответ."
         emptyTitle="Источники ИИ-ответов ещё не сохранены"
         heading="Топ конкурентов ИИ"
+        presenceKeyPrefix={`${presenceKeyPrefix}:ai-competitors`}
         projectDomain={projectDomain}
         showEmpty={false}
         snapshots={aiCompetitorSnapshots}
       />
 
-      <section>
+      <section
+        data-presence-cursor-anchor="true"
+        data-presence-key={`${presenceKeyPrefix}:frequency`}
+      >
         <h3>Частотность</h3>
         {loading ? (
           <span className="semantic-inspector-muted">Загружаем срезы…</span>
@@ -500,7 +520,11 @@ export function SemanticKeywordInspector({
         )}
       </section>
 
-      <section className="semantic-keyword-note">
+      <section
+        className="semantic-keyword-note"
+        data-presence-cursor-anchor="true"
+        data-presence-key={`${presenceKeyPrefix}:note`}
+      >
         <h3>Заметка</h3>
         <form onSubmit={(event) => void saveNote(event)}>
           <textarea
@@ -527,7 +551,11 @@ export function SemanticKeywordInspector({
         </form>
       </section>
 
-      <section className="semantic-inspector-dates">
+      <section
+        className="semantic-inspector-dates"
+        data-presence-cursor-anchor="true"
+        data-presence-key={`${presenceKeyPrefix}:dates`}
+      >
         <small>Создан: {formatDateTime(item.createdAt)}</small>
         <small>Обновлён: {formatDateTime(item.updatedAt)}</small>
         <small>Источник: {sourceLabel(item.sourceMode)}</small>

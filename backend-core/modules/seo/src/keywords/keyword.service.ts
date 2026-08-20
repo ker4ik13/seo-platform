@@ -176,6 +176,12 @@ export class KeywordService {
     requestId: string
   ): Promise<ApiCollectionResponse<SemanticKeywordListItem>> {
     const search = normalizeKeywordText(query.search);
+    const multiSearch = query.multiSearch
+      ? {
+          mode: query.multiSearch.mode,
+          terms: query.multiSearch.terms.map((term) => normalizeKeywordText(term))
+        }
+      : undefined;
     const tag = normalizeTagName(query.tag ?? "");
     const sort = query.sort ?? "CREATED_DESC";
     const selectedGroup = query.groupId
@@ -211,6 +217,7 @@ export class KeywordService {
             }
           }
         : {}),
+      ...keywordMultiSearchWhere(multiSearch),
       ...(tag
         ? {
             tags: {
@@ -2886,7 +2893,8 @@ function keywordFilterHash(
       isFavorite: query.isFavorite ?? null,
       isTracked: query.isTracked ?? null,
       priorityMin: query.priorityMin ?? null,
-      priorityMax: query.priorityMax ?? null
+      priorityMax: query.priorityMax ?? null,
+      multiSearch: query.multiSearch ?? null
     })
   );
 }
@@ -3420,6 +3428,25 @@ function keywordRawFilters(
     Prisma.sql`k.status::text = ${keywordStatus}`
   ];
   if (search) filters.push(Prisma.sql`strpos(k.text_normalized, ${search}) > 0`);
+  if (query.multiSearch) {
+    const terms = query.multiSearch.terms.map((term) => normalizeKeywordText(term));
+    if (query.multiSearch.mode === "EXACT") {
+      filters.push(Prisma.sql`k.text_normalized IN (${Prisma.join(terms)})`);
+    } else if (query.multiSearch.mode === "CONTAINS") {
+      filters.push(Prisma.sql`(${Prisma.join(
+        terms.map((term) => Prisma.sql`strpos(k.text_normalized, ${term}) > 0`),
+        " OR "
+      )})`);
+    } else {
+      filters.push(Prisma.sql`(${Prisma.join(
+        terms.map((term) => Prisma.sql`(${Prisma.join(
+          term.split(/\s+/u).map((word) => Prisma.sql`strpos(k.text_normalized, ${word}) > 0`),
+          " AND "
+        )})`),
+        " OR "
+      )})`);
+    }
+  }
   if (tag) {
     filters.push(Prisma.sql`EXISTS (
       SELECT 1
@@ -3471,6 +3498,32 @@ function keywordRawFilters(
     filters.push(query.isTracked ? tracked : Prisma.sql`NOT (${tracked})`);
   }
   return filters;
+}
+
+function keywordMultiSearchWhere(
+  search: Readonly<{
+    mode: NonNullable<KeywordListQuery["multiSearch"]>["mode"];
+    terms: readonly string[];
+  }> | undefined
+): Prisma.KeywordWhereInput {
+  if (!search) return {};
+  if (search.mode === "EXACT") {
+    return { textNormalized: { in: [...search.terms] } };
+  }
+  if (search.mode === "CONTAINS") {
+    return {
+      OR: search.terms.map((term) => ({
+        textNormalized: { contains: term }
+      }))
+    };
+  }
+  return {
+    OR: search.terms.map((term) => ({
+      AND: term.split(/\s+/u).map((word) => ({
+        textNormalized: { contains: word }
+      }))
+    }))
+  };
 }
 
 function frequencyTypeForSort(sort: SemanticKeywordSort): "BASE" | "EXACT" | "FIXED" {

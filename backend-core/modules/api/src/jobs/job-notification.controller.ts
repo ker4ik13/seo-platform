@@ -183,6 +183,13 @@ function operationDescriptor(jobType: string, jobId: string): {
       deepLink: "/app/tasks"
     };
   }
+  if (jobType === "CLUSTERING_RUN") {
+    return {
+      eventType: "CLUSTERING",
+      label: "Кластеризация запросов",
+      deepLink: `/app/tasks/clustering/${jobId}`
+    };
+  }
   if (jobType === "KEYWORD_RESEARCH") {
     return {
       eventType: "MAGNET",

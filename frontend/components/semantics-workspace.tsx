@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { SemanticClusterManager } from "./semantic-cluster-manager";
 import { SemanticCoreTable } from "./semantic-core-table";
 import { SemanticCustomColumnManager } from "./semantic-custom-column-manager";
@@ -11,6 +11,7 @@ import {
   type SemanticTrashRecoveryItem
 } from "./semantic-trash-recovery-dialog";
 import type { AppProject } from "../lib/app-types";
+import { useProjectPresence } from "./project-presence-provider";
 
 type SemanticTool = "IMPORT" | "CLUSTERS" | "COLUMNS";
 
@@ -29,6 +30,7 @@ export function SemanticsWorkspace({
   workspaceId: string;
   workspaceRoleCode: string;
 }>) {
+  const { publishActivity } = useProjectPresence();
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [groupRefreshVersion, setGroupRefreshVersion] = useState(0);
   const [clusterRefreshVersion, setClusterRefreshVersion] = useState(0);
@@ -37,6 +39,18 @@ export function SemanticsWorkspace({
   const [trashRecoveryItems, setTrashRecoveryItems] = useState<
     readonly SemanticTrashRecoveryItem[]
   >([]);
+
+  useEffect(() => {
+    publishActivity(
+      activeTool === "IMPORT" || trashRecoveryItems.length > 0
+        ? "SEMANTIC_IMPORT"
+        : activeTool === "COLUMNS"
+          ? "SEMANTIC_LAYOUT"
+          : activeTool === "CLUSTERS"
+            ? "SEMANTIC_GROUP"
+            : null
+    );
+  }, [activeTool, publishActivity, trashRecoveryItems.length]);
 
   return (
     <div className="semantic-workspace">
@@ -59,6 +73,7 @@ export function SemanticsWorkspace({
         <SemanticModal
           description={toolDescription(activeTool)}
           onClose={() => setActiveTool(undefined)}
+          presenceKey={`semantic-modal:${activeTool.toLocaleLowerCase("en")}`}
           size={activeTool === "IMPORT" ? "fullscreen" : "large"}
           title={toolLabel(activeTool)}
         >

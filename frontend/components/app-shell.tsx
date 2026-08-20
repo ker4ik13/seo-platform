@@ -127,7 +127,11 @@ export function AppShell({
     >
     <div className={`app-shell${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <DropdownCoordinator />
-      <aside className="sidebar">
+      <aside
+        className="sidebar"
+        data-presence-cursor-anchor="true"
+        data-presence-key="app-sidebar"
+      >
         <div className="sidebar-heading">
           <Link className="app-brand" href="/app" aria-label="SEOньорита">
             <img
@@ -167,6 +171,7 @@ export function AppShell({
                     : "nav-item"
                 }
                 data-presence-key={`nav:${item.section}`}
+                data-presence-cursor-anchor="true"
                 href={navigationHref(item)}
                 key={item.label}
                 title={item.label}
@@ -201,6 +206,7 @@ export function AppShell({
             activeSection === "settings" ? "nav-item active" : "nav-item"
           }
           data-presence-key="nav:settings"
+          data-presence-cursor-anchor="true"
           href="/app/settings/workspace"
           title="Настройки"
         >
@@ -222,7 +228,11 @@ export function AppShell({
             : `main-column section-${activeSection}`
         }
       >
-        <header className="topbar">
+        <header
+          className="topbar"
+          data-presence-cursor-anchor="true"
+          data-presence-key="app-topbar"
+        >
           <div className="app-mobile-brand">
             <img
               alt=""
@@ -261,6 +271,7 @@ export function AppShell({
               : `content content-${activeSection}`
           }
           data-presence-key={`screen:${activeSection}`}
+          data-presence-cursor-anchor="true"
         >
           {children}
         </main>

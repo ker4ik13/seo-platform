@@ -26,6 +26,8 @@ export const semanticDuplicateScopeKinds = [
 export type SemanticDuplicateScopeKind =
   (typeof semanticDuplicateScopeKinds)[number];
 
+export const semanticDuplicateGroupScopeLimit = 2_000;
+
 export interface SemanticDuplicateRules {
   readonly analysisMode: SemanticDuplicateAnalysisMode;
   readonly caseSensitive: boolean;
@@ -36,7 +38,10 @@ export interface SemanticDuplicateRules {
 
 export interface SemanticDuplicateScope {
   readonly kind: SemanticDuplicateScopeKind;
+  /** Legacy single-folder field accepted during rolling deployments. */
   readonly groupId?: string;
+  /** Selected folders after their visible descendants have been resolved. */
+  readonly groupIds?: readonly string[];
   readonly items?: readonly SemanticKeywordBulkSelection[];
 }
 

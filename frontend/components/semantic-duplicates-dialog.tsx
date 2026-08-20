@@ -4,18 +4,28 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type UIEvent
 } from "react";
-import type {
-  SemanticDuplicateAnalysisMode,
-  SemanticDuplicateApplyResult,
-  SemanticDuplicateCommandInput,
-  SemanticDuplicateGroupDecision,
-  SemanticDuplicateKeeperStrategy,
-  SemanticDuplicatePreview,
-  SemanticDuplicateScope,
-  SemanticKeywordBulkSelection
+import {
+  semanticDuplicateGroupScopeLimit,
+  type SemanticDuplicateAnalysisMode,
+  type SemanticDuplicateApplyResult,
+  type SemanticDuplicateCommandInput,
+  type SemanticDuplicateGroupDecision,
+  type SemanticDuplicateKeeperStrategy,
+  type SemanticDuplicatePreview,
+  type SemanticDuplicateScope,
+  type SemanticKeywordBulkSelection
 } from "@seo-platform/contracts";
+import {
+  expandedAncestorIds,
+  treeIdsWithDescendants,
+  visibleFolderRows
+} from "../lib/semantic-operation-tree";
+import type {
+  SemanticOperationGroup
+} from "./semantic-operation-scope";
 import {
   BrowserApiError,
   browserApiRequest
@@ -24,6 +34,7 @@ import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
 import { SearchEngineLogo } from "./search-engine-logo";
 import { SemanticModal } from "./semantic-modal";
+import { UnsavedChangesConfirmation } from "./unsaved-changes-confirmation";
 
 type ScopeKind = SemanticDuplicateScope["kind"];
 const DUPLICATE_PREVIEW_PAGE_SIZE = 100;
@@ -34,12 +45,14 @@ type DuplicateChoices = Readonly<
 
 export function SemanticDuplicatesDialog({
   activeGroup,
+  groups,
   onClose,
   onCompleted,
   projectId,
   selections
 }: Readonly<{
   activeGroup?: Readonly<{ id: string; name: string }>;
+  groups: readonly SemanticOperationGroup[];
   onClose: () => void;
   onCompleted: (message: string) => void;
   projectId: string;
@@ -47,6 +60,11 @@ export function SemanticDuplicatesDialog({
     SemanticKeywordBulkSelection & { label: string }
   >[];
 }>) {
+  const initialScopeKind: ScopeKind = selections.length > 0
+    ? "SELECTION"
+    : activeGroup
+      ? "GROUP"
+      : "PROJECT";
   const [analysisMode, setAnalysisMode] =
     useState<SemanticDuplicateAnalysisMode>("WORD_FORM_PRECISE");
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -54,8 +72,12 @@ export function SemanticDuplicatesDialog({
   const [ignoredWordsText, setIgnoredWordsText] = useState("");
   const [keeperStrategy, setKeeperStrategy] =
     useState<SemanticDuplicateKeeperStrategy>("HIGHEST_FREQUENCY");
-  const [scopeKind, setScopeKind] = useState<ScopeKind>(
-    selections.length > 0 ? "SELECTION" : activeGroup ? "GROUP" : "PROJECT"
+  const [scopeKind, setScopeKind] = useState<ScopeKind>(initialScopeKind);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<ReadonlySet<string>>(
+    () => new Set(activeGroup ? [activeGroup.id] : [])
+  );
+  const [expandedGroupIds, setExpandedGroupIds] = useState<ReadonlySet<string>>(
+    () => expandedAncestorIds(groups, activeGroup ? [activeGroup.id] : [])
   );
   const [preview, setPreview] = useState<SemanticDuplicatePreview>();
   const [choices, setChoices] = useState<DuplicateChoices>({});
@@ -64,6 +86,7 @@ export function SemanticDuplicatesDialog({
   const [applying, setApplying] = useState(false);
   const [deletedProgress, setDeletedProgress] = useState(0);
   const [error, setError] = useState<string>();
+  const [confirmClose, setConfirmClose] = useState(false);
   const previewRequestInFlight = useRef(false);
   const previewGeneration = useRef(0);
   const ignoredWords = useMemo(
@@ -71,10 +94,67 @@ export function SemanticDuplicatesDialog({
     [caseSensitive, ignoredWordsText]
   );
   const endpoint = `/app/api/projects/${encodeURIComponent(projectId)}/semantic-duplicates`;
+  const availableGroups = useMemo(
+    () => groups.filter(({ systemKind }) => systemKind !== "TRASH"),
+    [groups]
+  );
+  const resolvedGroupIds = useMemo(
+    () => treeIdsWithDescendants(availableGroups, selectedGroupIds),
+    [availableGroups, selectedGroupIds]
+  );
+  const visibleGroups = useMemo(
+    () => visibleFolderRows(availableGroups, expandedGroupIds),
+    [availableGroups, expandedGroupIds]
+  );
   const decisionSummary = useMemo(
     () => duplicateDecisionSummary(preview, choices),
     [choices, preview]
   );
+  const scopeSummary = duplicateScopeSummary(
+    scopeKind,
+    selectedGroupIds.size,
+    selections.length
+  );
+  const dirty =
+    analysisMode !== "WORD_FORM_PRECISE" ||
+    caseSensitive ||
+    !ignorePunctuation ||
+    ignoredWordsText.trim().length > 0 ||
+    keeperStrategy !== "HIGHEST_FREQUENCY" ||
+    scopeKind !== initialScopeKind ||
+    !sameStringSet(
+      selectedGroupIds,
+      new Set(activeGroup ? [activeGroup.id] : [])
+    ) ||
+    Boolean(preview);
+
+  function toggleGroup(groupId: string): void {
+    setSelectedGroupIds((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+    invalidatePreview();
+  }
+
+  function toggleExpanded(groupId: string): void {
+    setExpandedGroupIds((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }
+
+  function requestClose(): void {
+    if (applying) return;
+    if (dirty) {
+      setConfirmClose(true);
+      return;
+    }
+    onClose();
+  }
 
   function invalidatePreview(): void {
     previewGeneration.current += 1;
@@ -92,7 +172,7 @@ export function SemanticDuplicatesDialog({
       ignorePunctuation,
       ignoredWords,
       scopeKind,
-      activeGroup,
+      resolvedGroupIds,
       selections,
       keeperStrategy
     );
@@ -100,7 +180,7 @@ export function SemanticDuplicatesDialog({
       setError(duplicateValidationMessage(
         ignoredWords,
         scopeKind,
-        activeGroup,
+        resolvedGroupIds,
         selections
       ));
       return;
@@ -176,7 +256,7 @@ export function SemanticDuplicatesDialog({
       ignorePunctuation,
       ignoredWords,
       scopeKind,
-      activeGroup,
+      resolvedGroupIds,
       selections,
       keeperStrategy
     );
@@ -250,9 +330,74 @@ export function SemanticDuplicatesDialog({
   }
 
   return (
+    <>
     <SemanticModal
       description="Сравнение фраз без учёта порядка слов"
-      onClose={applying ? () => undefined : onClose}
+      footer={(
+        <div className="semantic-workflow-footer">
+          <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate semantic-duplicate-estimate">
+            <div>
+              <Icon name="projects" />
+              <div><dt>Область</dt><dd>{scopeSummary}</dd></div>
+            </div>
+            <div>
+              <Icon name="checkDouble" />
+              <div>
+                <dt>Групп к обработке</dt>
+                <dd>
+                  {preview
+                    ? formatInteger(decisionSummary.groupCount)
+                    : "Не рассчитано"}
+                </dd>
+              </div>
+            </div>
+            <div>
+              <Icon name="trash" />
+              <div>
+                <dt>В корзину</dt>
+                <dd>
+                  {preview
+                    ? formatInteger(decisionSummary.deletionCount)
+                    : "Не рассчитано"}
+                </dd>
+              </div>
+            </div>
+          </dl>
+          <div className="semantic-modal-actions semantic-duplicate-actions">
+            {applying && (
+              <span aria-live="polite">
+                Перемещено: {formatInteger(deletedProgress)}
+              </span>
+            )}
+            <button
+              className="secondary-button"
+              disabled={applying}
+              onClick={requestClose}
+              type="button"
+            >
+              Отмена
+            </button>
+            <button
+              className="danger-button"
+              disabled={
+                !preview ||
+                decisionSummary.deletionCount === 0 ||
+                applying ||
+                previewing ||
+                loadingMore
+              }
+              onClick={() => void applyPreview()}
+              type="button"
+            >
+              {applying
+                ? "Перемещаем…"
+                : `В корзину${preview ? ` (${formatInteger(decisionSummary.deletionCount)})` : ""}`}
+            </button>
+          </div>
+        </div>
+      )}
+      onClose={requestClose}
+      presenceKey="semantic-modal:duplicates"
       size="large"
       title="Неявные дубли"
     >
@@ -352,11 +497,21 @@ export function SemanticDuplicatesDialog({
               </p>
             </header>
 
-            <div className="semantic-negative-scope-cards">
+            <div className="semantic-negative-scope-cards semantic-duplicate-scope-cards">
+              <ScopeCard
+                checked={scopeKind === "PROJECT"}
+                disabled={applying}
+                label="Все запросы проекта"
+                onSelect={() => {
+                  setScopeKind("PROJECT");
+                  invalidatePreview();
+                }}
+              />
               {selections.length > 0 && (
                 <ScopeCard
                   checked={scopeKind === "SELECTION"}
                   count={selections.length}
+                  disabled={applying}
                   label="Выбранные запросы"
                   onSelect={() => {
                     setScopeKind("SELECTION");
@@ -364,25 +519,107 @@ export function SemanticDuplicatesDialog({
                   }}
                 />
               )}
-              {activeGroup && (
+              {availableGroups.length > 0 && (
                 <ScopeCard
                   checked={scopeKind === "GROUP"}
-                  label={`Папка «${activeGroup.name}»`}
+                  count={selectedGroupIds.size}
+                  disabled={applying}
+                  label="Конкретные папки"
                   onSelect={() => {
                     setScopeKind("GROUP");
                     invalidatePreview();
                   }}
                 />
               )}
-              <ScopeCard
-                checked={scopeKind === "PROJECT"}
-                label="Весь проект"
-                onSelect={() => {
-                  setScopeKind("PROJECT");
-                  invalidatePreview();
-                }}
-              />
             </div>
+
+            {scopeKind === "GROUP" && (
+              <div className="semantic-duplicate-folder-scope">
+                <div className="semantic-duplicate-folder-toolbar">
+                  <span>
+                    Выбрано папок: {formatInteger(selectedGroupIds.size)}
+                  </span>
+                  <div>
+                    {activeGroup && (
+                      <button
+                        disabled={applying}
+                        onClick={() => {
+                          setSelectedGroupIds(new Set([activeGroup.id]));
+                          setExpandedGroupIds(
+                            expandedAncestorIds(groups, [activeGroup.id])
+                          );
+                          invalidatePreview();
+                        }}
+                        type="button"
+                      >
+                        Только текущая
+                      </button>
+                    )}
+                    <button
+                      disabled={applying || selectedGroupIds.size === 0}
+                      onClick={() => {
+                        setSelectedGroupIds(new Set());
+                        invalidatePreview();
+                      }}
+                      type="button"
+                    >
+                      Очистить
+                    </button>
+                  </div>
+                </div>
+                <div
+                  aria-label="Папки для поиска дублей"
+                  className="semantic-operation-folder-list semantic-duplicate-folder-list"
+                >
+                  {visibleGroups.map(({ group, depth, hasChildren }) => (
+                    <div
+                      className="semantic-operation-folder-row"
+                      key={group.id}
+                      style={{ "--folder-depth": depth } as CSSProperties}
+                      title={group.path}
+                    >
+                      {hasChildren ? (
+                        <button
+                          aria-expanded={expandedGroupIds.has(group.id)}
+                          aria-label={
+                            expandedGroupIds.has(group.id)
+                              ? "Свернуть папку"
+                              : "Развернуть папку"
+                          }
+                          className="semantic-operation-folder-toggle"
+                          disabled={applying}
+                          onClick={() => toggleExpanded(group.id)}
+                          type="button"
+                        >
+                          <Icon name="chevronRight" />
+                        </button>
+                      ) : (
+                        <span className="semantic-operation-folder-toggle-spacer" />
+                      )}
+                      <label>
+                        <input
+                          checked={selectedGroupIds.has(group.id)}
+                          disabled={applying}
+                          onChange={() => toggleGroup(group.id)}
+                          type="checkbox"
+                        />
+                        <i
+                          aria-hidden="true"
+                          className="semantic-operation-folder-color"
+                          style={{ background: group.color ?? "#a8a5b8" }}
+                        />
+                        <span>{group.name}</span>
+                        <b>{formatInteger(group.keywordCount)}</b>
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                <small>
+                  Родительская папка включает все вложенные. Запросы, которые
+                  находятся сразу в нескольких папках, проверяются один раз.
+                </small>
+              </div>
+            )}
 
             <label className="semantic-workflow-field">
               <span>Какую фразу оставить</span>
@@ -669,58 +906,39 @@ export function SemanticDuplicatesDialog({
           </div>
         )}
 
-        <div className="semantic-modal-actions semantic-workflow-footer semantic-duplicate-actions">
-          <button
-            className="secondary-button"
-            disabled={applying}
-            onClick={onClose}
-            type="button"
-          >
-            Отмена
-          </button>
-          <div>
-            {applying && (
-              <span aria-live="polite">
-                Перемещено: {formatInteger(deletedProgress)}
-              </span>
-            )}
-            <button
-              className="danger-button"
-              disabled={
-                !preview ||
-                decisionSummary.deletionCount === 0 ||
-                applying ||
-                previewing ||
-                loadingMore
-              }
-              onClick={() => void applyPreview()}
-              type="button"
-            >
-              {applying
-                ? "Перемещаем…"
-                : `Переместить выбранные в корзину${preview ? ` (${formatInteger(decisionSummary.deletionCount)})` : ""}`}
-            </button>
-          </div>
-        </div>
       </div>
     </SemanticModal>
+    {confirmClose && (
+      <UnsavedChangesConfirmation
+        onCancel={() => setConfirmClose(false)}
+        onConfirm={onClose}
+      />
+    )}
+    </>
   );
 }
 
 function ScopeCard({
   checked,
   count,
+  disabled,
   label,
   onSelect
 }: Readonly<{
   checked: boolean;
   count?: number;
+  disabled: boolean;
   label: string;
   onSelect: () => void;
 }>) {
   return (
     <label className={checked ? "selected" : undefined}>
-      <input checked={checked} onChange={onSelect} type="radio" />
+      <input
+        checked={checked}
+        disabled={disabled}
+        onChange={onSelect}
+        type="radio"
+      />
       <span>
         <strong>{label}</strong>
         {count !== undefined && <small>{formatInteger(count)} шт.</small>}
@@ -753,11 +971,11 @@ function duplicateCommand(
   ignorePunctuation: boolean,
   ignoredWords: readonly string[],
   scopeKind: ScopeKind,
-  activeGroup: Readonly<{ id: string }> | undefined,
+  groupIds: readonly string[],
   selections: readonly SemanticKeywordBulkSelection[],
   keeperStrategy: SemanticDuplicateKeeperStrategy
 ): SemanticDuplicateCommandInput | undefined {
-  const scope = duplicateScope(scopeKind, activeGroup, selections);
+  const scope = duplicateScope(scopeKind, groupIds, selections);
   if (
     !scope ||
     ignoredWords.length > 100 ||
@@ -781,12 +999,15 @@ function duplicateCommand(
 
 function duplicateScope(
   kind: ScopeKind,
-  activeGroup: Readonly<{ id: string }> | undefined,
+  groupIds: readonly string[],
   selections: readonly SemanticKeywordBulkSelection[]
 ): SemanticDuplicateScope | undefined {
   if (kind === "PROJECT") return { kind };
   if (kind === "GROUP") {
-    return activeGroup ? { kind, groupId: activeGroup.id } : undefined;
+    return groupIds.length > 0 &&
+      groupIds.length <= semanticDuplicateGroupScopeLimit
+      ? { kind, groupIds }
+      : undefined;
   }
   return selections.length > 0 && selections.length <= 2_000
     ? { kind, items: selections.map(({ id, version }) => ({ id, version })) }
@@ -940,7 +1161,7 @@ function parseIgnoredWords(
 function duplicateValidationMessage(
   ignoredWords: readonly string[],
   scopeKind: ScopeKind,
-  activeGroup: Readonly<{ id: string }> | undefined,
+  groupIds: readonly string[],
   selections: readonly SemanticKeywordBulkSelection[]
 ): string {
   if (ignoredWords.length > 100) {
@@ -952,8 +1173,14 @@ function duplicateValidationMessage(
   if (ignoredWords.some((word) => !/[\p{L}\p{N}]/u.test(word))) {
     return "Каждое слово-исключение должно содержать букву или цифру.";
   }
-  if (scopeKind === "GROUP" && !activeGroup) {
-    return "Выберите папку для анализа.";
+  if (scopeKind === "GROUP" && groupIds.length === 0) {
+    return "Выберите хотя бы одну папку для анализа.";
+  }
+  if (
+    scopeKind === "GROUP" &&
+    groupIds.length > semanticDuplicateGroupScopeLimit
+  ) {
+    return `За один раз можно выбрать не больше ${formatInteger(semanticDuplicateGroupScopeLimit)} папок.`;
   }
   if (scopeKind === "SELECTION" && selections.length === 0) {
     return "Выберите хотя бы два запроса.";
@@ -962,6 +1189,27 @@ function duplicateValidationMessage(
     return "За один раз можно проверить не больше 2 000 выбранных запросов.";
   }
   return "Проверьте параметры поиска неявных дублей.";
+}
+
+function duplicateScopeSummary(
+  kind: ScopeKind,
+  selectedGroupCount: number,
+  selectedKeywordCount: number
+): string {
+  if (kind === "PROJECT") return "Все запросы проекта";
+  if (kind === "SELECTION") {
+    return `${formatInteger(selectedKeywordCount)} выбранных`;
+  }
+  return selectedGroupCount > 0
+    ? `${formatInteger(selectedGroupCount)} папок`
+    : "Папки не выбраны";
+}
+
+function sameStringSet(
+  left: ReadonlySet<string>,
+  right: ReadonlySet<string>
+): boolean {
+  return left.size === right.size && [...left].every((value) => right.has(value));
 }
 
 function keeperStrategyHint(strategy: SemanticDuplicateKeeperStrategy): string {

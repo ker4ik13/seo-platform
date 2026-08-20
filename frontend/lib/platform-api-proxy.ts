@@ -39,9 +39,12 @@ const FORWARDED_RESPONSE_HEADERS = [
 ] as const;
 const MAX_BROWSER_API_BODY_BYTES = 2 * 1_024 * 1_024;
 const MAX_SEMANTIC_KEYWORD_BULK_BODY_BYTES = 8 * 1_024 * 1_024;
+const MAX_CLUSTERING_RUN_BODY_BYTES = 32 * 1_024 * 1_024;
 const MAX_PUSH_SUBSCRIPTION_BODY_BYTES = 8 * 1_024;
 const MAX_BROWSER_API_BODY_READ_MS = 10_000;
+const MAX_CLUSTERING_RUN_BODY_READ_MS = 120_000;
 const DEFAULT_PLATFORM_API_TIMEOUT_MS = 10_000;
+const CLUSTERING_RUN_COMMAND_TIMEOUT_MS = 120_000;
 const SEMANTIC_EXPORT_FILE_TIMEOUT_MS = 15 * 60_000;
 
 export async function proxyPlatformApi(
@@ -110,8 +113,15 @@ export async function proxyPlatformApi(
   }
 
   const hasBody = !["GET", "HEAD"].includes(request.method);
+  const clusteringRunCreate = isClusteringRunCreatePath(upstreamPathSegments);
   const boundedBody = hasBody
-    ? await readBoundedRequestBody(request, maxBodyBytes)
+    ? await readBoundedRequestBody(
+        request,
+        maxBodyBytes,
+        clusteringRunCreate
+          ? MAX_CLUSTERING_RUN_BODY_READ_MS
+          : MAX_BROWSER_API_BODY_READ_MS
+      )
     : { ok: true as const, body: undefined };
   if (!boundedBody.ok) return boundedBody.response;
   const upstreamUrl = new URL(
@@ -130,7 +140,9 @@ export async function proxyPlatformApi(
     signal: AbortSignal.any([
       request.signal,
       AbortSignal.timeout(
-        isSemanticExportFilePath(upstreamPathSegments)
+        clusteringRunCreate
+          ? CLUSTERING_RUN_COMMAND_TIMEOUT_MS
+          : isSemanticExportFilePath(upstreamPathSegments)
           ? SEMANTIC_EXPORT_FILE_TIMEOUT_MS
           : DEFAULT_PLATFORM_API_TIMEOUT_MS
       )
@@ -219,7 +231,8 @@ export function canonicalSameOrigin(
 
 async function readBoundedRequestBody(
   request: NextRequest,
-  maxBodyBytes: number
+  maxBodyBytes: number,
+  timeoutMs: number
 ): Promise<
   | { readonly ok: true; readonly body: ArrayBuffer | undefined }
   | { readonly ok: false; readonly response: Response }
@@ -237,7 +250,7 @@ async function readBoundedRequestBody(
     void reader.cancel("BFF request body read timed out").catch(() => {
       // The timeout response below remains authoritative.
     });
-  }, MAX_BROWSER_API_BODY_READ_MS);
+  }, timeoutMs);
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -301,7 +314,20 @@ function browserApiBodyLimit(pathSegments: readonly string[]): number {
   ) {
     return MAX_SEMANTIC_KEYWORD_BULK_BODY_BYTES;
   }
+  if (isClusteringRunCreatePath(pathSegments)) {
+    return MAX_CLUSTERING_RUN_BODY_BYTES;
+  }
   return MAX_BROWSER_API_BODY_BYTES;
+}
+
+function isClusteringRunCreatePath(
+  pathSegments: readonly string[]
+): boolean {
+  return (
+    pathSegments.length === 3 &&
+    pathSegments[0] === "projects" &&
+    pathSegments[2] === "clustering-runs"
+  );
 }
 
 export function responseCookies(headers: Headers): readonly string[] {

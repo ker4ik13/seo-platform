@@ -37,6 +37,47 @@ test("normalizes a precise implicit-duplicate preview command", () => {
   );
 });
 
+test("normalizes a multi-folder duplicate scope and keeps legacy groupId compatible", () => {
+  const base = {
+    rules: {
+      analysisMode: "EXACT",
+      caseSensitive: false,
+      ignorePunctuation: true,
+      ignoredWords: []
+    },
+    keeperStrategy: "OLDEST",
+    page: 1,
+    pageSize: 100
+  } as const;
+
+  assert.deepEqual(
+    semanticDuplicateCommandInput({
+      ...base,
+      scope: { kind: "GROUP", groupIds: [duplicateId, keywordId] }
+    }).scope,
+    { kind: "GROUP", groupIds: [keywordId, duplicateId] }
+  );
+  assert.deepEqual(
+    semanticDuplicateCommandInput({
+      ...base,
+      scope: { kind: "GROUP", groupId: duplicateId }
+    }).scope,
+    { kind: "GROUP", groupIds: [duplicateId] }
+  );
+  assert.throws(() => semanticDuplicateCommandInput({
+    ...base,
+    scope: {
+      kind: "GROUP",
+      groupId: keywordId,
+      groupIds: [duplicateId]
+    }
+  }));
+  assert.throws(() => semanticDuplicateCommandInput({
+    ...base,
+    scope: { kind: "GROUP", groupIds: [keywordId, keywordId] }
+  }));
+});
+
 test("rejects unsupported fields and an invalid apply hash", () => {
   assert.throws(() => semanticDuplicateCommandInput({
     rules: {

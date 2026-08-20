@@ -10,6 +10,10 @@ const matchingMigrationUrl = new URL(
   "../../prisma/migrations/20260811173000_negative_keyword_matching_v2/migration.sql",
   import.meta.url
 );
+const presetLimitMigrationUrl = new URL(
+  "../../prisma/migrations/20260820213000_negative_keyword_preset_limit/migration.sql",
+  import.meta.url
+);
 
 test("negative keyword migration keeps notes bounded and presets tenant-scoped", async () => {
   const sql = await readFile(migrationUrl, "utf8");
@@ -36,5 +40,14 @@ test("negative keyword matching upgrade preserves presets and defaults new flags
   assert.match(sql, /ADD COLUMN "ignore_punctuation" BOOLEAN NOT NULL DEFAULT FALSE/u);
   assert.match(sql, /'WORD_FORM_FAST'/u);
   assert.match(sql, /'WORD_FORM_PRECISE'/u);
+  assert.doesNotMatch(sql, /DELETE|DROP TABLE|TRUNCATE/u);
+});
+
+test("negative keyword preset limit supports the combined Russian geo list", async () => {
+  const sql = await readFile(presetLimitMigrationUrl, "utf8");
+
+  assert.match(sql, /DROP CONSTRAINT "semantic_negative_keyword_presets_words_count"/u);
+  assert.match(sql, /cardinality\("words"\) BETWEEN 1 AND 1200/u);
+  assert.match(sql, /VALIDATE CONSTRAINT "semantic_negative_keyword_presets_words_count"/u);
   assert.doesNotMatch(sql, /DELETE|DROP TABLE|TRUNCATE/u);
 });

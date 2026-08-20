@@ -55,7 +55,11 @@ const expectedFunctions = [
   "public.fail_ai_answer_collection_batch(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)",
   "public.defer_ai_answer_collection_batch_capacity(UUID, UUID[], TEXT, INTEGER, INTEGER)",
   "public.quarantine_ai_answer_collection_batch_submit(UUID, UUID[], TEXT, INTEGER)",
-  "public.complete_ai_answer_collection_batch(UUID, UUID[], TEXT, INTEGER)"
+  "public.complete_ai_answer_collection_batch(UUID, UUID[], TEXT, INTEGER)",
+  "public.claim_clustering_run(TEXT, INTEGER)",
+  "public.renew_clustering_run_lease(UUID, UUID[], TEXT, INTEGER, INTEGER)",
+  "public.mark_clustering_run_submitting(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)",
+  "public.transition_clustering_run(UUID, UUID[], TEXT, INTEGER, TEXT, TEXT, INTEGER, TEXT, JSONB)"
 ];
 
 function compactSql(sql) {
@@ -134,6 +138,10 @@ test("connector role has no direct table access and only exact broker functions"
     assert.ok(
       normalized.includes(`GRANT EXECUTE ON FUNCTION ${signature} TO %I`),
       `Missing exact connector grant for ${signature}`
+    );
+    assert.ok(
+      normalized.includes(`'${signature.toLowerCase().replace(/\s+/gu, "")}'::regprocedure::oid`),
+      `Missing exact connector ACL allowlist entry for ${signature}`
     );
   }
 

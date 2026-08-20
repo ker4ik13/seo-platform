@@ -1,14 +1,16 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { OperationResultKind } from "../lib/operation-result-routes";
 import { OperationResultWorkspace } from "./operation-result-workspace";
 import { SemanticModal } from "./semantic-modal";
+import { UnsavedChangesConfirmation } from "./unsaved-changes-confirmation";
 
 export function OperationResultModal({
   actions,
   description,
   kind,
+  onClusteringApplied,
   onClose,
   operationId,
   projectId,
@@ -17,27 +19,60 @@ export function OperationResultModal({
   actions?: ReactNode;
   description: string;
   kind: OperationResultKind;
+  onClusteringApplied?: () => void;
   onClose: () => void;
   operationId: string;
   projectId: string;
   title: string;
 }>) {
+  const [dirty, setDirty] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
+
+  useEffect(() => {
+    setDirty(false);
+    setConfirmClose(false);
+  }, [kind, operationId]);
+
+  function requestClose(): void {
+    if (kind === "clustering" && dirty) {
+      setConfirmClose(true);
+      return;
+    }
+    onClose();
+  }
+
   return (
-    <SemanticModal
-      bodyClassName="operation-result-modal-body"
-      description={`${description} · ID ${operationId.slice(0, 8)}`}
-      headerActions={actions}
-      onClose={onClose}
-      size="fullscreen"
-      title={`Результат: ${title}`}
-    >
-      <OperationResultWorkspace
-        embedded
-        kind={kind}
-        operationId={operationId}
-        projectId={projectId}
-      />
-    </SemanticModal>
+    <>
+      <SemanticModal
+        bodyClassName="operation-result-modal-body"
+        className="operation-result-modal"
+        description={`${description} · ID ${operationId.slice(0, 8)}`}
+        headerActions={actions}
+        onClose={requestClose}
+        presenceKey="semantic-modal:operation-result"
+        size="fullscreen"
+        title={`Результат: ${title}`}
+      >
+        <OperationResultWorkspace
+          embedded
+          kind={kind}
+          {...(onClusteringApplied ? { onClusteringApplied } : {})}
+          {...(kind === "clustering" ? { onDirtyChange: setDirty } : {})}
+          operationId={operationId}
+          projectId={projectId}
+        />
+      </SemanticModal>
+      {confirmClose && (
+        <UnsavedChangesConfirmation
+          onCancel={() => setConfirmClose(false)}
+          onConfirm={() => {
+            setConfirmClose(false);
+            setDirty(false);
+            onClose();
+          }}
+        />
+      )}
+    </>
   );
 }
 

@@ -30,6 +30,38 @@ test("accepts a trusted tenant-scoped implicit-duplicate command", () => {
   assert.equal(result.page, 3);
 });
 
+test("normalizes a trusted multi-folder duplicate scope", () => {
+  const result = internalSemanticDuplicateCommandInput({
+    ...ids,
+    rules: {
+      analysisMode: "EXACT",
+      caseSensitive: false,
+      ignorePunctuation: true,
+      ignoredWords: []
+    },
+    scope: {
+      kind: "GROUP",
+      groupIds: [ids.actorId, ids.workspaceId]
+    },
+    keeperStrategy: "OLDEST",
+    page: 1,
+    pageSize: 100
+  });
+
+  assert.deepEqual(result.scope, {
+    kind: "GROUP",
+    groupIds: [ids.workspaceId, ids.actorId]
+  });
+  assert.throws(() => internalSemanticDuplicateCommandInput({
+    ...result,
+    scope: {
+      kind: "GROUP",
+      groupId: ids.workspaceId,
+      groupIds: [ids.actorId]
+    }
+  }));
+});
+
 test("rejects duplicate selections and malformed preview hashes", () => {
   const selection = {
     ...ids,

@@ -39,6 +39,7 @@ import {
 } from "./queue/frequency-collection-runtime.queue.js";
 import { safeErrorSummary } from "./runtime-safe-error.js";
 import { AiAnswerRuntimeService } from "./ai-answer-collections/ai-answer-runtime.service.js";
+import { ClusteringRuntimeService } from "./clustering-runs/clustering-runtime.service.js";
 
 const logger = new Logger("IntegrationConnectorWorker");
 const UUID_PATTERN =
@@ -65,6 +66,7 @@ async function bootstrap(): Promise<void> {
   const keywordResearchRuntime = app.get(KeywordResearchRuntimeService);
   const frequencyRuntime = app.get(FrequencyCollectionRuntimeService);
   const aiAnswerRuntime = app.get(AiAnswerRuntimeService);
+  const clusteringRuntime = app.get(ClusteringRuntimeService);
   const workerConnection = redis(config.redisUrl);
   const queueConnection = redis(config.redisUrl);
   const validationQueue = new Queue<IntegrationCredentialValidationJobData>(
@@ -146,14 +148,19 @@ async function bootstrap(): Promise<void> {
       ) {
         throw new Error("Invalid frequency collection runtime job");
       }
-      const aiFirst = job.data.tick % 2 === 0;
-      const first = aiFirst
-        ? await aiAnswerRuntime.processBatch(`connector-ai-answer-${randomUUID()}`)
-        : await frequencyRuntime.processBatch(`connector-frequency-${randomUUID()}`);
-      if (first.processed > 0) return first;
-      return aiFirst
-        ? frequencyRuntime.processBatch(`connector-frequency-${randomUUID()}`)
-        : aiAnswerRuntime.processBatch(`connector-ai-answer-${randomUUID()}`);
+      const workloads = [
+        () => frequencyRuntime.processBatch(`connector-frequency-${randomUUID()}`),
+        () => aiAnswerRuntime.processBatch(`connector-ai-answer-${randomUUID()}`),
+        () => clusteringRuntime.processBatch(`connector-clustering-${randomUUID()}`)
+      ] as const;
+      const start = job.data.tick % workloads.length;
+      for (let offset = 0; offset < workloads.length; offset += 1) {
+        const workload = workloads[(start + offset) % workloads.length];
+        if (!workload) continue;
+        const result = await workload();
+        if (result.processed > 0) return result;
+      }
+      return { processed: 0, result: "IDLE" };
     },
     {
       ...bullMqConnectionOptions(workerConnection),

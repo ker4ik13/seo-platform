@@ -29,6 +29,9 @@ import { ArsenkinWordstatConnector } from "./frequency-collections/arsenkin-word
 import { AiAnswerRuntimeBrokerService } from "./ai-answer-collections/ai-answer-runtime-broker.service.js";
 import { AiAnswerRuntimeService } from "./ai-answer-collections/ai-answer-runtime.service.js";
 import { ArsenkinAiAnswerConnector } from "./ai-answer-collections/arsenkin-ai-answer.connector.js";
+import { ArsenkinClusteringConnector } from "./clustering-runs/arsenkin-clustering.connector.js";
+import { ClusteringRuntimeBrokerService } from "./clustering-runs/clustering-runtime-broker.service.js";
+import { ClusteringRuntimeService } from "./clustering-runs/clustering-runtime.service.js";
 
 @Module({
   imports: [ConfigModule.forRole("CONNECTOR_WORKER"), DatabaseModule, SeoDataModule],
@@ -49,6 +52,8 @@ import { ArsenkinAiAnswerConnector } from "./ai-answer-collections/arsenkin-ai-a
     FrequencyCollectionRuntimeService,
     AiAnswerRuntimeBrokerService,
     AiAnswerRuntimeService,
+    ClusteringRuntimeBrokerService,
+    ClusteringRuntimeService,
     {
       provide: XmlStockWordstatConnector,
       useFactory: () => new XmlStockWordstatConnector()
@@ -64,6 +69,12 @@ import { ArsenkinAiAnswerConnector } from "./ai-answer-collections/arsenkin-ai-a
       inject: [ArsenkinHttpRateLimiter],
       useFactory: (rateLimiter: ArsenkinHttpRateLimiter) =>
         new ArsenkinAiAnswerConnector(rateLimiter)
+    },
+    {
+      provide: ArsenkinClusteringConnector,
+      inject: [ArsenkinHttpRateLimiter],
+      useFactory: (rateLimiter: ArsenkinHttpRateLimiter) =>
+        new ArsenkinClusteringConnector(rateLimiter)
     },
     {
       provide: KEYS_SO_KEYWORD_RESEARCH_CONNECTOR,

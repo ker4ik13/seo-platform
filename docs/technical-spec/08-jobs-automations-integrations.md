@@ -687,8 +687,11 @@ provider catalog. Новая документированная возможно
 доступна существующему credential только после повторной внешней проверки, а
 удалённая возможность сразу отсекается пересечением с каталогом.
 Для Arsenkin validation-broker после каждой успешной проверки сохраняет ровно
-`SERP_RANK_TRACKING`, `SERP_COLLECTION` и `WORDSTAT`; повторная проверка ключа
-не должна отключать маршрут ИИ-ответов `ai-serp`.
+`SERP_RANK_TRACKING`, `SERP_COLLECTION`, `WORDSTAT` и `CLUSTERING`; повторная
+проверка ключа не должна отключать маршруты ИИ-ответов `ai-serp` и
+кластеризации. Миграционный guard добавляет документированные `WORDSTAT` и
+`CLUSTERING` существующим активным проверенным credentials без повторного
+ввода секрета.
 XMLStock после успешного внешнего `regionsTree` ответа получает только catalog
 allowlist `SERP_RANK_TRACKING`, `SERP_COLLECTION` и `WORDSTAT`. Ошибки
 авторизации, очереди/лимита и временной недоступности нормализуются без
@@ -1267,7 +1270,11 @@ Connector учитывает provider quotas и не подменяет офиц
 - Yandex positions через Arsenkin в текущем connector contract поддерживает
   только `Топ-30`; выбор подключения не скрывается, а ограничение явно
   отображается до запуска;
-- clustering;
+- clustering принимает один immutable scope до 300 000 запросов; public и
+  trusted create routes имеют отдельный request body limit 32 MiB, а trusted
+  proposal ingestion — 256 MiB. Жёсткий метод расположен слева и выбран в UI
+  по умолчанию, все виды частотности изначально выключены. UUID items в fenced
+  командах передаются одним typed PostgreSQL array parameter;
 - indexation and supported SEO tools;
 - provider task cleanup;
 - Wordstat frequency использует один `set` на весь допустимый platform batch
@@ -1282,7 +1289,7 @@ Connector учитывает provider quotas и не подменяет офиц
   sliding-window limiter: не более 30 HTTP requests за 60 секунд, fail-closed
   при недоступности limiter;
 - fenced DB-bound cap резервирует не более пяти одновременных provider tasks
-  суммарно для Rank и Wordstat; ожидание свободного slot откладывает Job без
+  суммарно для Rank, Wordstat, AI answer и clustering; ожидание свободного slot откладывает Job без
   расходования poll attempt и без повторного `set`.
 
 ### 21.6. Яндекс Вебмастер
@@ -1479,7 +1486,7 @@ Platform operations видит:
 
 Private/noindex маршрут `/app/tasks` объединяет доступные пользователю
 операции частотности, позиций, технического аудита, проверки HTTP-статусов и
-сбора конкурентов, проверки ИИ-ответов и экспорта семантики. Завершённая строка
+сбора конкурентов, проверки ИИ-ответов, кластеризации и экспорта семантики. Завершённая строка
 экспорта предоставляет тот же permission-checked download route, что и drawer
 семантики; активный экспорт остаётся отменяемым, но не изображает готовый файл.
 Это

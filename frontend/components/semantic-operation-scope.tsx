@@ -3,7 +3,11 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import type { TrackingContextScopeMode } from "@seo-platform/contracts";
 import { browserApiCollectionRequest } from "../lib/browser-api";
-import { visibleFolderRows } from "../lib/semantic-operation-tree";
+import {
+  expandedAncestorIds,
+  treeIdsWithDescendants,
+  visibleFolderRows
+} from "../lib/semantic-operation-tree";
 import { Icon } from "./icon";
 
 export interface SemanticOperationSelection {
@@ -87,14 +91,17 @@ export function SemanticOperationScope({
       )
   );
   const [expandedGroupIds, setExpandedGroupIds] = useState<ReadonlySet<string>>(
-    () => expandedAncestors(groups, initialScope?.groupIds ?? (activeGroupId ? [activeGroupId] : []))
+    () => expandedAncestorIds(
+      groups,
+      initialScope?.groupIds ?? (activeGroupId ? [activeGroupId] : [])
+    )
   );
   const availableGroups = useMemo(
     () => groups.filter(({ systemKind }) => systemKind !== "TRASH"),
     [groups]
   );
   const resolvedGroupIds = useMemo(
-    () => groupsWithDescendants(availableGroups, selectedGroupIds),
+    () => treeIdsWithDescendants(availableGroups, selectedGroupIds),
     [availableGroups, selectedGroupIds]
   );
   const visibleGroups = useMemo(
@@ -381,24 +388,6 @@ export function SemanticOperationScope({
   );
 }
 
-function expandedAncestors(
-  groups: readonly SemanticOperationGroup[],
-  selectedIds: readonly string[]
-): ReadonlySet<string> {
-  const parentById = new Map(groups.map(({ id, parentId }) => [id, parentId]));
-  const expanded = new Set<string>();
-  for (const selectedId of selectedIds) {
-    let current = parentById.get(selectedId);
-    const seen = new Set<string>();
-    while (current && !seen.has(current)) {
-      seen.add(current);
-      expanded.add(current);
-      current = parentById.get(current);
-    }
-  }
-  return expanded;
-}
-
 async function loadQueryOptions(
   projectId: string,
   search: string,
@@ -415,24 +404,6 @@ async function loadQueryOptions(
     { signal }
   );
   return page.data.filter(({ trashed }) => trashed !== true);
-}
-
-function groupsWithDescendants(
-  groups: readonly SemanticOperationGroup[],
-  selectedIds: ReadonlySet<string>
-): readonly string[] {
-  const result = new Set(selectedIds);
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const group of groups) {
-      if (group.parentId && result.has(group.parentId) && !result.has(group.id)) {
-        result.add(group.id);
-        changed = true;
-      }
-    }
-  }
-  return [...result];
 }
 
 async function loadGroupSelections(

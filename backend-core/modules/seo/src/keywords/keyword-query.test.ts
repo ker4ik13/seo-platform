@@ -3,6 +3,7 @@ import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
 import {
   keywordListQuery,
+  keywordMultiSearchInput,
   keywordTagOptionsQuery
 } from "./keyword-query.js";
 
@@ -71,6 +72,42 @@ test("accepts a multigroup union with more than fifty folders", () => {
   assert.deepEqual(
     keywordListQuery({ groupIds: groupIds.join(",") }).groupIds,
     groupIds
+  );
+});
+
+test("parses and validates multiline keyword search bodies", () => {
+  assert.deepEqual(
+    keywordMultiSearchInput({
+      query: { limit: 250, intent: "LOCAL" },
+      search: {
+        terms: ["  Москва   холодильник ", "купить морозильник"],
+        mode: "CONTAINS"
+      }
+    }),
+    {
+      limit: 250,
+      intent: "LOCAL",
+      sort: "CREATED_DESC",
+      multiSearch: {
+        terms: ["Москва холодильник", "купить морозильник"],
+        mode: "CONTAINS"
+      }
+    }
+  );
+
+  assert.throws(
+    () => keywordMultiSearchInput({
+      query: {},
+      search: { terms: ["SEO", "seo"], mode: "EXACT" }
+    }),
+    BadRequestException
+  );
+  assert.throws(
+    () => keywordMultiSearchInput({
+      query: { unsupported: true },
+      search: { terms: ["seo"], mode: "EXACT" }
+    }),
+    BadRequestException
   );
 });
 

@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import {
   semanticKeywordCleaningCases,
+  semanticKeywordBulkCommandMaxItems,
   semanticKeywordBulkCreatePreviewMaxItems,
   semanticKeywordDuplicatePolicies,
   semanticKeywordIntents,
@@ -172,8 +173,15 @@ export function semanticKeywordCleaningInput(
 function semanticKeywordSelections(
   value: unknown
 ): SemanticKeywordBulkInput["items"] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 200) {
-    invalid("items", "Must select between 1 and 200 keywords");
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > semanticKeywordBulkCommandMaxItems
+  ) {
+    invalid(
+      "items",
+      `Must select between 1 and ${semanticKeywordBulkCommandMaxItems} keywords`
+    );
   }
   const items = value.map((entry, index) => {
     const item = exactRecord(entry, ["id", "version"], `items.${index}`);

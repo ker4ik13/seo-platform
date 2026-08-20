@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type FormEvent,
   type ReactNode,
   type UIEvent
@@ -21,29 +22,48 @@ import type {
   SemanticNegativeKeywordScope
 } from "@seo-platform/contracts";
 import {
+  semanticNegativeKeywordGroupScopeLimit,
+  semanticNegativeKeywordWordLimit
+} from "@seo-platform/contracts";
+import {
+  expandedAncestorIds,
+  treeIdsWithDescendants,
+  visibleFolderRows
+} from "../lib/semantic-operation-tree";
+import { builtInNegativeKeywordPresets } from "../lib/semantic-negative-keyword-presets";
+import {
   BrowserApiError,
   browserApiRequest
 } from "../lib/browser-api";
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
 import { SemanticModal } from "./semantic-modal";
+import { UnsavedChangesConfirmation } from "./unsaved-changes-confirmation";
+import type { SemanticOperationGroup } from "./semantic-operation-scope";
 
 type ScopeKind = SemanticNegativeKeywordScope["kind"];
 const NEGATIVE_PREVIEW_PAGE_SIZE = 100;
 
 export function SemanticNegativeKeywordsDialog({
   activeGroup,
+  groups,
   onClose,
   onCompleted,
   projectId,
   selections
 }: Readonly<{
   activeGroup?: Readonly<{ id: string; name: string }>;
+  groups: readonly SemanticOperationGroup[];
   onClose: () => void;
   onCompleted: (message: string) => void;
   projectId: string;
   selections: readonly Readonly<SemanticKeywordBulkSelection & { label: string }>[];
 }>) {
+  const initialScopeKind: ScopeKind = selections.length > 0
+    ? "SELECTION"
+    : activeGroup
+      ? "GROUP"
+      : "PROJECT";
   const [presets, setPresets] = useState<readonly SemanticNegativeKeywordPreset[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState("");
   const [presetName, setPresetName] = useState("");
@@ -52,8 +72,12 @@ export function SemanticNegativeKeywordsDialog({
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [ignoreWordOrder, setIgnoreWordOrder] = useState(false);
   const [ignorePunctuation, setIgnorePunctuation] = useState(false);
-  const [scopeKind, setScopeKind] = useState<ScopeKind>(
-    selections.length > 0 ? "SELECTION" : activeGroup ? "GROUP" : "PROJECT"
+  const [scopeKind, setScopeKind] = useState<ScopeKind>(initialScopeKind);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<ReadonlySet<string>>(
+    () => new Set(activeGroup ? [activeGroup.id] : [])
+  );
+  const [expandedGroupIds, setExpandedGroupIds] = useState<ReadonlySet<string>>(
+    () => expandedAncestorIds(groups, activeGroup ? [activeGroup.id] : [])
   );
   const [preview, setPreview] = useState<SemanticNegativeKeywordPreview>();
   const [previewMatches, setPreviewMatches] = useState<
@@ -69,9 +93,22 @@ export function SemanticNegativeKeywordsDialog({
   const [applying, setApplying] = useState(false);
   const [deletedProgress, setDeletedProgress] = useState(0);
   const [error, setError] = useState<string>();
+  const [confirmClose, setConfirmClose] = useState(false);
   const previewRequestInFlight = useRef(false);
   const words = useMemo(() => parseWords(wordsText, caseSensitive), [caseSensitive, wordsText]);
   const endpoint = `/app/api/projects/${encodeURIComponent(projectId)}`;
+  const availableGroups = useMemo(
+    () => groups.filter(({ systemKind }) => systemKind !== "TRASH"),
+    [groups]
+  );
+  const resolvedGroupIds = useMemo(
+    () => treeIdsWithDescendants(availableGroups, selectedGroupIds),
+    [availableGroups, selectedGroupIds]
+  );
+  const visibleGroups = useMemo(
+    () => visibleFolderRows(availableGroups, expandedGroupIds),
+    [availableGroups, expandedGroupIds]
+  );
 
   useEffect(() => {
     const controller = new AbortController();
@@ -100,9 +137,29 @@ export function SemanticNegativeKeywordsDialog({
     setError(undefined);
   }
 
+  function toggleGroup(groupId: string): void {
+    setSelectedGroupIds((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+    invalidatePreview();
+  }
+
+  function toggleExpanded(groupId: string): void {
+    setExpandedGroupIds((current) => {
+      const next = new Set(current);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }
+
   function selectPreset(presetId: string): void {
     setSelectedPresetId(presetId);
-    const preset = presets.find(({ id }) => id === presetId);
+    const preset = presets.find(({ id }) => id === presetId) ??
+      builtInNegativeKeywordPresets.find(({ id }) => id === presetId);
     if (preset) {
       setPresetName(preset.name);
       setWordsText(preset.rules.words.join("\n"));
@@ -185,7 +242,7 @@ export function SemanticNegativeKeywordsDialog({
       ignoreWordOrder,
       ignorePunctuation,
       scopeKind,
-      activeGroup,
+      resolvedGroupIds,
       selections
     );
     if (!command) {
@@ -193,7 +250,7 @@ export function SemanticNegativeKeywordsDialog({
         words,
         ignorePunctuation,
         scopeKind,
-        activeGroup,
+        resolvedGroupIds,
         selections
       ));
       return;
@@ -262,7 +319,7 @@ export function SemanticNegativeKeywordsDialog({
       ignoreWordOrder,
       ignorePunctuation,
       scopeKind,
-      activeGroup,
+      resolvedGroupIds,
       selections
     );
     if (!initialCommand || !preview || applying || loadingMore) return;
@@ -332,13 +389,116 @@ export function SemanticNegativeKeywordsDialog({
   }
 
   const selectedPreset = presets.find(({ id }) => id === selectedPresetId);
+  const selectedBuiltInPreset = builtInNegativeKeywordPresets.find(
+    ({ id }) => id === selectedPresetId
+  );
   const selectedMatchCount = preview
     ? Math.max(0, preview.matchedCount - excludedKeywordIds.size)
     : 0;
+  const rulesDirty = selectedPreset
+    ? presetName.trim() !== selectedPreset.name ||
+      words.join("\n") !== selectedPreset.rules.words.join("\n") ||
+      matchMode !== selectedPreset.rules.matchMode ||
+      caseSensitive !== selectedPreset.rules.caseSensitive ||
+      ignoreWordOrder !== selectedPreset.rules.ignoreWordOrder ||
+      ignorePunctuation !== selectedPreset.rules.ignorePunctuation
+    : presetName.trim().length > 0 ||
+      words.length > 0 ||
+      matchMode !== "WORD_FORM_PRECISE" ||
+      caseSensitive ||
+      ignoreWordOrder ||
+      ignorePunctuation;
+  const dirty =
+    rulesDirty ||
+    scopeKind !== initialScopeKind ||
+    !sameStringSet(
+      selectedGroupIds,
+      new Set(activeGroup ? [activeGroup.id] : [])
+    ) ||
+    Boolean(preview) ||
+    excludedKeywordIds.size > 0;
+
+  function requestClose(): void {
+    if (applying) return;
+    if (dirty) {
+      setConfirmClose(true);
+      return;
+    }
+    onClose();
+  }
 
   return (
+    <>
     <SemanticModal
-      onClose={applying ? () => undefined : onClose}
+      footer={(
+        <div className="semantic-workflow-footer">
+          <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate semantic-negative-estimate">
+            <div>
+              <Icon name="semantic" />
+              <div><dt>Минус-слов</dt><dd>{formatInteger(words.length)}</dd></div>
+            </div>
+            <div>
+              <Icon name="projects" />
+              <div>
+                <dt>Область</dt>
+                <dd>
+                  {scopeKind === "SELECTION"
+                    ? `${formatInteger(selections.length)} выбранных`
+                    : scopeKind === "GROUP"
+                      ? selectedGroupIds.size > 0
+                        ? `${formatInteger(selectedGroupIds.size)} папок`
+                        : "Папки не выбраны"
+                      : "Весь проект"}
+                </dd>
+              </div>
+            </div>
+            <div>
+              <Icon name="search" />
+              <div>
+                <dt>К удалению</dt>
+                <dd>
+                  {preview
+                    ? formatInteger(selectedMatchCount)
+                    : "Не рассчитано"}
+                </dd>
+              </div>
+            </div>
+          </dl>
+          <div className="semantic-modal-actions semantic-negative-actions">
+            {applying && (
+              <span aria-live="polite">
+                Перемещено: {formatInteger(deletedProgress)}
+              </span>
+            )}
+            <button
+              className="secondary-button"
+              disabled={applying}
+              onClick={requestClose}
+              type="button"
+            >
+              Отмена
+            </button>
+            <button
+              className="danger-button"
+              disabled={
+                !preview ||
+                selectedMatchCount === 0 ||
+                applying ||
+                previewing ||
+                loadingMore
+              }
+              onClick={() => void applyPreview()}
+              type="button"
+            >
+              {applying
+                ? "Перемещаем…"
+                : `В корзину${preview ? ` (${formatInteger(selectedMatchCount)})` : ""}`}
+            </button>
+          </div>
+        </div>
+      )}
+      onClose={requestClose}
+      presenceKey="semantic-modal:negative-keywords"
       size="large"
       title="Минус-слова"
     >
@@ -347,14 +507,40 @@ export function SemanticNegativeKeywordsDialog({
           <section className="semantic-workflow-panel semantic-negative-editor">
             <header>
               <h3>Набор и правила</h3>
-              <p>Добавьте до 500 слов или фраз — по одной на строку.</p>
+              <p>
+                Добавьте до {formatInteger(semanticNegativeKeywordWordLimit)} слов или фраз — по одной на строку.
+              </p>
             </header>
             <label>
-              <span>Сохранённый пресет</span>
-              <CustomSelect disabled={loadingPresets || applying} onChange={(event) => selectPreset(event.target.value)} value={selectedPresetId}>
+              <span>Готовый набор или мой пресет</span>
+              <CustomSelect
+                disabled={loadingPresets || applying}
+                onChange={(event) => selectPreset(event.target.value)}
+                searchable
+                searchPlaceholder="Найти набор"
+                value={selectedPresetId}
+              >
                 <option value="">Новый набор</option>
-                {presets.map((preset) => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
+                <option disabled value="builtin-heading">Готовые наборы · сначала проверьте</option>
+                {builtInNegativeKeywordPresets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {`${preset.name} · ${formatInteger(preset.rules.words.length)}`}
+                  </option>
+                ))}
+                {presets.length > 0 && <option disabled value="project-heading">Мои пресеты проекта</option>}
+                {presets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>{preset.name}</option>
+                ))}
               </CustomSelect>
+              {selectedBuiltInPreset ? (
+                <small className="semantic-negative-preset-hint">
+                  {selectedBuiltInPreset.description} Это шаблон: проверьте совпадения перед применением.
+                </small>
+              ) : (
+                <small className="semantic-negative-preset-hint">
+                  Готовые наборы не применяются автоматически — их можно изменить и сохранить в проект.
+                </small>
+              )}
             </label>
             <label>
               <span>Минус-слова</span>
@@ -366,7 +552,9 @@ export function SemanticNegativeKeywordsDialog({
                 rows={7}
                 value={wordsText}
               />
-              <small>{words.length} из 500</small>
+              <small>
+                {formatInteger(words.length)} из {formatInteger(semanticNegativeKeywordWordLimit)}
+              </small>
             </label>
             <div className="semantic-negative-options">
               <label>
@@ -388,7 +576,13 @@ export function SemanticNegativeKeywordsDialog({
               </label>
               <div className="semantic-negative-preset-actions">
                 <button className="secondary-button" disabled={savingPreset || words.length === 0} type="submit">
-                  {savingPreset ? "Сохраняем…" : selectedPreset ? "Обновить пресет" : "Сохранить пресет"}
+                  {savingPreset
+                    ? "Сохраняем…"
+                    : selectedPreset
+                      ? "Обновить пресет"
+                      : selectedBuiltInPreset
+                        ? "Сохранить в проект"
+                        : "Сохранить пресет"}
                 </button>
                 {selectedPreset && <button className="text-button danger-text" disabled={savingPreset} onClick={() => void deletePreset()} type="button"><Icon name="trash" />Удалить</button>}
               </div>
@@ -401,14 +595,92 @@ export function SemanticNegativeKeywordsDialog({
               <p>Совпадения считаются только среди активных запросов.</p>
             </header>
             <div className="semantic-negative-scope-cards">
+              <ScopeCard checked={scopeKind === "PROJECT"} label="Все запросы проекта" onSelect={() => { setScopeKind("PROJECT"); invalidatePreview(); }} />
               {selections.length > 0 && (
                 <ScopeCard checked={scopeKind === "SELECTION"} count={selections.length} label="Выбранные запросы" onSelect={() => { setScopeKind("SELECTION"); invalidatePreview(); }} />
               )}
-              {activeGroup && (
-                <ScopeCard checked={scopeKind === "GROUP"} label={`Папка «${activeGroup.name}»`} onSelect={() => { setScopeKind("GROUP"); invalidatePreview(); }} />
+              {availableGroups.length > 0 && (
+                <ScopeCard checked={scopeKind === "GROUP"} count={selectedGroupIds.size} label="Конкретные папки" onSelect={() => { setScopeKind("GROUP"); invalidatePreview(); }} />
               )}
-              <ScopeCard checked={scopeKind === "PROJECT"} label="Весь проект" onSelect={() => { setScopeKind("PROJECT"); invalidatePreview(); }} />
             </div>
+            {scopeKind === "GROUP" && (
+              <div className="semantic-duplicate-folder-scope semantic-negative-folder-scope">
+                <div className="semantic-duplicate-folder-toolbar">
+                  <span>Выбрано папок: {formatInteger(selectedGroupIds.size)}</span>
+                  <div>
+                    {activeGroup && (
+                      <button
+                        disabled={applying}
+                        onClick={() => {
+                          setSelectedGroupIds(new Set([activeGroup.id]));
+                          setExpandedGroupIds(expandedAncestorIds(groups, [activeGroup.id]));
+                          invalidatePreview();
+                        }}
+                        type="button"
+                      >
+                        Только текущая
+                      </button>
+                    )}
+                    <button
+                      disabled={applying || selectedGroupIds.size === 0}
+                      onClick={() => {
+                        setSelectedGroupIds(new Set());
+                        invalidatePreview();
+                      }}
+                      type="button"
+                    >
+                      Очистить
+                    </button>
+                  </div>
+                </div>
+                <div
+                  aria-label="Папки для поиска минус-слов"
+                  className="semantic-operation-folder-list semantic-duplicate-folder-list"
+                >
+                  {visibleGroups.map(({ group, depth, hasChildren }) => (
+                    <div
+                      className="semantic-operation-folder-row"
+                      key={group.id}
+                      style={{ "--folder-depth": depth } as CSSProperties}
+                      title={group.path}
+                    >
+                      {hasChildren ? (
+                        <button
+                          aria-expanded={expandedGroupIds.has(group.id)}
+                          aria-label={expandedGroupIds.has(group.id) ? "Свернуть папку" : "Развернуть папку"}
+                          className="semantic-operation-folder-toggle"
+                          disabled={applying}
+                          onClick={() => toggleExpanded(group.id)}
+                          type="button"
+                        >
+                          <Icon name="chevronRight" />
+                        </button>
+                      ) : (
+                        <span className="semantic-operation-folder-toggle-spacer" />
+                      )}
+                      <label>
+                        <input
+                          checked={selectedGroupIds.has(group.id)}
+                          disabled={applying}
+                          onChange={() => toggleGroup(group.id)}
+                          type="checkbox"
+                        />
+                        <i
+                          aria-hidden="true"
+                          className="semantic-operation-folder-color"
+                          style={{ background: group.color ?? "#a8a5b8" }}
+                        />
+                        <span>{group.name}</span>
+                        <b>{formatInteger(group.keywordCount)}</b>
+                      </label>
+                    </div>
+                  ))}
+                </div>
+                <small>
+                  Родительская папка включает все вложенные. Запросы из нескольких выбранных папок проверяются один раз.
+                </small>
+              </div>
+            )}
             <div className="semantic-negative-checkbox-options">
               <h4>Настройки поиска</h4>
               <label className="semantic-toggle-line">
@@ -505,24 +777,16 @@ export function SemanticNegativeKeywordsDialog({
           </section>
         </div>
 
-        <dl className="semantic-dialog-estimate semantic-negative-estimate">
-          <div><Icon name="semantic" /><div><dt>Минус-слов</dt><dd>{formatInteger(words.length)}</dd></div></div>
-          <div><Icon name="projects" /><div><dt>Область</dt><dd>{scopeKind === "SELECTION" ? "Выбранные" : scopeKind === "GROUP" ? activeGroup?.name ?? "Папка" : "Весь проект"}</dd></div></div>
-          <div><Icon name="search" /><div><dt>К удалению</dt><dd>{preview ? formatInteger(selectedMatchCount) : "Не рассчитано"}</dd></div></div>
-        </dl>
-
         {error && <div className="semantic-workflow-feedback"><div className="inline-alert danger" role="alert">{error}</div></div>}
-        <div className="semantic-modal-actions semantic-workflow-footer semantic-negative-actions">
-          <button className="secondary-button" disabled={applying} onClick={onClose} type="button">Отмена</button>
-          <div>
-            {applying && <span aria-live="polite">Перемещено: {formatInteger(deletedProgress)}</span>}
-            <button className="danger-button" disabled={!preview || selectedMatchCount === 0 || applying || previewing || loadingMore} onClick={() => void applyPreview()} type="button">
-              {applying ? "Перемещаем…" : `Переместить в корзину${preview ? ` (${formatInteger(selectedMatchCount)})` : ""}`}
-            </button>
-          </div>
-        </div>
       </div>
     </SemanticModal>
+    {confirmClose && (
+      <UnsavedChangesConfirmation
+        onCancel={() => setConfirmClose(false)}
+        onConfirm={onClose}
+      />
+    )}
+    </>
   );
 }
 
@@ -547,7 +811,7 @@ function commandInput(
   ignoreWordOrder: boolean,
   ignorePunctuation: boolean,
   scopeKind: ScopeKind,
-  activeGroup: Readonly<{ id: string; name: string }> | undefined,
+  groupIds: readonly string[],
   selections: readonly Readonly<SemanticKeywordBulkSelection & { label: string }>[]
 ): SemanticNegativeKeywordCommandInput | undefined {
   const rules = validRules(
@@ -558,7 +822,7 @@ function commandInput(
     ignorePunctuation
   );
   if (!rules) return undefined;
-  const scope = commandScope(scopeKind, activeGroup, selections);
+  const scope = commandScope(scopeKind, groupIds, selections);
   return scope ? { rules, scope } : undefined;
 }
 
@@ -570,7 +834,7 @@ function validRules(
   ignorePunctuation: boolean
 ): SemanticNegativeKeywordRules | undefined {
   return words.length > 0 &&
-    words.length <= 500 &&
+    words.length <= semanticNegativeKeywordWordLimit &&
     words.every((word) => word.length <= 160) &&
     (!ignorePunctuation || words.every((word) => /[\p{L}\p{N}]/u.test(word)))
     ? { words, matchMode, caseSensitive, ignoreWordOrder, ignorePunctuation }
@@ -591,11 +855,16 @@ function matchModeHint(mode: SemanticNegativeKeywordMatchMode): string {
 
 function commandScope(
   kind: ScopeKind,
-  activeGroup: Readonly<{ id: string }> | undefined,
+  groupIds: readonly string[],
   selections: readonly SemanticKeywordBulkSelection[]
 ): SemanticNegativeKeywordScope | undefined {
   if (kind === "PROJECT") return { kind };
-  if (kind === "GROUP") return activeGroup ? { kind, groupId: activeGroup.id } : undefined;
+  if (kind === "GROUP") {
+    return groupIds.length > 0 &&
+      groupIds.length <= semanticNegativeKeywordGroupScopeLimit
+      ? { kind, groupIds }
+      : undefined;
+  }
   return selections.length > 0
     ? { kind, items: selections.map(({ id, version }) => ({ id, version })) }
     : undefined;
@@ -662,18 +931,30 @@ function commandValidationMessage(
   words: readonly string[],
   ignorePunctuation: boolean,
   scopeKind: ScopeKind,
-  activeGroup: Readonly<{ id: string }> | undefined,
+  groupIds: readonly string[],
   selections: readonly SemanticKeywordBulkSelection[]
 ): string {
   if (words.length === 0) return "Добавьте хотя бы одно минус-слово.";
-  if (words.length > 500) return "В одном наборе может быть не больше 500 минус-слов.";
+  if (words.length > semanticNegativeKeywordWordLimit) {
+    return `В одном наборе может быть не больше ${formatInteger(semanticNegativeKeywordWordLimit)} минус-слов.`;
+  }
   if (words.some((word) => word.length > 160)) return "Одно минус-слово не может быть длиннее 160 символов.";
   if (ignorePunctuation && words.some((word) => !/[\p{L}\p{N}]/u.test(word))) {
     return "При игнорировании знаков каждая строка должна содержать хотя бы одну букву или цифру.";
   }
-  if (scopeKind === "GROUP" && !activeGroup) return "Выберите папку для проверки.";
+  if (scopeKind === "GROUP" && groupIds.length === 0) return "Выберите хотя бы одну папку для проверки.";
+  if (scopeKind === "GROUP" && groupIds.length > semanticNegativeKeywordGroupScopeLimit) {
+    return `За один раз можно выбрать не больше ${formatInteger(semanticNegativeKeywordGroupScopeLimit)} папок.`;
+  }
   if (scopeKind === "SELECTION" && selections.length === 0) return "Выберите хотя бы один запрос.";
   return "Проверьте параметры минус-слов.";
+}
+
+function sameStringSet(
+  left: ReadonlySet<string>,
+  right: ReadonlySet<string>
+): boolean {
+  return left.size === right.size && [...left].every((value) => right.has(value));
 }
 
 function negativeKeywordError(error: unknown): string {

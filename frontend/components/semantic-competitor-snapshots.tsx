@@ -19,6 +19,7 @@ export function SemanticCompetitorSnapshots({
   emptyText = "После следующего поддерживаемого съёма здесь появятся позиции, URL и доступные мета-данные результатов.",
   emptyTitle = "SERP для этого запроса ещё не сохранён",
   heading = "Топ конкурентов",
+  presenceKeyPrefix,
   projectDomain,
   showEmpty = true,
   snapshots
@@ -26,6 +27,7 @@ export function SemanticCompetitorSnapshots({
   emptyText?: string;
   emptyTitle?: string;
   heading?: string;
+  presenceKeyPrefix?: string;
   projectDomain: string;
   showEmpty?: boolean;
   snapshots: readonly CompetitorSnapshot[];
@@ -43,6 +45,10 @@ export function SemanticCompetitorSnapshots({
         return (
           <section
             className="semantic-competitor-snapshot"
+            data-presence-cursor-anchor={presenceKeyPrefix ? "true" : undefined}
+            data-presence-key={presenceKeyPrefix
+              ? `${presenceKeyPrefix}:${snapshot.snapshotId}`
+              : undefined}
             key={snapshot.snapshotId}
           >
             <header>
@@ -115,7 +121,13 @@ export function SemanticCompetitorSnapshots({
       })}
 
       {showEmpty && snapshots.length === 0 && (
-        <section className="semantic-competitor-snapshot">
+        <section
+          className="semantic-competitor-snapshot"
+          data-presence-cursor-anchor={presenceKeyPrefix ? "true" : undefined}
+          data-presence-key={presenceKeyPrefix
+            ? `${presenceKeyPrefix}:empty`
+            : undefined}
+        >
           <h3>{heading}</h3>
           <div className="semantic-inspector-empty">
             <strong>{emptyTitle}</strong>

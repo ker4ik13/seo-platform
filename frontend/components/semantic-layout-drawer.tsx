@@ -89,7 +89,12 @@ export function SemanticLayoutDrawer({
   const queryIndicators = semanticQueryIndicatorsFor(config);
 
   return (
-    <aside aria-label="Колонки и представления" className="semantic-layout-drawer">
+    <aside
+      aria-label="Колонки и представления"
+      className="semantic-layout-drawer"
+      data-presence-cursor-anchor="true"
+      data-presence-key="semantic-layout-drawer"
+    >
       <header>
         <div><span>Таблица</span><h2>Колонки и представления</h2></div>
         <button aria-label="Закрыть настройки таблицы" onClick={onClose} type="button">×</button>

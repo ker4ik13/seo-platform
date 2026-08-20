@@ -14,9 +14,13 @@ import type {
   SemanticClusterPageBulkPreview,
   SemanticClusterPageBulkPreviewChange,
   SemanticClusterPageBulkResult,
+  SemanticClusterMethod,
   SemanticClusterPageSource
 } from "@seo-platform/contracts";
-import { semanticClusterPageSources } from "@seo-platform/contracts";
+import {
+  semanticClusterMethods,
+  semanticClusterPageSources
+} from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import {
@@ -1183,7 +1187,7 @@ function clusterItem(
   row: ClusterRow,
   stats: KeywordPageStats = emptyKeywordPageStats()
 ): SemanticCluster {
-  if (row.method !== "MANUAL") {
+  if (!semanticClusterMethods.includes(row.method as SemanticClusterMethod)) {
     throw new HttpException(
       { code: "INVALID_UPSTREAM_RESPONSE", message: "Unsupported cluster method" },
       HttpStatus.BAD_GATEWAY
@@ -1213,7 +1217,7 @@ function clusterItem(
   return {
     id: row.id,
     name: row.name,
-    method: row.method,
+    method: row.method as SemanticClusterMethod,
     keywordCount: stats.keywordCount,
     isLocked: row.isLocked,
     excludeFromReclustering: row.excludeFromReclustering,
@@ -1275,7 +1279,7 @@ function emptyKeywordPageStats(): KeywordPageStats {
 }
 
 function clusterVersionState(row: ClusterRow): SemanticClusterVersionState {
-  if (row.method !== "MANUAL") {
+  if (!semanticClusterMethods.includes(row.method as SemanticClusterMethod)) {
     throw new HttpException(
       { code: "INVALID_CLUSTER_STATE", message: "Unsupported cluster method" },
       HttpStatus.INTERNAL_SERVER_ERROR
@@ -1292,7 +1296,7 @@ function clusterVersionState(row: ClusterRow): SemanticClusterVersionState {
   }
   return {
     name: row.name,
-    method: "MANUAL",
+    method: row.method as SemanticClusterMethod,
     status: row.status === "DELETED" ? "DELETED" : "ACTIVE",
     primaryPageId: row.primaryPageId,
     pageMappingSource: row.pageMappingSource as SemanticClusterPageSource | null,

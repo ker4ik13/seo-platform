@@ -87,6 +87,19 @@ export const semanticKeywordDefaultPageSize = semanticKeywordPageSizes[0];
 export type SemanticKeywordPageSize =
   (typeof semanticKeywordPageSizes)[number];
 export const semanticKeywordMaxPageSize: SemanticKeywordPageSize = 1_000;
+export const semanticKeywordMultiSearchMaxTerms = 500;
+export const semanticKeywordMultiSearchModes = [
+  "EXACT",
+  "CONTAINS",
+  "ALL_WORDS"
+] as const;
+export type SemanticKeywordMultiSearchMode =
+  (typeof semanticKeywordMultiSearchModes)[number];
+
+export interface SemanticKeywordMultiSearch {
+  readonly terms: readonly string[];
+  readonly mode: SemanticKeywordMultiSearchMode;
+}
 
 export interface KeywordListQuery {
   readonly limit: number;
@@ -104,6 +117,13 @@ export interface KeywordListQuery {
   readonly priorityMin?: number;
   readonly priorityMax?: number;
   readonly sort?: SemanticKeywordSort;
+  /** Body-only multiline search. It is never serialized into a URL. */
+  readonly multiSearch?: SemanticKeywordMultiSearch;
+}
+
+export interface SemanticKeywordMultiSearchInput {
+  readonly query: Omit<KeywordListQuery, "multiSearch">;
+  readonly search: SemanticKeywordMultiSearch;
 }
 
 export interface SemanticKeywordListItem {
@@ -393,6 +413,9 @@ export interface SemanticKeywordBulkSelection {
   readonly id: string;
   readonly version: number;
 }
+
+/** Synchronous write batch; clients split larger selections without losing the full selection. */
+export const semanticKeywordBulkCommandMaxItems = 200;
 
 export interface SemanticKeywordBulkPatch {
   readonly priority?: number;

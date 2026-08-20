@@ -23,6 +23,7 @@ import { JobNotificationModule } from "./job-notifications/job-notification.modu
 import { OperationActivityModule } from "./operation-activity/operation-activity.module.js";
 import { SemanticExportModule } from "./semantic-exports/semantic-export.module.js";
 import { AiAnswerCollectionModule } from "./ai-answer-collections/ai-answer-collection.module.js";
+import { ClusteringRunModule } from "./clustering-runs/clustering-run.module.js";
 
 @Module({
   imports: [
@@ -49,7 +50,8 @@ import { AiAnswerCollectionModule } from "./ai-answer-collections/ai-answer-coll
     JobNotificationModule,
     OperationActivityModule,
     SemanticExportModule,
-    AiAnswerCollectionModule
+    AiAnswerCollectionModule,
+    ClusteringRunModule
   ]
 })
 export class AppModule {}

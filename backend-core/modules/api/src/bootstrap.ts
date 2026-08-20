@@ -12,6 +12,7 @@ import {
   TRUSTED_PROXY_HOPS
 } from "./common/http-response-policy.js";
 import { loadAppConfig } from "./config/app-config.js";
+import { installClusteringRunBodyLimit } from "./semantics/clustering-run-body-limit.js";
 import { installKeywordBulkBodyLimit } from "./semantics/keyword-bulk-body-limit.js";
 
 export async function createPlatformApiApplication(
@@ -23,6 +24,7 @@ export async function createPlatformApiApplication(
     trustProxy: TRUSTED_PROXY_HOPS,
     requestIdHeader: "x-request-id"
   });
+  installClusteringRunBodyLimit(adapter.getInstance());
   installKeywordBulkBodyLimit(adapter.getInstance());
   const app = await NestFactory.create<NestFastifyApplication>(
     rootModule,

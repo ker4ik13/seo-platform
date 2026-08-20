@@ -172,6 +172,7 @@ export function SemanticGroupDialog({
     <SemanticModal
       description={groupDialogDescription(state)}
       onClose={saving ? () => undefined : onClose}
+      presenceKey={`semantic-modal:group:${state.mode}`}
       size="small"
       title={title}
     >

@@ -124,7 +124,11 @@ import type {
   InternalCreateAiAnswerCollectionInput,
   InternalCancelAiAnswerCollectionInput,
   AiAnswerCollectionSummary,
-  InternalAiAnswerOperationScope
+  InternalAiAnswerOperationScope,
+  CreateClusteringRunInput,
+  InternalCreateClusteringRunInput,
+  InternalCancelClusteringRunInput,
+  ClusteringRunSummary
 } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
@@ -158,6 +162,7 @@ import {
   scopedAiAnswerCollection,
   scopedAiAnswerOperationScope
 } from "./ai-answer-collection-response.js";
+import { scopedClusteringRun } from "./clustering-run-response.js";
 
 interface InternalContext {
   readonly tenant: TenantAuthorization;
@@ -199,6 +204,7 @@ const MAX_PROJECT_CREDENTIAL_OPTIONS = 500;
  * misconfigured dependency from making Platform API buffer unbounded JSON.
  */
 const MAX_JOBS_RESPONSE_BYTES = 2 * 1024 * 1024;
+const CLUSTERING_RUN_CREATE_TIMEOUT_MS = 120_000;
 const ADMIN_OPERATION_STATUSES = new Set<string>(adminOperationStatuses);
 
 @Injectable()
@@ -336,6 +342,26 @@ export class JobsClient {
     ));
   }
 
+  public async listClusteringRuns(
+    context: InternalContext
+  ): Promise<readonly ClusteringRunSummary[]> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      clusteringRunPath(context.tenant.workspaceId, projectId),
+      context
+    );
+    const input = exactRecord(value, ["runs"]);
+    if (!Array.isArray(input.runs) || input.runs.length > 25) {
+      throw invalidJobsResponse();
+    }
+    return input.runs.map((run) => scopedClusteringRun(
+      run,
+      context.tenant.workspaceId,
+      projectId
+    ));
+  }
+
   public async listProjectOperationActivity(
     context: InternalContext
   ): Promise<ReadonlyMap<string, number>> {
@@ -447,6 +473,66 @@ export class JobsClient {
       idempotencyKey
     );
     return scopedAiAnswerCollection(value, context.tenant.workspaceId, projectId);
+  }
+
+  public async createClusteringRun(
+    context: InternalContext,
+    input: CreateClusteringRunInput,
+    idempotencyKey: string,
+    jobCapacity: InternalCreateClusteringRunInput["jobCapacity"]
+  ): Promise<ClusteringRunSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalCreateClusteringRunInput = {
+      ...input,
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId,
+      idempotencyKey,
+      correlationId: context.requestId,
+      jobCapacity
+    };
+    const value = await this.request<unknown>(
+      "POST",
+      clusteringRunPath(context.tenant.workspaceId, projectId),
+      context,
+      body,
+      "shared",
+      idempotencyKey,
+      CLUSTERING_RUN_CREATE_TIMEOUT_MS
+    );
+    return scopedClusteringRun(value, context.tenant.workspaceId, projectId);
+  }
+
+  public async getClusteringRun(
+    context: InternalContext,
+    jobId: string
+  ): Promise<ClusteringRunSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.request<unknown>(
+      "GET",
+      `${clusteringRunPath(context.tenant.workspaceId, projectId)}/${encodeURIComponent(jobId)}`,
+      context
+    );
+    return scopedClusteringRun(value, context.tenant.workspaceId, projectId, jobId);
+  }
+
+  public async cancelClusteringRun(
+    context: InternalContext,
+    jobId: string
+  ): Promise<ClusteringRunSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalCancelClusteringRunInput = {
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId
+    };
+    const value = await this.request<unknown>(
+      "POST",
+      `${clusteringRunPath(context.tenant.workspaceId, projectId)}/${encodeURIComponent(jobId)}/cancel`,
+      context,
+      body
+    );
+    return scopedClusteringRun(value, context.tenant.workspaceId, projectId, jobId);
   }
 
   public async getAiAnswerCollection(
@@ -1796,7 +1882,8 @@ export class JobsClient {
     context: InternalContext,
     body?: unknown,
     authentication: "shared" | "integration-credential" = "shared",
-    idempotencyKey?: string
+    idempotencyKey?: string,
+    timeoutMs?: number
   ): Promise<Data> {
     const token =
       authentication === "integration-credential"
@@ -1828,9 +1915,9 @@ export class JobsClient {
           redirect: "error",
           ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
           signal: AbortSignal.timeout(
-            method === "GET"
+            timeoutMs ?? (method === "GET"
               ? this.config.dependencyTimeoutMs
-              : this.config.internalCommandTimeoutMs
+              : this.config.internalCommandTimeoutMs)
           )
         }
       );
@@ -2206,6 +2293,15 @@ function aiAnswerCollectionPath(
   return `/internal/v1/workspaces/${encodeURIComponent(
     workspaceId
   )}/projects/${encodeURIComponent(projectId)}/ai-answer-collections`;
+}
+
+function clusteringRunPath(
+  workspaceId: string,
+  projectId: string
+): string {
+  return `/internal/v1/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/projects/${encodeURIComponent(projectId)}/clustering-runs`;
 }
 
 function technicalCrawlResponse(

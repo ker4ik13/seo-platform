@@ -394,7 +394,12 @@ function keywordScopeWhere(
     ...(scope.kind === "GROUP"
       ? {
           memberships: {
-            some: { projectId, groupId: scope.groupId! }
+            some: {
+              projectId,
+              groupId: {
+                in: [...(scope.groupIds ?? (scope.groupId ? [scope.groupId] : []))]
+              }
+            }
           }
         }
       : scope.kind === "SELECTION"

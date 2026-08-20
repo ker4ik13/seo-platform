@@ -6,6 +6,7 @@ import {
 } from "@nestjs/common";
 import type {
   SemanticCapacityEntitlement,
+  SemanticClusterMethod,
   SemanticClusterPageSource,
   SemanticHistoryEntityState,
   SemanticHistoryField,
@@ -17,7 +18,10 @@ import type {
   SemanticVersionUndoPreview,
   SemanticVersionUndoResult
 } from "@seo-platform/contracts";
-import { semanticClusterPageSources } from "@seo-platform/contracts";
+import {
+  semanticClusterMethods,
+  semanticClusterPageSources
+} from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import type {
   SemanticEntityChange,
@@ -57,7 +61,7 @@ export interface SemanticKeywordChange {
 
 export interface SemanticClusterVersionState {
   readonly name: string;
-  readonly method: "MANUAL";
+  readonly method: SemanticClusterMethod;
   readonly status: "ACTIVE" | "DELETED";
   readonly primaryPageId: string | null;
   readonly pageMappingSource: SemanticClusterPageSource | null;
@@ -1473,7 +1477,8 @@ function requiredClusterState(
     typeof state.name !== "string" ||
     state.name.length < 1 ||
     state.name.length > 255 ||
-    state.method !== "MANUAL" ||
+    typeof state.method !== "string" ||
+    !semanticClusterMethods.includes(state.method as SemanticClusterMethod) ||
     !["ACTIVE", "DELETED"].includes(String(state.status)) ||
     !nullableUuid(state.primaryPageId) ||
     (state.pageMappingSource !== null &&
@@ -1502,7 +1507,7 @@ function requiredClusterState(
   }
   return {
     name: state.name,
-    method: "MANUAL",
+    method: state.method as SemanticClusterMethod,
     status: state.status as "ACTIVE" | "DELETED",
     primaryPageId: state.primaryPageId as string | null,
     pageMappingSource: state.pageMappingSource as SemanticClusterPageSource | null,

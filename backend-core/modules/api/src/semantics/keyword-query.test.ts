@@ -3,6 +3,7 @@ import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
 import {
   keywordListQuery,
+  keywordMultiSearchInput,
   keywordTagOptionsQuery
 } from "./keyword-query.js";
 
@@ -65,6 +66,61 @@ test("accepts a multigroup union with more than fifty folders", () => {
   assert.deepEqual(
     keywordListQuery({ groupIds: groupIds.join(",") }).groupIds,
     groupIds
+  );
+});
+
+test("parses a bounded multiline keyword search", () => {
+  assert.deepEqual(
+    keywordMultiSearchInput({
+      query: {
+        limit: 500,
+        groupIds: [
+          "01900000-0000-7000-8000-000000000012",
+          "01900000-0000-7000-8000-000000000011"
+        ],
+        sort: "TEXT_ASC"
+      },
+      search: {
+        terms: ["  купить   холодильник ", "Ремонт холодильника"],
+        mode: "ALL_WORDS"
+      }
+    }),
+    {
+      limit: 500,
+      groupIds: [
+        "01900000-0000-7000-8000-000000000011",
+        "01900000-0000-7000-8000-000000000012"
+      ],
+      sort: "TEXT_ASC",
+      multiSearch: {
+        terms: ["купить холодильник", "Ремонт холодильника"],
+        mode: "ALL_WORDS"
+      }
+    }
+  );
+});
+
+test("rejects malformed multiline keyword searches", () => {
+  assert.throws(
+    () => keywordMultiSearchInput({
+      query: {},
+      search: { terms: ["SEO", "seo"], mode: "EXACT" }
+    }),
+    DomainError
+  );
+  assert.throws(
+    () => keywordMultiSearchInput({
+      query: {},
+      search: { terms: ["seo"], mode: "REGEXP" }
+    }),
+    DomainError
+  );
+  assert.throws(
+    () => keywordMultiSearchInput({
+      query: {},
+      search: { terms: ["seo"], mode: "EXACT", unsupported: true }
+    }),
+    DomainError
   );
 });
 

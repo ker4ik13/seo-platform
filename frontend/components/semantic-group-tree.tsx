@@ -1,11 +1,24 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type DragEvent, type MouseEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+  type MouseEvent
+} from "react";
 import {
   semanticGroupDropPlacement,
   type SemanticGroupDropPlacement
 } from "../lib/semantic-group-drag";
 import { semanticGroupColors } from "../lib/semantic-group-colors";
+import {
+  semanticAllRegularGroupIds,
+  semanticGroupRangeSelection,
+  semanticVisiblePresenceGroupId
+} from "../lib/semantic-group-selection";
 import { ContextMenu, type ContextMenuItem } from "./context-menu";
 import { Icon } from "./icon";
 
@@ -101,6 +114,7 @@ export function SemanticGroupTree({
     group: SemanticGroupTreeItem;
   }>>();
   const hadActiveMultiGroupRef = useRef(false);
+  const selectionAnchorIdRef = useRef<string | undefined>(undefined);
   const activeGroupIdSet = useMemo(
     () => new Set(activeGroupIds),
     [activeGroupIds]
@@ -156,19 +170,22 @@ export function SemanticGroupTree({
   }, [groups, search]);
   const remotePresenceByGroupId = useMemo(() => {
     const result = new Map<string, SemanticGroupRemotePresence[]>();
+    const visibleGroupIds = flatGroups.map(({ group }) => group.id);
     for (const participant of remotePresence) {
-      const groupIds =
-        participant.groupIds.length > 0
-          ? participant.groupIds
-          : [ROOT_PRESENCE_KEY];
-      for (const groupId of groupIds) {
-        const current = result.get(groupId) ?? [];
-        current.push(participant);
-        result.set(groupId, current);
-      }
+      const groupId = participant.groupIds.length > 0
+        ? semanticVisiblePresenceGroupId(
+            participant.groupIds,
+            groups,
+            visibleGroupIds
+          )
+        : ROOT_PRESENCE_KEY;
+      if (!groupId) continue;
+      const current = result.get(groupId) ?? [];
+      current.push(participant);
+      result.set(groupId, current);
     }
     return result;
-  }, [remotePresence]);
+  }, [flatGroups, groups, remotePresence]);
   useEffect(() => {
     const clearDragTarget = () => setDragTarget(undefined);
     document.addEventListener("dragend", clearDragTarget);
@@ -191,7 +208,22 @@ export function SemanticGroupTree({
     event: MouseEvent,
     group: SemanticGroupTreeItem
   ): void {
-    if (event.metaKey || event.ctrlKey || event.shiftKey) {
+    if (event.shiftKey) {
+      const visibleIds = flatGroups.map(({ group: item }) => item.id);
+      const anchorId =
+        selectionAnchorIdRef.current ?? selectableActiveGroupId ?? group.id;
+      const range = semanticGroupRangeSelection(
+        visibleIds,
+        anchorId,
+        group.id
+      );
+      if (range) {
+        setSelectedIds(range);
+        return;
+      }
+    }
+    if (event.metaKey || event.ctrlKey) {
+      selectionAnchorIdRef.current = group.id;
       setSelectedIds((current) => {
         const next = new Set(current);
         if (selectableActiveGroupId) next.add(selectableActiveGroupId);
@@ -201,8 +233,24 @@ export function SemanticGroupTree({
       });
       return;
     }
+    selectionAnchorIdRef.current = group.id;
     setSelectedIds(new Set());
     onSelect(group.id);
+  }
+
+  function handleTreeKeyDown(event: KeyboardEvent<HTMLElement>): void {
+    if (
+      !(event.metaKey || event.ctrlKey) ||
+      event.key.toLocaleLowerCase("en") !== "a" ||
+      event.target instanceof HTMLInputElement
+    ) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    const allGroupIds = semanticAllRegularGroupIds(groups);
+    setSelectedIds(new Set(allGroupIds));
+    selectionAnchorIdRef.current ??= selectableActiveGroupId ?? allGroupIds[0];
   }
 
   function openContextMenu(
@@ -338,6 +386,7 @@ export function SemanticGroupTree({
     return (
       <div
         className={`semantic-group-tree-row${depth === 0 && !group.systemKind ? " top-level" : ""}${activeGroupId === group.id || activeGroupIdSet.has(group.id) ? " active" : ""}${selected ? " selected" : ""}${group.systemKind ? ` system ${group.systemKind.toLowerCase()}` : ""}${primaryPresence ? ` remote-presence presence-color-${primaryPresence.colorIndex}` : ""}${dragTarget && "group" in dragTarget && dragTarget.group.id === group.id ? ` drag-${dragTarget.placement}` : ""}`}
+        data-presence-cursor-anchor="true"
         data-presence-key={`semantic-group:${group.id}`}
         draggable={!group.systemKind}
         key={group.id}
@@ -443,7 +492,13 @@ export function SemanticGroupTree({
   }
 
   return (
-    <nav aria-label="Группы семантического ядра" className="semantic-group-tree">
+    <nav
+      aria-label="Группы семантического ядра"
+      className="semantic-group-tree"
+      data-presence-cursor-anchor="true"
+      data-presence-key="semantic-groups"
+      onKeyDown={handleTreeKeyDown}
+    >
       <header>
         <strong>Группы</strong>
         <div>
@@ -486,8 +541,10 @@ export function SemanticGroupTree({
       <button
         aria-current={!activeGroupId ? "true" : undefined}
         className={`semantic-group-root${remotePresenceByGroupId.has(ROOT_PRESENCE_KEY) ? ` remote-presence presence-color-${remotePresenceByGroupId.get(ROOT_PRESENCE_KEY)?.[0]?.colorIndex ?? 0}` : ""}${dragTarget?.placement === "root" ? " drag-target" : ""}`}
+        data-presence-cursor-anchor="true"
         data-presence-key="semantic-group:root"
         onClick={() => {
+          selectionAnchorIdRef.current = undefined;
           setSelectedIds(new Set());
           onSelect();
         }}

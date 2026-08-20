@@ -19,6 +19,16 @@ const statusLabels: Readonly<Record<string, string>> = {
 };
 
 const stageLabels: Readonly<Record<string, string>> = {
+  clustering: "Подготовка кластеризации",
+  submitting: "Отправка в Arsenkin",
+  provider_poll: "Ожидает результат Arsenkin",
+  provider_capacity: "Ожидает свободный слот Arsenkin",
+  proposal_ready: "Черновик готов к применению",
+  submit_ambiguous: "Нужна сверка задачи у провайдера",
+  credential_required: "Нужно проверить подключение",
+  retry_scheduled: "Запланирован повтор",
+  failed: "Кластеризация завершилась ошибкой",
+  cancelled: "Кластеризация отменена",
   waiting_provider: "Ожидает результат провайдера",
   waiting_provider_capacity: "Ожидает свободный слот провайдера",
   finished: "Завершено"

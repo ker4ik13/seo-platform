@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   AiAnswerCollectionSummary,
+  ClusteringRunSummary,
   FrequencyCollectionSummary,
   RankJobSummary,
   SemanticExportCollection,
@@ -32,12 +33,14 @@ type OperationTab = "ACTIVE" | "COMPLETED" | "ERROR";
 
 export function SemanticOperationsDrawer({
   onClose,
+  onClusteringApplied,
   onFrequencySettled,
   projectId,
   refreshToken = 0,
   watchedFrequencyId
 }: Readonly<{
   onClose: () => void;
+  onClusteringApplied?: () => void;
   onFrequencySettled?: () => void;
   projectId: string;
   refreshToken?: number;
@@ -46,6 +49,7 @@ export function SemanticOperationsDrawer({
   const [frequencies, setFrequencies] = useState<readonly FrequencyCollectionSummary[]>([]);
   const [ranks, setRanks] = useState<readonly RankJobSummary[]>([]);
   const [aiAnswers, setAiAnswers] = useState<readonly AiAnswerCollectionSummary[]>([]);
+  const [clusteringRuns, setClusteringRuns] = useState<readonly ClusteringRunSummary[]>([]);
   const [semanticExports, setSemanticExports] = useState<readonly SemanticExportJobSummary[]>([]);
   const [tab, setTab] = useState<OperationTab>("ACTIVE");
   const [loading, setLoading] = useState(true);
@@ -66,7 +70,7 @@ export function SemanticOperationsDrawer({
     if (requestInFlight.current) return;
     requestInFlight.current = true;
     try {
-      const [frequencyResult, rankResult, aiAnswerResult, exportResult] = await Promise.allSettled([
+      const [frequencyResult, rankResult, aiAnswerResult, clusteringResult, exportResult] = await Promise.allSettled([
         browserApiRequest<{ readonly collections: readonly FrequencyCollectionSummary[] }>(
           `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections`,
           signal ? { signal } : {}
@@ -77,6 +81,10 @@ export function SemanticOperationsDrawer({
         ),
         browserApiRequest<{ readonly collections: readonly AiAnswerCollectionSummary[] }>(
           `/app/api/projects/${encodeURIComponent(projectId)}/ai-answer-collections`,
+          signal ? { signal } : {}
+        ),
+        browserApiRequest<{ readonly runs: readonly ClusteringRunSummary[] }>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/clustering-runs`,
           signal ? { signal } : {}
         ),
         browserApiRequest<SemanticExportCollection>(
@@ -105,10 +113,13 @@ export function SemanticOperationsDrawer({
       if (aiAnswerResult.status === "fulfilled") {
         setAiAnswers(aiAnswerResult.value.collections);
       }
+      if (clusteringResult.status === "fulfilled") {
+        setClusteringRuns(clusteringResult.value.runs);
+      }
       if (exportResult.status === "fulfilled") {
         setSemanticExports(exportResult.value.exports);
       }
-      const failures = [frequencyResult, rankResult, aiAnswerResult, exportResult]
+      const failures = [frequencyResult, rankResult, aiAnswerResult, clusteringResult, exportResult]
         .filter((result): result is PromiseRejectedResult => result.status === "rejected")
         .map((result) => operationError(result.reason));
       setError(failures.length > 0 ? [...new Set(failures)].join(" · ") : undefined);
@@ -142,12 +153,13 @@ export function SemanticOperationsDrawer({
       ...frequencies.map(frequencyOperation),
       ...ranks.map(rankOperation),
       ...aiAnswers.map(aiAnswerOperation),
+      ...clusteringRuns.map(clusteringOperation),
       ...semanticExports.map(exportOperation)
     ];
     return values.sort((left, right) =>
       right.createdAt.localeCompare(left.createdAt)
     );
-  }, [aiAnswers, frequencies, ranks, semanticExports]);
+  }, [aiAnswers, clusteringRuns, frequencies, ranks, semanticExports]);
 
   const operations = useMemo(
     () => allOperations.filter((operation) => operation.tab === tab),
@@ -199,6 +211,11 @@ export function SemanticOperationsDrawer({
           `/app/api/projects/${encodeURIComponent(projectId)}/ai-answer-collections/${encodeURIComponent(current.id)}/cancel`,
           { method: "POST", body: {} }
         );
+      } else if (current.kind === "CLUSTERING") {
+        await browserApiRequest(
+          `/app/api/projects/${encodeURIComponent(projectId)}/clustering-runs/${encodeURIComponent(current.id)}/cancel`,
+          { method: "POST", body: {} }
+        );
       } else {
         await browserApiRequest(
           `/app/api/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(current.id)}/cancel`,
@@ -214,7 +231,7 @@ export function SemanticOperationsDrawer({
   }
 
   async function retry(operation: Operation): Promise<void> {
-    if (operation.kind === "EXPORT" || operation.kind === "AI_ANSWER") return;
+    if (operation.kind === "EXPORT" || operation.kind === "AI_ANSWER" || operation.kind === "CLUSTERING") return;
     setRetryingId(operation.id);
     setError(undefined);
     try {
@@ -244,7 +261,12 @@ export function SemanticOperationsDrawer({
 
   return (
     <>
-    <aside aria-label="Задачи и операции" className="semantic-operations-drawer">
+    <aside
+      aria-label="Задачи и операции"
+      className="semantic-operations-drawer"
+      data-presence-cursor-anchor="true"
+      data-presence-key="semantic-operations-drawer"
+    >
       <header>
         <div><h2>Задачи и операции</h2><span>Прогресс обновляется автоматически</span></div>
         <button aria-label="Закрыть операции" onClick={onClose} type="button">×</button>
@@ -301,7 +323,7 @@ export function SemanticOperationsDrawer({
                   {cancellingId === operation.id ? "Останавливаем…" : "Остановить"}
                 </button>
               )}
-              {(operation.kind === "FREQUENCY" || operation.kind === "RANK" || operation.kind === "AI_ANSWER") && (
+              {(operation.kind === "FREQUENCY" || operation.kind === "RANK" || operation.kind === "AI_ANSWER" || operation.kind === "CLUSTERING") && (
                 <button
                   className="semantic-operation-open"
                   onClick={() => setSelectedOperation(operation)}
@@ -353,7 +375,8 @@ export function SemanticOperationsDrawer({
     {openedOperation && (
       openedOperation.kind === "FREQUENCY" ||
       openedOperation.kind === "RANK" ||
-      openedOperation.kind === "AI_ANSWER"
+      openedOperation.kind === "AI_ANSWER" ||
+      openedOperation.kind === "CLUSTERING"
     ) && (
       <OperationResultModal
         actions={openedOperation.cancellable ? (
@@ -373,7 +396,10 @@ export function SemanticOperationsDrawer({
           ? "frequency"
           : openedOperation.kind === "AI_ANSWER"
             ? "ai-answer"
+            : openedOperation.kind === "CLUSTERING"
+              ? "clustering"
             : "rank"}
+        {...(onClusteringApplied ? { onClusteringApplied } : {})}
         onClose={() => setSelectedOperation(undefined)}
         operationId={openedOperation.id}
         projectId={projectId}
@@ -381,6 +407,8 @@ export function SemanticOperationsDrawer({
           ? "Сбор частотности"
           : openedOperation.kind === "AI_ANSWER"
             ? "Сбор ИИ-ответов"
+            : openedOperation.kind === "CLUSTERING"
+              ? "Кластеризация запросов"
             : "Проверка позиций"}
       />
     )}
@@ -401,7 +429,7 @@ export function SemanticOperationsDrawer({
 
 interface Operation {
   readonly id: string;
-  readonly kind: "FREQUENCY" | "RANK" | "AI_ANSWER" | "EXPORT";
+  readonly kind: "FREQUENCY" | "RANK" | "AI_ANSWER" | "CLUSTERING" | "EXPORT";
   readonly provider?: "XMLSTOCK" | "ARSENKIN";
   readonly title: string;
   readonly description: string;
@@ -503,6 +531,46 @@ function aiAnswerOperation(value: AiAnswerCollectionSummary): Operation {
     percent: value.selectedKeywords > 0
       ? Math.round(done / value.selectedKeywords * 100)
       : 0,
+    tab: operationTab(value.status),
+    cancellable: [
+      "QUEUED",
+      "RUNNING",
+      "WAITING_RATE_LIMIT",
+      "RETRY_SCHEDULED",
+      "FAILED_RETRYABLE"
+    ].includes(value.status),
+    retryable: false,
+    retryLabel: "",
+    downloadable: false,
+    version: value.version,
+    ...(value.routingScope
+      ? {
+          routeLabel: `${connectorRoutingScopeLabel(value.routingScope)}${hasConnectorFallback(value.connectorAttempts) ? " · fallback выполнен" : ""}`
+        }
+      : {}),
+    ...(value.failureCode ? { errorCode: value.failureCode } : {}),
+    createdAt: value.createdAt
+  };
+}
+
+function clusteringOperation(value: ClusteringRunSummary): Operation {
+  const done = value.completedKeywords + value.failedKeywords;
+  const engine = value.searchEngine === "YANDEX" ? "Яндекс" : "Google";
+  return {
+    id: value.id,
+    kind: "CLUSTERING",
+    provider: "ARSENKIN",
+    title: `Кластеризация · ${engine}`,
+    description: `Arsenkin · ${engine} · ТОП-${value.depth} · ${value.method === "SOFT" ? "мягкая" : "жёсткая"}`,
+    statusLabel: operationStatusLabel(value.status, value.stage),
+    progressLabel: value.status === "COMPLETED" && value.clusterCount !== undefined
+      ? `${value.clusterCount} кластеров`
+      : `${done} из ${value.selectedKeywords}`,
+    percent: value.status === "COMPLETED"
+      ? 100
+      : value.selectedKeywords > 0
+        ? Math.round(done / value.selectedKeywords * 100)
+        : 0,
     tab: operationTab(value.status),
     cancellable: [
       "QUEUED",

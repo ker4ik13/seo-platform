@@ -1,0 +1,31 @@
+import type { FastifyInstance } from "fastify";
+
+export const CLUSTERING_RUN_BODY_LIMIT_BYTES = 32 * 1_024 * 1_024;
+
+interface MutableRouteOptions {
+  readonly method: string | readonly string[];
+  readonly url: string;
+  bodyLimit?: number;
+}
+
+export function applyClusteringRunBodyLimit(
+  options: MutableRouteOptions
+): void {
+  const methods = Array.isArray(options.method)
+    ? options.method
+    : [options.method];
+  if (
+    methods.some((method) => String(method).toUpperCase() === "POST") &&
+    /^\/internal\/v1\/workspaces\/[^/]+\/projects\/[^/]+\/clustering-runs\/?$/u.test(
+      options.url
+    )
+  ) {
+    options.bodyLimit = CLUSTERING_RUN_BODY_LIMIT_BYTES;
+  }
+}
+
+export function installClusteringRunBodyLimit(fastify: FastifyInstance): void {
+  fastify.addHook("onRoute", (options) => {
+    applyClusteringRunBodyLimit(options);
+  });
+}

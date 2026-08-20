@@ -13,6 +13,7 @@ import {
   realtimeProjectTicket,
   type PresenceJoinResult,
   type ProjectPresenceCursor,
+  type ProjectPresenceActivity,
   type ProjectPresenceLeftEvent,
   type ProjectPresenceMember,
   type ProjectPresenceParticipant,
@@ -52,13 +53,17 @@ interface ProjectPresenceContextValue {
   readonly currentUserId: string;
   readonly currentRoute: string;
   readonly currentView: ProjectPresenceViewContext | null;
+  readonly currentActivity: ProjectPresenceActivity | null;
   readonly connectionStatus: ProjectPresenceConnectionStatus;
   readonly participants: readonly ProjectPresenceParticipant[];
   readonly activeParticipants: readonly ActiveProjectParticipant[];
+  readonly showRemoteActivity: boolean;
+  readonly setShowRemoteActivity: (visible: boolean) => void;
   readonly publishSelection: (
     selection: ProjectPresenceSelection | null
   ) => void;
   readonly publishView: (view: ProjectPresenceViewContext | null) => void;
+  readonly publishActivity: (activity: ProjectPresenceActivity | null) => void;
 }
 
 const ProjectPresenceContext = createContext<ProjectPresenceContextValue | null>(
@@ -87,12 +92,16 @@ export function ProjectPresenceProvider({
   >(() => new Map());
   const [currentView, setCurrentView] =
     useState<ProjectPresenceViewContext | null>(null);
+  const [currentActivity, setCurrentActivity] =
+    useState<ProjectPresenceActivity | null>(null);
+  const [showRemoteActivity, setShowRemoteActivityState] = useState(true);
   const socketRef = useRef<PresenceSocket | undefined>(undefined);
   const joinedRef = useRef(false);
   const routeRef = useRef(normalizedAppRoute(pathname));
   const cursorRef = useRef<ProjectPresenceCursor | null>(null);
   const selectionRef = useRef<ProjectPresenceSelection | null>(null);
   const viewRef = useRef<ProjectPresenceViewContext | null>(null);
+  const activityRef = useRef<ProjectPresenceActivity | null>(null);
   const statusRef = useRef<ProjectPresenceUpdateInput["status"]>("ACTIVE");
   const editingRef = useRef(false);
   const sequenceRef = useRef(0);
@@ -123,8 +132,25 @@ export function ProjectPresenceProvider({
     selectionRef.current = null;
     viewRef.current = null;
     setCurrentView(null);
+    activityRef.current = null;
+    setCurrentActivity(null);
     sendRef.current();
   }, [pathname]);
+
+  useEffect(() => {
+    if (!projectId) {
+      setShowRemoteActivityState(true);
+      return;
+    }
+    try {
+      setShowRemoteActivityState(
+        window.localStorage.getItem(presenceVisibilityKey(projectId)) !==
+          "hidden"
+      );
+    } catch {
+      setShowRemoteActivityState(true);
+    }
+  }, [projectId]);
 
   useEffect(() => {
     if (!projectId) {
@@ -141,6 +167,10 @@ export function ProjectPresenceProvider({
     let renewalTimer: ReturnType<typeof setTimeout> | undefined;
     let joinTimer: ReturnType<typeof setTimeout> | undefined;
     let currentSocket: PresenceSocket | undefined;
+    const pendingLeaves = new Map<
+      string,
+      ReturnType<typeof setTimeout>
+    >();
 
     const clearConnectionTimers = () => {
       if (renewalTimer) clearTimeout(renewalTimer);
@@ -166,7 +196,6 @@ export function ProjectPresenceProvider({
     const scheduleReconnect = (delay?: number) => {
       if (cancelled || retryTimer) return;
       closeSocket();
-      setParticipants([]);
       setConnectionStatus("DEGRADED");
       const retryDelay =
         delay ?? Math.min(15_000, 750 * 2 ** Math.min(retryAttempt, 4));
@@ -257,12 +286,20 @@ export function ProjectPresenceProvider({
       socket.on(realtimeCollaborationEvents.presenceLeft, (value) => {
         const left = safeLeftEvent(value);
         if (!left) return;
-        setParticipants((current) =>
-          current.filter(
-            (participant) =>
-              participant.connectionId !== left.connectionId ||
-              participant.userId !== left.userId
-          )
+        const existingTimer = pendingLeaves.get(left.connectionId);
+        if (existingTimer) clearTimeout(existingTimer);
+        pendingLeaves.set(
+          left.connectionId,
+          setTimeout(() => {
+            pendingLeaves.delete(left.connectionId);
+            setParticipants((current) =>
+              current.filter(
+                (participant) =>
+                  participant.connectionId !== left.connectionId ||
+                  participant.userId !== left.userId
+              )
+            );
+          }, 2_500)
         );
       });
       socket.once(realtimeCollaborationEvents.ready, (value) => {
@@ -304,6 +341,7 @@ export function ProjectPresenceProvider({
               cursor: cursorRef.current,
               selection: selectionRef.current,
               view: viewRef.current,
+              activity: activityRef.current,
               editing: editingRef.current,
               sequence: sequenceRef.current
             };
@@ -331,6 +369,8 @@ export function ProjectPresenceProvider({
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
       retryTimer = undefined;
+      for (const timer of pendingLeaves.values()) clearTimeout(timer);
+      pendingLeaves.clear();
       closeSocket();
       setParticipants([]);
     };
@@ -386,12 +426,7 @@ export function ProjectPresenceProvider({
       cursorRef.current = null;
       sendRef.current();
     };
-    const handleScroll = () => {
-      markActive();
-      if (cursorRef.current === null) return;
-      cursorRef.current = null;
-      sendRef.current();
-    };
+    const handleScroll = () => markActive();
     const updateEditing = () => {
       const next = isEditableElement(document.activeElement);
       if (editingRef.current === next) return;
@@ -495,6 +530,32 @@ export function ProjectPresenceProvider({
     []
   );
 
+  const publishActivity = useCallback(
+    (activity: ProjectPresenceActivity | null) => {
+      if (activityRef.current === activity) return;
+      activityRef.current = activity;
+      setCurrentActivity(activity);
+      sendRef.current();
+    },
+    []
+  );
+
+  const setShowRemoteActivity = useCallback(
+    (visible: boolean) => {
+      setShowRemoteActivityState(visible);
+      if (!projectId) return;
+      try {
+        window.localStorage.setItem(
+          presenceVisibilityKey(projectId),
+          visible ? "visible" : "hidden"
+        );
+      } catch {
+        // A blocked storage API must not disable collaboration for the tab.
+      }
+    },
+    [projectId]
+  );
+
   const activeParticipants = useMemo(
     () => aggregateProjectParticipants(participants, members, user.id),
     [members, participants, user.id]
@@ -505,21 +566,29 @@ export function ProjectPresenceProvider({
       currentUserId: user.id,
       currentRoute: normalizedAppRoute(pathname),
       currentView,
+      currentActivity,
       connectionStatus,
       participants,
       activeParticipants,
+      showRemoteActivity,
+      setShowRemoteActivity,
       publishSelection,
-      publishView
+      publishView,
+      publishActivity
     }),
     [
       activeParticipants,
       connectionStatus,
+      currentActivity,
       currentView,
       participants,
       pathname,
       projectId,
       publishSelection,
+      publishActivity,
       publishView,
+      setShowRemoteActivity,
+      showRemoteActivity,
       user.id
     ]
   );
@@ -589,6 +658,7 @@ function updateLocalParticipant(
       existing.route === update.route &&
       existing.status === update.status &&
       existing.editing === update.editing &&
+      existing.activity === update.activity &&
       existing.selection === update.selection &&
       existing.view === update.view
     ) {
@@ -624,6 +694,10 @@ function browserClientInstanceId(): string {
   }
 }
 
+function presenceVisibilityKey(projectId: string): string {
+  return `seo-project-presence-visibility:${projectId}`;
+}
+
 function normalizedAppRoute(pathname: string): string {
   return /^\/app(?:\/[A-Za-z0-9_-]{1,80}){0,8}$/u.test(pathname) &&
     pathname.length <= 256
@@ -640,11 +714,11 @@ function pointerCursor(event: PointerEvent): ProjectPresenceCursor | null {
       : null;
   const targetKey = anchor?.dataset.presenceKey;
   if (!targetKey || !PRESENCE_TARGET_KEY_PATTERN.test(targetKey)) {
-    return null;
+    return viewportCursor(event.clientX, event.clientY);
   }
   const rect = anchor.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) {
-    return null;
+    return viewportCursor(event.clientX, event.clientY);
   }
   return {
     x: unitCoordinate(event.clientX / Math.max(1, window.innerWidth)),
@@ -652,6 +726,16 @@ function pointerCursor(event: PointerEvent): ProjectPresenceCursor | null {
     targetKey,
     targetX: unitCoordinate((event.clientX - rect.left) / rect.width),
     targetY: unitCoordinate((event.clientY - rect.top) / rect.height)
+  };
+}
+
+function viewportCursor(clientX: number, clientY: number): ProjectPresenceCursor {
+  return {
+    x: unitCoordinate(clientX / Math.max(1, window.innerWidth)),
+    y: unitCoordinate(clientY / Math.max(1, window.innerHeight)),
+    targetKey: null,
+    targetX: null,
+    targetY: null
   };
 }
 

@@ -73,9 +73,9 @@ backup Dokploy запускает `pg_dump` внутри контейнера и
 | `frontend` | Next.js routes, UI, `/app`, `/admin`, browser/server BFF helpers |
 | `backend-core` | composition root и supervisor Core |
 | `backend-core/modules/api` | identity, workspace/project/RBAC, billing, audit, public API orchestration |
-| `backend-core/modules/seo` | semantics, project Markdown notes, pages, rank manifests/results/history, crawl snapshots |
+| `backend-core/modules/seo` | semantics, clustering proposals/apply, project Markdown notes, pages, rank manifests/results/history, crawl snapshots |
 | `backend-core/modules/realtime` | Socket.IO, session revoke, notifications и Web Push persistence |
-| `backend-execution` | durable jobs, queues, imports, vault, provider/rank/crawl/frequency workers |
+| `backend-execution` | durable jobs, queues, imports, vault, provider/rank/crawl/frequency/clustering workers |
 | `packages/contracts` | общие versioned HTTP/event/error contracts без бизнес-логики |
 | `packages/process-supervisor` | запуск child roles, signal forwarding и env allowlists |
 | `infrastructure` | Dokploy Compose, migrations, ACL/preflight, VPS runtime, monitoring/runbooks |
@@ -238,7 +238,10 @@ Project presence реализован в `backend-core/modules/realtime` пов�
 WebSocket-only Socket.IO namespace `/collaboration`. Browser получает
 одноразовый 30-секундный project ticket через защищённый Platform API,
 подключается только к server-authorized `project:{projectId}` и обновляет
-ограниченное состояние `route/status/cursor/selection/view/editing/sequence`.
+ограниченное состояние
+`route/status/cursor/selection/view/activity/editing/sequence`. `activity`
+содержит только enum-код открытого semantic workflow и не передаёт заголовок
+или содержимое модалки.
 Semantic `view` содержит только тип представления и bounded набор UUID активных
 папок; пустой набор обозначает корневое представление «Все запросы».
 Курсор отправляется не чаще одного раза в 80 ms, heartbeat — раз в 15 секунд,
@@ -252,18 +255,24 @@ bounded snapshot до 500 connections одного проекта. Presence не
 источником бизнес-данных и не попадает в audit.
 
 Frontend агрегирует несколько вкладок одного пользователя в одну аватарку в
-шапке, показывает reconnect/degraded state, скрывает просроченное состояние и
-рисует cursor overlay только на совпадающих route и semantic view. Для
-устойчивого положения на разных размерах экрана курсор использует безопасный
-row/cell `data-presence-key` и относительную позицию внутри элемента; fallback
-к координатам чужого viewport отсутствует. Невидимый, прокрученный за viewport
-или перекрытый локальной панелью anchor не отображается, а начало прокрутки и
-уход указателя в sidebar очищают cursor до следующего движения над строкой.
+шапке, исключает текущего и `AWAY`-пользователей, сохраняет user-stable React
+identity и короткий leave grace при плановом обновлении WebSocket lease.
+Детальная визуализация локально отключается кнопкой «Показывать курсоры»;
+аватарки при этом остаются. Cursor overlay рисуется только на совпадающих
+route и semantic view. Для устойчивого положения на разных размерах экрана
+курсор использует безопасный screen/sidebar/modal/row/cell
+`data-presence-key` и относительную позицию внутри элемента, а вне anchor —
+нормализованные viewport coordinates. Невидимый, прокрученный за viewport или
+перекрытый локальной панелью row/cell anchor не отображается; прокрутка больше
+не очищает последнее логическое положение cursor.
 Удалённое выделение задаётся CSS-классами самих строк/ячеек и поэтому
 прокручивается и обрезается таблицей без fixed overlay. Если участник открыл
-другую папку или union, дерево подсвечивает эти папки его стабильным цветом и
-показывает компактные participant dots, а его cursor/selection в текущей
-таблице скрываются. Таблица семантики публикует только UUID
+другую папку или union, дерево показывает ровно один presence-маркер: самую
+верхнюю видимую выбранную папку, а для свёрнутой ветки — ближайшего видимого
+предка. Cursor/selection в несовпадающем представлении скрываются. Открытый
+workflow подсвечивает
+соответствующую кнопку toolbar; focus/selection запроса выводит аватарку поверх
+номера строки. Таблица семантики публикует только UUID
 выбранных/подсвеченных строк и при наличии технический column ID:
 текст запроса, значение ячейки, hidden columns и DOM text в WebSocket payload не
 попадают. Profile enrichment и avatar bytes читаются отдельными
@@ -412,7 +421,8 @@ SEO Data. При недоступности SEO Data каталог остаёт
   независимыми очередями `rank-connector-runtime`,
   `frequency-collection-runtime`, `keyword-research-runtime` и
   `integration-credential-validation`, а также отдельным bounded runtime loop
-  для `AI_ANSWER_COLLECTION`;
+  для `AI_ANSWER_COLLECTION` и `CLUSTERING_RUN`; clustering использует тот же
+  быстрый dispatch queue, но отдельный durable Job/runtime;
 - `src/inspection-worker.main.ts` — опциональная malware inspection;
 - `src/auth-email-worker.main.ts` — опциональная transactional email delivery.
 
@@ -427,7 +437,7 @@ maintenance сохраняет собственный медленный инт�
 запускает три connector child process, совпадая с production default Compose.
 Arsenkin DB broker
 сохраняет общий bounded task capacity и lease fencing между всеми процессами.
-ИИ-съём использует собственный набор `SECURITY DEFINER` broker-функций для
+ИИ-съём и clustering используют собственные наборы `SECURITY DEFINER` broker-функций для
 claim/renew/submit/defer/fail/complete. Роль connector-а имеет `EXECUTE` только
 на эти exact routines и не получает прямой DML к Jobs-таблицам; batch
 проверяется по Job type, project/credential route, version, lease и точному
@@ -454,7 +464,7 @@ fencing и PostgreSQL claim остаются bounded safety границей; о
 | Данные | Модуль-владелец | Текущее хранилище |
 |---|---|---|
 | users (включая bounded account avatar до 512 KiB), sessions, workspaces (включая bounded workspace avatar до 512 KiB), projects и bounded project logos до 512 KiB, project transfer requests, RBAC, billing, audit, platform admin command receipts | Core API | `platform_db` |
-| semantics (включая keyword notes, saved views и presets минус-слов), project Markdown notes, pages, rankings, immutable normalized XMLStock/Arsenkin SERP results и Arsenkin AI-answer snapshots/sources, crawl/page-map projections | Core SEO | `seo_db` |
+| semantics (включая keyword notes, saved views, presets минус-слов и durable clustering proposals), project Markdown notes, pages, rankings, immutable normalized XMLStock/Arsenkin SERP results и Arsenkin AI-answer snapshots/sources, crawl/page-map projections | Core SEO | `seo_db` |
 | realtime subscriptions, deliveries, event inbox | Core Realtime | `realtime_db` + Redis |
 | jobs, schedules, uploads, credential vault, provider execution | Execution | `jobs_db` + Redis + S3 |
 
@@ -602,6 +612,83 @@ deployment, но отображением строки больше не упр�
 одной компактной строке только цифрой, `×` или `—`; обычный и ИИ-графики
 находятся в соответствующих раздельных блоках sidebar.
 
+### Поиск по списку запросов
+
+`frontend/components/semantic-multi-search-dialog.tsx` открывается отдельной
+иконкой слева от обычного поиска и принимает до 500 уникальных строк. Режимы
+`EXACT|CONTAINS|ALL_WORDS` выполняются в Core SEO через body-only
+`POST /keywords/search`: полный список не попадает в URL или query string
+логов, а текущие фильтры, сортировка и keyset cursor сохраняются. Из результата
+можно оставить серверный фильтр в таблице, выбрать все совпадения либо открыть
+стандартный перенос в папку. Общий
+`frontend/components/semantic-group-picker.tsx` переиспользует одно дерево
+папок в переносе запросов и review кластеризации.
+`frontend/components/unsaved-changes-confirmation.tsx` даёт общий modal guard
+для черновых изменений в review кластеризации, неявных дублях и минус-словах;
+крестик, Escape, клик по фону и кнопка отмены проходят через один сценарий.
+
+### Кластеризация запросов
+
+Действие семантики `Кластеризовать` разрешает versioned keyword scope вручную,
+из дерева папок или всего проекта и создаёт отдельный `CLUSTERING_RUN` в
+Execution. Параметры фиксируют Arsenkin credential route, поисковик, регион,
+soft/hard, число общих URL, глубину ТОП, главные страницы, стоп-домены,
+частотность и явное разрешение перекластеризации. Connector выполняет одну
+Arsenkin `clustering` task через `set/check/get`; четыре fenced broker-функции
+проверяют tenant/project/credential route, полный immutable набор items,
+job/lease version и persisted submit marker. Общий лимит пяти Arsenkin tasks
+считает rank, Wordstat, AI answer и clustering вместе.
+Connector `arsenkin-clustering@1.1.0` нормализует как табличные варианты
+ответа, так и фактическую вложенную проекцию
+`result.clustering.clustered|single`, где запросы являются ключами `words`;
+per-word `main` не трактуется как метрика всего кластера. До 100 URL-доказательств
+кластера вместе с числом пересечений сохраняются в bounded `top_urls` JSONB;
+браузеру не передаётся raw provider response.
+Один запуск ограничен 300 000 запросов на UI/API/broker/proposal boundaries;
+крупный versioned scope принимают только точные clustering routes с body limit
+32 MiB, а trusted proposal ingestion — 256 MiB. UUID-массив broker-команд
+передаётся одним PostgreSQL-параметром и не упирается в лимит bind parameters.
+В мастере слева и по умолчанию стоит жёсткая группировка, все виды частотности
+изначально выключены. Первый запуск для Яндекса и Google выбирает Москву
+(`213` и `1011969`); после принятого запуска Web восстанавливает последний
+регион отдельно для проекта и поисковика.
+Catalog и validation broker сохраняют `CLUSTERING` на активном проверенном
+Arsenkin credential; миграция backfill обновляет существующие подключения без
+ротации ключа, а единый DB-trigger не даёт `WORDSTAT`/`CLUSTERING` исчезнуть
+при последующих изменениях credential.
+
+Нормализованный результат сохраняется в Core SEO модулем
+`src/clustering-proposals` в трёх таблицах proposal/cluster/item и не меняет
+текущую семантику. Только trusted ingestion route proposal получает bounded
+body limit 256 MiB для полного результата до 300 000 строк. Public result объединяет Jobs summary с proposal, всеми
+   bounded cluster descriptors и cursor-paginated строками. Уже назначенный
+   SEO-кластер не является конфликтом: result сообщает число таких строк в
+   каждом provider-кластере, а реальный `CONFLICTED` означает изменение версии
+   запроса после запуска. Drawer «Операции»,
+общий журнал и private/noindex result workspace показывают прогресс и лог.
+   В готовом proposal пользователь переименовывает кластеры и для каждого
+   независимо выбирает SEO-кластер (новый, конкретный существующий или оставить
+   текущее назначение) и папку (создать, перенести в существующую либо оставить
+   membership). Выбранные parent новой папки и target существующей папки
+   запоминаются раздельно при переключении режима, а command содержит только
+   destination активного режима. Для новой папки parent выбирается прямо
+в карточке конкретного кластера, а корень проекта является значением по
+умолчанию. Выбранным запросам можно назначить другую существующую папку; такое
+точечное решение имеет приоритет над решением кластера. «Некластеризовано»
+остаётся на месте по умолчанию либо создаётся отдельной папкой. Apply под advisory locks
+повторно проверяет current versions и locked/excluded кластеры, folder
+entitlement, создаёт `ARSENKIN_SOFT|ARSENKIN_HARD` clusters, необязательные
+membership папок и semantic versions пакетами до 500 изменений. Любое явное
+назначение папки является переносом с удалением прежних обычных membership;
+режим «Не переносить» сохраняет их. Reject закрывает proposal без доменных изменений. Решение
+зафиксировано в `docs/adr/ADR-2026-044-arsenkin-clustering-proposals.md`.
+
+Массовый редактор запросов не обрезает selection scope на синхронном пределе:
+Web делит выбор на versioned команды по
+`semanticKeywordBulkCommandMaxItems=200` строк и агрегирует результат. Поэтому
+смена SEO-кластера для 457 и более выбранных строк проходит без ошибки
+валидации, сохраняя короткие bounded HTTP-команды.
+
 ### Сбор частотности
 
 Публичная command boundary принимает до 10 000 keywords и для Arsenkin, и для
@@ -611,8 +698,13 @@ XMLStock. Это platform safety bound, а не лимит XMLStock: Arsenkin о
 resolve/persist chunks и per-credential `WORDSTAT` concurrency/RPS остаются
 bounded, поэтому снятие прежнего UI/API-предела 200 не создаёт один гигантский
 provider request и не связывает между собой разные BYOK-ключи.
-Wizard по умолчанию выбирает регион «Россия» (`225`); в списке далее идут
-Москва и Санкт-Петербург. `frontend/lib/seo-regions.generated.ts` хранит
+Первый запуск wizard выбирает регион «Россия» (`225`), после успешного запуска
+восстанавливается последний Wordstat-регион этого проекта; в списке далее идут
+Москва и Санкт-Петербург. Позиции, ИИ-ответы и кластеризация начинают с Москвы
+для обоих поисковиков и также запоминают последний успешный регион раздельно по
+проекту, инструменту и поисковику. Клиентская валидация и storage fallback
+сосредоточены в `frontend/lib/semantic-region-preference.ts`; недоступный код
+сбрасывается к безопасному начальному значению. `frontend/lib/seo-regions.generated.ts` хранит
 проверенный snapshot полного российского subtree Яндекса (638 кодов) и всех
 российских Google location ID текущего provider catalog (504 кода), а
 `frontend/lib/seo-regions.ts` отдаёт отдельные provider-specific списки без
@@ -626,12 +718,23 @@ keyword insights. Те же insights объединяют `current_ranks` с п�
 append-only `rank_snapshots`, поэтому график не создаёт отдельную историю и не
 перезаписывает результаты съёма.
 
-Пресеты минус-слов принадлежат Core SEO и хранят до 500 нормализованных слов.
+Пресеты минус-слов принадлежат Core SEO и хранят до 1 200 нормализованных слов;
+additive migration `20260820213000_negative_keyword_preset_limit` синхронно
+расширяет тот же DB CHECK без изменения данных. Web дополняет проектные пресеты
+встроенными read-only шаблонами: один список из 1 096 уникальных названий 1 117
+городов России, единый список «города + регионы», отдельный набор регионов и
+узкие наборы информационного спроса, загрузок, работы и объявлений. Любой
+шаблон требует preview и может быть сохранён как копия в проект. Snapshot городов находится в
+`frontend/lib/russian-city-names.generated.ts`; состав и правила — в
+`frontend/lib/semantic-negative-keyword-presets.ts`.
 Режимы совместимы с основным workflow Key Collector: быстрое и улучшенное
 русскоязычное сопоставление словоформ, полное слово/фраза, подстрока и точное
 совпадение всей фразы. Для стоп-фраз отдельно сохраняются флаги игнорирования
 порядка слов и пунктуации; прежние пресеты после additive migration получают
-оба значения `false` и не меняют поведение. Применение всегда двухфазное:
+оба значения `false` и не меняют поведение. Scope можно задать всем проектом,
+optimistic selection либо union до 2 000 выбранных папок. Web разворачивает
+выбранных родителей до всех вложенных папок, а Core устраняет повторное
+попадание запроса через несколько membership. Применение всегда двухфазное:
 preview фиксирует scope/version/hash и отдаёт все совпадения страницами по 100
 строк вместе с UTF-16 диапазонами для inline-подсветки. Web накапливает страницы
 при прокрутке списка без селектора размера и ручных кнопок навигации. Затем команда
@@ -644,8 +747,10 @@ lock. Пресеты включены в allowlist передачи проект
 двухфазный поиск неявных дублей по order-independent мультимножеству слов:
 точный либо улучшенный русскоязычный формонезависимый режим, опциональный
 учёт регистра/пунктуации и до 100 слов-исключений. Scope ограничен всем
-проектом, одной папкой или optimistic selection; синхронный анализ не
-сканирует больше 50 000 активных строк. Preview отдаёт группы страницами по 100
+проектом, union до 2 000 выбранных папок или optimistic selection; Web
+раскрывает выбранных родителей до полного набора вложенных папок, а Core
+устраняет повторное попадание запроса через несколько membership. Синхронный
+анализ не сканирует больше 50 000 активных строк. Preview отдаёт группы страницами по 100
 с единым стабильным hash для всего анализа; Web накапливает их бесконечной
 прокруткой, а каждая страница остаётся ограничена 500 кандидатами на удаление.
 Каждая строка содержит полный запрос, все пути её папок и последние значения
@@ -659,6 +764,9 @@ project write lock; большой выбор Web применяет после�
 500 строк. Сервис не затрагивает непросмотренные/пропущенные группы, переносит
 только проверенные варианты в системную корзину и создаёт reversible semantic version
 `IMPLICIT_DUPLICATES`; постоянного удаления этот инструмент не выполняет.
+Модалки минус-слов и неявных дублей используют стандартный закреплённый footer:
+сводка области и результата остаётся слева, компактные действия — справа и не
+занимают отдельную строку в прокручиваемом содержимом.
 
 ### Импорт и crawl
 

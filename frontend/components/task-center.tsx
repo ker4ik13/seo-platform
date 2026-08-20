@@ -2,6 +2,7 @@
 
 import type {
   AiAnswerCollectionSummary,
+  ClusteringRunSummary,
   FrequencyCollectionSummary,
   KeywordResearchCollection,
   KeywordResearchRunSummary,
@@ -39,7 +40,7 @@ import { ProviderLogo } from "./provider-logo";
 import { ProjectContextSelect } from "./project-context-select";
 import type { AppProject } from "../lib/app-types";
 
-type TaskKind = "FREQUENCY" | "AI_ANSWER" | "RANK" | "CRAWL" | "RESEARCH" | "EXPORT";
+type TaskKind = "FREQUENCY" | "AI_ANSWER" | "CLUSTERING" | "RANK" | "CRAWL" | "RESEARCH" | "EXPORT";
 type TaskColumn = "QUEUED" | "RUNNING" | "ATTENTION" | "COMPLETED";
 type TaskTab = "ALL" | "ACTIVE" | "ERRORS" | "COMPLETED";
 
@@ -80,6 +81,7 @@ export function TaskCenter({
 }>) {
   const [frequencies, setFrequencies] = useState<readonly FrequencyCollectionSummary[]>([]);
   const [aiAnswers, setAiAnswers] = useState<readonly AiAnswerCollectionSummary[]>([]);
+  const [clusteringRuns, setClusteringRuns] = useState<readonly ClusteringRunSummary[]>([]);
   const [ranks, setRanks] = useState<readonly RankJobSummary[]>([]);
   const [crawls, setCrawls] = useState<readonly TechnicalCrawlSummary[]>([]);
   const [research, setResearch] = useState<readonly KeywordResearchRunSummary[]>([]);
@@ -120,18 +122,23 @@ export function TaskCenter({
           `${base}/ai-answer-collections`,
           signal ? { signal } : {}
         ),
+        browserApiRequest<{ readonly runs: readonly ClusteringRunSummary[] }>(
+          `${base}/clustering-runs`,
+          signal ? { signal } : {}
+        ),
         browserApiRequest<SemanticExportCollection>(
           `${base}/exports`,
           signal ? { signal } : {}
         )
       ]);
       if (signal?.aborted) return;
-      const [frequencyResult, rankResult, crawlResult, researchResult, aiAnswerResult, exportResult] = results;
+      const [frequencyResult, rankResult, crawlResult, researchResult, aiAnswerResult, clusteringResult, exportResult] = results;
       if (frequencyResult?.status === "fulfilled") setFrequencies(frequencyResult.value.collections);
       if (rankResult?.status === "fulfilled") setRanks(rankResult.value.jobs);
       if (crawlResult?.status === "fulfilled") setCrawls(crawlResult.value.crawls);
       if (researchResult?.status === "fulfilled") setResearch(researchResult.value.runs);
       if (aiAnswerResult?.status === "fulfilled") setAiAnswers(aiAnswerResult.value.collections);
+      if (clusteringResult?.status === "fulfilled") setClusteringRuns(clusteringResult.value.runs);
       if (exportResult?.status === "fulfilled") setSemanticExports(exportResult.value.exports);
       setErrors(
         results
@@ -167,12 +174,14 @@ export function TaskCenter({
   const tasks = useMemo(() => [
     ...frequencies.map(frequencyTask),
     ...aiAnswers.map(aiAnswerTask),
+    ...clusteringRuns.map(clusteringTask),
     ...ranks.map(rankTask),
     ...crawls.map(crawlTask),
     ...research.map(researchTask),
     ...semanticExports.map((value) => exportTask(value, projectId))
   ].sort((left, right) => right.createdAt.localeCompare(left.createdAt)), [
     aiAnswers,
+    clusteringRuns,
     crawls,
     frequencies,
     ranks,
@@ -251,6 +260,11 @@ export function TaskCenter({
           `${base}/ai-answer-collections/${encodeURIComponent(current.id)}/cancel`,
           { method: "POST", body: {} }
         );
+      } else if (current.kind === "CLUSTERING") {
+        await browserApiRequest(
+          `${base}/clustering-runs/${encodeURIComponent(current.id)}/cancel`,
+          { method: "POST", body: {} }
+        );
       } else if (current.kind === "EXPORT") {
         await browserApiRequest(
           `${base}/exports/${encodeURIComponent(current.id)}/cancel`,
@@ -305,6 +319,7 @@ export function TaskCenter({
           <option value="ALL">Все операции</option>
           <option value="FREQUENCY">Частотность</option>
           <option value="AI_ANSWER">ИИ-ответы</option>
+          <option value="CLUSTERING">Кластеризация</option>
           <option value="RANK">Позиции</option>
           <option value="CRAWL">Аудиты</option>
           <option value="RESEARCH">Сбор конкурентов</option>
@@ -500,6 +515,61 @@ function aiAnswerTask(value: AiAnswerCollectionSummary): ProjectTask {
   };
 }
 
+function clusteringTask(value: ClusteringRunSummary): ProjectTask {
+  const completed = value.completedKeywords + value.failedKeywords;
+  const routeTrail = connectorRouteTrail(value.connectorAttempts);
+  const engine = value.searchEngine === "YANDEX" ? "Яндекс" : "Google";
+  return {
+    id: value.id,
+    kind: "CLUSTERING",
+    resultKind: "clustering",
+    provider: "ARSENKIN",
+    title: "Кластеризация запросов",
+    description: `Arsenkin Tools · ${engine} · ТОП-${value.depth} · ${value.method === "SOFT" ? "мягкая" : "жёсткая"}`,
+    statusLabel: operationStatusLabel(value.status, value.stage),
+    column: taskColumn(value.status),
+    progressCurrent: completed,
+    progressTotal: value.selectedKeywords,
+    createdAt: value.createdAt,
+    ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
+    ...(value.failureCode ? { errorCode: value.failureCode } : {}),
+    version: value.version,
+    cancellable: [
+      "QUEUED",
+      "RUNNING",
+      "WAITING_RATE_LIMIT",
+      "RETRY_SCHEDULED",
+      "FAILED_RETRYABLE"
+    ].includes(value.status),
+    retryable: false,
+    retryLabel: "",
+    inputFacts: [
+      { label: "Поисковая система", value: engine },
+      { label: "Регион", value: value.regionCode },
+      { label: "Метод", value: value.method === "SOFT" ? "Мягкий" : "Жёсткий" },
+      { label: "Совпадений", value: String(value.overlapCount) },
+      { label: "Глубина", value: `ТОП-${value.depth}` },
+      { label: "Частотность", value: value.frequencyTypes.length > 0
+        ? value.frequencyTypes.map(clusteringFrequencyTypeLabel).join(", ")
+        : "Не собирать" },
+      { label: "Главные страницы", value: value.excludeMainPages ? "Исключать" : "Учитывать" },
+      { label: "Стоп-домены", value: formatInteger(value.stopDomains.length) },
+      { label: "Перекластеризация", value: value.replaceExistingClusters ? "Разрешена" : "Не менять готовые кластеры" },
+      { label: "Запросов", value: formatInteger(value.selectedKeywords) },
+      ...(value.routingScope
+        ? [{ label: "Маршрут", value: connectorRoutingScopeLabel(value.routingScope) }]
+        : []),
+      ...(routeTrail ? [{ label: "Попытки", value: routeTrail }] : [])
+    ],
+    resultFacts: [
+      { label: "Обработано", value: formatInteger(value.completedKeywords) },
+      { label: "Кластеров", value: value.clusterCount === undefined ? "—" : formatInteger(value.clusterCount) },
+      { label: "Без кластера", value: value.unclusteredCount === undefined ? "—" : formatInteger(value.unclusteredCount) },
+      { label: "Этап", value: operationStageLabel(value.stage, value.status) }
+    ]
+  };
+}
+
 function rankTask(value: RankJobSummary): ProjectTask {
   const result = value.result;
   const provider = providerLabel(value.provider);
@@ -655,6 +725,7 @@ function rankSearchContextLabel(value: RankJobSummary): string | undefined {
   return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 function frequencyTypeLabel(type: string): string { return ({ BASE: "Запрос", EXACT: '"Запрос"', FIXED: '"!Запрос"' } as Readonly<Record<string, string>>)[type] ?? type; }
+function clusteringFrequencyTypeLabel(type: string): string { return ({ BASE: "базовая", QUOTED: "фразовая", OVERALL: "общая", EXACT: "точная" } as Readonly<Record<string, string>>)[type] ?? type; }
 function frequencyDeviceLabel(device: string): string { return ({ ALL: "Все устройства", DESKTOP: "Десктоп", MOBILE: "Мобильные", PHONE_ONLY: "Телефоны", TABLET_ONLY: "Планшеты" } as Readonly<Record<string, string>>)[device] ?? device; }
 function rankStageLabel(stage: string): string { return ({ PREPARING_SCOPE: "Подготовка ключей", WAITING_FOR_QUEUE: "Ожидает очереди", AUTHORIZING: "Проверка доступа", SUBMITTING: "Отправка провайдеру", POLLING: "Ожидание провайдера", FETCHING_RESULT: "Получение результата", STAGING_RESULT: "Обработка результата", PERSISTING_RESULT: "Сохранение позиций", SUBMIT_OUTCOME_UNKNOWN: "Требует проверки", FINISHED: "Завершено" } as Readonly<Record<string, string>>)[stage] ?? stage; }
 function crawlStartLabel(urls: readonly string[]): string { const first = urls[0] ?? "—"; return urls.length > 1 ? `${first} · ещё ${urls.length - 1}` : first; }

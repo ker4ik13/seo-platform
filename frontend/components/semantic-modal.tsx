@@ -16,6 +16,7 @@ export function SemanticModal({
   footer,
   headerActions,
   onClose,
+  presenceKey,
   size = "medium",
   style,
   title
@@ -27,6 +28,7 @@ export function SemanticModal({
   footer?: ReactNode;
   headerActions?: ReactNode;
   onClose: () => void;
+  presenceKey?: string;
   size?: "small" | "medium" | "large" | "fullscreen";
   style?: CSSProperties;
   title: string;
@@ -49,6 +51,8 @@ export function SemanticModal({
       aria-describedby={description ? descriptionId : undefined}
       aria-labelledby={titleId}
       className={`semantic-modal semantic-modal-${size}${className ? ` ${className}` : ""}`}
+      data-presence-cursor-anchor="true"
+      data-presence-key={presenceKey ?? "semantic-modal"}
       onCancel={(event) => {
         event.preventDefault();
         onClose();

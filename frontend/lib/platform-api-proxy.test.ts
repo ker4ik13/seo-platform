@@ -423,6 +423,37 @@ test("allows the exact keyword bulk route to use its bounded 8 MiB relay limit",
   }
 });
 
+test("allows the exact clustering create route to relay a bounded large scope", async () => {
+  const originalFetch = globalThis.fetch;
+  let forwardedBytes = 0;
+  globalThis.fetch = async (_input, init) => {
+    forwardedBytes = init?.body instanceof ArrayBuffer ? init.body.byteLength : 0;
+    return Response.json({ data: {} });
+  };
+
+  try {
+    const body = new Uint8Array(2 * 1_024 * 1_024 + 1);
+    const request = new NextRequest(
+      "https://app.example.test/app/api/projects/project-id/clustering-runs",
+      {
+        method: "POST",
+        body,
+        headers: { "Content-Type": "application/json" }
+      }
+    );
+    const response = await proxyPlatformApi(request, [
+      "projects",
+      "project-id",
+      "clustering-runs"
+    ]);
+
+    assert.equal(response.status, 200);
+    assert.equal(forwardedBytes, body.byteLength);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("forwards a bounded request body after measuring it", async () => {
   const originalFetch = globalThis.fetch;
   let forwardedBody: BodyInit | null | undefined;

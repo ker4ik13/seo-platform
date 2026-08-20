@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useState, type FormEvent } from "react";
 import type {
   FrequencyCollectionSummary,
   ProjectConnectorBinding,
@@ -22,6 +22,11 @@ import {
 } from "../lib/project-integration-settings";
 import { integrationProviderLabel } from "../lib/integration-presentation";
 import { frequencyProviderUsageEstimate } from "../lib/provider-usage-estimate";
+import {
+  defaultSemanticRegion,
+  readLastSemanticRegion,
+  writeLastSemanticRegion
+} from "../lib/semantic-region-preference";
 import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
 import { SearchableRegionSelect } from "./searchable-region-select";
@@ -47,10 +52,13 @@ export function SemanticFrequencyDialog({
   groups: readonly SemanticOperationGroup[];
   initialSelections: readonly SemanticOperationSelection[];
 }>) {
+  const formId = useId();
   const [types, setTypes] = useState<ReadonlySet<SemanticFrequencyType>>(
     new Set(["BASE", "EXACT", "FIXED"])
   );
-  const [regionCode, setRegionCode] = useState("225");
+  const [regionCode, setRegionCode] = useState(
+    () => defaultSemanticRegion("WORDSTAT").code
+  );
   const [device, setDevice] = useState<SemanticFrequencyDevice>("ALL");
   const [settings, setSettings] = useState<ProjectConnectorSettings>();
   const [credentialId, setCredentialId] = useState("");
@@ -97,6 +105,17 @@ export function SemanticFrequencyDialog({
     setResolvingScope(resolving);
     setScopeError(nextError);
   }, []);
+
+  useEffect(() => {
+    setRegionCode(
+      readLastSemanticRegion(
+        window.localStorage,
+        projectId,
+        "FREQUENCY",
+        "WORDSTAT"
+      ).code
+    );
+  }, [projectId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -161,6 +180,13 @@ export function SemanticFrequencyDialog({
           }
         }
       );
+      writeLastSemanticRegion(
+        window.localStorage,
+        projectId,
+        "FREQUENCY",
+        "WORDSTAT",
+        regionCode
+      );
       onStarted(collection);
     } catch (requestError) {
       setError(frequencyErrorMessage(requestError));
@@ -171,11 +197,31 @@ export function SemanticFrequencyDialog({
 
   return (
     <SemanticModal
+      footer={(
+        <div className="semantic-workflow-footer">
+          <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate">
+            <div><Icon name="semantic" /><div><dt>К сбору</dt><dd>{selections.length} запросов</dd></div></div>
+            <div>
+              <Icon name="operations" />
+              <div><dt>Операций</dt><dd>{selectedSource?.provider === "ARSENKIN" ? (selections.length > 0 ? 1 : 0) : `до ${selections.length * orderedTypes.length}`}</dd></div>
+            </div>
+            <div><Icon name="frequency" /><div><dt>Расход провайдера</dt><dd>{providerUsage.usage}</dd></div></div>
+            <div><Icon name="checkDouble" /><div><dt>Доступно сейчас</dt><dd>{providerUsage.available}</dd></div></div>
+          </dl>
+          <div className="semantic-modal-actions">
+            <button className="secondary-button" disabled={running} onClick={onClose} type="button">Отмена</button>
+            <button className="primary-button" disabled={loadingSources || resolvingScope || running || !selectedSource || selections.length === 0 || orderedTypes.length === 0} form={formId} type="submit">
+              {resolvingScope ? "Загружаем запросы…" : running ? "Запускаем…" : `Запустить сбор (${selections.length})`}
+            </button>
+          </div>
+        </div>
+      )}
       onClose={running ? () => undefined : onClose}
+      presenceKey="semantic-modal:frequency"
       size="large"
       title="Сбор частотности"
     >
-      <form className="semantic-frequency-dialog semantic-workflow-dialog" onSubmit={(event) => void submit(event)}>
+      <form className="semantic-frequency-dialog semantic-workflow-dialog" id={formId} onSubmit={(event) => void submit(event)}>
         <div className="semantic-workflow-grid semantic-frequency-workflow-grid">
           <section className="semantic-workflow-panel semantic-source-panel">
             <header className="semantic-workflow-panel-heading">
@@ -239,7 +285,9 @@ export function SemanticFrequencyDialog({
                   onChange={({ code }) => setRegionCode(code)}
                   value={regionCode}
                 />
-                <small>По умолчанию — Россия, код 225.</small>
+                <small>
+                  Первый запуск — Россия; затем используется регион последнего успешного запуска.
+                </small>
               </label>
               <fieldset className="semantic-segmented-field">
                 <legend>Устройство</legend>
@@ -261,15 +309,6 @@ export function SemanticFrequencyDialog({
             </div>
           </section>
         </div>
-        <dl className="semantic-dialog-estimate">
-          <div><Icon name="semantic" /><div><dt>К сбору</dt><dd>{selections.length} запросов</dd></div></div>
-          <div>
-            <Icon name="operations" />
-            <div><dt>Операций</dt><dd>{selectedSource?.provider === "ARSENKIN" ? (selections.length > 0 ? 1 : 0) : `до ${selections.length * orderedTypes.length}`}</dd></div>
-          </div>
-          <div><Icon name="frequency" /><div><dt>Расход провайдера</dt><dd>{providerUsage.usage}</dd></div></div>
-          <div><Icon name="checkDouble" /><div><dt>Доступно сейчас</dt><dd>{providerUsage.available}</dd></div></div>
-        </dl>
         {(error || scopeError) && <div className="semantic-workflow-feedback">
           {error && (
             <div className="inline-alert danger" role="alert">
@@ -281,12 +320,6 @@ export function SemanticFrequencyDialog({
           )}
           {scopeError && <div className="inline-alert warning" role="alert">{scopeError}</div>}
         </div>}
-        <div className="semantic-modal-actions semantic-workflow-footer">
-          <button className="secondary-button" disabled={running} onClick={onClose} type="button">Отмена</button>
-          <button className="primary-button" disabled={loadingSources || resolvingScope || running || !selectedSource || selections.length === 0 || orderedTypes.length === 0} type="submit">
-            {resolvingScope ? "Загружаем запросы…" : running ? "Запускаем…" : `Запустить сбор (${selections.length})`}
-          </button>
-        </div>
       </form>
     </SemanticModal>
   );

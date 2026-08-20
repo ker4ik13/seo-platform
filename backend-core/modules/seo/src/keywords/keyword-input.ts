@@ -2,6 +2,7 @@ import { Buffer } from "node:buffer";
 import { BadRequestException } from "@nestjs/common";
 import {
   semanticKeywordCleaningCases,
+  semanticKeywordBulkCommandMaxItems,
   semanticKeywordBulkCreatePreviewMaxItems,
   semanticKeywordDuplicatePolicies,
   semanticKeywordIntents,
@@ -251,7 +252,11 @@ export function internalSemanticKeywordCleaningInput(
 function semanticKeywordSelections(
   value: unknown
 ): InternalSemanticKeywordBulkInput["items"] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 200) {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > semanticKeywordBulkCommandMaxItems
+  ) {
     invalid("items");
   }
   const items = value.map((entry) => {

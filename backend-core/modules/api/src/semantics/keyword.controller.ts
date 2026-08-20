@@ -63,6 +63,7 @@ import { semanticFrequencyContextRoute } from "./frequency-collection-input.js";
 import { aiAnswerHistoryQuery } from "./ai-answer-history-query.js";
 import {
   keywordListQuery,
+  keywordMultiSearchInput,
   keywordTagOptionsQuery
 } from "./keyword-query.js";
 
@@ -89,6 +90,28 @@ export class KeywordController {
     const result = await this.seoData.listKeywords(
       internalProjectContext(request, principal, tenant),
       keywordListQuery(query)
+    );
+    return {
+      data: result.data,
+      page: result.page,
+      meta: { requestId: context.requestId }
+    };
+  }
+
+  @Post("search")
+  @HttpCode(HttpStatus.OK)
+  @RequirePermission("semantic.view")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async multiSearch(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiCollectionResponse<SemanticKeywordListItem>> {
+    const context = requestContext(request);
+    const tenant = requiredProjectTenant(request);
+    const result = await this.seoData.listKeywords(
+      internalProjectContext(request, principal, tenant),
+      keywordMultiSearchInput(body)
     );
     return {
       data: result.data,

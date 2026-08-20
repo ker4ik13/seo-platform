@@ -48,6 +48,49 @@ test("negative keyword preview exposes every match through 100-row pages", async
   assert.deepEqual(secondPage.matches[0]?.highlightRanges, [{ start: 7, end: 12 }]);
 });
 
+test("folder scope searches the union selected by the user", async () => {
+  const firstGroupId = "01900000-0000-7000-8000-000000000010";
+  const secondGroupId = "01900000-0000-7000-8000-000000000011";
+  let where: unknown;
+  const service = new NegativeKeywordService({
+    keyword: {
+      findMany: async (input: Readonly<{ where: unknown }>) => {
+        where = input.where;
+        return [];
+      }
+    }
+  } as never, {} as never);
+
+  await service.preview({
+    ...context,
+    rules: {
+      words: ["слон"],
+      matchMode: "WHOLE_WORD",
+      caseSensitive: false,
+      ignoreWordOrder: false,
+      ignorePunctuation: false
+    },
+    scope: {
+      kind: "GROUP",
+      groupIds: [firstGroupId, secondGroupId]
+    },
+    page: 1,
+    pageSize: 100
+  });
+
+  assert.deepEqual(where, {
+    workspaceId: context.workspaceId,
+    projectId: context.projectId,
+    status: "ACTIVE",
+    memberships: {
+      some: {
+        projectId: context.projectId,
+        groupId: { in: [firstGroupId, secondGroupId] }
+      }
+    }
+  });
+});
+
 test("unchecked matches are skipped without starving later selected rows", () => {
   const matches = Array.from({ length: 700 }, (_, index) => ({
     keywordId: keywordId(index),

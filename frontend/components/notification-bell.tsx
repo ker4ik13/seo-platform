@@ -487,6 +487,7 @@ function operationTitle(kind: OperationResultKind, notificationTitle: string): s
   return ({
     frequency: "Сбор частотности",
     "ai-answer": "Сбор ИИ-ответов",
+    clustering: "Кластеризация запросов",
     rank: "Проверка позиций",
     crawl: "Технический аудит",
     research: "Сбор конкурентов"

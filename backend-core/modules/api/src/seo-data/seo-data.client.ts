@@ -24,6 +24,7 @@ import {
   semanticSavedViewQueryIndicators,
   semanticSavedViewScopes,
   semanticNegativeKeywordMatchModes,
+  semanticNegativeKeywordWordLimit,
   semanticDuplicatePreviewPageSizes,
   semanticSystemColumnKeys,
   type ApiCollectionResponse,
@@ -166,7 +167,13 @@ import {
   type AiAnswerHistoryQuery,
   type SemanticAiAnswerCompetitorSnapshot,
   type SemanticAiAnswerDetail,
-  type SemanticAiAnswerHistoryItem
+  type SemanticAiAnswerHistoryItem,
+  type InternalClusteringProposalResult,
+  type ApplyClusteringProposalInput,
+  type InternalApplyClusteringProposalInput,
+  type ClusteringProposalApplyResult,
+  type ClusteringProposalSummary,
+  type InternalRejectClusteringProposalInput
 } from "@seo-platform/contracts";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
 import { DomainError } from "../common/domain-error.js";
@@ -204,6 +211,11 @@ import {
   scopedInternalFrequencyOperationResult,
   scopedInternalRankOperationResult
 } from "./operation-result-response.js";
+import {
+  scopedClusteringProposalApplyResult,
+  scopedClusteringProposalSummary,
+  scopedInternalClusteringProposalResult
+} from "./clustering-proposal-response.js";
 import {
   projectNote,
   projectNoteCollection,
@@ -300,33 +312,43 @@ export class SeoDataClient {
     query: KeywordListQuery
   ): Promise<KeywordPage> {
     const projectId = requiredProjectId(context.tenant);
+    const { multiSearch, ...listQuery } = query;
     const url = new URL(
-      `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords`,
+      `/internal/v1/projects/${encodeURIComponent(projectId)}/keywords${multiSearch ? "/search" : ""}`,
       this.config.services.seoData
     );
-    url.searchParams.set("limit", String(query.limit));
-    if (query.cursor) url.searchParams.set("cursor", query.cursor);
-    if (query.search) url.searchParams.set("search", query.search);
-    if (query.tag) url.searchParams.set("tag", query.tag);
-    if (query.intent) url.searchParams.set("intent", query.intent);
-    if (query.groupId) url.searchParams.set("groupId", query.groupId);
-    if (query.groupIds?.length) {
-      url.searchParams.set("groupIds", query.groupIds.join(","));
+    if (multiSearch) {
+      const payload = await this.request(
+        "POST",
+        url,
+        context,
+        { query: listQuery, search: multiSearch }
+      );
+      return semanticKeywordPage(payload);
     }
-    if (query.clusterId) url.searchParams.set("clusterId", query.clusterId);
-    if (query.isFavorite !== undefined) {
-      url.searchParams.set("isFavorite", String(query.isFavorite));
+    url.searchParams.set("limit", String(listQuery.limit));
+    if (listQuery.cursor) url.searchParams.set("cursor", listQuery.cursor);
+    if (listQuery.search) url.searchParams.set("search", listQuery.search);
+    if (listQuery.tag) url.searchParams.set("tag", listQuery.tag);
+    if (listQuery.intent) url.searchParams.set("intent", listQuery.intent);
+    if (listQuery.groupId) url.searchParams.set("groupId", listQuery.groupId);
+    if (listQuery.groupIds?.length) {
+      url.searchParams.set("groupIds", listQuery.groupIds.join(","));
     }
-    if (query.isTracked !== undefined) {
-      url.searchParams.set("isTracked", String(query.isTracked));
+    if (listQuery.clusterId) url.searchParams.set("clusterId", listQuery.clusterId);
+    if (listQuery.isFavorite !== undefined) {
+      url.searchParams.set("isFavorite", String(listQuery.isFavorite));
     }
-    if (query.priorityMin !== undefined) {
-      url.searchParams.set("priorityMin", String(query.priorityMin));
+    if (listQuery.isTracked !== undefined) {
+      url.searchParams.set("isTracked", String(listQuery.isTracked));
     }
-    if (query.priorityMax !== undefined) {
-      url.searchParams.set("priorityMax", String(query.priorityMax));
+    if (listQuery.priorityMin !== undefined) {
+      url.searchParams.set("priorityMin", String(listQuery.priorityMin));
     }
-    if (query.sort) url.searchParams.set("sort", query.sort);
+    if (listQuery.priorityMax !== undefined) {
+      url.searchParams.set("priorityMax", String(listQuery.priorityMax));
+    }
+    if (listQuery.sort) url.searchParams.set("sort", listQuery.sort);
 
     const payload = await this.request("GET", url, context);
     return semanticKeywordPage(payload);
@@ -509,6 +531,82 @@ export class SeoDataClient {
       jobId,
       keywordIds
     );
+  }
+
+  public async clusteringProposalResult(
+    context: InternalContext,
+    jobId: string,
+    limit: number,
+    cursor?: string
+  ): Promise<InternalClusteringProposalResult> {
+    const scope = trackingScope(context);
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(scope.projectId)}/clustering-proposals/${encodeURIComponent(jobId)}/result`,
+      this.config.services.seoData
+    );
+    url.searchParams.set("limit", String(limit));
+    if (cursor !== undefined) url.searchParams.set("cursor", cursor);
+    const payload = await this.request("GET", url, context);
+    return scopedInternalClusteringProposalResult(
+      responseData(payload),
+      scope.workspaceId,
+      scope.projectId,
+      jobId,
+      limit,
+      cursor
+    );
+  }
+
+  public async applyClusteringProposal(
+    context: InternalContext,
+    jobId: string,
+    input: ApplyClusteringProposalInput,
+    entitlement: SemanticCapacityEntitlement
+  ): Promise<ClusteringProposalApplyResult> {
+    const scope = trackingScope(context);
+    const body: InternalApplyClusteringProposalInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      jobId,
+      entitlement
+    };
+    const payload = await this.request(
+      "POST",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(scope.projectId)}/clustering-proposals/${encodeURIComponent(jobId)}/apply`,
+        this.config.services.seoData
+      ),
+      context,
+      body
+    );
+    return scopedClusteringProposalApplyResult(responseData(payload), jobId);
+  }
+
+  public async rejectClusteringProposal(
+    context: InternalContext,
+    jobId: string,
+    proposalVersion: number
+  ): Promise<ClusteringProposalSummary> {
+    const scope = trackingScope(context);
+    const body: InternalRejectClusteringProposalInput = {
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      jobId,
+      proposalVersion
+    };
+    const payload = await this.request(
+      "POST",
+      new URL(
+        `/internal/v1/projects/${encodeURIComponent(scope.projectId)}/clustering-proposals/${encodeURIComponent(jobId)}/reject`,
+        this.config.services.seoData
+      ),
+      context,
+      body
+    );
+    return scopedClusteringProposalSummary(responseData(payload), jobId);
   }
 
   public async rankOperationResult(
@@ -4377,7 +4475,7 @@ export function semanticNegativeKeywordPreset(
     !rules ||
     !Array.isArray(rules.words) ||
     rules.words.length < 1 ||
-    rules.words.length > 500 ||
+    rules.words.length > semanticNegativeKeywordWordLimit ||
     !rules.words.every((word) => typeof word === "string" && word.length > 0 && word.length <= 160) ||
     typeof rules.matchMode !== "string" ||
     !semanticNegativeKeywordMatchModes.some((mode) => mode === rules.matchMode) ||

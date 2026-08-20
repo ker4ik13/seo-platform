@@ -1,6 +1,10 @@
 import type { PageIndexability, PageType } from "./pages.js";
 
-export const semanticClusterMethods = ["MANUAL"] as const;
+export const semanticClusterMethods = [
+  "MANUAL",
+  "ARSENKIN_SOFT",
+  "ARSENKIN_HARD"
+] as const;
 
 export type SemanticClusterMethod =
   (typeof semanticClusterMethods)[number];

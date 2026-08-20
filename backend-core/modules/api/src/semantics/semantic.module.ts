@@ -16,6 +16,7 @@ import { FrequencyCollectionController } from "./frequency-collection.controller
 import { NegativeKeywordController } from "./negative-keyword.controller.js";
 import { SemanticDuplicateController } from "./semantic-duplicate.controller.js";
 import { AiAnswerCollectionController } from "./ai-answer-collection.controller.js";
+import { ClusteringRunController } from "./clustering-run.controller.js";
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { AiAnswerCollectionController } from "./ai-answer-collection.controller.
     SemanticVersionController,
     FrequencyCollectionController,
     AiAnswerCollectionController,
+    ClusteringRunController,
     NegativeKeywordController,
     SemanticDuplicateController
   ]

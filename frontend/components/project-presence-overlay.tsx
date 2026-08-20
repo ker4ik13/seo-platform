@@ -32,7 +32,8 @@ export function ProjectPresenceOverlay() {
     currentRoute,
     currentUserId,
     currentView,
-    projectId
+    projectId,
+    showRemoteActivity
   } = useProjectPresence();
   const [mounted, setMounted] = useState(false);
   const [viewportVersion, setViewportVersion] = useState(0);
@@ -98,7 +99,14 @@ export function ProjectPresenceOverlay() {
     setVisuals(measurePresenceVisuals(remoteParticipants));
   }, [mounted, projectId, remoteParticipants, viewportVersion]);
 
-  if (!mounted || !projectId || typeof document === "undefined") return null;
+  if (
+    !mounted ||
+    !projectId ||
+    !showRemoteActivity ||
+    typeof document === "undefined"
+  ) {
+    return null;
+  }
   return createPortal(
     <div aria-hidden="true" className="project-presence-overlay">
       {visuals.cursors.map((cursor) => (
@@ -131,7 +139,7 @@ function measurePresenceVisuals(
       const point = cursorPoint(cursor);
       if (point) {
         cursors.push({
-          key: active.participant.connectionId,
+          key: active.userId,
           x: point.x,
           y: point.y,
           name: active.member.displayName,
@@ -160,8 +168,12 @@ function cursorPoint(
       };
       if (visibleTargetPoint(target, point.x, point.y)) return point;
     }
+    return undefined;
   }
-  return undefined;
+  return {
+    x: cursor.x * window.innerWidth,
+    y: cursor.y * window.innerHeight
+  };
 }
 
 function visibleTargetPoint(target: HTMLElement, x: number, y: number): boolean {

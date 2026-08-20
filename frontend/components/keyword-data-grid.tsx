@@ -8,6 +8,7 @@ import type {
   PointerEvent as ReactPointerEvent,
   ReactNode
 } from "react";
+import { useEffect, useState } from "react";
 
 export interface KeywordDataGridColumn<Row> {
   readonly key: string;
@@ -28,6 +29,8 @@ export interface KeywordDataGridRowPresence {
   readonly colorIndex: number;
   readonly kind: "SELECTED" | "HIGHLIGHTED";
   readonly label: string;
+  readonly avatarUrl?: string;
+  readonly initials: string;
 }
 
 const EMPTY_ROW_PRESENCE: ReadonlyMap<
@@ -37,6 +40,7 @@ const EMPTY_ROW_PRESENCE: ReadonlyMap<
 
 export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
   actions,
+  allRowsSelected,
   ariaLabel,
   columns,
   density = "COMFORTABLE",
@@ -57,9 +61,11 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
   rows,
   selectedIds,
   showRowNumbers = false,
-  tableClassName = "semantic-table"
+  tableClassName = "semantic-table",
+  toggleAllDisabled = false
 }: Readonly<{
   actions?: (row: Row) => ReactNode;
+  allRowsSelected?: boolean;
   ariaLabel: string;
   columns: readonly KeywordDataGridColumn<Row>[];
   density?: "COMFORTABLE" | "COMPACT";
@@ -81,8 +87,11 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
   selectedIds: ReadonlySet<string>;
   showRowNumbers?: boolean;
   tableClassName?: string;
+  toggleAllDisabled?: boolean;
 }>) {
-  const allSelected = rows.length > 0 && rows.every(({ id }) => selectedIds.has(id));
+  const allSelected =
+    allRowsSelected ??
+    (rows.length > 0 && rows.every(({ id }) => selectedIds.has(id)));
   const allHighlightedSelected =
     highlightedIds.size > 0 &&
     [...highlightedIds].every((id) => selectedIds.has(id));
@@ -196,10 +205,15 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
           <th className="semantic-select-cell semantic-select-header">
             <span className="semantic-header-selection-controls">
               <input
-                aria-label="Выбрать все показанные запросы"
+                aria-label="Выбрать все запросы текущего фильтра"
                 checked={allSelected}
+                disabled={toggleAllDisabled}
                 onChange={onToggleAll}
-                title="Выбрать все показанные запросы"
+                title={
+                  toggleAllDisabled
+                    ? "Загружаем все запросы для выбора"
+                    : "Выбрать все запросы текущего фильтра"
+                }
                 type="checkbox"
               />
               {onToggleHighlighted && (
@@ -311,7 +325,8 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
                   data-presence-cursor-anchor="true"
                   data-presence-key={`keyword:${row.id}:column:position`}
                 >
-                  {rowNumberOffset + index + 1}
+                  <span>{rowNumberOffset + index + 1}</span>
+                  {presence && <PresenceRowAvatar presence={presence} />}
                 </td>
               )}
               <td
@@ -364,6 +379,31 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
         )}
       </tbody>
     </table>
+  );
+}
+
+function PresenceRowAvatar({
+  presence
+}: Readonly<{ presence: KeywordDataGridRowPresence }>) {
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => setImageFailed(false), [presence.avatarUrl]);
+  return (
+    <span
+      aria-hidden="true"
+      className={`semantic-row-presence-avatar presence-color-${presence.colorIndex}`}
+      title={presence.label}
+    >
+      {presence.avatarUrl && !imageFailed ? (
+        <img
+          alt=""
+          decoding="async"
+          onError={() => setImageFailed(true)}
+          src={presence.avatarUrl}
+        />
+      ) : (
+        presence.initials
+      )}
+    </span>
   );
 }
 

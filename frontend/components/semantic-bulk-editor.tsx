@@ -2,17 +2,19 @@
 
 import { CustomSelect } from "./custom-select";
 
-import type {
-  SemanticKeywordCleaningCase,
-  SemanticKeywordCleaningPreview,
-  SemanticKeywordCleaningResult,
-  UpdateSemanticKeywordInput
+import {
+  semanticKeywordBulkCommandMaxItems,
+  type SemanticKeywordCleaningCase,
+  type SemanticKeywordCleaningPreview,
+  type SemanticKeywordCleaningResult,
+  type UpdateSemanticKeywordInput
 } from "@seo-platform/contracts";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   browserApiRequest,
   BrowserApiError
 } from "../lib/browser-api";
+import { semanticBulkSelectionBatches } from "../lib/semantic-row-selection";
 
 interface BulkSelection {
   readonly id: string;
@@ -326,18 +328,7 @@ export function SemanticBulkEditor({
     try {
       const response = single
         ? await updateSingleKeyword(projectId, single, patch)
-        : await browserApiRequest<BulkResult>(
-            `/app/api/projects/${encodeURIComponent(
-              projectId
-            )}/bulk-commands`,
-            {
-              method: "POST",
-              body: {
-                items: selections.map(({ id, version }) => ({ id, version })),
-                patch
-              }
-            }
-          );
+        : await updateKeywordsInBatches(projectId, selections, patch);
       setResult(response);
       onCompleted(response);
     } catch (requestError) {
@@ -861,6 +852,43 @@ async function updateSingleKeyword(
     failed: 0,
     conflicted: 0
   };
+}
+
+async function updateKeywordsInBatches(
+  projectId: string,
+  selections: readonly BulkSelection[],
+  patch: unknown
+): Promise<BulkResult> {
+  let result: BulkResult = {
+    selected: 0,
+    changed: 0,
+    skipped: 0,
+    failed: 0,
+    conflicted: 0
+  };
+  for (const batch of semanticBulkSelectionBatches(
+    selections,
+    semanticKeywordBulkCommandMaxItems
+  )) {
+    const batchResult = await browserApiRequest<BulkResult>(
+      `/app/api/projects/${encodeURIComponent(projectId)}/bulk-commands`,
+      {
+        method: "POST",
+        body: {
+          items: batch.map(({ id, version }) => ({ id, version })),
+          patch
+        }
+      }
+    );
+    result = {
+      selected: result.selected + batchResult.selected,
+      changed: result.changed + batchResult.changed,
+      skipped: result.skipped + batchResult.skipped,
+      failed: result.failed + batchResult.failed,
+      conflicted: result.conflicted + batchResult.conflicted
+    };
+  }
+  return result;
 }
 
 function sameTags(left: readonly string[], right: readonly string[]): boolean {

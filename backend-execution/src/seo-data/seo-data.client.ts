@@ -10,7 +10,11 @@ import {
   type KeywordListQuery,
   type InternalAiAnswerKeywords,
   type InternalResolveAiAnswerKeywordsInput,
-  type InternalPersistAiAnswerSnapshotBatchInput
+  type InternalPersistAiAnswerSnapshotBatchInput,
+  type InternalClusteringKeywords,
+  type InternalResolveClusteringKeywordsInput,
+  type InternalPersistClusteringProposalInput,
+  type ClusteringProposalSummary
 } from "@seo-platform/contracts";
 import type {
   InternalAbortSemanticImportInput,
@@ -28,11 +32,11 @@ import type {
   InternalSemanticImportReceipt,
   InternalPersistFrequencySnapshotBatchInput,
   SemanticImportResultSummary,
-  TrackingContextConfigurationInput
-  ,InternalResolveFrequencyKeywordInput
-  ,InternalResolveFrequencyKeywordsInput
-  ,InternalFrequencyKeyword
-  ,InternalPersistFrequencySnapshotsInput
+  TrackingContextConfigurationInput,
+  InternalResolveFrequencyKeywordInput,
+  InternalResolveFrequencyKeywordsInput,
+  InternalFrequencyKeyword,
+  InternalPersistFrequencySnapshotsInput
 } from "@seo-platform/contracts";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
@@ -304,6 +308,50 @@ export class SeoDataClient {
     ) throw new SeoDataClientError("UNAVAILABLE", true);
   }
 
+  public async resolveClusteringKeywords(
+    input: InternalResolveClusteringKeywordsInput
+  ): Promise<InternalClusteringKeywords> {
+    const payload = await this.requestBounded(
+      `/internal/v1/projects/${encodeURIComponent(input.projectId)}/clustering-proposals/resolve-batch`,
+      input,
+      CLUSTERING_RESOLVE_RESPONSE_MAX_BYTES
+    );
+    const value = exactObject(payload, ["items"]);
+    if (!value || !Array.isArray(value.items) || value.items.length !== input.items.length) {
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+    const expected = new Map(input.items.map((item) => [item.id, item.version]));
+    const seen = new Set<string>();
+    const items = value.items.map((candidate) => {
+      const item = exactObject(candidate, ["id", "text", "version"]);
+      if (
+        !item ||
+        !uuid(item.id) ||
+        seen.has(item.id as string) ||
+        typeof item.text !== "string" ||
+        item.text.length < 1 ||
+        item.text.length > 2_000 ||
+        !positiveInteger(item.version) ||
+        expected.get(item.id as string) !== item.version
+      ) throw new SeoDataClientError("UNAVAILABLE", true);
+      seen.add(item.id as string);
+      return { id: item.id as string, text: item.text, version: Number(item.version) };
+    });
+    return { items };
+  }
+
+  public async persistClusteringProposal(
+    input: InternalPersistClusteringProposalInput
+  ): Promise<ClusteringProposalSummary> {
+    const payload = await this.requestBounded(
+      `/internal/v1/projects/${encodeURIComponent(input.projectId)}/clustering-proposals`,
+      input,
+      CLUSTERING_PERSIST_RESPONSE_MAX_BYTES,
+      CLUSTERING_PERSIST_COMMAND_TIMEOUT_MS
+    );
+    return clusteringProposalSummary(payload, input);
+  }
+
   public async listExportKeywords(
     context: { readonly workspaceId: string; readonly projectId: string; readonly actorId: string },
     query: KeywordListQuery
@@ -494,9 +542,10 @@ export class SeoDataClient {
       readonly projectId: string;
       readonly actorId: string;
     },
-    maximumBytes: number
+    maximumBytes: number,
+    timeoutMs?: number
   ): Promise<unknown> {
-    const response = await this.fetch(path, body);
+    const response = await this.fetch(path, body, timeoutMs);
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
       throw clientError(response.status);
@@ -543,7 +592,8 @@ export class SeoDataClient {
       readonly workspaceId: string;
       readonly projectId: string;
       readonly actorId: string;
-    }
+    },
+    timeoutMs = this.config.internalCommandTimeoutMs
   ): Promise<Response> {
     const token = this.config.seoDataApiToken;
     if (!token) throw new SeoDataClientError("UNAVAILABLE", true);
@@ -560,7 +610,7 @@ export class SeoDataClient {
           "X-Actor-Id": body.actorId
         },
         body: JSON.stringify(body),
-        signal: AbortSignal.timeout(this.config.internalCommandTimeoutMs)
+        signal: AbortSignal.timeout(timeoutMs)
       });
     } catch {
       throw new SeoDataClientError("UNAVAILABLE", true);
@@ -604,6 +654,9 @@ const FREQUENCY_RESOLVE_RESPONSE_MAX_BYTES = 4 * 1_024 * 1_024;
 const FREQUENCY_PERSIST_RESPONSE_MAX_BYTES = 16 * 1_024;
 const AI_ANSWER_RESOLVE_RESPONSE_MAX_BYTES = 4 * 1_024 * 1_024;
 const AI_ANSWER_PERSIST_RESPONSE_MAX_BYTES = 16 * 1_024;
+const CLUSTERING_RESOLVE_RESPONSE_MAX_BYTES = 4 * 1_024 * 1_024;
+const CLUSTERING_PERSIST_RESPONSE_MAX_BYTES = 64 * 1_024;
+export const CLUSTERING_PERSIST_COMMAND_TIMEOUT_MS = 90_000;
 const EXPORT_PAGE_RESPONSE_MAX_BYTES = 16 * 1_024 * 1_024;
 const EXPORT_METADATA_RESPONSE_MAX_BYTES = 4 * 1_024 * 1_024;
 
@@ -1053,6 +1106,51 @@ function exactObject(
     fields.every((field) => field in payload)
     ? payload
     : undefined;
+}
+
+function clusteringProposalSummary(
+  value: unknown,
+  input: InternalPersistClusteringProposalInput
+): ClusteringProposalSummary {
+  const payload = object(value);
+  const required = [
+    "id", "jobId", "status", "keywordCount", "clusterCount", "unclusteredCount",
+    "readyCount", "protectedCount", "conflictedCount", "appliedKeywordCount",
+    "createdGroupCount", "semanticVersionIds", "version", "createdAt", "updatedAt"
+  ] as const;
+  const optional = ["appliedAt", "rejectedAt"] as const;
+  if (
+    !payload ||
+    required.some((field) => !(field in payload)) ||
+    Object.keys(payload).some((field) => !required.includes(field as never) && !optional.includes(field as never)) ||
+    !uuid(payload.id) ||
+    payload.jobId !== input.jobId ||
+    !["READY", "APPLIED", "REJECTED"].includes(String(payload.status)) ||
+    payload.keywordCount !== input.items.length ||
+    payload.clusterCount !== input.clusters.length ||
+    !nonNegativeInteger(payload.unclusteredCount) ||
+    Number(payload.unclusteredCount) > input.items.length ||
+    !nonNegativeInteger(payload.readyCount) ||
+    !nonNegativeInteger(payload.protectedCount) ||
+    !nonNegativeInteger(payload.conflictedCount) ||
+    Number(payload.readyCount) + Number(payload.protectedCount) + Number(payload.conflictedCount) > input.items.length ||
+    !nonNegativeInteger(payload.appliedKeywordCount) ||
+    Number(payload.appliedKeywordCount) > input.items.length ||
+    !nonNegativeInteger(payload.createdGroupCount) ||
+    Number(payload.createdGroupCount) > input.clusters.length + 1 ||
+    !Array.isArray(payload.semanticVersionIds) ||
+    payload.semanticVersionIds.length > input.items.length + input.clusters.length ||
+    payload.semanticVersionIds.some((id) => !uuid(id)) ||
+    new Set(payload.semanticVersionIds).size !== payload.semanticVersionIds.length ||
+    !positiveInteger(payload.version) ||
+    !isoTimestamp(payload.createdAt) ||
+    !isoTimestamp(payload.updatedAt) ||
+    (payload.appliedAt !== undefined && !isoTimestamp(payload.appliedAt)) ||
+    (payload.rejectedAt !== undefined && !isoTimestamp(payload.rejectedAt)) ||
+    (payload.status === "APPLIED" && payload.appliedAt === undefined) ||
+    (payload.status === "REJECTED" && payload.rejectedAt === undefined)
+  ) throw new SeoDataClientError("UNAVAILABLE", true);
+  return payload as unknown as ClusteringProposalSummary;
 }
 
 function strings(

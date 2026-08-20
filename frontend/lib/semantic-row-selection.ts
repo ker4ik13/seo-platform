@@ -71,3 +71,17 @@ export function initialSemanticCreateGroupId(
     ? activeGroup.id
     : ungroupedId;
 }
+
+export function semanticBulkSelectionBatches<Item>(
+  items: readonly Item[],
+  maximumBatchSize: number
+): readonly Item[][] {
+  if (!Number.isSafeInteger(maximumBatchSize) || maximumBatchSize < 1) {
+    throw new RangeError("maximumBatchSize must be a positive integer");
+  }
+  const batches: Item[][] = [];
+  for (let offset = 0; offset < items.length; offset += maximumBatchSize) {
+    batches.push(items.slice(offset, offset + maximumBatchSize));
+  }
+  return batches;
+}

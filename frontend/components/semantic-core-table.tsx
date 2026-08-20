@@ -8,15 +8,18 @@ import {
   semanticSavedViewQueryIndicators,
   semanticSystemColumnKeys,
   type SemanticKeywordPageSize,
+  type SemanticKeywordMultiSearch,
   type SemanticKeywordBulkCreateItemInput,
   type SemanticKeywordBulkCreatePreviewResult,
   type SemanticKeywordBulkCreateResult,
   type AiAnswerCollectionSummary,
+  type ClusteringRunSummary,
   type FrequencyCollectionSummary,
   type RankJobSummary,
   type SemanticExportJobSummary,
   type SemanticPositionHistorySearchEngine
 } from "@seo-platform/contracts";
+import type { ProjectPresenceActivity } from "@seo-platform/contracts";
 
 import {
   useEffect,
@@ -93,11 +96,16 @@ import {
   type SemanticGroupTreeItem
 } from "./semantic-group-tree";
 import { SemanticKeywordMoveDialog } from "./semantic-keyword-move-dialog";
+import {
+  SemanticMultiSearchDialog,
+  type SemanticMultiSearchAction
+} from "./semantic-multi-search-dialog";
 import { SemanticKeywordInspector } from "./semantic-keyword-inspector";
 import { SemanticProjectSerpResults } from "./semantic-project-serp-results";
 import { SemanticPositionDialog } from "./semantic-position-dialog";
 import { SemanticFrequencyDialog } from "./semantic-frequency-dialog";
 import { SemanticAiAnswerDialog } from "./semantic-ai-answer-dialog";
+import { SemanticClusteringDialog } from "./semantic-clustering-dialog";
 import { SemanticAiAnswerDetailsModal } from "./semantic-ai-answer-details-modal";
 import { SemanticOperationsDrawer } from "./semantic-operations-drawer";
 import { SemanticLayoutDrawer } from "./semantic-layout-drawer";
@@ -121,7 +129,11 @@ import {
   useProjectActiveOperationCount
 } from "./project-operation-activity-provider";
 import { useProjectPresence } from "./project-presence-provider";
-import { sameProjectPresenceView } from "../lib/project-presence";
+import {
+  projectPresenceAvatarUrl,
+  projectPresenceInitials,
+  sameProjectPresenceView
+} from "../lib/project-presence";
 import type { AppProject } from "../lib/app-types";
 import {
   defaultSemanticViewConfig,
@@ -316,8 +328,10 @@ export function SemanticCoreTable({
     currentRoute,
     currentUserId: presenceCurrentUserId,
     currentView,
+    publishActivity,
     publishSelection,
-    publishView
+    publishView,
+    showRemoteActivity
   } = useProjectPresence();
   const [items, setItems] = useState<readonly SemanticKeyword[]>([]);
   const [page, setPage] = useState<BrowserCursorPage>({
@@ -332,6 +346,7 @@ export function SemanticCoreTable({
   );
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [selectingAll, setSelectingAll] = useState(false);
   const [error, setError] = useState<string>();
   const [retryVersion, setRetryVersion] = useState(0);
   const [editor, setEditor] = useState<KeywordEditor>();
@@ -420,6 +435,8 @@ export function SemanticCoreTable({
   >();
   const [groupDialog, setGroupDialog] = useState<SemanticGroupDialogState>();
   const [moveKeywordDialog, setMoveKeywordDialog] = useState(false);
+  const [multiSearchDialogOpen, setMultiSearchDialogOpen] = useState(false);
+  const [multiSearch, setMultiSearch] = useState<SemanticKeywordMultiSearch>();
   const [moveKeywordTargetId, setMoveKeywordTargetId] = useState("");
   const [deleteSelectionOpen, setDeleteSelectionOpen] = useState(false);
   const [bulkEditorOpen, setBulkEditorOpen] = useState(false);
@@ -429,6 +446,7 @@ export function SemanticCoreTable({
   const [positionDialogOpen, setPositionDialogOpen] = useState(false);
   const [frequencyDialogOpen, setFrequencyDialogOpen] = useState(false);
   const [aiAnswerDialogOpen, setAiAnswerDialogOpen] = useState(false);
+  const [clusteringDialogOpen, setClusteringDialogOpen] = useState(false);
   const [aiAnswerKeyword, setAiAnswerKeyword] = useState<SemanticKeyword>();
   const [negativeKeywordsOpen, setNegativeKeywordsOpen] = useState(false);
   const [duplicatesOpen, setDuplicatesOpen] = useState(false);
@@ -447,6 +465,15 @@ export function SemanticCoreTable({
     y: number;
   }>>();
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null);
+  const selectAllAbortRef = useRef<AbortController | undefined>(undefined);
+  const multiSearchActionRef = useRef<
+    Exclude<SemanticMultiSearchAction, "SHOW"> | undefined
+  >(undefined);
+  const selectAllMatchingKeywordsRef = useRef<(
+    postAction: "SELECT" | "MOVE",
+    config: SemanticKeywordLoadConfig
+  ) => Promise<void>>(async () => undefined);
+  const toggleAllSelectionRef = useRef<() => void>(() => undefined);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const highlightAnchorIdRef = useRef<string | undefined>(undefined);
   const liveOperationSignatureRef = useRef("");
@@ -465,9 +492,10 @@ export function SemanticCoreTable({
     () => ({
       filters: viewConfig.filters,
       sort: viewConfig.sort,
+      ...(multiSearch ? { multiSearch } : {}),
       ...(multiGroupIds.length > 1 ? { groupIds: multiGroupIds } : {})
     }),
-    [multiGroupIds, viewConfig.filters, viewConfig.sort]
+    [multiGroupIds, multiSearch, viewConfig.filters, viewConfig.sort]
   );
   const currentSavedViewConfig = useMemo<SemanticViewConfig>(
     () => ({
@@ -524,14 +552,21 @@ export function SemanticCoreTable({
   );
   const remoteSemanticParticipants = useMemo(
     () =>
-      activeParticipants.filter(
+      showRemoteActivity
+        ? activeParticipants.filter(
         (active) =>
           active.userId !== presenceCurrentUserId &&
           active.participant.status === "ACTIVE" &&
           active.participant.route === currentRoute &&
           active.participant.view?.kind === "SEMANTIC_CORE"
-      ),
-    [activeParticipants, currentRoute, presenceCurrentUserId]
+          )
+        : [],
+    [
+      activeParticipants,
+      currentRoute,
+      presenceCurrentUserId,
+      showRemoteActivity
+    ]
   );
   const remoteSemanticGroupPresence = useMemo<
     readonly SemanticGroupRemotePresence[]
@@ -554,6 +589,8 @@ export function SemanticCoreTable({
         colorIndex: number;
         kind: KeywordDataGridRowPresence["kind"];
         names: string[];
+        avatarUrl?: string;
+        initials: string;
       }
     >();
     for (const active of remoteSemanticParticipants) {
@@ -572,10 +609,16 @@ export function SemanticCoreTable({
       for (const [keywordId, kind] of keywordKinds) {
         const existing = draft.get(keywordId);
         if (!existing) {
+          const avatarUrl = projectPresenceAvatarUrl(
+            projectId,
+            active.member
+          );
           draft.set(keywordId, {
             colorIndex: active.colorIndex,
             kind,
-            names: [active.member.displayName]
+            names: [active.member.displayName],
+            ...(avatarUrl ? { avatarUrl } : {}),
+            initials: projectPresenceInitials(active.member.displayName)
           });
           continue;
         }
@@ -591,11 +634,62 @@ export function SemanticCoreTable({
         {
           colorIndex: presence.colorIndex,
           kind: presence.kind,
-          label: `Выделяют: ${presence.names.join(", ")}`
+          label: `Выделяют: ${presence.names.join(", ")}`,
+          ...(presence.avatarUrl ? { avatarUrl: presence.avatarUrl } : {}),
+          initials: presence.initials
         }
       ])
     );
-  }, [currentView, remoteSemanticParticipants]);
+  }, [currentView, projectId, remoteSemanticParticipants]);
+
+  const remoteActivityParticipants = useMemo(
+    () =>
+      new Map(
+        remoteSemanticParticipants.flatMap((active) =>
+          active.participant.activity
+            ? [[active.participant.activity, active] as const]
+            : []
+        )
+      ),
+    [remoteSemanticParticipants]
+  );
+  const localPresenceActivity: ProjectPresenceActivity | null = editor
+    ? editor.mode === "create"
+      ? "SEMANTIC_ADD"
+      : "SEMANTIC_EDIT"
+    : clusteringDialogOpen
+      ? "SEMANTIC_CLUSTERING"
+      : frequencyDialogOpen
+        ? "SEMANTIC_FREQUENCY"
+        : positionDialogOpen
+          ? "SEMANTIC_POSITIONS"
+          : aiAnswerDialogOpen || aiAnswerKeyword
+            ? "SEMANTIC_AI_ANSWERS"
+            : negativeKeywordsOpen
+              ? "SEMANTIC_NEGATIVE_KEYWORDS"
+              : duplicatesOpen
+                ? "SEMANTIC_DUPLICATES"
+                : deleteSelectionOpen
+                  ? "SEMANTIC_DELETE"
+                  : exportDialog
+                    ? "SEMANTIC_EXPORT"
+                    : rightSidebar?.type === "HISTORY"
+                      ? "SEMANTIC_HISTORY"
+                      : rightSidebar?.type === "OPERATIONS"
+                        ? "SEMANTIC_OPERATIONS"
+                        : rightSidebar?.type === "LAYOUT"
+                          ? "SEMANTIC_LAYOUT"
+                          : rightSidebar?.type === "KEYWORD" || siteResultsKeyword
+                            ? "SEMANTIC_KEYWORD"
+                            : groupDialog?.mode === "move" || moveKeywordDialog
+                              ? "SEMANTIC_MOVE"
+                              : groupDialog
+                                ? "SEMANTIC_GROUP"
+                                : bulkEditorOpen || customValueEditor
+                                  ? "SEMANTIC_EDIT"
+                                  : null;
+
+  toggleAllSelectionRef.current = toggleAllSelection;
 
   useEffect(() => {
     const nextView = {
@@ -626,9 +720,16 @@ export function SemanticCoreTable({
     );
   }, [checkedIds, highlightedIds, publishSelection]);
 
+  useEffect(() => {
+    publishActivity(localPresenceActivity);
+  }, [localPresenceActivity, publishActivity]);
+
   useEffect(
-    () => () => publishSelection(null),
-    [publishSelection]
+    () => () => {
+      publishSelection(null);
+      publishActivity(null);
+    },
+    [publishActivity, publishSelection]
   );
 
   useEffect(() => {
@@ -800,6 +901,9 @@ export function SemanticCoreTable({
   useEffect(() => {
     const controller = new AbortController();
     const preservedScrollTop = tableScrollRef.current?.scrollTop ?? 0;
+    selectAllAbortRef.current?.abort();
+    selectAllAbortRef.current = undefined;
+    setSelectingAll(false);
     setCheckedIds(new Set());
     setHighlightedIds(new Set());
     highlightAnchorIdRef.current = undefined;
@@ -816,6 +920,14 @@ export function SemanticCoreTable({
         if (controller.signal.aborted) return;
         setItems(result.data);
         setPage(result.page);
+        const pendingMultiSearchAction = multiSearchActionRef.current;
+        if (pendingMultiSearchAction) {
+          multiSearchActionRef.current = undefined;
+          void selectAllMatchingKeywordsRef.current(
+            pendingMultiSearchAction,
+            keywordQueryConfig
+          );
+        }
         window.requestAnimationFrame(() => {
           const viewport = tableScrollRef.current;
           if (!viewport) return;
@@ -845,7 +957,7 @@ export function SemanticCoreTable({
     let timer: number | undefined;
     liveOperationSignatureRef.current = "";
     const reconcile = async (): Promise<boolean> => {
-      const [frequencyResult, rankResult, aiAnswerResult] = await Promise.allSettled([
+      const [frequencyResult, rankResult, aiAnswerResult, clusteringResult] = await Promise.allSettled([
         browserApiRequest<{ readonly collections: readonly FrequencyCollectionSummary[] }>(
           `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections`,
           { signal: controller.signal }
@@ -857,6 +969,10 @@ export function SemanticCoreTable({
         browserApiRequest<{ readonly collections: readonly AiAnswerCollectionSummary[] }>(
           `/app/api/projects/${encodeURIComponent(projectId)}/ai-answer-collections`,
           { signal: controller.signal }
+        ),
+        browserApiRequest<{ readonly runs: readonly ClusteringRunSummary[] }>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/clustering-runs`,
+          { signal: controller.signal }
         )
       ]);
       if (controller.signal.aborted) return liveOperationActiveRef.current;
@@ -866,6 +982,9 @@ export function SemanticCoreTable({
       const ranks = rankResult.status === "fulfilled" ? rankResult.value.jobs : [];
       const aiAnswers = aiAnswerResult.status === "fulfilled"
         ? aiAnswerResult.value.collections
+        : [];
+      const clusteringRuns = clusteringResult.status === "fulfilled"
+        ? clusteringResult.value.runs
         : [];
       const activeFrequencyCount = frequencies.filter(({ status }) => ![
         "ACTION_REQUIRED",
@@ -888,7 +1007,14 @@ export function SemanticCoreTable({
         "COMPLETED",
         "FAILED_FINAL"
       ].includes(status)).length;
-      const nextActiveOperationCount = activeFrequencyCount + activeRankCount + activeAiAnswerCount;
+      const activeClusteringCount = clusteringRuns.filter(({ status }) => ![
+        "ACTION_REQUIRED",
+        "CANCELLED",
+        "PARTIALLY_COMPLETED",
+        "COMPLETED",
+        "FAILED_FINAL"
+      ].includes(status)).length;
+      const nextActiveOperationCount = activeFrequencyCount + activeRankCount + activeAiAnswerCount + activeClusteringCount;
       const active = nextActiveOperationCount > 0;
       liveOperationActiveRef.current = active;
       const signature = JSON.stringify([
@@ -910,6 +1036,14 @@ export function SemanticCoreTable({
         ]),
         ...aiAnswers.map((job) => [
           "ai-answer",
+          job.id,
+          job.status,
+          job.completedKeywords,
+          job.failedKeywords,
+          job.updatedAt
+        ]),
+        ...clusteringRuns.map((job) => [
+          "clustering",
           job.id,
           job.status,
           job.completedKeywords,
@@ -1003,7 +1137,7 @@ export function SemanticCoreTable({
         if (!controller.signal.aborted) setClusters([]);
       });
     return () => controller.abort();
-  }, [clusterRefreshVersion, projectId]);
+  }, [clusterRefreshVersion, projectId, retryVersion]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1152,6 +1286,33 @@ export function SemanticCoreTable({
     return () => document.removeEventListener("keydown", copySelectedKeywords);
   }, [highlightedIds, items]);
 
+  useEffect(() => {
+    const selectAllFromKeyboard = (event: KeyboardEvent) => {
+      if (
+        event.key.toLocaleLowerCase("en") !== "a" ||
+        (!event.ctrlKey && !event.metaKey) ||
+        event.altKey ||
+        isEditableCopyTarget(event.target) ||
+        window.getSelection()?.toString() ||
+        document.querySelector(".semantic-modal[open]")
+      ) {
+        return;
+      }
+      const activeElement = document.activeElement;
+      const tableOwnsSelection =
+        checkedIds.size > 0 ||
+        highlightedIds.size > 0 ||
+        (activeElement instanceof Node &&
+          Boolean(tableScrollRef.current?.contains(activeElement)));
+      if (!tableOwnsSelection) return;
+      event.preventDefault();
+      toggleAllSelectionRef.current();
+    };
+    document.addEventListener("keydown", selectAllFromKeyboard);
+    return () =>
+      document.removeEventListener("keydown", selectAllFromKeyboard);
+  }, [checkedIds, highlightedIds]);
+
   function submitFilters(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     const { search: draftSearch, ...otherFilters } = draftConfig.filters;
@@ -1174,6 +1335,7 @@ export function SemanticCoreTable({
 
   function applySearch(value: string): void {
     const search = value.trim();
+    if (search) setMultiSearch(undefined);
     setViewConfig((current) => {
       const { search: ignored, ...filters } = current.filters;
       void ignored;
@@ -1184,6 +1346,7 @@ export function SemanticCoreTable({
   }
 
   function clearSearch(): void {
+    setMultiSearch(undefined);
     setDraftConfig((current) => {
       const { search: ignored, ...filters } = current.filters;
       void ignored;
@@ -1193,6 +1356,7 @@ export function SemanticCoreTable({
   }
 
   function clearFilters(): void {
+    setMultiSearch(undefined);
     const currentGroupId = viewConfig.filters.groupId;
     const reset = (current: SemanticViewConfig): SemanticViewConfig => {
       return {
@@ -2145,21 +2309,74 @@ export function SemanticCoreTable({
     toggleSelection(item.id);
   }
 
-  function toggleVisibleSelection(): void {
+  function toggleAllSelection(): void {
+    if (selectingAll) return;
     setBulkNotice(undefined);
-    const visibleIds = items.map(({ id }) => id);
-    const allSelected =
-      visibleIds.length > 0 &&
-      visibleIds.every((id) => checkedIds.has(id));
-    setCheckedIds((current) => {
-      const next = new Set(current);
-      for (const id of visibleIds) {
-        if (allSelected) next.delete(id);
-        else next.add(id);
-      }
-      return next;
-    });
+    const allLoadedSelected =
+      items.length > 0 &&
+      !page.hasNext &&
+      items.every(({ id }) => checkedIds.has(id));
+    if (allLoadedSelected) {
+      setCheckedIds(new Set());
+      return;
+    }
+    void selectAllMatchingKeywords();
   }
+
+  async function selectAllMatchingKeywords(
+    postAction: "SELECT" | "MOVE" = "SELECT",
+    config = keywordQueryConfig
+  ): Promise<void> {
+    const controller = new AbortController();
+    selectAllAbortRef.current?.abort();
+    selectAllAbortRef.current = controller;
+    setSelectingAll(true);
+    setError(undefined);
+    try {
+      let cursor: string | undefined;
+      let loaded: readonly SemanticKeyword[] = [];
+      let lastPage: BrowserCursorPage = { hasNext: false };
+      const seenCursors = new Set<string>();
+      do {
+        const result = await loadKeywordPage(
+          projectId,
+          config,
+          cursor,
+          controller.signal,
+          500
+        );
+        loaded = mergeKeywords(loaded, result.data);
+        lastPage = result.page;
+        if (!result.page.hasNext) break;
+        const nextCursor = result.page.nextCursor;
+        if (!nextCursor || seenCursors.has(nextCursor)) {
+          throw new Error("Keyword pagination did not advance");
+        }
+        seenCursors.add(nextCursor);
+        cursor = nextCursor;
+      } while (!controller.signal.aborted);
+      if (controller.signal.aborted) return;
+      setItems(loaded);
+      setPage(lastPage);
+      setCheckedIds(new Set(loaded.map(({ id }) => id)));
+      if (postAction === "MOVE" && loaded.length > 0) {
+        setActionIds(new Set(loaded.map(({ id }) => id)));
+        setMoveKeywordTargetId("");
+        setMoveKeywordDialog(true);
+      }
+      setBulkNotice(`Выбраны все запросы: ${formatInteger(loaded.length)}`);
+    } catch (requestError) {
+      if (!controller.signal.aborted) {
+        setError(keywordErrorMessage(requestError));
+      }
+    } finally {
+      if (selectAllAbortRef.current === controller) {
+        selectAllAbortRef.current = undefined;
+        setSelectingAll(false);
+      }
+    }
+  }
+  selectAllMatchingKeywordsRef.current = selectAllMatchingKeywords;
 
   function toggleHighlightedSelection(): void {
     setBulkNotice(undefined);
@@ -2653,6 +2870,19 @@ export function SemanticCoreTable({
         }
       ]
     : [];
+  const activityButtonClass = (
+    activity: ProjectPresenceActivity,
+    baseClassName?: string
+  ): string | undefined => {
+    const remote = remoteActivityParticipants.get(activity);
+    return [
+      baseClassName,
+      remote ? "remote-presence-action" : undefined,
+      remote ? `presence-color-${remote.colorIndex}` : undefined
+    ]
+      .filter(Boolean)
+      .join(" ") || undefined;
+  };
   return (
     <section
       aria-busy={loading}
@@ -2661,7 +2891,11 @@ export function SemanticCoreTable({
         "--semantic-groups-width": `${groupSidebarWidth}px`
       } as CSSProperties}
     >
-      <header className="semantic-core-header">
+      <header
+        className="semantic-core-header"
+        data-presence-cursor-anchor="true"
+        data-presence-key="semantic-header"
+      >
         <div className="semantic-title-block">
           <h1>Семантическое ядро</h1>
           <CustomSelect
@@ -2696,52 +2930,83 @@ export function SemanticCoreTable({
             <dd>{formatInteger(items.length)}</dd>
           </div>
         </dl>
-        <div className="semantic-header-status"><span>Личный вид таблицы</span></div>
+        <div className="semantic-header-actions">
+          <button
+            className={activityButtonClass("SEMANTIC_EXPORT")}
+            data-presence-cursor-anchor="true"
+            data-presence-key="semantic-action:export"
+            onClick={() => openExport()}
+            type="button"
+          >
+            <Icon name="export" />Экспорт
+          </button>
+          <button
+            className={activityButtonClass("SEMANTIC_HISTORY")}
+            data-presence-cursor-anchor="true"
+            data-presence-key="semantic-action:history"
+            data-semantic-sidebar-trigger
+            onClick={() =>
+              setRightSidebar((current) =>
+                current?.type === "HISTORY"
+                  ? undefined
+                  : { type: "HISTORY" }
+              )
+            }
+            type="button"
+          >
+            <Icon name="history" />История
+          </button>
+          <button
+            aria-label={
+              activeOperationCount > 0
+                ? `Операции, активных: ${activeOperationCount}`
+                : "Операции"
+            }
+            className={activityButtonClass(
+              "SEMANTIC_OPERATIONS",
+              activeOperationCount > 0 ? "has-active-operations" : undefined
+            )}
+            data-presence-cursor-anchor="true"
+            data-presence-key="semantic-action:operations"
+            data-semantic-sidebar-trigger
+            onClick={() =>
+              setRightSidebar((current) =>
+                current?.type === "OPERATIONS"
+                  ? undefined
+                  : { type: "OPERATIONS" }
+              )
+            }
+            type="button"
+          >
+            <Icon name="operations" />Операции
+            {activeOperationCount > 0 && (
+              <strong
+                aria-hidden="true"
+                className="semantic-operation-toolbar-badge"
+                title={`Активных операций: ${activeOperationCount}`}
+              >
+                <i />
+                {activeOperationCount}
+              </strong>
+            )}
+          </button>
+        </div>
       </header>
-      <nav aria-label="Действия с семантикой" className="semantic-commandbar">
-        <button onClick={openCreate} type="button"><Icon name="plus" />Добавить</button>
-        <button onClick={onOpenImport} type="button"><Icon name="import" />Импорт</button>
-        <button disabled={(rootTotal ?? items.length) === 0} onClick={() => setFrequencyDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Выберите запросы или папки в окне запуска"} type="button"><Icon name="frequency" />Собрать частотность</button>
-        <button disabled={(rootTotal ?? items.length) === 0} onClick={() => setPositionDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Выберите запросы или папки в окне запуска"} type="button"><Icon name="rankCheck" />Проверить позиции</button>
-        <button disabled={(rootTotal ?? items.length) === 0} onClick={() => setAiAnswerDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Проверить ИИ-ответы Яндекса или Google через Arsenkin"} type="button"><Icon name="ai" />Проверить ИИ-ответы</button>
-        <button disabled={(rootTotal ?? items.length) === 0} onClick={() => setNegativeKeywordsOpen(true)} title="Найти запросы по минус-словам и переместить их в корзину" type="button"><Icon name="warning" />Минус-слова</button>
-        <button disabled={(rootTotal ?? items.length) < 2} onClick={() => setDuplicatesOpen(true)} title="Найти фразы с одинаковым набором слов и удалить лишние варианты" type="button"><Icon name="checkDouble" />Дубли</button>
-        <button className="danger" disabled={checkedIds.size === 0} onClick={() => { setActionIds(null); setDeleteSelectionOpen(true); }} type="button"><Icon name="trash" />Удалить</button>
-        <button onClick={() => openExport()} type="button"><Icon name="export" />Экспорт</button>
-        <button
-          aria-label={activeOperationCount > 0
-            ? `Операции, активных: ${activeOperationCount}`
-            : "Операции"}
-          className={activeOperationCount > 0 ? "has-active-operations" : undefined}
-          data-semantic-sidebar-trigger
-          onClick={() =>
-            setRightSidebar((current) =>
-              current?.type === "HISTORY" ? undefined : { type: "HISTORY" }
-            )
-          }
-          type="button"
-        ><Icon name="history" />История</button>
-        <button
-          data-semantic-sidebar-trigger
-          onClick={() =>
-            setRightSidebar((current) =>
-              current?.type === "OPERATIONS" ? undefined : { type: "OPERATIONS" }
-            )
-          }
-          type="button"
-        >
-          <Icon name="operations" />Операции
-          {activeOperationCount > 0 && (
-            <strong
-              aria-hidden="true"
-              className="semantic-operation-toolbar-badge"
-              title={`Активных операций: ${activeOperationCount}`}
-            >
-              <i />
-              {activeOperationCount}
-            </strong>
-          )}
-        </button>
+      <nav
+        aria-label="Действия с семантикой"
+        className="semantic-commandbar"
+        data-presence-cursor-anchor="true"
+        data-presence-key="semantic-commandbar"
+      >
+        <button className={activityButtonClass("SEMANTIC_ADD")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:add" onClick={openCreate} type="button"><Icon name="plus" />Добавить</button>
+        <button className={activityButtonClass("SEMANTIC_IMPORT")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:import" onClick={onOpenImport} type="button"><Icon name="import" />Импорт</button>
+        <button className={activityButtonClass("SEMANTIC_FREQUENCY")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:frequency" disabled={(rootTotal ?? items.length) === 0} onClick={() => setFrequencyDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Выберите запросы или папки в окне запуска"} type="button"><Icon name="frequency" />Собрать частотность</button>
+        <button className={activityButtonClass("SEMANTIC_POSITIONS")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:positions" disabled={(rootTotal ?? items.length) === 0} onClick={() => setPositionDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Выберите запросы или папки в окне запуска"} type="button"><Icon name="rankCheck" />Проверить позиции</button>
+        <button className={activityButtonClass("SEMANTIC_AI_ANSWERS")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:ai-answers" disabled={(rootTotal ?? items.length) === 0} onClick={() => setAiAnswerDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Проверить ИИ-ответы Яндекса или Google через Arsenkin"} type="button"><Icon name="ai" />Проверить ИИ-ответы</button>
+        <button className={activityButtonClass("SEMANTIC_CLUSTERING")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:clustering" disabled={(rootTotal ?? items.length) === 0} onClick={() => setClusteringDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Разбить выбранные запросы или папки на группы по выдаче"} type="button"><Icon name="cluster" />Кластеризовать</button>
+        <button className={activityButtonClass("SEMANTIC_NEGATIVE_KEYWORDS")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:negative-keywords" disabled={(rootTotal ?? items.length) === 0} onClick={() => setNegativeKeywordsOpen(true)} title="Найти запросы по минус-словам и переместить их в корзину" type="button"><Icon name="warning" />Минус-слова</button>
+        <button className={activityButtonClass("SEMANTIC_DUPLICATES")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:duplicates" disabled={(rootTotal ?? items.length) < 2} onClick={() => setDuplicatesOpen(true)} title="Найти фразы с одинаковым набором слов и удалить лишние варианты" type="button"><Icon name="checkDouble" />Дубли</button>
+        <button className={activityButtonClass("SEMANTIC_DELETE", "danger")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:delete" disabled={checkedIds.size === 0} onClick={() => { setActionIds(null); setDeleteSelectionOpen(true); }} type="button"><Icon name="trash" />Удалить</button>
         {checkedIds.size > 0 && (
           <div className="semantic-selection-chip" role="status">
             <strong>Выбрано: {checkedIds.size}</strong>
@@ -2816,6 +3081,15 @@ export function SemanticCoreTable({
         className="semantic-table-tools"
       >
         <form className="semantic-search" onSubmit={submitSearch}>
+          <button
+            aria-label="Найти несколько запросов"
+            className={`semantic-multi-search-trigger${multiSearch ? " active" : ""}`}
+            onClick={() => setMultiSearchDialogOpen(true)}
+            title="Поиск по списку запросов"
+            type="button"
+          >
+            <Icon name="multiGroup" />
+          </button>
           <label>
             <span className="visually-hidden">Поиск по запросам</span>
             <Icon name="search" />
@@ -2832,6 +3106,16 @@ export function SemanticCoreTable({
               </button>
             )}
           </label>
+          {multiSearch && (
+            <span className="semantic-multi-search-chip">
+              {formatInteger(multiSearch.terms.length)} по списку
+              <button
+                aria-label="Сбросить поиск по списку"
+                onClick={() => setMultiSearch(undefined)}
+                type="button"
+              >×</button>
+            </span>
+          )}
         </form>
         <details className="semantic-filter-disclosure" data-exclusive-dropdown>
           <summary>
@@ -3785,6 +4069,8 @@ export function SemanticCoreTable({
           <div
             aria-busy={loading}
             className={`semantic-table-wrap${loading ? " refreshing" : ""}`}
+            data-presence-cursor-anchor="true"
+            data-presence-key="semantic-table-viewport"
             onKeyDown={navigateKeywordRows}
             onScroll={(event) =>
               setTableViewport({
@@ -3810,6 +4096,11 @@ export function SemanticCoreTable({
                   ⋮
                 </button>
               )}
+              allRowsSelected={
+                items.length > 0 &&
+                !page.hasNext &&
+                items.every(({ id }) => checkedIds.has(id))
+              }
               ariaLabel="Таблица семантического ядра"
               columns={tableColumns.map((column) => {
                 const nextSort = nextSemanticColumnSort(column, viewConfig.sort);
@@ -3867,7 +4158,7 @@ export function SemanticCoreTable({
                 event.dataTransfer.setData("application/x-seo-keyword-ids", ids.join(","));
               }}
               onRowClick={(item, event) => selectKeywordRow(item, event)}
-              onToggleAll={toggleVisibleSelection}
+              onToggleAll={toggleAllSelection}
               onToggleHighlighted={toggleHighlightedSelection}
               onToggleRow={(item, event) => toggleKeywordRow(item, event)}
               paddingBottom={virtualRows.paddingBottom}
@@ -3877,6 +4168,7 @@ export function SemanticCoreTable({
               rows={virtualRows.items}
               selectedIds={checkedIds}
               showRowNumbers
+              toggleAllDisabled={selectingAll}
             />
             <div aria-hidden="true" className="semantic-load-sentinel" ref={loadMoreSentinelRef} />
           </div>
@@ -3987,6 +4279,24 @@ export function SemanticCoreTable({
             }))}
         />
       )}
+      {multiSearchDialogOpen && (
+        <SemanticMultiSearchDialog
+          {...(multiSearch ? { initialSearch: multiSearch } : {})}
+          onApply={(search, action) => {
+            const clearTextSearch = (current: SemanticViewConfig): SemanticViewConfig => {
+              const { search: ignored, ...filters } = current.filters;
+              void ignored;
+              return { ...current, filters };
+            };
+            setDraftConfig(clearTextSearch);
+            setViewConfig(clearTextSearch);
+            multiSearchActionRef.current = action === "SHOW" ? undefined : action;
+            setMultiSearch(search);
+            setMultiSearchDialogOpen(false);
+          }}
+          onClose={() => setMultiSearchDialogOpen(false)}
+        />
+      )}
       {deleteSelectionOpen && mutationIds.size > 0 && (
         <SemanticModal
           description={groups.some(
@@ -4083,9 +4393,27 @@ export function SemanticCoreTable({
             .map(({ id, version, textOriginal }) => ({ id, version, label: textOriginal }))}
         />
       )}
+      {clusteringDialogOpen && (
+        <SemanticClusteringDialog
+          activeGroupId={viewConfig.filters.groupId}
+          groups={groups}
+          initialSelections={items
+            .filter(({ id }) => checkedIds.has(id))
+            .map(({ id, version, textOriginal }) => ({ id, version, label: textOriginal }))}
+          onClose={() => setClusteringDialogOpen(false)}
+          onStarted={() => {
+            setClusteringDialogOpen(false);
+            setOperationsRefreshVersion((value) => value + 1);
+            setBulkNotice("Кластеризация запущена в фоне. После завершения откройте результат и подтвердите раскладку по папкам.");
+            setRightSidebar({ type: "OPERATIONS" });
+          }}
+          projectId={projectId}
+        />
+      )}
       {negativeKeywordsOpen && (
         <SemanticNegativeKeywordsDialog
           {...(activeNegativeGroup ? { activeGroup: activeNegativeGroup } : {})}
+          groups={groups}
           onClose={() => setNegativeKeywordsOpen(false)}
           onCompleted={(message) => {
             setNegativeKeywordsOpen(false);
@@ -4103,6 +4431,7 @@ export function SemanticCoreTable({
       {duplicatesOpen && (
         <SemanticDuplicatesDialog
           {...(activeNegativeGroup ? { activeGroup: activeNegativeGroup } : {})}
+          groups={groups}
           onClose={() => setDuplicatesOpen(false)}
           onCompleted={(message) => {
             setDuplicatesOpen(false);
@@ -4143,6 +4472,11 @@ export function SemanticCoreTable({
       {rightSidebar?.type === "OPERATIONS" && (
         <SemanticOperationsDrawer
           onClose={() => setRightSidebar(undefined)}
+          onClusteringApplied={() => {
+            setCheckedIds(new Set());
+            setRetryVersion((value) => value + 1);
+            onGroupsChanged();
+          }}
           onFrequencySettled={() => {
             setWatchedFrequencyId(undefined);
             void refreshFrequencyMetrics();
@@ -4276,11 +4610,17 @@ function semanticVirtualRows(
   };
 }
 
+type SemanticKeywordLoadConfig = Pick<
+  SemanticViewConfig,
+  "filters" | "sort"
+> & Readonly<{
+  groupIds?: readonly string[];
+  multiSearch?: SemanticKeywordMultiSearch;
+}>;
+
 async function loadKeywordPage(
   projectId: string,
-  config: Pick<SemanticViewConfig, "filters" | "sort"> & Readonly<{
-    groupIds?: readonly string[];
-  }>,
+  config: SemanticKeywordLoadConfig,
   cursor?: string,
   signal?: AbortSignal,
   limit = 100
@@ -4307,6 +4647,31 @@ async function loadKeywordPage(
   }
   query.set("sort", config.sort);
   if (cursor) query.set("cursor", cursor);
+  if (config.multiSearch) {
+    const bodyQuery: Record<string, unknown> = {
+      limit,
+      sort: config.sort,
+      ...(cursor ? { cursor } : {}),
+      ...(filters.search ? { search: filters.search } : {}),
+      ...(filters.tag ? { tag: filters.tag } : {}),
+      ...(filters.intent ? { intent: filters.intent } : {}),
+      ...(filters.groupId ? { groupId: filters.groupId } : {}),
+      ...(config.groupIds?.length ? { groupIds: config.groupIds } : {}),
+      ...(filters.clusterId ? { clusterId: filters.clusterId } : {}),
+      ...(filters.isFavorite === undefined ? {} : { isFavorite: filters.isFavorite }),
+      ...(filters.isTracked === undefined ? {} : { isTracked: filters.isTracked }),
+      ...(filters.priorityMin === undefined ? {} : { priorityMin: filters.priorityMin }),
+      ...(filters.priorityMax === undefined ? {} : { priorityMax: filters.priorityMax })
+    };
+    return browserApiCollectionRequest<SemanticKeyword>(
+      `/app/api/projects/${encodeURIComponent(projectId)}/keywords/search`,
+      {
+        method: "POST",
+        body: { query: bodyQuery, search: config.multiSearch },
+        ...(signal ? { signal } : {})
+      }
+    );
+  }
   return browserApiCollectionRequest<SemanticKeyword>(
     `/app/api/projects/${encodeURIComponent(projectId)}/keywords?${query.toString()}`,
     signal ? { signal } : {}

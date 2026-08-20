@@ -16,11 +16,21 @@ export function ProjectPresenceAvatars() {
     activeParticipants,
     connectionStatus,
     currentUserId,
-    projectId
+    projectId,
+    setShowRemoteActivity,
+    showRemoteActivity
   } = useProjectPresence();
   if (!projectId) return null;
-  const visible = activeParticipants.slice(0, MAX_VISIBLE_PARTICIPANTS);
-  const overflow = Math.max(0, activeParticipants.length - visible.length);
+  const remoteActiveParticipants = activeParticipants.filter(
+    (active) =>
+      active.userId !== currentUserId &&
+      active.participant.status === "ACTIVE"
+  );
+  const visible = remoteActiveParticipants.slice(0, MAX_VISIBLE_PARTICIPANTS);
+  const overflow = Math.max(
+    0,
+    remoteActiveParticipants.length - visible.length
+  );
   const statusLabel =
     connectionStatus === "CONNECTED"
       ? "Совместная работа подключена"
@@ -30,7 +40,7 @@ export function ProjectPresenceAvatars() {
 
   return (
     <div
-      aria-label={`${statusLabel}. Активных участников: ${activeParticipants.length}`}
+      aria-label={`${statusLabel}. Других активных участников: ${remoteActiveParticipants.length}`}
       className={`project-presence-avatars status-${connectionStatus.toLowerCase()}`}
       role="group"
     >
@@ -38,7 +48,7 @@ export function ProjectPresenceAvatars() {
         <span
           className={`project-presence-avatar-wrap presence-color-${active.colorIndex} participant-${active.participant.status.toLowerCase()}`}
           key={active.userId}
-          title={participantTitle(active, active.userId === currentUserId)}
+          title={participantTitle(active)}
         >
           <ProjectParticipantAvatar
             active={active}
@@ -63,6 +73,20 @@ export function ProjectPresenceAvatars() {
           title={statusLabel}
         />
       )}
+      <button
+        aria-pressed={showRemoteActivity}
+        className={`project-presence-visibility-toggle${showRemoteActivity ? " active" : ""}`}
+        onClick={() => setShowRemoteActivity(!showRemoteActivity)}
+        title={
+          showRemoteActivity
+            ? "Скрыть курсоры и действия участников"
+            : "Показать курсоры и действия участников"
+        }
+        type="button"
+      >
+        <span aria-hidden="true">{showRemoteActivity ? "◉" : "○"}</span>
+        Показывать курсоры
+      </button>
       <span className="visually-hidden" role="status">
         {statusLabel}
       </span>
@@ -106,8 +130,7 @@ function ProjectParticipantAvatar({
 }
 
 function participantTitle(
-  active: ActiveProjectParticipant,
-  current: boolean
+  active: ActiveProjectParticipant
 ): string {
   const status =
     active.participant.status === "AWAY" ? "неактивен" : "в сети";
@@ -116,5 +139,5 @@ function participantTitle(
     active.connectionCount > 1
       ? `, вкладок: ${active.connectionCount}`
       : "";
-  return `${active.member.displayName}${current ? " (вы)" : ""} — ${projectPresenceRouteLabel(active.participant.route)}, ${status}${editing}${tabs}`;
+  return `${active.member.displayName} — ${projectPresenceRouteLabel(active.participant.route)}, ${status}${editing}${tabs}`;
 }

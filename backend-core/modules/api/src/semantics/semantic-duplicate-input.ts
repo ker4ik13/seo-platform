@@ -1,5 +1,6 @@
 import {
   semanticDuplicateAnalysisModes,
+  semanticDuplicateGroupScopeLimit,
   semanticDuplicateKeeperStrategies,
   semanticDuplicatePreviewPageSizes,
   semanticDuplicateScopeKinds,
@@ -233,7 +234,7 @@ function duplicateRules(value: unknown): SemanticDuplicateRules {
 }
 
 function duplicateScope(value: unknown): SemanticDuplicateScope {
-  const input = exactRecord(value, ["kind", "groupId", "items"]);
+  const input = exactRecord(value, ["kind", "groupId", "groupIds", "items"]);
   if (
     typeof input.kind !== "string" ||
     !semanticDuplicateScopeKinds.some((kind) => kind === input.kind)
@@ -241,7 +242,11 @@ function duplicateScope(value: unknown): SemanticDuplicateScope {
     invalid("scope.kind", "Unsupported scope");
   }
   if (input.kind === "PROJECT") {
-    if (input.groupId !== undefined || input.items !== undefined) {
+    if (
+      input.groupId !== undefined ||
+      input.groupIds !== undefined ||
+      input.items !== undefined
+    ) {
       invalid("scope", "Project scope cannot include group or items");
     }
     return { kind: "PROJECT" };
@@ -250,13 +255,17 @@ function duplicateScope(value: unknown): SemanticDuplicateScope {
     if (input.items !== undefined) {
       invalid("scope.items", "Group scope cannot include items");
     }
-    return {
-      kind: "GROUP",
-      groupId: uuid(input.groupId, "scope.groupId")
-    };
+    if (input.groupId !== undefined && input.groupIds !== undefined) {
+      invalid("scope", "Use either groupId or groupIds");
+    }
+    const groupIds = input.groupId !== undefined
+      ? [uuid(input.groupId, "scope.groupId")]
+      : duplicateGroupIds(input.groupIds);
+    return { kind: "GROUP", groupIds };
   }
   if (
     input.groupId !== undefined ||
+    input.groupIds !== undefined ||
     !Array.isArray(input.items) ||
     input.items.length < 1 ||
     input.items.length > 2_000
@@ -277,6 +286,26 @@ function duplicateScope(value: unknown): SemanticDuplicateScope {
     invalid("scope.items", "Duplicate keywords are not allowed");
   }
   return { kind: "SELECTION", items };
+}
+
+function duplicateGroupIds(value: unknown): readonly string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > semanticDuplicateGroupScopeLimit
+  ) {
+    invalid(
+      "scope.groupIds",
+      `Select between 1 and ${semanticDuplicateGroupScopeLimit} groups`
+    );
+  }
+  const groupIds = value.map((groupId, index) =>
+    uuid(groupId, `scope.groupIds.${index}`)
+  );
+  if (new Set(groupIds).size !== groupIds.length) {
+    invalid("scope.groupIds", "Duplicate groups are not allowed");
+  }
+  return groupIds.sort();
 }
 
 function exactRecord(

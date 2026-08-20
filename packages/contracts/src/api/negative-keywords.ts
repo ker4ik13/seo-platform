@@ -20,6 +20,9 @@ export const semanticNegativeKeywordScopeKinds = [
 export type SemanticNegativeKeywordScopeKind =
   (typeof semanticNegativeKeywordScopeKinds)[number];
 
+export const semanticNegativeKeywordWordLimit = 1_200;
+export const semanticNegativeKeywordGroupScopeLimit = 2_000;
+
 export interface SemanticNegativeKeywordRules {
   readonly words: readonly string[];
   readonly matchMode: SemanticNegativeKeywordMatchMode;
@@ -49,7 +52,10 @@ export interface UpdateSemanticNegativeKeywordPresetInput {
 
 export interface SemanticNegativeKeywordScope {
   readonly kind: SemanticNegativeKeywordScopeKind;
+  /** Legacy single-folder field accepted during rolling deployments. */
   readonly groupId?: string;
+  /** Selected folders after their visible descendants have been resolved. */
+  readonly groupIds?: readonly string[];
   readonly items?: readonly SemanticKeywordBulkSelection[];
 }
 

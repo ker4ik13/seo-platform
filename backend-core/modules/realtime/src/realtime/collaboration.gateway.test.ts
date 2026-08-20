@@ -391,6 +391,7 @@ function updateInput(): ProjectPresenceUpdateInput {
       kind: "SEMANTIC_CORE",
       groupIds: ["0198f258-8cc7-7abc-8def-1234567890c3"]
     },
+    activity: "SEMANTIC_POSITIONS",
     editing: false,
     sequence: 1
   };

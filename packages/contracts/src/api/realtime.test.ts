@@ -113,6 +113,7 @@ test("accepts only bounded cursor coordinates and semantic selection identifiers
       kind: "SEMANTIC_CORE",
       groupIds: ["0198f258-8cc7-7abc-8def-1234567890ad"]
     },
+    activity: "SEMANTIC_CLUSTERING",
     editing: false,
     sequence: 7
   } as const;
@@ -152,6 +153,10 @@ test("accepts only bounded cursor coordinates and semantic selection identifiers
         ...value.view,
         groupIds: [value.view.groupIds[0], value.view.groupIds[0]]
       }
+    },
+    {
+      ...value,
+      activity: "VISIBLE_MODAL_TITLE"
     }
   ]) {
     assert.throws(
@@ -160,11 +165,17 @@ test("accepts only bounded cursor coordinates and semantic selection identifiers
     );
   }
 
-  const { view: ignoredView, ...legacyValue } = value;
+  const {
+    view: ignoredView,
+    activity: ignoredActivity,
+    ...legacyValue
+  } = value;
   assert.equal(ignoredView.kind, "SEMANTIC_CORE");
+  assert.equal(ignoredActivity, "SEMANTIC_CLUSTERING");
   assert.deepEqual(projectPresenceUpdateInput(legacyValue), {
     ...legacyValue,
-    view: null
+    view: null,
+    activity: null
   });
 });
 
@@ -208,16 +219,23 @@ test("parses an exact ephemeral participant without tenant authority", () => {
     cursor: null,
     selection: null,
     view: { kind: "SEMANTIC_CORE", groupIds: [] },
+    activity: "SEMANTIC_GROUP",
     editing: false,
     sequence: 8,
     updatedAt: "2026-08-20T10:00:00.000Z"
   } as const;
   assert.deepEqual(projectPresenceParticipant(participant), participant);
-  const { view: legacyView, ...legacyParticipant } = participant;
+  const {
+    view: legacyView,
+    activity: legacyActivity,
+    ...legacyParticipant
+  } = participant;
   assert.equal(legacyView.kind, "SEMANTIC_CORE");
+  assert.equal(legacyActivity, "SEMANTIC_GROUP");
   assert.deepEqual(projectPresenceParticipant(legacyParticipant), {
     ...legacyParticipant,
-    view: null
+    view: null,
+    activity: null
   });
   assert.throws(
     () =>

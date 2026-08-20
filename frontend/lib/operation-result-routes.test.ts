@@ -13,7 +13,7 @@ import {
 const id = "01900000-0000-7000-8000-000000000001";
 
 test("accepts the implemented async operation kinds", () => {
-  assert.deepEqual(operationResultKinds, ["frequency", "ai-answer", "rank", "crawl", "research"]);
+  assert.deepEqual(operationResultKinds, ["frequency", "ai-answer", "clustering", "rank", "crawl", "research"]);
   for (const kind of operationResultKinds) assert.equal(operationResultKind(kind), kind);
   assert.equal(operationResultKind("import"), undefined);
 });
@@ -47,6 +47,10 @@ test("builds exact same-origin result API routes for every operation", () => {
   assert.equal(
     operationResultApiPath(id, "ai-answer", id),
     `/app/api/projects/${id}/ai-answer-collections/${id}/result?limit=200`
+  );
+  assert.equal(
+    operationResultApiPath(id, "clustering", id),
+    `/app/api/projects/${id}/clustering-runs/${id}/result?limit=200`
   );
   assert.equal(
     operationResultApiPath(id, "rank", id),

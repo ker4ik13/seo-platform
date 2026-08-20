@@ -559,6 +559,38 @@ SELECT format(
 )
 \gexec
 
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.claim_clustering_run(TEXT, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.renew_clustering_run_lease(UUID, UUID[], TEXT, INTEGER, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.mark_clustering_run_submitting(UUID, UUID[], TEXT, INTEGER, TEXT, INTEGER)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.transition_clustering_run(UUID, UUID[], TEXT, INTEGER, TEXT, TEXT, INTEGER, TEXT, JSONB)
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
 -- A PostgreSQL role is cluster-wide. REVOKE above intentionally touches only
 -- jobs_db/public and must never mutate another service database. Instead,
 -- reject an existing role if any direct ACL dependency remains outside the
@@ -627,7 +659,11 @@ BEGIN
     'public.fail_ai_answer_collection_batch(uuid,uuid[],text,integer,text,integer)'::regprocedure::oid,
     'public.defer_ai_answer_collection_batch_capacity(uuid,uuid[],text,integer,integer)'::regprocedure::oid,
     'public.quarantine_ai_answer_collection_batch_submit(uuid,uuid[],text,integer)'::regprocedure::oid,
-    'public.complete_ai_answer_collection_batch(uuid,uuid[],text,integer)'::regprocedure::oid
+    'public.complete_ai_answer_collection_batch(uuid,uuid[],text,integer)'::regprocedure::oid,
+    'public.claim_clustering_run(text,integer)'::regprocedure::oid,
+    'public.renew_clustering_run_lease(uuid,uuid[],text,integer,integer)'::regprocedure::oid,
+    'public.mark_clustering_run_submitting(uuid,uuid[],text,integer,text,integer)'::regprocedure::oid,
+    'public.transition_clustering_run(uuid,uuid[],text,integer,text,text,integer,text,jsonb)'::regprocedure::oid
   ];
 
   IF EXISTS (

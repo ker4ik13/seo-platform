@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   initialSemanticCreateGroupId,
+  semanticBulkSelectionBatches,
   semanticClipboardText,
   semanticHighlightAfterRowClick,
   toggleSemanticHighlightedSelection
@@ -54,4 +55,12 @@ test("new keyword inherits the open active folder but never trash", () => {
   assert.equal(initialSemanticCreateGroupId("ungrouped", groups), "ungrouped");
   assert.equal(initialSemanticCreateGroupId("trash", groups), "ungrouped");
   assert.equal(initialSemanticCreateGroupId("missing", groups), "ungrouped");
+});
+
+test("bulk editor keeps all 457 selected rows while respecting the 200-row API batch", () => {
+  const selections = Array.from({ length: 457 }, (_, index) => index);
+  assert.deepEqual(
+    semanticBulkSelectionBatches(selections, 200).map((batch) => batch.length),
+    [200, 200, 57]
+  );
 });

@@ -131,6 +131,7 @@ function participant(
     cursor: null,
     selection: null,
     view: null,
+    activity: null,
     editing: false,
     sequence: second,
     updatedAt: `2026-08-20T10:00:0${second}.000Z`

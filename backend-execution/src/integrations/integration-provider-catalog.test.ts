@@ -5,10 +5,15 @@ import {
   operationalIntegrationProviderCatalog
 } from "./integration-provider-catalog.js";
 
-test("Arsenkin catalog exposes its documented rank-tracking capability", () => {
+test("Arsenkin catalog exposes its documented execution capabilities", () => {
   assert.ok(
     integrationProviderMetadata("ARSENKIN").capabilities.includes(
       "SERP_RANK_TRACKING"
+    )
+  );
+  assert.ok(
+    integrationProviderMetadata("ARSENKIN").capabilities.includes(
+      "CLUSTERING"
     )
   );
 });
@@ -19,7 +24,7 @@ test("public catalog only advertises operational provider workflows", () => {
   );
   assert.deepEqual(
     integrationProviderMetadata("ARSENKIN").capabilities,
-    ["SERP_RANK_TRACKING", "SERP_COLLECTION", "WORDSTAT"]
+    ["SERP_RANK_TRACKING", "SERP_COLLECTION", "WORDSTAT", "CLUSTERING"]
   );
   assert.deepEqual(
     integrationProviderMetadata("KEYS_SO").capabilities,
