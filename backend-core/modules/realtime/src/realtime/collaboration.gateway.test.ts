@@ -387,6 +387,10 @@ function updateInput(): ProjectPresenceUpdateInput {
       highlightedIds: ["0198f258-8cc7-7abc-8def-1234567890c2"],
       columnId: "query"
     },
+    view: {
+      kind: "SEMANTIC_CORE",
+      groupIds: ["0198f258-8cc7-7abc-8def-1234567890c3"]
+    },
     editing: false,
     sequence: 1
   };

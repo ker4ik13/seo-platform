@@ -4715,13 +4715,13 @@ svg { display: block; }
   display: grid;
   font-size: 11px;
   gap: 7px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   min-height: 36px;
   padding: 0 8px;
   text-align: left;
 }
 .semantic-group-root[aria-current="true"], .semantic-group-root:hover { background: #eeecff; color: var(--brand); }
-.semantic-group-root small { color: var(--muted); font-size: 9px; }
+.semantic-group-root small { color: var(--muted); font-size: 9px; grid-column: 4; }
 .semantic-group-root > svg { color: var(--muted); height: 16px; width: 16px; }
 .semantic-group-tree-list { min-height: 0; overflow: auto; padding: 0 0 18px; }
 .semantic-system-groups {
@@ -4736,7 +4736,7 @@ svg { display: block; }
   border-radius: 7px;
   display: grid;
   gap: 2px;
-  grid-template-columns: 15px minmax(0, 1fr) auto 22px;
+  grid-template-columns: 15px minmax(0, 1fr) auto auto 22px;
   min-height: 34px;
   padding-right: 3px;
   position: relative;
@@ -4784,9 +4784,38 @@ svg { display: block; }
 .semantic-group-name { align-items: center; align-self: stretch; background: transparent; display: flex; gap: 7px; min-height: 100%; min-width: 0; padding: 0; text-align: left; width: 100%; }
 .semantic-group-name i { border-radius: 3px; flex: 0 0 auto; height: 14px; opacity: .75; width: 4px; }
 .semantic-group-name span { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.semantic-group-tree-row > small { color: var(--muted); font-size: 9px; }
-.semantic-group-more { background: transparent; border-radius: 5px; color: var(--muted); height: 25px; opacity: 0; padding: 0; width: 22px; }
+.semantic-group-tree-row > small { color: var(--muted); font-size: 9px; grid-column: 4; }
+.semantic-group-more { background: transparent; border-radius: 5px; color: var(--muted); grid-column: 5; height: 25px; opacity: 0; padding: 0; width: 22px; }
 .semantic-group-tree-row:hover .semantic-group-more, .semantic-group-more:focus-visible { opacity: 1; }
+.semantic-group-root.remote-presence:not(.drag-target),
+.semantic-group-tree-row.remote-presence:not(.drag-inside) {
+  box-shadow: inset 3px 0 0 var(--presence-color);
+}
+.semantic-group-root.remote-presence:not([aria-current="true"]),
+.semantic-group-tree-row.remote-presence:not(.active) {
+  background: var(--presence-soft);
+}
+.semantic-group-remote-presence {
+  align-items: center;
+  display: inline-flex;
+  gap: 2px;
+  grid-column: 3;
+  justify-content: flex-end;
+  min-width: 8px;
+}
+.semantic-group-remote-presence > i {
+  background: var(--presence-color);
+  border: 1px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--presence-color);
+  height: 7px;
+  width: 7px;
+}
+.semantic-group-remote-presence > b {
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1;
+}
 .semantic-table-tools {
   align-items: center;
   border-bottom: 1px solid var(--line);
@@ -5057,6 +5086,25 @@ svg { display: block; }
 }
 .semantic-table tbody tr.highlighted td:last-child {
   box-shadow: inset -1px 0 0 #5f46f5, inset 0 1px 0 var(--highlight-edge-top), inset 0 -1px 0 var(--highlight-edge-bottom);
+}
+.semantic-table tbody tr.remote-presence-selected > td,
+.semantic-table tbody tr.remote-presence-highlighted > td {
+  --remote-presence-edge-top: var(--presence-color);
+  --remote-presence-edge-bottom: var(--presence-color);
+  background: var(--presence-soft);
+  box-shadow: inset 0 1px 0 var(--remote-presence-edge-top), inset 0 -1px 0 var(--remote-presence-edge-bottom);
+}
+.semantic-table tbody tr.remote-presence-previous > td { --remote-presence-edge-top: transparent; }
+.semantic-table tbody tr.remote-presence-next > td { --remote-presence-edge-bottom: transparent; }
+.semantic-table tbody tr.remote-presence-selected > td:first-child {
+  box-shadow: inset 1px 0 0 var(--presence-color), inset 0 1px 0 var(--remote-presence-edge-top), inset 0 -1px 0 var(--remote-presence-edge-bottom);
+}
+.semantic-table tbody tr.remote-presence-highlighted > td:first-child {
+  box-shadow: inset 3px 0 0 var(--presence-color), inset 0 1px 0 var(--remote-presence-edge-top), inset 0 -1px 0 var(--remote-presence-edge-bottom);
+}
+.semantic-table tbody tr.remote-presence-selected > td:last-child,
+.semantic-table tbody tr.remote-presence-highlighted > td:last-child {
+  box-shadow: inset -1px 0 0 var(--presence-color), inset 0 1px 0 var(--remote-presence-edge-top), inset 0 -1px 0 var(--remote-presence-edge-bottom);
 }
 .semantic-metric-value { font-variant-numeric: tabular-nums; font-weight: 700; }
 .semantic-metric-empty { color: var(--muted); }
@@ -10635,30 +10683,6 @@ svg { display: block; }
   top: 20px;
   white-space: nowrap;
 }
-.project-presence-selection {
-  background: var(--presence-soft);
-  border: 2px solid var(--presence-color);
-  border-radius: 5px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .55);
-  position: fixed;
-}
-.project-presence-selection > b {
-  background: var(--presence-color);
-  border-radius: 5px 5px 0 0;
-  bottom: 100%;
-  color: #fff;
-  font-size: 8px;
-  font-weight: 750;
-  left: -2px;
-  line-height: 1;
-  max-width: 220px;
-  overflow: hidden;
-  padding: 4px 6px;
-  position: absolute;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 @media (max-width: 720px) {
   .project-presence-avatars { padding-left: 5px; }
   .project-presence-avatar-wrap,

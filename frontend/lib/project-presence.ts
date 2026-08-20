@@ -1,6 +1,7 @@
 import type {
   ProjectPresenceMember,
-  ProjectPresenceParticipant
+  ProjectPresenceParticipant,
+  ProjectPresenceViewContext
 } from "@seo-platform/contracts";
 
 export interface ActiveProjectParticipant {
@@ -80,6 +81,18 @@ export function stablePresenceColorIndex(userId: string): number {
     hash = Math.imul(hash, 16_777_619);
   }
   return (hash >>> 0) % 8;
+}
+
+export function sameProjectPresenceView(
+  left: ProjectPresenceViewContext | null,
+  right: ProjectPresenceViewContext | null
+): boolean {
+  if (left === null || right === null) return left === right;
+  return (
+    left.kind === right.kind &&
+    left.groupIds.length === right.groupIds.length &&
+    left.groupIds.every((groupId) => right.groupIds.includes(groupId))
+  );
 }
 
 export function projectPresenceRouteLabel(route: string): string {

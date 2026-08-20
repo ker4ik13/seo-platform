@@ -5,6 +5,7 @@ import {
   aggregateProjectParticipants,
   projectPresenceAvatarUrl,
   projectPresenceRouteLabel,
+  sameProjectPresenceView,
   stablePresenceColorIndex
 } from "./project-presence.ts";
 
@@ -82,6 +83,40 @@ test("derives bounded presentation without exposing profile data in URLs", () =>
   );
 });
 
+test("matches semantic presence only for the same folder context", () => {
+  const groupId = "0198f258-8cc7-7abc-8def-1234567890ae";
+  const otherGroupId = "0198f258-8cc7-7abc-8def-1234567890af";
+  assert.equal(sameProjectPresenceView(null, null), true);
+  assert.equal(
+    sameProjectPresenceView(
+      { kind: "SEMANTIC_CORE", groupIds: [groupId, otherGroupId] },
+      { kind: "SEMANTIC_CORE", groupIds: [groupId, otherGroupId] }
+    ),
+    true
+  );
+  assert.equal(
+    sameProjectPresenceView(
+      { kind: "SEMANTIC_CORE", groupIds: [groupId, otherGroupId] },
+      { kind: "SEMANTIC_CORE", groupIds: [otherGroupId, groupId] }
+    ),
+    true
+  );
+  assert.equal(
+    sameProjectPresenceView(
+      { kind: "SEMANTIC_CORE", groupIds: [groupId] },
+      { kind: "SEMANTIC_CORE", groupIds: [otherGroupId] }
+    ),
+    false
+  );
+  assert.equal(
+    sameProjectPresenceView(
+      { kind: "SEMANTIC_CORE", groupIds: [] },
+      null
+    ),
+    false
+  );
+});
+
 function participant(
   userId: string,
   connectionId: string,
@@ -95,6 +130,7 @@ function participant(
     status: "ACTIVE",
     cursor: null,
     selection: null,
+    view: null,
     editing: false,
     sequence: second,
     updatedAt: `2026-08-20T10:00:0${second}.000Z`

@@ -1297,6 +1297,11 @@ Join room — отдельная авторизуемая команда. Кли
 Ephemeral payload:
 
 - cursor throttled минимум до 80 ms между отправками, heartbeat — 15 секунд;
+- semantic presence содержит bounded view context `SEMANTIC_CORE` и до 50
+  уникальных UUID активных папок; пустой список означает «Все запросы»;
+- cursor anchor содержит только технический row/cell key и относительные
+  координаты внутри него; нормализованные viewport coordinates не используются
+  как fallback при отрисовке на другом клиенте;
 - ограничен по размеру;
 - не содержит значения скрытых ячеек;
 - истекает по Redis TTL 30 секунд;

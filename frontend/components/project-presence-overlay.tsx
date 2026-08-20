@@ -1,6 +1,5 @@
 "use client";
 
-import { usePathname } from "next/navigation";
 import {
   useEffect,
   useLayoutEffect,
@@ -8,7 +7,10 @@ import {
   useState
 } from "react";
 import { createPortal } from "react-dom";
-import type { ActiveProjectParticipant } from "../lib/project-presence";
+import {
+  sameProjectPresenceView,
+  type ActiveProjectParticipant
+} from "../lib/project-presence";
 import { useProjectPresence } from "./project-presence-provider";
 
 interface CursorVisual {
@@ -20,40 +22,33 @@ interface CursorVisual {
   readonly colorIndex: number;
 }
 
-interface SelectionVisual {
-  readonly key: string;
-  readonly left: number;
-  readonly top: number;
-  readonly width: number;
-  readonly height: number;
-  readonly label?: string;
-  readonly colorIndex: number;
-}
-
 interface PresenceVisuals {
   readonly cursors: readonly CursorVisual[];
-  readonly selections: readonly SelectionVisual[];
 }
 
 export function ProjectPresenceOverlay() {
-  const pathname = usePathname();
-  const { activeParticipants, currentUserId, projectId } =
-    useProjectPresence();
+  const {
+    activeParticipants,
+    currentRoute,
+    currentUserId,
+    currentView,
+    projectId
+  } = useProjectPresence();
   const [mounted, setMounted] = useState(false);
   const [viewportVersion, setViewportVersion] = useState(0);
   const [visuals, setVisuals] = useState<PresenceVisuals>({
-    cursors: [],
-    selections: []
+    cursors: []
   });
   const remoteParticipants = useMemo(
     () =>
       activeParticipants.filter(
         (active) =>
           active.userId !== currentUserId &&
-          active.participant.route === pathname &&
+          active.participant.route === currentRoute &&
+          sameProjectPresenceView(active.participant.view, currentView) &&
           active.participant.status === "ACTIVE"
       ),
-    [activeParticipants, currentUserId, pathname]
+    [activeParticipants, currentRoute, currentUserId, currentView]
   );
 
   useEffect(() => setMounted(true), []);
@@ -97,7 +92,7 @@ export function ProjectPresenceOverlay() {
 
   useLayoutEffect(() => {
     if (!mounted || !projectId) {
-      setVisuals({ cursors: [], selections: [] });
+      setVisuals({ cursors: [] });
       return;
     }
     setVisuals(measurePresenceVisuals(remoteParticipants));
@@ -106,20 +101,6 @@ export function ProjectPresenceOverlay() {
   if (!mounted || !projectId || typeof document === "undefined") return null;
   return createPortal(
     <div aria-hidden="true" className="project-presence-overlay">
-      {visuals.selections.map((selection) => (
-        <span
-          className={`project-presence-selection presence-color-${selection.colorIndex}`}
-          key={selection.key}
-          style={{
-            height: selection.height,
-            left: selection.left,
-            top: selection.top,
-            width: selection.width
-          }}
-        >
-          {selection.label && <b>{selection.label}</b>}
-        </span>
-      ))}
       {visuals.cursors.map((cursor) => (
         <span
           className={`project-presence-cursor presence-color-${cursor.colorIndex}`}
@@ -144,7 +125,6 @@ function measurePresenceVisuals(
   participants: readonly ActiveProjectParticipant[]
 ): PresenceVisuals {
   const cursors: CursorVisual[] = [];
-  const selections: SelectionVisual[] = [];
   for (const active of participants) {
     const cursor = active.participant.cursor;
     if (cursor) {
@@ -160,37 +140,8 @@ function measurePresenceVisuals(
         });
       }
     }
-    const selection = active.participant.selection;
-    if (!selection || selection.entity !== "KEYWORD") continue;
-    const ids = [
-      ...new Set([
-        ...selection.highlightedIds,
-        ...selection.selectedIds
-      ])
-    ].slice(0, 16);
-    ids.forEach((id, index) => {
-      const row = document.querySelector<HTMLElement>(
-        `[data-presence-row-id="${id}"]`
-      );
-      if (!row) return;
-      const rect = row.getBoundingClientRect();
-      if (!visibleRect(rect)) return;
-      selections.push({
-        key: `${active.userId}:${id}`,
-        left: rect.left,
-        top: rect.top,
-        width: rect.width,
-        height: rect.height,
-        ...(index === 0
-          ? {
-              label: `${active.member.displayName} · выделено ${ids.length}`
-            }
-          : {}),
-        colorIndex: active.colorIndex
-      });
-    });
   }
-  return { cursors, selections };
+  return { cursors };
 }
 
 function cursorPoint(
@@ -201,35 +152,24 @@ function cursorPoint(
     const target = document.querySelector<HTMLElement>(
       `[data-presence-key="${escaped}"]`
     );
-    if (target) {
+    if (target?.dataset.presenceCursorAnchor === "true") {
       const rect = target.getBoundingClientRect();
       const point = {
         x: rect.left + rect.width * cursor.targetX,
         y: rect.top + rect.height * cursor.targetY
       };
-      if (visiblePoint(point.x, point.y)) return point;
+      if (visibleTargetPoint(target, point.x, point.y)) return point;
     }
   }
-  const point = {
-    x: window.innerWidth * cursor.x,
-    y: window.innerHeight * cursor.y
-  };
-  return visiblePoint(point.x, point.y) ? point : undefined;
+  return undefined;
 }
 
-function visiblePoint(x: number, y: number): boolean {
-  return x >= 0 && y >= 0 && x <= window.innerWidth && y <= window.innerHeight;
-}
-
-function visibleRect(rect: DOMRect): boolean {
-  return (
-    rect.width > 0 &&
-    rect.height > 0 &&
-    rect.bottom >= 0 &&
-    rect.right >= 0 &&
-    rect.top <= window.innerHeight &&
-    rect.left <= window.innerWidth
-  );
+function visibleTargetPoint(target: HTMLElement, x: number, y: number): boolean {
+  if (x < 0 || y < 0 || x > window.innerWidth || y > window.innerHeight) {
+    return false;
+  }
+  const visibleElement = document.elementFromPoint(x, y);
+  return visibleElement !== null && target.contains(visibleElement);
 }
 
 function cssEscape(value: string): string {

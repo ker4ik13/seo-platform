@@ -24,6 +24,17 @@ export interface KeywordDataGridColumn<Row> {
   readonly onResizeEnd?: (width: number) => void;
 }
 
+export interface KeywordDataGridRowPresence {
+  readonly colorIndex: number;
+  readonly kind: "SELECTED" | "HIGHLIGHTED";
+  readonly label: string;
+}
+
+const EMPTY_ROW_PRESENCE: ReadonlyMap<
+  string,
+  KeywordDataGridRowPresence
+> = new Map();
+
 export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
   actions,
   ariaLabel,
@@ -41,6 +52,7 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
   onToggleRow,
   paddingBottom = 0,
   paddingTop = 0,
+  presenceByRowId = EMPTY_ROW_PRESENCE,
   rowNumberOffset = 0,
   rows,
   selectedIds,
@@ -63,6 +75,7 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
   onToggleRow: (row: Row, event: MouseEvent<HTMLInputElement>) => void;
   paddingBottom?: number;
   paddingTop?: number;
+  presenceByRowId?: ReadonlyMap<string, KeywordDataGridRowPresence>;
   rowNumberOffset?: number;
   rows: readonly Row[];
   selectedIds: ReadonlySet<string>;
@@ -243,6 +256,13 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
         {rows.map((row, index) => {
           const selected = selectedIds.has(row.id);
           const highlighted = highlightedIds.has(row.id);
+          const presence = presenceByRowId.get(row.id);
+          const previousPresence = presenceByRowId.get(
+            rows[index - 1]?.id ?? ""
+          );
+          const nextPresence = presenceByRowId.get(
+            rows[index + 1]?.id ?? ""
+          );
           const joinedPrevious =
             selected && selectedIds.has(rows[index - 1]?.id ?? "");
           const joinedNext =
@@ -260,27 +280,45 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
                 highlightedNext ? "highlighted-next" : "",
                 selected ? "selected" : "",
                 joinedPrevious ? "joined-previous" : "",
-                joinedNext ? "joined-next" : ""
+                joinedNext ? "joined-next" : "",
+                presence
+                  ? `remote-presence-${presence.kind.toLowerCase()}`
+                  : "",
+                presence ? `presence-color-${presence.colorIndex}` : "",
+                sameRowPresence(presence, previousPresence)
+                  ? "remote-presence-previous"
+                  : "",
+                sameRowPresence(presence, nextPresence)
+                  ? "remote-presence-next"
+                  : ""
               ]
                 .filter(Boolean)
                 .join(" ") || undefined}
               draggable={draggable}
+              data-presence-cursor-anchor="true"
               data-presence-key={`keyword:${row.id}`}
               data-presence-row-id={row.id}
               key={row.id}
               onClick={(event) => onRowClick?.(row, event)}
               onContextMenu={(event) => onContextMenu?.(event, row)}
               onDragStart={(event) => onDragStart?.(event, row)}
+              title={presence?.label}
             >
               {showRowNumbers && (
                 <td
                   aria-label={`Позиция строки ${rowNumberOffset + index + 1}`}
                   className="semantic-row-number-cell"
+                  data-presence-cursor-anchor="true"
+                  data-presence-key={`keyword:${row.id}:column:position`}
                 >
                   {rowNumberOffset + index + 1}
                 </td>
               )}
-              <td className="semantic-select-cell">
+              <td
+                className="semantic-select-cell"
+                data-presence-cursor-anchor="true"
+                data-presence-key={`keyword:${row.id}:column:selection`}
+              >
                 <input
                   aria-label={`Выбрать запрос ${row.id}`}
                   checked={selected}
@@ -299,6 +337,7 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
                       ? column.cellClassName(row)
                       : column.cellClassName
                   }
+                  data-presence-cursor-anchor="true"
                   data-presence-column-id={column.key}
                   data-presence-key={`keyword:${row.id}:column:${column.key}`}
                   data-presence-row-id={row.id}
@@ -307,7 +346,14 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
                   {column.cell(row)}
                 </td>
               ))}
-              {actions && <td>{actions(row)}</td>}
+              {actions && (
+                <td
+                  data-presence-cursor-anchor="true"
+                  data-presence-key={`keyword:${row.id}:column:actions`}
+                >
+                  {actions(row)}
+                </td>
+              )}
             </tr>
           );
         })}
@@ -318,6 +364,19 @@ export function KeywordDataGrid<Row extends Readonly<{ id: string }>>({
         )}
       </tbody>
     </table>
+  );
+}
+
+function sameRowPresence(
+  left: KeywordDataGridRowPresence | undefined,
+  right: KeywordDataGridRowPresence | undefined
+): boolean {
+  return Boolean(
+    left &&
+      right &&
+      left.colorIndex === right.colorIndex &&
+      left.kind === right.kind &&
+      left.label === right.label
   );
 }
 

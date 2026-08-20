@@ -88,6 +88,7 @@ import {
 } from "./semantic-group-dialog";
 import {
   SemanticGroupTree,
+  type SemanticGroupRemotePresence,
   type SemanticGroupTreeDropTarget,
   type SemanticGroupTreeItem
 } from "./semantic-group-tree";
@@ -109,7 +110,10 @@ import {
 } from "./semantic-trash-recovery-dialog";
 import { SemanticVersionHistory } from "./semantic-version-history";
 import { SearchEngineLogo } from "./search-engine-logo";
-import { KeywordDataGrid } from "./keyword-data-grid";
+import {
+  KeywordDataGrid,
+  type KeywordDataGridRowPresence
+} from "./keyword-data-grid";
 import { Icon } from "./icon";
 import { ProjectSelectOption } from "./project-select-option";
 import {
@@ -117,6 +121,7 @@ import {
   useProjectActiveOperationCount
 } from "./project-operation-activity-provider";
 import { useProjectPresence } from "./project-presence-provider";
+import { sameProjectPresenceView } from "../lib/project-presence";
 import type { AppProject } from "../lib/app-types";
 import {
   defaultSemanticViewConfig,
@@ -306,7 +311,14 @@ export function SemanticCoreTable({
   workspaceId,
   workspaceRoleCode
 }: SemanticCoreTableProps) {
-  const { publishSelection } = useProjectPresence();
+  const {
+    activeParticipants,
+    currentRoute,
+    currentUserId: presenceCurrentUserId,
+    currentView,
+    publishSelection,
+    publishView
+  } = useProjectPresence();
   const [items, setItems] = useState<readonly SemanticKeyword[]>([]);
   const [page, setPage] = useState<BrowserCursorPage>({
     hasNext: false
@@ -500,6 +512,103 @@ export function SemanticCoreTable({
   const debouncedTagSearch = useDebouncedValue(
     draftConfig.filters.tag ?? "",
     250
+  );
+  const presenceGroupIds = useMemo<readonly string[]>(
+    () =>
+      multiGroupIds.length > 1
+        ? [...new Set(multiGroupIds)].sort()
+        : viewConfig.filters.groupId
+          ? [viewConfig.filters.groupId]
+          : [],
+    [multiGroupIds, viewConfig.filters.groupId]
+  );
+  const remoteSemanticParticipants = useMemo(
+    () =>
+      activeParticipants.filter(
+        (active) =>
+          active.userId !== presenceCurrentUserId &&
+          active.participant.status === "ACTIVE" &&
+          active.participant.route === currentRoute &&
+          active.participant.view?.kind === "SEMANTIC_CORE"
+      ),
+    [activeParticipants, currentRoute, presenceCurrentUserId]
+  );
+  const remoteSemanticGroupPresence = useMemo<
+    readonly SemanticGroupRemotePresence[]
+  >(
+    () =>
+      remoteSemanticParticipants.map((active) => ({
+        userId: active.userId,
+        displayName: active.member.displayName,
+        colorIndex: active.colorIndex,
+        groupIds: active.participant.view?.groupIds ?? []
+      })),
+    [remoteSemanticParticipants]
+  );
+  const remoteKeywordPresence = useMemo<
+    ReadonlyMap<string, KeywordDataGridRowPresence>
+  >(() => {
+    const draft = new Map<
+      string,
+      {
+        colorIndex: number;
+        kind: KeywordDataGridRowPresence["kind"];
+        names: string[];
+      }
+    >();
+    for (const active of remoteSemanticParticipants) {
+      if (!sameProjectPresenceView(active.participant.view, currentView)) {
+        continue;
+      }
+      const selection = active.participant.selection;
+      if (!selection || selection.entity !== "KEYWORD") continue;
+      const keywordKinds = new Map<string, KeywordDataGridRowPresence["kind"]>();
+      for (const keywordId of selection.selectedIds) {
+        keywordKinds.set(keywordId, "SELECTED");
+      }
+      for (const keywordId of selection.highlightedIds) {
+        keywordKinds.set(keywordId, "HIGHLIGHTED");
+      }
+      for (const [keywordId, kind] of keywordKinds) {
+        const existing = draft.get(keywordId);
+        if (!existing) {
+          draft.set(keywordId, {
+            colorIndex: active.colorIndex,
+            kind,
+            names: [active.member.displayName]
+          });
+          continue;
+        }
+        if (!existing.names.includes(active.member.displayName)) {
+          existing.names.push(active.member.displayName);
+        }
+        if (kind === "HIGHLIGHTED") existing.kind = "HIGHLIGHTED";
+      }
+    }
+    return new Map(
+      [...draft].map(([keywordId, presence]) => [
+        keywordId,
+        {
+          colorIndex: presence.colorIndex,
+          kind: presence.kind,
+          label: `Выделяют: ${presence.names.join(", ")}`
+        }
+      ])
+    );
+  }, [currentView, remoteSemanticParticipants]);
+
+  useEffect(() => {
+    const nextView = {
+      kind: "SEMANTIC_CORE" as const,
+      groupIds: presenceGroupIds
+    };
+    if (sameProjectPresenceView(currentView, nextView)) return;
+    publishView(nextView);
+  }, [currentView, presenceGroupIds, projectId, publishView]);
+
+  useEffect(
+    () => () => publishView(null),
+    [publishView]
   );
 
   useEffect(() => {
@@ -2683,6 +2792,7 @@ export function SemanticCoreTable({
         onReorder={(group, position) => void reorderGroup(group, position)}
         onExpandedIdsChange={updateExpandedGroupIds}
         onSelect={selectGroup}
+        remotePresence={remoteSemanticGroupPresence}
         {...(total === undefined ? {} : { total })}
       />
       <div
@@ -3762,6 +3872,7 @@ export function SemanticCoreTable({
               onToggleRow={(item, event) => toggleKeywordRow(item, event)}
               paddingBottom={virtualRows.paddingBottom}
               paddingTop={virtualRows.paddingTop}
+              presenceByRowId={remoteKeywordPresence}
               rowNumberOffset={virtualRows.start}
               rows={virtualRows.items}
               selectedIds={checkedIds}

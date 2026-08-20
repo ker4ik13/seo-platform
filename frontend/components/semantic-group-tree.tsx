@@ -21,6 +21,13 @@ export interface SemanticGroupTreeItem {
   readonly version: number;
 }
 
+export interface SemanticGroupRemotePresence {
+  readonly userId: string;
+  readonly displayName: string;
+  readonly colorIndex: number;
+  readonly groupIds: readonly string[];
+}
+
 interface FlatGroup {
   readonly group: SemanticGroupTreeItem;
   readonly depth: number;
@@ -28,6 +35,8 @@ interface FlatGroup {
 }
 
 const EMPTY_GROUP_IDS: readonly string[] = [];
+const EMPTY_REMOTE_PRESENCE: readonly SemanticGroupRemotePresence[] = [];
+const ROOT_PRESENCE_KEY = "root";
 export type SemanticGroupTreeDropTarget =
   | Readonly<{ placement: "root" }>
   | Readonly<{
@@ -52,6 +61,7 @@ export function SemanticGroupTree({
   onRename,
   onSelect,
   onExpandedIdsChange,
+  remotePresence = EMPTY_REMOTE_PRESENCE,
   total
 }: Readonly<{
   activeGroupId?: string;
@@ -76,6 +86,7 @@ export function SemanticGroupTree({
   onRename: (group: SemanticGroupTreeItem) => void;
   onSelect: (groupId?: string) => void;
   onExpandedIdsChange: (expandedIds: ReadonlySet<string>) => void;
+  remotePresence?: readonly SemanticGroupRemotePresence[];
   total?: number;
 }>) {
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
@@ -143,6 +154,21 @@ export function SemanticGroupTree({
           systemGroupOrder(left.systemKind) - systemGroupOrder(right.systemKind)
       );
   }, [groups, search]);
+  const remotePresenceByGroupId = useMemo(() => {
+    const result = new Map<string, SemanticGroupRemotePresence[]>();
+    for (const participant of remotePresence) {
+      const groupIds =
+        participant.groupIds.length > 0
+          ? participant.groupIds
+          : [ROOT_PRESENCE_KEY];
+      for (const groupId of groupIds) {
+        const current = result.get(groupId) ?? [];
+        current.push(participant);
+        result.set(groupId, current);
+      }
+    }
+    return result;
+  }, [remotePresence]);
   useEffect(() => {
     const clearDragTarget = () => setDragTarget(undefined);
     document.addEventListener("dragend", clearDragTarget);
@@ -307,9 +333,12 @@ export function SemanticGroupTree({
     hasChildren
   }: FlatGroup) {
     const selected = effectiveSelectedIds.has(group.id);
+    const groupPresence = remotePresenceByGroupId.get(group.id) ?? [];
+    const primaryPresence = groupPresence[0];
     return (
       <div
-        className={`semantic-group-tree-row${depth === 0 && !group.systemKind ? " top-level" : ""}${activeGroupId === group.id || activeGroupIdSet.has(group.id) ? " active" : ""}${selected ? " selected" : ""}${group.systemKind ? ` system ${group.systemKind.toLowerCase()}` : ""}${dragTarget && "group" in dragTarget && dragTarget.group.id === group.id ? ` drag-${dragTarget.placement}` : ""}`}
+        className={`semantic-group-tree-row${depth === 0 && !group.systemKind ? " top-level" : ""}${activeGroupId === group.id || activeGroupIdSet.has(group.id) ? " active" : ""}${selected ? " selected" : ""}${group.systemKind ? ` system ${group.systemKind.toLowerCase()}` : ""}${primaryPresence ? ` remote-presence presence-color-${primaryPresence.colorIndex}` : ""}${dragTarget && "group" in dragTarget && dragTarget.group.id === group.id ? ` drag-${dragTarget.placement}` : ""}`}
+        data-presence-key={`semantic-group:${group.id}`}
         draggable={!group.systemKind}
         key={group.id}
         onContextMenu={(event) => openContextMenu(event, group)}
@@ -393,6 +422,7 @@ export function SemanticGroupTree({
           )}
           <span>{group.name}</span>
         </button>
+        <RemotePresenceDots participants={groupPresence} />
         <small>{formatInteger(group.keywordCount)}</small>
         <button
           aria-label={`Действия с группой ${group.name}`}
@@ -455,7 +485,8 @@ export function SemanticGroupTree({
       </label>
       <button
         aria-current={!activeGroupId ? "true" : undefined}
-        className={`semantic-group-root${dragTarget?.placement === "root" ? " drag-target" : ""}`}
+        className={`semantic-group-root${remotePresenceByGroupId.has(ROOT_PRESENCE_KEY) ? ` remote-presence presence-color-${remotePresenceByGroupId.get(ROOT_PRESENCE_KEY)?.[0]?.colorIndex ?? 0}` : ""}${dragTarget?.placement === "root" ? " drag-target" : ""}`}
+        data-presence-key="semantic-group:root"
         onClick={() => {
           setSelectedIds(new Set());
           onSelect();
@@ -479,6 +510,9 @@ export function SemanticGroupTree({
       >
         <Icon aria-hidden="true" name="list" />
         <strong>Все запросы</strong>
+        <RemotePresenceDots
+          participants={remotePresenceByGroupId.get(ROOT_PRESENCE_KEY) ?? []}
+        />
         <small>{total === undefined ? "—" : formatInteger(total)}</small>
       </button>
       <div
@@ -549,6 +583,30 @@ export function SemanticGroupTree({
         </ContextMenu>
       )}
     </nav>
+  );
+}
+
+function RemotePresenceDots({
+  participants
+}: Readonly<{
+  participants: readonly SemanticGroupRemotePresence[];
+}>) {
+  if (participants.length === 0) return null;
+  const names = participants.map(({ displayName }) => displayName).join(", ");
+  return (
+    <span
+      aria-label={`Сейчас здесь: ${names}`}
+      className="semantic-group-remote-presence"
+      title={`Сейчас здесь: ${names}`}
+    >
+      {participants.slice(0, 3).map((participant) => (
+        <i
+          className={`presence-color-${participant.colorIndex}`}
+          key={participant.userId}
+        />
+      ))}
+      {participants.length > 3 && <b>+{participants.length - 3}</b>}
+    </span>
   );
 }
 

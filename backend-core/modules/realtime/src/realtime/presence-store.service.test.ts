@@ -76,6 +76,7 @@ function presenceParticipant(
     status: "ACTIVE",
     cursor: null,
     selection: null,
+    view: { kind: "SEMANTIC_CORE", groupIds: [] },
     editing: false,
     sequence: 1,
     updatedAt: "2026-08-20T10:00:00.000Z"

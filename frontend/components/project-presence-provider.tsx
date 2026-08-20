@@ -4,6 +4,7 @@ import {
   projectPresenceCursorIntervalMilliseconds,
   projectPresenceHeartbeatMilliseconds,
   projectPresenceMaximumSelectionIds,
+  projectPresenceMaximumViewGroupIds,
   projectPresenceMembers,
   projectPresenceParticipant,
   projectPresenceTtlMilliseconds,
@@ -17,6 +18,7 @@ import {
   type ProjectPresenceParticipant,
   type ProjectPresenceSelection,
   type ProjectPresenceUpdateInput,
+  type ProjectPresenceViewContext,
   type RealtimeProjectTicket,
   type RealtimeReadyEvent
 } from "@seo-platform/contracts";
@@ -48,12 +50,15 @@ type ProjectPresenceConnectionStatus =
 interface ProjectPresenceContextValue {
   readonly projectId?: string;
   readonly currentUserId: string;
+  readonly currentRoute: string;
+  readonly currentView: ProjectPresenceViewContext | null;
   readonly connectionStatus: ProjectPresenceConnectionStatus;
   readonly participants: readonly ProjectPresenceParticipant[];
   readonly activeParticipants: readonly ActiveProjectParticipant[];
   readonly publishSelection: (
     selection: ProjectPresenceSelection | null
   ) => void;
+  readonly publishView: (view: ProjectPresenceViewContext | null) => void;
 }
 
 const ProjectPresenceContext = createContext<ProjectPresenceContextValue | null>(
@@ -80,11 +85,14 @@ export function ProjectPresenceProvider({
   const [members, setMembers] = useState<
     ReadonlyMap<string, ProjectPresenceMember>
   >(() => new Map());
+  const [currentView, setCurrentView] =
+    useState<ProjectPresenceViewContext | null>(null);
   const socketRef = useRef<PresenceSocket | undefined>(undefined);
   const joinedRef = useRef(false);
   const routeRef = useRef(normalizedAppRoute(pathname));
   const cursorRef = useRef<ProjectPresenceCursor | null>(null);
   const selectionRef = useRef<ProjectPresenceSelection | null>(null);
+  const viewRef = useRef<ProjectPresenceViewContext | null>(null);
   const statusRef = useRef<ProjectPresenceUpdateInput["status"]>("ACTIVE");
   const editingRef = useRef(false);
   const sequenceRef = useRef(0);
@@ -108,9 +116,13 @@ export function ProjectPresenceProvider({
   }, [projectId, user.avatarUpdatedAt, user.displayName, user.id]);
 
   useEffect(() => {
-    routeRef.current = normalizedAppRoute(pathname);
+    const nextRoute = normalizedAppRoute(pathname);
+    if (routeRef.current === nextRoute) return;
+    routeRef.current = nextRoute;
     cursorRef.current = null;
     selectionRef.current = null;
+    viewRef.current = null;
+    setCurrentView(null);
     sendRef.current();
   }, [pathname]);
 
@@ -291,6 +303,7 @@ export function ProjectPresenceProvider({
               status: statusRef.current,
               cursor: cursorRef.current,
               selection: selectionRef.current,
+              view: viewRef.current,
               editing: editingRef.current,
               sequence: sequenceRef.current
             };
@@ -373,6 +386,12 @@ export function ProjectPresenceProvider({
       cursorRef.current = null;
       sendRef.current();
     };
+    const handleScroll = () => {
+      markActive();
+      if (cursorRef.current === null) return;
+      cursorRef.current = null;
+      sendRef.current();
+    };
     const updateEditing = () => {
       const next = isEditableElement(document.activeElement);
       if (editingRef.current === next) return;
@@ -403,7 +422,11 @@ export function ProjectPresenceProvider({
     document.addEventListener("pointerout", handlePointerOut, {
       passive: true
     });
-    document.addEventListener("wheel", markActive, { passive: true });
+    document.addEventListener("wheel", handleScroll, { passive: true });
+    document.addEventListener("scroll", handleScroll, {
+      capture: true,
+      passive: true
+    });
     document.addEventListener("keydown", markActive, { passive: true });
     document.addEventListener("focusin", updateEditing);
     document.addEventListener("focusout", updateEditing);
@@ -415,7 +438,8 @@ export function ProjectPresenceProvider({
       document.removeEventListener("pointermove", handlePointerMove);
       document.removeEventListener("pointerdown", handlePointerMove);
       document.removeEventListener("pointerout", handlePointerOut);
-      document.removeEventListener("wheel", markActive);
+      document.removeEventListener("wheel", handleScroll);
+      document.removeEventListener("scroll", handleScroll, true);
       document.removeEventListener("keydown", markActive);
       document.removeEventListener("focusin", updateEditing);
       document.removeEventListener("focusout", updateEditing);
@@ -454,6 +478,23 @@ export function ProjectPresenceProvider({
     []
   );
 
+  const publishView = useCallback(
+    (view: ProjectPresenceViewContext | null) => {
+      const next = view
+        ? {
+            kind: "SEMANTIC_CORE" as const,
+            groupIds: [...uniqueIds(view.groupIds)]
+              .sort()
+              .slice(0, projectPresenceMaximumViewGroupIds)
+          }
+        : null;
+      viewRef.current = next;
+      setCurrentView(next);
+      sendRef.current();
+    },
+    []
+  );
+
   const activeParticipants = useMemo(
     () => aggregateProjectParticipants(participants, members, user.id),
     [members, participants, user.id]
@@ -462,17 +503,23 @@ export function ProjectPresenceProvider({
     () => ({
       ...(projectId ? { projectId } : {}),
       currentUserId: user.id,
+      currentRoute: normalizedAppRoute(pathname),
+      currentView,
       connectionStatus,
       participants,
       activeParticipants,
-      publishSelection
+      publishSelection,
+      publishView
     }),
     [
       activeParticipants,
       connectionStatus,
+      currentView,
       participants,
+      pathname,
       projectId,
       publishSelection,
+      publishView,
       user.id
     ]
   );
@@ -542,7 +589,8 @@ function updateLocalParticipant(
       existing.route === update.route &&
       existing.status === update.status &&
       existing.editing === update.editing &&
-      existing.selection === update.selection
+      existing.selection === update.selection &&
+      existing.view === update.view
     ) {
       return current;
     }
@@ -583,24 +631,24 @@ function normalizedAppRoute(pathname: string): string {
     : "/app";
 }
 
-function pointerCursor(event: PointerEvent): ProjectPresenceCursor {
-  const x = unitCoordinate(event.clientX / Math.max(1, window.innerWidth));
-  const y = unitCoordinate(event.clientY / Math.max(1, window.innerHeight));
+function pointerCursor(event: PointerEvent): ProjectPresenceCursor | null {
   const anchor =
     event.target instanceof Element
-      ? event.target.closest<HTMLElement>("[data-presence-key]")
+      ? event.target.closest<HTMLElement>(
+          '[data-presence-key][data-presence-cursor-anchor="true"]'
+        )
       : null;
   const targetKey = anchor?.dataset.presenceKey;
   if (!targetKey || !PRESENCE_TARGET_KEY_PATTERN.test(targetKey)) {
-    return { x, y, targetKey: null, targetX: null, targetY: null };
+    return null;
   }
   const rect = anchor.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) {
-    return { x, y, targetKey: null, targetX: null, targetY: null };
+    return null;
   }
   return {
-    x,
-    y,
+    x: unitCoordinate(event.clientX / Math.max(1, window.innerWidth)),
+    y: unitCoordinate(event.clientY / Math.max(1, window.innerHeight)),
     targetKey,
     targetX: unitCoordinate((event.clientX - rect.left) / rect.width),
     targetY: unitCoordinate((event.clientY - rect.top) / rect.height)

@@ -347,6 +347,7 @@ export class CollaborationGateway
       status: input.status,
       cursor: roundedCursor(input.cursor),
       selection: input.selection,
+      view: input.view,
       editing: input.editing,
       sequence: input.sequence,
       updatedAt: new Date().toISOString()
@@ -435,6 +436,7 @@ function initialParticipant(
     status: "ACTIVE",
     cursor: null,
     selection: null,
+    view: null,
     editing: false,
     sequence: 0,
     updatedAt: new Date().toISOString()

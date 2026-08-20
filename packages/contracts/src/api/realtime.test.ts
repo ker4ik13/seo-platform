@@ -109,10 +109,27 @@ test("accepts only bounded cursor coordinates and semantic selection identifiers
       ],
       columnId: "query"
     },
+    view: {
+      kind: "SEMANTIC_CORE",
+      groupIds: ["0198f258-8cc7-7abc-8def-1234567890ad"]
+    },
     editing: false,
     sequence: 7
   } as const;
   assert.deepEqual(projectPresenceUpdateInput(value), value);
+  assert.deepEqual(
+    projectPresenceUpdateInput({
+      ...value,
+      view: {
+        kind: "SEMANTIC_CORE",
+        groupIds: [
+          "0198f258-8cc7-7abc-8def-1234567890ae",
+          value.view.groupIds[0]
+        ]
+      }
+    }).view?.groupIds,
+    [value.view.groupIds[0], "0198f258-8cc7-7abc-8def-1234567890ae"]
+  );
 
   for (const mutation of [
     { ...value, route: "/app/semantics?secret=value" },
@@ -128,6 +145,13 @@ test("accepts only bounded cursor coordinates and semantic selection identifiers
         ...value.selection,
         selectedIds: [ID, ID]
       }
+    },
+    {
+      ...value,
+      view: {
+        ...value.view,
+        groupIds: [value.view.groupIds[0], value.view.groupIds[0]]
+      }
     }
   ]) {
     assert.throws(
@@ -135,6 +159,13 @@ test("accepts only bounded cursor coordinates and semantic selection identifiers
       InvalidRealtimeTicketContractError
     );
   }
+
+  const { view: ignoredView, ...legacyValue } = value;
+  assert.equal(ignoredView.kind, "SEMANTIC_CORE");
+  assert.deepEqual(projectPresenceUpdateInput(legacyValue), {
+    ...legacyValue,
+    view: null
+  });
 });
 
 test("parses a bounded project presence profile directory", () => {
@@ -176,11 +207,18 @@ test("parses an exact ephemeral participant without tenant authority", () => {
     status: "AWAY",
     cursor: null,
     selection: null,
+    view: { kind: "SEMANTIC_CORE", groupIds: [] },
     editing: false,
     sequence: 8,
     updatedAt: "2026-08-20T10:00:00.000Z"
   } as const;
   assert.deepEqual(projectPresenceParticipant(participant), participant);
+  const { view: legacyView, ...legacyParticipant } = participant;
+  assert.equal(legacyView.kind, "SEMANTIC_CORE");
+  assert.deepEqual(projectPresenceParticipant(legacyParticipant), {
+    ...legacyParticipant,
+    view: null
+  });
   assert.throws(
     () =>
       projectPresenceParticipant({

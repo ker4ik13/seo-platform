@@ -238,7 +238,9 @@ Project presence реализован в `backend-core/modules/realtime` пов�
 WebSocket-only Socket.IO namespace `/collaboration`. Browser получает
 одноразовый 30-секундный project ticket через защищённый Platform API,
 подключается только к server-authorized `project:{projectId}` и обновляет
-ограниченное состояние `route/status/cursor/selection/editing/sequence`.
+ограниченное состояние `route/status/cursor/selection/view/editing/sequence`.
+Semantic `view` содержит только тип представления и bounded набор UUID активных
+папок; пустой набор обозначает корневое представление «Все запросы».
 Курсор отправляется не чаще одного раза в 80 ms, heartbeat — раз в 15 секунд,
 authorization повторно проверяется не реже раза в 15 секунд и полностью
 обновляется новым ticket до окончания 60-секундного lease. Сервер дополнительно
@@ -251,11 +253,18 @@ bounded snapshot до 500 connections одного проекта. Presence не
 
 Frontend агрегирует несколько вкладок одного пользователя в одну аватарку в
 шапке, показывает reconnect/degraded state, скрывает просроченное состояние и
-рисует cursor overlay только на совпадающем route. Для устойчивого положения
-курсор использует безопасный `data-presence-key` и относительную позицию внутри
-элемента; fallback — нормализованные координаты viewport. Таблица семантики
-публикует только UUID выбранных/подсвеченных строк и при наличии технический
-column ID:
+рисует cursor overlay только на совпадающих route и semantic view. Для
+устойчивого положения на разных размерах экрана курсор использует безопасный
+row/cell `data-presence-key` и относительную позицию внутри элемента; fallback
+к координатам чужого viewport отсутствует. Невидимый, прокрученный за viewport
+или перекрытый локальной панелью anchor не отображается, а начало прокрутки и
+уход указателя в sidebar очищают cursor до следующего движения над строкой.
+Удалённое выделение задаётся CSS-классами самих строк/ячеек и поэтому
+прокручивается и обрезается таблицей без fixed overlay. Если участник открыл
+другую папку или union, дерево подсвечивает эти папки его стабильным цветом и
+показывает компактные participant dots, а его cursor/selection в текущей
+таблице скрываются. Таблица семантики публикует только UUID
+выбранных/подсвеченных строк и при наличии технический column ID:
 текст запроса, значение ячейки, hidden columns и DOM text в WebSocket payload не
 попадают. Profile enrichment и avatar bytes читаются отдельными
 permission-scoped `GET /api/v1/projects/:projectId/presence-members[/…]` из

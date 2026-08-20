@@ -16,6 +16,7 @@ export const projectPresenceCursorIntervalMilliseconds = 80;
 export const projectPresenceHeartbeatMilliseconds = 15_000;
 export const projectPresenceTtlMilliseconds = 30_000;
 export const projectPresenceMaximumSelectionIds = 50;
+export const projectPresenceMaximumViewGroupIds = 50;
 export const projectPresenceMaximumMembers = 200;
 export const projectPresenceMaximumConnections = 500;
 
@@ -39,12 +40,19 @@ export interface ProjectPresenceSelection {
   readonly columnId: string | null;
 }
 
+export interface ProjectPresenceViewContext {
+  readonly kind: "SEMANTIC_CORE";
+  /** Empty means the root "all keywords" view. */
+  readonly groupIds: readonly string[];
+}
+
 export interface ProjectPresenceUpdateInput {
   /** Normalized application pathname without query string or fragment. */
   readonly route: string;
   readonly status: ProjectPresenceStatus;
   readonly cursor: ProjectPresenceCursor | null;
   readonly selection: ProjectPresenceSelection | null;
+  readonly view: ProjectPresenceViewContext | null;
   readonly editing: boolean;
   readonly sequence: number;
 }
@@ -267,14 +275,11 @@ export function isRealtimeOpaqueTicket(value: unknown): value is string {
 export function projectPresenceUpdateInput(
   value: unknown
 ): ProjectPresenceUpdateInput {
-  const input = exactRecord(value, [
-    "route",
-    "status",
-    "cursor",
-    "selection",
-    "editing",
-    "sequence"
-  ]);
+  const input = optionalExactRecord(
+    value,
+    ["route", "status", "cursor", "selection", "editing", "sequence"],
+    ["view"]
+  );
   if (
     typeof input.route !== "string" ||
     input.route.length > 256 ||
@@ -298,6 +303,10 @@ export function projectPresenceUpdateInput(
       input.selection === null
         ? null
         : projectPresenceSelection(input.selection),
+    view:
+      input.view === undefined || input.view === null
+        ? null
+        : projectPresenceViewContext(input.view),
     editing: input.editing,
     sequence: Number(input.sequence)
   };
@@ -339,18 +348,22 @@ export function projectPresenceMembers(
 export function projectPresenceParticipant(
   value: unknown
 ): ProjectPresenceParticipant {
-  const participant = exactRecord(value, [
-    "connectionId",
-    "userId",
-    "clientInstanceId",
-    "route",
-    "status",
-    "cursor",
-    "selection",
-    "editing",
-    "sequence",
-    "updatedAt"
-  ]);
+  const participant = optionalExactRecord(
+    value,
+    [
+      "connectionId",
+      "userId",
+      "clientInstanceId",
+      "route",
+      "status",
+      "cursor",
+      "selection",
+      "editing",
+      "sequence",
+      "updatedAt"
+    ],
+    ["view"]
+  );
   if (
     typeof participant.connectionId !== "string" ||
     !/^[A-Za-z0-9_-]{1,128}$/u.test(participant.connectionId)
@@ -362,6 +375,7 @@ export function projectPresenceParticipant(
     status: participant.status,
     cursor: participant.cursor,
     selection: participant.selection,
+    view: participant.view ?? null,
     editing: participant.editing,
     sequence: participant.sequence
   });
@@ -371,6 +385,23 @@ export function projectPresenceParticipant(
     clientInstanceId: uuid(participant.clientInstanceId),
     ...update,
     updatedAt: isoTimestamp(participant.updatedAt)
+  };
+}
+
+function projectPresenceViewContext(
+  value: unknown
+): ProjectPresenceViewContext {
+  const view = exactRecord(value, ["kind", "groupIds"]);
+  if (
+    view.kind !== "SEMANTIC_CORE" ||
+    !Array.isArray(view.groupIds) ||
+    view.groupIds.length > projectPresenceMaximumViewGroupIds
+  ) {
+    return invalid();
+  }
+  return {
+    kind: "SEMANTIC_CORE",
+    groupIds: [...uniqueUuids(view.groupIds)].sort()
   };
 }
 
