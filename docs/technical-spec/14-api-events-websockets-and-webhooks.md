@@ -1293,6 +1293,7 @@ Join room — отдельная авторизуемая команда. Кли
 - cell selection changed;
 - user is typing;
 - viewport/focus hint.
+- browser post-commit semantic invalidation hint.
 
 Ephemeral payload:
 
@@ -1308,6 +1309,11 @@ Ephemeral payload:
 - не содержит значения скрытых ячеек;
 - истекает по Redis TTL 30 секунд;
 - не записывается в основной audit log.
+
+`semantics.change` принимает только UUID `changeId`. Server-derived
+`semantics.changed` добавляет project/user/time и отправляется другим sockets
+авторизованной project room. Названия папок, тексты запросов, версии и счётчики
+запрещены; клиент использует событие только как повод перечитать HTTP API.
 
 ### 19.5. Durable UI events
 

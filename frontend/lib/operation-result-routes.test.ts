@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  clusteringProposalSectionApiPath,
   isOperationResultId,
   mergeOperationResultRows,
   operationResultApiPath,
@@ -67,6 +68,20 @@ test("builds exact same-origin result API routes for every operation", () => {
   assert.throws(
     () => operationResultApiPath("foreign", "rank", id),
     TypeError
+  );
+});
+
+test("builds an independently paged clustering section route", () => {
+  assert.equal(
+    clusteringProposalSectionApiPath(id, id, id, {
+      cursor: "199",
+      limit: 200
+    }),
+    `/app/api/projects/${id}/clustering-runs/${id}/result/sections/${id}?limit=200&cursor=199`
+  );
+  assert.equal(
+    clusteringProposalSectionApiPath(id, id, "unclustered"),
+    `/app/api/projects/${id}/clustering-runs/${id}/result/sections/unclustered?limit=200`
   );
 });
 

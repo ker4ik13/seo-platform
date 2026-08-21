@@ -17,11 +17,14 @@ import type {
   InternalClusteringKeywords,
   InternalClusteringProposalResult,
   InternalClusteringProposalResultInput,
+  InternalClusteringProposalSectionResult,
+  InternalClusteringProposalSectionResultInput,
   InternalPersistClusteringProposalInput,
   InternalRejectClusteringProposalInput,
   InternalResolveClusteringKeywordsInput,
   SemanticClusterMethod
 } from "@seo-platform/contracts";
+import { clusteringProposalUnclusteredSectionId } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { lockSemanticKeywordWrites } from "../semantic-versions/semantic-version.service.js";
@@ -298,6 +301,74 @@ export class ClusteringProposalService {
         item.proposalClusterId
           ? currentClusterKeywordCountByProposalId.get(item.proposalClusterId) ?? 0
           : 0,
+        proposal.status
+      )),
+      page: {
+        hasNext,
+        ...(hasNext && visible.at(-1)
+          ? { nextCursor: String(visible.at(-1)!.sequence) }
+          : {})
+      }
+    };
+  }
+
+  public async sectionResult(
+    input: InternalClusteringProposalSectionResultInput
+  ): Promise<InternalClusteringProposalSectionResult> {
+    const proposal = await this.prisma.clusteringProposal.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        projectId: input.projectId,
+        jobId: input.jobId
+      },
+      select: { id: true, status: true }
+    });
+    if (!proposal) throw new NotFoundException("Clustering proposal not found");
+
+    const proposalClusterId =
+      input.sectionId === clusteringProposalUnclusteredSectionId
+        ? null
+        : input.sectionId;
+    if (proposalClusterId) {
+      const cluster = await this.prisma.clusteringProposalCluster.findFirst({
+        where: { id: proposalClusterId, proposalId: proposal.id },
+        select: { id: true }
+      });
+      if (!cluster) {
+        throw new NotFoundException("Clustering proposal section not found");
+      }
+    }
+
+    const pageItems = await this.prisma.clusteringProposalItem.findMany({
+      where: {
+        proposalId: proposal.id,
+        proposalClusterId,
+        ...(input.cursor === undefined
+          ? {}
+          : { sequence: { gt: input.cursor } })
+      },
+      orderBy: { sequence: "asc" },
+      take: input.limit + 1,
+      include: { proposalCluster: true }
+    });
+    const visible = pageItems.slice(0, input.limit);
+    const currentKeywords = await this.currentKeywords(
+      input.workspaceId,
+      input.projectId,
+      visible.map(({ keywordId }) => keywordId)
+    );
+    const currentById = new Map(
+      currentKeywords.map((keyword) => [keyword.id, keyword])
+    );
+    const hasNext = pageItems.length > input.limit;
+    return {
+      workspaceId: input.workspaceId,
+      projectId: input.projectId,
+      jobId: input.jobId,
+      sectionId: input.sectionId,
+      rows: visible.map((item) => proposalSectionRow(
+        item,
+        currentById.get(item.keywordId),
         proposal.status
       )),
       page: {
@@ -907,6 +978,22 @@ function proposalRow(
     ...(item.toponym ? { toponym: item.toponym } : {}),
     ...(item.geoDependent === null ? {} : { geoDependent: item.geoDependent })
   };
+}
+
+function proposalSectionRow(
+  item: Prisma.ClusteringProposalItemGetPayload<{
+    include: { proposalCluster: true };
+  }>,
+  current: CurrentKeyword | undefined,
+  proposalStatus: "READY" | "APPLIED" | "REJECTED"
+): ClusteringProposalResultRow {
+  const { proposedCluster: _proposedCluster, ...row } = proposalRow(
+    item,
+    current,
+    0,
+    proposalStatus
+  );
+  return row;
 }
 
 function itemConflictReason(

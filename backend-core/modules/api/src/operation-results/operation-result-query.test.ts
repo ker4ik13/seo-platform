@@ -11,6 +11,10 @@ test("normalizes the supported operation result page sizes and cursor", () => {
     limit: 500,
     cursor: "1000"
   });
+  assert.deepEqual(
+    operationResultPageQuery("200", "299999", 299_999),
+    { limit: 200, cursor: "299999" }
+  );
 });
 
 test("rejects unsupported page sizes and out-of-range cursors", () => {

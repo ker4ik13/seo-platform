@@ -36,7 +36,7 @@ function pageCursor(
   maximumSequence: number
 ): string | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,4})$/u.test(value)) {
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,8})$/u.test(value)) {
     invalid("Invalid operation result cursor");
   }
   const parsed = Number(value);

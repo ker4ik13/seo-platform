@@ -16,10 +16,14 @@ import type {
   ApiResponse,
   ClusteringOperationResult,
   ClusteringProposalApplyResult,
+  ClusteringProposalSectionResult,
   ClusteringProposalSummary,
   ClusteringRunSummary
 } from "@seo-platform/contracts";
-import { arsenkinClusteringKeywordLimit } from "@seo-platform/contracts";
+import {
+  arsenkinClusteringKeywordLimit,
+  clusteringProposalUnclusteredSectionId
+} from "@seo-platform/contracts";
 import { AuditService } from "../audit/audit.service.js";
 import { RequirePermission } from "../authorization/require-permission.js";
 import { TenantPermissionGuard } from "../authorization/tenant-permission.guard.js";
@@ -71,6 +75,44 @@ export class ClusteringRunController {
       runs: await this.jobs.listClusteringRuns(
         internalProjectContext(request, principal, tenant)
       )
+    });
+  }
+
+  @Get(":jobId/result/sections/:sectionId")
+  @RequirePermission("collector.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async sectionResult(
+    @Param("jobId") jobId: string,
+    @Param("sectionId") sectionId: string,
+    @Query("limit") limitValue: unknown,
+    @Query("cursor") cursorValue: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<ClusteringProposalSectionResult>> {
+    const tenant = requiredProjectTenant(request);
+    const context = internalProjectContext(request, principal, tenant);
+    const canonicalJobId = assertUuid(jobId, "jobId");
+    const canonicalSectionId =
+      sectionId === clusteringProposalUnclusteredSectionId
+        ? clusteringProposalUnclusteredSectionId
+        : assertUuid(sectionId, "sectionId");
+    const page = operationResultPageQuery(
+      limitValue,
+      cursorValue,
+      arsenkinClusteringKeywordLimit - 1
+    );
+    if (!this.seoData) throw new Error("SEO data client is not available");
+    const result = await this.seoData.clusteringProposalSectionResult(
+      context,
+      canonicalJobId,
+      canonicalSectionId,
+      page.limit,
+      page.cursor
+    );
+    return apiResponse(request, {
+      sectionId: result.sectionId,
+      rows: result.rows,
+      page: result.page
     });
   }
 

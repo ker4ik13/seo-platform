@@ -2,6 +2,7 @@ import {
   rankRunConflictDetails,
   type RankRunConflictDetails
 } from "@seo-platform/contracts";
+import { announceSemanticMutationForRequest } from "./semantic-realtime.ts";
 
 export interface BrowserFieldError {
   readonly path: string;
@@ -175,6 +176,7 @@ async function browserApiPayload(
       response.headers.get("x-request-id") ?? undefined
     );
   }
+  announceSemanticMutationForRequest(path, method);
   return { response, payload };
 }
 

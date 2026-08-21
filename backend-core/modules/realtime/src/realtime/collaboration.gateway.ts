@@ -13,6 +13,7 @@ import {
   InvalidRealtimeTicketContractError,
   projectPresenceMaximumConnections,
   projectPresenceUpdateInput,
+  projectSemanticChangeInput,
   realtimeCollaborationEvents,
   type PresenceJoinResult,
   type PresenceUpdateResult,
@@ -20,6 +21,8 @@ import {
   type ProjectPresenceParticipant,
   type ProjectPresenceParticipantEvent,
   type ProjectPresenceUpdateInput,
+  type ProjectSemanticChangeInput,
+  type ProjectSemanticChangeResult,
   type RealtimeReadyEvent
 } from "@seo-platform/contracts";
 import type { Namespace, Socket } from "socket.io";
@@ -301,6 +304,49 @@ export class CollaborationGateway
     }
   }
 
+  @SubscribeMessage(realtimeCollaborationEvents.semanticChange)
+  public async publishSemanticChange(
+    @ConnectedSocket() socket: Socket,
+    @MessageBody() message: unknown
+  ): Promise<ProjectSemanticChangeResult> {
+    let input: ProjectSemanticChangeInput;
+    try {
+      input = projectSemanticChangeInput(message);
+    } catch (error) {
+      if (!(error instanceof InvalidRealtimeTicketContractError)) throw error;
+      return semanticChangeError(
+        "VALIDATION_FAILED",
+        "Semantic change payload is invalid"
+      );
+    }
+    const data = socketData(socket);
+    const authorization = data.authorization;
+    if (!authorization || !data.presence) {
+      return unauthenticatedSemanticChange(socket);
+    }
+    if (!this.consumeRateToken(socket.id)) {
+      return semanticChangeError(
+        "RATE_LIMITED",
+        "Semantic change signals are arriving too quickly"
+      );
+    }
+    try {
+      await this.assertAuthorized(socket, false);
+    } catch {
+      return unauthenticatedSemanticChange(socket);
+    }
+    const event = {
+      ...input,
+      projectId: authorization.projectId,
+      actorUserId: authorization.userId,
+      occurredAt: new Date().toISOString()
+    };
+    socket
+      .to(projectRoom(authorization.projectId))
+      .emit(realtimeCollaborationEvents.semanticChanged, event);
+    return { ok: true, data: event };
+  }
+
   private async serializedPresenceOperation<Result>(
     socketId: string,
     execute: () => Promise<Result>
@@ -542,6 +588,26 @@ function unauthenticatedJoin(socket: Socket): PresenceJoinResult {
 }
 
 function unauthenticatedUpdate(socket: Socket): PresenceUpdateResult {
+  socket.disconnect(true);
+  return {
+    ok: false,
+    error: {
+      code: "UNAUTHENTICATED",
+      message: "Realtime authorization is no longer active"
+    }
+  };
+}
+
+function semanticChangeError(
+  code: "VALIDATION_FAILED" | "RATE_LIMITED",
+  message: string
+): ProjectSemanticChangeResult {
+  return { ok: false, error: { code, message } };
+}
+
+function unauthenticatedSemanticChange(
+  socket: Socket
+): ProjectSemanticChangeResult {
   socket.disconnect(true);
   return {
     ok: false,

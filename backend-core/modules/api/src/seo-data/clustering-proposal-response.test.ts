@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
-import { scopedInternalClusteringProposalResult } from "./clustering-proposal-response.js";
+import {
+  scopedInternalClusteringProposalResult,
+  scopedInternalClusteringProposalSectionResult
+} from "./clustering-proposal-response.js";
 
 const workspaceId = "01900000-0000-7000-8000-000000000001";
 const projectId = "01900000-0000-7000-8000-000000000002";
@@ -120,4 +123,78 @@ test("rejects cross-proposal cluster references and inconsistent totals", () => 
     jobId,
     200
   ), DomainError);
+});
+
+test("accepts a cluster-scoped page with gaps in global sequence", () => {
+  const result = scopedInternalClusteringProposalSectionResult(
+    {
+      workspaceId,
+      projectId,
+      jobId,
+      sectionId: clusterId,
+      rows: [
+        {
+          sequence: 14,
+          keywordId,
+          keyword: "купить диван",
+          state: "READY"
+        },
+        {
+          sequence: 20,
+          keywordId: "01900000-0000-7000-8000-000000000007",
+          keyword: "диван недорого",
+          state: "READY"
+        }
+      ],
+      page: { hasNext: true, nextCursor: "20" }
+    },
+    workspaceId,
+    projectId,
+    jobId,
+    clusterId,
+    2,
+    "5"
+  );
+
+  assert.deepEqual(result.rows.map(({ sequence }) => sequence), [14, 20]);
+  assert.equal(result.page.nextCursor, "20");
+});
+
+test("rejects a foreign or summary-bearing cluster section page", () => {
+  const section = {
+    workspaceId,
+    projectId,
+    jobId,
+    sectionId: clusterId,
+    rows: [{
+      sequence: 0,
+      keywordId,
+      keyword: "купить диван",
+      state: "READY",
+      proposedCluster: response().clusters[0]
+    }],
+    page: { hasNext: false }
+  };
+  assert.throws(
+    () => scopedInternalClusteringProposalSectionResult(
+      section,
+      workspaceId,
+      projectId,
+      jobId,
+      clusterId,
+      200
+    ),
+    DomainError
+  );
+  assert.throws(
+    () => scopedInternalClusteringProposalSectionResult(
+      { ...section, rows: [], sectionId: "unclustered" },
+      workspaceId,
+      projectId,
+      jobId,
+      clusterId,
+      200
+    ),
+    DomainError
+  );
 });

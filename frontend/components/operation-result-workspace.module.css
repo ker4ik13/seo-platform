@@ -416,6 +416,10 @@
 .clusteringQueryRow > span small { color: #858b9a; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .clusteringQueryRow > b { align-items: center; background: #efedff; border-radius: 999px; color: #5e4ae2; display: inline-flex; font-size: 9px; gap: 4px; max-width: 180px; overflow: hidden; padding: 5px 7px; text-overflow: ellipsis; white-space: nowrap; }
 .clusteringQueryRow > b svg { flex: 0 0 auto; height: 11px; width: 11px; }
+.clusteringQuerySentinel { align-items: center; color: #737888; display: flex; font-size: 11px; gap: 8px; min-height: 58px; padding: 12px; }
+.clusteringQueryError { align-items: center; background: #fff5f5; color: #a83c46; display: flex; font-size: 11px; gap: 10px; justify-content: space-between; min-height: 58px; padding: 10px 12px; }
+.clusteringQueryError button { background: #fff; border: 1px solid #e8b8bd; border-radius: 8px; color: #a83c46; font-size: 10px; font-weight: 800; min-height: 32px; padding: 0 11px; }
+.clusteringQueryEmpty { color: #858b9a; font-size: 11px; margin: 0; padding: 18px 12px; }
 .clusteringUrls { min-width: 0; }
 .clusteringUrls > a { align-items: center; border-bottom: 1px solid #f0f0f4; color: #397bc1; display: grid; font-size: 11px; gap: 9px; grid-template-columns: minmax(0, 1fr) auto; min-height: 44px; padding: 7px 11px; text-decoration: none; }
 .clusteringUrls > a:hover { background: #f8fbff; text-decoration: underline; }
@@ -423,6 +427,7 @@
 .clusteringUrls > a b { color: #555b69; font-size: 10px; font-variant-numeric: tabular-nums; }
 .clusteringUrls > p { color: #8f95a3; font-size: 11px; line-height: 1.45; margin: 0; padding: 20px 11px; }
 .clusteringLoadMore { background: #fff; border: 1px solid #d9d6ef; border-radius: 10px; color: #5b48df; font-size: 11px; font-weight: 800; min-height: 42px; }
+.clusteringQueries > .clusteringLoadMore { margin: 9px 11px; width: calc(100% - 22px); }
 .clusteringSelectionBar {
   align-items: center;
   background: #f1efff;

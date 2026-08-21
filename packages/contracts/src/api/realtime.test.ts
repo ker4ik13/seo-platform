@@ -9,6 +9,8 @@ import {
   projectPresenceMembers,
   projectPresenceParticipant,
   projectPresenceUpdateInput,
+  projectSemanticChangeEvent,
+  projectSemanticChangeInput,
   realtimeAuthorizationLeaseMilliseconds,
   realtimeProjectTicket,
   realtimeTicketRequestSchemaVersion,
@@ -249,6 +251,28 @@ test("parses an exact ephemeral participant without tenant authority", () => {
     () => projectPresenceParticipant({ ...participant, projectId: ID }),
     InvalidRealtimeTicketContractError
   );
+});
+
+test("parses only opaque semantic invalidation identities", () => {
+  const event = {
+    changeId: ID,
+    projectId: "0198f258-8cc7-7abc-8def-1234567890af",
+    actorUserId: "0198f258-8cc7-7abc-8def-1234567890ac",
+    occurredAt: "2026-08-21T10:00:00.000Z"
+  };
+  assert.deepEqual(projectSemanticChangeInput({ changeId: ID }), {
+    changeId: ID
+  });
+  assert.deepEqual(projectSemanticChangeEvent(event), event);
+  for (const invalid of [
+    { changeId: ID, keyword: "секретный запрос" },
+    { changeId: "not-a-uuid" }
+  ]) {
+    assert.throws(
+      () => projectSemanticChangeInput(invalid),
+      InvalidRealtimeTicketContractError
+    );
+  }
 });
 
 function internalInput() {

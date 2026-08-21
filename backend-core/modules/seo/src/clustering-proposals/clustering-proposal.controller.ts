@@ -15,7 +15,8 @@ import type {
   ClusteringProposalApplyResult,
   ClusteringProposalSummary,
   InternalClusteringKeywords,
-  InternalClusteringProposalResult
+  InternalClusteringProposalResult,
+  InternalClusteringProposalSectionResult
 } from "@seo-platform/contracts";
 import { operationResultDefaultPageSize } from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
@@ -29,6 +30,7 @@ import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import {
   internalApplyClusteringProposalInput,
   internalClusteringProposalResultInput,
+  internalClusteringProposalSectionResultInput,
   internalPersistClusteringProposalInput,
   internalRejectClusteringProposalInput,
   internalResolveClusteringKeywordsInput
@@ -73,6 +75,34 @@ export class ClusteringProposalCommandController {
 @UseGuards(PlatformApiGuard)
 export class ClusteringProposalReadController {
   public constructor(private readonly proposals: ClusteringProposalService) {}
+
+  @Get(":jobId/result/sections/:sectionId")
+  public async sectionResult(
+    @Param("projectId") projectId: string,
+    @Param("jobId") jobId: string,
+    @Param("sectionId") sectionId: string,
+    @Query("limit") limitValue: unknown,
+    @Query("cursor") cursorValue: unknown,
+    @Headers() headers: HeadersRecord,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<InternalClusteringProposalSectionResult>> {
+    const context = routeContext(projectId, headers);
+    const limit = limitValue === undefined
+      ? operationResultDefaultPageSize
+      : queryInteger(limitValue, "limit");
+    const cursor = cursorValue === undefined
+      ? undefined
+      : queryInteger(cursorValue, "cursor");
+    return response(request, await this.proposals.sectionResult(
+      internalClusteringProposalSectionResultInput({
+        ...context,
+        jobId: internalUuid(jobId, "jobId"),
+        sectionId,
+        limit,
+        ...(cursor === undefined ? {} : { cursor })
+      })
+    ));
+  }
 
   @Get(":jobId/result")
   public async result(
@@ -146,7 +176,7 @@ function routeContext(projectId: string, headers: HeadersRecord) {
 }
 
 function queryInteger(value: unknown, field: string): number {
-  if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,4})$/u.test(value)) {
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d{0,8})$/u.test(value)) {
     throw new BadRequestException(`Invalid clustering proposal ${field}`);
   }
   return Number(value);

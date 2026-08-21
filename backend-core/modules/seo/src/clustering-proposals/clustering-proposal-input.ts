@@ -5,11 +5,13 @@ import {
   clusteringClusterFolderActions,
   clusteringFolderModes,
   clusteringMethods,
+  clusteringProposalUnclusteredSectionId,
   clusteringSearchEngines,
   internalClusteringPersistItemLimit,
   internalClusteringResolveBatchLimit,
   type InternalApplyClusteringProposalInput,
   type InternalClusteringProposalResultInput,
+  type InternalClusteringProposalSectionResultInput,
   type InternalPersistClusteringProposalInput,
   type InternalRejectClusteringProposalInput,
   type InternalResolveClusteringKeywordsInput
@@ -197,6 +199,39 @@ export function internalClusteringProposalResultInput(
     ...(input.cursor === undefined
       ? {}
       : { cursor: integer(input.cursor, "cursor", 0, arsenkinClusteringKeywordLimit - 1) })
+  };
+}
+
+export function internalClusteringProposalSectionResultInput(
+  value: unknown
+): InternalClusteringProposalSectionResultInput {
+  const input = record(value, [
+    "workspaceId",
+    "projectId",
+    "actorId",
+    "jobId",
+    "sectionId",
+    "limit",
+    "cursor"
+  ]);
+  return {
+    ...scope(input),
+    jobId: uuid(input.jobId, "jobId"),
+    sectionId:
+      input.sectionId === clusteringProposalUnclusteredSectionId
+        ? clusteringProposalUnclusteredSectionId
+        : uuid(input.sectionId, "sectionId"),
+    limit: integer(input.limit, "limit", 1, 500),
+    ...(input.cursor === undefined
+      ? {}
+      : {
+          cursor: integer(
+            input.cursor,
+            "cursor",
+            0,
+            arsenkinClusteringKeywordLimit - 1
+          )
+        })
   };
 }
 

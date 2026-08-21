@@ -7,6 +7,7 @@ import {
   projectPresenceMaximumViewGroupIds,
   projectPresenceMembers,
   projectPresenceParticipant,
+  projectSemanticChangeEvent,
   projectPresenceTtlMilliseconds,
   realtimeCollaborationNamespace,
   realtimeCollaborationEvents,
@@ -20,6 +21,7 @@ import {
   type ProjectPresenceSelection,
   type ProjectPresenceUpdateInput,
   type ProjectPresenceViewContext,
+  type ProjectSemanticChangeInput,
   type RealtimeProjectTicket,
   type RealtimeReadyEvent
 } from "@seo-platform/contracts";
@@ -41,6 +43,7 @@ import {
   aggregateProjectParticipants,
   type ActiveProjectParticipant
 } from "../lib/project-presence";
+import { projectSemanticMutationEvent } from "../lib/semantic-realtime";
 
 type ProjectPresenceConnectionStatus =
   | "DISABLED"
@@ -57,6 +60,7 @@ interface ProjectPresenceContextValue {
   readonly connectionStatus: ProjectPresenceConnectionStatus;
   readonly participants: readonly ProjectPresenceParticipant[];
   readonly activeParticipants: readonly ActiveProjectParticipant[];
+  readonly semanticChangeVersion: number;
   readonly showRemoteActivity: boolean;
   readonly setShowRemoteActivity: (visible: boolean) => void;
   readonly publishSelection: (
@@ -95,6 +99,7 @@ export function ProjectPresenceProvider({
   const [currentActivity, setCurrentActivity] =
     useState<ProjectPresenceActivity | null>(null);
   const [showRemoteActivity, setShowRemoteActivityState] = useState(true);
+  const [semanticChangeVersion, setSemanticChangeVersion] = useState(0);
   const socketRef = useRef<PresenceSocket | undefined>(undefined);
   const joinedRef = useRef(false);
   const routeRef = useRef(normalizedAppRoute(pathname));
@@ -106,6 +111,35 @@ export function ProjectPresenceProvider({
   const editingRef = useRef(false);
   const sequenceRef = useRef(0);
   const sendRef = useRef<() => void>(() => undefined);
+  const semanticChangePendingRef = useRef(false);
+  const sendSemanticChangeRef = useRef<() => void>(() => undefined);
+
+  useEffect(() => {
+    if (!projectId) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const handleMutation = (event: Event) => {
+      if (
+        !(event instanceof CustomEvent) ||
+        !plainRecord(event.detail) ||
+        !hasExactKeys(event.detail, ["projectId"]) ||
+        event.detail.projectId !== projectId
+      ) {
+        return;
+      }
+      semanticChangePendingRef.current = true;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        timer = undefined;
+        sendSemanticChangeRef.current();
+      }, 120);
+    };
+    window.addEventListener(projectSemanticMutationEvent, handleMutation);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener(projectSemanticMutationEvent, handleMutation);
+      semanticChangePendingRef.current = false;
+    };
+  }, [projectId]);
 
   useEffect(() => {
     setMembers(
@@ -166,6 +200,7 @@ export function ProjectPresenceProvider({
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let renewalTimer: ReturnType<typeof setTimeout> | undefined;
     let joinTimer: ReturnType<typeof setTimeout> | undefined;
+    let semanticRefreshTimer: ReturnType<typeof setTimeout> | undefined;
     let currentSocket: PresenceSocket | undefined;
     const pendingLeaves = new Map<
       string,
@@ -183,6 +218,7 @@ export function ProjectPresenceProvider({
       clearConnectionTimers();
       joinedRef.current = false;
       sendRef.current = () => undefined;
+      sendSemanticChangeRef.current = () => undefined;
       if (currentSocket) {
         currentSocket.removeAllListeners();
         currentSocket.disconnect();
@@ -302,6 +338,15 @@ export function ProjectPresenceProvider({
           }, 2_500)
         );
       });
+      socket.on(realtimeCollaborationEvents.semanticChanged, (value) => {
+        const event = safeSemanticChangeEvent(value, projectId);
+        if (!event) return;
+        if (semanticRefreshTimer) clearTimeout(semanticRefreshTimer);
+        semanticRefreshTimer = setTimeout(() => {
+          semanticRefreshTimer = undefined;
+          setSemanticChangeVersion((version) => version + 1);
+        }, 120);
+      });
       socket.once(realtimeCollaborationEvents.ready, (value) => {
         const ready = safeReadyEvent(value);
         if (
@@ -352,7 +397,23 @@ export function ProjectPresenceProvider({
             );
             socket.emit(realtimeCollaborationEvents.presenceUpdate, update);
           };
+          sendSemanticChangeRef.current = () => {
+            if (
+              !semanticChangePendingRef.current ||
+              !joinedRef.current ||
+              currentSocket !== socket ||
+              !socket.connected
+            ) {
+              return;
+            }
+            semanticChangePendingRef.current = false;
+            const change: ProjectSemanticChangeInput = {
+              changeId: crypto.randomUUID()
+            };
+            socket.emit(realtimeCollaborationEvents.semanticChange, change);
+          };
           sendRef.current();
+          sendSemanticChangeRef.current();
           const renewalDelay = Math.max(
             1_000,
             Date.parse(joined.authorizationExpiresAt) - Date.now() - 10_000
@@ -371,6 +432,7 @@ export function ProjectPresenceProvider({
       retryTimer = undefined;
       for (const timer of pendingLeaves.values()) clearTimeout(timer);
       pendingLeaves.clear();
+      if (semanticRefreshTimer) clearTimeout(semanticRefreshTimer);
       closeSocket();
       setParticipants([]);
     };
@@ -570,6 +632,7 @@ export function ProjectPresenceProvider({
       connectionStatus,
       participants,
       activeParticipants,
+      semanticChangeVersion,
       showRemoteActivity,
       setShowRemoteActivity,
       publishSelection,
@@ -587,6 +650,7 @@ export function ProjectPresenceProvider({
       publishSelection,
       publishActivity,
       publishView,
+      semanticChangeVersion,
       setShowRemoteActivity,
       showRemoteActivity,
       user.id
@@ -612,6 +676,7 @@ interface ServerToClientEvents {
   readonly "presence.joined": (event: unknown) => void;
   readonly "presence.updated": (event: unknown) => void;
   readonly "presence.left": (event: unknown) => void;
+  readonly "semantics.changed": (event: unknown) => void;
 }
 
 interface ClientToServerEvents {
@@ -620,6 +685,7 @@ interface ClientToServerEvents {
     acknowledge: (result: unknown) => void
   ) => void;
   readonly "presence.update": (message: ProjectPresenceUpdateInput) => void;
+  readonly "semantics.change": (message: ProjectSemanticChangeInput) => void;
 }
 
 type PresenceSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
@@ -827,6 +893,18 @@ function safeParticipantEvent(
     return undefined;
   }
   return safeParticipant(value.participant);
+}
+
+function safeSemanticChangeEvent(
+  value: unknown,
+  projectId: string
+): ReturnType<typeof projectSemanticChangeEvent> | undefined {
+  try {
+    const event = projectSemanticChangeEvent(value);
+    return event.projectId === projectId ? event : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function safeParticipant(

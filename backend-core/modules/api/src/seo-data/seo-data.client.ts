@@ -169,6 +169,7 @@ import {
   type SemanticAiAnswerDetail,
   type SemanticAiAnswerHistoryItem,
   type InternalClusteringProposalResult,
+  type InternalClusteringProposalSectionResult,
   type ApplyClusteringProposalInput,
   type InternalApplyClusteringProposalInput,
   type ClusteringProposalApplyResult,
@@ -214,7 +215,8 @@ import {
 import {
   scopedClusteringProposalApplyResult,
   scopedClusteringProposalSummary,
-  scopedInternalClusteringProposalResult
+  scopedInternalClusteringProposalResult,
+  scopedInternalClusteringProposalSectionResult
 } from "./clustering-proposal-response.js";
 import {
   projectNote,
@@ -552,6 +554,32 @@ export class SeoDataClient {
       scope.workspaceId,
       scope.projectId,
       jobId,
+      limit,
+      cursor
+    );
+  }
+
+  public async clusteringProposalSectionResult(
+    context: InternalContext,
+    jobId: string,
+    sectionId: string,
+    limit: number,
+    cursor?: string
+  ): Promise<InternalClusteringProposalSectionResult> {
+    const scope = trackingScope(context);
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(scope.projectId)}/clustering-proposals/${encodeURIComponent(jobId)}/result/sections/${encodeURIComponent(sectionId)}`,
+      this.config.services.seoData
+    );
+    url.searchParams.set("limit", String(limit));
+    if (cursor !== undefined) url.searchParams.set("cursor", cursor);
+    const payload = await this.request("GET", url, context);
+    return scopedInternalClusteringProposalSectionResult(
+      responseData(payload),
+      scope.workspaceId,
+      scope.projectId,
+      jobId,
+      sectionId,
       limit,
       cursor
     );

@@ -6,6 +6,7 @@ import type { OperationResultPageInfo } from "./operation-results.js";
 export const arsenkinClusteringKeywordLimit = 300_000 as const;
 export const internalClusteringResolveBatchLimit = 1_000 as const;
 export const internalClusteringPersistItemLimit = 300_000 as const;
+export const clusteringProposalUnclusteredSectionId = "unclustered" as const;
 
 export const clusteringSearchEngines = ["YANDEX", "GOOGLE"] as const;
 export type ClusteringSearchEngine = (typeof clusteringSearchEngines)[number];
@@ -237,6 +238,14 @@ export interface ClusteringOperationResult {
   readonly page: OperationResultPageInfo;
 }
 
+/** A cursor page for one proposal cluster, loaded independently from the summary. */
+export interface ClusteringProposalSectionResult {
+  /** Proposal cluster UUID or the stable `unclustered` section key. */
+  readonly sectionId: string;
+  readonly rows: readonly ClusteringProposalResultRow[];
+  readonly page: OperationResultPageInfo;
+}
+
 export const clusteringFolderModes = ["NONE", "CREATE_SUBGROUPS"] as const;
 export type ClusteringFolderMode = (typeof clusteringFolderModes)[number];
 export const clusteringClusterFolderActions = ["NEW", "KEEP", "EXISTING"] as const;
@@ -312,6 +321,16 @@ export interface InternalClusteringProposalResultInput {
   readonly cursor?: number;
 }
 
+export interface InternalClusteringProposalSectionResultInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly jobId: string;
+  readonly sectionId: string;
+  readonly limit: number;
+  readonly cursor?: number;
+}
+
 export interface InternalClusteringProposalResult {
   readonly workspaceId: string;
   readonly projectId: string;
@@ -320,4 +339,11 @@ export interface InternalClusteringProposalResult {
   readonly clusters: readonly ClusteringProposalClusterSummary[];
   readonly rows: readonly ClusteringProposalResultRow[];
   readonly page: OperationResultPageInfo;
+}
+
+export interface InternalClusteringProposalSectionResult
+  extends ClusteringProposalSectionResult {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly jobId: string;
 }

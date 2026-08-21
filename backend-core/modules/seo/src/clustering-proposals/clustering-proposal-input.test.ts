@@ -3,6 +3,7 @@ import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
 import {
   internalApplyClusteringProposalInput,
+  internalClusteringProposalSectionResultInput,
   internalPersistClusteringProposalInput,
   internalResolveClusteringKeywordsInput
 } from "./clustering-proposal-input.js";
@@ -175,4 +176,36 @@ test("keeps apply and keyword resolution tenant scoped", () => {
     createUnclusteredGroup: false,
     entitlement
   }), BadRequestException);
+});
+
+test("accepts only a scoped proposal cluster or unclustered section", () => {
+  const base = {
+    workspaceId,
+    projectId,
+    actorId,
+    jobId,
+    limit: 200,
+    cursor: 41
+  };
+  assert.equal(
+    internalClusteringProposalSectionResultInput({
+      ...base,
+      sectionId: clusterId
+    }).sectionId,
+    clusterId
+  );
+  assert.equal(
+    internalClusteringProposalSectionResultInput({
+      ...base,
+      sectionId: "unclustered"
+    }).sectionId,
+    "unclustered"
+  );
+  assert.throws(
+    () => internalClusteringProposalSectionResultInput({
+      ...base,
+      sectionId: "all"
+    }),
+    BadRequestException
+  );
 });

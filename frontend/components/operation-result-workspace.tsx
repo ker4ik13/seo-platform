@@ -10,6 +10,7 @@ import type {
   ClusteringProposalApplyResult,
   ClusteringProposalClusterSummary,
   ClusteringProposalResultRow,
+  ClusteringProposalSectionResult,
   CrawlOperationResultPage,
   CrawlOperationResultRow,
   FrequencyOperationResult,
@@ -39,6 +40,7 @@ import {
   connectorRoutingScopeLabel
 } from "../lib/connector-routing-presentation";
 import {
+  clusteringProposalSectionApiPath,
   mergeOperationResultRows,
   operationResultApiPath,
   type OperationResultKind
@@ -377,11 +379,8 @@ export function OperationResultWorkspace({
 
       {data.kind === "clustering" && (
         <ClusteringApplyPanel
-          hasNext={Boolean(nextCursor)}
-          loadingMore={loadingMore}
           onChanged={reloadAfterClusteringMutation}
           {...(onDirtyChange ? { onDirtyChange } : {})}
-          onLoadMore={() => void loadMore()}
           operationId={operationId}
           projectId={projectId}
           result={data.value}
@@ -428,20 +427,14 @@ function OperationTable({ data }: Readonly<{ data: OperationResultData }>) {
 }
 
 function ClusteringApplyPanel({
-  hasNext,
-  loadingMore,
   onChanged,
   onDirtyChange,
-  onLoadMore,
   operationId,
   projectId,
   result
 }: Readonly<{
-  hasNext: boolean;
-  loadingMore: boolean;
   onChanged: () => void;
   onDirtyChange?: (dirty: boolean) => void;
-  onLoadMore: () => void;
   operationId: string;
   projectId: string;
   result: ClusteringOperationResult;
@@ -585,13 +578,9 @@ function ClusteringApplyPanel({
   const allSectionsCollapsed = renderedSectionIds.length > 0 && renderedSectionIds.every(
     (sectionId) => collapsedSectionIds.has(sectionId)
   );
-  const resultLoadState = loadingMore
-    ? "Подгружаем следующие строки…"
-    : hasNext
-      ? "Есть ещё запросы — загрузите следующую часть"
-      : isActiveStatus(result.run.status)
-        ? "Все доступные строки загружены · ждём новые"
-        : "Все строки загружены";
+  const resultLoadState = isActiveStatus(result.run.status)
+    ? "Результат ещё формируется · запросы подгружаются внутри кластеров"
+    : "Запросы подгружаются отдельно внутри каждого кластера";
 
   function updateName(cluster: ClusteringProposalClusterSummary, value: string): void {
     setNameOverrides((current) => {
@@ -785,7 +774,7 @@ function ClusteringApplyPanel({
             </button>
           </div>
           <div className={styles.clusteringSectionList}>
-            {renderedSections.map(({ cluster, rows }) => {
+            {renderedSections.map(({ cluster, rowFilter, rows }) => {
               const sectionId = cluster?.id ?? "unclustered";
               const topUrls = cluster?.topUrls.length
                 ? cluster.topUrls
@@ -820,7 +809,7 @@ function ClusteringApplyPanel({
                 ? `Внутри: ${groupPath(groups, folderDecision?.parentGroupId ?? "", "Корень проекта")}`
                 : `В папку: ${groupPath(groups, folderDecision?.groupId ?? "", "Выберите папку")}`;
               return (
-                <article className={`${styles.clusteringSection} ${styles.clusteringClusterIncluded}${expanded ? "" : ` ${styles.clusteringSectionCollapsed}`}`} key={sectionId}>
+                <article className={`${styles.clusteringSection} ${styles.clusteringClusterIncluded}${expanded ? "" : ` ${styles.clusteringSectionCollapsed}`}`} key={`${proposalVersion}:${sectionId}`}>
                   <header>
                     <button
                       aria-expanded={expanded}
@@ -931,19 +920,20 @@ function ClusteringApplyPanel({
                     />
                   )}
                   {expanded && <div className={styles.clusteringSectionBody}>
-                    <div className={styles.clusteringQueries}>
-                      <div className={styles.clusteringColumnTitle}><strong>Запросы</strong><span>Показано {formatInteger(rows.length)}</span></div>
-                      {rows.map((row) => {
-                        const destination = keywordGroupOverrides.get(row.keywordId);
-                        return (
-                          <label className={styles.clusteringQueryRow} key={row.keywordId}>
-                            {ready && <input checked={selectedKeywordIds.has(row.keywordId)} disabled={row.state !== "READY"} onChange={() => toggleKeyword(row.keywordId)} type="checkbox" />}
-                            <span><strong>{row.keyword}</strong><small>{clusteringRowStateLabel(row)}</small></span>
-                            {destination && <b title={groupPath(groups, destination, destination)}><Icon name="inbox" />{groupPath(groups, destination, "Папка")}</b>}
-                          </label>
-                        );
-                      })}
-                    </div>
+                    <ClusteringSectionQueries
+                      expectedCount={cluster?.keywordCount ?? proposal.unclusteredCount}
+                      groups={groups}
+                      initialRows={rows}
+                      keywordGroupOverrides={keywordGroupOverrides}
+                      onToggleKeyword={toggleKeyword}
+                      operationId={operationId}
+                      projectId={projectId}
+                      proposalVersion={proposalVersion}
+                      ready={ready}
+                      {...(rowFilter ? { rowFilter } : {})}
+                      sectionId={sectionId}
+                      selectedKeywordIds={selectedKeywordIds}
+                    />
                     <aside className={styles.clusteringUrls}>
                       <div className={styles.clusteringColumnTitle}><strong>URL в выдаче</strong><span>{formatInteger(topUrls.length)}</span></div>
                       {topUrls.length > 0 ? topUrls.map(({ url, overlapCount }, index) => (
@@ -960,16 +950,6 @@ function ClusteringApplyPanel({
             {clusterSections.length === 0 && <p>Запросы и кластеры по поиску не найдены.</p>}
             {clusterSections.length > renderedSections.length && (
               <p>Показаны первые 500 из {formatInteger(clusterSections.length)}. Уточните поиск для остальных.</p>
-            )}
-            {hasNext && (
-              <button
-                className={styles.clusteringLoadMore}
-                disabled={loadingMore}
-                onClick={onLoadMore}
-                type="button"
-              >
-                {loadingMore ? "Загружаем запросы…" : "Загрузить ещё запросы"}
-              </button>
             )}
           </div>
           {ready && selectedKeywordIds.size > 0 && (
@@ -1031,11 +1011,200 @@ function ClusteringApplyPanel({
   );
 }
 
+function ClusteringSectionQueries({
+  expectedCount,
+  groups,
+  initialRows,
+  keywordGroupOverrides,
+  onToggleKeyword,
+  operationId,
+  projectId,
+  proposalVersion,
+  ready,
+  rowFilter,
+  sectionId,
+  selectedKeywordIds
+}: Readonly<{
+  expectedCount: number;
+  groups: readonly SemanticKeywordGroup[];
+  initialRows: readonly ClusteringProposalResultRow[];
+  keywordGroupOverrides: ReadonlyMap<string, string>;
+  onToggleKeyword: (keywordId: string) => void;
+  operationId: string;
+  projectId: string;
+  proposalVersion: number;
+  ready: boolean;
+  rowFilter?: string;
+  sectionId: string;
+  selectedKeywordIds: ReadonlySet<string>;
+}>) {
+  const [rows, setRows] = useState(initialRows);
+  const [page, setPage] = useState<OperationResultPageInfo>();
+  const [requestedFirstPage, setRequestedFirstPage] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string>();
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const loadingRef = useRef(false);
+  const mountedRef = useRef(true);
+  const scopeRef = useRef(
+    `${projectId}:${operationId}:${proposalVersion}:${sectionId}`
+  );
+  const visibleRows = rowFilter
+    ? rows.filter(({ keyword }) =>
+        keyword.toLocaleLowerCase("ru-RU").includes(rowFilter)
+      )
+    : rows;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setRows((current) => mergeOperationResultRows(current, initialRows));
+  }, [initialRows]);
+
+  const loadPage = useCallback(async () => {
+    if (loadingRef.current) return;
+    const cursor = requestedFirstPage ? page?.nextCursor : undefined;
+    if (requestedFirstPage && !error && !cursor) return;
+    const requestScope = scopeRef.current;
+    loadingRef.current = true;
+    setLoading(true);
+    setError(undefined);
+    try {
+      const result = await browserApiRequest<ClusteringProposalSectionResult>(
+        clusteringProposalSectionApiPath(
+          projectId,
+          operationId,
+          sectionId,
+          {
+            limit: operationResultDefaultPageSize,
+            ...(cursor ? { cursor } : {})
+          }
+        )
+      );
+      if (!mountedRef.current || scopeRef.current !== requestScope) return;
+      setRows((current) => mergeOperationResultRows(current, result.rows));
+      setPage(result.page);
+      setRequestedFirstPage(true);
+    } catch (requestError) {
+      if (!mountedRef.current || scopeRef.current !== requestScope) return;
+      setRequestedFirstPage(true);
+      setError(operationResultError(requestError));
+    } finally {
+      if (mountedRef.current && scopeRef.current === requestScope) {
+        loadingRef.current = false;
+        setLoading(false);
+      }
+    }
+  }, [error, operationId, page?.nextCursor, projectId, requestedFirstPage, sectionId]);
+
+  useEffect(() => {
+    const target = sentinelRef.current;
+    if (
+      !target ||
+      loading ||
+      requestedFirstPage ||
+      rows.length >= expectedCount
+    ) {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void loadPage();
+      },
+      { rootMargin: "240px 0px", threshold: 0 }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [expectedCount, loadPage, loading, requestedFirstPage, rows.length]);
+
+  return (
+    <div className={styles.clusteringQueries}>
+      <div className={styles.clusteringColumnTitle}>
+        <strong>Запросы</strong>
+        <span>
+          {rowFilter
+            ? `Найдено ${formatInteger(visibleRows.length)} · загружено ${formatInteger(rows.length)} из ${formatInteger(expectedCount)}`
+            : `Показано ${formatInteger(rows.length)} из ${formatInteger(expectedCount)}`}
+        </span>
+      </div>
+      {visibleRows.map((row) => {
+        const destination = keywordGroupOverrides.get(row.keywordId);
+        return (
+          <label className={styles.clusteringQueryRow} key={row.keywordId}>
+            {ready && (
+              <input
+                checked={selectedKeywordIds.has(row.keywordId)}
+                disabled={row.state !== "READY"}
+                onChange={() => onToggleKeyword(row.keywordId)}
+                type="checkbox"
+              />
+            )}
+            <span>
+              <strong>{row.keyword}</strong>
+              <small>{clusteringRowStateLabel(row)}</small>
+            </span>
+            {destination && (
+              <b title={groupPath(groups, destination, destination)}>
+                <Icon name="inbox" />
+                {groupPath(groups, destination, "Папка")}
+              </b>
+            )}
+          </label>
+        );
+      })}
+      {rows.length < expectedCount && !requestedFirstPage && (
+        <div
+          aria-label="Подгрузка запросов кластера"
+          className={styles.clusteringQuerySentinel}
+          ref={sentinelRef}
+        >
+          <span className={styles.inlineSpinner} />
+          <span>Загружаем запросы этого кластера…</span>
+        </div>
+      )}
+      {loading && requestedFirstPage && (
+        <div className={styles.clusteringQuerySentinel} role="status">
+          <span className={styles.inlineSpinner} />
+          <span>Загружаем следующую часть…</span>
+        </div>
+      )}
+      {error && (
+        <div className={styles.clusteringQueryError} role="alert">
+          <span>{error}</span>
+          <button onClick={() => void loadPage()} type="button">
+            Повторить
+          </button>
+        </div>
+      )}
+      {!error && page?.hasNext && !loading && (
+        <button
+          className={styles.clusteringLoadMore}
+          onClick={() => void loadPage()}
+          type="button"
+        >
+          Загрузить ещё запросы
+        </button>
+      )}
+      {!loading && !error && requestedFirstPage && rows.length === 0 && (
+        <p className={styles.clusteringQueryEmpty}>
+          В этом кластере больше нет доступных запросов.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function clusteringSections(
   result: ClusteringOperationResult,
   query: string
 ): readonly Readonly<{
   cluster?: ClusteringProposalClusterSummary;
+  rowFilter?: string;
   rows: readonly ClusteringProposalResultRow[];
 }>[] {
   const rowsByClusterId = new Map<string, ClusteringProposalResultRow[]>();
@@ -1052,12 +1221,15 @@ function clusteringSections(
   }
   const sections: Array<Readonly<{
     cluster?: ClusteringProposalClusterSummary;
+    rowFilter?: string;
     rows: readonly ClusteringProposalResultRow[];
   }>> = result.clusters.map((cluster) => ({
     cluster,
     rows: rowsByClusterId.get(cluster.id) ?? []
   }));
-  if (unclustered.length > 0) sections.push({ rows: unclustered });
+  if ((result.proposal?.unclusteredCount ?? unclustered.length) > 0) {
+    sections.push({ rows: unclustered });
+  }
   if (!query) return sections;
   return sections.flatMap((section) => {
     const clusterMatches = section.cluster && `${section.cluster.name} ${section.cluster.topUrl ?? ""} ${section.cluster.topUrls.map(({ url }) => url).join(" ")}`.toLocaleLowerCase("ru-RU").includes(query);
@@ -1065,7 +1237,7 @@ function clusteringSections(
     return clusterMatches
       ? [section]
       : matchingRows.length > 0
-        ? [{ ...section, rows: matchingRows }]
+        ? [{ ...section, rowFilter: query, rows: matchingRows }]
         : [];
   });
 }

@@ -8,7 +8,9 @@ export const realtimeCollaborationEvents = {
   presenceUpdate: "presence.update",
   presenceJoined: "presence.joined",
   presenceUpdated: "presence.updated",
-  presenceLeft: "presence.left"
+  presenceLeft: "presence.left",
+  semanticChange: "semantics.change",
+  semanticChanged: "semantics.changed"
 } as const;
 export const realtimeTicketTtlMilliseconds = 30_000;
 export const realtimeAuthorizationLeaseMilliseconds = 60_000;
@@ -106,6 +108,21 @@ export interface ProjectPresenceLeftEvent {
   readonly occurredAt: string;
 }
 
+/**
+ * Browser -> Realtime invalidation signal sent only after a committed semantic
+ * HTTP mutation. It intentionally carries no keyword, folder or counter data.
+ */
+export interface ProjectSemanticChangeInput {
+  readonly changeId: string;
+}
+
+/** Realtime -> project room signal. Receivers reconcile from the HTTP API. */
+export interface ProjectSemanticChangeEvent extends ProjectSemanticChangeInput {
+  readonly projectId: string;
+  readonly actorUserId: string;
+  readonly occurredAt: string;
+}
+
 export interface IssueRealtimeProjectTicketInput {
   readonly clientInstanceId: string;
 }
@@ -183,6 +200,22 @@ export type PresenceUpdateResult =
           | "VALIDATION_FAILED"
           | "RATE_LIMITED"
           | "PROVIDER_UNAVAILABLE";
+        readonly message: string;
+      };
+    };
+
+export type ProjectSemanticChangeResult =
+  | {
+      readonly ok: true;
+      readonly data: ProjectSemanticChangeEvent;
+    }
+  | {
+      readonly ok: false;
+      readonly error: {
+        readonly code:
+          | "UNAUTHENTICATED"
+          | "VALIDATION_FAILED"
+          | "RATE_LIMITED";
         readonly message: string;
       };
     };
@@ -415,6 +448,30 @@ export function projectPresenceParticipant(
     clientInstanceId: uuid(participant.clientInstanceId),
     ...update,
     updatedAt: isoTimestamp(participant.updatedAt)
+  };
+}
+
+export function projectSemanticChangeInput(
+  value: unknown
+): ProjectSemanticChangeInput {
+  const input = exactRecord(value, ["changeId"]);
+  return { changeId: uuid(input.changeId) };
+}
+
+export function projectSemanticChangeEvent(
+  value: unknown
+): ProjectSemanticChangeEvent {
+  const event = exactRecord(value, [
+    "changeId",
+    "projectId",
+    "actorUserId",
+    "occurredAt"
+  ]);
+  return {
+    changeId: uuid(event.changeId),
+    projectId: uuid(event.projectId),
+    actorUserId: uuid(event.actorUserId),
+    occurredAt: isoTimestamp(event.occurredAt)
   };
 }
 

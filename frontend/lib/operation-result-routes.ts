@@ -1,4 +1,7 @@
-import { operationResultDefaultPageSize } from "@seo-platform/contracts";
+import {
+  clusteringProposalUnclusteredSectionId,
+  operationResultDefaultPageSize
+} from "@seo-platform/contracts";
 
 export const operationResultKinds = [
   "frequency",
@@ -79,6 +82,27 @@ export function operationResultApiPath(
   }
   if (kind === "rank") return `${base}/jobs/${id}/result${suffix}`;
   return `${base}/crawls/${id}/result${suffix}`;
+}
+
+export function clusteringProposalSectionApiPath(
+  projectId: string,
+  operationId: string,
+  sectionId: string,
+  page?: Readonly<{ cursor?: string; limit?: number }>
+): string {
+  if (
+    !isOperationResultId(projectId) ||
+    !isOperationResultId(operationId) ||
+    (sectionId !== clusteringProposalUnclusteredSectionId &&
+      !isOperationResultId(sectionId))
+  ) {
+    throw new TypeError("Invalid clustering proposal section scope");
+  }
+  const query = new URLSearchParams({
+    limit: String(page?.limit ?? operationResultDefaultPageSize)
+  });
+  if (page?.cursor) query.set("cursor", page.cursor);
+  return `/app/api/projects/${encodeURIComponent(projectId)}/clustering-runs/${encodeURIComponent(operationId)}/result/sections/${encodeURIComponent(sectionId)}?${query.toString()}`;
 }
 
 export function mergeOperationResultRows<

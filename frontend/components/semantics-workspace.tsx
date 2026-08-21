@@ -11,6 +11,7 @@ import {
   type SemanticTrashRecoveryItem
 } from "./semantic-trash-recovery-dialog";
 import type { AppProject } from "../lib/app-types";
+import { announceProjectSemanticMutation } from "../lib/semantic-realtime";
 import { useProjectPresence } from "./project-presence-provider";
 
 type SemanticTool = "IMPORT" | "CLUSTERS" | "COLUMNS";
@@ -30,7 +31,7 @@ export function SemanticsWorkspace({
   workspaceId: string;
   workspaceRoleCode: string;
 }>) {
-  const { publishActivity } = useProjectPresence();
+  const { publishActivity, semanticChangeVersion } = useProjectPresence();
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [groupRefreshVersion, setGroupRefreshVersion] = useState(0);
   const [clusterRefreshVersion, setClusterRefreshVersion] = useState(0);
@@ -57,15 +58,15 @@ export function SemanticsWorkspace({
       <SemanticCoreTable
         currentUserId={currentUserId}
         columnRefreshVersion={columnRefreshVersion}
-        clusterRefreshVersion={clusterRefreshVersion}
-        groupRefreshVersion={groupRefreshVersion}
+        clusterRefreshVersion={clusterRefreshVersion + semanticChangeVersion}
+        groupRefreshVersion={groupRefreshVersion + semanticChangeVersion}
         onGroupsChanged={() => setGroupRefreshVersion((value) => value + 1)}
         onOpenColumns={() => setActiveTool("COLUMNS")}
         onOpenImport={() => setActiveTool("IMPORT")}
         projectId={projectId}
         projectName={projectName}
         projects={projects}
-        refreshVersion={refreshVersion}
+        refreshVersion={refreshVersion + semanticChangeVersion}
         workspaceId={workspaceId}
         workspaceRoleCode={workspaceRoleCode}
       />
@@ -83,6 +84,7 @@ export function SemanticsWorkspace({
                 onPublished={(result) => {
                   setRefreshVersion((value) => value + 1);
                   setGroupRefreshVersion((value) => value + 1);
+                  announceProjectSemanticMutation(projectId);
                   if (result.trashedDuplicateCandidates?.length) {
                     setActiveTool(undefined);
                     setTrashRecoveryItems(

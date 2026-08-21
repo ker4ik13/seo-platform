@@ -182,6 +182,45 @@ test("broadcasts bounded cursor and semantic selection metadata", async () => {
   assert.equal(JSON.stringify(result).includes("keyword text"), false);
 });
 
+test("broadcasts a data-free semantic invalidation only after presence join", async () => {
+  const authorization = activeAuthorization();
+  const gateway = new CollaborationGateway(ticketService(), presenceStore());
+  const socket = socketDouble({ data: { authorization } });
+  gateway.afterInit(namespaceDouble([socket.socket]).namespace);
+  const changeId = "0198f258-8cc7-7abc-8def-1234567890c4";
+
+  const beforeJoin = await gateway.publishSemanticChange(socket.socket, {
+    changeId
+  });
+  assert.equal(beforeJoin.ok, false);
+  assert.equal(socket.disconnectCount, 1);
+
+  const joinedSocket = socketDouble({ data: { authorization } });
+  gateway.afterInit(namespaceDouble([joinedSocket.socket]).namespace);
+  await gateway.joinPresence(joinedSocket.socket, {});
+  joinedSocket.broadcasts.length = 0;
+  const result = await gateway.publishSemanticChange(joinedSocket.socket, {
+    changeId
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.deepEqual(joinedSocket.broadcasts, [
+    {
+      room: `project:${authorization.projectId}`,
+      event: "semantics.changed",
+      payload: result.data
+    }
+  ]);
+  assert.deepEqual(result.data, {
+    changeId,
+    projectId: authorization.projectId,
+    actorUserId: authorization.userId,
+    occurredAt: result.data.occurredAt
+  });
+  assert.equal(JSON.stringify(result).includes("keyword"), false);
+});
+
 test("rejects malformed cursor anchors without changing presence", async () => {
   const authorization = activeAuthorization();
   const gateway = new CollaborationGateway(ticketService(), presenceStore());

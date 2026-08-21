@@ -4,8 +4,10 @@ import {
   clusteringProposalItemStates,
   clusteringProposalStatuses,
   type ClusteringProposalApplyResult,
+  type ClusteringProposalResultRow,
   type ClusteringProposalSummary,
-  type InternalClusteringProposalResult
+  type InternalClusteringProposalResult,
+  type InternalClusteringProposalSectionResult
 } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 
@@ -43,54 +45,14 @@ export function scopedInternalClusteringProposalResult(
     return cluster;
   });
   const clustersById = new Map(clusters.map((cluster) => [cluster.id, cluster]));
-  const rows = input.rows.map((candidate) => {
-    const row = exact(
-      candidate,
-      ["sequence", "keywordId", "keyword", "state"],
-      [
-        "conflictReason", "currentClusterName", "proposedCluster", "frequency", "exactFrequency",
-        "aggregatorsPercent", "toponym", "geoDependent"
-      ]
-    );
-    const sequence = integer(row.sequence, 0, arsenkinClusteringKeywordLimit - 1);
-    const keywordId = uuid(row.keywordId);
-    if (
-      sequences.has(sequence) ||
-      keywordIds.has(keywordId) ||
-      typeof row.keyword !== "string" ||
-      row.keyword.length < 1 ||
-      row.keyword.length > 2_000
-    ) invalid();
-    sequences.add(sequence);
-    keywordIds.add(keywordId);
-    const proposedCluster = row.proposedCluster === undefined
-      ? undefined
-      : proposalCluster(row.proposedCluster);
-    if (
-      proposedCluster &&
-      JSON.stringify(clustersById.get(proposedCluster.id)) !== JSON.stringify(proposedCluster)
-    ) invalid();
-    return {
-      sequence,
-      keywordId,
-      keyword: row.keyword,
-      state: member(row.state, clusteringProposalItemStates),
-      ...(row.conflictReason === undefined
-        ? {}
-        : { conflictReason: member(row.conflictReason, clusteringProposalConflictReasons) }),
-      ...(row.currentClusterName === undefined
-        ? {}
-        : { currentClusterName: bounded(row.currentClusterName, 255) }),
-      ...(proposedCluster ? { proposedCluster } : {}),
-      ...optionalDecimal(row.frequency, "frequency"),
-      ...optionalDecimal(row.exactFrequency, "exactFrequency"),
-      ...(row.aggregatorsPercent === undefined
-        ? {}
-        : { aggregatorsPercent: finite(row.aggregatorsPercent, 0, 100) }),
-      ...(row.toponym === undefined ? {} : { toponym: bounded(row.toponym, 255) }),
-      ...(row.geoDependent === undefined ? {} : { geoDependent: boolean(row.geoDependent) })
-    };
-  });
+  const rows = input.rows.map((candidate) =>
+    proposalResultRow(candidate, clustersById)
+  );
+  for (const row of rows) {
+    if (sequences.has(row.sequence) || keywordIds.has(row.keywordId)) invalid();
+    sequences.add(row.sequence);
+    keywordIds.add(row.keywordId);
+  }
   const firstSequence = cursor === undefined ? 0 : Number(cursor) + 1;
   if (
     rows.some((row, index) => row.sequence !== firstSequence + index) ||
@@ -117,6 +79,73 @@ export function scopedInternalClusteringProposalResult(
     page: {
       hasNext: page.hasNext,
       ...(typeof page.nextCursor === "string" ? { nextCursor: page.nextCursor } : {})
+    }
+  };
+}
+
+export function scopedInternalClusteringProposalSectionResult(
+  value: unknown,
+  workspaceId: string,
+  projectId: string,
+  jobId: string,
+  sectionId: string,
+  limit: number,
+  cursor?: string
+): InternalClusteringProposalSectionResult {
+  const input = exact(value, [
+    "workspaceId",
+    "projectId",
+    "jobId",
+    "sectionId",
+    "rows",
+    "page"
+  ]);
+  const page = exact(input.page, ["hasNext"], ["nextCursor"]);
+  if (
+    input.workspaceId !== workspaceId ||
+    input.projectId !== projectId ||
+    input.jobId !== jobId ||
+    input.sectionId !== sectionId ||
+    !Array.isArray(input.rows) ||
+    input.rows.length > limit ||
+    typeof page.hasNext !== "boolean" ||
+    (page.hasNext &&
+      (typeof page.nextCursor !== "string" || input.rows.length !== limit)) ||
+    (!page.hasNext && page.nextCursor !== undefined)
+  ) {
+    invalid();
+  }
+  const rows = input.rows.map((candidate) => proposalResultRow(candidate));
+  const minimumSequence = cursor === undefined ? -1 : cursorInteger(cursor);
+  const keywordIds = new Set<string>();
+  for (const [index, row] of rows.entries()) {
+    const previous = rows[index - 1];
+    if (
+      row.sequence <= minimumSequence ||
+      (previous && row.sequence <= previous.sequence) ||
+      keywordIds.has(row.keywordId)
+    ) {
+      invalid();
+    }
+    keywordIds.add(row.keywordId);
+  }
+  if (
+    page.hasNext &&
+    page.nextCursor !== String(rows.at(-1)?.sequence)
+  ) {
+    invalid();
+  }
+  return {
+    workspaceId,
+    projectId,
+    jobId,
+    sectionId,
+    rows,
+    page: {
+      hasNext: page.hasNext,
+      ...(typeof page.nextCursor === "string"
+        ? { nextCursor: page.nextCursor }
+        : {})
     }
   };
 }
@@ -151,6 +180,82 @@ export function scopedClusteringProposalSummary(
   jobId: string
 ): ClusteringProposalSummary {
   return proposalSummary(value, jobId);
+}
+
+function proposalResultRow(
+  value: unknown,
+  clustersById?: ReadonlyMap<string, ReturnType<typeof proposalCluster>>
+): ClusteringProposalResultRow {
+  const row = exact(
+    value,
+    ["sequence", "keywordId", "keyword", "state"],
+    [
+      "conflictReason",
+      "currentClusterName",
+      "proposedCluster",
+      "frequency",
+      "exactFrequency",
+      "aggregatorsPercent",
+      "toponym",
+      "geoDependent"
+    ]
+  );
+  const sequence = integer(
+    row.sequence,
+    0,
+    arsenkinClusteringKeywordLimit - 1
+  );
+  const keywordId = uuid(row.keywordId);
+  if (
+    typeof row.keyword !== "string" ||
+    row.keyword.length < 1 ||
+    row.keyword.length > 2_000
+  ) {
+    invalid();
+  }
+  const proposedCluster =
+    row.proposedCluster === undefined
+      ? undefined
+      : proposalCluster(row.proposedCluster);
+  if (
+    proposedCluster &&
+    (!clustersById ||
+      JSON.stringify(clustersById.get(proposedCluster.id)) !==
+        JSON.stringify(proposedCluster))
+  ) {
+    invalid();
+  }
+  return {
+    sequence,
+    keywordId,
+    keyword: row.keyword,
+    state: member(row.state, clusteringProposalItemStates),
+    ...(row.conflictReason === undefined
+      ? {}
+      : {
+          conflictReason: member(
+            row.conflictReason,
+            clusteringProposalConflictReasons
+          )
+        }),
+    ...(row.currentClusterName === undefined
+      ? {}
+      : { currentClusterName: bounded(row.currentClusterName, 255) }),
+    ...(proposedCluster ? { proposedCluster } : {}),
+    ...optionalDecimal(row.frequency, "frequency"),
+    ...optionalDecimal(row.exactFrequency, "exactFrequency"),
+    ...(row.aggregatorsPercent === undefined
+      ? {}
+      : {
+          aggregatorsPercent: finite(row.aggregatorsPercent, 0, 100)
+        }),
+    ...(row.toponym === undefined
+      ? {}
+      : { toponym: bounded(row.toponym, 255) }),
+    ...(row.geoDependent === undefined
+      ? {}
+      : { geoDependent: boolean(row.geoDependent) })
+  };
 }
 
 function proposalSummary(value: unknown, jobId: string): ClusteringProposalSummary {
@@ -263,6 +368,15 @@ function uuids(value: unknown, maximum: number): readonly string[] {
 function integer(value: unknown, minimum: number, maximum: number): number {
   if (!Number.isSafeInteger(value) || Number(value) < minimum || Number(value) > maximum) invalid();
   return Number(value);
+}
+
+function cursorInteger(value: string): number {
+  if (!/^(?:0|[1-9]\d{0,5})$/u.test(value)) invalid();
+  return integer(
+    Number(value),
+    0,
+    arsenkinClusteringKeywordLimit - 1
+  );
 }
 
 function finite(value: unknown, minimum: number, maximum: number): number {
