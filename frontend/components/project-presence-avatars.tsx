@@ -66,7 +66,7 @@ export function ProjectPresenceAvatars() {
           +{overflow}
         </span>
       )}
-      {connectionStatus !== "CONNECTED" && (
+      {connectionStatus === "DEGRADED" && (
         <span
           aria-hidden="true"
           className="project-presence-connection-indicator"

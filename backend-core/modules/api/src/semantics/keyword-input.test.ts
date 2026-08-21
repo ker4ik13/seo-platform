@@ -13,6 +13,7 @@ import {
 import {
   createSemanticKeywordGroupInput,
   deleteSemanticKeywordGroupInput,
+  duplicateSemanticKeywordGroupInput,
   updateSemanticKeywordGroupInput
 } from "./keyword-group-input.js";
 
@@ -22,12 +23,16 @@ test("parses explicit trash and permanent-delete choices", () => {
     permanent: true
   });
   assert.deepEqual(deleteSemanticKeywordGroupInput(undefined), {
-    deleteKeywords: false
+    deleteKeywords: false,
+    promoteChildren: false
   });
-  assert.deepEqual(
-    deleteSemanticKeywordGroupInput({ deleteKeywords: true }),
-    { deleteKeywords: true }
-  );
+  assert.deepEqual(deleteSemanticKeywordGroupInput({
+    deleteKeywords: true,
+    promoteChildren: true
+  }), {
+    deleteKeywords: true,
+    promoteChildren: true
+  });
   assert.throws(
     () => deleteSemanticKeywordGroupInput({ deleteKeywords: "yes" }),
     DomainError
@@ -182,9 +187,10 @@ test("normalizes nested group create and nullable update", () => {
     createSemanticKeywordGroupInput({
       name: "  Услуги  ",
       parentId,
-      color: "#AABBCC"
+      color: "#AABBCC",
+      position: 4
     }),
-    { name: "Услуги", parentId, color: "#aabbcc" }
+    { name: "Услуги", parentId, color: "#aabbcc", position: 4 }
   );
   assert.deepEqual(
     updateSemanticKeywordGroupInput({
@@ -201,6 +207,31 @@ test("normalizes nested group create and nullable update", () => {
   );
   assert.throws(
     () => updateSemanticKeywordGroupInput({ name: "SEO", position: -1 }),
+    DomainError
+  );
+  assert.deepEqual(
+    duplicateSemanticKeywordGroupInput({
+      name: "  Услуги — копия  ",
+      parentId,
+      color: "#AABBCC",
+      includeDescendants: true,
+      includeKeywords: false
+    }),
+    {
+      name: "Услуги — копия",
+      parentId,
+      color: "#aabbcc",
+      includeDescendants: true,
+      includeKeywords: false
+    }
+  );
+  assert.throws(
+    () =>
+      duplicateSemanticKeywordGroupInput({
+        name: "SEO",
+        includeDescendants: "yes",
+        includeKeywords: true
+      }),
     DomainError
   );
 });

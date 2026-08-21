@@ -3,6 +3,7 @@ import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import type {
   InternalCreateSemanticKeywordGroupInput,
   InternalDeleteSemanticKeywordGroupInput,
+  InternalDuplicateSemanticKeywordGroupInput,
   InternalUpdateSemanticKeywordGroupInput,
   SemanticKeywordGroup
 } from "@seo-platform/contracts";
@@ -61,6 +62,108 @@ export class KeywordGroupService {
           : undefined;
         assertRegularParent(parent);
         const path = groupPath(parent?.path ?? parent?.name, input.name);
+        const siblings = await transaction.keywordGroup.findMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            parentId: input.parentId ?? null,
+            status: "ACTIVE",
+            systemKind: null
+          },
+          orderBy: [{ position: "asc" }, { id: "asc" }],
+          select: { id: true, position: true }
+        });
+        const targetPosition = Math.min(
+          input.position ?? siblings.length,
+          siblings.length
+        );
+        const created = await transaction.keywordGroup.create({
+          data: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            ...(input.parentId ? { parentId: input.parentId } : {}),
+            name: input.name,
+            path,
+            pathHash: sha256(path),
+            ...(input.color ? { color: input.color } : {}),
+            position: targetPosition
+          }
+        });
+        const orderedSiblingIds = siblings.map(({ id }) => id);
+        orderedSiblingIds.splice(targetPosition, 0, created.id);
+        for (const [position, siblingId] of orderedSiblingIds.entries()) {
+          if (siblingId === created.id) continue;
+          const sibling = siblings.find(({ id }) => id === siblingId);
+          if (sibling?.position === position) continue;
+          await transaction.keywordGroup.update({
+            where: { id: siblingId },
+            data: { position, version: { increment: 1 } }
+          });
+        }
+        return groupItem(
+          await requiredGroup(
+            transaction,
+            input.workspaceId,
+            input.projectId,
+            created.id
+          )
+        );
+      });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) throw duplicateGroup();
+      throw error;
+    }
+  }
+
+  public async duplicate(
+    groupId: string,
+    input: InternalDuplicateSemanticKeywordGroupInput
+  ): Promise<SemanticKeywordGroup> {
+    try {
+      return await this.prisma.$transaction(async (transaction) => {
+        await lockGroupTree(transaction, input.projectId);
+        await lockGroup(transaction, input.projectId, groupId);
+        await ensureSystemGroups(
+          transaction,
+          input.workspaceId,
+          input.projectId
+        );
+        const source = await requiredGroup(
+          transaction,
+          input.workspaceId,
+          input.projectId,
+          groupId
+        );
+        assertMutableGroup(source);
+        assertVersion(source.version, input.version);
+        const parent = input.parentId
+          ? await requiredGroup(
+              transaction,
+              input.workspaceId,
+              input.projectId,
+              input.parentId
+            )
+          : undefined;
+        assertRegularParent(parent);
+
+        const sourcePath = source.path ?? source.name;
+        const sourceGroups = input.includeDescendants
+          ? await transaction.keywordGroup.findMany({
+              where: {
+                workspaceId: input.workspaceId,
+                projectId: input.projectId,
+                status: "ACTIVE",
+                systemKind: null,
+                OR: [
+                  { id: source.id },
+                  { path: { startsWith: `${sourcePath} / ` } }
+                ]
+              },
+              include: GROUP_INCLUDE
+            })
+          : [source];
+        sourceGroups.sort(compareGroupDepth);
+
         const lastSibling = await transaction.keywordGroup.findFirst({
           where: {
             workspaceId: input.workspaceId,
@@ -72,24 +175,78 @@ export class KeywordGroupService {
           orderBy: { position: "desc" },
           select: { position: true }
         });
-        const created = await transaction.keywordGroup.create({
-          data: {
-            workspaceId: input.workspaceId,
-            projectId: input.projectId,
-            ...(input.parentId ? { parentId: input.parentId } : {}),
-            name: input.name,
-            path,
-            pathHash: sha256(path),
-            ...(input.color ? { color: input.color } : {}),
-            position: (lastSibling?.position ?? -1) + 1
+        const createdBySource = new Map<
+          string,
+          Readonly<{ id: string; path: string }>
+        >();
+        let duplicatedRootId: string | undefined;
+
+        for (const sourceGroup of sourceGroups) {
+          const isRoot = sourceGroup.id === source.id;
+          const createdParent = isRoot
+            ? parent
+              ? { id: parent.id, path: parent.path ?? parent.name }
+              : undefined
+            : sourceGroup.parentId
+              ? createdBySource.get(sourceGroup.parentId)
+              : undefined;
+          if (!isRoot && !createdParent) {
+            throw groupConflict("Duplicated group tree is inconsistent");
           }
-        });
+          const name = isRoot ? input.name : sourceGroup.name;
+          const path = groupPath(createdParent?.path, name);
+          const color = isRoot
+            ? input.color ?? sourceGroup.color
+            : sourceGroup.color;
+          const created = await transaction.keywordGroup.create({
+            data: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              ...(createdParent ? { parentId: createdParent.id } : {}),
+              name,
+              path,
+              pathHash: sha256(path),
+              ...(color ? { color } : {}),
+              position: isRoot
+                ? (lastSibling?.position ?? -1) + 1
+                : sourceGroup.position
+            }
+          });
+          createdBySource.set(sourceGroup.id, { id: created.id, path });
+          if (isRoot) duplicatedRootId = created.id;
+        }
+
+        if (input.includeKeywords) {
+          for (const sourceGroup of sourceGroups) {
+            const created = createdBySource.get(sourceGroup.id);
+            if (!created) continue;
+            await transaction.$executeRaw`
+              INSERT INTO "keyword_group_memberships" (
+                "project_id",
+                "keyword_id",
+                "group_id"
+              )
+              SELECT
+                "project_id",
+                "keyword_id",
+                ${created.id}::uuid
+              FROM "keyword_group_memberships"
+              WHERE "project_id" = ${input.projectId}::uuid
+                AND "group_id" = ${sourceGroup.id}::uuid
+              ON CONFLICT ("keyword_id", "group_id") DO NOTHING
+            `;
+          }
+        }
+
+        if (!duplicatedRootId) {
+          throw groupConflict("Duplicated group was not created");
+        }
         return groupItem(
           await requiredGroup(
             transaction,
             input.workspaceId,
             input.projectId,
-            created.id
+            duplicatedRootId
           )
         );
       });
@@ -242,61 +399,104 @@ export class KeywordGroupService {
     groupId: string,
     input: InternalDeleteSemanticKeywordGroupInput
   ): Promise<void> {
-    await this.prisma.$transaction(async (transaction) => {
-      await lockGroupTree(transaction, input.projectId);
-      await lockGroup(transaction, input.projectId, groupId);
-      const current = await requiredGroup(
-        transaction,
-        input.workspaceId,
-        input.projectId,
-        groupId
-      );
-      assertMutableGroup(current);
-      assertVersion(current.version, input.version);
-      const systemGroups = await ensureSystemGroups(
-        transaction,
-        input.workspaceId,
-        input.projectId
-      );
-      const currentPath = current.path ?? current.name;
-      const subtree = await transaction.keywordGroup.findMany({
-        where: {
-          workspaceId: input.workspaceId,
-          projectId: input.projectId,
-          status: "ACTIVE",
-          OR: [{ id: groupId }, { path: { startsWith: `${currentPath} / ` } }]
-        },
-        select: { id: true }
-      });
-      const groupIds = subtree.map(({ id }) => id);
-      if (input.deleteKeywords) {
-        await moveSubtreeKeywordsToTrash(
+    try {
+      await this.prisma.$transaction(async (transaction) => {
+        await lockGroupTree(transaction, input.projectId);
+        await lockGroup(transaction, input.projectId, groupId);
+        const current = await requiredGroup(
           transaction,
+          input.workspaceId,
           input.projectId,
-          groupIds,
-          systemGroups.TRASH.id,
-          input.actorId
+          groupId
         );
-      } else {
-        await moveOrphanedSubtreeKeywordsToUngrouped(
+        assertMutableGroup(current);
+        assertVersion(current.version, input.version);
+        const systemGroups = await ensureSystemGroups(
           transaction,
-          input.projectId,
-          groupIds,
-          systemGroups.UNGROUPED.id
+          input.workspaceId,
+          input.projectId
         );
-      }
-      await transaction.keywordGroup.updateMany({
-        where: { id: { in: groupIds } },
-        data: {
-          status: "DELETED",
-          parentId: null,
-          path: null,
-          pathHash: null,
-          version: { increment: 1 }
+        const currentPath = current.path ?? current.name;
+        const subtree = await transaction.keywordGroup.findMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            status: "ACTIVE",
+            systemKind: null,
+            OR: [{ id: groupId }, { path: { startsWith: `${currentPath} / ` } }]
+          },
+          orderBy: [{ position: "asc" }, { id: "asc" }],
+          select: {
+            id: true,
+            parentId: true,
+            name: true,
+            path: true,
+            position: true
+          }
+        });
+        const deletedGroupIds = input.promoteChildren
+          ? [groupId]
+          : subtree.map(({ id }) => id);
+        if (input.deleteKeywords) {
+          if (input.promoteChildren) {
+            await moveOrphanedDeletedGroupKeywordsToTrash(
+              transaction,
+              input.projectId,
+              deletedGroupIds,
+              systemGroups.TRASH.id,
+              input.actorId
+            );
+          } else {
+            await moveSubtreeKeywordsToTrash(
+              transaction,
+              input.projectId,
+              deletedGroupIds,
+              systemGroups.TRASH.id,
+              input.actorId
+            );
+          }
+        } else {
+          await moveOrphanedSubtreeKeywordsToUngrouped(
+            transaction,
+            input.projectId,
+            deletedGroupIds,
+            systemGroups.UNGROUPED.id
+          );
+        }
+        if (input.promoteChildren) {
+          await markGroupsDeleted(transaction, deletedGroupIds);
+          await promoteDirectChildren(
+            transaction,
+            input.workspaceId,
+            input.projectId,
+            current,
+            subtree
+          );
+        } else {
+          await markGroupsDeleted(transaction, deletedGroupIds);
         }
       });
-    });
+    } catch (error) {
+      if (isUniqueConstraintError(error)) throw duplicateGroup();
+      throw error;
+    }
   }
+}
+
+async function markGroupsDeleted(
+  transaction: Prisma.TransactionClient,
+  groupIds: readonly string[]
+): Promise<void> {
+  await transaction.keywordGroup.updateMany({
+    where: { id: { in: [...groupIds] } },
+    data: {
+      status: "DELETED",
+      parentId: null,
+      path: null,
+      pathHash: null,
+      version: { increment: 1 }
+    }
+  });
 }
 
 async function requiredGroup(
@@ -362,6 +562,111 @@ function groupItem(group: GroupAggregate): SemanticKeywordGroup {
     createdAt: group.createdAt.toISOString(),
     updatedAt: group.updatedAt.toISOString()
   };
+}
+
+function compareGroupDepth(left: GroupAggregate, right: GroupAggregate): number {
+  const depthDifference = groupDepth(left.path) - groupDepth(right.path);
+  if (depthDifference !== 0) return depthDifference;
+  if (left.position !== right.position) return left.position - right.position;
+  return left.id.localeCompare(right.id);
+}
+
+function groupDepth(path: string | null): number {
+  return path ? path.split(" / ").length : 0;
+}
+
+async function promoteDirectChildren(
+  transaction: Prisma.TransactionClient,
+  workspaceId: string,
+  projectId: string,
+  current: GroupAggregate,
+  subtree: readonly Readonly<{
+    id: string;
+    parentId: string | null;
+    name: string;
+    path: string | null;
+    position: number;
+  }>[]
+): Promise<void> {
+  const directChildren = subtree
+    .filter(({ parentId }) => parentId === current.id)
+    .sort(
+      (left, right) =>
+        left.position - right.position || left.id.localeCompare(right.id)
+    );
+  if (directChildren.length === 0) return;
+  const parent = current.parentId
+    ? await requiredGroup(transaction, workspaceId, projectId, current.parentId)
+    : undefined;
+  assertRegularParent(parent);
+  const parentPath = parent?.path ?? parent?.name;
+  const destinationSiblings = await transaction.keywordGroup.findMany({
+    where: {
+      workspaceId,
+      projectId,
+      parentId: current.parentId,
+      status: "ACTIVE",
+      systemKind: null,
+      id: { not: current.id }
+    },
+    orderBy: [{ position: "asc" }, { id: "asc" }],
+    select: { id: true, position: true }
+  });
+  const insertionPosition = destinationSiblings.filter(
+    ({ id, position }) =>
+      position < current.position ||
+      (position === current.position && id < current.id)
+  ).length;
+  const directChildIds = new Set(directChildren.map(({ id }) => id));
+  const orderedDestinationIds = destinationSiblings.map(({ id }) => id);
+  orderedDestinationIds.splice(
+    insertionPosition,
+    0,
+    ...directChildren.map(({ id }) => id)
+  );
+  const destinationPositionById = new Map(
+    orderedDestinationIds.map((id, position) => [id, position])
+  );
+  const currentPath = current.path ?? current.name;
+  const currentPrefix = `${currentPath} / `;
+  const promotedRows = subtree
+    .filter(({ id }) => id !== current.id)
+    .sort((left, right) => {
+      const depthDifference = groupDepth(left.path) - groupDepth(right.path);
+      if (depthDifference !== 0) return depthDifference;
+      return left.position - right.position || left.id.localeCompare(right.id);
+    });
+
+  for (const row of promotedRows) {
+    if (!row.path?.startsWith(currentPrefix)) {
+      throw groupConflict("Promoted group tree is inconsistent");
+    }
+    const relativePath = row.path.slice(currentPrefix.length);
+    const path = groupPath(parentPath, relativePath);
+    const directChild = directChildIds.has(row.id);
+    await transaction.keywordGroup.update({
+      where: { id: row.id },
+      data: {
+        ...(directChild
+          ? {
+              parentId: current.parentId,
+              position: destinationPositionById.get(row.id) ?? 0
+            }
+          : {}),
+        path,
+        pathHash: sha256(path),
+        version: { increment: 1 }
+      }
+    });
+  }
+  for (const sibling of destinationSiblings) {
+    const position = destinationPositionById.get(sibling.id);
+    if (position === undefined || sibling.position === position) continue;
+    await transaction.keywordGroup.update({
+      where: { id: sibling.id },
+      data: { position, version: { increment: 1 } }
+    });
+  }
 }
 
 async function ensureSystemGroups(
@@ -431,6 +736,58 @@ async function moveSubtreeKeywordsToTrash(
   });
   await transaction.keywordGroupMembership.createMany({
     data: keywordIds.map((keywordId) => ({
+      projectId,
+      keywordId,
+      groupId: trashGroupId
+    })),
+    skipDuplicates: true
+  });
+}
+
+async function moveOrphanedDeletedGroupKeywordsToTrash(
+  transaction: Prisma.TransactionClient,
+  projectId: string,
+  groupIds: readonly string[],
+  trashGroupId: string,
+  actorId: string
+): Promise<void> {
+  if (groupIds.length === 0) return;
+  const targetRows = await transaction.keywordGroupMembership.findMany({
+    where: { projectId, groupId: { in: [...groupIds] } },
+    select: { keywordId: true },
+    distinct: ["keywordId"]
+  });
+  const keywordIds = targetRows.map(({ keywordId }) => keywordId);
+  if (keywordIds.length === 0) return;
+  const outsideRows = await transaction.keywordGroupMembership.findMany({
+    where: {
+      projectId,
+      keywordId: { in: keywordIds },
+      groupId: { notIn: [...groupIds] }
+    },
+    select: { keywordId: true },
+    distinct: ["keywordId"]
+  });
+  const assignedOutside = new Set(outsideRows.map(({ keywordId }) => keywordId));
+  const orphanedIds = keywordIds.filter((id) => !assignedOutside.has(id));
+  await transaction.keywordGroupMembership.deleteMany({
+    where: { projectId, groupId: { in: [...groupIds] } }
+  });
+  if (orphanedIds.length === 0) return;
+  await transaction.keyword.updateMany({
+    where: { projectId, id: { in: orphanedIds }, status: "ACTIVE" },
+    data: {
+      status: "DELETED",
+      deletedAt: new Date(),
+      updatedBy: actorId,
+      version: { increment: 1 }
+    }
+  });
+  await transaction.keywordGroupMembership.deleteMany({
+    where: { projectId, keywordId: { in: orphanedIds } }
+  });
+  await transaction.keywordGroupMembership.createMany({
+    data: orphanedIds.map((keywordId) => ({
       projectId,
       keywordId,
       groupId: trashGroupId

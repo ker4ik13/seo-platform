@@ -2,6 +2,7 @@ import { BadRequestException } from "@nestjs/common";
 import type {
   InternalCreateSemanticKeywordGroupInput,
   InternalDeleteSemanticKeywordGroupInput,
+  InternalDuplicateSemanticKeywordGroupInput,
   InternalUpdateSemanticKeywordGroupInput
 } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
@@ -17,7 +18,8 @@ export function internalCreateSemanticKeywordGroupInput(
     "entitlement",
     "name",
     "parentId",
-    "color"
+    "color",
+    "position"
   ]);
   const parentId = optionalUuid(input.parentId, "parentId", false);
   const color = optionalColor(input.color, false);
@@ -26,7 +28,36 @@ export function internalCreateSemanticKeywordGroupInput(
     entitlement: semanticCapacityEntitlement(input.entitlement),
     name: groupName(input.name),
     ...(parentId ? { parentId } : {}),
-    ...(color ? { color } : {})
+    ...(color ? { color } : {}),
+    ...optionalPosition(input.position)
+  };
+}
+
+export function internalDuplicateSemanticKeywordGroupInput(
+  value: unknown
+): InternalDuplicateSemanticKeywordGroupInput {
+  const input = exactRecord(value, [
+    ...scopeFields(),
+    "version",
+    "name",
+    "parentId",
+    "color",
+    "includeDescendants",
+    "includeKeywords"
+  ]);
+  const parentId = optionalUuid(input.parentId, "parentId", false);
+  const color = optionalColor(input.color, false);
+  return {
+    ...scope(input),
+    version: positiveInteger(input.version, "version"),
+    name: groupName(input.name),
+    ...(parentId ? { parentId } : {}),
+    ...(color ? { color } : {}),
+    includeDescendants: booleanValue(
+      input.includeDescendants,
+      "includeDescendants"
+    ),
+    includeKeywords: booleanValue(input.includeKeywords, "includeKeywords")
   };
 }
 
@@ -67,7 +98,8 @@ export function internalDeleteSemanticKeywordGroupInput(
   const input = exactRecord(value, [
     ...scopeFields(),
     "version",
-    "deleteKeywords"
+    "deleteKeywords",
+    "promoteChildren"
   ]);
   return {
     ...scope(input),
@@ -75,7 +107,11 @@ export function internalDeleteSemanticKeywordGroupInput(
     deleteKeywords:
       input.deleteKeywords === undefined
         ? false
-        : booleanValue(input.deleteKeywords, "deleteKeywords")
+        : booleanValue(input.deleteKeywords, "deleteKeywords"),
+    promoteChildren:
+      input.promoteChildren === undefined
+        ? false
+        : booleanValue(input.promoteChildren, "promoteChildren")
   };
 }
 

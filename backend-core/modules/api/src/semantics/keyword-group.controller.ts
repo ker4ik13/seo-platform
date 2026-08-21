@@ -45,6 +45,7 @@ import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import {
   createSemanticKeywordGroupInput,
   deleteSemanticKeywordGroupInput,
+  duplicateSemanticKeywordGroupInput,
   updateSemanticKeywordGroupInput
 } from "./keyword-group-input.js";
 
@@ -106,6 +107,52 @@ export class KeywordGroupController {
       workspaceId: tenant.workspaceId,
       projectId: tenant.projectId,
       action: "semantic.group.created",
+      resourceType: "semantic_group",
+      resourceId: result.id,
+      outcome: "SUCCESS",
+      requestId: context.requestId
+    });
+    setEntityVersion(reply, result.version);
+    return apiResponse(request, result, result.version);
+  }
+
+  @Post(":groupId/duplicate")
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermission("semantic.update")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async duplicate(
+    @Param("groupId") groupId: string,
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<SemanticKeywordGroup>> {
+    const tenant = requiredMutableProjectTenant(request);
+    const canonicalGroupId = assertUuid(groupId, "groupId");
+    const context = requestContext(request);
+    const version = requiredVersion(headerValue(request, "if-match"));
+    const input = duplicateSemanticKeywordGroupInput(body);
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.group.duplicate_requested",
+      resourceType: "semantic_group",
+      resourceId: canonicalGroupId,
+      outcome: "REQUESTED",
+      requestId: context.requestId
+    });
+    const result = await this.seoData.duplicateKeywordGroup(
+      internalProjectContext(request, principal, tenant),
+      canonicalGroupId,
+      input,
+      version
+    );
+    await recordCommittedAudit(this.audit, this.logger, {
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.group.duplicated",
       resourceType: "semantic_group",
       resourceId: result.id,
       outcome: "SUCCESS",
@@ -189,7 +236,8 @@ export class KeywordGroupController {
       internalProjectContext(request, principal, tenant),
       canonicalGroupId,
       version,
-      input.deleteKeywords
+      input.deleteKeywords,
+      input.promoteChildren
     );
     await recordCommittedAudit(this.audit, this.logger, {
       actorId: principal.userId,

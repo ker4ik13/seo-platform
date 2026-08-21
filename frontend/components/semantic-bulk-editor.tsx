@@ -1,6 +1,11 @@
 "use client";
 
 import { CustomSelect } from "./custom-select";
+import {
+  SemanticGroupPickerField,
+  type SemanticGroupPickerSpecialOption
+} from "./semantic-group-picker";
+import type { SemanticGroupTreeItem } from "./semantic-group-tree";
 
 import {
   semanticKeywordBulkCommandMaxItems,
@@ -28,11 +33,6 @@ interface BulkSelection {
   readonly clusterId?: string;
   readonly targetUrl?: string;
   readonly tags: readonly string[];
-}
-
-interface BulkGroup {
-  readonly id: string;
-  readonly path: string;
 }
 
 interface BulkCluster {
@@ -69,6 +69,10 @@ interface SplitResult {
   readonly movedKeywordCount: number;
 }
 
+const BULK_GROUP_SPECIAL_OPTIONS = [
+  { icon: "list", label: "Не менять", value: "KEEP" }
+] satisfies readonly SemanticGroupPickerSpecialOption[];
+
 type BulkIntent =
   | "INFORMATIONAL"
   | "NAVIGATIONAL"
@@ -89,7 +93,7 @@ export function SemanticBulkEditor({
 }: Readonly<{
   projectId: string;
   selections: readonly BulkSelection[];
-  groups: readonly BulkGroup[];
+  groups: readonly SemanticGroupTreeItem[];
   clusters: readonly BulkCluster[];
   initialFocus?: "TAGS";
   onCancel: () => void;
@@ -421,18 +425,18 @@ export function SemanticBulkEditor({
         </label>
         <label className="semantic-bulk-group">
           <span>Группа</span>
-          <CustomSelect
-            onChange={(event) => setGroupId(event.target.value)}
-            value={groupId}
-          >
-            {!single && <option value="KEEP">Не менять</option>}
-            <option value="CLEAR">Без группы</option>
-            {groups.map((group) => (
-              <option key={group.id} value={group.id}>
-                {group.path}
-              </option>
-            ))}
-          </CustomSelect>
+          <SemanticGroupPickerField
+            dialogTitle="Группа запроса"
+            groups={groups}
+            onChange={(value) => setGroupId(value === "" ? "CLEAR" : value)}
+            rootLabel="Без группы"
+            {...(!single
+              ? {
+                  specialOptions: BULK_GROUP_SPECIAL_OPTIONS
+                }
+              : {})}
+            value={groupId === "CLEAR" ? "" : groupId}
+          />
         </label>
         <label className="semantic-bulk-cluster">
           <span>Кластер</span>

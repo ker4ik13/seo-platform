@@ -27,6 +27,7 @@ import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import {
   internalCreateSemanticKeywordGroupInput,
   internalDeleteSemanticKeywordGroupInput,
+  internalDuplicateSemanticKeywordGroupInput,
   internalUpdateSemanticKeywordGroupInput
 } from "./keyword-group-input.js";
 import { KeywordGroupService } from "./keyword-group.service.js";
@@ -63,6 +64,23 @@ export class KeywordGroupController {
     const input = internalCreateSemanticKeywordGroupInput(body);
     assertMutation(projectId, headers, input);
     const data = await this.groups.create(input);
+    return response(request, data);
+  }
+
+  @Post(":groupId/duplicate")
+  public async duplicate(
+    @Param("projectId") projectId: string,
+    @Param("groupId") groupId: string,
+    @Body() body: unknown,
+    @Headers() headers: InternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<SemanticKeywordGroup>> {
+    const input = internalDuplicateSemanticKeywordGroupInput(body);
+    assertMutation(projectId, headers, input);
+    const data = await this.groups.duplicate(
+      internalUuid(groupId, "groupId"),
+      input
+    );
     return response(request, data);
   }
 

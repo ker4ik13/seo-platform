@@ -89,6 +89,7 @@ import {
   SemanticGroupDialog,
   type SemanticGroupDialogState
 } from "./semantic-group-dialog";
+import { SemanticGroupPickerField } from "./semantic-group-picker";
 import {
   SemanticGroupTree,
   type SemanticGroupRemotePresence,
@@ -273,6 +274,7 @@ interface ManualKeywordDuplicateReview {
 }
 
 const MANUAL_KEYWORD_LIMIT = 2_000;
+const SEMANTIC_KEYWORD_EDITOR_FORM_ID = "semantic-keyword-editor-form";
 
 interface SemanticCoreTableProps {
   readonly currentUserId: string;
@@ -410,6 +412,7 @@ export function SemanticCoreTable({
   const [groupSidebarWidth, setGroupSidebarWidth] = useState(
     semanticGroupSidebarDefaultWidth
   );
+  const [mobileGroupTreeOpen, setMobileGroupTreeOpen] = useState(false);
   const [columnWidths, setColumnWidths] = useState<
     Readonly<Record<string, number>>
   >({});
@@ -488,6 +491,14 @@ export function SemanticCoreTable({
     height: 520,
     scrollTop: 0
   });
+  useEffect(() => {
+    if (!mobileGroupTreeOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileGroupTreeOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [mobileGroupTreeOpen]);
   const keywordQueryConfig = useMemo(
     () => ({
       filters: viewConfig.filters,
@@ -2886,7 +2897,7 @@ export function SemanticCoreTable({
   return (
     <section
       aria-busy={loading}
-      className="semantic-core"
+      className={`semantic-core${mobileGroupTreeOpen ? " semantic-mobile-groups-open" : ""}`}
       style={{
         "--semantic-groups-width": `${groupSidebarWidth}px`
       } as CSSProperties}
@@ -2897,7 +2908,10 @@ export function SemanticCoreTable({
         data-presence-key="semantic-header"
       >
         <div className="semantic-title-block">
-          <h1>Семантическое ядро</h1>
+          <h1>
+            <span className="semantic-desktop-title">Семантическое ядро</span>
+            <span className="semantic-mobile-title">Семантика</span>
+          </h1>
           <CustomSelect
             aria-label="Проект семантического ядра"
             onChange={(event) => selectProject(event.target.value)}
@@ -2932,13 +2946,23 @@ export function SemanticCoreTable({
         </dl>
         <div className="semantic-header-actions">
           <button
+            aria-expanded={mobileGroupTreeOpen}
+            aria-label={mobileGroupTreeOpen ? "Закрыть группы" : "Открыть группы"}
+            className="semantic-mobile-groups-button"
+            onClick={() => setMobileGroupTreeOpen((current) => !current)}
+            type="button"
+          >
+            <Icon name="inbox" />
+            <span>{activeGroup?.name ?? "Группы"}</span>
+          </button>
+          <button
             className={activityButtonClass("SEMANTIC_EXPORT")}
             data-presence-cursor-anchor="true"
             data-presence-key="semantic-action:export"
             onClick={() => openExport()}
             type="button"
           >
-            <Icon name="export" />Экспорт
+            <Icon name="export" /><span>Экспорт</span>
           </button>
           <button
             className={activityButtonClass("SEMANTIC_HISTORY")}
@@ -2954,7 +2978,7 @@ export function SemanticCoreTable({
             }
             type="button"
           >
-            <Icon name="history" />История
+            <Icon name="history" /><span>История</span>
           </button>
           <button
             aria-label={
@@ -2978,7 +3002,7 @@ export function SemanticCoreTable({
             }
             type="button"
           >
-            <Icon name="operations" />Операции
+            <Icon name="operations" /><span>Операции</span>
             {activeOperationCount > 0 && (
               <strong
                 aria-hidden="true"
@@ -3020,6 +3044,24 @@ export function SemanticCoreTable({
         )}
       </nav>
 
+      {mobileGroupTreeOpen && (
+        <>
+          <button
+            aria-label="Закрыть группы"
+            className="semantic-mobile-groups-backdrop"
+            onClick={() => setMobileGroupTreeOpen(false)}
+            type="button"
+          />
+          <button
+            aria-label="Закрыть группы"
+            className="semantic-mobile-groups-close"
+            onClick={() => setMobileGroupTreeOpen(false)}
+            type="button"
+          >
+            <Icon name="close" />
+          </button>
+        </>
+      )}
       <SemanticGroupTree
         {...(viewConfig.filters.groupId
           ? { activeGroupId: viewConfig.filters.groupId }
@@ -3027,22 +3069,43 @@ export function SemanticCoreTable({
         expandedIds={expandedGroupIds}
         activeGroupIds={multiGroupIds}
         groups={groups as readonly SemanticGroupTreeItem[]}
-        onCreate={(parentId) => setGroupDialog({ mode: "create", ...(parentId ? { parentId } : {}) })}
-        onDelete={(selectedGroups) => setGroupDialog({ mode: "delete", groups: selectedGroups })}
-        onExport={(group) => openExport(group.id)}
+        onCreate={(parentId, position) => {
+          setMobileGroupTreeOpen(false);
+          setGroupDialog({
+            mode: "create",
+            ...(parentId ? { parentId } : {}),
+            ...(position === undefined ? {} : { position })
+          });
+        }}
+        onDelete={(selectedGroups) => {
+          setMobileGroupTreeOpen(false);
+          setGroupDialog({ mode: "delete", groups: selectedGroups });
+        }}
+        onDuplicate={(group) => {
+          setMobileGroupTreeOpen(false);
+          setGroupDialog({ mode: "duplicate", group });
+        }}
+        onExport={(group) => {
+          setMobileGroupTreeOpen(false);
+          openExport(group.id);
+        }}
         onColorChange={(selectedGroups, color) =>
           void changeGroupColors(selectedGroups, color)
         }
         onDropMove={(selectedGroups, target) =>
           void moveGroupsImmediately(selectedGroups, target)
         }
-        onMoveRequest={(selectedGroups) =>
+        onMoveRequest={(selectedGroups) => {
+          setMobileGroupTreeOpen(false);
           setGroupDialog({
             mode: "move",
             groups: selectedGroups
-          })
-        }
-        onOpenSelection={openMultipleGroups}
+          });
+        }}
+        onOpenSelection={(groupIds) => {
+          openMultipleGroups(groupIds);
+          setMobileGroupTreeOpen(false);
+        }}
         onKeywordDrop={(keywordIds, targetId) => {
           const availableIds = keywordIds.filter((id) =>
             items.some((item) => item.id === id)
@@ -3053,10 +3116,16 @@ export function SemanticCoreTable({
           setMoveKeywordTargetId(targetId ?? "");
           setMoveKeywordDialog(true);
         }}
-        onRename={(group) => setGroupDialog({ mode: "rename", group })}
+        onRename={(group) => {
+          setMobileGroupTreeOpen(false);
+          setGroupDialog({ mode: "rename", group });
+        }}
         onReorder={(group, position) => void reorderGroup(group, position)}
         onExpandedIdsChange={updateExpandedGroupIds}
-        onSelect={selectGroup}
+        onSelect={(groupId) => {
+          selectGroup(groupId);
+          setMobileGroupTreeOpen(false);
+        }}
         remotePresence={remoteSemanticGroupPresence}
         {...(total === undefined ? {} : { total })}
       />
@@ -3149,19 +3218,13 @@ export function SemanticCoreTable({
         </label>
         <label>
           <span>Группа</span>
-          <CustomSelect
-            onChange={(event) =>
-              updateOptionalFilter("groupId", event.target.value)
-            }
+          <SemanticGroupPickerField
+            dialogTitle="Фильтр по папке"
+            groups={groups}
+            onChange={(value) => updateOptionalFilter("groupId", value)}
+            rootLabel="Все группы"
             value={draftConfig.filters.groupId ?? ""}
-          >
-            <option value="">Все группы</option>
-            {groups.map((group) => (
-              <option key={group.id} value={group.id}>
-                {group.path}
-              </option>
-            ))}
-          </CustomSelect>
+          />
         </label>
         <label>
           <span>Кластер</span>
@@ -3314,13 +3377,15 @@ export function SemanticCoreTable({
         </details>
         <div className="semantic-table-view-actions">
           <button
+            aria-label="Колонки и представления"
             className={`semantic-compact-button${rightSidebar?.type === "LAYOUT" ? " active" : ""}`}
             data-semantic-sidebar-trigger
             onClick={() => setRightSidebar((current) => current?.type === "LAYOUT" ? undefined : { type: "LAYOUT" })}
             type="button"
           >
             <Icon name="settings" />
-            Колонки и представления
+            <span className="semantic-layout-button-full">Колонки и представления</span>
+            <span className="semantic-layout-button-mobile" aria-hidden="true">Вид таблицы</span>
           </button>
         </div>
       </div>
@@ -3556,7 +3621,51 @@ export function SemanticCoreTable({
 
       {editor && (
         <SemanticModal
+          bodyClassName="semantic-keyword-editor-modal-body"
+          className="semantic-keyword-editor-modal"
           description="Группа, кластер, посадочная страница и теги сохраняются вместе с проверкой версии."
+          footer={
+            <div className="semantic-keyword-editor-footer">
+              <span>
+                {editor.mode === "edit"
+                  ? "Изменения применятся к одному запросу"
+                  : manualDuplicateReview
+                    ? `Новых: ${formatInteger(manualDuplicateReview.preview.newKeywords)} · совпадений: ${formatInteger(manualDuplicateRows.length)}`
+                    : `Уникальных запросов: ${formatInteger(manualInputStats?.unique ?? 0)}`}
+              </span>
+              <div className="semantic-modal-actions">
+                <button
+                  className="secondary-button"
+                  disabled={saving}
+                  onClick={() => {
+                    setManualDuplicateReview(undefined);
+                    setEditor(undefined);
+                  }}
+                  type="button"
+                >
+                  Отмена
+                </button>
+                <button
+                  className="primary-button"
+                  disabled={saving}
+                  form={SEMANTIC_KEYWORD_EDITOR_FORM_ID}
+                  type="submit"
+                >
+                  {editor.mode === "edit"
+                    ? saving
+                      ? "Сохраняем…"
+                      : "Сохранить"
+                    : saving
+                      ? manualDuplicateReview
+                        ? "Добавляем…"
+                        : "Проверяем…"
+                      : manualDuplicateReview
+                        ? "Добавить и применить выбор"
+                        : "Проверить и добавить"}
+                </button>
+              </div>
+            </div>
+          }
           onClose={saving ? () => undefined : () => {
             setManualDuplicateReview(undefined);
             setEditor(undefined);
@@ -3566,6 +3675,7 @@ export function SemanticCoreTable({
         >
           <form
             className="semantic-editor"
+            id={SEMANTIC_KEYWORD_EDITOR_FORM_ID}
             onSubmit={(event) => void saveKeyword(event)}
           >
           <fieldset className="semantic-editor-fields" disabled={saving}>
@@ -3578,7 +3688,7 @@ export function SemanticCoreTable({
                     autoFocus
                     maxLength={4_100_000}
                     onChange={(event) => updateDraft({ text: event.target.value })}
-                    placeholder="купить слона\nдоставка слона\nцена слона"
+                    placeholder={"купить слона\nдоставка слона\nцена слона"}
                     required
                     rows={6}
                     value={editor.draft.text}
@@ -3654,22 +3764,18 @@ export function SemanticCoreTable({
                 <option value="MIXED">Смешанный</option>
               </CustomSelect>
             </label>
-            <label className="semantic-editor-group">
+            <div className="semantic-editor-field semantic-editor-group">
               <span>Группа</span>
-              <CustomSelect
-                onChange={(event) =>
-                  updateDraft({ groupId: event.target.value })
-                }
+              <SemanticGroupPickerField
+                dialogTitle="Группа запросов"
+                groups={groups}
+                onChange={(groupId) => updateDraft({ groupId })}
+                rootIcon="inbox"
+                rootLabel="Без группы"
+                searchPlaceholder="Найти группу по названию или пути"
                 value={editor.draft.groupId}
-              >
-                <option value="">Без группы</option>
-                {groups.map((group) => (
-                  <option key={group.id} value={group.id}>
-                    {group.path}
-                  </option>
-                ))}
-              </CustomSelect>
-            </label>
+              />
+            </div>
             <label className="semantic-editor-cluster">
               <span>Кластер</span>
               <CustomSelect
@@ -3879,32 +3985,6 @@ export function SemanticCoreTable({
               {mutationError}
             </div>
           )}
-          <div className="semantic-editor-actions">
-            <button
-              className="secondary-button"
-              disabled={saving}
-              onClick={() => {
-                setManualDuplicateReview(undefined);
-                setEditor(undefined);
-              }}
-              type="button"
-            >
-              Отмена
-            </button>
-            <button className="primary-button" disabled={saving} type="submit">
-              {editor.mode === "edit"
-                ? saving
-                  ? "Сохраняем…"
-                  : "Сохранить"
-                : saving
-                  ? manualDuplicateReview
-                    ? "Добавляем…"
-                    : "Проверяем…"
-                  : manualDuplicateReview
-                    ? "Добавить и применить выбор"
-                    : "Проверить и добавить"}
-            </button>
-          </div>
           </form>
         </SemanticModal>
       )}

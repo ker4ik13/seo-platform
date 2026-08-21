@@ -1,18 +1,19 @@
 "use client";
 
-import { CustomSelect } from "./custom-select";
-
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import {
   semanticGroupColors,
   semanticGroupDefaultColor
 } from "../lib/semantic-group-colors";
 import { SemanticModal } from "./semantic-modal";
+import { SemanticGroupPickerField } from "./semantic-group-picker";
+import { Icon } from "./icon";
 import type { SemanticGroupTreeItem } from "./semantic-group-tree";
 
 export type SemanticGroupDialogState =
-  | Readonly<{ mode: "create"; parentId?: string }>
+  | Readonly<{ mode: "create"; parentId?: string; position?: number }>
+  | Readonly<{ mode: "duplicate"; group: SemanticGroupTreeItem }>
   | Readonly<{ mode: "rename"; group: SemanticGroupTreeItem }>
   | Readonly<{
       mode: "move";
@@ -34,12 +35,19 @@ export function SemanticGroupDialog({
   projectId: string;
   state: SemanticGroupDialogState;
 }>) {
-  const initialGroup = state.mode === "rename" ? state.group : undefined;
-  const [name, setName] = useState(initialGroup?.name ?? "");
+  const initialGroup =
+    state.mode === "rename" || state.mode === "duplicate"
+      ? state.group
+      : undefined;
+  const [name, setName] = useState(
+    state.mode === "duplicate"
+      ? duplicateGroupName(state.group, groups)
+      : initialGroup?.name ?? ""
+  );
   const [parentId, setParentId] = useState(
     state.mode === "create"
       ? state.parentId ?? ""
-      : state.mode === "rename"
+      : state.mode === "rename" || state.mode === "duplicate"
         ? state.group.parentId ?? ""
         : state.mode === "move"
           ? state.suggestedTargetId ?? ""
@@ -50,7 +58,11 @@ export function SemanticGroupDialog({
   );
   const [saving, setSaving] = useState(false);
   const [deleteKeywords, setDeleteKeywords] = useState(false);
+  const [promoteChildren, setPromoteChildren] = useState(false);
+  const [includeDescendants, setIncludeDescendants] = useState(true);
+  const [includeKeywords, setIncludeKeywords] = useState(false);
   const [error, setError] = useState<string>();
+  const formId = useId();
   const nameRef = useRef<HTMLInputElement>(null);
   const movedGroups = state.mode === "move" ? state.groups : [];
   const parentOptions = groups.filter(
@@ -65,9 +77,23 @@ export function SemanticGroupDialog({
         (candidate.id !== state.group.id &&
           !candidate.path.startsWith(`${state.group.path} / `)))
   );
+  const deletedGroup =
+    state.mode === "delete" && state.groups.length === 1
+      ? state.groups[0]
+      : undefined;
+  const directChildren = deletedGroup
+    ? groups.filter(
+        ({ parentId, systemKind }) =>
+          !systemKind && parentId === deletedGroup.id
+      )
+    : [];
 
   useEffect(() => {
-    if (state.mode !== "create" && state.mode !== "rename") return;
+    if (
+      state.mode !== "create" &&
+      state.mode !== "rename" &&
+      state.mode !== "duplicate"
+    ) return;
     const frame = requestAnimationFrame(() => {
       nameRef.current?.focus();
       if (state.mode === "rename") nameRef.current?.select();
@@ -87,10 +113,32 @@ export function SemanticGroupDialog({
           body: {
             name,
             color,
-            ...(parentId ? { parentId } : {})
+            ...(parentId ? { parentId } : {}),
+            ...(state.position !== undefined &&
+            parentId === (state.parentId ?? "")
+              ? { position: state.position }
+              : {})
           }
         });
         onCompleted(`Группа «${name.trim()}» создана`);
+        return;
+      }
+      if (state.mode === "duplicate") {
+        await browserApiRequest(
+          `${groupPath(projectId, state.group.id)}/duplicate`,
+          {
+            method: "POST",
+            ifMatch: state.group.version,
+            body: {
+              name,
+              color,
+              ...(parentId ? { parentId } : {}),
+              includeDescendants,
+              includeKeywords
+            }
+          }
+        );
+        onCompleted(`Группа «${state.group.name}» дублирована`);
         return;
       }
       if (state.mode === "rename") {
@@ -138,7 +186,11 @@ export function SemanticGroupDialog({
           browserApiRequest<void>(groupPath(projectId, group.id), {
             method: "DELETE",
             ifMatch: group.version,
-            body: { deleteKeywords }
+            body: {
+              deleteKeywords,
+              promoteChildren:
+                state.groups.length === 1 && promoteChildren
+            }
           })
         )
       );
@@ -163,6 +215,8 @@ export function SemanticGroupDialog({
   const title =
     state.mode === "create"
       ? "Новая группа"
+      : state.mode === "duplicate"
+        ? "Дублировать группу"
       : state.mode === "rename"
         ? "Изменить группу"
         : state.mode === "move"
@@ -175,12 +229,54 @@ export function SemanticGroupDialog({
       presenceKey={`semantic-modal:group:${state.mode}`}
       size="small"
       title={title}
+      footer={
+        <div className="semantic-modal-actions">
+          <button
+            className="secondary-button"
+            disabled={saving}
+            onClick={onClose}
+            type="button"
+          >
+            Отмена
+          </button>
+          <button
+            className={state.mode === "delete" ? "danger-button" : "primary-button"}
+            disabled={saving}
+            form={formId}
+            type="submit"
+          >
+            {saving
+              ? state.mode === "duplicate"
+                ? "Дублируем…"
+                : "Сохраняем…"
+              : state.mode === "delete"
+                ? "Удалить"
+                : state.mode === "move"
+                  ? `Переместить (${state.groups.length})`
+                  : state.mode === "duplicate"
+                    ? "Создать копию"
+                    : "Сохранить"}
+          </button>
+        </div>
+      }
     >
-      <form className="semantic-dialog-form" onSubmit={(event) => void submit(event)}>
-        {(state.mode === "create" || state.mode === "rename") && (
+      <form
+        className="semantic-dialog-form"
+        id={formId}
+        onSubmit={(event) => void submit(event)}
+      >
+        {(state.mode === "create" ||
+          state.mode === "rename" ||
+          state.mode === "duplicate") && (
           <>
             <label>
-              <span>{state.mode === "create" ? "Имя папки" : "Название"}</span>
+              <span>
+                {state.mode === "duplicate"
+                  ? "Название копии"
+                  : state.mode === "create"
+                    ? "Имя папки"
+                    : "Название"}
+              </span>
               <input
                 autoFocus
                 maxLength={255}
@@ -190,23 +286,30 @@ export function SemanticGroupDialog({
                 value={name}
               />
             </label>
-            <label>
-              <span>Родительская группа</span>
-              <GroupParentSelect
+            <div className="semantic-dialog-field">
+              <span>
+                {state.mode === "duplicate" ? "Создать копию в" : "Расположение"}
+              </span>
+              <SemanticGroupPickerField
                 groups={parentOptions}
                 onChange={setParentId}
+                rootLabel="Корневой уровень"
                 value={parentId}
               />
-            </label>
+            </div>
             <fieldset className="semantic-dialog-color">
               <legend>Цвет</legend>
               <div className="semantic-dialog-color-custom">
-                <input
-                  aria-label="Выбрать цвет"
-                  onChange={(event) => setColor(event.target.value.toUpperCase())}
-                  type="color"
-                  value={/^#[0-9a-f]{6}$/iu.test(color) ? color : semanticGroupDefaultColor}
-                />
+                <label className="semantic-dialog-color-picker">
+                  <span className="visually-hidden">Выбрать цвет</span>
+                  <input
+                    aria-label="Выбрать цвет"
+                    onChange={(event) => setColor(event.target.value.toUpperCase())}
+                    type="color"
+                    value={/^#[0-9a-f]{6}$/iu.test(color) ? color : semanticGroupDefaultColor}
+                  />
+                  <Icon name="edit" />
+                </label>
                 <label>
                   <span className="visually-hidden">HEX-код цвета</span>
                   <input
@@ -239,6 +342,34 @@ export function SemanticGroupDialog({
                 ))}
               </div>
             </fieldset>
+            {state.mode === "duplicate" && (
+              <div className="semantic-group-duplicate-options">
+                <label className="semantic-dialog-checkbox">
+                  <input
+                    checked={includeKeywords}
+                    onChange={(event) => setIncludeKeywords(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>
+                    <strong>Скопировать запросы</strong>
+                    <small>
+                      Те же запросы будут добавлены в копии папок без создания дублей.
+                    </small>
+                  </span>
+                </label>
+                <label className="semantic-dialog-checkbox">
+                  <input
+                    checked={includeDescendants}
+                    onChange={(event) => setIncludeDescendants(event.target.checked)}
+                    type="checkbox"
+                  />
+                  <span>
+                    <strong>Скопировать вложенные папки</strong>
+                    <small>Структура и порядок подгрупп сохранятся.</small>
+                  </span>
+                </label>
+              </div>
+            )}
           </>
         )}
         {state.mode === "move" && (
@@ -248,23 +379,44 @@ export function SemanticGroupDialog({
                 <span key={group.id}>{group.path}</span>
               ))}
             </div>
-            <label>
+            <div className="semantic-dialog-field">
               <span>Куда переместить</span>
-              <GroupParentSelect
+              <SemanticGroupPickerField
                 autoFocus
                 groups={parentOptions}
                 onChange={setParentId}
+                rootLabel="Корневой уровень"
                 value={parentId}
               />
-            </label>
+            </div>
           </>
         )}
         {state.mode === "delete" && (
           <>
             <div className="inline-alert" role="status">
-              Вложенные папки удалятся вместе с выбранной. По умолчанию её
-              запросы будут перенесены в системную папку «Без группы».
+              {promoteChildren
+                ? "Вложенные папки и их запросы сохранятся. Удалится только выбранная папка."
+                : "Вложенные папки удалятся вместе с выбранной. По умолчанию запросы без другого размещения попадут в «Без группы»."}
             </div>
+            {deletedGroup && directChildren.length > 0 && (
+              <label className="semantic-dialog-checkbox">
+                <input
+                  checked={promoteChildren}
+                  onChange={(event) => setPromoteChildren(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>
+                  <strong>
+                    {deletedGroup.parentId
+                      ? `Перенести подгруппы на уровень выше (${directChildren.length})`
+                      : `Перенести подгруппы в корень (${directChildren.length})`}
+                  </strong>
+                  <small>
+                    Сохранятся непосредственные подгруппы, вся их вложенность и запросы.
+                  </small>
+                </span>
+              </label>
+            )}
             <label className="semantic-dialog-checkbox">
               <input
                 checked={deleteKeywords}
@@ -273,53 +425,18 @@ export function SemanticGroupDialog({
               />
               <span>
                 <strong>Переместить запросы в корзину</strong>
-                <small>Выключено по умолчанию. В корзине запросы можно удалить навсегда.</small>
+                <small>
+                  {promoteChildren
+                    ? "В корзину попадут запросы удаляемой папки, которые не размещены в сохраняемых или других папках."
+                    : "Выключено по умолчанию. В корзине запросы можно удалить навсегда."}
+                </small>
               </span>
             </label>
           </>
         )}
         {error && <div className="inline-alert danger" role="alert">{error}</div>}
-        <div className="semantic-modal-actions">
-          <button className="secondary-button" disabled={saving} onClick={onClose} type="button">
-            Отмена
-          </button>
-          <button
-            className={state.mode === "delete" ? "danger-button" : "primary-button"}
-            disabled={saving}
-            type="submit"
-          >
-            {saving
-              ? "Сохраняем…"
-              : state.mode === "delete"
-                ? "Удалить"
-                : state.mode === "move"
-                  ? `Переместить (${state.groups.length})`
-                  : "Сохранить"}
-          </button>
-        </div>
       </form>
     </SemanticModal>
-  );
-}
-
-function GroupParentSelect({
-  autoFocus,
-  groups,
-  onChange,
-  value
-}: Readonly<{
-  autoFocus?: boolean;
-  groups: readonly SemanticGroupTreeItem[];
-  onChange: (value: string) => void;
-  value: string;
-}>) {
-  return (
-    <CustomSelect autoFocus={autoFocus} onChange={(event) => onChange(event.target.value)} value={value}>
-      <option value="">Корневой уровень</option>
-      {groups.map((group) => (
-        <option key={group.id} value={group.id}>{group.path}</option>
-      ))}
-    </CustomSelect>
   );
 }
 
@@ -330,9 +447,35 @@ function groupPath(projectId: string, groupId?: string): string {
 
 function groupDialogDescription(state: SemanticGroupDialogState): string {
   if (state.mode === "create") return "Создайте папку на выбранном уровне дерева.";
+  if (state.mode === "duplicate") return "Создайте независимую копию папки, структуры и членств запросов.";
   if (state.mode === "rename") return "Название, цвет и родитель сохраняются с проверкой версии.";
   if (state.mode === "move") return `Выбрано групп: ${state.groups.length}. Вложенные группы переместятся вместе с родителем.`;
   return `Выбрано групп: ${state.groups.length}. Выберите, что сделать с запросами внутри.`;
+}
+
+function duplicateGroupName(
+  source: SemanticGroupTreeItem,
+  groups: readonly SemanticGroupTreeItem[]
+): string {
+  const siblingNames = new Set(
+    groups
+      .filter(
+        (group) =>
+          !group.systemKind && group.parentId === source.parentId
+      )
+      .map((group) => group.name.normalize("NFKC").toLocaleLowerCase("ru"))
+  );
+  const copyName = (suffix = "") => {
+    const marker = ` — копия${suffix}`;
+    return `${source.name.slice(0, 255 - marker.length).trimEnd()}${marker}`;
+  };
+  const base = copyName();
+  if (!siblingNames.has(base.toLocaleLowerCase("ru"))) return base;
+  for (let index = 2; index < 10_000; index += 1) {
+    const candidate = copyName(` (${index})`);
+    if (!siblingNames.has(candidate.toLocaleLowerCase("ru"))) return candidate;
+  }
+  return copyName(` (${source.id.slice(0, 8)})`);
 }
 
 function groupErrorMessage(error: unknown): string {

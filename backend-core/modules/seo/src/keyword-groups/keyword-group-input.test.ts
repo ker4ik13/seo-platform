@@ -4,6 +4,7 @@ import { BadRequestException } from "@nestjs/common";
 import {
   internalCreateSemanticKeywordGroupInput,
   internalDeleteSemanticKeywordGroupInput,
+  internalDuplicateSemanticKeywordGroupInput,
   internalUpdateSemanticKeywordGroupInput
 } from "./keyword-group-input.js";
 
@@ -13,8 +14,7 @@ const actorId = "01900000-0000-7000-8000-000000000003";
 const parentId = "01900000-0000-7000-8000-000000000004";
 
 test("accepts exact tenant-scoped semantic group commands", () => {
-  assert.deepEqual(
-    internalCreateSemanticKeywordGroupInput({
+  const createInput = internalCreateSemanticKeywordGroupInput({
       workspaceId,
       projectId,
       actorId,
@@ -28,10 +28,11 @@ test("accepts exact tenant-scoped semantic group commands", () => {
       },
       name: "SEO",
       parentId,
-      color: "#6758ef"
-    }).parentId,
-    parentId
-  );
+      color: "#6758ef",
+      position: 7
+    });
+  assert.equal(createInput.parentId, parentId);
+  assert.equal(createInput.position, 7);
   assert.deepEqual(
     internalUpdateSemanticKeywordGroupInput({
       workspaceId,
@@ -54,7 +55,7 @@ test("accepts exact tenant-scoped semantic group commands", () => {
       position: 4
     }
   );
-  assert.equal(
+  assert.deepEqual(
     internalUpdateSemanticKeywordGroupInput({
       workspaceId,
       projectId,
@@ -74,17 +75,56 @@ test("accepts exact tenant-scoped semantic group commands", () => {
       actorId,
       version: 3
     }),
-    { workspaceId, projectId, actorId, version: 3, deleteKeywords: false }
+    {
+      workspaceId,
+      projectId,
+      actorId,
+      version: 3,
+      deleteKeywords: false,
+      promoteChildren: false
+    }
   );
-  assert.equal(
+  assert.deepEqual(
     internalDeleteSemanticKeywordGroupInput({
       workspaceId,
       projectId,
       actorId,
       version: 3,
-      deleteKeywords: true
-    }).deleteKeywords,
-    true
+      deleteKeywords: true,
+      promoteChildren: true
+    }),
+    {
+      workspaceId,
+      projectId,
+      actorId,
+      version: 3,
+      deleteKeywords: true,
+      promoteChildren: true
+    }
+  );
+  assert.deepEqual(
+    internalDuplicateSemanticKeywordGroupInput({
+      workspaceId,
+      projectId,
+      actorId,
+      version: 4,
+      name: "SEO — копия",
+      parentId,
+      color: "#6758ef",
+      includeDescendants: true,
+      includeKeywords: true
+    }),
+    {
+      workspaceId,
+      projectId,
+      actorId,
+      version: 4,
+      name: "SEO — копия",
+      parentId,
+      color: "#6758ef",
+      includeDescendants: true,
+      includeKeywords: true
+    }
   );
 });
 
@@ -120,6 +160,19 @@ test("rejects authority fields and malformed group data", () => {
         version: 1,
         name: "SEO",
         position: -1
+      }),
+    BadRequestException
+  );
+  assert.throws(
+    () =>
+      internalDuplicateSemanticKeywordGroupInput({
+        workspaceId,
+        projectId,
+        actorId,
+        version: 1,
+        name: "SEO",
+        includeDescendants: false,
+        includeKeywords: "yes"
       }),
     BadRequestException
   );

@@ -31,11 +31,13 @@ import {
   type CreateSemanticKeywordInput,
   type CreateSemanticClusterInput,
   type CreateSemanticKeywordGroupInput,
+  type DuplicateSemanticKeywordGroupInput,
   type InternalCreateSemanticKeywordInput,
   type InternalSemanticKeywordBulkCreateInput,
   type InternalSemanticKeywordBulkCreatePreviewInput,
   type InternalCreateSemanticClusterInput,
   type InternalCreateSemanticKeywordGroupInput,
+  type InternalDuplicateSemanticKeywordGroupInput,
   type InternalDeleteSemanticKeywordInput,
   type InternalDeleteSemanticClusterInput,
   type InternalSemanticClusterMergeInput,
@@ -899,6 +901,35 @@ export class SeoDataClient {
     return semanticKeywordGroup(responseData(payload));
   }
 
+  public async duplicateKeywordGroup(
+    context: InternalContext,
+    groupId: string,
+    input: DuplicateSemanticKeywordGroupInput,
+    version: number
+  ): Promise<SemanticKeywordGroup> {
+    const scope = trackingScope(context);
+    const body: InternalDuplicateSemanticKeywordGroupInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      version
+    };
+    const url = keywordGroupUrl(
+      context,
+      this.config.services.seoData,
+      groupId
+    );
+    url.pathname = `${url.pathname}/duplicate`;
+    const payload = await this.request(
+      "POST",
+      url,
+      context,
+      body
+    );
+    return semanticKeywordGroup(responseData(payload));
+  }
+
   public async updateKeywordGroup(
     context: InternalContext,
     groupId: string,
@@ -926,7 +957,8 @@ export class SeoDataClient {
     context: InternalContext,
     groupId: string,
     version: number,
-    deleteKeywords = false
+    deleteKeywords = false,
+    promoteChildren = false
   ): Promise<void> {
     const scope = trackingScope(context);
     const body: InternalDeleteSemanticKeywordGroupInput = {
@@ -934,7 +966,8 @@ export class SeoDataClient {
       projectId: scope.projectId,
       actorId: context.actorId,
       version,
-      deleteKeywords
+      deleteKeywords,
+      promoteChildren
     };
     await this.request(
       "DELETE",

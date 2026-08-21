@@ -1,6 +1,15 @@
 "use client";
 
-import { useMemo, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties
+} from "react";
+import { createPortal } from "react-dom";
 import type { SemanticGroupTreeItem } from "./semantic-group-tree";
 import { Icon, type IconName } from "./icon";
 
@@ -8,6 +17,258 @@ interface GroupPickerRow {
   readonly group: SemanticGroupTreeItem;
   readonly depth: number;
   readonly hasChildren: boolean;
+}
+
+const GROUP_PICKER_OPEN_EVENT = "semantic-group-picker-open";
+const EMPTY_SPECIAL_OPTIONS: readonly SemanticGroupPickerSpecialOption[] = [];
+
+export interface SemanticGroupPickerSpecialOption {
+  readonly icon?: IconName;
+  readonly label: string;
+  readonly value: string;
+}
+
+export function SemanticGroupPickerField({
+  autoFocus = false,
+  dialogTitle = "Расположение папки",
+  groups,
+  onChange,
+  rootIcon = "projects",
+  rootLabel = "Корневой уровень",
+  searchPlaceholder = "Найти папку по названию или пути",
+  specialOptions = EMPTY_SPECIAL_OPTIONS,
+  value
+}: Readonly<{
+  autoFocus?: boolean;
+  dialogTitle?: string;
+  groups: readonly SemanticGroupTreeItem[];
+  onChange: (groupId: string) => void;
+  rootIcon?: IconName;
+  rootLabel?: string;
+  searchPlaceholder?: string;
+  specialOptions?: readonly SemanticGroupPickerSpecialOption[];
+  value: string;
+}>) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [popoverStyle, setPopoverStyle] = useState<CSSProperties>();
+  const availableGroups = useMemo(
+    () => groups.filter(({ systemKind }) => !systemKind),
+    [groups]
+  );
+  const selected = availableGroups.find(({ id }) => id === value);
+  const selectedSpecial = specialOptions.find((option) => option.value === value);
+  const selectedLabel = selected?.path ?? selectedSpecial?.label ?? rootLabel;
+  const selectedName = selected?.name ?? selectedSpecial?.label ?? rootLabel;
+  const portalTarget =
+    typeof document === "undefined"
+      ? undefined
+      : triggerRef.current?.closest("dialog") ?? document.body;
+
+  const updatePosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const bounds = trigger.getBoundingClientRect();
+    const viewportPadding = 10;
+    const gap = 6;
+    const width = Math.min(
+      Math.max(bounds.width, 360),
+      window.innerWidth - viewportPadding * 2
+    );
+    const left = Math.min(
+      Math.max(viewportPadding, bounds.left),
+      window.innerWidth - width - viewportPadding
+    );
+    const below = window.innerHeight - bounds.bottom - gap - viewportPadding;
+    const above = bounds.top - gap - viewportPadding;
+    const openBelow = below >= 280 || below >= above;
+    const availableHeight = Math.max(220, openBelow ? below : above);
+    setPopoverStyle({
+      left,
+      maxHeight: Math.min(430, availableHeight),
+      top: openBelow
+        ? bounds.bottom + gap
+        : Math.max(
+            viewportPadding,
+            bounds.top - Math.min(430, availableHeight) - gap
+          ),
+      width
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    updatePosition();
+  }, [open, updatePosition]);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (
+        !triggerRef.current?.contains(target) &&
+        !popoverRef.current?.contains(target)
+      ) {
+        setOpen(false);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setOpen(false);
+      requestAnimationFrame(() => triggerRef.current?.focus());
+    };
+    const closeForAnotherPicker = (event: Event) => {
+      if ((event as CustomEvent<EventTarget>).detail !== triggerRef.current) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", closeOnOutsidePointer);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener(GROUP_PICKER_OPEN_EVENT, closeForAnotherPicker);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsidePointer);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener(GROUP_PICKER_OPEN_EVENT, closeForAnotherPicker);
+    };
+  }, [open, updatePosition]);
+
+  useEffect(() => {
+    if (!autoFocus) return;
+    const frame = requestAnimationFrame(() => triggerRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [autoFocus]);
+
+  return (
+    <>
+      <button
+        aria-label={`${dialogTitle}: ${selectedLabel}${selected ? `. Запросов в группе: ${formatInteger(selected.keywordCount)}` : ""}`}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        className="semantic-group-picker-trigger"
+        onClick={() => {
+          setOpen((current) => {
+            const next = !current;
+            if (next) {
+              window.dispatchEvent(
+                new CustomEvent(GROUP_PICKER_OPEN_EVENT, {
+                  detail: triggerRef.current
+                })
+              );
+            }
+            return next;
+          });
+        }}
+        ref={triggerRef}
+        type="button"
+      >
+        <i style={{ backgroundColor: selected?.color ?? "transparent" }} />
+        <span className="semantic-group-picker-trigger-copy">
+          <strong>{selectedName}</strong>
+          {selected && selected.path !== selected.name && (
+            <OverflowingGroupPath path={selected.path} />
+          )}
+        </span>
+        {selected && (
+          <b
+            className="semantic-group-picker-trigger-count"
+            title={`Запросов в группе: ${formatInteger(selected.keywordCount)}`}
+          >
+            {formatInteger(selected.keywordCount)}
+          </b>
+        )}
+        <Icon className={open ? "expanded" : undefined} name="chevronRight" />
+      </button>
+      {open && popoverStyle && portalTarget &&
+        createPortal(
+          <div
+            aria-label={`Выбор: ${dialogTitle}`}
+            className="semantic-group-picker-popover"
+            data-exclusive-dropdown-layer
+            onMouseDown={(event) => event.stopPropagation()}
+            ref={popoverRef}
+            role="dialog"
+            style={popoverStyle}
+          >
+            <header>
+              <span>
+                <strong>{dialogTitle}</strong>
+                <small title={selectedLabel}>{selectedLabel}</small>
+              </span>
+              <button
+                aria-label={`Закрыть: ${dialogTitle}`}
+                onClick={() => setOpen(false)}
+                type="button"
+              >
+                <Icon name="close" />
+              </button>
+            </header>
+            <SemanticGroupPicker
+              autoFocus
+              groups={availableGroups}
+              onChange={(groupId) => {
+                onChange(groupId);
+                setOpen(false);
+                requestAnimationFrame(() => triggerRef.current?.focus());
+              }}
+              rootIcon={rootIcon}
+              rootLabel={rootLabel}
+              searchPlaceholder={searchPlaceholder}
+              specialOptions={specialOptions}
+              value={value}
+            />
+          </div>,
+          portalTarget
+        )}
+    </>
+  );
+}
+
+function OverflowingGroupPath({ path }: Readonly<{ path: string }>) {
+  const viewportRef = useRef<HTMLElement>(null);
+  const contentRef = useRef<HTMLSpanElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+
+  useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    const content = contentRef.current;
+    if (!viewport || !content) return;
+    const measure = () => {
+      const trailingGap = Number.parseFloat(
+        window.getComputedStyle(content).paddingRight
+      );
+      const naturalWidth = content.scrollWidth - (trailingGap || 0);
+      setOverflowing(naturalWidth > viewport.clientWidth + 1);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [path]);
+
+  return (
+    <small
+      aria-hidden="true"
+      className={`semantic-group-picker-trigger-path${overflowing ? " is-overflowing" : ""}`}
+      ref={viewportRef}
+      title={path}
+    >
+      <span className="semantic-group-picker-trigger-path-track">
+        <span ref={contentRef}>{path}</span>
+        {overflowing && <span>{path}</span>}
+      </span>
+    </small>
+  );
 }
 
 export function SemanticGroupPicker({
@@ -19,6 +280,7 @@ export function SemanticGroupPicker({
   rootLabel = "Без группы",
   searchPlaceholder = "Найти папку по названию или пути",
   showRootOption = true,
+  specialOptions = EMPTY_SPECIAL_OPTIONS,
   value
 }: Readonly<{
   autoFocus?: boolean;
@@ -29,6 +291,7 @@ export function SemanticGroupPicker({
   rootLabel?: string;
   searchPlaceholder?: string;
   showRootOption?: boolean;
+  specialOptions?: readonly SemanticGroupPickerSpecialOption[];
   value: string;
 }>) {
   const availableGroups = useMemo(
@@ -67,6 +330,21 @@ export function SemanticGroupPicker({
         />
       </label>
       <div aria-label="Дерево групп" className="semantic-move-tree" role="tree">
+        {specialOptions.map((option) => (
+          <button
+            aria-selected={value === option.value}
+            className={`semantic-move-tree-row root special${value === option.value ? " selected" : ""}`}
+            key={option.value}
+            onClick={() => onChange(option.value)}
+            role="treeitem"
+            type="button"
+          >
+            <span className="semantic-move-tree-spacer" />
+            <Icon name={option.icon ?? "list"} />
+            <span>{option.label}</span>
+            {value === option.value && <Icon name="checkDouble" />}
+          </button>
+        ))}
         {showRootOption && (
           <button
             aria-selected={value === ""}

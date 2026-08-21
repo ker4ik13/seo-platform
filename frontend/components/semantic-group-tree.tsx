@@ -64,6 +64,7 @@ export function SemanticGroupTree({
   groups,
   onCreate,
   onDelete,
+  onDuplicate,
   onExport,
   onColorChange,
   onDropMove,
@@ -81,8 +82,9 @@ export function SemanticGroupTree({
   activeGroupIds?: readonly string[];
   expandedIds: ReadonlySet<string> | null;
   groups: readonly SemanticGroupTreeItem[];
-  onCreate: (parentId?: string) => void;
+  onCreate: (parentId?: string, position?: number) => void;
   onDelete: (groups: readonly SemanticGroupTreeItem[]) => void;
+  onDuplicate: (group: SemanticGroupTreeItem) => void;
   onExport: (group: SemanticGroupTreeItem) => void;
   onColorChange: (
     groups: readonly SemanticGroupTreeItem[],
@@ -295,7 +297,10 @@ export function SemanticGroupTree({
     : [];
   const contextSiblings = contextMenu
     ? groups
-        .filter(({ parentId }) => parentId === contextMenu.group.parentId)
+        .filter(
+          ({ parentId, systemKind }) =>
+            !systemKind && parentId === contextMenu.group.parentId
+        )
         .sort(compareGroupPosition)
     : [];
   const contextIndex = contextMenu
@@ -318,8 +323,22 @@ export function SemanticGroupTree({
         {
           id: "create",
           icon: <Icon name="folderPlus" />,
-          label: "Создать подгруппу",
+          label: "Создать внутри…",
           onSelect: () => onCreate(contextMenu.group.id)
+        },
+        {
+          id: "create-sibling",
+          icon: <Icon name="folderPlus" />,
+          label: "Создать рядом…",
+          onSelect: () =>
+            onCreate(contextMenu.group.parentId, contextIndex + 1)
+        },
+        {
+          id: "duplicate",
+          icon: <Icon name="copy" />,
+          label: "Дублировать…",
+          disabled: contextGroups.length !== 1,
+          onSelect: () => onDuplicate(contextMenu.group)
         },
         {
           id: "rename",
@@ -340,14 +359,16 @@ export function SemanticGroupTree({
         {
           id: "move-up",
           icon: <Icon name="arrowUp" />,
-          label: "Поднять выше",
+          inlineGroup: "order",
+          label: "Выше",
           disabled: contextGroups.length !== 1 || contextIndex <= 0,
           onSelect: () => onReorder(contextMenu.group, contextIndex - 1)
         },
         {
           id: "move-down",
           icon: <Icon name="arrowDown" />,
-          label: "Опустить ниже",
+          inlineGroup: "order",
+          label: "Ниже",
           disabled:
             contextGroups.length !== 1 ||
             contextIndex < 0 ||
@@ -432,6 +453,13 @@ export function SemanticGroupTree({
           paddingLeft: `${4 + depth * 10}px`
         }}
       >
+        {depth > 0 && (
+          <span
+            aria-hidden="true"
+            className="semantic-group-depth-guides"
+            style={{ width: `${depth * 10}px` }}
+          />
+        )}
         <button
           aria-label={
             hasChildren

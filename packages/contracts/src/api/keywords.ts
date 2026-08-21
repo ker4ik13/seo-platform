@@ -376,6 +376,15 @@ export interface CreateSemanticKeywordGroupInput {
   readonly name: string;
   readonly parentId?: string;
   readonly color?: string;
+  readonly position?: number;
+}
+
+export interface DuplicateSemanticKeywordGroupInput {
+  readonly name: string;
+  readonly parentId?: string;
+  readonly color?: string;
+  readonly includeDescendants: boolean;
+  readonly includeKeywords: boolean;
 }
 
 export interface UpdateSemanticKeywordGroupInput {
@@ -393,6 +402,14 @@ export interface InternalCreateSemanticKeywordGroupInput
   readonly entitlement: import("./billing.js").SemanticCapacityEntitlement;
 }
 
+export interface InternalDuplicateSemanticKeywordGroupInput
+  extends DuplicateSemanticKeywordGroupInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly version: number;
+}
+
 export interface InternalUpdateSemanticKeywordGroupInput
   extends UpdateSemanticKeywordGroupInput {
   readonly workspaceId: string;
@@ -407,6 +424,7 @@ export interface InternalDeleteSemanticKeywordGroupInput {
   readonly actorId: string;
   readonly version: number;
   readonly deleteKeywords: boolean;
+  readonly promoteChildren: boolean;
 }
 
 export interface SemanticKeywordBulkSelection {

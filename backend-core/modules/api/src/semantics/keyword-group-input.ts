@@ -1,5 +1,6 @@
 import type {
   CreateSemanticKeywordGroupInput,
+  DuplicateSemanticKeywordGroupInput,
   UpdateSemanticKeywordGroupInput
 } from "@seo-platform/contracts";
 import { validationError } from "../common/domain-error.js";
@@ -17,7 +18,32 @@ export function createSemanticKeywordGroupInput(
   return {
     name: groupName(input.name),
     ...(parentId ? { parentId } : {}),
-    ...(color ? { color } : {})
+    ...(color ? { color } : {}),
+    ...optionalPosition(input.position)
+  };
+}
+
+export function duplicateSemanticKeywordGroupInput(
+  value: unknown
+): DuplicateSemanticKeywordGroupInput {
+  const input = exactRecord(value, [
+    "name",
+    "parentId",
+    "color",
+    "includeDescendants",
+    "includeKeywords"
+  ]);
+  const parentId = optionalParentId(input.parentId, false).parentId;
+  const color = optionalColor(input.color, false).color;
+  return {
+    name: groupName(input.name),
+    ...(parentId ? { parentId } : {}),
+    ...(color ? { color } : {}),
+    includeDescendants: booleanValue(
+      input.includeDescendants,
+      "includeDescendants"
+    ),
+    includeKeywords: booleanValue(input.includeKeywords, "includeKeywords")
   };
 }
 
@@ -35,37 +61,53 @@ export function updateSemanticKeywordGroupInput(
 
 export function deleteSemanticKeywordGroupInput(
   value: unknown
-): Readonly<{ deleteKeywords: boolean }> {
+): Readonly<{ deleteKeywords: boolean; promoteChildren: boolean }> {
   if (value === undefined || value === null || value === "") {
-    return { deleteKeywords: false };
+    return { deleteKeywords: false, promoteChildren: false };
   }
   if (typeof value !== "object" || Array.isArray(value)) {
     invalid("$", "Must be a JSON object");
   }
   const input = value as Readonly<Record<string, unknown>>;
   if (
-    Object.keys(input).some((key) => key !== "deleteKeywords") ||
+    Object.keys(input).some(
+      (key) => key !== "deleteKeywords" && key !== "promoteChildren"
+    ) ||
     (input.deleteKeywords !== undefined &&
-      typeof input.deleteKeywords !== "boolean")
+      typeof input.deleteKeywords !== "boolean") ||
+    (input.promoteChildren !== undefined &&
+      typeof input.promoteChildren !== "boolean")
   ) {
-    invalid("deleteKeywords", "Must be a boolean");
+    invalid("$", "Delete choices must be booleans");
   }
-  return { deleteKeywords: input.deleteKeywords === true };
+  return {
+    deleteKeywords: input.deleteKeywords === true,
+    promoteChildren: input.promoteChildren === true
+  };
 }
 
-function exactRecord(value: unknown): Readonly<Record<string, unknown>> {
+function exactRecord(
+  value: unknown,
+  supportedFields: readonly string[] = [
+    "name",
+    "parentId",
+    "color",
+    "position"
+  ]
+): Readonly<Record<string, unknown>> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     invalid("$", "Must be a JSON object");
   }
   const input = value as Readonly<Record<string, unknown>>;
-  if (
-    Object.keys(input).some(
-      (key) => !["name", "parentId", "color", "position"].includes(key)
-    )
-  ) {
+  if (Object.keys(input).some((key) => !supportedFields.includes(key))) {
     invalid("$", "Contains unsupported fields");
   }
   return input;
+}
+
+function booleanValue(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") invalid(field, "Must be a boolean");
+  return value;
 }
 
 function optionalPosition(
