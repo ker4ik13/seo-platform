@@ -43,6 +43,28 @@ test("accepts a canonical internal position-history export", () => {
   );
 });
 
+test("accepts competitor data as ordinary export columns", () => {
+  const input = {
+    ...validCreate,
+    format: "CSV",
+    columns: [
+      "query",
+      "serpCompetitorUrls",
+      "serpCompetitorSerp",
+      "aiCompetitorUrls",
+      "aiCompetitorSerp"
+    ]
+  } as const;
+  assert.deepEqual(internalCreateSemanticExportInput(input), input);
+  assert.throws(
+    () => internalCreateSemanticExportInput({
+      ...input,
+      competitors: { sources: ["SERP"] }
+    }),
+    /Invalid semantic export body/u
+  );
+});
+
 test("rejects unknown fields at every internal command boundary", () => {
   assert.throws(
     () => internalCreateSemanticExportInput({ ...validCreate, admin: true }),

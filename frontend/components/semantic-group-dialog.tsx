@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { semanticKeywordGroupBulkCreateMaxItems } from "@seo-platform/contracts";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
+import {
+  semanticGroupNameLineCount,
+  semanticGroupNamesFromText
+} from "../lib/semantic-group-name-batch";
 import {
   semanticGroupColors,
   semanticGroupDefaultColor
@@ -63,7 +68,8 @@ export function SemanticGroupDialog({
   const [includeKeywords, setIncludeKeywords] = useState(false);
   const [error, setError] = useState<string>();
   const formId = useId();
-  const nameRef = useRef<HTMLInputElement>(null);
+  const nameInputRef = useRef<HTMLInputElement>(null);
+  const namesTextareaRef = useRef<HTMLTextAreaElement>(null);
   const movedGroups = state.mode === "move" ? state.groups : [];
   const parentOptions = groups.filter(
     (candidate) =>
@@ -87,6 +93,13 @@ export function SemanticGroupDialog({
           !systemKind && parentId === deletedGroup.id
       )
     : [];
+  const unavailableSiblingNames = groups
+    .filter(
+      (group) =>
+        !group.systemKind && (group.parentId ?? "") === parentId
+    )
+    .map(({ name }) => name);
+  const pendingCreateCount = semanticGroupNameLineCount(name);
 
   useEffect(() => {
     if (
@@ -95,8 +108,12 @@ export function SemanticGroupDialog({
       state.mode !== "duplicate"
     ) return;
     const frame = requestAnimationFrame(() => {
-      nameRef.current?.focus();
-      if (state.mode === "rename") nameRef.current?.select();
+      const field =
+        state.mode === "create"
+          ? namesTextareaRef.current
+          : nameInputRef.current;
+      field?.focus();
+      if (state.mode === "rename") nameInputRef.current?.select();
     });
     return () => cancelAnimationFrame(frame);
   }, [state.mode]);
@@ -108,10 +125,14 @@ export function SemanticGroupDialog({
     setError(undefined);
     try {
       if (state.mode === "create") {
-        await browserApiRequest(groupPath(projectId), {
+        const names = semanticGroupNamesFromText(
+          name,
+          unavailableSiblingNames
+        );
+        await browserApiRequest(`${groupPath(projectId)}/bulk`, {
           method: "POST",
           body: {
-            name,
+            names,
             color,
             ...(parentId ? { parentId } : {}),
             ...(state.position !== undefined &&
@@ -120,7 +141,11 @@ export function SemanticGroupDialog({
               : {})
           }
         });
-        onCompleted(`Группа «${name.trim()}» создана`);
+        onCompleted(
+          names.length === 1
+            ? `Группа «${names[0] ?? ""}» создана`
+            : `Создано групп: ${names.length}`
+        );
         return;
       }
       if (state.mode === "duplicate") {
@@ -255,7 +280,11 @@ export function SemanticGroupDialog({
                   ? `Переместить (${state.groups.length})`
                   : state.mode === "duplicate"
                     ? "Создать копию"
-                    : "Сохранить"}
+                    : state.mode === "create"
+                      ? pendingCreateCount > 1
+                        ? `Создать (${pendingCreateCount})`
+                        : "Создать"
+                      : "Сохранить"}
           </button>
         </div>
       }
@@ -274,17 +303,45 @@ export function SemanticGroupDialog({
                 {state.mode === "duplicate"
                   ? "Название копии"
                   : state.mode === "create"
-                    ? "Имя папки"
+                    ? "Названия папок"
                     : "Название"}
               </span>
-              <input
-                autoFocus
-                maxLength={255}
-                onChange={(event) => setName(event.target.value)}
-                required
-                ref={nameRef}
-                value={name}
-              />
+              {state.mode === "create" ? (
+                <textarea
+                  aria-describedby={`${formId}-group-names-hint`}
+                  autoFocus
+                  className="semantic-group-names-textarea"
+                  onChange={(event) => {
+                    setName(event.target.value);
+                    setError(undefined);
+                  }}
+                  placeholder={"Москва\nСанкт-Петербург\nКазань"}
+                  ref={namesTextareaRef}
+                  required
+                  rows={5}
+                  value={name}
+                />
+              ) : (
+                <input
+                  autoFocus
+                  maxLength={255}
+                  onChange={(event) => setName(event.target.value)}
+                  required
+                  ref={nameInputRef}
+                  value={name}
+                />
+              )}
+              {state.mode === "create" && (
+                <small
+                  className="semantic-group-name-hint"
+                  id={`${formId}-group-names-hint`}
+                >
+                  <span>Каждая непустая строка станет отдельной папкой</span>
+                  <strong>
+                    {pendingCreateCount} из {semanticKeywordGroupBulkCreateMaxItems}
+                  </strong>
+                </small>
+              )}
             </label>
             <div className="semantic-dialog-field">
               <span>
@@ -292,7 +349,10 @@ export function SemanticGroupDialog({
               </span>
               <SemanticGroupPickerField
                 groups={parentOptions}
-                onChange={setParentId}
+                onChange={(nextParentId) => {
+                  setParentId(nextParentId);
+                  setError(undefined);
+                }}
                 rootLabel="Корневой уровень"
                 value={parentId}
               />
@@ -446,7 +506,7 @@ function groupPath(projectId: string, groupId?: string): string {
 }
 
 function groupDialogDescription(state: SemanticGroupDialogState): string {
-  if (state.mode === "create") return "Создайте папку на выбранном уровне дерева.";
+  if (state.mode === "create") return "Введите названия папок — по одному на строке.";
   if (state.mode === "duplicate") return "Создайте независимую копию папки, структуры и членств запросов.";
   if (state.mode === "rename") return "Название, цвет и родитель сохраняются с проверкой версии.";
   if (state.mode === "move") return `Выбрано групп: ${state.groups.length}. Вложенные группы переместятся вместе с родителем.`;
@@ -483,6 +543,7 @@ function groupErrorMessage(error: unknown): string {
   if (error instanceof BrowserApiError) {
     if (error.code === "VERSION_CONFLICT") return "Группа уже изменена. Обновите дерево и повторите.";
     if (error.code === "DUPLICATE") return "Группа с таким именем уже существует на выбранном уровне.";
+    if (error.code === "QUOTA_EXCEEDED") return "Достигнут лимит папок для текущего тарифа.";
     if (error.code === "RESOURCE_STATE_CONFLICT") return "Проверьте циклический перенос, вложенные группы и наличие запросов.";
     if (error.code === "FORBIDDEN") return "Недостаточно прав для изменения групп.";
     return error.message;

@@ -146,11 +146,55 @@ export interface SemanticPositionHistoryExportRow {
   readonly snapshots: readonly SemanticPositionHistoryExportSnapshot[];
 }
 
+export const semanticCompetitorExportSources = ["SERP", "AI"] as const;
+
+export type SemanticCompetitorExportSource =
+  (typeof semanticCompetitorExportSources)[number];
+
+export const semanticCompetitorExportColumnKeys = [
+  "serpCompetitorUrls",
+  "serpCompetitorSerp",
+  "aiCompetitorUrls",
+  "aiCompetitorSerp"
+] as const;
+
+export type SemanticCompetitorExportColumnKey =
+  (typeof semanticCompetitorExportColumnKeys)[number];
+
+/** Export-only columns that do not become visible table or saved-view columns. */
+export type SemanticExportColumnKey =
+  | SemanticSavedViewColumnKey
+  | SemanticCompetitorExportColumnKey;
+
+/**
+ * Read the latest available competitor projection for every keyword and
+ * search engine in the immutable semantic scope. The selected sources are
+ * derived from the export columns requested by the worker.
+ */
+export interface SemanticCompetitorExportOptions {
+  readonly sources: readonly SemanticCompetitorExportSource[];
+}
+
+/** Internal SEO read projection consumed only by the export worker. */
+export interface SemanticCompetitorExportItem {
+  readonly source: SemanticCompetitorExportSource;
+  readonly url: string;
+  readonly normalizedUrl: string;
+  readonly title?: string;
+  readonly description?: string;
+}
+
+/** One paginated keyword unit with its latest SERP/AI competitor rows. */
+export interface SemanticCompetitorExportKeyword {
+  readonly keywordId: string;
+  readonly competitors: readonly SemanticCompetitorExportItem[];
+}
+
 export interface CreateSemanticExportInput {
   readonly format: SemanticExportFormat;
   readonly scope: SemanticExportScope;
   readonly locale: SemanticExportLocale;
-  readonly columns: readonly SemanticSavedViewColumnKey[];
+  readonly columns: readonly SemanticExportColumnKey[];
   readonly filters?: SemanticExportFilters;
   readonly sort?: SemanticKeywordSort;
   readonly keywordIds?: readonly string[];

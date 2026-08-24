@@ -44,6 +44,7 @@ import {
 import { SeoDataClient } from "../seo-data/seo-data.client.js";
 import {
   createSemanticKeywordGroupInput,
+  createSemanticKeywordGroupsInput,
   deleteSemanticKeywordGroupInput,
   duplicateSemanticKeywordGroupInput,
   updateSemanticKeywordGroupInput
@@ -114,6 +115,44 @@ export class KeywordGroupController {
     });
     setEntityVersion(reply, result.version);
     return apiResponse(request, result, result.version);
+  }
+
+  @Post("bulk")
+  @HttpCode(HttpStatus.CREATED)
+  @RequirePermission("semantic.update")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async createMany(
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<readonly SemanticKeywordGroup[]>> {
+    const tenant = requiredMutableProjectTenant(request);
+    const context = requestContext(request);
+    const input = createSemanticKeywordGroupsInput(body);
+    await this.audit.record({
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.group.bulk_create_requested",
+      resourceType: "semantic_group",
+      outcome: "REQUESTED",
+      requestId: context.requestId
+    });
+    const result = await this.seoData.createKeywordGroups(
+      internalProjectContext(request, principal, tenant),
+      input,
+      await this.billingEntitlements.semanticCapacity(tenant.workspaceId)
+    );
+    await recordCommittedAudit(this.audit, this.logger, {
+      actorId: principal.userId,
+      workspaceId: tenant.workspaceId,
+      projectId: tenant.projectId,
+      action: "semantic.group.bulk_created",
+      resourceType: "semantic_group",
+      outcome: "SUCCESS",
+      requestId: context.requestId
+    });
+    return apiResponse(request, result);
   }
 
   @Post(":groupId/duplicate")

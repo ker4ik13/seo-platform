@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { Inject, Injectable } from "@nestjs/common";
 import type {
+  ApiCollectionResponse,
   InternalCreateSemanticExportInput,
   KeywordListQuery,
+  SemanticCompetitorExportKeyword,
+  SemanticCompetitorExportSource,
+  SemanticExportColumnKey,
   SemanticKeywordGroup,
   SemanticKeywordListItem,
   SemanticPositionHistoryExportRow,
@@ -26,11 +30,13 @@ import {
   semanticExportFile,
   semanticPositionHistoryExportFile,
   type SemanticExportFile,
+  type SemanticExportKeywordRow,
   type SemanticPositionHistoryWorkbookPlan
 } from "./semantic-export-encoder.js";
 import { storedSemanticExportInput } from "./semantic-export-input.js";
 
 const PAGE_SIZE = 1_000;
+const COMPETITOR_PAGE_SIZE = 100;
 const POSITION_HISTORY_PAGE_SIZE = 25;
 const LEASE_MILLISECONDS = 15 * 60 * 1_000;
 const MAX_PENDING_EXPORTS = 200;
@@ -242,10 +248,15 @@ export class SemanticExportWorkerService {
     job: Job,
     input: InternalCreateSemanticExportInput,
     leaseOwner: string
-  ): AsyncGenerator<SemanticKeywordListItem> {
+  ): AsyncGenerator<SemanticExportKeywordRow> {
     const context = exportContext(input);
     const selected = input.keywordIds ? new Set(input.keywordIds) : undefined;
-    const query = await this.exportQuery(input, context);
+    const competitorSources = competitorSourcesForColumns(input.columns);
+    const query = await this.exportQuery(
+      input,
+      context,
+      competitorSources.length > 0 ? COMPETITOR_PAGE_SIZE : PAGE_SIZE
+    );
     let cursor: string | undefined;
     let exportedRows = 0;
     const observedCursors = new Set<string>();
@@ -255,6 +266,16 @@ export class SemanticExportWorkerService {
         ...query,
         ...(cursor ? { cursor } : {})
       });
+      const competitorPage = competitorSources.length === 0
+        ? undefined
+        : await this.seoData.listExportCompetitors(
+            context,
+            { ...query, ...(cursor ? { cursor } : {}) },
+            { sources: competitorSources }
+          );
+      if (competitorPage && !matchingCompetitorPage(page, competitorPage)) {
+        throw new ExportFailure("EXPORT_PROJECTION_DRIFT", true);
+      }
       if (page.page.totalApprox !== undefined) {
         await this.updateProgressTotal(
           job.id,
@@ -262,13 +283,18 @@ export class SemanticExportWorkerService {
           selected ? selected.size + exportedRows : page.page.totalApprox
         );
       }
-      for (const item of page.data) {
+      for (const [index, item] of page.data.entries()) {
         if (selected && !selected.delete(item.id)) continue;
         exportedRows += 1;
         if (!Number.isSafeInteger(exportedRows)) {
           throw new ExportFailure("EXPORT_ROW_COUNT_TOO_LARGE", false);
         }
-        yield item;
+        yield competitorPage
+          ? {
+              ...item,
+              exportCompetitors: competitorPage.data[index]!.competitors
+            }
+          : item;
       }
       await this.assertLease(job.id, leaseOwner, exportedRows);
       if (selected?.size === 0) break;
@@ -565,6 +591,39 @@ function exportContext(input: InternalCreateSemanticExportInput): {
     projectId: input.projectId,
     actorId: input.actorId
   };
+}
+
+function competitorSourcesForColumns(
+  columns: readonly SemanticExportColumnKey[]
+): readonly SemanticCompetitorExportSource[] {
+  const sources: SemanticCompetitorExportSource[] = [];
+  if (
+    columns.includes("serpCompetitorUrls") ||
+    columns.includes("serpCompetitorSerp")
+  ) {
+    sources.push("SERP");
+  }
+  if (
+    columns.includes("aiCompetitorUrls") ||
+    columns.includes("aiCompetitorSerp")
+  ) {
+    sources.push("AI");
+  }
+  return sources;
+}
+
+function matchingCompetitorPage(
+  keywords: ApiCollectionResponse<SemanticKeywordListItem>,
+  competitors: ApiCollectionResponse<SemanticCompetitorExportKeyword>
+): boolean {
+  return (
+    keywords.data.length === competitors.data.length &&
+    keywords.data.every(
+      (keyword, index) => keyword.id === competitors.data[index]?.keywordId
+    ) &&
+    keywords.page.hasNext === competitors.page.hasNext &&
+    keywords.page.nextCursor === competitors.page.nextCursor
+  );
 }
 
 function customColumnNameMap(

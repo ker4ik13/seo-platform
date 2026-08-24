@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { HttpException, HttpStatus, Injectable } from "@nestjs/common";
 import type {
   InternalCreateSemanticKeywordGroupInput,
+  InternalCreateSemanticKeywordGroupsInput,
   InternalDeleteSemanticKeywordGroupInput,
   InternalDuplicateSemanticKeywordGroupInput,
   InternalUpdateSemanticKeywordGroupInput,
@@ -44,6 +45,16 @@ export class KeywordGroupService {
   public async create(
     input: InternalCreateSemanticKeywordGroupInput
   ): Promise<SemanticKeywordGroup> {
+    const { name, ...sharedInput } = input;
+    const created = await this.createMany({ ...sharedInput, names: [name] });
+    const group = created[0];
+    if (!group) throw groupConflict("Created group was not returned");
+    return group;
+  }
+
+  public async createMany(
+    input: InternalCreateSemanticKeywordGroupsInput
+  ): Promise<readonly SemanticKeywordGroup[]> {
     try {
       return await this.prisma.$transaction(async (transaction) => {
         await lockGroupTree(transaction, input.projectId);
@@ -51,6 +62,15 @@ export class KeywordGroupService {
           transaction,
           input.workspaceId,
           input.projectId
+        );
+        await assertFolderCapacity(
+          transaction,
+          input.workspaceId,
+          input.projectId,
+          input.names.length,
+          input.entitlement.foldersPerProject,
+          input.entitlement.planCode,
+          input.entitlement.planVersion
         );
         const parent = input.parentId
           ? await requiredGroup(
@@ -61,7 +81,7 @@ export class KeywordGroupService {
             )
           : undefined;
         assertRegularParent(parent);
-        const path = groupPath(parent?.path ?? parent?.name, input.name);
+        const parentPath = parent?.path ?? parent?.name;
         const siblings = await transaction.keywordGroup.findMany({
           where: {
             workspaceId: input.workspaceId,
@@ -77,35 +97,48 @@ export class KeywordGroupService {
           input.position ?? siblings.length,
           siblings.length
         );
-        const created = await transaction.keywordGroup.create({
-          data: {
-            workspaceId: input.workspaceId,
-            projectId: input.projectId,
-            ...(input.parentId ? { parentId: input.parentId } : {}),
-            name: input.name,
-            path,
-            pathHash: sha256(path),
-            ...(input.color ? { color: input.color } : {}),
-            position: targetPosition
-          }
-        });
+        const createdIds: string[] = [];
+        for (const [offset, name] of input.names.entries()) {
+          const path = groupPath(parentPath, name);
+          const created = await transaction.keywordGroup.create({
+            data: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              ...(input.parentId ? { parentId: input.parentId } : {}),
+              name,
+              path,
+              pathHash: sha256(path),
+              ...(input.color ? { color: input.color } : {}),
+              position: targetPosition + offset
+            }
+          });
+          createdIds.push(created.id);
+        }
         const orderedSiblingIds = siblings.map(({ id }) => id);
-        orderedSiblingIds.splice(targetPosition, 0, created.id);
+        orderedSiblingIds.splice(targetPosition, 0, ...createdIds);
+        const createdIdSet = new Set(createdIds);
+        const siblingById = new Map(
+          siblings.map((sibling) => [sibling.id, sibling])
+        );
         for (const [position, siblingId] of orderedSiblingIds.entries()) {
-          if (siblingId === created.id) continue;
-          const sibling = siblings.find(({ id }) => id === siblingId);
+          if (createdIdSet.has(siblingId)) continue;
+          const sibling = siblingById.get(siblingId);
           if (sibling?.position === position) continue;
           await transaction.keywordGroup.update({
             where: { id: siblingId },
             data: { position, version: { increment: 1 } }
           });
         }
-        return groupItem(
-          await requiredGroup(
-            transaction,
-            input.workspaceId,
-            input.projectId,
-            created.id
+        return Promise.all(
+          createdIds.map(async (groupId) =>
+            groupItem(
+              await requiredGroup(
+                transaction,
+                input.workspaceId,
+                input.projectId,
+                groupId
+              )
+            )
           )
         );
       });
@@ -546,6 +579,39 @@ async function lockGroupTree(
       hashtextextended(${`semantic-group-tree:${projectId}`}, 0)
     )
   `;
+}
+
+async function assertFolderCapacity(
+  transaction: Prisma.TransactionClient,
+  workspaceId: string,
+  projectId: string,
+  additional: number,
+  limit: number,
+  planCode: string,
+  planVersion: number
+): Promise<void> {
+  if (limit === 0) return;
+  const current = await transaction.keywordGroup.count({
+    where: { workspaceId, projectId, status: "ACTIVE", systemKind: null }
+  });
+  if (current + additional <= limit) return;
+  throw new HttpException(
+    {
+      error: {
+        code: "QUOTA_EXCEEDED",
+        message: "The foldersPerProject limit for the current plan would be exceeded",
+        details: {
+          resource: "foldersPerProject",
+          current,
+          additional,
+          limit,
+          planCode,
+          planVersion
+        }
+      }
+    },
+    HttpStatus.CONFLICT
+  );
 }
 
 function groupItem(group: GroupAggregate): SemanticKeywordGroup {

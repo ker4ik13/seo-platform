@@ -58,6 +58,11 @@ export function SemanticModal({
         onClose();
       }}
       onMouseDown={(event) => {
+        // Portalled controls (for example CustomSelect) are mounted under the
+        // dialog so they stay inside the native modal top layer, but their
+        // popovers may be positioned outside the dialog rectangle. A click on
+        // such a child must never be treated as a backdrop click.
+        if (event.target !== event.currentTarget) return;
         const bounds = event.currentTarget.getBoundingClientRect();
         const outside =
           event.clientX < bounds.left ||

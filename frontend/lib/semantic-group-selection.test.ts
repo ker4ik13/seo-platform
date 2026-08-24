@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   semanticAllRegularGroupIds,
   semanticGroupRangeSelection,
+  semanticKeywordSearchPlaceholder,
   semanticVisiblePresenceGroupId
 } from "./semantic-group-selection.ts";
 
@@ -33,6 +34,58 @@ test("select all includes collapsed descendants but excludes system groups", () 
       { id: "trash", systemKind: "TRASH" }
     ]),
     ["parent", "collapsed-child"]
+  );
+});
+
+test("describes every keyword search scope in the placeholder", () => {
+  assert.equal(
+    semanticKeywordSearchPlaceholder({
+      activeGroup: { name: "Города" },
+      activeGroupId: "cities",
+      multiGroupIds: []
+    }),
+    "Поиск по: Города"
+  );
+  assert.equal(
+    semanticKeywordSearchPlaceholder({
+      activeGroup: { name: "Системное имя", systemKind: "UNGROUPED" },
+      activeGroupId: "ungrouped",
+      multiGroupIds: []
+    }),
+    "Поиск по: Без группы"
+  );
+  assert.equal(
+    semanticKeywordSearchPlaceholder({
+      activeGroup: { name: "Системное имя", systemKind: "TRASH" },
+      activeGroupId: "trash",
+      multiGroupIds: []
+    }),
+    "Поиск по: Корзина"
+  );
+  assert.equal(
+    semanticKeywordSearchPlaceholder({ multiGroupIds: [] }),
+    "Поиск по: Весь проект"
+  );
+  assert.equal(
+    semanticKeywordSearchPlaceholder({
+      activeGroup: { name: "Не должна попасть в подпись" },
+      activeGroupId: "first",
+      multiGroupIds: ["first", "second", "second", "third"]
+    }),
+    "Поиск по: 3 группы"
+  );
+  assert.equal(
+    semanticKeywordSearchPlaceholder({
+      multiGroupIds: ["1", "2", "3", "4", "5"]
+    }),
+    "Поиск по: 5 групп"
+  );
+  assert.equal(
+    semanticKeywordSearchPlaceholder({
+      activeGroupId: "still-loading",
+      multiGroupIds: []
+    }),
+    "Поиск по: Выбранная группа"
   );
 });
 

@@ -12,6 +12,7 @@ import {
 } from "./keyword-input.js";
 import {
   createSemanticKeywordGroupInput,
+  createSemanticKeywordGroupsInput,
   deleteSemanticKeywordGroupInput,
   duplicateSemanticKeywordGroupInput,
   updateSemanticKeywordGroupInput
@@ -203,6 +204,31 @@ test("normalizes nested group create and nullable update", () => {
   );
   assert.throws(
     () => createSemanticKeywordGroupInput({ name: "SEO / PPC" }),
+    DomainError
+  );
+  assert.deepEqual(
+    createSemanticKeywordGroupsInput({
+      names: ["  Москва  ", " Санкт-Петербург "],
+      parentId,
+      color: "#AABBCC",
+      position: 4
+    }),
+    {
+      names: ["Москва", "Санкт-Петербург"],
+      parentId,
+      color: "#aabbcc",
+      position: 4
+    }
+  );
+  assert.throws(
+    () => createSemanticKeywordGroupsInput({ names: ["SEO", "seo"] }),
+    DomainError
+  );
+  assert.throws(
+    () =>
+      createSemanticKeywordGroupsInput({
+        names: Array.from({ length: 201 }, (_, index) => `Папка ${index}`)
+      }),
     DomainError
   );
   assert.throws(

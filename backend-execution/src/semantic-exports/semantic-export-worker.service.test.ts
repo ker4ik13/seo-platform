@@ -161,6 +161,93 @@ test("background worker builds the position history report in two bounded passes
   }
 });
 
+test("background worker enriches each keyword row with competitor columns", async () => {
+  let stored = {
+    ...queuedJob(),
+    inputSnapshot: {
+      format: "CSV",
+      scope: "CURRENT_FILTER",
+      locale: "ru",
+      columns: [
+        "query",
+        "serpCompetitorUrls",
+        "serpCompetitorSerp",
+        "aiCompetitorUrls"
+      ]
+    }
+  } as Job;
+  const prisma = memoryPrisma(
+    () => stored,
+    (next) => { stored = next; }
+  );
+  const keywordRows = [keyword(11), keyword(12)];
+  const seoData = {
+    listExportCustomColumns: async () => [],
+    listExportKeywords: async () => ({
+      data: keywordRows,
+      page: { hasNext: false, totalApprox: keywordRows.length },
+      meta: { requestId: "keywords" }
+    }),
+    listExportCompetitors: async (
+      _context: unknown,
+      query: { readonly limit: number },
+      options: { readonly sources: readonly string[] }
+    ) => {
+      assert.equal(query.limit, 100);
+      assert.deepEqual(options.sources, ["SERP", "AI"]);
+      return {
+      data: [
+        {
+          keywordId: keywordRows[0]!.id,
+          competitors: [
+            {
+              source: "SERP",
+              url: "https://competitor.example/shared",
+              normalizedUrl: "https://competitor.example/shared",
+              title: "Первый",
+              description: "Описание"
+            },
+            {
+              source: "AI",
+              url: "https://ai.example/source",
+              normalizedUrl: "https://ai.example/source"
+            }
+          ]
+        },
+        {
+          keywordId: keywordRows[1]!.id,
+          competitors: [{
+            source: "SERP",
+            url: "https://competitor.example/shared",
+            normalizedUrl: "https://competitor.example/shared",
+            title: "Второй"
+          }]
+        }
+      ],
+      page: { hasNext: false, totalApprox: 2 },
+      meta: { requestId: "test" }
+      };
+    }
+  } as unknown as SeoDataClient;
+  const storage = memoryStorage();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = storage.fetch;
+  try {
+    const worker = new SemanticExportWorkerService(prisma, seoData, storage.port);
+    const result = await worker.process(stored.id, worker.workerId());
+
+    assert.equal(result.outcome, "COMPLETED");
+    assert.equal(result.rowCount, 2);
+    const csv = new TextDecoder().decode(storage.artifact());
+    assert.match(csv, /^Запрос,Конкуренты,SERP конкурентов,ИИ-конкуренты\r\n/u);
+    assert.equal(csv.match(/https:\/\/competitor\.example\/shared/gu)?.length, 2);
+    assert.equal(csv.match(/https:\/\/ai\.example\/source/gu)?.length, 1);
+    assert.match(csv, /Title: Первый\nDescription: Описание/u);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function queuedJob(): Job {
   const now = new Date("2026-08-12T10:00:00.000Z");
   return {

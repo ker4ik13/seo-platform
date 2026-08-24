@@ -379,6 +379,16 @@ export interface CreateSemanticKeywordGroupInput {
   readonly position?: number;
 }
 
+/** A single interactive command stays bounded even when a project has no folder limit. */
+export const semanticKeywordGroupBulkCreateMaxItems = 200;
+
+export interface CreateSemanticKeywordGroupsInput {
+  readonly names: readonly string[];
+  readonly parentId?: string;
+  readonly color?: string;
+  readonly position?: number;
+}
+
 export interface DuplicateSemanticKeywordGroupInput {
   readonly name: string;
   readonly parentId?: string;
@@ -396,6 +406,14 @@ export interface UpdateSemanticKeywordGroupInput {
 
 export interface InternalCreateSemanticKeywordGroupInput
   extends CreateSemanticKeywordGroupInput {
+  readonly workspaceId: string;
+  readonly projectId: string;
+  readonly actorId: string;
+  readonly entitlement: import("./billing.js").SemanticCapacityEntitlement;
+}
+
+export interface InternalCreateSemanticKeywordGroupsInput
+  extends CreateSemanticKeywordGroupsInput {
   readonly workspaceId: string;
   readonly projectId: string;
   readonly actorId: string;

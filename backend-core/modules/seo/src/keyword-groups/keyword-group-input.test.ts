@@ -3,6 +3,7 @@ import test from "node:test";
 import { BadRequestException } from "@nestjs/common";
 import {
   internalCreateSemanticKeywordGroupInput,
+  internalCreateSemanticKeywordGroupsInput,
   internalDeleteSemanticKeywordGroupInput,
   internalDuplicateSemanticKeywordGroupInput,
   internalUpdateSemanticKeywordGroupInput
@@ -33,6 +34,42 @@ test("accepts exact tenant-scoped semantic group commands", () => {
     });
   assert.equal(createInput.parentId, parentId);
   assert.equal(createInput.position, 7);
+  assert.deepEqual(
+    internalCreateSemanticKeywordGroupsInput({
+      workspaceId,
+      projectId,
+      actorId,
+      entitlement: {
+        planCode: "PRO",
+        planVersion: 1,
+        storedKeywords: 10_000,
+        keywordsPerProject: 5_000,
+        foldersPerProject: 200,
+        trackedContextPairs: 5_000
+      },
+      names: ["  Москва  ", "Санкт-Петербург"],
+      parentId,
+      color: "#6758EF",
+      position: 2
+    }),
+    {
+      workspaceId,
+      projectId,
+      actorId,
+      entitlement: {
+        planCode: "PRO",
+        planVersion: 1,
+        storedKeywords: 10_000,
+        keywordsPerProject: 5_000,
+        foldersPerProject: 200,
+        trackedContextPairs: 5_000
+      },
+      names: ["Москва", "Санкт-Петербург"],
+      parentId,
+      color: "#6758ef",
+      position: 2
+    }
+  );
   assert.deepEqual(
     internalUpdateSemanticKeywordGroupInput({
       workspaceId,
@@ -173,6 +210,24 @@ test("rejects authority fields and malformed group data", () => {
         name: "SEO",
         includeDescendants: false,
         includeKeywords: "yes"
+      }),
+    BadRequestException
+  );
+  assert.throws(
+    () =>
+      internalCreateSemanticKeywordGroupsInput({
+        workspaceId,
+        projectId,
+        actorId,
+        entitlement: {
+          planCode: "PRO",
+          planVersion: 1,
+          storedKeywords: 10_000,
+          keywordsPerProject: 5_000,
+          foldersPerProject: 200,
+          trackedContextPairs: 5_000
+        },
+        names: ["SEO", "seo"]
       }),
     BadRequestException
   );

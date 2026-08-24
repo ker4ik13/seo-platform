@@ -15,6 +15,7 @@ import {
   type ClusteringRunSummary,
   type FrequencyCollectionSummary,
   type RankJobSummary,
+  type SemanticExportColumnKey,
   type SemanticExportJobSummary,
   type SemanticPositionHistorySearchEngine
 } from "@seo-platform/contracts";
@@ -56,6 +57,7 @@ import {
   semanticClipboardText,
   semanticHighlightAllRows,
   semanticHighlightAfterRowClick,
+  semanticSelectionScopeSignature,
   toggleSemanticHighlightedSelection
 } from "../lib/semantic-row-selection";
 import {
@@ -82,6 +84,7 @@ import {
   readSemanticManualAddPreferences,
   writeSemanticManualAddPreferences
 } from "../lib/semantic-manual-add-preferences";
+import { semanticKeywordSearchPlaceholder } from "../lib/semantic-group-selection";
 import { shouldRefreshSemanticOperationMetrics } from "../lib/semantic-live-operation-metrics";
 import { SemanticBulkEditor } from "./semantic-bulk-editor";
 import { ContextMenu, type ContextMenuItem } from "./context-menu";
@@ -393,7 +396,7 @@ export function SemanticCoreTable({
   const [exportDialog, setExportDialog] = useState<SemanticExportDialogState>();
   const [exportScope, setExportScope] =
     useState<SemanticExportScope>("CURRENT_FILTER");
-  const [exportColumns, setExportColumns] = useState<readonly SemanticViewColumn[]>(
+  const [exportColumns, setExportColumns] = useState<readonly SemanticExportColumnKey[]>(
     defaultSemanticViewConfig.columns
   );
   const [exportBom, setExportBom] = useState(true);
@@ -475,6 +478,7 @@ export function SemanticCoreTable({
   const highlightAllKeywordsRef = useRef<() => void>(() => undefined);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const highlightAnchorIdRef = useRef<string | undefined>(undefined);
+  const selectionScopeSignatureRef = useRef<string | undefined>(undefined);
   const liveOperationSignatureRef = useRef("");
   const liveMetricRefreshInFlightRef = useRef(false);
   const liveOperationActiveRef = useRef(false);
@@ -504,6 +508,16 @@ export function SemanticCoreTable({
     }),
     [multiGroupIds, multiSearch, viewConfig.filters, viewConfig.sort]
   );
+  const selectionScopeSignature = semanticSelectionScopeSignature({
+    projectId,
+    filters: keywordQueryConfig.filters,
+    ...(keywordQueryConfig.groupIds
+      ? { groupIds: keywordQueryConfig.groupIds }
+      : {}),
+    ...(keywordQueryConfig.multiSearch
+      ? { multiSearch: keywordQueryConfig.multiSearch }
+      : {})
+  });
   const currentSavedViewConfig = useMemo<SemanticViewConfig>(
     () => ({
       ...viewConfig,
@@ -906,14 +920,25 @@ export function SemanticCoreTable({
   }, [projectId, refreshVersion, retryVersion]);
 
   useEffect(() => {
-    const controller = new AbortController();
-    const preservedScrollTop = tableScrollRef.current?.scrollTop ?? 0;
+    const previousSignature = selectionScopeSignatureRef.current;
+    selectionScopeSignatureRef.current = selectionScopeSignature;
+    if (
+      previousSignature === undefined ||
+      previousSignature === selectionScopeSignature
+    ) {
+      return;
+    }
     selectAllAbortRef.current?.abort();
     selectAllAbortRef.current = undefined;
     setSelectingAll(false);
     setCheckedIds(new Set());
     setHighlightedIds(new Set());
     highlightAnchorIdRef.current = undefined;
+  }, [selectionScopeSignature]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const preservedScrollTop = tableScrollRef.current?.scrollTop ?? 0;
     setLoading(true);
     setError(undefined);
     void loadKeywordPage(
@@ -2426,7 +2451,7 @@ export function SemanticCoreTable({
     );
     setExportColumns(viewConfig.columns);
     setExportBom(
-      exportContent === "SEMANTIC" &&
+      exportContent !== "POSITION_HISTORY" &&
       (exportFormat === "CSV" || exportFormat === "TSV")
     );
     if (exportContent === "POSITION_HISTORY") setExportFormat("XLSX");
@@ -2455,7 +2480,7 @@ export function SemanticCoreTable({
             format: exportContent === "POSITION_HISTORY" ? "XLSX" : exportFormat,
             scope: exportScope,
             locale: "ru",
-            columns: exportContent === "POSITION_HISTORY" ? ["query"] : exportColumns,
+            columns: exportContent === "SEMANTIC" ? exportColumns : ["query"],
             ...(groupId
               ? { filters: { groupId } }
               : selected.length > 0
@@ -2469,7 +2494,7 @@ export function SemanticCoreTable({
                   }
                 }),
             sort: viewConfig.sort,
-            ...(exportContent === "SEMANTIC" ? { includeBom: exportBom } : {}),
+            ...(exportContent !== "POSITION_HISTORY" ? { includeBom: exportBom } : {}),
             ...(exportContent === "POSITION_HISTORY"
               ? {
                   positionHistory: semanticHistoryExportOptions(
@@ -2478,7 +2503,7 @@ export function SemanticCoreTable({
                     exportHistoryEngines
                   )
                 }
-              : {})
+              : {}),
           }
         }
       );
@@ -2814,6 +2839,13 @@ export function SemanticCoreTable({
   const activeGroup = viewConfig.filters.groupId
     ? groups.find(({ id }) => id === viewConfig.filters.groupId)
     : undefined;
+  const keywordSearchPlaceholder = semanticKeywordSearchPlaceholder({
+    ...(activeGroup ? { activeGroup } : {}),
+    ...(viewConfig.filters.groupId
+      ? { activeGroupId: viewConfig.filters.groupId }
+      : {}),
+    multiGroupIds
+  });
   const activeGroupIsEmpty = activeGroup?.keywordCount === 0;
   const activeScopeIsEmpty = activeGroup
     ? activeGroupIsEmpty
@@ -3239,12 +3271,12 @@ export function SemanticCoreTable({
             </span>
           )}
           <label>
-            <span className="visually-hidden">Поиск по запросам</span>
+            <span className="visually-hidden">{keywordSearchPlaceholder}</span>
             <Icon name="search" />
             <input
               maxLength={200}
               onChange={(event) => updateFilter({ search: event.target.value })}
-              placeholder="Поиск по запросам"
+              placeholder={keywordSearchPlaceholder}
               type="text"
               value={draftConfig.filters.search ?? ""}
             />
@@ -3461,7 +3493,7 @@ export function SemanticCoreTable({
 
       {exportDialog && (
         <SemanticModal
-          description="Обычная таблица и отчёт истории позиций формируются в фоне с учётом текущей области и фильтров."
+          description="Таблица и история позиций формируются в фоне с учётом текущей области и фильтров."
           onClose={() => setExportDialog(undefined)}
           size="medium"
           title="Экспорт семантики"
@@ -3484,6 +3516,8 @@ export function SemanticCoreTable({
                     if (content === "POSITION_HISTORY") {
                       setExportFormat("XLSX");
                       setExportBom(false);
+                    } else {
+                      setExportBom(exportFormat === "CSV" || exportFormat === "TSV");
                     }
                   }}
                   value={exportContent}
@@ -3529,45 +3563,31 @@ export function SemanticCoreTable({
               </label>
             </div>
             {exportContent === "SEMANTIC" ? (
-              <>
-                <fieldset className="semantic-export-columns">
-                  <legend>Колонки</legend>
-                  {[
-                    ...semanticColumns,
-                    ...customColumns.map((column) => ({
-                      key: `custom:${column.id}` as const,
-                      label: column.name
-                    }))
-                  ].map((column) => (
-                    <label key={column.key}>
-                      <input
-                        checked={exportColumns.includes(column.key)}
-                        disabled={exporting || exportJob?.status === "COMPLETED"}
-                        onChange={() => setExportColumns((current) =>
-                          current.includes(column.key)
-                            ? current.filter((item) => item !== column.key)
-                            : [...current, column.key]
-                        )}
-                        type="checkbox"
-                      />
-                      <span>{column.label}</span>
-                    </label>
-                  ))}
-                </fieldset>
-                <label className="semantic-control-check">
-                  <input
-                    checked={exportBom}
-                    disabled={
-                      exporting ||
-                      exportJob?.status === "COMPLETED" ||
-                      (exportFormat !== "CSV" && exportFormat !== "TSV")
-                    }
-                    onChange={(event) => setExportBom(event.target.checked)}
-                    type="checkbox"
-                  />
-                  <span>Добавить UTF-8 BOM для корректного открытия в Excel</span>
-                </label>
-              </>
+              <fieldset className="semantic-export-columns">
+                <legend>Колонки</legend>
+                {[
+                  ...semanticColumns,
+                  ...semanticCompetitorExportColumns,
+                  ...customColumns.map((column) => ({
+                    key: `custom:${column.id}` as const,
+                    label: column.name
+                  }))
+                ].map((column) => (
+                  <label key={column.key}>
+                    <input
+                      checked={exportColumns.includes(column.key)}
+                      disabled={exporting || exportJob?.status === "COMPLETED"}
+                      onChange={() => setExportColumns((current) =>
+                        current.includes(column.key)
+                          ? current.filter((item) => item !== column.key)
+                          : [...current, column.key]
+                      )}
+                      type="checkbox"
+                    />
+                    <span>{column.label}</span>
+                  </label>
+                ))}
+              </fieldset>
             ) : (
               <fieldset className="semantic-history-export-settings">
                 <legend>Отчёт истории позиций</legend>
@@ -3619,6 +3639,21 @@ export function SemanticCoreTable({
                 </p>
               </fieldset>
             )}
+            {exportContent !== "POSITION_HISTORY" && (
+              <label className="semantic-control-check">
+                <input
+                  checked={exportBom}
+                  disabled={
+                    exporting ||
+                    exportJob?.status === "COMPLETED" ||
+                    (exportFormat !== "CSV" && exportFormat !== "TSV")
+                  }
+                  onChange={(event) => setExportBom(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Добавить UTF-8 BOM для корректного открытия в Excel</span>
+              </label>
+            )}
             {exportJob && (
               <div className="semantic-export-progress" role="status">
                 <div>
@@ -3662,7 +3697,11 @@ export function SemanticCoreTable({
                   className="primary-button"
                   href={semanticExportFileUrl(projectId, exportJob.id)}
                   onClick={() => setExportNotice(
-                    `Скачивание ${exportContent === "POSITION_HISTORY" ? "отчёта истории позиций" : exportFormat} началось. Если браузер запросит разрешение, подтвердите его.`
+                    `Скачивание ${
+                      exportContent === "POSITION_HISTORY"
+                        ? "отчёта истории позиций"
+                        : exportFormat
+                    } началось. Если браузер запросит разрешение, подтвердите его.`
                   )}
                 >
                   Скачать файл
@@ -4845,6 +4884,16 @@ const semanticColumns: readonly Readonly<{
   { key: "priority", label: "Приоритет" },
   { key: "source", label: "Источник" },
   { key: "updatedAt", label: "Обновлён" }
+];
+
+const semanticCompetitorExportColumns: readonly Readonly<{
+  key: SemanticExportColumnKey;
+  label: string;
+}>[] = [
+  { key: "serpCompetitorUrls", label: "Конкуренты" },
+  { key: "serpCompetitorSerp", label: "SERP конкурентов" },
+  { key: "aiCompetitorUrls", label: "ИИ-конкуренты" },
+  { key: "aiCompetitorSerp", label: "SERP ИИ-конкурентов" }
 ];
 
 function nextSemanticColumnSort(

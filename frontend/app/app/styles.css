@@ -5505,6 +5505,9 @@ svg { display: block; }
 .semantic-dialog-form > label, .semantic-position-dialog label, .semantic-dialog-field { display: grid; gap: 6px; }
 .semantic-dialog-form label > span, .semantic-position-dialog label > span, .semantic-dialog-field > span { color: var(--muted); font-size: 10px; font-weight: 700; }
 .semantic-dialog-form input:not([type="checkbox"]), .semantic-dialog-form select, .semantic-position-dialog select { background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; min-height: 40px; padding: 0 10px; width: 100%; }
+.semantic-group-names-textarea { border-radius: 8px; font: inherit; line-height: 1.45; min-height: 132px; padding: 9px 10px; resize: vertical; width: 100%; }
+.semantic-group-name-hint { align-items: center; color: var(--muted); display: flex; font-size: 8px; font-weight: 500; gap: 10px; justify-content: space-between; line-height: 1.35; }
+.semantic-group-name-hint strong { color: var(--text); flex: 0 0 auto; font-size: inherit; font-weight: 700; }
 .semantic-dialog-color { border: 0; display: grid; gap: 8px; margin: 0; padding: 0; width: 100%; }
 .semantic-dialog-color legend { color: var(--muted); font-size: 10px; font-weight: 700; margin-bottom: 6px; }
 .semantic-dialog-color-custom { align-items: center; display: grid; gap: 9px; grid-template-columns: 44px 126px; }
@@ -11561,6 +11564,14 @@ svg { display: block; }
 
   .semantic-dialog-color-palette {
     grid-template-columns: repeat(6, 28px);
+  }
+
+  .semantic-group-name-hint {
+    font-size: 10px;
+  }
+
+  .semantic-group-names-textarea {
+    min-height: 150px !important;
   }
 
   .semantic-group-picker-popover {

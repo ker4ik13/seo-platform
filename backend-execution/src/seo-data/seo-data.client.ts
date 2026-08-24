@@ -2,6 +2,8 @@ import { Inject, Injectable } from "@nestjs/common";
 import {
   rankProviderOverflowCount,
   type ApiCollectionResponse,
+  type SemanticCompetitorExportKeyword,
+  type SemanticCompetitorExportOptions,
   type SemanticCustomColumn,
   type SemanticKeywordGroup,
   type SemanticKeywordListItem,
@@ -397,6 +399,37 @@ export class SeoDataClient {
       },
       meta: { requestId: "internal-semantic-export" }
     };
+  }
+
+  public async listExportCompetitors(
+    context: { readonly workspaceId: string; readonly projectId: string; readonly actorId: string },
+    query: KeywordListQuery,
+    options: SemanticCompetitorExportOptions
+  ): Promise<ApiCollectionResponse<SemanticCompetitorExportKeyword>> {
+    const url = new URL(
+      `/internal/v1/projects/${encodeURIComponent(context.projectId)}/semantic-exports/competitors`,
+      this.config.services.seoData
+    );
+    url.searchParams.set("limit", String(query.limit));
+    if (query.cursor) url.searchParams.set("cursor", query.cursor);
+    if (query.search) url.searchParams.set("search", query.search);
+    if (query.tag) url.searchParams.set("tag", query.tag);
+    if (query.intent) url.searchParams.set("intent", query.intent);
+    if (query.groupId) url.searchParams.set("groupId", query.groupId);
+    if (query.groupIds?.length) url.searchParams.set("groupIds", query.groupIds.join(","));
+    if (query.clusterId) url.searchParams.set("clusterId", query.clusterId);
+    if (query.isFavorite !== undefined) url.searchParams.set("isFavorite", String(query.isFavorite));
+    if (query.isTracked !== undefined) url.searchParams.set("isTracked", String(query.isTracked));
+    if (query.priorityMin !== undefined) url.searchParams.set("priorityMin", String(query.priorityMin));
+    if (query.priorityMax !== undefined) url.searchParams.set("priorityMax", String(query.priorityMax));
+    if (query.sort) url.searchParams.set("sort", query.sort);
+    url.searchParams.set("sources", options.sources.join(","));
+    const payload = await this.requestGetBounded(
+      url,
+      context,
+      EXPORT_PAGE_RESPONSE_MAX_BYTES
+    );
+    return competitorExportPage(payload, query.limit);
   }
 
   public async listExportPositionHistory(
@@ -1076,6 +1109,78 @@ function positionHistoryExportPage(
     },
     meta: { requestId: "internal-semantic-position-history-export" }
   };
+}
+
+function competitorExportPage(
+  value: unknown,
+  limit: number
+): ApiCollectionResponse<SemanticCompetitorExportKeyword> {
+  const envelope = object(value);
+  const page = envelope ? object(envelope.page) : undefined;
+  if (
+    !envelope ||
+    !Array.isArray(envelope.data) ||
+    envelope.data.length > limit ||
+    !page ||
+    typeof page.hasNext !== "boolean" ||
+    (page.nextCursor !== undefined && typeof page.nextCursor !== "string") ||
+    (page.totalApprox !== undefined && !nonNegativeInteger(page.totalApprox))
+  ) {
+    throw new SeoDataClientError("UNAVAILABLE", true);
+  }
+  for (const candidate of envelope.data) {
+    const row = exactObject(candidate, ["keywordId", "competitors"]);
+    if (
+      !row ||
+      !uuid(row.keywordId) ||
+      !Array.isArray(row.competitors) ||
+      row.competitors.length > 500
+    ) {
+      throw new SeoDataClientError("UNAVAILABLE", true);
+    }
+    const identities = new Set<string>();
+    for (const competitor of row.competitors) {
+      const item = object(competitor);
+      if (
+        !item ||
+        Object.keys(item).some((field) =>
+          !["source", "url", "normalizedUrl", "title", "description"].includes(field)
+        ) ||
+        !["SERP", "AI"].includes(String(item.source)) ||
+        !validHttpUrl(item.url) ||
+        !validHttpUrl(item.normalizedUrl) ||
+        (item.title !== undefined &&
+          (typeof item.title !== "string" || item.title.length > 50_000)) ||
+        (item.description !== undefined &&
+          (typeof item.description !== "string" || item.description.length > 50_000)) ||
+        identities.has(`${String(item.source)}:${String(item.normalizedUrl)}`)
+      ) {
+        throw new SeoDataClientError("UNAVAILABLE", true);
+      }
+      identities.add(`${String(item.source)}:${String(item.normalizedUrl)}`);
+    }
+  }
+  return {
+    data: envelope.data as readonly SemanticCompetitorExportKeyword[],
+    page: {
+      hasNext: page.hasNext as boolean,
+      ...(typeof page.nextCursor === "string" ? { nextCursor: page.nextCursor } : {}),
+      ...(page.totalApprox === undefined ? {} : { totalApprox: Number(page.totalApprox) })
+    },
+    meta: { requestId: "internal-semantic-competitor-export" }
+  };
+}
+
+function validHttpUrl(value: unknown): value is string {
+  if (typeof value !== "string" || value.length < 1 || value.length > 8_192) {
+    return false;
+  }
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
 }
 
 function canonicalDate(value: unknown): value is string {

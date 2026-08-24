@@ -83,7 +83,7 @@ export class SemanticExportService {
               projectId: input.projectId
             },
             progressTotal:
-              input.scope === "SELECTED" || input.scope === "CURRENT_PAGE"
+              (input.scope === "SELECTED" || input.scope === "CURRENT_PAGE")
                 ? BigInt(input.keywordIds?.length ?? 0)
                 : null,
             progressUnit: "rows",

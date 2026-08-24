@@ -7,6 +7,7 @@ import { JobsApiGuard } from "../internal/jobs-api.guard.js";
 import type { KeywordGroupService } from "../keyword-groups/keyword-group.service.js";
 import type { KeywordService } from "../keywords/keyword.service.js";
 import type { SemanticCustomColumnService } from "../semantic-custom-columns/semantic-custom-column.service.js";
+import type { SemanticCompetitorExportService } from "./semantic-competitor-export.service.js";
 import { SemanticExportReadController } from "./semantic-export-read.controller.js";
 import type { SemanticPositionHistoryExportService } from "./semantic-position-history-export.service.js";
 
@@ -61,11 +62,22 @@ test("forwards bounded export reads inside the trusted tenant context", async ()
       };
     }
   } as unknown as SemanticPositionHistoryExportService;
+  const competitors = {
+    list: async (...input: readonly unknown[]) => {
+      calls.push(["competitors", ...input]);
+      return {
+        data: [],
+        page: { hasNext: false, totalApprox: 0 },
+        meta: { requestId: request.id }
+      };
+    }
+  } as unknown as SemanticCompetitorExportService;
   const controller = new SemanticExportReadController(
     keywords,
     groups,
     columns,
-    positionHistory
+    positionHistory,
+    competitors
   );
 
   assert.deepEqual(
@@ -88,6 +100,19 @@ test("forwards bounded export reads inside the trusted tenant context", async ()
   assert.deepEqual(
     await controller.listCustomColumns(projectId, headers, request),
     { data: [], meta: { requestId: request.id } }
+  );
+  assert.deepEqual(
+    await controller.listCompetitors(
+      projectId,
+      { limit: "100", sources: "SERP,AI" },
+      headers,
+      request
+    ),
+    {
+      data: [],
+      page: { hasNext: false, totalApprox: 0 },
+      meta: { requestId: request.id }
+    }
   );
   assert.deepEqual(
     await controller.listPositionHistory(
@@ -118,6 +143,13 @@ test("forwards bounded export reads inside the trusted tenant context", async ()
     ["groups", workspaceId, projectId],
     ["columns", workspaceId, projectId],
     [
+      "competitors",
+      { workspaceId, projectId, actorId },
+      { limit: 100, sort: "CREATED_DESC" },
+      { sources: ["SERP", "AI"] },
+      request.id
+    ],
+    [
       "position-history",
       { workspaceId, projectId, actorId },
       { limit: 25, sort: "CREATED_DESC" },
@@ -136,7 +168,8 @@ test("rejects an export route outside the trusted project", async () => {
     {} as KeywordService,
     {} as KeywordGroupService,
     {} as SemanticCustomColumnService,
-    {} as SemanticPositionHistoryExportService
+    {} as SemanticPositionHistoryExportService,
+    {} as SemanticCompetitorExportService
   );
 
   await assert.rejects(

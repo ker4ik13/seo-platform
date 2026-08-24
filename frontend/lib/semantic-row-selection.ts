@@ -13,6 +13,54 @@ export interface SemanticSelectableGroup {
   readonly systemKind?: "UNGROUPED" | "TRASH";
 }
 
+export interface SemanticSelectionScopeFilters {
+  readonly search?: string;
+  readonly tag?: string;
+  readonly intent?: string;
+  readonly groupId?: string;
+  readonly clusterId?: string;
+  readonly isFavorite?: boolean;
+  readonly isTracked?: boolean;
+  readonly priorityMin?: number;
+  readonly priorityMax?: number;
+}
+
+export interface SemanticSelectionScope {
+  readonly projectId: string;
+  readonly filters: SemanticSelectionScopeFilters;
+  readonly groupIds?: readonly string[];
+  readonly multiSearch?: Readonly<{
+    readonly terms: readonly string[];
+    readonly mode: string;
+  }>;
+}
+
+/**
+ * Identifies the visible row scope without coupling selection to pagination,
+ * sorting or background refresh counters.
+ */
+export function semanticSelectionScopeSignature(
+  scope: SemanticSelectionScope
+): string {
+  const { filters } = scope;
+  return JSON.stringify([
+    scope.projectId,
+    filters.search ?? null,
+    filters.tag ?? null,
+    filters.intent ?? null,
+    filters.groupId ?? null,
+    filters.clusterId ?? null,
+    filters.isFavorite ?? null,
+    filters.isTracked ?? null,
+    filters.priorityMin ?? null,
+    filters.priorityMax ?? null,
+    [...new Set(scope.groupIds ?? [])].sort(),
+    scope.multiSearch
+      ? [scope.multiSearch.mode, ...scope.multiSearch.terms]
+      : null
+  ]);
+}
+
 export function semanticHighlightAfterRowClick(
   orderedIds: readonly string[],
   anchorId: string | undefined,

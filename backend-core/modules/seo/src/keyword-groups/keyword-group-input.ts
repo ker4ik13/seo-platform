@@ -1,10 +1,12 @@
 import { BadRequestException } from "@nestjs/common";
 import type {
   InternalCreateSemanticKeywordGroupInput,
+  InternalCreateSemanticKeywordGroupsInput,
   InternalDeleteSemanticKeywordGroupInput,
   InternalDuplicateSemanticKeywordGroupInput,
   InternalUpdateSemanticKeywordGroupInput
 } from "@seo-platform/contracts";
+import { semanticKeywordGroupBulkCreateMaxItems } from "@seo-platform/contracts";
 import { internalUuid } from "../internal/internal-command-context.js";
 import { semanticCapacityEntitlement } from "../internal/semantic-capacity.js";
 
@@ -27,6 +29,29 @@ export function internalCreateSemanticKeywordGroupInput(
     ...scope(input),
     entitlement: semanticCapacityEntitlement(input.entitlement),
     name: groupName(input.name),
+    ...(parentId ? { parentId } : {}),
+    ...(color ? { color } : {}),
+    ...optionalPosition(input.position)
+  };
+}
+
+export function internalCreateSemanticKeywordGroupsInput(
+  value: unknown
+): InternalCreateSemanticKeywordGroupsInput {
+  const input = exactRecord(value, [
+    ...scopeFields(),
+    "entitlement",
+    "names",
+    "parentId",
+    "color",
+    "position"
+  ]);
+  const parentId = optionalUuid(input.parentId, "parentId", false);
+  const color = optionalColor(input.color, false);
+  return {
+    ...scope(input),
+    entitlement: semanticCapacityEntitlement(input.entitlement),
+    names: groupNames(input.names),
     ...(parentId ? { parentId } : {}),
     ...(color ? { color } : {}),
     ...optionalPosition(input.position)
@@ -132,6 +157,24 @@ function groupName(value: unknown): string {
   const name = value.normalize("NFKC").replace(/\s+/gu, " ").trim();
   if (!name || name.length > 255 || name.includes("/")) invalid("name");
   return name;
+}
+
+function groupNames(value: unknown): readonly string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > semanticKeywordGroupBulkCreateMaxItems
+  ) {
+    invalid("names");
+  }
+  const names = value.map((name) => groupName(name));
+  if (
+    new Set(names.map((name) => name.toLocaleLowerCase("ru"))).size !==
+    names.length
+  ) {
+    invalid("names");
+  }
+  return names;
 }
 
 function optionalUuid(

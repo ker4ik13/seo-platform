@@ -1,15 +1,16 @@
 import { Zip, ZipDeflate } from "fflate";
 import type {
   CreateSemanticExportInput,
+  SemanticCompetitorExportItem,
+  SemanticExportColumnKey,
   SemanticKeywordListItem,
   SemanticPositionHistoryExportRow,
-  SemanticPositionHistorySearchEngine,
-  SemanticSavedViewColumnKey
+  SemanticPositionHistorySearchEngine
 } from "@seo-platform/contracts";
 
 const encoder = new TextEncoder();
 const XLSX_MAX_DATA_ROWS_PER_SHEET = 1_048_575;
-const XLSX_NUMERIC_COLUMNS = new Set<SemanticSavedViewColumnKey>([
+const XLSX_NUMERIC_COLUMNS = new Set<SemanticExportColumnKey>([
   "frequency",
   "frequencyExact",
   "frequencyFixed",
@@ -21,10 +22,16 @@ const XLSX_NUMERIC_COLUMNS = new Set<SemanticSavedViewColumnKey>([
   "visibility",
   "priority"
 ]);
+const XLSX_WRAPPED_COLUMNS = new Set<SemanticExportColumnKey>([
+  "serpCompetitorUrls",
+  "serpCompetitorSerp",
+  "aiCompetitorUrls",
+  "aiCompetitorSerp"
+]);
 
 const HEADERS: Readonly<
   Record<
-    Exclude<SemanticSavedViewColumnKey, `custom:${string}`>,
+    Exclude<SemanticExportColumnKey, `custom:${string}`>,
     Readonly<Record<"en" | "ru", string>>
   >
 > = {
@@ -51,8 +58,17 @@ const HEADERS: Readonly<
   intent: { en: "Intent", ru: "Интент" },
   priority: { en: "Priority", ru: "Приоритет" },
   source: { en: "Source", ru: "Источник" },
-  updatedAt: { en: "Updated at", ru: "Обновлён" }
+  updatedAt: { en: "Updated at", ru: "Обновлён" },
+  serpCompetitorUrls: { en: "SERP competitors", ru: "Конкуренты" },
+  serpCompetitorSerp: { en: "Competitor SERP", ru: "SERP конкурентов" },
+  aiCompetitorUrls: { en: "AI competitors", ru: "ИИ-конкуренты" },
+  aiCompetitorSerp: { en: "AI competitor SERP", ru: "SERP ИИ-конкурентов" }
 };
+
+export interface SemanticExportKeywordRow extends SemanticKeywordListItem {
+  /** Internal export-only enrichment; it is never part of the keyword API. */
+  readonly exportCompetitors?: readonly SemanticCompetitorExportItem[];
+}
 
 export interface SemanticExportFile {
   readonly filename: string;
@@ -68,7 +84,7 @@ export interface SemanticPositionHistoryWorkbookPlan {
 }
 
 export function semanticExportFile(
-  rows: AsyncIterable<SemanticKeywordListItem>,
+  rows: AsyncIterable<SemanticExportKeywordRow>,
   input: CreateSemanticExportInput,
   customColumnNames: Readonly<Record<string, string>>,
   now = new Date()
@@ -104,7 +120,7 @@ export function semanticPositionHistoryExportFile(
 }
 
 async function* textDocument(
-  rows: AsyncIterable<SemanticKeywordListItem>,
+  rows: AsyncIterable<SemanticExportKeywordRow>,
   input: CreateSemanticExportInput,
   customColumnNames: Readonly<Record<string, string>>
 ): AsyncGenerator<Uint8Array> {
@@ -152,7 +168,7 @@ async function* textDocument(
 }
 
 async function* xlsxDocument(
-  rows: AsyncIterable<SemanticKeywordListItem>,
+  rows: AsyncIterable<SemanticExportKeywordRow>,
   input: CreateSemanticExportInput,
   customColumnNames: Readonly<Record<string, string>>
 ): AsyncGenerator<Uint8Array> {
@@ -482,8 +498,8 @@ function excelColumnNumber(value: string): number {
 }
 
 function exportRecord(
-  item: SemanticKeywordListItem,
-  columns: readonly SemanticSavedViewColumnKey[]
+  item: SemanticExportKeywordRow,
+  columns: readonly SemanticExportColumnKey[]
 ): Readonly<Record<string, unknown>> {
   const customValues = new Map(
     (item.customValues ?? []).map(({ columnId, value }) => [columnId, value])
@@ -494,14 +510,14 @@ function exportRecord(
       column,
       customId
         ? (customValues.get(customId) ?? null)
-        : systemColumnValue(item, column as Exclude<SemanticSavedViewColumnKey, `custom:${string}`>)
+        : systemColumnValue(item, column as Exclude<SemanticExportColumnKey, `custom:${string}`>)
     ];
   }));
 }
 
 function systemColumnValue(
-  item: SemanticKeywordListItem,
-  column: Exclude<SemanticSavedViewColumnKey, `custom:${string}`>
+  item: SemanticExportKeywordRow,
+  column: Exclude<SemanticExportColumnKey, `custom:${string}`>
 ): unknown {
   switch (column) {
     case "query": return item.textOriginal;
@@ -528,7 +544,37 @@ function systemColumnValue(
     case "priority": return item.priority;
     case "source": return item.sourceMode;
     case "updatedAt": return item.updatedAt;
+    case "serpCompetitorUrls": return competitorUrls(item, "SERP");
+    case "serpCompetitorSerp": return competitorSerp(item, "SERP");
+    case "aiCompetitorUrls": return competitorUrls(item, "AI");
+    case "aiCompetitorSerp": return competitorSerp(item, "AI");
   }
+}
+
+function competitorUrls(
+  item: SemanticExportKeywordRow,
+  source: SemanticCompetitorExportItem["source"]
+): string {
+  return (item.exportCompetitors ?? [])
+    .filter((competitor) => competitor.source === source)
+    .map(({ url }) => url)
+    .join("\n");
+}
+
+function competitorSerp(
+  item: SemanticExportKeywordRow,
+  source: SemanticCompetitorExportItem["source"]
+): string {
+  return (item.exportCompetitors ?? [])
+    .filter((competitor) => competitor.source === source)
+    .map((competitor) =>
+      `Title: ${singleLine(competitor.title)}\nDescription: ${singleLine(competitor.description)}`
+    )
+    .join("\n\n");
+}
+
+function singleLine(value: string | undefined): string {
+  return value?.replace(/\s+/gu, " ").trim() ?? "";
 }
 
 function aiAnswerPosition(
@@ -567,7 +613,7 @@ function searchVisibility(item: SemanticKeywordListItem): number {
 }
 
 function columnHeader(
-  column: SemanticSavedViewColumnKey,
+  column: SemanticExportColumnKey,
   locale: "en" | "ru",
   customColumnNames: Readonly<Record<string, string>>
 ): string {
@@ -576,7 +622,7 @@ function columnHeader(
 }
 
 function assertCustomColumns(
-  columns: readonly SemanticSavedViewColumnKey[],
+  columns: readonly SemanticExportColumnKey[],
   names: Readonly<Record<string, string>>
 ): void {
   for (const column of columns) {
@@ -585,7 +631,7 @@ function assertCustomColumns(
   }
 }
 
-function customColumnId(column: SemanticSavedViewColumnKey): string | undefined {
+function customColumnId(column: SemanticExportColumnKey): string | undefined {
   return column.startsWith("custom:") ? column.slice(7) : undefined;
 }
 
@@ -626,7 +672,7 @@ function worksheetStart(): string {
 function xlsxRow(
   index: number,
   values: readonly unknown[],
-  columns?: readonly SemanticSavedViewColumnKey[]
+  columns?: readonly SemanticExportColumnKey[]
 ): string {
   return `<row r="${index}">${values.map((value, column) =>
     xlsxCell(
@@ -634,7 +680,11 @@ function xlsxRow(
       column + 1,
       value,
       columns?.[column] !== undefined &&
-        XLSX_NUMERIC_COLUMNS.has(columns[column]!)
+        XLSX_NUMERIC_COLUMNS.has(columns[column]!),
+      columns?.[column] !== undefined &&
+        XLSX_WRAPPED_COLUMNS.has(columns[column]!)
+        ? 1
+        : undefined
     )
   ).join("")}</row>`;
 }
@@ -643,21 +693,23 @@ function xlsxCell(
   row: number,
   column: number,
   value: unknown,
-  numeric = false
+  numeric = false,
+  style?: number
 ): string {
   const reference = `${excelColumn(column)}${row}`;
-  if (value === null || value === undefined) return `<c r="${reference}"/>`;
-  if (typeof value === "number" && Number.isFinite(value)) return `<c r="${reference}"><v>${value}</v></c>`;
+  const styleAttribute = style === undefined ? "" : ` s="${style}"`;
+  if (value === null || value === undefined) return `<c r="${reference}"${styleAttribute}/>`;
+  if (typeof value === "number" && Number.isFinite(value)) return `<c r="${reference}"${styleAttribute}><v>${value}</v></c>`;
   if (numeric && typeof value === "string" && /^(?:0|[1-9]\d*)$/u.test(value)) {
-    return `<c r="${reference}"><v>${value}</v></c>`;
+    return `<c r="${reference}"${styleAttribute}><v>${value}</v></c>`;
   }
   if (numeric) {
     throw new TypeError("Semantic export contains an invalid numeric XLSX value");
   }
-  if (typeof value === "boolean") return `<c r="${reference}" t="b"><v>${value ? 1 : 0}</v></c>`;
+  if (typeof value === "boolean") return `<c r="${reference}"${styleAttribute} t="b"><v>${value ? 1 : 0}</v></c>`;
   const text = (Array.isArray(value) ? value.map(String).join(", ") : String(value))
     .slice(0, 32_767);
-  return `<c r="${reference}" t="inlineStr"><is><t xml:space="preserve">${xml(text)}</t></is></c>`;
+  return `<c r="${reference}"${styleAttribute} t="inlineStr"><is><t xml:space="preserve">${xml(text)}</t></is></c>`;
 }
 
 function excelColumn(value: number): string {
@@ -718,7 +770,16 @@ function contentTypes(sheetCount: number): string {
 }
 
 function stylesXml(): string {
-  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>';
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>' +
+    '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
+    '<borders count="1"><border/></borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+    '<cellXfs count="2">' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>' +
+    '</cellXfs></styleSheet>';
 }
 
 function positionHistoryStylesXml(): string {

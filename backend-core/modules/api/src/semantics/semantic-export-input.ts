@@ -1,4 +1,5 @@
 import {
+  semanticCompetitorExportColumnKeys,
   semanticExportFormats,
   semanticExportLocales,
   semanticExportScopes,
@@ -7,9 +8,9 @@ import {
   semanticPositionHistorySearchEngines,
   semanticSystemColumnKeys,
   type CreateSemanticExportInput,
+  type SemanticExportColumnKey,
   type SemanticExportFilters,
-  type SemanticPositionHistoryExportOptions,
-  type SemanticSavedViewColumnKey
+  type SemanticPositionHistoryExportOptions
 } from "@seo-platform/contracts";
 import { validationError } from "../common/domain-error.js";
 
@@ -228,15 +229,17 @@ function optionalUuidList(
 
 function exportColumns(
   value: unknown
-): readonly SemanticSavedViewColumnKey[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 108) {
-    invalid("columns", "Must contain 1 to 108 columns");
+): readonly SemanticExportColumnKey[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 112) {
+    invalid("columns", "Must contain 1 to 112 columns");
   }
   const columns = value.map((column, index) => {
     if (
       typeof column !== "string" ||
       (!semanticSystemColumnKeys.includes(
         column as (typeof semanticSystemColumnKeys)[number]
+      ) && !semanticCompetitorExportColumnKeys.includes(
+        column as (typeof semanticCompetitorExportColumnKeys)[number]
       ) &&
         !CUSTOM_COLUMN_PATTERN.test(column))
     ) {
@@ -244,7 +247,7 @@ function exportColumns(
     }
     return (column.startsWith("custom:")
       ? `custom:${column.slice("custom:".length).toLowerCase()}`
-      : column) as SemanticSavedViewColumnKey;
+      : column) as SemanticExportColumnKey;
   });
   if (new Set(columns).size !== columns.length) {
     invalid("columns", "Columns must be unique");

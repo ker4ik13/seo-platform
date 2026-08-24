@@ -1,8 +1,10 @@
 import type {
   CreateSemanticKeywordGroupInput,
+  CreateSemanticKeywordGroupsInput,
   DuplicateSemanticKeywordGroupInput,
   UpdateSemanticKeywordGroupInput
 } from "@seo-platform/contracts";
+import { semanticKeywordGroupBulkCreateMaxItems } from "@seo-platform/contracts";
 import { validationError } from "../common/domain-error.js";
 
 const UUID_PATTERN =
@@ -17,6 +19,20 @@ export function createSemanticKeywordGroupInput(
   const color = optionalColor(input.color, false).color;
   return {
     name: groupName(input.name),
+    ...(parentId ? { parentId } : {}),
+    ...(color ? { color } : {}),
+    ...optionalPosition(input.position)
+  };
+}
+
+export function createSemanticKeywordGroupsInput(
+  value: unknown
+): CreateSemanticKeywordGroupsInput {
+  const input = exactRecord(value, ["names", "parentId", "color", "position"]);
+  const parentId = optionalParentId(input.parentId, false).parentId;
+  const color = optionalColor(input.color, false).color;
+  return {
+    names: groupNames(input.names),
     ...(parentId ? { parentId } : {}),
     ...(color ? { color } : {}),
     ...optionalPosition(input.position)
@@ -130,6 +146,27 @@ function groupName(value: unknown): string {
     );
   }
   return name;
+}
+
+function groupNames(value: unknown): readonly string[] {
+  if (
+    !Array.isArray(value) ||
+    value.length < 1 ||
+    value.length > semanticKeywordGroupBulkCreateMaxItems
+  ) {
+    invalid(
+      "names",
+      `Must contain 1 to ${semanticKeywordGroupBulkCreateMaxItems} names`
+    );
+  }
+  const names = value.map((name) => groupName(name));
+  if (
+    new Set(names.map((name) => name.toLocaleLowerCase("ru"))).size !==
+    names.length
+  ) {
+    invalid("names", "Must contain unique names");
+  }
+  return names;
 }
 
 function optionalParentId(

@@ -31,12 +31,14 @@ import {
   type CreateSemanticKeywordInput,
   type CreateSemanticClusterInput,
   type CreateSemanticKeywordGroupInput,
+  type CreateSemanticKeywordGroupsInput,
   type DuplicateSemanticKeywordGroupInput,
   type InternalCreateSemanticKeywordInput,
   type InternalSemanticKeywordBulkCreateInput,
   type InternalSemanticKeywordBulkCreatePreviewInput,
   type InternalCreateSemanticClusterInput,
   type InternalCreateSemanticKeywordGroupInput,
+  type InternalCreateSemanticKeywordGroupsInput,
   type InternalDuplicateSemanticKeywordGroupInput,
   type InternalDeleteSemanticKeywordInput,
   type InternalDeleteSemanticClusterInput,
@@ -899,6 +901,28 @@ export class SeoDataClient {
       body
     );
     return semanticKeywordGroup(responseData(payload));
+  }
+
+  public async createKeywordGroups(
+    context: InternalContext,
+    input: CreateSemanticKeywordGroupsInput,
+    entitlement: SemanticCapacityEntitlement
+  ): Promise<readonly SemanticKeywordGroup[]> {
+    const scope = trackingScope(context);
+    const body: InternalCreateSemanticKeywordGroupsInput = {
+      ...input,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      actorId: context.actorId,
+      entitlement
+    };
+    const payload = await this.request(
+      "POST",
+      keywordGroupUrl(context, this.config.services.seoData, "bulk"),
+      context,
+      body
+    );
+    return semanticKeywordGroupItems(responseData(payload));
   }
 
   public async duplicateKeywordGroup(
@@ -3317,13 +3341,7 @@ function keywordUrl(
 export function semanticKeywordGroups(
   value: unknown
 ): readonly SemanticKeywordGroup[] {
-  if (!Array.isArray(value) || value.length > 2_000) {
-    throw invalidResponse();
-  }
-  const groups = value.map(semanticKeywordGroup);
-  if (new Set(groups.map(({ id }) => id)).size !== groups.length) {
-    throw invalidResponse();
-  }
+  const groups = semanticKeywordGroupItems(value);
   const ids = new Set(groups.map(({ id }) => id));
   if (
     groups.some(
@@ -3331,6 +3349,22 @@ export function semanticKeywordGroups(
         parentId !== undefined && (parentId === id || !ids.has(parentId))
     )
   ) {
+    throw invalidResponse();
+  }
+  return groups;
+}
+
+function semanticKeywordGroupItems(
+  value: unknown
+): readonly SemanticKeywordGroup[] {
+  if (!Array.isArray(value) || value.length > 2_000) {
+    throw invalidResponse();
+  }
+  const groups = value.map(semanticKeywordGroup);
+  if (new Set(groups.map(({ id }) => id)).size !== groups.length) {
+    throw invalidResponse();
+  }
+  if (groups.some(({ id, parentId }) => parentId === id)) {
     throw invalidResponse();
   }
   return groups;

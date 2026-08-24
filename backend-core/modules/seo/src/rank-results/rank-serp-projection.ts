@@ -59,7 +59,7 @@ export function rankHistorySearchSource(
   );
 }
 
-function projectUrlBelongsToDomain(
+export function projectUrlBelongsToDomain(
   value: string,
   projectDomain: string
 ): boolean {

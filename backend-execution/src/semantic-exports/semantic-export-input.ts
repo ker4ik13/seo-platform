@@ -1,5 +1,6 @@
 import { BadRequestException } from "@nestjs/common";
 import {
+  semanticCompetitorExportColumnKeys,
   semanticExportFormats,
   semanticExportLocales,
   semanticExportScopes,
@@ -9,14 +10,17 @@ import {
   semanticSystemColumnKeys,
   type InternalCancelSemanticExportInput,
   type InternalCreateSemanticExportInput,
-  type SemanticSavedViewColumnKey
+  type SemanticExportColumnKey
 } from "@seo-platform/contracts";
 import type { Job } from "../generated/prisma/client.js";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const KEY = /^[A-Za-z0-9._:-]{8,180}$/u;
 const CUSTOM_COLUMN = /^custom:[0-9a-f-]{36}$/iu;
-const SYSTEM_COLUMNS = new Set<string>(semanticSystemColumnKeys);
+const EXPORT_COLUMNS = new Set<string>([
+  ...semanticSystemColumnKeys,
+  ...semanticCompetitorExportColumnKeys
+]);
 const CREATE_FIELDS = new Set([
   "workspaceId",
   "projectId",
@@ -63,12 +67,12 @@ export function internalCreateSemanticExportInput(value: unknown): InternalCreat
   const format = enumValue(input.format, semanticExportFormats, "format");
   const scope = enumValue(input.scope, semanticExportScopes, "scope");
   const locale = enumValue(input.locale, semanticExportLocales, "locale");
-  if (!Array.isArray(input.columns) || input.columns.length < 1 || input.columns.length > 108) invalid("columns");
+  if (!Array.isArray(input.columns) || input.columns.length < 1 || input.columns.length > 112) invalid("columns");
   const columns = input.columns.map((column) => {
-    if (typeof column !== "string" || (!SYSTEM_COLUMNS.has(column) && !CUSTOM_COLUMN.test(column))) invalid("columns");
+    if (typeof column !== "string" || (!EXPORT_COLUMNS.has(column) && !CUSTOM_COLUMN.test(column))) invalid("columns");
     return (column.startsWith("custom:")
       ? `custom:${column.slice("custom:".length).toLowerCase()}`
-      : column) as SemanticSavedViewColumnKey;
+      : column) as SemanticExportColumnKey;
   });
   if (new Set(columns).size !== columns.length) invalid("columns");
   const filters = input.filters === undefined ? undefined : exportFilters(input.filters);

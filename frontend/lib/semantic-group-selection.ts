@@ -19,6 +19,43 @@ export function semanticAllRegularGroupIds(
     .map(({ id }) => id);
 }
 
+export function semanticKeywordSearchPlaceholder({
+  activeGroup,
+  activeGroupId,
+  multiGroupIds
+}: Readonly<{
+  activeGroup?: Readonly<{
+    name: string;
+    systemKind?: "UNGROUPED" | "TRASH";
+  }>;
+  activeGroupId?: string;
+  multiGroupIds: readonly string[];
+}>): string {
+  const selectedGroupCount = new Set(multiGroupIds).size;
+  if (selectedGroupCount > 1) {
+    return `Поиск по: ${formatRussianGroupCount(selectedGroupCount)}`;
+  }
+  if (activeGroup?.systemKind === "TRASH") return "Поиск по: Корзина";
+  if (activeGroup?.systemKind === "UNGROUPED") return "Поиск по: Без группы";
+  if (activeGroup) return `Поиск по: ${activeGroup.name}`;
+  if (activeGroupId) return "Поиск по: Выбранная группа";
+  return "Поиск по: Весь проект";
+}
+
+function formatRussianGroupCount(value: number): string {
+  const mod100 = value % 100;
+  const mod10 = value % 10;
+  const suffix =
+    mod100 >= 11 && mod100 <= 14
+      ? "групп"
+      : mod10 === 1
+        ? "группа"
+        : mod10 >= 2 && mod10 <= 4
+          ? "группы"
+          : "групп";
+  return `${value.toLocaleString("ru-RU")} ${suffix}`;
+}
+
 /**
  * Returns the single row that should carry a remote participant marker.
  * A selected child wins while it is visible; for a collapsed branch the

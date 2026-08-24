@@ -83,6 +83,21 @@ test("uses the Jobs-only semantic export read boundary", async () => {
     if (url.endsWith("/semantic-exports/custom-columns")) {
       return Response.json({ data: [], meta: { requestId: "columns" } });
     }
+    if (url.includes("/semantic-exports/competitors?")) {
+      return Response.json({
+        data: [{
+          keywordId: "01900000-0000-7000-8000-000000000011",
+          competitors: [{
+            source: "SERP",
+            url: "https://competitor.example/page",
+            normalizedUrl: "https://competitor.example/page",
+            title: "Competitor"
+          }]
+        }],
+        page: { hasNext: false, totalApprox: 1 },
+        meta: { requestId: "competitors" }
+      });
+    }
     return Response.json({
       data: [],
       page: { hasNext: false, totalApprox: 0 },
@@ -98,6 +113,12 @@ test("uses the Jobs-only semantic export read boundary", async () => {
     });
     await client.listExportKeywordGroups(context);
     await client.listExportCustomColumns(context);
+    const competitorPage = await client.listExportCompetitors(
+      context,
+      { limit: 100, sort: "CREATED_DESC" },
+      { sources: ["SERP", "AI"] }
+    );
+    assert.equal(competitorPage.data[0]?.competitors[0]?.source, "SERP");
     await client.listExportPositionHistory(
       context,
       { limit: 25, sort: "CREATED_DESC" },
@@ -114,6 +135,7 @@ test("uses the Jobs-only semantic export read boundary", async () => {
         `http://seo-data:4001/internal/v1/projects/${context.projectId}/semantic-exports/keywords?limit=500&search=seo&sort=CREATED_ASC`,
         `http://seo-data:4001/internal/v1/projects/${context.projectId}/semantic-exports/keyword-groups`,
         `http://seo-data:4001/internal/v1/projects/${context.projectId}/semantic-exports/custom-columns`,
+        `http://seo-data:4001/internal/v1/projects/${context.projectId}/semantic-exports/competitors?limit=100&sort=CREATED_DESC&sources=SERP%2CAI`,
         `http://seo-data:4001/internal/v1/projects/${context.projectId}/semantic-exports/position-history?limit=25&sort=CREATED_DESC&observedFrom=2026-08-01T00%3A00%3A00.000Z&observedBefore=2026-08-20T00%3A00%3A00.000Z&searchEngines=YANDEX%2CGOOGLE`
       ]
     );

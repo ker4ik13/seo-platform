@@ -6,6 +6,7 @@ import {
   semanticClipboardText,
   semanticHighlightAllRows,
   semanticHighlightAfterRowClick,
+  semanticSelectionScopeSignature,
   toggleSemanticHighlightedSelection
 } from "./semantic-row-selection.ts";
 
@@ -119,5 +120,43 @@ test("bulk editor keeps all 457 selected rows while respecting the 200-row API b
   assert.deepEqual(
     semanticBulkSelectionBatches(selections, 200).map((batch) => batch.length),
     [200, 200, 57]
+  );
+});
+
+test("background reload and sorting do not change the keyword selection scope", () => {
+  const scope = {
+    projectId: "project-1",
+    filters: { groupId: "group-1", isFavorite: true },
+    groupIds: ["group-3", "group-2"]
+  } as const;
+
+  assert.equal(
+    semanticSelectionScopeSignature(scope),
+    semanticSelectionScopeSignature({
+      ...scope,
+      groupIds: ["group-2", "group-3", "group-2"]
+    })
+  );
+});
+
+test("a genuinely different keyword scope gets a different selection signature", () => {
+  const current = semanticSelectionScopeSignature({
+    projectId: "project-1",
+    filters: { groupId: "group-1" }
+  });
+
+  assert.notEqual(
+    current,
+    semanticSelectionScopeSignature({
+      projectId: "project-1",
+      filters: { groupId: "group-2" }
+    })
+  );
+  assert.notEqual(
+    current,
+    semanticSelectionScopeSignature({
+      projectId: "project-2",
+      filters: { groupId: "group-1" }
+    })
   );
 });

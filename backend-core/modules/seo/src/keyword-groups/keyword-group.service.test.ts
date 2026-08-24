@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { HttpException } from "@nestjs/common";
 import type { PrismaService } from "../database/prisma.service.js";
 import { KeywordGroupService } from "./keyword-group.service.js";
 
@@ -227,6 +228,171 @@ test("creates a sibling at an explicit tree position and shifts following groups
       data: { position: 2, version: { increment: 1 } }
     }
   ]);
+});
+
+test("creates multiple sibling groups atomically in entered order", async () => {
+  const createdIds = [
+    "01900000-0000-7000-8000-000000000041",
+    "01900000-0000-7000-8000-000000000042",
+    "01900000-0000-7000-8000-000000000043"
+  ];
+  const firstId = "01900000-0000-7000-8000-000000000031";
+  const secondId = "01900000-0000-7000-8000-000000000032";
+  const ungroupedId = "01900000-0000-7000-8000-000000000020";
+  const trashId = "01900000-0000-7000-8000-000000000021";
+  const now = new Date("2026-08-24T10:00:00Z");
+  const createdData: Readonly<Record<string, unknown>>[] = [];
+  const updates: Array<Readonly<{ id: string; data: unknown }>> = [];
+  const regularRow = (
+    id: string,
+    name: string,
+    position: number
+  ) => ({
+    id,
+    workspaceId,
+    projectId,
+    parentId: null,
+    name,
+    path: name,
+    pathHash: "a".repeat(64),
+    color: "#6758ef",
+    position,
+    systemKind: null,
+    status: "ACTIVE" as const,
+    version: 1,
+    createdAt: now,
+    updatedAt: now,
+    _count: { memberships: 0 }
+  });
+  const systemRow = (id: string, kind: "UNGROUPED" | "TRASH") => ({
+    ...regularRow(id, kind === "UNGROUPED" ? "Без группы" : "Корзина", 0),
+    path: `__system__/${kind.toLowerCase()}`,
+    systemKind: kind
+  });
+  const rows = new Map<string, ReturnType<typeof regularRow>>();
+  const transaction = {
+    $executeRaw: async () => 1,
+    keywordGroup: {
+      findFirst: async ({ where }: { where: Readonly<Record<string, unknown>> }) => {
+        if (where.systemKind === "UNGROUPED") return { id: ungroupedId };
+        if (where.systemKind === "TRASH") return { id: trashId };
+        if (where.id === ungroupedId) return systemRow(ungroupedId, "UNGROUPED");
+        if (where.id === trashId) return systemRow(trashId, "TRASH");
+        return typeof where.id === "string" ? rows.get(where.id) ?? null : null;
+      },
+      findMany: async () => [
+        { id: firstId, position: 0 },
+        { id: secondId, position: 1 }
+      ],
+      create: async ({ data }: { data: Readonly<Record<string, unknown>> }) => {
+        const id = createdIds[createdData.length];
+        if (!id) throw new Error("Unexpected create call");
+        createdData.push(data);
+        rows.set(
+          id,
+          regularRow(id, String(data.name), Number(data.position))
+        );
+        return { id };
+      },
+      update: async ({ where, data }: { where: { id: string }; data: unknown }) => {
+        updates.push({ id: where.id, data });
+        return regularRow(where.id, "existing", 0);
+      }
+    }
+  };
+  const service = new KeywordGroupService({
+    $transaction: async (callback: (client: typeof transaction) => unknown) =>
+      callback(transaction)
+  } as unknown as PrismaService);
+
+  const result = await service.createMany({
+    workspaceId,
+    projectId,
+    actorId,
+    entitlement: unlimitedEntitlement,
+    names: ["Москва", "Санкт-Петербург", "Казань"],
+    color: "#6758ef",
+    position: 1
+  });
+
+  assert.deepEqual(
+    createdData.map(({ name, position }) => ({ name, position })),
+    [
+      { name: "Москва", position: 1 },
+      { name: "Санкт-Петербург", position: 2 },
+      { name: "Казань", position: 3 }
+    ]
+  );
+  assert.deepEqual(result.map(({ name, position }) => ({ name, position })), [
+    { name: "Москва", position: 1 },
+    { name: "Санкт-Петербург", position: 2 },
+    { name: "Казань", position: 3 }
+  ]);
+  assert.deepEqual(updates, [
+    {
+      id: secondId,
+      data: { position: 4, version: { increment: 1 } }
+    }
+  ]);
+});
+
+test("rejects the whole group batch before writes when folder capacity is exceeded", async () => {
+  let createCalls = 0;
+  const systemRow = (kind: "UNGROUPED" | "TRASH") => ({
+    id: `${kind}-id`,
+    workspaceId,
+    projectId,
+    parentId: null,
+    name: kind === "UNGROUPED" ? "Без группы" : "Корзина",
+    path: `__system__/${kind.toLowerCase()}`,
+    pathHash: "a".repeat(64),
+    color: "#6758ef",
+    position: kind === "UNGROUPED" ? 1_998 : 1_999,
+    systemKind: kind,
+    status: "ACTIVE" as const,
+    version: 1,
+    createdAt: new Date("2026-08-24T10:00:00Z"),
+    updatedAt: new Date("2026-08-24T10:00:00Z"),
+    _count: { memberships: 0 }
+  });
+  const transaction = {
+    $executeRaw: async () => 1,
+    keywordGroup: {
+      findFirst: async ({ where }: { where: Readonly<Record<string, unknown>> }) => {
+        if (where.systemKind === "UNGROUPED") return { id: "UNGROUPED-id" };
+        if (where.systemKind === "TRASH") return { id: "TRASH-id" };
+        if (where.id === "UNGROUPED-id") return systemRow("UNGROUPED");
+        if (where.id === "TRASH-id") return systemRow("TRASH");
+        return null;
+      },
+      count: async () => 2,
+      create: async () => {
+        createCalls += 1;
+        return { id: "unexpected" };
+      }
+    }
+  };
+  const service = new KeywordGroupService({
+    $transaction: async (callback: (client: typeof transaction) => unknown) =>
+      callback(transaction)
+  } as unknown as PrismaService);
+
+  await assert.rejects(
+    service.createMany({
+      workspaceId,
+      projectId,
+      actorId,
+      entitlement: {
+        ...unlimitedEntitlement,
+        planCode: "START",
+        foldersPerProject: 3
+      },
+      names: ["Москва", "Казань"]
+    }),
+    (error: unknown) =>
+      error instanceof HttpException && error.getStatus() === 409
+  );
+  assert.equal(createCalls, 0);
 });
 
 test("reorders siblings by explicit project position without changing parent", async () => {

@@ -26,6 +26,7 @@ import {
 import { PlatformApiGuard } from "../internal/platform-api.guard.js";
 import {
   internalCreateSemanticKeywordGroupInput,
+  internalCreateSemanticKeywordGroupsInput,
   internalDeleteSemanticKeywordGroupInput,
   internalDuplicateSemanticKeywordGroupInput,
   internalUpdateSemanticKeywordGroupInput
@@ -65,6 +66,18 @@ export class KeywordGroupController {
     assertMutation(projectId, headers, input);
     const data = await this.groups.create(input);
     return response(request, data);
+  }
+
+  @Post("bulk")
+  public async createMany(
+    @Param("projectId") projectId: string,
+    @Body() body: unknown,
+    @Headers() headers: InternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<readonly SemanticKeywordGroup[]>> {
+    const input = internalCreateSemanticKeywordGroupsInput(body);
+    assertMutation(projectId, headers, input);
+    return collectionResponse(request, await this.groups.createMany(input));
   }
 
   @Post(":groupId/duplicate")
@@ -148,5 +161,15 @@ function response(
   return {
     data,
     meta: { requestId: request.id, version: data.version }
+  };
+}
+
+function collectionResponse(
+  request: FastifyRequest,
+  data: readonly SemanticKeywordGroup[]
+): ApiResponse<readonly SemanticKeywordGroup[]> {
+  return {
+    data,
+    meta: { requestId: request.id }
   };
 }

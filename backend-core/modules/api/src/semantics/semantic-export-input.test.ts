@@ -88,6 +88,43 @@ test("accepts only a bounded XLSX position-history report", () => {
   );
 });
 
+test("accepts competitor data as ordinary export columns", () => {
+  const input = createSemanticExportInput({
+    format: "CSV",
+    scope: "CURRENT_FILTER",
+    locale: "ru",
+    columns: [
+      "query",
+      "serpCompetitorUrls",
+      "serpCompetitorSerp",
+      "aiCompetitorUrls",
+      "aiCompetitorSerp"
+    ]
+  });
+
+  assert.deepEqual(input.columns, [
+    "query",
+    "serpCompetitorUrls",
+    "serpCompetitorSerp",
+    "aiCompetitorUrls",
+    "aiCompetitorSerp"
+  ]);
+  assert.throws(
+    () => createSemanticExportInput({
+      ...input,
+      competitors: { sources: ["SERP"] }
+    }),
+    DomainError
+  );
+  assert.throws(
+    () => createSemanticExportInput({
+      ...input,
+      columns: ["query", "competitorUnknown"]
+    }),
+    DomainError
+  );
+});
+
 test("requires scope-specific IDs and rejects ambiguous full exports", () => {
   assert.throws(
     () =>

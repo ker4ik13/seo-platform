@@ -1427,6 +1427,91 @@ test("forwards normalized tag suggestions through the trusted project route", as
   }
 });
 
+test("forwards an ordered semantic group batch and accepts an existing parent", async () => {
+  const originalFetch = globalThis.fetch;
+  const parentId = "01900000-0000-7000-8000-000000000030";
+  let capturedUrl: URL | undefined;
+  let capturedBody: Readonly<Record<string, unknown>> | undefined;
+  globalThis.fetch = (async (
+    input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> => {
+    capturedUrl = new URL(
+      input instanceof Request ? input.url : input.toString()
+    );
+    capturedBody = JSON.parse(String(init?.body)) as Readonly<
+      Record<string, unknown>
+    >;
+    return jsonResponse({
+      data: [
+        {
+          id: "01900000-0000-7000-8000-000000000031",
+          parentId,
+          name: "Москва",
+          path: "Города / Москва",
+          color: "#6758ef",
+          position: 2,
+          keywordCount: 0,
+          version: 1,
+          createdAt: "2026-08-24T10:00:00.000Z",
+          updatedAt: "2026-08-24T10:00:00.000Z"
+        },
+        {
+          id: "01900000-0000-7000-8000-000000000032",
+          parentId,
+          name: "Казань",
+          path: "Города / Казань",
+          color: "#6758ef",
+          position: 3,
+          keywordCount: 0,
+          version: 1,
+          createdAt: "2026-08-24T10:00:00.000Z",
+          updatedAt: "2026-08-24T10:00:00.000Z"
+        }
+      ]
+    });
+  }) as typeof fetch;
+  const entitlement = {
+    planCode: "TEAM",
+    planVersion: 1,
+    storedKeywords: 2_000_000,
+    keywordsPerProject: 2_000_000,
+    foldersPerProject: 500,
+    trackedContextPairs: 50_000
+  } as const;
+
+  try {
+    const result = await client().createKeywordGroups(
+      internalContext(),
+      {
+        names: ["Москва", "Казань"],
+        parentId,
+        color: "#6758ef",
+        position: 2
+      },
+      entitlement
+    );
+
+    assert.deepEqual(result.map(({ name }) => name), ["Москва", "Казань"]);
+    assert.equal(
+      capturedUrl?.pathname,
+      `/internal/v1/projects/${projectId}/keyword-groups/bulk`
+    );
+    assert.deepEqual(capturedBody, {
+      names: ["Москва", "Казань"],
+      parentId,
+      color: "#6758ef",
+      position: 2,
+      workspaceId,
+      projectId,
+      actorId,
+      entitlement
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("scopes crawl issue requests to the selected page", async () => {
   const originalFetch = globalThis.fetch;
   const pageId = "01900000-0000-7000-8000-000000000020";

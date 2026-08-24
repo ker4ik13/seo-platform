@@ -7,7 +7,8 @@ import type {
 import { unzipSync } from "fflate";
 import {
   semanticExportFile,
-  semanticPositionHistoryExportFile
+  semanticPositionHistoryExportFile,
+  type SemanticExportKeywordRow
 } from "./semantic-export-encoder.js";
 
 test("streams 2,002 rows into a valid XLSX workbook", async () => {
@@ -114,6 +115,50 @@ test("always adds a BOM for Google Sheets CSV", async () => {
   assert.equal(csv.startsWith("Запрос\r\n"), true);
 });
 
+test("writes competitor URLs and SERP data into ordinary keyword columns", async () => {
+  const input = {
+    format: "CSV",
+    scope: "CURRENT_FILTER",
+    locale: "ru",
+    columns: [
+      "query",
+      "serpCompetitorUrls",
+      "serpCompetitorSerp",
+      "aiCompetitorUrls",
+      "aiCompetitorSerp"
+    ],
+    includeBom: true
+  } as const;
+  const csvFile = semanticExportFile(
+    keywordWithCompetitors(),
+    input,
+    {},
+    new Date("2026-08-24T10:00:00.000Z")
+  );
+
+  assert.equal(csvFile.filename, "semantic-core-2026-08-24.csv");
+  const csvBytes = await collect(csvFile.bytes);
+  assert.deepEqual(Array.from(csvBytes.slice(0, 3)), [0xef, 0xbb, 0xbf]);
+  const csv = new TextDecoder().decode(csvBytes);
+  assert.equal(
+    csv,
+    "Запрос,Конкуренты,SERP конкурентов,ИИ-конкуренты,SERP ИИ-конкурентов\r\n" +
+      "запрос с конкурентами,\"https://competitor.example/one\nhttps://competitor.example/two\",\"Title: Первый заголовок\nDescription: Первое описание\n\nTitle: Второй заголовок\nDescription: Второе описание\",https://ai.example/source,\"Title: ИИ заголовок\nDescription: ИИ описание\"\r\n"
+  );
+
+  const xlsxFile = semanticExportFile(
+    keywordWithCompetitors(),
+    { ...input, format: "XLSX" },
+    {}
+  );
+  const archive = unzipSync(await collect(xlsxFile.bytes));
+  const sheet = new TextDecoder().decode(archive["xl/worksheets/sheet1.xml"]);
+  const styles = new TextDecoder().decode(archive["xl/styles.xml"]);
+  assert.match(sheet, /https:\/\/competitor\.example\/one\nhttps:\/\/competitor\.example\/two/u);
+  assert.match(sheet, /Title: Первый заголовок\nDescription: Первое описание/u);
+  assert.match(styles, /wrapText="1"/u);
+});
+
 test("builds a position-history workbook with formulas and comparison colors", async () => {
   const file = semanticPositionHistoryExportFile(
     positionHistoryRows(),
@@ -169,6 +214,35 @@ async function* keywords(
   for (let index = 1; index <= count; index += 1) {
     yield keyword(`запрос ${index}`);
   }
+}
+
+async function* keywordWithCompetitors(): AsyncGenerator<SemanticExportKeywordRow> {
+  yield {
+    ...keyword("запрос с конкурентами"),
+    exportCompetitors: [
+      {
+        source: "SERP",
+        url: "https://competitor.example/one",
+        normalizedUrl: "https://competitor.example/one",
+        title: "Первый\nзаголовок",
+        description: "Первое   описание"
+      },
+      {
+        source: "SERP",
+        url: "https://competitor.example/two",
+        normalizedUrl: "https://competitor.example/two",
+        title: "Второй заголовок",
+        description: "Второе описание"
+      },
+      {
+        source: "AI",
+        url: "https://ai.example/source",
+        normalizedUrl: "https://ai.example/source",
+        title: "ИИ заголовок",
+        description: "ИИ описание"
+      }
+    ]
+  };
 }
 
 async function* oneKeyword(

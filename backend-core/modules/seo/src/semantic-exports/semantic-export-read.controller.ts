@@ -11,13 +11,18 @@ import {
 import type {
   ApiCollectionResponse,
   ApiResponse,
+  SemanticCompetitorExportKeyword,
+  SemanticCompetitorExportOptions,
   SemanticCustomColumn,
   SemanticKeywordGroup,
   SemanticKeywordListItem,
   SemanticPositionHistoryExportOptions,
   SemanticPositionHistoryExportRow
 } from "@seo-platform/contracts";
-import { semanticPositionHistorySearchEngines } from "@seo-platform/contracts";
+import {
+  semanticCompetitorExportSources,
+  semanticPositionHistorySearchEngines
+} from "@seo-platform/contracts";
 import type { FastifyRequest } from "fastify";
 import {
   internalCommandContext,
@@ -28,6 +33,7 @@ import { KeywordGroupService } from "../keyword-groups/keyword-group.service.js"
 import { keywordListQuery } from "../keywords/keyword-query.js";
 import { KeywordService } from "../keywords/keyword.service.js";
 import { SemanticCustomColumnService } from "../semantic-custom-columns/semantic-custom-column.service.js";
+import { SemanticCompetitorExportService } from "./semantic-competitor-export.service.js";
 import { SemanticPositionHistoryExportService } from "./semantic-position-history-export.service.js";
 
 type InternalHeaders = Readonly<
@@ -41,7 +47,8 @@ export class SemanticExportReadController {
     private readonly keywords: KeywordService,
     private readonly groups: KeywordGroupService,
     private readonly columns: SemanticCustomColumnService,
-    private readonly positionHistory: SemanticPositionHistoryExportService
+    private readonly positionHistory: SemanticPositionHistoryExportService,
+    private readonly competitors: SemanticCompetitorExportService
   ) {}
 
   @Get("keywords")
@@ -56,6 +63,22 @@ export class SemanticExportReadController {
       context.workspaceId,
       context.projectId,
       keywordListQuery(query),
+      request.id
+    );
+  }
+
+  @Get("competitors")
+  public async listCompetitors(
+    @Param("projectId") projectId: string,
+    @Query() query: unknown,
+    @Headers() headers: InternalHeaders,
+    @Req() request: FastifyRequest
+  ): Promise<ApiCollectionResponse<SemanticCompetitorExportKeyword>> {
+    const context = routeContext(projectId, headers);
+    return this.competitors.list(
+      context,
+      keywordListQuery(query),
+      competitorOptions(query),
       request.id
     );
   }
@@ -133,6 +156,29 @@ function positionHistoryOptions(
     observedFrom,
     observedBefore,
     searchEngines: searchEngines as SemanticPositionHistoryExportOptions["searchEngines"]
+  };
+}
+
+function competitorOptions(value: unknown): SemanticCompetitorExportOptions {
+  const query = typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Readonly<Record<string, unknown>>
+    : {};
+  if (typeof query.sources !== "string") {
+    throw new BadRequestException("Invalid competitor export sources");
+  }
+  const sources = query.sources.split(",").map((item) => item.trim());
+  if (
+    sources.length < 1 ||
+    sources.length > semanticCompetitorExportSources.length ||
+    new Set(sources).size !== sources.length ||
+    sources.some((source) => !semanticCompetitorExportSources.includes(
+      source as (typeof semanticCompetitorExportSources)[number]
+    ))
+  ) {
+    throw new BadRequestException("Invalid competitor export sources");
+  }
+  return {
+    sources: sources as SemanticCompetitorExportOptions["sources"]
   };
 }
 
