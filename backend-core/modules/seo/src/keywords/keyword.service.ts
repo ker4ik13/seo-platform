@@ -1152,48 +1152,76 @@ export class KeywordService {
           input.duplicatePolicy === "ADD_TO_GROUP" &&
           input.groupId
         ) {
-          const linkedGroup = await linkActiveKeywordToGroup(
+          const beforeState = keywordVersionState(existing);
+          const movedGroup = await moveActiveKeywordToGroup(
             transaction,
             input.workspaceId,
             input.projectId,
             existing.id,
-            input.groupId
+            input.groupId,
+            input.actorId,
+            existing.version
           );
-          if (linkedGroup) {
-            const linked = await requiredKeyword(
+          const moved = await requiredKeyword(
+            transaction,
+            input.workspaceId,
+            input.projectId,
+            existing.id
+          );
+          const change = {
+            entityId: moved.id,
+            operation: "UPDATE" as const,
+            beforeState,
+            afterState: keywordVersionState(moved),
+            beforeVersion: existing.version,
+            afterVersion: moved.version
+          };
+          if (semanticVersion) {
+            await this.semanticVersions.appendBulkKeywordChange(
               transaction,
-              input.workspaceId,
-              input.projectId,
-              existing.id
+              semanticVersion,
+              change
             );
-            return {
-              ...keywordItem(
-                linked,
-                await targetUrlFor(
-                  transaction,
-                  input.workspaceId,
-                  input.projectId,
-                  linked.targetPageId
-                ),
-                await isKeywordTracked(
-                  transaction,
-                  input.workspaceId,
-                  input.projectId,
-                  linked.id
-                ),
-                await clusterNameFor(
-                  transaction,
-                  input.workspaceId,
-                  input.projectId,
-                  linked.clusterId
-                ),
-                [],
-                [],
-                linkedGroup
-              ),
-              createOutcome: "LINKED_EXISTING"
-            };
+          } else {
+            await this.semanticVersions.createWithKeywordChange(
+              transaction,
+              {
+                workspaceId: input.workspaceId,
+                projectId: input.projectId,
+                actorId: input.actorId,
+                reason: "KEYWORD_CREATE",
+                summary: "Перемещён существующий поисковый запрос"
+              },
+              change
+            );
           }
+          return {
+            ...keywordItem(
+              moved,
+              await targetUrlFor(
+                transaction,
+                input.workspaceId,
+                input.projectId,
+                moved.targetPageId
+              ),
+              await isKeywordTracked(
+                transaction,
+                input.workspaceId,
+                input.projectId,
+                moved.id
+              ),
+              await clusterNameFor(
+                transaction,
+                input.workspaceId,
+                input.projectId,
+                moved.clusterId
+              ),
+              [],
+              [],
+              movedGroup
+            ),
+            createOutcome: "LINKED_EXISTING"
+          };
         }
         if (
           existing &&
@@ -2425,15 +2453,15 @@ async function assertGroup(
   }
 }
 
-async function linkActiveKeywordToGroup(
+async function moveActiveKeywordToGroup(
   transaction: Prisma.TransactionClient,
   workspaceId: string,
   projectId: string,
   keywordId: string,
-  groupId: string
-): Promise<
-  Readonly<{ id: string; path: string | null; name: string }> | undefined
-> {
+  groupId: string,
+  actorId: string,
+  expectedVersion: number
+): Promise<Readonly<{ id: string; path: string | null; name: string }>> {
   await lockKeywordGroupTree(transaction, projectId);
   const group = await transaction.keywordGroup.findFirst({
     where: { id: groupId, workspaceId, projectId, status: "ACTIVE" },
@@ -2445,24 +2473,25 @@ async function linkActiveKeywordToGroup(
     );
   }
   await lockKeyword(transaction, projectId, keywordId);
-  const membership = await transaction.keywordGroupMembership.findFirst({
-    where: { projectId, keywordId, groupId },
-    select: { keywordId: true }
+  const updated = await transaction.keyword.updateMany({
+    where: {
+      id: keywordId,
+      workspaceId,
+      projectId,
+      status: "ACTIVE",
+      version: expectedVersion
+    },
+    data: {
+      updatedBy: actorId,
+      version: { increment: 1 }
+    }
   });
-  if (membership) return undefined;
+  if (updated.count !== 1) throw keywordVersionConflict(expectedVersion);
+  await transaction.keywordGroupMembership.deleteMany({
+    where: { projectId, keywordId }
+  });
   await transaction.keywordGroupMembership.create({
     data: { projectId, keywordId, groupId }
-  });
-  await transaction.keywordGroupMembership.deleteMany({
-    where: {
-      projectId,
-      keywordId,
-      group: {
-        workspaceId,
-        projectId,
-        systemKind: "UNGROUPED"
-      }
-    }
   });
   return { id: group.id, path: group.path, name: group.name };
 }

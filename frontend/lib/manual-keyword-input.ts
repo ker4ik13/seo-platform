@@ -45,6 +45,22 @@ export interface ManualKeywordDuplicatePolicyInput {
   readonly skipDuplicates: boolean;
 }
 
+type ManualKeywordDuplicatePreviewRow =
+  SemanticKeywordBulkCreatePreviewResult["rows"][number];
+
+export function manualKeywordDuplicateCanApply(
+  row: ManualKeywordDuplicatePreviewRow,
+  targetGroupId?: string
+): boolean {
+  if (row.state === "TRASHED_DUPLICATE") return true;
+  if (row.state !== "ACTIVE_DUPLICATE" || !targetGroupId) return false;
+  return (
+    !row.inTargetGroup ||
+    row.groupsTruncated ||
+    row.groups.some((group) => group.id !== targetGroupId)
+  );
+}
+
 export function manualKeywordDuplicatePolicy({
   addDuplicatesToGroup,
   inTargetGroup,
@@ -52,14 +68,18 @@ export function manualKeywordDuplicatePolicy({
   selectedForTargetGroup,
   skipDuplicates
 }: ManualKeywordDuplicatePolicyInput): SemanticKeywordDuplicatePolicy {
-  if (previewState === "TRASHED_DUPLICATE") return "SKIP_EXISTING";
+  if (previewState === "TRASHED_DUPLICATE") {
+    return selectedForTargetGroup ? "RESTORE_TRASHED" : "SKIP_EXISTING";
+  }
+  if (previewState === "ACTIVE_DUPLICATE" && selectedForTargetGroup) {
+    return "ADD_TO_GROUP";
+  }
   if (previewState === "ACTIVE_DUPLICATE" && inTargetGroup) {
     return "SKIP_EXISTING";
   }
   if (
-    (previewState === "ACTIVE_DUPLICATE" && selectedForTargetGroup) ||
-    ((previewState === undefined || previewState === "NEW") &&
-      addDuplicatesToGroup)
+    (previewState === undefined || previewState === "NEW") &&
+    addDuplicatesToGroup
   ) {
     return "ADD_TO_GROUP";
   }

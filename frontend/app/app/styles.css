@@ -4756,8 +4756,13 @@ svg { display: block; }
 .semantic-group-tree > header span { background: #ece9ff; border-radius: 999px; color: var(--brand); font-size: 9px; padding: 3px 6px; }
 .semantic-group-tree > header button { background: transparent; border-radius: 7px; color: var(--muted); font-size: 20px; height: 30px; width: 30px; }
 .semantic-group-tree > header button:hover { background: #f0eff6; color: var(--brand); }
-.semantic-group-search { display: block; padding: 2px 4px 8px; }
-.semantic-group-search input { background: #fff; border: 1px solid var(--line); border-radius: 7px; font-size: 11px; height: 34px; padding: 0 9px; width: 100%; }
+.semantic-group-search { display: block; padding: 2px 4px 8px; position: relative; }
+.semantic-group-search input { appearance: none; background: #fff; border: 1px solid var(--line); border-radius: 7px; font-size: 11px; height: 34px; padding: 0 36px 0 9px; width: 100%; }
+.semantic-group-search input::-webkit-search-cancel-button,
+.semantic-group-search input::-webkit-search-decoration { appearance: none; display: none; }
+.semantic-group-search > button { align-items: center; background: transparent; border: 0; border-radius: 6px; color: var(--muted); display: flex; height: 26px; justify-content: center; padding: 0; position: absolute; right: 8px; top: 6px; width: 26px; }
+.semantic-group-search > button:hover { background: #efedf8; color: var(--brand); }
+.semantic-group-search > button svg { height: 14px; width: 14px; }
 .semantic-group-root {
   align-items: center;
   background: transparent;
@@ -4922,9 +4927,10 @@ svg { display: block; }
 .semantic-multi-search-trigger:hover,
 .semantic-multi-search-trigger.active { background: #efedff; border-color: #bdb4ff; color: var(--brand); }
 .semantic-multi-search-trigger svg { height: 16px; width: 16px; }
-.semantic-multi-search-chip { align-items: center; background: #efedff; border: 1px solid #d6d0ff; border-radius: 999px; color: #5b48d5; display: inline-flex; flex: 0 0 auto; font-size: 8px; font-weight: 750; gap: 5px; min-height: 25px; padding: 0 4px 0 8px; white-space: nowrap; }
-.semantic-multi-search-chip button { align-items: center; background: transparent; border: 0; border-radius: 50%; color: inherit; display: inline-flex; font-size: 15px; height: 19px; justify-content: center; padding: 0; width: 19px; }
+.semantic-multi-search-chip { align-items: center; background: linear-gradient(135deg, #f4f2ff, #ece9ff); border: 1px solid #cfc8ff; border-radius: 8px; color: #5641d0; display: inline-flex; flex: 0 0 auto; font-size: 9px; font-weight: 750; gap: 5px; height: 34px; padding: 0 4px 0 9px; white-space: nowrap; }
+.semantic-multi-search-chip button { align-items: center; background: transparent; border: 0; border-radius: 6px; color: inherit; display: inline-flex; height: 26px; justify-content: center; padding: 0; width: 26px; }
 .semantic-multi-search-chip button:hover { background: rgba(103, 88, 239, .12); }
+.semantic-multi-search-chip button svg { height: 13px; width: 13px; }
 .semantic-table-tools .semantic-search input { min-height: 34px; }
 .semantic-table-tools .semantic-search .secondary-button { min-height: 34px; }
 .semantic-filter-disclosure { position: relative; }
@@ -5525,8 +5531,8 @@ svg { display: block; }
   box-shadow: 0 0 0 2px var(--brand);
   transform: scale(1.08);
 }
-.semantic-dialog-selection { border: 1px solid var(--line); border-radius: 8px; display: grid; max-height: 180px; overflow: auto; padding: 5px; }
-.semantic-dialog-selection span { border-bottom: 1px solid var(--line); font-size: 10px; overflow: hidden; padding: 7px; text-overflow: ellipsis; white-space: nowrap; }
+.semantic-dialog-selection { align-content: start; border: 1px solid var(--line); border-radius: 8px; display: grid; grid-auto-rows: 30px; max-height: 180px; overflow-x: hidden; overflow-y: auto; padding: 5px; }
+.semantic-dialog-selection span { align-items: center; border-bottom: 1px solid var(--line); display: flex; font-size: 10px; line-height: 1.25; min-height: 30px; overflow: hidden; padding: 0 7px; text-overflow: ellipsis; white-space: nowrap; }
 .semantic-dialog-selection span:last-child { border-bottom: 0; }
 .semantic-dialog-checkbox { align-items: flex-start; background: #fafafd; border: 1px solid var(--line-strong); border-radius: 9px; display: flex !important; gap: 10px !important; padding: 11px 12px; }
 .semantic-dialog-checkbox input { accent-color: var(--brand); flex: 0 0 auto; margin-top: 2px; }
@@ -5583,7 +5589,12 @@ svg { display: block; }
 .semantic-move-search > svg { color: var(--muted); height: 14px; left: 10px; pointer-events: none; position: absolute; top: 50%; transform: translateY(-50%); width: 14px; z-index: 1; }
 .semantic-move-search > input { appearance: none; background: #fff; border: 1px solid var(--line-strong); border-radius: 8px; display: block; font: inherit; font-size: 11px; height: 34px; line-height: 1; min-height: 34px !important; min-width: 0; padding: 0 10px 0 32px !important; width: 100%; }
 .semantic-move-search > input:focus-visible { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(103, 88, 239, .12); outline: 0; }
-.semantic-move-search > input::-webkit-search-cancel-button { cursor: pointer; }
+.semantic-move-search > input::-webkit-search-cancel-button,
+.semantic-move-search > input::-webkit-search-decoration { appearance: none; display: none; }
+.semantic-move-search > button { align-items: center; background: transparent; border: 0; border-radius: 6px; color: var(--muted); display: flex; height: 26px; justify-content: center; padding: 0; position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 26px; z-index: 2; }
+.semantic-move-search > button:hover { background: #efedf8; color: var(--brand); }
+.semantic-move-search > button svg { height: 13px; width: 13px; }
+.semantic-move-search:has(> button) > input { padding-right: 34px !important; }
 .semantic-move-tree { background: #fbfbfd; border: 1px solid var(--line-strong); border-radius: 10px; max-height: min(52vh, 420px); min-height: 210px; overflow: auto; padding: 4px; }
 .semantic-move-tree-row { --semantic-folder-guide-color: rgba(104, 112, 132, .15); align-items: stretch; border-radius: 7px; display: grid; grid-template-columns: calc(var(--move-group-depth, 0) * 15px + 24px) minmax(0, 1fr); min-height: 34px; position: relative; }
 .semantic-move-tree-row:not(.root)::before {
@@ -5955,11 +5966,43 @@ svg { display: block; }
 .semantic-operation-query-list strong { font-size: 10px; }
 .semantic-operation-query-list small { color: var(--muted); font-size: 8px; }
 .semantic-operation-query-list p { color: var(--muted); font-size: 9px; margin: 0; padding: 12px; text-align: center; }
+.semantic-operation-query-sentinel,
+.semantic-operation-query-load-error {
+  align-items: center;
+  color: var(--muted);
+  display: flex;
+  font-size: 9px;
+  gap: 7px;
+  justify-content: center;
+  min-height: 38px;
+  padding: 7px;
+  text-align: center;
+}
+.semantic-operation-query-sentinel i {
+  animation: spin .8s linear infinite;
+  border: 2px solid #ddd9ff;
+  border-radius: 50%;
+  border-top-color: var(--brand);
+  height: 14px;
+  width: 14px;
+}
+.semantic-operation-query-load-error { color: #a13b48; flex-wrap: wrap; }
+.semantic-operation-query-load-error button {
+  background: #fff;
+  border: 1px solid #efb8c0;
+  border-radius: 7px;
+  color: #a13b48;
+  font-size: 9px;
+  min-height: 28px;
+  padding: 0 9px;
+}
+.semantic-operation-query-page-status { border-top: 1px solid var(--line); }
 .semantic-operation-folder-list { background: #fff; border: 1px solid var(--line); border-radius: 8px; display: grid; max-height: 154px; overflow: auto; padding: 4px; }
 .semantic-operation-folder-list label { align-items: center; border-radius: 6px; cursor: pointer; display: grid; font-size: 10px; gap: 8px; grid-template-columns: auto minmax(0, 1fr) auto; min-height: 32px; padding: 4px 7px; }
 .semantic-operation-folder-list label:hover { background: #f7f6ff; }
 .semantic-operation-folder-list span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .semantic-operation-all-scope { background: #fff; border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 4px; padding: 11px; }
+.semantic-workflow-panel .semantic-operation-all-scope { align-self: start; }
 .semantic-operation-all-scope strong { font-size: 10px; }
 .semantic-operation-all-scope span { color: var(--muted); font-size: 9px; line-height: 1.4; }
 .semantic-frequency-grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); }
@@ -8127,6 +8170,7 @@ svg { display: block; }
 /* Semantic operation workflows follow the approved three-stage modal layout. */
 .semantic-modal:has(.semantic-workflow-dialog) {
   border-radius: 20px;
+  height: min(92dvh, 900px);
   max-height: min(92dvh, 900px);
   overflow: hidden;
   width: min(1000px, calc(100vw - 32px));
@@ -8143,14 +8187,25 @@ svg { display: block; }
 }
 
 .semantic-modal:has(.semantic-workflow-dialog) .semantic-modal-body {
+  display: flex;
   max-height: none;
+  overflow: hidden;
   padding: 0;
 }
 
 .semantic-workflow-dialog {
   display: grid;
+  flex: 1 1 auto;
   gap: 0 !important;
+  grid-template-rows: minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
   min-width: 0;
+  overflow: hidden;
+}
+
+.semantic-position-dialog.semantic-workflow-dialog {
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .semantic-workflow-dialog .semantic-dialog-steps {
@@ -8180,11 +8235,13 @@ svg { display: block; }
 
 .semantic-workflow-grid {
   display: grid;
+  min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .semantic-frequency-workflow-grid {
-  grid-template-columns: minmax(0, .92fr) minmax(0, 1.28fr);
+  grid-template-columns: minmax(0, .84fr) minmax(0, 1fr) minmax(0, 1.12fr);
 }
 
 .semantic-position-workflow-grid {
@@ -8195,8 +8252,11 @@ svg { display: block; }
   align-content: start;
   display: grid;
   gap: 14px;
+  min-height: 0;
   min-width: 0;
+  overflow-y: auto;
   padding: 18px 20px;
+  scrollbar-width: thin;
 }
 
 .semantic-workflow-panel:not(:last-child) {
@@ -8235,7 +8295,7 @@ svg { display: block; }
 }
 
 .semantic-frequency-workflow-grid .semantic-provider-list {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
 }
 
 .semantic-position-source-panel .semantic-provider-list {
@@ -8434,6 +8494,24 @@ svg { display: block; }
   font-weight: 650;
 }
 
+.semantic-frequency-device-control {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.semantic-frequency-device-control label,
+.semantic-frequency-device-control label:first-child,
+.semantic-frequency-device-control label:last-child {
+  border-radius: 8px;
+  grid-column: span 2;
+  margin: 0 !important;
+}
+
+.semantic-frequency-device-control label:nth-child(n + 4) {
+  grid-column: span 3;
+}
+
 .semantic-engine-cards {
   display: grid;
   gap: 8px;
@@ -8524,6 +8602,9 @@ svg { display: block; }
   background: transparent;
   border: 0;
   gap: 9px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
   padding: 0;
 }
 
@@ -8535,7 +8616,10 @@ svg { display: block; }
   gap: 6px;
 }
 
-.semantic-position-scope-panel .semantic-operation-scope-tabs {
+.semantic-position-scope-panel .semantic-operation-scope-tabs,
+.semantic-frequency-scope-panel .semantic-operation-scope-tabs,
+.semantic-clustering-scope-panel .semantic-operation-scope-tabs,
+.semantic-ai-scope-panel .semantic-operation-scope-tabs {
   grid-template-columns: 1fr;
 }
 
@@ -8545,11 +8629,38 @@ svg { display: block; }
 }
 
 .semantic-workflow-panel .semantic-operation-query-list {
-  max-height: 132px;
+  max-height: none;
 }
 
 .semantic-workflow-panel .semantic-operation-folder-list {
-  max-height: 145px;
+  align-content: start;
+  align-self: start;
+  grid-auto-rows: max-content;
+  height: auto;
+  max-height: 100%;
+  min-height: 0;
+  resize: vertical;
+  width: 100%;
+}
+
+.semantic-position-scope-panel,
+.semantic-frequency-scope-panel,
+.semantic-clustering-scope-panel,
+.semantic-ai-scope-panel {
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+
+.semantic-workflow-panel .semantic-operation-query-picker {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+  min-height: 0;
+}
+
+.semantic-workflow-panel .semantic-operation-query-list {
+  align-self: stretch;
+  min-height: 180px;
+  resize: vertical;
 }
 
 .semantic-workflow-panel .semantic-operation-scope > small {
@@ -8685,7 +8796,48 @@ svg { display: block; }
     border-right: 0;
   }
 
-  .semantic-position-scope-panel .semantic-operation-scope-tabs {
+  .semantic-modal:has(.semantic-workflow-dialog) .semantic-modal-body {
+    display: block;
+    overflow: auto;
+  }
+
+  .semantic-workflow-dialog {
+    height: auto;
+    min-height: 100%;
+    overflow: visible;
+  }
+
+  .semantic-position-dialog.semantic-workflow-dialog {
+    grid-template-rows: auto auto auto;
+  }
+
+  .semantic-workflow-grid,
+  .semantic-workflow-panel,
+  .semantic-position-scope-panel,
+  .semantic-frequency-scope-panel,
+  .semantic-clustering-scope-panel,
+  .semantic-ai-scope-panel {
+    overflow: visible;
+  }
+
+  .semantic-workflow-panel .semantic-operation-scope,
+  .semantic-workflow-panel .semantic-operation-query-picker {
+    height: auto;
+  }
+
+  .semantic-workflow-panel .semantic-operation-query-list {
+    height: min(48dvh, 420px);
+  }
+
+  .semantic-workflow-panel .semantic-operation-folder-list {
+    height: auto;
+    max-height: min(48dvh, 420px);
+  }
+
+  .semantic-position-scope-panel .semantic-operation-scope-tabs,
+  .semantic-frequency-scope-panel .semantic-operation-scope-tabs,
+  .semantic-clustering-scope-panel .semantic-operation-scope-tabs,
+  .semantic-ai-scope-panel .semantic-operation-scope-tabs {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
@@ -8714,8 +8866,24 @@ svg { display: block; }
     grid-template-columns: 1fr;
   }
 
-  .semantic-position-scope-panel .semantic-operation-scope-tabs {
+  .semantic-position-scope-panel .semantic-operation-scope-tabs,
+  .semantic-frequency-scope-panel .semantic-operation-scope-tabs,
+  .semantic-clustering-scope-panel .semantic-operation-scope-tabs,
+  .semantic-ai-scope-panel .semantic-operation-scope-tabs {
     grid-template-columns: 1fr;
+  }
+
+  .semantic-workflow-panel .semantic-operation-query-list {
+    height: min(46dvh, 360px);
+    min-height: 220px;
+    resize: none;
+  }
+
+  .semantic-workflow-panel .semantic-operation-folder-list {
+    height: auto;
+    max-height: min(46dvh, 360px);
+    min-height: 0;
+    resize: none;
   }
 
   .semantic-workflow-panel {
@@ -11100,19 +11268,18 @@ svg { display: block; }
   }
 
   .semantic-table-tools .semantic-search {
-    display: grid;
+    display: flex;
     flex: none;
     flex-wrap: nowrap;
     gap: 6px;
     grid-column: 1 / -1;
-    grid-template-columns: 34px minmax(0, 1fr) auto;
     height: 34px;
     min-width: 0;
     width: 100%;
   }
 
   .semantic-table-tools .semantic-search > label {
-    flex-basis: auto;
+    flex: 1 1 auto;
     height: 34px;
     min-width: 0;
   }
@@ -11219,6 +11386,10 @@ svg { display: block; }
   .semantic-core.semantic-mobile-groups-open .semantic-group-search input {
     font-size: 16px;
     height: 42px;
+  }
+
+  .semantic-core.semantic-mobile-groups-open .semantic-group-search > button {
+    top: 8px;
   }
 
   .semantic-core.semantic-mobile-groups-open .semantic-group-root,

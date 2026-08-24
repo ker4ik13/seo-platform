@@ -376,7 +376,7 @@ export function SemanticGroupDialog({
           <>
             <div className="semantic-dialog-selection">
               {state.groups.map((group) => (
-                <span key={group.id}>{group.path}</span>
+                <span key={group.id} title={group.path}>{group.path}</span>
               ))}
             </div>
             <div className="semantic-dialog-field">

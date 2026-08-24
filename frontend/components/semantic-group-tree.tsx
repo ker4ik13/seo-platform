@@ -565,6 +565,16 @@ export function SemanticGroupTree({
           type="search"
           value={search}
         />
+        {search && (
+          <button
+            aria-label="Очистить поиск по группам"
+            onClick={() => setSearch("")}
+            title="Очистить"
+            type="button"
+          >
+            <Icon name="close" />
+          </button>
+        )}
       </label>
       <button
         aria-current={!activeGroupId ? "true" : undefined}

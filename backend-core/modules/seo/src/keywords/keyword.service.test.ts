@@ -1552,12 +1552,14 @@ test("skips active and trashed duplicates without capacity or restore writes", a
   }
 });
 
-test("links an active canonical keyword to another regular group", async () => {
+test("moves an active canonical keyword to another regular group", async () => {
   const keywordId = "01900000-0000-7000-8000-000000000086";
   const targetGroupId = "01900000-0000-7000-8000-000000000087";
-  const existing = {
+  const tagId = "01900000-0000-7000-8000-000000000089";
+  let stored = {
     ...keyword(keywordId, "2026-08-01T10:00:00Z"),
     typedCustomValues: [],
+    tags: [{ tag: { id: tagId, name: "Приоритет" } }],
     memberships: [
       {
         group: {
@@ -1570,18 +1572,25 @@ test("links an active canonical keyword to another regular group", async () => {
     ]
   };
   let createdMembership: unknown;
-  let removedUngrouped: unknown;
+  let removedMemberships: unknown;
+  let observedUpdate: unknown;
+  let versionChange: unknown;
   const transaction = {
     $executeRaw: async () => 1,
     $queryRaw: async () => [{ id: keywordId }],
     keyword: {
-      findFirst: async () => existing,
-      findUnique: async () => existing,
+      findFirst: async () => stored,
+      findUnique: async () => stored,
+      updateMany: async (input: { data: unknown; where: unknown }) => {
+        observedUpdate = input;
+        stored = { ...stored, version: stored.version + 1 };
+        return { count: 1 };
+      },
       count: async () => {
-        throw new Error("Linking an existing keyword must not consume capacity");
+        throw new Error("Moving an existing keyword must not consume capacity");
       },
       create: async () => {
-        throw new Error("Linking must not create another keyword identity");
+        throw new Error("Moving must not create another keyword identity");
       }
     },
     keywordGroup: {
@@ -1594,13 +1603,29 @@ test("links an active canonical keyword to another regular group", async () => {
     },
     keywordGroupMembership: {
       findFirst: async () => null,
-      create: async ({ data }: { data: unknown }) => {
+      create: async ({ data }: { data: {
+        projectId: string;
+        keywordId: string;
+        groupId: string;
+      } }) => {
         createdMembership = data;
+        stored = {
+          ...stored,
+          memberships: [{
+            group: {
+              id: data.groupId,
+              path: "Услуги / Продвижение",
+              name: "Продвижение",
+              systemKind: null
+            }
+          }]
+        };
         return data;
       },
       deleteMany: async ({ where }: { where: unknown }) => {
-        removedUngrouped = where;
-        return { count: 0 };
+        removedMemberships = where;
+        stored = { ...stored, memberships: [] };
+        return { count: 1 };
       }
     },
     page: {
@@ -1610,13 +1635,24 @@ test("links an active canonical keyword to another regular group", async () => {
       findFirst: async () => null
     }
   };
+  const versions = {
+    ...semanticVersions(),
+    createWithKeywordChange: async (
+      _transaction: unknown,
+      _identity: unknown,
+      change: unknown
+    ) => {
+      versionChange = change;
+      return {};
+    }
+  } as unknown as SemanticVersionService;
   const service = new KeywordService(
     {
       $transaction: async (
         callback: (client: typeof transaction) => unknown
       ) => callback(transaction)
     } as unknown as PrismaService,
-    semanticVersions()
+    versions
   );
 
   const result = await service.create({
@@ -1626,20 +1662,60 @@ test("links an active canonical keyword to another regular group", async () => {
 
   assert.equal(result.id, keywordId);
   assert.equal(result.groupId, targetGroupId);
+  assert.equal(result.version, 2);
   assert.equal(result.createOutcome, "LINKED_EXISTING");
   assert.deepEqual(createdMembership, {
     projectId,
     keywordId,
     groupId: targetGroupId
   });
-  assert.deepEqual(removedUngrouped, {
-    projectId,
-    keywordId,
-    group: {
+  assert.deepEqual(removedMemberships, { projectId, keywordId });
+  assert.deepEqual(observedUpdate, {
+    where: {
+      id: keywordId,
       workspaceId,
       projectId,
-      systemKind: "UNGROUPED"
+      status: "ACTIVE",
+      version: 1
+    },
+    data: {
+      updatedBy: "01900000-0000-7000-8000-000000000003",
+      version: { increment: 1 }
     }
+  });
+  assert.deepEqual(versionChange, {
+    entityId: keywordId,
+    operation: "UPDATE",
+    beforeState: {
+      textOriginal: "SEO аудит",
+      textNormalized: "seo аудит",
+      normalizedHash: "a".repeat(64),
+      language: "ru",
+      priority: 0,
+      isFavorite: false,
+      intent: null,
+      status: "ACTIVE",
+      clusterId: null,
+      targetPageId: "01900000-0000-7000-8000-000000000020",
+      groupId: "01900000-0000-7000-8000-000000000030",
+      tagIds: [tagId]
+    },
+    afterState: {
+      textOriginal: "SEO аудит",
+      textNormalized: "seo аудит",
+      normalizedHash: "a".repeat(64),
+      language: "ru",
+      priority: 0,
+      isFavorite: false,
+      intent: null,
+      status: "ACTIVE",
+      clusterId: null,
+      targetPageId: "01900000-0000-7000-8000-000000000020",
+      groupId: targetGroupId,
+      tagIds: [tagId]
+    },
+    beforeVersion: 1,
+    afterVersion: 2
   });
 });
 

@@ -259,16 +259,8 @@ export function SemanticFrequencyDialog({
           <section className="semantic-workflow-panel semantic-settings-panel">
             <header>
               <h3>Настройки сбора</h3>
-              <p>Укажите охват, регион, устройство и виды частотности.</p>
+              <p>Укажите регион, устройство и виды частотности.</p>
             </header>
-            <SemanticOperationScope
-              activeGroupId={activeGroupId}
-              groups={groups}
-              initialSelections={initialSelections}
-              maxItems={keywordLimit}
-              onChange={resolveScope}
-              projectId={projectId}
-            />
             <div className="semantic-frequency-settings">
               <fieldset className="semantic-check-list">
               <legend>Виды частотности</legend>
@@ -291,7 +283,11 @@ export function SemanticFrequencyDialog({
               </label>
               <fieldset className="semantic-segmented-field">
                 <legend>Устройство</legend>
-                <div className="semantic-segmented-control" role="radiogroup" aria-label="Устройство Wordstat">
+                <div
+                  aria-label="Устройство Wordstat"
+                  className="semantic-segmented-control semantic-frequency-device-control"
+                  role="radiogroup"
+                >
                   {([
                     ["ALL", "Все"],
                     ["DESKTOP", "Десктоп"],
@@ -307,6 +303,20 @@ export function SemanticFrequencyDialog({
                 </div>
               </fieldset>
             </div>
+          </section>
+          <section className="semantic-workflow-panel semantic-frequency-scope-panel">
+            <header>
+              <h3>Охват сбора</h3>
+              <p>Выберите все запросы, конкретные запросы или папки.</p>
+            </header>
+            <SemanticOperationScope
+              activeGroupId={activeGroupId}
+              groups={groups}
+              initialSelections={initialSelections}
+              maxItems={keywordLimit}
+              onChange={resolveScope}
+              projectId={projectId}
+            />
           </section>
         </div>
         {(error || scopeError) && <div className="semantic-workflow-feedback">

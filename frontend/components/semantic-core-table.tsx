@@ -9,7 +9,6 @@ import {
   semanticSystemColumnKeys,
   type SemanticKeywordPageSize,
   type SemanticKeywordMultiSearch,
-  type SemanticKeywordBulkCreateItemInput,
   type SemanticKeywordBulkCreatePreviewResult,
   type SemanticKeywordBulkCreateResult,
   type AiAnswerCollectionSummary,
@@ -44,6 +43,7 @@ import {
 } from "../lib/app-path";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
 import {
+  manualKeywordDuplicateCanApply,
   manualKeywordDuplicatePolicy,
   manualKeywordInputStats,
   manualKeywordTexts,
@@ -113,10 +113,6 @@ import { SemanticLayoutDrawer } from "./semantic-layout-drawer";
 import { SemanticNegativeKeywordsDialog } from "./semantic-negative-keywords-dialog";
 import { SemanticDuplicatesDialog } from "./semantic-duplicates-dialog";
 import { SemanticModal } from "./semantic-modal";
-import {
-  SemanticTrashRecoveryDialog,
-  type SemanticTrashRecoveryItem
-} from "./semantic-trash-recovery-dialog";
 import { SemanticVersionHistory } from "./semantic-version-history";
 import { SearchEngineLogo } from "./search-engine-logo";
 import {
@@ -356,9 +352,6 @@ export function SemanticCoreTable({
     useState<ManualKeywordDuplicateReview>();
   const [saving, setSaving] = useState(false);
   const [mutationError, setMutationError] = useState<string>();
-  const [trashRecoveryItems, setTrashRecoveryItems] = useState<
-    readonly SemanticTrashRecoveryItem[]
-  >([]);
   const [groups, setGroups] = useState<readonly SemanticKeywordGroup[]>([]);
   const [multiGroupIds, setMultiGroupIds] = useState<readonly string[]>([]);
   const [clusters, setClusters] = useState<readonly SemanticCluster[]>([]);
@@ -2017,7 +2010,7 @@ export function SemanticCoreTable({
         selectedIndices: new Set(
           enabled && groupId
             ? current.preview.rows.flatMap((row) =>
-                row.state === "ACTIVE_DUPLICATE" && !row.inTargetGroup
+                manualKeywordDuplicateCanApply(row, groupId)
                   ? [row.index]
                   : []
               )
@@ -2137,7 +2130,7 @@ export function SemanticCoreTable({
                 !addDuplicatesToGroupByDefault
                   ? []
                   : preview.rows.flatMap((row) =>
-                      row.state === "ACTIVE_DUPLICATE" && !row.inTargetGroup
+                      manualKeywordDuplicateCanApply(row, draft.groupId)
                         ? [row.index]
                         : []
                     )
@@ -2190,25 +2183,13 @@ export function SemanticCoreTable({
         const locallySkipped = inputStats.duplicates;
         setRetryVersion((value) => value + 1);
         setBulkNotice(
-          `Добавлено: ${result.created} · в выбранную группу: ${result.linked} · ` +
+          `Добавлено: ${result.created} · перемещено: ${result.linked} · ` +
             `восстановлено: ${result.restored} · ` +
             `пропущено: ${result.skipped}` +
             (locallySkipped > 0
               ? ` · повторов во вставке объединено: ${locallySkipped}`
               : "")
         );
-        if (result.trashCandidates.length > 0) {
-          setTrashRecoveryItems(
-            result.trashCandidates.map(({ keywordId, text }) => ({
-              keywordId,
-              text,
-              input: {
-                ...commonBody,
-                text
-              } as SemanticKeywordBulkCreateItemInput
-            }))
-          );
-        }
         if (result.retryRows.length > 0) {
           setManualDuplicateReview(undefined);
           setEditor((current) => current && current.mode === "create"
@@ -2752,12 +2733,17 @@ export function SemanticCoreTable({
           id === editor.draft.groupId && systemKind === undefined
       )
     : undefined;
-  const manualLinkableDuplicateRows = manualDuplicateRows.filter(
-    (row) => row.state === "ACTIVE_DUPLICATE" && !row.inTargetGroup
-  );
+  const manualActionableDuplicateRows = manualDuplicateTargetGroup
+    ? manualDuplicateRows.filter(
+        (row) => manualKeywordDuplicateCanApply(
+          row,
+          manualDuplicateTargetGroup.id
+        )
+      )
+    : [];
   const allManualDuplicatesSelected =
-    manualLinkableDuplicateRows.length > 0 &&
-    manualLinkableDuplicateRows.every((row) =>
+    manualActionableDuplicateRows.length > 0 &&
+    manualActionableDuplicateRows.every((row) =>
       manualDuplicateReview?.selectedIndices.has(row.index)
     );
   const activeGroup = viewConfig.filters.groupId
@@ -3159,6 +3145,19 @@ export function SemanticCoreTable({
           >
             <Icon name="multiGroup" />
           </button>
+          {multiSearch && (
+            <span className="semantic-multi-search-chip">
+              {formatInteger(multiSearch.terms.length)} по списку
+              <button
+                aria-label="Сбросить поиск по списку"
+                onClick={() => setMultiSearch(undefined)}
+                title="Сбросить поиск по списку"
+                type="button"
+              >
+                <Icon name="close" />
+              </button>
+            </span>
+          )}
           <label>
             <span className="visually-hidden">Поиск по запросам</span>
             <Icon name="search" />
@@ -3175,16 +3174,6 @@ export function SemanticCoreTable({
               </button>
             )}
           </label>
-          {multiSearch && (
-            <span className="semantic-multi-search-chip">
-              {formatInteger(multiSearch.terms.length)} по списку
-              <button
-                aria-label="Сбросить поиск по списку"
-                onClick={() => setMultiSearch(undefined)}
-                type="button"
-              >×</button>
-            </span>
-          )}
         </form>
         <details className="semantic-filter-disclosure" data-exclusive-dropdown>
           <summary>
@@ -3852,7 +3841,7 @@ export function SemanticCoreTable({
                     disabled={
                       !manualDuplicateTargetGroup ||
                       (manualDuplicateReview !== undefined &&
-                        manualLinkableDuplicateRows.length === 0)
+                        manualActionableDuplicateRows.length === 0)
                     }
                     onChange={(event) =>
                       setManualDuplicateImport(event.target.checked)
@@ -3876,8 +3865,8 @@ export function SemanticCoreTable({
                     </strong>
                     <small>
                       {manualDuplicateTargetGroup
-                        ? "Имеет приоритет над правилом «Не добавлять дубли»: существующий запрос будет связан с этой группой без создания копии. После проверки действие можно изменить построчно."
-                        : "Сначала выберите обычную группу. Без неё совпадения нельзя связать с текущей группой."}
+                        ? "Имеет приоритет над правилом «Не добавлять дубли»: выбранный существующий запрос будет перемещён из прежних групп в эту, а запрос из корзины — восстановлен. После проверки действие можно изменить построчно."
+                        : "Сначала выберите обычную группу. Дубли из активных групп нельзя переместить без целевой группы; запрос из корзины можно восстановить построчно без группы."}
                     </small>
                   </span>
                 </label>
@@ -3896,11 +3885,11 @@ export function SemanticCoreTable({
                   </strong>
                   <span>
                     Новых запросов: {formatInteger(manualDuplicateReview.preview.newKeywords)}.
-                    Проверьте группы и выберите, какие существующие запросы добавить в текущую.
+                    Проверьте группы и выберите, какие запросы переместить или восстановить.
                   </span>
                 </div>
                 <small>
-                  Выбрано для добавления: {formatInteger(
+                  Выбрано действий: {formatInteger(
                     manualDuplicateReview.selectedIndices.size
                   )}
                 </small>
@@ -3926,10 +3915,14 @@ export function SemanticCoreTable({
                                 : group.path
                           ).join(", ") + (row.groupsTruncated ? ", …" : "")
                         : "Без группы";
-                      const linkable =
+                      const movable =
                         row.state === "ACTIVE_DUPLICATE" &&
-                        !row.inTargetGroup &&
-                        manualDuplicateTargetGroup !== undefined;
+                        manualKeywordDuplicateCanApply(
+                          row,
+                          manualDuplicateTargetGroup?.id
+                        );
+                      const restorableFromTrash =
+                        row.state === "TRASHED_DUPLICATE";
                       const selected =
                         manualDuplicateReview.selectedIndices.has(row.index);
                       return (
@@ -3937,7 +3930,7 @@ export function SemanticCoreTable({
                           <td title={text}>{text}</td>
                           <td title={currentGroups}>{currentGroups}</td>
                           <td>
-                            {linkable ? (
+                            {movable || restorableFromTrash ? (
                               <label className="semantic-manual-duplicate-choice">
                                 <input
                                   checked={selected}
@@ -3950,20 +3943,22 @@ export function SemanticCoreTable({
                                   type="checkbox"
                                 />
                                 <span>
-                                  {selected
-                                    ? `Добавить в «${manualDuplicateTargetGroup.name}»`
-                                    : editor.draft.skipDuplicates
-                                      ? "Оставить в текущих группах"
-                                      : "Не добавлять сейчас — оставить в форме"}
+                                  {restorableFromTrash
+                                    ? selected
+                                      ? manualDuplicateTargetGroup
+                                        ? `Восстановить и перенести в «${manualDuplicateTargetGroup.name}»`
+                                        : "Восстановить без группы"
+                                      : "Оставить в корзине"
+                                    : selected
+                                      ? `Переместить в «${manualDuplicateTargetGroup?.name ?? "выбранную группу"}»`
+                                      : editor.draft.skipDuplicates
+                                        ? "Оставить в текущих группах"
+                                        : "Не перемещать сейчас — оставить в форме"}
                                 </span>
                               </label>
                             ) : row.state === "ACTIVE_DUPLICATE" && row.inTargetGroup ? (
                               <span className="semantic-manual-duplicate-status">
-                                Уже в выбранной группе
-                              </span>
-                            ) : row.state === "TRASHED_DUPLICATE" ? (
-                              <span className="semantic-manual-duplicate-status warning">
-                                В корзине — восстановление будет предложено отдельно
+                                Уже только в выбранной группе
                               </span>
                             ) : (
                               <span className="semantic-manual-duplicate-status">
@@ -4079,22 +4074,6 @@ export function SemanticCoreTable({
         <SemanticSiteResultsModal
           item={siteResultsKeyword}
           onClose={() => setSiteResultsKeyword(undefined)}
-        />
-      )}
-
-      {!editor && trashRecoveryItems.length > 0 && (
-        <SemanticTrashRecoveryDialog
-          items={trashRecoveryItems}
-          onClose={() => setTrashRecoveryItems([])}
-          onCompleted={({ restored, skipped }) => {
-            setTrashRecoveryItems([]);
-            setBulkNotice(
-              `Из корзины восстановлено: ${restored}` +
-                (skipped > 0 ? ` · уже были активны: ${skipped}` : "")
-            );
-            setRetryVersion((value) => value + 1);
-          }}
-          projectId={projectId}
         />
       )}
 

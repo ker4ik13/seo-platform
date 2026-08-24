@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   MANUAL_KEYWORD_BULK_CHUNK_SIZE,
+  manualKeywordDuplicateCanApply,
   manualKeywordDuplicatePolicy,
   manualKeywordInputStats,
   manualKeywordRetryRows,
@@ -45,6 +46,85 @@ test("target-group import wins when both duplicate options are enabled", () => {
       skipDuplicates: true
     }),
     "SKIP_EXISTING"
+  );
+  assert.equal(
+    manualKeywordDuplicatePolicy({
+      addDuplicatesToGroup: true,
+      inTargetGroup: true,
+      previewState: "ACTIVE_DUPLICATE",
+      selectedForTargetGroup: true,
+      skipDuplicates: true
+    }),
+    "ADD_TO_GROUP"
+  );
+});
+
+test("trashed duplicates are restored only after an explicit row choice", () => {
+  assert.equal(
+    manualKeywordDuplicatePolicy({
+      addDuplicatesToGroup: true,
+      inTargetGroup: false,
+      previewState: "TRASHED_DUPLICATE",
+      selectedForTargetGroup: true,
+      skipDuplicates: true
+    }),
+    "RESTORE_TRASHED"
+  );
+  assert.equal(
+    manualKeywordDuplicatePolicy({
+      addDuplicatesToGroup: true,
+      inTargetGroup: false,
+      previewState: "TRASHED_DUPLICATE",
+      selectedForTargetGroup: false,
+      skipDuplicates: false
+    }),
+    "SKIP_EXISTING"
+  );
+});
+
+test("duplicate review offers only real moves and explicit trash restores", () => {
+  const targetGroupId = "01900000-0000-7000-8000-000000000001";
+  const targetGroup = {
+    id: targetGroupId,
+    name: "Новая",
+    path: "Новая"
+  };
+  assert.equal(
+    manualKeywordDuplicateCanApply({
+      index: 0,
+      state: "ACTIVE_DUPLICATE",
+      groups: [targetGroup],
+      groupsTruncated: false,
+      inTargetGroup: true
+    }, targetGroupId),
+    false
+  );
+  assert.equal(
+    manualKeywordDuplicateCanApply({
+      index: 0,
+      state: "ACTIVE_DUPLICATE",
+      groups: [
+        targetGroup,
+        {
+          id: "01900000-0000-7000-8000-000000000002",
+          name: "Старая",
+          path: "Старая"
+        }
+      ],
+      groupsTruncated: false,
+      inTargetGroup: true
+    }, targetGroupId),
+    true
+  );
+  assert.equal(
+    manualKeywordDuplicateCanApply({
+      index: 0,
+      state: "TRASHED_DUPLICATE",
+      groups: [],
+      groupsTruncated: false,
+      inTargetGroup: false
+    }),
+    true
   );
 });
 

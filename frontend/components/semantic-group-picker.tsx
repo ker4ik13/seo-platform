@@ -328,6 +328,16 @@ export function SemanticGroupPicker({
           type="search"
           value={search}
         />
+        {search && (
+          <button
+            aria-label="Очистить поиск папки"
+            onClick={() => setSearch("")}
+            title="Очистить"
+            type="button"
+          >
+            <Icon name="close" />
+          </button>
+        )}
       </label>
       <div aria-label="Дерево групп" className="semantic-move-tree" role="tree">
         {specialOptions.map((option) => (

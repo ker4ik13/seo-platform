@@ -1,8 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type UIEvent
+} from "react";
 import type { TrackingContextScopeMode } from "@seo-platform/contracts";
-import { browserApiCollectionRequest } from "../lib/browser-api";
+import {
+  browserApiCollectionRequest,
+  type BrowserApiCollection
+} from "../lib/browser-api";
 import {
   expandedAncestorIds,
   treeIdsWithDescendants,
@@ -73,7 +84,17 @@ export function SemanticOperationScope({
   const [querySearch, setQuerySearch] = useState("");
   const [queryOptions, setQueryOptions] = useState<readonly KeywordListItem[]>([]);
   const [queryLoading, setQueryLoading] = useState(false);
+  const [queryLoadingMore, setQueryLoadingMore] = useState(false);
+  const [queryLoadError, setQueryLoadError] = useState<string>();
+  const [queryNextCursor, setQueryNextCursor] = useState<string>();
+  const [queryHasNext, setQueryHasNext] = useState(false);
+  const [queryTotalApprox, setQueryTotalApprox] = useState<number>();
+  const [queryReloadToken, setQueryReloadToken] = useState(0);
   const [queryError, setQueryError] = useState<string>();
+  const queryListRef = useRef<HTMLDivElement>(null);
+  const querySentinelRef = useRef<HTMLDivElement>(null);
+  const queryPaginationControllerRef = useRef<AbortController | undefined>(undefined);
+  const queryLoadingMoreRef = useRef(false);
   const [querySelections, setQuerySelections] = useState<
     ReadonlyMap<string, SemanticOperationSelection>
   >(() => new Map(initialSelections.map((selection) => [selection.id, selection])));
@@ -110,7 +131,12 @@ export function SemanticOperationScope({
   );
   const visibleQueryOptions = useMemo(() => {
     const result = new Map<string, KeywordListItem>();
+    const normalizedSearch = querySearch.trim().toLocaleLowerCase("ru-RU");
     for (const selection of querySelections.values()) {
+      if (
+        normalizedSearch &&
+        !selection.label.toLocaleLowerCase("ru-RU").includes(normalizedSearch)
+      ) continue;
       result.set(selection.id, {
         id: selection.id,
         version: selection.version,
@@ -121,7 +147,7 @@ export function SemanticOperationScope({
       if (!option.trashed) result.set(option.id, option);
     }
     return [...result.values()];
-  }, [queryOptions, querySelections]);
+  }, [queryOptions, querySearch, querySelections]);
 
   useEffect(() => {
     onScopeChange?.({
@@ -165,18 +191,33 @@ export function SemanticOperationScope({
   }, [maxItems, mode, onChange, onScopeChange, projectId, querySelections, resolvedGroupIds, selectedGroupIds]);
 
   useEffect(() => {
-    if (mode !== "KEYWORDS") return;
+    queryPaginationControllerRef.current?.abort();
+    queryPaginationControllerRef.current = undefined;
+    queryLoadingMoreRef.current = false;
+    setQueryLoadingMore(false);
+    setQueryLoadError(undefined);
+    setQueryOptions([]);
+    setQueryNextCursor(undefined);
+    setQueryHasNext(false);
+    setQueryTotalApprox(undefined);
+    if (mode !== "KEYWORDS") {
+      setQueryLoading(false);
+      return;
+    }
+    setQueryLoading(true);
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      setQueryLoading(true);
-      setQueryError(undefined);
-      void loadQueryOptions(projectId, querySearch, controller.signal)
-        .then((options) => {
-          if (!controller.signal.aborted) setQueryOptions(options);
+      void loadQueryOptions(projectId, querySearch, undefined, controller.signal)
+        .then((page) => {
+          if (controller.signal.aborted) return;
+          setQueryOptions(activeQueryOptions(page.data));
+          setQueryNextCursor(page.page.nextCursor);
+          setQueryHasNext(page.page.hasNext && Boolean(page.page.nextCursor));
+          setQueryTotalApprox(page.page.totalApprox);
         })
         .catch((error: unknown) => {
           if (controller.signal.aborted) return;
-          setQueryError(
+          setQueryLoadError(
             error instanceof Error
               ? error.message
               : "Не удалось загрузить запросы."
@@ -190,7 +231,74 @@ export function SemanticOperationScope({
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [mode, projectId, querySearch]);
+  }, [mode, projectId, queryReloadToken, querySearch]);
+
+  useEffect(() => () => queryPaginationControllerRef.current?.abort(), []);
+
+  const loadNextQueryPage = useCallback((): void => {
+    if (
+      mode !== "KEYWORDS" ||
+      queryLoading ||
+      queryLoadingMoreRef.current ||
+      !queryHasNext ||
+      !queryNextCursor
+    ) return;
+    const controller = new AbortController();
+    queryPaginationControllerRef.current?.abort();
+    queryPaginationControllerRef.current = controller;
+    queryLoadingMoreRef.current = true;
+    setQueryLoadingMore(true);
+    setQueryLoadError(undefined);
+    void loadQueryOptions(
+      projectId,
+      querySearch,
+      queryNextCursor,
+      controller.signal
+    )
+      .then((page) => {
+        if (controller.signal.aborted) return;
+        setQueryOptions((current) => mergeQueryOptions(current, page.data));
+        setQueryNextCursor(page.page.nextCursor);
+        setQueryHasNext(page.page.hasNext && Boolean(page.page.nextCursor));
+        setQueryTotalApprox(page.page.totalApprox);
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setQueryLoadError(
+          error instanceof Error
+            ? error.message
+            : "Не удалось загрузить следующую страницу запросов."
+        );
+      })
+      .finally(() => {
+        if (queryPaginationControllerRef.current !== controller) return;
+        queryPaginationControllerRef.current = undefined;
+        queryLoadingMoreRef.current = false;
+        setQueryLoadingMore(false);
+      });
+  }, [mode, projectId, queryHasNext, queryLoading, queryNextCursor, querySearch]);
+
+  useEffect(() => {
+    const root = queryListRef.current;
+    const target = querySentinelRef.current;
+    if (
+      mode !== "KEYWORDS" ||
+      !root ||
+      !target ||
+      !queryHasNext ||
+      queryLoadError
+    ) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some(({ isIntersecting }) => isIntersecting)) {
+          loadNextQueryPage();
+        }
+      },
+      { root, rootMargin: "0px 0px 120px", threshold: 0.01 }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [loadNextQueryPage, mode, queryHasNext, queryLoadError]);
 
   function toggleGroup(groupId: string): void {
     setSelectedGroupIds((current) => {
@@ -230,12 +338,10 @@ export function SemanticOperationScope({
   }
 
   function selectVisibleQueries(): void {
-    const additions = visibleQueryOptions.filter(
-      ({ id }) => !querySelections.has(id)
-    );
+    const additions = queryOptions.filter(({ id }) => !querySelections.has(id));
     if (querySelections.size + additions.length > maxItems) {
       setQueryError(
-        `Показанные строки превысят лимит ${maxItems}. Уточните поиск и выберите нужные запросы.`
+        `Загруженные строки превысят лимит ${maxItems}. Уточните поиск и выберите нужные запросы.`
       );
       return;
     }
@@ -250,6 +356,13 @@ export function SemanticOperationScope({
       }
       return next;
     });
+  }
+
+  function loadMoreOnScroll(event: UIEvent<HTMLDivElement>): void {
+    const element = event.currentTarget;
+    if (element.scrollHeight - element.scrollTop - element.clientHeight < 120) {
+      loadNextQueryPage();
+    }
   }
 
   return (
@@ -308,7 +421,7 @@ export function SemanticOperationScope({
               />
             </label>
             <button onClick={selectVisibleQueries} type="button">
-              Выбрать показанные
+              Выбрать загруженные
             </button>
             <button
               disabled={querySelections.size === 0}
@@ -319,9 +432,11 @@ export function SemanticOperationScope({
             </button>
           </div>
           <div
-            aria-busy={queryLoading}
+            aria-busy={queryLoading || queryLoadingMore}
             aria-label="Конкретные запросы"
             className="semantic-operation-query-list"
+            onScroll={loadMoreOnScroll}
+            ref={queryListRef}
           >
             {visibleQueryOptions.map((option) => (
               <label key={option.id}>
@@ -336,10 +451,35 @@ export function SemanticOperationScope({
                 </span>
               </label>
             ))}
-            {!queryLoading && visibleQueryOptions.length === 0 && (
+            {!queryLoading && !queryLoadError && visibleQueryOptions.length === 0 && (
               <p>По этому поиску запросов нет.</p>
             )}
-            {queryLoading && <p role="status">Загружаем запросы…</p>}
+            {queryLoading && queryOptions.length === 0 && (
+              <p role="status">Загружаем запросы…</p>
+            )}
+            {queryLoadError && (
+              <div className="semantic-operation-query-load-error" role="alert">
+                <span>{queryLoadError}</span>
+                <button onClick={() => setQueryReloadToken((value) => value + 1)} type="button">
+                  Повторить
+                </button>
+              </div>
+            )}
+            {queryHasNext && !queryLoadError && (
+              <div
+                aria-label={queryLoadingMore ? "Загружаем ещё запросы" : "Загрузить следующую страницу"}
+                className="semantic-operation-query-sentinel"
+                ref={querySentinelRef}
+                role="status"
+              >
+                {queryLoadingMore ? <><i aria-hidden="true" />Загружаем ещё…</> : "Прокрутите ниже"}
+              </div>
+            )}
+            {!queryLoading && !queryHasNext && queryOptions.length > 0 && (
+              <p className="semantic-operation-query-page-status" role="status">
+                Загружено {queryOptions.length}{queryTotalApprox !== undefined ? ` из ${queryTotalApprox}` : ""}
+              </p>
+            )}
           </div>
           {queryError && <div className="inline-alert warning" role="alert">{queryError}</div>}
         </div>
@@ -391,19 +531,35 @@ export function SemanticOperationScope({
 async function loadQueryOptions(
   projectId: string,
   search: string,
+  cursor: string | undefined,
   signal: AbortSignal
-): Promise<readonly KeywordListItem[]> {
+): Promise<BrowserApiCollection<KeywordListItem>> {
   const query = new URLSearchParams({
     limit: "200",
     sort: "TEXT_ASC"
   });
   const normalizedSearch = search.trim();
   if (normalizedSearch) query.set("search", normalizedSearch);
-  const page = await browserApiCollectionRequest<KeywordListItem>(
+  if (cursor) query.set("cursor", cursor);
+  return browserApiCollectionRequest<KeywordListItem>(
     `/app/api/projects/${encodeURIComponent(projectId)}/keywords?${query.toString()}`,
     { signal }
   );
-  return page.data.filter(({ trashed }) => trashed !== true);
+}
+
+function activeQueryOptions(
+  options: readonly KeywordListItem[]
+): readonly KeywordListItem[] {
+  return options.filter(({ trashed }) => trashed !== true);
+}
+
+function mergeQueryOptions(
+  current: readonly KeywordListItem[],
+  nextPage: readonly KeywordListItem[]
+): readonly KeywordListItem[] {
+  const merged = new Map(current.map((option) => [option.id, option]));
+  for (const option of activeQueryOptions(nextPage)) merged.set(option.id, option);
+  return [...merged.values()];
 }
 
 async function loadGroupSelections(
