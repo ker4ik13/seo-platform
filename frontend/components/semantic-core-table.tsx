@@ -2932,6 +2932,7 @@ export function SemanticCoreTable({
         {
           id: "edit-checked",
           label: `Изменить выбранные запросы (${checkedIds.size})…`,
+          icon: <Icon name="edit" />,
           disabled: checkedIds.size === 0,
           dividerBefore: true,
           onSelect: () => {
@@ -2942,6 +2943,7 @@ export function SemanticCoreTable({
         {
           id: "edit-highlighted",
           label: `Изменить выделенные запросы (${highlightedIds.size})…`,
+          icon: <Icon name="edit" />,
           disabled: highlightedIds.size === 0,
           onSelect: () => {
             setActionIds(new Set(highlightedIds));
@@ -2951,6 +2953,7 @@ export function SemanticCoreTable({
         {
           id: "move-checked",
           label: `Перенести выбранные запросы (${checkedIds.size})…`,
+          icon: <Icon name="move" />,
           disabled: checkedIds.size === 0,
           dividerBefore: true,
           onSelect: () => {
@@ -2961,6 +2964,7 @@ export function SemanticCoreTable({
         {
           id: "move-highlighted",
           label: `Перенести выделенные запросы (${highlightedIds.size})…`,
+          icon: <Icon name="move" />,
           disabled: highlightedIds.size === 0,
           onSelect: () => {
             setActionIds(new Set(highlightedIds));
@@ -2970,6 +2974,7 @@ export function SemanticCoreTable({
         {
           id: "delete-checked",
           label: `Удалить выбранные запросы (${checkedIds.size})`,
+          icon: <Icon name="trash" />,
           danger: true,
           disabled: checkedIds.size === 0,
           dividerBefore: true,
@@ -2981,6 +2986,7 @@ export function SemanticCoreTable({
         {
           id: "delete-highlighted",
           label: `Удалить выделенные запросы (${highlightedIds.size})`,
+          icon: <Icon name="trash" />,
           danger: true,
           disabled: highlightedIds.size === 0,
           onSelect: () => {
