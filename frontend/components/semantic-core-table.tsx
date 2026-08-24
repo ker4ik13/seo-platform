@@ -127,6 +127,7 @@ import {
 } from "./project-operation-activity-provider";
 import { useProjectPresence } from "./project-presence-provider";
 import {
+  normalizeProjectPresenceView,
   projectPresenceAvatarUrl,
   projectPresenceInitials,
   sameProjectPresenceView
@@ -696,10 +697,10 @@ export function SemanticCoreTable({
   toggleAllSelectionRef.current = toggleAllSelection;
 
   useEffect(() => {
-    const nextView = {
-      kind: "SEMANTIC_CORE" as const,
+    const nextView = normalizeProjectPresenceView({
+      kind: "SEMANTIC_CORE",
       groupIds: presenceGroupIds
-    };
+    });
     if (sameProjectPresenceView(currentView, nextView)) return;
     publishView(nextView);
   }, [currentView, presenceGroupIds, projectId, publishView]);

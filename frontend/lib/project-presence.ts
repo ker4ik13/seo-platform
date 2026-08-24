@@ -1,8 +1,27 @@
-import type {
-  ProjectPresenceMember,
-  ProjectPresenceParticipant,
-  ProjectPresenceViewContext
+import {
+  projectPresenceMaximumViewGroupIds,
+  type ProjectPresenceMember,
+  type ProjectPresenceParticipant,
+  type ProjectPresenceViewContext
 } from "@seo-platform/contracts";
+
+/*
+ * The semantic workspace itself may open an unlimited folder union, while
+ * realtime presence intentionally publishes only a bounded hint. Keeping the
+ * projection canonical prevents a caller with more folders than the wire
+ * contract allows from repeatedly publishing an equivalent truncated view.
+ */
+export function normalizeProjectPresenceView(
+  view: ProjectPresenceViewContext | null
+): ProjectPresenceViewContext | null {
+  if (view === null) return null;
+  return {
+    kind: "SEMANTIC_CORE",
+    groupIds: [...new Set(view.groupIds)]
+      .sort()
+      .slice(0, projectPresenceMaximumViewGroupIds)
+  };
+}
 
 export interface ActiveProjectParticipant {
   readonly userId: string;

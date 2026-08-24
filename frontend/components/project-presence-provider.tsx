@@ -4,7 +4,6 @@ import {
   projectPresenceCursorIntervalMilliseconds,
   projectPresenceHeartbeatMilliseconds,
   projectPresenceMaximumSelectionIds,
-  projectPresenceMaximumViewGroupIds,
   projectPresenceMembers,
   projectPresenceParticipant,
   projectSemanticChangeEvent,
@@ -41,6 +40,8 @@ import type { AppUser } from "../lib/app-types";
 import { browserApiRequest } from "../lib/browser-api";
 import {
   aggregateProjectParticipants,
+  normalizeProjectPresenceView,
+  sameProjectPresenceView,
   type ActiveProjectParticipant
 } from "../lib/project-presence";
 import { projectSemanticMutationEvent } from "../lib/semantic-realtime";
@@ -577,14 +578,17 @@ export function ProjectPresenceProvider({
 
   const publishView = useCallback(
     (view: ProjectPresenceViewContext | null) => {
-      const next = view
-        ? {
-            kind: "SEMANTIC_CORE" as const,
-            groupIds: [...uniqueIds(view.groupIds)]
-              .sort()
-              .slice(0, projectPresenceMaximumViewGroupIds)
-          }
-        : null;
+      const next = normalizeProjectPresenceView(
+        view
+          ? {
+              kind: "SEMANTIC_CORE",
+              groupIds: view.groupIds.filter((groupId) =>
+                UUID_PATTERN.test(groupId)
+              )
+            }
+          : null
+      );
+      if (sameProjectPresenceView(viewRef.current, next)) return;
       viewRef.current = next;
       setCurrentView(next);
       sendRef.current();

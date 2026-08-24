@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { ProjectPresenceParticipant } from "@seo-platform/contracts";
+import {
+  projectPresenceMaximumViewGroupIds,
+  type ProjectPresenceParticipant
+} from "@seo-platform/contracts";
 import {
   aggregateProjectParticipants,
+  normalizeProjectPresenceView,
   projectPresenceAvatarUrl,
   projectPresenceRouteLabel,
   sameProjectPresenceView,
@@ -114,6 +118,40 @@ test("matches semantic presence only for the same folder context", () => {
       null
     ),
     false
+  );
+});
+
+test("canonicalizes an unlimited folder union into one bounded presence view", () => {
+  const groupIds = Array.from(
+    { length: projectPresenceMaximumViewGroupIds + 6 },
+    (_, index) =>
+      `0198f258-8cc7-7abc-8def-${index.toString(16).padStart(12, "0")}`
+  ).reverse();
+  const normalized = normalizeProjectPresenceView({
+    kind: "SEMANTIC_CORE",
+    groupIds: [...groupIds, groupIds[0]!]
+  });
+
+  assert.ok(normalized);
+  assert.equal(
+    normalized.groupIds.length,
+    projectPresenceMaximumViewGroupIds
+  );
+  assert.deepEqual(
+    normalized.groupIds,
+    [...new Set(groupIds)]
+      .sort()
+      .slice(0, projectPresenceMaximumViewGroupIds)
+  );
+  assert.equal(
+    sameProjectPresenceView(
+      normalized,
+      normalizeProjectPresenceView({
+        kind: "SEMANTIC_CORE",
+        groupIds
+      })
+    ),
+    true
   );
 });
 

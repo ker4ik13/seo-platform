@@ -262,7 +262,6 @@ export function SemanticGroupTree({
     event.preventDefault();
     if (!effectiveSelectedIds.has(group.id)) {
       setSelectedIds(new Set());
-      onSelect(group.id);
     }
     setContextMenu({ x: event.clientX, y: event.clientY, group });
   }
