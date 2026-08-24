@@ -4,6 +4,7 @@ import {
   initialSemanticCreateGroupId,
   semanticBulkSelectionBatches,
   semanticClipboardText,
+  semanticHighlightAllRows,
   semanticHighlightAfterRowClick,
   toggleSemanticHighlightedSelection
 } from "./semantic-row-selection.ts";
@@ -11,18 +12,74 @@ import {
 const ids = ["one", "two", "three", "four"] as const;
 
 test("plain row click highlights one row without creating bulk selection state", () => {
-  const result = semanticHighlightAfterRowClick(ids, "one", "three", false);
+  const result = semanticHighlightAfterRowClick(
+    ids,
+    "one",
+    "three",
+    new Set(["one"]),
+    { additive: false, extendRange: false }
+  );
   assert.equal(result.anchorId, "three");
   assert.deepEqual([...result.highlightedIds], ["three"]);
 });
 
 test("shift row click creates an ordered copy range from the focus anchor", () => {
-  const result = semanticHighlightAfterRowClick(ids, "two", "four", true);
+  const result = semanticHighlightAfterRowClick(
+    ids,
+    "two",
+    "four",
+    new Set(["two"]),
+    { additive: false, extendRange: true }
+  );
   assert.equal(result.anchorId, "two");
   assert.deepEqual([...result.highlightedIds], ["two", "three", "four"]);
 });
 
-test("clipboard uses highlighted rows in table order and ignores checked rows", () => {
+test("ctrl or command row click toggles non-contiguous highlights", () => {
+  const added = semanticHighlightAfterRowClick(
+    ids,
+    "one",
+    "three",
+    new Set(["one"]),
+    { additive: true, extendRange: false }
+  );
+  assert.equal(added.anchorId, "three");
+  assert.deepEqual([...added.highlightedIds], ["one", "three"]);
+
+  const removed = semanticHighlightAfterRowClick(
+    ids,
+    added.anchorId,
+    "one",
+    added.highlightedIds,
+    { additive: true, extendRange: false }
+  );
+  assert.equal(removed.anchorId, "one");
+  assert.deepEqual([...removed.highlightedIds], ["three"]);
+});
+
+test("ctrl or command plus shift adds a range to existing highlights", () => {
+  const result = semanticHighlightAfterRowClick(
+    ids,
+    "two",
+    "four",
+    new Set(["one"]),
+    { additive: true, extendRange: true }
+  );
+  assert.equal(result.anchorId, "two");
+  assert.deepEqual([...result.highlightedIds], ["one", "two", "three", "four"]);
+});
+
+test("select all creates only the ordered visual highlight scope", () => {
+  const result = semanticHighlightAllRows(ids, "three");
+  assert.equal(result.anchorId, "three");
+  assert.deepEqual([...result.highlightedIds], ids);
+
+  const empty = semanticHighlightAllRows([], "missing");
+  assert.equal(empty.anchorId, undefined);
+  assert.deepEqual([...empty.highlightedIds], []);
+});
+
+test("clipboard uses the supplied row set in table order", () => {
   const rows = ids.map((id) => ({ id, textOriginal: `query ${id}` }));
   assert.equal(
     semanticClipboardText(rows, new Set(["four", "two"])),

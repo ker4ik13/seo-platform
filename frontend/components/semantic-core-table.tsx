@@ -21,6 +21,7 @@ import {
 import type { ProjectPresenceActivity } from "@seo-platform/contracts";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -53,6 +54,7 @@ import {
 import {
   initialSemanticCreateGroupId,
   semanticClipboardText,
+  semanticHighlightAllRows,
   semanticHighlightAfterRowClick,
   toggleSemanticHighlightedSelection
 } from "../lib/semantic-row-selection";
@@ -467,10 +469,10 @@ export function SemanticCoreTable({
     Exclude<SemanticMultiSearchAction, "SHOW"> | undefined
   >(undefined);
   const selectAllMatchingKeywordsRef = useRef<(
-    postAction: "SELECT" | "MOVE",
+    postAction: "SELECT" | "MOVE" | "HIGHLIGHT",
     config: SemanticKeywordLoadConfig
   ) => Promise<void>>(async () => undefined);
-  const toggleAllSelectionRef = useRef<() => void>(() => undefined);
+  const highlightAllKeywordsRef = useRef<() => void>(() => undefined);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const highlightAnchorIdRef = useRef<string | undefined>(undefined);
   const liveOperationSignatureRef = useRef("");
@@ -694,7 +696,7 @@ export function SemanticCoreTable({
                                   ? "SEMANTIC_EDIT"
                                   : null;
 
-  toggleAllSelectionRef.current = toggleAllSelection;
+  highlightAllKeywordsRef.current = highlightAllKeywords;
 
   useEffect(() => {
     const nextView = normalizeProjectPresenceView({
@@ -1278,7 +1280,7 @@ export function SemanticCoreTable({
         .writeText(clipboardText)
         .then(() =>
           setBulkNotice(
-            `Скопировано запросов: ${formatInteger(highlightedIds.size)}`
+            `Скопировано выделенных запросов: ${formatInteger(highlightedIds.size)}`
           )
         )
         .catch(() =>
@@ -1311,7 +1313,7 @@ export function SemanticCoreTable({
           Boolean(tableScrollRef.current?.contains(activeElement)));
       if (!tableOwnsSelection) return;
       event.preventDefault();
-      toggleAllSelectionRef.current();
+      highlightAllKeywordsRef.current();
     };
     document.addEventListener("keydown", selectAllFromKeyboard);
     return () =>
@@ -2247,7 +2249,11 @@ export function SemanticCoreTable({
       items.map(({ id }) => id),
       highlightAnchorIdRef.current,
       item.id,
-      event.shiftKey
+      highlightedIds,
+      {
+        additive: event.ctrlKey || event.metaKey,
+        extendRange: event.shiftKey
+      }
     );
     highlightAnchorIdRef.current = highlight.anchorId;
     setHighlightedIds(highlight.highlightedIds);
@@ -2283,7 +2289,8 @@ export function SemanticCoreTable({
         ? highlightAnchorIdRef.current ?? currentId
         : undefined,
       nextItem.id,
-      event.shiftKey
+      highlightedIds,
+      { additive: false, extendRange: event.shiftKey }
     );
     highlightAnchorIdRef.current = highlight.anchorId;
     setHighlightedIds(highlight.highlightedIds);
@@ -2316,8 +2323,25 @@ export function SemanticCoreTable({
     void selectAllMatchingKeywords();
   }
 
+  function highlightAllKeywords(): void {
+    if (selectingAll || items.length === 0) return;
+    setBulkNotice(undefined);
+    if (page.hasNext) {
+      void selectAllMatchingKeywords("HIGHLIGHT");
+      return;
+    }
+    const ids = items.map(({ id }) => id);
+    const highlight = semanticHighlightAllRows(
+      ids,
+      highlightAnchorIdRef.current
+    );
+    highlightAnchorIdRef.current = highlight.anchorId;
+    setHighlightedIds(highlight.highlightedIds);
+    setBulkNotice(`Выделены все запросы: ${formatInteger(ids.length)}`);
+  }
+
   async function selectAllMatchingKeywords(
-    postAction: "SELECT" | "MOVE" = "SELECT",
+    postAction: "SELECT" | "MOVE" | "HIGHLIGHT" = "SELECT",
     config = keywordQueryConfig
   ): Promise<void> {
     const controller = new AbortController();
@@ -2351,9 +2375,22 @@ export function SemanticCoreTable({
       if (controller.signal.aborted) return;
       setItems(loaded);
       setPage(lastPage);
-      setCheckedIds(new Set(loaded.map(({ id }) => id)));
+      const loadedIds = loaded.map(({ id }) => id);
+      if (postAction === "HIGHLIGHT") {
+        const highlight = semanticHighlightAllRows(
+          loadedIds,
+          highlightAnchorIdRef.current
+        );
+        highlightAnchorIdRef.current = highlight.anchorId;
+        setHighlightedIds(highlight.highlightedIds);
+        setBulkNotice(
+          `Выделены все запросы: ${formatInteger(loadedIds.length)}`
+        );
+        return;
+      }
+      setCheckedIds(new Set(loadedIds));
       if (postAction === "MOVE" && loaded.length > 0) {
-        setActionIds(new Set(loaded.map(({ id }) => id)));
+        setActionIds(new Set(loadedIds));
         setMoveKeywordTargetId("");
         setMoveKeywordDialog(true);
       }
@@ -2710,6 +2747,33 @@ export function SemanticCoreTable({
     });
   }
 
+  const copyKeywordRows = useCallback((
+    keywordIds: ReadonlySet<string>,
+    kind: "выбранных" | "выделенных"
+  ): void => {
+    const clipboardText = semanticClipboardText(items, keywordIds);
+    if (!clipboardText) {
+      setMutationError(`Нет ${kind} запросов для копирования.`);
+      return;
+    }
+    const copiedCount = items.reduce(
+      (count, { id }) => count + (keywordIds.has(id) ? 1 : 0),
+      0
+    );
+    void navigator.clipboard
+      .writeText(clipboardText)
+      .then(() =>
+        setBulkNotice(
+          `Скопировано ${kind} запросов: ${formatInteger(copiedCount)}`
+        )
+      )
+      .catch(() =>
+        setMutationError(
+          "Браузер не разрешил доступ к буферу обмена. Проверьте разрешение сайта."
+        )
+      );
+  }, [items]);
+
   function selectProject(nextProjectId: string): void {
     if (!nextProjectId || nextProjectId === projectId) return;
     const secure = window.location.protocol === "https:" ? "; Secure" : "";
@@ -2822,11 +2886,26 @@ export function SemanticCoreTable({
   const rowMenuItems: readonly ContextMenuItem[] = rowContextMenu
     ? [
         {
+          id: "copy-checked",
+          label: `Скопировать выбранные (${checkedIds.size})`,
+          icon: <Icon name="copy" />,
+          disabled: checkedIds.size === 0,
+          onSelect: () => copyKeywordRows(checkedIds, "выбранных")
+        },
+        {
+          id: "copy-highlighted",
+          label: `Скопировать выделенные (${highlightedIds.size})`,
+          icon: <Icon name="copy" />,
+          disabled: highlightedIds.size === 0,
+          onSelect: () => copyKeywordRows(highlightedIds, "выделенных")
+        },
+        {
           id: "edit",
           label:
             rowContextMenu.targetIds.length > 1
               ? `Изменить запросы (${rowContextMenu.targetIds.length})…`
               : "Изменить запрос",
+          dividerBefore: true,
           onSelect: () => {
             setActionIds(new Set(rowContextMenu.targetIds));
             setBulkEditorInitialFocus(undefined);

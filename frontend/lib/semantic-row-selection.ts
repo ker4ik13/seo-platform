@@ -1,6 +1,11 @@
 export interface SemanticHighlightState {
-  readonly anchorId: string;
+  readonly anchorId: string | undefined;
   readonly highlightedIds: ReadonlySet<string>;
+}
+
+export interface SemanticHighlightModifiers {
+  readonly additive: boolean;
+  readonly extendRange: boolean;
 }
 
 export interface SemanticSelectableGroup {
@@ -12,22 +17,50 @@ export function semanticHighlightAfterRowClick(
   orderedIds: readonly string[],
   anchorId: string | undefined,
   targetId: string,
-  extendRange: boolean
+  highlightedIds: ReadonlySet<string>,
+  modifiers: SemanticHighlightModifiers
 ): SemanticHighlightState {
   const targetIndex = orderedIds.indexOf(targetId);
   const anchorIndex = anchorId ? orderedIds.indexOf(anchorId) : -1;
-  if (!extendRange || targetIndex < 0 || anchorIndex < 0) {
+  if (modifiers.extendRange && targetIndex >= 0 && anchorIndex >= 0) {
+    const start = Math.min(anchorIndex, targetIndex);
+    const end = Math.max(anchorIndex, targetIndex);
+    const next = modifiers.additive
+      ? new Set(highlightedIds)
+      : new Set<string>();
+    for (const id of orderedIds.slice(start, end + 1)) next.add(id);
     return {
-      anchorId: targetId,
-      highlightedIds: new Set([targetId])
+      anchorId: anchorId ?? targetId,
+      highlightedIds: next
     };
   }
 
-  const start = Math.min(anchorIndex, targetIndex);
-  const end = Math.max(anchorIndex, targetIndex);
+  if (modifiers.additive) {
+    const next = new Set(highlightedIds);
+    if (next.has(targetId)) next.delete(targetId);
+    else next.add(targetId);
+    return {
+      anchorId: targetId,
+      highlightedIds: next
+    };
+  }
+
   return {
-    anchorId: anchorId ?? targetId,
-    highlightedIds: new Set(orderedIds.slice(start, end + 1))
+    anchorId: targetId,
+    highlightedIds: new Set([targetId])
+  };
+}
+
+export function semanticHighlightAllRows(
+  orderedIds: readonly string[],
+  preferredAnchorId: string | undefined
+): SemanticHighlightState {
+  return {
+    anchorId:
+      preferredAnchorId && orderedIds.includes(preferredAnchorId)
+        ? preferredAnchorId
+        : orderedIds[0],
+    highlightedIds: new Set(orderedIds)
   };
 }
 
