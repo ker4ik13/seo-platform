@@ -14,7 +14,7 @@ import {
   type SemanticKeywordCleaningResult,
   type UpdateSemanticKeywordInput
 } from "@seo-platform/contracts";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import {
   browserApiRequest,
   BrowserApiError
@@ -86,7 +86,6 @@ export function SemanticBulkEditor({
   selections,
   groups,
   clusters,
-  initialFocus,
   onCancel,
   onCompleted,
   onSplitCompleted
@@ -95,7 +94,6 @@ export function SemanticBulkEditor({
   selections: readonly BulkSelection[];
   groups: readonly SemanticGroupTreeItem[];
   clusters: readonly BulkCluster[];
-  initialFocus?: "TAGS";
   onCancel: () => void;
   onCompleted: (result: BulkResult) => void;
   onSplitCompleted: (result: SplitResult) => void;
@@ -145,17 +143,12 @@ export function SemanticBulkEditor({
     useState<SemanticKeywordCleaningPreview>();
   const [cleaningBusy, setCleaningBusy] = useState<"PREVIEW" | "APPLY">();
   const [cleaningError, setCleaningError] = useState<string>();
-  const tagsRef = useRef<HTMLInputElement>(null);
   const sourceClusterId = selections[0]?.clusterId;
   const sourceCluster = sourceClusterId && selections.every(
     ({ clusterId: itemClusterId }) => itemClusterId === sourceClusterId
   )
     ? clusters.find(({ id }) => id === sourceClusterId)
     : undefined;
-
-  useEffect(() => {
-    if (initialFocus === "TAGS") tagsRef.current?.focus();
-  }, [initialFocus]);
 
   const cleaningRules = {
     collapseWhitespace,
@@ -362,7 +355,7 @@ export function SemanticBulkEditor({
             <label className="semantic-bulk-query">
               <span>Запрос</span>
               <input
-                autoFocus={initialFocus !== "TAGS"}
+                autoFocus
                 maxLength={2_000}
                 onChange={(event) => setText(event.target.value)}
                 required
@@ -504,7 +497,6 @@ export function SemanticBulkEditor({
             disabled={!replaceTags}
             onChange={(event) => setTagNames(event.target.value)}
             placeholder="Важно, Услуги (пусто — удалить все)"
-            ref={tagsRef}
             value={tagNames}
           />
         </label>

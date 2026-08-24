@@ -442,8 +442,6 @@ export function SemanticCoreTable({
   const [moveKeywordTargetId, setMoveKeywordTargetId] = useState("");
   const [deleteSelectionOpen, setDeleteSelectionOpen] = useState(false);
   const [bulkEditorOpen, setBulkEditorOpen] = useState(false);
-  const [bulkEditorInitialFocus, setBulkEditorInitialFocus] =
-    useState<"TAGS">();
   const [actionIds, setActionIds] = useState<ReadonlySet<string> | null>(null);
   const [positionDialogOpen, setPositionDialogOpen] = useState(false);
   const [frequencyDialogOpen, setFrequencyDialogOpen] = useState(false);
@@ -461,8 +459,6 @@ export function SemanticCoreTable({
   );
   const projectDomain = projects.find(({ id }) => id === projectId)?.domain ?? "";
   const [rowContextMenu, setRowContextMenu] = useState<Readonly<{
-    item: SemanticKeyword;
-    targetIds: readonly string[];
     x: number;
     y: number;
   }>>();
@@ -1998,7 +1994,6 @@ export function SemanticCoreTable({
     setBulkNotice(undefined);
     setMutationError(undefined);
     setActionIds(new Set([item.id]));
-    setBulkEditorInitialFocus(undefined);
     setBulkEditorOpen(true);
   }
 
@@ -2764,9 +2759,12 @@ export function SemanticCoreTable({
 
   function openRowMenu(event: MouseEvent, item: SemanticKeyword): void {
     event.preventDefault();
+    if (highlightedIds.size === 0) {
+      highlightAnchorIdRef.current = item.id;
+      setHighlightedIds(new Set([item.id]));
+      setRightSidebar({ type: "KEYWORD", keywordId: item.id });
+    }
     setRowContextMenu({
-      item,
-      targetIds: checkedIds.size > 0 ? [...checkedIds] : [item.id],
       x: event.clientX,
       y: event.clientY
     });
@@ -2932,48 +2930,61 @@ export function SemanticCoreTable({
           onSelect: () => copyKeywordRows(highlightedIds, "выделенных")
         },
         {
-          id: "edit",
-          label:
-            rowContextMenu.targetIds.length > 1
-              ? `Изменить запросы (${rowContextMenu.targetIds.length})…`
-              : "Изменить запрос",
+          id: "edit-checked",
+          label: `Изменить выбранные запросы (${checkedIds.size})…`,
+          disabled: checkedIds.size === 0,
           dividerBefore: true,
           onSelect: () => {
-            setActionIds(new Set(rowContextMenu.targetIds));
-            setBulkEditorInitialFocus(undefined);
+            setActionIds(new Set(checkedIds));
             setBulkEditorOpen(true);
           }
         },
         {
-          id: "move",
-          label:
-            rowContextMenu.targetIds.length > 1
-              ? `Перенести запросы (${rowContextMenu.targetIds.length})…`
-              : "Перенести в группу…",
+          id: "edit-highlighted",
+          label: `Изменить выделенные запросы (${highlightedIds.size})…`,
+          disabled: highlightedIds.size === 0,
           onSelect: () => {
-            setActionIds(new Set(rowContextMenu.targetIds));
+            setActionIds(new Set(highlightedIds));
+            setBulkEditorOpen(true);
+          }
+        },
+        {
+          id: "move-checked",
+          label: `Перенести выбранные запросы (${checkedIds.size})…`,
+          disabled: checkedIds.size === 0,
+          dividerBefore: true,
+          onSelect: () => {
+            setActionIds(new Set(checkedIds));
             setMoveKeywordDialog(true);
           }
         },
         {
-          id: "bulk",
-          label: "Теги, интент и URL…",
+          id: "move-highlighted",
+          label: `Перенести выделенные запросы (${highlightedIds.size})…`,
+          disabled: highlightedIds.size === 0,
           onSelect: () => {
-            setActionIds(new Set(rowContextMenu.targetIds));
-            setBulkEditorInitialFocus("TAGS");
-            setBulkEditorOpen(true);
+            setActionIds(new Set(highlightedIds));
+            setMoveKeywordDialog(true);
           }
         },
         {
-          id: "delete",
-          label:
-            rowContextMenu.targetIds.length > 1
-              ? `Удалить запросы (${rowContextMenu.targetIds.length})`
-              : "Удалить запрос",
+          id: "delete-checked",
+          label: `Удалить выбранные запросы (${checkedIds.size})`,
           danger: true,
+          disabled: checkedIds.size === 0,
           dividerBefore: true,
           onSelect: () => {
-            setActionIds(new Set(rowContextMenu.targetIds));
+            setActionIds(new Set(checkedIds));
+            setDeleteSelectionOpen(true);
+          }
+        },
+        {
+          id: "delete-highlighted",
+          label: `Удалить выделенные запросы (${highlightedIds.size})`,
+          danger: true,
+          disabled: highlightedIds.size === 0,
+          onSelect: () => {
+            setActionIds(new Set(highlightedIds));
             setDeleteSelectionOpen(true);
           }
         }
@@ -4111,7 +4122,6 @@ export function SemanticCoreTable({
           }
           onClose={() => {
             setBulkEditorOpen(false);
-            setBulkEditorInitialFocus(undefined);
             setActionIds(null);
           }}
           size={mutationIds.size === 1 ? "medium" : "large"}
@@ -4123,17 +4133,14 @@ export function SemanticCoreTable({
           <SemanticBulkEditor
           clusters={clusters}
           groups={groups}
-          {...(bulkEditorInitialFocus ? { initialFocus: bulkEditorInitialFocus } : {})}
           onCancel={() => {
             setBulkEditorOpen(false);
-            setBulkEditorInitialFocus(undefined);
             setActionIds(null);
           }}
           onCompleted={(result) => {
             setCheckedIds(new Set());
             setActionIds(null);
             setBulkEditorOpen(false);
-            setBulkEditorInitialFocus(undefined);
             setBulkNotice(
               `${result.selected === 1 ? "Запрос сохранён" : `Обновлено ${result.changed} из ${result.selected}`}` +
                 (result.conflicted > 0
@@ -4146,7 +4153,6 @@ export function SemanticCoreTable({
             setCheckedIds(new Set());
             setActionIds(null);
             setBulkEditorOpen(false);
-            setBulkEditorInitialFocus(undefined);
             setBulkNotice(
               `Создан кластер «${result.createdCluster.name}»: перенесено ${result.movedKeywordCount} запросов`
             );
@@ -4631,9 +4637,7 @@ export function SemanticCoreTable({
       {rowContextMenu && (
         <ContextMenu
           items={rowMenuItems}
-          label={rowContextMenu.targetIds.length > 1
-            ? `Действия с ${rowContextMenu.targetIds.length} запросами`
-            : `Действия с запросом ${rowContextMenu.item.textOriginal}`}
+          label="Действия с выбранными и выделенными запросами"
           onClose={() => setRowContextMenu(undefined)}
           x={rowContextMenu.x}
           y={rowContextMenu.y}
