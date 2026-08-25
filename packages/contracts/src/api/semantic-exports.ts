@@ -22,6 +22,7 @@ export const semanticExportScopes = [
   "CURRENT_PAGE",
   "CURRENT_FILTER",
   "GROUP_SUBTREE",
+  "FOLDER_MAP",
   "FULL_CORE"
 ] as const;
 
@@ -131,6 +132,15 @@ export interface SemanticPositionHistoryExportOptions {
   readonly searchEngines: readonly SemanticPositionHistorySearchEngine[];
 }
 
+/**
+ * XLSX folder-map mode. `groupIds` contains the explicitly selected roots;
+ * descendants are resolved by the export worker from the current project tree.
+ */
+export interface SemanticFolderMapExportOptions {
+  readonly groupIds: readonly string[];
+  readonly includeDescendants: boolean;
+}
+
 export interface SemanticPositionHistoryExportSnapshot {
   readonly searchEngine: SemanticPositionHistorySearchEngine;
   readonly observedDate: string;
@@ -201,4 +211,6 @@ export interface CreateSemanticExportInput {
   readonly includeBom?: boolean;
   /** When present, format must be XLSX and columns are ignored by the workbook layout. */
   readonly positionHistory?: SemanticPositionHistoryExportOptions;
+  /** When present, format must be XLSX and scope must be FOLDER_MAP. */
+  readonly folderMap?: SemanticFolderMapExportOptions;
 }

@@ -238,6 +238,14 @@ function exportInputSnapshot(
             searchEngines: [...input.positionHistory.searchEngines]
           }
         }
+      : {}),
+    ...(input.folderMap
+      ? {
+          folderMap: {
+            groupIds: [...input.folderMap.groupIds],
+            includeDescendants: input.folderMap.includeDescendants
+          }
+        }
       : {})
   };
 }

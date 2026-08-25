@@ -7,6 +7,7 @@ import type {
 import { unzipSync } from "fflate";
 import {
   semanticExportFile,
+  semanticFolderMapExportFile,
   semanticPositionHistoryExportFile,
   type SemanticExportKeywordRow
 } from "./semantic-export-encoder.js";
@@ -35,6 +36,75 @@ test("streams 2,002 rows into a valid XLSX workbook", async () => {
   assert.match(sheet, /<t xml:space="preserve">запрос 2002<\/t>/u);
   assert.ok(archive["xl/workbook.xml"]);
   assert.ok(archive["[Content_Types].xml"]);
+});
+
+test("builds a linked folder-map workbook with one data sheet per non-empty folder", async () => {
+  const rootId = "01900000-0000-7000-8000-000000000020";
+  const childId = "01900000-0000-7000-8000-000000000021";
+  const emptyId = "01900000-0000-7000-8000-000000000022";
+  const file = semanticFolderMapExportFile(
+    (groupId) => folderKeywordRows(groupId, rootId, childId),
+    {
+      format: "XLSX",
+      scope: "FOLDER_MAP",
+      locale: "ru",
+      columns: ["query", "frequency"],
+      folderMap: {
+        groupIds: [rootId],
+        includeDescendants: true
+      }
+    },
+    {
+      groups: [
+        {
+          id: rootId,
+          name: "Каталог/Морозильники",
+          path: "Каталог/Морозильники",
+          keywordCount: 1,
+          depth: 0
+        },
+        {
+          id: childId,
+          parentId: rootId,
+          name: "Каталог/Морозильники",
+          path: "Каталог/Морозильники / Каталог/Морозильники",
+          keywordCount: 1,
+          depth: 1
+        },
+        {
+          id: emptyId,
+          parentId: rootId,
+          name: "Пустая папка",
+          path: "Каталог/Морозильники / Пустая папка",
+          keywordCount: 0,
+          depth: 1
+        }
+      ]
+    },
+    {},
+    new Date("2026-08-25T10:00:00.000Z")
+  );
+
+  assert.equal(file.filename, "semantic-site-map-2026-08-25.xlsx");
+  const archive = unzipSync(await collect(file.bytes));
+  const workbook = new TextDecoder().decode(archive["xl/workbook.xml"]);
+  const map = new TextDecoder().decode(archive["xl/worksheets/sheet1.xml"]);
+  const rootSheet = new TextDecoder().decode(archive["xl/worksheets/sheet2.xml"]);
+  const childSheet = new TextDecoder().decode(archive["xl/worksheets/sheet3.xml"]);
+
+  assert.match(workbook, /<sheet name="Карта"/u);
+  assert.match(workbook, /<sheet name="Каталог Морозильники"/u);
+  assert.match(workbook, /<sheet name="Каталог Морозильники \(2\)"/u);
+  assert.equal(archive["xl/worksheets/sheet4.xml"], undefined);
+  assert.match(map, /<t xml:space="preserve">Карта сайта<\/t>/u);
+  assert.doesNotMatch(map, /<t xml:space="preserve">Запросов<\/t>/u);
+  assert.match(map, /<hyperlink ref="A2" location="'Каталог Морозильники'!A1"\/>/u);
+  assert.match(map, /<hyperlink ref="B3" location="'Каталог Морозильники \(2\)'!A1"\/>/u);
+  assert.doesNotMatch(map, /<hyperlink ref="B4"/u);
+  assert.match(rootSheet, /<hyperlink ref="A1" location="'Карта'!A2"\/>/u);
+  assert.match(rootSheet, /<t xml:space="preserve">Запрос<\/t>/u);
+  assert.match(rootSheet, /<t xml:space="preserve">=опасный запрос<\/t>/u);
+  assert.match(childSheet, /<hyperlink ref="A1" location="'Карта'!B3"\/>/u);
 });
 
 test("writes frequencies and search positions as native XLSX numbers", async () => {
@@ -243,6 +313,18 @@ async function* keywordWithCompetitors(): AsyncGenerator<SemanticExportKeywordRo
       }
     ]
   };
+}
+
+async function* folderKeywordRows(
+  groupId: string,
+  rootId: string,
+  childId: string
+): AsyncGenerator<SemanticExportKeywordRow> {
+  if (groupId === rootId) {
+    yield keyword("=опасный запрос");
+  } else if (groupId === childId) {
+    yield keyword("дочерний запрос");
+  }
 }
 
 async function* oneKeyword(

@@ -43,6 +43,35 @@ test("accepts a canonical internal position-history export", () => {
   );
 });
 
+test("accepts a canonical internal folder-map export", () => {
+  const input = {
+    ...validCreate,
+    scope: "FOLDER_MAP",
+    filters: undefined,
+    folderMap: {
+      groupIds: [
+        "01900000-0000-7000-8000-000000000020",
+        "01900000-0000-7000-8000-000000000021"
+      ],
+      includeDescendants: true
+    }
+  } as const;
+  const { filters: _filters, ...expected } = input;
+
+  assert.deepEqual(internalCreateSemanticExportInput(expected), expected);
+  assert.throws(
+    () => internalCreateSemanticExportInput({ ...expected, format: "CSV" }),
+    /Invalid semantic export format/u
+  );
+  assert.throws(
+    () => internalCreateSemanticExportInput({
+      ...expected,
+      folderMap: { ...expected.folderMap, groupIds: [] }
+    }),
+    /Invalid semantic export folderMap.groupIds/u
+  );
+});
+
 test("accepts competitor data as ordinary export columns", () => {
   const input = {
     ...validCreate,

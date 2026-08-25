@@ -28,9 +28,11 @@ import {
 import { writeArtifact } from "./multipart-object-writer.js";
 import {
   semanticExportFile,
+  semanticFolderMapExportFile,
   semanticPositionHistoryExportFile,
   type SemanticExportFile,
   type SemanticExportKeywordRow,
+  type SemanticFolderMapWorkbookPlan,
   type SemanticPositionHistoryWorkbookPlan
 } from "./semantic-export-encoder.js";
 import { storedSemanticExportInput } from "./semantic-export-input.js";
@@ -98,6 +100,34 @@ export class SemanticExportWorkerService {
           ),
           input,
           plan
+        );
+      } else if (input.folderMap) {
+        const groups = await this.seoData.listExportKeywordGroups(context);
+        const plan = folderMapPlan(groups, input.folderMap);
+        const totalRows = plan.groups.reduce(
+          (total, group) => total + group.keywordCount,
+          0
+        );
+        if (!Number.isSafeInteger(totalRows)) {
+          throw new ExportFailure("EXPORT_ROW_COUNT_TOO_LARGE", false);
+        }
+        await this.updateProgressTotal(claimed.id, leaseOwner, totalRows);
+        const customColumns = await this.seoData.listExportCustomColumns(context);
+        const customColumnNames = customColumnNameMap(customColumns);
+        file = semanticFolderMapExportFile(
+          (groupId) => counted(
+            this.exportFolderMapRows(
+              claimed,
+              input,
+              leaseOwner,
+              groupId,
+              counter
+            ),
+            counter
+          ),
+          input,
+          plan,
+          customColumnNames
         );
       } else {
         const customColumns = await this.seoData.listExportCustomColumns(context);
@@ -310,6 +340,60 @@ export class SemanticExportWorkerService {
     if (selected && selected.size > 0) {
       throw new ExportFailure("EXPORT_KEYWORDS_UNAVAILABLE", false);
     }
+  }
+
+  private async *exportFolderMapRows(
+    job: Job,
+    input: InternalCreateSemanticExportInput,
+    leaseOwner: string,
+    groupId: string,
+    counter: Readonly<{ value: number }>
+  ): AsyncGenerator<SemanticExportKeywordRow> {
+    if (!input.folderMap) {
+      throw new ExportFailure("INVALID_EXPORT_MANIFEST", false);
+    }
+    const context = exportContext(input);
+    const competitorSources = competitorSourcesForColumns(input.columns);
+    const query: KeywordListQuery = {
+      groupId,
+      limit: competitorSources.length > 0 ? COMPETITOR_PAGE_SIZE : PAGE_SIZE,
+      sort: input.sort ?? "CREATED_ASC"
+    };
+    let cursor: string | undefined;
+    const observedCursors = new Set<string>();
+    do {
+      await this.assertLease(job.id, leaseOwner, counter.value);
+      const page = await this.seoData.listExportKeywords(context, {
+        ...query,
+        ...(cursor ? { cursor } : {})
+      });
+      const competitorPage = competitorSources.length === 0
+        ? undefined
+        : await this.seoData.listExportCompetitors(
+            context,
+            { ...query, ...(cursor ? { cursor } : {}) },
+            { sources: competitorSources }
+          );
+      if (competitorPage && !matchingCompetitorPage(page, competitorPage)) {
+        throw new ExportFailure("EXPORT_PROJECTION_DRIFT", true);
+      }
+      for (const [index, item] of page.data.entries()) {
+        yield competitorPage
+          ? {
+              ...item,
+              exportCompetitors: competitorPage.data[index]!.competitors
+            }
+          : item;
+      }
+      await this.assertLease(job.id, leaseOwner, counter.value);
+      if (!page.page.hasNext) break;
+      const nextCursor = page.page.nextCursor;
+      if (!nextCursor || observedCursors.has(nextCursor)) {
+        throw new ExportFailure("EXPORT_PAGINATION_STALLED", true);
+      }
+      observedCursors.add(nextCursor);
+      cursor = nextCursor;
+    } while (cursor);
   }
 
   private async positionHistoryPlan(
@@ -642,6 +726,103 @@ function customColumnNameMap(
     result[column.id.toLowerCase()] = column.name;
   }
   return result;
+}
+
+function folderMapPlan(
+  groups: readonly SemanticKeywordGroup[],
+  options: NonNullable<InternalCreateSemanticExportInput["folderMap"]>
+): SemanticFolderMapWorkbookPlan {
+  const groupsById = new Map<string, SemanticKeywordGroup>();
+  for (const group of groups) {
+    if (
+      !UUID_PATTERN.test(group.id) ||
+      groupsById.has(group.id) ||
+      (group.parentId !== undefined && !UUID_PATTERN.test(group.parentId)) ||
+      typeof group.name !== "string" ||
+      !group.name.trim() ||
+      group.name.length > 500 ||
+      typeof group.path !== "string" ||
+      !group.path.trim() ||
+      group.path.length > 8_000 ||
+      !Number.isSafeInteger(group.position) ||
+      group.position < 0 ||
+      !Number.isSafeInteger(group.keywordCount) ||
+      group.keywordCount < 0 ||
+      (group.systemKind !== undefined &&
+        group.systemKind !== "UNGROUPED" &&
+        group.systemKind !== "TRASH")
+    ) {
+      throw new ExportFailure("INVALID_EXPORT_METADATA", false);
+    }
+    groupsById.set(group.id, group);
+  }
+
+  const includedIds = new Set<string>();
+  for (const groupId of options.groupIds) {
+    const group = groupsById.get(groupId);
+    if (!group || group.systemKind !== undefined) {
+      throw new ExportFailure("EXPORT_GROUP_NOT_FOUND", false);
+    }
+    includedIds.add(groupId);
+  }
+  if (options.includeDescendants) {
+    for (let changed = true; changed; ) {
+      changed = false;
+      for (const group of groups) {
+        if (
+          group.systemKind === undefined &&
+          group.parentId &&
+          includedIds.has(group.parentId) &&
+          !includedIds.has(group.id)
+        ) {
+          includedIds.add(group.id);
+          changed = true;
+        }
+      }
+    }
+  }
+
+  const ROOT = "__folder_map_root__";
+  const children = new Map<string, SemanticKeywordGroup[]>();
+  for (const groupId of includedIds) {
+    const group = groupsById.get(groupId)!;
+    const parentId = group.parentId && includedIds.has(group.parentId)
+      ? group.parentId
+      : ROOT;
+    const siblings = children.get(parentId) ?? [];
+    siblings.push(group);
+    children.set(parentId, siblings);
+  }
+  for (const siblings of children.values()) {
+    siblings.sort((left, right) =>
+      left.position - right.position || left.id.localeCompare(right.id)
+    );
+  }
+
+  const ordered: SemanticFolderMapWorkbookPlan["groups"][number][] = [];
+  const visited = new Set<string>();
+  const visit = (group: SemanticKeywordGroup, depth: number): void => {
+    if (visited.has(group.id) || depth > 64) {
+      throw new ExportFailure("INVALID_EXPORT_METADATA", false);
+    }
+    visited.add(group.id);
+    ordered.push({
+      id: group.id,
+      ...(group.parentId && includedIds.has(group.parentId)
+        ? { parentId: group.parentId }
+        : {}),
+      name: group.name,
+      path: group.path,
+      keywordCount: group.keywordCount,
+      depth
+    });
+    for (const child of children.get(group.id) ?? []) visit(child, depth + 1);
+  };
+  for (const root of children.get(ROOT) ?? []) visit(root, 0);
+  if (visited.size !== includedIds.size || ordered.length < 1) {
+    throw new ExportFailure("INVALID_EXPORT_METADATA", false);
+  }
+  return { groups: ordered };
 }
 
 function descendantGroupIds(

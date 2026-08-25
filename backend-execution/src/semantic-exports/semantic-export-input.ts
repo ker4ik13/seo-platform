@@ -36,7 +36,8 @@ const CREATE_FIELDS = new Set([
   "sort",
   "keywordIds",
   "includeBom",
-  "positionHistory"
+  "positionHistory",
+  "folderMap"
 ]);
 const CAPACITY_FIELDS = new Set([
   "planCode",
@@ -80,10 +81,17 @@ export function internalCreateSemanticExportInput(value: unknown): InternalCreat
   const positionHistory = input.positionHistory === undefined
     ? undefined
     : positionHistoryOptions(input.positionHistory);
+  const folderMap = input.folderMap === undefined
+    ? undefined
+    : folderMapOptions(input.folderMap);
   if ((scope === "SELECTED" || scope === "CURRENT_PAGE") !== Boolean(keywordIds)) invalid("keywordIds");
   if (scope === "GROUP_SUBTREE" && !filters?.groupId) invalid("filters.groupId");
   if (scope === "FULL_CORE" && filters) invalid("filters");
   if (positionHistory && format !== "XLSX") invalid("format");
+  if ((scope === "FOLDER_MAP") !== Boolean(folderMap)) invalid("folderMap");
+  if (folderMap && format !== "XLSX") invalid("format");
+  if (folderMap && (filters || positionHistory)) invalid("folderMap");
+  if (folderMap && !columns.includes("query")) invalid("columns");
   const capacity = exactRecord(input.jobCapacity, CAPACITY_FIELDS, "jobCapacity");
   return {
     workspaceId: uuid(input.workspaceId, "workspaceId"),
@@ -104,7 +112,25 @@ export function internalCreateSemanticExportInput(value: unknown): InternalCreat
     ...(input.sort === undefined ? {} : { sort: enumValue(input.sort, semanticKeywordSorts, "sort") }),
     ...(keywordIds ? { keywordIds } : {}),
     ...(input.includeBom === undefined ? {} : { includeBom: booleanValue(input.includeBom, "includeBom") }),
-    ...(positionHistory ? { positionHistory } : {})
+    ...(positionHistory ? { positionHistory } : {}),
+    ...(folderMap ? { folderMap } : {})
+  };
+}
+
+function folderMapOptions(
+  value: unknown
+): NonNullable<InternalCreateSemanticExportInput["folderMap"]> {
+  const input = exactRecord(
+    value,
+    new Set(["groupIds", "includeDescendants"]),
+    "folderMap"
+  );
+  return {
+    groupIds: uuidList(input.groupIds, "folderMap.groupIds", 5_000),
+    includeDescendants: booleanValue(
+      input.includeDescendants,
+      "folderMap.includeDescendants"
+    )
   };
 }
 

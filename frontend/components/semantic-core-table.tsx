@@ -118,6 +118,7 @@ import { SemanticLayoutDrawer } from "./semantic-layout-drawer";
 import { SemanticNegativeKeywordsDialog } from "./semantic-negative-keywords-dialog";
 import { SemanticDuplicatesDialog } from "./semantic-duplicates-dialog";
 import { SemanticModal } from "./semantic-modal";
+import { SemanticExportFolderPicker } from "./semantic-export-folder-picker";
 import { SemanticVersionHistory } from "./semantic-version-history";
 import { SearchEngineLogo } from "./search-engine-logo";
 import {
@@ -306,7 +307,7 @@ type SemanticExportFormat =
   | "XLSX";
 
 type SemanticExportScope = "CURRENT_FILTER" | "SELECTED" | "GROUP_SUBTREE";
-type SemanticExportContent = "SEMANTIC" | "POSITION_HISTORY";
+type SemanticExportContent = "SEMANTIC" | "POSITION_HISTORY" | "FOLDER_MAP";
 
 interface SemanticExportDialogState {
   readonly groupId?: string;
@@ -399,6 +400,10 @@ export function SemanticCoreTable({
   const [exportColumns, setExportColumns] = useState<readonly SemanticExportColumnKey[]>(
     defaultSemanticViewConfig.columns
   );
+  const [exportFolderMapGroupIds, setExportFolderMapGroupIds] = useState<ReadonlySet<string>>(
+    new Set()
+  );
+  const [exportFolderMapIncludeDescendants, setExportFolderMapIncludeDescendants] = useState(true);
   const [exportBom, setExportBom] = useState(true);
   const [, setProjectTableView] = useState<SemanticSavedView>();
   const [activeSavedView, setActiveSavedView] = useState<SemanticSavedView>();
@@ -2444,12 +2449,32 @@ export function SemanticCoreTable({
           ? "SELECTED"
           : "CURRENT_FILTER"
     );
-    setExportColumns(viewConfig.columns);
+    setExportColumns(
+      exportContent === "FOLDER_MAP" && !viewConfig.columns.includes("query")
+        ? ["query", ...viewConfig.columns]
+        : viewConfig.columns
+    );
+    const contextualGroupIds = groupId
+      ? [groupId]
+      : multiGroupIds.length > 0
+        ? multiGroupIds
+        : viewConfig.filters.groupId
+          ? [viewConfig.filters.groupId]
+          : [];
+    const regularGroupIds = new Set(
+      groups
+        .filter(({ id, systemKind }) =>
+          contextualGroupIds.includes(id) && systemKind === undefined
+        )
+        .map(({ id }) => id)
+    );
+    setExportFolderMapGroupIds(regularGroupIds);
+    setExportFolderMapIncludeDescendants(true);
     setExportBom(
-      exportContent !== "POSITION_HISTORY" &&
+      exportContent === "SEMANTIC" &&
       (exportFormat === "CSV" || exportFormat === "TSV")
     );
-    if (exportContent === "POSITION_HISTORY") setExportFormat("XLSX");
+    if (exportContent !== "SEMANTIC") setExportFormat("XLSX");
     setExportJob(undefined);
   }
 
@@ -2472,11 +2497,18 @@ export function SemanticCoreTable({
           method: "POST",
           idempotencyKey: `semantic-export:${globalThis.crypto.randomUUID()}`,
           body: {
-            format: exportContent === "POSITION_HISTORY" ? "XLSX" : exportFormat,
-            scope: exportScope,
+            format: exportContent === "SEMANTIC" ? exportFormat : "XLSX",
+            scope: exportContent === "FOLDER_MAP" ? "FOLDER_MAP" : exportScope,
             locale: "ru",
-            columns: exportContent === "SEMANTIC" ? exportColumns : ["query"],
-            ...(groupId
+            columns: exportContent === "POSITION_HISTORY" ? ["query"] : exportColumns,
+            ...(exportContent === "FOLDER_MAP"
+              ? {
+                  folderMap: {
+                    groupIds: [...exportFolderMapGroupIds],
+                    includeDescendants: exportFolderMapIncludeDescendants
+                  }
+                }
+              : groupId
               ? { filters: { groupId } }
               : selected.length > 0
               ? { keywordIds: selected }
@@ -2489,7 +2521,7 @@ export function SemanticCoreTable({
                   }
                 }),
             sort: viewConfig.sort,
-            ...(exportContent !== "POSITION_HISTORY" ? { includeBom: exportBom } : {}),
+            ...(exportContent === "SEMANTIC" ? { includeBom: exportBom } : {}),
             ...(exportContent === "POSITION_HISTORY"
               ? {
                   positionHistory: semanticHistoryExportOptions(
@@ -3510,9 +3542,9 @@ export function SemanticCoreTable({
 
       {exportDialog && (
         <SemanticModal
-          description="Таблица и история позиций формируются в фоне с учётом текущей области и фильтров."
+          description="Таблица, история позиций и карта сайта формируются в фоне."
           onClose={() => setExportDialog(undefined)}
-          size="medium"
+          size={exportContent === "FOLDER_MAP" ? "large" : "medium"}
           title="Экспорт семантики"
         >
           <form
@@ -3530,9 +3562,14 @@ export function SemanticCoreTable({
                   onChange={(event) => {
                     const content = event.target.value as SemanticExportContent;
                     setExportContent(content);
-                    if (content === "POSITION_HISTORY") {
+                    if (content !== "SEMANTIC") {
                       setExportFormat("XLSX");
                       setExportBom(false);
+                      if (content === "FOLDER_MAP") {
+                        setExportColumns((current) =>
+                          current.includes("query") ? current : ["query", ...current]
+                        );
+                      }
                     } else {
                       setExportBom(exportFormat === "CSV" || exportFormat === "TSV");
                     }
@@ -3541,27 +3578,30 @@ export function SemanticCoreTable({
                 >
                   <option value="SEMANTIC">Таблица семантики</option>
                   <option value="POSITION_HISTORY">История позиций по датам</option>
+                  <option value="FOLDER_MAP">Карта сайта по папкам</option>
                 </CustomSelect>
               </label>
-              <label>
-                <span>Область экспорта</span>
-                <CustomSelect
-                  disabled={exporting || Boolean(exportDialog.groupId)}
-                  onChange={(event) => setExportScope(event.target.value as SemanticExportScope)}
-                  value={exportScope}
-                >
-                  <option value="CURRENT_FILTER">Все строки текущего фильтра</option>
-                  <option disabled={checkedIds.size === 0} value="SELECTED">Выбранные строки ({checkedIds.size})</option>
-                  {exportDialog.groupId && <option value="GROUP_SUBTREE">Текущая группа и подгруппы</option>}
-                </CustomSelect>
-              </label>
+              {exportContent !== "FOLDER_MAP" && (
+                <label>
+                  <span>Область экспорта</span>
+                  <CustomSelect
+                    disabled={exporting || Boolean(exportDialog.groupId)}
+                    onChange={(event) => setExportScope(event.target.value as SemanticExportScope)}
+                    value={exportScope}
+                  >
+                    <option value="CURRENT_FILTER">Все строки текущего фильтра</option>
+                    <option disabled={checkedIds.size === 0} value="SELECTED">Выбранные строки ({checkedIds.size})</option>
+                    {exportDialog.groupId && <option value="GROUP_SUBTREE">Текущая группа и подгруппы</option>}
+                  </CustomSelect>
+                </label>
+              )}
               <label>
                 <span>Формат</span>
                 <CustomSelect
                   disabled={
                     exporting ||
                     exportJob?.status === "COMPLETED" ||
-                    exportContent === "POSITION_HISTORY"
+                    exportContent !== "SEMANTIC"
                   }
                   onChange={(event) => {
                     const format = event.target.value as SemanticExportFormat;
@@ -3579,7 +3619,17 @@ export function SemanticCoreTable({
                 </CustomSelect>
               </label>
             </div>
-            {exportContent === "SEMANTIC" ? (
+            {exportContent === "FOLDER_MAP" && (
+              <SemanticExportFolderPicker
+                disabled={exporting || exportJob?.status === "COMPLETED"}
+                groups={groups}
+                includeDescendants={exportFolderMapIncludeDescendants}
+                onIncludeDescendantsChange={setExportFolderMapIncludeDescendants}
+                onSelectedGroupIdsChange={setExportFolderMapGroupIds}
+                selectedGroupIds={exportFolderMapGroupIds}
+              />
+            )}
+            {exportContent !== "POSITION_HISTORY" ? (
               <fieldset className="semantic-export-columns">
                 <legend>Колонки</legend>
                 {[
@@ -3592,8 +3642,15 @@ export function SemanticCoreTable({
                 ].map((column) => (
                   <label key={column.key}>
                     <input
-                      checked={exportColumns.includes(column.key)}
-                      disabled={exporting || exportJob?.status === "COMPLETED"}
+                      checked={
+                        exportColumns.includes(column.key) ||
+                        (exportContent === "FOLDER_MAP" && column.key === "query")
+                      }
+                      disabled={
+                        exporting ||
+                        exportJob?.status === "COMPLETED" ||
+                        (exportContent === "FOLDER_MAP" && column.key === "query")
+                      }
                       onChange={() => setExportColumns((current) =>
                         current.includes(column.key)
                           ? current.filter((item) => item !== column.key)
@@ -3656,7 +3713,7 @@ export function SemanticCoreTable({
                 </p>
               </fieldset>
             )}
-            {exportContent !== "POSITION_HISTORY" && (
+            {exportContent === "SEMANTIC" && (
               <label className="semantic-control-check">
                 <input
                   checked={exportBom}
@@ -3717,6 +3774,8 @@ export function SemanticCoreTable({
                     `Скачивание ${
                       exportContent === "POSITION_HISTORY"
                         ? "отчёта истории позиций"
+                        : exportContent === "FOLDER_MAP"
+                          ? "карты сайта"
                         : exportFormat
                     } началось. Если браузер запросит разрешение, подтвердите его.`
                   )}
@@ -3728,11 +3787,12 @@ export function SemanticCoreTable({
                   className="primary-button"
                   disabled={
                     exporting ||
-                    (exportContent === "SEMANTIC" && exportColumns.length === 0) ||
+                    (exportContent !== "POSITION_HISTORY" && exportColumns.length === 0) ||
                     (exportContent === "POSITION_HISTORY" &&
                       (exportHistoryEngines.length === 0 ||
                         !validSemanticHistoryDateRange(exportHistoryFrom, exportHistoryTo))) ||
-                    (exportScope === "SELECTED" && checkedIds.size === 0)
+                    (exportContent === "FOLDER_MAP" && exportFolderMapGroupIds.size === 0) ||
+                    (exportContent !== "FOLDER_MAP" && exportScope === "SELECTED" && checkedIds.size === 0)
                   }
                   type="submit"
                 >

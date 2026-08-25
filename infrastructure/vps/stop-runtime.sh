@@ -40,7 +40,7 @@ then
     stop >/dev/null 2>&1 || true
 fi
 
-for ((attempt = 1; attempt <= 10; attempt += 1)); do
+for ((attempt = 1; attempt <= 20; attempt += 1)); do
   tmux has-session -t "$runtime_session" 2>/dev/null || break
   sleep 1
 done

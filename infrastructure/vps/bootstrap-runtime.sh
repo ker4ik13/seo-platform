@@ -216,6 +216,7 @@ if [ ! -f "$runtime_env_file" ]; then
   write_environment_value NATS_WORKSPACE_INVITE_EVENT_SUBJECT production.email.workspace.invite.requested.v1
   write_environment_value NATS_NPD_RECEIPT_EVENT_SUBJECT production.email.billing.npd-receipt.delivery-requested.v1
   write_environment_value NATS_AUTH_EMAIL_DLQ_SUBJECT production.dlq.jobs.transactional-email.v1
+  write_environment_value AUTH_EMAIL_ENABLED false
 
   mv "$temporary_env_file" "$runtime_env_file"
   temporary_env_file=

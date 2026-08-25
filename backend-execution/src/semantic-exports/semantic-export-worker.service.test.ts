@@ -248,6 +248,85 @@ test("background worker enriches each keyword row with competitor columns", asyn
   }
 });
 
+test("background worker expands selected folder roots and exports direct memberships by sheet", async () => {
+  const rootId = "01900000-0000-7000-8000-000000000020";
+  const childId = "01900000-0000-7000-8000-000000000021";
+  const emptyId = "01900000-0000-7000-8000-000000000022";
+  let stored = {
+    ...queuedJob(),
+    inputSnapshot: {
+      format: "XLSX",
+      scope: "FOLDER_MAP",
+      locale: "ru",
+      columns: ["query", "priority"],
+      sort: "TEXT_ASC",
+      folderMap: {
+        groupIds: [rootId],
+        includeDescendants: true
+      }
+    }
+  } as Job;
+  const prisma = memoryPrisma(
+    () => stored,
+    (next) => { stored = next; }
+  );
+  const requestedGroupIds: string[] = [];
+  const seoData = {
+    listExportCustomColumns: async () => [],
+    listExportKeywordGroups: async () => [
+      group(rootId, "Каталог", 1, 0),
+      group(childId, "Морозильные лари", 2, 0, rootId, "Каталог / Морозильные лари"),
+      group(emptyId, "Пустая папка", 0, 1, rootId, "Каталог / Пустая папка"),
+      group("01900000-0000-7000-8000-000000000023", "Не выбрана", 7, 2)
+    ],
+    listExportKeywords: async (
+      _context: unknown,
+      query: { readonly groupId?: string; readonly sort?: string }
+    ) => {
+      assert.ok(query.groupId);
+      assert.equal(query.sort, "TEXT_ASC");
+      requestedGroupIds.push(query.groupId);
+      const data = query.groupId === rootId
+        ? [keyword(31)]
+        : query.groupId === childId
+          ? [keyword(32), keyword(33)]
+          : [];
+      return {
+        data,
+        page: { hasNext: false, totalApprox: data.length },
+        meta: { requestId: "folder-map" }
+      };
+    }
+  } as unknown as SeoDataClient;
+  const storage = memoryStorage();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = storage.fetch;
+  try {
+    const worker = new SemanticExportWorkerService(prisma, seoData, storage.port);
+    const result = await worker.process(stored.id, worker.workerId());
+
+    assert.deepEqual(result, {
+      exportId: stored.id,
+      outcome: "COMPLETED",
+      rowCount: 3
+    });
+    assert.deepEqual(requestedGroupIds, [rootId, childId]);
+    const archive = unzipSync(storage.artifact());
+    const map = new TextDecoder().decode(archive["xl/worksheets/sheet1.xml"]);
+    const rootSheet = new TextDecoder().decode(archive["xl/worksheets/sheet2.xml"]);
+    const childSheet = new TextDecoder().decode(archive["xl/worksheets/sheet3.xml"]);
+    assert.match(map, /Каталог/u);
+    assert.match(map, /Морозильные лари/u);
+    assert.match(map, /Пустая папка/u);
+    assert.doesNotMatch(map, /Не выбрана/u);
+    assert.match(rootSheet, /запрос 31/u);
+    assert.match(childSheet, /запрос 32/u);
+    assert.match(childSheet, /запрос 33/u);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 function queuedJob(): Job {
   const now = new Date("2026-08-12T10:00:00.000Z");
   return {
@@ -321,6 +400,37 @@ function keyword(index: number): SemanticKeywordListItem {
     createdAt: "2026-08-12T10:00:00.000Z",
     updatedAt: "2026-08-12T10:00:00.000Z",
     version: 1
+  };
+}
+
+function group(
+  id: string,
+  name: string,
+  keywordCount: number,
+  position: number,
+  parentId?: string,
+  path = name
+): Readonly<{
+  id: string;
+  parentId?: string;
+  name: string;
+  path: string;
+  position: number;
+  keywordCount: number;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}> {
+  return {
+    id,
+    ...(parentId ? { parentId } : {}),
+    name,
+    path,
+    position,
+    keywordCount,
+    version: 1,
+    createdAt: "2026-08-12T10:00:00.000Z",
+    updatedAt: "2026-08-12T10:00:00.000Z"
   };
 }
 

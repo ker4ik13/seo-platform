@@ -10,6 +10,7 @@ import {
   type CreateSemanticExportInput,
   type SemanticExportColumnKey,
   type SemanticExportFilters,
+  type SemanticFolderMapExportOptions,
   type SemanticPositionHistoryExportOptions
 } from "@seo-platform/contracts";
 import { validationError } from "../common/domain-error.js";
@@ -33,7 +34,8 @@ export function createSemanticExportInput(
       "sort",
       "keywordIds",
       "includeBom",
-      "positionHistory"
+      "positionHistory",
+      "folderMap"
     ],
     "$"
   );
@@ -47,9 +49,13 @@ export function createSemanticExportInput(
     input.keywordIds === undefined
       ? undefined
       : exportKeywordIds(input.keywordIds);
+  const columns = exportColumns(input.columns);
   const positionHistory = input.positionHistory === undefined
     ? undefined
     : positionHistoryOptions(input.positionHistory);
+  const folderMap = input.folderMap === undefined
+    ? undefined
+    : folderMapOptions(input.folderMap);
 
   if (
     (scope === "SELECTED" || scope === "CURRENT_PAGE") &&
@@ -76,12 +82,24 @@ export function createSemanticExportInput(
   if (positionHistory && format !== "XLSX") {
     invalid("format", "Position history report is available only as XLSX");
   }
+  if ((scope === "FOLDER_MAP") !== Boolean(folderMap)) {
+    invalid("folderMap", "Folder-map scope requires folder-map options");
+  }
+  if (folderMap && format !== "XLSX") {
+    invalid("format", "Folder map is available only as XLSX");
+  }
+  if (folderMap && (filters !== undefined || positionHistory !== undefined)) {
+    invalid("folderMap", "Folder map cannot be combined with filters or position history");
+  }
+  if (folderMap && !columns.includes("query")) {
+    invalid("columns", "Folder map must include the query column");
+  }
 
   return {
     format,
     scope,
     locale: requiredEnum(input.locale, semanticExportLocales, "locale"),
-    columns: exportColumns(input.columns),
+    columns,
     ...(filters ? { filters } : {}),
     ...(input.sort === undefined
       ? {}
@@ -92,7 +110,23 @@ export function createSemanticExportInput(
     ...(input.includeBom === undefined
       ? {}
       : { includeBom: requiredBoolean(input.includeBom, "includeBom") }),
-    ...(positionHistory ? { positionHistory } : {})
+    ...(positionHistory ? { positionHistory } : {}),
+    ...(folderMap ? { folderMap } : {})
+  };
+}
+
+function folderMapOptions(value: unknown): SemanticFolderMapExportOptions {
+  const input = exactRecord(
+    value,
+    ["groupIds", "includeDescendants"],
+    "folderMap"
+  );
+  return {
+    groupIds: requiredUuidList(input.groupIds, "folderMap.groupIds", 5_000),
+    includeDescendants: requiredBoolean(
+      input.includeDescendants,
+      "folderMap.includeDescendants"
+    )
   };
 }
 
@@ -225,6 +259,26 @@ function optionalUuidList(
     invalid(field, "Must contain unique UUIDs");
   }
   return [...values].sort();
+}
+
+function requiredUuidList(
+  value: unknown,
+  field: string,
+  maximum: number
+): readonly string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > maximum) {
+    invalid(field, `Must contain 1 to ${maximum} UUIDs`);
+  }
+  const values = value.map((item, index) => {
+    if (typeof item !== "string" || !UUID_PATTERN.test(item)) {
+      invalid(`${field}[${index}]`, "Must be a UUID");
+    }
+    return item.toLowerCase();
+  });
+  if (new Set(values).size !== values.length) {
+    invalid(field, "Must contain unique UUIDs");
+  }
+  return values;
 }
 
 function exportColumns(

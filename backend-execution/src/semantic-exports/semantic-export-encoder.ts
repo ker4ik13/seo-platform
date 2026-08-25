@@ -83,6 +83,20 @@ export interface SemanticPositionHistoryWorkbookPlan {
   >;
 }
 
+export interface SemanticFolderMapWorkbookGroup {
+  readonly id: string;
+  readonly parentId?: string;
+  readonly name: string;
+  readonly path: string;
+  readonly keywordCount: number;
+  readonly depth: number;
+}
+
+export interface SemanticFolderMapWorkbookPlan {
+  /** Groups in the exact pre-order in which they must appear on the map. */
+  readonly groups: readonly SemanticFolderMapWorkbookGroup[];
+}
+
 export function semanticExportFile(
   rows: AsyncIterable<SemanticExportKeywordRow>,
   input: CreateSemanticExportInput,
@@ -116,6 +130,31 @@ export function semanticPositionHistoryExportFile(
     filename: `positions-history-${date}.xlsx`,
     contentType: exportContentType("XLSX"),
     bytes: positionHistoryXlsxDocument(rows, input, plan)
+  };
+}
+
+export function semanticFolderMapExportFile(
+  rowsForGroup: (groupId: string) => AsyncIterable<SemanticExportKeywordRow>,
+  input: CreateSemanticExportInput,
+  plan: SemanticFolderMapWorkbookPlan,
+  customColumnNames: Readonly<Record<string, string>>,
+  now = new Date()
+): SemanticExportFile {
+  if (!input.folderMap || input.scope !== "FOLDER_MAP" || input.format !== "XLSX") {
+    throw new TypeError("Folder-map export requires XLSX folder-map options");
+  }
+  assertCustomColumns(input.columns, customColumnNames);
+  validateFolderMapPlan(plan);
+  const date = now.toISOString().slice(0, 10);
+  return {
+    filename: `semantic-site-map-${date}.xlsx`,
+    contentType: exportContentType("XLSX"),
+    bytes: folderMapXlsxDocument(
+      rowsForGroup,
+      input,
+      plan,
+      customColumnNames
+    )
   };
 }
 
@@ -239,6 +278,286 @@ async function* xlsxDocument(
   yield* drain();
   zip.end();
   yield* drain();
+}
+
+async function* folderMapXlsxDocument(
+  rowsForGroup: (groupId: string) => AsyncIterable<SemanticExportKeywordRow>,
+  input: CreateSemanticExportInput,
+  plan: SemanticFolderMapWorkbookPlan,
+  customColumnNames: Readonly<Record<string, string>>
+): AsyncGenerator<Uint8Array> {
+  const workbookGroups = folderMapSheetGroups(plan.groups);
+  const sheetNames = ["Карта", ...workbookGroups.map(({ sheetName }) => sheetName)];
+  const output: Uint8Array[] = [];
+  let zipError: Error | undefined;
+  const zip = new Zip((error, data) => {
+    if (error) zipError = error;
+    if (data.byteLength > 0) output.push(data);
+  });
+  const drain = function* (): Generator<Uint8Array> {
+    if (zipError) throw zipError;
+    while (output.length > 0) yield output.shift()!;
+  };
+  const addText = (name: string, value: string): void => {
+    const file = new ZipDeflate(name, { level: 6 });
+    zip.add(file);
+    file.push(encoder.encode(value), true);
+  };
+
+  addText(
+    "xl/worksheets/sheet1.xml",
+    folderMapWorksheet(plan.groups, workbookGroups)
+  );
+  yield* drain();
+
+  const headers = input.columns.map((column) =>
+    columnHeader(column, input.locale, customColumnNames)
+  );
+  for (const [groupIndex, group] of workbookGroups.entries()) {
+    const sheet = new ZipDeflate(
+      `xl/worksheets/sheet${groupIndex + 2}.xml`,
+      { level: 6 }
+    );
+    zip.add(sheet);
+    sheet.push(
+      encoder.encode(folderMapDataWorksheetStart(input.columns, headers))
+    );
+    yield* drain();
+
+    let rowIndex = 2;
+    for await (const item of rowsForGroup(group.id)) {
+      if (rowIndex - 1 >= XLSX_MAX_DATA_ROWS_PER_SHEET) {
+        throw new TypeError("Folder-map worksheet exceeds the XLSX row limit");
+      }
+      rowIndex += 1;
+      const record = exportRecord(item, input.columns);
+      sheet.push(
+        encoder.encode(
+          folderMapDataRow(
+            rowIndex,
+            input.columns.map((column) => record[column]),
+            input.columns
+          )
+        )
+      );
+      yield* drain();
+    }
+    sheet.push(
+      encoder.encode(
+        folderMapDataWorksheetEnd(
+          input.columns.length,
+          rowIndex,
+          group.mapReference
+        )
+      ),
+      true
+    );
+    yield* drain();
+  }
+
+  addText("xl/workbook.xml", workbookXmlWithNames(sheetNames));
+  addText("xl/_rels/workbook.xml.rels", workbookRelationships(sheetNames.length));
+  addText("xl/styles.xml", folderMapStylesXml());
+  addText("_rels/.rels", rootRelationships());
+  addText("[Content_Types].xml", contentTypes(sheetNames.length));
+  yield* drain();
+  zip.end();
+  yield* drain();
+}
+
+interface FolderMapSheetGroup extends SemanticFolderMapWorkbookGroup {
+  readonly sheetName: string;
+  readonly mapReference: string;
+}
+
+function folderMapSheetGroups(
+  groups: readonly SemanticFolderMapWorkbookGroup[]
+): readonly FolderMapSheetGroup[] {
+  const usedNames = new Set(["карта"]);
+  return groups
+    .map((group, index) => ({ group, mapReference: folderMapNameReference(group, index) }))
+    .filter(({ group }) => group.keywordCount > 0)
+    .map(({ group, mapReference }) => ({
+      ...group,
+      mapReference,
+      sheetName: uniqueWorksheetName(group.name, usedNames)
+    }));
+}
+
+function folderMapWorksheet(
+  groups: readonly SemanticFolderMapWorkbookGroup[],
+  sheetGroups: readonly FolderMapSheetGroup[]
+): string {
+  const sheetByGroupId = new Map(sheetGroups.map((group) => [group.id, group]));
+  const maximumDepth = Math.max(0, ...groups.map(({ depth }) => depth));
+  const lastColumnNumber = maximumDepth + 1;
+  const lastColumn = excelColumn(lastColumnNumber);
+  const rows = [
+    `<row r="1" ht="27" customHeight="1">${styledInlineCell(1, 1, "Карта сайта", 1)}</row>`,
+    ...groups.map((group, index) => {
+      const row = index + 2;
+      const column = group.depth + 1;
+      return `<row r="${row}" ht="23" customHeight="1">${styledInlineCell(row, column, group.name, sheetByGroupId.has(group.id) ? 3 : 4)}</row>`;
+    })
+  ].join("");
+  const merges = [
+    ...(lastColumnNumber > 1 ? [`A1:${lastColumn}1`] : []),
+    ...groups.flatMap((group, index) => {
+      const firstColumn = group.depth + 1;
+      return firstColumn < lastColumnNumber
+        ? [`${excelColumn(firstColumn)}${index + 2}:${lastColumn}${index + 2}`]
+        : [];
+    })
+  ];
+  const hyperlinks = groups.flatMap((group, index) => {
+    const sheet = sheetByGroupId.get(group.id);
+    if (!sheet) return [];
+    return [
+      `<hyperlink ref="${folderMapNameReference(group, index)}" location="${xml(internalWorksheetLocation(sheet.sheetName, "A1"))}"/>`
+    ];
+  });
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews>' +
+    '<sheetFormatPr defaultRowHeight="18"/>' +
+    `<cols>${maximumDepth > 0 ? `<col min="1" max="${maximumDepth}" width="3.5" customWidth="1"/>` : ""}<col min="${lastColumnNumber}" max="${lastColumnNumber}" width="52" customWidth="1"/></cols>` +
+    `<sheetData>${rows}</sheetData>` +
+    (merges.length > 0
+      ? `<mergeCells count="${merges.length}">${merges.map((reference) => `<mergeCell ref="${reference}"/>`).join("")}</mergeCells>`
+      : "") +
+    (hyperlinks.length > 0 ? `<hyperlinks>${hyperlinks.join("")}</hyperlinks>` : "") +
+    '<pageMargins left="0.35" right="0.35" top="0.5" bottom="0.5" header="0.2" footer="0.2"/>' +
+    '</worksheet>';
+}
+
+function folderMapNameReference(
+  group: SemanticFolderMapWorkbookGroup,
+  index: number
+): string {
+  return `${excelColumn(group.depth + 1)}${index + 2}`;
+}
+
+function folderMapDataWorksheetStart(
+  columns: readonly SemanticExportColumnKey[],
+  headers: readonly string[]
+): string {
+  const columnDefinitions = columns.map((column, index) =>
+    `<col min="${index + 1}" max="${index + 1}" width="${folderMapColumnWidth(column)}" customWidth="1"/>`
+  ).join("");
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<sheetViews><sheetView workbookViewId="0"><pane ySplit="2" topLeftCell="A3" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A3" sqref="A3"/></sheetView></sheetViews>' +
+    '<sheetFormatPr defaultRowHeight="20"/>' +
+    `<cols>${columnDefinitions}</cols><sheetData>` +
+    `<row r="1" ht="25" customHeight="1">${styledInlineCell(1, 1, "← Вернуться к карте сайта", 5)}</row>` +
+    `<row r="2" ht="25" customHeight="1">${headers.map((header, index) => styledInlineCell(2, index + 1, header, 6)).join("")}</row>`;
+}
+
+function folderMapDataRow(
+  row: number,
+  values: readonly unknown[],
+  columns: readonly SemanticExportColumnKey[]
+): string {
+  const wrapped = columns.some((column) => XLSX_WRAPPED_COLUMNS.has(column));
+  return `<row r="${row}"${wrapped ? ' ht="42" customHeight="1"' : ""}>${values.map((value, index) => {
+    const column = columns[index]!;
+    const numeric = XLSX_NUMERIC_COLUMNS.has(column);
+    return xlsxCell(
+      row,
+      index + 1,
+      value,
+      numeric,
+      numeric ? 9 : XLSX_WRAPPED_COLUMNS.has(column) ? 8 : 7
+    );
+  }).join("")}</row>`;
+}
+
+function folderMapDataWorksheetEnd(
+  columnCount: number,
+  lastRow: number,
+  mapReference: string
+): string {
+  const lastColumn = excelColumn(columnCount);
+  const merge = columnCount > 1
+    ? `<mergeCells count="1"><mergeCell ref="A1:${lastColumn}1"/></mergeCells>`
+    : "";
+  return `</sheetData><autoFilter ref="A2:${lastColumn}${Math.max(2, lastRow)}"/>${merge}<hyperlinks><hyperlink ref="A1" location="${xml(internalWorksheetLocation("Карта", mapReference))}"/></hyperlinks><pageMargins left="0.35" right="0.35" top="0.5" bottom="0.5" header="0.2" footer="0.2"/></worksheet>`;
+}
+
+function folderMapColumnWidth(column: SemanticExportColumnKey): number {
+  if (column === "query") return 48;
+  if (XLSX_WRAPPED_COLUMNS.has(column)) return 52;
+  if (
+    column === "targetUrl" ||
+    column === "yandexRelevantUrl" ||
+    column === "googleRelevantUrl"
+  ) return 42;
+  if (column === "group" || column === "cluster") return 30;
+  if (column === "tags") return 26;
+  if (XLSX_NUMERIC_COLUMNS.has(column)) return 14;
+  return 22;
+}
+
+function internalWorksheetLocation(sheetName: string, cell: string): string {
+  return `'${sheetName.replaceAll("'", "''")}'!${cell}`;
+}
+
+function uniqueWorksheetName(value: string, usedNames: Set<string>): string {
+  const normalized = value
+    .replace(/\p{Cc}/gu, " ")
+    .replace(/[\\/*?:\u005B\u005D]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .replace(/^'+|'+$/gu, "")
+    .trim() || "Папка";
+  for (let suffix = 1; suffix <= 100_000; suffix += 1) {
+    const ending = suffix === 1 ? "" : ` (${suffix})`;
+    const candidate = truncateWorksheetName(normalized, 31 - ending.length) + ending;
+    const key = candidate.toLocaleLowerCase("ru-RU");
+    if (!usedNames.has(key)) {
+      usedNames.add(key);
+      return candidate;
+    }
+  }
+  throw new TypeError("Folder-map worksheet names are not unique");
+}
+
+function truncateWorksheetName(value: string, maximumLength: number): string {
+  let result = "";
+  for (const character of value) {
+    if (result.length + character.length > maximumLength) break;
+    result += character;
+  }
+  return result.replace(/'+$/gu, "").trim() || "Папка";
+}
+
+function validateFolderMapPlan(plan: SemanticFolderMapWorkbookPlan): void {
+  if (plan.groups.length < 1 || plan.groups.length > 100_000) {
+    throw new TypeError("Folder-map workbook group count is invalid");
+  }
+  const ids = new Set<string>();
+  const depths = new Map<string, number>();
+  for (const group of plan.groups) {
+    if (
+      !group.id ||
+      ids.has(group.id) ||
+      !group.name.trim() ||
+      group.name.length > 500 ||
+      !group.path.trim() ||
+      group.path.length > 8_000 ||
+      !Number.isSafeInteger(group.keywordCount) ||
+      group.keywordCount < 0 ||
+      !Number.isSafeInteger(group.depth) ||
+      group.depth < 0 ||
+      group.depth > 64
+    ) {
+      throw new TypeError("Folder-map workbook metadata is invalid");
+    }
+    if (group.parentId && depths.get(group.parentId) !== group.depth - 1) {
+      throw new TypeError("Folder-map workbook hierarchy is invalid");
+    }
+    ids.add(group.id);
+    depths.set(group.id, group.depth);
+  }
 }
 
 async function* positionHistoryXlsxDocument(
@@ -780,6 +1099,39 @@ function stylesXml(): string {
       '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
       '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>' +
     '</cellXfs></styleSheet>';
+}
+
+function folderMapStylesXml(): string {
+  return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+    '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+    '<fonts count="4">' +
+      '<font><sz val="11"/><name val="Calibri"/><family val="2"/></font>' +
+      '<font><b/><color rgb="FFFFFFFF"/><sz val="11"/><name val="Calibri"/></font>' +
+      '<font><u/><color rgb="FF5B3DF5"/><sz val="11"/><name val="Calibri"/></font>' +
+      '<font><b/><color rgb="FF1A2030"/><sz val="11"/><name val="Calibri"/></font>' +
+    '</fonts>' +
+    '<fills count="5">' +
+      '<fill><patternFill patternType="none"/></fill>' +
+      '<fill><patternFill patternType="gray125"/></fill>' +
+      '<fill><patternFill patternType="solid"><fgColor rgb="FF5B3DF5"/><bgColor indexed="64"/></patternFill></fill>' +
+      '<fill><patternFill patternType="solid"><fgColor rgb="FFF2F0FF"/><bgColor indexed="64"/></patternFill></fill>' +
+      '<fill><patternFill patternType="solid"><fgColor rgb="FFF7F8FC"/><bgColor indexed="64"/></patternFill></fill>' +
+    '</fills>' +
+    '<borders count="2"><border/><border><left style="thin"><color rgb="FFE2E4EC"/></left><right style="thin"><color rgb="FFE2E4EC"/></right><top style="thin"><color rgb="FFE2E4EC"/></top><bottom style="thin"><color rgb="FFE2E4EC"/></bottom><diagonal/></border></borders>' +
+    '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+    '<cellXfs count="10">' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+      '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>' +
+      '<xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>' +
+      '<xf numFmtId="0" fontId="2" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center"/></xf>' +
+      '<xf numFmtId="0" fontId="3" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top"/></xf>' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>' +
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="top"/></xf>' +
+    '</cellXfs>' +
+    '</styleSheet>';
 }
 
 function positionHistoryStylesXml(): string {

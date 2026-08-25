@@ -111,7 +111,7 @@ function exportFormat(value: unknown): SemanticExportFormat | undefined {
 function exportScope(value: unknown): SemanticExportScope | undefined {
   return value === "SELECTED" || value === "CURRENT_PAGE" ||
     value === "CURRENT_FILTER" || value === "GROUP_SUBTREE" ||
-    value === "FULL_CORE"
+    value === "FOLDER_MAP" || value === "FULL_CORE"
     ? value
     : undefined;
 }

@@ -13,6 +13,7 @@ const vpsDirectory = path.join(infrastructureDirectory, "vps");
 const shellScripts = [
   "bootstrap-runtime.sh",
   "billing-webhook-proxy.sh",
+  "configure-auth-email.sh",
   "configure-yookassa.sh",
   "configure-web-push.sh",
   "migrate-runtime.sh",
@@ -74,7 +75,7 @@ test("VPS runtime uses UTC for PostgreSQL and every Node process", async () => {
   const nodeRuntimeCount = [...source.matchAll(/NODE_ENV=production \\/gu)].length;
   const utcRuntimeCount = [...source.matchAll(/TZ=UTC \\/gu)].length;
 
-  assert.equal(nodeRuntimeCount, 11);
+  assert.equal(nodeRuntimeCount, 12);
   assert.equal(utcRuntimeCount, nodeRuntimeCount);
   assert.match(source, /postgres[\s\S]*-c timezone=UTC/);
 });
@@ -117,6 +118,34 @@ test("VPS YooKassa adapter is operator-configurable and disabled by default", as
   assert.match(webhookSource, /\/api\/v1\/billing\/providers\/yookassa\/webhook/u);
   assert.match(webhookSource, /127\.0\.0\.1:4000/u);
   assert.match(webhookSource, /webhook_listen=\$public_host:443/u);
+});
+
+test("VPS auth-email keeps SMTP in one optional isolated worker", async () => {
+  const componentSource = await readVpsFile("run-component.sh");
+  const startSource = await readVpsFile("start-runtime.sh");
+  const statusSource = await readVpsFile("status-runtime.sh");
+  const configureSource = await readVpsFile("configure-auth-email.sh");
+  const supervisorSource = await readVpsFile("supervise-component.sh");
+  const stopSource = await readVpsFile("stop-runtime.sh");
+  const workerBlock = componentSource.match(/  auth-email-worker\)[\s\S]*?    ;;/u)?.[0] ?? "";
+
+  assert.match(workerBlock, /jobs_auth_email_runtime/u);
+  assert.match(workerBlock, /NATS_AUTH_EMAIL_CONSUMER_USER/u);
+  assert.match(workerBlock, /JOBS_TO_PLATFORM_AUTH_EMAIL_TOKEN/u);
+  assert.match(workerBlock, /AUTH_EMAIL_SMTP_PASSWORD/u);
+  assert.doesNotMatch(workerBlock, /REDIS_URL|S3_|INTEGRATION_CREDENTIAL/u);
+  assert.match(componentSource, /AUTH_EMAIL_VERIFICATION_REQUIRED="\$\{AUTH_EMAIL_ENABLED:-false\}"/u);
+  assert.match(startSource, /AUTH_EMAIL_ENABLED:-false/u);
+  assert.match(startSource, /start_window auth-email-worker/u);
+  assert.match(startSource, /seo-platform-auth-email-worker\.ready/u);
+  assert.match(statusSource, /service=auth-email-worker status=ready/u);
+  assert.match(configureSource, /runtime\.env\.tmp\.\$\$/u);
+  assert.match(configureSource, /read -r -s entered_password/u);
+  assert.match(configureSource, /await transport\.verify\(\)/u);
+  assert.doesNotMatch(configureSource, /printf[^\n]*smtp_password/u);
+  assert.match(supervisorSource, /component" = auth-email-worker/u);
+  assert.match(supervisorSource, /shutdown_attempts=20/u);
+  assert.match(stopSource, /attempt <= 20/u);
 });
 
 test("VPS rank and connector runtimes run multiple bounded processes", async () => {

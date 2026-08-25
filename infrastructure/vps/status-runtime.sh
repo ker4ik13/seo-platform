@@ -11,6 +11,16 @@ script_dir=$(
 
 load_runtime_environment
 
+if [ "${AUTH_EMAIL_ENABLED:-false}" = true ]; then
+  if [ -f /tmp/seo-platform-auth-email-worker.ready ]; then
+    printf 'service=auth-email-worker status=ready\n'
+  else
+    printf 'service=auth-email-worker status=unavailable\n'
+  fi
+else
+  printf 'service=auth-email-worker status=disabled\n'
+fi
+
 if tmux has-session -t "$runtime_session" 2>/dev/null; then
   printf 'tmux=%s status=running\n' "$runtime_session"
   tmux list-windows \

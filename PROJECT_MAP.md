@@ -492,6 +492,11 @@ child processes (`RANK_WORKER_PROCESSES`, `CONNECTOR_WORKER_PROCESSES`), но
 работает отдельным быстрым тиком (по умолчанию 1 секунда), а credential
 maintenance сохраняет собственный медленный интервал. Одноузловой VPS runtime
 запускает три connector child process, совпадая с production default Compose.
+После успешной операторской SMTP-проверки тот же runtime опционально запускает
+отдельный `auth-email-worker` с единственными разрешёнными Jobs DB, NATS,
+Platform JIT и SMTP credentials; без `AUTH_EMAIL_ENABLED=true` процесс не
+создаётся. Readiness worker является обязательной частью старта включённой
+почты, а его graceful shutdown получает окно больше внутреннего drain budget.
 Arsenkin DB broker
 сохраняет общий bounded task capacity и lease fencing между всеми процессами.
 ИИ-съём и clustering используют собственные наборы `SECURITY DEFINER` broker-функций для
@@ -873,6 +878,17 @@ filter/sort/column/format snapshot и передаёт только Job ID в Bu
 артефакт в S3. XLSX автоматически делится по ограничению строк листа, а все
 spreadsheet-форматы защищены от formula injection. Состояние и row progress
 остаются PostgreSQL-owned; истёкший lease восстанавливается dispatcher-ом.
+Scope `FOLDER_MAP` переиспользует тот же Job и read boundary: manifest хранит
+выбранные UUID папок и флаг включения потомков, worker сверяет их с актуальным
+деревом `keyword-groups`, исключает системные узлы и строит относительный
+pre-order. XLSX получает первым листом `Карта` со вложенностью и внутренними
+ссылками, а затем по одному листу на каждую непустую папку; запросы читаются
+отдельно по прямому membership каждой папки, поэтому multi-group запрос может
+встретиться на нескольких листах. На листах используются выбранные export
+columns и обязательный `query`, в первой строке есть ссылка возврата на карту.
+Пустые папки остаются только в карте. Имена листов очищаются, ограничиваются 31
+символом и дедуплицируются; новый storage path, queue, deployable или таблица
+не добавлены.
 Режим XLSX «История позиций» использует тот же Job, очередь и storage path, но
 читает через отдельный bounded read service все BYOK-снимки выбранных
 поисковиков независимо от tracking context. Worker делает два постраничных

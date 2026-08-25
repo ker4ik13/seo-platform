@@ -21,7 +21,11 @@ child_pid=
 forward_signal() {
   if [ -n "$child_pid" ] && kill -0 "$child_pid" 2>/dev/null; then
     kill -TERM "$child_pid" 2>/dev/null || true
-    for ((attempt = 1; attempt <= 10; attempt += 1)); do
+    shutdown_attempts=10
+    if [ "$component" = auth-email-worker ]; then
+      shutdown_attempts=20
+    fi
+    for ((attempt = 1; attempt <= shutdown_attempts; attempt += 1)); do
       kill -0 "$child_pid" 2>/dev/null || break
       sleep 1
     done

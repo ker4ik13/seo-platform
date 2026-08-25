@@ -19,6 +19,7 @@ for build_artifact in \
   backend-core/dist/realtime.main.js \
   backend-core/dist/web-push-worker.main.js \
   backend-execution/dist/http.main.js \
+  backend-execution/dist/auth-email-worker.main.js \
   backend-execution/dist/inspection-worker.main.js \
   frontend/.next/BUILD_ID
 do
@@ -125,6 +126,17 @@ wait_for_http http://127.0.0.1:4002/health/ready
 start_window realtime
 wait_for_http http://127.0.0.1:4003/health/ready
 wait_for_http http://127.0.0.1:4000/health/ready
+if [ "${AUTH_EMAIL_ENABLED:-false}" = true ]; then
+  auth_email_ready_file=/tmp/seo-platform-auth-email-worker.ready
+  rm -f "$auth_email_ready_file"
+  start_window auth-email-worker
+  for ((attempt = 1; attempt <= 60; attempt += 1)); do
+    [ -f "$auth_email_ready_file" ] && break
+    sleep 1
+  done
+  [ -f "$auth_email_ready_file" ] ||
+    runtime_fail "auth-email worker did not become ready"
+fi
 if [ "${YOOKASSA_ENABLED:-false}" = true ]; then
   start_window billing-webhook-proxy
 fi

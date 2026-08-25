@@ -54,6 +54,39 @@ test("accepts XLSX and a multi-group current filter", () => {
   assert.deepEqual(input.filters?.groupIds, [groupId, secondGroupId]);
 });
 
+test("accepts only a dedicated XLSX folder-map export", () => {
+  const input = createSemanticExportInput({
+    format: "XLSX",
+    scope: "FOLDER_MAP",
+    locale: "ru",
+    columns: ["query", "frequency"],
+    folderMap: {
+      groupIds: [secondGroupId, groupId],
+      includeDescendants: true
+    }
+  });
+
+  assert.deepEqual(input.folderMap, {
+    groupIds: [secondGroupId, groupId],
+    includeDescendants: true
+  });
+  assert.throws(
+    () => createSemanticExportInput({ ...input, format: "CSV" }),
+    DomainError
+  );
+  assert.throws(
+    () => createSemanticExportInput({ ...input, scope: "CURRENT_FILTER" }),
+    DomainError
+  );
+  assert.throws(
+    () => createSemanticExportInput({
+      ...input,
+      filters: { groupId }
+    }),
+    DomainError
+  );
+});
+
 test("accepts only a bounded XLSX position-history report", () => {
   const input = createSemanticExportInput({
     format: "XLSX",

@@ -639,6 +639,7 @@ function exportScopeLabel(scope: SemanticExportJobSummary["scope"]): string {
     CURRENT_PAGE: "текущая страница",
     CURRENT_FILTER: "текущий фильтр",
     GROUP_SUBTREE: "группа и подгруппы",
+    FOLDER_MAP: "карта сайта по папкам",
     FULL_CORE: "весь проект"
   }[scope];
 }

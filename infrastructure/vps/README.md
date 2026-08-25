@@ -63,6 +63,29 @@ infrastructure/vps/start-runtime.sh
 release его необходимо заменить на контролируемый адрес. Повторный запуск не
 вращает существующую пару ключей.
 
+Transactional email для подтверждения адреса, восстановления пароля и
+приглашений также включается только на остановленном runtime. Команда сначала
+проверяет TLS-соединение и SMTP-авторизацию, затем атомарно сохраняет реквизиты
+в `runtime.env`; при неуспешной проверке рабочая конфигурация не меняется.
+Пароль вводится без echo и не попадает в аргументы процесса или логи:
+
+```bash
+infrastructure/vps/stop-runtime.sh
+SEO_PLATFORM_AUTH_EMAIL_FROM=no-reply@example.com \
+SEO_PLATFORM_AUTH_EMAIL_SMTP_HOST=smtp.example.com \
+SEO_PLATFORM_AUTH_EMAIL_SMTP_PORT=587 \
+SEO_PLATFORM_AUTH_EMAIL_SMTP_SECURE=false \
+SEO_PLATFORM_AUTH_EMAIL_SMTP_USER=no-reply@example.com \
+  infrastructure/vps/configure-auth-email.sh
+infrastructure/vps/start-runtime.sh
+```
+
+Для почты Timeweb используются `smtp.timeweb.ru`, порт `587` с STARTTLS
+(`SMTP_SECURE=false`) либо порт `465` с TLS (`SMTP_SECURE=true`); логин и From
+должны совпадать с созданным почтовым ящиком (см. [официальные настройки
+почтовых клиентов](https://timeweb.com/ru/docs/pochta/osnovnye-voprosy-po-rabote-s-pochtoj/osnovnye-nastrojki-pochtovyh-klientov/)). После запуска
+`status-runtime.sh` обязан показывать `service=auth-email-worker status=ready`.
+
 YooKassa adapter входит в Platform API. Подключение выполняется только на
 остановленном runtime: shop ID передаётся как переменная, а secret вводится
 без echo и остаётся в mode-600 `runtime.env`. Команда также включает
@@ -97,7 +120,8 @@ runtime directory до `start-runtime.sh`; start завершится ошибк
 3. запускает Redis/NATS и provision-ит точную JetStream topology;
 4. provision-ит versioned MinIO buckets, least-privilege app policy и CORS;
 5. запускает ClamAV, сервисы и отдельные workers;
-   при настроенном Web Push также запускает isolated sender;
+   при настроенных Web Push или transactional email также запускает их
+   isolated sender/worker и ждёт readiness;
 6. ждёт readiness каждого обязательного компонента.
 
 Полные логи находятся в
