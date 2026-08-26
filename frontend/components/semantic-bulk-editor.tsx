@@ -28,6 +28,7 @@ interface BulkSelection {
   readonly language: string;
   readonly priority: number;
   readonly isFavorite: boolean;
+  readonly isTracked: boolean;
   readonly intent?: BulkIntent;
   readonly groupId?: string;
   readonly clusterId?: string;
@@ -106,6 +107,9 @@ export function SemanticBulkEditor({
   );
   const [favorite, setFavorite] = useState<"KEEP" | "YES" | "NO">(
     single ? (single.isFavorite ? "YES" : "NO") : "KEEP"
+  );
+  const [tracked, setTracked] = useState<"KEEP" | "YES" | "NO">(
+    single ? (single.isTracked ? "YES" : "NO") : "KEEP"
   );
   const [intent, setIntent] = useState<"KEEP" | "CLEAR" | BulkIntent>(
     single?.intent ?? (single ? "CLEAR" : "KEEP")
@@ -288,6 +292,7 @@ export function SemanticBulkEditor({
           language,
           priority,
           favorite,
+          tracked,
           intent,
           groupId,
           clusterId,
@@ -299,6 +304,9 @@ export function SemanticBulkEditor({
           ...(favorite === "KEEP"
             ? {}
             : { isFavorite: favorite === "YES" }),
+          ...(tracked === "KEEP"
+            ? {}
+            : { isTracked: tracked === "YES" }),
           ...(intent === "KEEP"
             ? {}
             : { intent: intent === "CLEAR" ? null : intent }),
@@ -396,6 +404,19 @@ export function SemanticBulkEditor({
             {!single && <option value="KEEP">Не менять</option>}
             <option value="YES">{single ? "Да" : "Добавить"}</option>
             <option value="NO">{single ? "Нет" : "Убрать"}</option>
+          </CustomSelect>
+        </label>
+        <label className="semantic-bulk-tracked">
+          <span>Отслеживается</span>
+          <CustomSelect
+            onChange={(event) =>
+              setTracked(event.target.value as typeof tracked)
+            }
+            value={tracked}
+          >
+            {!single && <option value="KEEP">Не менять</option>}
+            <option value="YES">Да</option>
+            <option value="NO">Нет</option>
           </CustomSelect>
         </label>
         <label className="semantic-bulk-intent">
@@ -788,6 +809,7 @@ function singleKeywordPatch(
     language: string;
     priority: string;
     favorite: "KEEP" | "YES" | "NO";
+    tracked: "KEEP" | "YES" | "NO";
     intent: "KEEP" | "CLEAR" | BulkIntent;
     groupId: string;
     clusterId: string;
@@ -822,6 +844,9 @@ function singleKeywordPatch(
     ...(values.favorite === (initial.isFavorite ? "YES" : "NO")
       ? {}
       : { isFavorite: values.favorite === "YES" }),
+    ...(values.tracked === (initial.isTracked ? "YES" : "NO")
+      ? {}
+      : { isTracked: values.tracked === "YES" }),
     ...(intent === (initial.intent ?? null) ? {} : { intent }),
     ...(groupId === (initial.groupId ?? null) ? {} : { groupId }),
     ...(clusterId === (initial.clusterId ?? null) ? {} : { clusterId }),

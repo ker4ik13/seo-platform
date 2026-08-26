@@ -185,6 +185,7 @@ test("rejects launch-profile groups outside the current project", async () => {
         configuration,
         launchProfile: {
           searchSource: "LIVE",
+          includeUntracked: false,
           scope: {
             mode: "GROUPS",
             groupIds: ["01900000-0000-7000-8000-000000000099"]

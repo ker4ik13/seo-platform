@@ -1326,6 +1326,34 @@ test("validates assigned keyword pages and point mutation states", () => {
   );
 });
 
+test("accepts tracking-context keyword pages above the legacy 200-row limit", () => {
+  const data = Array.from({ length: 201 }, (_, index) => ({
+    assignmentId: `01900000-0000-7000-8000-${String(index + 1).padStart(12, "0")}`,
+    contextId,
+    keywordId: `01900000-0000-7000-9000-${String(index + 1).padStart(12, "0")}`,
+    keywordVersion: 1,
+    textOriginal: `Запрос ${index + 1}`,
+    language: "ru",
+    isTracked: true,
+    assignedBy: actorId,
+    assignedAt: "2026-07-29T10:05:00.000Z"
+  }));
+
+  const page = trackingContextKeywordPage(
+    {
+      data,
+      page: {
+        hasNext: false,
+        totalApprox: data.length
+      },
+      meta: { requestId: "internal-request-large-page" }
+    },
+    contextId
+  );
+
+  assert.equal(page.data.length, 201);
+});
+
 test("forwards an idempotent create through trusted tenant headers and body", async () => {
   const originalFetch = globalThis.fetch;
   let capturedUrl: URL | undefined;

@@ -117,7 +117,7 @@ function OperationRow({ onOpen, operation }: Readonly<{ onOpen: () => void; oper
         <strong>{operation.project?.name ?? "Без проекта"}</strong>
         <small>{operation.workspace?.name ?? operation.workspaceId}</small>
       </div>
-      <div data-label="Состояние"><OperationStatus status={operation.status} />{operation.stage && <small className="operation-stage">{operation.stage}</small>}</div>
+      <div data-label="Состояние"><OperationStatus status={operation.status} type={operation.type} />{operation.stage && <small className="operation-stage">{operation.stage}</small>}</div>
       <div className="operation-progress" data-label="Прогресс / результат">
         <div><strong>{progressLabel(operation)}</strong><small>{resultLabel(operation)}</small></div>
         {percent !== undefined && <span><i style={{ width: `${percent}%` }} /></span>}
@@ -141,7 +141,7 @@ function OperationDrawer({ onClose, operation }: Readonly<{ onClose: () => void;
           <div><p>Операция</p><h2>{operationType(operation.type)}</h2></div>
           <button aria-label="Закрыть" onClick={onClose} type="button">×</button>
         </header>
-        <div className="operation-detail-status"><OperationStatus status={operation.status} /><span>{progressLabel(operation)}</span></div>
+        <div className="operation-detail-status"><OperationStatus status={operation.status} type={operation.type} /><span>{progressLabel(operation)}</span></div>
         <div className="snapshot">
           <Snapshot label="Operation ID" value={operation.id} />
           <Snapshot label="Тип" value={operation.type} />
@@ -168,13 +168,20 @@ function OperationDrawer({ onClose, operation }: Readonly<{ onClose: () => void;
 function Metric({ label, tone, value }: Readonly<{ label: string; tone: string; value: number | undefined }>) {
   return <article><span>{label}</span><strong>{value === undefined ? "—" : formatNumber(value)}</strong><small className={`metric-${tone}`}>По всем операциям</small></article>;
 }
-function OperationStatus({ status }: Readonly<{ status: string }>) { return <b className={`status status-${status.toLowerCase().replaceAll("_", "-")}`}>{operationStatus(status)}</b>; }
+function OperationStatus({ status, type }: Readonly<{ status: string; type: string }>) {
+  const exhaustedValidation = type === "INTEGRATION_CREDENTIAL_VALIDATE" && status === "FAILED_RETRYABLE";
+  const tone = exhaustedValidation ? "failed-final" : status.toLowerCase().replaceAll("_", "-");
+  return <b className={`status status-${tone}`}>{operationStatus(status, type)}</b>;
+}
 function Snapshot({ label, value }: Readonly<{ label: string; value: string }>) { return <div><span>{label}</span><strong>{value}</strong></div>; }
 
 function operationType(value: string): string {
-  return ({ MANUAL_RANK_CHECK: "Проверка позиций", FREQUENCY_COLLECTION: "Сбор частотности", CLUSTERING_RUN: "Кластеризация запросов", TECHNICAL_CRAWL: "Обход сайта", KEYWORD_RESEARCH: "Исследование запросов", SEMANTIC_IMPORT: "Импорт семантики", SEMANTIC_EXPORT: "Экспорт семантики", INTEGRATION_CREDENTIAL_VALIDATION: "Проверка подключения" } as Record<string, string>)[value] ?? value.toLocaleLowerCase("ru-RU").replaceAll("_", " ");
+  return ({ MANUAL_RANK_CHECK: "Проверка позиций", FREQUENCY_COLLECTION: "Сбор частотности", CLUSTERING_RUN: "Кластеризация запросов", TECHNICAL_CRAWL: "Обход сайта", KEYWORD_RESEARCH: "Исследование запросов", SEMANTIC_IMPORT: "Импорт семантики", SEMANTIC_EXPORT: "Экспорт семантики", INTEGRATION_CREDENTIAL_VALIDATE: "Проверка подключения" } as Record<string, string>)[value] ?? value.toLocaleLowerCase("ru-RU").replaceAll("_", " ");
 }
-function operationStatus(value: string): string {
+function operationStatus(value: string, type: string): string {
+  if (value === "FAILED_RETRYABLE" && type === "INTEGRATION_CREDENTIAL_VALIDATE") {
+    return "Повторы исчерпаны";
+  }
   return ({ DRAFT: "Черновик", ESTIMATING: "Оценка", AWAITING_APPROVAL: "Ожидает запуска", RESERVING_BALANCE: "Резерв", PREPARING: "Подготовка", QUEUED: "В очереди", WAITING_RATE_LIMIT: "Ожидает лимит", RUNNING: "Выполняется", PAUSE_REQUESTED: "Останавливается", PAUSED: "На паузе", CANCEL_REQUESTED: "Отменяется", CANCELLED: "Отменена", RETRY_SCHEDULED: "Повтор запланирован", PARTIALLY_COMPLETED: "Частично завершена", COMPLETED: "Завершена", FAILED_RETRYABLE: "Повтор после ошибки", FAILED_FINAL: "Ошибка", ACTION_REQUIRED: "Требует внимания", EXPIRED: "Истекла" } as Record<string, string>)[value] ?? value;
 }
 function typeMark(value: string): string { return ({ MANUAL_RANK_CHECK: "↗", FREQUENCY_COLLECTION: "ƒ", CLUSTERING_RUN: "◫", TECHNICAL_CRAWL: "⌁", KEYWORD_RESEARCH: "◎", SEMANTIC_IMPORT: "↓", SEMANTIC_EXPORT: "↑" } as Record<string, string>)[value] ?? "•"; }

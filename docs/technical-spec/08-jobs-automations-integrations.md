@@ -287,8 +287,8 @@ replicas. Permit удерживается только вокруг фактич
 время `POLL_WAIT` или внутренних операций. Throttling включает bounded
 adaptive cooldown, успешные ответы постепенно восстанавливают окно, а
 недоступный limiter блокирует внешний вызов fail-closed. Начальные окна на
-один credential: Yandex Live — `8 concurrent / 8 RPS`, Google Live —
-`12 / 12`, Yandex Search API — `30 / 60`, Wordstat — `8 / 8`; provider
+один credential: Yandex Live — `20 concurrent / 10 RPS`, Google Live —
+`48 / 30`, Yandex Search API — `48 / 50`, Wordstat — `10 / 10`; provider
 ответы `55`, `110`, `429` и `503` уменьшают только соответствующее окно.
 
 Rank и connector process roles разрешено горизонтально размножать внутри
@@ -307,6 +307,11 @@ Runtime dispatcher запускается раз в секунду, поэтом
 connector-процессы за один queue burst заполняют свободные provider slots, а
 provider HTTP выполняется параллельно уже вне этой блокировки. XMLStock
 capacity miss возвращает poll/item в ожидание без списания attempt.
+XMLStock не участвует в общей DB capacity из пяти provider tasks: rank
+dispatcher подготавливает до 48 keyword executions одного Job за проход,
+чтобы заполнить три connector process по 16 rank workers. Общая DB capacity
+из пяти задач остаётся Arsenkin-only; один XMLStock credential всё равно
+строго ограничен своим Redis product bucket.
 Finalization рассматривает только
 последнюю execution attempt каждого manifest chunk; предыдущие безопасно
 прерванные attempts остаются immutable audit history и не меняют cardinality
@@ -316,7 +321,9 @@ XMLStock Live Top-30/50/100 выполняется по одной десяти�
 poll. После каждого успешного ответа connector атомарно сохраняет
 нормализованный checkpoint и SHA-256 в `rank_connector_executions`; 429/5xx
 возвращает execution в `POLL_WAIT`, не удаляя checkpoint. Следующий worker
-проверяет hash и продолжает с `nextPage`, поэтому уже оплаченные страницы не
+проверяет hash и продолжает с `nextPage`; успешный checkpoint доступен для
+следующего claim сразу, без искусственной пятисекундной паузы, а distributed
+limiter ограничивает фактический GET. Поэтому уже оплаченные страницы не
 запрашиваются повторно. Permanent ошибки и исчерпание bounded poll horizon
 по-прежнему финализируются, а не уходят в бесконечный цикл.
 
@@ -668,6 +675,11 @@ Validation flow:
 для `RETRY_SCHEDULED` с учётом `retryAt`. GET результата требует
 `integration.view` и должен работать в billing read-only режиме, POST требует
 `integration.test` и блокируется, когда новые операции запрещены.
+В platform operations `FAILED_RETRYABLE` проверки credential после исчерпания
+`maxAttempts` относится к attention, а не active: у Job уже есть
+`finished_at`, `retry_at = NULL`, и UI показывает «Повторы исчерпаны». Это
+правило type-aware и не меняет lifecycle других Job types, где одноимённый
+статус может ещё входить в provider-specific recovery.
 
 Credential list может содержать опциональный `activeValidation`, но только
 для текущего `material_version`. Запрос фильтрует active statuses и stable
@@ -1229,7 +1241,9 @@ Connector учитывает provider quotas и не подменяет офиц
   из 3/5/10 `page` запросов, начиная с нулевой страницы;
 - Wordstat JSON: `/wordstat/json/`, `pagetype=words`, регион и устройство;
   BASE/EXACT/FIXED формируются операторами `query`, `"query"`, `"!query"` и
-  хранятся раздельно. `groupby` не является batch входных keyword;
+  хранятся раздельно. Для expansion один seed передаётся одним GET,
+  `groupby=1..2000` ограничивает `results`, а `associations` нормализуется как
+  правая колонка. `groupby` не является batch входных keyword;
 - credential validation использует read-only `pagetype=regionsTree` и не
   выполняет платный SERP/Wordstat запрос;
 - ответы разбираются потоковым bounded XML parser либо bounded JSON parser;
@@ -1248,12 +1262,15 @@ Connector учитывает provider quotas и не подменяет офиц
 
 - REST JSON;
 - API token header;
-- domain/keyword reports;
-- competitor keywords/pages;
+- проектная вкладка получает dashboard TOP-метрики, organic keywords и
+  bounded список доменов-конкурентов;
+- normalized keyword row содержит запрос, URL, позицию и доступную частотность;
 - SERP tasks;
 - async `202` polling;
 - `429 Retry-After`;
-- provider report IDs.
+- provider report IDs;
+- run сохраняется в `keyword_research_runs/keyword_research_rows`, а импорт
+  выполняется отдельной import-worker ролью только после явного confirm;
 - в первом релизе используется только BYOK;
 - пользователь должен иметь тариф Keys.so с доступом к API;
 - общий ключ платформы запрещено включать до подписания отдельного соглашения, разрешающего предоставление данных пользователям платформы;
@@ -1281,6 +1298,14 @@ Connector учитывает provider quotas и не подменяет офиц
   до 10 000 query, `check` до статуса `finish` и один `get` на общий task ID;
   positions использует один `set` на sealed rank task до 15 000 keyword.
   Per-keyword paid submit запрещён;
+- Wordstat expansion использует отдельный документированный tool `type=2`:
+  до 500 seed-фраз отправляются одним `set`, обе колонки `left/right`
+  нормализуются в staging до 10 000 строк. Уже сохранённый provider task ID
+  только poll-ится и никогда не submit-ится повторно. Arsenkin API не получает
+  пользовательский result limit; 10 000 является внутренней границей staging,
+  тогда как XMLStock сохраняет явный пользовательский лимит. После preview
+  импорт поддерживает общую папку, автоматические подпапки по seed-фразам и
+  абсолютное переопределение папки для отдельных строк;
 - в первом релизе используется BYOK;
 - пользователь должен иметь тариф Arsenkin Tools с API;
 - platform-paid режим включается только после согласования с провайдером коммерческой схемы и передачи результатов третьим лицам;
@@ -1519,6 +1544,14 @@ backoff остаются общими.
 Кнопка результата открывает modal именно выбранной операции: status,
 безопасный input snapshot, прогресс, итоговые счётчики и finite error; она не
 перенаправляет пользователя в текущую семантику без контекста запуска.
+Все result/log modal используют единый semantics-like workspace: компактную
+таблицу с устойчивыми колонками и sticky состоянием загрузки. Над сводкой
+показываются сохранённый контекст запуска, когда он существует, и безопасная
+проекция пользователя по `actorId`; автоматический запуск подписывается явно.
+В основную таблицу не выводятся credential/route ID, raw provider payload и
+внутренние quality codes. Необязательные поля показываются только когда
+содержат прикладные данные, поэтому разные операции не создают пустые широкие
+колонки.
 Строки rank/frequency результата выдаются cursor-страницами только размера
 `200` или `500`: owning service применяет tenant/project/job scope до `take`,
 а каждый следующий boundary проверяет непрерывную immutable `sequence` и

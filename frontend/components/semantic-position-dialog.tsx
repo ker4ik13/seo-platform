@@ -22,7 +22,10 @@ import type {
   TrackingContextSummary,
   WorkspaceConnectorRoutingSettings
 } from "@seo-platform/contracts";
-import { rankProviderKeywordLimit } from "@seo-platform/contracts";
+import {
+  rankProviderKeywordLimit,
+  trackingContextKeywordPageLimit
+} from "@seo-platform/contracts";
 import {
   BrowserApiError,
   browserApiCollectionRequest,
@@ -74,11 +77,15 @@ import {
 } from "../lib/rank-credential-preference";
 import {
   defaultSemanticSearchRegions,
-  readLastSemanticSearchRegions,
+  pairedSemanticSearchRegions,
+  projectSemanticSearchRegions,
+  readStoredSemanticRegion,
   searchRegionKind,
   writeLastSemanticRegion,
+  type SemanticSearchEngine,
   type SemanticSearchRegions
 } from "../lib/semantic-region-preference";
+import type { ProjectSearchCity } from "@seo-platform/contracts";
 import { SemanticModal } from "./semantic-modal";
 import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
@@ -97,6 +104,7 @@ export function SemanticPositionDialog({
   initialSelections,
   onClose,
   onStarted,
+  projectSearchCity,
   projectId,
   workspaceId
 }: Readonly<{
@@ -105,6 +113,7 @@ export function SemanticPositionDialog({
   initialSelections: readonly SemanticOperationSelection[];
   onClose: () => void;
   onStarted: (job: RankJobSummary) => void;
+  projectSearchCity?: ProjectSearchCity | undefined;
   projectId: string;
   workspaceId: string;
 }>) {
@@ -129,6 +138,9 @@ export function SemanticPositionDialog({
   const [scopeError, setScopeError] = useState<string>();
   const [contextAssignmentError, setContextAssignmentError] = useState<string>();
   const [resolvingScope, setResolvingScope] = useState(false);
+  const [scopeCount, setScopeCount] = useState<number | undefined>(
+    initialSelections.length
+  );
   const [selections, setSelections] = useState<readonly SemanticOperationSelection[]>(
     initialSelections
   );
@@ -136,6 +148,9 @@ export function SemanticPositionDialog({
   const [preferredRegions, setPreferredRegions] = useState(
     defaultSemanticSearchRegions
   );
+  const [preferredRegionSources, setPreferredRegionSources] = useState<
+    SemanticRegionSources
+  >({ YANDEX: "DEFAULT", GOOGLE: "DEFAULT" });
   const [contextDraft, setContextDraft] = useState(defaultContextDraft);
   const [yandexLiveTurbo, setYandexLiveTurbo] = useState(false);
   const createContextCommand = useRef<IdempotentCommand | undefined>(
@@ -146,7 +161,13 @@ export function SemanticPositionDialog({
   const runCommand = useRef<IdempotentCommand | undefined>(undefined);
   const pendingRun = useRef<PendingSemanticRankRun | undefined>(undefined);
   const initialSelectionsRef = useRef(initialSelections);
-  const keywordIds = selections.map(({ id }) => id);
+  const assignmentKeywordIds = selections.map(({ id }) => id);
+  const keywordIds = selections
+    .filter(({ isTracked }) => contextDraft.includeUntracked || isTracked !== false)
+    .map(({ id }) => id);
+  const displayedKeywordCount = resolvingScope
+    ? scopeCount ?? selections.length
+    : keywordIds.length;
   const addedSinceLastRun =
     selectedContextId &&
     contextDraft.scopeMode === "GROUPS" &&
@@ -172,7 +193,7 @@ export function SemanticPositionDialog({
     : "XMLSTOCK";
   const providerUsage = rankProviderUsageEstimate(
     selectedSource,
-    keywordIds.length,
+    displayedKeywordCount,
     contextDraft.searchEngine,
     contextDraft.depth,
     contextDraft.searchSource,
@@ -184,8 +205,12 @@ export function SemanticPositionDialog({
     nextError?: string
   ) => {
     setSelections(next);
+    if (!resolving && !nextError) setScopeCount(next.length);
     setResolvingScope(resolving);
     setScopeError(nextError);
+  }, []);
+  const resolveScopeCount = useCallback((count: number | undefined) => {
+    setScopeCount(count);
   }, []);
   const resolveScopeState = useCallback(
     (scope: SemanticOperationScopeState) => {
@@ -210,6 +235,7 @@ export function SemanticPositionDialog({
     const context = settings?.contexts.find(({ id }) => id === contextId);
     if (context) {
       setSelections([]);
+      setScopeCount(context.assignedKeywordCount);
       setAssignedKeywordIds(undefined);
       setAssignedKeywordSelections(undefined);
       setResolvingScope(true);
@@ -217,6 +243,7 @@ export function SemanticPositionDialog({
       setContextDraft(trackingContextDraft(context));
     } else {
       setSelections(initialSelectionsRef.current);
+      setScopeCount(initialSelectionsRef.current.length);
       setAssignedKeywordIds(undefined);
       setAssignedKeywordSelections(initialSelectionsRef.current);
       setResolvingScope(false);
@@ -271,6 +298,10 @@ export function SemanticPositionDialog({
             (source.provider === "ARSENKIN" || source.provider === "XMLSTOCK")
         );
         const previousJob = rankRuns.jobs[0];
+        const lastSuccessfulJob = rankRuns.jobs.find(
+          ({ status }) =>
+            status === "COMPLETED" || status === "PARTIALLY_COMPLETED"
+        );
         const previousProvider =
           previousJob?.provider === "ARSENKIN" ||
           previousJob?.provider === "XMLSTOCK"
@@ -288,22 +319,62 @@ export function SemanticPositionDialog({
           options[0];
         const lastRunContext = trackingResult.contexts.find(
           ({ id, status }) =>
-            id === previousJob?.trackingContextId && status === "ACTIVE"
+            id === lastSuccessfulJob?.trackingContextId && status === "ACTIVE"
         );
-        let nextPreferredRegions = readLastSemanticSearchRegions(
+        const projectRegions = projectSemanticSearchRegions(projectSearchCity);
+        const storedYandex = readStoredSemanticRegion(
           window.localStorage,
           projectId,
-          "POSITIONS"
+          "POSITIONS",
+          "YANDEX_RANK"
         );
+        const storedGoogle = readStoredSemanticRegion(
+          window.localStorage,
+          projectId,
+          "POSITIONS",
+          "GOOGLE_RANK"
+        );
+        let nextPreferredRegions: SemanticSearchRegions = {
+          YANDEX:
+            storedYandex ?? projectRegions?.YANDEX ??
+            defaultSemanticSearchRegions().YANDEX,
+          GOOGLE:
+            storedGoogle ?? projectRegions?.GOOGLE ??
+            defaultSemanticSearchRegions().GOOGLE
+        };
+        const nextPreferredRegionSources: SemanticRegionSources = {
+          YANDEX: storedYandex
+            ? "LAST_RUN"
+            : projectRegions
+              ? "PROJECT"
+              : "DEFAULT",
+          GOOGLE: storedGoogle
+            ? "LAST_RUN"
+            : projectRegions
+              ? "PROJECT"
+              : "DEFAULT"
+        };
         if (lastRunContext) {
           const lastRunDraft = trackingContextDraft(lastRunContext);
-          nextPreferredRegions = {
-            ...nextPreferredRegions,
-            [lastRunDraft.searchEngine]: {
-              code: lastRunDraft.regionCode,
-              label: lastRunDraft.regionLabel
-            }
+          const lastRunRegion = {
+            code: lastRunDraft.regionCode,
+            label: lastRunDraft.regionLabel
           };
+          const paired = pairedSemanticSearchRegions(
+            searchRegionKind(lastRunDraft.searchEngine),
+            lastRunRegion
+          );
+          if (paired) {
+            nextPreferredRegions = paired;
+            nextPreferredRegionSources.YANDEX = "LAST_RUN";
+            nextPreferredRegionSources.GOOGLE = "LAST_RUN";
+          } else {
+            nextPreferredRegions = {
+              ...nextPreferredRegions,
+              [lastRunDraft.searchEngine]: lastRunRegion
+            };
+            nextPreferredRegionSources[lastRunDraft.searchEngine] = "LAST_RUN";
+          }
           writeLastSemanticRegion(
             window.localStorage,
             projectId,
@@ -322,8 +393,10 @@ export function SemanticPositionDialog({
         setCredentialId(preferredSource?.id ?? "");
         setLastUsedCredentialId(exactCredentialId);
         setPreferredRegions(nextPreferredRegions);
+        setPreferredRegionSources(nextPreferredRegionSources);
         if (previousContext) {
           setSelectedContextId(previousContext.id);
+          setScopeCount(previousContext.assignedKeywordCount);
           setContextDraft(trackingContextDraft(previousContext));
         } else {
           setContextDraft((current) => ({
@@ -351,7 +424,7 @@ export function SemanticPositionDialog({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [activeGroupId, initialSelections.length, projectId, workspaceId]);
+  }, [activeGroupId, initialSelections.length, projectId, projectSearchCity, workspaceId]);
 
   useEffect(() => {
     if (!selectedContextId) {
@@ -480,7 +553,7 @@ export function SemanticPositionDialog({
       const assignmentSignature = JSON.stringify({
         contextId: selectedContext.id,
         version: selectedContext.version,
-        keywordIds: [...keywordIds].sort()
+        keywordIds: [...assignmentKeywordIds].sort()
       });
       assignmentCommand.current = stableIdempotencyCommand(
         assignmentCommand.current,
@@ -491,7 +564,7 @@ export function SemanticPositionDialog({
         projectId,
         selectedContext.id,
         selectedContext.version,
-        keywordIds,
+        assignmentKeywordIds,
         assignmentCommand.current.key
       );
       assignmentCommand.current = undefined;
@@ -701,7 +774,7 @@ export function SemanticPositionDialog({
       footer={(
         <div className="semantic-workflow-footer">
           <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate">
-            <div><Icon name="semantic" /><div><dt>Запросов</dt><dd>{keywordIds.length}</dd></div></div>
+            <div><Icon name="semantic" /><div><dt>Запросов</dt><dd>{scopeCount === undefined && resolvingScope ? "Считаем…" : displayedKeywordCount}</dd></div></div>
             <div>
               <SearchEngineLogo engine={contextDraft.searchEngine} size="compact" />
               <div><dt>Поисковик</dt><dd>{contextDraft.searchEngine === "YANDEX" ? "Яндекс" : "Google"}</dd></div>
@@ -803,7 +876,10 @@ export function SemanticPositionDialog({
                 runCommand.current = undefined;
               }}
               preferredRegions={preferredRegions}
-              scope={selectedContextId && assignedKeywordSelections === undefined ? (
+              preferredRegionSources={preferredRegionSources}
+              scope={selectedContextId &&
+              contextDraft.scopeMode === "KEYWORDS" &&
+              assignedKeywordSelections === undefined ? (
                 <div className="semantic-dialog-loading" role="status">
                   Загружаем запросы сохранённого контекста…
                 </div>
@@ -823,6 +899,7 @@ export function SemanticPositionDialog({
                   key={`${selectedContextId || "new-context"}:ready`}
                   maxItems={rankProviderKeywordLimit}
                   onChange={resolveScope}
+                  onCountChange={resolveScopeCount}
                   onScopeChange={resolveScopeState}
                   projectId={projectId}
                 />
@@ -931,6 +1008,7 @@ function PositionRunParameters({
   onSearchSourceChange,
   onYandexLiveTurboChange,
   preferredRegions,
+  preferredRegionSources,
   scope
 }: Readonly<{
   draft: TrackingContextDraft;
@@ -944,6 +1022,7 @@ function PositionRunParameters({
   onSearchSourceChange: (source: "SEARCH_API" | "LIVE") => void;
   onYandexLiveTurboChange: (enabled: boolean) => void;
   preferredRegions: SemanticSearchRegions;
+  preferredRegionSources: SemanticRegionSources;
   scope: ReactNode;
 }>) {
   const selectedSource = sources.find(({ id }) => id === credentialId);
@@ -954,6 +1033,11 @@ function PositionRunParameters({
     draft.searchEngine === "YANDEX" && provider === "ARSENKIN"
       ? [30]
       : [30, 50, 100];
+  const preferredRegion = preferredRegions[draft.searchEngine];
+  const regionSource =
+    draft.regionCode === preferredRegion.code
+      ? preferredRegionSources[draft.searchEngine]
+      : "MANUAL";
 
   function selectSearchEngine(
     searchEngine: TrackingContextDraft["searchEngine"]
@@ -1099,7 +1183,16 @@ function PositionRunParameters({
               valueLabel={draft.regionLabel}
             />
             <small>
-              Первый запуск — Москва; затем используется регион последнего успешного съёма.
+              <span className={`semantic-region-source ${regionSource.toLowerCase()}`}>
+                {regionSourceLabel(regionSource)}
+              </span>
+              {regionSource === "LAST_RUN"
+                ? " Регион последнего съёма имеет приоритет над городом проекта."
+                : regionSource === "PROJECT"
+                  ? " Этот город задан в настройках проекта."
+                  : regionSource === "DEFAULT"
+                    ? " Город проекта не задан."
+                    : " Регион изменён только для этого запуска."}
             </small>
           </label>
           <fieldset className="semantic-device-cards">
@@ -1173,6 +1266,22 @@ function PositionRunParameters({
               выборе этого подключения глубина переключается автоматически.
             </div>
           )}
+          <label className="semantic-toggle-line semantic-position-untracked-toggle">
+            <input
+              checked={draft.includeUntracked}
+              onChange={(event) => onChange({
+                ...draft,
+                includeUntracked: event.target.checked
+              })}
+              type="checkbox"
+            />
+            <span>
+              <strong>Снимать позиции по неотслеживаемым запросам</strong>
+              <small>
+                По умолчанию запросы с выключенным отслеживанием пропускаются.
+              </small>
+            </span>
+          </label>
         </section>
         <section className="semantic-workflow-panel semantic-position-scope-panel">
           <header>
@@ -1184,6 +1293,19 @@ function PositionRunParameters({
       </div>
     </>
   );
+}
+
+type SemanticRegionSource = "LAST_RUN" | "PROJECT" | "DEFAULT" | "MANUAL";
+type SemanticRegionSources = Record<
+  SemanticSearchEngine,
+  Exclude<SemanticRegionSource, "MANUAL">
+>;
+
+function regionSourceLabel(source: SemanticRegionSource): string {
+  if (source === "LAST_RUN") return "Последний съём";
+  if (source === "PROJECT") return "Город проекта";
+  if (source === "MANUAL") return "Выбрано вручную";
+  return "По умолчанию · Москва";
 }
 
 function defaultContextDraft(
@@ -1272,12 +1394,15 @@ async function loadAssignedKeywordSelections(
   const selections = new Map<string, SemanticOperationSelection>();
   let cursor: string | undefined;
   do {
-    const query = new URLSearchParams({ limit: "200" });
+    const query = new URLSearchParams({
+      limit: String(trackingContextKeywordPageLimit)
+    });
     if (cursor) query.set("cursor", cursor);
     const page = await browserApiCollectionRequest<{
       readonly keywordId: string;
       readonly keywordVersion: number;
       readonly textOriginal: string;
+      readonly isTracked: boolean;
     }>(
       `${trackingContextApiPath(projectId, contextId)}/keywords?${query.toString()}`,
       { signal }
@@ -1286,7 +1411,8 @@ async function loadAssignedKeywordSelections(
       selections.set(assignment.keywordId, {
         id: assignment.keywordId,
         version: assignment.keywordVersion,
-        label: assignment.textOriginal
+        label: assignment.textOriginal,
+        isTracked: assignment.isTracked
       });
     }
     cursor = page.page.hasNext ? page.page.nextCursor : undefined;

@@ -19,6 +19,39 @@ export function semanticAllRegularGroupIds(
     .map(({ id }) => id);
 }
 
+export function semanticGroupIdsWithDescendants(
+  groups: readonly Readonly<{
+    id: string;
+    parentId?: string;
+    systemKind?: string;
+  }>[],
+  rootIds: Iterable<string>
+): readonly string[] {
+  const regularGroups = groups.filter(({ systemKind }) => !systemKind);
+  const rootSet = new Set(rootIds);
+  const childrenByParentId = new Map<string, string[]>();
+  for (const group of regularGroups) {
+    if (!group.parentId) continue;
+    const children = childrenByParentId.get(group.parentId) ?? [];
+    children.push(group.id);
+    childrenByParentId.set(group.parentId, children);
+  }
+  const selected: string[] = [];
+  const visited = new Set<string>();
+  const visit = (groupId: string): void => {
+    if (visited.has(groupId)) return;
+    visited.add(groupId);
+    selected.push(groupId);
+    for (const childId of childrenByParentId.get(groupId) ?? []) {
+      visit(childId);
+    }
+  };
+  for (const group of regularGroups) {
+    if (rootSet.has(group.id)) visit(group.id);
+  }
+  return selected;
+}
+
 export function semanticKeywordSearchPlaceholder({
   activeGroup,
   activeGroupId,

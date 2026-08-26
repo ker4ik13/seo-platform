@@ -14,6 +14,7 @@ import {
   rankScopeIsMaterializable
 } from "./rank-scope-bounds.js";
 import { semanticRankScopeHash } from "./rank-scope-hash.js";
+import { trackingContextIncludesUntracked } from "../tracking-contexts/tracking-context-launch-profile.js";
 
 const CONFIGURATION_HASH_PATTERN = /^[0-9a-f]{64}$/u;
 
@@ -23,6 +24,7 @@ const CONTEXT_SELECT = {
   projectId: true,
   status: true,
   version: true,
+  launchProfile: true,
   configurations: {
     orderBy: { configurationVersion: "desc" as const },
     take: 1,
@@ -79,10 +81,14 @@ export class RankScopeService {
           throw new NotFoundException("Tracking context not found");
         }
         const configuration = currentConfiguration(context);
+        const includeUntracked = trackingContextIncludesUntracked(
+          context.launchProfile
+        );
         const bounds = await inspectRankScopeBounds(transaction, {
           workspaceId: input.workspaceId,
           projectId: input.projectId,
-          contextId: context.id
+          contextId: context.id,
+          includeUntracked
         });
         const materializable = rankScopeIsMaterializable(bounds);
         const assignments = materializable
@@ -92,7 +98,10 @@ export class RankScopeService {
                 projectId: input.projectId,
                 contextId: context.id,
                 removedAt: null,
-                keyword: { status: "ACTIVE" }
+                keyword: {
+                  status: "ACTIVE",
+                  ...(includeUntracked ? {} : { isTracked: true })
+                }
               },
               orderBy: { keywordId: "asc" },
               take: MAX_RANK_SCOPE_ENTRIES + 1,

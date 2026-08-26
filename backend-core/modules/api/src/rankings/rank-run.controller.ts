@@ -19,6 +19,7 @@ import type {
   ProjectSummary,
   RankOperationResult,
   RankJobSummary,
+  RankRuntimeDiagnostics,
   WorkspaceSummary
 } from "@seo-platform/contracts";
 import { rankProviderKeywordLimit } from "@seo-platform/contracts";
@@ -113,6 +114,25 @@ export class RankRunController {
     ]);
     const { workspaceId: _workspaceId, projectId: _projectId, ...safe } = result;
     return apiResponse(request, { ...safe, job });
+  }
+
+  @Get("jobs/:jobId/runtime-diagnostics")
+  @RequirePermission("ranking.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async runtimeDiagnostics(
+    @Param("jobId") jobId: string,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<RankRuntimeDiagnostics>> {
+    const tenant = requiredProjectTenant(request);
+    const canonicalJobId = assertUuid(jobId, "jobId");
+    return apiResponse(
+      request,
+      await this.jobs.getRankRuntimeDiagnostics(
+        internalProjectContext(request, principal, tenant),
+        canonicalJobId
+      )
+    );
   }
 
   @Post("rank-runs")

@@ -382,7 +382,38 @@ SELECT format(
 SELECT format(
   'GRANT EXECUTE ON FUNCTION
     public.complete_keyword_research_page(
-      UUID, TEXT, UUID, INTEGER, INTEGER, JSONB, BYTEA, INTEGER, BOOLEAN
+      UUID, TEXT, UUID, INTEGER, INTEGER, JSONB, BYTEA, INTEGER, BOOLEAN,
+      JSONB, JSONB
+    )
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.complete_xmlstock_wordstat_research_seed(
+      UUID, TEXT, UUID, INTEGER, INTEGER, JSONB, BYTEA
+    )
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.mark_keyword_research_submitting(
+      UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, INTEGER
+    )
+  TO %I',
+  :'connector_user'
+)
+\gexec
+
+SELECT format(
+  'GRANT EXECUTE ON FUNCTION
+    public.transition_wordstat_keyword_research_run(
+      UUID, TEXT, UUID, INTEGER, INTEGER, TEXT, TEXT, INTEGER, TEXT, JSONB, BYTEA
     )
   TO %I',
   :'connector_user'
@@ -638,7 +669,10 @@ BEGIN
     'public.defer_rank_connector_poll_capacity(uuid,uuid,text,uuid,integer,integer,integer)'::regprocedure::oid
     ,
     'public.claim_keyword_research_run(text,integer)'::regprocedure::oid,
-    'public.complete_keyword_research_page(uuid,text,uuid,integer,integer,jsonb,bytea,integer,boolean)'::regprocedure::oid,
+    'public.complete_keyword_research_page(uuid,text,uuid,integer,integer,jsonb,bytea,integer,boolean,jsonb,jsonb)'::regprocedure::oid,
+    'public.complete_xmlstock_wordstat_research_seed(uuid,text,uuid,integer,integer,jsonb,bytea)'::regprocedure::oid,
+    'public.mark_keyword_research_submitting(uuid,text,uuid,integer,integer,text,integer)'::regprocedure::oid,
+    'public.transition_wordstat_keyword_research_run(uuid,text,uuid,integer,integer,text,text,integer,text,jsonb,bytea)'::regprocedure::oid,
     'public.fail_keyword_research_run(uuid,text,uuid,integer,integer,text,integer)'::regprocedure::oid,
     'public.claim_frequency_collection_item(text,integer)'::regprocedure::oid,
     'public.complete_frequency_collection_item(uuid,uuid,text,integer,integer)'::regprocedure::oid,

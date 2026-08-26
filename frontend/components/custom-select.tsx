@@ -56,6 +56,7 @@ export interface CustomSelectProps extends NativeSelectProps {
   readonly defaultValue?: string | number;
   readonly emptyMessage?: string;
   readonly onChange?: (event: CustomSelectChangeEvent) => void;
+  readonly popoverFooter?: ReactNode;
   readonly searchPlaceholder?: string;
   readonly searchable?: boolean;
   readonly showSelectedCheck?: boolean;
@@ -77,6 +78,7 @@ export function CustomSelect({
   onBlur,
   onChange,
   onFocus,
+  popoverFooter,
   required = false,
   searchPlaceholder = "Поиск…",
   searchable = false,
@@ -383,6 +385,19 @@ export function CustomSelect({
               ))
             )}
           </div>
+          {popoverFooter && (
+            <div
+              className="custom-select-popover-footer"
+              onClick={(event) => {
+                const target = event.target;
+                if (target instanceof Element && target.closest("a,button")) {
+                  close();
+                }
+              }}
+            >
+              {popoverFooter}
+            </div>
+          )}
         </div>,
         portalTarget
       )}

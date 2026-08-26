@@ -347,7 +347,8 @@ export class TrackingContextService {
             id: true,
             version: true,
             textOriginal: true,
-            language: true
+            language: true,
+            isTracked: true
           }
         }
       }
@@ -368,6 +369,7 @@ export class TrackingContextService {
         keywordVersion: row.keyword.version,
         textOriginal: row.keyword.textOriginal,
         language: row.keyword.language,
+        isTracked: row.keyword.isTracked,
         assignedBy: row.assignedBy,
         assignedAt: row.assignedAt.toISOString()
       })),
@@ -1266,7 +1268,7 @@ function launchProfileSnapshot(
   const input = record(value, "tracking context launch profile");
   if (
     Object.keys(input).some(
-      (key) => !["searchSource", "scope"].includes(key)
+      (key) => !["searchSource", "includeUntracked", "scope"].includes(key)
     )
   ) {
     throw new Error("Stored tracking context launch profile is invalid");
@@ -1276,6 +1278,9 @@ function launchProfileSnapshot(
     trackingSearchSources,
     "launchProfile.searchSource"
   );
+  const includeUntracked = input.includeUntracked === undefined
+    ? false
+    : booleanValue(input.includeUntracked, "launchProfile.includeUntracked");
   const scope = record(input.scope, "tracking context launch scope");
   if (
     Object.keys(scope).some((key) => !["mode", "groupIds"].includes(key)) ||
@@ -1299,7 +1304,7 @@ function launchProfileSnapshot(
   ) {
     throw new Error("Stored tracking context launch scope is invalid");
   }
-  return { searchSource, scope: { mode, groupIds } };
+  return { searchSource, includeUntracked, scope: { mode, groupIds } };
 }
 
 async function assertLaunchProfileGroupScope(

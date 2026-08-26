@@ -5,6 +5,8 @@ import type {
   AiAnswerCollectionSummary,
   ClusteringRunSummary,
   FrequencyCollectionSummary,
+  KeywordResearchCollection,
+  KeywordResearchRunSummary,
   RankJobSummary,
   SemanticExportCollection,
   SemanticExportJobSummary
@@ -18,6 +20,7 @@ import {
   hasConnectorFallback
 } from "../lib/connector-routing-presentation";
 import { operationStatusLabel } from "../lib/operation-status-presentation";
+import { operationDurationLabel } from "../lib/operation-duration";
 import {
   isCancellableRankJob,
   rankSearchSystemLabel
@@ -50,6 +53,7 @@ export function SemanticOperationsDrawer({
   const [ranks, setRanks] = useState<readonly RankJobSummary[]>([]);
   const [aiAnswers, setAiAnswers] = useState<readonly AiAnswerCollectionSummary[]>([]);
   const [clusteringRuns, setClusteringRuns] = useState<readonly ClusteringRunSummary[]>([]);
+  const [researchRuns, setResearchRuns] = useState<readonly KeywordResearchRunSummary[]>([]);
   const [semanticExports, setSemanticExports] = useState<readonly SemanticExportJobSummary[]>([]);
   const [tab, setTab] = useState<OperationTab>("ACTIVE");
   const [loading, setLoading] = useState(true);
@@ -70,7 +74,7 @@ export function SemanticOperationsDrawer({
     if (requestInFlight.current) return;
     requestInFlight.current = true;
     try {
-      const [frequencyResult, rankResult, aiAnswerResult, clusteringResult, exportResult] = await Promise.allSettled([
+      const [frequencyResult, rankResult, aiAnswerResult, clusteringResult, researchResult, exportResult] = await Promise.allSettled([
         browserApiRequest<{ readonly collections: readonly FrequencyCollectionSummary[] }>(
           `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections`,
           signal ? { signal } : {}
@@ -85,6 +89,10 @@ export function SemanticOperationsDrawer({
         ),
         browserApiRequest<{ readonly runs: readonly ClusteringRunSummary[] }>(
           `/app/api/projects/${encodeURIComponent(projectId)}/clustering-runs`,
+          signal ? { signal } : {}
+        ),
+        browserApiRequest<KeywordResearchCollection>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/keyword-research-runs`,
           signal ? { signal } : {}
         ),
         browserApiRequest<SemanticExportCollection>(
@@ -116,10 +124,13 @@ export function SemanticOperationsDrawer({
       if (clusteringResult.status === "fulfilled") {
         setClusteringRuns(clusteringResult.value.runs);
       }
+      if (researchResult.status === "fulfilled") {
+        setResearchRuns(researchResult.value.runs);
+      }
       if (exportResult.status === "fulfilled") {
         setSemanticExports(exportResult.value.exports);
       }
-      const failures = [frequencyResult, rankResult, aiAnswerResult, clusteringResult, exportResult]
+      const failures = [frequencyResult, rankResult, aiAnswerResult, clusteringResult, researchResult, exportResult]
         .filter((result): result is PromiseRejectedResult => result.status === "rejected")
         .map((result) => operationError(result.reason));
       setError(failures.length > 0 ? [...new Set(failures)].join(" · ") : undefined);
@@ -154,12 +165,13 @@ export function SemanticOperationsDrawer({
       ...ranks.map(rankOperation),
       ...aiAnswers.map(aiAnswerOperation),
       ...clusteringRuns.map(clusteringOperation),
+      ...researchRuns.map(researchOperation),
       ...semanticExports.map(exportOperation)
     ];
     return values.sort((left, right) =>
       right.createdAt.localeCompare(left.createdAt)
     );
-  }, [aiAnswers, clusteringRuns, frequencies, ranks, semanticExports]);
+  }, [aiAnswers, clusteringRuns, frequencies, ranks, researchRuns, semanticExports]);
 
   const operations = useMemo(
     () => allOperations.filter((operation) => operation.tab === tab),
@@ -216,6 +228,11 @@ export function SemanticOperationsDrawer({
           `/app/api/projects/${encodeURIComponent(projectId)}/clustering-runs/${encodeURIComponent(current.id)}/cancel`,
           { method: "POST", body: {} }
         );
+      } else if (current.kind === "RESEARCH") {
+        await browserApiRequest(
+          `/app/api/projects/${encodeURIComponent(projectId)}/keyword-research-runs/${encodeURIComponent(current.id)}/cancel`,
+          { method: "POST", body: {}, ifMatch: current.version }
+        );
       } else {
         await browserApiRequest(
           `/app/api/projects/${encodeURIComponent(projectId)}/exports/${encodeURIComponent(current.id)}/cancel`,
@@ -231,7 +248,7 @@ export function SemanticOperationsDrawer({
   }
 
   async function retry(operation: Operation): Promise<void> {
-    if (operation.kind === "EXPORT" || operation.kind === "AI_ANSWER" || operation.kind === "CLUSTERING") return;
+    if (operation.kind === "EXPORT" || operation.kind === "AI_ANSWER" || operation.kind === "CLUSTERING" || operation.kind === "RESEARCH") return;
     setRetryingId(operation.id);
     setError(undefined);
     try {
@@ -301,6 +318,12 @@ export function SemanticOperationsDrawer({
             </div>
             <div className="semantic-operation-progress"><i style={{ width: `${operation.percent}%` }} /></div>
             <div className="semantic-operation-meta"><span>{operation.routeLabel ?? "Фоновая операция"}</span><time>{formatDateTime(operation.createdAt)}</time></div>
+            {(operation.durationLabel || operation.resultLabel) && (
+              <div className="semantic-operation-card-facts">
+                {operation.resultLabel && <span>{operation.resultLabel}</span>}
+                {operation.durationLabel && <span>Выполнено за <strong>{operation.durationLabel}</strong></span>}
+              </div>
+            )}
             {operation.errorCode && <small>Код: {operation.errorCode}</small>}
             <footer>
               {operation.retryable && (
@@ -323,7 +346,7 @@ export function SemanticOperationsDrawer({
                   {cancellingId === operation.id ? "Останавливаем…" : "Остановить"}
                 </button>
               )}
-              {(operation.kind === "FREQUENCY" || operation.kind === "RANK" || operation.kind === "AI_ANSWER" || operation.kind === "CLUSTERING") && (
+              {(operation.kind === "FREQUENCY" || operation.kind === "RANK" || operation.kind === "AI_ANSWER" || operation.kind === "CLUSTERING" || operation.kind === "RESEARCH") && (
                 <button
                   className="semantic-operation-open"
                   onClick={() => setSelectedOperation(operation)}
@@ -376,7 +399,8 @@ export function SemanticOperationsDrawer({
       openedOperation.kind === "FREQUENCY" ||
       openedOperation.kind === "RANK" ||
       openedOperation.kind === "AI_ANSWER" ||
-      openedOperation.kind === "CLUSTERING"
+      openedOperation.kind === "CLUSTERING" ||
+      openedOperation.kind === "RESEARCH"
     ) && (
       <OperationResultModal
         actions={openedOperation.cancellable ? (
@@ -398,6 +422,8 @@ export function SemanticOperationsDrawer({
             ? "ai-answer"
             : openedOperation.kind === "CLUSTERING"
               ? "clustering"
+              : openedOperation.kind === "RESEARCH"
+                ? "research"
             : "rank"}
         {...(onClusteringApplied ? { onClusteringApplied } : {})}
         onClose={() => setSelectedOperation(undefined)}
@@ -409,6 +435,8 @@ export function SemanticOperationsDrawer({
             ? "Сбор ИИ-ответов"
             : openedOperation.kind === "CLUSTERING"
               ? "Кластеризация запросов"
+              : openedOperation.kind === "RESEARCH"
+                ? openedOperation.title
             : "Проверка позиций"}
       />
     )}
@@ -429,8 +457,8 @@ export function SemanticOperationsDrawer({
 
 interface Operation {
   readonly id: string;
-  readonly kind: "FREQUENCY" | "RANK" | "AI_ANSWER" | "CLUSTERING" | "EXPORT";
-  readonly provider?: "XMLSTOCK" | "ARSENKIN";
+  readonly kind: "FREQUENCY" | "RANK" | "AI_ANSWER" | "CLUSTERING" | "RESEARCH" | "EXPORT";
+  readonly provider?: "XMLSTOCK" | "ARSENKIN" | "KEYS_SO";
   readonly title: string;
   readonly description: string;
   readonly statusLabel: string;
@@ -445,10 +473,15 @@ interface Operation {
   readonly errorCode?: string;
   readonly routeLabel?: string;
   readonly createdAt: string;
+  readonly startedAt?: string;
+  readonly finishedAt?: string;
+  readonly durationLabel?: string;
+  readonly resultLabel?: string;
 }
 
 function frequencyOperation(value: FrequencyCollectionSummary): Operation {
   const done = value.completedKeywords + value.failedKeywords;
+  const durationLabel = operationDurationLabel(value);
   return {
     id: value.id,
     kind: "FREQUENCY",
@@ -470,7 +503,12 @@ function frequencyOperation(value: FrequencyCollectionSummary): Operation {
         }
       : {}),
     ...(value.failureCode ? { errorCode: value.failureCode } : {}),
-    createdAt: value.createdAt
+    createdAt: value.createdAt,
+    ...(value.startedAt ? { startedAt: value.startedAt } : {}),
+    ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
+    ...(durationLabel
+      ? { durationLabel }
+      : {})
   };
 }
 
@@ -486,6 +524,7 @@ function rankOperation(value: RankJobSummary): Operation {
     searchSystem,
     value.depth ? `Топ-${value.depth}` : undefined
   ].filter((part): part is string => Boolean(part)).join(" · ");
+  const durationLabel = operationDurationLabel(value);
   return {
     id: value.id,
     kind: "RANK",
@@ -512,7 +551,15 @@ function rankOperation(value: RankJobSummary): Operation {
     ...(value.status === "FAILED" || value.status === "ACTION_REQUIRED"
       ? { errorCode: value.failure.code }
       : {}),
-    createdAt: value.createdAt
+    createdAt: value.createdAt,
+    ...(value.startedAt ? { startedAt: value.startedAt } : {}),
+    ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
+    ...(durationLabel
+      ? { durationLabel }
+      : {}),
+    ...(value.result
+      ? { resultLabel: `Найдено позиций: ${formatInteger(Number(value.result.foundCount))}` }
+      : {})
   };
 }
 
@@ -520,6 +567,7 @@ function aiAnswerOperation(value: AiAnswerCollectionSummary): Operation {
   const done = value.completedKeywords + value.failedKeywords;
   const engine = value.searchEngine === "YANDEX" ? "Яндекс" : "Google";
   const device = value.device === "DESKTOP" ? "десктоп" : "мобильное";
+  const durationLabel = operationDurationLabel(value);
   return {
     id: value.id,
     kind: "AI_ANSWER",
@@ -549,13 +597,19 @@ function aiAnswerOperation(value: AiAnswerCollectionSummary): Operation {
         }
       : {}),
     ...(value.failureCode ? { errorCode: value.failureCode } : {}),
-    createdAt: value.createdAt
+    createdAt: value.createdAt,
+    ...(value.startedAt ? { startedAt: value.startedAt } : {}),
+    ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
+    ...(durationLabel
+      ? { durationLabel }
+      : {})
   };
 }
 
 function clusteringOperation(value: ClusteringRunSummary): Operation {
   const done = value.completedKeywords + value.failedKeywords;
   const engine = value.searchEngine === "YANDEX" ? "Яндекс" : "Google";
+  const durationLabel = operationDurationLabel(value);
   return {
     id: value.id,
     kind: "CLUSTERING",
@@ -589,13 +643,72 @@ function clusteringOperation(value: ClusteringRunSummary): Operation {
         }
       : {}),
     ...(value.failureCode ? { errorCode: value.failureCode } : {}),
-    createdAt: value.createdAt
+    createdAt: value.createdAt,
+    ...(value.startedAt ? { startedAt: value.startedAt } : {}),
+    ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
+    ...(durationLabel
+      ? { durationLabel }
+      : {})
+  };
+}
+
+function researchOperation(value: KeywordResearchRunSummary): Operation {
+  const keysSo = value.source === "KEYS_SO";
+  const current = value.importedKeywords > 0
+    ? value.importedKeywords
+    : value.collectedKeywords;
+  const total = value.totalAvailable ?? value.maxKeywords;
+  const durationLabel = operationDurationLabel(value);
+  const providerLabel = value.provider === "XMLSTOCK"
+    ? "XMLStock"
+    : value.provider === "ARSENKIN"
+      ? "Arsenkin Tools"
+      : "Keys.so";
+  return {
+    id: value.id,
+    kind: "RESEARCH",
+    provider: value.provider,
+    title: keysSo ? "Анализ Keys.so" : "Парсинг Wordstat",
+    description: keysSo
+      ? `${providerLabel} · ${value.domain ?? "—"}`
+      : `${providerLabel} · ${value.seedCount ?? 0} исходных фраз · ${value.regionCode === "225" ? "Россия" : `регион ${value.regionCode ?? "225"}`}`,
+    statusLabel: operationStatusLabel(value.status),
+    progressLabel: value.status === "READY_TO_IMPORT"
+      ? `Найдено ${formatInteger(value.collectedKeywords)}`
+      : total > 0
+        ? `${formatInteger(current)} из ${formatInteger(total)}`
+        : "Ожидает данных",
+    percent: value.status === "READY_TO_IMPORT" || value.status === "COMPLETED"
+      ? 100
+      : total > 0
+        ? Math.min(100, Math.round(current / total * 100))
+        : 0,
+    tab: operationTab(value.status),
+    cancellable: [
+      "QUEUED",
+      "RUNNING",
+      "RETRY_SCHEDULED",
+      "READY_TO_IMPORT"
+    ].includes(value.status),
+    retryable: false,
+    retryLabel: "",
+    downloadable: false,
+    version: value.version,
+    routeLabel: keysSo ? "Данные домена" : "Расширение семантики",
+    ...(value.failureCode ? { errorCode: value.failureCode } : {}),
+    createdAt: value.createdAt,
+    ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
+    ...(durationLabel ? { durationLabel } : {}),
+    ...(value.collectedKeywords > 0
+      ? { resultLabel: `Найдено запросов: ${formatInteger(value.collectedKeywords)}` }
+      : {})
   };
 }
 
 function exportOperation(value: SemanticExportJobSummary): Operation {
   const total = value.totalRows ?? value.rowCount ?? value.processedRows;
   const complete = value.status === "COMPLETED";
+  const durationLabel = operationDurationLabel(value);
   return {
     id: value.id,
     kind: "EXPORT",
@@ -625,7 +738,12 @@ function exportOperation(value: SemanticExportJobSummary): Operation {
     version: value.version,
     ...(value.failureCode ? { errorCode: value.failureCode } : {}),
     routeLabel: exportScopeLabel(value.scope),
-    createdAt: value.createdAt
+    createdAt: value.createdAt,
+    ...(value.startedAt ? { startedAt: value.startedAt } : {}),
+    ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
+    ...(durationLabel
+      ? { durationLabel }
+      : {})
   };
 }
 
@@ -694,6 +812,10 @@ function formatShortTime(value: string): string {
         hour: "2-digit",
         minute: "2-digit"
       }).format(date);
+}
+
+function formatInteger(value: number): string {
+  return new Intl.NumberFormat("ru-RU").format(value);
 }
 
 function operationError(error: unknown): string {

@@ -68,6 +68,25 @@ test("reads an empty scope atomically at RepeatableRead", async () => {
     projectId,
     contextId: trackingContextId,
     removedAt: null,
+    keyword: { status: "ACTIVE", isTracked: true }
+  });
+});
+
+test("includes disabled keywords only for an explicit launch override", async () => {
+  const observed: unknown[] = [];
+  const service = scopeService(
+    context({ launchProfile: { includeUntracked: true } }),
+    [],
+    observed
+  );
+
+  await service.calculate(command);
+
+  assert.deepEqual(observed[2], {
+    workspaceId,
+    projectId,
+    contextId: trackingContextId,
+    removedAt: null,
     keyword: { status: "ACTIVE" }
   });
 });

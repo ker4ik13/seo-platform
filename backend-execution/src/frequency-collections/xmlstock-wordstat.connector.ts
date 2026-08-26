@@ -13,15 +13,32 @@ const XMLSTOCK_WORDSTAT_URL = "https://xmlstock.com/wordstat/json/";
 
 export type WordstatCollectionResult =
   | { readonly ok: true; readonly value: string }
+  | ProviderFailure;
+
+type ProviderFailure = {
+  readonly ok: false;
+  readonly code: string;
+  readonly retryable: boolean;
+  readonly retryAfterSeconds?: number;
+};
+
+export interface XmlStockWordstatExpansionRow {
+  readonly keyword: string;
+  readonly frequencyBase: number;
+  readonly sourceQuery: string;
+  readonly sourceColumn: "LEFT" | "RIGHT";
+}
+
+export type XmlStockWordstatExpansionResult =
   | {
-      readonly ok: false;
-      readonly code: string;
-      readonly retryable: boolean;
-      readonly retryAfterSeconds?: number;
-    };
+      readonly ok: true;
+      readonly rows: readonly XmlStockWordstatExpansionRow[];
+      readonly raw: unknown;
+    }
+  | ProviderFailure;
 
 export class XmlStockWordstatConnector {
-  public readonly version = "xmlstock-wordstat@1.2.1";
+  public readonly version = "xmlstock-wordstat@1.3.0";
 
   public constructor(private readonly fetcher: ProviderFetch = fetch) {}
 
@@ -72,6 +89,107 @@ export class XmlStockWordstatConnector {
       throw error;
     }
   }
+
+  public async expand(
+    input: {
+      readonly query: string;
+      readonly regionCode: string;
+      readonly device: SemanticFrequencyDevice;
+      readonly minusWords: readonly string[];
+      readonly clearMinusPhrases: boolean;
+      readonly includeRightColumn: boolean;
+      readonly clearPlus: boolean;
+      readonly maxKeywords: number;
+    },
+    secret: IntegrationCredentialSecret,
+    timeoutMs: number
+  ): Promise<XmlStockWordstatExpansionResult> {
+    if (!secret.accountIdentifier) return failure("INVALID_CREDENTIAL", false);
+    let query: string;
+    try {
+      query = expansionQuery(input);
+    } catch (error) {
+      if (error instanceof WordstatQueryError) {
+        return failure("PROVIDER_REQUEST_REJECTED", false);
+      }
+      throw error;
+    }
+    const url = new URL(XMLSTOCK_WORDSTAT_URL);
+    url.searchParams.set("user", secret.accountIdentifier);
+    url.searchParams.set("key", secret.apiKey);
+    url.searchParams.set("query", query);
+    url.searchParams.set("pagetype", "words");
+    url.searchParams.set("groupby", String(Math.min(2_000, input.maxKeywords)));
+    url.searchParams.set("regions", input.regionCode);
+    url.searchParams.set("device", providerDevice(input.device));
+    try {
+      const response = await providerJsonRequest(
+        url,
+        { method: "GET", headers: { Accept: "application/json" } },
+        timeoutMs,
+        this.fetcher
+      );
+      const result = xmlStockWordstatExpansionResult(
+        response.status,
+        response.value,
+        input.query,
+        input.includeRightColumn,
+        input.maxKeywords
+      );
+      return !result.ok && result.retryable && response.retryAfterSeconds !== undefined
+        ? { ...result, retryAfterSeconds: response.retryAfterSeconds }
+        : result;
+    } catch (error) {
+      if (error instanceof ProviderTransportError) {
+        return failure("PROVIDER_UNAVAILABLE", true);
+      }
+      throw error;
+    }
+  }
+}
+
+export function xmlStockWordstatExpansionResult(
+  status: number,
+  value: unknown,
+  sourceQuery: string,
+  includeRightColumn: boolean,
+  maxKeywords: number
+): XmlStockWordstatExpansionResult {
+  const requestFailure = providerRequestFailure(status, value);
+  if (requestFailure) return requestFailure;
+  if (!Number.isSafeInteger(maxKeywords) || maxKeywords < 1 || maxKeywords > 10_000) {
+    return failure("PROVIDER_INVALID_RESPONSE", true);
+  }
+  const body = record(value);
+  if (!body || !Array.isArray(body.results)) {
+    return failure("PROVIDER_INVALID_RESPONSE", true);
+  }
+  if (includeRightColumn && !Array.isArray(body.associations)) {
+    return failure("PROVIDER_INVALID_RESPONSE", true);
+  }
+  const normalizedSource = normalizedDisplayPhrase(sourceQuery);
+  if (!normalizedSource) return failure("PROVIDER_INVALID_RESPONSE", true);
+  const output = new Map<string, XmlStockWordstatExpansionRow>();
+  const totalCount = providerCount(body.totalCount ?? body.total_count);
+  if (totalCount !== undefined) {
+    addExpansionRow(output, normalizedSource, totalCount, normalizedSource, "LEFT", maxKeywords);
+  }
+  if (!appendExpansionRows(output, body.results, normalizedSource, "LEFT", maxKeywords)) {
+    return failure("PROVIDER_INVALID_RESPONSE", true);
+  }
+  if (
+    includeRightColumn &&
+    !appendExpansionRows(
+      output,
+      body.associations as readonly unknown[],
+      normalizedSource,
+      "RIGHT",
+      maxKeywords
+    )
+  ) {
+    return failure("PROVIDER_INVALID_RESPONSE", true);
+  }
+  return { ok: true, rows: [...output.values()], raw: value };
 }
 
 export function wordstatQuery(
@@ -111,33 +229,10 @@ export function xmlStockWordstatResult(
   value: unknown,
   keyword?: string
 ): WordstatCollectionResult {
-  if (status === 401 || status === 403) return failure("INVALID_CREDENTIAL", false);
-  if (status === 429) return failure("PROVIDER_RATE_LIMITED", true);
-  if (status === 503) return failure("PROVIDER_RATE_LIMITED", true);
-  if (status >= 500) return failure("PROVIDER_UNAVAILABLE", true);
-  if (status < 200 || status >= 300) return failure("PROVIDER_REQUEST_REJECTED", false);
+  const requestFailure = providerRequestFailure(status, value);
+  if (requestFailure) return requestFailure;
   const body = record(value);
   if (!body) return failure("PROVIDER_INVALID_RESPONSE", true);
-  const error = providerError(body.error);
-  if (error) {
-    if (error === "-34" || error === "401" || error === "403") {
-      return failure("INVALID_CREDENTIAL", false);
-    }
-    if (
-      error === "32" ||
-      error === "55" ||
-      error === "110" ||
-      error === "429" ||
-      error === "503"
-    ) {
-      return failure("PROVIDER_RATE_LIMITED", true);
-    }
-    if (error === "20" || error === "101" || error === "300") {
-      return failure("PROVIDER_UNAVAILABLE", true);
-    }
-    if (error === "200") return failure("PROVIDER_LOW_BALANCE", false);
-    return failure("PROVIDER_REQUEST_REJECTED", false);
-  }
   const count = decimal(body.totalCount ?? body.total_count);
   if (count !== undefined) return { ok: true, value: count };
 
@@ -172,6 +267,102 @@ export function xmlStockWordstatResult(
     }
   }
   return failure("PROVIDER_INVALID_RESPONSE", true);
+}
+
+function expansionQuery(input: {
+  readonly query: string;
+  readonly minusWords: readonly string[];
+  readonly clearMinusPhrases: boolean;
+  readonly clearPlus: boolean;
+}): string {
+  let query = input.query.trim().replace(/\s+/gu, " ");
+  if (input.clearMinusPhrases) {
+    query = query.replace(/(^|\s)-(?:"[^"]+"|\S+)/gu, "$1").replace(/\s+/gu, " ").trim();
+  }
+  if (input.clearPlus) query = query.replaceAll("+", "");
+  query = wordstatQuery(query, "BASE");
+  for (const item of input.minusWords) {
+    const phrase = item.trim().replace(/\s+/gu, " ").replaceAll('"', "");
+    if (!phrase) continue;
+    query += phrase.includes(" ") ? ` -"${phrase}"` : ` -${phrase}`;
+  }
+  return validQuery(query);
+}
+
+function appendExpansionRows(
+  output: Map<string, XmlStockWordstatExpansionRow>,
+  rows: readonly unknown[],
+  sourceQuery: string,
+  sourceColumn: "LEFT" | "RIGHT",
+  maxKeywords: number
+): boolean {
+  for (const candidate of rows) {
+    const row = record(candidate);
+    const phrase = normalizedDisplayPhrase(row?.phrase);
+    const count = providerCount(row?.count);
+    if (!phrase || count === undefined) return false;
+    addExpansionRow(output, phrase, count, sourceQuery, sourceColumn, maxKeywords);
+  }
+  return true;
+}
+
+function addExpansionRow(
+  output: Map<string, XmlStockWordstatExpansionRow>,
+  keyword: string,
+  frequencyBase: number,
+  sourceQuery: string,
+  sourceColumn: "LEFT" | "RIGHT",
+  maxKeywords: number
+): void {
+  const key = keyword.toLocaleLowerCase("ru-RU");
+  const current = output.get(key);
+  if (current) {
+    if (frequencyBase > current.frequencyBase) output.set(key, { ...current, frequencyBase });
+    return;
+  }
+  if (output.size < maxKeywords) {
+    output.set(key, { keyword, frequencyBase, sourceQuery, sourceColumn });
+  }
+}
+
+function providerRequestFailure(
+  status: number,
+  value: unknown
+): ProviderFailure | undefined {
+  if (status === 401 || status === 403) return failure("INVALID_CREDENTIAL", false);
+  if (status === 429 || status === 503) return failure("PROVIDER_RATE_LIMITED", true);
+  if (status >= 500) return failure("PROVIDER_UNAVAILABLE", true);
+  if (status < 200 || status >= 300) return failure("PROVIDER_REQUEST_REJECTED", false);
+  const error = providerError(record(value)?.error);
+  if (!error) return undefined;
+  if (error === "-34" || error === "401" || error === "403") {
+    return failure("INVALID_CREDENTIAL", false);
+  }
+  if (["32", "55", "110", "429", "503"].includes(error)) {
+    return failure("PROVIDER_RATE_LIMITED", true);
+  }
+  if (["20", "101", "300"].includes(error)) {
+    return failure("PROVIDER_UNAVAILABLE", true);
+  }
+  if (error === "200") return failure("PROVIDER_LOW_BALANCE", false);
+  return failure("PROVIDER_REQUEST_REJECTED", false);
+}
+
+function providerCount(value: unknown): number | undefined {
+  const parsed = decimal(value);
+  if (parsed === undefined) return undefined;
+  const count = Number(parsed);
+  return Number.isSafeInteger(count) && count >= 0 && count <= 2_147_483_647
+    ? count
+    : undefined;
+}
+
+function normalizedDisplayPhrase(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().replace(/\s+/gu, " ");
+  return normalized.length >= 1 && normalized.length <= 2_000 && !hasControlCharacter(normalized)
+    ? normalized
+    : undefined;
 }
 
 export class WordstatQueryError extends Error {
@@ -226,7 +417,7 @@ function providerError(value: unknown): string | undefined {
 function failure(
   code: string,
   retryable: boolean
-): WordstatCollectionResult {
+): ProviderFailure {
   return { ok: false, code, retryable };
 }
 

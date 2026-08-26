@@ -4,6 +4,7 @@ import {
   XmlStockWordstatConnector,
   WordstatQueryError,
   wordstatQuery,
+  xmlStockWordstatExpansionResult,
   xmlStockWordstatResult
 } from "./xmlstock-wordstat.connector.js";
 
@@ -112,6 +113,65 @@ test("pins explicit all-region collection instead of inheriting account defaults
     1_000
   );
   assert.equal(url?.searchParams.get("regions"), "all");
+});
+
+test("expands a phrase through XMLStock results and associations", async () => {
+  let url: URL | undefined;
+  const connector = new XmlStockWordstatConnector(async (input) => {
+    url = new URL(String(input));
+    return Response.json({
+      totalCount: "120",
+      results: [
+        { phrase: "купить холодильник", count: "70" },
+        { phrase: "холодильник цена", count: "45" }
+      ],
+      associations: [{ phrase: "морозильная камера", count: "21" }]
+    });
+  });
+
+  const result = await connector.expand(
+    {
+      query: "холодильник",
+      regionCode: "225",
+      device: "ALL",
+      minusWords: ["бесплатно"],
+      clearMinusPhrases: false,
+      includeRightColumn: true,
+      clearPlus: false,
+      maxKeywords: 500
+    },
+    { apiKey: "secret", accountIdentifier: "42" },
+    1_000
+  );
+
+  assert.equal(result.ok, true);
+  if (!result.ok) assert.fail();
+  assert.deepEqual(
+    result.rows.map(({ keyword, sourceColumn }) => ({ keyword, sourceColumn })),
+    [
+      { keyword: "холодильник", sourceColumn: "LEFT" },
+      { keyword: "купить холодильник", sourceColumn: "LEFT" },
+      { keyword: "холодильник цена", sourceColumn: "LEFT" },
+      { keyword: "морозильная камера", sourceColumn: "RIGHT" }
+    ]
+  );
+  assert.equal(url?.searchParams.get("pagetype"), "words");
+  assert.equal(url?.searchParams.get("groupby"), "500");
+  assert.equal(url?.searchParams.get("regions"), "225");
+  assert.equal(url?.searchParams.get("query"), "холодильник -бесплатно");
+});
+
+test("rejects a malformed XMLStock expansion response", () => {
+  assert.deepEqual(
+    xmlStockWordstatExpansionResult(
+      200,
+      { results: [{ phrase: "запрос", count: "not-a-count" }], associations: [] },
+      "запрос",
+      true,
+      100
+    ),
+    { ok: false, code: "PROVIDER_INVALID_RESPONSE", retryable: true }
+  );
 });
 
 test("normalizes XMLStock low balance and rate-limit errors", () => {

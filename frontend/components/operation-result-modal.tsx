@@ -1,14 +1,17 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { OperationResultKind } from "../lib/operation-result-routes";
-import { OperationResultWorkspace } from "./operation-result-workspace";
+import {
+  OperationResultWorkspace,
+  RankRuntimeDiagnosticsModal,
+  type RankRuntimeLogState
+} from "./operation-result-workspace";
 import { SemanticModal } from "./semantic-modal";
 import { UnsavedChangesConfirmation } from "./unsaved-changes-confirmation";
 
 export function OperationResultModal({
   actions,
-  description,
   kind,
   onClusteringApplied,
   onClose,
@@ -27,14 +30,23 @@ export function OperationResultModal({
 }>) {
   const [dirty, setDirty] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
+  const [rankRuntimeLogState, setRankRuntimeLogState] = useState<RankRuntimeLogState>();
+  const [rankRuntimeLogOpen, setRankRuntimeLogOpen] = useState(false);
 
   useEffect(() => {
     setDirty(false);
     setConfirmClose(false);
+    setRankRuntimeLogState(undefined);
+    setRankRuntimeLogOpen(false);
   }, [kind, operationId]);
 
+  const handleRankRuntimeLogStateChange = useCallback((state?: RankRuntimeLogState) => {
+    setRankRuntimeLogState(state);
+    if (!state) setRankRuntimeLogOpen(false);
+  }, []);
+
   function requestClose(): void {
-    if (kind === "clustering" && dirty) {
+    if (dirty) {
       setConfirmClose(true);
       return;
     }
@@ -46,8 +58,23 @@ export function OperationResultModal({
       <SemanticModal
         bodyClassName="operation-result-modal-body"
         className="operation-result-modal"
-        description={`${description} · ID ${operationId.slice(0, 8)}`}
-        headerActions={actions}
+        headerActions={(
+          <>
+            {rankRuntimeLogState && (
+              <button
+                aria-haspopup="dialog"
+                className="operation-result-header-action operation-result-runtime-log-action"
+                onClick={() => setRankRuntimeLogOpen(true)}
+                title="Открыть логи XMLStock"
+                type="button"
+              >
+                <span aria-hidden="true" className="operation-result-runtime-log-dot" />
+                <span className="operation-result-runtime-log-label">Логи</span>
+              </button>
+            )}
+            {actions}
+          </>
+        )}
         onClose={requestClose}
         presenceKey="semantic-modal:operation-result"
         size="fullscreen"
@@ -57,11 +84,22 @@ export function OperationResultModal({
           embedded
           kind={kind}
           {...(onClusteringApplied ? { onClusteringApplied } : {})}
-          {...(kind === "clustering" ? { onDirtyChange: setDirty } : {})}
+          {...(kind === "clustering" || kind === "research"
+            ? { onDirtyChange: setDirty }
+            : {})}
+          onRankRuntimeLogStateChange={handleRankRuntimeLogStateChange}
           operationId={operationId}
           projectId={projectId}
         />
       </SemanticModal>
+      {rankRuntimeLogOpen && rankRuntimeLogState && (
+        <RankRuntimeDiagnosticsModal
+          active={rankRuntimeLogState.active}
+          onClose={() => setRankRuntimeLogOpen(false)}
+          operationId={operationId}
+          projectId={projectId}
+        />
+      )}
       {confirmClose && (
         <UnsavedChangesConfirmation
           onCancel={() => setConfirmClose(false)}

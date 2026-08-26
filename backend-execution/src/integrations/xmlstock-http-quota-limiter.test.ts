@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  XMLSTOCK_HTTP_QUOTA_POLICIES,
   acquireXmlStockHttpQuotaPermit,
   penalizeXmlStockHttpQuota,
   recordXmlStockHttpQuotaSuccess,
@@ -12,6 +13,15 @@ const firstCredential = "01900000-0000-7000-8000-000000000001";
 const secondCredential = "01900000-0000-7000-8000-000000000002";
 const firstMember = "01900000-0000-7000-8000-000000000003";
 const secondMember = "01900000-0000-7000-8000-000000000004";
+
+test("uses the documented XMLStock product windows", () => {
+  assert.deepEqual(XMLSTOCK_HTTP_QUOTA_POLICIES, {
+    YANDEX_LIVE: { concurrency: 20, requestsPerSecond: 10 },
+    GOOGLE_LIVE: { concurrency: 48, requestsPerSecond: 30 },
+    YANDEX_SEARCH_API: { concurrency: 48, requestsPerSecond: 50 },
+    WORDSTAT: { concurrency: 10, requestsPerSecond: 10 }
+  });
+});
 
 test("quota keys isolate credentials and XMLStock products", () => {
   assert.notEqual(

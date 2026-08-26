@@ -353,7 +353,7 @@ export function SemanticGroupDialog({
                   setParentId(nextParentId);
                   setError(undefined);
                 }}
-                rootLabel="Корневой уровень"
+                rootLabel="Корневая папка"
                 value={parentId}
               />
             </div>
@@ -445,7 +445,7 @@ export function SemanticGroupDialog({
                 autoFocus
                 groups={parentOptions}
                 onChange={setParentId}
-                rootLabel="Корневой уровень"
+                rootLabel="Корневая папка"
                 value={parentId}
               />
             </div>

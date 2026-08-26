@@ -624,7 +624,8 @@ FROM unnest(CASE current_database()
     'public.rank_execution_grant_request_is_exact(jsonb,uuid,uuid,uuid,uuid,integer,integer,bytea)',
     'public.rank_execution_grant_decision_is_exact(jsonb,text,bytea,bytea,timestamp with time zone,timestamp with time zone)',
     'public.list_integration_credential_key_versions()',
-    'public.register_integration_credential_kek_canary(integer,bytea,bytea,bytea,bytea,bytea,bytea)'
+    'public.register_integration_credential_kek_canary(integer,bytea,bytea,bytea,bytea,bytea,bytea)',
+    'public.read_rank_runtime_diagnostics_entries(uuid,uuid,uuid,integer)'
   ]
   ELSE ARRAY[]::TEXT[]
 END) AS required_routine(routine_signature)

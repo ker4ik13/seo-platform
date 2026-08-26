@@ -1,11 +1,13 @@
 import {
   connectorRoutingScopes,
+  rankRuntimeDiagnosticStates,
   rankProviderKeywordLimit,
   rankJobFailureCodes,
   redactRankJobSummary,
   type RankJobFailureCode,
   type RankJobResultSummary,
-  type RankJobSummary
+  type RankJobSummary,
+  type RankRuntimeDiagnostics
 } from "@seo-platform/contracts";
 import { DomainError } from "../common/domain-error.js";
 
@@ -20,6 +22,7 @@ const RESPONSE_FIELDS = [
   "id",
   "workspaceId",
   "projectId",
+  "actorId",
   "trackingContextId",
   "type",
   "provider",
@@ -60,6 +63,7 @@ export function scopedRankJobSummary(
   const responseWorkspaceId = uuid(input.workspaceId);
   const responseProjectId = uuid(input.projectId);
   const trackingContextId = uuid(input.trackingContextId);
+  const actorId = input.actorId === undefined ? undefined : uuid(input.actorId);
   const progress = rankJobProgress(input.progress);
   const billingCurrency = currency(input.billingCurrency);
   const createdAt = timestamp(input.createdAt);
@@ -117,6 +121,7 @@ export function scopedRankJobSummary(
     id,
     workspaceId: responseWorkspaceId,
     projectId: responseProjectId,
+    ...(actorId ? { actorId } : {}),
     trackingContextId,
     type: "MANUAL_RANK_CHECK",
     provider,
@@ -298,6 +303,151 @@ export function scopedRankJobSummary(
     if (error instanceof DomainError) throw error;
     throw invalidResponse();
   }
+}
+
+export function scopedRankRuntimeDiagnostics(
+  value: unknown,
+  expectedJobId: string
+): RankRuntimeDiagnostics {
+  const input = requiredExactRecord(value, [
+    "jobId",
+    "generatedAt",
+    "policy",
+    "totals",
+    "entries"
+  ]);
+  const jobId = uuid(input.jobId);
+  if (jobId !== expectedJobId) throw invalidResponse();
+  const policyInput = requiredExactRecord(input.policy, [
+    "product",
+    "concurrency",
+    "requestsPerSecond"
+  ]);
+  const product = member(policyInput.product, [
+    "YANDEX_LIVE",
+    "GOOGLE_LIVE",
+    "YANDEX_SEARCH_API"
+  ] as const);
+  const concurrency = boundedInteger(policyInput.concurrency, 1, 50);
+  const requestsPerSecond = boundedInteger(
+    policyInput.requestsPerSecond,
+    1,
+    100
+  );
+  const totalsInput = requiredExactRecord(input.totals, [
+    "total",
+    "prepared",
+    "active",
+    "waitingProvider",
+    "completed",
+    "failed"
+  ]);
+  const total = boundedInteger(
+    totalsInput.total,
+    0,
+    rankProviderKeywordLimit
+  );
+  const prepared = boundedInteger(totalsInput.prepared, 0, total);
+  const active = boundedInteger(totalsInput.active, 0, prepared);
+  const waitingProvider = boundedInteger(
+    totalsInput.waitingProvider,
+    0,
+    prepared
+  );
+  const completed = boundedInteger(totalsInput.completed, 0, prepared);
+  const failed = boundedInteger(totalsInput.failed, 0, prepared);
+  if (!Array.isArray(input.entries) || input.entries.length > 250) {
+    throw invalidResponse();
+  }
+  if (
+    completed + failed > prepared ||
+    (total === 0 && input.entries.length > 0)
+  ) {
+    throw invalidResponse();
+  }
+  const seenSequences = new Set<number>();
+  const entries = input.entries.map((candidate) => {
+    const entry = exactRecord(candidate, [
+      "sequence",
+      "keyword",
+      "lane",
+      "state",
+      "executionAttempt",
+      "submitAttempts",
+      "pollAttempts",
+      "completedPages",
+      "totalPages",
+      "active",
+      "nextActionAt",
+      "errorCode",
+      "updatedAt"
+    ]);
+    const sequence = boundedInteger(
+      entry.sequence,
+      0,
+      Math.max(0, total - 1)
+    );
+    if (seenSequences.has(sequence)) throw invalidResponse();
+    seenSequences.add(sequence);
+    const totalPages = boundedInteger(entry.totalPages, 1, 10);
+    const completedPages = boundedInteger(
+      entry.completedPages,
+      0,
+      totalPages
+    );
+    const nextActionAt = optionalTimestamp(entry.nextActionAt);
+    const errorCode = entry.errorCode;
+    if (
+      typeof entry.active !== "boolean" ||
+      (errorCode !== undefined &&
+        (typeof errorCode !== "string" ||
+          !/^[A-Z0-9_]{1,100}$/u.test(errorCode)))
+    ) {
+      throw invalidResponse();
+    }
+    return {
+      sequence,
+      keyword: boundedKeyword(entry.keyword),
+      lane: boundedInteger(entry.lane, 1, concurrency),
+      state: member(entry.state, rankRuntimeDiagnosticStates),
+      executionAttempt: boundedInteger(entry.executionAttempt, 1, 1000),
+      submitAttempts: boundedInteger(entry.submitAttempts, 0, 1000),
+      pollAttempts: boundedInteger(entry.pollAttempts, 0, 10000),
+      completedPages,
+      totalPages,
+      active: entry.active,
+      ...(nextActionAt ? { nextActionAt } : {}),
+      ...(typeof errorCode === "string" ? { errorCode } : {}),
+      updatedAt: timestamp(entry.updatedAt)
+    };
+  });
+  return {
+    jobId,
+    generatedAt: timestamp(input.generatedAt),
+    policy: { product, concurrency, requestsPerSecond },
+    totals: {
+      total,
+      prepared,
+      active,
+      waitingProvider,
+      completed,
+      failed
+    },
+    entries
+  };
+}
+
+function boundedKeyword(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > 1_000 ||
+    Array.from(value).length > 500 ||
+    new TextEncoder().encode(value).byteLength > 2_000
+  ) {
+    throw invalidResponse();
+  }
+  return value;
 }
 
 function routeSummary(
@@ -552,6 +702,18 @@ function numericMember<const Values extends readonly number[]>(
     throw invalidResponse();
   }
   return value as Values[number];
+}
+
+function boundedInteger(value: unknown, minimum: number, maximum: number): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
+    throw invalidResponse();
+  }
+  return value;
 }
 
 function requiredExactRecord(

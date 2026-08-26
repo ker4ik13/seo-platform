@@ -111,6 +111,7 @@ export interface TechnicalCrawlSummary {
   readonly jobId: string;
   readonly workspaceId: string;
   readonly projectId: string;
+  readonly actorId?: string;
   readonly status: TechnicalCrawlStatus;
   readonly config: TechnicalCrawlConfig;
   readonly discoveredUrls: number;

@@ -207,6 +207,8 @@ export interface CreateSemanticKeywordInput {
   readonly language: string;
   readonly priority: number;
   readonly isFavorite: boolean;
+  /** Defaults to true when omitted by an older client. */
+  readonly isTracked?: boolean;
   readonly intent?: SemanticKeywordIntent;
   readonly groupId?: string;
   readonly clusterId?: string;
@@ -304,6 +306,7 @@ export interface UpdateSemanticKeywordInput {
   readonly language?: string;
   readonly priority?: number;
   readonly isFavorite?: boolean;
+  readonly isTracked?: boolean;
   readonly showAiAnswerButton?: boolean;
   readonly intent?: SemanticKeywordIntent | null;
   readonly groupId?: string | null;
@@ -456,6 +459,7 @@ export const semanticKeywordBulkCommandMaxItems = 200;
 export interface SemanticKeywordBulkPatch {
   readonly priority?: number;
   readonly isFavorite?: boolean;
+  readonly isTracked?: boolean;
   readonly intent?: SemanticKeywordIntent | null;
   readonly groupId?: string | null;
   readonly clusterId?: string | null;

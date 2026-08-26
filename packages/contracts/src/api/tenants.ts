@@ -162,6 +162,7 @@ export interface ProjectSummary {
   readonly domain: string;
   readonly locale: string;
   readonly timezone: string;
+  readonly searchCity?: ProjectSearchCity;
   readonly status: "DRAFT" | "ACTIVE" | "ARCHIVED";
   readonly ownerUserId: string;
   readonly logoSource?: "CUSTOM" | "DISCOVERED";
@@ -170,6 +171,12 @@ export interface ProjectSummary {
   readonly projectAccessLevel?: ProjectAccessLevel;
   readonly version: number;
   readonly createdAt: string;
+}
+
+export interface ProjectSearchCity {
+  readonly name: string;
+  readonly yandexRegionCode: string;
+  readonly googleRegionCode: string;
 }
 
 export interface ProjectOperationActivitySummary {
@@ -259,6 +266,7 @@ export interface CreateProjectInput {
   readonly domain: string;
   readonly locale?: string;
   readonly timezone?: string;
+  readonly searchCity?: ProjectSearchCity;
   readonly confirmDuplicateDomain?: boolean;
 }
 
@@ -267,5 +275,6 @@ export interface UpdateProjectInput {
   readonly domain?: string;
   readonly locale?: string;
   readonly timezone?: string;
+  readonly searchCity?: ProjectSearchCity | null;
   readonly confirmDuplicateDomain?: boolean;
 }

@@ -25,6 +25,7 @@ export interface RankScopeIdentity {
   readonly workspaceId: string;
   readonly projectId: string;
   readonly contextId: string;
+  readonly includeUntracked: boolean;
 }
 
 /**
@@ -65,6 +66,7 @@ export async function inspectRankScopeBounds(
         AND "assignment"."context_id" = ${scope.contextId}::uuid
         AND "assignment"."removed_at" IS NULL
         AND "keyword"."status" = 'ACTIVE'
+        AND (${scope.includeUntracked} OR "keyword"."is_tracked" = true)
       ORDER BY "assignment"."keyword_id"
       LIMIT ${MAX_RANK_SCOPE_ENTRIES + 1}
     )

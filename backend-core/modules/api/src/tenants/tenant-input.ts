@@ -3,6 +3,7 @@ import type {
   CreateWorkspaceInput,
   DeleteProjectInput,
   ProjectLogoContentType,
+  ProjectSearchCity,
   UpdateProjectInput,
   UpdateWorkspaceInput
 } from "@seo-platform/contracts";
@@ -165,6 +166,7 @@ export function createProjectInput(value: unknown): CreateProjectInput {
     input,
     "confirmDuplicateDomain"
   );
+  const searchCity = optionalProjectSearchCity(input.searchCity);
 
   return {
     name: stringField(input, "name", { min: 1, max: 160 }),
@@ -172,6 +174,7 @@ export function createProjectInput(value: unknown): CreateProjectInput {
     domain: stringField(input, "domain", { min: 3, max: 255 }),
     ...(locale ? { locale } : {}),
     ...(timezone ? { timezone } : {}),
+    ...(searchCity ? { searchCity } : {}),
     ...(confirmDuplicateDomain === undefined
       ? {}
       : { confirmDuplicateDomain })
@@ -191,8 +194,13 @@ export function updateProjectInput(value: unknown): UpdateProjectInput {
     input,
     "confirmDuplicateDomain"
   );
+  const searchCity = input.searchCity === undefined
+    ? undefined
+    : input.searchCity === null
+      ? null
+      : projectSearchCity(input.searchCity);
 
-  if (!name && !domain && !locale && !timezone) {
+  if (!name && !domain && !locale && !timezone && searchCity === undefined) {
     throw validationError(
       "$",
       "EMPTY_UPDATE",
@@ -204,9 +212,47 @@ export function updateProjectInput(value: unknown): UpdateProjectInput {
     ...(domain ? { domain } : {}),
     ...(locale ? { locale } : {}),
     ...(timezone ? { timezone } : {}),
+    ...(searchCity !== undefined ? { searchCity } : {}),
     ...(confirmDuplicateDomain === undefined
       ? {}
       : { confirmDuplicateDomain })
+  };
+}
+
+function optionalProjectSearchCity(value: unknown): ProjectSearchCity | undefined {
+  return value === undefined || value === null
+    ? undefined
+    : projectSearchCity(value);
+}
+
+function projectSearchCity(value: unknown): ProjectSearchCity {
+  const input = inputObject(value);
+  const yandexRegionCode = stringField(input, "yandexRegionCode", {
+    min: 1,
+    max: 16
+  });
+  const googleRegionCode = stringField(input, "googleRegionCode", {
+    min: 1,
+    max: 16
+  });
+  if (!/^\d{1,10}$/u.test(yandexRegionCode)) {
+    throw validationError(
+      "searchCity.yandexRegionCode",
+      "INVALID_REGION_CODE",
+      "Use a numeric Yandex region code"
+    );
+  }
+  if (!/^\d{1,10}$/u.test(googleRegionCode)) {
+    throw validationError(
+      "searchCity.googleRegionCode",
+      "INVALID_REGION_CODE",
+      "Use a numeric Google region code"
+    );
+  }
+  return {
+    name: stringField(input, "name", { min: 1, max: 160 }),
+    yandexRegionCode,
+    googleRegionCode
   };
 }
 

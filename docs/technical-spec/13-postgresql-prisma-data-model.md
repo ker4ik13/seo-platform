@@ -263,6 +263,9 @@ workspace role; отсутствие записи означает полный 
 - type;
 - locale;
 - timezone;
+- search_city_name nullable;
+- search_city_yandex_region_code nullable;
+- search_city_google_region_code nullable;
 - status;
 - tags;
 - template_id;
@@ -283,6 +286,11 @@ Indexes:
 `owner_user_id` backfill-ится из владельца workspace и обязателен. `created_by`
 остаётся неизменяемой исторической ссылкой на автора и не используется как
 текущее владение.
+
+Три поля `search_city_*` либо все равны `NULL`, либо вместе задают выбранный в
+настройках российский город и provider-specific коды. Они являются только
+default preference; region каждого фактического запуска сохраняется в его
+immutable input/context.
 
 #### `project_transfer_requests`
 
@@ -601,11 +609,12 @@ import/consume. Production BYOK policy создаёт связанную audit r
 - deleted_at;
 - version.
 
-`is_tracked` временно сохраняется как legacy compatibility column, но не
-является источником истины. Публичный `isTracked` вычисляется по наличию
-активного temporal assignment к активному tracking context. Новые команды
-назначения не должны обновлять этот boolean; удалить колонку можно только
-отдельной contract migration после проверки всех consumers.
+`is_tracked` — канонический пользовательский переключатель участия keyword в
+новых съёмах позиций. Он имеет default `true`, меняется versioned keyword-
+командами и не зависит от temporal assignments. При добавлении запроса в
+tracking context значение не переписывается. Rank scope читает колонку
+авторитетно и включает строки со значением `false` только при явном immutable
+launch override `includeUntracked = true`.
 
 Indexes:
 
@@ -892,9 +901,9 @@ IS NULL` допускает только один активный период.
 контексту и keyword включают `workspace_id/project_id` и используют
 `ON DELETE RESTRICT`.
 
-`SemanticKeywordListItem.isTracked` равен `true`, только если существует
-активный assignment к активному context; `keywords.is_tracked` для этого
-решения не читается.
+Assignment отвечает только за membership сохранённого tracking context.
+`SemanticKeywordListItem.isTracked` читается из `keywords.is_tracked`; создание
+или закрытие assignment не меняет пользовательский переключатель.
 
 #### `tracking_context_create_receipts`
 
@@ -1193,6 +1202,29 @@ sidecar в одной транзакции; все мутации уже сущ�
 lock устраняет взаимную блокировку cancel/claim/persist/finalize; после
 internal seal request допускается только один контролируемый Job version
 drift — запись cooperative cancel.
+
+#### `keyword_research_runs` и `keyword_research_rows`
+
+`keyword_research_runs` принадлежит Jobs DB и хранит tenant/actor scope,
+источник `KEYS_SO|ARSENKIN_WORDSTAT|XMLSTOCK_WORDSTAT`, provider, immutable `input_snapshot`,
+opaque `provider_task_id`, статус, lease/version, retry, итоговые счётчики,
+Keys.so overview/competitors и подтверждённый `target_group_path`.
+`distribution_mode` фиксирует общую раскладку Wordstat: одна папка или
+вложенные папки по исходным seed-фразам.
+`keyword_research_rows` хранит нормализованный запрос, URL/позицию/частотности,
+исходную Wordstat seed-фразу и колонку `LEFT|RIGHT`, stable sequence и selected
+state. Необязательный row-level `target_group_path` переопределяет общую
+раскладку только для этой строки. Raw provider response и secret material не
+сохраняются в этих таблицах.
+
+DB broker claim/submit/defer/complete использует version/lease fencing.
+Arsenkin run с известным `provider_task_id` может только продолжить poll;
+неизвестный исход начавшегося submit не возвращается автоматически в
+submit-ready state. XMLStock run продвигается по одному seed через отдельную
+lease/version-fenced completion function; повторный worker не может дважды
+записать уже завершённую страницу. Confirm импортирует `ALL` либо bounded `SELECTED` rows
+через отдельную import-worker роль и не даёт connector-worker прямой доступ к
+Core SEO DB.
 
 ### 6.2. Imports/exports
 
@@ -1921,8 +1953,8 @@ model Keyword {
   groupId        String?   @map("group_id") @db.Uuid
   clusterId      String?   @map("cluster_id") @db.Uuid
   targetPageId   String?   @map("target_page_id") @db.Uuid
-  /// Legacy compatibility; temporal assignments are authoritative.
-  isTracked      Boolean   @default(false) @map("is_tracked")
+  /// User-controlled default participation in new rank runs.
+  isTracked      Boolean   @default(true) @map("is_tracked")
   version        Int       @default(1)
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz

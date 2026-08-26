@@ -43,6 +43,10 @@ export function internalCreateSemanticKeywordInput(
     language: canonicalLanguage(input.language),
     priority: priority(input.priority),
     isFavorite: booleanValue(input.isFavorite, "isFavorite"),
+    isTracked:
+      input.isTracked === undefined
+        ? true
+        : booleanValue(input.isTracked, "isTracked"),
     ...(intent ? { intent } : {}),
     ...(groupId ? { groupId } : {}),
     ...(clusterId ? { clusterId } : {}),
@@ -161,6 +165,9 @@ export function internalUpdateSemanticKeywordInput(
     ...(input.isFavorite === undefined
       ? {}
       : { isFavorite: booleanValue(input.isFavorite, "isFavorite") }),
+    ...(input.isTracked === undefined
+      ? {}
+      : { isTracked: booleanValue(input.isTracked, "isTracked") }),
     ...(input.showAiAnswerButton === undefined
       ? {}
       : {
@@ -205,6 +212,7 @@ export function internalSemanticKeywordBulkInput(
   const patch = exactRecord(input.patch, [
     "priority",
     "isFavorite",
+    "isTracked",
     "intent",
     "groupId",
     "clusterId",
@@ -225,6 +233,14 @@ export function internalSemanticKeywordBulkInput(
             isFavorite: booleanValue(
               patch.isFavorite,
               "patch.isFavorite"
+            )
+          }),
+      ...(patch.isTracked === undefined
+        ? {}
+        : {
+            isTracked: booleanValue(
+              patch.isTracked,
+              "patch.isTracked"
             )
           }),
       ...optionalIntent(patch.intent, true),
@@ -357,6 +373,7 @@ function editableFields(): readonly string[] {
     "language",
     "priority",
     "isFavorite",
+    "isTracked",
     "intent",
     "groupId",
     "clusterId",

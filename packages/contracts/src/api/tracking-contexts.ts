@@ -29,6 +29,8 @@ export type TrackingContextScopeMode =
  */
 export interface TrackingContextLaunchProfile {
   readonly searchSource: TrackingSearchSource;
+  /** Include keywords whose per-keyword tracking flag is disabled. */
+  readonly includeUntracked: boolean;
   readonly scope: {
     readonly mode: TrackingContextScopeMode;
     readonly groupIds: readonly string[];
@@ -170,6 +172,9 @@ export interface TrackingContextKeywordQuery {
   readonly search?: string;
 }
 
+/** Bounded page size for lightweight tracking-context assignments. */
+export const trackingContextKeywordPageLimit = 1_000 as const;
+
 export interface TrackingContextKeywordAssignmentItem {
   readonly assignmentId: string;
   readonly contextId: string;
@@ -177,6 +182,7 @@ export interface TrackingContextKeywordAssignmentItem {
   readonly keywordVersion: number;
   readonly textOriginal: string;
   readonly language: string;
+  readonly isTracked: boolean;
   readonly assignedBy: string;
   readonly assignedAt: string;
 }

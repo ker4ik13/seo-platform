@@ -5,6 +5,7 @@ import {
   createProjectInput,
   createWorkspaceInput,
   deleteProjectInput,
+  updateProjectInput,
   updateProjectLogoInput,
   updateWorkspaceAvatarInput,
   updateWorkspaceInput
@@ -106,6 +107,23 @@ test("preserves duplicate-domain confirmation", () => {
     confirmDuplicateDomain: true
   });
   assert.equal(input.confirmDuplicateDomain, true);
+});
+
+test("accepts and explicitly clears a paired project search city", () => {
+  const searchCity = {
+    name: "Санкт-Петербург",
+    yandexRegionCode: "2",
+    googleRegionCode: "1012040"
+  };
+  assert.deepEqual(updateProjectInput({ searchCity }), { searchCity });
+  assert.deepEqual(updateProjectInput({ searchCity: null }), {
+    searchCity: null
+  });
+  assert.throws(() =>
+    updateProjectInput({
+      searchCity: { ...searchCity, yandexRegionCode: "not-a-region" }
+    })
+  );
 });
 
 test("requires an exact non-empty project deletion confirmation", () => {

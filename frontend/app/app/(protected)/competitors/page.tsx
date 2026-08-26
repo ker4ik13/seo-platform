@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import { KeywordResearchConnectorSetup } from "../../../../components/keyword-research-connector-setup";
 import { KeywordResearchWorkspace } from "../../../../components/keyword-research-workspace";
 import { ProjectOnboarding } from "../../../../components/tenant-onboarding";
+import { WordstatExpansionConnectorSetup } from "../../../../components/wordstat-expansion-connector-setup";
 import { requireProtectedAppContext } from "../../../../lib/protected-app";
 
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Конкуренты и сбор семантики",
+  title: "Keys.so и Wordstat",
   robots: { index: false, follow: false }
 };
 
@@ -27,18 +28,19 @@ export default async function CompetitorsPage() {
         <>
           <section className="page-heading">
             <div>
-              <h1>Конкуренты и сбор семантики</h1>
+              <h1>Keys.so и Wordstat</h1>
               <p>
-                Получайте органические запросы конкурентов через собственный
-                API-ключ Keys.so, проверяйте результат и добавляйте выбранное в
-                семантическое ядро.
+                Анализируйте домены в Keys.so и расширяйте выбранные запросы
+                через Wordstat, не покидая проект.
               </p>
             </div>
           </section>
           <KeywordResearchConnectorSetup projectId={context.project.id} />
+          <WordstatExpansionConnectorSetup projectId={context.project.id} />
           <KeywordResearchWorkspace
             projectDomain={context.project.domain}
             projectId={context.project.id}
+            projectSearchCity={context.project.searchCity}
           />
         </>
       )}

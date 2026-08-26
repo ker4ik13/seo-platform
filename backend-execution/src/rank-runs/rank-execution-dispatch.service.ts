@@ -14,7 +14,6 @@ import type {
 import { databaseClock } from "../database/database-clock.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { safeErrorSummary } from "../runtime-safe-error.js";
-import { XMLSTOCK_YANDEX_LIVE_TURBO_MAPPING_VERSION } from "../rank-estimates/rank-estimate-execution.js";
 import {
   RankManifestClient,
   RankManifestClientError
@@ -36,7 +35,12 @@ import {
 
 const HASH_PATTERN = /^[a-f0-9]{64}$/u;
 const RANK_PROVIDER_ACTIVE_TASK_LIMIT = 5;
-const RANK_JOB_ACTIVE_CHUNK_LIMIT = 2;
+/**
+ * Keep enough immutable chunks authorized to fill all connector processes.
+ * The provider-specific Redis limiter and fenced DB claims remain the actual
+ * XMLStock capacity boundary; this dispatcher only prepares safe work.
+ */
+const RANK_JOB_ACTIVE_CHUNK_LIMIT = 48;
 
 export type RankExecutionDispatchOutcome =
   | "DISABLED"
@@ -691,13 +695,7 @@ async function rankExecutionDispatchCapacity(
           ON rank_job."workspace_id" = execution."workspace_id"
          AND rank_job."project_id" = execution."project_id"
          AND rank_job."id" = execution."job_id"
-        JOIN "rank_estimates" estimate
-          ON estimate."workspace_id" = execution."workspace_id"
-         AND estimate."project_id" = execution."project_id"
-         AND estimate."id" = execution."estimate_id"
         WHERE execution."provider" = ${provider}
-          AND (estimate."execution_snapshot" ->> 'providerMappingVersion')
-            IS DISTINCT FROM ${XMLSTOCK_YANDEX_LIVE_TURBO_MAPPING_VERSION}
           AND rank_job."status" = 'RUNNING'
           AND rank_job."cancel_requested_at" IS NULL
           AND (
@@ -754,17 +752,15 @@ async function rankExecutionDispatchCapacity(
 }
 
 /**
- * Standard provider jobs retain the conservative lifecycle window. Turbo is
- * instead bounded by connector worker concurrency and durable DB leases, as
- * the XMLStock product explicitly has no standard thread limit.
+ * Arsenkin has one shared provider-task lifecycle window. XMLStock is instead
+ * bounded per credential and product by the distributed HTTP quota limiter;
+ * applying the Arsenkin window here serialized unrelated XMLStock projects.
  */
 export function rankProviderActiveTaskLimit(
   provider: "ARSENKIN" | "XMLSTOCK",
-  providerMappingVersion: string
+  _providerMappingVersion: string
 ): number | undefined {
-  return provider === "XMLSTOCK" &&
-    providerMappingVersion ===
-      XMLSTOCK_YANDEX_LIVE_TURBO_MAPPING_VERSION
+  return provider === "XMLSTOCK"
     ? undefined
     : RANK_PROVIDER_ACTIVE_TASK_LIMIT;
 }

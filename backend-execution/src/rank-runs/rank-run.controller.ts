@@ -14,7 +14,8 @@ import {
 } from "@nestjs/common";
 import type {
   ApiResponse,
-  RankJobSummary
+  RankJobSummary,
+  RankRuntimeDiagnostics
 } from "@seo-platform/contracts";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import {
@@ -99,6 +100,28 @@ export class RankRunController {
     });
     return {
       data: await this.rankRuns.get(input),
+      meta: { requestId: request.id }
+    };
+  }
+
+  @Get("jobs/:jobId/runtime-diagnostics")
+  public async runtimeDiagnostics(
+    @Param("workspaceId") workspaceId: string,
+    @Param("projectId") projectId: string,
+    @Param("jobId") jobId: string,
+    @Headers() headers: Readonly<Record<string, string | string[] | undefined>>,
+    @Req() request: FastifyRequest
+  ): Promise<ApiResponse<RankRuntimeDiagnostics>> {
+    const context = internalCommandContext(headers);
+    assertPathContext(workspaceId, projectId, context);
+    const input = internalRankJobQuery({
+      workspaceId: context.workspaceId,
+      projectId: context.projectId,
+      actorId: context.actorId,
+      jobId: internalUuid(jobId, "jobId")
+    });
+    return {
+      data: await this.rankRuns.runtimeDiagnostics(input),
       meta: { requestId: request.id }
     };
   }

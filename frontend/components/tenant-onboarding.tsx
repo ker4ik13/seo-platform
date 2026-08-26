@@ -43,7 +43,7 @@ export function WorkspaceOnboarding() {
   }
 
   return (
-    <section className="onboarding-panel">
+    <section className="onboarding-panel" id="workspace-onboarding">
       <span className="state-icon">1</span>
       <div>
         <h1>Создайте рабочую область</h1>

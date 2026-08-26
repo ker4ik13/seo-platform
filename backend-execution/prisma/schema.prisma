@@ -907,9 +907,14 @@ model KeywordResearchRun {
   bindingId         String                @map("binding_id") @db.Uuid
   routeId           String                @map("route_id") @db.Uuid
   credentialId      String                @map("credential_id") @db.Uuid
+  source            String                @default("KEYS_SO") @db.VarChar(32)
   provider          String                @db.VarChar(64)
-  domain            String                @db.VarChar(253)
-  database          String                @db.VarChar(16)
+  domain            String?               @db.VarChar(253)
+  database          String?               @db.VarChar(16)
+  inputSnapshot     Json                  @map("input_snapshot")
+  providerTaskId    String?               @map("provider_task_id") @db.VarChar(255)
+  overview          Json?
+  competitors       Json?
   maxKeywords       Int                   @map("max_keywords")
   status            KeywordResearchStatus @default(QUEUED)
   nextPage          Int                   @default(1) @map("next_page")
@@ -918,6 +923,8 @@ model KeywordResearchRun {
   selectedKeywords  Int                   @default(0) @map("selected_keywords")
   importedKeywords  Int                   @default(0) @map("imported_keywords")
   duplicatePolicy   String?               @map("duplicate_policy") @db.VarChar(16)
+  targetGroupPath   String?               @map("target_group_path") @db.VarChar(2048)
+  distributionMode  String                @default("SINGLE_GROUP") @map("distribution_mode") @db.VarChar(32)
   entitlement       Json?
   retryAt           DateTime?             @map("retry_at") @db.Timestamptz(6)
   failureCode       String?               @map("failure_code") @db.VarChar(64)
@@ -972,7 +979,10 @@ model KeywordResearchRow {
   frequencyFixed Int?     @map("frequency_fixed")
   position       Int?
   kei            Float?
+  sourceQuery    String?  @map("source_query") @db.Text
+  sourceColumn   String?  @map("source_column") @db.VarChar(8)
   selected       Boolean  @default(false)
+  targetGroupPath String? @map("target_group_path") @db.VarChar(2048)
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   run KeywordResearchRun @relation(fields: [workspaceId, projectId, runId], references: [workspaceId, projectId, id], onDelete: Cascade, onUpdate: Restrict, map: "keyword_research_rows_run_tenant_fkey")

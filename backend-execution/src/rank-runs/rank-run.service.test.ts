@@ -60,6 +60,119 @@ test("uses the immutable policy generation of the selected rank provider", () =>
   );
 });
 
+test("projects bounded XMLStock runtime diagnostics without exposing a lease owner", async () => {
+  const now = new Date("2026-08-26T18:30:00.000Z");
+  let rawQueryCall = 0;
+  const prisma = {
+    job: {
+      findFirst: async () =>
+        rankJob({
+          provider: "XMLSTOCK",
+          scopeSnapshot: {
+            searchEngine: "YANDEX",
+            searchSource: "LIVE",
+            depth: 50
+          }
+        })
+    },
+    $queryRaw: async () => {
+      rawQueryCall += 1;
+      if (rawQueryCall === 1) return [{ now }];
+      if (rawQueryCall === 2) {
+        return [
+          { status: "FETCHING", count: 1n, activeCount: 1n },
+          { status: "PERSISTED", count: 1n, activeCount: 0n }
+        ];
+      }
+      if (rawQueryCall === 3) {
+        return [
+          {
+            sequence: 0,
+            keyword: "купить холодильник",
+            status: "FETCHING",
+            executionAttempt: 1,
+            submitAttempts: 1,
+            pollAttempts: 2,
+            nextActionAt: null,
+            providerProgress: {
+              schemaVersion: "xmlstock-rank-page-progress@2",
+              nextPage: 2,
+              resultsPerPage: 10
+            },
+            errorCode: null,
+            active: true,
+            updatedAt: new Date(now.getTime() - 1_000)
+          }
+        ];
+      }
+      throw new Error("Unexpected rank diagnostics query");
+    }
+  } as unknown as PrismaService;
+
+  const diagnostics = await new RankRunService(prisma, queue([]))
+    .runtimeDiagnostics({ workspaceId, projectId, actorId, jobId });
+
+  assert.deepEqual(diagnostics, {
+    jobId,
+    generatedAt: now.toISOString(),
+    policy: {
+      product: "YANDEX_LIVE",
+      concurrency: 20,
+      requestsPerSecond: 10
+    },
+    totals: {
+      total: 3,
+      prepared: 2,
+      active: 1,
+      waitingProvider: 0,
+      completed: 1,
+      failed: 0
+    },
+    entries: [
+      {
+        sequence: 0,
+        keyword: "купить холодильник",
+        lane: 1,
+        state: "REQUESTING",
+        executionAttempt: 1,
+        submitAttempts: 1,
+        pollAttempts: 2,
+        completedPages: 2,
+        totalPages: 5,
+        active: true,
+        updatedAt: new Date(now.getTime() - 1_000).toISOString()
+      }
+    ]
+  });
+  assert.doesNotMatch(
+    JSON.stringify(diagnostics),
+    /connector-rank-private-worker-identity/u
+  );
+});
+
+test("does not expose runtime diagnostics for a non-XMLStock rank run", async () => {
+  let rawQueryCalls = 0;
+  const prisma = {
+    job: { findFirst: async () => rankJob() },
+    $queryRaw: async () => {
+      rawQueryCalls += 1;
+      return [];
+    }
+  } as unknown as PrismaService;
+
+  await assert.rejects(
+    new RankRunService(prisma, queue([])).runtimeDiagnostics({
+      workspaceId,
+      projectId,
+      actorId,
+      jobId
+    }),
+    (error: unknown) =>
+      error instanceof HttpException && error.getStatus() === 404
+  );
+  assert.equal(rawQueryCalls, 0);
+});
+
 test("permits a newer successful validation for the unchanged credential material during execution", () => {
   const estimatedAt = new Date("2026-08-05T10:00:00.000Z");
   const refreshedAt = new Date("2026-08-05T11:00:00.000Z");

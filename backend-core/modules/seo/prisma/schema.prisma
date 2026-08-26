@@ -170,8 +170,8 @@ model Keyword {
   status         EntityStatus   @default(ACTIVE)
   clusterId      String?        @map("cluster_id") @db.Uuid
   targetPageId   String?        @map("target_page_id") @db.Uuid
-  /// Legacy compatibility field; active tracking assignments are authoritative.
-  isTracked      Boolean        @default(false) @map("is_tracked")
+  /// Per-keyword switch for scheduled/manual position tracking.
+  isTracked      Boolean        @default(true) @map("is_tracked")
   customValues   Json           @default("{}") @map("custom_values")
   sourceMode     DataSourceMode @default(MANUAL) @map("source_mode")
   sourceId       String?        @map("source_id") @db.Uuid

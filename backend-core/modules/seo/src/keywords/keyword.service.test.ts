@@ -277,7 +277,7 @@ test("returns a scoped cursor page with groups, tags and target URLs", async () 
   assert.equal(result.data[0]?.groupPath, "Услуги / SEO");
   assert.equal(result.data[0]?.targetUrl, "https://example.com/seo");
   assert.deepEqual(result.data[0]?.tags, ["Приоритет"]);
-  assert.equal(result.data[0]?.isTracked, true);
+  assert.equal(result.data[0]?.isTracked, false);
   assert.equal(result.data[0]?.frequency?.value, "12890");
   assert.deepEqual(result.data[0]?.frequency, {
     value: "12890",
@@ -1276,7 +1276,7 @@ test("sorts by the latest engine result and keeps missing positions last", async
   ]);
 });
 
-test("sorts AI positions and AI collection dates from the latest engine snapshot", async () => {
+test("sorts current AI positions before historical positions and then missing values", async () => {
   const keywordId = "01900000-0000-7000-8000-000000000014";
   const rawQueries: Prisma.Sql[] = [];
   const service = new KeywordService(
@@ -1313,20 +1313,35 @@ test("sorts AI positions and AI collection dates from the latest engine snapshot
   await service.list(
     workspaceId,
     projectId,
+    { limit: 100, sort: "GOOGLE_AI_POSITION_DESC" },
+    "request-ai-position-sort-desc"
+  );
+  await service.list(
+    workspaceId,
+    projectId,
     { limit: 100, sort: "GOOGLE_AI_CHECKED_AT_DESC" },
     "request-ai-date-sort"
   );
 
-  assert.equal(rawQueries.length, 2);
-  assert.match(rawQueries[0]?.sql ?? "", /FROM ai_answer_snapshots latest_ai/u);
+  assert.equal(rawQueries.length, 3);
+  assert.match(rawQueries[0]?.sql ?? "", /FROM ai_answer_snapshots current_ai/u);
   assert.match(rawQueries[0]?.sql ?? "", /latest_ai\.site_found/u);
-  assert.match(rawQueries[0]?.sql ?? "", /latest_ai\.answer_present/u);
+  assert.match(rawQueries[0]?.sql ?? "", /historical_position/u);
+  assert.match(rawQueries[0]?.sql ?? "", /previous\.site_found = TRUE/u);
+  assert.match(
+    rawQueries[0]?.sql ?? "",
+    /\(previous\.observed_at, previous\.id\) </u
+  );
   assert.match(rawQueries[0]?.sql ?? "", /ORDER BY ranked\.sort_value ASC/u);
   assert.ok(rawQueries[0]?.values.includes("YANDEX"));
   assert.ok(rawQueries[0]?.values.includes(2_000_000n));
-  assert.match(rawQueries[1]?.sql ?? "", /extract\(epoch from latest_ai\.observed_at\)/u);
+  assert.match(rawQueries[1]?.sql ?? "", /historical_position/u);
   assert.match(rawQueries[1]?.sql ?? "", /ORDER BY ranked\.sort_value DESC/u);
   assert.ok(rawQueries[1]?.values.includes("GOOGLE"));
+  assert.ok(rawQueries[1]?.values.includes(0n));
+  assert.match(rawQueries[2]?.sql ?? "", /extract\(epoch from latest_ai\.observed_at\)/u);
+  assert.match(rawQueries[2]?.sql ?? "", /ORDER BY ranked\.sort_value DESC/u);
+  assert.ok(rawQueries[2]?.values.includes("GOOGLE"));
 });
 
 test("moves a keyword to the system trash before allowing permanent deletion", async () => {
@@ -1693,6 +1708,7 @@ test("moves an active canonical keyword to another regular group", async () => {
       language: "ru",
       priority: 0,
       isFavorite: false,
+      isTracked: false,
       intent: null,
       status: "ACTIVE",
       clusterId: null,
@@ -1707,6 +1723,7 @@ test("moves an active canonical keyword to another regular group", async () => {
       language: "ru",
       priority: 0,
       isFavorite: false,
+      isTracked: false,
       intent: null,
       status: "ACTIVE",
       clusterId: null,
@@ -1887,6 +1904,7 @@ test("restores a trashed duplicate only with the explicit recovery policy", asyn
       language: "ru",
       priority: 0,
       isFavorite: false,
+      isTracked: false,
       intent: null,
       status: "DELETED",
       clusterId: null,
@@ -1901,6 +1919,7 @@ test("restores a trashed duplicate only with the explicit recovery policy", asyn
       language: "ru",
       priority: 0,
       isFavorite: false,
+      isTracked: false,
       intent: null,
       status: "ACTIVE",
       clusterId: null,

@@ -1,4 +1,8 @@
 import type { IntegrationCredentialSecret } from "../integrations/integration-credential-crypto.service.js";
+import type {
+  KeysSoCompetitor,
+  KeysSoDomainOverview
+} from "@seo-platform/contracts";
 import type { ProviderFetch } from "../integrations/integration-credential-validation.connector.js";
 import {
   providerJsonRequest,
@@ -6,6 +10,7 @@ import {
 } from "../integrations/provider-json-request.js";
 
 const ENDPOINT = "https://api.keys.so/report/simple/organic/keywords";
+const DASHBOARD_ENDPOINT = "https://api.keys.so/report/simple/domain_dashboard";
 const PAGE_SIZE = 25;
 
 export interface KeysSoKeywordRow {
@@ -19,6 +24,18 @@ export interface KeysSoKeywordRow {
   readonly kei?: number;
 }
 
+type KeysSoFailure = {
+  readonly ok: false;
+  readonly code:
+    | "INVALID_CREDENTIAL"
+    | "PROVIDER_RATE_LIMITED"
+    | "DOMAIN_NOT_FOUND"
+    | "PROVIDER_REQUEST_REJECTED"
+    | "PROVIDER_UNAVAILABLE";
+  readonly retryable: boolean;
+  readonly retryAfterSeconds?: number;
+};
+
 export type KeysSoKeywordResearchResult =
   | {
       readonly ok: true;
@@ -27,17 +44,17 @@ export type KeysSoKeywordResearchResult =
       readonly lastPage?: number;
       readonly raw: unknown;
     }
+  | KeysSoFailure;
+
+export type KeysSoDomainInspectionResult =
   | {
-      readonly ok: false;
-      readonly code:
-        | "INVALID_CREDENTIAL"
-        | "PROVIDER_RATE_LIMITED"
-        | "DOMAIN_NOT_FOUND"
-        | "PROVIDER_REQUEST_REJECTED"
-        | "PROVIDER_UNAVAILABLE";
-      readonly retryable: boolean;
-      readonly retryAfterSeconds?: number;
-    };
+      readonly ok: true;
+      readonly overview: KeysSoDomainOverview;
+      readonly competitors: readonly KeysSoCompetitor[];
+      readonly totalAvailable?: number;
+      readonly raw: unknown;
+    }
+  | KeysSoFailure;
 
 export class KeysSoKeywordResearchConnector {
   public constructor(private readonly fetcher: ProviderFetch = fetch) {}
@@ -69,29 +86,8 @@ export class KeysSoKeywordResearchConnector {
         timeoutMs,
         this.fetcher
       );
-      if (response.status === 401 || response.status === 403) {
-        return failure("INVALID_CREDENTIAL", false);
-      }
-      if (response.status === 429) {
-        return failure(
-          "PROVIDER_RATE_LIMITED",
-          true,
-          response.retryAfterSeconds
-        );
-      }
-      if (response.status === 404) {
-        return failure("DOMAIN_NOT_FOUND", false);
-      }
-      if (response.status >= 500) {
-        return failure(
-          "PROVIDER_UNAVAILABLE",
-          true,
-          response.retryAfterSeconds
-        );
-      }
-      if (response.status < 200 || response.status >= 300) {
-        return failure("PROVIDER_REQUEST_REJECTED", false);
-      }
+      const failed = responseFailure(response.status, response.retryAfterSeconds);
+      if (failed) return failed;
       return success(response.value);
     } catch (error) {
       if (error instanceof ProviderTransportError) {
@@ -100,6 +96,50 @@ export class KeysSoKeywordResearchConnector {
       throw error;
     }
   }
+
+  public async inspectDomain(
+    input: { readonly domain: string; readonly database: string },
+    secret: IntegrationCredentialSecret,
+    timeoutMs: number
+  ): Promise<KeysSoDomainInspectionResult> {
+    const url = new URL(DASHBOARD_ENDPOINT);
+    url.searchParams.set("base", input.database);
+    url.searchParams.set("domain", input.domain);
+    try {
+      const response = await providerJsonRequest(
+        url,
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            "X-Keyso-TOKEN": secret.apiKey
+          }
+        },
+        timeoutMs,
+        this.fetcher
+      );
+      const failed = responseFailure(response.status, response.retryAfterSeconds);
+      return failed ?? inspection(response.value);
+    } catch (error) {
+      if (error instanceof ProviderTransportError) {
+        return failure("PROVIDER_UNAVAILABLE", true);
+      }
+      throw error;
+    }
+  }
+}
+
+function responseFailure(
+  status: number,
+  retryAfterSeconds?: number
+): KeysSoFailure | undefined {
+  if (status === 202) return failure("PROVIDER_UNAVAILABLE", true, retryAfterSeconds ?? 5);
+  if (status === 401 || status === 403) return failure("INVALID_CREDENTIAL", false);
+  if (status === 429) return failure("PROVIDER_RATE_LIMITED", true, retryAfterSeconds);
+  if (status === 404) return failure("DOMAIN_NOT_FOUND", false);
+  if (status >= 500) return failure("PROVIDER_UNAVAILABLE", true, retryAfterSeconds);
+  if (status < 200 || status >= 300) return failure("PROVIDER_REQUEST_REJECTED", false);
+  return undefined;
 }
 
 function success(value: unknown): KeysSoKeywordResearchResult {
@@ -141,11 +181,67 @@ function success(value: unknown): KeysSoKeywordResearchResult {
   };
 }
 
+function inspection(value: unknown): KeysSoDomainInspectionResult {
+  const root = record(value);
+  const body = record(root?.data) ?? root;
+  if (!body) return failure("PROVIDER_UNAVAILABLE", true);
+  const top1 = nonNegativeInteger(body.it1);
+  const top3 = nonNegativeInteger(body.it3);
+  const top5 = nonNegativeInteger(body.it5);
+  const top10 = nonNegativeInteger(body.it10);
+  const top50 = nonNegativeInteger(body.it50);
+  if ([top1, top3, top5, top10, top50].some((item) => item === undefined)) {
+    return failure("PROVIDER_UNAVAILABLE", true);
+  }
+  const visibility = nonNegativeNumber(body.vis);
+  const pagesInIndex = nonNegativeInteger(body.pagesinindex);
+  const aiAnswers = nonNegativeInteger(body.aiAnswersCnt);
+  const totalAvailable = nonNegativeInteger(body.keys);
+  const competitors = Array.isArray(body.concs)
+    ? body.concs.slice(0, 100).flatMap((item) => {
+        const row = record(item);
+        const domain = trimmed(row?.name ?? row?.domain, 253);
+        const commonKeywords = nonNegativeInteger(row?.cnt ?? row?.keys);
+        if (!domain || commonKeywords === undefined) return [];
+        const similarity = nonNegativeNumber(row?.perc);
+        const thematicity = nonNegativeNumber(row?.theme);
+        const competitorTop10 = nonNegativeInteger(row?.it10);
+        const competitorTop50 = nonNegativeInteger(row?.it50);
+        const competitorVisibility = nonNegativeNumber(row?.vis);
+        return [{
+          domain,
+          commonKeywords,
+          ...(similarity === undefined ? {} : { similarity }),
+          ...(thematicity === undefined ? {} : { thematicity }),
+          ...(competitorTop10 === undefined ? {} : { top10: competitorTop10 }),
+          ...(competitorTop50 === undefined ? {} : { top50: competitorTop50 }),
+          ...(competitorVisibility === undefined ? {} : { visibility: competitorVisibility })
+        } satisfies KeysSoCompetitor];
+      })
+    : [];
+  return {
+    ok: true,
+    overview: {
+      top1: top1 as number,
+      top3: top3 as number,
+      top5: top5 as number,
+      top10: top10 as number,
+      top50: top50 as number,
+      ...(visibility === undefined ? {} : { visibility }),
+      ...(pagesInIndex === undefined ? {} : { pagesInIndex }),
+      ...(aiAnswers === undefined ? {} : { aiAnswers })
+    },
+    competitors,
+    ...(totalAvailable === undefined ? {} : { totalAvailable }),
+    raw: value
+  };
+}
+
 function failure(
-  code: Exclude<KeysSoKeywordResearchResult, { readonly ok: true }>["code"],
+  code: KeysSoFailure["code"],
   retryable: boolean,
   retryAfterSeconds?: number
-): KeysSoKeywordResearchResult {
+): KeysSoFailure {
   return {
     ok: false,
     code,

@@ -16,6 +16,11 @@ test("Arsenkin catalog exposes its documented execution capabilities", () => {
       "CLUSTERING"
     )
   );
+  assert.ok(
+    integrationProviderMetadata("ARSENKIN").capabilities.includes(
+      "KEYWORD_RESEARCH"
+    )
+  );
 });
 test("public catalog only advertises operational provider workflows", () => {
   assert.deepEqual(
@@ -24,7 +29,13 @@ test("public catalog only advertises operational provider workflows", () => {
   );
   assert.deepEqual(
     integrationProviderMetadata("ARSENKIN").capabilities,
-    ["SERP_RANK_TRACKING", "SERP_COLLECTION", "WORDSTAT", "CLUSTERING"]
+    [
+      "SERP_RANK_TRACKING",
+      "SERP_COLLECTION",
+      "WORDSTAT",
+      "CLUSTERING",
+      "KEYWORD_RESEARCH"
+    ]
   );
   assert.deepEqual(
     integrationProviderMetadata("KEYS_SO").capabilities,
@@ -33,5 +44,9 @@ test("public catalog only advertises operational provider workflows", () => {
   assert.equal(
     integrationProviderMetadata("XMLSTOCK").credentialValidationMode,
     "ACCOUNT_METADATA"
+  );
+  assert.deepEqual(
+    integrationProviderMetadata("XMLSTOCK").capabilities,
+    ["SERP_RANK_TRACKING", "SERP_COLLECTION", "WORDSTAT", "KEYWORD_RESEARCH"]
   );
 });

@@ -63,13 +63,6 @@ const navigation: readonly {
     projectScoped: true
   },
   {
-    label: "Конкуренты",
-    icon: "competitors",
-    href: "/app/competitors",
-    section: "competitors",
-    available: false
-  },
-  {
     label: "Заметки",
     icon: "note",
     href: "/app/notes",

@@ -19,12 +19,14 @@ import {
   treeIdsWithDescendants,
   visibleFolderRows
 } from "../lib/semantic-operation-tree";
+import { semanticOperationScopeQuery } from "../lib/semantic-operation-scope-query";
 import { Icon } from "./icon";
 
 export interface SemanticOperationSelection {
   readonly id: string;
   readonly version: number;
   readonly label: string;
+  readonly isTracked?: boolean;
 }
 
 export interface SemanticOperationGroup {
@@ -42,11 +44,17 @@ export interface SemanticOperationScopeState {
   readonly groupIds: readonly string[];
 }
 
+export type SemanticOperationScopeCountChange = (
+  count: number | undefined,
+  resolving: boolean
+) => void;
+
 interface KeywordListItem {
   readonly id: string;
   readonly version: number;
   readonly textOriginal: string;
   readonly groupPath?: string;
+  readonly isTracked: boolean;
   readonly trashed?: boolean;
 }
 
@@ -57,6 +65,7 @@ export function SemanticOperationScope({
   initialScope,
   maxItems,
   onChange,
+  onCountChange,
   onScopeChange,
   projectId
 }: Readonly<{
@@ -70,6 +79,7 @@ export function SemanticOperationScope({
     resolving: boolean,
     error?: string
   ) => void;
+  onCountChange?: SemanticOperationScopeCountChange;
   onScopeChange?: (scope: SemanticOperationScopeState) => void;
   projectId: string;
 }>) {
@@ -140,7 +150,8 @@ export function SemanticOperationScope({
       result.set(selection.id, {
         id: selection.id,
         version: selection.version,
-        textOriginal: selection.label
+        textOriginal: selection.label,
+        isTracked: selection.isTracked ?? true
       });
     }
     for (const option of queryOptions) {
@@ -155,6 +166,7 @@ export function SemanticOperationScope({
       groupIds: mode === "GROUPS" ? [...selectedGroupIds] : []
     });
     if (mode === "KEYWORDS") {
+      onCountChange?.(querySelections.size, false);
       if (querySelections.size > maxItems) {
         onChange(
           [],
@@ -167,28 +179,49 @@ export function SemanticOperationScope({
       return;
     }
     if (mode === "GROUPS" && resolvedGroupIds.length === 0) {
+      onCountChange?.(0, false);
       onChange([], false);
       return;
     }
     const controller = new AbortController();
+    let resolvedCount: number | undefined;
+    onCountChange?.(undefined, true);
     onChange([], true);
-    const loader = mode === "ALL"
-      ? loadProjectSelections(projectId, maxItems, controller.signal)
-      : loadGroupSelections(projectId, resolvedGroupIds, maxItems, controller.signal);
-    void loader
+    const reportCount = (count: number): void => {
+      resolvedCount = count;
+      if (!controller.signal.aborted) onCountChange?.(count, true);
+    };
+    const timer = window.setTimeout(() => {
+      const loader = mode === "ALL"
+        ? loadProjectSelections(projectId, maxItems, controller.signal, reportCount)
+        : loadGroupSelections(
+            projectId,
+            resolvedGroupIds,
+            maxItems,
+            controller.signal,
+            reportCount
+          );
+      void loader
       .then((selections) => {
-        if (!controller.signal.aborted) onChange(selections, false);
+        if (controller.signal.aborted) return;
+        onCountChange?.(selections.length, false);
+        onChange(selections, false);
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted) return;
+        onCountChange?.(resolvedCount, false);
         onChange(
           [],
           false,
           error instanceof Error ? error.message : "Не удалось загрузить запросы папок."
         );
       });
-    return () => controller.abort();
-  }, [maxItems, mode, onChange, onScopeChange, projectId, querySelections, resolvedGroupIds, selectedGroupIds]);
+    }, SCOPE_RESOLUTION_DEBOUNCE_MS);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [maxItems, mode, onChange, onCountChange, onScopeChange, projectId, querySelections, resolvedGroupIds, selectedGroupIds]);
 
   useEffect(() => {
     queryPaginationControllerRef.current?.abort();
@@ -328,7 +361,8 @@ export function SemanticOperationScope({
         next.set(option.id, {
           id: option.id,
           version: option.version,
-          label: option.textOriginal
+          label: option.textOriginal,
+          isTracked: option.isTracked
         });
       } else {
         setQueryError(`За один запуск можно выбрать не больше ${maxItems} запросов.`);
@@ -351,7 +385,8 @@ export function SemanticOperationScope({
         next.set(option.id, {
           id: option.id,
           version: option.version,
-          label: option.textOriginal
+          label: option.textOriginal,
+          isTracked: option.isTracked
         });
       }
       return next;
@@ -566,58 +601,76 @@ async function loadGroupSelections(
   projectId: string,
   groupIds: readonly string[],
   maxItems: number,
-  signal: AbortSignal
+  signal: AbortSignal,
+  onCount: (count: number) => void
 ): Promise<readonly SemanticOperationSelection[]> {
   const selections = new Map<string, SemanticOperationSelection>();
-  for (const groupId of groupIds) {
-    let cursor: string | undefined;
-    do {
-      const query = new URLSearchParams({
-        groupId,
-        limit: "200",
-        sort: "CREATED_ASC"
-      });
-      if (cursor) query.set("cursor", cursor);
-      const page = await browserApiCollectionRequest<KeywordListItem>(
-        `/app/api/projects/${encodeURIComponent(projectId)}/keywords?${query.toString()}`,
-        { signal }
-      );
-      for (const keyword of page.data) {
-        selections.set(keyword.id, {
-          id: keyword.id,
-          version: keyword.version,
-          label: keyword.textOriginal
-        });
-        if (selections.size > maxItems) {
-          throw new Error(
-            `В выбранных папках больше ${maxItems} запросов. Уточните папки или выделите конкретные запросы в таблице.`
-          );
-        }
+  let cursor: string | undefined;
+  do {
+    const query = semanticOperationScopeQuery(groupIds, cursor);
+    const page = await browserApiCollectionRequest<KeywordListItem>(
+      `/app/api/projects/${encodeURIComponent(projectId)}/keywords?${query.toString()}`,
+      { signal }
+    );
+    if (!cursor && page.page.totalApprox !== undefined) {
+      onCount(page.page.totalApprox);
+      if (page.page.totalApprox > maxItems) {
+        throw new Error(
+          `В выбранных папках ${page.page.totalApprox} запросов, а этот источник принимает не больше ${maxItems} за запуск. Уточните папки или выберите конкретные запросы.`
+        );
       }
-      cursor = page.page.hasNext ? page.page.nextCursor : undefined;
-    } while (cursor);
-  }
+    }
+    for (const keyword of page.data) {
+      selections.set(keyword.id, {
+        id: keyword.id,
+        version: keyword.version,
+        label: keyword.textOriginal,
+        isTracked: keyword.isTracked
+      });
+      if (selections.size > maxItems) {
+        onCount(selections.size);
+        throw new Error(
+          `В выбранных папках больше ${maxItems} запросов. Уточните папки или выберите конкретные запросы.`
+        );
+      }
+    }
+    cursor = page.page.hasNext ? page.page.nextCursor : undefined;
+  } while (cursor);
   return [...selections.values()];
 }
 
 async function loadProjectSelections(
   projectId: string,
   maxItems: number,
-  signal: AbortSignal
+  signal: AbortSignal,
+  onCount: (count: number) => void
 ): Promise<readonly SemanticOperationSelection[]> {
   const selections: SemanticOperationSelection[] = [];
   let cursor: string | undefined;
   do {
-    const query = new URLSearchParams({ limit: "500", sort: "CREATED_ASC" });
-    if (cursor) query.set("cursor", cursor);
+    const query = semanticOperationScopeQuery(undefined, cursor);
     const page = await browserApiCollectionRequest<KeywordListItem>(
       `/app/api/projects/${encodeURIComponent(projectId)}/keywords?${query.toString()}`,
       { signal }
     );
+    if (!cursor && page.page.totalApprox !== undefined) {
+      onCount(page.page.totalApprox);
+      if (page.page.totalApprox > maxItems) {
+        throw new Error(
+          `В проекте ${page.page.totalApprox} запросов, а этот источник принимает не больше ${maxItems} за запуск. Выберите отдельные папки или конкретные запросы.`
+        );
+      }
+    }
     for (const keyword of page.data) {
       if (keyword.trashed) continue;
-      selections.push({ id: keyword.id, version: keyword.version, label: keyword.textOriginal });
+      selections.push({
+        id: keyword.id,
+        version: keyword.version,
+        label: keyword.textOriginal,
+        isTracked: keyword.isTracked
+      });
       if (selections.length > maxItems) {
+        onCount(selections.length);
         throw new Error(
           `В проекте больше ${maxItems} запросов. Выберите отдельные папки или конкретные запросы.`
         );
@@ -627,3 +680,5 @@ async function loadProjectSelections(
   } while (cursor);
   return selections;
 }
+
+const SCOPE_RESOLUTION_DEBOUNCE_MS = 120;

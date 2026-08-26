@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DomainError } from "../common/domain-error.js";
-import { scopedRankJobSummary } from "./rank-job-response.js";
+import {
+  scopedRankJobSummary,
+  scopedRankRuntimeDiagnostics
+} from "./rank-job-response.js";
 
 const workspaceId = "01900000-0000-7000-8000-000000000001";
 const projectId = "01900000-0000-7000-8000-000000000002";
@@ -333,6 +336,82 @@ test("accepts rank progress up to 15,000 keywords and rejects overflow", () => {
         projectId,
         jobId
       ),
+    invalidDependencyResponse
+  );
+});
+
+test("accepts only bounded secret-free XMLStock runtime diagnostics", () => {
+  const diagnostics = {
+    jobId,
+    generatedAt: "2026-07-29T12:00:10.000Z",
+    policy: {
+      product: "YANDEX_SEARCH_API",
+      concurrency: 48,
+      requestsPerSecond: 50
+    },
+    totals: {
+      total: 2,
+      prepared: 2,
+      active: 1,
+      waitingProvider: 1,
+      completed: 0,
+      failed: 0
+    },
+    entries: [
+      {
+        sequence: 0,
+        keyword: "seo платформа",
+        lane: 1,
+        state: "REQUESTING",
+        executionAttempt: 1,
+        submitAttempts: 1,
+        pollAttempts: 0,
+        completedPages: 0,
+        totalPages: 1,
+        active: true,
+        updatedAt: "2026-07-29T12:00:09.000Z"
+      },
+      {
+        sequence: 1,
+        keyword: "снять позиции сайта",
+        lane: 2,
+        state: "WAITING_PROVIDER",
+        executionAttempt: 1,
+        submitAttempts: 1,
+        pollAttempts: 2,
+        completedPages: 0,
+        totalPages: 1,
+        active: false,
+        nextActionAt: "2026-07-29T12:00:30.000Z",
+        errorCode: "PROVIDER_PENDING",
+        updatedAt: "2026-07-29T12:00:08.000Z"
+      }
+    ]
+  } as const;
+
+  assert.deepEqual(
+    scopedRankRuntimeDiagnostics(diagnostics, jobId),
+    diagnostics
+  );
+  assert.throws(
+    () => scopedRankRuntimeDiagnostics({
+      ...diagnostics,
+      providerRequestId: "must-not-leak"
+    }, jobId),
+    invalidDependencyResponse
+  );
+  assert.throws(
+    () => scopedRankRuntimeDiagnostics({
+      ...diagnostics,
+      totals: { ...diagnostics.totals, prepared: 0 }
+    }, jobId),
+    invalidDependencyResponse
+  );
+  assert.throws(
+    () => scopedRankRuntimeDiagnostics({
+      ...diagnostics,
+      entries: [{ ...diagnostics.entries[0], keyword: "x".repeat(1_001) }]
+    }, jobId),
     invalidDependencyResponse
   );
 });

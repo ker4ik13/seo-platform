@@ -195,6 +195,12 @@ debounce и имеет одну явную очистку с безопасны�
 перезагрузки сохраняют checkbox-выбор и визуальное выделение запросов по
 стабильным ID; очистка привязана к фактической смене filter scope, а не к самому
 HTTP-запросу или изменению счётчика.
+У canonical keyword есть отдельный versioned переключатель `isTracked` с
+default `true`. Его меняют форма добавления, sidebar и массовый редактор;
+membership tracking context не переписывает это состояние. Новый rank scope и
+XLSX-экспорт истории позиций по умолчанию исключают выключенные запросы, а
+явный `includeUntracked` в immutable launch/export snapshot позволяет разовый
+запуск или экспорт. Retry sealed rank manifest сохраняет исходный scope.
 Фильтр тегов предлагает project-scoped активные значения, допускает
 произвольную строку и регистронезависимо ищет по нормализованному имени;
 серверная сортировка тегов выполняется до cursor pagination, оставляя строки
@@ -204,6 +210,10 @@ HTTP-запросу или изменению счётчика.
 `not-found` с известной предыдущей позицией, после них запросы без единого
 найденного замера. Направление сортировки меняет порядок чисел только внутри
 первых двух уровней и не перемешивает их между собой.
+Сортировка по ИИ-позициям Яндекса и Google использует тот же порядок: текущие
+найденные ИИ-позиции, затем потерянные позиции с последним найденным значением,
+затем запросы без найденной ИИ-позиции. Это правило применяется сервером до
+cursor pagination как для ASC, так и для DESC.
 
 Представления таблицы семантики хранят versioned конфигурацию на сервере:
 фильтры, сортировку, порядок/видимость и ширину колонок, плотность, размер
@@ -228,7 +238,8 @@ project-shared «Общее для проекта» (либо первый об�
 Мастер съёма позиций умеет выбирать сохранённый профиль, раскрывать вложенное
 дерево папок и materialize родительский scope вместе с потомками. В
 `tracking_contexts.launch_profile` сохраняются только provider-neutral тип
-выдачи и режим/UUID папок; SEO Data повторно подтверждает tenant ownership
+выдачи, режим/UUID папок и явный `includeUntracked`; SEO Data повторно
+подтверждает tenant ownership
 каждой папки. Выбор сохранённого профиля восстанавливает его полный assignment
 как актуальные `keywordId/text/version`, а «Новый контекст» сохраняет переданное
 из таблицы выделение. Credential не сохраняется в профиле: UI хранит только
@@ -376,7 +387,14 @@ same-origin permission-scoped endpoint Core API: пользовательски�
 favicon из HTML, manifest и стандартных путей сайта. Выбранные
 workspace/project обозначаются заливкой строки без дублирующей галочки. Один
 project-option renderer показывает logo как в открытом списке, так и в закрытом
-значении sidebar, семантики и project-scoped экранов. Core API одним
+значении sidebar, семантики и project-scoped экранов.
+Если у пользователя нет workspace, tenant switcher остаётся раскрываемым и
+показывает в footer явное действие создания, ведущее в тот же onboarding.
+Общий operation scope picker объединяет выбранные папки в один exact union,
+берёт authoritative count однострочным probe, останавливается сразу при
+превышении provider limit и materialize-ит допустимый набор страницами по 1000
+строк вместо последовательного обхода каждой папки.
+Core API одним
 агрегированным запросом получает из Execution число активных операций по
 доступным проектам; ненулевое число отображается spinner/badge рядом с проектом
 без раскрытия чужих project ID. В семантике кнопка «Операции» использует тот же
@@ -508,7 +526,9 @@ XMLStock HTTP ограничивается распределёнными Redis 
 `credentialId + product` (`YANDEX_LIVE`, `GOOGLE_LIVE`,
 `YANDEX_SEARCH_API`, `WORDSTAT`): разные API-ключи не блокируют друг друга,
 один ключ делит лимит между своими проектами. Permit удерживает только внешний
-HTTP, не `POLL_WAIT`; throttling адаптивно уменьшает окно. Состояние limiter
+HTTP, не `POLL_WAIT`; базовые окна соответствуют provider boundary:
+Yandex Live — `20 concurrent / 10 RPS`, Google Live — `48 / 30`, Yandex
+Search API — `48 / 50`, Wordstat — `10 / 10`. Throttling адаптивно уменьшает окно. Состояние limiter
 хранится только в connector ACL namespace
 `seo-platform:jobs:v1:provider-rate-limit:*`. PostgreSQL fair claim
 предпочитает менее занятую пару credential/project, оставаясь source of truth
@@ -516,9 +536,11 @@ HTTP, не `POLL_WAIT`; throttling адаптивно уменьшает окн�
 Яндекс Live Turbo является отдельным явно оплаченным mapping: connector
 передаёт `tbm=turbo` и не применяет к нему стандартный Redis bucket XMLStock,
 поскольку provider документирует неограниченное число потоков. Turbo также не
-занимает консервативное окно пяти активных provider tasks, а его записи не
-блокируют стандартный Live в этом окне. Платформенная worker concurrency, lease
-fencing и PostgreSQL claim остаются bounded safety границей; обычный Live явно
+занимает общий Arsenkin-only лимит пяти активных provider tasks. Обычный
+XMLStock также не занимает этот lifecycle limit: dispatcher за тик готовит до
+48 immutable keyword chunks на Job, а фактическую внешнюю параллельность
+ограничивает Redis bucket выбранного credential/product. Платформенная worker
+concurrency, lease fencing и PostgreSQL claim остаются bounded safety границей; обычный Live явно
 передаёт пустой `tbm`, чтобы настройка кабинета не включала Turbo неявно.
 
 ## 5. Владение данными
@@ -540,7 +562,9 @@ Unsafe Prisma raw APIs запрещены статическим тестом.
 
 ### Ручной съём позиций и Top-100
 
-1. Frontend запрашивает estimate через Core.
+1. Frontend запрашивает estimate через Core; materializer дедуплицирует
+   canonical keyword ID и исключает `isTracked = false`, если launch profile не
+   содержит явный `includeUntracked`.
 2. Execution фиксирует immutable snapshot binding/route/credential versions.
 3. Rank role создаёт sealed manifest в Core SEO.
 4. Core повторно проверяет lifecycle, RBAC и BYOK entitlement и выдаёт
@@ -569,6 +593,10 @@ XMLStock Google Top-100 собирается десятью последоват
 `jobs_db`; следующий poll запрашивает ровно следующую страницу, а временный
 429/5xx повторяет только текущую страницу. Поэтому сбой на второй–десятой
 странице не теряет уже собранный Top и не создаёт повторную оплату за него.
+Успешный page checkpoint делает следующую Live-страницу доступной немедленно;
+distributed RPS limiter всё равно сериализует внешний GET. Provider pending
+и retryable failure остаются в отложенной очереди с `next_action_at` и не
+удерживают connector worker.
 Poll/recovery остаётся lease-fenced и bounded (до 720 попыток), чтобы
 permanent provider failure не превращался в бесконечный платный цикл.
 Для Yandex Live Turbo первая страница определяет документированный размер
@@ -597,6 +625,20 @@ Job graph: исторические `CLAIMED`/`POLL_WAIT`/`STAGED` записи 
 завершённых Jobs остаются audit evidence, но больше не уменьшают параллельное
 окно. Для XMLStock `POLL_WAIT` вообще не занимает HTTP capacity; Redis permit
 выдаётся выбранному credential/product непосредственно перед запросом.
+Tenant-scoped `GET .../jobs/:jobId/runtime-diagnostics` отдаёт только
+безопасный live-снимок XMLStock execution: текст доступного пользователю
+ключа, логический цветной поток, sequence, состояние, счётчики HTTP
+submit/poll, page progress и allowlisted error code.
+Credential, provider request ID, raw payload и физическое имя worker наружу не
+выдаются; UI накапливает короткий журнал только пока открыта подмодалка логов.
+General `jobs_runtime` по-прежнему не читает private
+`rank_provider_request_intents` напрямую: HTTP-сервис получает только
+tenant-scoped allowlist полей через owner-owned
+`read_rank_runtime_diagnostics_entries`, где active-state вычисляется внутри
+БД без выдачи физического lease owner.
+Для XMLStock-съёма кнопка входа в этот монитор находится прямо в header
+результата, открытого из сайдбара операций, а не занимает место в таблице или
+контекстной строке результата.
 Автоматический credential refresh не запускается во время активного manual
 rank Job. Если уже начавшийся Job всё же пересёкся с более новой успешной
 validation (например, при rolling upgrade), grant принимает только proof того
@@ -770,15 +812,91 @@ bounded, поэтому снятие прежнего UI/API-предела 200 
 provider request и не связывает между собой разные BYOK-ключи.
 Первый запуск wizard выбирает регион «Россия» (`225`), после успешного запуска
 восстанавливается последний Wordstat-регион этого проекта; в списке далее идут
-Москва и Санкт-Петербург. Позиции, ИИ-ответы и кластеризация начинают с Москвы
-для обоих поисковиков и также запоминают последний успешный регион раздельно по
-проекту, инструменту и поисковику. Клиентская валидация и storage fallback
+Москва и Санкт-Петербург. Настройки проекта хранят nullable согласованную пару
+кодов российского города для Яндекса и Google. Позиции выбирают регион в
+порядке: последний завершённый съём конкретного поисковика, город проекта,
+Москва; источник значения явно подписан в селекте. ИИ-ответы и кластеризация
+начинают с Москвы и запоминают последний успешный регион раздельно по проекту,
+инструменту и поисковику. Клиентская валидация и storage fallback
 сосредоточены в `frontend/lib/semantic-region-preference.ts`; недоступный код
 сбрасывается к безопасному начальному значению. `frontend/lib/seo-regions.generated.ts` хранит
 проверенный snapshot полного российского subtree Яндекса (638 кодов) и всех
 российских Google location ID текущего provider catalog (504 кода), а
 `frontend/lib/seo-regions.ts` отдаёт отдельные provider-specific списки без
 ложного сопоставления кодов между системами.
+
+### Keys.so и расширение Wordstat
+
+Проектная вкладка `/app/competitors` теперь является рабочим пространством
+`Keys.so и Wordstat`. Один Jobs-owned `keyword-research-runtime` обслуживает три
+явных source: `KEYS_SO` получает dashboard TOP-метрики, organic keywords и
+конкурентов домена, `ARSENKIN_WORDSTAT` запускает документированный Wordstat
+tool `type=2` для не более 500 seed-фраз, а `XMLSTOCK_WORDSTAT` выполняет
+по одному GET `/wordstat/json/?pagetype=words` на seed. Оба Wordstat source
+сохраняют до 10 000 нормализованных строк из основной и правой колонок.
+Preview получает первые 500 строк вместе с run summary и дальше догружает
+immutable строки keyset-страницами по `ordinal`, поэтому результат Wordstat
+скроллится до конца без одного тяжёлого ответа.
+Arsenkin не получает пользовательский параметр лимита результата: UI скрывает
+его для этого провайдера, а 10 000 остаётся только внутренней границей
+нормализованного staging. Для XMLStock пользовательский лимит сохраняется.
+Выбранные строки Keys.so можно сразу передать в Wordstat без ручного
+копирования; провайдер выбирается явно, а регион нового expansion run всегда
+начинается с России (`225`).
+Та же `WordstatExpansionDialog` запускается из основной панели инструментов
+семантики: открытая папка и отмеченные запросы передаются в её стандартный
+scope picker, а ручной ввод остаётся доступен даже в пустом проекте. Созданный
+run отображается в сайдбаре операций семантики и в общем журнале; просмотр и
+импорт используют уже существующий research result workspace.
+
+`keyword_research_runs/keyword_research_rows` хранят immutable input,
+нормализованный staging preview, opaque provider task marker, lease/version и
+import state. Connector-worker не пишет Core SEO: после явного confirm
+отдельный import-worker передаёт `ALL` либо выбранные строки bounded chunks по
+500 в существующую папку или в новую папку под выбранным parent. `ALL`
+означает весь server-side результат независимо от числа загруженных
+preview-страниц: browser передаёт только bounded `excludedRowIds`, а
+`selectedRowIds` допустим только для режима `SELECTED`. При confirm
+Wordstat-строки не получают автоматические provider/source-теги; источник и
+исходная фраза остаются в typed run metadata и custom values. Завершение
+асинхронного импорта входит в общий лёгкий polling операций семантики и меняет
+локальную revision таблицы: запросы, общий счётчик и дерево папок обновляются
+без перезагрузки страницы.
+режим `SKIP_EXISTING` оставляет найденные дубли в прежних папках, а
+`OVERWRITE_MAPPED` удаляет прежние membership и переносит дубль в выбранную
+папку. Chunk hash строится из канонической формы SEO import row, поэтому
+optional `groupPath`/frequency fields не зависят от порядка ключей JSON.
+При confirm
+можно оставить одну общую папку, автоматически создать подпапки по исходным
+Wordstat-фразам либо задать существующую папку для отдельных preview-строк;
+row override имеет приоритет над общей раскладкой. Arsenkin
+submit marker fenced; известный task только poll-ится, а неизвестный transport
+outcome не приводит к повторному платному `set`. Wordstat expansion делит общий
+предел пяти Arsenkin provider tasks с позициями, частотностью, ИИ-ответами и
+кластеризацией. Additive migration
+`backend-execution/prisma/migrations/20260826160000_keys_so_wordstat_expansion`
+обобщает существующий Keys.so staging без нового deployable или очереди, а
+`20260826173000_arsenkin_keyword_research_capability` добавляет отдельную
+`KEYWORD_RESEARCH` capability обоим Wordstat-провайдерам, XMLStock completion
+fence и безопасный backfill project routes, а additive migration
+`20260826190000_keyword_research_row_destinations` хранит режим раскладки run
+и необязательную целевую папку preview-строки. Runtime-роль `jobs_connector`
+получает только точные `EXECUTE` ACL на claim, page/XMLStock completion,
+Arsenkin submit/transition и fail broker-функции; прямой доступ к таблицам
+по-прежнему запрещён и проверяется инфраструктурным allowlist-тестом.
+
+Единый `OperationResultWorkspace` обслуживает результаты частотности,
+позиций, ИИ-ответов, кластеризации, технических обходов и keyword research.
+Верхняя строка показывает безопасные context и actor projection, затем —
+только прикладные итоговые показатели; построчная часть использует компактную
+геометрию таблицы семантики и cursor/infinite scroll. Raw provider payload,
+credential ID и внутренние quality codes в основной таблице не показываются.
+
+Охват запросов в мастерах позиций/частотности/Wordstat сначала получает точный
+distinct count запросом `limit=1`, а допустимый набор materialize-ится одним
+union по папкам страницами по 1000. Это убирает прежний N-folders × pages
+обход. Если workspace ещё нет, tenant switcher показывает в popover явное
+действие создания и ведёт в существующий onboarding.
 
 ### Минус-слова, неявные дубли и карточка запроса
 
@@ -890,7 +1008,9 @@ columns и обязательный `query`, в первой строке ест
 символом и дедуплицируются; новый storage path, queue, deployable или таблица
 не добавлены.
 Режим XLSX «История позиций» использует тот же Job, очередь и storage path, но
-читает через отдельный bounded read service все BYOK-снимки выбранных
+по умолчанию выбирает только `isTracked = true`; явная настройка экспорта может
+включить выключенные запросы. Режим читает через отдельный bounded read service
+все BYOK-снимки выбранных
 поисковиков независимо от tracking context. Worker делает два постраничных
 прохода: сначала определяет фактические даты, затем потоково формирует отдельные
 листы Яндекс/Google. В книге есть формулы TOP-5/10/30; позиции записываются

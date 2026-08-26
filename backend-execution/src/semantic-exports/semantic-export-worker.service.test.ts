@@ -96,9 +96,15 @@ test("background worker builds the position history report in two bounded passes
     ...queuedJob(),
     inputSnapshot: {
       format: "XLSX",
-      scope: "FULL_CORE",
+      scope: "SELECTED",
       locale: "ru",
       columns: ["query"],
+      filters: { isTracked: true },
+      keywordIds: [
+        "01900000-0000-7000-8000-000000000011",
+        "01900000-0000-7000-8000-000000000012",
+        "01900000-0000-7000-8000-000000000013"
+      ],
       positionHistory: {
         observedFrom: "2026-08-01T00:00:00.000Z",
         observedBefore: "2026-08-20T00:00:00.000Z",
@@ -133,8 +139,12 @@ test("background worker builds the position history report in two bounded passes
     listExportCustomColumns: async () => {
       throw new Error("Position report must not load custom columns");
     },
-    listExportPositionHistory: async () => {
+    listExportPositionHistory: async (
+      _context: unknown,
+      query: Readonly<{ isTracked?: boolean }>
+    ) => {
       reads += 1;
+      assert.equal(query.isTracked, true);
       return {
         data: historyRows,
         page: { hasNext: false, totalApprox: historyRows.length },

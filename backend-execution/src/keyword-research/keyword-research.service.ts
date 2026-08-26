@@ -10,7 +10,9 @@ import type {
   InternalCancelKeywordResearchRunInput,
   InternalConfirmKeywordResearchRunInput,
   InternalCreateKeywordResearchRunInput,
-  KeywordResearchRunSummary
+  InternalRetryKeywordResearchImportInput,
+  KeywordResearchRunSummary,
+  KeywordResearchRowPage
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
@@ -18,8 +20,21 @@ import { assertJobCapacity } from "../jobs/job-capacity.js";
 import { WorkspaceConnectorRoutingService } from "../integrations/workspace-connector-routing.service.js";
 import {
   entitlementJson,
+  keywordResearchRowPage,
   keywordResearchSummary
 } from "./keyword-research-record.js";
+
+function destinationsByPath(
+  destinations: NonNullable<InternalConfirmKeywordResearchRunInput["rowDestinations"]>
+): ReadonlyMap<string, readonly string[]> {
+  const grouped = new Map<string, string[]>();
+  for (const { rowId, targetGroupPath } of destinations) {
+    const rowIds = grouped.get(targetGroupPath) ?? [];
+    rowIds.push(rowId);
+    grouped.set(targetGroupPath, rowIds);
+  }
+  return grouped;
+}
 
 const CREATE_SCOPE = "keyword-research:create";
 const CANCELLABLE = [
@@ -52,18 +67,30 @@ export class KeywordResearchService {
     });
     if (existing) return replay(existing, hash);
 
+    const capability = input.source === "KEYS_SO"
+      ? "COMPETITOR_RESEARCH"
+      : "KEYWORD_RESEARCH";
+    const expectedProvider = input.source === "KEYS_SO"
+      ? "KEYS_SO"
+      : input.source === "ARSENKIN_WORDSTAT"
+        ? "ARSENKIN"
+        : "XMLSTOCK";
     const route = await this.routing.resolve(
       input.workspaceId,
       input.projectId,
-      "COMPETITOR_RESEARCH",
-      input.actorId
+      capability,
+      input.actorId,
+      expectedProvider
     );
-    if (route.provider !== "KEYS_SO") {
+    if (route.provider !== expectedProvider) {
       throw new HttpException(
         {
           code: "CONNECTOR_NOT_READY",
-          message:
-            "Configure and verify an active Keys.so competitor research credential"
+          message: input.source === "KEYS_SO"
+            ? "Configure and verify an active Keys.so competitor research credential"
+            : input.source === "ARSENKIN_WORDSTAT"
+              ? "Configure and verify an active Arsenkin Wordstat credential"
+              : "Configure and verify an active XMLStock Wordstat credential"
         },
         HttpStatus.UNPROCESSABLE_ENTITY
       );
@@ -76,6 +103,7 @@ export class KeywordResearchService {
           input.workspaceId,
           input.jobCapacity
         );
+        const inputSnapshot = researchInputSnapshot(input);
         const job = await transaction.job.create({
           data: {
             workspaceId: input.workspaceId,
@@ -87,11 +115,7 @@ export class KeywordResearchService {
             idempotencyScope: CREATE_SCOPE,
             idempotencyKey: input.idempotencyKey,
             requestHash: Buffer.from(hash, "hex"),
-            inputSnapshot: {
-              domain: input.domain,
-              database: input.database,
-              maxKeywords: input.maxKeywords
-            },
+            inputSnapshot,
             scopeSnapshot: {
               workspaceId: input.workspaceId,
               projectId: input.projectId,
@@ -112,10 +136,10 @@ export class KeywordResearchService {
             progressTotal: BigInt(input.maxKeywords),
             progressUnit: "keywords",
             credentialMode: route.credentialMode,
-            provider: "KEYS_SO",
+            provider: expectedProvider,
             correlationId: input.correlationId,
             queuedAt: new Date(),
-            maxAttempts: 8
+            maxAttempts: input.source === "ARSENKIN_WORDSTAT" ? 120 : 8
           }
         });
         return transaction.keywordResearchRun.create({
@@ -127,9 +151,12 @@ export class KeywordResearchService {
             bindingId: route.bindingId,
             routeId: route.routeId,
             credentialId: route.credentialId,
-            provider: "KEYS_SO",
-            domain: input.domain,
-            database: input.database,
+            source: input.source,
+            provider: expectedProvider,
+            ...(input.source === "KEYS_SO"
+              ? { domain: input.domain, database: input.database }
+              : {}),
+            inputSnapshot,
             maxKeywords: input.maxKeywords
           },
           include: { rows: true }
@@ -175,6 +202,32 @@ export class KeywordResearchService {
     return keywordResearchSummary(run, run.rows);
   }
 
+  public async rows(
+    workspaceId: string,
+    projectId: string,
+    runId: string,
+    query: Readonly<{ cursor?: number; limit: number }>
+  ): Promise<KeywordResearchRowPage> {
+    const run = await this.prisma.keywordResearchRun.findFirst({
+      where: { id: runId, workspaceId, projectId },
+      select: { id: true }
+    });
+    if (!run) throw new NotFoundException("Keyword research run not found");
+    const rows = await this.prisma.keywordResearchRow.findMany({
+      where: {
+        workspaceId,
+        projectId,
+        runId,
+        ...(query.cursor === undefined
+          ? {}
+          : { ordinal: { gt: query.cursor } })
+      },
+      orderBy: [{ ordinal: "asc" }, { id: "asc" }],
+      take: query.limit + 1
+    });
+    return keywordResearchRowPage(rows, query.limit);
+  }
+
   public async confirm(
     runId: string,
     input: InternalConfirmKeywordResearchRunInput
@@ -192,25 +245,104 @@ export class KeywordResearchService {
       if (current.status !== "READY_TO_IMPORT") {
         throw new ConflictException("Keyword research run is not ready to import");
       }
-      const selected = await transaction.keywordResearchRow.count({
+      if (current.source !== "KEYS_SO" && !input.targetGroupPath) {
+        throw new ConflictException("Choose a target folder for Wordstat keywords");
+      }
+      const selectedRowIds = input.selectedRowIds ?? [];
+      const excludedRowIds = input.excludedRowIds ?? [];
+      const totalRows = await transaction.keywordResearchRow.count({
         where: {
           workspaceId: input.workspaceId,
           projectId: input.projectId,
-          runId,
-          id: { in: [...input.selectedRowIds] }
+          runId
         }
       });
-      if (selected !== input.selectedRowIds.length) {
+      const explicitRowIds = input.selectionMode === "ALL"
+        ? excludedRowIds
+        : selectedRowIds;
+      const matchedExplicitRows = explicitRowIds.length === 0
+        ? 0
+        : await transaction.keywordResearchRow.count({
+            where: {
+              workspaceId: input.workspaceId,
+              projectId: input.projectId,
+              runId,
+              id: { in: [...explicitRowIds] }
+            }
+          });
+      const expectedExplicitRows = input.selectionMode === "ALL"
+        ? excludedRowIds.length
+        : selectedRowIds.length;
+      if (matchedExplicitRows !== expectedExplicitRows) {
         throw new ConflictException("Selected keyword research rows are stale");
       }
+      const selected = input.selectionMode === "ALL"
+        ? totalRows - excludedRowIds.length
+        : selectedRowIds.length;
+      if (selected < 1) {
+        throw new ConflictException("Keyword research selection is empty");
+      }
+      const rowDestinations = input.rowDestinations ?? [];
+      if (rowDestinations.length > 0) {
+        const destinationRows = await transaction.keywordResearchRow.count({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            runId,
+            id: { in: rowDestinations.map(({ rowId }) => rowId) }
+          }
+        });
+        if (destinationRows !== rowDestinations.length) {
+          throw new ConflictException("Keyword research folder assignments are stale");
+        }
+      }
       await transaction.keywordResearchRow.updateMany({
-        where: { runId },
-        data: { selected: false }
+        where: {
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          runId
+        },
+        data: {
+          selected: input.selectionMode === "ALL",
+          targetGroupPath: null
+        }
       });
-      await transaction.keywordResearchRow.updateMany({
-        where: { runId, id: { in: [...input.selectedRowIds] } },
-        data: { selected: true }
-      });
+      if (input.selectionMode === "SELECTED") {
+        await transaction.keywordResearchRow.updateMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            runId,
+            id: { in: [...selectedRowIds] }
+          },
+          data: { selected: true }
+        });
+      } else if (excludedRowIds.length > 0) {
+        await transaction.keywordResearchRow.updateMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            runId,
+            id: { in: [...excludedRowIds] }
+          },
+          data: { selected: false }
+        });
+      }
+      for (const [targetGroupPath, rowIds] of destinationsByPath(rowDestinations)) {
+        const assigned = await transaction.keywordResearchRow.updateMany({
+          where: {
+            workspaceId: input.workspaceId,
+            projectId: input.projectId,
+            runId,
+            selected: true,
+            id: { in: [...rowIds] }
+          },
+          data: { targetGroupPath }
+        });
+        if (assigned.count !== rowIds.length) {
+          throw new ConflictException("Keyword research folder assignments are stale");
+        }
+      }
       const updated = await transaction.keywordResearchRun.updateMany({
         where: {
           id: runId,
@@ -223,6 +355,8 @@ export class KeywordResearchService {
           status: "IMPORT_QUEUED",
           selectedKeywords: selected,
           duplicatePolicy: input.duplicatePolicy,
+          targetGroupPath: input.targetGroupPath ?? null,
+          distributionMode: input.distributionMode ?? "SINGLE_GROUP",
           entitlement: entitlementJson(input.entitlement),
           failureCode: null,
           version: { increment: 1 }
@@ -292,6 +426,65 @@ export class KeywordResearchService {
     return this.get(input.workspaceId, input.projectId, runId);
   }
 
+  public async retryImport(
+    runId: string,
+    input: InternalRetryKeywordResearchImportInput
+  ): Promise<KeywordResearchRunSummary> {
+    await this.prisma.$transaction(async (transaction) => {
+      const current = await transaction.keywordResearchRun.findFirst({
+        where: {
+          id: runId,
+          workspaceId: input.workspaceId,
+          projectId: input.projectId
+        }
+      });
+      if (!current) throw new NotFoundException("Keyword research run not found");
+      assertVersion(current.version, input.version);
+      if (
+        current.status !== "FAILED" ||
+        !current.failureCode?.startsWith("SEO_DATA_") ||
+        current.selectedKeywords < 1 ||
+        current.duplicatePolicy === null ||
+        current.entitlement === null
+      ) {
+        throw new ConflictException("Keyword research import cannot be retried");
+      }
+      const updated = await transaction.keywordResearchRun.updateMany({
+        where: {
+          id: runId,
+          workspaceId: input.workspaceId,
+          projectId: input.projectId,
+          status: "FAILED",
+          version: input.version
+        },
+        data: {
+          status: "IMPORT_QUEUED",
+          failureCode: null,
+          retryAt: null,
+          finishedAt: null,
+          version: { increment: 1 }
+        }
+      });
+      if (updated.count !== 1) throw versionConflict();
+      await transaction.job.update({
+        where: { id: current.jobId },
+        data: {
+          status: "QUEUED",
+          stage: "importing",
+          progressCurrent: 0,
+          progressTotal: BigInt(current.selectedKeywords),
+          retryAt: null,
+          errorSummary: Prisma.JsonNull,
+          leaseOwner: null,
+          leaseExpiresAt: null,
+          finishedAt: null,
+          version: { increment: 1 }
+        }
+      });
+    });
+    return this.get(input.workspaceId, input.projectId, runId);
+  }
+
   private async required(workspaceId: string, projectId: string, runId: string) {
     const run = await this.prisma.keywordResearchRun.findFirst({
       where: { id: runId, workspaceId, projectId },
@@ -304,19 +497,40 @@ export class KeywordResearchService {
 
 function requestHash(input: InternalCreateKeywordResearchRunInput): string {
   return createHash("sha256")
-    .update("seo-platform:keyword-research:create:v1\0", "utf8")
+    .update("seo-platform:keyword-research:create:v2\0", "utf8")
     .update(
       JSON.stringify({
         workspaceId: input.workspaceId,
         projectId: input.projectId,
         actorId: input.actorId,
-        domain: input.domain,
-        database: input.database,
-        maxKeywords: input.maxKeywords
+        input: researchInputSnapshot(input)
       }),
       "utf8"
     )
     .digest("hex");
+}
+
+function researchInputSnapshot(
+  input: InternalCreateKeywordResearchRunInput
+): Prisma.InputJsonValue {
+  return (input.source === "KEYS_SO"
+    ? {
+        source: input.source,
+        domain: input.domain,
+        database: input.database,
+        maxKeywords: input.maxKeywords
+      }
+    : {
+        source: input.source,
+        queries: input.queries,
+        regionCode: input.regionCode,
+        device: input.device,
+        minusWords: input.minusWords,
+        clearMinusPhrases: input.clearMinusPhrases,
+        includeRightColumn: input.includeRightColumn,
+        clearPlus: input.clearPlus,
+        maxKeywords: input.maxKeywords
+      }) as unknown as Prisma.InputJsonValue;
 }
 
 function replay(

@@ -122,6 +122,7 @@ test("rejects unsafe project domains and builds an explicit duplicate retry", ()
       domain: "example.test",
       locale: "ru",
       timezone: "UTC",
+      searchCity: null,
       confirmDuplicateDomain: true
     }
   );

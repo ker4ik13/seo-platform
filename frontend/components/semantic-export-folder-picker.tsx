@@ -118,8 +118,8 @@ export function SemanticExportFolderPicker({
       <div className="semantic-export-folder-controls">
         <label className="semantic-export-folder-search">
           <Icon name="search" />
-          <span className="sr-only">Поиск папок карты сайта</span>
           <input
+            aria-label="Поиск папок карты сайта"
             disabled={disabled}
             onChange={(event) => setSearch(event.target.value)}
             placeholder="Найти папку по названию или пути"

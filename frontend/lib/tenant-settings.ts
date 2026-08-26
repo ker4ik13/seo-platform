@@ -13,6 +13,7 @@ export interface WorkspaceSettingsDraft {
 
 export interface ProjectSettingsDraft extends WorkspaceSettingsDraft {
   readonly domain: string;
+  readonly searchCity?: AppProject["searchCity"];
 }
 
 export type WorkspaceSettingsField = keyof WorkspaceSettingsDraft;
@@ -43,7 +44,8 @@ export function projectSettingsDraft(
     name: project.name,
     domain: project.domain,
     locale: project.locale,
-    timezone: project.timezone
+    timezone: project.timezone,
+    searchCity: project.searchCity
   };
 }
 
@@ -127,6 +129,7 @@ export function projectUpdateInput(
     domain: normalizedDomain(draft.domain) ?? draft.domain.trim(),
     locale: draft.locale.trim(),
     timezone: draft.timezone.trim(),
+    searchCity: draft.searchCity ?? null,
     ...(confirmDuplicateDomain ? { confirmDuplicateDomain: true } : {})
   };
 }

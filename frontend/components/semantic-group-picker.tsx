@@ -30,22 +30,26 @@ export interface SemanticGroupPickerSpecialOption {
 
 export function SemanticGroupPickerField({
   autoFocus = false,
+  className,
   dialogTitle = "Расположение папки",
   groups,
   onChange,
   rootIcon = "projects",
-  rootLabel = "Корневой уровень",
+  rootLabel = "Корневая папка",
   searchPlaceholder = "Найти папку по названию или пути",
+  showRootOption = true,
   specialOptions = EMPTY_SPECIAL_OPTIONS,
   value
 }: Readonly<{
   autoFocus?: boolean;
+  className?: string;
   dialogTitle?: string;
   groups: readonly SemanticGroupTreeItem[];
   onChange: (groupId: string) => void;
   rootIcon?: IconName;
   rootLabel?: string;
   searchPlaceholder?: string;
+  showRootOption?: boolean;
   specialOptions?: readonly SemanticGroupPickerSpecialOption[];
   value: string;
 }>) {
@@ -150,7 +154,7 @@ export function SemanticGroupPickerField({
         aria-label={`${dialogTitle}: ${selectedLabel}${selected ? `. Запросов в группе: ${formatInteger(selected.keywordCount)}` : ""}`}
         aria-expanded={open}
         aria-haspopup="dialog"
-        className="semantic-group-picker-trigger"
+        className={`semantic-group-picker-trigger${className ? ` ${className}` : ""}`}
         onClick={() => {
           setOpen((current) => {
             const next = !current;
@@ -219,6 +223,7 @@ export function SemanticGroupPickerField({
               rootIcon={rootIcon}
               rootLabel={rootLabel}
               searchPlaceholder={searchPlaceholder}
+              showRootOption={showRootOption}
               specialOptions={specialOptions}
               value={value}
             />

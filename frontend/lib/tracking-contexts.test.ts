@@ -92,6 +92,7 @@ test("normalizes a tracking context draft into the public mutation shape", () =>
     },
     launchProfile: {
       searchSource: "LIVE",
+      includeUntracked: false,
       scope: {
         mode: "KEYWORDS",
         groupIds: []

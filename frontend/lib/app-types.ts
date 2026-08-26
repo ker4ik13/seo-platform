@@ -1,4 +1,7 @@
-import type { ProjectAccessLevel } from "@seo-platform/contracts";
+import type {
+  ProjectAccessLevel,
+  ProjectSearchCity
+} from "@seo-platform/contracts";
 
 export interface AppUser {
   readonly id: string;
@@ -35,6 +38,7 @@ export interface AppProject {
   readonly domain: string;
   readonly locale: string;
   readonly timezone: string;
+  readonly searchCity?: ProjectSearchCity;
   readonly status: "DRAFT" | "ACTIVE" | "ARCHIVED";
   readonly ownerUserId: string;
   readonly logoSource?: "CUSTOM" | "DISCOVERED";

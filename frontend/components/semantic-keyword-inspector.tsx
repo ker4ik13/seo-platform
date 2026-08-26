@@ -74,6 +74,8 @@ export function SemanticKeywordInspector({
   const [noteDirty, setNoteDirty] = useState(false);
   const [savingNote, setSavingNote] = useState(false);
   const [noteStatus, setNoteStatus] = useState<string>();
+  const [trackingBusy, setTrackingBusy] = useState(false);
+  const [trackingStatus, setTrackingStatus] = useState<string>();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [aiHistoryOpen, setAiHistoryOpen] = useState(false);
   const [frequencyToDelete, setFrequencyToDelete] =
@@ -95,6 +97,8 @@ export function SemanticKeywordInspector({
     setNote("");
     setNoteDirty(false);
     setNoteStatus(undefined);
+    setTrackingBusy(false);
+    setTrackingStatus(undefined);
     setHistoryOpen(false);
     setAiHistoryOpen(false);
     setFrequencyToDelete(undefined);
@@ -241,6 +245,30 @@ export function SemanticKeywordInspector({
     }
   }
 
+  async function toggleTracking(): Promise<void> {
+    if (trackingBusy || item.trashed) return;
+    setTrackingBusy(true);
+    setTrackingStatus(undefined);
+    try {
+      const updated = await browserApiRequest<SemanticKeywordListItem>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/keywords/${encodeURIComponent(item.id)}`,
+        {
+          method: "PATCH",
+          body: { isTracked: !item.isTracked },
+          ifMatch: item.version
+        }
+      );
+      onUpdated(updated);
+      setTrackingStatus(
+        updated.isTracked ? "Отслеживание включено" : "Отслеживание выключено"
+      );
+    } catch (requestError) {
+      setTrackingStatus(trackingError(requestError));
+    } finally {
+      setTrackingBusy(false);
+    }
+  }
+
   async function copyTargetUrl(): Promise<void> {
     if (!item.targetUrl) return;
     try {
@@ -268,6 +296,19 @@ export function SemanticKeywordInspector({
         </div>
         <div className="semantic-sidebar-actions">
           {!item.trashed && (
+            <button
+              aria-label={item.isTracked ? "Отключить отслеживание" : "Включить отслеживание"}
+              aria-pressed={item.isTracked}
+              className={`semantic-sidebar-tracking${item.isTracked ? " active" : ""}`}
+              disabled={trackingBusy}
+              onClick={() => void toggleTracking()}
+              title={item.isTracked ? "Отключить отслеживание" : "Включить отслеживание"}
+              type="button"
+            >
+              <Icon name={item.isTracked ? "eye" : "eyeOff"} />
+            </button>
+          )}
+          {!item.trashed && (
             <button className="semantic-sidebar-edit" onClick={onEdit} type="button">
               Изменить
             </button>
@@ -287,6 +328,7 @@ export function SemanticKeywordInspector({
           <div><dt>Группа</dt><dd>{visibleGroupPath(item.groupPath)}</dd></div>
           <div><dt>Кластер</dt><dd>{item.clusterName ?? "Не назначен"}</dd></div>
           <div><dt>Язык</dt><dd>{item.language.toUpperCase()}</dd></div>
+          <div><dt>Отслеживание</dt><dd>{item.isTracked ? "Включено" : "Выключено"}</dd></div>
           <div className="semantic-inspector-overview-tags">
             <dt>Теги</dt>
             <dd>
@@ -298,6 +340,7 @@ export function SemanticKeywordInspector({
             </dd>
           </div>
         </dl>
+        {trackingStatus && <small className="semantic-tracking-status" role="status">{trackingStatus}</small>}
         <div className="semantic-inspector-target-url">
           <div className="semantic-inspector-target-url-heading">
             <strong>Целевая страница</strong>
@@ -836,6 +879,15 @@ function noteError(error: unknown): string {
     return "Запрос изменился в другой вкладке. Закройте панель, откройте её снова и повторите сохранение.";
   }
   return error instanceof BrowserApiError ? error.message : "Не удалось сохранить заметку.";
+}
+
+function trackingError(error: unknown): string {
+  if (error instanceof BrowserApiError && error.status === 412) {
+    return "Запрос уже изменился. Откройте его заново и повторите действие.";
+  }
+  return error instanceof BrowserApiError
+    ? error.message
+    : "Не удалось изменить отслеживание.";
 }
 
 function frequencyDeletionError(error: unknown): string {

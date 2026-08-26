@@ -3,6 +3,8 @@ import test from "node:test";
 import {
   defaultSemanticRegion,
   defaultSemanticSearchRegions,
+  pairedSemanticSearchRegions,
+  projectSemanticSearchRegions,
   readLastSemanticRegion,
   readLastSemanticSearchRegions,
   writeLastSemanticRegion
@@ -17,6 +19,25 @@ test("uses Russia for frequency and Moscow for both rank engines", () => {
     YANDEX: { code: "213", label: "Москва" },
     GOOGLE: { code: "1011969", label: "Москва" }
   });
+});
+
+test("maps a project city and a last-run city to both search engines", () => {
+  const project = {
+    name: "Санкт-Петербург",
+    yandexRegionCode: "2",
+    googleRegionCode: "1012040"
+  };
+  assert.deepEqual(projectSemanticSearchRegions(project), {
+    YANDEX: { code: "2", label: "Санкт-Петербург" },
+    GOOGLE: { code: "1012040", label: "Санкт-Петербург" }
+  });
+  assert.deepEqual(
+    pairedSemanticSearchRegions("YANDEX_RANK", {
+      code: "2",
+      label: "Санкт-Петербург"
+    }),
+    projectSemanticSearchRegions(project)
+  );
 });
 
 test("stores the last successful region per project, tool and engine", () => {

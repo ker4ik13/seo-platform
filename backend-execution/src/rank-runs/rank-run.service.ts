@@ -13,6 +13,10 @@ import {
   type InternalRankRunConflictDetails,
   type InternalRankJobQuery,
   type RankJobSummary,
+  type RankRuntimeDiagnosticEntry,
+  type RankRuntimeDiagnosticProduct,
+  type RankRuntimeDiagnosticState,
+  type RankRuntimeDiagnostics,
   type RankRunConflictReason
 } from "@seo-platform/contracts";
 import { Prisma } from "../generated/prisma/client.js";
@@ -24,6 +28,7 @@ import { databaseClock } from "../database/database-clock.js";
 import { PrismaService } from "../database/prisma.service.js";
 import { assertJobCapacity } from "../jobs/job-capacity.js";
 import { QueueService } from "../queue/queue.service.js";
+import { XMLSTOCK_HTTP_QUOTA_POLICIES } from "../integrations/xmlstock-http-quota-limiter.js";
 import {
   RANK_ESTIMATE_VALIDATION_FRESHNESS_MILLISECONDS,
   credentialSnapshot,
@@ -246,6 +251,100 @@ export class RankRunService {
     );
     if (!stored) throw rankJobNotFound("Manual rank Job not found");
     return toRankJobSummary(stored);
+  }
+
+  public async runtimeDiagnostics(
+    input: InternalRankJobQuery
+  ): Promise<RankRuntimeDiagnostics> {
+    const stored = await findRankJob(
+      this.prisma,
+      input.jobId,
+      input.workspaceId,
+      input.projectId
+    );
+    if (!stored || stored.provider !== "XMLSTOCK") {
+      throw rankJobNotFound("XMLStock rank diagnostics not found");
+    }
+    const summary = toRankJobSummary(stored);
+    const product = rankRuntimeProduct(summary);
+    const policy = XMLSTOCK_HTTP_QUOTA_POLICIES[product];
+    const [clock, totalsByStatus, rows] = await Promise.all([
+      databaseClock(this.prisma, "Unable to read rank diagnostics clock"),
+      this.prisma.$queryRaw<readonly RankRuntimeStatusCountRow[]>(
+        Prisma.sql`
+          WITH latest AS (
+            SELECT DISTINCT ON (execution.job_item_id)
+              execution.status,
+              execution.lease_expires_at,
+              execution.lease_owner
+            FROM public.rank_connector_executions execution
+            WHERE execution.workspace_id = ${input.workspaceId}::uuid
+              AND execution.project_id = ${input.projectId}::uuid
+              AND execution.job_id = ${input.jobId}::uuid
+              AND execution.provider = 'XMLSTOCK'
+            ORDER BY
+              execution.job_item_id,
+              execution.execution_attempt DESC,
+              execution.id DESC
+          )
+          SELECT
+            status::text AS status,
+            COUNT(*)::bigint AS count,
+            COUNT(*) FILTER (
+              WHERE lease_owner IS NOT NULL
+                AND lease_expires_at > clock_timestamp()
+                AND status IN ('CLAIMED', 'SUBMITTING', 'FETCHING')
+            )::bigint AS "activeCount"
+          FROM latest
+          GROUP BY status
+        `
+      ),
+      this.prisma.$queryRaw<readonly RankRuntimeEntryRow[]>(
+        Prisma.sql`
+          SELECT
+            diagnostics.sequence,
+            diagnostics.keyword,
+            diagnostics.status,
+            diagnostics.execution_attempt AS "executionAttempt",
+            diagnostics.submit_attempts AS "submitAttempts",
+            diagnostics.poll_attempts AS "pollAttempts",
+            diagnostics.next_action_at AS "nextActionAt",
+            diagnostics.provider_progress AS "providerProgress",
+            diagnostics.error_code AS "errorCode",
+            diagnostics.active,
+            diagnostics.updated_at AS "updatedAt"
+          FROM public.read_rank_runtime_diagnostics_entries(
+            ${input.workspaceId}::uuid,
+            ${input.projectId}::uuid,
+            ${input.jobId}::uuid,
+            250
+          ) diagnostics
+        `
+      )
+    ]);
+    const total = Number(summary.progress.total);
+    if (!Number.isSafeInteger(total) || total < 0) {
+      throw new Error("Invalid rank diagnostics total");
+    }
+    const counts = rankRuntimeTotals(totalsByStatus, total);
+    return {
+      jobId: summary.id,
+      generatedAt: clock.toISOString(),
+      policy: {
+        product,
+        concurrency: policy.concurrency,
+        requestsPerSecond: policy.requestsPerSecond
+      },
+      totals: counts,
+      entries: rows.map((row) =>
+        rankRuntimeEntry(
+          row,
+          product,
+          summary.depth ?? 100,
+          policy.concurrency
+        )
+      )
+    };
   }
 
   public async retryMissing(
@@ -706,6 +805,202 @@ export class RankRunService {
       // accepted commands whose best-effort BullMQ notification was lost.
     }
   }
+}
+
+interface RankRuntimeStatusCountRow {
+  readonly status: string;
+  readonly count: bigint;
+  readonly activeCount: bigint;
+}
+
+interface RankRuntimeEntryRow {
+  readonly sequence: number;
+  readonly keyword: string;
+  readonly status: string;
+  readonly executionAttempt: number;
+  readonly submitAttempts: number;
+  readonly pollAttempts: number;
+  readonly nextActionAt: Date | null;
+  readonly providerProgress: unknown | null;
+  readonly errorCode: string | null;
+  readonly active: boolean;
+  readonly updatedAt: Date;
+}
+
+function rankRuntimeProduct(
+  summary: RankJobSummary
+): RankRuntimeDiagnosticProduct {
+  if (summary.searchEngine === "GOOGLE") return "GOOGLE_LIVE";
+  return summary.searchSource === "SEARCH_API"
+    ? "YANDEX_SEARCH_API"
+    : "YANDEX_LIVE";
+}
+
+function rankRuntimeTotals(
+  rows: readonly RankRuntimeStatusCountRow[],
+  total: number
+): RankRuntimeDiagnostics["totals"] {
+  const counts = new Map<string, number>();
+  let prepared = 0;
+  let active = 0;
+  for (const row of rows) {
+    const count = Number(row.count);
+    const activeCount = Number(row.activeCount);
+    if (
+      !Number.isSafeInteger(count) ||
+      count < 0 ||
+      !Number.isSafeInteger(activeCount) ||
+      activeCount < 0 ||
+      activeCount > count
+    ) {
+      throw new Error("Invalid rank diagnostics status count");
+    }
+    counts.set(row.status, count);
+    prepared += count;
+    active += activeCount;
+  }
+  if (prepared > total || active > prepared) {
+    throw new Error("Invalid rank diagnostics totals");
+  }
+  return {
+    total,
+    prepared,
+    active,
+    waitingProvider: counts.get("POLL_WAIT") ?? 0,
+    completed: counts.get("PERSISTED") ?? 0,
+    failed: counts.get("FAILED_FINAL") ?? 0
+  };
+}
+
+function rankRuntimeEntry(
+  row: RankRuntimeEntryRow,
+  product: RankRuntimeDiagnosticProduct,
+  depth: 30 | 50 | 100,
+  concurrency: number
+): RankRuntimeDiagnosticEntry {
+  const sequence = nonNegativeRuntimeInteger(row.sequence, "sequence");
+  const executionAttempt = positiveRuntimeInteger(
+    row.executionAttempt,
+    "execution attempt"
+  );
+  const submitAttempts = nonNegativeRuntimeInteger(
+    row.submitAttempts,
+    "submit attempts"
+  );
+  const pollAttempts = nonNegativeRuntimeInteger(
+    row.pollAttempts,
+    "poll attempts"
+  );
+  const pageProgress = rankRuntimePageProgress(
+    row.providerProgress,
+    product,
+    depth,
+    row.status
+  );
+  if (typeof row.active !== "boolean") {
+    throw new Error("Invalid rank diagnostics active state");
+  }
+  if (!(row.updatedAt instanceof Date) || !Number.isFinite(row.updatedAt.getTime())) {
+    throw new Error("Invalid rank diagnostics update timestamp");
+  }
+  const errorCode = row.errorCode && /^[A-Z0-9_]{1,100}$/u.test(row.errorCode)
+    ? row.errorCode
+    : undefined;
+  return {
+    sequence,
+    keyword: rankRuntimeKeyword(row.keyword),
+    lane: sequence % concurrency + 1,
+    state: rankRuntimeState(row.status, pageProgress.completedPages > 0),
+    executionAttempt,
+    submitAttempts,
+    pollAttempts,
+    ...pageProgress,
+    active: row.active,
+    ...(row.nextActionAt instanceof Date &&
+    Number.isFinite(row.nextActionAt.getTime())
+      ? { nextActionAt: row.nextActionAt.toISOString() }
+      : {}),
+    ...(errorCode ? { errorCode } : {}),
+    updatedAt: row.updatedAt.toISOString()
+  };
+}
+
+function rankRuntimeKeyword(value: string): string {
+  if (
+    typeof value !== "string" ||
+    value.length < 1 ||
+    value.length > 1_000 ||
+    Array.from(value).length > 500 ||
+    Buffer.byteLength(value, "utf8") > 2_000
+  ) {
+    throw new Error("Invalid rank diagnostics keyword");
+  }
+  return value;
+}
+
+function rankRuntimeState(
+  status: string,
+  hasPageProgress: boolean
+): RankRuntimeDiagnosticState {
+  if (status === "READY_TO_SUBMIT") return "QUEUED";
+  if (["CLAIMED", "SUBMITTING", "FETCHING"].includes(status)) {
+    return "REQUESTING";
+  }
+  if (status === "POLL_WAIT") {
+    return hasPageProgress ? "WAITING_NEXT_PAGE" : "WAITING_PROVIDER";
+  }
+  if (["STAGED", "PERSISTING"].includes(status)) return "SAVING";
+  if (status === "PERSISTED") return "COMPLETED";
+  if (status === "FAILED_RETRYABLE") return "RETRY_WAIT";
+  return "FAILED";
+}
+
+function rankRuntimePageProgress(
+  value: unknown,
+  product: RankRuntimeDiagnosticProduct,
+  depth: 30 | 50 | 100,
+  status: string
+): Pick<RankRuntimeDiagnosticEntry, "completedPages" | "totalPages"> {
+  if (product === "YANDEX_SEARCH_API") {
+    return {
+      completedPages: status === "PERSISTED" ? 1 : 0,
+      totalPages: 1
+    };
+  }
+  let completedPages = 0;
+  let resultsPerPage = 10;
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const progress = value as Readonly<Record<string, unknown>>;
+    if (
+      Number.isSafeInteger(progress.nextPage) &&
+      Number(progress.nextPage) >= 0
+    ) {
+      completedPages = Number(progress.nextPage);
+    }
+    if ([10, 20, 30, 40, 50].includes(Number(progress.resultsPerPage))) {
+      resultsPerPage = Number(progress.resultsPerPage);
+    }
+  }
+  const totalPages = Math.ceil(depth / resultsPerPage);
+  return {
+    completedPages: status === "PERSISTED"
+      ? totalPages
+      : Math.min(totalPages, completedPages),
+    totalPages
+  };
+}
+
+function nonNegativeRuntimeInteger(value: number, field: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`Invalid rank diagnostics ${field}`);
+  }
+  return value;
+}
+
+function positiveRuntimeInteger(value: number, field: string): number {
+  const parsed = nonNegativeRuntimeInteger(value, field);
+  if (parsed < 1) throw new Error(`Invalid rank diagnostics ${field}`);
+  return parsed;
 }
 
 function assertExecutableEstimate(

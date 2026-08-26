@@ -1384,14 +1384,6 @@ async function persistImportedRankSnapshot(
         assignedBy: input.actorId
       }))
     });
-    await transaction.keyword.updateMany({
-      where: {
-        workspaceId: input.workspaceId,
-        projectId: input.projectId,
-        id: { in: missingAssignments }
-      },
-      data: { isTracked: true }
-    });
   }
   const assignments =
     await transaction.trackingContextKeywordAssignment.findMany({

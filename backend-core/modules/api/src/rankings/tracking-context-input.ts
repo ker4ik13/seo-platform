@@ -2,6 +2,7 @@ import {
   trackingDepths,
   trackingDevices,
   trackingDomainMatchModes,
+  trackingContextKeywordPageLimit,
   trackingContextKeywordReplacementLimit,
   trackingContextScopeModes,
   trackingSearchEngines,
@@ -55,9 +56,12 @@ export function trackingContextKeywordQuery(
   if (
     !Number.isSafeInteger(parsedLimit) ||
     parsedLimit < 1 ||
-    parsedLimit > 200
+    parsedLimit > trackingContextKeywordPageLimit
   ) {
-    invalid("limit", "Must be an integer between 1 and 200");
+    invalid(
+      "limit",
+      `Must be an integer between 1 and ${trackingContextKeywordPageLimit}`
+    );
   }
   if (cursor && !CURSOR_PATTERN.test(cursor)) {
     invalid("cursor", "Must be a valid pagination cursor");
@@ -119,7 +123,7 @@ function contextInput(
 function launchProfileInput(value: unknown): TrackingContextLaunchProfile {
   const input = exactRecord(
     value,
-    ["searchSource", "scope"],
+    ["searchSource", "includeUntracked", "scope"],
     "launchProfile"
   );
   const searchSource = enumValue(
@@ -160,7 +164,17 @@ function launchProfileInput(value: unknown): TrackingContextLaunchProfile {
         : "Must be empty unless scope mode is GROUPS"
     );
   }
-  return { searchSource, scope: { mode, groupIds } };
+  if (
+    input.includeUntracked !== undefined &&
+    typeof input.includeUntracked !== "boolean"
+  ) {
+    invalid("launchProfile.includeUntracked", "Must be a boolean");
+  }
+  return {
+    searchSource,
+    includeUntracked: input.includeUntracked ?? false,
+    scope: { mode, groupIds }
+  };
 }
 
 function configurationInput(

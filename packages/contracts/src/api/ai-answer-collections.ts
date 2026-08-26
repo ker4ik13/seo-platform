@@ -62,6 +62,7 @@ export interface AiAnswerCollectionSummary {
   readonly id: string;
   readonly workspaceId: string;
   readonly projectId: string;
+  readonly actorId?: string;
   readonly provider: "ARSENKIN";
   readonly routingScope?: ConnectorRoutingScope;
   readonly connectorAttempts?: readonly ConnectorOperationAttemptSummary[];

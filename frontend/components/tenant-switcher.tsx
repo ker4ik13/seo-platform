@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect } from "react";
+import Link from "next/link";
 import type {
   AppProject,
   AppWorkspace
 } from "../lib/app-types";
 import { CustomSelect } from "./custom-select";
+import { Icon } from "./icon";
 import { ProjectSelectOption } from "./project-select-option";
 import { WorkspaceAvatar } from "./workspace-avatar";
 
@@ -56,12 +58,20 @@ export function TenantSwitcher({
         <CustomSelect
           aria-label="Рабочая область"
           className="tenant-workspace-select"
-          disabled={workspaces.length === 0}
           onChange={(event) => selectWorkspace(event.target.value)}
+          popoverFooter={workspaces.length === 0 ? (
+            <Link className="tenant-create-workspace-action" href="/app#workspace-onboarding">
+              <span aria-hidden="true"><Icon name="plus" /></span>
+              <span>
+                <strong>Создать рабочую область</strong>
+                <small>Проекты, команда и интеграции будут храниться здесь</small>
+              </span>
+            </Link>
+          ) : undefined}
           showSelectedCheck={false}
           value={workspace?.id ?? ""}
         >
-          {workspaces.length === 0 && <option value="">Нет областей</option>}
+          {workspaces.length === 0 && <option disabled value="">Нет области</option>}
           {workspaces.map((item) => (
             <option key={item.id} value={item.id}>
               <WorkspaceOption

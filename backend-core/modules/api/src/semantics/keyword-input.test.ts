@@ -47,6 +47,7 @@ test("normalizes a complete manual semantic keyword", () => {
     language: "ru",
     priority: 10,
     isFavorite: true,
+    isTracked: false,
     intent: "COMMERCIAL",
     targetUrl: "https://EXAMPLE.com:443/audit",
     tagNames: [" Важно ", "важно", "Услуги"]
@@ -55,6 +56,7 @@ test("normalizes a complete manual semantic keyword", () => {
   assert.equal(input.text, "SEO аудит");
   assert.equal(input.language, "ru");
   assert.equal(input.targetUrl, "https://example.com/audit");
+  assert.equal(input.isTracked, false);
   assert.equal(input.duplicatePolicy, "REJECT_EXISTING");
   assert.deepEqual(input.tagNames, ["важно", "Услуги"]);
 });
@@ -73,6 +75,7 @@ test("parses a bounded keyword bulk create with an explicit duplicate policy", (
   assert.equal(result.items[0]?.text, "SEO аудит");
   assert.equal(result.items[0]?.language, "ru");
   assert.equal(result.items[0]?.priority, 0);
+  assert.equal(result.items[0]?.isTracked, true);
   assert.equal(
     semanticKeywordBulkCreateInput({
       duplicatePolicy: "SKIP_EXISTING",
@@ -174,6 +177,20 @@ test("accepts only a boolean AI-answer shortcut preference", () => {
   );
 });
 
+test("parses explicit keyword tracking choices", () => {
+  assert.equal(
+    createSemanticKeywordInput({ text: "SEO аудит" }).isTracked,
+    true
+  );
+  assert.deepEqual(updateSemanticKeywordInput({ isTracked: false }), {
+    isTracked: false
+  });
+  assert.throws(
+    () => updateSemanticKeywordInput({ isTracked: "yes" }),
+    DomainError
+  );
+});
+
 test("normalizes keyword notes and supports an explicit removal", () => {
   assert.deepEqual(updateSemanticKeywordInput({ note: "  Гипотеза по кластеру  " }), {
     note: "Гипотеза по кластеру"
@@ -268,11 +285,23 @@ test("requires exact versions for every bounded bulk selection", () => {
   assert.deepEqual(
     semanticKeywordBulkInput({
       items: [{ id, version: 3 }],
-      patch: { isFavorite: true, intent: null, clusterId, tagNames: [] }
+      patch: {
+        isFavorite: true,
+        isTracked: false,
+        intent: null,
+        clusterId,
+        tagNames: []
+      }
     }),
     {
       items: [{ id, version: 3 }],
-      patch: { isFavorite: true, intent: null, clusterId, tagNames: [] }
+      patch: {
+        isFavorite: true,
+        isTracked: false,
+        intent: null,
+        clusterId,
+        tagNames: []
+      }
     }
   );
   assert.throws(

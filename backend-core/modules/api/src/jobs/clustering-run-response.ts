@@ -34,6 +34,7 @@ export function scopedClusteringRun(
     id,
     workspaceId,
     projectId,
+    ...(input.actorId === undefined ? {} : { actorId: uuid(input.actorId) }),
     provider: "ARSENKIN",
     ...(hasScope ? { routingScope: member(input.routingScope, connectorRoutingScopes) } : {}),
     ...(hasAttempts ? { connectorAttempts: attempts(input.connectorAttempts) } : {}),

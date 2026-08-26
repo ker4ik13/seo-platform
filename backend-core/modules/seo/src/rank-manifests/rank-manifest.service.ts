@@ -31,6 +31,7 @@ import {
 } from "@seo-platform/contracts/canonical-json";
 import { Prisma } from "../generated/prisma/client.js";
 import { PrismaService } from "../database/prisma.service.js";
+import { trackingContextIncludesUntracked } from "../tracking-contexts/tracking-context-launch-profile.js";
 import { semanticRankScopeHash } from "../rank-scopes/rank-scope-hash.js";
 import {
   inspectRankScopeBounds,
@@ -56,6 +57,7 @@ const CONTEXT_SELECT = {
   projectId: true,
   status: true,
   version: true,
+  launchProfile: true,
   configurations: {
     orderBy: { configurationVersion: "desc" as const },
     take: 1,
@@ -472,10 +474,14 @@ async function currentManifestScope(
     );
     return { context, configuration, assignments, retry: true };
   }
+  const includeUntracked = trackingContextIncludesUntracked(
+    context.launchProfile
+  );
   const bounds = await inspectRankScopeBounds(transaction, {
     workspaceId: input.workspaceId,
     projectId: input.projectId,
-    contextId: context.id
+    contextId: context.id,
+    includeUntracked
   });
   assertManifestScopeBounds(input, bounds);
   const assignments =
@@ -485,7 +491,10 @@ async function currentManifestScope(
         projectId: input.projectId,
         contextId: context.id,
         removedAt: null,
-        keyword: { status: "ACTIVE" }
+        keyword: {
+          status: "ACTIVE",
+          ...(includeUntracked ? {} : { isTracked: true })
+        }
       },
       orderBy: { keywordId: "asc" },
       take: MAX_RANK_SCOPE_ENTRIES + 1,

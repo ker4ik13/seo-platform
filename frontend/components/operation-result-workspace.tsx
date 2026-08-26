@@ -13,13 +13,18 @@ import type {
   ClusteringProposalSectionResult,
   CrawlOperationResultPage,
   CrawlOperationResultRow,
+  ConfirmKeywordResearchRunInput,
   FrequencyOperationResult,
   FrequencyOperationResultRow,
+  KeywordResearchCollection,
   KeywordResearchRunSummary,
   OperationResultPageInfo,
+  ProjectPresenceMember,
   RankJobSummary,
   RankOperationResult,
   RankOperationResultRow,
+  RankRuntimeDiagnosticEntry,
+  RankRuntimeDiagnostics,
   SemanticCluster,
   SemanticKeywordGroup,
   SemanticFrequencyType
@@ -36,16 +41,13 @@ import {
 import { createPortal } from "react-dom";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import {
-  connectorRouteTrail,
-  connectorRoutingScopeLabel
-} from "../lib/connector-routing-presentation";
-import {
   clusteringProposalSectionApiPath,
   mergeOperationResultRows,
   operationResultApiPath,
   type OperationResultKind
 } from "../lib/operation-result-routes";
 import { operationStatusLabel } from "../lib/operation-status-presentation";
+import { projectPresenceAvatarUrl } from "../lib/project-presence";
 import {
   rememberClusterFolderAction,
   rememberClusterFolderDestination,
@@ -63,7 +65,9 @@ import {
 import { ProviderLogo } from "./provider-logo";
 import { CustomSelect } from "./custom-select";
 import { Icon } from "./icon";
+import { KeywordResearchRunPreview } from "./keyword-research-workspace";
 import { SemanticGroupPicker } from "./semantic-group-picker";
+import { SemanticModal } from "./semantic-modal";
 import styles from "./operation-result-workspace.module.css";
 
 type OperationResultData =
@@ -74,12 +78,17 @@ type OperationResultData =
   | Readonly<{ kind: "crawl"; value: CrawlOperationResultPage }>
   | Readonly<{ kind: "research"; value: KeywordResearchRunSummary }>;
 
+export interface RankRuntimeLogState {
+  readonly active: boolean;
+}
+
 export function OperationResultWorkspace({
   embedded = false,
   kind,
   operationId,
   onClusteringApplied,
   onDirtyChange,
+  onRankRuntimeLogStateChange,
   projectId
 }: Readonly<{
   embedded?: boolean;
@@ -87,6 +96,7 @@ export function OperationResultWorkspace({
   operationId: string;
   onClusteringApplied?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
+  onRankRuntimeLogStateChange?: (state?: RankRuntimeLogState) => void;
   projectId: string;
 }>) {
   const [data, setData] = useState<OperationResultData>();
@@ -99,6 +109,10 @@ export function OperationResultWorkspace({
     cursor: string;
     message: string;
   }>>();
+  const [rankDiagnosticsOpen, setRankDiagnosticsOpen] = useState(false);
+  const [projectMembers, setProjectMembers] = useState<
+    readonly ProjectPresenceMember[]
+  >([]);
   const scopeKey = `${projectId}:${kind}:${operationId}`;
   const tablePanelRef = useRef<HTMLDivElement>(null);
   const infiniteSentinelRef = useRef<HTMLDivElement>(null);
@@ -176,9 +190,23 @@ export function OperationResultWorkspace({
     setError(undefined);
     setPageError(undefined);
     setLoadingMore(false);
+    setRankDiagnosticsOpen(false);
     void load(controller.signal);
     return () => controller.abort();
   }, [load, scopeKey]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void browserApiRequest<readonly ProjectPresenceMember[]>(
+      `/app/api/projects/${encodeURIComponent(projectId)}/presence-members`,
+      { signal: controller.signal }
+    ).then((members) => {
+      if (!controller.signal.aborted) setProjectMembers(members);
+    }).catch(() => {
+      if (!controller.signal.aborted) setProjectMembers([]);
+    });
+    return () => controller.abort();
+  }, [projectId]);
 
   useEffect(() => {
     if (
@@ -194,6 +222,26 @@ export function OperationResultWorkspace({
       window.clearTimeout(timer);
     };
   }, [data, load, rankJobWithoutResult]);
+
+  const rankRuntimeJob = data?.kind === "rank"
+    ? data.value.job
+    : rankJobWithoutResult;
+  const rankRuntimeLogAvailable = rankRuntimeJob?.provider === "XMLSTOCK";
+  const rankRuntimeLogActive = rankRuntimeJob
+    ? isActiveStatus(rankRuntimeJob.status)
+    : false;
+
+  useEffect(() => {
+    onRankRuntimeLogStateChange?.(
+      rankRuntimeLogAvailable
+        ? { active: rankRuntimeLogActive }
+        : undefined
+    );
+  }, [
+    onRankRuntimeLogStateChange,
+    rankRuntimeLogActive,
+    rankRuntimeLogAvailable
+  ]);
 
   const loadMore = useCallback(async (): Promise<void> => {
     const page = data ? operationResultPage(data) : undefined;
@@ -287,27 +335,47 @@ export function OperationResultWorkspace({
     if (rankJobWithoutResult) {
       const active = isActiveStatus(rankJobWithoutResult.status);
       return (
-        <section className={workspaceClass(embedded)}>
-          <div
-            className={`${styles.state} ${active ? "" : styles.error}`}
-            role={active ? "status" : "alert"}
-          >
-            {active && <span className={styles.spinner} />}
-            <strong>{active ? "Результат ещё формируется" : "Результат не сформирован"}</strong>
-            <p>
-              {active
-                ? `${operationStatusLabel(rankJobWithoutResult.status)} · ${rankJobWithoutResult.progress.current} из ${rankJobWithoutResult.progress.total}`
-                : rankJobWithoutResult.failure
-                  ? rankJobFailureMessage(rankJobWithoutResult.failure.code)
-                  : `Операция завершена со статусом «${operationStatusLabel(rankJobWithoutResult.status)}».`}
-            </p>
-            {!active && (
-              <button onClick={() => void load(undefined, true)} type="button">
-                Повторить загрузку
-              </button>
-            )}
-          </div>
-        </section>
+        <>
+          <section className={workspaceClass(embedded)}>
+            <div
+              className={`${styles.state} ${active ? "" : styles.error}`}
+              role={active ? "status" : "alert"}
+            >
+              {active && <span className={styles.spinner} />}
+              <strong>{active ? "Результат ещё формируется" : "Результат не сформирован"}</strong>
+              <p>
+                {active
+                  ? `${operationStatusLabel(rankJobWithoutResult.status)} · ${rankJobWithoutResult.progress.current} из ${rankJobWithoutResult.progress.total}`
+                  : rankJobWithoutResult.failure
+                    ? rankJobFailureMessage(rankJobWithoutResult.failure.code)
+                    : `Операция завершена со статусом «${operationStatusLabel(rankJobWithoutResult.status)}».`}
+              </p>
+              {!embedded && rankJobWithoutResult.provider === "XMLSTOCK" && (
+                <button
+                  className={styles.runtimeLogButton}
+                  onClick={() => setRankDiagnosticsOpen(true)}
+                  type="button"
+                >
+                  <span aria-hidden="true" />
+                  Логи XMLStock
+                </button>
+              )}
+              {!active && (
+                <button onClick={() => void load(undefined, true)} type="button">
+                  Повторить загрузку
+                </button>
+              )}
+            </div>
+          </section>
+          {!embedded && rankDiagnosticsOpen && rankJobWithoutResult.provider === "XMLSTOCK" && (
+            <RankRuntimeDiagnosticsModal
+              active={active}
+              onClose={() => setRankDiagnosticsOpen(false)}
+              operationId={operationId}
+              projectId={projectId}
+            />
+          )}
+        </>
       );
     }
     return (
@@ -325,6 +393,10 @@ export function OperationResultWorkspace({
 
   const summary = operationSummary(data);
   const visibleError = pageError?.message ?? error;
+  const actorId = operationActorId(data);
+  const actor = actorId
+    ? projectMembers.find(({ userId }) => userId === actorId)
+    : undefined;
 
   return (
     <section className={workspaceClass(embedded)}>
@@ -340,6 +412,16 @@ export function OperationResultWorkspace({
             </div>
           </div>
           <div className={styles.headerActions}>
+            {data.kind === "rank" && data.value.job.provider === "XMLSTOCK" && (
+              <button
+                className={styles.runtimeLogButton}
+                onClick={() => setRankDiagnosticsOpen(true)}
+                type="button"
+              >
+                <span aria-hidden="true" />
+                Логи XMLStock
+              </button>
+            )}
             <button
               disabled={refreshing}
               onClick={() => void load(undefined, true)}
@@ -351,6 +433,30 @@ export function OperationResultWorkspace({
           </div>
         </header>
       )}
+
+      <div className={styles.contextBar}>
+        {summary.context && (
+          <span className={styles.contextItem}>
+            <Icon name="projects" />
+            <span><small>Контекст</small><strong>{summary.context}</strong></span>
+          </span>
+        )}
+        <span className={styles.contextItem}>
+          {actor?.avatarUpdatedAt ? (
+            <img
+              alt=""
+              src={projectPresenceAvatarUrl(projectId, actor)}
+            />
+          ) : (
+            <i>{actor ? initials(actor.displayName) : "A"}</i>
+          )}
+          <span>
+            <small>Пользователь</small>
+            <strong>{actor?.displayName ?? (actorId ? "Участник проекта" : "Автоматический запуск")}</strong>
+          </span>
+        </span>
+        <span className={styles.contextDescription}>{summary.description}</span>
+      </div>
 
       <div className={`${styles.summary}${data.kind === "clustering" ? ` ${styles.summaryClustering}` : ""}`}>
         <div className={styles.statusBlock}>
@@ -387,7 +493,16 @@ export function OperationResultWorkspace({
         />
       )}
 
-      {data.kind !== "clustering" && <div className={styles.tablePanel} ref={tablePanelRef}>
+      {data.kind === "research" && (
+        <ResearchApplyPanel
+          onChanged={() => void load()}
+          {...(onDirtyChange ? { onDirtyChange } : {})}
+          projectId={projectId}
+          result={data.value}
+        />
+      )}
+
+      {data.kind !== "clustering" && data.kind !== "research" && <div className={styles.tablePanel} ref={tablePanelRef}>
         <OperationTable data={data} />
         {nextCursor && (
           <div
@@ -413,6 +528,14 @@ export function OperationResultWorkspace({
           </span>
         </div>
       )}
+      {!embedded && rankDiagnosticsOpen && data.kind === "rank" && (
+        <RankRuntimeDiagnosticsModal
+          active={isActiveStatus(data.value.job.status)}
+          onClose={() => setRankDiagnosticsOpen(false)}
+          operationId={operationId}
+          projectId={projectId}
+        />
+      )}
     </section>
   );
 }
@@ -424,6 +547,127 @@ function OperationTable({ data }: Readonly<{ data: OperationResultData }>) {
   if (data.kind === "rank") return <RankTable result={data.value} />;
   if (data.kind === "crawl") return <CrawlTable result={data.value} />;
   return <ResearchTable result={data.value} />;
+}
+
+function ResearchApplyPanel({
+  onChanged,
+  onDirtyChange,
+  projectId,
+  result
+}: Readonly<{
+  onChanged: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+  projectId: string;
+  result: KeywordResearchRunSummary;
+}>) {
+  const [collection, setCollection] = useState<KeywordResearchCollection>();
+  const [groups, setGroups] = useState<readonly SemanticKeywordGroup[]>([]);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(
+    () => new Set(result.rows.map(({ id }) => id))
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const rowSignature = result.rows.map(({ id }) => id).join("\n");
+
+  useEffect(() => {
+    setSelected(new Set(rowSignature ? rowSignature.split("\n") : []));
+  }, [result.id, rowSignature]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void Promise.all([
+      browserApiRequest<KeywordResearchCollection>(
+        `/app/api/v1/projects/${encodeURIComponent(projectId)}/keyword-research-runs`,
+        { signal: controller.signal }
+      ),
+      browserApiRequest<readonly SemanticKeywordGroup[]>(
+        `/app/api/projects/${encodeURIComponent(projectId)}/keyword-groups`,
+        { signal: controller.signal }
+      )
+    ]).then(([nextCollection, nextGroups]) => {
+      if (controller.signal.aborted) return;
+      setCollection(nextCollection);
+      setGroups(nextGroups);
+      setError(undefined);
+    }).catch((requestError: unknown) => {
+      if (!controller.signal.aborted) {
+        setError(operationResultError(requestError));
+      }
+    });
+    return () => controller.abort();
+  }, [projectId]);
+
+  async function confirm(input: ConfirmKeywordResearchRunInput): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await browserApiRequest(
+        `/app/api/v1/projects/${encodeURIComponent(projectId)}/keyword-research-runs/${encodeURIComponent(result.id)}/confirm`,
+        { method: "POST", ifMatch: result.version, body: input }
+      );
+      onDirtyChange?.(false);
+      onChanged();
+    } catch (requestError) {
+      setError(operationResultError(requestError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancel(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await browserApiRequest(
+        `/app/api/v1/projects/${encodeURIComponent(projectId)}/keyword-research-runs/${encodeURIComponent(result.id)}/cancel`,
+        { method: "POST", ifMatch: result.version, body: {} }
+      );
+      onDirtyChange?.(false);
+      onChanged();
+    } catch (requestError) {
+      setError(operationResultError(requestError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retryImport(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await browserApiRequest(
+        `/app/api/v1/projects/${encodeURIComponent(projectId)}/keyword-research-runs/${encodeURIComponent(result.id)}/retry-import`,
+        { method: "POST", ifMatch: result.version, body: {} }
+      );
+      onChanged();
+    } catch (requestError) {
+      setError(operationResultError(requestError));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className={styles.researchApplyPanel}>
+      {error && <div className={styles.inlineError} role="alert">{error}</div>}
+      <KeywordResearchRunPreview
+        busy={busy}
+        canCancel={collection?.access.canCancel === true}
+        canImport={collection?.access.canImport === true}
+        groups={groups}
+        onCancel={() => void cancel()}
+        onConfirm={(input) => void confirm(input)}
+        onRetryImport={() => void retryImport()}
+        {...(onDirtyChange ? { onDirtyChange } : {})}
+        onSelected={setSelected}
+        run={result}
+        selected={selected}
+      />
+    </div>
+  );
 }
 
 function ClusteringApplyPanel({
@@ -806,7 +1050,7 @@ function ClusteringApplyPanel({
               );
               const expanded = Boolean(normalizedQuery) || !collapsedSectionIds.has(sectionId);
               const destinationLabel = folderDecisionValue === "NEW"
-                ? `Внутри: ${groupPath(groups, folderDecision?.parentGroupId ?? "", "Корень проекта")}`
+                ? `Внутри: ${groupPath(groups, folderDecision?.parentGroupId ?? "", "Корневая папка")}`
                 : `В папку: ${groupPath(groups, folderDecision?.groupId ?? "", "Выберите папку")}`;
               return (
                 <article className={`${styles.clusteringSection} ${styles.clusteringClusterIncluded}${expanded ? "" : ` ${styles.clusteringSectionCollapsed}`}`} key={`${proposalVersion}:${sectionId}`}>
@@ -914,7 +1158,7 @@ function ClusteringApplyPanel({
                         folderDecisionValue === "NEW"
                           ? folderDecision?.parentGroupId ?? ""
                           : folderDecision?.groupId ?? "",
-                        folderDecisionValue === "NEW" ? "Корень проекта" : "Папка не выбрана"
+                        folderDecisionValue === "NEW" ? "Корневая папка" : "Папка не выбрана"
                       )}
                       value={folderDecisionValue === "NEW" ? folderDecision?.parentGroupId ?? "" : folderDecision?.groupId ?? ""}
                     />
@@ -1391,7 +1635,7 @@ function ClusteringFolderPopover({
             groups={groups}
             onChange={onChange}
             rootIcon="projects"
-            rootLabel="Корень проекта"
+            rootLabel="Корневая папка"
             searchPlaceholder="Найти папку"
             showRootOption={mode === "NEW"}
             value={value}
@@ -1422,7 +1666,7 @@ function AiAnswerTable({ result }: Readonly<{ result: AiAnswerOperationResult }>
           <tr key={`${row.sequence}:${row.keywordId}`}>
             <td>{row.sequence + 1}</td>
             <td className={styles.primaryCell}>
-              <strong>{row.keyword}</strong><small>{shortId(row.keywordId)}</small>
+              <strong>{row.keyword}</strong>
             </td>
             <td><ItemStatus status={row.status} {...(row.errorCode ? { errorCode: row.errorCode } : {})} /></td>
             <td>
@@ -1451,7 +1695,7 @@ function FrequencyTable({ result }: Readonly<{ result: FrequencyOperationResult 
         <tbody>{result.rows.map((row) => (
           <tr key={row.keywordId}>
             <td>{row.sequence + 1}</td>
-            <td className={styles.primaryCell}><strong>{row.keyword}</strong><small>{shortId(row.keywordId)}</small></td>
+            <td className={styles.primaryCell}><strong>{row.keyword}</strong></td>
             <td><ItemStatus status={row.status} {...(row.errorCode ? { errorCode: row.errorCode } : {})} /></td>
             <FrequencyCell row={row} type="BASE" />
             <FrequencyCell row={row} type="EXACT" />
@@ -1470,22 +1714,288 @@ function FrequencyCell({ row, type }: Readonly<{ row: FrequencyOperationResultRo
   return <td className={styles.numberCell}>{snapshot?.value === undefined ? "—" : formatDecimal(snapshot.value)}</td>;
 }
 
+interface RankRuntimeLogEvent extends RankRuntimeDiagnosticEntry {
+  readonly eventKey: string;
+}
+
+export function RankRuntimeDiagnosticsModal({
+  active,
+  onClose,
+  operationId,
+  projectId
+}: Readonly<{
+  active: boolean;
+  onClose: () => void;
+  operationId: string;
+  projectId: string;
+}>) {
+  const [snapshot, setSnapshot] = useState<RankRuntimeDiagnostics>();
+  const [events, setEvents] = useState<readonly RankRuntimeLogEvent[]>([]);
+  const [error, setError] = useState<string>();
+  const [refreshing, setRefreshing] = useState(false);
+  const signaturesRef = useRef(new Map<number, string>());
+
+  const load = useCallback(async (signal?: AbortSignal) => {
+    setRefreshing(true);
+    try {
+      const next = await browserApiRequest<RankRuntimeDiagnostics>(
+        `/app/api/v1/projects/${encodeURIComponent(projectId)}/jobs/${encodeURIComponent(operationId)}/runtime-diagnostics`,
+        signal ? { signal } : {}
+      );
+      if (signal?.aborted) return;
+      const changed: RankRuntimeLogEvent[] = [];
+      for (const entry of next.entries) {
+        const signature = rankRuntimeEntrySignature(entry);
+        if (signaturesRef.current.get(entry.sequence) !== signature) {
+          signaturesRef.current.set(entry.sequence, signature);
+          changed.push({
+            ...entry,
+            eventKey: `${entry.sequence}:${entry.updatedAt}:${signature}`
+          });
+        }
+      }
+      if (changed.length > 0) {
+        setEvents((current) => [...changed, ...current].slice(0, 500));
+      }
+      setSnapshot(next);
+      setError(undefined);
+    } catch (requestError) {
+      if (!signal?.aborted) setError(operationResultError(requestError));
+    } finally {
+      if (!signal?.aborted) setRefreshing(false);
+    }
+  }, [operationId, projectId]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let timer: number | undefined;
+    const tick = async (): Promise<void> => {
+      await load(controller.signal);
+      if (!controller.signal.aborted && active) {
+        timer = window.setTimeout(() => void tick(), 1_000);
+      }
+    };
+    void tick();
+    return () => {
+      controller.abort();
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [active, load]);
+
+  const activeLanes = snapshot?.entries
+    .filter((entry) => entry.active)
+    .map(({ lane }) => lane)
+    .filter((lane, index, values) => values.indexOf(lane) === index)
+    .sort((left, right) => left - right) ?? [];
+
+  return (
+    <SemanticModal
+      bodyClassName={styles.runtimeLogBody ?? ""}
+      description="Безопасный live-монитор запросов: обновление раз в секунду, без API-ключей и provider req_id."
+      footer={(
+        <div className={styles.runtimeLogFooter}>
+          <span>
+            {active
+              ? "Мониторинг продолжится, пока открыто окно"
+              : "Операция завершена · показан финальный снимок"}
+          </span>
+          <button onClick={onClose} type="button">Закрыть</button>
+        </div>
+      )}
+      onClose={onClose}
+      presenceKey={`rank-runtime-diagnostics:${operationId}`}
+      size="large"
+      title="Логи XMLStock"
+    >
+      <div className={styles.runtimeLogWorkspace}>
+        <div className={styles.runtimeLogOverview}>
+          <div className={styles.runtimeLiveState}>
+            <span className={active ? styles.runtimeLiveDot : styles.runtimeDoneDot} />
+            <div>
+              <strong>{active ? "В реальном времени" : "Операция завершена"}</strong>
+              <small>{snapshot ? rankRuntimeProductLabel(snapshot.policy.product) : "Подключаем монитор…"}</small>
+            </div>
+          </div>
+          <RuntimeMetric label="Активных потоков" value={snapshot?.totals.active ?? 0} />
+          <RuntimeMetric label="Ожидают провайдера" value={snapshot?.totals.waitingProvider ?? 0} />
+          <RuntimeMetric label="Завершено" value={snapshot?.totals.completed ?? 0} />
+          <RuntimeMetric label="Ошибок" value={snapshot?.totals.failed ?? 0} tone="error" />
+          <div className={styles.runtimePolicy}>
+            <small>Лимит подключения</small>
+            <strong>
+              {snapshot
+                ? `${snapshot.policy.concurrency} потоков · ${snapshot.policy.requestsPerSecond} запросов/с`
+                : "—"}
+            </strong>
+          </div>
+        </div>
+
+        <div className={styles.runtimeLaneBar}>
+          <strong>Сейчас выполняются</strong>
+          <div>
+            {activeLanes.length > 0 ? activeLanes.map((lane) => (
+              <span
+                key={lane}
+                style={{ "--runtime-lane-color": rankRuntimeLaneColor(lane) } as CSSProperties}
+              >
+                Поток {lane}
+              </span>
+            )) : <small>{refreshing ? "Обновляем…" : "Свободные потоки ожидают запросы"}</small>}
+          </div>
+          <button
+            disabled={refreshing}
+            onClick={() => void load()}
+            type="button"
+          >
+            {refreshing ? "Обновление…" : "Обновить"}
+          </button>
+        </div>
+
+        {error && <div className={styles.runtimeLogError} role="alert">{error}</div>}
+
+        <div className={styles.runtimeLogTableWrap}>
+          <table className={styles.runtimeLogTable}>
+            <caption>Живой журнал выполнения XMLStock</caption>
+            <thead>
+              <tr>
+                <th>Время</th>
+                <th>Поток</th>
+                <th>Запрос</th>
+                <th>Состояние</th>
+                <th>HTTP-попытки</th>
+                <th>Страницы</th>
+                <th>Следующее действие</th>
+              </tr>
+            </thead>
+            <tbody>
+              {events.map((entry) => (
+                <tr key={entry.eventKey}>
+                  <td>{formatRuntimeTime(entry.updatedAt)}</td>
+                  <td>
+                    <span
+                      className={styles.runtimeLane}
+                      style={{ "--runtime-lane-color": rankRuntimeLaneColor(entry.lane) } as CSSProperties}
+                    >
+                      {entry.lane}
+                    </span>
+                  </td>
+                  <td className={styles.runtimeKeyword}>
+                    <strong>{entry.keyword}</strong>
+                    <small>Строка {entry.sequence + 1} · попытка {entry.executionAttempt}</small>
+                  </td>
+                  <td>
+                    <span className={`${styles.runtimeState ?? ""} ${styles[`runtimeState${entry.state}`] ?? ""}`}>
+                      {rankRuntimeStateLabel(entry.state)}
+                    </span>
+                  </td>
+                  <td>{entry.submitAttempts + entry.pollAttempts}<small>{entry.submitAttempts} отправка · {entry.pollAttempts} опрос</small></td>
+                  <td>{entry.completedPages} из {entry.totalPages}</td>
+                  <td className={entry.errorCode ? styles.runtimeErrorCode : undefined}>
+                    {entry.errorCode ?? formatRuntimeNextAction(entry.nextActionAt)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {events.length === 0 && (
+            <div className={styles.runtimeLogEmpty}>
+              <span className={styles.inlineSpinner} />
+              <strong>Ждём первые события</strong>
+              <small>Подготовленные запросы появятся здесь автоматически.</small>
+            </div>
+          )}
+        </div>
+      </div>
+    </SemanticModal>
+  );
+}
+
+function RuntimeMetric({
+  label,
+  tone,
+  value
+}: Readonly<{ label: string; tone?: "error"; value: number }>) {
+  return (
+    <div className={tone === "error" ? styles.runtimeMetricError : styles.runtimeMetric}>
+      <small>{label}</small>
+      <strong>{formatInteger(value)}</strong>
+    </div>
+  );
+}
+
+function rankRuntimeEntrySignature(entry: RankRuntimeDiagnosticEntry): string {
+  return [
+    entry.state,
+    entry.executionAttempt,
+    entry.submitAttempts,
+    entry.pollAttempts,
+    entry.completedPages,
+    entry.totalPages,
+    entry.active ? 1 : 0,
+    entry.nextActionAt ?? "",
+    entry.errorCode ?? ""
+  ].join(":");
+}
+
+function rankRuntimeProductLabel(value: RankRuntimeDiagnostics["policy"]["product"]): string {
+  return ({
+    YANDEX_LIVE: "Яндекс Live",
+    GOOGLE_LIVE: "Google Live",
+    YANDEX_SEARCH_API: "Яндекс XML Proxy"
+  } as const)[value];
+}
+
+function rankRuntimeStateLabel(value: RankRuntimeDiagnosticEntry["state"]): string {
+  return ({
+    QUEUED: "Подготовлен",
+    REQUESTING: "HTTP-запрос",
+    WAITING_PROVIDER: "Ждёт XMLStock",
+    WAITING_NEXT_PAGE: "Следующая страница",
+    SAVING: "Сохранение",
+    COMPLETED: "Готово",
+    RETRY_WAIT: "Повтор",
+    FAILED: "Ошибка"
+  } as const)[value];
+}
+
+function rankRuntimeLaneColor(lane: number): string {
+  return `hsl(${(lane * 47 + 238) % 360} 72% 52%)`;
+}
+
+function formatRuntimeTime(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "—"
+    : new Intl.DateTimeFormat("ru-RU", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit"
+      }).format(date);
+}
+
+function formatRuntimeNextAction(value: string | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  const delay = Math.max(0, Math.ceil((date.getTime() - Date.now()) / 1000));
+  return delay > 0 ? `через ${delay} с` : "сейчас";
+}
+
 function RankTable({ result }: Readonly<{ result: RankOperationResult }>) {
   if (result.rows.length === 0) return <EmptyRows active={isActiveStatus(result.job.status)} />;
   return (
     <div className={styles.tableScroll}>
       <table className={styles.table}>
         <caption>Позиции запросов этого запуска</caption>
-        <thead><tr><th>#</th><th>Запрос</th><th>Результат</th><th>Позиция</th><th>Релевантный URL</th><th>Заголовок</th><th>Качество</th><th>Проверено</th></tr></thead>
+        <thead><tr><th>#</th><th>Запрос</th><th>Результат</th><th>Позиция</th><th>Релевантный URL</th><th>Заголовок</th><th>Проверено</th></tr></thead>
         <tbody>{result.rows.map((row) => (
           <tr key={`${row.sequence}:${row.keywordId}`}>
             <td>{row.sequence + 1}</td>
-            <td className={styles.primaryCell}><strong>{row.keyword}</strong><small>{shortId(row.keywordId)}</small></td>
+            <td className={styles.primaryCell}><strong>{row.keyword}</strong></td>
             <td><RankState state={row.state} /></td>
             <td className={styles.numberCell}>{rankPosition(row)}</td>
             <td className={styles.urlCell}><ExternalUrl value={row.rankingUrl} /></td>
             <td className={styles.longCell} title={row.title ?? row.snippet}>{row.title ?? row.snippet ?? "—"}</td>
-            <td>{row.dataQualityFlags.length === 0 ? "Без замечаний" : row.dataQualityFlags.join(" · ")}</td>
             <td>{formatDateTime(row.observedAt)}</td>
           </tr>
         ))}</tbody>
@@ -1655,7 +2165,7 @@ function ResearchTable({ result }: Readonly<{ result: KeywordResearchRunSummary 
         <tbody>{result.rows.map((row, index) => (
           <tr key={row.id}>
             <td>{index + 1}</td>
-            <td className={styles.primaryCell}><strong>{row.keyword}</strong><small>{shortId(row.id)}</small></td>
+            <td className={styles.primaryCell}><strong>{row.keyword}</strong></td>
             <td className={styles.urlCell}><ExternalUrl value={row.url} /></td>
             <td className={styles.numberCell}>{formatOptionalNumber(row.frequencyBase)}</td>
             <td className={styles.numberCell}>{formatOptionalNumber(row.frequencyExact)}</td>
@@ -1706,6 +2216,7 @@ function ExternalUrl({ value }: Readonly<{ value: string | undefined }>) {
 interface SummaryView {
   readonly title: string;
   readonly description: string;
+  readonly context?: string;
   readonly provider?: "XMLSTOCK" | "ARSENKIN" | "KEYS_SO";
   readonly status: string;
   readonly tone: "Active" | "Success" | "Warning" | "Error" | "Neutral";
@@ -1718,7 +2229,6 @@ function operationSummary(data: OperationResultData): SummaryView {
   if (data.kind === "frequency") {
     const value = data.value.collection;
     const current = value.completedKeywords + value.failedKeywords;
-    const routeTrail = connectorRouteTrail(value.connectorAttempts);
     return {
       title: "Сбор частотности",
       description: `${providerLabel(value.provider)} · ${value.types.map(frequencyTypeLabel).join(" + ")}`,
@@ -1734,12 +2244,6 @@ function operationSummary(data: OperationResultData): SummaryView {
         { label: "Ошибок", value: formatInteger(value.failedKeywords) },
         { label: "Регион", value: value.regionCode },
         { label: "Устройство", value: deviceLabel(value.device) },
-        ...(value.routingScope
-          ? [{ label: "Маршрут", value: connectorRoutingScopeLabel(value.routingScope) }]
-          : []),
-        ...(routeTrail
-          ? [{ label: "Провайдеры", value: routeTrail }]
-          : []),
         ...(value.failureCode
           ? [{ label: "Код ошибки", value: value.failureCode }]
           : [])
@@ -1749,7 +2253,6 @@ function operationSummary(data: OperationResultData): SummaryView {
   if (data.kind === "ai-answer") {
     const value = data.value.collection;
     const current = value.completedKeywords + value.failedKeywords;
-    const routeTrail = connectorRouteTrail(value.connectorAttempts);
     return {
       title: "Сбор ИИ-ответов",
       description: `Arsenkin Tools · ${value.searchEngine === "YANDEX" ? "Яндекс" : "Google"} · ${deviceLabel(value.device)}`,
@@ -1760,10 +2263,6 @@ function operationSummary(data: OperationResultData): SummaryView {
         { label: "Успешно", value: formatInteger(value.completedKeywords) },
         { label: "Ошибок", value: formatInteger(value.failedKeywords) },
         { label: "Регион", value: value.regionCode },
-        ...(value.routingScope
-          ? [{ label: "Маршрут", value: connectorRoutingScopeLabel(value.routingScope) }]
-          : []),
-        ...(routeTrail ? [{ label: "Провайдеры", value: routeTrail }] : []),
         ...(value.failureCode ? [{ label: "Код ошибки", value: value.failureCode }] : [])
       ]
     };
@@ -1790,11 +2289,6 @@ function operationSummary(data: OperationResultData): SummaryView {
         { label: "Без кластера", value: formatInteger(value.unclusteredCount ?? proposal?.unclusteredCount ?? 0) },
         { label: "Совпадений", value: String(value.overlapCount) },
         { label: "Глубина", value: `ТОП-${value.depth}` },
-        { label: "Частотность", value: value.frequencyTypes.length > 0
-          ? value.frequencyTypes.map(clusteringFrequencyTypeLabel).join(", ")
-          : "Не собирать" },
-        { label: "Главные страницы", value: value.excludeMainPages ? "Исключаются" : "Учитываются" },
-        { label: "Стоп-домены", value: formatInteger(value.stopDomains.length) },
         ...(value.failureCode ? [{ label: "Код ошибки", value: value.failureCode }] : [])
       ]
     };
@@ -1806,7 +2300,6 @@ function operationSummary(data: OperationResultData): SummaryView {
     const found = Number(value.job.result?.foundCount ?? value.rows.filter(({ state }) => state === "FOUND").length);
     const notFound = Number(value.job.result?.notFoundCount ?? value.rows.filter(({ state }) => state === "NOT_FOUND").length);
     const failed = Number(value.job.result?.failedCount ?? 0);
-    const routeTrail = connectorRouteTrail(value.job.connectorAttempts);
     const searchSource = rankSearchSourceFromProviderMappingVersion(
       value.execution.searchEngine,
       value.execution.providerMappingVersion
@@ -1817,23 +2310,16 @@ function operationSummary(data: OperationResultData): SummaryView {
     );
     return {
       title: "Проверка позиций",
-      description: `${value.contextName} · ${searchSystem} · ${deviceLabel(value.execution.device)}`,
+      description: `${searchSystem} · ${deviceLabel(value.execution.device)}`,
+      context: value.contextName,
       provider: value.job.provider,
       ...summaryStatus(value.job.status, current, total),
       facts: [
-        { label: "Провайдер", value: providerLabel(value.job.provider) },
-        { label: "Поисковая система", value: searchSystem },
         { label: "Найдено", value: formatInteger(found) },
         { label: "Не найдено", value: formatInteger(notFound) },
         { label: "Ошибок", value: formatInteger(failed) },
         { label: "Регион", value: value.execution.regionCode ?? value.execution.countryCode },
         { label: "Глубина", value: `Топ-${value.execution.depth}` },
-        ...(value.job.routingScope
-          ? [{ label: "Маршрут", value: connectorRoutingScopeLabel(value.job.routingScope) }]
-          : []),
-        ...(routeTrail
-          ? [{ label: "Провайдеры", value: routeTrail }]
-          : []),
         ...("failure" in value.job && value.job.failure
           ? [{ label: "Код ошибки", value: value.job.failure.code }]
           : [])
@@ -1863,10 +2349,16 @@ function operationSummary(data: OperationResultData): SummaryView {
   const value = data.value;
   const current = value.importedKeywords > 0 ? value.importedKeywords : value.collectedKeywords;
   const total = value.totalAvailable ?? value.maxKeywords;
+  const keysSo = value.source === "KEYS_SO";
+  const wordstatProvider = value.source === "XMLSTOCK_WORDSTAT"
+    ? "XMLSTOCK"
+    : "ARSENKIN";
   return {
-    title: "Сбор конкурентов",
-    description: `Keys.so · ${value.domain} · ${value.database.toUpperCase()}`,
-    provider: "KEYS_SO",
+    title: keysSo ? "Анализ Keys.so" : "Парсинг Wordstat",
+    description: keysSo
+      ? `Keys.so · ${value.domain ?? "—"} · ${(value.database ?? "msk").toUpperCase()}`
+      : `${wordstatProvider === "XMLSTOCK" ? "XMLStock" : "Arsenkin"} · ${value.seedCount ?? 0} исходных фраз · ${value.regionCode === "225" ? "Россия" : `регион ${value.regionCode ?? "225"}`}`,
+    provider: keysSo ? "KEYS_SO" : wordstatProvider,
     ...summaryStatus(value.status, current, total),
     facts: [
       { label: "Найдено", value: formatInteger(value.collectedKeywords) },
@@ -2040,6 +2532,24 @@ function isActiveStatus(status: string): boolean {
   return ["PREPARING", "QUEUED", "RUNNING", "WAITING_RATE_LIMIT", "RETRY_SCHEDULED", "FAILED_RETRYABLE", "CANCEL_REQUESTED", "IMPORT_QUEUED", "IMPORTING"].includes(status);
 }
 
+function operationActorId(data: OperationResultData): string | undefined {
+  if (data.kind === "frequency") return data.value.collection.actorId;
+  if (data.kind === "ai-answer") return data.value.collection.actorId;
+  if (data.kind === "clustering") return data.value.run.actorId;
+  if (data.kind === "rank") return data.value.job.actorId;
+  if (data.kind === "crawl") return data.value.crawl.actorId;
+  return data.value.actorId;
+}
+
+function initials(value: string): string {
+  return value
+    .trim()
+    .split(/\s+/u)
+    .slice(0, 2)
+    .map((part) => part[0]?.toLocaleUpperCase("ru-RU") ?? "")
+    .join("") || "У";
+}
+
 function frequencyProvider(row: FrequencyOperationResultRow): string { return row.snapshots[0]?.provider ?? "—"; }
 function frequencyObservedAt(row: FrequencyOperationResultRow): string { return formatDateTime(row.snapshots[0]?.observedAt); }
 function rankPosition(row: RankOperationResultRow): string { return row.state === "FOUND" ? formatOptionalNumber(row.position ?? row.absolutePosition) : row.state === "NOT_FOUND" ? "Не найден" : "—"; }
@@ -2048,11 +2558,9 @@ function formatDecimal(value: string): string { const number = Number(value); re
 function formatInteger(value: number): string { return new Intl.NumberFormat("ru-RU").format(value); }
 function formatBytes(value: number): string { if (value < 1024) return `${value} Б`; if (value < 1_048_576) return `${(value / 1024).toFixed(1)} КБ`; return `${(value / 1_048_576).toFixed(1)} МБ`; }
 function formatDateTime(value: string | undefined): string { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat("ru-RU", { dateStyle: "short", timeStyle: "short" }).format(date); }
-function shortId(value: string): string { return value.slice(0, 8); }
 function safeExternalUrl(value: string): string | undefined { try { const url = new URL(value); return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : undefined; } catch { return undefined; } }
 function providerLabel(provider: "XMLSTOCK" | "ARSENKIN"): string { return provider === "XMLSTOCK" ? "XMLStock" : "Arsenkin Tools"; }
 function frequencyTypeLabel(type: string): string { return ({ BASE: "База", EXACT: '""', FIXED: '"!"' } as Readonly<Record<string, string>>)[type] ?? type; }
-function clusteringFrequencyTypeLabel(type: string): string { return ({ BASE: "базовая", QUOTED: "фразовая", OVERALL: "общая", EXACT: "точная" } as Readonly<Record<string, string>>)[type] ?? type; }
 function deviceLabel(device: string): string { return ({ ALL: "Все устройства", DESKTOP: "Десктоп", MOBILE: "Мобильные", PHONE_ONLY: "Телефоны", TABLET_ONLY: "Планшеты" } as Readonly<Record<string, string>>)[device] ?? device; }
 function indexabilityLabel(value: string): string { return ({ INDEXABLE: "Индексируется", NOINDEX: "Noindex", CANONICALIZED: "Canonical на другой URL", REDIRECTED: "Редирект", ERROR: "Ошибка", UNKNOWN: "Не определено" } as Readonly<Record<string, string>>)[value] ?? value; }
 function clusteringRowStateLabel(row: ClusteringProposalResultRow): string {

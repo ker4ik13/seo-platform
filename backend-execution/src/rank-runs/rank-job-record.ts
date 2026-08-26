@@ -196,6 +196,7 @@ export function toRankJobSummary(stored: StoredRankJob): RankJobSummary {
     id: stored.id,
     workspaceId: stored.workspaceId,
     projectId: stored.projectId,
+    ...(stored.actorId ? { actorId: stored.actorId } : {}),
     trackingContextId: run.trackingContextId,
     type: "MANUAL_RANK_CHECK",
     provider: stored.provider,

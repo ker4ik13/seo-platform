@@ -80,6 +80,7 @@ import type {
   RankRunConflictDetails,
   RankRunConflictReason,
   RankJobSummary,
+  RankRuntimeDiagnostics,
   SemanticImportSummary,
   StorageCapacityEntitlement,
   UploadPartUrls,
@@ -92,7 +93,9 @@ import type {
   InternalCreateKeywordResearchRunInput,
   InternalConfirmKeywordResearchRunInput,
   InternalCancelKeywordResearchRunInput,
+  InternalRetryKeywordResearchImportInput,
   ConfirmKeywordResearchRunInput,
+  KeywordResearchRowPage,
   KeywordResearchRunSummary,
   SemanticCapacityEntitlement,
   CreateFrequencyCollectionInput,
@@ -134,7 +137,10 @@ import { DomainError } from "../common/domain-error.js";
 import type { TenantAuthorization } from "../authorization/authorization.types.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import type { AppConfig } from "../config/app-config.js";
-import { scopedRankJobSummary } from "./rank-job-response.js";
+import {
+  scopedRankJobSummary,
+  scopedRankRuntimeDiagnostics
+} from "./rank-job-response.js";
 import { scopedRankEstimate } from "./rank-estimate-response.js";
 import {
   scopedAutomation,
@@ -148,7 +154,10 @@ import {
   scopedCrawlAutomationRun,
   scopedCrawlAutomationRuns
 } from "./crawl-automation-response.js";
-import { scopedKeywordResearchRun } from "./keyword-research-response.js";
+import {
+  scopedKeywordResearchRowPage,
+  scopedKeywordResearchRun
+} from "./keyword-research-response.js";
 import {
   scopedFrequencyCollection,
   scopedFrequencyOperationScope
@@ -285,7 +294,9 @@ export class JobsClient {
     const value = await this.request<unknown>(
       "GET",
       keywordResearchCollectionPath(context.tenant.workspaceId, projectId),
-      context
+      context,
+      undefined,
+      "integration-credential"
     );
     const input = exactRecord(value, ["runs"]);
     if (!Array.isArray(input.runs) || input.runs.length > 25) {
@@ -438,7 +449,7 @@ export class JobsClient {
       frequencyCollectionPath(context.tenant.workspaceId, projectId),
       context,
       body,
-      "shared",
+      "integration-credential",
       idempotencyKey
     );
     return scopedFrequencyCollection(
@@ -714,7 +725,7 @@ export class JobsClient {
       keywordResearchCollectionPath(context.tenant.workspaceId, projectId),
       context,
       body,
-      "shared",
+      "integration-credential",
       idempotencyKey
     );
     return scopedKeywordResearchRun(
@@ -735,7 +746,9 @@ export class JobsClient {
         context.tenant.workspaceId,
         projectId
       )}/${encodeURIComponent(runId)}`,
-      context
+      context,
+      undefined,
+      "integration-credential"
     );
     return scopedKeywordResearchRun(
       value,
@@ -743,6 +756,27 @@ export class JobsClient {
       projectId,
       runId
     );
+  }
+
+  public async getKeywordResearchRows(
+    context: InternalContext,
+    runId: string,
+    query: Readonly<{ cursor?: number; limit: number }>
+  ): Promise<KeywordResearchRowPage> {
+    const projectId = requiredProjectId(context.tenant);
+    const search = new URLSearchParams({ limit: String(query.limit) });
+    if (query.cursor !== undefined) search.set("cursor", String(query.cursor));
+    const value = await this.request<unknown>(
+      "GET",
+      `${keywordResearchCollectionPath(
+        context.tenant.workspaceId,
+        projectId
+      )}/${encodeURIComponent(runId)}/rows?${search.toString()}`,
+      context,
+      undefined,
+      "integration-credential"
+    );
+    return scopedKeywordResearchRowPage(value, query.cursor, query.limit);
   }
 
   public async confirmKeywordResearchRun(
@@ -768,7 +802,8 @@ export class JobsClient {
         projectId
       )}/${encodeURIComponent(runId)}/confirm`,
       context,
-      body
+      body,
+      "integration-credential"
     );
     return scopedKeywordResearchRun(
       value,
@@ -797,7 +832,38 @@ export class JobsClient {
         projectId
       )}/${encodeURIComponent(runId)}/cancel`,
       context,
-      body
+      body,
+      "integration-credential"
+    );
+    return scopedKeywordResearchRun(
+      value,
+      context.tenant.workspaceId,
+      projectId,
+      runId
+    );
+  }
+
+  public async retryKeywordResearchImport(
+    context: InternalContext,
+    runId: string,
+    version: number
+  ): Promise<KeywordResearchRunSummary> {
+    const projectId = requiredProjectId(context.tenant);
+    const body: InternalRetryKeywordResearchImportInput = {
+      workspaceId: context.tenant.workspaceId,
+      projectId,
+      actorId: context.actorId,
+      version
+    };
+    const value = await this.request<unknown>(
+      "POST",
+      `${keywordResearchCollectionPath(
+        context.tenant.workspaceId,
+        projectId
+      )}/${encodeURIComponent(runId)}/retry-import`,
+      context,
+      body,
+      "integration-credential"
     );
     return scopedKeywordResearchRun(
       value,
@@ -1775,6 +1841,23 @@ export class JobsClient {
     );
   }
 
+  public async getRankRuntimeDiagnostics(
+    context: InternalContext,
+    jobId: string
+  ): Promise<RankRuntimeDiagnostics> {
+    const projectId = requiredProjectId(context.tenant);
+    const value = await this.requestIntegration<unknown>(
+      "GET",
+      `${rankJobPath(
+        context.tenant.workspaceId,
+        projectId,
+        jobId
+      )}/runtime-diagnostics`,
+      context
+    );
+    return scopedRankRuntimeDiagnostics(value, jobId);
+  }
+
   public async cancelRankJob(
     context: InternalContext,
     jobId: string
@@ -2315,6 +2398,7 @@ function technicalCrawlResponse(
     "discoveredUrls", "processedUrls", "successfulUrls", "failedUrls",
     "issueCount", "version", "createdAt"
   ], [
+    "actorId",
     "failureCode",
     "backoffCode",
     "backoffUntil",
@@ -2512,6 +2596,9 @@ function technicalCrawlResponse(
     jobId: uuidValue(input.jobId),
     workspaceId: responseWorkspaceId,
     projectId: responseProjectId,
+    ...(input.actorId === undefined
+      ? {}
+      : { actorId: uuidValue(input.actorId) }),
     status: input.status as TechnicalCrawlSummary["status"],
     config: {
       purpose: purpose as TechnicalCrawlSummary["config"]["purpose"],

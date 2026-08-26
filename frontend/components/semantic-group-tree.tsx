@@ -16,6 +16,7 @@ import {
 import { semanticGroupColors } from "../lib/semantic-group-colors";
 import {
   semanticAllRegularGroupIds,
+  semanticGroupIdsWithDescendants,
   semanticGroupRangeSelection,
   semanticVisiblePresenceGroupId
 } from "../lib/semantic-group-selection";
@@ -530,6 +531,27 @@ export function SemanticGroupTree({
         <strong>Группы</strong>
         <div>
           {selectedGroups.length > 0 && <span>{selectedGroups.length}</span>}
+          <button
+            aria-label="Выбрать вложенные группы"
+            className="semantic-group-descendants"
+            disabled={selectedGroups.length === 0}
+            onClick={() => {
+              const ids = semanticGroupIdsWithDescendants(
+                groups,
+                selectedGroups.map(({ id }) => id)
+              );
+              setSelectedIds(new Set(ids));
+              selectionAnchorIdRef.current ??= ids[0];
+            }}
+            title={
+              selectedGroups.length === 0
+                ? "Сначала выберите группу"
+                : "Добавить к выбору все вложенные группы"
+            }
+            type="button"
+          >
+            <Icon name="checkDouble" />
+          </button>
           <button
             aria-label="Открыть выбранные группы вместе"
             className="semantic-group-multi-open"

@@ -338,7 +338,8 @@ export class SemanticExportWorkerService {
     } while (cursor);
 
     if (selected && selected.size > 0) {
-      throw new ExportFailure("EXPORT_KEYWORDS_UNAVAILABLE", false);
+      if (input.filters?.isTracked === true) selected.clear();
+      else throw new ExportFailure("EXPORT_KEYWORDS_UNAVAILABLE", false);
     }
   }
 
@@ -496,7 +497,8 @@ export class SemanticExportWorkerService {
     } while (cursor);
 
     if (selected && selected.size > 0) {
-      throw new ExportFailure("EXPORT_KEYWORDS_UNAVAILABLE", false);
+      if (input.filters?.isTracked === true) selected.clear();
+      else throw new ExportFailure("EXPORT_KEYWORDS_UNAVAILABLE", false);
     }
   }
 

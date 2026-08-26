@@ -266,25 +266,7 @@ export class KeywordService {
       ...(query.clusterId ? { clusterId: query.clusterId } : {}),
       ...(query.isTracked === undefined
         ? {}
-        : {
-            trackingAssignments: query.isTracked
-              ? {
-                  some: {
-                    workspaceId,
-                    projectId,
-                    removedAt: null,
-                    context: { status: "ACTIVE" }
-                  }
-                }
-              : {
-                  none: {
-                    workspaceId,
-                    projectId,
-                    removedAt: null,
-                    context: { status: "ACTIVE" }
-                  }
-                }
-          })
+        : { isTracked: query.isTracked })
     };
     let externalSortValueById = new Map<string, string>();
     let rows: KeywordAggregate[];
@@ -365,7 +347,6 @@ export class KeywordService {
     ];
     const [
       pages,
-      activeTrackingAssignments,
       clusters,
       frequencySnapshots,
       currentRanks,
@@ -382,19 +363,6 @@ export class KeywordService {
               status: "ACTIVE"
             },
             select: { id: true, url: true }
-          }),
-      keywordIds.length === 0
-        ? Promise.resolve([])
-        : this.prisma.trackingContextKeywordAssignment.findMany({
-            where: {
-              workspaceId,
-              projectId,
-              keywordId: { in: keywordIds },
-              removedAt: null,
-              context: { status: "ACTIVE" }
-            },
-            select: { keywordId: true },
-            distinct: ["keywordId"]
           }),
       clusterIds.length === 0
         ? Promise.resolve([])
@@ -510,9 +478,6 @@ export class KeywordService {
           }
         });
     const pageUrlById = new Map(pages.map(({ id, url }) => [id, url]));
-    const trackedKeywordIds = new Set(
-      activeTrackingAssignments.map(({ keywordId }) => keywordId)
-    );
     const clusterNameById = new Map(
       clusters.map(({ id, name }) => [id, name])
     );
@@ -685,7 +650,6 @@ export class KeywordService {
           row.targetPageId
             ? pageUrlById.get(row.targetPageId)
             : undefined,
-          trackedKeywordIds.has(row.id),
           row.clusterId ? clusterNameById.get(row.clusterId) : undefined,
           frequenciesByKeywordId.get(row.id),
           [...(positionsByKeywordId.get(row.id)?.values() ?? [])],
@@ -1204,12 +1168,6 @@ export class KeywordService {
                 input.projectId,
                 moved.targetPageId
               ),
-              await isKeywordTracked(
-                transaction,
-                input.workspaceId,
-                input.projectId,
-                moved.id
-              ),
               await clusterNameFor(
                 transaction,
                 input.workspaceId,
@@ -1242,12 +1200,6 @@ export class KeywordService {
                 input.workspaceId,
                 input.projectId,
                 existing.targetPageId
-              ),
-              await isKeywordTracked(
-                transaction,
-                input.workspaceId,
-                input.projectId,
-                existing.id
               ),
               await clusterNameFor(
                 transaction,
@@ -1325,6 +1277,7 @@ export class KeywordService {
               language: input.language,
               priority: input.priority,
               isFavorite: input.isFavorite,
+              isTracked: input.isTracked ?? true,
               intent: input.intent ?? null,
               clusterId: input.clusterId ?? null,
               targetPageId: pageId ?? null,
@@ -1396,12 +1349,6 @@ export class KeywordService {
             ...keywordItem(
               result,
               input.targetUrl,
-              await isKeywordTracked(
-                transaction,
-                input.workspaceId,
-                input.projectId,
-                result.id
-              ),
               await clusterNameFor(
                 transaction,
                 input.workspaceId,
@@ -1423,6 +1370,7 @@ export class KeywordService {
             language: input.language,
             priority: input.priority,
             isFavorite: input.isFavorite,
+            isTracked: input.isTracked ?? true,
             ...(input.intent ? { intent: input.intent } : {}),
             ...(input.clusterId ? { clusterId: input.clusterId } : {}),
             ...(pageId ? { targetPageId: pageId } : {}),
@@ -1484,7 +1432,6 @@ export class KeywordService {
           ...keywordItem(
             result,
             input.targetUrl,
-            false,
             await clusterNameFor(
               transaction,
               input.workspaceId,
@@ -1836,6 +1783,9 @@ export class KeywordService {
             ...(input.isFavorite === undefined
               ? {}
               : { isFavorite: input.isFavorite }),
+            ...(input.isTracked === undefined
+              ? {}
+              : { isTracked: input.isTracked }),
             ...(input.showAiAnswerButton === undefined
               ? {}
               : { showAiAnswerButton: input.showAiAnswerButton }),
@@ -1927,12 +1877,6 @@ export class KeywordService {
         return keywordItem(
           result,
           targetUrl,
-          await isKeywordTracked(
-            transaction,
-            input.workspaceId,
-            input.projectId,
-            keywordId
-          ),
           await clusterNameFor(
             transaction,
             input.workspaceId,
@@ -2396,26 +2340,6 @@ function cleaningKey(language: string, normalizedHash: string): string {
   return `${language}\u0000${normalizedHash}`;
 }
 
-async function isKeywordTracked(
-  transaction: Prisma.TransactionClient,
-  workspaceId: string,
-  projectId: string,
-  keywordId: string
-): Promise<boolean> {
-  const assignment =
-    await transaction.trackingContextKeywordAssignment.findFirst({
-      where: {
-        workspaceId,
-        projectId,
-        keywordId,
-        removedAt: null,
-        context: { status: "ACTIVE" }
-      },
-      select: { id: true }
-    });
-  return Boolean(assignment);
-}
-
 async function requiredKeyword(
   transaction: Prisma.TransactionClient | PrismaService,
   workspaceId: string,
@@ -2674,7 +2598,6 @@ async function lockSemanticClusterSet(
 function keywordItem(
   row: KeywordAggregate,
   targetUrl: string | undefined,
-  isTracked: boolean,
   clusterName?: string,
   frequencies: readonly SemanticKeywordListFrequencyValue[] = [],
   positions: readonly SemanticKeywordListPosition[] = [],
@@ -2702,7 +2625,7 @@ function keywordItem(
     language: row.language,
     priority: row.priority,
     isFavorite: row.isFavorite,
-    isTracked,
+    isTracked: row.isTracked,
     showAiAnswerButton: row.showAiAnswerButton,
     ...(row.intent
       ? {
@@ -2740,6 +2663,7 @@ function keywordVersionState(
     language: row.language,
     priority: row.priority,
     isFavorite: row.isFavorite,
+    isTracked: row.isTracked,
     intent: row.intent,
     status: row.status === "DELETED" ? "DELETED" : "ACTIVE",
     clusterId: row.clusterId,
@@ -3228,13 +3152,15 @@ async function metricSortedKeywordPage(
   const aiPositionMetric = ascending
     ? Prisma.sql`CASE
         WHEN latest_ai.site_found THEN latest_ai.position::bigint
-        WHEN latest_ai.answer_present THEN ${positionBucket}::bigint
+        WHEN latest_ai.historical_position IS NOT NULL
+          THEN ${positionBucket}::bigint + latest_ai.historical_position::bigint
         ELSE ${positionBucket * 2n}::bigint
       END`
     : Prisma.sql`CASE
         WHEN latest_ai.site_found
           THEN ${positionBucket * 2n}::bigint + latest_ai.position::bigint
-        WHEN latest_ai.answer_present THEN ${positionBucket}::bigint
+        WHEN latest_ai.historical_position IS NOT NULL
+          THEN ${positionBucket}::bigint + latest_ai.historical_position::bigint
         ELSE 0::bigint
       END`;
   const metricJoin = sort.startsWith("FREQUENCY_")
@@ -3253,13 +3179,32 @@ async function metricSortedKeywordPage(
       ? Prisma.sql`
         LEFT JOIN LATERAL (
           SELECT ${aiPositionMetric} AS metric
-          FROM ai_answer_snapshots latest_ai
-          WHERE latest_ai.workspace_id = k.workspace_id
-            AND latest_ai.project_id = k.project_id
-            AND latest_ai.keyword_id = k.id
-            AND latest_ai.search_engine = ${rankEngine}
-          ORDER BY latest_ai.observed_at DESC, latest_ai.id DESC
-          LIMIT 1
+          FROM (
+            SELECT
+              current_ai.site_found,
+              current_ai.position,
+              (
+                SELECT previous.position
+                FROM ai_answer_snapshots previous
+                WHERE previous.workspace_id = current_ai.workspace_id
+                  AND previous.project_id = current_ai.project_id
+                  AND previous.keyword_id = current_ai.keyword_id
+                  AND previous.search_engine = current_ai.search_engine
+                  AND previous.site_found = TRUE
+                  AND previous.position IS NOT NULL
+                  AND (previous.observed_at, previous.id) <
+                      (current_ai.observed_at, current_ai.id)
+                ORDER BY previous.observed_at DESC, previous.id DESC
+                LIMIT 1
+              ) AS historical_position
+            FROM ai_answer_snapshots current_ai
+            WHERE current_ai.workspace_id = k.workspace_id
+              AND current_ai.project_id = k.project_id
+              AND current_ai.keyword_id = k.id
+              AND current_ai.search_engine = ${rankEngine}
+            ORDER BY current_ai.observed_at DESC, current_ai.id DESC
+            LIMIT 1
+          ) latest_ai
         ) metric_source ON TRUE`
       : aiCheckedAtSort
         ? Prisma.sql`
@@ -3511,20 +3456,7 @@ function keywordRawFilters(
   }
   if (query.clusterId) filters.push(Prisma.sql`k.cluster_id = ${query.clusterId}::uuid`);
   if (query.isTracked !== undefined) {
-    const tracked = Prisma.sql`EXISTS (
-      SELECT 1
-      FROM tracking_context_keyword_assignments tcka
-      INNER JOIN tracking_contexts tc
-        ON tc.workspace_id = tcka.workspace_id
-       AND tc.project_id = tcka.project_id
-       AND tc.id = tcka.context_id
-      WHERE tcka.workspace_id = k.workspace_id
-        AND tcka.project_id = k.project_id
-        AND tcka.keyword_id = k.id
-        AND tcka.removed_at IS NULL
-        AND tc.status::text = 'ACTIVE'
-    )`;
-    filters.push(query.isTracked ? tracked : Prisma.sql`NOT (${tracked})`);
+    filters.push(Prisma.sql`k.is_tracked = ${query.isTracked}`);
   }
   return filters;
 }

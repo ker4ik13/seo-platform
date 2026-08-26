@@ -110,8 +110,11 @@ test("bounds keyword queries and validates point command identifiers", () => {
     trackingContextKeywordQuery({ limit: "200", search: " seo " }),
     { limit: 200, search: "seo" }
   );
+  assert.deepEqual(trackingContextKeywordQuery({ limit: "1000" }), {
+    limit: 1000
+  });
   assert.throws(
-    () => trackingContextKeywordQuery({ limit: "201" }),
+    () => trackingContextKeywordQuery({ limit: "1001" }),
     BadRequestException
   );
   assert.throws(

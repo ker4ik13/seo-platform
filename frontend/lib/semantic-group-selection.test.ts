@@ -2,10 +2,41 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   semanticAllRegularGroupIds,
+  semanticGroupIdsWithDescendants,
   semanticGroupRangeSelection,
   semanticKeywordSearchPlaceholder,
   semanticVisiblePresenceGroupId
 } from "./semantic-group-selection.ts";
+
+test("adds every nested regular group for one or several selected roots", () => {
+  assert.deepEqual(
+    semanticGroupIdsWithDescendants(
+      [
+        { id: "first" },
+        { id: "first-child", parentId: "first" },
+        { id: "first-grandchild", parentId: "first-child" },
+        { id: "second" },
+        { id: "second-child", parentId: "second" },
+        { id: "trash", parentId: "first", systemKind: "TRASH" }
+      ],
+      ["first", "second"]
+    ),
+    ["first", "first-child", "first-grandchild", "second", "second-child"]
+  );
+});
+
+test("descendant selection stays bounded when stored parent links contain a cycle", () => {
+  assert.deepEqual(
+    semanticGroupIdsWithDescendants(
+      [
+        { id: "one", parentId: "two" },
+        { id: "two", parentId: "one" }
+      ],
+      ["one"]
+    ),
+    ["one", "two"]
+  );
+});
 
 test("selects only rows visible between the group range endpoints", () => {
   assert.deepEqual(

@@ -35,10 +35,12 @@ import {
   type TenantSettingsFieldErrors
 } from "../lib/tenant-settings";
 import { ProjectFavicon } from "./project-favicon";
+import { CustomSelect } from "./custom-select";
+import { russianSearchCities } from "../lib/seo-regions";
 
 const PROJECT_LOGO_MAX_BYTES = 512 * 1_024;
 
-const PROJECT_FIELDS = ["name", "domain", "locale", "timezone"] as const;
+const PROJECT_FIELDS = ["name", "domain", "locale", "timezone", "searchCity"] as const;
 type LifecycleAction = "archive" | "restore";
 type ConflictKind = "save" | LifecycleAction;
 interface ProjectDeletionReceipt {
@@ -148,8 +150,23 @@ export function ProjectSettings({
     if (deleteConfirmationOpen) deleteConfirmationRef.current?.focus();
   }, [deleteConfirmationOpen]);
 
-  function updateDraft(field: ProjectSettingsField, value: string): void {
+  function updateDraft(
+    field: Exclude<ProjectSettingsField, "searchCity">,
+    value: string
+  ): void {
     setDraft((current) => ({ ...current, [field]: value }));
+    setFieldErrors({});
+    setFailure(undefined);
+    setSuccess(undefined);
+    setConflict(undefined);
+    setDuplicateConfirmation(false);
+  }
+
+  function updateSearchCity(yandexRegionCode: string): void {
+    const searchCity = russianSearchCities.find(
+      (city) => city.yandexRegionCode === yandexRegionCode
+    );
+    setDraft((current) => ({ ...current, searchCity }));
     setFieldErrors({});
     setFailure(undefined);
     setSuccess(undefined);
@@ -777,6 +794,29 @@ export function ProjectSettings({
               ) : (
                 <small id="project-domain-hint">Без пути, параметров и номера порта</small>
               )}
+            </label>
+          </div>
+          <div className="form-row">
+            <label className="form-field">
+              <span>Город для съёма позиций</span>
+              <CustomSelect
+                disabled={!editAllowed || Boolean(busy) || Boolean(confirmAction)}
+                onChange={(event) => updateSearchCity(event.target.value)}
+                searchable
+                searchPlaceholder="Найти город"
+                value={draft.searchCity?.yandexRegionCode ?? ""}
+              >
+                <option value="">Не выбрано</option>
+                {russianSearchCities.map((city) => (
+                  <option key={city.yandexRegionCode} value={city.yandexRegionCode}>
+                    {city.name}
+                  </option>
+                ))}
+              </CustomSelect>
+              <small>
+                Используется для новых проверок в Яндексе и Google. Регион
+                последнего съёма имеет приоритет.
+              </small>
             </label>
           </div>
           <div className="form-row">

@@ -3,6 +3,7 @@ import {
   trackingDepths,
   trackingDevices,
   trackingDomainMatchModes,
+  trackingContextKeywordPageLimit,
   trackingContextKeywordReplacementLimit,
   trackingContextScopeModes,
   trackingSearchEngines,
@@ -85,7 +86,11 @@ export function internalUpdateTrackingContextInput(
 export function launchProfileInput(
   value: unknown
 ): TrackingContextLaunchProfile {
-  const input = strictRecord(value, ["searchSource", "scope"]);
+  const input = strictRecord(value, [
+    "searchSource",
+    "includeUntracked",
+    "scope"
+  ]);
   if (
     typeof input.searchSource !== "string" ||
     !SEARCH_SOURCES.has(input.searchSource)
@@ -117,6 +122,10 @@ export function launchProfileInput(
   return {
     searchSource:
       input.searchSource as TrackingContextLaunchProfile["searchSource"],
+    includeUntracked:
+      input.includeUntracked === undefined
+        ? false
+        : booleanValue(input.includeUntracked, "launchProfile.includeUntracked"),
     scope: {
       mode: scope.mode as TrackingContextLaunchProfile["scope"]["mode"],
       groupIds
@@ -226,7 +235,7 @@ export function trackingContextKeywordQuery(
   if (
     !Number.isSafeInteger(parsedLimit) ||
     parsedLimit < 1 ||
-    parsedLimit > 200
+    parsedLimit > trackingContextKeywordPageLimit
   ) {
     invalid("limit");
   }
@@ -476,6 +485,11 @@ function boundedString(
 function positiveInteger(value: unknown, field: string): number {
   if (!Number.isSafeInteger(value) || Number(value) < 1) invalid(field);
   return Number(value);
+}
+
+function booleanValue(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") invalid(field);
+  return value;
 }
 
 function optionalSingleString(

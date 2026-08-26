@@ -41,6 +41,7 @@ export function createSemanticKeywordInput(
     language: canonicalLanguage(input.language ?? "und"),
     priority: priority(input.priority ?? 0),
     isFavorite: booleanValue(input.isFavorite ?? false, "isFavorite"),
+    isTracked: booleanValue(input.isTracked ?? true, "isTracked"),
     ...(intent ? { intent } : {}),
     ...(groupId ? { groupId } : {}),
     ...(clusterId ? { clusterId } : {}),
@@ -121,6 +122,9 @@ export function updateSemanticKeywordInput(
     ...(input.isFavorite === undefined
       ? {}
       : { isFavorite: booleanValue(input.isFavorite, "isFavorite") }),
+    ...(input.isTracked === undefined
+      ? {}
+      : { isTracked: booleanValue(input.isTracked, "isTracked") }),
     ...(input.showAiAnswerButton === undefined
       ? {}
       : {
@@ -287,6 +291,7 @@ function semanticKeywordBulkPatch(
     [
       "priority",
       "isFavorite",
+      "isTracked",
       "intent",
       "groupId",
       "clusterId",
@@ -305,6 +310,9 @@ function semanticKeywordBulkPatch(
     ...(input.isFavorite === undefined
       ? {}
       : { isFavorite: booleanValue(input.isFavorite, "patch.isFavorite") }),
+    ...(input.isTracked === undefined
+      ? {}
+      : { isTracked: booleanValue(input.isTracked, "patch.isTracked") }),
     ...optionalIntent(input.intent, true),
     ...optionalGroupId(input.groupId, true),
     ...optionalClusterId(input.clusterId, true),
@@ -322,6 +330,7 @@ function editableFields(): readonly string[] {
     "language",
     "priority",
     "isFavorite",
+    "isTracked",
     "intent",
     "groupId",
     "clusterId",

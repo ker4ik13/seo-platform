@@ -668,6 +668,41 @@ execution выключен. Internal preparation API нельзя выдават
 
 ### 13.5. Imports/exports/jobs
 
+Проектное исследование ключей использует public routes:
+
+- `GET|POST /api/v1/projects/{projectId}/keyword-research-runs`;
+- `GET /api/v1/projects/{projectId}/keyword-research-runs/{runId}`;
+- `GET /api/v1/projects/{projectId}/keyword-research-runs/{runId}/rows?cursor={ordinal}&limit={1..500}`;
+- `POST .../{runId}/confirm`;
+- `POST .../{runId}/retry-import`;
+- `POST .../{runId}/cancel`.
+
+Create требует session, CSRF, `collector.run` и `Idempotency-Key`; source —
+строго `KEYS_SO`, `ARSENKIN_WORDSTAT` либо `XMLSTOCK_WORDSTAT`. Для Wordstat
+provider выбирается явно, а новый wizard начинает с региона России (`225`). Confirm требует
+`competitor.manage`, `If-Match` и фиксирует `ALL|SELECTED`, duplicate policy и
+target group path. Для `ALL` `selectedRowIds` запрещён, а необязательный
+`excludedRowIds` содержит только явно снятые строки; для `SELECTED` обязателен
+непустой `selectedRowIds`, а `excludedRowIds` запрещён. Оба списка bounded
+лимитом staging 10 000 и повторно проверяются в tenant/project/run scope.
+Cancel требует `collector.cancel` и `If-Match`. Read требует
+`competitor.view`; archived/read-only lifecycle оставляет чтение, но блокирует
+новый run и import.
+
+Core обращается к точным internal routes
+`/internal/v1/workspaces/{workspaceId}/projects/{projectId}/keyword-research-runs`
+и их `/{runId}`, `/{runId}/rows`, `/confirm`, `/retry-import`, `/cancel`
+вариантам. Строки
+результата читаются keyset-страницами по immutable `ordinal`, по умолчанию по
+200 и не более 500 за запрос; это позволяет preview использовать infinite
+scroll без загрузки всех 10 000 строк. Routes защищены отдельным
+credential/internal token и повторно сверяют workspace/project/actor context.
+`retry-import` доступен только для `FAILED` после SEO Data import failure и
+повторно использует уже сохранённые selection, duplicate policy, destination и
+entitlement: провайдер не вызывается второй раз.
+Connector queue содержит только run ID; источник истины, lease, provider task
+marker, preview и import state находятся в Jobs PostgreSQL.
+
 - `/uploads`;
 - `/projects/{projectId}/imports`;
 - `/projects/{projectId}/exports`;

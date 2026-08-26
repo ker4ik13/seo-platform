@@ -12,6 +12,7 @@ import {
   Prisma,
   type JobStatus
 } from "../generated/prisma/client.js";
+import { INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE } from "../integrations/integration-credential-validation-job.js";
 import type { PlatformAdminOperationQuery } from "./platform-admin-operation-input.js";
 
 const visibleOperationTypes = [
@@ -45,8 +46,7 @@ const adminActiveStatuses = [
   "PAUSE_REQUESTED",
   "PAUSED",
   "CANCEL_REQUESTED",
-  "RETRY_SCHEDULED",
-  "FAILED_RETRYABLE"
+  "RETRY_SCHEDULED"
 ] as const satisfies readonly JobStatus[];
 const adminCompletedStatuses = [
   "PARTIALLY_COMPLETED",
@@ -115,9 +115,9 @@ export class OperationActivityService {
     const baseWhere: Prisma.JobWhereInput = query.type
       ? { type: query.type }
       : {};
-    const statuses = statusGroupStatuses(query.statusGroup);
-    const filteredWhere: Prisma.JobWhereInput = statuses
-      ? { ...baseWhere, status: { in: [...statuses] } }
+    const statusWhere = statusGroupWhere(query.statusGroup);
+    const filteredWhere: Prisma.JobWhereInput = statusWhere
+      ? { AND: [baseWhere, statusWhere] }
       : baseWhere;
     const anchor = query.cursor
       ? await this.prisma.job.findUnique({
@@ -148,13 +148,13 @@ export class OperationActivityService {
         }),
         this.prisma.job.count({ where: baseWhere }),
         this.prisma.job.count({
-          where: { ...baseWhere, status: { in: [...adminActiveStatuses] } }
+          where: { AND: [baseWhere, adminActiveWhere()] }
         }),
         this.prisma.job.count({
           where: { ...baseWhere, status: { in: [...adminCompletedStatuses] } }
         }),
         this.prisma.job.count({
-          where: { ...baseWhere, status: { in: [...adminAttentionStatuses] } }
+          where: { AND: [baseWhere, adminAttentionWhere()] }
         }),
         this.prisma.job.groupBy({
           by: ["type"],
@@ -176,13 +176,39 @@ export class OperationActivityService {
   }
 }
 
-function statusGroupStatuses(
+function statusGroupWhere(
   group: AdminOperationStatusGroup
-): readonly JobStatus[] | undefined {
-  if (group === "ACTIVE") return adminActiveStatuses;
-  if (group === "COMPLETED") return adminCompletedStatuses;
-  if (group === "ATTENTION") return adminAttentionStatuses;
+): Prisma.JobWhereInput | undefined {
+  if (group === "ACTIVE") return adminActiveWhere();
+  if (group === "COMPLETED") {
+    return { status: { in: [...adminCompletedStatuses] } };
+  }
+  if (group === "ATTENTION") return adminAttentionWhere();
   return undefined;
+}
+
+function adminActiveWhere(): Prisma.JobWhereInput {
+  return {
+    OR: [
+      { status: { in: [...adminActiveStatuses] } },
+      {
+        status: "FAILED_RETRYABLE",
+        type: { not: INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE }
+      }
+    ]
+  };
+}
+
+function adminAttentionWhere(): Prisma.JobWhereInput {
+  return {
+    OR: [
+      { status: { in: [...adminAttentionStatuses] } },
+      {
+        status: "FAILED_RETRYABLE",
+        type: INTEGRATION_CREDENTIAL_VALIDATION_JOB_TYPE
+      }
+    ]
+  };
 }
 
 function adminOperationSummary(job: AdminJob): InternalAdminOperationSummary {

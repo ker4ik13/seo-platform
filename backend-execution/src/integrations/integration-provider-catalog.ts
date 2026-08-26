@@ -8,11 +8,12 @@ export const integrationProviderCatalog = [
     provider: "XMLSTOCK",
     displayName: "XMLStock",
     description:
-      "Search results, rank tracking and Wordstat through a user-owned XMLStock account.",
+      "Search results, rank tracking, Wordstat frequencies and keyword expansion through a user-owned XMLStock account.",
     capabilities: [
       "SERP_RANK_TRACKING",
       "SERP_COLLECTION",
-      "WORDSTAT"
+      "WORDSTAT",
+      "KEYWORD_RESEARCH"
     ],
     supportedModes: ["BYOK_API_KEY"],
     credentialValidationMode: "ACCOUNT_METADATA",
@@ -25,12 +26,13 @@ export const integrationProviderCatalog = [
     provider: "ARSENKIN",
     displayName: "Arsenkin Tools",
     description:
-      "Rank tracking, AI answer monitoring, Wordstat frequency collection and keyword clustering through a user-owned Arsenkin Tools account.",
+      "Rank tracking, AI answer monitoring, Wordstat collection and expansion, and keyword clustering through a user-owned Arsenkin Tools account.",
     capabilities: [
       "SERP_RANK_TRACKING",
       "SERP_COLLECTION",
       "WORDSTAT",
-      "CLUSTERING"
+      "CLUSTERING",
+      "KEYWORD_RESEARCH"
     ],
     supportedModes: ["BYOK_API_KEY"],
     credentialValidationMode: "ACCOUNT_METADATA",

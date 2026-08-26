@@ -11,6 +11,8 @@ import {
   type SemanticKeywordMultiSearch,
   type SemanticKeywordBulkCreatePreviewResult,
   type SemanticKeywordBulkCreateResult,
+  type CreateWordstatExpansionRunInput,
+  type KeywordResearchRunSummary,
   type AiAnswerCollectionSummary,
   type ClusteringRunSummary,
   type FrequencyCollectionSummary,
@@ -85,7 +87,11 @@ import {
   writeSemanticManualAddPreferences
 } from "../lib/semantic-manual-add-preferences";
 import { semanticKeywordSearchPlaceholder } from "../lib/semantic-group-selection";
-import { shouldRefreshSemanticOperationMetrics } from "../lib/semantic-live-operation-metrics";
+import {
+  semanticResearchImportSignature,
+  shouldRefreshSemanticOperationMetrics,
+  shouldRefreshSemanticResearchImport
+} from "../lib/semantic-live-operation-metrics";
 import { SemanticBulkEditor } from "./semantic-bulk-editor";
 import { ContextMenu, type ContextMenuItem } from "./context-menu";
 import type { SemanticCustomColumn } from "./semantic-custom-column-types";
@@ -110,6 +116,7 @@ import { SemanticKeywordInspector } from "./semantic-keyword-inspector";
 import { SemanticProjectSerpResults } from "./semantic-project-serp-results";
 import { SemanticPositionDialog } from "./semantic-position-dialog";
 import { SemanticFrequencyDialog } from "./semantic-frequency-dialog";
+import { WordstatExpansionDialog } from "./keyword-research-workspace";
 import { SemanticAiAnswerDialog } from "./semantic-ai-answer-dialog";
 import { SemanticClusteringDialog } from "./semantic-clustering-dialog";
 import { SemanticAiAnswerDetailsModal } from "./semantic-ai-answer-details-modal";
@@ -253,6 +260,7 @@ interface KeywordDraft {
   readonly language: string;
   readonly priority: string;
   readonly isFavorite: boolean;
+  readonly isTracked: boolean;
   readonly skipDuplicates: boolean;
   readonly intent: "" | SemanticKeywordIntent;
   readonly groupId: string;
@@ -292,7 +300,7 @@ interface SemanticCoreTableProps {
   readonly projectName: string;
   readonly projects: readonly Pick<
     AppProject,
-    "id" | "name" | "domain" | "version" | "activeOperationCount"
+    "id" | "name" | "domain" | "version" | "activeOperationCount" | "searchCity"
   >[];
   readonly workspaceId: string;
   readonly workspaceRoleCode: string;
@@ -390,6 +398,8 @@ export function SemanticCoreTable({
   const [exportHistoryTo, setExportHistoryTo] = useState(
     () => semanticHistoryDefaultRange().to
   );
+  const [exportHistoryIncludeUntracked, setExportHistoryIncludeUntracked] =
+    useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportCancelling, setExportCancelling] = useState(false);
   const [exportJob, setExportJob] = useState<SemanticExportJobSummary>();
@@ -450,6 +460,7 @@ export function SemanticCoreTable({
   const [actionIds, setActionIds] = useState<ReadonlySet<string> | null>(null);
   const [positionDialogOpen, setPositionDialogOpen] = useState(false);
   const [frequencyDialogOpen, setFrequencyDialogOpen] = useState(false);
+  const [wordstatDialogOpen, setWordstatDialogOpen] = useState(false);
   const [aiAnswerDialogOpen, setAiAnswerDialogOpen] = useState(false);
   const [clusteringDialogOpen, setClusteringDialogOpen] = useState(false);
   const [aiAnswerKeyword, setAiAnswerKeyword] = useState<SemanticKeyword>();
@@ -472,6 +483,9 @@ export function SemanticCoreTable({
   const multiSearchActionRef = useRef<
     Exclude<SemanticMultiSearchAction, "SHOW"> | undefined
   >(undefined);
+  const wordstatCreateCommandRef = useRef<
+    Readonly<{ signature: string; key: string }> | undefined
+  >(undefined);
   const selectAllMatchingKeywordsRef = useRef<(
     postAction: "SELECT" | "MOVE" | "HIGHLIGHT",
     config: SemanticKeywordLoadConfig
@@ -481,6 +495,7 @@ export function SemanticCoreTable({
   const highlightAnchorIdRef = useRef<string | undefined>(undefined);
   const selectionScopeSignatureRef = useRef<string | undefined>(undefined);
   const liveOperationSignatureRef = useRef("");
+  const liveResearchImportSignatureRef = useRef("[]");
   const liveMetricRefreshInFlightRef = useRef(false);
   const liveOperationActiveRef = useRef(false);
   const savedViewAutosaveBaselineRef = useRef("");
@@ -681,9 +696,11 @@ export function SemanticCoreTable({
       : "SEMANTIC_EDIT"
     : clusteringDialogOpen
       ? "SEMANTIC_CLUSTERING"
-      : frequencyDialogOpen
-        ? "SEMANTIC_FREQUENCY"
-        : positionDialogOpen
+      : wordstatDialogOpen
+        ? "SEMANTIC_WORDSTAT"
+        : frequencyDialogOpen
+          ? "SEMANTIC_FREQUENCY"
+          : positionDialogOpen
           ? "SEMANTIC_POSITIONS"
           : aiAnswerDialogOpen || aiAnswerKeyword
             ? "SEMANTIC_AI_ANSWERS"
@@ -990,7 +1007,13 @@ export function SemanticCoreTable({
     let timer: number | undefined;
     liveOperationSignatureRef.current = "";
     const reconcile = async (): Promise<boolean> => {
-      const [frequencyResult, rankResult, aiAnswerResult, clusteringResult] = await Promise.allSettled([
+      const [
+        frequencyResult,
+        rankResult,
+        aiAnswerResult,
+        clusteringResult,
+        researchResult
+      ] = await Promise.allSettled([
         browserApiRequest<{ readonly collections: readonly FrequencyCollectionSummary[] }>(
           `/app/api/projects/${encodeURIComponent(projectId)}/frequency-collections`,
           { signal: controller.signal }
@@ -1006,6 +1029,10 @@ export function SemanticCoreTable({
         browserApiRequest<{ readonly runs: readonly ClusteringRunSummary[] }>(
           `/app/api/projects/${encodeURIComponent(projectId)}/clustering-runs`,
           { signal: controller.signal }
+        ),
+        browserApiRequest<{ readonly runs: readonly KeywordResearchRunSummary[] }>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/keyword-research-runs`,
+          { signal: controller.signal }
         )
       ]);
       if (controller.signal.aborted) return liveOperationActiveRef.current;
@@ -1018,6 +1045,9 @@ export function SemanticCoreTable({
         : [];
       const clusteringRuns = clusteringResult.status === "fulfilled"
         ? clusteringResult.value.runs
+        : [];
+      const researchRuns = researchResult.status === "fulfilled"
+        ? researchResult.value.runs
         : [];
       const activeFrequencyCount = frequencies.filter(({ status }) => ![
         "ACTION_REQUIRED",
@@ -1047,9 +1077,28 @@ export function SemanticCoreTable({
         "COMPLETED",
         "FAILED_FINAL"
       ].includes(status)).length;
-      const nextActiveOperationCount = activeFrequencyCount + activeRankCount + activeAiAnswerCount + activeClusteringCount;
+      const activeResearchCount = researchRuns.filter(({ status }) => [
+        "QUEUED",
+        "RUNNING",
+        "RETRY_SCHEDULED",
+        "IMPORT_QUEUED",
+        "IMPORTING"
+      ].includes(status)).length;
+      const nextActiveOperationCount = activeFrequencyCount + activeRankCount +
+        activeAiAnswerCount + activeClusteringCount + activeResearchCount;
       const active = nextActiveOperationCount > 0;
       liveOperationActiveRef.current = active;
+      if (researchResult.status === "fulfilled") {
+        const researchImportSignature = semanticResearchImportSignature(researchRuns);
+        const previousResearchImportSignature = liveResearchImportSignatureRef.current;
+        liveResearchImportSignatureRef.current = researchImportSignature;
+        if (shouldRefreshSemanticResearchImport(
+          previousResearchImportSignature,
+          researchImportSignature
+        )) {
+          setRetryVersion((value) => value + 1);
+        }
+      }
       const signature = JSON.stringify([
         ...frequencies.map((job) => [
           "frequency",
@@ -1081,6 +1130,15 @@ export function SemanticCoreTable({
           job.status,
           job.completedKeywords,
           job.failedKeywords,
+          job.updatedAt
+        ]),
+        ...researchRuns.map((job) => [
+          "keyword-research",
+          job.id,
+          job.status,
+          job.collectedKeywords,
+          job.importedKeywords,
+          job.version,
           job.updatedAt
         ])
       ]);
@@ -1981,6 +2039,7 @@ export function SemanticCoreTable({
         language: "ru",
         priority: "0",
         isFavorite: false,
+        isTracked: true,
         skipDuplicates: manualAddPreferencesRef.current.skipDuplicates,
         intent: "",
         groupId: initialSemanticCreateGroupId(
@@ -2102,6 +2161,7 @@ export function SemanticCoreTable({
       language: draft.language,
       priority: Number(draft.priority),
       isFavorite: draft.isFavorite,
+      isTracked: draft.isTracked,
       ...(draft.intent ? { intent: draft.intent } : editor.mode === "edit"
         ? { intent: null }
         : {}),
@@ -2470,6 +2530,7 @@ export function SemanticCoreTable({
     );
     setExportFolderMapGroupIds(regularGroupIds);
     setExportFolderMapIncludeDescendants(true);
+    setExportHistoryIncludeUntracked(false);
     setExportBom(
       exportContent === "SEMANTIC" &&
       (exportFormat === "CSV" || exportFormat === "TSV")
@@ -2480,16 +2541,32 @@ export function SemanticCoreTable({
 
   async function downloadExport(): Promise<void> {
     if (exporting) return;
+    const selectedItems = exportScope === "SELECTED"
+      ? items.filter(({ id }) => checkedIds.has(id))
+      : [];
+    const selected = selectedItems
+      .filter(({ isTracked }) =>
+        exportContent !== "POSITION_HISTORY" ||
+        exportHistoryIncludeUntracked ||
+        isTracked
+      )
+      .map(({ id }) => id);
+    if (
+      exportScope === "SELECTED" &&
+      exportContent === "POSITION_HISTORY" &&
+      !exportHistoryIncludeUntracked &&
+      selected.length === 0
+    ) {
+      setMutationError(
+        "Среди выбранных строк нет отслеживаемых запросов. Включите неотслеживаемые запросы или измените выбор."
+      );
+      return;
+    }
     setExporting(true);
     setExportNotice(undefined);
     setMutationError(undefined);
     setExportJob(undefined);
     const groupId = exportDialog?.groupId;
-    const selected = exportScope === "SELECTED"
-      ? items
-          .filter(({ id }) => checkedIds.has(id))
-          .map(({ id }) => id)
-      : [];
     try {
       let current = await browserApiRequest<SemanticExportJobSummary>(
         `/app/api/projects/${encodeURIComponent(projectId)}/exports`,
@@ -2509,12 +2586,30 @@ export function SemanticCoreTable({
                   }
                 }
               : groupId
-              ? { filters: { groupId } }
+              ? {
+                  filters: {
+                    groupId,
+                    ...(exportContent === "POSITION_HISTORY" &&
+                    !exportHistoryIncludeUntracked
+                      ? { isTracked: true }
+                      : {})
+                  }
+                }
               : selected.length > 0
-              ? { keywordIds: selected }
+              ? {
+                  keywordIds: selected,
+                  ...(exportContent === "POSITION_HISTORY" &&
+                  !exportHistoryIncludeUntracked
+                    ? { filters: { isTracked: true } }
+                    : {})
+                }
               : {
                   filters: {
                     ...viewConfig.filters,
+                    ...(exportContent === "POSITION_HISTORY" &&
+                    !exportHistoryIncludeUntracked
+                      ? { isTracked: true }
+                      : {}),
                     ...(multiGroupIds.length > 1
                       ? { groupIds: multiGroupIds }
                       : {})
@@ -2834,6 +2929,33 @@ export function SemanticCoreTable({
     const secure = window.location.protocol === "https:" ? "; Secure" : "";
     document.cookie = `seo_project=${encodeURIComponent(nextProjectId)}; Path=/; Max-Age=31536000; SameSite=Lax${secure}`;
     window.location.assign("/app/semantics");
+  }
+
+  async function startWordstatExpansion(
+    input: CreateWordstatExpansionRunInput
+  ): Promise<void> {
+    const signature = JSON.stringify(input);
+    if (wordstatCreateCommandRef.current?.signature !== signature) {
+      wordstatCreateCommandRef.current = {
+        signature,
+        key: `wordstat-expansion:${crypto.randomUUID()}`
+      };
+    }
+    await browserApiRequest<KeywordResearchRunSummary>(
+      `/app/api/projects/${encodeURIComponent(projectId)}/keyword-research-runs`,
+      {
+        method: "POST",
+        idempotencyKey: wordstatCreateCommandRef.current.key,
+        body: input
+      }
+    );
+    wordstatCreateCommandRef.current = undefined;
+    setWordstatDialogOpen(false);
+    setOperationsRefreshVersion((value) => value + 1);
+    setBulkNotice(
+      "Парсинг Wordstat запущен в фоне. Результат появится в операциях и не изменит семантику без подтверждения."
+    );
+    setRightSidebar({ type: "OPERATIONS" });
   }
 
   const total = rootTotal;
@@ -3172,6 +3294,7 @@ export function SemanticCoreTable({
         <button className={activityButtonClass("SEMANTIC_ADD")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:add" onClick={openCreate} type="button"><Icon name="plus" />Добавить</button>
         <button className={activityButtonClass("SEMANTIC_IMPORT")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:import" onClick={onOpenImport} type="button"><Icon name="import" />Импорт</button>
         <button className={activityButtonClass("SEMANTIC_FREQUENCY")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:frequency" disabled={(rootTotal ?? items.length) === 0} onClick={() => setFrequencyDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Выберите запросы или папки в окне запуска"} type="button"><Icon name="frequency" />Собрать частотность</button>
+        <button className={activityButtonClass("SEMANTIC_WORDSTAT")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:wordstat" onClick={() => setWordstatDialogOpen(true)} title="Вставьте исходные фразы или выберите запросы и папки проекта" type="button"><Icon name="search" />Парсинг Wordstat</button>
         <button className={activityButtonClass("SEMANTIC_POSITIONS")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:positions" disabled={(rootTotal ?? items.length) === 0} onClick={() => setPositionDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Выберите запросы или папки в окне запуска"} type="button"><Icon name="rankCheck" />Проверить позиции</button>
         <button className={activityButtonClass("SEMANTIC_AI_ANSWERS")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:ai-answers" disabled={(rootTotal ?? items.length) === 0} onClick={() => setAiAnswerDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Проверить ИИ-ответы Яндекса или Google через Arsenkin"} type="button"><Icon name="ai" />Проверить ИИ-ответы</button>
         <button className={activityButtonClass("SEMANTIC_CLUSTERING")} data-presence-cursor-anchor="true" data-presence-key="semantic-action:clustering" disabled={(rootTotal ?? items.length) === 0} onClick={() => setClusteringDialogOpen(true)} title={(rootTotal ?? items.length) === 0 ? "В проекте пока нет запросов" : "Разбить выбранные запросы или папки на группы по выдаче"} type="button"><Icon name="cluster" />Кластеризовать</button>
@@ -3703,6 +3826,17 @@ export function SemanticCoreTable({
                     />
                   </label>
                 </div>
+                <label className="semantic-control-check semantic-history-export-untracked">
+                  <input
+                    checked={exportHistoryIncludeUntracked}
+                    disabled={exporting || exportJob?.status === "COMPLETED"}
+                    onChange={(event) =>
+                      setExportHistoryIncludeUntracked(event.target.checked)
+                    }
+                    type="checkbox"
+                  />
+                  <span>Включить неотслеживаемые запросы</span>
+                </label>
                 <div className="semantic-history-export-legend">
                   <span><i className="up" /> Рост или новая позиция</span>
                   <span><i className="down" /> Падение или потеря позиции</span>
@@ -4009,6 +4143,16 @@ export function SemanticCoreTable({
               />
               <span>Избранный запрос</span>
             </label>
+            <label className="semantic-editor-check">
+              <input
+                checked={editor.draft.isTracked}
+                onChange={(event) =>
+                  updateDraft({ isTracked: event.target.checked })
+                }
+                type="checkbox"
+              />
+              <span>Отслеживать позиции</span>
+            </label>
             {editor.mode === "create" && (
               <>
                 <label className="semantic-editor-check semantic-editor-deduplicate">
@@ -4227,13 +4371,14 @@ export function SemanticCoreTable({
           projectId={projectId}
           selections={items
             .filter(({ id }) => mutationIds.has(id))
-            .map(({ id, version, textOriginal, language, priority, isFavorite, intent, groupId, clusterId, targetUrl, tags }) => ({
+            .map(({ id, version, textOriginal, language, priority, isFavorite, isTracked, intent, groupId, clusterId, targetUrl, tags }) => ({
               id,
               version,
               text: textOriginal,
               language,
               priority,
               isFavorite,
+              isTracked,
               ...(intent ? { intent } : {}),
               ...(groupId ? { groupId } : {}),
               ...(clusterId ? { clusterId } : {}),
@@ -4466,6 +4611,7 @@ export function SemanticCoreTable({
                 ? {
                     ...keyword,
                     hasNote: updated.hasNote ?? false,
+                    isTracked: updated.isTracked,
                     updatedAt: updated.updatedAt,
                     version: updated.version
                   }
@@ -4588,13 +4734,38 @@ export function SemanticCoreTable({
           </div>
         </SemanticModal>
       )}
+      {wordstatDialogOpen && (
+        <WordstatExpansionDialog
+          {...(viewConfig.filters.groupId
+            ? { activeGroupId: viewConfig.filters.groupId }
+            : {})}
+          groups={groups}
+          initialSelections={items
+            .filter(({ id }) => checkedIds.has(id))
+            .map(({ id, version, textOriginal }) => ({
+              id,
+              version,
+              label: textOriginal
+            }))}
+          initialText=""
+          onClose={() => setWordstatDialogOpen(false)}
+          onSubmit={startWordstatExpansion}
+          projectId={projectId}
+          projectSearchCity={projects.find(({ id }) => id === projectId)?.searchCity}
+        />
+      )}
       {positionDialogOpen && (
         <SemanticPositionDialog
           activeGroupId={viewConfig.filters.groupId}
           groups={groups}
           initialSelections={items
             .filter(({ id }) => checkedIds.has(id))
-            .map(({ id, version, textOriginal }) => ({ id, version, label: textOriginal }))}
+            .map(({ id, version, textOriginal, isTracked }) => ({
+              id,
+              version,
+              label: textOriginal,
+              isTracked
+            }))}
           onClose={() => setPositionDialogOpen(false)}
           onStarted={(job) => {
             setPositionDialogOpen(false);
@@ -4603,6 +4774,7 @@ export function SemanticCoreTable({
             setBulkNotice("Проверка позиций запущена в фоне. Прогресс доступен в операциях.");
             setRightSidebar({ type: "OPERATIONS" });
           }}
+          projectSearchCity={projects.find(({ id }) => id === projectId)?.searchCity}
           projectId={projectId}
           workspaceId={workspaceId}
         />

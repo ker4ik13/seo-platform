@@ -23,10 +23,10 @@ export interface XmlStockHttpQuotaPolicy {
 export const XMLSTOCK_HTTP_QUOTA_POLICIES: Readonly<
   Record<XmlStockHttpProduct, XmlStockHttpQuotaPolicy>
 > = {
-  YANDEX_LIVE: { concurrency: 8, requestsPerSecond: 8 },
-  GOOGLE_LIVE: { concurrency: 12, requestsPerSecond: 12 },
-  YANDEX_SEARCH_API: { concurrency: 30, requestsPerSecond: 60 },
-  WORDSTAT: { concurrency: 8, requestsPerSecond: 8 }
+  YANDEX_LIVE: { concurrency: 20, requestsPerSecond: 10 },
+  GOOGLE_LIVE: { concurrency: 48, requestsPerSecond: 30 },
+  YANDEX_SEARCH_API: { concurrency: 48, requestsPerSecond: 50 },
+  WORDSTAT: { concurrency: 10, requestsPerSecond: 10 }
 };
 
 export const XMLSTOCK_HTTP_QUOTA_NAMESPACE =

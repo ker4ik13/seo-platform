@@ -67,6 +67,9 @@ export function SemanticFrequencyDialog({
   const [error, setError] = useState<FrequencyDialogError>();
   const [scopeError, setScopeError] = useState<string>();
   const [resolvingScope, setResolvingScope] = useState(false);
+  const [scopeCount, setScopeCount] = useState<number | undefined>(
+    initialSelections.length
+  );
   const [selections, setSelections] = useState<readonly SemanticOperationSelection[]>(
     initialSelections
   );
@@ -88,7 +91,7 @@ export function SemanticFrequencyDialog({
   const selectedSource = sources.find(({ id }) => id === credentialId);
   const providerUsage = frequencyProviderUsageEstimate(
     selectedSource,
-    selections.length,
+    scopeCount ?? selections.length,
     orderedTypes.length
   );
   const keywordLimit = selectedSource?.provider === "ARSENKIN"
@@ -102,8 +105,12 @@ export function SemanticFrequencyDialog({
     nextError?: string
   ) => {
     setSelections(next);
+    if (!resolving && !nextError) setScopeCount(next.length);
     setResolvingScope(resolving);
     setScopeError(nextError);
+  }, []);
+  const resolveScopeCount = useCallback((count: number | undefined) => {
+    setScopeCount(count);
   }, []);
 
   useEffect(() => {
@@ -200,10 +207,10 @@ export function SemanticFrequencyDialog({
       footer={(
         <div className="semantic-workflow-footer">
           <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate">
-            <div><Icon name="semantic" /><div><dt>К сбору</dt><dd>{selections.length} запросов</dd></div></div>
+            <div><Icon name="semantic" /><div><dt>К сбору</dt><dd>{scopeCount === undefined ? "Считаем…" : `${scopeCount} запросов`}</dd></div></div>
             <div>
               <Icon name="operations" />
-              <div><dt>Операций</dt><dd>{selectedSource?.provider === "ARSENKIN" ? (selections.length > 0 ? 1 : 0) : `до ${selections.length * orderedTypes.length}`}</dd></div>
+              <div><dt>Операций</dt><dd>{selectedSource?.provider === "ARSENKIN" ? ((scopeCount ?? selections.length) > 0 ? 1 : 0) : `до ${(scopeCount ?? selections.length) * orderedTypes.length}`}</dd></div>
             </div>
             <div><Icon name="frequency" /><div><dt>Расход провайдера</dt><dd>{providerUsage.usage}</dd></div></div>
             <div><Icon name="checkDouble" /><div><dt>Доступно сейчас</dt><dd>{providerUsage.available}</dd></div></div>
@@ -315,6 +322,7 @@ export function SemanticFrequencyDialog({
               initialSelections={initialSelections}
               maxItems={keywordLimit}
               onChange={resolveScope}
+              onCountChange={resolveScopeCount}
               projectId={projectId}
             />
           </section>

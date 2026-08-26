@@ -15,6 +15,7 @@ import type {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
 import { semanticExportFileUrl } from "../lib/app-path";
+import { operationDurationLabel } from "../lib/operation-duration";
 import {
   connectorRouteTrail,
   connectorRoutingScopeLabel,
@@ -62,6 +63,7 @@ interface ProjectTask {
   readonly progressCurrent: number;
   readonly progressTotal: number;
   readonly createdAt: string;
+  readonly startedAt?: string;
   readonly finishedAt?: string;
   readonly errorCode?: string;
   readonly version: number;
@@ -371,7 +373,11 @@ export function TaskCenter({
                   <strong>{progressLabel(task)}</strong>
                   {task.progressTotal > 0 && <span className="task-card-progress"><i style={{ width: `${taskPercent(task)}%` }} /></span>}
                 </span>
-                <span className="task-ledger-time"><time>{formatRelativeDate(task.createdAt)}</time><code>{shortId(task.id)}</code></span>
+                <span className="task-ledger-time">
+                  <time>{formatRelativeDate(task.createdAt)}</time>
+                  {operationDurationLabel(task) && <small>За {operationDurationLabel(task)}</small>}
+                  <code>{shortId(task.id)}</code>
+                </span>
               </button>
             )) : (
               <div className="task-ledger-empty">
@@ -445,6 +451,7 @@ function frequencyTask(value: FrequencyCollectionSummary): ProjectTask {
     description: `${providerLabel(value.provider)}${hasConnectorFallback(value.connectorAttempts) ? " · fallback" : ""} · ${value.types.map(frequencyTypeLabel).join(" + ")}`,
     statusLabel: operationStatusLabel(value.status, value.stage), column: taskColumn(value.status), progressCurrent: completed,
     progressTotal: value.selectedKeywords, createdAt: value.createdAt,
+    ...(value.startedAt ? { startedAt: value.startedAt } : {}),
     ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
     ...(value.failureCode ? { errorCode: value.failureCode } : {}),
     version: value.version,
@@ -485,6 +492,7 @@ function aiAnswerTask(value: AiAnswerCollectionSummary): ProjectTask {
     progressCurrent: completed,
     progressTotal: value.selectedKeywords,
     createdAt: value.createdAt,
+    ...(value.startedAt ? { startedAt: value.startedAt } : {}),
     ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
     ...(value.failureCode ? { errorCode: value.failureCode } : {}),
     version: value.version,
@@ -531,6 +539,7 @@ function clusteringTask(value: ClusteringRunSummary): ProjectTask {
     progressCurrent: completed,
     progressTotal: value.selectedKeywords,
     createdAt: value.createdAt,
+    ...(value.startedAt ? { startedAt: value.startedAt } : {}),
     ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
     ...(value.failureCode ? { errorCode: value.failureCode } : {}),
     version: value.version,
@@ -579,7 +588,9 @@ function rankTask(value: RankJobSummary): ProjectTask {
     id: value.id, kind: "RANK", resultKind: "rank", provider: value.provider, title: "Проверка позиций",
     description: `${provider}${hasConnectorFallback(value.connectorAttempts) ? " · fallback" : ""}${searchContext ? ` · ${searchContext}` : ""}`, statusLabel: operationStatusLabel(value.status, value.stage),
     column: taskColumn(value.status), progressCurrent: Number(value.progress.current), progressTotal: Number(value.progress.total),
-    createdAt: value.createdAt, ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
+    createdAt: value.createdAt,
+    ...(value.startedAt ? { startedAt: value.startedAt } : {}),
+    ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
     ...(value.status === "FAILED" || value.status === "ACTION_REQUIRED" ? { errorCode: value.failure.code } : {}),
     version: 1,
     cancellable: isCancellableRankJob(value),
@@ -620,6 +631,7 @@ function crawlTask(value: TechnicalCrawlSummary): ProjectTask {
     description: `${value.config.startUrls.length} стартовых URL · до ${formatInteger(value.config.maxUrls)} страниц`,
     statusLabel: operationStatusLabel(value.status), column: taskColumn(value.status), progressCurrent: value.processedUrls,
     progressTotal: Math.max(value.discoveredUrls, value.processedUrls), createdAt: value.createdAt,
+    ...(value.startedAt ? { startedAt: value.startedAt } : {}),
     ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}), ...(value.failureCode ? { errorCode: value.failureCode } : {}),
     version: value.version,
     cancellable: ["QUEUED", "RUNNING"].includes(value.status), retryable: false,
@@ -643,9 +655,18 @@ function crawlTask(value: TechnicalCrawlSummary): ProjectTask {
 }
 
 function researchTask(value: KeywordResearchRunSummary): ProjectTask {
+  const keysSo = value.source === "KEYS_SO";
+  const providerName = value.provider === "XMLSTOCK"
+    ? "XMLStock"
+    : value.provider === "ARSENKIN"
+      ? "Arsenkin Tools"
+      : "Keys.so";
   return {
-    id: value.id, kind: "RESEARCH", resultKind: "research", provider: "KEYS_SO", title: "Сбор конкурентов",
-    description: `Keys.so · ${value.domain} · ${value.database.toUpperCase()}`, statusLabel: operationStatusLabel(value.status),
+    id: value.id, kind: "RESEARCH", resultKind: "research", provider: value.provider, title: keysSo ? "Анализ Keys.so" : "Парсинг Wordstat",
+    description: keysSo
+      ? `Keys.so · ${value.domain ?? "—"} · ${(value.database ?? "msk").toUpperCase()}`
+      : `${providerName} · ${value.seedCount ?? 0} исходных фраз · ${value.regionCode === "225" ? "Россия" : `регион ${value.regionCode ?? "225"}`}`,
+    statusLabel: operationStatusLabel(value.status),
     column: taskColumn(value.status), progressCurrent: value.importedKeywords > 0 ? value.importedKeywords : value.collectedKeywords,
     progressTotal: value.totalAvailable ?? value.maxKeywords, createdAt: value.createdAt,
     ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}), ...(value.failureCode ? { errorCode: value.failureCode } : {}),
@@ -653,8 +674,15 @@ function researchTask(value: KeywordResearchRunSummary): ProjectTask {
     cancellable: ["QUEUED", "RUNNING", "RETRY_SCHEDULED", "READY_TO_IMPORT"].includes(value.status), retryable: false,
     retryLabel: "Повторить",
     inputFacts: [
-      { label: "Домен", value: value.domain },
-      { label: "База", value: value.database.toUpperCase() },
+      ...(keysSo
+        ? [
+            { label: "Домен", value: value.domain ?? "—" },
+            { label: "База", value: (value.database ?? "msk").toUpperCase() }
+          ]
+        : [
+            { label: "Исходных фраз", value: formatInteger(value.seedCount ?? 0) },
+            { label: "Регион", value: value.regionCode === "225" ? "Россия" : value.regionCode ?? "225" }
+          ]),
       { label: "Лимит ключей", value: formatInteger(value.maxKeywords) }
     ],
     resultFacts: [
@@ -682,6 +710,7 @@ function exportTask(
     progressCurrent: complete ? total : value.processedRows,
     progressTotal: total,
     createdAt: value.createdAt,
+    ...(value.startedAt ? { startedAt: value.startedAt } : {}),
     ...(value.finishedAt ? { finishedAt: value.finishedAt } : {}),
     ...(value.failureCode ? { errorCode: value.failureCode } : {}),
     ...(complete ? { downloadUrl: semanticExportFileUrl(projectId, value.id) } : {}),

@@ -39,6 +39,27 @@ test("normalizes a complete tracking context command", () => {
   assert.deepEqual(updateTrackingContextInput(validInput), result);
 });
 
+test("normalizes the explicit untracked launch override and defaults legacy input", () => {
+  const explicit = createTrackingContextInput({
+    ...validInput,
+    launchProfile: {
+      searchSource: "LIVE",
+      includeUntracked: true,
+      scope: { mode: "ALL", groupIds: [] }
+    }
+  });
+  assert.equal(explicit.launchProfile?.includeUntracked, true);
+
+  const legacy = createTrackingContextInput({
+    ...validInput,
+    launchProfile: {
+      searchSource: "LIVE",
+      scope: { mode: "ALL", groupIds: [] }
+    }
+  });
+  assert.equal(legacy.launchProfile?.includeUntracked, false);
+});
+
 test("accepts a matching mode without a URL value", () => {
   const result = createTrackingContextInput({
     ...validInput,
@@ -103,6 +124,9 @@ test("parses a bounded assigned-keyword query", () => {
   assert.deepEqual(trackingContextKeywordQuery(undefined), {
     limit: 100
   });
+  assert.deepEqual(trackingContextKeywordQuery({ limit: "1000" }), {
+    limit: 1000
+  });
 });
 
 test("rejects unknown, ambiguous and unbounded query values", () => {
@@ -111,7 +135,7 @@ test("rejects unknown, ambiguous and unbounded query values", () => {
     DomainError
   );
   assert.throws(
-    () => trackingContextKeywordQuery({ limit: "201" }),
+    () => trackingContextKeywordQuery({ limit: "1001" }),
     DomainError
   );
   assert.throws(

@@ -60,6 +60,7 @@ test("counts only active user-visible operations by project", async () => {
 
 test("lists a bounded platform operation summary without raw job payloads", async () => {
   let countCall = 0;
+  const countQueries: unknown[] = [];
   const createdAt = new Date("2026-08-11T18:00:00.000Z");
   const service = new OperationActivityService({
     job: {
@@ -94,7 +95,10 @@ test("lists a bounded platform operation summary without raw job payloads", asyn
           updatedAt: createdAt
         }
       ],
-      count: async () => [9, 2, 6, 1][countCall++] ?? 0,
+      count: async (value: unknown) => {
+        countQueries.push(value);
+        return [9, 2, 6, 1][countCall++] ?? 0;
+      },
       groupBy: async () => [
         { type: "MANUAL_RANK_CHECK", _count: { _all: 7 } },
         { type: "FREQUENCY_COLLECTION", _count: { _all: 2 } }
@@ -126,4 +130,111 @@ test("lists a bounded platform operation summary without raw job payloads", asyn
   });
   assert.equal(result.data[0]?.errorCode, "PROVIDER_DELAYED");
   assert.doesNotMatch(JSON.stringify(result), /must-not-leak/u);
+  assert.deepEqual(countQueries[1], {
+    where: {
+      AND: [
+        {},
+        {
+          OR: [
+            {
+              status: {
+                in: [
+                  "ESTIMATING",
+                  "AWAITING_APPROVAL",
+                  "RESERVING_BALANCE",
+                  "PREPARING",
+                  "QUEUED",
+                  "WAITING_RATE_LIMIT",
+                  "RUNNING",
+                  "PAUSE_REQUESTED",
+                  "PAUSED",
+                  "CANCEL_REQUESTED",
+                  "RETRY_SCHEDULED"
+                ]
+              }
+            },
+            {
+              status: "FAILED_RETRYABLE",
+              type: { not: "INTEGRATION_CREDENTIAL_VALIDATE" }
+            }
+          ]
+        }
+      ]
+    }
+  });
+  assert.deepEqual(countQueries[3], {
+    where: {
+      AND: [
+        {},
+        {
+          OR: [
+            { status: { in: ["FAILED_FINAL", "ACTION_REQUIRED"] } },
+            {
+              status: "FAILED_RETRYABLE",
+              type: "INTEGRATION_CREDENTIAL_VALIDATE"
+            }
+          ]
+        }
+      ]
+    }
+  });
+});
+
+test("classifies exhausted credential validation as attention", async () => {
+  let findManyQuery: unknown;
+  const service = new OperationActivityService({
+    job: {
+      findMany: async (value: unknown) => {
+        findManyQuery = value;
+        return [];
+      },
+      count: async () => 0,
+      groupBy: async () => []
+    }
+  } as unknown as PrismaService);
+
+  await service.adminList({ statusGroup: "ATTENTION", limit: 50 });
+
+  assert.deepEqual(findManyQuery, {
+    where: {
+      AND: [
+        {},
+        {
+          OR: [
+            { status: { in: ["FAILED_FINAL", "ACTION_REQUIRED"] } },
+            {
+              status: "FAILED_RETRYABLE",
+              type: "INTEGRATION_CREDENTIAL_VALIDATE"
+            }
+          ]
+        }
+      ]
+    },
+    select: {
+      id: true,
+      workspaceId: true,
+      projectId: true,
+      actorId: true,
+      type: true,
+      status: true,
+      stage: true,
+      provider: true,
+      progressCurrent: true,
+      progressTotal: true,
+      progressUnit: true,
+      actualCostMicro: true,
+      currency: true,
+      attempt: true,
+      maxAttempts: true,
+      errorSummary: true,
+      resultSummary: true,
+      createdAt: true,
+      queuedAt: true,
+      startedAt: true,
+      finishedAt: true,
+      updatedAt: true
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    take: 51
+  });
 });

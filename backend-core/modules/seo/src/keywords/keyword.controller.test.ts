@@ -55,7 +55,10 @@ test("forwards an exact tenant-scoped keyword bulk create", async () => {
     await controller.bulkCreate(projectId, body, headers, request),
     { data: result, meta: { requestId: request.id } }
   );
-  assert.deepEqual(observed, body);
+  assert.deepEqual(observed, {
+    ...body,
+    items: [{ ...body.items[0], isTracked: true }]
+  });
 
   await assert.rejects(
     () =>

@@ -47,6 +47,17 @@ Web читает его keyset/cursor-страницами по 200 строк �
 растягивая малое число строк. На desktop пользователь может изменить высоту
 обоих списков вертикальным resize.
 
+Охват всего проекта или нескольких папок разрешается отдельно от
+presentation-списка: Web debounce-ит быстрое переключение, передаёт все
+разрешённые папки одним union-фильтром и сначала делает однострочный count-probe.
+Он возвращает точный distinct count, поэтому UI сразу показывает размер охвата
+и не materialize-ит строки, если превышен лимит провайдера. Допустимый scope
+затем читается фоновыми страницами по 1000 строк. Это исключает прежний
+последовательный обход «папка × страница» и повторный расход на запросы,
+состоящие сразу в нескольких папках. Назначения
+сохранённого tracking context также читаются bounded-страницами до 1000 строк;
+для охвата `ALL/GROUPS` их фоновое сравнение не блокирует открытие редактора.
+
 По ADR-2026-033 provider/credential принадлежат project connector binding, а
 schedule/timezone — automation. Экран может показывать их effective projection
 рядом с context, но они не входят в immutable tracking configuration.
@@ -66,6 +77,7 @@ Turbo для XMLStock Яндекс Live является launch-only execution o
 
 - создать контекст;
 - выбрать запросы по view/group/tag/filter;
+- сохранить в launch profile выбор `includeUntracked`;
 - включить/исключить SERP features;
 - настроить domain matching;
 - выбрать хранение raw SERP;
@@ -109,6 +121,14 @@ Scope materializer работает с каноническими keyword ID, а
 содержит его один раз, provider получает один запрос, а сохранённый snapshot
 автоматически виден во всех групповых проекциях этого keyword ID. Это исключает
 двойной расход и не требует fan-out копий результата.
+
+Канонический `keywords.is_tracked` по умолчанию равен `true`. Новый rank scope
+отбрасывает запросы с `isTracked = false` до estimate, manifest и расчёта
+стоимости. В мастере есть явный переключатель «Снимать позиции по
+неотслеживаемым запросам»; его значение фиксируется в immutable launch profile
+как `includeUntracked`. Tracking-context assignment задаёт сохранённый состав,
+но не изменяет `isTracked`. Retry уже запечатанного manifest повторяет его
+исходный scope и не перечитывает текущий переключатель.
 
 ### 3.1. Manual BYOK slice Arsenkin
 
@@ -265,7 +285,12 @@ capacity между всеми своими проектами и connector repl
 понижают окно и включают cooldown, а серия успешных ответов постепенно
 восстанавливает базовую ёмкость. Redis остаётся только transient capacity
 coordination и работает fail-closed; Job/lease/progress source of truth —
-PostgreSQL.
+PostgreSQL. Базовые окна одного credential: Yandex Live — `20 concurrent /
+10 RPS`, Google Live — `48 / 30`, Yandex Search API — `48 / 50`, Wordstat —
+`10 / 10`. XMLStock не использует общий lifecycle limit из пяти задач:
+dispatcher может подготовить до 48 keyword chunks одного Job за тик, после
+чего Redis и connector worker concurrency задают фактический предел внешних
+HTTP-вызовов. Лимит пяти provider tasks остаётся только у Arsenkin.
 
 XMLStock Яндекс Live Turbo не использует standard Yandex Live bucket: запрос
 явно получает `tbm=turbo`, а внешняя пропускная способность остаётся
@@ -396,6 +421,10 @@ tenant-scoped полный снимок с форматированным отв
 обычным текстом. Отсутствие AI-блока является валидным результатом, а не
 ошибкой provider-а. ИИ-позиции и даты последнего ИИ-съёма поддерживают
 server-side сортировку до cursor pagination, отдельно для Яндекса и Google.
+Сортировка ИИ-позиций сначала возвращает текущие найденные значения, затем
+запросы с последней найденной исторической позицией и только после них запросы
+без найденной позиции. Направление ASC/DESC действует внутри первых двух групп
+и не меняет порядок самих групп.
 Keyword insights отдают до 240 последних ИИ-снимков; sidebar строит график из
 14 последних снимков canonical keyword по обоим engine внутри отдельного блока
 ИИ-позиций; обычный rank-график остаётся в обычном блоке и не склеивается с
@@ -694,7 +723,24 @@ snapshot и ключа идемпотентности.
 checkpoint `xmlstock-rank-page@2`; TOP-100 поэтому занимает от 2 до 10 GET в
 зависимости от настройки аккаунта. Все найденные позиции переводятся в
 абсолютный индекс; matching URL сохраняется как ranking/relevant URL, raw XML
-отбрасывается после строгой нормализации.
+отбрасывается после строгой нормализации. После успешного checkpoint следующая
+Live-страница получает `next_action_at = now` и может сразу перейти свободному
+worker; provider pending/retry остаётся отложенным и worker во время ожидания
+не блокируется.
+
+Для XMLStock run доступен tenant-scoped live diagnostics read. Он показывает
+ограниченный снимок последних keyword executions, доступный пользователю текст
+ключа, логические цветные потоки, submit/poll attempts, page progress,
+следующее действие и allowlisted error code. Физические worker ID, `req_id`,
+credentials и raw provider responses не выдаются. Web опрашивает endpoint
+только при открытой подмодалке «Логи XMLStock» и хранит не более 500
+изменившихся записей локально. В модалке результата XMLStock-съёма, открытой
+из сайдбара операций, явная кнопка «Логи» находится в header; для других
+провайдеров она не отображается.
+Private provider intent не открывается general Jobs runtime таблицей:
+owner-owned tenant-scoped projection возвращает только текст ключа и
+allowlisted execution-поля, а active-state вычисляет без физического имени
+worker.
 
 Источник выдачи является обязательной частью immutable estimate и request
 snapshot. В первом контуре поддерживаются XMLStock Яндекс Search API, Яндекс
@@ -748,22 +794,52 @@ Fenced lease frequency connector равен 120 секундам: это пок�
 
 ## 13. Сбор ключей конкурентов
 
-Источники: Keys.so и последующие connectors.
+Проектная вкладка `Keys.so` использует BYOK connector и создаёт асинхронный
+`KEYWORD_RESEARCH` run. Для домена и базы она получает нормализованные organic
+keywords, URL, позицию и частотность, а также dashboard-метрики TOP-1/3/5/10/50,
+видимость и bounded список конкурентов. Сырые provider-ответы и API token в
+browser не передаются. Отсутствующий у Keys.so домен является конечной
+provider-ошибкой, а не пустым успешным отчётом.
 
-Функции:
+Результат сначала сохраняется в Jobs-owned staging preview. Пользователь
+импортирует все строки или выбранные строки в существующую папку либо в новую
+папку под выбранным parent. Import worker передаёт Core SEO bounded chunks по
+500 запросов, применяет явную duplicate policy и сохраняет источник в тегах и
+custom values. Выбранные Keys.so строки можно без копирования вручную передать
+как seed-фразы в соседний мастер Wordstat.
 
-- organic keywords;
-- paid keywords, если доступно;
-- top pages;
-- shared/unique keywords;
-- domain comparison;
-- historical data;
-- filters by position/frequency/traffic;
-- import proposal;
-- mapping provider fields;
-- estimate and quota.
+Выбор «Все найденные» является server-side выражением над полным immutable
+результатом run, а не списком строк текущей preview-страницы. Клиент передаёт
+`selectionMode=ALL` и только ID явно снятых строк в `excludedRowIds`;
+`selectionMode=SELECTED` передаёт только `selectedRowIds`. Поэтому infinite
+scroll не меняет смысл выбора, а импорт полного результата не требует сначала
+загрузить все строки в browser.
 
-Результат сначала показывается в staging preview; пользователь выбирает, что импортировать.
+### 13.1. Расширение семантики Wordstat через Arsenkin и XMLStock
+
+Мастер принимает до 500 уникальных seed-фраз из textarea, текущего выбора
+запросов или папок проекта. Он фиксирует регион, устройство, минус-слова,
+очистку минус-фраз/плюсов, включение правой колонки и лимит результата до
+10 000 строк. Пользователь явно выбирает провайдера. Arsenkin connector
+запускает документированный Wordstat tool `type=2` одним `set`, затем выполняет
+`check/get` того же provider task. XMLStock connector выполняет отдельный GET
+`/wordstat/json/` с `pagetype=words` для каждой seed-фразы и ограничивает
+`groupby` официальным пределом 2 000. Поля `results` и `associations`
+нормализуются в те же строки `LEFT|RIGHT` с исходной seed-фразой и
+частотностью. Начальный регион обоих вариантов всегда Россия (`225`).
+
+Run проходит состояния `QUEUED → RUNNING → READY_TO_IMPORT`; закрытие или
+повторный poll не запускают платную задачу повторно. Если transport outcome
+после начала `set` неизвестен, операция изолируется для ручного решения.
+Provider task разделяет общий предел пяти активных Arsenkin tasks с позициями,
+обычной частотностью, ИИ-ответами и кластеризацией. XMLStock запросы получают
+отдельный per-credential `WORDSTAT` permit и fenced completion каждого seed;
+retry не повторяет уже сохранённую страницу. Preview и импорт у обоих
+провайдеров используют тот же выбор существующей/новой папки, что и Keys.so.
+Импорт Wordstat не создаёт автоматические теги провайдера или источника:
+происхождение остаётся в run metadata и custom values строки. После завершения
+import-worker клиентский монитор операций перечитывает запросы, общий счётчик
+и дерево папок без ручной перезагрузки страницы.
 
 ## 14. Проверка индексации
 
@@ -916,7 +992,9 @@ Fallback запрещён:
 Если snapshots отсутствуют на точных датах, UI показывает фактически использованные даты.
 
 Фоновый XLSX-отчёт истории позиций доступен из экспорта семантики отдельно от
-обычной выгрузки таблицы. Он принимает выбранные Яндекс/Google и ограниченный
+обычной выгрузки таблицы. По умолчанию он исключает запросы с
+`isTracked = false`, а отдельная явная опция включает их. Отчёт принимает
+выбранные Яндекс/Google и ограниченный
 UTC-диапазон, читает append-only BYOK history keyword ID через все tracking
 contexts и размещает фактические даты по убыванию в отдельных листах. Значения
 позиций записываются числами, отсутствующая позиция — прочерком; строки TOP-5,

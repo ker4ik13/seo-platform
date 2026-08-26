@@ -1,6 +1,7 @@
 import {
   trackingContextStatuses,
   trackingContextScopeModes,
+  trackingContextKeywordPageLimit,
   trackingContextKeywordReplacementLimit,
   trackingDepths,
   trackingDevices,
@@ -157,7 +158,11 @@ function trackingLaunchProfile(
   value: unknown
 ): TrackingContextLaunchProfile | undefined {
   if (value === undefined) return undefined;
-  const input = exactRecord(value, ["searchSource", "scope"]);
+  const input = exactRecord(value, [
+    "searchSource",
+    "includeUntracked",
+    "scope"
+  ]);
   const scope = exactRecord(input.scope, ["mode", "groupIds"]);
   const searchSource = enumValue(
     input.searchSource,
@@ -171,12 +176,18 @@ function trackingLaunchProfile(
   const groupIds = scope.groupIds.map(uuidValue);
   if (
     new Set(groupIds).size !== groupIds.length ||
+    (input.includeUntracked !== undefined &&
+      typeof input.includeUntracked !== "boolean") ||
     (mode === "GROUPS" && groupIds.length === 0) ||
     (mode !== "GROUPS" && groupIds.length > 0)
   ) {
     throw invalidResponse();
   }
-  return { searchSource, scope: { mode, groupIds } };
+  return {
+    searchSource,
+    includeUntracked: input.includeUntracked ?? false,
+    scope: { mode, groupIds }
+  };
 }
 
 export function trackingContextKeywordPage(
@@ -192,7 +203,7 @@ export function trackingContextKeywordPage(
   ]);
   if (
     !Array.isArray(response.data) ||
-    response.data.length > 200 ||
+    response.data.length > trackingContextKeywordPageLimit ||
     typeof page.hasNext !== "boolean" ||
     (page.nextCursor !== undefined &&
       (typeof page.nextCursor !== "string" ||
@@ -426,6 +437,7 @@ function trackingContextKeywordItem(
     "keywordVersion",
     "textOriginal",
     "language",
+    "isTracked",
     "assignedBy",
     "assignedAt"
   ]);
@@ -440,9 +452,18 @@ function trackingContextKeywordItem(
     keywordVersion: positiveInteger(input.keywordVersion),
     textOriginal: requiredString(input.textOriginal, 1, 10_000),
     language: requiredString(input.language, 2, 16),
+    isTracked:
+      input.isTracked === undefined
+        ? true
+        : booleanResponse(input.isTracked),
     assignedBy: uuidValue(input.assignedBy),
     assignedAt: isoDateValue(input.assignedAt)
   };
+}
+
+function booleanResponse(value: unknown): boolean {
+  if (typeof value !== "boolean") throw invalidResponse();
+  return value;
 }
 
 function apiMeta(value: unknown): void {

@@ -80,9 +80,12 @@ Finalize сериализуется тем же manifest lock. После пол
 
 Список контекстов ограничен 200 агрегатами и возвращает
 `contextsTruncated`. Список назначений использует связанный с контекстом и
-поиском непрозрачный keyset cursor. `SemanticKeywordListItem.isTracked`
-вычисляется по активным назначениям активных контекстов; колонка
-`keywords.is_tracked` не является источником истины.
+поиском непрозрачный keyset cursor. `keywords.is_tracked` — канонический
+пользовательский переключатель съёма позиций для запроса и по умолчанию равен
+`true`; назначения к tracking context описывают только состав сохранённого
+scope и не меняют переключатель. Новый rank manifest исключает выключенные
+запросы, если immutable launch profile явно не содержит
+`includeUntracked: true`.
 
 Прямого browser/public доступа к SEO Data нет. Авторизованный public read
 доступен через Platform API

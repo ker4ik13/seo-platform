@@ -1102,6 +1102,7 @@ function keywordState(keyword: CurrentKeyword): SemanticKeywordVersionState {
     language: keyword.language,
     priority: keyword.priority,
     isFavorite: keyword.isFavorite,
+    isTracked: keyword.isTracked,
     intent: keyword.intent,
     status: keyword.status === "DELETED" ? "DELETED" : "ACTIVE",
     clusterId: keyword.clusterId,

@@ -32,7 +32,59 @@
 .headerActions :where(button, a):focus-visible,
 .state button:focus-visible,
 .inlineError button:focus-visible,
-.table a:focus-visible { outline: 3px solid rgb(103 88 239 / 22%); outline-offset: 2px; }
+.table a:focus-visible { outline: 2px solid rgb(91 61 245 / 58%); outline-offset: 2px; }
+
+.contextBar {
+  align-items: center;
+  background: #fbfbfd;
+  border-bottom: 1px solid #e5e7ee;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 18px;
+  min-height: 48px;
+  padding: 6px 12px;
+}
+.contextItem { align-items: center; display: flex; gap: 8px; min-width: 0; }
+.contextItem > svg,
+.contextItem > i,
+.contextItem > img {
+  align-items: center;
+  background: #eeecff;
+  border-radius: 50%;
+  color: #5b46ed;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+  height: 28px;
+  justify-content: center;
+  object-fit: cover;
+  width: 28px;
+}
+.contextItem > svg { border-radius: 8px; padding: 6px; }
+.contextItem > span { display: grid; gap: 1px; min-width: 0; }
+.contextItem small { color: #858b99; font-size: 9px; }
+.contextItem strong { color: #252936; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contextDescription { color: #7b8191; font-size: 10px; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runtimeLogButton {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #dfe2ea;
+  border-radius: 8px;
+  color: #4f5564;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 10px;
+  font-weight: 750;
+  gap: 7px;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 10px;
+}
+.runtimeLogButton > span { background: #25a45a; border-radius: 50%; box-shadow: 0 0 0 4px rgb(37 164 90 / 10%); height: 7px; width: 7px; }
+.runtimeLogButton:hover { border-color: #bcb5f5; color: #5542e8; }
+.runtimeLogButton:focus-visible { box-shadow: 0 0 0 3px rgb(103 88 239 / 14%); outline: 0; }
 
 .summary { align-items: stretch; background: #fff; border-bottom: 1px solid #e5e7ee; display: grid; grid-template-columns: minmax(230px, 1.3fr) repeat(auto-fit, minmax(100px, .7fr)); min-height: 62px; }
 .statusBlock,
@@ -67,6 +119,18 @@
 .inlineError { align-items: center; background: #fff3f4; border-bottom: 1px solid #ffcbd1; color: #a72d3c; display: flex; font-size: 11px; gap: 12px; justify-content: space-between; padding: 8px 14px; }
 .inlineError button { background: transparent; border-color: #e8aab2; color: inherit; min-height: 30px; }
 .tablePanel { background: #fff; flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; }
+.researchApplyPanel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.researchApplyPanel > :global(.keyword-research-run-preview) {
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 0;
+}
 .crawlResult { min-width: 0; }
 .crawlToolbar { align-items: center; background: #fff; border-bottom: 1px solid #e5e7ee; display: grid; gap: 8px; grid-template-columns: minmax(180px, 1fr) minmax(180px, .65fr) minmax(210px, .75fr) auto; padding: 9px 10px; position: sticky; top: 0; z-index: 4; }
 .crawlToolbar label { min-width: 0; }
@@ -75,14 +139,14 @@
 .crawlToolbar > span { color: #7b8191; font-size: 9px; text-align: right; white-space: nowrap; }
 .visuallyHidden { height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; width: 1px; clip: rect(0 0 0 0); }
 .tableScroll { min-width: 100%; }
-.table { border-collapse: separate; border-spacing: 0; min-width: 1080px; table-layout: fixed; width: 100%; }
+.table { border-collapse: separate; border-spacing: 0; min-width: 900px; table-layout: fixed; width: 100%; }
 .wideTable { min-width: 1420px; }
 .httpTable { min-width: 1120px; }
 .httpTable th:nth-child(2) { width: 330px; }
 .httpTable th:nth-child(4) { width: 240px; }
 .table caption { height: 1px; margin: -1px; overflow: hidden; padding: 0; position: absolute; width: 1px; clip: rect(0 0 0 0); }
-.table th { background: #f7f8fa; border-bottom: 1px solid #e5e7ee; color: #697083; font-size: 9px; font-weight: 800; letter-spacing: .025em; padding: 9px 10px; position: sticky; text-align: left; text-transform: uppercase; top: 0; z-index: 2; }
-.table td { border-bottom: 1px solid #eceef3; color: #252936; font-size: 10px; line-height: 1.4; overflow: hidden; padding: 9px 10px; text-overflow: ellipsis; vertical-align: top; }
+.table th { background: #f7f8fa; border-bottom: 1px solid #e5e7ee; color: #697083; font-size: 10px; font-weight: 800; letter-spacing: .025em; padding: 8px 10px; position: sticky; text-align: left; text-transform: uppercase; top: 0; z-index: 2; }
+.table td { border-bottom: 1px solid #eceef3; color: #252936; font-size: 12px; height: 42px; line-height: 1.35; overflow: hidden; padding: 7px 10px; text-overflow: ellipsis; vertical-align: middle; }
 .table tbody tr:hover td { background: #fafaff; }
 .table th:first-child,
 .table td:first-child { color: #858b99; text-align: right; width: 46px; }
@@ -92,7 +156,7 @@
 .longCell strong,
 .longCell small { display: block; }
 .primaryCell strong,
-.longCell strong { color: #171a24; font-size: 11px; }
+.longCell strong { color: #171a24; font-size: 12px; }
 .primaryCell small,
 .longCell small { color: #83899a; font-size: 9px; margin-top: 2px; }
 .numberCell { font-variant-numeric: tabular-nums; font-weight: 700; text-align: right; }
@@ -135,6 +199,104 @@
 .state button { margin-top: 14px; }
 .state.error strong { color: #a72d3c; }
 .spinner { animation: spin .8s linear infinite; border: 2px solid #ddd9ff; border-radius: 50%; border-top-color: #6758ef; height: 28px; margin-bottom: 12px; width: 28px; }
+
+.runtimeLogBody { min-height: 0; overflow: hidden !important; padding: 0 !important; }
+.runtimeLogWorkspace { background: #f7f8fb; display: flex; flex-direction: column; height: min(74vh, 760px); min-height: 0; }
+.runtimeLogOverview { background: #fff; border-bottom: 1px solid #e4e6ed; display: grid; flex: 0 0 auto; grid-template-columns: minmax(190px, 1.25fr) repeat(4, minmax(90px, .6fr)) minmax(190px, 1fr); }
+.runtimeLiveState,
+.runtimeMetric,
+.runtimeMetricError,
+.runtimePolicy { align-items: center; border-right: 1px solid #e5e7ee; display: flex; min-height: 72px; min-width: 0; padding: 10px 14px; }
+.runtimeLiveState { gap: 10px; }
+.runtimeLiveState > div,
+.runtimeMetric,
+.runtimeMetricError,
+.runtimePolicy { flex-direction: column; justify-content: center; }
+.runtimeLiveState > div { display: grid; gap: 3px; min-width: 0; }
+.runtimeLiveState strong,
+.runtimeMetric strong,
+.runtimeMetricError strong,
+.runtimePolicy strong { color: #222631; font-size: 13px; line-height: 1.25; }
+.runtimeLiveState small,
+.runtimeMetric small,
+.runtimeMetricError small,
+.runtimePolicy small { color: #818797; font-size: 9px; }
+.runtimeMetric strong,
+.runtimeMetricError strong { font-size: 18px; margin-top: 3px; }
+.runtimeMetricError strong { color: #b52c3d; }
+.runtimePolicy { align-items: flex-start; border-right: 0; gap: 4px; }
+.runtimeLiveDot,
+.runtimeDoneDot { border-radius: 50%; flex: 0 0 auto; height: 10px; width: 10px; }
+.runtimeLiveDot { animation: runtimePulse 1.4s ease-out infinite; background: #26a65b; box-shadow: 0 0 0 5px rgb(38 166 91 / 12%); }
+.runtimeDoneDot { background: #8a90a0; box-shadow: 0 0 0 5px rgb(138 144 160 / 12%); }
+.runtimeLaneBar { align-items: center; background: #fbfbfd; border-bottom: 1px solid #e4e6ed; display: flex; flex: 0 0 auto; gap: 12px; min-height: 50px; padding: 7px 12px; }
+.runtimeLaneBar > strong { color: #343946; font-size: 10px; white-space: nowrap; }
+.runtimeLaneBar > div { align-items: center; display: flex; flex: 1 1 auto; gap: 6px; min-width: 0; overflow-x: auto; padding: 3px; }
+.runtimeLaneBar > div > span { background: color-mix(in srgb, var(--runtime-lane-color) 10%, white); border: 1px solid color-mix(in srgb, var(--runtime-lane-color) 30%, white); border-radius: 999px; color: var(--runtime-lane-color); flex: 0 0 auto; font-size: 9px; font-weight: 800; padding: 5px 8px; }
+.runtimeLaneBar > div > small { color: #858b99; font-size: 9px; }
+.runtimeLaneBar > button,
+.runtimeLogFooter button { align-items: center; background: #fff; border: 1px solid #dfe2ea; border-radius: 8px; color: #525866; display: inline-flex; font-size: 10px; font-weight: 750; justify-content: center; min-height: 34px; padding: 0 12px; }
+.runtimeLaneBar > button:hover,
+.runtimeLogFooter button:hover { border-color: #bcb5f5; color: #5542e8; }
+.runtimeLaneBar > button:focus-visible,
+.runtimeLogFooter button:focus-visible { box-shadow: 0 0 0 3px rgb(103 88 239 / 14%); outline: 0; }
+.runtimeLaneBar > button:disabled { opacity: .55; }
+.runtimeLogError { background: #fff1f3; border-bottom: 1px solid #f6c8ce; color: #ac3140; flex: 0 0 auto; font-size: 10px; padding: 8px 12px; }
+.runtimeLogTableWrap { background: #fff; flex: 1 1 auto; min-height: 0; overflow: auto; position: relative; }
+.runtimeLogTable { border-collapse: separate; border-spacing: 0; min-width: 980px; table-layout: fixed; width: 100%; }
+.runtimeLogTable caption { height: 1px; margin: -1px; overflow: hidden; position: absolute; width: 1px; clip: rect(0 0 0 0); }
+.runtimeLogTable th { background: #f7f8fa; border-bottom: 1px solid #e1e4eb; color: #6d7485; font-size: 9px; font-weight: 800; letter-spacing: .035em; padding: 8px 10px; position: sticky; text-align: left; text-transform: uppercase; top: 0; z-index: 2; }
+.runtimeLogTable td { border-bottom: 1px solid #eceef3; color: #343946; font-size: 10px; height: 46px; overflow: hidden; padding: 7px 10px; text-overflow: ellipsis; vertical-align: middle; }
+.runtimeLogTable tbody tr:hover td { background: #fafaff; }
+.runtimeLogTable th:nth-child(1) { width: 82px; }
+.runtimeLogTable th:nth-child(2) { width: 68px; text-align: center; }
+.runtimeLogTable td:nth-child(2) { text-align: center; }
+.runtimeLogTable th:nth-child(3) { width: 260px; }
+.runtimeLogTable th:nth-child(4) { width: 140px; }
+.runtimeLogTable th:nth-child(5) { width: 140px; }
+.runtimeLogTable th:nth-child(6) { width: 92px; }
+.runtimeLogTable td small { color: #858b99; display: block; font-size: 8px; margin-top: 2px; }
+.runtimeKeyword strong { color: #222631; display: block; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runtimeLane { align-items: center; background: color-mix(in srgb, var(--runtime-lane-color) 12%, white); border: 1px solid color-mix(in srgb, var(--runtime-lane-color) 32%, white); border-radius: 7px; color: var(--runtime-lane-color); display: inline-flex; font-size: 10px; font-weight: 850; height: 25px; justify-content: center; min-width: 30px; }
+.runtimeState { background: #f0f1f4; border-radius: 999px; color: #656b79; display: inline-flex; font-size: 8px; font-weight: 800; padding: 5px 7px; }
+.runtimeStateQUEUED { background: #f0f1f4; color: #656b79; }
+.runtimeStateREQUESTING { background: #e9f3ff; color: #2769a9; }
+.runtimeStateWAITING_PROVIDER,
+.runtimeStateWAITING_NEXT_PAGE,
+.runtimeStateRETRY_WAIT { background: #fff5e5; color: #986116; }
+.runtimeStateSAVING { background: #f0edff; color: #5744d9; }
+.runtimeStateCOMPLETED { background: #e9f8ef; color: #248849; }
+.runtimeStateFAILED { background: #fff0f2; color: #b3293b; }
+.runtimeErrorCode { color: #b3293b !important; font-weight: 750; }
+.runtimeLogEmpty { align-items: center; color: #858b99; display: flex; flex-direction: column; inset: 0; justify-content: center; min-height: 260px; padding: 24px; position: absolute; text-align: center; }
+.runtimeLogEmpty strong { color: #3b404d; font-size: 12px; margin-top: 9px; }
+.runtimeLogEmpty small { font-size: 9px; margin-top: 4px; }
+.runtimeLogFooter { align-items: center; display: flex; gap: 14px; justify-content: space-between; width: 100%; }
+.runtimeLogFooter > span { color: #7b8191; font-size: 10px; }
+
+@keyframes runtimePulse {
+  0% { box-shadow: 0 0 0 0 rgb(38 166 91 / 30%); }
+  70% { box-shadow: 0 0 0 7px rgb(38 166 91 / 0%); }
+  100% { box-shadow: 0 0 0 0 rgb(38 166 91 / 0%); }
+}
+
+@media (max-width: 720px) {
+  .contextBar { align-items: stretch; flex-direction: column; gap: 7px; padding-block: 8px; }
+  .contextDescription { margin-left: 0; }
+  .runtimeLogButton { align-self: flex-start; }
+  .runtimeLogWorkspace { height: min(78vh, 720px); }
+  .runtimeLogOverview { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .runtimeLiveState,
+  .runtimePolicy { grid-column: 1 / -1; }
+  .runtimeLiveState,
+  .runtimeMetric,
+  .runtimeMetricError,
+  .runtimePolicy { border-bottom: 1px solid #e5e7ee; min-height: 58px; }
+  .runtimeLaneBar { align-items: stretch; flex-wrap: wrap; }
+  .runtimeLaneBar > div { order: 3; width: 100%; }
+  .runtimeLogFooter > span { display: none; }
+  .runtimeLogFooter { justify-content: flex-end; }
+}
 
 .clusteringPending,
 .clusteringSettled {
@@ -499,9 +661,16 @@
 }
 
 @media (max-width: 680px) {
+  .researchApplyPanel { overflow-y: auto; }
+  .researchApplyPanel > :global(.keyword-research-run-preview) { height: auto; }
   .header { align-items: flex-start; flex-direction: column; }
   .headerActions { width: 100%; }
-  .headerActions > * { flex: 1; }
+  .headerActions > * { flex: 1; min-height: 44px; }
+  .state button,
+  .inlineError button,
+  .filteredEmpty button,
+  .clusteringSelectionBar > button,
+  .clusteringApplyActions button { min-height: 44px; }
   .summary { grid-template-columns: 1fr 1fr; }
   .table th,
   .table td { padding: 8px; }

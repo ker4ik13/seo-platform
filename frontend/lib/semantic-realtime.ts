@@ -47,6 +47,9 @@ export function semanticMutationProjectId(
   if (/^clustering-runs\/[0-9a-f-]+\/apply$/u.test(resource)) {
     return projectId;
   }
+  if (/^keyword-research-runs\/[0-9a-f-]+\/confirm$/u.test(resource)) {
+    return projectId;
+  }
   if (
     /^clusters(?:\/|$)/u.test(resource) &&
     !resource.endsWith("-preview")
@@ -59,4 +62,4 @@ export function semanticMutationProjectId(
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const PROJECT_API_PATTERN =
-  /^\/app\/api\/projects\/([^/]+)\/(.+)$/u;
+  /^\/app\/api\/(?:v1\/)?projects\/([^/]+)\/(.+)$/u;

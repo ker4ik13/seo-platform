@@ -13,8 +13,9 @@ import {
 import { storedEntitlement } from "./keyword-research-record.js";
 
 const MAPPING_HASH = createHash("sha256")
-  .update("seo-platform:keyword-research:keys-so-import:v1", "utf8")
+  .update("seo-platform:keyword-research:import:v4", "utf8")
   .digest("hex");
+const IMPORT_CHUNK_SIZE = 500;
 
 @Injectable()
 export class KeywordResearchImportService {
@@ -62,28 +63,47 @@ export class KeywordResearchImportService {
           selected: true
         },
         orderBy: { ordinal: "asc" },
-        take: 500
+        take: 10_000
       });
       if (rows.length !== claimed.selectedKeywords || rows.length < 1) {
         throw new TypeError("Stored keyword research selection is invalid");
       }
-      const normalized = await this.seoData.normalizeKeywords({
-        workspaceId: claimed.workspaceId,
-        projectId: claimed.projectId,
-        actorId: claimed.actorId,
-        importId: claimed.id,
-        rows: rows.map((row) => ({
-          rowNumber: String(row.ordinal),
-          text: row.keyword,
-          language: claimed.database === "gny" ? "en" : "ru"
-        }))
-      });
+      const language = claimed.source === "KEYS_SO" && claimed.database === "gny"
+        ? "en"
+        : "ru";
+      const normalizedRows: Awaited<
+        ReturnType<SeoDataClient["normalizeKeywords"]>
+      >["rows"][number][] = [];
+      for (const chunk of chunks(rows, IMPORT_CHUNK_SIZE)) {
+        const normalized = await this.seoData.normalizeKeywords({
+          workspaceId: claimed.workspaceId,
+          projectId: claimed.projectId,
+          actorId: claimed.actorId,
+          importId: claimed.id,
+          rows: chunk.map((row) => ({
+            rowNumber: String(row.ordinal),
+            text: row.keyword,
+            language
+          }))
+        });
+        normalizedRows.push(...normalized.rows);
+      }
       const normalizedByNumber = new Map(
-        normalized.rows.map((row) => [row.rowNumber, row])
+        normalizedRows.map((row) => [row.rowNumber, row])
+      );
+      const importTags = keywordResearchImportTags(
+        claimed.source,
+        claimed.domain
       );
       const publishRows = rows.map((row): SemanticImportPublishRow => {
         const keyword = normalizedByNumber.get(String(row.ordinal));
         if (!keyword) throw new TypeError("Keyword normalization is incomplete");
+        const groupPath = keywordResearchImportGroupPath({
+          rowTargetGroupPath: row.targetGroupPath,
+          runTargetGroupPath: claimed.targetGroupPath,
+          distributionMode: claimed.distributionMode,
+          sourceQuery: row.sourceQuery
+        });
         const frequencies = [
           frequency("BASE", row.frequencyBase),
           frequency("EXACT", row.frequencyExact),
@@ -98,17 +118,23 @@ export class KeywordResearchImportService {
           normalizedHash: keyword.normalizedHash,
           language: keyword.language,
           ...(frequencies.length > 0 ? { frequencies } : {}),
-          tags: ["Keys.so", claimed.domain],
-          customValues: {
-            ...(row.url ? { "Keys.so URL": row.url } : {}),
-            ...(row.position === null
-              ? {}
-              : { "Keys.so position": String(row.position) }),
-            ...(row.kei === null ? {} : { "Keys.so KEI": String(row.kei) })
-          }
+          ...(groupPath ? { groupPath } : {}),
+          ...(importTags ? { tags: importTags } : {}),
+          customValues: claimed.source === "KEYS_SO"
+            ? {
+                ...(row.url ? { "Keys.so URL": row.url } : {}),
+                ...(row.position === null
+                  ? {}
+                  : { "Keys.so position": String(row.position) }),
+                ...(row.kei === null ? {} : { "Keys.so KEI": String(row.kei) })
+              }
+            : {
+                ...(row.sourceQuery ? { "Wordstat исходный запрос": row.sourceQuery } : {}),
+                ...(row.sourceColumn ? { "Wordstat колонка": row.sourceColumn } : {})
+              }
         };
       });
-      const newKeywords = normalized.rows.filter(
+      const newKeywords = normalizedRows.filter(
         ({ existsInProject }) => !existsInProject
       ).length;
       const context = {
@@ -122,21 +148,23 @@ export class KeywordResearchImportService {
         mappingHash: MAPPING_HASH,
         duplicatePolicy: duplicatePolicy(claimed.duplicatePolicy),
         createMissingKeywords: true,
-        expectedChunks: 1,
+        expectedChunks: Math.ceil(publishRows.length / IMPORT_CHUNK_SIZE),
         expectedUniqueRows: String(publishRows.length),
         expectedNewKeywords: String(newKeywords),
         entitlement: storedEntitlement(claimed.entitlement)
       });
-      await this.seoData.applyChunk({
-        ...context,
-        chunkIndex: 0,
-        payloadHash: createHash("sha256")
-          .update(JSON.stringify(publishRows), "utf8")
-          .digest("hex"),
-        duplicatePolicy: duplicatePolicy(claimed.duplicatePolicy),
-        createMissingKeywords: true,
-        rows: publishRows
-      });
+      let chunkIndex = 0;
+      for (const chunk of chunks(publishRows, IMPORT_CHUNK_SIZE)) {
+        await this.seoData.applyChunk({
+          ...context,
+          chunkIndex,
+          payloadHash: keywordResearchImportPayloadHash(chunk),
+          duplicatePolicy: duplicatePolicy(claimed.duplicatePolicy),
+          createMissingKeywords: true,
+          rows: chunk
+        });
+        chunkIndex += 1;
+      }
       const result = await this.seoData.completeImport(context);
       await this.prisma.$transaction(async (transaction) => {
         const updated = await transaction.keywordResearchRun.updateMany({
@@ -259,6 +287,48 @@ export class KeywordResearchImportService {
   }
 }
 
+/**
+ * SEO data validates a chunk after parsing every row into its canonical
+ * contract shape. Hash that same shape here so optional fields cannot change
+ * the signature merely because a connector inserted object keys in a
+ * different order.
+ */
+export function keywordResearchImportPayloadHash(
+  rows: readonly SemanticImportPublishRow[]
+): string {
+  const canonicalRows = rows.map((row) => ({
+    sourceRowNumber: row.sourceRowNumber,
+    textOriginal: row.textOriginal,
+    textNormalized: row.textNormalized,
+    normalizedHash: row.normalizedHash,
+    language: row.language,
+    ...(row.priority === undefined ? {} : { priority: row.priority }),
+    ...(row.isFavorite === undefined ? {} : { isFavorite: row.isFavorite }),
+    ...(row.intent === undefined ? {} : { intent: row.intent }),
+    ...(row.groupPath === undefined ? {} : { groupPath: row.groupPath }),
+    ...(row.groupPaths === undefined ? {} : { groupPaths: row.groupPaths }),
+    ...(row.targetUrl === undefined ? {} : { targetUrl: row.targetUrl }),
+    ...(row.frequencies === undefined
+      ? {}
+      : { frequencies: row.frequencies }),
+    ...(row.positions === undefined ? {} : { positions: row.positions }),
+    ...(row.observedAt === undefined ? {} : { observedAt: row.observedAt }),
+    ...(row.tags === undefined ? {} : { tags: row.tags }),
+    customValues: row.customValues
+  }));
+  return createHash("sha256")
+    .update(JSON.stringify(canonicalRows), "utf8")
+    .digest("hex");
+}
+
+export function keywordResearchImportTags(
+  source: string,
+  domain?: string | null
+): readonly string[] | undefined {
+  if (source !== "KEYS_SO") return undefined;
+  return ["Keys.so", domain ?? ""].filter(Boolean);
+}
+
 function duplicatePolicy(value: string | null): SemanticImportDuplicatePolicy {
   if (
     value !== "SKIP_EXISTING" &&
@@ -275,4 +345,48 @@ function frequency(
   value: number | null
 ): { readonly type: "BASE" | "EXACT" | "FIXED"; readonly value: string } | undefined {
   return value === null ? undefined : { type, value: String(value) };
+}
+
+function chunks<T>(values: readonly T[], size: number): readonly (readonly T[])[] {
+  const result: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    result.push(values.slice(index, index + size));
+  }
+  return result;
+}
+
+function storedGroupPath(value: string | null): readonly string[] | undefined {
+  if (!value) return undefined;
+  const segments = value.split(" / ").map((segment) => segment.trim());
+  if (
+    segments.length < 1 ||
+    segments.length > 12 ||
+    segments.some((segment) => !segment || segment.length > 255)
+  ) {
+    throw new TypeError("Stored keyword research target group is invalid");
+  }
+  return segments;
+}
+
+export function keywordResearchImportGroupPath(input: Readonly<{
+  rowTargetGroupPath: string | null;
+  runTargetGroupPath: string | null;
+  distributionMode: string;
+  sourceQuery: string | null;
+}>): readonly string[] | undefined {
+  const rowTarget = storedGroupPath(input.rowTargetGroupPath);
+  if (rowTarget) return rowTarget;
+  const runTarget = storedGroupPath(input.runTargetGroupPath);
+  if (!runTarget) return undefined;
+  if (input.distributionMode === "SINGLE_GROUP") return runTarget;
+  if (input.distributionMode !== "BY_SOURCE_QUERY") {
+    throw new TypeError("Stored keyword research distribution mode is invalid");
+  }
+  const sourceFolder = (input.sourceQuery ?? "Исходный запрос")
+    .trim()
+    .replace(/\s+/gu, " ")
+    .replaceAll("/", "∕")
+    .slice(0, 255)
+    .trim();
+  return [...runTarget, sourceFolder || "Исходный запрос"];
 }

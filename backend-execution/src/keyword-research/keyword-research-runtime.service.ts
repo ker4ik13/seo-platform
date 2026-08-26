@@ -1,11 +1,15 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Inject, Injectable, Optional } from "@nestjs/common";
 import type { AppConfig } from "../config/app-config.js";
 import { APP_CONFIG } from "../config/config.module.js";
 import { IntegrationCredentialCryptoService } from "../integrations/integration-credential-crypto.service.js";
 import { IntegrationCredentialRefreshSchedulerService } from "../integrations/integration-credential-refresh-scheduler.service.js";
+import { XmlStockHttpQuotaLimiter } from "../integrations/xmlstock-http-quota-limiter.js";
+import { XmlStockWordstatConnector } from "../frequency-collections/xmlstock-wordstat.connector.js";
 import {
+  ARSENKIN_WORDSTAT_EXPANSION_CONNECTOR,
   KEYS_SO_KEYWORD_RESEARCH_CONNECTOR,
+  type ArsenkinWordstatExpansionConnector,
   type KeysSoKeywordResearchConnector
 } from "./keyword-research.tokens.js";
 import {
@@ -19,7 +23,11 @@ export class KeywordResearchRuntimeService {
     private readonly broker: KeywordResearchRuntimeBrokerService,
     private readonly crypto: IntegrationCredentialCryptoService,
     @Inject(KEYS_SO_KEYWORD_RESEARCH_CONNECTOR)
-    private readonly connector: KeysSoKeywordResearchConnector,
+    private readonly keysSo: KeysSoKeywordResearchConnector,
+    @Inject(ARSENKIN_WORDSTAT_EXPANSION_CONNECTOR)
+    private readonly wordstat: ArsenkinWordstatExpansionConnector,
+    private readonly xmlStockWordstat: XmlStockWordstatConnector,
+    private readonly xmlStockQuota: XmlStockHttpQuotaLimiter,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Optional()
     private readonly refreshScheduler?: IntegrationCredentialRefreshSchedulerService
@@ -47,11 +55,129 @@ export class KeywordResearchRuntimeService {
       }
       const secret = this.crypto.decrypt(
         claim.workspaceId,
-        "KEYS_SO",
+        claim.provider,
         claim.credentialId,
         claim.encryptedCredential
       );
-      const result = await this.connector.collect(
+      if (claim.source === "KEYS_SO") {
+        return await this.processKeysSo(claim, secret);
+      }
+      if (claim.source === "XMLSTOCK_WORDSTAT") {
+        return await this.processXmlStockWordstat(claim, secret);
+      }
+      return await this.processWordstat(claim, secret, leaseSeconds);
+    } catch (error) {
+      if (error instanceof KeywordResearchLeaseLostError) return "LEASE_LOST";
+      await (claim.source === "KEYS_SO" || claim.source === "XMLSTOCK_WORDSTAT"
+        ? this.broker.fail(claim, {
+            code: "CONNECTOR_INTERNAL_ERROR",
+            retryable: true,
+            retryAfterSeconds: 30
+          })
+        : claim.providerTaskId?.startsWith("submitting:")
+          ? this.broker.transitionWordstat(claim, { action: "QUARANTINE" })
+          : claim.providerTaskId
+            ? this.broker.transitionWordstat(claim, {
+                action: "DEFER",
+                taskId: claim.providerTaskId,
+                retryAfterSeconds: 30
+              })
+            : this.broker.transitionWordstat(claim, {
+                action: "FAIL",
+                code: "CONNECTOR_INTERNAL_ERROR",
+                retryAfterSeconds: 30
+              }))
+        .catch(() => undefined);
+      throw error;
+    } finally {
+      await this.refreshScheduler
+        ?.scheduleAfterProviderOperation(claim.credentialId)
+        .catch(() => undefined);
+    }
+  }
+
+  private async processXmlStockWordstat(
+    claim: Extract<Awaited<ReturnType<KeywordResearchRuntimeBrokerService["claim"]>>, { readonly source: "XMLSTOCK_WORDSTAT" }>,
+    secret: Parameters<XmlStockWordstatConnector["expand"]>[1]
+  ): Promise<string> {
+    if (!claim) throw new KeywordResearchLeaseLostError();
+    const query = claim.input.queries[claim.page - 1];
+    if (!query) {
+      await this.broker.fail(claim, {
+        code: "CONNECTOR_INVALID_INPUT",
+        retryable: false
+      });
+      return "FAILED";
+    }
+    const remaining = claim.maxKeywords - claim.collectedKeywords;
+    const timeoutMs = this.config.integrationCredentialValidation.timeoutMs;
+    const acquired = await this.xmlStockQuota.tryAcquire({
+      credentialId: claim.credentialId,
+      product: "WORDSTAT",
+      leaseMs: timeoutMs + 5_000
+    });
+    if (!acquired.allowed) {
+      await this.broker.fail(claim, {
+        code: "PROVIDER_RATE_LIMITED",
+        retryable: true,
+        retryAfterSeconds: Math.max(5, acquired.retryAfterSeconds)
+      });
+      return "RETRY_SCHEDULED";
+    }
+    try {
+      const result = await this.xmlStockWordstat.expand(
+        {
+          query,
+          regionCode: claim.input.regionCode,
+          device: claim.input.device,
+          minusWords: claim.input.minusWords,
+          clearMinusPhrases: claim.input.clearMinusPhrases,
+          includeRightColumn: claim.input.includeRightColumn,
+          clearPlus: claim.input.clearPlus,
+          maxKeywords: Math.min(2_000, Math.max(1, remaining))
+        },
+        secret,
+        timeoutMs
+      );
+      if (!result.ok) {
+        if (result.code === "PROVIDER_RATE_LIMITED") {
+          await this.xmlStockQuota.penalize({
+            credentialId: claim.credentialId,
+            product: "WORDSTAT",
+            ...(result.retryAfterSeconds === undefined
+              ? {}
+              : { retryAfterSeconds: result.retryAfterSeconds })
+          });
+        }
+        await this.broker.fail(claim, result);
+        return result.retryable ? "RETRY_SCHEDULED" : "FAILED";
+      }
+      await this.xmlStockQuota.recordSuccess({
+        credentialId: claim.credentialId,
+        product: "WORDSTAT"
+      });
+      await this.broker.completeXmlStockSeed(claim, {
+        rows: result.rows,
+        responseHash: createHash("sha256")
+          .update(JSON.stringify(result.raw), "utf8")
+          .digest()
+      });
+      return claim.page >= claim.input.queries.length ||
+        claim.collectedKeywords + result.rows.length >= claim.maxKeywords
+        ? "READY_TO_IMPORT"
+        : "PAGE_COMPLETED";
+    } finally {
+      await this.xmlStockQuota.release(acquired);
+    }
+  }
+
+  private async processKeysSo(
+    claim: Extract<Awaited<ReturnType<KeywordResearchRuntimeBrokerService["claim"]>>, { readonly source: "KEYS_SO" }>,
+    secret: Parameters<KeysSoKeywordResearchConnector["collect"]>[1]
+  ): Promise<string> {
+    if (!claim) throw new KeywordResearchLeaseLostError();
+    const [result, inspection] = await Promise.all([
+      this.keysSo.collect(
         {
           domain: claim.domain,
           database: claim.database,
@@ -59,10 +185,22 @@ export class KeywordResearchRuntimeService {
         },
         secret,
         this.config.integrationCredentialValidation.timeoutMs
-      );
+      ),
+      claim.page === 1
+        ? this.keysSo.inspectDomain(
+            { domain: claim.domain, database: claim.database },
+            secret,
+            this.config.integrationCredentialValidation.timeoutMs
+          )
+        : Promise.resolve(undefined)
+    ]);
       if (!result.ok) {
         await this.broker.fail(claim, result);
         return result.retryable ? "RETRY_SCHEDULED" : "FAILED";
+      }
+      if (inspection && !inspection.ok) {
+        await this.broker.fail(claim, inspection);
+        return inspection.retryable ? "RETRY_SCHEDULED" : "FAILED";
       }
       const remaining = claim.maxKeywords - claim.collectedKeywords;
       const rows = result.rows.slice(0, Math.max(0, remaining));
@@ -74,28 +212,91 @@ export class KeywordResearchRuntimeService {
       await this.broker.completePage(claim, {
         rows,
         responseHash: createHash("sha256")
-          .update(JSON.stringify(result.raw), "utf8")
+          .update(JSON.stringify({ keywords: result.raw, inspection: inspection?.raw }), "utf8")
           .digest(),
-        ...(result.totalAvailable === undefined
+        ...(inspection?.totalAvailable === undefined && result.totalAvailable === undefined
           ? {}
-          : { totalAvailable: result.totalAvailable }),
+          : { totalAvailable: inspection?.totalAvailable ?? result.totalAvailable }),
+        ...(inspection ? { overview: inspection.overview, competitors: inspection.competitors } : {}),
         complete
       });
       return complete ? "READY_TO_IMPORT" : "PAGE_COMPLETED";
-    } catch (error) {
-      if (error instanceof KeywordResearchLeaseLostError) return "LEASE_LOST";
-      await this.broker
-        .fail(claim, {
-          code: "CONNECTOR_INTERNAL_ERROR",
-          retryable: true,
-          retryAfterSeconds: 30
-        })
-        .catch(() => undefined);
-      throw error;
-    } finally {
-      await this.refreshScheduler
-        ?.scheduleAfterProviderOperation(claim.credentialId)
-        .catch(() => undefined);
+  }
+
+  private async processWordstat(
+    claim: Extract<Awaited<ReturnType<KeywordResearchRuntimeBrokerService["claim"]>>, { readonly source: "ARSENKIN_WORDSTAT" }>,
+    secret: Parameters<ArsenkinWordstatExpansionConnector["submit"]>[1],
+    leaseSeconds: number
+  ): Promise<string> {
+    if (!claim) throw new KeywordResearchLeaseLostError();
+    if (claim.providerTaskId?.startsWith("submitting:")) {
+      await this.broker.transitionWordstat(claim, { action: "QUARANTINE" });
+      return "ACTION_REQUIRED";
     }
+    if (!claim.providerTaskId) {
+      const marker = `submitting:${randomUUID()}`;
+      const result = await this.wordstat.submit(
+        claim.input,
+        secret,
+        this.config.integrationCredentialValidation.timeoutMs,
+        () => this.broker.markSubmitting(claim, marker, leaseSeconds)
+      );
+      if (result.status === "ACCEPTED") {
+        await this.broker.transitionWordstat(claim, {
+          action: "DEFER",
+          taskId: result.taskId,
+          retryAfterSeconds: 5
+        });
+        return "RETRY_SCHEDULED";
+      }
+      if (result.status === "OUTCOME_UNKNOWN") {
+        await this.broker.transitionWordstat(claim, { action: "QUARANTINE" });
+        return "ACTION_REQUIRED";
+      }
+      if (result.status === "RETRYABLE_FAILURE" && result.code === "PROVIDER_CONCURRENCY_LIMITED") {
+        await this.broker.transitionWordstat(claim, {
+          action: "CAPACITY",
+          retryAfterSeconds: result.retryAfterSeconds ?? 5
+        });
+        return "RETRY_SCHEDULED";
+      }
+      await this.broker.transitionWordstat(claim, {
+        action: "FAIL",
+        code: result.code,
+        ...(result.status === "RETRYABLE_FAILURE"
+          ? { retryAfterSeconds: result.retryAfterSeconds ?? 30 }
+          : {})
+      });
+      return result.status === "RETRYABLE_FAILURE" ? "RETRY_SCHEDULED" : "FAILED";
+    }
+    const result = await this.wordstat.fetchResult(
+      claim.providerTaskId,
+      claim.input,
+      secret,
+      this.config.integrationCredentialValidation.timeoutMs
+    );
+    if (result.status === "READY") {
+      await this.broker.transitionWordstat(claim, {
+        action: "COMPLETE",
+        rows: result.rows,
+        responseHash: createHash("sha256")
+          .update(JSON.stringify(result.raw), "utf8")
+          .digest()
+      });
+      return "READY_TO_IMPORT";
+    }
+    if (result.status === "PENDING" || result.status === "RETRYABLE_FAILURE") {
+      await this.broker.transitionWordstat(claim, {
+        action: "DEFER",
+        taskId: claim.providerTaskId,
+        retryAfterSeconds: result.retryAfterSeconds ?? 5
+      });
+      return "RETRY_SCHEDULED";
+    }
+    await this.broker.transitionWordstat(claim, {
+      action: "FAIL",
+      code: result.code
+    });
+    return "FAILED";
   }
 }

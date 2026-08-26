@@ -7,6 +7,7 @@ import {
   Logger,
   Param,
   Post,
+  Query,
   Req,
   Res,
   UseGuards
@@ -15,6 +16,7 @@ import type {
   ApiResponse,
   KeywordResearchAccess,
   KeywordResearchCollection,
+  KeywordResearchRowPage,
   KeywordResearchRunSummary
 } from "@seo-platform/contracts";
 import type { FastifyReply } from "fastify";
@@ -48,7 +50,8 @@ import { JobsClient } from "../jobs/jobs.client.js";
 import {
   assertEmptyKeywordResearchCancelInput,
   confirmKeywordResearchRunInput,
-  createKeywordResearchRunInput
+  createKeywordResearchRunInput,
+  keywordResearchRowsQuery
 } from "./keyword-research.input.js";
 
 @Controller("api/v1/projects/:projectId/keyword-research-runs")
@@ -93,6 +96,27 @@ export class KeywordResearchController {
     );
     setEntityVersion(reply, run.version);
     return apiResponse(request, run, run.version);
+  }
+
+  @Get(":runId/rows")
+  @RequirePermission("competitor.view")
+  @UseGuards(SessionAuthGuard, TenantPermissionGuard)
+  public async rows(
+    @Param("runId") runId: string,
+    @Query("cursor") cursor: unknown,
+    @Query("limit") limit: unknown,
+    @Req() request: TenantRequest,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<KeywordResearchRowPage>> {
+    const tenant = requiredProjectTenant(request);
+    return apiResponse(
+      request,
+      await this.jobs.getKeywordResearchRows(
+        internalProjectContext(request, principal, tenant),
+        assertUuid(runId, "runId"),
+        keywordResearchRowsQuery(cursor, limit)
+      )
+    );
   }
 
   @Post()
@@ -180,6 +204,29 @@ export class KeywordResearchController {
     const tenant = requiredProjectTenant(request);
     const id = assertUuid(runId, "runId");
     const run = await this.jobs.cancelKeywordResearchRun(
+      internalProjectContext(request, principal, tenant),
+      id,
+      requiredVersion(headerValue(request, "if-match"))
+    );
+    setEntityVersion(reply, run.version);
+    return apiResponse(request, run, run.version);
+  }
+
+  @Post(":runId/retry-import")
+  @HttpCode(HttpStatus.ACCEPTED)
+  @RequirePermission("competitor.manage")
+  @UseGuards(CsrfSessionGuard, TenantPermissionGuard)
+  public async retryImport(
+    @Param("runId") runId: string,
+    @Body() body: unknown,
+    @Req() request: TenantRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+    @CurrentPrincipal() principal: AuthenticatedPrincipal
+  ): Promise<ApiResponse<KeywordResearchRunSummary>> {
+    assertEmptyKeywordResearchCancelInput(body);
+    const tenant = requiredMutableProjectTenant(request);
+    const id = assertUuid(runId, "runId");
+    const run = await this.jobs.retryKeywordResearchImport(
       internalProjectContext(request, principal, tenant),
       id,
       requiredVersion(headerValue(request, "if-match"))

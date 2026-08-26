@@ -40,6 +40,7 @@ test("builds a redacted allowlisted manual rank Job projection", () => {
     id: jobId,
     workspaceId,
     projectId,
+    actorId,
     trackingContextId,
     type: "MANUAL_RANK_CHECK",
     provider: "ARSENKIN",

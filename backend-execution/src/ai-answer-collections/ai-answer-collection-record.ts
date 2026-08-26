@@ -31,6 +31,7 @@ export function aiAnswerCollectionSummary(job: Job): AiAnswerCollectionSummary {
     id: job.id,
     workspaceId: job.workspaceId,
     projectId: job.projectId,
+    ...(job.actorId ? { actorId: job.actorId } : {}),
     provider: "ARSENKIN",
     ...(routingScope ? { routingScope } : {}),
     ...(attempts.length ? { connectorAttempts: attempts } : {}),

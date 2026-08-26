@@ -35,6 +35,7 @@ export function frequencyCollectionSummary(
     id: job.id,
     workspaceId: job.workspaceId,
     projectId: required(job.projectId),
+    ...(job.actorId ? { actorId: job.actorId } : {}),
     provider: provider(job.provider),
     ...(route.routingScope ? { routingScope: route.routingScope } : {}),
     ...(route.connectorAttempts.length > 0

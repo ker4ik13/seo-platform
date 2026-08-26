@@ -1,8 +1,10 @@
 import {
+  russianSearchCities,
   seoRegionOptions,
   type SeoRegionCodeKind,
   type SeoRegionOption
 } from "./seo-regions.ts";
+import type { ProjectSearchCity } from "@seo-platform/contracts";
 
 export type SemanticRegionPreferenceScope =
   | "FREQUENCY"
@@ -49,18 +51,50 @@ export function readLastSemanticRegion(
   scope: SemanticRegionPreferenceScope,
   kind: SeoRegionCodeKind
 ): SeoRegionOption {
-  const fallback = defaultSemanticRegion(kind);
+  return readStoredSemanticRegion(storage, projectId, scope, kind) ??
+    defaultSemanticRegion(kind);
+}
+
+export function readStoredSemanticRegion(
+  storage: PreferenceStorage,
+  projectId: string,
+  scope: SemanticRegionPreferenceScope,
+  kind: SeoRegionCodeKind
+): SeoRegionOption | undefined {
   const key = preferenceKey(projectId, scope, kind);
   try {
     const storedCode = storage.getItem(key);
-    if (!storedCode) return fallback;
+    if (!storedCode) return undefined;
     const option = regionOption(kind, storedCode);
     if (option) return option;
     storage.removeItem(key);
-    return fallback;
+    return undefined;
   } catch {
-    return fallback;
+    return undefined;
   }
+}
+
+export function projectSemanticSearchRegions(
+  city: ProjectSearchCity | undefined
+): SemanticSearchRegions | undefined {
+  return city
+    ? {
+        YANDEX: { code: city.yandexRegionCode, label: city.name },
+        GOOGLE: { code: city.googleRegionCode, label: city.name }
+      }
+    : undefined;
+}
+
+export function pairedSemanticSearchRegions(
+  kind: Extract<SeoRegionCodeKind, "YANDEX_RANK" | "GOOGLE_RANK">,
+  region: SeoRegionOption
+): SemanticSearchRegions | undefined {
+  const city = russianSearchCities.find((candidate) =>
+    kind === "YANDEX_RANK"
+      ? candidate.yandexRegionCode === region.code
+      : candidate.googleRegionCode === region.code
+  );
+  return projectSemanticSearchRegions(city);
 }
 
 export function readLastSemanticSearchRegions(

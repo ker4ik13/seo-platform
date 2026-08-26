@@ -13,9 +13,13 @@ import { ArsenkinRankConnector } from "./rank-runs/arsenkin-rank.connector.js";
 import { XmlStockRankConnector } from "./rank-runs/xmlstock-rank.connector.js";
 import { RankConnectorRuntimeBrokerService } from "./rank-runs/rank-connector-runtime-broker.service.js";
 import { KeysSoKeywordResearchConnector } from "./keyword-research/keys-so-keyword-research.connector.js";
+import { ArsenkinWordstatExpansionConnector } from "./keyword-research/arsenkin-wordstat-expansion.connector.js";
 import { KeywordResearchRuntimeBrokerService } from "./keyword-research/keyword-research-runtime-broker.service.js";
 import { KeywordResearchRuntimeService } from "./keyword-research/keyword-research-runtime.service.js";
-import { KEYS_SO_KEYWORD_RESEARCH_CONNECTOR } from "./keyword-research/keyword-research.tokens.js";
+import {
+  ARSENKIN_WORDSTAT_EXPANSION_CONNECTOR,
+  KEYS_SO_KEYWORD_RESEARCH_CONNECTOR
+} from "./keyword-research/keyword-research.tokens.js";
 import {
   ARSENKIN_RANK_CONNECTOR,
   RankConnectorRuntimeService,
@@ -79,6 +83,12 @@ import { ClusteringRuntimeService } from "./clustering-runs/clustering-runtime.s
     {
       provide: KEYS_SO_KEYWORD_RESEARCH_CONNECTOR,
       useFactory: () => new KeysSoKeywordResearchConnector()
+    },
+    {
+      provide: ARSENKIN_WORDSTAT_EXPANSION_CONNECTOR,
+      inject: [ArsenkinHttpRateLimiter],
+      useFactory: (rateLimiter: ArsenkinHttpRateLimiter) =>
+        new ArsenkinWordstatExpansionConnector(rateLimiter)
     },
     {
       provide: ARSENKIN_RANK_CONNECTOR,

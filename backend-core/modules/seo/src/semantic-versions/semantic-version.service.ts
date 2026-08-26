@@ -42,6 +42,7 @@ export interface SemanticKeywordVersionState {
   readonly language: string;
   readonly priority: number;
   readonly isFavorite: boolean;
+  readonly isTracked: boolean;
   readonly intent: string | null;
   readonly status: "ACTIVE" | "DELETED";
   readonly clusterId: string | null;
@@ -1029,6 +1030,7 @@ async function restoreKeyword(
       language: state.language,
       priority: state.priority,
       isFavorite: state.isFavorite,
+      isTracked: state.isTracked,
       intent: state.intent,
       status: state.status,
       clusterId: state.clusterId,
@@ -1264,6 +1266,7 @@ const HISTORY_FIELD_LABELS: Readonly<Record<string, string>> = {
   language: "Язык",
   priority: "Приоритет",
   isFavorite: "Избранное",
+  isTracked: "Отслеживается",
   intent: "Интент",
   status: "Статус",
   groupId: "Группа",
@@ -1361,6 +1364,7 @@ function historyEntityState(
         "language",
         "priority",
         "isFavorite",
+        "isTracked",
         "intent",
         "status",
         "groupId",
@@ -1545,6 +1549,7 @@ function requiredKeywordState(value: Prisma.JsonValue): SemanticKeywordVersionSt
     "language",
     "priority",
     "isFavorite",
+    "isTracked",
     "intent",
     "status",
     "clusterId",
@@ -1553,8 +1558,9 @@ function requiredKeywordState(value: Prisma.JsonValue): SemanticKeywordVersionSt
     "tagIds"
   ];
   if (
-    Object.keys(state).length !== keys.length ||
-    keys.some((key) => !(key in state)) ||
+    ![keys.length - 1, keys.length].includes(Object.keys(state).length) ||
+    keys.filter((key) => key !== "isTracked").some((key) => !(key in state)) ||
+    Object.keys(state).some((key) => !keys.includes(key)) ||
     typeof state.textOriginal !== "string" ||
     typeof state.textNormalized !== "string" ||
     typeof state.normalizedHash !== "string" ||
@@ -1562,6 +1568,7 @@ function requiredKeywordState(value: Prisma.JsonValue): SemanticKeywordVersionSt
     typeof state.language !== "string" ||
     !Number.isSafeInteger(state.priority) ||
     typeof state.isFavorite !== "boolean" ||
+    (state.isTracked !== undefined && typeof state.isTracked !== "boolean") ||
     (state.intent !== null && typeof state.intent !== "string") ||
     (state.status !== "ACTIVE" && state.status !== "DELETED") ||
     !nullableUuid(state.clusterId) ||
@@ -1579,6 +1586,7 @@ function requiredKeywordState(value: Prisma.JsonValue): SemanticKeywordVersionSt
     language: state.language,
     priority: Number(state.priority),
     isFavorite: state.isFavorite,
+    isTracked: (state.isTracked as boolean | undefined) ?? true,
     intent: state.intent as string | null,
     status: state.status,
     clusterId: state.clusterId as string | null,

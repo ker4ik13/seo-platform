@@ -544,21 +544,24 @@ model WorkspaceInvite {
 }
 
 model Project {
-  id          String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
-  workspaceId String        @map("workspace_id") @db.Uuid
-  name        String        @db.VarChar(160)
-  slug        String        @db.VarChar(100)
-  domain      String        @db.VarChar(255)
-  locale      String        @default("en") @db.VarChar(16)
-  timezone    String        @default("UTC") @db.VarChar(64)
-  status      ProjectStatus @default(DRAFT)
-  createdBy   String        @map("created_by") @db.Uuid
-  ownerUserId String        @map("owner_user_id") @db.Uuid
-  version     Int           @default(1)
-  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
-  archivedAt  DateTime?     @map("archived_at") @db.Timestamptz(6)
-  deletedAt   DateTime?     @map("deleted_at") @db.Timestamptz(6)
+  id                         String        @id @default(dbgenerated("uuidv7()")) @db.Uuid
+  workspaceId                String        @map("workspace_id") @db.Uuid
+  name                       String        @db.VarChar(160)
+  slug                       String        @db.VarChar(100)
+  domain                     String        @db.VarChar(255)
+  locale                     String        @default("en") @db.VarChar(16)
+  timezone                   String        @default("UTC") @db.VarChar(64)
+  searchCityName             String?       @map("search_city_name") @db.VarChar(160)
+  searchCityYandexRegionCode String?       @map("search_city_yandex_region_code") @db.VarChar(16)
+  searchCityGoogleRegionCode String?       @map("search_city_google_region_code") @db.VarChar(16)
+  status                     ProjectStatus @default(DRAFT)
+  createdBy                  String        @map("created_by") @db.Uuid
+  ownerUserId                String        @map("owner_user_id") @db.Uuid
+  version                    Int           @default(1)
+  createdAt                  DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  archivedAt                 DateTime?     @map("archived_at") @db.Timestamptz(6)
+  deletedAt                  DateTime?     @map("deleted_at") @db.Timestamptz(6)
 
   workspace        Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   logo             ProjectLogo?

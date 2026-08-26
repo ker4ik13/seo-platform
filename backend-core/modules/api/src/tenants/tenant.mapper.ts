@@ -58,6 +58,17 @@ export function toProjectSummary(
     domain: project.domain,
     locale: project.locale,
     timezone: project.timezone,
+    ...(project.searchCityName &&
+    project.searchCityYandexRegionCode &&
+    project.searchCityGoogleRegionCode
+      ? {
+          searchCity: {
+            name: project.searchCityName,
+            yandexRegionCode: project.searchCityYandexRegionCode,
+            googleRegionCode: project.searchCityGoogleRegionCode
+          }
+        }
+      : {}),
     status:
       project.status === "ARCHIVED"
         ? "ARCHIVED"

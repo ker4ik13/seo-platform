@@ -270,6 +270,10 @@ test("bootstrap and post-migration provisioners are secret-safe and fail closed"
   );
   assert.match(
     normalizedRuntimeSql,
+    /public\.read_rank_runtime_diagnostics_entries\(uuid,uuid,uuid,integer\)/u
+  );
+  assert.match(
+    normalizedRuntimeSql,
     /rank runtime must have only SELECT and INSERT on provider request intents/u
   );
   assert.match(

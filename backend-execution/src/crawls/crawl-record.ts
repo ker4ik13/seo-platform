@@ -159,6 +159,7 @@ export function technicalCrawlSummary(
     jobId: crawl.jobId,
     workspaceId: crawl.workspaceId,
     projectId: crawl.projectId,
+    actorId: crawl.actorId,
     status: crawl.status,
     config: storedCrawlConfig(crawl.config),
     discoveredUrls: crawl.discoveredUrls,

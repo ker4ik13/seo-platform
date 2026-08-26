@@ -24,6 +24,7 @@ export interface TrackingContextDraft {
   readonly domainMatchValue: string;
   readonly safeSearch: boolean;
   readonly searchSource: TrackingSearchSource;
+  readonly includeUntracked: boolean;
   readonly scopeMode: TrackingContextScopeMode;
   readonly groupIds: readonly string[];
 }
@@ -65,6 +66,7 @@ export function emptyTrackingContextDraft(): TrackingContextDraft {
     domainMatchValue: "",
     safeSearch: false,
     searchSource: "LIVE",
+    includeUntracked: false,
     scopeMode: "KEYWORDS",
     groupIds: []
   };
@@ -106,6 +108,7 @@ export function trackingContextDraft(
         : "",
     safeSearch: context.configuration.safeSearch,
     searchSource: context.launchProfile?.searchSource ?? "LIVE",
+    includeUntracked: context.launchProfile?.includeUntracked ?? false,
     scopeMode: context.launchProfile?.scope.mode ?? "ALL",
     groupIds: context.launchProfile?.scope.groupIds ?? []
   };
@@ -327,6 +330,7 @@ function trackingContextMutationInput(
     },
     launchProfile: {
       searchSource: draft.searchSource,
+      includeUntracked: draft.includeUntracked,
       scope: {
         mode: draft.scopeMode,
         groupIds:

@@ -252,6 +252,9 @@ function appProject(payload: unknown): AppProject {
     locale: stringValue(project.locale),
     timezone: stringValue(project.timezone),
     domain: stringValue(project.domain),
+    ...(project.searchCity === undefined
+      ? {}
+      : { searchCity: projectSearchCity(project.searchCity) }),
     status: status as AppProject["status"],
     ownerUserId: stringValue(project.ownerUserId),
     ...(project.logoSource === undefined
@@ -269,6 +272,15 @@ function appProject(payload: unknown): AppProject {
         }),
     ...(projectAccessLevel ? { projectAccessLevel } : {}),
     version: numberValue(project.version)
+  };
+}
+
+function projectSearchCity(value: unknown): NonNullable<AppProject["searchCity"]> {
+  const city = record(value);
+  return {
+    name: stringValue(city.name),
+    yandexRegionCode: stringValue(city.yandexRegionCode),
+    googleRegionCode: stringValue(city.googleRegionCode)
   };
 }
 

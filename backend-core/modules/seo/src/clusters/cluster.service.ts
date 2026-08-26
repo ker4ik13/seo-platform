@@ -1317,6 +1317,7 @@ function mergeKeywordVersionState(
     language: row.language,
     priority: row.priority,
     isFavorite: row.isFavorite,
+    isTracked: row.isTracked,
     intent: row.intent,
     status: row.status === "DELETED" ? "DELETED" : "ACTIVE",
     clusterId: row.clusterId,

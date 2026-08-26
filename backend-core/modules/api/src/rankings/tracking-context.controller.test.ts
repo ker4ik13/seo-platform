@@ -318,6 +318,7 @@ test("lists and changes point keyword assignments without bulk ambiguity", async
               keywordVersion: 7,
               textOriginal: "SEO аудит",
               language: "ru",
+              isTracked: false,
               assignedBy: actorId,
               assignedAt: "2026-07-29T10:05:00.000Z"
             }

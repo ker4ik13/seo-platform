@@ -15,6 +15,122 @@ const crawlId = "01900000-0000-7000-8000-000000000008";
 const crawlJobId = "01900000-0000-7000-8000-000000000009";
 const destinationWorkspaceId = "01900000-0000-7000-8000-000000000010";
 
+test("creates a Wordstat research run through the credential boundary", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedUrl: URL | undefined;
+  let capturedHeaders: Headers | undefined;
+  let capturedBody: Readonly<Record<string, unknown>> | undefined;
+  globalThis.fetch = (async (
+    input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> => {
+    capturedUrl = new URL(
+      input instanceof Request ? input.url : input.toString()
+    );
+    capturedHeaders = new Headers(init?.headers);
+    capturedBody = JSON.parse(String(init?.body)) as Readonly<
+      Record<string, unknown>
+    >;
+    return dataResponse({
+      id: crawlJobId,
+      workspaceId,
+      projectId,
+      source: "XMLSTOCK_WORDSTAT",
+      provider: "XMLSTOCK",
+      regionCode: "225",
+      device: "ALL",
+      seedCount: 1,
+      includeRightColumn: true,
+      maxKeywords: 5_000,
+      status: "QUEUED",
+      collectedKeywords: 0,
+      selectedKeywords: 0,
+      importedKeywords: 0,
+      rows: [],
+      version: 1,
+      createdAt: "2026-08-26T12:00:00.000Z",
+      updatedAt: "2026-08-26T12:00:00.000Z"
+    });
+  }) as typeof fetch;
+
+  try {
+    const result = await client().createKeywordResearchRun(
+      projectContext("request-wordstat-create-001"),
+      {
+        source: "XMLSTOCK_WORDSTAT",
+        queries: ["нейросети"],
+        regionCode: "225",
+        device: "ALL",
+        minusWords: [],
+        clearMinusPhrases: false,
+        includeRightColumn: true,
+        clearPlus: false,
+        maxKeywords: 5_000
+      },
+      "wordstat-create-001",
+      { planCode: "TRIAL", planVersion: 1, concurrentJobs: 1 }
+    );
+
+    assert.equal(result.status, "QUEUED");
+    assert.equal(
+      capturedUrl?.pathname,
+      `/internal/v1/workspaces/${workspaceId}/projects/${projectId}/keyword-research-runs`
+    );
+    assert.equal(
+      capturedHeaders?.get("x-internal-token"),
+      "c".repeat(32)
+    );
+    assert.equal(capturedHeaders?.get("idempotency-key"), "wordstat-create-001");
+    assert.equal(capturedBody?.workspaceId, workspaceId);
+    assert.equal(capturedBody?.projectId, projectId);
+    assert.equal(capturedBody?.actorId, actorId);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("loads the next immutable page of parsed Wordstat queries", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedUrl: URL | undefined;
+  globalThis.fetch = (async (
+    input: string | URL | Request
+  ): Promise<Response> => {
+    capturedUrl = new URL(
+      input instanceof Request ? input.url : input.toString()
+    );
+    return dataResponse({
+      rows: [{
+        id: validationId,
+        ordinal: 501,
+        keyword: "нейросети бесплатно",
+        frequencyBase: 877330,
+        sourceQuery: "нейросети",
+        sourceColumn: "LEFT",
+        selected: true
+      }],
+      page: { hasNext: false }
+    });
+  }) as typeof fetch;
+
+  try {
+    const page = await client().getKeywordResearchRows(
+      projectContext("request-wordstat-rows-001"),
+      crawlJobId,
+      { cursor: 500, limit: 200 }
+    );
+    assert.equal(page.rows[0]?.ordinal, 501);
+    assert.equal(page.page.hasNext, false);
+    assert.equal(
+      capturedUrl?.pathname,
+      `/internal/v1/workspaces/${workspaceId}/projects/${projectId}/keyword-research-runs/${crawlJobId}/rows`
+    );
+    assert.equal(capturedUrl?.searchParams.get("cursor"), "500");
+    assert.equal(capturedUrl?.searchParams.get("limit"), "200");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("loads one bounded active-operation count collection for a workspace", async () => {
   const originalFetch = globalThis.fetch;
   let captured: { readonly url: URL; readonly headers: Headers } | undefined;

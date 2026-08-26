@@ -56,7 +56,7 @@ test("waits without failing while the provider dispatch window is full", async (
   assert.deepEqual(fixture.events, []);
 });
 
-test("keeps only Yandex Live Turbo outside the provider lifecycle window", () => {
+test("keeps every XMLStock product outside the Arsenkin lifecycle window", () => {
   assert.equal(
     rankProviderActiveTaskLimit(
       "XMLSTOCK",
@@ -69,7 +69,7 @@ test("keeps only Yandex Live Turbo outside the provider lifecycle window", () =>
       "XMLSTOCK",
       "xmlstock-yandex-live@2"
     ),
-    5
+    undefined
   );
   assert.equal(
     rankProviderActiveTaskLimit(

@@ -17,6 +17,7 @@ test("detects committed semantic mutations that require reconciliation", () => {
     ["POST", "negative-keywords/apply"],
     ["POST", "semantic-duplicates/apply"],
     ["POST", `clustering-runs/${keywordId}/apply`],
+    ["POST", `keyword-research-runs/${keywordId}/confirm`],
     ["POST", "clusters"],
     ["POST", `semantic-versions/${keywordId}/undo`]
   ] as const) {
@@ -28,6 +29,14 @@ test("detects committed semantic mutations that require reconciliation", () => {
       projectId
     );
   }
+
+  assert.equal(
+    semanticMutationProjectId(
+      `/app/api/v1/projects/${projectId}/keyword-research-runs/${keywordId}/confirm`,
+      "POST"
+    ),
+    projectId
+  );
 });
 
 test("does not announce reads, previews or unrelated project commands", () => {

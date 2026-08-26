@@ -48,6 +48,7 @@ export function scopedFrequencyCollection(
     id,
     workspaceId,
     projectId,
+    ...(input.actorId === undefined ? {} : { actorId: uuid(input.actorId) }),
     provider: member(input.provider, frequencyCollectionProviders),
     ...(!hasRoutingScope
       ? {}

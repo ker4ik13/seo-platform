@@ -321,6 +321,22 @@ export function TrackingContextSettingsPanel({
         </div>
 
         <ContextScopeEditor draft={draft} groups={groups} onChange={setDraft} />
+        <label className="semantic-toggle-line tracking-context-untracked-toggle">
+          <input
+            checked={draft.includeUntracked}
+            onChange={(event) => setDraft({
+              ...draft,
+              includeUntracked: event.target.checked
+            })}
+            type="checkbox"
+          />
+          <span>
+            <strong>Включать неотслеживаемые запросы</strong>
+            <small>
+              По умолчанию такие запросы остаются в контексте, но не попадают в съём позиций.
+            </small>
+          </span>
+        </label>
 
         {error && <div className="inline-alert danger" role="alert">{error}</div>}
         {notice && <div className="inline-alert success" role="status">{notice}</div>}

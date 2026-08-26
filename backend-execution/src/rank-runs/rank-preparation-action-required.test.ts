@@ -526,6 +526,7 @@ function assertActionRequiredSummary(summary: RankJobSummary): void {
     id: jobId,
     workspaceId,
     projectId,
+    actorId,
     trackingContextId,
     type: "MANUAL_RANK_CHECK",
     provider: "ARSENKIN",

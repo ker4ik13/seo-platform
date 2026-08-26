@@ -486,6 +486,15 @@ export class TenantService {
             timezone: normalizeTimezone(
               input.timezone ?? workspace.timezone
             ),
+            ...(input.searchCity
+              ? {
+                  searchCityName: input.searchCity.name,
+                  searchCityYandexRegionCode:
+                    input.searchCity.yandexRegionCode,
+                  searchCityGoogleRegionCode:
+                    input.searchCity.googleRegionCode
+                }
+              : {}),
             status: "ACTIVE",
             createdBy: userId,
             ownerUserId: workspace.ownerUserId
@@ -581,6 +590,21 @@ export class TenantService {
           ...(input.timezone
             ? { timezone: normalizeTimezone(input.timezone) }
             : {}),
+          ...(input.searchCity === undefined
+            ? {}
+            : input.searchCity === null
+              ? {
+                  searchCityName: null,
+                  searchCityYandexRegionCode: null,
+                  searchCityGoogleRegionCode: null
+                }
+              : {
+                  searchCityName: input.searchCity.name,
+                  searchCityYandexRegionCode:
+                    input.searchCity.yandexRegionCode,
+                  searchCityGoogleRegionCode:
+                    input.searchCity.googleRegionCode
+                }),
           version: { increment: 1 }
         }
       });

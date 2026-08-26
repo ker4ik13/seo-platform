@@ -69,7 +69,7 @@ test("atomically seals immutable header, chunks and keyword snapshots", async ()
     projectId,
     contextId: trackingContextId,
     removedAt: null,
-    keyword: { status: "ACTIVE" }
+    keyword: { status: "ACTIVE", isTracked: true }
   });
 });
 

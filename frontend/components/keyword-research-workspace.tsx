@@ -1,26 +1,50 @@
 "use client";
 
-import { CustomSelect } from "./custom-select";
-
 import {
   keysSoDatabases,
+  type ConfirmKeywordResearchRunInput,
+  type CreateKeywordResearchRunInput,
+  type CreateWordstatExpansionRunInput,
   type KeywordResearchCollection,
+  type KeywordResearchRow,
+  type KeywordResearchRowPage,
   type KeywordResearchRunSummary,
   type KeysSoDatabase,
-  type SemanticImportDuplicatePolicy
+  type ProjectConnectorCredentialOption,
+  type ProjectConnectorSettings,
+  type ProjectSearchCity,
+  type SemanticImportDuplicatePolicy,
+  type SemanticKeywordGroup,
+  type WordstatExpansionDevice,
+  type WordstatImportDistributionMode
 } from "@seo-platform/contracts";
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
+  useRef,
   useState,
   type FormEvent
 } from "react";
+import { BrowserApiError, browserApiRequest } from "../lib/browser-api";
+import { integrationProviderLabel } from "../lib/integration-presentation";
+import { projectConnectorBinding } from "../lib/project-integration-settings";
 import {
-  BrowserApiError,
-  browserApiRequest
-} from "../lib/browser-api";
+  wordstatResultLimit,
+  wordstatScopeIsResolving
+} from "../lib/wordstat-expansion-form";
+import { CustomSelect } from "./custom-select";
+import { Icon } from "./icon";
 import { ProviderLogo } from "./provider-logo";
+import { SearchableRegionSelect } from "./searchable-region-select";
+import { SemanticGroupPickerField } from "./semantic-group-picker";
+import type { SemanticGroupTreeItem } from "./semantic-group-tree";
+import {
+  SemanticOperationScope,
+  type SemanticOperationSelection
+} from "./semantic-operation-scope";
+import { SemanticModal } from "./semantic-modal";
 
 const ACTIVE = new Set([
   "QUEUED",
@@ -29,39 +53,63 @@ const ACTIVE = new Set([
   "IMPORT_QUEUED",
   "IMPORTING"
 ]);
+const CANCELLABLE = new Set([
+  "QUEUED",
+  "RUNNING",
+  "RETRY_SCHEDULED",
+  "READY_TO_IMPORT"
+]);
+const PRIMARY_DESTINATION = "__PRIMARY_DESTINATION__";
+type ResearchTab = "KEYS_SO" | "WORDSTAT";
 
 export function KeywordResearchWorkspace({
   projectId,
-  projectDomain
-}: Readonly<{ projectId: string; projectDomain: string }>) {
+  projectDomain,
+  projectSearchCity
+}: Readonly<{
+  projectId: string;
+  projectDomain: string;
+  projectSearchCity?: ProjectSearchCity | undefined;
+}>) {
   const [collection, setCollection] = useState<KeywordResearchCollection>();
+  const [groups, setGroups] = useState<readonly SemanticKeywordGroup[]>([]);
+  const [source, setSource] = useState<ResearchTab>("KEYS_SO");
   const [domain, setDomain] = useState(projectDomain);
   const [database, setDatabase] = useState<KeysSoDatabase>("msk");
   const [maxKeywords, setMaxKeywords] = useState("100");
-  const [duplicatePolicy, setDuplicatePolicy] =
-    useState<SemanticImportDuplicatePolicy>("SKIP_EXISTING");
-  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [expandedRunId, setExpandedRunId] = useState<string>();
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [wordstatOpen, setWordstatOpen] = useState(false);
+  const [wordstatSeeds, setWordstatSeeds] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [notice, setNotice] = useState<string>();
+  const createCommand = useRef<
+    Readonly<{ signature: string; key: string }> | undefined
+  >(undefined);
 
   const load = useCallback(async (signal?: AbortSignal) => {
     try {
-      const next = await browserApiRequest<KeywordResearchCollection>(
-        path(projectId),
-        signal ? { signal } : {}
-      );
+      const [next, nextGroups] = await Promise.all([
+        browserApiRequest<KeywordResearchCollection>(
+          path(projectId),
+          signal ? { signal } : {}
+        ),
+        browserApiRequest<readonly SemanticKeywordGroup[]>(
+          `/app/api/projects/${encodeURIComponent(projectId)}/keyword-groups`,
+          signal ? { signal } : {}
+        ).catch(() => [] as readonly SemanticKeywordGroup[])
+      ]);
       setCollection(next);
+      setGroups(nextGroups);
       setError(undefined);
-      const ready = next.runs.find(
-        ({ status }) => status === "READY_TO_IMPORT"
+      setExpandedRunId((current) =>
+        current ?? next.runs.find(({ status }) => status === "READY_TO_IMPORT")?.id ?? next.runs[0]?.id
       );
-      setExpandedRunId((current) => current ?? ready?.id ?? next.runs[0]?.id);
     } catch (caught) {
       if (!signal?.aborted) {
-        setError(message(caught, "Не удалось загрузить сборы семантики."));
+        setError(message(caught, "Не удалось загрузить данные Keys.so и Wordstat."));
       }
     } finally {
       if (!signal?.aborted) setLoading(false);
@@ -78,74 +126,90 @@ export function KeywordResearchWorkspace({
     () => collection?.runs.some(({ status }) => ACTIVE.has(status)) ?? false,
     [collection]
   );
-
   useEffect(() => {
     if (!hasActive) return;
-    const timer = globalThis.setInterval(() => void load(), 4_000);
-    return () => globalThis.clearInterval(timer);
+    const timer = window.setInterval(() => void load(), 4_000);
+    return () => window.clearInterval(timer);
   }, [hasActive, load]);
 
   const expanded = collection?.runs.find(({ id }) => id === expandedRunId);
-  const selectionSeed =
-    expanded?.status === "READY_TO_IMPORT"
-      ? expanded.rows.map(({ id }) => id).join(",")
-      : "";
-
+  const expandedId = expanded?.id;
+  const expandedRowIds = expanded?.rows.map(({ id }) => id).join("\n") ?? "";
   useEffect(() => {
-    setSelected(new Set(selectionSeed ? selectionSeed.split(",") : []));
-  }, [selectionSeed]);
+    setSelected(new Set(expandedRowIds ? expandedRowIds.split("\n") : []));
+  }, [expandedId, expandedRowIds]);
 
-  async function start(event: FormEvent<HTMLFormElement>): Promise<void> {
+  const visibleRuns = collection?.runs.filter((run) =>
+    source === "KEYS_SO" ? run.source === "KEYS_SO" : run.source !== "KEYS_SO"
+  ) ?? [];
+  const latestKeysRun = collection?.runs.find(
+    (run) => run.source === "KEYS_SO" && run.overview !== undefined
+  );
+
+  async function createRun(
+    input: CreateKeywordResearchRunInput,
+    prefix: "keyword-research" | "wordstat-expansion"
+  ): Promise<KeywordResearchRunSummary> {
+    const signature = JSON.stringify(input);
+    if (createCommand.current?.signature !== signature) {
+      createCommand.current = {
+        signature,
+        key: `${prefix}:${crypto.randomUUID()}`
+      };
+    }
+    const run = await browserApiRequest<KeywordResearchRunSummary>(path(projectId), {
+      method: "POST",
+      idempotencyKey: createCommand.current.key,
+      body: input
+    });
+    createCommand.current = undefined;
+    return run;
+  }
+
+  async function startKeys(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (busy || collection?.access.canRun !== true) return;
     setBusy(true);
     setError(undefined);
     setNotice(undefined);
     try {
-      const run = await browserApiRequest<KeywordResearchRunSummary>(
-        path(projectId),
-        {
-          method: "POST",
-          idempotencyKey: `keyword-research:${globalThis.crypto.randomUUID()}`,
-          body: {
-            domain: domain.trim(),
-            database,
-            maxKeywords: Number(maxKeywords)
-          }
-        }
-      );
+      const run = await createRun({
+        source: "KEYS_SO",
+        domain: domain.trim(),
+        database,
+        maxKeywords: Number(maxKeywords)
+      }, "keyword-research");
       setExpandedRunId(run.id);
-      setNotice(
-        "Сбор поставлен в очередь. Предпросмотр появится автоматически."
-      );
+      setNotice("Анализ Keys.so поставлен в очередь.");
       await load();
     } catch (caught) {
-      setError(message(caught, "Не удалось запустить сбор через Keys.so."));
+      setError(message(caught, "Не удалось запустить анализ Keys.so."));
     } finally {
       setBusy(false);
     }
   }
 
-  async function confirm(run: KeywordResearchRunSummary): Promise<void> {
-    if (busy || selected.size < 1 || collection?.access.canImport !== true) {
-      return;
-    }
+  async function startWordstat(input: CreateWordstatExpansionRunInput): Promise<void> {
+    const run = await createRun(input, "wordstat-expansion");
+    setSource("WORDSTAT");
+    setExpandedRunId(run.id);
+    setNotice("Парсинг Wordstat поставлен в очередь. Результат появится автоматически.");
+    await load();
+  }
+
+  async function confirm(
+    run: KeywordResearchRunSummary,
+    input: ConfirmKeywordResearchRunInput
+  ): Promise<void> {
+    if (busy || collection?.access.canImport !== true) return;
     setBusy(true);
     setError(undefined);
-    setNotice(undefined);
     try {
       await browserApiRequest<KeywordResearchRunSummary>(
         `${path(projectId)}/${encodeURIComponent(run.id)}/confirm`,
-        {
-          method: "POST",
-          ifMatch: run.version,
-          body: {
-            selectedRowIds: [...selected],
-            duplicatePolicy
-          }
-        }
+        { method: "POST", ifMatch: run.version, body: input }
       );
-      setNotice("Выбранные запросы поставлены в очередь импорта.");
+      setNotice("Запросы поставлены в очередь импорта.");
       await load();
     } catch (caught) {
       setError(message(caught, "Не удалось подтвердить импорт."));
@@ -163,141 +227,110 @@ export function KeywordResearchWorkspace({
         `${path(projectId)}/${encodeURIComponent(run.id)}/cancel`,
         { method: "POST", ifMatch: run.version, body: {} }
       );
-      setNotice("Сбор отменён.");
+      setNotice("Операция отменена.");
       await load();
     } catch (caught) {
-      setError(message(caught, "Не удалось отменить сбор."));
+      setError(message(caught, "Не удалось отменить операцию."));
     } finally {
       setBusy(false);
     }
   }
 
+  async function retryImport(run: KeywordResearchRunSummary): Promise<void> {
+    if (busy || collection?.access.canImport !== true) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await browserApiRequest<KeywordResearchRunSummary>(
+        `${path(projectId)}/${encodeURIComponent(run.id)}/retry-import`,
+        { method: "POST", ifMatch: run.version, body: {} }
+      );
+      setNotice("Импорт перезапущен с сохранёнными настройками.");
+      await load();
+    } catch (caught) {
+      setError(message(caught, "Не удалось повторить импорт."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openWordstat(seeds: readonly string[] = []): void {
+    setWordstatSeeds(seeds.join("\n"));
+    setWordstatOpen(true);
+  }
+
   if (loading && !collection) {
-    return (
-      <section className="panel panel-empty" aria-busy="true">
-        <span className="spinner" aria-hidden="true" />
-        <p>Загружаем сборы семантики…</p>
-      </section>
-    );
+    return <section className="panel panel-empty" aria-busy="true"><span className="spinner" /><p>Загружаем данные…</p></section>;
   }
 
   return (
-    <div className="settings-stack">
+    <div className="keyword-research-workspace settings-stack">
       {error && <div className="inline-error" role="alert">{error}</div>}
       {notice && <div className="inline-success" role="status">{notice}</div>}
 
-      <section className="panel">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow provider-inline"><ProviderLogo provider="KEYS_SO" size="compact" /> Keys.so · organic keywords</p>
-            <h2>Собрать запросы конкурента</h2>
-            <p>
-              Сначала сервис показывает найденные запросы. В ядро попадут
-              только отмеченные строки после подтверждения.
-            </p>
+      <div className="keyword-research-source-tabs" role="tablist" aria-label="Источник данных">
+        <button aria-selected={source === "KEYS_SO"} className={source === "KEYS_SO" ? "selected" : undefined} onClick={() => setSource("KEYS_SO")} role="tab" type="button">
+          <ProviderLogo provider="KEYS_SO" size="compact" /> Keys.so
+        </button>
+        <button aria-selected={source === "WORDSTAT"} className={source === "WORDSTAT" ? "selected" : undefined} onClick={() => setSource("WORDSTAT")} role="tab" type="button">
+          <span className="keyword-research-provider-pair"><ProviderLogo provider="XMLSTOCK" size="compact" /><ProviderLogo provider="ARSENKIN" size="compact" /></span> Парсинг Wordstat
+        </button>
+      </div>
+
+      {source === "KEYS_SO" ? (
+        <>
+          <section className="panel keyword-research-launch-card">
+            <div className="section-heading">
+              <div><p className="eyebrow">Аналитика домена</p><h2>Ключи и конкуренты из Keys.so</h2><p>Получите сводку по ТОПу, органические запросы и ближайших конкурентов.</p></div>
+              <a className="secondary-button" href="/app/settings/integrations">Настроить API</a>
+            </div>
+            <form className="keyword-research-launch-form" onSubmit={startKeys}>
+              <label className="form-field"><span>Домен</span><input autoComplete="off" onChange={(event) => setDomain(event.target.value)} placeholder="example.ru" required value={domain} /></label>
+              <label className="form-field"><span>База</span><CustomSelect onChange={(event) => setDatabase(event.target.value as KeysSoDatabase)} value={database}>{keysSoDatabases.map((code) => <option key={code} value={code}>{databaseLabel(code)}</option>)}</CustomSelect></label>
+              <label className="form-field"><span>Ключей</span><input max={500} min={25} onChange={(event) => setMaxKeywords(event.target.value)} required step={25} type="number" value={maxKeywords} /></label>
+              <button className="primary-button" disabled={busy || collection?.access.canRun !== true} type="submit">{busy ? "Запускаем…" : "Получить данные"}</button>
+            </form>
+          </section>
+          {latestKeysRun?.overview && <KeysOverview run={latestKeysRun} />}
+        </>
+      ) : (
+        <section className="panel keyword-research-wordstat-card">
+          <div className="section-heading">
+            <div><p className="eyebrow">XMLStock · Arsenkin Tools</p><h2>Расширить семантику через Wordstat</h2><p>Выберите провайдера, вставьте до 500 исходных фраз или возьмите запросы проекта. Перед импортом результат можно проверить.</p></div>
+            <div className="button-row">
+              <a className="secondary-button" href="/app/settings/integrations">Настроить провайдеров</a>
+              <button className="primary-button" disabled={collection?.access.canRun !== true} onClick={() => openWordstat()} type="button"><Icon name="plus" /> Запустить парсинг</button>
+            </div>
           </div>
-          <a className="secondary-button" href="/app/settings/integrations">
-            Настроить API
-          </a>
-        </div>
-        <form className="settings-form" onSubmit={start}>
-          <label className="form-field">
-            <span>Домен конкурента</span>
-            <input
-              autoComplete="off"
-              onChange={(event) => setDomain(event.target.value)}
-              placeholder="competitor.ru"
-              required
-              value={domain}
-            />
-          </label>
-          <label className="form-field">
-            <span>База Keys.so</span>
-            <CustomSelect
-              onChange={(event) =>
-                setDatabase(event.target.value as KeysSoDatabase)
-              }
-              value={database}
-            >
-              {keysSoDatabases.map((code) => (
-                <option key={code} value={code}>
-                  {databaseLabel(code)}
-                </option>
-              ))}
-            </CustomSelect>
-          </label>
-          <label className="form-field">
-            <span>Максимум запросов</span>
-            <input
-              max={500}
-              min={25}
-              onChange={(event) => setMaxKeywords(event.target.value)}
-              required
-              step={25}
-              type="number"
-              value={maxKeywords}
-            />
-          </label>
-          <button
-            className="primary-button"
-            disabled={busy || collection?.access.canRun !== true}
-            type="submit"
-          >
-            {busy ? "Подождите…" : "Начать сбор"}
-          </button>
-        </form>
-        {collection?.access.mutationRestriction !== "NONE" && (
-          <p className="inline-note">
-            Запуск ограничен текущей ролью или состоянием проекта.
-          </p>
-        )}
-      </section>
+        </section>
+      )}
 
       <section className="panel">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">История</p>
-            <h2>Сборы и импорт</h2>
-          </div>
-          {hasActive && <span className="status-badge">Выполняется</span>}
-        </div>
-        {!collection || collection.runs.length === 0 ? (
-          <div className="panel-empty">
-            <strong>Сборов пока нет</strong>
-            <p>Подключите Keys.so и запустите первый анализ конкурента.</p>
-          </div>
+        <div className="section-heading"><div><p className="eyebrow">Операции</p><h2>{source === "KEYS_SO" ? "Сборы Keys.so" : "Парсинги Wordstat"}</h2></div>{visibleRuns.some(({ status }) => ACTIVE.has(status)) && <span className="status-badge">Выполняется</span>}</div>
+        {visibleRuns.length === 0 ? (
+          <div className="panel-empty"><strong>Операций пока нет</strong><p>Запустите первый сбор — он появится здесь.</p></div>
         ) : (
-          <div className="settings-stack">
-            {collection.runs.map((run) => (
+          <div className="keyword-research-run-list">
+            {visibleRuns.map((run) => (
               <article className="subpanel" key={run.id}>
-                <button
-                  className="semantic-row-button"
-                  onClick={() => setExpandedRunId(run.id)}
-                  type="button"
-                >
-                  <span>
-                    <strong>{run.domain}</strong>
-                    <small>
-                      {run.database} · {run.collectedKeywords} из{" "}
-                      {run.totalAvailable ?? "?"}
-                    </small>
-                  </span>
-                  <span className={`status-badge status-${run.status.toLowerCase()}`}>
-                    {statusLabel(run.status)}
-                  </span>
+                <button className="semantic-row-button" onClick={() => setExpandedRunId(run.id)} type="button">
+                  <span><strong>{runTitle(run)}</strong><small>{runMeta(run)}</small></span>
+                  <span className={`status-badge status-${run.status.toLowerCase()}`}>{statusLabel(run.status)}</span>
                 </button>
                 {expanded?.id === run.id && (
-                  <RunPreview
+                  <KeywordResearchRunPreview
                     busy={busy}
-                    duplicatePolicy={duplicatePolicy}
+                    canCancel={collection?.access.canCancel === true}
+                    canImport={collection?.access.canImport === true}
+                    groups={groups}
                     onCancel={() => void cancel(run)}
-                    onConfirm={() => void confirm(run)}
-                    onDuplicatePolicy={setDuplicatePolicy}
+                    onConfirm={(input) => void confirm(run, input)}
+                    onOpenWordstat={(seeds) => openWordstat(seeds)}
+                    onRetryImport={() => void retryImport(run)}
                     onSelected={setSelected}
+                    key={run.id}
                     run={run}
                     selected={selected}
-                    canCancel={collection.access.canCancel}
-                    canImport={collection.access.canImport}
                   />
                 )}
               </article>
@@ -305,174 +338,798 @@ export function KeywordResearchWorkspace({
           </div>
         )}
       </section>
+
+      {wordstatOpen && (
+        <WordstatExpansionDialog
+          groups={groups}
+          initialText={wordstatSeeds}
+          onClose={() => setWordstatOpen(false)}
+          onSubmit={async (input) => {
+            await startWordstat(input);
+            setWordstatOpen(false);
+          }}
+          projectId={projectId}
+          projectSearchCity={projectSearchCity}
+        />
+      )}
     </div>
   );
 }
 
-function RunPreview({
+function KeysOverview({ run }: Readonly<{ run: KeywordResearchRunSummary }>) {
+  const [tab, setTab] = useState<"OVERVIEW" | "KEYWORDS" | "COMPETITORS">("OVERVIEW");
+  const overview = run.overview;
+  return (
+    <section className="panel keyword-research-result-panel">
+      <div className="keyword-research-result-tabs" role="tablist">
+        {([ ["OVERVIEW", "Обзор"], ["KEYWORDS", `Ключи · ${run.totalAvailable ?? run.collectedKeywords}`], ["COMPETITORS", `Конкуренты · ${run.competitors?.length ?? 0}`] ] as const).map(([value, label]) => <button className={tab === value ? "selected" : undefined} key={value} onClick={() => setTab(value)} role="tab" type="button">{label}</button>)}
+      </div>
+      {tab === "OVERVIEW" && overview && <div className="keyword-research-metric-grid">{([ ["ТОП-1", overview.top1], ["ТОП-3", overview.top3], ["ТОП-5", overview.top5], ["ТОП-10", overview.top10], ["ТОП-50", overview.top50], ["Видимость", overview.visibility ?? "—"] ] as const).map(([label, value]) => <article key={label}><span>{label}</span><strong>{typeof value === "number" ? formatInteger(value) : value}</strong></article>)}</div>}
+      {tab === "KEYWORDS" && <SimpleKeywordTable run={run} />}
+      {tab === "COMPETITORS" && <CompetitorTable run={run} />}
+    </section>
+  );
+}
+
+function SimpleKeywordTable({ run }: Readonly<{ run: KeywordResearchRunSummary }>) {
+  return <div className="table-scroll"><table className="data-table"><thead><tr><th>Запрос</th><th>Позиция</th><th>Частотность</th><th>URL</th></tr></thead><tbody>{run.rows.map((row) => <tr key={row.id}><td><strong>{row.keyword}</strong></td><td>{row.position ?? "—"}</td><td>{row.frequencyBase ?? "—"}</td><td><span className="table-secondary">{row.url ?? "—"}</span></td></tr>)}</tbody></table></div>;
+}
+
+function CompetitorTable({ run }: Readonly<{ run: KeywordResearchRunSummary }>) {
+  if (!run.competitors?.length) return <div className="panel-empty"><p>Keys.so не вернул конкурентов для этого домена.</p></div>;
+  return <div className="table-scroll"><table className="data-table"><thead><tr><th>Домен</th><th>Общие ключи</th><th>Сходство</th><th>ТОП-10</th><th>Видимость</th></tr></thead><tbody>{run.competitors.map((item) => <tr key={item.domain}><td><strong>{item.domain}</strong></td><td>{formatInteger(item.commonKeywords)}</td><td>{item.similarity ?? "—"}</td><td>{item.top10 ?? "—"}</td><td>{item.visibility ?? "—"}</td></tr>)}</tbody></table></div>;
+}
+
+export function KeywordResearchRunPreview({
   run,
   selected,
   onSelected,
-  duplicatePolicy,
-  onDuplicatePolicy,
   onConfirm,
   onCancel,
+  onOpenWordstat,
+  onRetryImport,
+  groups,
   canImport,
   canCancel,
-  busy
+  busy,
+  onDirtyChange
 }: Readonly<{
   run: KeywordResearchRunSummary;
   selected: ReadonlySet<string>;
   onSelected: (value: ReadonlySet<string>) => void;
-  duplicatePolicy: SemanticImportDuplicatePolicy;
-  onDuplicatePolicy: (value: SemanticImportDuplicatePolicy) => void;
-  onConfirm: () => void;
+  onConfirm: (input: ConfirmKeywordResearchRunInput) => void;
   onCancel: () => void;
+  onOpenWordstat?: (seeds: readonly string[]) => void;
+  onRetryImport: () => void;
+  groups: readonly SemanticKeywordGroup[];
   canImport: boolean;
   canCancel: boolean;
   busy: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
 }>) {
   const ready = run.status === "READY_TO_IMPORT";
+  const retryableImport =
+    run.status === "FAILED" &&
+    run.selectedKeywords > 0 &&
+    run.failureCode?.startsWith("SEO_DATA_") === true;
+  const [duplicatePolicy, setDuplicatePolicy] = useState<SemanticImportDuplicatePolicy>("SKIP_EXISTING");
+  const [selectionMode, setSelectionMode] = useState<"ALL" | "SELECTED">("ALL");
+  const [excludedRowIds, setExcludedRowIds] = useState<ReadonlySet<string>>(
+    new Set()
+  );
+  const [destination, setDestination] = useState<"NEW" | "EXISTING">("NEW");
+  const [groupId, setGroupId] = useState("");
+  const [parentId, setParentId] = useState("");
+  const [distributionMode, setDistributionMode] =
+    useState<WordstatImportDistributionMode>("SINGLE_GROUP");
+  const initialNewName = `Wordstat · ${new Date(run.createdAt).toLocaleDateString("ru-RU")}`;
+  const [newName, setNewName] = useState(initialNewName);
+  const [rowGroupIds, setRowGroupIds] = useState<ReadonlyMap<string, string>>(
+    new Map()
+  );
+  const [rowSearch, setRowSearch] = useState("");
+  const [loadedRows, setLoadedRows] = useState<readonly KeywordResearchRow[]>(
+    run.rows
+  );
+  const [paginationComplete, setPaginationComplete] = useState(
+    run.rows.length >= run.collectedKeywords
+  );
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [pageError, setPageError] = useState<string>();
+  const resultScrollRef = useRef<HTMLDivElement>(null);
+  const resultSentinelRef = useRef<HTMLDivElement>(null);
+  const loadingMoreRef = useRef(false);
+  const requestedCursorsRef = useRef(new Set<string>());
+  useEffect(() => {
+    setLoadedRows((current) => mergeKeywordResearchRows(current, run.rows));
+    if (run.collectedKeywords > run.rows.length) setPaginationComplete(false);
+  }, [run.collectedKeywords, run.rows]);
+  const normalizedRowSearch = rowSearch.trim().toLocaleLowerCase("ru-RU");
+  const visibleRows = useMemo(
+    () => normalizedRowSearch
+      ? loadedRows.filter((row) =>
+          `${row.keyword}\n${row.sourceQuery ?? ""}`
+            .toLocaleLowerCase("ru-RU")
+            .includes(normalizedRowSearch)
+        )
+      : loadedRows,
+    [loadedRows, normalizedRowSearch]
+  );
+  const selectedCount = selectionMode === "ALL"
+    ? Math.max(0, run.collectedKeywords - excludedRowIds.size)
+    : selected.size;
+  const isRowSelected = (rowId: string): boolean => selectionMode === "ALL"
+    ? !excludedRowIds.has(rowId)
+    : selected.has(rowId);
+  const nextCursor = !paginationComplete && loadedRows.length < run.collectedKeywords
+    ? loadedRows.at(-1)?.ordinal
+    : undefined;
+
+  const loadMore = useCallback(async (): Promise<void> => {
+    if (
+      nextCursor === undefined ||
+      loadingMoreRef.current ||
+      requestedCursorsRef.current.has(String(nextCursor))
+    ) {
+      return;
+    }
+    const cursor = String(nextCursor);
+    requestedCursorsRef.current.add(cursor);
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    setPageError(undefined);
+    try {
+      const result = await browserApiRequest<KeywordResearchRowPage>(
+        `${path(run.projectId)}/${encodeURIComponent(run.id)}/rows?cursor=${encodeURIComponent(cursor)}&limit=200`
+      );
+      setLoadedRows((current) => mergeKeywordResearchRows(current, result.rows));
+      setPaginationComplete(!result.page.hasNext);
+    } catch (caught) {
+      requestedCursorsRef.current.delete(cursor);
+      setPageError(message(caught, "Не удалось загрузить следующие запросы."));
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [nextCursor, run.id, run.projectId]);
+
+  useEffect(() => {
+    const root = resultScrollRef.current;
+    const target = resultSentinelRef.current;
+    if (!root || !target || nextCursor === undefined || pageError) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void loadMore();
+      },
+      { root, rootMargin: "320px 0px", threshold: 0 }
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [loadMore, nextCursor, pageError]);
+  const targetGroupPath = destination === "EXISTING"
+    ? groups.find(({ id }) => id === groupId)?.path
+    : joinPath(groups.find(({ id }) => id === parentId)?.path, newName.trim());
+  const targetMissing = run.source !== "KEYS_SO" && !targetGroupPath;
+  const primaryDestinationOption = useMemo(
+    () => [{
+      icon: "projects" as const,
+      label: distributionMode === "BY_SOURCE_QUERY"
+        ? "Автоматически по исходной фразе"
+        : "Корневая папка",
+      value: PRIMARY_DESTINATION
+    }],
+    [distributionMode]
+  );
+  const rowDestinations = [...rowGroupIds].flatMap(([rowId, destinationGroupId]) => {
+    if (selectionMode === "SELECTED" && !selected.has(rowId)) return [];
+    if (selectionMode === "ALL" && excludedRowIds.has(rowId)) return [];
+    const targetGroupPath = groups.find(({ id }) => id === destinationGroupId)?.path;
+    return targetGroupPath ? [{ rowId, targetGroupPath }] : [];
+  });
+  const dirty =
+    destination !== "NEW" ||
+    groupId !== "" ||
+    parentId !== "" ||
+    distributionMode !== "SINGLE_GROUP" ||
+    newName !== initialNewName ||
+    rowGroupIds.size > 0 ||
+    selectionMode !== "ALL" ||
+    excludedRowIds.size > 0 ||
+    duplicatePolicy !== "SKIP_EXISTING";
+
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
+
+  function setRowGroup(rowId: string, destinationGroupId: string): void {
+    setRowGroupIds((current) => {
+      const next = new Map(current);
+      if (destinationGroupId === PRIMARY_DESTINATION) next.delete(rowId);
+      else next.set(rowId, destinationGroupId);
+      return next;
+    });
+  }
+
+  const confirmImport = () => onConfirm({
+    selectionMode,
+    ...(selectionMode === "SELECTED" ? { selectedRowIds: [...selected] } : {}),
+    ...(selectionMode === "ALL" && excludedRowIds.size > 0
+      ? { excludedRowIds: [...excludedRowIds] }
+      : {}),
+    duplicatePolicy,
+    ...(targetGroupPath ? { targetGroupPath } : {}),
+    ...(rowDestinations.length > 0 ? { rowDestinations } : {}),
+    distributionMode
+  });
+
   return (
-    <div className="settings-stack">
-      {run.failureCode && (
-        <div className="inline-error">Ошибка: {run.failureCode}</div>
+    <div className={`keyword-research-run-preview${ready ? " is-ready" : ""}`}>
+      {run.failureCode && <div className="inline-error keyword-research-preview-error">Ошибка: {run.failureCode}</div>}
+      {retryableImport && (
+        <div className="keyword-research-retry-import">
+          <span><strong>Сбор завершён, не прошёл только импорт.</strong><small>Запросы и выбранные папки сохранены — повторный парсинг не нужен.</small></span>
+          <button className="primary-button" disabled={!canImport || busy} onClick={onRetryImport} type="button">{busy ? "Перезапускаем…" : "Повторить импорт"}</button>
+        </div>
       )}
-      {run.rows.length > 0 && (
-        <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>
-                  <input
-                    aria-label="Выбрать все"
-                    checked={
-                      ready &&
-                      run.rows.length > 0 &&
-                      selected.size === run.rows.length
-                    }
-                    disabled={!ready}
-                    onChange={(event) =>
-                      onSelected(
-                        event.target.checked
-                          ? new Set(run.rows.map(({ id }) => id))
-                          : new Set()
-                      )
-                    }
-                    type="checkbox"
-                  />
-                </th>
-                <th>Запрос</th>
-                <th>Позиция</th>
-                <th>Частотность</th>
-                <th>KEI</th>
-              </tr>
-            </thead>
-            <tbody>
-              {run.rows.map((row) => (
-                <tr key={row.id}>
-                  <td>
+      <section className="keyword-research-results-pane">
+        <header className="keyword-research-results-toolbar">
+          <span className="keyword-research-results-heading">
+            <strong>Найденные запросы</strong>
+            <small>
+              {visibleRows.length === loadedRows.length
+                ? `${formatInteger(loadedRows.length)} загружено`
+                : `${formatInteger(visibleRows.length)} из ${formatInteger(loadedRows.length)}`}
+              {run.collectedKeywords > loadedRows.length
+                ? ` · всего ${formatInteger(run.collectedKeywords)}`
+                : ""}
+            </small>
+          </span>
+          {loadedRows.length > 0 && (
+            <label className="keyword-research-result-search">
+              <Icon name="search" />
+              <input
+                aria-label="Поиск по результатам Wordstat"
+                onChange={(event) => setRowSearch(event.target.value)}
+                placeholder="Найти запрос или исходную фразу"
+                type="search"
+                value={rowSearch}
+              />
+              {rowSearch && (
+                <button aria-label="Очистить поиск" onClick={() => setRowSearch("")} type="button">
+                  <Icon name="close" />
+                </button>
+              )}
+            </label>
+          )}
+          <span className="keyword-research-selection-count">
+            Выбрано <strong>{formatInteger(selectedCount)}</strong>
+          </span>
+        </header>
+        {loadedRows.length > 0 ? (
+          <div className="table-scroll keyword-research-preview-table" ref={resultScrollRef}>
+            <table
+              className={`data-table keyword-research-result-table ${
+                run.source === "KEYS_SO"
+                  ? "is-keys-so-result"
+                  : `is-wordstat-result${ready ? " has-folder-column" : ""}`
+              }`}
+            >
+              <thead>
+                <tr>
+                  <th>
                     <input
-                      aria-label={`Выбрать ${row.keyword}`}
-                      checked={selected.has(row.id)}
-                      disabled={!ready}
+                      aria-label="Выбрать все найденные запросы"
+                      checked={run.collectedKeywords > 0 && selectedCount === run.collectedKeywords}
                       onChange={(event) => {
-                        const next = new Set(selected);
-                        if (event.target.checked) next.add(row.id);
-                        else next.delete(row.id);
-                        onSelected(next);
+                        setExcludedRowIds(new Set());
+                        if (event.target.checked) {
+                          setSelectionMode("ALL");
+                          onSelected(new Set());
+                        } else {
+                          setSelectionMode("SELECTED");
+                          onSelected(new Set());
+                        }
                       }}
                       type="checkbox"
                     />
-                  </td>
-                  <td>
-                    <strong>{row.keyword}</strong>
-                    {row.url && <small className="table-secondary">{row.url}</small>}
-                  </td>
-                  <td>{row.position ?? "—"}</td>
-                  <td>
-                    {row.frequencyBase ?? "—"} / {row.frequencyExact ?? "—"} /{" "}
-                    {row.frequencyFixed ?? "—"}
-                  </td>
-                  <td>{row.kei ?? "—"}</td>
+                  </th>
+                  <th>Запрос</th>
+                  {run.source !== "KEYS_SO" ? (
+                    <><th>Исходная фраза</th><th>Колонка</th></>
+                  ) : (
+                    <><th>Позиция</th><th>URL</th></>
+                  )}
+                  <th>Частотность</th>
+                  {run.source !== "KEYS_SO" && ready && <th>Папка</th>}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+              </thead>
+              <tbody>
+                {visibleRows.map((row) => (
+                  <tr key={row.id}>
+                    <td>
+                      <input
+                        aria-label={`Отметить ${row.keyword}`}
+                        checked={isRowSelected(row.id)}
+                        onChange={(event) => {
+                          if (selectionMode === "ALL") {
+                            setExcludedRowIds((current) => {
+                              const next = new Set(current);
+                              if (event.target.checked) next.delete(row.id);
+                              else next.add(row.id);
+                              return next;
+                            });
+                            return;
+                          }
+                          const next = new Set(selected);
+                          if (event.target.checked) next.add(row.id);
+                          else next.delete(row.id);
+                          onSelected(next);
+                        }}
+                        type="checkbox"
+                      />
+                    </td>
+                    <td><strong>{row.keyword}</strong></td>
+                    {run.source !== "KEYS_SO" ? (
+                      <><td><span className="table-secondary">{row.sourceQuery ?? "—"}</span></td><td>{row.sourceColumn === "RIGHT" ? "Справа" : "Слева"}</td></>
+                    ) : (
+                      <><td>{row.position ?? "—"}</td><td><span className="table-secondary">{row.url ?? "—"}</span></td></>
+                    )}
+                    <td>{row.frequencyBase === undefined ? "—" : formatInteger(row.frequencyBase)}</td>
+                    {run.source !== "KEYS_SO" && ready && (
+                      <td className="keyword-research-row-folder">
+                        <SemanticGroupPickerField
+                          className="keyword-research-row-folder-trigger"
+                          dialogTitle={`Папка для «${row.keyword}»`}
+                          groups={groups}
+                          onChange={(value) => setRowGroup(row.id, value)}
+                          rootLabel="Корневая папка"
+                          showRootOption={false}
+                          specialOptions={primaryDestinationOption}
+                          value={rowGroupIds.get(row.id) ?? PRIMARY_DESTINATION}
+                        />
+                      </td>
+                    )}
+                  </tr>
+                ))}
+                {visibleRows.length === 0 && (
+                  <tr><td className="keyword-research-filter-empty" colSpan={ready && run.source !== "KEYS_SO" ? 6 : 5}>Ничего не найдено. Измените запрос поиска.</td></tr>
+                )}
+              </tbody>
+            </table>
+            {nextCursor !== undefined && (
+              <div
+                aria-hidden="true"
+                className="keyword-research-infinite-sentinel"
+                ref={resultSentinelRef}
+              >
+                {loadingMore && <span className="spinner" />}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="keyword-research-results-empty">В результате пока нет запросов.</div>
+        )}
+        {(nextCursor !== undefined || loadingMore || pageError) && (
+          <p className="keyword-research-preview-limit">
+            {pageError ? (
+              <><span>{pageError}</span> <button className="text-button" onClick={() => void loadMore()} type="button">Повторить</button></>
+            ) : loadingMore ? (
+              `Подгружаем следующие запросы · ${formatInteger(loadedRows.length)} из ${formatInteger(run.collectedKeywords)}`
+            ) : (
+              `Прокрутите ниже — запросы загрузятся автоматически · ${formatInteger(loadedRows.length)} из ${formatInteger(run.collectedKeywords)}`
+            )}
+          </p>
+        )}
+        {run.source === "KEYS_SO" && selected.size > 0 && onOpenWordstat && (
+          <div className="keyword-research-inline-action">
+            <span>Выбрано для расширения: {selected.size}</span>
+            <button className="secondary-button" onClick={() => onOpenWordstat(loadedRows.filter(({ id }) => selected.has(id)).map(({ keyword }) => keyword))} type="button"><Icon name="search" /> Парсить в Wordstat</button>
+          </div>
+        )}
+      </section>
       {ready && (
-        <div className="button-row">
-          <label className="form-field">
-            <span>Если запрос уже есть</span>
-            <CustomSelect
-              onChange={(event) =>
-                onDuplicatePolicy(
-                  event.target.value as SemanticImportDuplicatePolicy
-                )
-              }
-              value={duplicatePolicy}
-            >
-              <option value="SKIP_EXISTING">Пропустить</option>
-              <option value="OVERWRITE_MAPPED">Обновить метрики</option>
-            </CustomSelect>
-          </label>
-          <button
-            className="primary-button"
-            disabled={!canImport || selected.size < 1 || busy}
-            onClick={onConfirm}
-            type="button"
-          >
-            Импортировать выбранные ({selected.size})
-          </button>
-        </div>
+        <aside className="keyword-research-import-panel">
+          <header className="keyword-research-import-heading">
+            <span><strong>Добавление в семантику</strong><small>Настройте один раз, затем при необходимости переопределите папку у отдельных строк.</small></span>
+            <b>{formatInteger(selectedCount)}</b>
+          </header>
+          <div className="keyword-research-import-scroll">
+            <div className="keyword-research-import-settings">
+              <label className="form-field"><span>Что импортировать</span><CustomSelect onChange={(event) => {
+                const mode = event.target.value as "ALL" | "SELECTED";
+                setSelectionMode(mode);
+                setExcludedRowIds(new Set());
+                if (mode === "ALL") onSelected(new Set());
+              }} value={selectionMode}><option value="ALL">Все найденные · {run.collectedKeywords}</option><option value="SELECTED">Только отмеченные · {selected.size}</option></CustomSelect></label>
+              <label className="form-field"><span>Если запрос уже есть</span><CustomSelect onChange={(event) => setDuplicatePolicy(event.target.value as SemanticImportDuplicatePolicy)} value={duplicatePolicy}><option value="SKIP_EXISTING">Не добавлять найденные дубли</option><option value="OVERWRITE_MAPPED">Перенести дубли в выбранную папку</option></CustomSelect></label>
+            </div>
+            <p className="keyword-research-duplicate-hint">
+              {duplicatePolicy === "SKIP_EXISTING"
+                ? "Существующие запросы останутся в своих папках, добавятся только новые."
+                : "Существующие запросы будут убраны из прежних папок и перенесены в папку, выбранную ниже."}
+            </p>
+            {run.source !== "KEYS_SO" && (
+              <div className="keyword-research-destination">
+                <div className="keyword-research-destination-switch"><button className={destination === "NEW" ? "selected" : undefined} onClick={() => setDestination("NEW")} type="button">Новая папка</button><button className={destination === "EXISTING" ? "selected" : undefined} onClick={() => setDestination("EXISTING")} type="button">Существующая</button></div>
+                {destination === "NEW" ? (
+                  <div className="keyword-research-new-folder">
+                    <label className="form-field"><span>Название новой папки</span><input maxLength={255} onChange={(event) => setNewName(event.target.value)} placeholder="Например, Идеи из Wordstat" value={newName} /></label>
+                    <label className="form-field"><span>Создать внутри</span><SemanticGroupPickerField groups={groups} onChange={setParentId} rootLabel="Корневая папка" value={parentId} /></label>
+                  </div>
+                ) : (
+                  <label className="form-field"><span>Перенести в папку</span><SemanticGroupPickerField groups={groups} onChange={setGroupId} rootLabel="Выберите папку" value={groupId} /></label>
+                )}
+                {targetGroupPath && <p className="keyword-research-path-preview"><Icon name="projects" /> <span>{targetGroupPath}</span></p>}
+                <div className="keyword-research-distribution-mode" role="radiogroup" aria-label="Способ раскладки результатов"><span>Как разложить</span><div className="keyword-research-destination-switch"><button className={distributionMode === "SINGLE_GROUP" ? "selected" : undefined} onClick={() => setDistributionMode("SINGLE_GROUP")} role="radio" aria-checked={distributionMode === "SINGLE_GROUP"} type="button">В одну папку</button><button className={distributionMode === "BY_SOURCE_QUERY" ? "selected" : undefined} onClick={() => setDistributionMode("BY_SOURCE_QUERY")} role="radio" aria-checked={distributionMode === "BY_SOURCE_QUERY"} type="button">По фразам</button></div></div>
+                <p className="keyword-research-distribution-hint"><Icon name="semantic" /><span><strong>{distributionMode === "BY_SOURCE_QUERY" ? "Для каждой исходной фразы будет создана своя вложенная папка." : "Корневая папка применяется ко всем запросам."}</strong> Папку отдельной строки можно изменить прямо в таблице.</span></p>
+              </div>
+            )}
+          </div>
+          <footer className="keyword-research-import-actions">
+            {CANCELLABLE.has(run.status) && <button className="secondary-button keyword-research-cancel-button" disabled={!canCancel || busy} onClick={onCancel} type="button">Отклонить</button>}
+            <button className="primary-button" disabled={!canImport || busy || targetMissing || selectedCount < 1} onClick={confirmImport} type="button">{busy ? "Ставим в очередь…" : selectionMode === "ALL" ? `Импортировать (${selectedCount})` : `Импортировать (${selected.size})`}</button>
+          </footer>
+        </aside>
       )}
-      {["QUEUED", "RUNNING", "RETRY_SCHEDULED", "READY_TO_IMPORT"].includes(
-        run.status
-      ) && (
-        <button
-          className="danger-button"
-          disabled={!canCancel || busy}
-          onClick={onCancel}
-          type="button"
-        >
-          Отменить
-        </button>
-      )}
+      {!ready && CANCELLABLE.has(run.status) && <button className="danger-button keyword-research-standalone-cancel" disabled={!canCancel || busy} onClick={onCancel} type="button">Отменить операцию</button>}
     </div>
   );
 }
 
+export function WordstatExpansionDialog({
+  activeGroupId,
+  groups,
+  initialSelections = [],
+  initialText,
+  projectId,
+  projectSearchCity,
+  onClose,
+  onSubmit
+}: Readonly<{
+  activeGroupId?: string | undefined;
+  groups: readonly SemanticGroupTreeItem[];
+  initialSelections?: readonly SemanticOperationSelection[];
+  initialText: string;
+  projectId: string;
+  projectSearchCity?: ProjectSearchCity | undefined;
+  onClose: () => void;
+  onSubmit: (input: CreateWordstatExpansionRunInput) => Promise<void>;
+}>) {
+  const formId = useId();
+  const [settings, setSettings] = useState<ProjectConnectorSettings>();
+  const [credentialId, setCredentialId] = useState("");
+  const [loadingProviders, setLoadingProviders] = useState(true);
+  const [providerError, setProviderError] = useState<string>();
+  const [mode, setMode] = useState<"TEXT" | "PROJECT">(
+    initialText.trim() || (!activeGroupId && initialSelections.length === 0)
+      ? "TEXT"
+      : "PROJECT"
+  );
+  const [text, setText] = useState(initialText);
+  const [selections, setSelections] = useState<readonly SemanticOperationSelection[]>(
+    initialSelections
+  );
+  const [scopeResolving, setScopeResolving] = useState(false);
+  const [scopeError, setScopeError] = useState<string>();
+  const [regionCode, setRegionCode] = useState("225");
+  const [regionLabel, setRegionLabel] = useState("Россия");
+  const [device, setDevice] = useState<WordstatExpansionDevice>("ALL");
+  const [minusWords, setMinusWords] = useState("");
+  const [includeRightColumn, setIncludeRightColumn] = useState(true);
+  const [clearMinusPhrases, setClearMinusPhrases] = useState(false);
+  const [clearPlus, setClearPlus] = useState(false);
+  const [maxKeywords, setMaxKeywords] = useState("5000");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const sources = useMemo(
+    () => settings ? wordstatExpansionSources(settings) : [],
+    [settings]
+  );
+  const selectedSource = sources.find(({ id }) => id === credentialId);
+  const provider: "XMLSTOCK" | "ARSENKIN" =
+    selectedSource?.provider === "ARSENKIN" ? "ARSENKIN" : "XMLSTOCK";
+  const ownQueries = useMemo(() => uniqueLines(text, 500), [text]);
+  const queries = mode === "TEXT" ? ownQueries : selections.map(({ label }) => label);
+  const maximumResultCount = wordstatResultLimit(provider, maxKeywords);
+  const maximumResultCountValid = maximumResultCount !== undefined;
+  const projectScopeResolving = wordstatScopeIsResolving(mode, scopeResolving);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoadingProviders(true);
+    setProviderError(undefined);
+    void browserApiRequest<ProjectConnectorSettings>(
+      `/app/api/projects/${encodeURIComponent(projectId)}/integration-settings`,
+      { signal: controller.signal }
+    )
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        const configured = wordstatExpansionSources(result);
+        setSettings(result);
+        setCredentialId((current) =>
+          configured.some(({ id }) => id === current)
+            ? current
+            : configured[0]?.id ?? ""
+        );
+      })
+      .catch((caught) => {
+        if (!controller.signal.aborted) {
+          setProviderError(message(caught, "Не удалось загрузить подключения Wordstat."));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoadingProviders(false);
+      });
+    return () => controller.abort();
+  }, [projectId]);
+
+  async function submit(event?: FormEvent<HTMLFormElement>): Promise<void> {
+    event?.preventDefault();
+    if (
+      queries.length < 1 ||
+      queries.length > 500 ||
+      !maximumResultCountValid ||
+      !selectedSource ||
+      busy ||
+      projectScopeResolving
+    ) return;
+    setBusy(true);
+    setError(undefined);
+    try {
+      await onSubmit({
+        source: provider === "XMLSTOCK" ? "XMLSTOCK_WORDSTAT" : "ARSENKIN_WORDSTAT",
+        queries,
+        regionCode,
+        device,
+        minusWords: uniqueLines(minusWords, 100),
+        clearMinusPhrases,
+        includeRightColumn,
+        clearPlus,
+        maxKeywords: maximumResultCount
+      });
+    } catch (caught) {
+      setError(message(caught, "Не удалось запустить парсинг Wordstat."));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <SemanticModal
+      description="До 500 исходных фраз. Результат сначала появится в предпросмотре и не изменит ядро без подтверждения."
+      footer={(
+        <div className="semantic-workflow-footer">
+          <dl className="semantic-dialog-estimate semantic-workflow-footer-estimate">
+            <div><Icon name="semantic" /><div><dt>Исходных запросов</dt><dd>{queries.length}</dd></div></div>
+            <div><ProviderLogo provider={provider} /><div><dt>Подключение</dt><dd>{selectedSource ? `${selectedSource.label} · ${integrationProviderLabel(selectedSource.provider)}` : loadingProviders ? "Загружаем…" : "Не выбрано"}</dd></div></div>
+            <div><Icon name="operations" /><div><dt>Результат</dt><dd>{provider === "ARSENKIN" ? "Все данные Arsenkin" : maximumResultCountValid ? `до ${formatInteger(maximumResultCount)}` : "Укажите от 1 до 10 000"}</dd></div></div>
+          </dl>
+          <div className="semantic-modal-actions">
+            <button className="secondary-button" disabled={busy} onClick={onClose} type="button">Отмена</button>
+            <button
+              className="primary-button"
+              disabled={busy || loadingProviders || !selectedSource || projectScopeResolving || queries.length < 1 || queries.length > 500 || !maximumResultCountValid}
+              form={formId}
+              type="submit"
+            >
+              {busy ? "Запускаем…" : `Запустить (${queries.length})`}
+            </button>
+          </div>
+        </div>
+      )}
+      onClose={busy ? () => undefined : onClose}
+      presenceKey="semantic-modal:wordstat-expansion"
+      size="large"
+      title="Парсинг Wordstat"
+    >
+      <form
+        className="keyword-research-wordstat-dialog semantic-workflow-dialog"
+        id={formId}
+        onSubmit={(event) => void submit(event)}
+      >
+        <div className="semantic-workflow-grid keyword-research-wordstat-workflow-grid">
+          <section className="semantic-workflow-panel keyword-research-wordstat-source-panel">
+            <header className="semantic-workflow-panel-heading">
+              <h3>Источник данных</h3>
+              <a className="semantic-dialog-link" href="/app/settings/integrations">Управлять</a>
+              <p>Выберите подключённый сервис, через который будет выполнен сбор Wordstat.</p>
+            </header>
+            {loadingProviders ? (
+              <div className="semantic-dialog-loading" role="status">Загружаем подключения…</div>
+            ) : sources.length ? (
+              <div className="semantic-provider-list keyword-research-wordstat-provider-list" role="radiogroup" aria-label="Подключение Wordstat">
+                {sources.map((source) => (
+                  <button
+                    aria-checked={source.id === credentialId}
+                    className={`semantic-provider-card ${source.id === credentialId ? "selected" : ""}`}
+                    key={source.id}
+                    onClick={() => setCredentialId(source.id)}
+                    role="radio"
+                    type="button"
+                  >
+                    <ProviderLogo provider={source.provider} />
+                    <span className="semantic-provider-card-copy">
+                      <strong>{integrationProviderLabel(source.provider)}</strong>
+                      <small>{source.label} · Wordstat API</small>
+                      <b>Подключено</b>
+                    </span>
+                    <i aria-hidden="true" className="semantic-provider-radio" />
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="inline-alert warning">Нет активного подключения XMLStock или Arsenkin для парсинга Wordstat.</div>
+            )}
+            <div className="inline-alert info compact keyword-research-wordstat-preview-note">
+              Результат сначала попадёт в предпросмотр. Запросы появятся в ядре только после вашего подтверждения.
+            </div>
+          </section>
+
+          <section className="semantic-workflow-panel keyword-research-wordstat-settings-panel">
+            <header>
+              <h3>Настройки парсинга</h3>
+              <p>Россия выбрана по умолчанию. Уточните устройство и правила очистки.</p>
+            </header>
+            <label className="semantic-workflow-field">
+              <span>Регион Wordstat</span>
+              <SearchableRegionSelect kind="WORDSTAT" onChange={({ code, label }) => { setRegionCode(code); setRegionLabel(label); }} value={regionCode} valueLabel={regionLabel} />
+              {regionCode === "225" ? <small>По умолчанию · вся Россия</small> : projectSearchCity && regionCode === projectSearchCity.yandexRegionCode ? <small>Город проекта · {projectSearchCity.name}</small> : null}
+            </label>
+            <fieldset className="semantic-segmented-field">
+              <legend>Устройство</legend>
+              <div className="semantic-segmented-control keyword-research-wordstat-device-control" role="radiogroup" aria-label="Устройство Wordstat">
+                {([
+                  ["ALL", "Все"],
+                  ["DESKTOP", "Десктоп"],
+                  ["MOBILE", "Мобильные"],
+                  ["PHONE_ONLY", "Телефоны"],
+                  ["TABLET_ONLY", "Планшеты"]
+                ] as const).map(([value, label]) => (
+                  <label className={device === value ? "selected" : undefined} key={value}>
+                    <input checked={device === value} onChange={() => setDevice(value)} type="radio" />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            {provider === "XMLSTOCK" && (
+              <label className="semantic-workflow-field">
+                <span>Максимум результатов</span>
+                <input aria-invalid={!maximumResultCountValid} max={10_000} min={1} onChange={(event) => setMaxKeywords(event.target.value)} type="number" value={maxKeywords} />
+                <small>От 1 до 10 000 фраз.</small>
+              </label>
+            )}
+            <div className="keyword-research-wordstat-option-list">
+              <label className="semantic-check-row"><input checked={includeRightColumn} onChange={(event) => setIncludeRightColumn(event.target.checked)} type="checkbox" /><span><strong>Добавить правую колонку</strong><small>Связанные формулировки справа в Wordstat.</small></span></label>
+              <label className="semantic-check-row"><input checked={clearMinusPhrases} onChange={(event) => setClearMinusPhrases(event.target.checked)} type="checkbox" /><span><strong>Учитывать минус-слова</strong><small>Исключить фразы с указанными словами.</small></span></label>
+              <label className="semantic-check-row"><input checked={clearPlus} onChange={(event) => setClearPlus(event.target.checked)} type="checkbox" /><span><strong>Убирать оператор «+»</strong></span></label>
+            </div>
+            <label className="semantic-workflow-field keyword-research-wordstat-minus-field">
+              <span>Минус-слова · по одному на строке</span>
+              <textarea onChange={(event) => setMinusWords(event.target.value)} placeholder={'бесплатно\nскачать'} rows={3} value={minusWords} />
+            </label>
+          </section>
+
+          <section className="semantic-workflow-panel semantic-wordstat-scope-panel keyword-research-wordstat-seeds-panel">
+            <header>
+              <h3>Исходные запросы</h3>
+              <p>Вставьте свои фразы или выберите запросы и папки проекта.</p>
+            </header>
+            <fieldset className="semantic-segmented-field">
+              <legend className="sr-only">Источник исходных запросов</legend>
+              <div className="semantic-segmented-control keyword-research-wordstat-mode-control" role="radiogroup" aria-label="Источник исходных запросов">
+                <label className={mode === "TEXT" ? "selected" : undefined}><input checked={mode === "TEXT"} onChange={() => { setMode("TEXT"); setScopeError(undefined); }} type="radio" /><span>Вставить текст</span></label>
+                <label className={mode === "PROJECT" ? "selected" : undefined}><input checked={mode === "PROJECT"} onChange={() => setMode("PROJECT")} type="radio" /><span>Выбрать из проекта</span></label>
+              </div>
+            </fieldset>
+            {mode === "TEXT" ? (
+              <label className="semantic-workflow-field keyword-research-wordstat-query-field">
+                <span>По одному запросу на строке</span>
+                <textarea autoFocus onChange={(event) => setText(event.target.value)} placeholder={'ремонт холодильников\nкупить морозильную камеру'} value={text} />
+                <small>{ownQueries.length} из 500 уникальных фраз</small>
+              </label>
+            ) : (
+              <SemanticOperationScope activeGroupId={activeGroupId} groups={groups} initialSelections={initialSelections} maxItems={500} onChange={(next, resolving, nextError) => { setSelections(next); setScopeResolving(resolving); setScopeError(nextError); }} projectId={projectId} />
+            )}
+          </section>
+        </div>
+        {(scopeError || providerError || error) && (
+          <div className="semantic-workflow-feedback">
+            {scopeError && <div className="inline-alert warning" role="alert">{scopeError}</div>}
+            {providerError && <div className="inline-alert warning" role="alert">{providerError}</div>}
+            {error && <div className="inline-alert danger" role="alert">{error}</div>}
+          </div>
+        )}
+      </form>
+    </SemanticModal>
+  );
+}
+
+function wordstatExpansionSources(
+  settings: ProjectConnectorSettings
+): readonly ProjectConnectorCredentialOption[] {
+  const binding = projectConnectorBinding(settings, "KEYWORD_RESEARCH");
+  if (!binding?.enabled) return [];
+  const routeIds = (binding.routes ?? (binding.route ? [binding.route] : []))
+    .filter(({ provider }) => provider === "XMLSTOCK" || provider === "ARSENKIN")
+    .map(({ credentialId }) => credentialId);
+  const byId = new Map(settings.credentialOptions.map((option) => [option.id, option]));
+  return routeIds.flatMap((id) => {
+    const option = byId.get(id);
+    return option &&
+      option.status === "ACTIVE" &&
+      (option.provider === "XMLSTOCK" || option.provider === "ARSENKIN")
+      ? [option]
+      : [];
+  });
+}
+
+function uniqueLines(value: string, max: number): readonly string[] {
+  const output = new Map<string, string>();
+  for (const raw of value.split(/\r?\n/gu)) {
+    const normalized = raw.trim().replace(/\s+/gu, " ");
+    if (!normalized) continue;
+    const key = normalized.toLocaleLowerCase("ru-RU");
+    if (!output.has(key)) output.set(key, normalized);
+    if (output.size >= max) break;
+  }
+  return [...output.values()];
+}
+
+function joinPath(parent: string | undefined, name: string): string | undefined {
+  if (!name) return undefined;
+  return parent ? `${parent} / ${name}` : name;
+}
+
+function mergeKeywordResearchRows(
+  current: readonly KeywordResearchRow[],
+  incoming: readonly KeywordResearchRow[]
+): readonly KeywordResearchRow[] {
+  const rows = new Map(current.map((row) => [row.id, row]));
+  for (const row of incoming) rows.set(row.id, row);
+  return [...rows.values()].sort(
+    (left, right) => left.ordinal - right.ordinal || left.id.localeCompare(right.id)
+  );
+}
+
 function path(projectId: string): string {
-  return `/api/v1/projects/${encodeURIComponent(
-    projectId
-  )}/keyword-research-runs`;
+  return `/app/api/v1/projects/${encodeURIComponent(projectId)}/keyword-research-runs`;
+}
+
+function runTitle(run: KeywordResearchRunSummary): string {
+  if (run.source === "KEYS_SO") return run.domain ?? "Keys.so";
+  return `${wordstatProviderLabel(run)} · ${run.seedCount ?? 0} исходных фраз`;
+}
+
+function runMeta(run: KeywordResearchRunSummary): string {
+  return run.source === "KEYS_SO"
+    ? `${databaseLabel(run.database ?? "msk")} · ${run.collectedKeywords} из ${run.totalAvailable ?? "?"}`
+    : `${run.regionCode === "225" ? "Россия" : `регион ${run.regionCode ?? "225"}`} · найдено ${run.collectedKeywords} · ${run.includeRightColumn ? "левая + правая колонки" : "левая колонка"}`;
+}
+
+function wordstatProviderLabel(run: KeywordResearchRunSummary): string {
+  return run.source === "XMLSTOCK_WORDSTAT" ? "XMLStock Wordstat" : "Arsenkin Wordstat";
 }
 
 function statusLabel(status: KeywordResearchRunSummary["status"]): string {
-  return {
-    QUEUED: "В очереди",
-    RUNNING: "Собирается",
-    RETRY_SCHEDULED: "Повтор",
-    READY_TO_IMPORT: "Готов к импорту",
-    IMPORT_QUEUED: "Импорт в очереди",
-    IMPORTING: "Импортируется",
-    COMPLETED: "Готово",
-    FAILED: "Ошибка",
-    CANCELLED: "Отменено"
-  }[status];
+  return { QUEUED: "В очереди", RUNNING: "Собирается", RETRY_SCHEDULED: "Ожидает провайдера", READY_TO_IMPORT: "Готов к импорту", IMPORT_QUEUED: "Импорт в очереди", IMPORTING: "Импортируется", COMPLETED: "Готово", FAILED: "Ошибка", CANCELLED: "Отменено" }[status];
 }
 
 function databaseLabel(database: KeysSoDatabase): string {
   const known: Partial<Record<KeysSoDatabase, string>> = {
-    msk: "Москва · Google",
-    zen: "Москва · Яндекс",
+    msk: "Яндекс · Москва",
+    gru: "Google · Москва",
+    zen: "Дзен",
     spb: "Санкт-Петербург",
     gkv: "Казахстан",
     mns: "Минск",
-    gny: "Нью-Йорк · English"
+    gny: "Google · Нью-Йорк"
   };
   return known[database] ?? `Регион ${database.toUpperCase()}`;
+}
+
+function formatInteger(value: number): string {
+  return new Intl.NumberFormat("ru-RU").format(value);
 }
 
 function message(error: unknown, fallback: string): string {

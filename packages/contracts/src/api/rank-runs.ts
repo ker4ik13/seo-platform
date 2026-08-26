@@ -32,6 +32,69 @@ export const rankJobStatuses = [
 
 export type RankJobStatus = (typeof rankJobStatuses)[number];
 
+export const rankRuntimeDiagnosticStates = [
+  "QUEUED",
+  "REQUESTING",
+  "WAITING_PROVIDER",
+  "WAITING_NEXT_PAGE",
+  "SAVING",
+  "COMPLETED",
+  "RETRY_WAIT",
+  "FAILED"
+] as const;
+
+export type RankRuntimeDiagnosticState =
+  (typeof rankRuntimeDiagnosticStates)[number];
+
+export type RankRuntimeDiagnosticProduct =
+  | "YANDEX_LIVE"
+  | "GOOGLE_LIVE"
+  | "YANDEX_SEARCH_API";
+
+export interface RankRuntimeDiagnosticPolicy {
+  readonly product: RankRuntimeDiagnosticProduct;
+  readonly concurrency: number;
+  readonly requestsPerSecond: number;
+}
+
+export interface RankRuntimeDiagnosticTotals {
+  readonly total: number;
+  readonly prepared: number;
+  readonly active: number;
+  readonly waitingProvider: number;
+  readonly completed: number;
+  readonly failed: number;
+}
+
+/**
+ * Safe live projection for one XMLStock keyword execution. Provider request
+ * IDs, credential identities, raw payloads and physical worker names are not
+ * exposed. `lane` is a stable logical lane used only for visual monitoring.
+ */
+export interface RankRuntimeDiagnosticEntry {
+  readonly sequence: number;
+  readonly keyword: string;
+  readonly lane: number;
+  readonly state: RankRuntimeDiagnosticState;
+  readonly executionAttempt: number;
+  readonly submitAttempts: number;
+  readonly pollAttempts: number;
+  readonly completedPages: number;
+  readonly totalPages: number;
+  readonly active: boolean;
+  readonly nextActionAt?: string;
+  readonly errorCode?: string;
+  readonly updatedAt: string;
+}
+
+export interface RankRuntimeDiagnostics {
+  readonly jobId: string;
+  readonly generatedAt: string;
+  readonly policy: RankRuntimeDiagnosticPolicy;
+  readonly totals: RankRuntimeDiagnosticTotals;
+  readonly entries: readonly RankRuntimeDiagnosticEntry[];
+}
+
 /**
  * Restores the user-selected SERP source from the immutable provider mapping.
  * Legacy mapping versions did not distinguish XML/Search API from live SERP
@@ -239,6 +302,7 @@ interface RankJobSummaryBase {
   readonly id: string;
   readonly workspaceId: string;
   readonly projectId: string;
+  readonly actorId?: string;
   readonly trackingContextId: string;
   readonly type: "MANUAL_RANK_CHECK";
   readonly provider: "ARSENKIN" | "XMLSTOCK";
@@ -378,6 +442,7 @@ export function redactRankJobSummary(input: RankJobSummary): RankJobSummary {
     id: input.id,
     workspaceId: input.workspaceId,
     projectId: input.projectId,
+    ...(input.actorId ? { actorId: input.actorId } : {}),
     trackingContextId: input.trackingContextId,
     type: input.type,
     provider: input.provider,
