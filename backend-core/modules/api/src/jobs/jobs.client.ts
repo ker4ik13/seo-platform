@@ -449,7 +449,7 @@ export class JobsClient {
       frequencyCollectionPath(context.tenant.workspaceId, projectId),
       context,
       body,
-      "integration-credential",
+      "shared",
       idempotencyKey
     );
     return scopedFrequencyCollection(

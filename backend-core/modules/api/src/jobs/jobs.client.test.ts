@@ -131,6 +131,64 @@ test("loads the next immutable page of parsed Wordstat queries", async () => {
   }
 });
 
+test("creates a frequency collection through the general Jobs boundary", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedUrl: URL | undefined;
+  let capturedHeaders: Headers | undefined;
+  globalThis.fetch = (async (
+    input: string | URL | Request,
+    init?: RequestInit
+  ): Promise<Response> => {
+    capturedUrl = new URL(
+      input instanceof Request ? input.url : input.toString()
+    );
+    capturedHeaders = new Headers(init?.headers);
+    return dataResponse({
+      id: crawlJobId,
+      workspaceId,
+      projectId,
+      provider: "XMLSTOCK",
+      status: "QUEUED",
+      selectedKeywords: 1,
+      completedKeywords: 0,
+      failedKeywords: 0,
+      types: ["BASE"],
+      regionCode: "225",
+      device: "ALL",
+      version: 1,
+      createdAt: "2026-08-27T10:00:00.000Z",
+      updatedAt: "2026-08-27T10:00:00.000Z"
+    });
+  }) as typeof fetch;
+
+  try {
+    const result = await client().createFrequencyCollection(
+      projectContext("request-frequency-create-001"),
+      {
+        items: [{ id: validationId, version: 1 }],
+        types: ["BASE"],
+        regionCode: "225",
+        device: "ALL"
+      },
+      "frequency-create-001",
+      { planCode: "TRIAL", planVersion: 1, concurrentJobs: 1 }
+    );
+
+    assert.equal(result.status, "QUEUED");
+    assert.equal(
+      capturedUrl?.pathname,
+      `/internal/v1/workspaces/${workspaceId}/projects/${projectId}/frequency-collections`
+    );
+    assert.equal(capturedHeaders?.get("x-internal-token"), "i".repeat(32));
+    assert.equal(
+      capturedHeaders?.get("idempotency-key"),
+      "frequency-create-001"
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("loads one bounded active-operation count collection for a workspace", async () => {
   const originalFetch = globalThis.fetch;
   let captured: { readonly url: URL; readonly headers: Headers } | undefined;
