@@ -260,8 +260,10 @@ async function bootstrap(): Promise<void> {
     frequencyWorker
   ] as const;
   for (const runtimeWorker of workers) {
-    runtimeWorker.on("failed", (job) => {
-      logger.error(`Connector operation failed for job ${job?.id ?? "unknown"}`);
+    runtimeWorker.on("failed", (job, error) => {
+      logger.error(
+        `Connector operation failed for job ${job?.id ?? "unknown"}: ${safeErrorSummary(error)}`
+      );
     });
     runtimeWorker.on("error", (error) => {
       logger.error(

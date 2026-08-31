@@ -13,3 +13,11 @@ test("connector dispatcher fills the dedicated rank worker pool", async () => {
   assert.match(source, /RANK_CONNECTOR_RUNTIME_QUEUE/u);
   assert.match(source, /FREQUENCY_COLLECTION_RUNTIME_QUEUE/u);
 });
+
+test("connector failures retain only a safe diagnostic summary", async () => {
+  const source = await readFile(workerUrl, "utf8");
+
+  assert.match(source, /runtimeWorker\.on\("failed", \(job, error\) =>/u);
+  assert.match(source, /safeErrorSummary\(error\)/u);
+  assert.doesNotMatch(source, /error\.stack/u);
+});
