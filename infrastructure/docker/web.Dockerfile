@@ -31,6 +31,7 @@ ENV NEXT_PUBLIC_PRIVACY_VERSION=$NEXT_PUBLIC_PRIVACY_VERSION
 ENV NEXT_PUBLIC_MARKETING_VERSION=$NEXT_PUBLIC_MARKETING_VERSION
 
 RUN pnpm --filter @seo-platform/contracts build \
+  && pnpm --filter @seo-platform/operational-alerts build \
   && pnpm --filter "$TARGET_PACKAGE" build \
   && pnpm --filter "$TARGET_PACKAGE" deploy --prod /deploy \
   && cp -R "$TARGET_PATH/.next" /deploy/.next

@@ -57,8 +57,18 @@ test("frontend is one Next.js deployable with the protected admin route", async 
       dockerfile.indexOf('pnpm --filter "$TARGET_PACKAGE" build'),
     "the clean Docker build must compile contracts before Next.js"
   );
+  assert.ok(
+    dockerfile.indexOf(
+      "pnpm --filter @seo-platform/operational-alerts build"
+    ) < dockerfile.indexOf('pnpm --filter "$TARGET_PACKAGE" deploy'),
+    "the clean Docker build must compile runtime workspace packages before deploy"
+  );
   assert.equal(
     frontendPackage.dependencies?.["@seo-platform/contracts"],
+    "workspace:*"
+  );
+  assert.equal(
+    frontendPackage.dependencies?.["@seo-platform/operational-alerts"],
     "workspace:*"
   );
   assert.equal(
